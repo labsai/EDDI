@@ -65,7 +65,7 @@ public class RepositoryModule extends AbstractBaseModule {
         bind(IRestDocumentDescriptorStore.class).to(RestDocumentDescriptorStore.class).in(Scopes.SINGLETON);
         bind(IRestExtensionStore.class).to(RestExtensionStore.class).in(Scopes.SINGLETON);
 
-        bind(IRestBotStore.class).to(RestBotStore.class).in(Scopes.SINGLETON);
+        bind(IRestBotStore.class).to(RestBotStore.class);
         bind(IRestPackageStore.class).to(RestPackageStore.class).in(Scopes.SINGLETON);
         bind(IRestRegularDictionaryStore.class).to(RestRegularDictionaryStore.class).in(Scopes.SINGLETON);
         bind(IRestBehaviorStore.class).to(RestBehaviorStore.class).in(Scopes.SINGLETON);

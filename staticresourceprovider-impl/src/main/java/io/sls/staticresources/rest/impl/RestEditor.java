@@ -11,7 +11,9 @@ import org.slf4j.LoggerFactory;
 
 import javax.inject.Inject;
 import javax.inject.Named;
+import javax.servlet.http.HttpServletRequest;
 import javax.ws.rs.InternalServerErrorException;
+import javax.ws.rs.core.Context;
 import java.io.File;
 import java.io.IOException;
 import java.util.List;
@@ -23,18 +25,23 @@ import java.util.List;
  */
 
 public class RestEditor implements IRestEditor {
+    private static final String KEYCLOAK_BASE_URL = "KEYCLOAK_BASE_URL";
     private static final String USER_DISPLAY_NAME = "USER_DISPLAY_NAME";
     private static final String LANGUAGE_IDENTIFIER = "LANGUAGE_FILE";
     private static final String LOGOUT_URL = "LOGOUT_URL";
     private final IResourceFilesManager resourceFilesManager;
     private final String uriEngineServerUI;
+    private final String keycloakBaseUrl;
     private Logger logger = LoggerFactory.getLogger(this.getClass());
 
     @Inject
-    public RestEditor(IResourceFilesManager resourceFilesManager,
-                      @Named("system.uriEngineServerUI") String uriEngineServerUI) {
+    public RestEditor(@Context HttpServletRequest httpServletRequest,
+                      IResourceFilesManager resourceFilesManager,
+                      @Named("system.uriEngineServerUI") String uriEngineServerUI,
+                      @Named("webserver.keycloak.authServerUrl") String keycloakUrl) {
         this.resourceFilesManager = resourceFilesManager;
         this.uriEngineServerUI = uriEngineServerUI;
+        this.keycloakBaseUrl = keycloakUrl;
     }
 
     @Override
@@ -49,6 +56,7 @@ public class RestEditor implements IRestEditor {
             final StringBuilder editorFile = new StringBuilder(FileUtilities.readTextFromFile(new File(htmlFile)));
             includeLanguageFile(editorFile, resourceDirectory.getRootWebDir(), resourceDirectory.getWebI18nDir(), language, location);
             includeUserDisplayName(editorFile);
+            includeKeycloakBaseUrl(editorFile);
             includeRestApiHostScriptTag(editorFile);
             includeEngineServerURI(editorFile);
             return editorFile.toString();
@@ -76,6 +84,13 @@ public class RestEditor implements IRestEditor {
         String currentUserDisplayName = (String) ThreadContext.get("currentuser:displayname");
         if (currentUserDisplayName != null) {
             editorFile.replace(startIndex, startIndex + USER_DISPLAY_NAME.length(), currentUserDisplayName);
+        }
+    }
+
+    private void includeKeycloakBaseUrl(StringBuilder editorFile) {
+        int startIndex = editorFile.indexOf(KEYCLOAK_BASE_URL);
+        if (startIndex != -1 && keycloakBaseUrl != null) {
+            editorFile.replace(startIndex, startIndex + KEYCLOAK_BASE_URL.length(), keycloakBaseUrl);
         }
     }
 

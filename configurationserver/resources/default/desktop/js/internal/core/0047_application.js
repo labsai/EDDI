@@ -456,18 +456,7 @@ if (typeof console === 'undefined') {
 }
 
 function initKeycloakAuthentication(onSuccess, onFailure) {
-    keycloak = Keycloak(
-        {
-            "realm": "EDDI",
-            "realm-public-key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAoh65p/IArHyKn8F0RO7KhWOex9YdgrR54v+fqGrbbSs3lGXFiQcfSZu+YoFFkUJpcPrMwBsTACR3ZYqu7LSHNc1MiAcEv9n15SSuKcBcqvjlMRM7RunVTf7i/+RJhKyPoXQi/RUqOey0SBCGIkqGctjkjygTVWfxBfYEgB0G7ImaolF9NFb5FgiLeLgr+Otoj2p+WQZiVZ75W7Zk8TYNfxfWicgmRtHiyq1F8n5FUDPXITpR+PVYkpQduu4dt8Q2CwkrlyBYEWI9hTNjeoWPwc6j7CFVABUZsv6jLWzCe/f7qOtVH/rLb/nN8o23SJu3faisP7v6bhZ5L+c87ZDsrwIDAQAB",
-            "url": "https://sso.labs.ai/auth",
-            "ssl-required": "external",
-            "resource": "EDDI",
-            "public-client": true,
-            "use-resource-role-mappings": true,
-            "clientId": "EDDI"
-        }
-    );
+    keycloak = Keycloak(keycloakAdapterConfigUrl);
     keycloak.init({onLoad: 'login-required'}).success(function (authenticated) {
         if (authenticated) {
             onSuccess();

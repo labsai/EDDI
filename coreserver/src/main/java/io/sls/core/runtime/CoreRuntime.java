@@ -32,6 +32,7 @@ public final class CoreRuntime {
     private final Boolean addFingerprintToResources;
     private final Boolean alwaysReloadResourcesFile;
     private final Boolean acceptSelfSignedCertificates;
+    private final String environment;
 
     @Inject
     public CoreRuntime(SystemRuntime.IRuntime runtime,
@@ -40,7 +41,8 @@ public final class CoreRuntime {
                        @Named("mergeResourceFiles") Boolean mergeResourceFiles,
                        @Named("addFingerprintToResources") Boolean addFingerprintToResources,
                        @Named("alwaysReloadResourcesFile") Boolean alwaysReloadResourcesFile,
-                       @Named("security.acceptSelfSignedCertificates") Boolean acceptSelfSignedCertificates) {
+                       @Named("security.acceptSelfSignedCertificates") Boolean acceptSelfSignedCertificates,
+                       @Named("system.environment") String environment) {
         this.runtime = runtime;
         this.host = host;
         this.httpsPort = httpsPort;
@@ -48,6 +50,7 @@ public final class CoreRuntime {
         this.addFingerprintToResources = addFingerprintToResources;
         this.alwaysReloadResourcesFile = alwaysReloadResourcesFile;
         this.acceptSelfSignedCertificates = acceptSelfSignedCertificates;
+        this.environment = environment;
 
         init();
     }
@@ -78,7 +81,7 @@ public final class CoreRuntime {
             for (File dir : resourceDir.listFiles()) {
                 for (File targetDeviceDir : dir.listFiles()) {
                     String dirName = dir.getName();
-                    resourceDirectory = new ResourceDirectory(dirName, targetDeviceDir.getName(), runtime.getResourceDir(), runtime.getWebDir());
+                    resourceDirectory = new ResourceDirectory(dirName, targetDeviceDir.getName(), runtime.getResourceDir(), runtime.getWebDir(), environment);
                     if (SNIPPET_IDENTIFIER.equals(dirName)) {
                     }
                     resourceDirectories.add(resourceDirectory);

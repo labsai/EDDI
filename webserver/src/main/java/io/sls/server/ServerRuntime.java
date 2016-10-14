@@ -135,28 +135,32 @@ public class ServerRuntime implements IServerRuntime {
         httpConnector.setPort(options.httpPort);
         httpConnector.setIdleTimeout(30000);
 
-        SslContextFactory sslContextFactory = new SslContextFactory();
-        sslContextFactory.setKeyStorePath(options.pathKeystore);
+        if ("development".equals(environment)) {
+            // skip the HTTPS connector for development
+            server.setConnectors(new Connector[]{httpConnector});
+        } else {
+            SslContextFactory sslContextFactory = new SslContextFactory();
+            sslContextFactory.setKeyStorePath(options.pathKeystore);
 
-        if (!RuntimeUtilities.isNullOrEmpty(options.passwordKeystore)) {
-            sslContextFactory.setKeyStorePassword(options.passwordKeystore);
-            sslContextFactory.setKeyManagerPassword(options.passwordKeystore);
-            sslContextFactory.setTrustStorePassword(options.passwordKeystore);
+            if (!RuntimeUtilities.isNullOrEmpty(options.passwordKeystore)) {
+                sslContextFactory.setKeyStorePassword(options.passwordKeystore);
+                sslContextFactory.setKeyManagerPassword(options.passwordKeystore);
+                sslContextFactory.setTrustStorePassword(options.passwordKeystore);
+            }
+
+            HttpConfiguration httpsConfig = new HttpConfiguration(httpConfig);
+            SecureRequestCustomizer requestCustomizer = new SecureRequestCustomizer();
+            requestCustomizer.setStsMaxAge(2000);
+            requestCustomizer.setStsIncludeSubDomains(true);
+            httpsConfig.addCustomizer(requestCustomizer);
+
+            ServerConnector httpsConnector = new ServerConnector(server,
+                    new SslConnectionFactory(sslContextFactory, HttpVersion.HTTP_1_1.asString()),
+                    new HttpConnectionFactory(httpsConfig));
+            httpsConnector.setPort(options.httpsPort);
+            httpsConnector.setIdleTimeout(500000);
+            server.setConnectors(new Connector[]{httpConnector, httpsConnector});
         }
-
-        HttpConfiguration httpsConfig = new HttpConfiguration(httpConfig);
-        SecureRequestCustomizer requestCustomizer = new SecureRequestCustomizer();
-        requestCustomizer.setStsMaxAge(2000);
-        requestCustomizer.setStsIncludeSubDomains(true);
-        httpsConfig.addCustomizer(requestCustomizer);
-
-        ServerConnector httpsConnector = new ServerConnector(server,
-                new SslConnectionFactory(sslContextFactory, HttpVersion.HTTP_1_1.asString()),
-                new HttpConnectionFactory(httpsConfig));
-        httpsConnector.setPort(options.httpsPort);
-        httpsConnector.setIdleTimeout(500000);
-
-        server.setConnectors(new Connector[]{httpConnector, httpsConnector});
 
         // Set a handler
         final HandlerList handlers = new HandlerList();

@@ -24,7 +24,7 @@ import java.io.FileInputStream;
  * Time: 18:59
  */
 public class ConfigurationServer {
-    private static final String ENVIRONMENT_KEY = "EDDI_ENV";
+    public static final String ENVIRONMENT_KEY = "EDDI_ENV";
     private static final String USER_DIR = System.getProperty("user.dir");
 
     public static void main(String[] args) throws Exception {

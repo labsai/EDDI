@@ -35,7 +35,8 @@ public class StaticResourcesModule extends AbstractBaseModule {
                                                              @Named("mergeResourceFiles") Boolean mergeResourceFiles,
                                                              @Named("addFingerprintToResources") Boolean addFingerprintToResources,
                                                              @Named("alwaysReloadResourcesFile") Boolean alwaysReloadResourcesFile,
-                                                             @Named("availableUIs") String availableUIs) {
+                                                             @Named("availableUIs") String availableUIs,
+                                                             @Named("system.environment") String environment) {
         String resourceDir = runtime.getResourceDir();
         String webDir = runtime.getWebDir();
         IResourceFilesManager.Options options = new ResourceFilesManager.Options(
@@ -44,8 +45,8 @@ public class StaticResourcesModule extends AbstractBaseModule {
 
         List<IResourceDirectory> resourceDirectories = new ArrayList<>();
         for (String keyIdentifier : availableUIs.split(",")) {
-            resourceDirectories.add(createResourceDirectory(resourceDir, webDir, keyIdentifier, "desktop"));
-            resourceDirectories.add(createResourceDirectory(resourceDir, webDir, keyIdentifier, "mobile"));
+            resourceDirectories.add(createResourceDirectory(resourceDir, webDir, keyIdentifier, "desktop", environment));
+            resourceDirectories.add(createResourceDirectory(resourceDir, webDir, keyIdentifier, "mobile", environment));
                     }
         IResourceFilesManager resourceFilesManager = new ResourceFilesManager(options, resourceDirectories);
         resourceFilesManager.reloadResourceFiles();
@@ -53,8 +54,8 @@ public class StaticResourcesModule extends AbstractBaseModule {
         return resourceFilesManager;
     }
 
-    private ResourceDirectory createResourceDirectory(String resourceDir, String webDir, String keyIdentifier, String targetDevice) {
-        return new ResourceDirectory(keyIdentifier, targetDevice, resourceDir, webDir);
+    private ResourceDirectory createResourceDirectory(String resourceDir, String webDir, String keyIdentifier, String targetDevice, String environment) {
+        return new ResourceDirectory(keyIdentifier, targetDevice, resourceDir, webDir, environment);
 
     }
 }

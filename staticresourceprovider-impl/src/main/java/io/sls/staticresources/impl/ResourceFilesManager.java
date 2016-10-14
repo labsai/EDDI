@@ -80,6 +80,8 @@ public class ResourceFilesManager implements IResourceFilesManager {
 
             copyBinary(resourceDirectory.getResourceBinaryDir(), resourceDirectory.getWebBinaryDir());
 
+            copyKeycloak(resourceDirectory.getResourceKeycloakDir(), resourceDirectory.getWebKeycloakDir());
+
             copyI18NFiles(resourceDirectory.getResourceI18nDir(), resourceDirectory.getWebI18nDir(), NO_EXCLUDED_DIRS);
 
             //prepare html file [include links to resources]
@@ -228,6 +230,25 @@ public class ResourceFilesManager implements IResourceFilesManager {
             FileUtilities.copyAllFiles(new File(source), targetDir);
             end = System.currentTimeMillis();
             String successMessage = "binary files successfully copied! (%sms)";
+            successMessage = String.format(successMessage, end - start);
+            logger.info(successMessage);
+        } catch (IOException e) {
+            logger.error("could not copy binary files to web directory", e);
+        }
+    }
+
+    private void copyKeycloak(String source, String target) {
+        long start;
+        long end;
+        try {
+            start = System.currentTimeMillis();
+            File targetDir = new File(target);
+            if (targetDir.exists()) {
+                FileUtilities.deleteAllFilesInDirectory(targetDir);
+            }
+            FileUtilities.copyAllFiles(new File(source), targetDir);
+            end = System.currentTimeMillis();
+            String successMessage = "keycloak files successfully copied! (%sms)";
             successMessage = String.format(successMessage, end - start);
             logger.info(successMessage);
         } catch (IOException e) {

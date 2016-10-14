@@ -32,6 +32,8 @@ public interface IResourceDirectory {
 
     String getResourceBinaryDir();
 
+    String getResourceKeycloakDir();
+
     String getResourceI18nDir();
 
     String getResourceHtmlFile();
@@ -53,6 +55,8 @@ public interface IResourceDirectory {
     String getWebAudioDir();
 
     String getWebBinaryDir();
+
+    String getWebKeycloakDir();
 
     String getWebI18nDir();
 

@@ -15,15 +15,17 @@ public class ResourceDirectory implements IResourceDirectory {
 
     public final String rootResourceDir;
     public final String rootWebDir;
+    private final String environment;
 
 
     @Inject
-    public ResourceDirectory(String keyIdentifier, String targetDevice, String resourcesPath, String webPath) {
+    public ResourceDirectory(String keyIdentifier, String targetDevice, String resourcesPath, String webPath, String environment) {
         this.keyIdentifier = keyIdentifier;
         this.targetDevice = targetDevice;
 
         rootResourceDir = resourcesPath;
         rootWebDir = webPath;
+        this.environment = environment;
     }
 
     @Override
@@ -106,6 +108,11 @@ public class ResourceDirectory implements IResourceDirectory {
     }
 
     @Override
+    public String getResourceKeycloakDir() {
+        return FileUtilities.buildPath(rootResourceDir, "keycloak", environment);
+    }
+
+    @Override
     public String getResourceI18nDir() {
         return FileUtilities.buildPath(getResourceDir(), "i18n");
     }
@@ -158,6 +165,11 @@ public class ResourceDirectory implements IResourceDirectory {
     @Override
     public String getWebBinaryDir() {
         return FileUtilities.buildPath(getWebDir(), "binary");
+    }
+
+    @Override
+    public String getWebKeycloakDir() {
+        return FileUtilities.buildPath(rootWebDir, "keycloak");
     }
 
     @Override
