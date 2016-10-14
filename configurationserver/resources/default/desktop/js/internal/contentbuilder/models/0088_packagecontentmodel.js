@@ -129,7 +129,7 @@ function PackageContentModel(dataProvider, actionHandler) {
 
     this.addChildControl = function (sender) {
         var callback = function (success, event) {
-            if (success) {
+            if (success && event.documentDescription) {
                 var value = application.url.getVersionAndIdForResource(event.documentDescription.resource);
                 var id = value.id;
                 var version = value.version;
