@@ -1,0 +1,71 @@
+.ui-autocomplete {
+    width: 200px;
+    margin: 0;
+    background: white;
+    text-align: center;
+    border-bottom: solid black 1px;
+    border-left: solid black 1px;
+    border-right: solid black 1px;
+    border-bottom-left-radius: 3px;
+    border-bottom-right-radius: 3px;
+}
+
+.ui-autocomplete-category {
+    width: 100px;
+    position: absolute;
+    margin: 20px 0 0 0;
+}
+
+.ui-autocomplete-over {
+    background-color: #add8e6;
+}
+
+.ui-menu-item:selection {
+    background-color: #add8e6;
+}
+
+.ui-menu-item:hover {
+    background-color: #add8e6;
+}
+
+.ui-first {
+    padding-top: 20px;
+}
+
+/* Interaction states
+----------------------------------*/
+.ui-state-default, .ui-widget-content .ui-state-default, .ui-widget-header .ui-state-default {
+    border: 1px solid #d3d3d3 /*{borderColorDefault}*/;
+    background: #e6e6e6 /*{bgColorDefault}*/ /*{bgImgUrlDefault}*/ 50% /*{bgDefaultXPos}*/ 50% /*{bgDefaultYPos}*/ repeat-x /*{bgDefaultRepeat}*/;
+    font-weight: normal /*{fwDefault}*/;
+    color: #555555 /*{fcDefault}*/;
+}
+
+.ui-state-default a, .ui-state-default a:link, .ui-state-default a:visited {
+    color: #555555 /*{fcDefault}*/;
+    text-decoration: none;
+}
+
+.ui-state-hover, .ui-widget-content .ui-state-hover, .ui-widget-header .ui-state-hover, .ui-state-focus, .ui-widget-content .ui-state-focus, .ui-widget-header .ui-state-focus {
+    border: 1px solid #999999 /*{borderColorHover}*/;
+    background: #dadada /*{bgColorHover}*/ /*{bgImgUrlHover}*/ 50% /*{bgHoverXPos}*/ 50% /*{bgHoverYPos}*/ repeat-x /*{bgHoverRepeat}*/;
+    font-weight: normal /*{fwDefault}*/;
+    color: #212121 /*{fcHover}*/;
+}
+
+.ui-state-hover a, .ui-state-hover a:hover, .ui-state-hover a:link, .ui-state-hover a:visited {
+    color: #212121 /*{fcHover}*/;
+    text-decoration: none;
+}
+
+.ui-state-active, .ui-widget-content .ui-state-active, .ui-widget-header .ui-state-active {
+    border: 1px solid #aaaaaa /*{borderColorActive}*/;
+    background: #ffffff /*{bgColorActive}*/ /*{bgImgUrlActive}*/ 50% /*{bgActiveXPos}*/ 50% /*{bgActiveYPos}*/ repeat-x /*{bgActiveRepeat}*/;
+    font-weight: normal /*{fwDefault}*/;
+    color: #212121 /*{fcActive}*/;
+}
+
+.ui-state-active a, .ui-state-active a:link, .ui-state-active a:visited {
+    color: #212121 /*{fcActive}*/;
+    text-decoration: none;
+}

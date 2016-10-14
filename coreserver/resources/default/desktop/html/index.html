@@ -1,0 +1,166 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN"
+        "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml">
+<head>
+    <title>E.D.D.I.</title>
+    <meta http-equiv="content-type" content="text/html; charset=UTF-8"/>
+    <meta http-equiv="content-style-type" content="text/css"/>
+    <meta http-equiv="content-script-type" content="text/javascript"/>
+
+    <!-- REST service -->
+    <script type="text/javascript" src="/rest-js"></script>
+
+    <!-- included js & css files -->
+    CSS_FILES
+
+    EXTERNAL_JAVASCRIPT_FILES
+    INTERNAL_JAVASCRIPT_FILES
+
+    <!-- current language resource file -->
+    LANGUAGE_FILE
+</head>
+
+<body>
+<div class="main_container">
+
+    <div id="ended_dialog" title="Conversation has ended!" style="display:none;">
+        <p>
+            <span class="" style="float: left; margin: 0 7px 50px 0;"></span>
+            Press the button to start a new conversation...
+        </p>
+    </div>
+
+    <div id="change_password_dialog" title="Change Password" style="display:none; width: 500px;">
+        <p>
+            <span class="" style="float: left; margin: 0 7px 50px 0;"></span>
+
+        <form id="change_password_frm" method="POST" action="">
+            <label for="newPassword">Please enter your new Password (min. 6 Character):</label>
+            <input class="password" name="newPassword" type="password" id="newPassword"/>
+            <label for="confirmPassword">Please enter your Password again:</label>
+            <input id="confirmPassword" type="password" name="confirm_password"/>
+        </form>
+        </p>
+    </div>
+
+    <!-- HEADER START -->
+    <div class="header_container">
+        <img src="/binary/default/desktop/images/labs_ai_logo.png" class="logo" alt="Logo"/>
+        <!--<a href="">
+          <img id="feedback_opinion"
+               src="/images/feedback_opinion.png"
+               onmouseover="mouseMovement(this, '/images/feedback_opinion_onmouseover.png')"
+               onmouseout="mouseMovement(this, '/images/feedback_opinion.png')"
+               class="feedback_button"
+               alt="Ihre MEIHNUNG bitte"/>
+      </a>
+      <a href="">
+          <img id="feedback_error"
+               src="/images/feedback_error.png"
+               onmouseover="mouseMovement(this, '/images/feedback_error_onmouseover.png')"
+               onmouseout="mouseMovement(this, '/images/feedback_error.png')"
+               class="error_button"
+               alt="FEHLER melden"/>
+      </a>  -->
+    </div>
+    <!-- HEADER END -->
+    <div class="chat_container">
+
+        <!-- CHAT START -->
+        <img src="/binary/default/desktop/images/eddi.png" alt="" class="avatar"/>
+
+        <div class="output_bot_container">
+            <div id="output_bot" class="output_bot">
+            </div>
+        </div>
+        <div class="input_user_container">
+            <textarea id="input_user" class="input_user" placeholder="Write your question here..." cols=""
+                      rows=""></textarea>
+
+            <img id="status_indicator" src="/binary/default/desktop/images/status.gif" alt="" class="status_indicator"/>
+
+            <input id="user_input_button_submit"
+                   type="button"
+                   value="Ask!"
+                   class="btn_ask btn"/>
+            <img id="undo" src="/binary/default/desktop/images/undo.png" alt="Undo" title="Go Back" class="undo_image"/>
+            <img id="redo" src="/binary/default/desktop/images/redo.png" alt="Redo" title="Restore" class="redo_image"/>
+        </div>
+
+        <input type="button" id="new" name="Restart Conversation" value="Restart Presentation"
+               onclick="startNewConversation()"
+               class="btn_new btn"/>
+
+        <input type="button" id="change_password_btn" name="Change Password" value="Change Password"
+               class="btn_change_password btn"/>
+        <!--<div class="dialog_buttons_container">
+            <a id="reinit" href="">
+                <img id="reinit_img"
+                     src="/images/reinit.png" alt="neues Beratungsgespräch starten"
+                     onmouseover="mouseMovement(this, '/binary/default/desktop/images/reinit_onmouseover.png')"
+                     onmouseout="mouseMovement(this, '/binary/default/desktop/images/reinit.png')"
+                     class="reinit_image"/>
+            </a>
+            &lt;!&ndash;<img id="dialog_history"
+          src="/binary/default/desktop/images/dialog_history.png" alt="Dialogverlauf anzeigen"
+          onmouseover="mouseMovement(this, '/binary/default/desktop/images/dialog_history_onmouseover.png')"
+          onmouseout="mouseMovement(this, '/binary/default/desktop/images/dialog_history.png')"
+          class="dialog_history_image"/>  &ndash;&gt;
+        </div>-->
+
+        <!--<div id="jquery_jplayer_1" class="jp-jplayer"></div>
+
+        <div id="jp_container_1" class="jp-audio">
+            <div class="jp-type-single">
+                <div class="jp-gui jp-interface">
+                    <ul class="jp-controls">
+                        <li><a href="javascript:;" class="jp-play" tabindex="1">play</a></li>
+                        <li><a href="javascript:;" class="jp-pause" tabindex="1">pause</a></li>
+                        <li><a href="javascript:;" class="jp-stop" tabindex="1">stop</a></li>
+                        <li><a href="javascript:;" class="jp-mute" tabindex="1" title="mute">mute</a></li>
+                        <li><a href="javascript:;" class="jp-unmute" tabindex="1" title="unmute">unmute</a></li>
+                        <li><a href="javascript:;" class="jp-volume-max" tabindex="1" title="max volume">max volume</a>
+                        </li>
+                    </ul>
+                    <div class="jp-progress">
+                        <div class="jp-seek-bar">
+                            <div class="jp-play-bar"></div>
+                        </div>
+                    </div>
+                    <div class="jp-volume-bar">
+                        <div class="jp-volume-bar-value"></div>
+                    </div>
+                    <div class="jp-time-holder">
+                        <div class="jp-current-time"></div>
+                        <div class="jp-duration"></div>
+
+                        <ul class="jp-toggles">
+                            <li><a href="javascript:;" class="jp-repeat" tabindex="1" title="repeat">repeat</a></li>
+                            <li><a href="javascript:;" class="jp-repeat-off" tabindex="1" title="repeat off">repeat
+                                off</a></li>
+                        </ul>
+                    </div>
+                </div>
+                <div class="jp-no-solution">
+                    <span>Update Required</span>
+                    To play the media you will need to either update your browser to a recent version or update your <a
+                        href="http://get.adobe.com/flashplayer/" target="_blank">Flash plugin</a>.
+                </div>
+            </div>
+        </div>-->
+
+        <img src="/binary/default/desktop/images/copyright.png" alt="Spoken Language System" class="copyright_image"/>
+
+        <div class="loginbox">
+            <span id="user_display_name">You are currently logged in as "USER_DISPLAY_NAME". </span>
+            <a id="logout_url" href="LOGOUT_URL"
+               onclick="document.execCommand('ClearAuthenticationCache'); alert('You have successfully logged out!')"
+               class="btn">Logout</a>
+        </div>
+    </div>
+
+    <!-- CHAT END -->
+
+</div>
+</body>
+</html>

@@ -1,0 +1,367 @@
+@font-face {
+    font-family: Isonorm;
+    src: url('/binary/default/desktop/images/isonorm.eot'); /* For IE */
+    src: url('/binary/default/desktop/images/isonorm.ttf') format('truetype'); /* For non-IE */
+}
+
+@font-face {
+    font-family: IsonormBold;
+    src: url('/binary/default/desktop/images/isonormbold.eot'); /* For IE */
+    src: url('/binary/default/desktop/images/isonormbold.ttf') format('truetype'); /* For non-IE */
+}
+
+body {
+    position: absolute;
+    top: 0;
+    left: 0;
+
+    margin: 0;
+    padding: 0;
+
+    width: 100%;
+    height: 100%;
+
+    background-image: url('/binary/default/desktop/images/background_piece.png');
+    background-repeat: repeat;
+}
+
+textarea {
+    outline: none;
+}
+
+.main_container {
+    position: absolute;
+    width: 1024px;
+    height: 600px;
+    background-image: url('/binary/default/desktop/images/background.png');
+    background-repeat: no-repeat;
+}
+
+.header_chat_container {
+    float: left;
+    width: 486px;
+    height: 800px;
+}
+
+.header_container {
+    float: right;
+    width: 485px;
+}
+
+.logo {
+    width: 100px;
+    height: 100px;
+    float: right;
+}
+
+.feedback_button {
+    float: right;
+    padding-left: 5px;
+    height: 60px;
+    border: 0;
+}
+
+.error_button {
+    float: right;
+    height: 60px;
+    border: 0;
+}
+
+.avatar {
+    position: absolute;
+    z-index: 1;
+    top: 0;
+    width: 486px;
+    height: 600px;
+}
+
+.output_bot_container {
+    position: absolute;
+    float: right;
+    z-index: 2;
+    background-image: url('/binary/default/desktop/images/speech_bubble_sls.png');
+    background-repeat: no-repeat;
+    font-family: Isonorm, Arial, sans-serif;
+    font-size: 1.3em;
+    top: 220px;
+    left: 370px;
+    width: 318px;
+    height: 174px;
+    padding-left: 45px;
+    padding-top: 10px;
+}
+
+.output_bot {
+    width: 265px;
+    height: 160px;
+    overflow-y: auto;
+}
+
+.input_user {
+    resize: none;
+    margin: 5px;
+    width: 270px;
+    height: 60px;
+    font-family: Isonorm, Arial, sans-serif;
+    font-size: medium;
+    border: 0;
+    overflow: auto;
+}
+
+.input_user_container {
+    position: absolute;
+    float: right;
+    z-index: 2;
+    background-image: url('/binary/default/desktop/images/speech_bubble_user.png');
+    top: 400px;
+    left: 400px;
+    width: 286px;
+    height: 110px;
+}
+
+.redo_image {
+    float: right;
+    padding-right: 5px;
+    border: 0;
+    display: none;
+}
+
+.undo_image {
+    float: left;
+    padding-left: 5px;
+    border: 0;
+    display: none;
+}
+
+.user_history_container_1 {
+    position: absolute;
+    float: right;
+    z-index: 2;
+    background-image: url('/binary/default/desktop/images/speech_bubble_user_2.png');
+    background-repeat: no-repeat;
+    top: 365px;
+    left: 200px;
+    width: 288px;
+    height: 99px;
+    visibility: hidden;
+}
+
+.user_history_1 {
+    padding: 5px;
+    width: 255px;
+    height: 40px;
+    font-family: sans-serif;
+    font-size: smaller;
+    text-align: justify;
+}
+
+.user_history_container_2 {
+    position: absolute;
+    float: left;
+    z-index: 2;
+    background-image: url('/binary/default/desktop/images/speech_bubble_user_3.png');
+    background-repeat: no-repeat;
+    top: 450px;
+    left: 200px;
+    width: 288px;
+    height: 99px;
+    visibility: hidden;
+}
+
+.user_history_2 {
+    padding: 5px;
+    width: 255px;
+    height: 40px;
+    font-family: sans-serif;
+    font-size: smaller;
+    text-align: justify;
+}
+
+.user_history_container_3 {
+    position: absolute;
+    float: right;
+    z-index: 2;
+    background-image: url('/binary/default/desktop/images/speech_bubble_user_4.png');
+    background-repeat: no-repeat;
+    top: 535px;
+    left: 200px;
+    width: 288px;
+    height: 99px;
+    visibility: hidden;
+}
+
+.user_history_3 {
+    padding: 5px;
+    width: 255px;
+    height: 40px;
+    font-family: sans-serif;
+    font-size: smaller;
+    text-align: justify;
+}
+
+.user_history_container_4 {
+    position: absolute;
+    float: right;
+    z-index: 2;
+    background-image: url('/binary/default/desktop/images/speech_bubble_user_5.png');
+    background-repeat: no-repeat;
+    top: 625px;
+    left: 200px;
+    width: 288px;
+    height: 99px;
+    visibility: hidden;
+}
+
+.user_history_4 {
+    padding: 5px;
+    width: 255px;
+    height: 40px;
+    font-family: sans-serif;
+    font-size: smaller;
+    text-align: justify;
+}
+
+.dialog_buttons_container {
+    position: absolute;
+    z-index: 2;
+    float: right;
+    width: 288px;
+    left: 170px;
+    top: 405px;
+    border: 0;
+}
+
+.reinit_image {
+    float: left;
+    border: 0;
+}
+
+.dialog_history_image {
+    float: right;
+    border: 0;
+}
+
+.copyright_image {
+    position: absolute;
+    z-index: 2;
+    top: 570px;
+    right: 10px;
+    border: 0;
+}
+
+.search_criteria_container {
+    float: left;
+    width: 180px;
+    height: 100%;
+}
+
+.search_hits_container {
+    float: left;
+    width: 597px;
+    height: 800px;
+    margin-top: 20px;
+}
+
+.status_indicator {
+    visibility: hidden;
+}
+
+.desktop {
+    position: absolute;
+    top: 120px;
+
+    width: 600px;
+    height: 400px;
+    background: white;
+    z-index: 1001;
+
+    padding: 10px;
+    margin-left: 10px;
+
+    font-family: Isonorm, Arial, sans-serif;
+    font-size: 1.8em;
+
+    -webkit-border-radius: 10px;
+    -khtml-border-radius: 10px;
+    -moz-border-radius: 10px;
+    border-radius: 10px;
+}
+
+.media_img {
+    width: 100%;
+    height: 100%;
+}
+
+.btn_new {
+    position: absolute;
+    z-index: 2;
+    top: 510px;
+    left: 400px;
+}
+
+.btn_change_password {
+    position: absolute;
+    z-index: 2;
+    top: 530px;
+    left: 850px;
+}
+
+.btn_autoplay {
+    position: absolute;
+    z-index: 2;
+    top: 410px;
+    left: 235px;
+}
+
+.btn_next {
+    position: absolute;
+    z-index: 2;
+    top: 410px;
+    left: 425px;
+}
+
+.btn_ask {
+    float: right;
+    margin: 3px;
+}
+
+.btn {
+    -moz-box-shadow: inset 0px 1px 0px 0px #97c4fe;
+    -webkit-box-shadow: inset 0px 1px 0px 0px #97c4fe;
+    box-shadow: inset 0px 1px 0px 0px #97c4fe;
+    background: -webkit-gradient(linear, left top, left bottom, color-stop(0.05, #3d94f6), color-stop(1, #1e62d0));
+    background: -moz-linear-gradient(center top, #3d94f6 5%, #1e62d0 100%);
+    filter: progid:DXImageTransform.Microsoft.gradient(startColorstr = '#3d94f6', endColorstr = '#1e62d0');
+    background-color: #3d94f6;
+    -moz-border-radius: 6px;
+    -webkit-border-radius: 6px;
+    border-radius: 6px;
+    border: 1px solid #337fed;
+    display: inline-block;
+    color: #ffffff;
+    font-family: arial;
+    font-size: 15px;
+    font-weight: bold;
+    padding: 5px 10px;
+    text-decoration: none;
+    text-shadow: 1px 1px 0px #1570cd;
+}
+
+.btn:hover {
+    background: -webkit-gradient(linear, left top, left bottom, color-stop(0.05, #1e62d0), color-stop(1, #3d94f6));
+    background: -moz-linear-gradient(center top, #1e62d0 5%, #3d94f6 100%);
+    filter: progid:DXImageTransform.Microsoft.gradient(startColorstr = '#1e62d0', endColorstr = '#3d94f6');
+    background-color: #1e62d0;
+}
+
+#welcome_dialog {
+    font-size: 1.0em;
+    font-family: Isonorm;
+}
+
+.loginbox {
+    position: absolute;
+    top: 100px;
+    right: 0;
+}
+

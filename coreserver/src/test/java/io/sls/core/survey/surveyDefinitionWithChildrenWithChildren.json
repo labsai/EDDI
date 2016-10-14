@@ -1,0 +1,26 @@
+{
+    "name":"root",
+    "children":[
+        {
+            "name":"root",
+            "children":[
+                {
+                    "name":"root",
+                    "propertyExpressions":[],
+                    "categoryExpressions":[
+                        "category(usecases)",
+                        "category(usecases2)"
+                    ],
+                    "outputId":"usecasesOutput",
+                    "randomFactor":0,
+                    "sortingType":"alphabetic",
+                    "showMax":5,
+                    "showMin":2,
+                    "rounds":2,
+                    "surveyChildZeroResults":false,
+                    "surveyChildUnchangedResults":false
+                }
+            ]
+        }
+    ]
+}

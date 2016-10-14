@@ -1,0 +1,12 @@
+.selectioncontrol_dropdown {
+    background-color: #4682b4;
+    padding-top: 3px;
+    padding-bottom: 3px;
+    margin: 8px;
+    float: left;
+    width: 95%;
+    text-overflow: ellipsis;
+    -o-text-overflow: ellipsis; /* required for Opera */
+    -ms-text-overflow: ellipsis; /* required for IE8, allegedly */
+    border-radius: 3px;
+}

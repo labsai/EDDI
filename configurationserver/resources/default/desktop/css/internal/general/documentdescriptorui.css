@@ -1,0 +1,55 @@
+.documentdescriptorui {
+
+}
+
+.documentdescriptorui {
+    position: absolute;
+    bottom: 180px;
+    left: 0;
+}
+
+.documentdescriptorui_row {
+    margin-bottom: 7px;
+}
+
+.documentdescriptorui_key {
+    display: block;
+    font-weight: bold;
+}
+
+.documentdescriptorui_value {
+    display: block;
+    text-overflow: ellipsis;
+}
+
+.documentdescriptorui_header {
+    background-image: url('/binary/default/desktop/images/navitem_bg.png');
+    width: 173px;
+    height: 34px;
+}
+
+.documentdescriptorui_header span {
+    width: 100%;
+    display: block;
+    text-align: center;
+    color: white;
+    text-decoration: none;
+    font-size: 18px;
+    font-family: IsonormBold;
+    line-height: 34px;
+}
+
+.documentdescriptorui_description {
+    color: #4a021c;
+    text-decoration: none;
+    font-size: 16px;
+    font-family: Isonorm;
+    margin-left: 6px;
+    background-image: url('/binary/default/desktop/images/navlist_bg.png');
+    background-repeat: no-repeat;
+    min-height: 106px;
+    width: 134px;
+    padding: 13px;
+    max-height: 300px;
+    overflow: hidden;
+}

@@ -1,0 +1,43 @@
+.connector_control {
+    background-color: white;
+    padding: 3px;
+    padding-left: 0px;
+    margin: 5px;
+    -moz-box-shadow: 0 0 10px 1px #ccc;
+    -webkit-box-shadow: 0 0 10px 1px #ccc;
+    box-shadow: 0 0 10px 1px #ccc;
+}
+
+.connector_control_left {
+    float: left;
+    background-color: #84c7f5;
+    width: 15%;
+    font-weight: bold;
+    border-width: 0px;
+    border-top-width: 1px;
+    border-bottom-width: 1px;
+    border-color: #aaaaaa;
+    border-style: solid;
+}
+
+.connector_control_right {
+    min-height: 80px;
+    border-radius: 8px;
+    padding-top: 8px;
+    padding-bottom: 8px;
+    float: right;
+    background-color: white;
+    width: 83%;
+    text-overflow: ellipsis;
+    -o-text-overflow: ellipsis;
+    -ms-text-overflow: ellipsis;
+    -moz-box-shadow: inset 0 0 20px #cccccc;
+    -webkit-box-shadow: inset 0 0 20px #cccccc;
+    box-shadow: inset 0 0 20px #cccccc;
+}
+
+.connector_control_select {
+    background-color: #84c7f5;
+    padding-top: 3px;
+    padding-bottom: 3px;
+}

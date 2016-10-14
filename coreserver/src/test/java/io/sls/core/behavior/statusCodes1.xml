@@ -1,0 +1,13 @@
+<customer name="haym.info">
+    <dialog name="handy">
+
+        <dialogStatus name="testDialogStatus" sequenceNumber="1">
+            <input rule="expression(test)"
+                   occurrence="current"
+                   accessControl="required"
+                   ignoreUnusedExpressions="false"
+                   ignorePunctuationExpressions="false"/>
+        </dialogStatus>
+
+    </dialog>
+</customer>

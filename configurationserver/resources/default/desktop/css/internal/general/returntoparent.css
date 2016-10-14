@@ -1,0 +1,45 @@
+.returntoparent_enclosing {
+    position: absolute;
+    bottom: 360px;
+    left: 0px;
+}
+
+.returntoparent_container_tobot {
+
+}
+
+#returntoparent_checkbox_text {
+    mergin-left: 5px;
+    font-size: 13px;
+}
+
+.returntoparent {
+    margin: 5px;
+    padding: 4px;
+    border-radius: 3px;
+    border-color: #AAA;
+    border-width: 1px;
+    border-style: solid;
+    background-color: lightBlue;
+}
+
+.returntoparent:hover {
+    background-color: #A7D4F3;
+}
+
+.returntoparent_text {
+    text-decoration: none;
+    color: black;
+    float: left;
+    margin-left: 8px;
+    margin-top: 6px;
+    margin-right: 6px;
+}
+
+.returntoparent_imgarrowleft {
+    background-image: url('/binary/default/desktop/images/arrowleft.png');
+    width: 32px;
+    height: 32px;
+    background-size: 32px 32px;
+    float: left;
+}

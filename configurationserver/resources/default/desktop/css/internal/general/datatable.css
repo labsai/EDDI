@@ -1,0 +1,157 @@
+.dataTables_wrapper {
+    background-color: #305977;
+}
+
+div.dataTables_length {
+    float: left;
+}
+
+div.dataTables_length label {
+    color: white;
+    text-decoration: none;
+    font-size: 15px;
+    font-family: Isonorm;
+    line-height: 30px;
+}
+
+.dataTables_length_selection {
+    margin: 6px;
+    background-color: #f5f5f5;
+    border-radius: 3px;
+    padding: 5px;
+    padding-top: 2px;
+    padding-bottom: 2px;
+    border-color: black;
+    border-width: 1px;
+}
+
+div.dataTables_filter {
+    float: right;
+}
+
+div.dataTables_info {
+    float: left;
+}
+
+div.dataTables_paginate {
+    float: left;
+    line-height: 30px;
+}
+
+div.dataTables_length,
+div.dataTables_filter,
+div.dataTables_paginate,
+div.dataTables_info {
+    padding: 6px;
+}
+
+table.pretty {
+    width: 100%;
+    clear: both;
+}
+
+table.pretty thead th {
+    text-align: center;
+    background: #5c93ba;
+    font-size: 16px;
+    font-family: Isonorm;
+}
+
+/* Body cells */
+table.pretty tbody th {
+    text-align: left;
+    background: #91c5d4;
+}
+
+table.pretty tbody td {
+    text-align: center;
+    font-size: 16px;
+    font-family: Isonorm;
+}
+
+table.pretty tbody tr:nth-child(even) {
+    background: #a7d4f3;
+}
+
+table.pretty tbody tr:nth-child(odd) {
+    background: #d8ebf9;
+}
+
+table.pretty tbody .table_row_selected td {
+    background-color: #9acd32 !important;
+}
+
+table.pretty td,
+table.pretty th {
+    padding: 5px;
+    border: 1px solid #fff;
+}
+
+/* Self clearing - */
+div.dataTables_wrapper:after {
+    content: ".";
+    display: block;
+    clear: both;
+    visibility: hidden;
+    line-height: 0;
+    height: 0;
+}
+
+a.paginate_button,
+a.paginate_active {
+    display: inline-block;
+    background-color: #608995;
+    padding: 2px 6px;
+    margin-left: 2px;
+    cursor: pointer;
+    /**cursor: hand;*/
+}
+
+a.paginate_active {
+    background-color: transparent;
+    border: 1px solid black;
+}
+
+a.paginate_button_disabled {
+    color: #3d6672;
+}
+
+.paging_full_numbers a:active {
+    outline: none
+}
+
+.paging_full_numbers a:hover {
+    text-decoration: none;
+}
+
+div.dataTables_paginate span>a {
+    width: 15px;
+    text-align: center;
+}
+
+div.dataTables_info {
+    padding: 9px 6px 6px 6px;
+}
+
+.dataTables_dotbutton {
+    width: 30px;
+    height: 30px;
+}
+
+.table_col_outputvalues ul {
+    text-align: left;
+    list-style-type: disc;
+    padding-left: 40px;
+}
+
+.table_row_error {
+    background-color: #f08080 !important;
+}
+
+.table_row_success {
+    background-color: #80f080 !important;
+}
+
+.table_cell_error {
+    background-color: red !important;
+}

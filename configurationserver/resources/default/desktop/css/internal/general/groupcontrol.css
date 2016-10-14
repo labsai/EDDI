@@ -1,0 +1,145 @@
+.groupcontrol_closed {
+    width: 71px;
+    height: 85%;
+    background-color: white;
+    float: left;
+    margin-left: 15px;
+    margin-top: 15px;
+    overflow-y: hidden;
+    -moz-box-shadow: 0 0 10px 1px #ccc;
+    -webkit-box-shadow: 0 0 10px 1px #ccc;
+    box-shadow: 0 0 10px 1px #ccc;
+}
+
+.groupcontrol_opened {
+    width: 500px;
+    min-height: 85%;
+    background-color: white;
+    float: left;
+    margin-left: 15px;
+    margin-top: 15px;
+    -moz-box-shadow: 0 0 10px 1px #ccc;
+    -webkit-box-shadow: 0 0 10px 1px #ccc;
+    box-shadow: 0 0 10px 1px #ccc;
+}
+
+.groupcontrol_leftbutton_closed {
+    cursor: pointer;
+    width: 16px;
+    height: 21px;
+    margin: 8px;
+    margin-left: 27px;
+    background-image: url('/binary/default/desktop/images/arrowright.png');
+    background-repeat: no-repeat;
+    background-size: contain;
+    -moz-transform: rotate(90deg); /* FF3.5+ */
+    -o-transform: rotate(90deg); /* Opera 10.5 */
+    -webkit-transform: rotate(90deg); /* Saf3.1+, Chrome */
+    filter: progid:DXImageTransform.Microsoft.BasicImage(rotation = 1.57); /* IE6,IE7 */
+    -ms-filter: "progid:DXImageTransform.Microsoft.BasicImage(rotation=1.57)"; /* IE8 */
+    -ms-transform: rotate(90deg); /* IE9 */
+}
+
+.groupcontrol_leftbutton_opened {
+    cursor: pointer;
+    width: 16px;
+    height: 21px;
+    margin: 8px;
+    margin-left: 27px;
+    float: left;
+    background-image: url('/binary/default/desktop/images/arrowright.png');
+    background-size: contain;
+    background-repeat: no-repeat;
+    -moz-transform: rotate(90deg); /* FF3.5+ */
+    -o-transform: rotate(90deg); /* Opera 10.5 */
+    -webkit-transform: rotate(90deg); /* Saf3.1+, Chrome */
+    filter: progid:DXImageTransform.Microsoft.BasicImage(rotation = 1.57); /* IE6,IE7 */
+    -ms-filter: "progid:DXImageTransform.Microsoft.BasicImage(rotation=1.57)"; /* IE8 */
+    -ms-transform: rotate(90deg); /* IE9 */
+}
+
+.groupcontrol_subheader {
+    float: right;
+}
+
+.groupcontrol_rightbutton {
+    cursor: pointer;
+    width: 23px;
+    height: 40px;
+    background-repeat: no-repeat;
+    float: right;
+    background-image: url('/binary/default/desktop/images/headeritem_add.png');
+    background-size: contain;
+    margin-right: 14px;
+}
+
+.groupcontrol_text_closed {
+    margin-top: 35px;
+    display: block;
+    font-size: 20px;
+    font-family: Isonorm;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+    -o-text-overflow: ellipsis; /* required for Opera */
+    -ms-text-overflow: ellipsis; /* required for IE8, allegedly */
+    -moz-transform: rotate(90deg); /* FF3.5+ */
+    -o-transform: rotate(90deg); /* Opera 10.5 */
+    -webkit-transform: rotate(90deg); /* Saf3.1+, Chrome */
+    filter: progid:DXImageTransform.Microsoft.BasicImage(rotation = 1.57); /* IE6,IE7 */
+    -ms-filter: "progid:DXImageTransform.Microsoft.BasicImage(rotation=1.57)"; /* IE8 */
+    -ms-transform: rotate(90deg); /* IE9 */
+}
+
+.groupcontrol_text_opened {
+    max-width: 330px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    -o-text-overflow: ellipsis; /* required for Opera */
+    -ms-text-overflow: ellipsis; /* required for IE8, allegedly */
+    display: block;
+    font-size: 20px;
+    font-family: Isonorm;
+    margin-top: 11px;
+    margin-left: 15px;
+    float: left;
+    text-overflow: ellipsis;
+}
+
+.groupcontrol_sortable_inner {
+    min-height: 200px;
+}
+
+.groupcontrol_footer {
+    min-height: 34px;
+}
+
+.groupcontrol_closed_placeholder {
+    width: 71px;
+    height: 85%;
+    float: left;
+    margin-left: 15px;
+    margin-top: 15px;
+    overflow-y: hidden;
+    -moz-box-shadow: 0 0 10px 1px #ccc;
+    -webkit-box-shadow: 0 0 10px 1px #ccc;
+    box-shadow: 0 0 10px 1px #ccc;
+    border-color: #e4bac5;
+    border-width: medium;
+    border-style: dashed;
+}
+
+.groupcontrol_opened_placeholder {
+    padding: 8px;
+    width: 500px;
+    min-height: 85%;
+    float: left;
+    margin-left: 15px;
+    margin-top: 15px;
+    overflow-y: hidden;
+    -moz-box-shadow: 0 0 10px 1px #ccc;
+    -webkit-box-shadow: 0 0 10px 1px #ccc;
+    box-shadow: 0 0 10px 1px #ccc;
+    border-color: #e4bac5;
+    border-width: medium;
+    border-style: dashed;
+}

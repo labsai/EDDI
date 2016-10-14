@@ -1,0 +1,34 @@
+<assembly>
+    <!-- this will get an extra resource project-1.1.1-package.zip, you can
+         choose jar as well in the format-->
+    <id>package</id>
+    <formats>
+        <format>zip</format>
+    </formats>
+    <includeBaseDirectory>false</includeBaseDirectory>
+    <!-- Insert here extra files as configs or, batch files, resources, docs etc-->
+    <fileSets>
+        <fileSet>
+            <outputDirectory>/</outputDirectory>
+            <includes>
+                <include>config/*.*</include>
+                <include>resources/**/*.*</include>
+                <include>keystore/*.*</include>
+                <include>*.sh</include>
+                <include>*.bat</include>
+            </includes>
+        </fileSet>
+    </fileSets>
+    <!-- This will scrub your dependencies and add them to your lib folder, I excluded
+         Test stuff as it is not needed, could have declared the resource as a test
+         only phase as well would not have had to exclude it here
+    -->
+    <dependencySets>
+        <dependencySet>
+            <outputDirectory>lib</outputDirectory>
+            <excludes>
+                <exclude>junit:junit</exclude>
+            </excludes>
+        </dependencySet>
+    </dependencySets>
+</assembly>

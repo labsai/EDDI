@@ -1,0 +1,185 @@
+.packagecontrol_closed {
+    width: 90%;
+    background-color: white;
+    margin: 15px 15px 0px 15px;
+    -moz-box-shadow: 0 0 10px 1px #ccc;
+    -webkit-box-shadow: 0 0 10px 1px #ccc;
+    box-shadow: 0 0 10px 1px #ccc;
+}
+
+.packagecontrol_opened {
+    width: 90%;
+    background-color: white;
+    margin: 15px 15px 0px 15px;
+    padding-bottom: 8px;
+    -moz-box-shadow: 0 0 10px 1px #ccc;
+    -webkit-box-shadow: 0 0 10px 1px #ccc;
+    box-shadow: 0 0 10px 1px #ccc;
+}
+
+.packagecontrol_rightbutton {
+    cursor: pointer;
+    width: 23px;
+    height: 40px;
+    background-repeat: no-repeat;
+    margin-right: 12px;
+    float: right;
+    background-image: url('/binary/default/desktop/images/headeritem_add.png');
+    background-size: contain;
+}
+
+.packagecontrol_leftbutton_closed {
+    cursor: pointer;
+    width: 2em;
+    height: 2em;
+    margin: 8px;
+    float: left;
+    background-image: url('/binary/default/desktop/images/arrowright.png');
+    background-repeat: no-repeat;
+    background-size: contain;
+}
+
+.packagecontrol_leftbutton_opened {
+    cursor: pointer;
+    width: 2em;
+    height: 2em;
+    margin: 8px;
+    float: left;
+    background-image: url('/binary/default/desktop/images/arrowright.png');
+    background-size: contain;
+    background-repeat: no-repeat;
+    -moz-transform: rotate(90deg); /* FF3.5+ */
+    -o-transform: rotate(90deg); /* Opera 10.5 */
+    -webkit-transform: rotate(90deg); /* Saf3.1+, Chrome */
+    filter: progid:DXImageTransform.Microsoft.BasicImage(rotation = 1.57); /* IE6,IE7 */
+    -ms-filter: "progid:DXImageTransform.Microsoft.BasicImage(rotation=1.57)"; /* IE8 */
+    -ms-transform: rotate(90deg); /* IE9 */
+}
+
+.packagecontrol_text_opened {
+    max-width: 250px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    -o-text-overflow: ellipsis; /* required for Opera */
+    -ms-text-overflow: ellipsis; /* required for IE8, allegedly */
+    display: block;
+    font-size: 18px;
+    font-family: Isonorm;
+    margin-top: 12px;
+    float: left;
+}
+
+.packagecontrol_text_closed {
+    max-width: 300px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    -o-text-overflow: ellipsis; /* required for Opera */
+    -ms-text-overflow: ellipsis; /* required for IE8, allegedly */
+    display: block;
+    font-size: 18px;
+    font-family: Isonorm;
+    margin-top: 12px;
+    float: left;
+}
+
+.packagecontrol_footer {
+
+}
+
+.packagecontrol_sortable_inner {
+    min-height: 100px;
+}
+
+.packagecontrol_sortable_inner:last-child:after {
+    content: ".";
+    display: block;
+    height: 0;
+    clear: both;
+    visibility: hidden;
+}
+
+.packagecontrol_sequencenumber {
+    float: right;
+    background-image: url('/binary/default/desktop/images/headeritem_bg.png');
+    background-repeat: no-repeat;
+    width: 23px;
+    height: 40px;
+    margin-right: 12px;
+    font-size: 20px;
+    font-family: Isonorm;
+    /* width and height can be anything, as long as they're equal */
+}
+
+.packagecontrol_sequencenumbertext {
+    line-height: 40px;
+    text-align: center;
+}
+
+.packagecontrol_closed_placeholder {
+    width: 90%;
+    margin-left: 15px;
+    margin-top: 15px;
+    overflow-y: hidden;
+    -moz-box-shadow: 0 0 10px 1px #ccc;
+    -webkit-box-shadow: 0 0 10px 1px #ccc;
+    box-shadow: 0 0 10px 1px #ccc;
+    border-color: #e4bac5;
+    border-width: medium;
+    border-style: dashed;
+}
+
+.packagecontrol_opened_placeholder {
+    width: 90%;
+    margin-left: 15px;
+    margin-top: 15px;
+    overflow-y: hidden;
+    -moz-box-shadow: 0 0 10px 1px #ccc;
+    -webkit-box-shadow: 0 0 10px 1px #ccc;
+    box-shadow: 0 0 10px 1px #ccc;
+    border-color: #e4bac5;
+    border-width: medium;
+    border-style: dashed;
+}
+
+.packagecontrol_actionbox {
+    background-color: white;
+    padding: 3px;
+    margin: 5px;
+    -moz-box-shadow: 0 0 10px 1px #ccc;
+    -webkit-box-shadow: 0 0 10px 1px #ccc;
+    box-shadow: 0 0 10px 1px #ccc;
+}
+
+.packagecontrol_actionrow {
+    padding: 3px;
+    margin: 5px;
+}
+
+.packagecontrol_actiondescriptor {
+    overflow: hidden;
+    float: left;
+    width: 20%;
+    padding-top: 8px;
+    padding-bottom: 8px;
+    text-overflow: ellipsis;
+    -o-text-overflow: ellipsis; /* required for Opera */
+    -ms-text-overflow: ellipsis; /* required for IE8, allegedly */
+}
+
+.packagecontrol_action {
+    overflow: hidden;
+    float: right;
+    width: 75%;
+    background-color: #84c7f5;
+    text-overflow: ellipsis;
+    -o-text-overflow: ellipsis; /* required for Opera */
+    -ms-text-overflow: ellipsis; /* required for IE8, allegedly */
+    border-width: 1px;
+    border-color: #aaaaaa;
+    border-style: solid;
+    -moz-box-shadow: inset 0 0 10px #aaaaaa;
+    -webkit-box-shadow: inset 0 0 10px #aaaaaa;
+    box-shadow: inset 0 0 10px #aaaaaa;
+    border-radius: 3px;
+    padding: 8px;
+}

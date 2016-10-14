@@ -1,0 +1,14 @@
+Manifest-Version: 1.0
+Class-Path: ConfigurationRepositoryDefinition.jar resteasy-jaxrs-2.3.4
+ .Final.jar jackson-mapper-asl-1.8.5.jar resteasy-jaxb-provider-2.3.4.
+ Final.jar scannotation-1.0.3.jar jackson-xc-1.8.5.jar resteasy-jsapi-
+ 2.3.4.Final.jar resteasy-atom-provider-2.3.4.Final.jar jaxrs-api-2.3.
+ 4.Final.jar jackson-jaxrs-1.8.5.jar resteasy-jackson2-provider-2.3.4.F
+ inal.jar jackson-core-asl-1.8.5.jar mongo-2.8.0.jar slf4j-log4j12-1.6
+ .4.jar log4j-1.2.16.jar slf4j-api-1.6.4.jar servlet-api-3.0.jar jetty
+ -io-8.1.1.v20120215.jar jetty-server-8.1.1.v20120215-sources.jar jett
+ y-servlets-8.1.1.v20120215-sources.jar jetty-security-8.1.1.v20120215
+ .jar jetty-servlet-8.1.1.v20120215.jar jetty-http-8.1.1.v20120215.jar
+  jetty-continuation-8.1.1.v20120215.jar jetty-server-8.1.1.v20120215.
+ jar jetty-util-8.1.1.v20120215.jar
+

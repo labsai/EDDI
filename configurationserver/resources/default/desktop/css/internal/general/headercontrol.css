@@ -1,0 +1,51 @@
+.headercontrol {
+    float: right;
+    cursor: pointer;
+}
+
+.headercontrol_goto {
+    margin: 5px;
+    padding: 4px;
+    float: left;
+    border-radius: 3px;
+    border-color: #aaaaaa;
+    border-width: 1px;
+    border-style: solid;
+    background-color: #add8e6;
+}
+
+.headercontrol_goto:hover {
+    background-color: #A7D4F3;
+}
+
+.headercontrol_text {
+    float: left;
+    text-decoration: none;
+    color: black;
+}
+
+.headercontrol_icon {
+    margin-right: 5px;
+    float: left;
+    width: 24px;
+    height: 20px;
+    background-image: url('/binary/default/desktop/images/linkicon.png');
+    background-size: 24px;
+    background-repeat: no-repeat;
+}
+
+.headercontrol_dropdown {
+    margin: 5px;
+    margin-left: 0px;
+    margin-right: 7px;
+    padding: 5px;
+    padding-left: 15px;
+    padding-right: 15px;
+    float: left;
+    background-color: #add8e6;
+    border-radius: 3px;
+    border-width: 1px;
+    border-color: #aaaaaa;
+    border-style: solid;
+    min-width: 48px;
+}
