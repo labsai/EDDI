@@ -58,6 +58,53 @@ launch with VM options `-DEDDI_ENV=[development/production] -Duser.dir=[LOCAL_PA
 
 ## Development
 
+### Keycloak
+
+EDDI requires a Keycloak instance for handling authentication. For development, you might want to have a local Keycloak instance running.
+The easiest way to set this up is to use Docker:
+
+```
+docker run -d -e KEYCLOAK_USER=admin -e KEYCLOAK_PASSWORD=admin jboss/keycloak
+```
+NOTE: if you are running this on [docker-machine](https://docs.docker.com/machine/) you need to additionally forward port 8080 to your host. In this case you should instead use the following command:
+```
+docker run -d -e KEYCLOAK_USER=admin -e KEYCLOAK_PASSWORD=admin -p8080:8080 jboss/keycloak
+```
+After the first start, connect to Keycloak the Keycloak Administration interface at <keycloak-host>:8080/auth, login with admin/admin and import the EDDI realm from keycloak-dev.json:
+
+1. Add Realm
+2. Select file -> keycloak-dev.json
+3. Create
+
+Additionally, you have to supply the following system properties (via -D) for running the configserver or the coreserver:
+
+* webserver.keycloak.authServerUrl=http://<host>:<port>/auth
+* webserver.keycloak.realmKey=MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAqki8ITnzytNy+3rPzbrOwSYyA3Jo4+/sf4oUorOuV4ByoW423c/wvYyojq0q/C0HcLLJeCpWzHlC7xvUrPhofVWEQDUrhAo1KNIoW8Fw9LfyFzaUtwMJ3hdRxYQ4gMHERv8IOLd4fZqTIiV2taxE3/nCR5D6WqAjTBvAoh2a69HJ6Ln+TUwCa5uMC/d3NPhsjSERA3ABLwlYKZD+VhngttqN4m8US32ayP9A5lCoM/uVcTb9CJl754VsjcwTybHQpWLbCdOu4SH0b7y6VcSNUJDCNeDkl8JJ84YG6prxDS8/SKTYFZKUxxvdYJ/Lm0HRPEqCpy+snZVApV9MQd7rOQIDAQAB
+
+If your Keycloak URL is different from http://localhost:8080/auth then you need to change configurationserver/resources/keycloak/development/keycloak-adapter.json accordingly.
+
+### MongoDB
+```
+docker run --name some-mongo -d mongo --auth
+```
+NOTE: Again, in case of docker-machine:
+```
+docker run --name eddi-mongo -d -p27017:27017 mongo --auth
+
+docker exec -it eddi-mongo mongo admin
+db.createUser({ user: 'admin', pwd: 'adminpass', roles: [ { role : "userAdminAnyDatabase", db : "admin"} ] });
+exit
+
+docker exec -it eddi-mongo mongo -u admin -p adminpass --authenticationDatabase admin eddi
+db.createUser({ user: 'eddi', pwd: 'eddipass', roles: [ { role : "readWriteAnyDatabase", db : "admin"} ] });
+exit
+```
+
+Additionally, you have to supply the following system properties (via -D) for running the configserver or the coreserver:
+
+* mongodb.hosts=<host> (if <host> is different from localhost)
+* mongodb.password=eddipass
+
 ### REST
 
 All REST Interfaces start with 'IRest' as IRestBotAdministration for instance
