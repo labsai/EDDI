@@ -23,9 +23,18 @@ public abstract class AbstractBaseModule extends AbstractModule {
 
     protected void registerConfigFiles(InputStream... configFiles) {
         try {
+            /**
+             * Allow *.properties config to be overridden by system properties
+             */
+            final Properties systemProperties = System.getProperties();
             for (InputStream configFile : configFiles) {
                 Properties properties = new Properties();
                 properties.load(configFile);
+                properties.entrySet().forEach(propertyEntry -> {
+                    if (systemProperties.containsKey(propertyEntry.getKey())) {
+                        propertyEntry.setValue(systemProperties.getProperty((String) propertyEntry.getKey()));
+                    }
+                });
                 Names.bindProperties(binder(), properties);
             }
         } catch (IOException e) {
