@@ -1,5 +1,7 @@
 package io.sls.resources.rest.behavior.model;
 
+import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
+
 import java.util.ArrayList;
 import java.util.LinkedList;
 import java.util.List;
@@ -9,6 +11,7 @@ import java.util.List;
  * Date: 24.03.12
  * Time: 18:37
  */
+@JsonIgnoreProperties({"default", "id", "producesOutput", "selected", "sequenceNumber", "opened"})
 public class BehaviorRuleConfiguration {
     private String name;
     private List<String> actions;
