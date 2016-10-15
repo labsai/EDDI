@@ -1,5 +1,7 @@
 package io.sls.resources.rest.regulardictionary.model;
 
+import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
+
 import java.util.ArrayList;
 import java.util.List;
 
@@ -79,6 +81,7 @@ public class RegularDictionaryConfiguration {
         }
     }
 
+    @JsonIgnoreProperties({"auto_generate_expression", "auto_to_lower"})
     public static class PhraseConfiguration {
         protected String phrase;
         protected String exp;
