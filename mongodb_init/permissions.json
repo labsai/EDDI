@@ -1,0 +1,112 @@
+[{
+	"_id": {
+		"$oid": "5803b3d028518d1ac481180a"
+	},
+	"permissions": {
+		"ADMINISTRATION": {
+			"users": [{
+				"user": null,
+				"versions": null
+			}],
+			"groups": []
+		}
+	}
+},
+{
+	"_id": {
+		"$oid": "5803b3e228518d1ac481180b"
+	},
+	"permissions": {
+		"ADMINISTRATION": {
+			"users": [{
+				"user": null,
+				"versions": null
+			}],
+			"groups": []
+		}
+	}
+},
+{
+	"_id": {
+		"$oid": "5803b3f028518d1ac481180c"
+	},
+	"permissions": {
+		"ADMINISTRATION": {
+			"users": [{
+				"user": null,
+				"versions": null
+			}],
+			"groups": []
+		}
+	}
+},
+{
+	"_id": {
+		"$oid": "5803b3ff28518d1ac481180d"
+	},
+	"permissions": {
+		"ADMINISTRATION": {
+			"users": [{
+				"user": null,
+				"versions": null
+			}],
+			"groups": []
+		}
+	}
+},
+{
+	"_id": {
+		"$oid": "5803b40e28518d1ac481180e"
+	},
+	"permissions": {
+		"ADMINISTRATION": {
+			"users": [{
+				"user": null,
+				"versions": null
+			}],
+			"groups": []
+		}
+	}
+},
+{
+	"_id": {
+		"$oid": "5803b41b28518d1ac481180f"
+	},
+	"permissions": {
+		"ADMINISTRATION": {
+			"users": [{
+				"user": null,
+				"versions": null
+			}],
+			"groups": []
+		}
+	}
+},
+{
+	"_id": {
+		"$oid": "5803b42a28518d1ac4811810"
+	},
+	"permissions": {
+		"ADMINISTRATION": {
+			"users": [{
+				"user": null,
+				"versions": null
+			}],
+			"groups": []
+		}
+	}
+},
+{
+	"_id": {
+		"$oid": "5803b43728518d1ac4811811"
+	},
+	"permissions": {
+		"ADMINISTRATION": {
+			"users": [{
+				"user": null,
+				"versions": null
+			}],
+			"groups": []
+		}
+	}
+}]

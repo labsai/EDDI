@@ -1,0 +1,131 @@
+[{
+	"_id": {
+		"$oid": "5803b3d028518d1ac481180a"
+	},
+	"type": "core://io.sls.normalizer",
+	"extensionPoints": [],
+	"configDefinition": {
+		"allowedChars": {
+			"type": "text",
+			"defaultValue": "1234567890abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ",
+			"displayKey": "ALLOWED_CHARACTER"
+		},
+		"convertUmlaute": {
+			"type": "boolean",
+			"defaultValue": "true",
+			"displayKey": "CONVERT_UMLAUTE"
+		}
+	},
+	"_version": 1
+},
+{
+	"_id": {
+		"$oid": "5803b3e228518d1ac481180b"
+	},
+	"type": "core://io.sls.parser",
+	"extensionPoints": [{
+		"namespace": "core://io.sls.parser.dictionaries",
+		"interfaceClass": "io.sls.parser.model.IDictionary",
+		"displayKey": "DICTIONARIES"
+	},
+	{
+		"namespace": "core://io.sls.parser.corrections",
+		"interfaceClass": "io.sls.parser.model.ICorrection",
+		"displayKey": "CORRECTIONS"
+	}],
+	"configDefinition": {
+		
+	},
+	"_version": 1
+},
+{
+	"_id": {
+		"$oid": "5803b3f028518d1ac481180c"
+	},
+	"type": "core://io.sls.behavior",
+	"extensionPoints": [],
+	"configDefinition": {
+		"uri": {
+			"type": "resource://io.sls.behavior",
+			"defaultValue": "",
+			"displayKey": "BEHAVIOR_RULE_SET"
+		}
+	},
+	"_version": 1
+},
+{
+	"_id": {
+		"$oid": "5803b3ff28518d1ac481180d"
+	},
+	"type": "core://io.sls.output",
+	"extensionPoints": [],
+	"configDefinition": {
+		"uri": {
+			"type": "resource://io.sls.output",
+			"defaultValue": "",
+			"displayKey": "OUTPUT_SET"
+		}
+	},
+	"_version": 1
+},
+{
+	"_id": {
+		"$oid": "5803b40e28518d1ac481180e"
+	},
+	"type": "core://io.sls.parser.dictionaries.integer",
+	"extensionPoints": [],
+	"configDefinition": {
+		
+	},
+	"_version": 1
+},
+{
+	"_id": {
+		"$oid": "5803b41b28518d1ac481180f"
+	},
+	"type": "core://io.sls.parser.dictionaries.regular",
+	"extensionPoints": [],
+	"configDefinition": {
+		"uri": {
+			"type": "resource://io.sls.regulardictionary",
+			"defaultValue": "",
+			"displayKey": "DICTIONARY_URI"
+		}
+	},
+	"_version": 1
+},
+{
+	"_id": {
+		"$oid": "5803b42a28518d1ac4811810"
+	},
+	"type": "core://io.sls.parser.corrections.levenshtein",
+	"extensionPoints": [],
+	"configDefinition": {
+		"distance": {
+			"type": "integer",
+			"defaultValue": "2",
+			"displayKey": "DISTANCE"
+		}
+	},
+	"_version": 1
+},
+{
+	"_id": {
+		"$oid": "5803b43728518d1ac4811811"
+	},
+	"type": "core://io.sls.parser.corrections.phonetic",
+	"extensionPoints": [],
+	"configDefinition": {
+		"metaphone": {
+			"type": "boolean",
+			"defaultValue": "true",
+			"displayKey": "DISTANCE"
+		},
+		"soundex": {
+			"type": "boolean",
+			"defaultValue": "true",
+			"displayKey": "DISTANCE"
+		}
+	},
+	"_version": 1
+}]

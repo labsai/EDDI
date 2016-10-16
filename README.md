@@ -99,8 +99,9 @@ docker exec -it eddi-mongo mongo -u admin -p adminpass --authenticationDatabase 
 db.createUser({ user: 'eddi', pwd: 'eddipass', roles: [ { role : "readWriteAnyDatabase", db : "admin"} ] });
 exit
 
-docker exec -i eddi-mongo mongoimport --db eddi --collection extensions -u eddi -p eddipass --jsonArray < mongodb_init/extensions
-docker exec -i eddi-mongo mongoimport --db eddi --collection descriptors -u eddi -p eddipass --jsonArray < mongodb_init/descriptors
+docker exec -i eddi-mongo mongoimport --db eddi --collection extensions -u eddi -p eddipass --jsonArray < mongodb_init/extensions.json
+docker exec -i eddi-mongo mongoimport --db eddi --collection descriptors -u eddi -p eddipass --jsonArray < mongodb_init/descriptors.json
+docker exec -i eddi-mongo mongoimport --db eddi --collection permissions -u eddi -p eddipass --jsonArray < mongodb_init/permissions.json
 ```
 
 Additionally, you have to supply the following system properties (via -D) for running the configserver or the coreserver:
