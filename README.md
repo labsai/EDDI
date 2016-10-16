@@ -98,6 +98,9 @@ exit
 docker exec -it eddi-mongo mongo -u admin -p adminpass --authenticationDatabase admin eddi
 db.createUser({ user: 'eddi', pwd: 'eddipass', roles: [ { role : "readWriteAnyDatabase", db : "admin"} ] });
 exit
+
+docker exec -i eddi-mongo mongoimport --db eddi --collection extensions -u eddi -p eddipass --jsonArray < mongodb_init/extensions
+docker exec -i eddi-mongo mongoimport --db eddi --collection descriptors -u eddi -p eddipass --jsonArray < mongodb_init/descriptors
 ```
 
 Additionally, you have to supply the following system properties (via -D) for running the configserver or the coreserver:
@@ -113,40 +116,40 @@ All REST Interfaces start with 'IRest' as IRestBotAdministration for instance
 io.sls.core.rest.IRestBotAdministration
 io.sls.core.rest.IRestBotEngine
 
-
 ### Dependency Injection
 
-Wanna add some classes? Use Dependency Injection via Google Guice
-The main methods are the places you are looking to initialize those modules
+Wanna add some classes? Use Dependency Injection via Google Guice.
+The main methods are the appropriate places to initialize custom modules.
 
 ## Documentation
 
-bot states: 
-- green - editable
-- red - previous version
+Bot states: 
 
-Bot constists of packages
+* green - editable
+* red - previous version
 
-a package has a lifecicle and contains plugins/extensions (e.g. Input Parser plugin, Dialog/Behaviour Rules plugin, Output plugin)
+A Bot constists of packages.
 
-plugins can contain other plugins and interfaces, such as plugin "Dictionaries" can contain different dictionaries
+A package has a lifecycle and contains plugins/extensions (e.g. Input Parser plugin, Dialog/Behaviour Rules plugin, Output plugin).
 
-a dictionary classifies input (phrases and terms) and can also be an NLP dictionary where different sentence elements are parsed
+Plugins can contain other plugins and interfaces such as plugin "Dictionaries" can contain different dictionaries.
+
+A dictionary classifies input (phrases and terms) and can also be an NLP dictionary where different sentence elements are parsed.
 
 Dialog/Behaviour Rules is a group of rules:
-- checks conditions (can also be plugins)
-- if true defines which action sould be executed next and sets the action in the analysis session (conversation memory / state)
 
+* checks conditions (can also be plugins)
+* if true defines which action should be executed next and sets the action in the analysis session (conversation memory / state)
 
 ### REST API
 
 IRestBotEngine: interact with bot
 
-- create new conversation
+* create new conversation
 POST /bots/{environment}/{botId}
 -> returns /{environment}/{botId}/{conversationId}
 
-- talk to bot
+* talk to bot
 POST /{environment}/{botId}/{conversationId}
 
 
@@ -164,30 +167,30 @@ Bootstrapping/Deploying
 io.sls.core.runtime.*
 ```
 
- The conversation lifecycle between the bot and the human
+The conversation lifecycle between the bot and the human
 ```java
 io.sls.core.lifecycle.*
 ```
 
- The one and only user specific (conversation) state in the whole application
- Is used for communication between the plugins
+The one and only user specific (conversation) state in the whole application.
+It is used for communication between the plugins.
 ```java
 io.sls.memory.*
 ```
 
- Prepares the user input for the parser
+Prepares the user input for the parser.
 ```java
 io.sls.core.normalizing.*
 ```
 
- Parses the input of the user and translates it to "Expressions", based on dictionaries and correction algorithms. Expression are meanings, e.g. day after tomorrow -> date(today+1), yes -> confirmation(true)
- Dictionaries and Corrections are plugins and therefore can be extended.
+Parses the input of the user and translates it to "Expressions", based on dictionaries and correction algorithms. Expression are meanings, e.g. day after tomorrow -> date(today+1), yes -> confirmation(true)
+Dictionaries and Corrections are plugins and therefore can be extended.
 ```java
 io.sls.core.parser.*
 ```
 
- There are groups of Rules. Each rules holds an list of conditions that all need to pass true in order for the rule to be successful. As soon as one rule has passed true none of the other following group members is executed. Successful rules have a set of "actions" that should be executed later on. 
- Conditions are plugins, thus extendable. 
+There are groups of Rules. Each rules holds an list of conditions that all need to pass true in order for the rule to be successful. As soon as one rule has passed true none of the other following group members is executed. Successful rules have a set of "actions" that should be executed later on. 
+Conditions are plugins, thus extendable. 
 ```java
 io.sls.core.behavior.*
 ```
@@ -209,7 +212,7 @@ Rest interfaces
 io.sls.resources.rest.*
 ```
 
-data storage
+Data storage
 ```java
 io.sls.persistence.*
 ```
@@ -224,31 +227,20 @@ All configurations in EDDI are stored as separate JSONs and are versioned on eve
 
 Therefore each JSON has the following properties:
 
- 
-
     _id
         Is the unique identifier for the specific resource and will be used for reference
     _version
         Is an integer and is used to version every change made to any configuation within EDDI
 
- 
-
 Both properties will be assigned internally and therefore are prefixed with an underscore. Do not change these values as this will result in data inconsistency.
-
- 
-
- 
-
- 
 
 Bots of configurations on how a bot should react to inputs from the users or certain events.
 
 Bots contain (Knowledge-)Packages. A JSON of a bot may look like this:
 
- 
-
 ---------------------------
 
+```json
 {
 
     "_id":"51059a82e4b087c8e3554bce",
@@ -264,21 +256,15 @@ Bots contain (Knowledge-)Packages. A JSON of a bot may look like this:
     "authenticationRequired" : true
 
 }
-
- 
+```
 
 --------------------------
 
- 
-
 A Bot-Config ist a simple JSON containing two mandatory properties:
-
- 
 
     packages
         An array of URI references to the package configs
     authenticationRequired
         A boolean param indicating whether this bot should be available to public or an user authentication will be required
 
-
-Documentation is in on going progress and will be extended shortly..
+Documentation is in ongoing progress and will be extended shortly...

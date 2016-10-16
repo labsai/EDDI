@@ -1,112 +1,96 @@
-Collection "descriptors":
-/* 1 */
-{
-    "_id" : ObjectId("50530211d2b8b3b97721495a"),
+[{
+    "_id" : { "$oid" : "50530211d2b8b3b97721495a" },
     "_version" : 1,
     "createdBy" : "",
-    "createdOn" : NumberLong(1347617297734),
+    "createdOn" : { "$numberLong" : "1347617297734" },
     "deleted" : false,
     "description" : "",
     "lastModifiedBy" : "",
-    "lastModifiedOn" : NumberLong(1347617297734),
+    "lastModifiedOn" : { "$numberLong" : "1347617297734" },
     "name" : "Input Normalizer",
     "resource" : "resource://io.sls.extensions/extensionstore/extensions/50530211d2b8b3b97721495a?version=1"
-}
-
-/* 2 */
+},
 {
-    "_id" : ObjectId("5053021ad2b8b3b97721495b"),
+    "_id" : { "$oid" : "5053021ad2b8b3b97721495b" },
     "_version" : 1,
     "createdBy" : "",
-    "createdOn" : NumberLong(1347617306971),
+    "createdOn" : { "$numberLong" : "1347617306971" },
     "deleted" : false,
     "description" : "",
     "lastModifiedBy" : "",
-    "lastModifiedOn" : NumberLong(1347617306971),
+    "lastModifiedOn" : { "$numberLong" : "1347617306971" },
     "name" : "Input Understanding",
     "resource" : "resource://io.sls.extensions/extensionstore/extensions/5053021ad2b8b3b97721495b?version=1"
-}
-
-/* 3 */
+},
 {
-    "_id" : ObjectId("50530227d2b8b3b97721495c"),
+    "_id" : { "$oid" : "50530227d2b8b3b97721495c" },
     "_version" : 1,
     "createdBy" : "",
-    "createdOn" : NumberLong(1347617319873),
+    "createdOn" : { "$numberLong" : "1347617319873" },
     "deleted" : false,
     "description" : "",
     "lastModifiedBy" : "",
-    "lastModifiedOn" : NumberLong(1347617319873),
+    "lastModifiedOn" : { "$numberLong" : "1347617319873" },
     "name" : "Dialog Behavior",
     "resource" : "resource://io.sls.extensions/extensionstore/extensions/50530227d2b8b3b97721495c?version=1"
-}
-
-/* 4 */
+},
 {
-    "_id" : ObjectId("5053022dd2b8b3b97721495d"),
+    "_id" : { "$oid" : "5053022dd2b8b3b97721495d" },
     "_version" : 1,
     "createdBy" : "",
-    "createdOn" : NumberLong(1347617325092),
+    "createdOn" : { "$numberLong" : "1347617325092" },
     "deleted" : false,
     "description" : "",
     "lastModifiedBy" : "",
-    "lastModifiedOn" : NumberLong(1347617325092),
+    "lastModifiedOn" : { "$numberLong" : "1347617325092" },
     "name" : "Output",
     "resource" : "resource://io.sls.extensions/extensionstore/extensions/5053022dd2b8b3b97721495d?version=1"
-}
-
-/* 5 */
+},
 {
-    "_id" : ObjectId("50530236d2b8b3b97721495e"),
+    "_id" : { "$oid" : "50530236d2b8b3b97721495e" },
     "_version" : 1,
     "createdBy" : "",
-    "createdOn" : NumberLong(1347617334293),
+    "createdOn" : { "$numberLong" : "1347617334293" },
     "deleted" : false,
     "description" : "",
     "lastModifiedBy" : "",
-    "lastModifiedOn" : NumberLong(1347617334293),
+    "lastModifiedOn" : { "$numberLong" : "1347617334293" },
     "name" : "Integer Dictionary",
     "resource" : "resource://io.sls.extensions/extensionstore/extensions/50530236d2b8b3b97721495e?version=1"
-}
-
-/* 6 */
+},
 {
-    "_id" : ObjectId("5053023bd2b8b3b97721495f"),
+    "_id" : { "$oid" : "5053023bd2b8b3b97721495f" },
     "_version" : 1,
     "createdBy" : "",
-    "createdOn" : NumberLong(1347617339244),
+    "createdOn" : { "$numberLong" : "1347617339244" },
     "deleted" : false,
     "description" : "",
     "lastModifiedBy" : "",
-    "lastModifiedOn" : NumberLong(1347617339244),
+    "lastModifiedOn" : { "$numberLong" : "1347617339244" },
     "name" : "Regular Dictionary",
     "resource" : "resource://io.sls.extensions/extensionstore/extensions/5053023bd2b8b3b97721495f?version=1"
-}
-
-/* 7 */
+},
 {
-    "_id" : ObjectId("50530242d2b8b3b977214960"),
+    "_id" : { "$oid" : "50530242d2b8b3b977214960" },
     "_version" : 1,
     "createdBy" : "",
-    "createdOn" : NumberLong(1347617346265),
+    "createdOn" : { "$numberLong" : "1347617346265" },
     "deleted" : false,
     "description" : "",
     "lastModifiedBy" : "",
-    "lastModifiedOn" : NumberLong(1347617346265),
+    "lastModifiedOn" : { "$numberLong" : "1347617346265" },
     "name" : "Levenshtein Correction",
     "resource" : "resource://io.sls.extensions/extensionstore/extensions/50530242d2b8b3b977214960?version=1"
-}
-
-/* 8 */
+},
 {
-    "_id" : ObjectId("50530251d2b8b3b977214961"),
+    "_id" : { "$oid" : "50530251d2b8b3b977214961" },
     "_version" : 1,
     "createdBy" : "",
-    "createdOn" : NumberLong(1347617361297),
+    "createdOn" : { "$numberLong" : "1347617361297" },
     "deleted" : false,
     "description" : "",
     "lastModifiedBy" : "",
-    "lastModifiedOn" : NumberLong(1347617361297),
+    "lastModifiedOn" : { "$numberLong" : "1347617361297" },
     "name" : "Phonetic Correction",
     "resource" : "resource://io.sls.extensions/extensionstore/extensions/50530251d2b8b3b977214961?version=1"
-}
+}]

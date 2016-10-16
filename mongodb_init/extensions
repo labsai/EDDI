@@ -1,6 +1,5 @@
-/* 1 */
-{
-    "_id" : ObjectId("50530211d2b8b3b97721495a"),
+[{
+    "_id" : { "$oid" : "50530211d2b8b3b97721495a" },
     "type" : "core://io.sls.normalizer",
     "extensionPoints" : [],
     "configDefinition" : {
@@ -16,11 +15,9 @@
         }
     },
     "_version" : 1
-}
-
-/* 2 */
+},
 {
-    "_id" : ObjectId("5053021ad2b8b3b97721495b"),
+    "_id" : { "$oid" : "5053021ad2b8b3b97721495b" },
     "type" : "core://io.sls.parser",
     "extensionPoints" : [ 
         {
@@ -36,11 +33,9 @@
     ],
     "configDefinition" : {},
     "_version" : 1
-}
-
-/* 3 */
+},
 {
-    "_id" : ObjectId("50530227d2b8b3b97721495c"),
+    "_id" : { "$oid" : "50530227d2b8b3b97721495c" },
     "type" : "core://io.sls.behavior",
     "extensionPoints" : [],
     "configDefinition" : {
@@ -51,11 +46,9 @@
         }
     },
     "_version" : 1
-}
-
-/* 4 */
+},
 {
-    "_id" : ObjectId("5053022dd2b8b3b97721495d"),
+    "_id" : { "$oid" : "5053022dd2b8b3b97721495d" },
     "type" : "core://io.sls.output",
     "extensionPoints" : [],
     "configDefinition" : {
@@ -66,20 +59,16 @@
         }
     },
     "_version" : 1
-}
-
-/* 5 */
+},
 {
-    "_id" : ObjectId("50530236d2b8b3b97721495e"),
+    "_id" : { "$oid" : "50530236d2b8b3b97721495e" },
     "type" : "core://io.sls.parser.dictionaries.integer",
     "extensionPoints" : [],
     "configDefinition" : {},
     "_version" : 1
-}
-
-/* 6 */
+},
 {
-    "_id" : ObjectId("5053023bd2b8b3b97721495f"),
+    "_id" : { "$oid" : "5053023bd2b8b3b97721495f" },
     "type" : "core://io.sls.parser.dictionaries.regular",
     "extensionPoints" : [],
     "configDefinition" : {
@@ -90,11 +79,9 @@
         }
     },
     "_version" : 1
-}
-
-/* 7 */
+},
 {
-    "_id" : ObjectId("50530242d2b8b3b977214960"),
+    "_id" : { "$oid" : "50530242d2b8b3b977214960" },
     "type" : "core://io.sls.parser.corrections.levenshtein",
     "extensionPoints" : [],
     "configDefinition" : {
@@ -105,11 +92,9 @@
         }
     },
     "_version" : 1
-}
-
-/* 8 */
+},
 {
-    "_id" : ObjectId("50530251d2b8b3b977214961"),
+    "_id" : { "$oid" : "50530251d2b8b3b977214961" },
     "type" : "core://io.sls.parser.corrections.phonetic",
     "extensionPoints" : [],
     "configDefinition" : {
@@ -125,4 +110,4 @@
         }
     },
     "_version" : 1
-}
+}]
