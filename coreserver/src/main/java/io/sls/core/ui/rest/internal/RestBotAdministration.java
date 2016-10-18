@@ -16,6 +16,7 @@ import org.slf4j.LoggerFactory;
 import javax.inject.Inject;
 import javax.ws.rs.InternalServerErrorException;
 import javax.ws.rs.core.Response;
+import java.util.EnumSet;
 import java.util.Objects;
 import java.util.concurrent.Callable;
 
@@ -52,7 +53,7 @@ public class RestBotAdministration implements IRestBotAdministration {
     private void deploy(final Deployment.Environment environment, final String botId, final Integer version) {
         Callable<Void> deployBot = () -> {
             try {
-                if (Objects.equals(getStatus(environment, botId, version), Deployment.Status.NOT_FOUND.toString())) {
+                if (EnumSet.of(Deployment.Status.NOT_FOUND, Deployment.Status.ERROR).contains(getStatus(environment, botId, version))) {
                     botFactory.deployBot(environment, botId, version);
                 }
             } catch (ServiceException e) {
@@ -81,16 +82,16 @@ public class RestBotAdministration implements IRestBotAdministration {
         RuntimeUtilities.checkNotNull(botId, "botId");
         RuntimeUtilities.checkNotNull(version, "version");
 
-        return getStatus(environment, botId, version);
+        return getStatus(environment, botId, version).toString();
     }
 
-    private String getStatus(Deployment.Environment environment, String botId, Integer version) {
+    private Deployment.Status getStatus(Deployment.Environment environment, String botId, Integer version) {
         try {
             IBot bot = botFactory.getBot(environment, botId, version);
             if (bot != null) {
-                return bot.getDeploymentStatus().toString();
+                return bot.getDeploymentStatus();
             } else {
-                return Deployment.Status.NOT_FOUND.toString();
+                return Deployment.Status.NOT_FOUND;
             }
         } catch (ServiceException e) {
             String message = "Error while deploying bot! (botId=%s , version=%s)";
