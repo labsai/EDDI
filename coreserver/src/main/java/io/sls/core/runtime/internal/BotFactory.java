@@ -8,10 +8,7 @@ import io.sls.memory.IConversationMemory;
 import io.sls.memory.model.Deployment;
 
 import javax.inject.Inject;
-import java.util.Collections;
-import java.util.LinkedList;
-import java.util.List;
-import java.util.Map;
+import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.stream.Collectors;
 
@@ -21,15 +18,16 @@ import java.util.stream.Collectors;
  * Time: 17:46
  */
 public class BotFactory implements IBotFactory {
-    private final Map<BotId, IBot> bots = new ConcurrentHashMap<>();
-    private final Map<Deployment.Environment, Map<BotId, IBot>> environments = new ConcurrentHashMap<>();
+    private final Map<Deployment.Environment, ConcurrentHashMap<BotId, IBot>> environments;
     private final BotStoreClientLibrary botStoreClientLibrary;
 
     @Inject
     public BotFactory(IBotStoreService botStoreService, IPackageFactory packageFactory) {
-        environments.put(Deployment.Environment.restricted, new ConcurrentHashMap<>());
-        environments.put(Deployment.Environment.unrestricted, new ConcurrentHashMap<>());
-        environments.put(Deployment.Environment.test, new ConcurrentHashMap<>());
+        Map<Deployment.Environment, ConcurrentHashMap<BotId, IBot>> _environments = new HashMap<>(Deployment.Environment.values().length);
+        _environments.put(Deployment.Environment.restricted, new ConcurrentHashMap<>());
+        _environments.put(Deployment.Environment.unrestricted, new ConcurrentHashMap<>());
+        _environments.put(Deployment.Environment.test, new ConcurrentHashMap<>());
+        environments = Collections.unmodifiableMap(_environments);
         botStoreClientLibrary = new BotStoreClientLibrary(botStoreService, packageFactory);
     }
 
@@ -65,35 +63,36 @@ public class BotFactory implements IBotFactory {
     @Override
     public void deployBot(Deployment.Environment environment, final String botId, final Integer version) throws ServiceException, IllegalAccessException {
         BotId id = new BotId(botId, version);
-        Map<BotId, IBot> botEnvironment = getBotEnvironment(environment);
+        ConcurrentHashMap<BotId, IBot> botEnvironment = getBotEnvironment(environment);
+        // fast path
         if (!botEnvironment.containsKey(id)) {
-            if(bots.containsKey(id)) {
-                botEnvironment.put(id, bots.get(id));
-            }else {
-                Bot emptyBot = new Bot(botId, version) {
-                    @Override
-                    public void addPackage(IExecutablePackage executablePackage) throws IllegalAccessException {
-                        throw new IllegalAccessException("Bot deployment is still in progress!");
-                    }
+            Bot emptyBot = new Bot(botId, version) {
+                @Override
+                public void addPackage(IExecutablePackage executablePackage) throws IllegalAccessException {
+                    throw new IllegalAccessException("Bot deployment is still in progress!");
+                }
 
-                    @Override
-                    public IConversation startConversation(IConversation.IConversationOutputRenderer outputProvider) throws InstantiationException, IllegalAccessException {
-                        throw new IllegalAccessException("Bot deployment is still in progress!");
-                    }
+                @Override
+                public IConversation startConversation(IConversation.IConversationOutputRenderer outputProvider) throws InstantiationException, IllegalAccessException {
+                    throw new IllegalAccessException("Bot deployment is still in progress!");
+                }
 
-                    @Override
-                    public IConversation continueConversation(IConversationMemory conversationMemory, IConversation.IConversationOutputRenderer outputProvider) throws InstantiationException, IllegalAccessException {
-                        throw new IllegalAccessException("Bot deployment is still in progress!");
-                    }
-                };
-                emptyBot.setDeploymentStatus(Deployment.Status.IN_PROGRESS);
-                botEnvironment.put(id, emptyBot);
+                @Override
+                public IConversation continueConversation(IConversationMemory conversationMemory, IConversation.IConversationOutputRenderer outputProvider) throws InstantiationException, IllegalAccessException {
+                    throw new IllegalAccessException("Bot deployment is still in progress!");
+                }
+            };
+            emptyBot.setDeploymentStatus(Deployment.Status.IN_PROGRESS);
+
+            // atomically register dummy bot in environment
+            if (botEnvironment.putIfAbsent(id, emptyBot) == null) {
                 IBot bot;
                 try {
                     bot = botStoreClientLibrary.getBot(botId, version);
-                    bots.put(id, bot);
                 } catch (ServiceException e) {
                     emptyBot.setDeploymentStatus(Deployment.Status.ERROR);
+                    // on failure, remove any entry from environment to allow redeployment
+                    botEnvironment.remove(id);
                     throw e;
                 }
 
@@ -113,7 +112,7 @@ public class BotFactory implements IBotFactory {
         }
     }
 
-    private Map<BotId, IBot> getBotEnvironment(Deployment.Environment environment) {
+    private ConcurrentHashMap<BotId, IBot> getBotEnvironment(Deployment.Environment environment) {
         return environments.get(environment);
     }
 
