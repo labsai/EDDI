@@ -38,6 +38,10 @@ public class RestBotUI implements IRestBotUI {
     public static final String MOBILE = "mobile";
     public static final String DESKTOP = "desktop";
     public static final String BODY_IDENTIFIER = "<body>";
+
+    private static final String DEFAULT_LANGUAGE = "en";
+    private static final String DEFAULT_LOCATION = "US";
+
     private final HttpServletRequest httpServletRequest;
     private final HttpServletResponse httpServletResponse;
     private final IHtmlFaceStore faceStore;
@@ -94,6 +98,12 @@ public class RestBotUI implements IRestBotUI {
 
                 if (RuntimeUtilities.isNullOrEmpty(uiIdentifier)) {
                     uiIdentifier = "default";
+                }
+                if (RuntimeUtilities.isNullOrEmpty(language)) {
+                    language = DEFAULT_LANGUAGE;
+                }
+                if (RuntimeUtilities.isNullOrEmpty(location)) {
+                    location = DEFAULT_LOCATION;
                 }
             }
 
