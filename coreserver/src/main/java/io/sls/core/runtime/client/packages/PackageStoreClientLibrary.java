@@ -8,6 +8,7 @@ import io.sls.resources.rest.documentdescriptor.model.DocumentDescriptor;
 import io.sls.resources.rest.packages.model.PackageConfiguration;
 
 import javax.inject.Inject;
+import javax.inject.Provider;
 import java.net.URI;
 import java.util.Map;
 
@@ -23,9 +24,9 @@ public class PackageStoreClientLibrary implements IPackageStoreClientLibrary {
 
     @Inject
     public PackageStoreClientLibrary(IPackageStoreService packageStoreService,
-                                     Map<String, ILifecycleTask> lifecycleExtensions) {
+                                     Provider<Map<String, ILifecycleTask>> lifecycleExtensionsProvider) {
         this.packageStoreService = packageStoreService;
-        this.lifecycleExtensions = lifecycleExtensions;
+        this.lifecycleExtensions = lifecycleExtensionsProvider.get();
     }
 
     @Override

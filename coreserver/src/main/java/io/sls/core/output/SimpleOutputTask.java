@@ -29,7 +29,6 @@ import java.util.Map;
  * Date: 12.03.12
  * Time: 16:36
  */
-@Singleton
 public class SimpleOutputTask extends AbstractLifecycleTask implements ILifecycleTask {
     private SimpleOutput simpleOutput;
     private ResourceClientLibrary resourceClientLibrary;
