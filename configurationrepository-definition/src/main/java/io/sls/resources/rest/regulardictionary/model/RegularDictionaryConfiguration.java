@@ -36,6 +36,7 @@ public class RegularDictionaryConfiguration {
         return phrases;
     }
 
+    @JsonIgnoreProperties({"auto_generate_expression", "auto_to_lower"})
     public static class WordConfiguration {
         private String word;
         private String exp;
