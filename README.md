@@ -2,7 +2,7 @@
 
 A Platform for creating, running and maintaining chatbots of all kinds.
 
-License: GNU GPLv3
+License: Apache License 2.0
 
 ## Intro
 
