@@ -5,7 +5,6 @@ import io.sls.memory.model.ConversationMemorySnapshot;
 import java.util.Date;
 
 /**
- * Copyright by Spoken Language System. All rights reserved.
  * User: jarisch
  * Date: 22.11.12
  * Time: 14:30

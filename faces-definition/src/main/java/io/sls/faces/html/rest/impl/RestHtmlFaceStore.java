@@ -16,7 +16,6 @@ import javax.ws.rs.core.Response;
 import java.net.URI;
 
 /**
- * Copyright by Spoken Language System. All rights reserved.
  * User: jarisch
  * Date: 21.01.13
  * Time: 16:52

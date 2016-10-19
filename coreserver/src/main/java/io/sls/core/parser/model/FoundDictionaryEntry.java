@@ -5,7 +5,6 @@ import io.sls.expressions.Expression;
 import java.util.List;
 
 /**
- * Copyright by Spoken Language System. All rights reserved.
  * User: jarisch
  * Date: 25.01.13
  * Time: 17:14

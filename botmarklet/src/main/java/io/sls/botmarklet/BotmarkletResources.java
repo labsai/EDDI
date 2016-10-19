@@ -9,7 +9,6 @@ import java.util.LinkedList;
 import java.util.List;
 
 /**
- * Copyright by Spoken Language System. All rights reserved.
  * User: jarisch
  * Date: 20.01.13
  * Time: 19:33

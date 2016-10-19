@@ -1,7 +1,6 @@
 package io.sls.permission.ssl;
 
 /**
- * Copyright by Spoken Language System. All rights reserved.
  * User: jarisch
  * Date: 28.01.13
  * Time: 13:22

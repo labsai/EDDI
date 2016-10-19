@@ -12,7 +12,6 @@ import javax.ws.rs.core.Response;
 
 
 /**
- * Copyright by Spoken Language System. All rights reserved.
  * User: jarisch
  * Date: 20.11.12
  * Time: 11:48

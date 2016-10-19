@@ -7,7 +7,6 @@ import java.util.Arrays;
 import java.util.List;
 
 /**
- * Copyright by Spoken Language System. All rights reserved.
  * User: jarisch
  * Date: 16.11.12
  * Time: 11:33

@@ -1,7 +1,6 @@
 package io.sls.testing.descriptor.model;
 
 /**
- * Copyright by Spoken Language System. All rights reserved.
  * User: jarisch
  * Date: 23.11.12
  * Time: 10:17

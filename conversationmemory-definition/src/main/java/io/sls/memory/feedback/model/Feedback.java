@@ -1,7 +1,6 @@
 package io.sls.memory.feedback.model;
 
 /**
- * Copyright by Spoken Language System. All rights reserved.
  * User: jarisch
  * Date: 19.11.12
  * Time: 11:04

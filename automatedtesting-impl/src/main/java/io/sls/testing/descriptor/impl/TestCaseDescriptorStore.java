@@ -13,7 +13,6 @@ import org.codehaus.jackson.type.TypeReference;
 import javax.inject.Inject;
 
 /**
- * Copyright by Spoken Language System. All rights reserved.
  * User: jarisch
  * Date: 22.11.12
  * Time: 15:38

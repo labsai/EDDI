@@ -4,7 +4,6 @@ import io.sls.faces.html.model.HtmlFace;
 import io.sls.persistence.IResourceStore;
 
 /**
- * Copyright by Spoken Language System. All rights reserved.
  * User: jarisch
  * Date: 18.01.13
  * Time: 21:50

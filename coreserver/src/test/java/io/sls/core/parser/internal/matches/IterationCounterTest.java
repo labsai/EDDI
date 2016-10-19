@@ -4,7 +4,6 @@ import org.junit.Assert;
 import org.junit.Test;
 
 /**
- * Copyright by Spoken Language System. All rights reserved.
  * User: jarisch
  * Date: 02.11.12
  * Time: 14:32

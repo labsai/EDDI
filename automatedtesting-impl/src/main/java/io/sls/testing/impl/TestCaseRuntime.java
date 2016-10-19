@@ -24,7 +24,6 @@ import java.util.Objects;
 import java.util.concurrent.Callable;
 
 /**
- * Copyright by Spoken Language System. All rights reserved.
  * User: jarisch
  * Date: 22.11.12
  * Time: 17:01

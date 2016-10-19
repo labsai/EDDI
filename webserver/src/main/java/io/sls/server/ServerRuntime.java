@@ -41,7 +41,6 @@ import java.net.URL;
 import java.util.*;
 
 /**
- * Copyright by Spoken Language System. All rights reserved.
  * User: jarisch
  * Date: 21.11.12
  * Time: 23:09

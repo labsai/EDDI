@@ -8,7 +8,6 @@ import javax.servlet.http.HttpServletRequest;
 
 
 /**
- * Copyright by Spoken Language System. All rights reserved.
  * User: jarisch
  * Date: 26.01.13
  * Time: 21:03

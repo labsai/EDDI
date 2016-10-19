@@ -4,7 +4,6 @@ import io.sls.resources.rest.documentdescriptor.model.DocumentDescriptor;
 import io.sls.testing.model.TestCaseState;
 
 /**
- * Copyright by Spoken Language System. All rights reserved.
  * User: jarisch
  * Date: 22.11.12
  * Time: 14:37

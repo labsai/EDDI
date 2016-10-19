@@ -5,7 +5,6 @@ import java.util.List;
 import java.util.StringTokenizer;
 
 /**
- * Copyright by Spoken Language System. All rights reserved.
  * User: jarisch
  * Date: 19.11.12
  * Time: 18:45

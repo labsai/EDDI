@@ -18,7 +18,6 @@ import java.util.HashMap;
 import java.util.List;
 
 /**
- * Copyright by Spoken Language System. All rights reserved.
  * User: jarisch
  * Date: 19.11.12
  * Time: 14:25

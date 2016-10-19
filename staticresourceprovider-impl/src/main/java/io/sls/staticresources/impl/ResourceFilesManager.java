@@ -14,7 +14,6 @@ import java.util.List;
 import java.util.NoSuchElementException;
 
 /**
- * Copyright by Spoken Language System. All rights reserved.
  * User: jarisch
  * Date: 03.10.12
  * Time: 14:43

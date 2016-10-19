@@ -4,7 +4,6 @@ import java.net.URI;
 import java.util.Date;
 
 /**
- * Copyright by Spoken Language System. All rights reserved.
  * User: jarisch
  * Date: 18.11.12
  * Time: 17:19

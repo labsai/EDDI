@@ -1,7 +1,6 @@
 package io.sls.core.parser.phrases;
 
 /**
- * Copyright by Spoken Language System. All rights reserved.
  * User: jarisch
  * Date: 02.11.12
  * Time: 11:49

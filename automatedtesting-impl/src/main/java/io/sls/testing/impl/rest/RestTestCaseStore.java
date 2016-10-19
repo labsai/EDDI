@@ -30,7 +30,6 @@ import java.util.LinkedList;
 import java.util.List;
 
 /**
- * Copyright by Spoken Language System. All rights reserved.
  * User: jarisch
  * Date: 22.11.12
  * Time: 15:35

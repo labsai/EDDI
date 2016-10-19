@@ -39,7 +39,6 @@ import java.text.SimpleDateFormat;
 import java.util.*;
 
 /**
- * Copyright by Spoken Language System. All rights reserved.
  * User: jarisch
  * Date: 22.06.13
  * Time: 20:18

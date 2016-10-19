@@ -1,7 +1,6 @@
 package io.sls.core.parser.internal.matches;
 
 /**
- * Copyright by Spoken Language System. All rights reserved.
  * User: jarisch
  * Date: 06.11.12
  * Time: 15:11

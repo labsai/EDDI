@@ -12,7 +12,6 @@ import java.util.List;
 import java.util.regex.Pattern;
 
 /**
- * Copyright by Spoken Language System. All rights reserved.
  * User: jarisch
  * Date: 14.12.12
  * Time: 21:55

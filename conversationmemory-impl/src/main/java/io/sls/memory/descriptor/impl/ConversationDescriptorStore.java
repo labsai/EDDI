@@ -15,7 +15,6 @@ import javax.inject.Inject;
 import java.io.IOException;
 
 /**
- * Copyright by Spoken Language System. All rights reserved.
  * User: jarisch
  * Date: 19.11.12
  * Time: 17:28
