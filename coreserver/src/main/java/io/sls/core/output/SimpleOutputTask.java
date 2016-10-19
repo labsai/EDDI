@@ -1,23 +1,19 @@
 package io.sls.core.output;
 
-import com.google.inject.Key;
-import com.google.inject.name.Names;
 import io.sls.core.lifecycle.AbstractLifecycleTask;
 import io.sls.core.lifecycle.ILifecycleTask;
 import io.sls.core.lifecycle.LifecycleException;
 import io.sls.core.lifecycle.PackageConfigurationException;
-import io.sls.core.runtime.client.configuration.ResourceClientLibrary;
+import io.sls.core.runtime.client.configuration.IResourceClientLibrary;
 import io.sls.core.runtime.service.ServiceException;
-import io.sls.core.service.restinterfaces.IRestInterfaceFactory;
 import io.sls.memory.IConversationMemory;
 import io.sls.memory.IData;
 import io.sls.memory.impl.Data;
 import io.sls.resources.rest.output.model.OutputConfiguration;
 import io.sls.resources.rest.output.model.OutputConfigurationSet;
-import io.sls.runtime.DependencyInjector;
 import io.sls.utilities.RuntimeUtilities;
 
-import javax.inject.Singleton;
+import javax.inject.Inject;
 import java.net.URI;
 import java.util.Collections;
 import java.util.LinkedList;
@@ -30,17 +26,16 @@ import java.util.Map;
  * Time: 16:36
  */
 public class SimpleOutputTask extends AbstractLifecycleTask implements ILifecycleTask {
+    private static final String SEPARATOR = " ";
+    private static final String ACTION_KEY = "action";
     private SimpleOutput simpleOutput;
-    private ResourceClientLibrary resourceClientLibrary;
-    private final String ACTION_KEY = "action";
-    private String separator = " ";
+    private IResourceClientLibrary resourceClientLibrary;
 
-    public SimpleOutputTask() {
+    @Inject
+    public SimpleOutputTask(IResourceClientLibrary resourceClientLibrary) {
+        this.resourceClientLibrary = resourceClientLibrary;
         this.simpleOutput = new SimpleOutput();
-        DependencyInjector dependencyInjector = DependencyInjector.getInstance();
-        String configurationServerURI = dependencyInjector.getInstance(Key.get(String.class, Names.named("system.configurationServerURI")));
-        IRestInterfaceFactory restInterfaceFactory = dependencyInjector.getInstance(IRestInterfaceFactory.class);
-        resourceClientLibrary = new ResourceClientLibrary(restInterfaceFactory,configurationServerURI);
+
     }
 
     @Override
@@ -65,7 +60,7 @@ public class SimpleOutputTask extends AbstractLifecycleTask implements ILifecycl
 
     @Override
     public void executeTask(IConversationMemory memory) throws LifecycleException {
-        List<IOutputFilter> outputFilters = new LinkedList<IOutputFilter>();
+        List<IOutputFilter> outputFilters = new LinkedList<>();
         IData latestData = memory.getCurrentStep().getLatestData(ACTION_KEY);
         if (latestData == null) {
             return;
@@ -89,11 +84,11 @@ public class SimpleOutputTask extends AbstractLifecycleTask implements ILifecycl
         List<IData> allOutputParts = memory.getCurrentStep().getAllData("output:action");
         StringBuilder finalOutput = new StringBuilder();
         for (IData outputPart : allOutputParts) {
-            finalOutput.append(outputPart.getResult()).append(separator);
+            finalOutput.append(outputPart.getResult()).append(SEPARATOR);
         }
 
         if (!allOutputParts.isEmpty()) {
-            finalOutput.delete(finalOutput.length() - separator.length(), finalOutput.length());
+            finalOutput.delete(finalOutput.length() - SEPARATOR.length(), finalOutput.length());
         }
 
         Data finalOutputData = new Data("output:final", finalOutput.toString());
@@ -129,11 +124,9 @@ public class SimpleOutputTask extends AbstractLifecycleTask implements ILifecycl
             for (OutputConfiguration outputConfiguration : outputConfigurationSet.getOutputs()) {
                 String key = outputConfiguration.getKey();
                 int occurrence = outputConfiguration.getOccurrence();
-                for (String text : outputConfiguration.getOutputValues()) {
-                    if (!RuntimeUtilities.isNullOrEmpty(text)) {
-                        simpleOutput.addOutputEntry(new OutputEntry(key, text, occurrence));
-                    }
-                }
+                outputConfiguration.getOutputValues().stream().filter(
+                        text -> !RuntimeUtilities.isNullOrEmpty(text)).forEachOrdered(
+                        text -> simpleOutput.addOutputEntry(new OutputEntry(key, text, occurrence)));
             }
         } catch (ServiceException e) {
             String message = "Error while fetching OutputConfigurationSet!\n" + e.getLocalizedMessage();
