@@ -1,27 +1,23 @@
 package io.sls.core.parser;
 
-import com.google.inject.Key;
-import com.google.inject.name.Names;
 import io.sls.core.lifecycle.*;
 import io.sls.core.parser.correction.*;
 import io.sls.core.parser.dictionaries.*;
 import io.sls.core.parser.internal.InputParser;
 import io.sls.core.parser.internal.matches.Solution;
 import io.sls.core.parser.model.IDictionary;
-import io.sls.core.runtime.client.configuration.ResourceClientLibrary;
+import io.sls.core.runtime.client.configuration.IResourceClientLibrary;
 import io.sls.core.runtime.service.ServiceException;
-import io.sls.core.service.restinterfaces.IRestInterfaceFactory;
 import io.sls.expressions.Expression;
 import io.sls.expressions.utilities.IExpressionUtilities;
 import io.sls.memory.IConversationMemory;
 import io.sls.memory.IData;
 import io.sls.memory.impl.Data;
 import io.sls.resources.rest.regulardictionary.model.RegularDictionaryConfiguration;
-import io.sls.runtime.DependencyInjector;
 import io.sls.utilities.CharacterUtilities;
 import io.sls.utilities.RuntimeUtilities;
 
-import javax.inject.Singleton;
+import javax.inject.Inject;
 import java.net.URI;
 import java.util.*;
 
@@ -30,13 +26,11 @@ import java.util.*;
  * Date: 11.06.12
  * Time: 17:55
  */
-@Singleton
 public class InputParserTask extends AbstractLifecycleTask implements ILifecycleTask {
-    private final IExpressionUtilities expressionUtilities;
     private IInputParser sentenceParser;
     private List<IDictionary> dictionaries;
     private List<ICorrection> corrections;
-    private ResourceClientLibrary resourceClientLibrary;
+    private IResourceClientLibrary resourceClientLibrary;
     private final String regularDictionaryURI = "core://io.sls.parser.dictionaries.regular";
     private final String damerauLevenshteinURI = "core://io.sls.parser.corrections.levenshtein";
     private final String integerDictionaryURI = "core://io.sls.parser.dictionaries.integer";
@@ -55,14 +49,13 @@ public class InputParserTask extends AbstractLifecycleTask implements ILifecycle
     private final String KEY_DISTANCE = "distance";
     private final String KEY_LOOKUP_IF_KNOWN = "lookupIfKnown";
     private final String KEY_LANGUAGE = "language";
-    private final String configurationServerURI;
+    private IExpressionUtilities expressionUtilities;
 
-    public InputParserTask() {
-        DependencyInjector dependencyInjector = DependencyInjector.getInstance();
-        expressionUtilities = dependencyInjector.getInstance(IExpressionUtilities.class);
-        configurationServerURI = dependencyInjector.getInstance(Key.get(String.class, Names.named("system.configurationServerURI")));
-        IRestInterfaceFactory restInterfaceFactory = dependencyInjector.getInstance(IRestInterfaceFactory.class);
-        resourceClientLibrary = new ResourceClientLibrary(restInterfaceFactory, configurationServerURI);
+    @Inject
+    public InputParserTask(IResourceClientLibrary resourceClientLibrary,
+                           IExpressionUtilities expressionUtilities) {
+        this.resourceClientLibrary = resourceClientLibrary;
+        this.expressionUtilities = expressionUtilities;
     }
 
     @Override
@@ -109,7 +102,7 @@ public class InputParserTask extends AbstractLifecycleTask implements ILifecycle
     }
 
     private List<Expression> convertDictionaryEntriesToExpressions(List<IDictionary.IFoundWord> dictionaryEntries) {
-        List<Expression> expressions = new LinkedList<Expression>();
+        List<Expression> expressions = new LinkedList<>();
 
         for (IDictionary.IDictionaryEntry dictionaryEntry : dictionaryEntries) {
             expressions.addAll(dictionaryEntry.getExpressions());
@@ -121,12 +114,12 @@ public class InputParserTask extends AbstractLifecycleTask implements ILifecycle
     @Override
     public void setExtensions(Map<String, Object> extensions) throws UnrecognizedExtensionException, IllegalExtensionConfigurationException {
         List<Map<String, Object>> dictionariesList = (List<Map<String, Object>>) extensions.get("dictionaries");
-        dictionaries = new LinkedList<IDictionary>();
+        dictionaries = new LinkedList<>();
         if (dictionariesList != null) {
             convertDictionaries(dictionariesList);
         }
 
-        corrections = new LinkedList<ICorrection>();
+        corrections = new LinkedList<>();
         List<Map<String, Object>> correctionsList = (List<Map<String, Object>>) extensions.get("corrections");
         if (correctionsList != null) {
             convertCorrections(correctionsList);
