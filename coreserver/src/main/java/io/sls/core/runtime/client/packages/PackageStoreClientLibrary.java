@@ -19,14 +19,14 @@ import java.util.Map;
  */
 public class PackageStoreClientLibrary implements IPackageStoreClientLibrary {
     private final IPackageStoreService packageStoreService;
-    private final Map<String, ILifecycleTask> lifecycleExtensions;
+    private final Provider<Map<String, ILifecycleTask>> lifecycleExtensionsProvider;
     private static final String CORE = "core";
 
     @Inject
     public PackageStoreClientLibrary(IPackageStoreService packageStoreService,
                                      Provider<Map<String, ILifecycleTask>> lifecycleExtensionsProvider) {
         this.packageStoreService = packageStoreService;
-        this.lifecycleExtensions = lifecycleExtensionsProvider.get();
+        this.lifecycleExtensionsProvider = lifecycleExtensionsProvider;
     }
 
     @Override
@@ -49,6 +49,7 @@ public class PackageStoreClientLibrary implements IPackageStoreClientLibrary {
             for (PackageConfiguration.PackageExtension packageExtension : packageConfiguration.getPackageExtensions()) {
                 URI type = packageExtension.getType();
                 if (CORE.equals(type.getScheme())) {
+                    Map<String, ILifecycleTask> lifecycleExtensions = lifecycleExtensionsProvider.get();
                     ILifecycleTask lifecycleTask = lifecycleExtensions.get(type.getHost());
                     lifecycleTask.setExtensions(packageExtension.getExtensions());
                     lifecycleTask.configure(packageExtension.getConfig());
