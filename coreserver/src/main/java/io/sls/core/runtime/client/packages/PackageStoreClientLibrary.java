@@ -46,10 +46,10 @@ public class PackageStoreClientLibrary implements IPackageStoreClientLibrary {
         final ILifecycleManager lifecycleManager = new LifecycleManager();
 
         try {
+            Map<String, ILifecycleTask> lifecycleExtensions = lifecycleExtensionsProvider.get();
             for (PackageConfiguration.PackageExtension packageExtension : packageConfiguration.getPackageExtensions()) {
                 URI type = packageExtension.getType();
                 if (CORE.equals(type.getScheme())) {
-                    Map<String, ILifecycleTask> lifecycleExtensions = lifecycleExtensionsProvider.get();
                     ILifecycleTask lifecycleTask = lifecycleExtensions.get(type.getHost());
                     lifecycleTask.setExtensions(packageExtension.getExtensions());
                     lifecycleTask.configure(packageExtension.getConfig());
