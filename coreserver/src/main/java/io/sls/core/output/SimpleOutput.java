@@ -3,18 +3,17 @@ package io.sls.core.output;
 import java.util.*;
 
 /**
- * Spoken Language System. Core.
  * User: jarisch
  * Date: 22.02.12
  * Time: 20:27
  */
 public class SimpleOutput {
-    private Map<String, List<OutputEntry>> outputMapper = new HashMap<String, List<OutputEntry>>();
+    private Map<String, List<OutputEntry>> outputMapper = new HashMap<>();
 
     public void addOutputEntry(OutputEntry outputEntry) {
         String key = outputEntry.getKey();
         if (!outputMapper.containsKey(key)) {
-            outputMapper.put(key, new LinkedList<OutputEntry>());
+            outputMapper.put(key, new LinkedList<>());
         }
 
         List<OutputEntry> tmpOutputEntries = outputMapper.get(key);
@@ -25,7 +24,7 @@ public class SimpleOutput {
     }
 
     public List<List<OutputEntry>> getOutputs(List<IOutputFilter> outputFilter) {
-        List<List<OutputEntry>> outputs = new LinkedList<List<OutputEntry>>();
+        List<List<OutputEntry>> outputs = new LinkedList<>();
 
         for (IOutputFilter filter : outputFilter) {
             List<OutputEntry> entryList = outputMapper.get(filter.getKey());
@@ -33,7 +32,7 @@ public class SimpleOutput {
                 continue;
             }
 
-            List<OutputEntry> tmpOutputEntries = new LinkedList<OutputEntry>(entryList);
+            List<OutputEntry> tmpOutputEntries = new LinkedList<>(entryList);
 
             List<OutputEntry> outputEntries;
             int occurrence = filter.getOccurence();
@@ -49,7 +48,7 @@ public class SimpleOutput {
     }
 
     public List<String> convert(List<OutputEntry> outputEntries) {
-        List<String> ret = new LinkedList<String>();
+        List<String> ret = new LinkedList<>();
         for (OutputEntry outputEntry : outputEntries) {
             ret.add(outputEntry.getText());
         }

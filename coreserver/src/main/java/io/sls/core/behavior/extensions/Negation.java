@@ -9,7 +9,6 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * Spoken Language System. Core.
  * User: jarisch
  * Date: 14.03.12
  * Time: 14:03

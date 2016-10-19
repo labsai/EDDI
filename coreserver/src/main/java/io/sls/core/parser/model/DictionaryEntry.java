@@ -7,7 +7,6 @@ import io.sls.runtime.DependencyInjector;
 import java.util.List;
 
 /**
- * Spoken Language System. Core.
  * User: jarisch
  * Date: 30.03.12
  * Time: 17:51

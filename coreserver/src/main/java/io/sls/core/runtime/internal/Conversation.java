@@ -13,7 +13,6 @@ import io.sls.memory.model.ConversationState;
 import java.util.List;
 
 /**
- * Spoken Language System. Core.
  * User: jarisch
  * Date: 13.03.12
  * Time: 18:03

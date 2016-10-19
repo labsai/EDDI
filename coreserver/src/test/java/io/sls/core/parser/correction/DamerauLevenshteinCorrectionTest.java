@@ -5,7 +5,6 @@ import io.sls.runtime.DependencyInjector;
 import org.junit.Before;
 
 /**
- * Spoken Language System. Core.
  * User: jarisch
  * Date: 15.04.12
  * Time: 01:20
