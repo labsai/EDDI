@@ -5,7 +5,6 @@ import io.sls.expressions.Expression;
 import java.util.List;
 
 /**
- * Created by IntelliJ IDEA.
  * User: michael
  * Date: 08.01.2012
  * Time: 04:50:04

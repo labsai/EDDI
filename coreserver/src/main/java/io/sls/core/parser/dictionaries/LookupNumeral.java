@@ -3,7 +3,6 @@ package io.sls.core.parser.dictionaries;
 import io.sls.core.parser.internal.InputHolder;
 
 /**
- * Created by IntelliJ IDEA.
  * User: jarisch
  * Date: 20.12.2010
  * Time: 20:22:48

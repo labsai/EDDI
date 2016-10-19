@@ -1,12 +1,14 @@
 package io.sls.core.parser.dictionaries;
 
-import io.sls.core.parser.model.*;
+import io.sls.core.parser.model.FoundWord;
+import io.sls.core.parser.model.IDictionary;
+import io.sls.core.parser.model.Phrase;
+import io.sls.core.parser.model.Word;
 import io.sls.expressions.Expression;
 
 import java.util.*;
 
 /**
- * Created by IntelliJ IDEA.
  * User: michael
  * Date: 24.01.2012
  * Time: 17:39:45

@@ -1,7 +1,6 @@
 package io.sls.core.lifecycle;
 
 /**
- * Created by IntelliJ IDEA.
  * User: jarisch
  * Date: 20.01.2012
  * Time: 17:28:44

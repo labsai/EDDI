@@ -13,7 +13,6 @@ import java.util.Collections;
 import java.util.List;
 
 /**
- * Created by IntelliJ IDEA.
  * User: jarisch
  * Date: 14.06.2010
  * Time: 17:21:49

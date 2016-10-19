@@ -4,7 +4,6 @@ import io.sls.expressions.value.Value;
 
 
 /**
- * Created by IntelliJ IDEA.
  * User: jarisch
  * Date: 10.12.2009
  * Time: 16:34:56

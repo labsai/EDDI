@@ -1,7 +1,6 @@
 package io.sls.core.behavior;
 
 /**
- * Created by IntelliJ IDEA.
  * User: jarisch
  * Date: 03.12.2011
  * Time: 09:56:44

@@ -4,7 +4,6 @@ import java.util.LinkedList;
 import java.util.List;
 
 /**
- * Created by IntelliJ IDEA.
  * User: jarisch
  * Date: 16.11.2010
  * Time: 23:10:51

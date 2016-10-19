@@ -9,7 +9,6 @@ import org.junit.Test;
 import java.util.LinkedList;
 
 /**
- * Created by IntelliJ IDEA.
  * User: jarisch
  * Date: 11.02.2012
  * Time: 23:06:05

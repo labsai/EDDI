@@ -4,7 +4,6 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 /**
- * Created by IntelliJ IDEA.
  * User: jarisch
  * Date: 14.12.2009
  * Time: 15:55:47

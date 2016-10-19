@@ -1,18 +1,17 @@
 package io.sls.core.runtime.internal;
 
-import io.sls.memory.model.Deployment;
 import io.sls.core.lifecycle.LifecycleException;
-import io.sls.memory.IConversationMemory;
-import io.sls.memory.impl.ConversationMemory;
 import io.sls.core.runtime.IBot;
 import io.sls.core.runtime.IConversation;
 import io.sls.core.runtime.IExecutablePackage;
+import io.sls.memory.IConversationMemory;
+import io.sls.memory.impl.ConversationMemory;
+import io.sls.memory.model.Deployment;
 
 import java.util.LinkedList;
 import java.util.List;
 
 /**
- * Created by IntelliJ IDEA.
  * User: michael
  * Date: 19.02.2012
  * Time: 18:41:37

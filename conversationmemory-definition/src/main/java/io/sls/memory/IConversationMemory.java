@@ -8,7 +8,6 @@ import java.util.Set;
 import java.util.Stack;
 
 /**
- * Created by IntelliJ IDEA.
  * User: jarisch
  * Date: 20.01.2012
  * Time: 19:00:06

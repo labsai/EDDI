@@ -12,7 +12,6 @@ import java.util.List;
 import java.util.Set;
 
 /**
- * Created by IntelliJ IDEA.
  * User: jarisch
  * Date: 12.02.2012
  * Time: 13:03:36

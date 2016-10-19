@@ -6,7 +6,6 @@ import io.sls.memory.IData;
 import java.util.*;
 
 /**
- * Created by IntelliJ IDEA.
  * User: michael
  * Date: 20.02.2012
  * Time: 21:56:39

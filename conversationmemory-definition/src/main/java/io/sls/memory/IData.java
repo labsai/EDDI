@@ -5,11 +5,9 @@ import java.util.Date;
 import java.util.List;
 
 /**
- * Created by IntelliJ IDEA.
  * User: jarisch
  * Date: 07.02.12
  * Time: 19:34
- * To change this template use File | Settings | File Templates.
  */
 public interface IData extends Serializable {
     String getKey();

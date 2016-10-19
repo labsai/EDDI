@@ -9,7 +9,6 @@ import org.slf4j.LoggerFactory;
 import java.util.LinkedList;
 
 /**
- * Created by IntelliJ IDEA.
  * User: jarisch
  * Date: 21.01.2010
  * Time: 15:57:33

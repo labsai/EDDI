@@ -7,7 +7,6 @@ import java.util.List;
 
 
 /**
- * Created by IntelliJ IDEA.
  * User: jarisch
  * Date: 11.11.2010
  * Time: 19:13:49

@@ -11,7 +11,6 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * Created by IntelliJ IDEA.
  * User: jarisch
  * Date: 09.02.2010
  * Time: 12:49:41

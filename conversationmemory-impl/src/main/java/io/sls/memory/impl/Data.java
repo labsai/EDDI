@@ -8,7 +8,6 @@ import java.util.List;
 import java.util.Random;
 
 /**
- * Created by IntelliJ IDEA.
  * User: jarisch
  * Date: 21.01.2012
  * Time: 18:57:25
