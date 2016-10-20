@@ -457,6 +457,81 @@ if (typeof console === 'undefined') {
 
 function initKeycloakAuthentication(onSuccess, onFailure) {
     keycloak = Keycloak(keycloakAdapterConfigUrl);
+    /**
+     * The default Keycloak JS adapter only provides asynchronous update operation. This is a custom, synchronous version of
+     * the update operation. It is required for synchronous restdataprovider calls (there are a lot of them).
+     * TODO: we should transform the existing synchronous calls to asynchronous calls
+     */
+    keycloak.updateTokenSync = function keycloakUpdateSync(minValidity) {
+        if (!keycloak.tokenParsed || !keycloak.refreshToken) {
+            return false;
+        }
+
+        minValidity = minValidity || 5;
+
+        var exec = function () {
+            var refreshToken = false;
+            if (keycloak.timeSkew == -1) {
+                console.info('Skew ' + keycloak.timeSkew);
+                refreshToken = true;
+                console.info('[KEYCLOAK] Refreshing token: time skew not set');
+            } else if (minValidity == -1) {
+                refreshToken = true;
+                console.info('[KEYCLOAK] Refreshing token: forced refresh');
+            } else if (keycloak.isTokenExpired(minValidity)) {
+                refreshToken = true;
+                console.info('[KEYCLOAK] Refreshing token: token expired');
+            }
+
+            if (refreshToken) {
+                var params = 'grant_type=refresh_token&' + 'refresh_token=' + keycloak.refreshToken;
+                var url = keycloak.getRealmUrl() + '/protocol/openid-connect/token';
+
+                var req = new XMLHttpRequest();
+                req.open('POST', url, false);
+                req.setRequestHeader('Content-type', 'application/x-www-form-urlencoded');
+                req.withCredentials = true;
+
+                if (keycloak.clientId && keycloak.clientSecret) {
+                    req.setRequestHeader('Authorization', 'Basic ' + btoa(keycloak.clientId + ':' + keycloak.clientSecret));
+                } else {
+                    params += '&client_id=' + encodeURIComponent(keycloak.clientId);
+                }
+
+                var timeLocal = new Date().getTime();
+
+                var result;
+                req.onreadystatechange = function () {
+                    if (req.readyState == 4) {
+                        if (req.status == 200) {
+                            console.info('[KEYCLOAK] Token refreshed');
+
+                            timeLocal = (timeLocal + new Date().getTime()) / 2;
+
+                            var tokenResponse = JSON.parse(req.responseText);
+
+                            keycloak.setToken(tokenResponse['access_token'], tokenResponse['refresh_token'], tokenResponse['id_token'], timeLocal);
+
+                            keycloak.onAuthRefreshSuccess && keycloak.onAuthRefreshSuccess();
+                            result = true;
+                        } else {
+                            console.warn('[KEYCLOAK] Failed to refresh token');
+
+                            keycloak.onAuthRefreshError && keycloak.onAuthRefreshError();
+                            result = false;
+                        }
+                    }
+                };
+
+                req.send(params);
+                return result;
+            } else {
+                return true;
+            }
+        }
+
+        return exec();
+    };
     keycloak.init({onLoad: 'login-required'}).success(function (authenticated) {
         if (authenticated) {
             onSuccess();

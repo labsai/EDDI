@@ -36,131 +36,150 @@ REST.Request = function (){
 }
 
 REST.Request.prototype = {
-    execute : function(callback){
-        var request = new XMLHttpRequest();
-        var url = this.uri;
+    execute : function(callback) {
+        var _execute = function(self, callback) {
+            var request = new XMLHttpRequest();
+            var url = self.uri;
 
-        if (REST.antiBrowserCache == true) {
-            request.url = url;
-        }
-
-        var restRequest = this;
-        for(var i=0;i<this.matrixParameters.length;i++){
-            url += ";" + REST.Encoding.encodePathParamName(this.matrixParameters[i][0]);
-            url += "=" + REST.Encoding.encodePathParamValue(this.matrixParameters[i][1]);
-        }
-        for(var i=0;i<this.queryParameters.length;i++){
-            if(i == 0)
-                url += "?";
-            else
-                url += "&";
-            url += REST.Encoding.encodeQueryParamNameOrValue(this.queryParameters[i][0]);
-            url += "=" + REST.Encoding.encodeQueryParamNameOrValue(this.queryParameters[i][1]);
-        }
-        for(var i=0;i<this.cookies.length;i++){
-            document.cookie = encodeURI(this.cookies[i][0])
-                + "=" + encodeURI(this.cookies[i][1]);
-        }
-        request.open(this.method, url, this.async, this.username, this.password);
-        var acceptSet = false;
-        var contentTypeSet = false;
-        var containsAuthorizationHeader = false;
-        for(var i=0;i<this.headers.length;i++){
-            if(this.headers[i][0].toLowerCase() == 'accept')
-                acceptSet = this.headers[i][1];
-            if(this.headers[i][0].toLowerCase() == 'content-type')
-                contentTypeSet = this.headers[i][1];
-            if(this.headers[i][0].toLowerCase() == 'authorization')
-                containsAuthorizationHeader = true;
-
-            request.setRequestHeader(REST.Encoding.encodeHeaderName(this.headers[i][0]),
-                REST.Encoding.encodeHeaderValue(this.headers[i][1]));
-        }
-        if(!containsAuthorizationHeader)
-            request.setRequestHeader('Authorization', 'Bearer: ' + keycloak.token);
-
-        if(!acceptSet)
-            request.setRequestHeader('Accept', this.acceptHeader);
-        REST.log("Got form params: "+this.formParameters.length);
-        // see if we're sending an entity or a form
-        if(this.entity && (this.formParameters.length > 0 || this.forms.length > 0))
-            throw "Cannot have both an entity and form parameters";
-        // form
-        if(this.formParameters.length > 0 || this.forms.length > 0){
-            if(contentTypeSet && contentTypeSet != "application/x-www-form-urlencoded")
-                throw "The ContentType that was set by header value ("+contentTypeSet+") is incompatible with form parameters";
-            if(this.contentTypeHeader && this.contentTypeHeader != "application/x-www-form-urlencoded")
-                throw "The ContentType that was set with setContentType ("+this.contentTypeHeader+") is incompatible with form parameters";
-            contentTypeSet = "application/x-www-form-urlencoded";
-            request.setRequestHeader('Content-Type', contentTypeSet);
-        }else if(this.entity && !contentTypeSet && this.contentTypeHeader){
-            // entity
-            contentTypeSet = this.contentTypeHeader;
-            request.setRequestHeader('Content-Type', this.contentTypeHeader);
-        }
-        // we use this flag to work around buggy browsers
-        var gotReadyStateChangeEvent = false;
-        if(callback){
-            request.onreadystatechange = function() {
-                gotReadyStateChangeEvent = true;
-                REST.log("Got readystatechange");
-                REST._complete(this, callback);
-            };
-        }
-        var data = this.entity;
-        if(this.entity){
-            if(this.entity instanceof Element){
-                if(!contentTypeSet || REST._isXMLMIME(contentTypeSet))
-                    data = REST.serialiseXML(this.entity);
-            }else if(this.entity instanceof Document){
-                if(!contentTypeSet || REST._isXMLMIME(contentTypeSet))
-                    data = this.entity;
-            }else if(this.entity instanceof Object){
-                if(!contentTypeSet || REST._isJSONMIME(contentTypeSet))
-                    data = JSON.stringify(this.entity);
+            if (REST.antiBrowserCache == true) {
+                request.url = url;
             }
-        }else if(this.formParameters.length > 0){
-            data = '';
-            for(var i=0;i<this.formParameters.length;i++){
-                if(i > 0)
-                    data += "&";
-                data += REST.Encoding.encodeFormNameOrValue(this.formParameters[i][0]);
-                data += "=" + REST.Encoding.encodeFormNameOrValue(this.formParameters[i][1]);
+
+            var restRequest = self;
+            for (var i = 0; i < self.matrixParameters.length; i++) {
+                url += ";" + REST.Encoding.encodePathParamName(self.matrixParameters[i][0]);
+                url += "=" + REST.Encoding.encodePathParamValue(self.matrixParameters[i][1]);
             }
-        } else if (this.forms.length > 0) {
-            data = '';
-            for (var i = 0; i < this.forms.length; i++) {
-                if (i > 0)
-                    data += "&";
-                var obj = this.forms[i][1];
-                var key = REST.getKeys(obj)[0];
-                data += REST.Encoding.encodeFormNameOrValue(key);
-                data += "=" + REST.Encoding.encodeFormNameOrValue(obj[key]);
+            for (var i = 0; i < self.queryParameters.length; i++) {
+                if (i == 0)
+                    url += "?";
+                else
+                    url += "&";
+                url += REST.Encoding.encodeQueryParamNameOrValue(self.queryParameters[i][0]);
+                url += "=" + REST.Encoding.encodeQueryParamNameOrValue(self.queryParameters[i][1]);
             }
-        }
-        REST.log("Content-Type set to "+contentTypeSet);
-        REST.log("Entity set to "+data);
+            for (var i = 0; i < self.cookies.length; i++) {
+                document.cookie = encodeURI(self.cookies[i][0])
+                    + "=" + encodeURI(self.cookies[i][1]);
+            }
+            request.open(self.method, url, self.async, self.username, self.password);
+            var acceptSet = self;
+            var contentTypeSet = self;
+            var containsAuthorizationHeader = self;
+            for (var i = 0; i < self.headers.length; i++) {
+                if (self.headers[i][0].toLowerCase() == 'accept')
+                    acceptSet = self.headers[i][1];
+                if (self.headers[i][0].toLowerCase() == 'content-type')
+                    contentTypeSet = self.headers[i][1];
+                if (self.headers[i][0].toLowerCase() == 'authorization')
+                    containsAuthorizationHeader = true;
 
-        request.send(data);
-        // now if the browser did not follow the specs and did not fire the events while synchronous,
-        // handle it manually
-        if(!this.async && !gotReadyStateChangeEvent && callback){
-            REST.log("Working around browser readystatechange bug");
-            REST._complete(request, callback);
-        }
+                request.setRequestHeader(REST.Encoding.encodeHeaderName(self.headers[i][0]),
+                    REST.Encoding.encodeHeaderValue(self.headers[i][1]));
+            }
+            if (!containsAuthorizationHeader) {
+                request.setRequestHeader('Authorization', 'Bearer: ' + keycloak.token);
+            }
 
-        if (REST.debug == true) { REST.lastRequest = request; }
+            if(!acceptSet)
+                request.setRequestHeader('Accept', self.acceptHeader);
+            REST.log("Got form params: "+self.formParameters.length);
+            // see if we're sending an entity or a form
+            if(self.entity && (self.formParameters.length > 0 || self.forms.length > 0))
+                throw "Cannot have both an entity and form parameters";
+            // form
+            if(self.formParameters.length > 0 || self.forms.length > 0){
+                if(contentTypeSet && contentTypeSet != "application/x-www-form-urlencoded")
+                    throw "The ContentType that was set by header value ("+contentTypeSet+") is incompatible with form parameters";
+                if(self.contentTypeHeader && self.contentTypeHeader != "application/x-www-form-urlencoded")
+                    throw "The ContentType that was set with setContentType ("+self.contentTypeHeader+") is incompatible with form parameters";
+                contentTypeSet = "application/x-www-form-urlencoded";
+                request.setRequestHeader('Content-Type', contentTypeSet);
+            }else if(self.entity && !contentTypeSet && self.contentTypeHeader){
+                // entity
+                contentTypeSet = self.contentTypeHeader;
+                request.setRequestHeader('Content-Type', self.contentTypeHeader);
+            }
+            // we use this flag to work around buggy browsers
+            var gotReadyStateChangeEvent = false;
+            if(callback){
+                request.onreadystatechange = function() {
+                    gotReadyStateChangeEvent = true;
+                    REST.log("Got readystatechange");
+                    REST._complete(this, callback);
+                };
+            }
+            var data = self.entity;
+            if(self.entity){
+                if(self.entity instanceof Element){
+                    if(!contentTypeSet || REST._isXMLMIME(contentTypeSet))
+                        data = REST.serialiseXML(self.entity);
+                }else if(self.entity instanceof Document){
+                    if(!contentTypeSet || REST._isXMLMIME(contentTypeSet))
+                        data = self.entity;
+                }else if(self.entity instanceof Object){
+                    if(!contentTypeSet || REST._isJSONMIME(contentTypeSet))
+                        data = JSON.stringify(self.entity);
+                }
+            }else if(self.formParameters.length > 0){
+                data = '';
+                for(var i=0;i<self.formParameters.length;i++){
+                    if(i > 0)
+                        data += "&";
+                    data += REST.Encoding.encodeFormNameOrValue(self.formParameters[i][0]);
+                    data += "=" + REST.Encoding.encodeFormNameOrValue(self.formParameters[i][1]);
+                }
+            } else if (self.forms.length > 0) {
+                data = '';
+                for (var i = 0; i < self.forms.length; i++) {
+                    if (i > 0)
+                        data += "&";
+                    var obj = self.forms[i][1];
+                    var key = REST.getKeys(obj)[0];
+                    data += REST.Encoding.encodeFormNameOrValue(key);
+                    data += "=" + REST.Encoding.encodeFormNameOrValue(obj[key]);
+                }
+            }
+            REST.log("Content-Type set to "+contentTypeSet);
+            REST.log("Entity set to "+data);
 
-        if (REST.antiBrowserCache == true && request.status != 304) {
-            var _cachedHeaders = {
-                "Etag":request.getResponseHeader('Etag'),
-                "Last-Modified":request.getResponseHeader('Last-Modified'),
-                "entity":request.responseText
-            };
+            request.send(data);
+            // now if the browser did not follow the specs and did not fire the events while synchronous,
+            // handle it manually
+            if(!self.async && !gotReadyStateChangeEvent && callback){
+                REST.log("Working around browser readystatechange bug");
+                REST._complete(request, callback);
+            }
 
-            var signature = REST._generate_cache_signature(url);
-            REST._remove_deprecated_cache_signature(signature);
-            REST._addToArray(REST.cacheHeaders, signature, _cachedHeaders);
+            if (REST.debug == true) { REST.lastRequest = request; }
+
+            if (REST.antiBrowserCache == true && request.status != 304) {
+                var _cachedHeaders = {
+                    "Etag":request.getResponseHeader('Etag'),
+                    "Last-Modified":request.getResponseHeader('Last-Modified'),
+                    "entity":request.responseText
+                };
+
+                var signature = REST._generate_cache_signature(url);
+                REST._remove_deprecated_cache_signature(signature);
+                REST._addToArray(REST.cacheHeaders, signature, _cachedHeaders);
+            }
+        };
+        var minValidity = 10;
+        if (this.async) {
+            var self = this;
+            keycloak.updateToken(minValidity).success(function() {
+                _execute(self, callback);
+            }).error(function() {
+                keycloak.login();
+            });
+        } else {
+            if (keycloak.updateTokenSync(minValidity)) {
+                _execute(this, callback);
+            } else {
+                keycloak.login();
+            }
+
         }
     },
     setAccepts : function(acceptHeader){
