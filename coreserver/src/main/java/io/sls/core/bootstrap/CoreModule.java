@@ -16,6 +16,8 @@ import io.sls.core.rest.IRestBotUI;
 import io.sls.core.runtime.CoreRuntime;
 import io.sls.core.runtime.IBotFactory;
 import io.sls.core.runtime.IPackageFactory;
+import io.sls.core.runtime.client.bots.BotStoreClientLibrary;
+import io.sls.core.runtime.client.bots.IBotStoreClientLibrary;
 import io.sls.core.runtime.client.configuration.IResourceClientLibrary;
 import io.sls.core.runtime.client.configuration.ResourceClientLibrary;
 import io.sls.core.runtime.client.packages.IPackageStoreClientLibrary;
@@ -49,6 +51,7 @@ public class CoreModule extends AbstractBaseModule {
         registerConfigFiles(configFiles);
 
         bind(IResourceClientLibrary.class).to(ResourceClientLibrary.class).in(Scopes.SINGLETON);
+        bind(IBotStoreClientLibrary.class).to(BotStoreClientLibrary.class).in(Scopes.SINGLETON);
         bind(IPackageStoreClientLibrary.class).to(PackageStoreClientLibrary.class).in(Scopes.SINGLETON);
         bind(IPackageStoreService.class).to(PackageStoreService.class).in(Scopes.SINGLETON);
         bind(IBotStoreService.class).to(BotStoreService.class).in(Scopes.SINGLETON);

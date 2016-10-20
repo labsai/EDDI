@@ -18,7 +18,7 @@ import java.net.URI;
  * Date: 17.05.12
  * Time: 18:11
  */
-public class BotStoreClientLibrary {
+public class BotStoreClientLibrary implements IBotStoreClientLibrary {
     private final IBotStoreService botStoreService;
     private final IPackageFactory packageFactory;
 
@@ -29,6 +29,7 @@ public class BotStoreClientLibrary {
         this.packageFactory = packageFactory;
     }
 
+    @Override
     public IBot getBot(final String botId, final Integer version) throws ServiceException, IllegalAccessException {
         final IBot bot = new Bot(botId, version);
         final BotConfiguration botConfiguration = botStoreService.getBotConfiguration(botId, version);

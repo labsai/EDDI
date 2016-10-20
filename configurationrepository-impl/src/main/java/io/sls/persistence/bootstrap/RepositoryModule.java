@@ -61,20 +61,20 @@ public class RepositoryModule extends AbstractBaseModule {
         bind(IBehaviorStore.class).to(BehaviorStore.class).in(Scopes.SINGLETON);
         bind(IOutputStore.class).to(OutputStore.class).in(Scopes.SINGLETON);
 
-        bind(IRestPermissionStore.class).to(RestPermissionStore.class).in(Scopes.SINGLETON);
-        bind(IRestDocumentDescriptorStore.class).to(RestDocumentDescriptorStore.class).in(Scopes.SINGLETON);
-        bind(IRestExtensionStore.class).to(RestExtensionStore.class).in(Scopes.SINGLETON);
+        bind(IRestPermissionStore.class).to(RestPermissionStore.class);
+        bind(IRestDocumentDescriptorStore.class).to(RestDocumentDescriptorStore.class);
+        bind(IRestExtensionStore.class).to(RestExtensionStore.class);
 
-        bind(IRestBotStore.class).to(RestBotStore.class).in(Scopes.SINGLETON);
-        bind(IRestPackageStore.class).to(RestPackageStore.class).in(Scopes.SINGLETON);
-        bind(IRestRegularDictionaryStore.class).to(RestRegularDictionaryStore.class).in(Scopes.SINGLETON);
-        bind(IRestBehaviorStore.class).to(RestBehaviorStore.class).in(Scopes.SINGLETON);
-        bind(IRestOutputStore.class).to(RestOutputStore.class).in(Scopes.SINGLETON);
-        bind(IRestMonitorStore.class).to(RestMonitorStore.class).in(Scopes.SINGLETON);
+        bind(IRestBotStore.class).to(RestBotStore.class);
+        bind(IRestPackageStore.class).to(RestPackageStore.class);
+        bind(IRestRegularDictionaryStore.class).to(RestRegularDictionaryStore.class);
+        bind(IRestBehaviorStore.class).to(RestBehaviorStore.class);
+        bind(IRestOutputStore.class).to(RestOutputStore.class);
+        bind(IRestMonitorStore.class).to(RestMonitorStore.class);
 
-        bind(IRestOutputKeys.class).to(RestOutputKeys.class).in(Scopes.SINGLETON);
+        bind(IRestOutputKeys.class).to(RestOutputKeys.class);
 
-        bind(IRestScriptImport.class).to(RestScriptImport.class).in(Scopes.SINGLETON);
+        bind(IRestScriptImport.class).to(RestScriptImport.class);
 
     }
 }

@@ -1,8 +1,10 @@
 package io.sls.core.runtime.internal;
 
-import io.sls.core.runtime.*;
-import io.sls.core.runtime.client.bots.BotStoreClientLibrary;
-import io.sls.core.runtime.service.IBotStoreService;
+import io.sls.core.runtime.IBot;
+import io.sls.core.runtime.IBotFactory;
+import io.sls.core.runtime.IConversation;
+import io.sls.core.runtime.IExecutablePackage;
+import io.sls.core.runtime.client.bots.IBotStoreClientLibrary;
 import io.sls.core.runtime.service.ServiceException;
 import io.sls.memory.IConversationMemory;
 import io.sls.memory.model.Deployment;
@@ -19,16 +21,21 @@ import java.util.stream.Collectors;
  */
 public class BotFactory implements IBotFactory {
     private final Map<Deployment.Environment, ConcurrentHashMap<BotId, IBot>> environments;
-    private final BotStoreClientLibrary botStoreClientLibrary;
+    private final IBotStoreClientLibrary botStoreClientLibrary;
 
     @Inject
-    public BotFactory(IBotStoreService botStoreService, IPackageFactory packageFactory) {
-        Map<Deployment.Environment, ConcurrentHashMap<BotId, IBot>> _environments = new HashMap<>(Deployment.Environment.values().length);
-        _environments.put(Deployment.Environment.restricted, new ConcurrentHashMap<>());
-        _environments.put(Deployment.Environment.unrestricted, new ConcurrentHashMap<>());
-        _environments.put(Deployment.Environment.test, new ConcurrentHashMap<>());
-        environments = Collections.unmodifiableMap(_environments);
-        botStoreClientLibrary = new BotStoreClientLibrary(botStoreService, packageFactory);
+    public BotFactory(IBotStoreClientLibrary botStoreClientLibrary) {
+        this.botStoreClientLibrary = botStoreClientLibrary;
+        this.environments = Collections.unmodifiableMap(createEmptyEnvironments());
+    }
+
+    private Map<Deployment.Environment, ConcurrentHashMap<BotId, IBot>> createEmptyEnvironments() {
+        Map<Deployment.Environment, ConcurrentHashMap<BotId, IBot>> environments =
+                new HashMap<>(Deployment.Environment.values().length);
+        environments.put(Deployment.Environment.restricted, new ConcurrentHashMap<>());
+        environments.put(Deployment.Environment.unrestricted, new ConcurrentHashMap<>());
+        environments.put(Deployment.Environment.test, new ConcurrentHashMap<>());
+        return environments;
     }
 
     @Override
@@ -37,7 +44,10 @@ public class BotFactory implements IBotFactory {
 
         Map<BotId, IBot> bots = getBotEnvironment(environment);
         botVersions.addAll(bots.keySet().stream().filter(id -> id.getId().equals(botId)).collect(Collectors.toList()));
-        Collections.sort(botVersions, Collections.reverseOrder((botId1, botId2) -> botId1.getVersion() < botId2.getVersion() ? -1 : botId1.getVersion().equals(botId2.getVersion()) ? 0 : 1));
+        Collections.sort(botVersions,
+                Collections.reverseOrder((botId1, botId2) ->
+                        botId1.getVersion() < botId2.getVersion() ?
+                                -1 : botId1.getVersion().equals(botId2.getVersion()) ? 0 : 1));
 
         IBot latestBot = null;
 
