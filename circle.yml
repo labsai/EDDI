@@ -1,0 +1,14 @@
+machine:
+  java:
+      version: openjdk8
+
+dependencies:
+  override:
+    - mvn clean install -DskipTests
+
+test:
+  override:
+    - mvn test
+  post:
+    - mkdir -p $CIRCLE_TEST_REPORTS/junit/
+    - find . -type f -regex ".*/target/.*-reports/.*xml" -exec cp {} $CIRCLE_TEST_REPORTS/junit/ \;
