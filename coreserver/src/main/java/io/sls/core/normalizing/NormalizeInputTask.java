@@ -11,9 +11,7 @@ import java.util.Collections;
 import java.util.List;
 
 /**
- * User: Alex
- * Date: 13.06.2011
- * Time: 15:43:49
+ * @author ginccc
  */
 @Singleton
 public class NormalizeInputTask extends AbstractLifecycleTask implements ILifecycleTask {

@@ -15,9 +15,7 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * User: jarisch
- * Date: 11.12.12
- * Time: 21:33
+ * @author ginccc
  */
 @Singleton
 public class MediaTask extends AbstractLifecycleTask implements ILifecycleTask {

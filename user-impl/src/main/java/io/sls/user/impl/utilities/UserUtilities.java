@@ -11,9 +11,7 @@ import java.net.URI;
 import java.security.Principal;
 
 /**
- * User: jarisch
- * Date: 12.09.12
- * Time: 13:47
+ * @author ginccc
  */
 public final class UserUtilities {
     private static final String USER_STORE = "userstore";

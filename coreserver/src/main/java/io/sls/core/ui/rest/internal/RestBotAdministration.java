@@ -19,9 +19,7 @@ import java.util.EnumSet;
 import java.util.concurrent.Callable;
 
 /**
- * User: jarisch
- * Date: 27.08.12
- * Time: 15:22
+ * @author ginccc
  */
 @RequestScoped
 @Slf4j

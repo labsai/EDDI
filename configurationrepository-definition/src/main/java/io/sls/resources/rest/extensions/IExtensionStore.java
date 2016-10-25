@@ -6,9 +6,7 @@ import io.sls.resources.rest.extensions.model.ExtensionDefinition;
 import java.util.List;
 
 /**
- * User: jarisch
- * Date: 11.09.12
- * Time: 12:06
+ * @author ginccc
  */
 public interface IExtensionStore extends IResourceStore<ExtensionDefinition> {
     IResourceId searchExtension(String uri);

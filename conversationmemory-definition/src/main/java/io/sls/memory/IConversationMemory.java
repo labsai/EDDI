@@ -8,9 +8,7 @@ import java.util.Set;
 import java.util.Stack;
 
 /**
- * User: jarisch
- * Date: 20.01.2012
- * Time: 19:00:06
+ * @author ginccc
  */
 public interface IConversationMemory extends Serializable {
     String getId();

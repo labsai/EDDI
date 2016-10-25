@@ -13,7 +13,7 @@ import javax.ws.rs.ext.Provider;
 import java.io.IOException;
 
 /**
- * Created by jariscgr on 18.08.2016.
+ * @author ginccc
  */
 @Provider
 public class AuthorizationHeaderFilter implements ContainerRequestFilter {

@@ -15,9 +15,7 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.stream.Collectors;
 
 /**
- * User: jarisch
- * Date: 09.06.12
- * Time: 17:46
+ * @author ginccc
  */
 public class BotFactory implements IBotFactory {
     private final Map<Deployment.Environment, ConcurrentHashMap<BotId, IBot>> environments;

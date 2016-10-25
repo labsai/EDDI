@@ -8,9 +8,7 @@ import java.util.LinkedList;
 import java.util.List;
 
 /**
- * User: jarisch
- * Date: 02.11.12
- * Time: 11:50
+ * @author ginccc
  */
 public class TestDictionary implements IDictionary {
     private List<IWord> words = new LinkedList<IWord>();

@@ -8,9 +8,7 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * User: jarisch
- * Date: 09.09.2010
- * Time: 19:42:37
+ * @author ginccc
  */
 public interface IExtension extends Cloneable {
     String getId();

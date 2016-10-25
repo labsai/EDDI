@@ -12,9 +12,7 @@ import java.util.List;
 import java.util.Set;
 
 /**
- * User: jarisch
- * Date: 12.02.2012
- * Time: 13:03:36
+ * @author ginccc
  */
 public class ConversationStepTest {
     private IConversationMemory.IWritableConversationStep conversationStep;

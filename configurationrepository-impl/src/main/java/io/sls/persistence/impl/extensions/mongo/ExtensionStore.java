@@ -24,9 +24,7 @@ import java.util.Arrays;
 import java.util.List;
 
 /**
- * User: jarisch
- * Date: 11.09.12
- * Time: 12:12
+ * @author ginccc
  */
 public class ExtensionStore implements IExtensionStore {
     private static final String COLLECTION_EXTENSIONS = "extensions";

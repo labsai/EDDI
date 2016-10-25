@@ -12,9 +12,7 @@ import java.util.LinkedList;
 import java.util.List;
 
 /**
- * User: michael
- * Date: 19.02.2012
- * Time: 18:41:37
+ * @author ginccc
  */
 public class Bot implements IBot {
     private String id;

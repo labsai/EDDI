@@ -1,9 +1,7 @@
 package io.sls.core.runtime.service;
 
 /**
- * User: jarisch
- * Date: 20.05.12
- * Time: 19:38
+ * @author ginccc
  */
 public class ServiceException extends Exception {
     public ServiceException(String message) {

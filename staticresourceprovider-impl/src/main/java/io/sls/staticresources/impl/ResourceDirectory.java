@@ -7,7 +7,7 @@ import javax.inject.Inject;
 import java.util.LinkedList;
 
 /**
- * Created by jariscgr on 29.08.2016.
+ * @author ginccc
  */
 public class ResourceDirectory implements IResourceDirectory {
     public final String keyIdentifier;

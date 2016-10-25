@@ -5,9 +5,7 @@ import io.sls.expressions.Expression;
 import java.util.List;
 
 /**
- * User: jarisch
- * Date: 25.01.13
- * Time: 17:20
+ * @author ginccc
  */
 public class FoundWord extends FoundDictionaryEntry implements IDictionary.IFoundWord {
     private final IDictionary.IWord word;

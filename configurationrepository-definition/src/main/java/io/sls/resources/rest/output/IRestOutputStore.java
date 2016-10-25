@@ -14,9 +14,7 @@ import java.net.URI;
 import java.util.List;
 
 /**
- * User: jarisch
- * Date: 04.06.12
- * Time: 20:34
+ * @author ginccc
  */
 @Path("/outputstore/outputsets")
 public interface IRestOutputStore extends IRestVersionInfo {

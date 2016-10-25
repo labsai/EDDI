@@ -5,9 +5,7 @@ import io.sls.memory.descriptor.model.ConversationDescriptor;
 import io.sls.persistence.IDescriptorStore;
 
 /**
- * User: jarisch
- * Date: 19.11.12
- * Time: 17:29
+ * @author ginccc
  */
 public interface IConversationDescriptorStore extends IDescriptorStore<ConversationDescriptor> {
 }

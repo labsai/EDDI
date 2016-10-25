@@ -4,9 +4,7 @@ package io.sls.core.utilities;
 import io.sls.utilities.CharacterUtilities;
 
 /**
- * User: jarisch
- * Date: 29.01.2010
- * Time: 17:50:02
+ * @author ginccc
  */
 public class WordSplitter {
     private StringBuilder lookup;

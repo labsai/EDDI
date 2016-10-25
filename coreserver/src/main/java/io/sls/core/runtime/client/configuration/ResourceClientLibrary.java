@@ -14,9 +14,7 @@ import java.util.HashMap;
 import java.util.Map;
 
 /**
- * User: jarisch
- * Date: 16.08.12
- * Time: 16:38
+ * @author ginccc
  */
 public class ResourceClientLibrary implements IResourceClientLibrary {
     private final IRestInterfaceFactory restInterfaceFactory;

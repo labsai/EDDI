@@ -6,9 +6,7 @@ import io.sls.resources.rest.regulardictionary.model.RegularDictionaryConfigurat
 import java.util.List;
 
 /**
- * User: jarisch
- * Date: 21.07.12
- * Time: 13:18
+ * @author ginccc
  */
 public interface IRegularDictionaryStore extends IResourceStore<RegularDictionaryConfiguration> {
     RegularDictionaryConfiguration read(String id, Integer version, String filter, String order, Integer index, Integer limit) throws ResourceNotFoundException, ResourceStoreException;

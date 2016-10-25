@@ -1,9 +1,7 @@
 package io.sls.resources.rest.extensions.model;
 
 /**
- * User: jarisch
- * Date: 12.09.12
- * Time: 15:03
+ * @author ginccc
  */
 public class InputField {
     private String type;

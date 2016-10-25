@@ -7,9 +7,7 @@ import java.util.Arrays;
 import java.util.List;
 
 /**
- * User: jarisch
- * Date: 16.11.12
- * Time: 11:33
+ * @author ginccc
  */
 public class SimpleOutputTest {
     @Test

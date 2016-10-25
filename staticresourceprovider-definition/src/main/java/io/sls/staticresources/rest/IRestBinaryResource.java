@@ -8,9 +8,7 @@ import javax.ws.rs.PathParam;
 import java.io.File;
 
 /**
- * User: jarisch
- * Date: 08.08.12
- * Time: 18:05
+ * @author ginccc
  */
 @Path("/binary")
 public interface IRestBinaryResource {

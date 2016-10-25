@@ -5,9 +5,7 @@ import io.sls.expressions.Expression;
 import java.util.List;
 
 /**
- * User: michael
- * Date: 08.01.2012
- * Time: 04:50:04
+ * @author ginccc
  */
 public interface IDictionary {
     IFoundWord[] NO_WORDS_FOUND = new IFoundWord[0];

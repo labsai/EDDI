@@ -13,9 +13,7 @@ import org.codehaus.jackson.type.TypeReference;
 import javax.inject.Inject;
 
 /**
- * User: jarisch
- * Date: 22.11.12
- * Time: 15:38
+ * @author ginccc
  */
 public class TestCaseDescriptorStore extends DescriptorStore<TestCaseDescriptor> implements ITestCaseDescriptorStore {
     @Inject

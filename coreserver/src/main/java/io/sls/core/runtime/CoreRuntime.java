@@ -18,9 +18,7 @@ import java.util.LinkedList;
 import java.util.List;
 
 /**
- * User: jarisch
- * Date: 23.06.12
- * Time: 19:23
+ * @author ginccc
  */
 public final class CoreRuntime {
     public static final String SNIPPET_IDENTIFIER = "snippet";

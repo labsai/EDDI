@@ -12,11 +12,8 @@ import io.sls.resources.rest.bots.model.BotConfiguration;
 import javax.inject.Inject;
 import java.net.URI;
 
-
 /**
- * User: jarisch
- * Date: 17.05.12
- * Time: 18:11
+ * @author ginccc
  */
 public class BotStoreClientLibrary implements IBotStoreClientLibrary {
     private final IBotStoreService botStoreService;

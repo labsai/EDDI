@@ -7,9 +7,7 @@ import io.sls.runtime.DependencyInjector;
 import java.util.List;
 
 /**
- * User: jarisch
- * Date: 30.03.12
- * Time: 17:51
+ * @author ginccc
  */
 public class DictionaryEntry implements IDictionary.IDictionaryEntry {
     protected final IExpressionUtilities expressionUtilities;

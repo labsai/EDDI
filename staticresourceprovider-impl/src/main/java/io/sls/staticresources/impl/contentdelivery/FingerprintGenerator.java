@@ -8,9 +8,7 @@ import java.text.SimpleDateFormat;
 import java.util.Date;
 
 /**
- * User: jarisch
- * Date: 21.09.12
- * Time: 14:39
+ * @author ginccc
  */
 public class FingerprintGenerator {
 

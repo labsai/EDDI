@@ -2,11 +2,8 @@ package io.sls.expressions;
 
 import io.sls.expressions.value.Value;
 
-
 /**
- * User: jarisch
- * Date: 10.12.2009
- * Time: 16:34:56
+ * @author ginccc
  */
 public class Connector extends Expression {
     public static final Value OR = new Value("or");

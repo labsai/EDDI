@@ -4,7 +4,7 @@ import io.sls.core.runtime.IBot;
 import io.sls.core.runtime.service.ServiceException;
 
 /**
- * Created by ginccc
+ * @author ginccc
  */
 public interface IBotStoreClientLibrary {
     IBot getBot(String botId, Integer version) throws ServiceException, IllegalAccessException;

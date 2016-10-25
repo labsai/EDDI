@@ -9,9 +9,7 @@ import java.util.LinkedList;
 import java.util.List;
 
 /**
- * User: jarisch
- * Date: 20.08.12
- * Time: 14:05
+ * @author ginccc
  */
 public class ResultManipulatorTest {
 

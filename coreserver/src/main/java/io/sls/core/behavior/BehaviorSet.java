@@ -4,9 +4,7 @@ import java.util.LinkedList;
 import java.util.List;
 
 /**
- * User: jarisch
- * Date: 04.08.2009
- * Time: 14:12:33
+ * @author ginccc
  */
 public class BehaviorSet {
     private List<BehaviorGroup> behaviorGroups = new LinkedList<BehaviorGroup>();

@@ -12,11 +12,7 @@ import java.util.HashMap;
 import java.util.Map;
 
 /**
- * Created with IntelliJ IDEA.
- * User: Michael
- * Date: 14.08.12
- * Time: 15:07
- * To change this template use File | Settings | File Templates.
+ * @author ginccc
  */
 public class HistorizedResourceStoreTest {
     private HistorizedResourceStore<DataClass> testResourceStore;

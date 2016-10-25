@@ -14,9 +14,7 @@ import javax.ws.rs.core.Response;
 import java.net.URI;
 
 /**
- * User: jarisch
- * Date: 29.08.12
- * Time: 13:34
+ * @author ginccc
  */
 public class RestUserStore implements IRestUserStore {
     private final IUserStore userStore;

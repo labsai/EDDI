@@ -10,9 +10,7 @@ import java.util.HashMap;
 import java.util.Map;
 
 /**
- * User: jarisch
- * Date: 14.08.12
- * Time: 13:39
+ * @author ginccc
  */
 public class RestUtilities {
     private static final String versionQueryParam = "?version=";

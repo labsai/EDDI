@@ -22,9 +22,7 @@ import java.util.LinkedList;
 import java.util.List;
 
 /**
- * User: jarisch
- * Date: 12.11.12
- * Time: 14:50
+ * @author ginccc
  */
 @Slf4j
 public class RestMonitorStore implements IRestMonitorStore {

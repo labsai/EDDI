@@ -1,9 +1,7 @@
 package io.sls.core.extensions;
 
 /**
- * User: jarisch
- * Date: 11.09.12
- * Time: 10:36
+ * @author ginccc
  */
 public interface IExtensionRegistry<D, E> {
     void register(String id, D extensionDescriptor);

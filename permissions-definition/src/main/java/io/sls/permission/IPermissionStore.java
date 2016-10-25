@@ -4,9 +4,7 @@ import io.sls.permission.model.Permissions;
 import io.sls.persistence.IResourceStore;
 
 /**
- * User: jarisch
- * Date: 29.08.12
- * Time: 14:09
+ * @author ginccc
  */
 public interface IPermissionStore {
     Permissions readPermissions(String resourceId) throws IResourceStore.ResourceStoreException, IResourceStore.ResourceNotFoundException;

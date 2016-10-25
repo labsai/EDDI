@@ -5,9 +5,6 @@ import io.sls.expressions.value.Value;
 
 import java.util.List;
 
-/**
- * Created by jariscgr on 09.08.2016.
- */
 public interface IExpressionUtilities {
     List<Expression> deepCopyExpressions(List<Expression> listReferencesToCopy);
 

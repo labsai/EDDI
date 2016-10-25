@@ -8,9 +8,7 @@ import java.util.*;
 
 
 /**
- * User: jarisch
- * Date: 09.09.2010
- * Time: 19:29:32
+ * @author ginccc
  */
 public class Connector implements IExtension {
     public static final String ID = "connector";

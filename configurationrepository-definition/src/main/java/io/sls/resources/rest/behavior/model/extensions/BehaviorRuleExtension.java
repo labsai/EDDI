@@ -3,9 +3,7 @@ package io.sls.resources.rest.behavior.model.extensions;
 import java.util.List;
 
 /**
- * User: jarisch
- * Date: 06.08.12
- * Time: 13:14
+ * @author ginccc
  */
 public class BehaviorRuleExtension {
     private String name;

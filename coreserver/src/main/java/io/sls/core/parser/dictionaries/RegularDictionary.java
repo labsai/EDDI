@@ -9,9 +9,7 @@ import io.sls.expressions.Expression;
 import java.util.*;
 
 /**
- * User: michael
- * Date: 24.01.2012
- * Time: 17:39:45
+ * @author ginccc
  */
 public class RegularDictionary implements IDictionary {
     private String language;

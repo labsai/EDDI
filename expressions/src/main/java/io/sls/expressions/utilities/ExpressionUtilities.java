@@ -13,12 +13,6 @@ import java.util.LinkedList;
 import java.util.List;
 import java.util.stream.Collectors;
 
-/**
- * User: Alex
- * Date: 20.11.2010
- * Time: 13:51:15
- */
-
 @Singleton
 @Slf4j
 public class ExpressionUtilities implements IExpressionUtilities {

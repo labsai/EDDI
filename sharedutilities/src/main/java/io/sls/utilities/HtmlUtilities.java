@@ -1,11 +1,7 @@
 package io.sls.utilities;
 
 /**
- * Created with IntelliJ IDEA.
- * User: jarisch
- * Date: 17.09.12
- * Time: 11:13
- * To change this template use File | Settings | File Templates.
+ * @author ginccc
  */
 public class HtmlUtilities {
     private HtmlUtilities() {

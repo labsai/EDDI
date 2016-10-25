@@ -32,9 +32,7 @@ import java.net.URI;
 import java.security.Principal;
 
 /**
- * User: jarisch
- * Date: 27.08.12
- * Time: 13:13
+ * @author ginccc
  */
 @Provider
 @ServerInterceptor

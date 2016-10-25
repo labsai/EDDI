@@ -5,9 +5,7 @@ import javax.ws.rs.Path;
 import javax.ws.rs.PathParam;
 
 /**
- * User: jarisch
- * Date: 17.08.12
- * Time: 14:58
+ * @author ginccc
  */
 public interface IRestVersionInfo {
     @GET

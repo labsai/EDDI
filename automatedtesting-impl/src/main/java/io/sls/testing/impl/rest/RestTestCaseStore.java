@@ -29,9 +29,7 @@ import java.util.LinkedList;
 import java.util.List;
 
 /**
- * User: jarisch
- * Date: 22.11.12
- * Time: 15:35
+ * @author ginccc
  */
 @RequestScoped
 @Slf4j

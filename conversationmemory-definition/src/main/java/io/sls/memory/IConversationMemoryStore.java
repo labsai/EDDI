@@ -5,9 +5,7 @@ import io.sls.memory.model.ConversationState;
 import io.sls.persistence.IResourceStore;
 
 /**
- * User: jarisch
- * Date: 23.08.12
- * Time: 15:53
+ * @author ginccc
  */
 public interface IConversationMemoryStore {
     String storeConversationMemorySnapshot(ConversationMemorySnapshot snapshot) throws IResourceStore.ResourceStoreException;

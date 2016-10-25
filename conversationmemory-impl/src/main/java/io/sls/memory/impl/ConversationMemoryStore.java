@@ -17,9 +17,7 @@ import javax.inject.Inject;
 import java.io.IOException;
 
 /**
- * User: jarisch
- * Date: 23.08.12
- * Time: 15:55
+ * @author ginccc
  */
 public class ConversationMemoryStore implements IConversationMemoryStore, IResourceStore<ConversationMemorySnapshot> {
 

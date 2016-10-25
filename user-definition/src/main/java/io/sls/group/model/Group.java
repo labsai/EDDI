@@ -7,9 +7,7 @@ import java.util.LinkedList;
 import java.util.List;
 
 /**
- * User: jarisch
- * Date: 28.08.12
- * Time: 12:23
+ * @author ginccc
  */
 public class Group implements IGroup {
     private String name;

@@ -8,9 +8,7 @@ import javax.ws.rs.core.MediaType;
 import javax.ws.rs.core.Response;
 
 /**
- * User: jarisch
- * Date: 29.08.12
- * Time: 10:52
+ * @author ginccc
  */
 @Path("/groupstore/groups")
 public interface IRestGroupStore {

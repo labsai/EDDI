@@ -14,9 +14,7 @@ import java.util.LinkedHashSet;
 import java.util.Set;
 
 /**
- * User: jarisch
- * Date: 16.05.12
- * Time: 17:33
+ * @author ginccc
  */
 public class ApplicationConfiguration extends Application {
     private final Set<Class<?>> CLASSES;

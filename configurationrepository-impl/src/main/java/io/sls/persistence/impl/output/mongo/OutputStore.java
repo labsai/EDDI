@@ -20,9 +20,7 @@ import java.util.LinkedList;
 import java.util.List;
 
 /**
- * User: jarisch
- * Date: 09.08.12
- * Time: 15:41
+ * @author ginccc
  */
 public class OutputStore implements IOutputStore {
     private final String collectionName = "outputs";

@@ -8,7 +8,7 @@ import io.sls.permission.impl.PermissionStore;
 import io.sls.runtime.bootstrap.AbstractBaseModule;
 
 /**
- * Created by jariscgr on 09.08.2016.
+ * @author ginccc
  */
 public class PermissionModule extends AbstractBaseModule {
     @Override

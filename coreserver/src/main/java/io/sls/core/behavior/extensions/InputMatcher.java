@@ -16,9 +16,7 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * User: jarisch
- * Date: 03.08.2009
- * Time: 14:42:01
+ * @author ginccc
  */
 public class InputMatcher implements IExtension {
     public static final String ID = "inputmatcher";

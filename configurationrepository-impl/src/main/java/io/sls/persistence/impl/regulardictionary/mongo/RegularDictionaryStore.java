@@ -18,9 +18,7 @@ import java.util.LinkedList;
 import java.util.List;
 
 /**
- * User: jarisch
- * Date: 14.08.12
- * Time: 17:26
+ * @author ginccc
  */
 public class RegularDictionaryStore implements IRegularDictionaryStore {
     private final String collectionName = "regulardictionaries";

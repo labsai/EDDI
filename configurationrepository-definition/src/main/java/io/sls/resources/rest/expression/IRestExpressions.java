@@ -7,9 +7,7 @@ import javax.ws.rs.core.MediaType;
 import java.util.List;
 
 /**
- * User: jarisch
- * Date: 26.11.12
- * Time: 14:57
+ * @author ginccc
  */
 @Path("/expressions")
 public interface IRestExpressions {

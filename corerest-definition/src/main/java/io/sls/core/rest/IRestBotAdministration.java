@@ -7,9 +7,7 @@ import javax.ws.rs.core.MediaType;
 import javax.ws.rs.core.Response;
 
 /**
- * User: jarisch
- * Date: 27.08.12
- * Time: 15:06
+ * @author ginccc
  */
 @Path("/administration")
 public interface IRestBotAdministration {

@@ -5,9 +5,7 @@ import io.sls.runtime.DependencyInjector;
 import org.junit.Before;
 
 /**
- * User: jarisch
- * Date: 31.03.12
- * Time: 17:00
+ * @author ginccc
  */
 public class InputParserTest {
     private IExpressionUtilities expressionUtilities;

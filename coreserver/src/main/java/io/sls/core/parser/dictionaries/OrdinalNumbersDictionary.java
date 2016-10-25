@@ -13,9 +13,7 @@ import java.util.Collections;
 import java.util.List;
 
 /**
- * User: jarisch
- * Date: 14.06.2010
- * Time: 17:21:49
+ * @author ginccc
  */
 public class OrdinalNumbersDictionary implements IDictionary {
     public static final String ID = "punctuation";

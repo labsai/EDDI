@@ -16,9 +16,7 @@ import javax.inject.Inject;
 import java.io.IOException;
 
 /**
- * User: jarisch
- * Date: 18.01.13
- * Time: 21:50
+ * @author ginccc
  */
 public class HtmlFaceStore implements IHtmlFaceStore {
     public static final String COLLECTION_FACES = "faces";

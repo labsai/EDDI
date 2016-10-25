@@ -7,9 +7,7 @@ import java.util.LinkedList;
 import java.util.List;
 
 /**
- * User: jarisch
- * Date: 06.11.12
- * Time: 15:37
+ * @author ginccc
  */
 public class MatchingResult {
     private List<IDictionary.IFoundWord> result = new LinkedList<IDictionary.IFoundWord>();

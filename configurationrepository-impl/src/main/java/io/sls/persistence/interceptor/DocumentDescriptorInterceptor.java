@@ -36,11 +36,8 @@ import java.security.Principal;
 import java.util.Date;
 
 /**
- * User: jarisch
- * Date: 27.08.12
- * Time: 13:13
+ * @author ginccc
  */
-
 @Provider
 @ServerInterceptor
 @Slf4j

@@ -5,9 +5,7 @@ import org.apache.commons.mail.EmailException;
 import org.apache.commons.mail.HtmlEmail;
 
 /**
- * User: jarisch
- * Date: 05.12.12
- * Time: 15:24
+ * @author ginccc
  */
 @Slf4j
 public class SendMail {

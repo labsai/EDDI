@@ -10,9 +10,7 @@ import java.util.LinkedList;
 import java.util.List;
 
 /**
- * User: jarisch
- * Date: 21.11.12
- * Time: 12:25
+ * @author ginccc
  */
 public class ConversationDescriptor extends ResourceDescriptor {
     public enum ViewState {

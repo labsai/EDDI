@@ -13,9 +13,7 @@ import io.sls.memory.model.ConversationState;
 import java.util.List;
 
 /**
- * User: jarisch
- * Date: 13.03.12
- * Time: 18:03
+ * @author ginccc
  */
 public class Conversation implements IConversation {
     private ConversationState conversationState;

@@ -3,9 +3,7 @@ package io.sls.core.parser.internal.matches;
 import java.util.*;
 
 /**
- * User: jarisch
- * Date: 02.11.12
- * Time: 13:25
+ * @author ginccc
  */
 public class MatchMatrix implements Iterable<Suggestion> {
     private Map<String, List<MatchingResult>> mappedMatchMatrix = new LinkedHashMap<String, List<MatchingResult>>();

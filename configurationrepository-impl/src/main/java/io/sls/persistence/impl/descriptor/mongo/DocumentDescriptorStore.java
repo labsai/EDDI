@@ -15,9 +15,7 @@ import javax.inject.Inject;
 import java.io.IOException;
 
 /**
- * User: jarisch
- * Date: 06.09.12
- * Time: 09:50
+ * @author ginccc
  */
 public class DocumentDescriptorStore extends DescriptorStore<DocumentDescriptor> implements IDocumentDescriptorStore {
 

@@ -4,9 +4,7 @@ import io.sls.core.lifecycle.LifecycleException;
 import io.sls.memory.IConversationMemory;
 
 /**
- * User: michael
- * Date: 07.01.2012
- * Time: 23:22:18
+ * @author ginccc
  */
 public interface IConversation {
     IConversationMemory getConversationMemory();

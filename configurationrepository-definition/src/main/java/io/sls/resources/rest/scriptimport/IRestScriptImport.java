@@ -6,9 +6,7 @@ import javax.ws.rs.QueryParam;
 import javax.ws.rs.core.Response;
 
 /**
- * User: jarisch
- * Date: 22.06.13
- * Time: 20:12
+ * @author ginccc
  */
 @Path("/scriptimport")
 public interface IRestScriptImport {

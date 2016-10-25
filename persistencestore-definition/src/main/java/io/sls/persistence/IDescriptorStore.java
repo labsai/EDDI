@@ -3,9 +3,7 @@ package io.sls.persistence;
 import java.util.List;
 
 /**
- * User: jarisch
- * Date: 19.11.12
- * Time: 17:30
+ * @author ginccc
  */
 public interface IDescriptorStore<T> {
     List<T> readDescriptors(String type, String filter, Integer index, Integer limit, boolean includeDeleted) throws IResourceStore.ResourceStoreException, IResourceStore.ResourceNotFoundException;

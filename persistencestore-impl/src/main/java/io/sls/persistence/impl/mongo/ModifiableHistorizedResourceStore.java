@@ -7,11 +7,7 @@ import io.sls.utilities.RuntimeUtilities;
 import java.io.IOException;
 
 /**
- * Created with IntelliJ IDEA.
- * User: Michael
- * Date: 14.08.12
- * Time: 14:44
- * To change this template use File | Settings | File Templates.
+ * @author ginccc
  */
 public class ModifiableHistorizedResourceStore<T> extends HistorizedResourceStore<T> implements IResourceStore<T> {
     public ModifiableHistorizedResourceStore(IResourceStorage<T> resourceStore) {

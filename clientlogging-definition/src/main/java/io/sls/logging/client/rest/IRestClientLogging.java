@@ -8,9 +8,7 @@ import javax.ws.rs.QueryParam;
 import java.io.InputStream;
 
 /**
- * User: jarisch
- * Date: 26.01.13
- * Time: 21:12
+ * @author ginccc
  */
 @Path("/logging")
 public interface IRestClientLogging {

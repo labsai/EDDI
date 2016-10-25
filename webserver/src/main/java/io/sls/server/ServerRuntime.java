@@ -40,9 +40,7 @@ import java.net.URL;
 import java.util.*;
 
 /**
- * User: jarisch
- * Date: 21.11.12
- * Time: 23:09
+ * @author ginccc
  */
 @Singleton
 @Slf4j

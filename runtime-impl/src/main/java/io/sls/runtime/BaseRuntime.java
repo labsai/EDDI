@@ -15,9 +15,7 @@ import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 
 /**
- * User: jarisch
- * Date: 21.11.12
- * Time: 21:57
+ * @author ginccc
  */
 public class BaseRuntime implements SystemRuntime.IRuntime {
     private final String projectVersion;

@@ -12,9 +12,7 @@ import java.net.URI;
 import java.util.List;
 
 /**
- * User: jarisch
- * Date: 17.05.12
- * Time: 14:55
+ * @author ginccc
  */
 @Path("/botstore/bots")
 public interface IRestBotStore extends IRestVersionInfo {

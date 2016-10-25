@@ -12,9 +12,7 @@ import java.util.List;
 
 
 /**
- * User: jarisch
- * Date: 11.11.2010
- * Time: 19:13:49
+ * @author ginccc
  */
 public class PhoneticCorrection implements ICorrection {
     private HashMap<String, List<IDictionary.IFoundWord>> soundexCodes;

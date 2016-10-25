@@ -19,7 +19,7 @@ import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
 
 /**
- * Created by jariscgr on 08.08.2016.
+ * @author ginccc
  */
 public class RuntimeModule extends AbstractBaseModule {
     private final InputStream[] configFiles;

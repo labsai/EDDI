@@ -21,9 +21,7 @@ import java.net.URI;
 import java.util.*;
 
 /**
- * User: jarisch
- * Date: 26.11.12
- * Time: 16:20
+ * @author ginccc
  */
 @Slf4j
 public class RestOutputKeys implements IRestOutputKeys {

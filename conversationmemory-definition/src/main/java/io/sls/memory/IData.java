@@ -5,9 +5,7 @@ import java.util.Date;
 import java.util.List;
 
 /**
- * User: jarisch
- * Date: 07.02.12
- * Time: 19:34
+ * @author ginccc
  */
 public interface IData extends Serializable {
     String getKey();

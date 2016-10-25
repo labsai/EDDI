@@ -11,9 +11,7 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * User: jarisch
- * Date: 08.02.2010
- * Time: 22:15:38
+ * @author ginccc
  */
 public class ResultSize implements IExtension {
     private int max = -1;

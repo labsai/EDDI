@@ -8,7 +8,7 @@ import io.sls.expressions.utilities.IExpressionUtilities;
 import io.sls.runtime.bootstrap.AbstractBaseModule;
 
 /**
- * Created by jariscgr on 09.08.2016.
+ * @author ginccc
  */
 public class ExpressionModule extends AbstractBaseModule {
     @Override

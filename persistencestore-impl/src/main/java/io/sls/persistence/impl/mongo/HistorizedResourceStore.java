@@ -7,11 +7,7 @@ import io.sls.utilities.RuntimeUtilities;
 import java.io.IOException;
 
 /**
- * Created with IntelliJ IDEA.
- * User: Michael
- * Date: 14.08.12
- * Time: 14:44
- * To change this template use File | Settings | File Templates.
+ * @author ginccc
  */
 public class HistorizedResourceStore<T> implements IResourceStore<T> {
     protected static IResourceStore.ResourceNotFoundException createResourceNotFoundException(String id, Integer version) {

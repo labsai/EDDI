@@ -1,9 +1,7 @@
 package io.sls.testing.descriptor.model;
 
 /**
- * User: jarisch
- * Date: 23.11.12
- * Time: 10:17
+ * @author ginccc
  */
 public class SimpleTestCaseDescriptor {
     private String name;

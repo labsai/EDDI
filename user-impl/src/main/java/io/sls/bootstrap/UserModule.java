@@ -12,7 +12,7 @@ import io.sls.user.impl.rest.RestUserStore;
 import io.sls.user.rest.IRestUserStore;
 
 /**
- * Created by jariscgr on 09.08.2016.
+ * @author ginccc
  */
 public class UserModule extends AbstractBaseModule {
     @Override

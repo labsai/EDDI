@@ -3,9 +3,7 @@ package io.sls.utilities;
 import java.util.Collection;
 
 /**
- * User: jarisch
- * Date: 26.11.12
- * Time: 16:54
+ * @author ginccc
  */
 public final class CollectionUtilities {
     private CollectionUtilities() {

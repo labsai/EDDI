@@ -3,9 +3,7 @@ package io.sls.core.runtime;
 import io.sls.core.lifecycle.ILifecycleManager;
 
 /**
- * User: jarisch
- * Date: 23.06.12
- * Time: 19:43
+ * @author ginccc
  */
 public interface IExecutablePackage {
     String getContext();

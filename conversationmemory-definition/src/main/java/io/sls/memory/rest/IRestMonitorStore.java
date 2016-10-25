@@ -11,9 +11,7 @@ import javax.ws.rs.core.MediaType;
 import java.util.List;
 
 /**
- * User: jarisch
- * Date: 12.11.12
- * Time: 10:52
+ * @author ginccc
  */
 @Path("/conversationstore/conversations")
 public interface IRestMonitorStore {

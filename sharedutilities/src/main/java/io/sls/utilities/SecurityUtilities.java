@@ -15,9 +15,7 @@ import java.util.Random;
 import java.util.Set;
 
 /**
- * User: jarisch
- * Date: 28.08.12
- * Time: 15:35
+ * @author ginccc
  */
 public class SecurityUtilities {
     private static final String UTF_8 = "UTF-8";

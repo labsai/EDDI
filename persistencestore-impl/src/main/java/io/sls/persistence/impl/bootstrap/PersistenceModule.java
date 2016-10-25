@@ -12,7 +12,7 @@ import java.util.LinkedList;
 import java.util.List;
 
 /**
- * Created by jariscgr on 08.08.2016.
+ * @author ginccc
  */
 public class PersistenceModule extends AbstractBaseModule {
     private final InputStream configFile;

@@ -3,9 +3,7 @@ package io.sls.user.model;
 import io.sls.user.IUser;
 
 /**
- * User: jarisch
- * Date: 28.08.12
- * Time: 12:21
+ * @author ginccc
  */
 public class User implements IUser {
     private String username;

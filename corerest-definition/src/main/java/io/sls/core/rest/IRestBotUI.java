@@ -8,9 +8,7 @@ import javax.ws.rs.*;
 import javax.ws.rs.core.MediaType;
 
 /**
- * User: jarisch
- * Date: 14.09.12
- * Time: 10:14
+ * @author ginccc
  */
 @Path("/ui")
 public interface IRestBotUI {

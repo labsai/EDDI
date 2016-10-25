@@ -10,9 +10,7 @@ import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 
 /**
- * User: jarisch
- * Date: 09.06.12
- * Time: 17:46
+ * @author ginccc
  */
 public class PackageFactory implements IPackageFactory {
     private final Map<PackageId, IExecutablePackage> executablePackages = new ConcurrentHashMap<>();

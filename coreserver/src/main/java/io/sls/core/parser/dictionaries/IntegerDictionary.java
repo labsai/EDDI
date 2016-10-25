@@ -13,9 +13,7 @@ import java.util.Collections;
 import java.util.List;
 
 /**
- * User: jarisch
- * Date: 14.06.2010
- * Time: 17:18:47
+ * @author ginccc
  */
 public class IntegerDictionary implements IDictionary {
     private static final String ID = "integer";

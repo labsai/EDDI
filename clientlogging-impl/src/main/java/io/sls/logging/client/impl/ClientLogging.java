@@ -7,9 +7,7 @@ import javax.servlet.http.HttpServletRequest;
 
 
 /**
- * User: jarisch
- * Date: 26.01.13
- * Time: 21:03
+ * @author ginccc
  */
 @Slf4j
 public class ClientLogging implements IClientLogging {

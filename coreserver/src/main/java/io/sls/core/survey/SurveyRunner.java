@@ -5,9 +5,7 @@ import io.sls.core.survey.model.SurveyElement;
 import java.util.List;
 
 /**
- * User: michael
- * Date: 10.12.2011
- * Time: 15:27:59
+ * @author ginccc
  */
 public class SurveyRunner {
     private List<SurveyElement> survey;

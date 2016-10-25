@@ -11,11 +11,7 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * Created with IntelliJ IDEA.
- * User: jarisch
- * Date: 21.09.12
- * Time: 15:33
- * To change this template use File | Settings | File Templates.
+ * @author ginccc
  */
 public class ContentDeliveryPreparation {
 

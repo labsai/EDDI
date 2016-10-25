@@ -8,9 +8,7 @@ import lombok.extern.slf4j.Slf4j;
 import java.util.LinkedList;
 
 /**
- * User: jarisch
- * Date: 21.01.2010
- * Time: 15:57:33
+ * @author ginccc
  */
 @Slf4j
 public class BehaviorRulesEvaluator {

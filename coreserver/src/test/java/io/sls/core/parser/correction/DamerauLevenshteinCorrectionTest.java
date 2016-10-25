@@ -5,9 +5,7 @@ import io.sls.runtime.DependencyInjector;
 import org.junit.Before;
 
 /**
- * User: jarisch
- * Date: 15.04.12
- * Time: 01:20
+ * @author ginccc
  */
 public class DamerauLevenshteinCorrectionTest {
     private IExpressionUtilities expressionUtilities;

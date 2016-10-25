@@ -24,9 +24,7 @@ import java.util.Map;
 import java.util.regex.Pattern;
 
 /**
- * User: jarisch
- * Date: 11.09.12
- * Time: 12:35
+ * @author ginccc
  */
 @Slf4j
 public class ResourceFilter<T> implements IResourceFilter<T> {

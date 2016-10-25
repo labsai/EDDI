@@ -8,9 +8,7 @@ import java.util.LinkedList;
 import java.util.List;
 
 /**
- * User: jarisch
- * Date: 03.08.2009
- * Time: 14:39:16
+ * @author ginccc
  */
 @Slf4j
 public class BehaviorRule implements Cloneable {

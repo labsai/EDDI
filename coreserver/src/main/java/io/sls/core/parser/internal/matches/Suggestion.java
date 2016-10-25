@@ -6,9 +6,7 @@ import java.util.LinkedList;
 import java.util.List;
 
 /**
- * User: jarisch
- * Date: 02.11.12
- * Time: 13:05
+ * @author ginccc
  */
 public class Suggestion {
     private List<MatchingResult> rawSolution = new LinkedList<MatchingResult>();

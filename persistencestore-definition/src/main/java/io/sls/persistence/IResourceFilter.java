@@ -4,9 +4,7 @@ package io.sls.persistence;
 import java.util.List;
 
 /**
- * User: jarisch
- * Date: 11.09.12
- * Time: 12:35
+ * @author ginccc
  */
 public interface IResourceFilter<T> {
     List<T> readResources(QueryFilters[] queryFilters, Integer index, Integer limit, String... sortTypes) throws IResourceStore.ResourceStoreException, IResourceStore.ResourceNotFoundException;

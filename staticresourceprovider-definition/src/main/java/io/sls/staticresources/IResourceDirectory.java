@@ -1,7 +1,7 @@
 package io.sls.staticresources;
 
 /**
- * Created by jariscgr on 29.08.2016.
+ * @author ginccc
  */
 public interface IResourceDirectory {
     String getPathOfLanguageFile(String language, String location);

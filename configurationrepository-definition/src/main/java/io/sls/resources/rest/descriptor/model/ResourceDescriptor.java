@@ -4,9 +4,7 @@ import java.net.URI;
 import java.util.Date;
 
 /**
- * User: jarisch
- * Date: 18.11.12
- * Time: 17:19
+ * @author ginccc
  */
 public class ResourceDescriptor {
     private URI resource;

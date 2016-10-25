@@ -5,9 +5,7 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * User: jarisch
- * Date: 20.05.12
- * Time: 19:27
+ * @author ginccc
  */
 public class PackageConfiguration {
     private List<PackageExtension> packageExtensions;

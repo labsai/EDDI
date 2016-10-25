@@ -7,9 +7,7 @@ import java.util.LinkedList;
 import java.util.List;
 
 /**
- * User: jarisch
- * Date: 30.03.12
- * Time: 17:52
+ * @author ginccc
  */
 public class Phrase extends DictionaryEntry implements IDictionary.IPhrase {
     public Phrase(String value, List<Expression> expressions, String identifier) {

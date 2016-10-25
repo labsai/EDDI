@@ -14,9 +14,7 @@ import java.net.URI;
 import java.util.List;
 
 /**
- * User: jarisch
- * Date: 14.07.12
- * Time: 16:22
+ * @author ginccc
  */
 @Path("/regulardictionarystore/regulardictionaries")
 public interface IRestRegularDictionaryStore extends IRestVersionInfo {

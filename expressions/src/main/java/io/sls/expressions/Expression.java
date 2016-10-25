@@ -6,9 +6,7 @@ import lombok.extern.slf4j.Slf4j;
 import java.util.*;
 
 /**
- * User: jarisch
- * Date: 10.12.2009
- * Time: 15:37:14
+ * @author ginccc
  */
 @Slf4j
 public class Expression implements Cloneable {

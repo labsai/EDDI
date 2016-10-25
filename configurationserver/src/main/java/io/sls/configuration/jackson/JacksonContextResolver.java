@@ -7,9 +7,7 @@ import javax.ws.rs.ext.ContextResolver;
 import javax.ws.rs.ext.Provider;
 
 /**
- * User: jarisch
- * Date: 03.09.12
- * Time: 15:20
+ * @author ginccc
  */
 @Provider
 public class JacksonContextResolver implements ContextResolver<ObjectMapper> {

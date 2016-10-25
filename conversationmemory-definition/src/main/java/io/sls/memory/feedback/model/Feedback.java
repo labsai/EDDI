@@ -1,9 +1,7 @@
 package io.sls.memory.feedback.model;
 
 /**
- * User: jarisch
- * Date: 19.11.12
- * Time: 11:04
+ * @author ginccc
  */
 public class Feedback {
     public enum Type {

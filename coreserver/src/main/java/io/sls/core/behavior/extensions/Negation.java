@@ -9,9 +9,7 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * User: jarisch
- * Date: 14.03.12
- * Time: 14:03
+ * @author ginccc
  */
 public class Negation implements IExtension {
     public static final String ID = "negation";

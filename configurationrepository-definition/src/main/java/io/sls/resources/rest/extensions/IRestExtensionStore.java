@@ -11,9 +11,7 @@ import java.net.URI;
 import java.util.List;
 
 /**
- * User: jarisch
- * Date: 11.09.12
- * Time: 12:06
+ * @author ginccc
  */
 @Path("/extensionstore/extensions")
 public interface IRestExtensionStore {

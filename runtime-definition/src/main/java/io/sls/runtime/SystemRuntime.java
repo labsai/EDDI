@@ -6,9 +6,7 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Future;
 
 /**
- * User: jarisch
- * Date: 21.11.12
- * Time: 17:34
+ * @author ginccc
  */
 public final class SystemRuntime {
     private static IRuntime runtime;

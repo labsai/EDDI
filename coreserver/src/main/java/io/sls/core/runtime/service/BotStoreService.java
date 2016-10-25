@@ -9,9 +9,7 @@ import javax.inject.Named;
 
 
 /**
- * User: jarisch
- * Date: 17.05.12
- * Time: 18:39
+ * @author ginccc
  */
 public class BotStoreService implements IBotStoreService {
 

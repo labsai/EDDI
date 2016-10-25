@@ -18,9 +18,7 @@ import java.util.LinkedList;
 import java.util.List;
 
 /**
- * User: jarisch
- * Date: 19.11.12
- * Time: 17:34
+ * @author ginccc
  */
 public class DescriptorStore<T> implements IDescriptorStore<T> {
     private static final String COLLECTION_DESCRIPTORS = "descriptors";

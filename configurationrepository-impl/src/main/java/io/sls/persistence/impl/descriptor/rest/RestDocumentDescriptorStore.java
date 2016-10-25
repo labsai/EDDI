@@ -15,9 +15,7 @@ import javax.ws.rs.NotFoundException;
 import java.util.List;
 
 /**
- * User: jarisch
- * Date: 06.09.12
- * Time: 09:51
+ * @author ginccc
  */
 @Slf4j
 public class RestDocumentDescriptorStore extends RestVersionInfo implements IRestDocumentDescriptorStore {

@@ -10,9 +10,7 @@ import javax.ws.rs.core.MediaType;
 import java.util.List;
 
 /**
- * User: jarisch
- * Date: 11.09.12
- * Time: 09:32
+ * @author ginccc
  */
 @Path("/packagestore/extensions")
 public interface IRestPackageExtensionStore {

@@ -1,9 +1,7 @@
 package io.sls.core.parser.model;
 
 /**
- * User: jarisch
- * Date: 25.01.13
- * Time: 17:26
+ * @author ginccc
  */
 public class FoundUnknown extends FoundWord {
     public FoundUnknown(Unknown unknown) {

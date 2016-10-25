@@ -7,9 +7,7 @@ import javax.ws.rs.*;
 import javax.ws.rs.core.MediaType;
 
 /**
- * User: jarisch
- * Date: 29.08.12
- * Time: 10:52
+ * @author ginccc
  */
 @Path("/permissionstore/permissions")
 public interface IRestPermissionStore {

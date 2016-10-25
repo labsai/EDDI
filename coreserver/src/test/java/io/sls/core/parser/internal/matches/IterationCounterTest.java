@@ -4,9 +4,7 @@ import org.junit.Assert;
 import org.junit.Test;
 
 /**
- * User: jarisch
- * Date: 02.11.12
- * Time: 14:32
+ * @author ginccc
  */
 public class IterationCounterTest {
 

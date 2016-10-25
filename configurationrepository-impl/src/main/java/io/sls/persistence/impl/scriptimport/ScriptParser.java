@@ -1,9 +1,7 @@
 package io.sls.persistence.impl.scriptimport;
 
 /**
- * User: jarisch
- * Date: 22.06.13
- * Time: 22:38
+ * @author ginccc
  */
 public class ScriptParser implements IScriptParser {
     private String script;

@@ -1,9 +1,7 @@
 package io.sls.core.parser.phrases;
 
 /**
- * User: jarisch
- * Date: 02.11.12
- * Time: 11:50
+ * @author ginccc
  */
 public class PhraseRegexTest {
     /*@Test

@@ -10,9 +10,7 @@ import javax.inject.Inject;
 import javax.inject.Named;
 
 /**
- * User: jarisch
- * Date: 17.05.12
- * Time: 20:35
+ * @author ginccc
  */
 public class PackageStoreService implements IPackageStoreService {
     private final IRestInterfaceFactory restInterfaceFactory;

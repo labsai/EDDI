@@ -5,9 +5,7 @@ import io.sls.utilities.CharacterUtilities;
 import lombok.extern.slf4j.Slf4j;
 
 /**
- * User: jarisch
- * Date: 16.12.2009
- * Time: 11:42:28
+ * @author ginccc
  */
 @Slf4j
 public class Value extends Expression {

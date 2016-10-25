@@ -28,9 +28,7 @@ import java.security.Principal;
 import java.util.List;
 
 /**
- * User: jarisch
- * Date: 29.08.12
- * Time: 14:18
+ * @author ginccc
  */
 public class PermissionStore implements IPermissionStore {
     public static final String COLLECTION_PERMISSIONS = "permissions";

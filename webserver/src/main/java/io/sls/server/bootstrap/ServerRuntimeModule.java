@@ -20,7 +20,7 @@ import javax.inject.Singleton;
 import java.io.InputStream;
 
 /**
- * Created by jariscgr on 09.08.2016.
+ * @author ginccc
  */
 public class ServerRuntimeModule extends AbstractBaseModule {
     public ServerRuntimeModule(InputStream... configFile) {

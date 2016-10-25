@@ -9,9 +9,7 @@ import java.io.IOException;
 import java.io.StringWriter;
 
 /**
- * User: jarisch
- * Date: 17.05.12
- * Time: 15:19
+ * @author ginccc
  */
 public final class JSONSerialization {
     private static ObjectMapper objectMapper;

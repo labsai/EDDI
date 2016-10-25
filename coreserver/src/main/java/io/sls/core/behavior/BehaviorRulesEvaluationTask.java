@@ -23,9 +23,7 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * User: Alex
- * Date: 15.06.2011
- * Time: 14:09:26
+ * @author ginccc
  */
 @Singleton
 @Slf4j

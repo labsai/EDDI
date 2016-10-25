@@ -1,9 +1,7 @@
 package io.sls.core.output;
 
 /**
- * User: jarisch
- * Date: 12.03.12
- * Time: 16:26
+ * @author ginccc
  */
 public interface IOutputFilter {
     String getKey();

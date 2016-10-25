@@ -18,11 +18,8 @@ import java.io.IOException;
 import java.util.List;
 
 /**
- * User: jarisch
- * Date: 08.08.12
- * Time: 12:37
+ * @author ginccc
  */
-
 @Slf4j
 public class RestEditor implements IRestEditor {
     private static final String KEYCLOAK_BASE_URL = "KEYCLOAK_BASE_URL";
