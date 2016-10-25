@@ -2,16 +2,15 @@ package io.sls.expressions.value;
 
 import io.sls.expressions.Expression;
 import io.sls.utilities.CharacterUtilities;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
+import lombok.extern.slf4j.Slf4j;
 
 /**
  * User: jarisch
  * Date: 16.12.2009
  * Time: 11:42:28
  */
+@Slf4j
 public class Value extends Expression {
-    private static Logger log = LoggerFactory.getLogger(Value.class);
 
     public Value() {
     }

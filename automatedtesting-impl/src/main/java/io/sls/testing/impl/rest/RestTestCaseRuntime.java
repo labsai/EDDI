@@ -6,10 +6,9 @@ import io.sls.testing.ITestCaseStore;
 import io.sls.testing.impl.TestCaseRuntime;
 import io.sls.testing.model.TestCaseState;
 import io.sls.testing.rest.IRestTestCaseRuntime;
+import lombok.extern.slf4j.Slf4j;
 import org.jboss.resteasy.plugins.guice.RequestScoped;
 import org.jboss.resteasy.spi.HttpResponse;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 
 import javax.inject.Inject;
 import javax.inject.Named;
@@ -23,13 +22,13 @@ import javax.ws.rs.core.Response;
  * Time: 13:25
  */
 @RequestScoped
+@Slf4j
 public class RestTestCaseRuntime implements IRestTestCaseRuntime {
     private final HttpResponse httpResponse;
     private final IRestInterfaceFactory restInterfaceFactory;
     private final ITestCaseStore testCaseStore;
     private final IConversationMemoryStore conversationMemoryStore;
     private final String coreServerURI;
-    private Logger logger = LoggerFactory.getLogger(this.getClass());
 
     @Inject
     public RestTestCaseRuntime(@Context HttpResponse httpResponse,
@@ -49,7 +48,7 @@ public class RestTestCaseRuntime implements IRestTestCaseRuntime {
             httpResponse.setStatus(Response.Status.ACCEPTED.getStatusCode());
             createTestCaseRuntime().executeTestCase(id, testCaseStore.loadTestCase(id));
         } catch (Exception e) {
-            logger.error(e.getLocalizedMessage(), e);
+            log.error(e.getLocalizedMessage(), e);
             throw new InternalServerErrorException(e);
         }
     }

@@ -12,9 +12,8 @@ import io.sls.user.IUserStore;
 import io.sls.user.model.User;
 import io.sls.utilities.RestUtilities;
 import io.sls.utilities.RuntimeUtilities;
+import lombok.extern.slf4j.Slf4j;
 import org.jboss.resteasy.spi.NoLogWebApplicationException;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 
 import javax.inject.Inject;
 import javax.ws.rs.InternalServerErrorException;
@@ -27,12 +26,12 @@ import java.util.List;
  * Date: 12.11.12
  * Time: 14:50
  */
+@Slf4j
 public class RestMonitorStore implements IRestMonitorStore {
     private final IUserStore userStore;
     private final IDocumentDescriptorStore documentDescriptorStore;
     private final IConversationDescriptorStore conversationDescriptorStore;
     private final IConversationMemoryStore conversationMemoryStore;
-    private Logger logger = LoggerFactory.getLogger(this.getClass());
 
     @Inject
     public RestMonitorStore(IUserStore userStore,
@@ -96,7 +95,7 @@ public class RestMonitorStore implements IRestMonitorStore {
             return retConversationDescriptors;
 
         } catch (IResourceStore.ResourceStoreException e) {
-            logger.error(e.getMessage(), e);
+            log.error(e.getMessage(), e);
             throw new InternalServerErrorException(e.getMessage(), e);
         } catch (IResourceStore.ResourceNotFoundException e) {
             throw new NoLogWebApplicationException(e);
@@ -110,7 +109,7 @@ public class RestMonitorStore implements IRestMonitorStore {
         try {
             return conversationMemoryStore.loadConversationMemorySnapshot(conversationId);
         } catch (IResourceStore.ResourceStoreException e) {
-            logger.error(e.getMessage(), e);
+            log.error(e.getMessage(), e);
             throw new InternalServerErrorException(e);
         } catch (IResourceStore.ResourceNotFoundException e) {
             throw new NoLogWebApplicationException(e);

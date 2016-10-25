@@ -6,8 +6,7 @@ import io.sls.staticresources.IResourceFilesManager;
 import io.sls.staticresources.rest.IRestEditor;
 import io.sls.utilities.FileUtilities;
 import io.sls.utilities.HtmlUtilities;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
+import lombok.extern.slf4j.Slf4j;
 
 import javax.inject.Inject;
 import javax.inject.Named;
@@ -24,6 +23,7 @@ import java.util.List;
  * Time: 12:37
  */
 
+@Slf4j
 public class RestEditor implements IRestEditor {
     private static final String KEYCLOAK_BASE_URL = "KEYCLOAK_BASE_URL";
     private static final String USER_DISPLAY_NAME = "USER_DISPLAY_NAME";
@@ -32,7 +32,6 @@ public class RestEditor implements IRestEditor {
     private final IResourceFilesManager resourceFilesManager;
     private final String uriEngineServerUI;
     private final String keycloakBaseUrl;
-    private Logger logger = LoggerFactory.getLogger(this.getClass());
 
     @Inject
     public RestEditor(@Context HttpServletRequest httpServletRequest,
@@ -61,7 +60,7 @@ public class RestEditor implements IRestEditor {
             includeEngineServerURI(editorFile);
             return editorFile.toString();
         } catch (IOException e) {
-            logger.error(e.getLocalizedMessage(), e);
+            log.error(e.getLocalizedMessage(), e);
             throw new InternalServerErrorException(e.getLocalizedMessage(), e);
         }
     }
@@ -75,7 +74,7 @@ public class RestEditor implements IRestEditor {
             int startIndex = editorFile.indexOf(LANGUAGE_IDENTIFIER);
             editorFile.replace(startIndex, startIndex + LANGUAGE_IDENTIFIER.length(), scriptTag.toString());
         } else {
-            logger.error("No ResourceDirectory has been found while trying to include language file.");
+            log.error("No ResourceDirectory has been found while trying to include language file.");
         }
     }
 

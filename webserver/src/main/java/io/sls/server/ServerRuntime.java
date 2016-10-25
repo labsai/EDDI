@@ -4,6 +4,7 @@ import io.sls.runtime.SystemRuntime;
 import io.sls.runtime.ThreadContext;
 import io.sls.utilities.RuntimeUtilities;
 import io.sls.utilities.StringUtilities;
+import lombok.extern.slf4j.Slf4j;
 import org.eclipse.jetty.http.HttpVersion;
 import org.eclipse.jetty.security.ConstraintMapping;
 import org.eclipse.jetty.security.ConstraintSecurityHandler;
@@ -26,8 +27,6 @@ import org.jboss.resteasy.plugins.guice.GuiceResteasyBootstrapServletContextList
 import org.jboss.resteasy.plugins.providers.RegisterBuiltin;
 import org.jboss.resteasy.plugins.server.servlet.HttpServletDispatcher;
 import org.jboss.resteasy.spi.ResteasyProviderFactory;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 
 import javax.inject.Named;
 import javax.inject.Singleton;
@@ -46,6 +45,7 @@ import java.util.*;
  * Time: 23:09
  */
 @Singleton
+@Slf4j
 public class ServerRuntime implements IServerRuntime {
 
     public static class Options {
@@ -64,7 +64,6 @@ public class ServerRuntime implements IServerRuntime {
         public long responseDelayInMillis;
     }
 
-    private static Logger logger = LoggerFactory.getLogger(ServerRuntime.class);
     private static final String ANY_PATH = "/*";
 
     private Options options;
@@ -108,9 +107,9 @@ public class ServerRuntime implements IServerRuntime {
                             Arrays.asList(new Filter[0]),
                             Arrays.asList(new HttpServletHolder(httpServletDispatcher, "/*"),
                                     new HttpServletHolder(new JSAPIServlet(), "/rest-js")));
-                    logger.info("Jetty has successfully started.");
+                    log.info("Jetty has successfully started.");
                 } catch (Exception e) {
-                    logger.error(e.getLocalizedMessage(), e);
+                    log.error(e.getLocalizedMessage(), e);
                 }
             }
         }.start();
@@ -195,7 +194,7 @@ public class ServerRuntime implements IServerRuntime {
         /*if (options.basicAuthPaths.length > 0) {
             servletHandler.setSecurityHandler(basicAuth());
             servletHandler.addFilter(new FilterHolder(createBasicAuthenticationFilter(options.basicAuthPaths)), ANY_PATH, getAllDispatcherTypes());
-            logger.info("Basic Authentication has been enabled...");
+            log.info("Basic Authentication has been enabled...");
         }*/
         servletHandler.addFilter(new FilterHolder(createInitThreadBoundValuesFilter()), ANY_PATH, getAllDispatcherTypes());
 
@@ -203,7 +202,7 @@ public class ServerRuntime implements IServerRuntime {
             //TODO check for production
             //add header param in order to enable cross-site-scripting
             servletHandler.addFilter(new FilterHolder(createCrossSiteScriptFilter()), ANY_PATH, getAllDispatcherTypes());
-            logger.info("CrossSiteScriptFilter has been enabled...");
+            log.info("CrossSiteScriptFilter has been enabled...");
         }
 
         server.setHandler(handlers);
@@ -385,7 +384,7 @@ public class ServerRuntime implements IServerRuntime {
                 try {
                     Thread.sleep(responseDelayInMillis);
                 } catch (InterruptedException e) {
-                    logger.error(e.getLocalizedMessage(), e);
+                    log.error(e.getLocalizedMessage(), e);
                 } finally {
                     filterChain.doFilter(request, response);
                 }

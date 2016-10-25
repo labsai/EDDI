@@ -8,8 +8,7 @@ import io.sls.resources.rest.bots.model.BotConfiguration;
 import io.sls.resources.rest.documentdescriptor.IDocumentDescriptorStore;
 import io.sls.resources.rest.documentdescriptor.model.DocumentDescriptor;
 import io.sls.utilities.RestUtilities;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
+import lombok.extern.slf4j.Slf4j;
 
 import javax.inject.Inject;
 import javax.ws.rs.InternalServerErrorException;
@@ -23,10 +22,10 @@ import java.util.List;
  * Date: 17.05.12
  * Time: 15:02
  */
+@Slf4j
 public class RestBotStore extends RestVersionInfo implements IRestBotStore {
     private final IBotStore botStore;
     private final IDocumentDescriptorStore documentDescriptorStore;
-    private Logger logger = LoggerFactory.getLogger(RestBotStore.class);
 
     @Inject
     public RestBotStore(IBotStore botStore,
@@ -40,7 +39,7 @@ public class RestBotStore extends RestVersionInfo implements IRestBotStore {
         try {
             return documentDescriptorStore.readDescriptors("io.sls.bot", filter, index, limit, false);
         } catch (IResourceStore.ResourceStoreException e) {
-            logger.error(e.getLocalizedMessage(), e);
+            log.error(e.getLocalizedMessage(), e);
             throw new InternalServerErrorException(e.getLocalizedMessage(), e);
         } catch (IResourceStore.ResourceNotFoundException e) {
             throw new NotFoundException(e.getLocalizedMessage(), e);
@@ -54,7 +53,7 @@ public class RestBotStore extends RestVersionInfo implements IRestBotStore {
         } catch (IResourceStore.ResourceNotFoundException e) {
             throw new NotFoundException(e.getLocalizedMessage(), e);
         } catch (IResourceStore.ResourceStoreException e) {
-            logger.error(e.getLocalizedMessage(), e);
+            log.error(e.getLocalizedMessage(), e);
             throw new InternalServerErrorException(e.getLocalizedMessage(), e);
         }
     }
@@ -65,7 +64,7 @@ public class RestBotStore extends RestVersionInfo implements IRestBotStore {
             Integer newVersion = botStore.update(id, version, botConfiguration);
             return RestUtilities.createURI(resourceURI, id, versionQueryParam, newVersion);
         } catch (IResourceStore.ResourceStoreException e) {
-            logger.error(e.getLocalizedMessage(), e);
+            log.error(e.getLocalizedMessage(), e);
             throw new InternalServerErrorException(e.getLocalizedMessage(), e);
         } catch (IResourceStore.ResourceModifiedException e) {
             try {
@@ -110,7 +109,7 @@ public class RestBotStore extends RestVersionInfo implements IRestBotStore {
             URI createdUri = RestUtilities.createURI(resourceURI, resourceId.getId(), versionQueryParam, resourceId.getVersion());
             return Response.created(createdUri).entity(createdUri).build();
         } catch (IResourceStore.ResourceStoreException e) {
-            logger.error(e.getLocalizedMessage(), e);
+            log.error(e.getLocalizedMessage(), e);
             throw new InternalServerErrorException(e.getLocalizedMessage(), e);
         }
     }
@@ -120,7 +119,7 @@ public class RestBotStore extends RestVersionInfo implements IRestBotStore {
         try {
             botStore.delete(id, version);
         } catch (IResourceStore.ResourceStoreException e) {
-            logger.error(e.getLocalizedMessage(), e);
+            log.error(e.getLocalizedMessage(), e);
             throw new InternalServerErrorException(e.getLocalizedMessage(), e);
         } catch (IResourceStore.ResourceModifiedException e) {
             try {

@@ -11,9 +11,8 @@ import io.sls.resources.rest.packages.IPackageStore;
 import io.sls.resources.rest.packages.model.PackageConfiguration;
 import io.sls.utilities.CollectionUtilities;
 import io.sls.utilities.RestUtilities;
+import lombok.extern.slf4j.Slf4j;
 import org.jboss.resteasy.spi.NoLogWebApplicationException;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 
 import javax.inject.Inject;
 import javax.ws.rs.InternalServerErrorException;
@@ -26,11 +25,11 @@ import java.util.*;
  * Date: 26.11.12
  * Time: 16:20
  */
+@Slf4j
 public class RestOutputKeys implements IRestOutputKeys {
     private final IPackageStore packageStore;
     private final IBehaviorStore behaviorStore;
     private final IOutputStore outputStore;
-    private Logger logger = LoggerFactory.getLogger(this.getClass());
 
     @Inject
     public RestOutputKeys(IPackageStore packageStore,
@@ -77,7 +76,7 @@ public class RestOutputKeys implements IRestOutputKeys {
         } catch (IResourceStore.ResourceNotFoundException e) {
             throw new NoLogWebApplicationException(Response.Status.NOT_FOUND);
         } catch (IResourceStore.ResourceStoreException e) {
-            logger.error(e.getLocalizedMessage(), e);
+            log.error(e.getLocalizedMessage(), e);
             throw new InternalServerErrorException(e);
         }
     }

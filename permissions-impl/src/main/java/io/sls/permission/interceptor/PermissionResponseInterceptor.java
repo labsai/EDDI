@@ -14,10 +14,9 @@ import io.sls.user.IUserStore;
 import io.sls.user.impl.utilities.UserUtilities;
 import io.sls.utilities.RestUtilities;
 import io.sls.utilities.SecurityUtilities;
+import lombok.extern.slf4j.Slf4j;
 import org.jboss.resteasy.annotations.interception.SecurityPrecedence;
 import org.jboss.resteasy.annotations.interception.ServerInterceptor;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 
 import javax.servlet.http.HttpServletRequest;
 import javax.ws.rs.InternalServerErrorException;
@@ -41,14 +40,13 @@ import java.security.Principal;
 @Provider
 @ServerInterceptor
 @SecurityPrecedence
+@Slf4j
 public class PermissionResponseInterceptor implements ContainerResponseFilter {
     public static final String METHOD_NAME_CREATE_USER = "createUser";
     private static final String METHOD_NAME_START_CONVERSATION = "startConversation";
     private static final String METHOD_NAME_CREATE_TESTCASE = "createTestCase";
     private final IUserStore userStore;
     private final IPermissionStore permissionStore;
-
-    private Logger logger = LoggerFactory.getLogger(this.getClass());
 
     @Context
     private HttpServletRequest httpServletRequest;
@@ -100,7 +98,7 @@ public class PermissionResponseInterceptor implements ContainerResponseFilter {
                 } else if (httpStatus >= 200 && httpStatus < 300 && httpStatus != 202) {
                     String message = "A POST request was successfully executed, but didn't return http code 201 or 202). [methodName=%s]";
                     message = String.format(message, methodName);
-                    logger.error(message);
+                    log.error(message);
                 }
             }
         } catch (IResourceStore.ResourceStoreException | IResourceStore.ResourceNotFoundException e) {

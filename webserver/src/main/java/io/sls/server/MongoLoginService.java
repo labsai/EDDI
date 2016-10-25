@@ -5,14 +5,13 @@ import io.sls.runtime.ThreadContext;
 import io.sls.user.IUserStore;
 import io.sls.user.model.User;
 import io.sls.utilities.SecurityUtilities;
+import lombok.extern.slf4j.Slf4j;
 import org.eclipse.jetty.security.DefaultIdentityService;
 import org.eclipse.jetty.security.IdentityService;
 import org.eclipse.jetty.security.LoginService;
 import org.eclipse.jetty.security.MappedLoginService;
 import org.eclipse.jetty.server.UserIdentity;
 import org.eclipse.jetty.util.security.Credential;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 
 import javax.inject.Inject;
 import javax.security.auth.Subject;
@@ -24,10 +23,10 @@ import java.security.Principal;
  * Date: 28.08.12
  * Time: 18:01
  */
+@Slf4j
 public class MongoLoginService implements LoginService {
     private final IUserStore userStore;
     private IdentityService identityService = new DefaultIdentityService();
-    private Logger logger = LoggerFactory.getLogger(this.getClass());
 
     @Inject
     public MongoLoginService(IUserStore userStore) {
@@ -54,7 +53,7 @@ public class MongoLoginService implements LoginService {
                 }
             }
         } catch (IResourceStore.ResourceStoreException e) {
-            logger.error("Could not process login.", e);
+            log.error("Could not process login.", e);
         } catch (IResourceStore.ResourceNotFoundException e) {
             //no user entity found for the given username
         }

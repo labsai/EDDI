@@ -11,9 +11,8 @@ import io.sls.staticresources.IResourceFilesManager;
 import io.sls.utilities.FileUtilities;
 import io.sls.utilities.HtmlUtilities;
 import io.sls.utilities.RuntimeUtilities;
+import lombok.extern.slf4j.Slf4j;
 import org.jboss.resteasy.plugins.guice.RequestScoped;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 
 import javax.inject.Inject;
 import javax.servlet.ServletException;
@@ -31,6 +30,7 @@ import java.io.IOException;
  * Time: 10:19
  */
 @RequestScoped
+@Slf4j
 public class RestBotUI implements IRestBotUI {
     private static final String USER_DISPLAY_NAME = "USER_DISPLAY_NAME";
     private static final String LOGOUT_URL = "LOGOUT_URL";
@@ -46,7 +46,6 @@ public class RestBotUI implements IRestBotUI {
     private final HttpServletResponse httpServletResponse;
     private final IHtmlFaceStore faceStore;
     private final IResourceFilesManager resourceFilesManager;
-    private Logger logger = LoggerFactory.getLogger(this.getClass());
 
     @Inject
     public RestBotUI(@Context HttpServletRequest httpServletRequest,
@@ -122,7 +121,7 @@ public class RestBotUI implements IRestBotUI {
             includeRestApiHostScriptTag(htmlContent);
             return htmlContent.toString();
         } catch (IOException e) {
-            logger.error(e.getLocalizedMessage(), e);
+            log.error(e.getLocalizedMessage(), e);
             throw new InternalServerErrorException(e.getLocalizedMessage(), e);
         } catch (IResourceStore.ResourceStoreException | ServletException e) {
             throw new InternalServerErrorException(e.getLocalizedMessage(), e);
@@ -140,7 +139,7 @@ public class RestBotUI implements IRestBotUI {
             String uiIdentifier = htmlFace.getUiIdentifier();
             return viewBotUI(environment, botId, language, location, uiIdentifier, targetDevice);
         } catch (IResourceStore.ResourceNotFoundException e) {
-            logger.error(e.getMessage(), e);
+            log.error(e.getMessage(), e);
             throw new NotFoundException(e.getMessage(), e);
         } catch (IResourceStore.ResourceStoreException e) {
             throw new InternalServerErrorException(e.getLocalizedMessage(), e);
@@ -154,7 +153,7 @@ public class RestBotUI implements IRestBotUI {
             HtmlFace htmlFace = faceStore.searchFaceByHost(serverName);
             return viewUI(htmlFace.getEnvironment(), language, location, targetDevice);
         } catch (IResourceStore.ResourceNotFoundException e) {
-            logger.error(e.getMessage(), e);
+            log.error(e.getMessage(), e);
             throw new NotFoundException(e.getMessage(), e);
         } catch (IResourceStore.ResourceStoreException e) {
             throw new InternalServerErrorException(e.getLocalizedMessage(), e);

@@ -11,8 +11,7 @@ import io.sls.memory.impl.Data;
 import io.sls.resources.rest.behavior.model.BehaviorConfiguration;
 import io.sls.serialization.DeserializationException;
 import io.sls.serialization.JSONSerialization;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
+import lombok.extern.slf4j.Slf4j;
 
 import javax.inject.Inject;
 import javax.inject.Singleton;
@@ -29,9 +28,9 @@ import java.util.Map;
  * Time: 14:09:26
  */
 @Singleton
+@Slf4j
 public class BehaviorRulesEvaluationTask extends AbstractLifecycleTask implements ILifecycleTask {
     private BehaviorRulesEvaluator evaluator;
-    private Logger logger = LoggerFactory.getLogger(this.getClass());
     private static final String BEHAVIOR_CONFIG = "uri";
     private final IResourceClientLibrary resourceClientLibrary;
 
@@ -75,7 +74,7 @@ public class BehaviorRulesEvaluationTask extends AbstractLifecycleTask implement
             }
         } catch (BehaviorRulesEvaluator.BehaviorRuleExecutionException e) {
             String msg = "Error while evaluating behavior rules!";
-            logger.error(msg, e);
+            log.error(msg, e);
             throw new LifecycleException(msg, e);
         }
     }

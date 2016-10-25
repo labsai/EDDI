@@ -1,16 +1,15 @@
 package io.sls.core.utilities;
 
 import io.sls.utilities.CharacterUtilities;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
+import lombok.extern.slf4j.Slf4j;
 
 import java.sql.Time;
 import java.util.Date;
 import java.util.List;
 import java.util.regex.Pattern;
 
+@Slf4j
 public class LanguageUtilities {
-    private static Logger logger = LoggerFactory.getLogger(LanguageUtilities.class);
 
     private LanguageUtilities() {
     }
@@ -59,7 +58,7 @@ public class LanguageUtilities {
                     //if(i > 0 && i < 24)
                     return String.valueOf(i);
                 } catch (NumberFormatException nfe) {
-                    logger.error(nfe.getLocalizedMessage(), nfe);
+                    log.error(nfe.getLocalizedMessage(), nfe);
                     return null;
                 }
             }

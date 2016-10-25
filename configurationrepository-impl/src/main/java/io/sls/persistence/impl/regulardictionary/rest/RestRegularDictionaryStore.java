@@ -9,8 +9,7 @@ import io.sls.resources.rest.regulardictionary.IRegularDictionaryStore;
 import io.sls.resources.rest.regulardictionary.IRestRegularDictionaryStore;
 import io.sls.resources.rest.regulardictionary.model.RegularDictionaryConfiguration;
 import io.sls.utilities.RestUtilities;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
+import lombok.extern.slf4j.Slf4j;
 
 import javax.inject.Inject;
 import javax.ws.rs.InternalServerErrorException;
@@ -25,10 +24,10 @@ import java.util.List;
  * Date: 04.06.12
  * Time: 22:32
  */
+@Slf4j
 public class RestRegularDictionaryStore extends RestVersionInfo implements IRestRegularDictionaryStore {
     private final IRegularDictionaryStore regularDictionaryStore;
     private final IDocumentDescriptorStore documentDescriptorStore;
-    private Logger logger = LoggerFactory.getLogger(RestRegularDictionaryStore.class);
 
     @Inject
     public RestRegularDictionaryStore(IRegularDictionaryStore regularDictionaryStore,
@@ -42,7 +41,7 @@ public class RestRegularDictionaryStore extends RestVersionInfo implements IRest
         try {
             return documentDescriptorStore.readDescriptors("io.sls.regulardictionary", filter, index, limit, false);
         } catch (IResourceStore.ResourceStoreException e) {
-            logger.error(e.getLocalizedMessage(), e);
+            log.error(e.getLocalizedMessage(), e);
             throw new InternalServerErrorException(e.getLocalizedMessage(), e);
         } catch (IResourceStore.ResourceNotFoundException e) {
             throw new WebApplicationException(Response.Status.NOT_FOUND);
@@ -56,7 +55,7 @@ public class RestRegularDictionaryStore extends RestVersionInfo implements IRest
         } catch (IResourceStore.ResourceNotFoundException e) {
             throw new NotFoundException(e.getLocalizedMessage(), e);
         } catch (IResourceStore.ResourceStoreException e) {
-            logger.error(e.getLocalizedMessage(), e);
+            log.error(e.getLocalizedMessage(), e);
             throw new InternalServerErrorException(e.getLocalizedMessage(), e);
         }
     }
@@ -66,7 +65,7 @@ public class RestRegularDictionaryStore extends RestVersionInfo implements IRest
         try {
             return regularDictionaryStore.readExpressions(id, version, filter, order, index, limit);
         } catch (IResourceStore.ResourceStoreException e) {
-            logger.error(e.getLocalizedMessage(), e);
+            log.error(e.getLocalizedMessage(), e);
             throw new InternalServerErrorException(e.getLocalizedMessage(), e);
         } catch (IResourceStore.ResourceNotFoundException e) {
             throw new NotFoundException(e.getLocalizedMessage(), e);
@@ -79,7 +78,7 @@ public class RestRegularDictionaryStore extends RestVersionInfo implements IRest
             Integer newVersion = regularDictionaryStore.update(id, version, regularDictionaryConfiguration);
             return RestUtilities.createURI(resourceURI, id, versionQueryParam, newVersion);
         } catch (IResourceStore.ResourceStoreException e) {
-            logger.error(e.getLocalizedMessage(), e);
+            log.error(e.getLocalizedMessage(), e);
             throw new InternalServerErrorException(e.getLocalizedMessage(), e);
         } catch (IResourceStore.ResourceModifiedException e) {
             try {
@@ -100,7 +99,7 @@ public class RestRegularDictionaryStore extends RestVersionInfo implements IRest
             URI createdUri = RestUtilities.createURI(resourceURI, resourceId.getId(), versionQueryParam, resourceId.getVersion());
             return Response.created(createdUri).entity(createdUri).build();
         } catch (IResourceStore.ResourceStoreException e) {
-            logger.error(e.getLocalizedMessage(), e);
+            log.error(e.getLocalizedMessage(), e);
             throw new InternalServerErrorException(e.getLocalizedMessage(), e);
         }
     }
@@ -110,7 +109,7 @@ public class RestRegularDictionaryStore extends RestVersionInfo implements IRest
         try {
             regularDictionaryStore.delete(id, version);
         } catch (IResourceStore.ResourceStoreException e) {
-            logger.error(e.getLocalizedMessage(), e);
+            log.error(e.getLocalizedMessage(), e);
             throw new InternalServerErrorException(e.getLocalizedMessage(), e);
         } catch (IResourceStore.ResourceModifiedException e) {
             try {
@@ -133,7 +132,7 @@ public class RestRegularDictionaryStore extends RestVersionInfo implements IRest
             return updateRegularDictionary(id, version, patchedRegularDictionaryConfiguration);
 
         } catch (IResourceStore.ResourceStoreException e) {
-            logger.error(e.getLocalizedMessage(), e);
+            log.error(e.getLocalizedMessage(), e);
             throw new InternalServerErrorException(e.getLocalizedMessage(), e);
         } catch (IResourceStore.ResourceNotFoundException e) {
             throw new NotFoundException(e.getLocalizedMessage(), e);

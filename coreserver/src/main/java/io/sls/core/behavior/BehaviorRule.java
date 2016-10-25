@@ -2,8 +2,7 @@ package io.sls.core.behavior;
 
 import io.sls.core.behavior.extensions.IExtension;
 import io.sls.memory.IConversationMemory;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
+import lombok.extern.slf4j.Slf4j;
 
 import java.util.LinkedList;
 import java.util.List;
@@ -13,22 +12,21 @@ import java.util.List;
  * Date: 03.08.2009
  * Time: 14:39:16
  */
+@Slf4j
 public class BehaviorRule implements Cloneable {
     private String name;
     private List<String> actions;
     private List<IExtension> extensions;
 
-    private Logger logger = LoggerFactory.getLogger(this.getClass());
-
     public BehaviorRule() {
-        actions = new LinkedList<String>();
-        extensions = new LinkedList<IExtension>();
+        actions = new LinkedList<>();
+        extensions = new LinkedList<>();
     }
 
     public BehaviorRule(String name) {
         this.name = name;
-        actions = new LinkedList<String>();
-        extensions = new LinkedList<IExtension>();
+        actions = new LinkedList<>();
+        extensions = new LinkedList<>();
     }
 
     public String getName() {
@@ -60,9 +58,9 @@ public class BehaviorRule implements Cloneable {
             List<BehaviorRule> endlessLoop = trace.subList(trace.indexOf(this), trace.size());
             endlessLoop.add(this);
 
-            logger.error("reached endless loop:");
+            log.error("reached endless loop:");
             for (BehaviorRule status : trace)
-                logger.error(" -> " + status.getName());
+                log.error(" -> " + status.getName());
 
             return IExtension.ExecutionState.ERROR;
         } else {

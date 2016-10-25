@@ -1,7 +1,6 @@
 package io.sls.core.utilities;
 
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
+import lombok.extern.slf4j.Slf4j;
 
 import java.io.UnsupportedEncodingException;
 import java.net.MalformedURLException;
@@ -18,8 +17,8 @@ import java.util.Map;
  * Date: 10.08.12
  * Time: 12:13
  */
+@Slf4j
 public class URIUtilities {
-    private static Logger logger = LoggerFactory.getLogger(URIUtilities.class);
 
     public static Map<String, List<String>> getUrlParameters(String url) throws UnsupportedEncodingException {
         Map<String, List<String>> params = new HashMap<String, List<String>>();
@@ -90,7 +89,7 @@ public class URIUtilities {
             try {
                 urls.add(URI.create(urlString).toURL());
             } catch (MalformedURLException e) {
-                logger.error(e.getMessage(), e);
+                log.error(e.getMessage(), e);
             }
         }
 

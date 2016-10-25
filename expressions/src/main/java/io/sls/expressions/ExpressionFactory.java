@@ -4,8 +4,7 @@ import io.sls.expressions.value.AllValue;
 import io.sls.expressions.value.AnyValue;
 import io.sls.expressions.value.Value;
 import io.sls.utilities.CharacterUtilities;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
+import lombok.extern.slf4j.Slf4j;
 
 import javax.inject.Inject;
 import javax.inject.Singleton;
@@ -19,9 +18,9 @@ import java.util.List;
  * Time: 18:10:59
  */
 @Singleton
+@Slf4j
 public class ExpressionFactory implements IExpressionFactory {
     private Hashtable<String, Expression> expressions = new Hashtable<>();
-    private Logger logger = LoggerFactory.getLogger(ExpressionFactory.class);
 
     @Inject
     public ExpressionFactory() {
@@ -63,7 +62,7 @@ public class ExpressionFactory implements IExpressionFactory {
                 exp.setDomain(exp.getDomain());
             }
         } catch (CloneNotSupportedException e) {
-            logger.error(e.getLocalizedMessage(), e);
+            log.error(e.getLocalizedMessage(), e);
         }
 
         return exp;

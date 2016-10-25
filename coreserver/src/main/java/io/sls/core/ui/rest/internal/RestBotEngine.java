@@ -17,9 +17,8 @@ import io.sls.persistence.IResourceStore;
 import io.sls.runtime.SystemRuntime;
 import io.sls.utilities.RestUtilities;
 import io.sls.utilities.RuntimeUtilities;
+import lombok.extern.slf4j.Slf4j;
 import org.jboss.resteasy.spi.NoLogWebApplicationException;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 
 import javax.inject.Inject;
 import javax.ws.rs.InternalServerErrorException;
@@ -32,12 +31,11 @@ import java.util.concurrent.Callable;
  * Date: 22.08.12
  * Time: 10:41
  */
+@Slf4j
 public class RestBotEngine implements IRestBotEngine {
     final String resourceURI = "resource://io.sls.conversation/conversationstore/conversations/";
     private final IBotFactory botFactory;
     private final IConversationMemoryStore conversationMemoryStore;
-
-    private Logger logger = LoggerFactory.getLogger(this.getClass());
 
     @Inject
     public RestBotEngine(IBotFactory botFactory,
@@ -69,7 +67,7 @@ public class RestBotEngine implements IRestBotEngine {
                 InstantiationException |
                 LifecycleException |
                 IllegalAccessException e) {
-            logger.error(e.getLocalizedMessage(), e);
+            log.error(e.getLocalizedMessage(), e);
             throw new InternalServerErrorException(e.getLocalizedMessage(), e);
         }
     }
@@ -89,7 +87,7 @@ public class RestBotEngine implements IRestBotEngine {
             SimpleConversationMemorySnapshot simpleConversationMemorySnapshot = ConversationMemoryUtilities.convertSimpleConversationMemory(conversationMemorySnapshot);
             return simpleConversationMemorySnapshot;
         } catch (IResourceStore.ResourceStoreException | IllegalAccessException e) {
-            logger.error(e.getLocalizedMessage(), e);
+            log.error(e.getLocalizedMessage(), e);
             throw new InternalServerErrorException(e.getLocalizedMessage(), e);
         } catch (IResourceStore.ResourceNotFoundException e) {
             throw new NoLogWebApplicationException(Response.Status.NOT_FOUND);
@@ -152,7 +150,7 @@ public class RestBotEngine implements IRestBotEngine {
                     storeConversationMemory(conversationMemory, environment);
                 } catch (Exception e) {
                     setConversationState(conversationId, ConversationState.ERROR);
-                    logger.error("Error while processing user input", e);
+                    log.error("Error while processing user input", e);
                     throw e;
                 }
 
@@ -163,15 +161,15 @@ public class RestBotEngine implements IRestBotEngine {
             return Response.accepted().build();
         } catch (InstantiationException | IllegalAccessException e) {
             String errorMsg = "Error while processing message!";
-            logger.error(errorMsg, e);
+            log.error(errorMsg, e);
             throw new InternalServerErrorException(errorMsg, e);
         } catch (IResourceStore.ResourceStoreException e) {
-            logger.error(e.getLocalizedMessage(), e);
+            log.error(e.getLocalizedMessage(), e);
             throw new InternalServerErrorException(e.getLocalizedMessage(), e);
         } catch (IResourceStore.ResourceNotFoundException e) {
             throw new NoLogWebApplicationException(Response.Status.NOT_FOUND);
         } catch (Exception e) {
-            logger.error(e.getLocalizedMessage(), e);
+            log.error(e.getLocalizedMessage(), e);
             throw new InternalServerErrorException(e.getLocalizedMessage(), e);
         }
     }
@@ -211,7 +209,7 @@ public class RestBotEngine implements IRestBotEngine {
                         storeConversationMemory(conversationMemory, environment);
                     }
                 } catch (Exception e) {
-                    logger.error("Error while Undo!", e);
+                    log.error("Error while Undo!", e);
                     throw e;
                 }
 
@@ -223,15 +221,15 @@ public class RestBotEngine implements IRestBotEngine {
             return Response.accepted().build();
         } catch (IllegalAccessException e) {
             String errorMsg = "Error while processing message!";
-            logger.error(errorMsg, e);
+            log.error(errorMsg, e);
             throw new InternalServerErrorException(errorMsg, e);
         } catch (IResourceStore.ResourceStoreException e) {
-            logger.error(e.getLocalizedMessage(), e);
+            log.error(e.getLocalizedMessage(), e);
             throw new InternalServerErrorException(e.getLocalizedMessage(), e);
         } catch (IResourceStore.ResourceNotFoundException e) {
             throw new NoLogWebApplicationException(Response.Status.NOT_FOUND);
         } catch (Exception e) {
-            logger.error(e.getLocalizedMessage(), e);
+            log.error(e.getLocalizedMessage(), e);
             throw new InternalServerErrorException(e.getLocalizedMessage(), e);
         }
     }
@@ -271,7 +269,7 @@ public class RestBotEngine implements IRestBotEngine {
                         storeConversationMemory(conversationMemory, environment);
                     }
                 } catch (Exception e) {
-                    logger.error("Error while Redo!", e);
+                    log.error("Error while Redo!", e);
                     throw e;
                 }
 
@@ -282,15 +280,15 @@ public class RestBotEngine implements IRestBotEngine {
             return Response.accepted().build();
         } catch (IllegalAccessException e) {
             String errorMsg = "Error while processing message!";
-            logger.error(errorMsg, e);
+            log.error(errorMsg, e);
             throw new InternalServerErrorException(errorMsg, e);
         } catch (IResourceStore.ResourceStoreException e) {
-            logger.error(e.getLocalizedMessage(), e);
+            log.error(e.getLocalizedMessage(), e);
             throw new InternalServerErrorException(e.getLocalizedMessage(), e);
         } catch (IResourceStore.ResourceNotFoundException e) {
             throw new NoLogWebApplicationException(Response.Status.NOT_FOUND);
         } catch (Exception e) {
-            logger.error(e.getLocalizedMessage(), e);
+            log.error(e.getLocalizedMessage(), e);
             throw new InternalServerErrorException(e.getLocalizedMessage(), e);
         }
     }

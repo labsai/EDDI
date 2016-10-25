@@ -14,8 +14,7 @@ import io.sls.runtime.ThreadContext;
 import io.sls.serialization.IDocumentBuilder;
 import io.sls.user.IUserStore;
 import io.sls.utilities.RuntimeUtilities;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
+import lombok.extern.slf4j.Slf4j;
 
 import java.io.IOException;
 import java.util.HashMap;
@@ -29,6 +28,7 @@ import java.util.regex.Pattern;
  * Date: 11.09.12
  * Time: 12:35
  */
+@Slf4j
 public class ResourceFilter<T> implements IResourceFilter<T> {
     private static final String FIELD_ID = "_id";
     private static final String FIELD_VERSION = "_version";
@@ -40,8 +40,6 @@ public class ResourceFilter<T> implements IResourceFilter<T> {
     private final IDocumentBuilder documentBuilder;
     private IGroupStore groupStore;
     private final IUserStore userStore;
-
-    private Logger logger = LoggerFactory.getLogger(this.getClass());
 
     public ResourceFilter(DBCollection collection, IResourceStore<T> resourceStore, IPermissionStore permissionStore, IUserStore userStore, IGroupStore groupStore, IDocumentBuilder documentBuilder) {
         this.collection = collection;
@@ -80,7 +78,7 @@ public class ResourceFilter<T> implements IResourceFilter<T> {
                 try {
                     permissions = getPermissions(id);
                 } catch (IResourceStore.ResourceNotFoundException e) {
-                    logger.warn("Missing Permission with Resource id: %s , access has been granted.");
+                    log.warn("Missing Permission with Resource id: %s , access has been granted.");
                 }
 
                 if (permissions != null && permissions.getPermissions().values().isEmpty()) {

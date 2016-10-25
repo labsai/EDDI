@@ -16,9 +16,8 @@ import io.sls.user.IUserStore;
 import io.sls.user.impl.utilities.UserUtilities;
 import io.sls.utilities.RestUtilities;
 import io.sls.utilities.SecurityUtilities;
+import lombok.extern.slf4j.Slf4j;
 import org.jboss.resteasy.annotations.interception.ServerInterceptor;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 
 import javax.ws.rs.DELETE;
 import javax.ws.rs.InternalServerErrorException;
@@ -44,14 +43,13 @@ import java.util.Date;
 
 @Provider
 @ServerInterceptor
+@Slf4j
 public class DocumentDescriptorInterceptor implements ContainerResponseFilter {
     private static final String METHOD_NAME_UPDATE_DESCRIPTOR = "updateDescriptor";
     private static final String METHOD_NAME_UPDATE_PERMISSIONS = "updatePermissions";
     private final IDocumentDescriptorStore documentDescriptorStore;
     private final IConversationDescriptorStore conversationDescriptorStore;
     private final IUserStore userStore;
-
-    private Logger logger = LoggerFactory.getLogger(this.getClass());
 
     @Context
     private ResourceInfo resourceInfo;
@@ -115,7 +113,7 @@ public class DocumentDescriptorInterceptor implements ContainerResponseFilter {
         } catch (IResourceStore.ResourceStoreException |
                 IResourceStore.ResourceNotFoundException |
                 IResourceStore.ResourceModifiedException e) {
-            logger.error(e.getLocalizedMessage(), e);
+            log.error(e.getLocalizedMessage(), e);
             throw new InternalServerErrorException(e.getLocalizedMessage(), e);
         }
     }

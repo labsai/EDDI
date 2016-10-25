@@ -7,8 +7,7 @@ import io.sls.resources.rest.documentdescriptor.IRestDocumentDescriptorStore;
 import io.sls.resources.rest.documentdescriptor.model.DocumentDescriptor;
 import io.sls.resources.rest.documentdescriptor.model.SimpleDocumentDescriptor;
 import io.sls.resources.rest.patch.PatchInstruction;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
+import lombok.extern.slf4j.Slf4j;
 
 import javax.inject.Inject;
 import javax.ws.rs.InternalServerErrorException;
@@ -20,9 +19,9 @@ import java.util.List;
  * Date: 06.09.12
  * Time: 09:51
  */
+@Slf4j
 public class RestDocumentDescriptorStore extends RestVersionInfo implements IRestDocumentDescriptorStore {
     private final IDocumentDescriptorStore documentDescriptorStore;
-    private Logger logger = LoggerFactory.getLogger(RestDocumentDescriptorStore.class);
 
     @Inject
     public RestDocumentDescriptorStore(IDocumentDescriptorStore documentDescriptorStore) {
@@ -34,7 +33,7 @@ public class RestDocumentDescriptorStore extends RestVersionInfo implements IRes
         try {
             return documentDescriptorStore.readDescriptors(type, filter, index, limit, false);
         } catch (IResourceStore.ResourceStoreException e) {
-            logger.error(e.getLocalizedMessage(), e);
+            log.error(e.getLocalizedMessage(), e);
             throw new InternalServerErrorException(e.getLocalizedMessage(), e);
         } catch (IResourceStore.ResourceNotFoundException e) {
             throw new NotFoundException(e.getLocalizedMessage(), e);
@@ -46,7 +45,7 @@ public class RestDocumentDescriptorStore extends RestVersionInfo implements IRes
         try {
             return documentDescriptorStore.readDescriptor(id, version);
         } catch (IResourceStore.ResourceStoreException e) {
-            logger.error(e.getLocalizedMessage(), e);
+            log.error(e.getLocalizedMessage(), e);
             throw new InternalServerErrorException(e.getLocalizedMessage(), e);
         } catch (IResourceStore.ResourceNotFoundException e) {
             throw new NotFoundException(e.getLocalizedMessage(), e);
@@ -75,7 +74,7 @@ public class RestDocumentDescriptorStore extends RestVersionInfo implements IRes
 
             documentDescriptorStore.setDescriptor(id, version, documentDescriptor);
         } catch (IResourceStore.ResourceStoreException e) {
-            logger.error(e.getLocalizedMessage(), e);
+            log.error(e.getLocalizedMessage(), e);
             throw new InternalServerErrorException(e.getLocalizedMessage(), e);
         } catch (IResourceStore.ResourceNotFoundException e) {
             throw new NotFoundException(e.getLocalizedMessage(), e);

@@ -7,9 +7,8 @@ import io.sls.resources.rest.packages.model.PackageConfiguration;
 import io.sls.resources.rest.regulardictionary.IRegularDictionaryStore;
 import io.sls.utilities.CollectionUtilities;
 import io.sls.utilities.RestUtilities;
+import lombok.extern.slf4j.Slf4j;
 import org.jboss.resteasy.spi.NoLogWebApplicationException;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 
 import javax.inject.Inject;
 import javax.ws.rs.InternalServerErrorException;
@@ -24,10 +23,10 @@ import java.util.Map;
  * Date: 26.11.12
  * Time: 14:59
  */
+@Slf4j
 public class RestExpression implements IRestExpressions {
     private final IPackageStore packageStore;
     private final IRegularDictionaryStore regularDictionaryStore;
-    private Logger logger = LoggerFactory.getLogger(this.getClass());
 
     @Inject
     public RestExpression(IPackageStore packageStore,
@@ -50,7 +49,7 @@ public class RestExpression implements IRestExpressions {
         } catch (IResourceStore.ResourceNotFoundException e) {
             throw new NoLogWebApplicationException(Response.Status.NOT_FOUND);
         } catch (IResourceStore.ResourceStoreException e) {
-            logger.error(e.getLocalizedMessage(), e);
+            log.error(e.getLocalizedMessage(), e);
             throw new InternalServerErrorException(e);
         }
     }
