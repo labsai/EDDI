@@ -1,8 +1,7 @@
 package io.sls.expressions;
 
 import io.sls.utilities.CharacterUtilities;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
+import lombok.extern.slf4j.Slf4j;
 
 import java.util.*;
 
@@ -11,9 +10,8 @@ import java.util.*;
  * Date: 10.12.2009
  * Time: 15:37:14
  */
+@Slf4j
 public class Expression implements Cloneable {
-    private Logger logger = LoggerFactory.getLogger(this.getClass());
-
     protected String domain;
     protected String expressionName;
     protected List<Expression> subExpressions = new LinkedList<Expression>();
@@ -70,7 +68,7 @@ public class Expression implements Cloneable {
 
     public void setSubExpression(int index, Expression subExpression) {
         if (index < 0 || index >= this.subExpressions.size()) {
-            logger.error("Tried to set a subexpression out of bounds!");
+            log.error("Tried to set a subexpression out of bounds!");
             return;
         }
 
@@ -85,7 +83,7 @@ public class Expression implements Cloneable {
 
     public void addSubExpressions(int index, Expression... subExpressions) {
         if (index < 0 || index > this.subExpressions.size()) {
-            logger.error("Tried to set a subexpression out of bounds!");
+            log.error("Tried to set a subexpression out of bounds!");
             return;
         }
 
@@ -170,7 +168,7 @@ public class Expression implements Cloneable {
             Object clone = this.clone();
             return (Expression) clone;
         } catch (CloneNotSupportedException e) {
-            logger.error("Cloning error!", e);
+            log.error("Cloning error!", e);
         }
         return null;
     }

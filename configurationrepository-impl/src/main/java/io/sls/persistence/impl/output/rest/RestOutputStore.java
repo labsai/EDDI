@@ -10,8 +10,7 @@ import io.sls.resources.rest.output.model.OutputConfiguration;
 import io.sls.resources.rest.output.model.OutputConfigurationSet;
 import io.sls.resources.rest.patch.PatchInstruction;
 import io.sls.utilities.RestUtilities;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
+import lombok.extern.slf4j.Slf4j;
 
 import javax.inject.Inject;
 import javax.ws.rs.InternalServerErrorException;
@@ -28,10 +27,10 @@ import java.util.List;
  * Date: 05.06.12
  * Time: 20:23
  */
+@Slf4j
 public class RestOutputStore extends RestVersionInfo implements IRestOutputStore {
     private final IOutputStore outputStore;
     private final IDocumentDescriptorStore documentDescriptorStore;
-    private Logger logger = LoggerFactory.getLogger(RestOutputStore.class);
 
     @Inject
     public RestOutputStore(IOutputStore outputStore,
@@ -45,7 +44,7 @@ public class RestOutputStore extends RestVersionInfo implements IRestOutputStore
         try {
             return documentDescriptorStore.readDescriptors("io.sls.output", filter, index, limit, false);
         } catch (IResourceStore.ResourceStoreException e) {
-            logger.error(e.getLocalizedMessage(), e);
+            log.error(e.getLocalizedMessage(), e);
             throw new InternalServerErrorException(e.getLocalizedMessage(), e);
         } catch (IResourceStore.ResourceNotFoundException e) {
             throw new WebApplicationException(Response.Status.NOT_FOUND);
@@ -59,7 +58,7 @@ public class RestOutputStore extends RestVersionInfo implements IRestOutputStore
         } catch (IResourceStore.ResourceNotFoundException e) {
             throw new NotFoundException(e.getLocalizedMessage(), e);
         } catch (IResourceStore.ResourceStoreException e) {
-            logger.error(e.getLocalizedMessage(), e);
+            log.error(e.getLocalizedMessage(), e);
             throw new InternalServerErrorException(e.getLocalizedMessage(), e);
         }
     }
@@ -69,7 +68,7 @@ public class RestOutputStore extends RestVersionInfo implements IRestOutputStore
         try {
             return outputStore.readOutputKeys(id, version, filter, order, limit);
         } catch (IResourceStore.ResourceStoreException e) {
-            logger.error(e.getLocalizedMessage(), e);
+            log.error(e.getLocalizedMessage(), e);
             throw new InternalServerErrorException(e.getLocalizedMessage(), e);
         } catch (IResourceStore.ResourceNotFoundException e) {
             throw new NotFoundException(e.getLocalizedMessage(), e);
@@ -94,7 +93,7 @@ public class RestOutputStore extends RestVersionInfo implements IRestOutputStore
             Integer newVersion = outputStore.update(id, version, outputConfigurationSet);
             return RestUtilities.createURI(resourceURI, id, versionQueryParam, newVersion);
         } catch (IResourceStore.ResourceStoreException e) {
-            logger.error(e.getLocalizedMessage(), e);
+            log.error(e.getLocalizedMessage(), e);
             throw new InternalServerErrorException(e.getLocalizedMessage(), e);
         } catch (IResourceStore.ResourceModifiedException e) {
             try {
@@ -115,7 +114,7 @@ public class RestOutputStore extends RestVersionInfo implements IRestOutputStore
             URI createdUri = RestUtilities.createURI(resourceURI, resourceId.getId(), versionQueryParam, resourceId.getVersion());
             return Response.created(createdUri).entity(createdUri).build();
         } catch (IResourceStore.ResourceStoreException e) {
-            logger.error(e.getLocalizedMessage(), e);
+            log.error(e.getLocalizedMessage(), e);
             throw new InternalServerErrorException(e.getLocalizedMessage(), e);
         }
     }
@@ -125,7 +124,7 @@ public class RestOutputStore extends RestVersionInfo implements IRestOutputStore
         try {
             outputStore.delete(id, version);
         } catch (IResourceStore.ResourceStoreException e) {
-            logger.error(e.getLocalizedMessage(), e);
+            log.error(e.getLocalizedMessage(), e);
             throw new InternalServerErrorException(e.getLocalizedMessage(), e);
         } catch (IResourceStore.ResourceModifiedException e) {
             try {
@@ -148,7 +147,7 @@ public class RestOutputStore extends RestVersionInfo implements IRestOutputStore
             return updateOutputSet(id, version, patchedOutputConfigurationSet);
 
         } catch (IResourceStore.ResourceStoreException e) {
-            logger.error(e.getLocalizedMessage(), e);
+            log.error(e.getLocalizedMessage(), e);
             throw new InternalServerErrorException(e.getLocalizedMessage(), e);
         } catch (IResourceStore.ResourceNotFoundException e) {
             throw new NotFoundException(e.getLocalizedMessage(), e);

@@ -8,16 +8,14 @@ import io.sls.memory.model.Deployment;
 import io.sls.runtime.SystemRuntime;
 import io.sls.runtime.ThreadContext;
 import io.sls.utilities.RuntimeUtilities;
+import lombok.extern.slf4j.Slf4j;
 import org.jboss.resteasy.plugins.guice.RequestScoped;
 import org.jboss.resteasy.spi.NoLogWebApplicationException;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 
 import javax.inject.Inject;
 import javax.ws.rs.InternalServerErrorException;
 import javax.ws.rs.core.Response;
 import java.util.EnumSet;
-import java.util.Objects;
 import java.util.concurrent.Callable;
 
 /**
@@ -26,9 +24,9 @@ import java.util.concurrent.Callable;
  * Time: 15:22
  */
 @RequestScoped
+@Slf4j
 public class RestBotAdministration implements IRestBotAdministration {
     private final IBotFactory botFactory;
-    private Logger logger = LoggerFactory.getLogger(this.getClass());
 
     @Inject
     public RestBotAdministration(IBotFactory botFactory) {
@@ -45,7 +43,7 @@ public class RestBotAdministration implements IRestBotAdministration {
             deploy(environment, botId, version);
             return Response.accepted().build();
         } catch (Exception e) {
-            logger.error(e.getLocalizedMessage(), e);
+            log.error(e.getLocalizedMessage(), e);
             throw new InternalServerErrorException(e.getLocalizedMessage(), e);
         }
     }
@@ -59,15 +57,15 @@ public class RestBotAdministration implements IRestBotAdministration {
             } catch (ServiceException e) {
                 String message = "Error while deploying bot! (botId=%s , version=%s)";
                 message = String.format(message, botId, version);
-                logger.error(message, e);
+                log.error(message, e);
                 throw new InternalServerErrorException(message, e);
             } catch (IllegalAccessException e) {
                 String message = "Bot deployment is currently in progress! (botId=%s , version=%s)";
                 message = String.format(message, botId, version);
-                logger.error(message, e);
+                log.error(message, e);
                 throw new NoLogWebApplicationException(new Throwable(message), Response.Status.FORBIDDEN);
             } catch (Exception e) {
-                logger.error(e.getLocalizedMessage(), e);
+                log.error(e.getLocalizedMessage(), e);
                 throw new InternalServerErrorException(e.getLocalizedMessage(), e);
             }
 
@@ -96,7 +94,7 @@ public class RestBotAdministration implements IRestBotAdministration {
         } catch (ServiceException e) {
             String message = "Error while deploying bot! (botId=%s , version=%s)";
             message = String.format(message, botId, version);
-            logger.error(message, e);
+            log.error(message, e);
             throw new InternalServerErrorException(message, e);
         }
     }

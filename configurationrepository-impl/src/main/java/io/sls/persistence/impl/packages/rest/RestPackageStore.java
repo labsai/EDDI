@@ -8,8 +8,7 @@ import io.sls.resources.rest.packages.IPackageStore;
 import io.sls.resources.rest.packages.IRestPackageStore;
 import io.sls.resources.rest.packages.model.PackageConfiguration;
 import io.sls.utilities.RestUtilities;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
+import lombok.extern.slf4j.Slf4j;
 
 import javax.inject.Inject;
 import javax.ws.rs.InternalServerErrorException;
@@ -20,13 +19,13 @@ import java.net.URI;
 import java.util.List;
 import java.util.Map;
 
+@Slf4j
 public class RestPackageStore extends RestVersionInfo implements IRestPackageStore {
     public static final String KEY_URI = "uri";
     private static final String KEY_CONFIG = "config";
     public static final String KEY_EXTENSIONS = "extensions";
     private final IPackageStore packageStore;
     private final IDocumentDescriptorStore documentDescriptorStore;
-    private Logger logger = LoggerFactory.getLogger(this.getClass());
 
 
     @Inject
@@ -41,7 +40,7 @@ public class RestPackageStore extends RestVersionInfo implements IRestPackageSto
         try {
             return documentDescriptorStore.readDescriptors("io.sls.package", filter, index, limit, false);
         } catch (IResourceStore.ResourceStoreException e) {
-            logger.error(e.getLocalizedMessage(), e);
+            log.error(e.getLocalizedMessage(), e);
             throw new InternalServerErrorException(e.getLocalizedMessage(), e);
         } catch (IResourceStore.ResourceNotFoundException e) {
             throw new WebApplicationException(Response.Status.NOT_FOUND);
@@ -55,7 +54,7 @@ public class RestPackageStore extends RestVersionInfo implements IRestPackageSto
         } catch (IResourceStore.ResourceNotFoundException e) {
             throw new NotFoundException(e.getLocalizedMessage(), e);
         } catch (IResourceStore.ResourceStoreException e) {
-            logger.error(e.getLocalizedMessage(), e);
+            log.error(e.getLocalizedMessage(), e);
             throw new InternalServerErrorException(e.getLocalizedMessage(), e);
         }
     }
@@ -66,7 +65,7 @@ public class RestPackageStore extends RestVersionInfo implements IRestPackageSto
             Integer newVersion = packageStore.update(id, version, packageConfiguration);
             return RestUtilities.createURI(resourceURI, id, versionQueryParam, newVersion);
         } catch (IResourceStore.ResourceStoreException e) {
-            logger.error(e.getLocalizedMessage(), e);
+            log.error(e.getLocalizedMessage(), e);
             throw new InternalServerErrorException(e.getLocalizedMessage(), e);
         } catch (IResourceStore.ResourceModifiedException e) {
             try {
@@ -135,7 +134,7 @@ public class RestPackageStore extends RestVersionInfo implements IRestPackageSto
             URI createdUri = RestUtilities.createURI(resourceURI, resourceId.getId(), versionQueryParam, resourceId.getVersion());
             return Response.created(createdUri).entity(createdUri).build();
         } catch (IResourceStore.ResourceStoreException e) {
-            logger.error(e.getLocalizedMessage(), e);
+            log.error(e.getLocalizedMessage(), e);
             throw new InternalServerErrorException(e.getLocalizedMessage(), e);
         }
     }
@@ -145,7 +144,7 @@ public class RestPackageStore extends RestVersionInfo implements IRestPackageSto
         try {
             packageStore.delete(id, version);
         } catch (IResourceStore.ResourceStoreException e) {
-            logger.error(e.getLocalizedMessage(), e);
+            log.error(e.getLocalizedMessage(), e);
             throw new InternalServerErrorException(e.getLocalizedMessage(), e);
         } catch (IResourceStore.ResourceModifiedException e) {
             try {

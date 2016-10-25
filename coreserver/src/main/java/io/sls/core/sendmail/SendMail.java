@@ -1,17 +1,16 @@
 package io.sls.core.sendmail;
 
+import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.mail.EmailException;
 import org.apache.commons.mail.HtmlEmail;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 
 /**
  * User: jarisch
  * Date: 05.12.12
  * Time: 15:24
  */
+@Slf4j
 public class SendMail {
-    private Logger logger = LoggerFactory.getLogger(this.getClass());
 
     public static class Options {
         public Options(String host, String port, String auth, String from, String password) {
@@ -55,6 +54,6 @@ public class SendMail {
         email.setSubject(subject);
         email.setMsg(message);
         email.send();
-        logger.info("An email as been sent!");
+        log.info("An email as been sent!");
     }
 }

@@ -4,8 +4,7 @@ import io.sls.staticresources.IResourceDirectory;
 import io.sls.staticresources.IResourceFilesManager;
 import io.sls.staticresources.impl.contentdelivery.ContentDeliveryPreparation;
 import io.sls.utilities.FileUtilities;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
+import lombok.extern.slf4j.Slf4j;
 
 import java.io.File;
 import java.io.IOException;
@@ -18,6 +17,7 @@ import java.util.NoSuchElementException;
  * Date: 03.10.12
  * Time: 14:43
  */
+@Slf4j
 public class ResourceFilesManager implements IResourceFilesManager {
     private static final String INTERNAL_JAVASCRIPT_FILES_IDENTIFIER = "INTERNAL_JAVASCRIPT_FILES";
     private static final String EXTERNAL_JAVASCRIPT_FILES_IDENTIFIER = "EXTERNAL_JAVASCRIPT_FILES";
@@ -26,7 +26,6 @@ public class ResourceFilesManager implements IResourceFilesManager {
 
     private Options options;
     private List<IResourceDirectory> resourceDirectories;
-    private Logger logger = LoggerFactory.getLogger(this.getClass());
     private final ContentDeliveryPreparation deliveryPreparation = new ContentDeliveryPreparation();
 
 
@@ -96,21 +95,21 @@ public class ResourceFilesManager implements IResourceFilesManager {
                     end = System.currentTimeMillis();
                     String successMessage = "html file successfully prepared! (%sms)";
                     successMessage = String.format(successMessage, end - start);
-                    logger.info(successMessage);
+                    log.info(successMessage);
                 } else {
                     String msg = "No html file found. Preparation has been skipped. (path=%s)";
                     msg = String.format(msg, resourceDirectory.getResourceHtmlFile());
-                    logger.info(msg);
+                    log.info(msg);
                 }
             } catch (IOException e) {
-                logger.error("could not prepare html file", e);
+                log.error("could not prepare html file", e);
             }
         }
 
         totalEnd = System.currentTimeMillis();
         String successMessage = "resource files successfully prepared! (total: %sms)";
         successMessage = String.format(successMessage, totalEnd - totalStart);
-        logger.info(successMessage);
+        log.info(successMessage);
     }
 
     private void prepareCSSFiles(String source, String target, String[] excludedDirs) {
@@ -129,9 +128,9 @@ public class ResourceFilesManager implements IResourceFilesManager {
             end = System.currentTimeMillis();
             String successMessage = "css files successfully prepared! (%sms)";
             successMessage = String.format(successMessage, end - start);
-            logger.info(successMessage);
+            log.info(successMessage);
         } catch (Exception e) {
-            logger.error("could not prepare css content", e);
+            log.error("could not prepare css content", e);
         }
     }
 
@@ -151,9 +150,9 @@ public class ResourceFilesManager implements IResourceFilesManager {
             end = System.currentTimeMillis();
             String successMessage = "internal js files successfully prepared! (%sms)";
             successMessage = String.format(successMessage, end - start);
-            logger.info(successMessage);
+            log.info(successMessage);
         } catch (Exception e) {
-            logger.error("could not prepare internal js content", e);
+            log.error("could not prepare internal js content", e);
         }
     }
 
@@ -173,9 +172,9 @@ public class ResourceFilesManager implements IResourceFilesManager {
             end = System.currentTimeMillis();
             String successMessage = "external js files successfully prepared! (%sms)";
             successMessage = String.format(successMessage, end - start);
-            logger.info(successMessage);
+            log.info(successMessage);
         } catch (Exception e) {
-            logger.error("could not prepare external js content", e);
+            log.error("could not prepare external js content", e);
         }
     }
 
@@ -192,9 +191,9 @@ public class ResourceFilesManager implements IResourceFilesManager {
             end = System.currentTimeMillis();
             String successMessage = "image files successfully copied! (%sms)";
             successMessage = String.format(successMessage, end - start);
-            logger.info(successMessage);
+            log.info(successMessage);
         } catch (IOException e) {
-            logger.error("could not copy images to web directory", e);
+            log.error("could not copy images to web directory", e);
         }
     }
 
@@ -211,9 +210,9 @@ public class ResourceFilesManager implements IResourceFilesManager {
             end = System.currentTimeMillis();
             String successMessage = "audio files successfully copied! (%sms)";
             successMessage = String.format(successMessage, end - start);
-            logger.info(successMessage);
+            log.info(successMessage);
         } catch (IOException e) {
-            logger.error("could not copy audio files to web directory", e);
+            log.error("could not copy audio files to web directory", e);
         }
     }
 
@@ -230,9 +229,9 @@ public class ResourceFilesManager implements IResourceFilesManager {
             end = System.currentTimeMillis();
             String successMessage = "binary files successfully copied! (%sms)";
             successMessage = String.format(successMessage, end - start);
-            logger.info(successMessage);
+            log.info(successMessage);
         } catch (IOException e) {
-            logger.error("could not copy binary files to web directory", e);
+            log.error("could not copy binary files to web directory", e);
         }
     }
 
@@ -249,9 +248,9 @@ public class ResourceFilesManager implements IResourceFilesManager {
             end = System.currentTimeMillis();
             String successMessage = "keycloak files successfully copied! (%sms)";
             successMessage = String.format(successMessage, end - start);
-            logger.info(successMessage);
+            log.info(successMessage);
         } catch (IOException e) {
-            logger.error("could not copy binary files to web directory", e);
+            log.error("could not copy binary files to web directory", e);
         }
     }
 
@@ -271,11 +270,11 @@ public class ResourceFilesManager implements IResourceFilesManager {
             end = System.currentTimeMillis();
             String successMessage = "i18n files successfully prepared! (%sms)";
             successMessage = String.format(successMessage, end - start);
-            logger.info(successMessage);
+            log.info(successMessage);
         } catch (IOException e) {
-            logger.error("could not copy i18n files to web directory", e);
+            log.error("could not copy i18n files to web directory", e);
         } catch (ContentDeliveryPreparation.PrepareFilesException e) {
-            logger.error("could not copy i18n files to web directory", e);
+            log.error("could not copy i18n files to web directory", e);
         }
     }
 
@@ -301,7 +300,7 @@ public class ResourceFilesManager implements IResourceFilesManager {
         } else {
             String message = "Could not found css identifier \"%s\" in html file!";
             message = String.format(message, CSS_FILES_IDENTIFIER);
-            logger.error(message);
+            log.error(message);
         }
     }
 
@@ -321,7 +320,7 @@ public class ResourceFilesManager implements IResourceFilesManager {
         } else {
             String message = "Could not found javascript identifier \"%s\" in html file!";
             message = String.format(message, identifier);
-            logger.error(message);
+            log.error(message);
         }
     }
 

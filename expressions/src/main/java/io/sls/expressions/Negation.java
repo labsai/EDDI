@@ -1,15 +1,14 @@
 package io.sls.expressions;
 
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
+import lombok.extern.slf4j.Slf4j;
 
 /**
  * User: jarisch
  * Date: 14.12.2009
  * Time: 15:55:47
  */
+@Slf4j
 public class Negation extends Expression {
-    private static Logger log = LoggerFactory.getLogger(Negation.class);
 
     public Negation() {
         super();

@@ -3,8 +3,7 @@ package io.sls.core.behavior;
 import io.sls.core.behavior.extensions.IExtension;
 import io.sls.memory.IConversationMemory;
 import io.sls.utilities.RuntimeUtilities;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
+import lombok.extern.slf4j.Slf4j;
 
 import java.util.LinkedList;
 
@@ -13,9 +12,9 @@ import java.util.LinkedList;
  * Date: 21.01.2010
  * Time: 15:57:33
  */
+@Slf4j
 public class BehaviorRulesEvaluator {
     private BehaviorSet behaviorSet;
-    private Logger logger = LoggerFactory.getLogger(this.getClass());
 
     public BehaviorRulesEvaluator() {
     }
@@ -61,7 +60,7 @@ public class BehaviorRulesEvaluator {
                 } else if (state == IExtension.ExecutionState.ERROR) {
                     String msg = String.format("An Error has occurred while evaluating Behavior Rule: %s",
                             behaviorRule.getName());
-                    logger.error(msg);
+                    log.error(msg);
                     throw new BehaviorRuleExecutionException(msg);
                 } else
                     resultSet.getFailRules().add(behaviorRule);

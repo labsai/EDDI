@@ -55,7 +55,7 @@ public class InputMatcher implements IExtension {
 
     @Override
     public Map<String, String> getValues() {
-        HashMap<String, String> result = new HashMap<String, String>();
+        HashMap<String, String> result = new HashMap<>();
         result.put(expressionsQualifier, CharacterUtilities.arrayToString(expressions, ","));
         //result.put("occurrence", ... );
 
@@ -94,7 +94,7 @@ public class InputMatcher implements IExtension {
         List<Expression> inputExpressions;
 
         IData data = memory.getCurrentStep().getLatestData("expression");
-        inputExpressions = data != null ? expressionUtilities.parseExpressions(data.getResult().toString()) : new LinkedList<Expression>();
+        inputExpressions = data != null ? expressionUtilities.parseExpressions(data.getResult().toString()) : new LinkedList<>();
         inputExpressions = filterExpressions(inputExpressions);
 
         boolean isInputEmpty = expressions.size() == 1 &&

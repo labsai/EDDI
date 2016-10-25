@@ -4,8 +4,7 @@ import io.sls.core.behavior.BehaviorGroup;
 import io.sls.core.behavior.BehaviorRule;
 import io.sls.core.behavior.BehaviorSet;
 import io.sls.memory.IConversationMemory;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
+import lombok.extern.slf4j.Slf4j;
 
 import java.util.HashMap;
 import java.util.LinkedList;
@@ -17,6 +16,7 @@ import java.util.Map;
  * Date: 04.08.2009
  * Time: 13:43:25
  */
+@Slf4j
 public class Dependency implements IExtension {
     public static final String ID = "dependency";
 
@@ -24,7 +24,6 @@ public class Dependency implements IExtension {
 
     private ExecutionState state = ExecutionState.NOT_EXECUTED;
     private final String referenceQualifier = "reference";
-    private Logger logger = LoggerFactory.getLogger(this.getClass());
     private BehaviorSet behaviorSet;
 
     public Dependency() {
@@ -74,7 +73,7 @@ public class Dependency implements IExtension {
             }
             filteredBehaviorRules.addAll(cloneBehaviorRules(behaviorRules, reference));
         } catch (CloneNotSupportedException e) {
-            logger.error(e.getLocalizedMessage(), e);
+            log.error(e.getLocalizedMessage(), e);
         }
 
         for (BehaviorRule behaviorRule : filteredBehaviorRules) {

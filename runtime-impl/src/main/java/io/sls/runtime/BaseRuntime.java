@@ -31,7 +31,7 @@ public class BaseRuntime implements SystemRuntime.IRuntime {
 
     private boolean isInit = false;
 
-    private Logger logger;
+    private Logger log;
 
     @Inject
     public BaseRuntime(ExecutorService executorService,
@@ -66,13 +66,13 @@ public class BaseRuntime implements SystemRuntime.IRuntime {
 
     @Override
     public void logVersion() {
-        logger.info(projectName + " v" + getVersion());
+        log.info(projectName + " v" + getVersion());
     }
 
     protected void initLogging() {
         System.setProperty("systemRuntime.logDir", getLogDir());
         Configurator.initialize("Logging", null, new File(getConfigDir() + lowerCaseFirstLetter(projectName) + ".log4j.xml").toURI());
-        logger = LoggerFactory.getLogger(BaseRuntime.class);
+        log = LoggerFactory.getLogger(BaseRuntime.class);
     }
 
     @Override
@@ -127,7 +127,7 @@ public class BaseRuntime implements SystemRuntime.IRuntime {
                 callback.onComplete(result);
                 return result;
             } catch (Throwable t) {
-                logger.error(t.getLocalizedMessage(), t);
+                log.error(t.getLocalizedMessage(), t);
                 callback.onFailure(t);
                 throw new Exception("Error while executing callable.", t);
             } finally {
@@ -147,7 +147,7 @@ public class BaseRuntime implements SystemRuntime.IRuntime {
                         executorService.shutdownNow(); // Cancel currently executing tasks
                         // Wait a while for tasks to respond to being cancelled
                         if (!executorService.awaitTermination(60, TimeUnit.SECONDS)) {
-                            logger.error("Pool did not terminate");
+                            log.error("Pool did not terminate");
                         }
                     }
                 } catch (InterruptedException e) {
@@ -155,7 +155,7 @@ public class BaseRuntime implements SystemRuntime.IRuntime {
                     executorService.shutdownNow();
                     // Preserve interrupt status
                     Thread.currentThread().interrupt();
-                    logger.error(e.getLocalizedMessage(), e);
+                    log.error(e.getLocalizedMessage(), e);
                 }
             }
         });

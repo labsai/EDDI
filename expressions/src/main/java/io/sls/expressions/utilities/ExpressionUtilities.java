@@ -4,8 +4,7 @@ import io.sls.expressions.Connector;
 import io.sls.expressions.Expression;
 import io.sls.expressions.IExpressionFactory;
 import io.sls.expressions.value.Value;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
+import lombok.extern.slf4j.Slf4j;
 
 import javax.inject.Inject;
 import javax.inject.Singleton;
@@ -21,9 +20,9 @@ import java.util.stream.Collectors;
  */
 
 @Singleton
+@Slf4j
 public class ExpressionUtilities implements IExpressionUtilities {
     private final IExpressionFactory expressionFactory;
-    private Logger log = LoggerFactory.getLogger(ExpressionUtilities.class);
 
     @Inject
     public ExpressionUtilities(IExpressionFactory expressionFactory) {

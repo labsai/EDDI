@@ -2,6 +2,7 @@ package io.sls.runtime.bootstrap;
 
 import com.google.inject.AbstractModule;
 import com.google.inject.name.Names;
+import lombok.extern.slf4j.Slf4j;
 
 import java.io.IOException;
 import java.io.InputStream;
@@ -10,6 +11,7 @@ import java.util.Properties;
 /**
  * Created by jariscgr on 09.08.2016.
  */
+@Slf4j
 public abstract class AbstractBaseModule extends AbstractModule {
     protected final InputStream[] configFiles;
 
@@ -38,7 +40,7 @@ public abstract class AbstractBaseModule extends AbstractModule {
                 Names.bindProperties(binder(), properties);
             }
         } catch (IOException e) {
-            /*logger.error(e.getLocalizedMessage(), e);*/
+            log.error(e.getLocalizedMessage(), e);
         }
     }
 }

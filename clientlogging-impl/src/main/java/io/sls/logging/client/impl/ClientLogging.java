@@ -1,8 +1,7 @@
 package io.sls.logging.client.impl;
 
 import io.sls.logging.client.IClientLogging;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
+import lombok.extern.slf4j.Slf4j;
 
 import javax.servlet.http.HttpServletRequest;
 
@@ -12,8 +11,8 @@ import javax.servlet.http.HttpServletRequest;
  * Date: 26.01.13
  * Time: 21:03
  */
+@Slf4j
 public class ClientLogging implements IClientLogging {
-    private Logger logger = LoggerFactory.getLogger(this.getClass());
     private static final String DEBUG = "debug";
     private static final String INFO = "info";
     private static final String WARN = "warn";
@@ -26,14 +25,14 @@ public class ClientLogging implements IClientLogging {
         message = String.format(message, remoteAddr, msg);
 
         if (DEBUG.equals(logType)) {
-            logger.debug(message);
+            log.debug(message);
         } else if (INFO.equals(logType)) {
-            logger.info(message);
+            log.info(message);
         } else if (WARN.equals(logType)) {
-            logger.warn(message);
+            log.warn(message);
         } else {
-            logger.error(message);
-            logger.error("User-Agent: " + httpServletRequest.getHeader("User-Agent"));
+            log.error(message);
+            log.error("User-Agent: " + httpServletRequest.getHeader("User-Agent"));
         }
     }
 }

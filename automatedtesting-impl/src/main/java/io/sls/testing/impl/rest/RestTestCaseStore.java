@@ -14,11 +14,10 @@ import io.sls.testing.model.TestCaseState;
 import io.sls.testing.rest.IRestTestCaseStore;
 import io.sls.utilities.RestUtilities;
 import io.sls.utilities.RuntimeUtilities;
+import lombok.extern.slf4j.Slf4j;
 import org.jboss.resteasy.plugins.guice.RequestScoped;
 import org.jboss.resteasy.spi.HttpResponse;
 import org.jboss.resteasy.spi.NoLogWebApplicationException;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 
 import javax.inject.Inject;
 import javax.ws.rs.InternalServerErrorException;
@@ -35,14 +34,12 @@ import java.util.List;
  * Time: 15:35
  */
 @RequestScoped
+@Slf4j
 public class RestTestCaseStore implements IRestTestCaseStore {
     private final HttpResponse httpResponse;
     private final ITestCaseStore testCaseStore;
     private final ITestCaseDescriptorStore testCaseDescriptorStore;
     private final IConversationMemoryStore conversationMemoryStore;
-
-    private Logger logger = LoggerFactory.getLogger(this.getClass());
-
 
     @Inject
     public RestTestCaseStore(@Context HttpResponse httpResponse,
@@ -90,7 +87,7 @@ public class RestTestCaseStore implements IRestTestCaseStore {
             return retConversationDescriptors;
 
         } catch (IResourceStore.ResourceStoreException e) {
-            logger.error(e.getMessage(), e);
+            log.error(e.getMessage(), e);
             throw new InternalServerErrorException(e.getMessage(), e);
         } catch (IResourceStore.ResourceNotFoundException e) {
             throw new NoLogWebApplicationException(e);
@@ -118,7 +115,7 @@ public class RestTestCaseStore implements IRestTestCaseStore {
 
             testCaseDescriptorStore.setDescriptor(id, version, testCaseDescriptor);
         } catch (IResourceStore.ResourceStoreException e) {
-            logger.error(e.getLocalizedMessage(), e);
+            log.error(e.getLocalizedMessage(), e);
             throw new InternalServerErrorException(e.getLocalizedMessage(), e);
         } catch (IResourceStore.ResourceNotFoundException e) {
             throw new NotFoundException(e.getLocalizedMessage(), e);
@@ -130,7 +127,7 @@ public class RestTestCaseStore implements IRestTestCaseStore {
         try {
             return testCaseStore.read(id, 0);
         } catch (IResourceStore.ResourceStoreException e) {
-            logger.error(e.getLocalizedMessage(), e);
+            log.error(e.getLocalizedMessage(), e);
             throw new InternalServerErrorException(e);
         } catch (IResourceStore.ResourceNotFoundException e) {
             throw new NoLogWebApplicationException(Response.Status.NOT_FOUND);
@@ -153,7 +150,7 @@ public class RestTestCaseStore implements IRestTestCaseStore {
             httpResponse.setStatus(Response.Status.CREATED.getStatusCode());
             return RestUtilities.createURI(resourceURI, resourceId.getId(), versionQueryParam, 0);
         } catch (IResourceStore.ResourceStoreException e) {
-            logger.error(e.getLocalizedMessage(), e);
+            log.error(e.getLocalizedMessage(), e);
             throw new InternalServerErrorException(e);
         } catch (IResourceStore.ResourceNotFoundException e) {
             throw new NoLogWebApplicationException(Response.Status.NOT_FOUND);
@@ -166,7 +163,7 @@ public class RestTestCaseStore implements IRestTestCaseStore {
             testCaseStore.update(id, 0, testCase);
             return RestUtilities.createURI(resourceURI, id, versionQueryParam, 0);
         } catch (IResourceStore.ResourceStoreException e) {
-            logger.error(e.getLocalizedMessage(), e);
+            log.error(e.getLocalizedMessage(), e);
             throw new InternalServerErrorException(e);
         } catch (IResourceStore.ResourceNotFoundException e) {
             throw new NoLogWebApplicationException(Response.Status.NOT_FOUND);
@@ -180,7 +177,7 @@ public class RestTestCaseStore implements IRestTestCaseStore {
         try {
             testCaseStore.delete(id, 0);
         } catch (IResourceStore.ResourceStoreException e) {
-            logger.error(e.getLocalizedMessage(), e);
+            log.error(e.getLocalizedMessage(), e);
             throw new InternalServerErrorException(e);
         } catch (IResourceStore.ResourceModifiedException e) {
             throw new NoLogWebApplicationException(Response.Status.CONFLICT);
