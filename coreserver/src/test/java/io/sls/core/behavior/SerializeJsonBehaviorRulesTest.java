@@ -14,9 +14,7 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * User: Michael
- * Date: 24.03.12
- * Time: 19:09
+ * @author ginccc
  */
 public class SerializeJsonBehaviorRulesTest {
 

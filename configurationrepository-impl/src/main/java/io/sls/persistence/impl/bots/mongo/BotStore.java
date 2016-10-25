@@ -14,9 +14,7 @@ import javax.inject.Inject;
 import java.io.IOException;
 
 /**
- * User: jarisch
- * Date: 12.07.12
- * Time: 20:26
+ * @author ginccc
  */
 public class BotStore implements IBotStore {
     private final String collectionName = "bots";

@@ -8,9 +8,7 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * User: jarisch
- * Date: 01.05.12
- * Time: 16:10
+ * @author ginccc
  */
 public class ExtensionDescriptorBuilder {
 

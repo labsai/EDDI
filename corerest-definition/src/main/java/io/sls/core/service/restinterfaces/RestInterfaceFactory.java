@@ -26,9 +26,7 @@ import java.util.HashMap;
 import java.util.Map;
 
 /**
- * User: jarisch
- * Date: 09.06.12
- * Time: 17:37
+ * @author ginccc
  */
 @Singleton
 public class RestInterfaceFactory implements IRestInterfaceFactory {

@@ -8,9 +8,7 @@ import javax.ws.rs.Path;
 import javax.ws.rs.PathParam;
 
 /**
- * User: jarisch
- * Date: 22.11.12
- * Time: 13:15
+ * @author ginccc
  */
 @Path("/testcases/run")
 public interface IRestTestCaseRuntime {

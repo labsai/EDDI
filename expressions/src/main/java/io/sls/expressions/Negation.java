@@ -3,9 +3,7 @@ package io.sls.expressions;
 import lombok.extern.slf4j.Slf4j;
 
 /**
- * User: jarisch
- * Date: 14.12.2009
- * Time: 15:55:47
+ * @author ginccc
  */
 @Slf4j
 public class Negation extends Expression {

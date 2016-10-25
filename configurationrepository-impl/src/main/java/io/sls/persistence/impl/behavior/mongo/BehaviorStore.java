@@ -19,9 +19,7 @@ import java.util.LinkedList;
 import java.util.List;
 
 /**
- * User: jarisch
- * Date: 06.08.12
- * Time: 13:30
+ * @author ginccc
  */
 public class BehaviorStore implements IBehaviorStore {
 

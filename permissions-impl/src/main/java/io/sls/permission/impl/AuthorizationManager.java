@@ -16,9 +16,7 @@ import java.util.LinkedList;
 import java.util.List;
 
 /**
- * User: jarisch
- * Date: 28.08.12
- * Time: 12:11
+ * @author ginccc
  */
 public class AuthorizationManager implements IAuthorizationManager {
     private final IGroupStore groupStore;

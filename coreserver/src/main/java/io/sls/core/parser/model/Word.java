@@ -5,9 +5,7 @@ import io.sls.expressions.Expression;
 import java.util.List;
 
 /**
- * User: jarisch
- * Date: 30.03.12
- * Time: 17:51
+ * @author ginccc
  */
 public class Word extends DictionaryEntry implements IDictionary.IWord {
     private boolean isPartOfPhrase;

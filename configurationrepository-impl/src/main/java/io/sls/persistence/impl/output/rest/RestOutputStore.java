@@ -23,9 +23,7 @@ import java.util.Comparator;
 import java.util.List;
 
 /**
- * User: jarisch
- * Date: 05.06.12
- * Time: 20:23
+ * @author ginccc
  */
 @Slf4j
 public class RestOutputStore extends RestVersionInfo implements IRestOutputStore {

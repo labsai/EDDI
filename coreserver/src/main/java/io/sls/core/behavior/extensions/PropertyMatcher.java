@@ -13,9 +13,7 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * User: jarisch
- * Date: 14.03.12
- * Time: 13:51
+ * @author ginccc
  */
 public class PropertyMatcher implements IExtension {
     public static final String ID = "propertymatcher";

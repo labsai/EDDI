@@ -7,9 +7,7 @@ import io.sls.memory.model.ConversationState;
 import java.util.*;
 
 /**
- * User: michael
- * Date: 20.02.2012
- * Time: 21:29:19
+ * @author ginccc
  */
 public class ConversationMemory implements IConversationMemory {
     private String id;

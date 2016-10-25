@@ -6,9 +6,7 @@ import lombok.Getter;
 import lombok.Setter;
 
 /**
- * User: jarisch
- * Date: 06.09.12
- * Time: 09:32
+ * @author ginccc
  */
 @Getter
 @Setter

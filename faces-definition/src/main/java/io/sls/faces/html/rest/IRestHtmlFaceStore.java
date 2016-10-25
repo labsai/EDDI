@@ -8,9 +8,7 @@ import javax.ws.rs.core.MediaType;
 import java.net.URI;
 
 /**
- * User: jarisch
- * Date: 21.01.13
- * Time: 16:49
+ * @author ginccc
  */
 @Path("/htmlfacestore/htmlfaces/")
 public interface IRestHtmlFaceStore {

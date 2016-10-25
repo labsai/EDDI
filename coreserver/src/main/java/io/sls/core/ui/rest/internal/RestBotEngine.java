@@ -27,9 +27,7 @@ import java.net.URI;
 import java.util.concurrent.Callable;
 
 /**
- * User: jarisch
- * Date: 22.08.12
- * Time: 10:41
+ * @author ginccc
  */
 @Slf4j
 public class RestBotEngine implements IRestBotEngine {

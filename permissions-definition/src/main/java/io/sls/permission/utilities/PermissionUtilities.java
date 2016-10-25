@@ -22,9 +22,7 @@ import java.util.LinkedList;
 import java.util.List;
 
 /**
- * User: jarisch
- * Date: 31.08.12
- * Time: 12:14
+ * @author ginccc
  */
 public final class PermissionUtilities {
     private PermissionUtilities() {

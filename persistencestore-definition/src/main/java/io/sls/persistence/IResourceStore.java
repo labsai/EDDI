@@ -1,9 +1,7 @@
 package io.sls.persistence;
 
 /**
- * User: Michael
- * Date: 13.08.12
- * Time: 18:10
+ * @author ginccc
  */
 public interface IResourceStore<T> {
 

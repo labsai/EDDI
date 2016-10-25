@@ -15,9 +15,7 @@ import javax.inject.Inject;
 import java.io.IOException;
 
 /**
- * User: jarisch
- * Date: 19.11.12
- * Time: 17:28
+ * @author ginccc
  */
 public class ConversationDescriptorStore extends DescriptorStore<ConversationDescriptor> implements IConversationDescriptorStore {
 

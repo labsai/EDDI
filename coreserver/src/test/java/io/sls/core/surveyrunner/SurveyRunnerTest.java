@@ -7,9 +7,7 @@ import java.util.ArrayList;
 import java.util.List;
 
 /**
- * User: michael
- * Date: 10.12.2011
- * Time: 15:10:12
+ * @author ginccc
  */
 public class SurveyRunnerTest {
 

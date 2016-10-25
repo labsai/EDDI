@@ -12,9 +12,7 @@ import javax.ws.rs.core.Response;
 
 
 /**
- * User: jarisch
- * Date: 20.11.12
- * Time: 11:48
+ * @author ginccc
  */
 public class RestPermissionStore implements IRestPermissionStore {
     private final String resourceURI = "resource://io.sls.permission/permissionstore/permissions/";

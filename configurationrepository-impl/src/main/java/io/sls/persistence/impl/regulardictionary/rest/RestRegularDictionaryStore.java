@@ -20,9 +20,7 @@ import java.net.URI;
 import java.util.List;
 
 /**
- * User: jarisch
- * Date: 04.06.12
- * Time: 22:32
+ * @author ginccc
  */
 @Slf4j
 public class RestRegularDictionaryStore extends RestVersionInfo implements IRestRegularDictionaryStore {

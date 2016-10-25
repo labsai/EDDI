@@ -8,9 +8,7 @@ import javax.ws.rs.Path;
 import javax.ws.rs.QueryParam;
 
 /**
- * User: jarisch
- * Date: 20.01.13
- * Time: 18:09
+ * @author ginccc
  */
 @Path("/botmarklet")
 public interface IRestBotmarklet {

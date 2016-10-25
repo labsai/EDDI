@@ -5,9 +5,7 @@ import java.util.Arrays;
 import java.util.List;
 
 /**
- * User: jarisch
- * Date: 09.08.12
- * Time: 16:41
+ * @author ginccc
  */
 public class OutputConfiguration {
     private String key;

@@ -20,9 +20,7 @@ import org.jboss.resteasy.plugins.guice.ext.RequestScopeModule;
 import java.io.FileInputStream;
 
 /**
- * User: jarisch
- * Date: 16.07.2010
- * Time: 23:52:41
+ * @author ginccc
  */
 public class CoreServer {
     private static final String ENVIRONMENT_KEY = "EDDI_ENV";

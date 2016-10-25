@@ -7,9 +7,7 @@ import javax.ws.rs.*;
 import javax.ws.rs.core.MediaType;
 
 /**
- * User: jarisch
- * Date: 08.08.12
- * Time: 12:36
+ * @author ginccc
  */
 @Path("/editor")
 public interface IRestEditor {

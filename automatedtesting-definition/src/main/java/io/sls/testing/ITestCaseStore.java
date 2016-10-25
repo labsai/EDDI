@@ -5,9 +5,7 @@ import io.sls.testing.model.TestCase;
 import io.sls.testing.model.TestCaseState;
 
 /**
- * User: jarisch
- * Date: 22.11.12
- * Time: 15:49
+ * @author ginccc
  */
 public interface ITestCaseStore extends IResourceStore<TestCase> {
     String storeTestCase(String id, TestCase testCase) throws IResourceStore.ResourceStoreException;

@@ -21,9 +21,7 @@ import javax.inject.Singleton;
 import java.util.*;
 
 /**
- * User: jarisch
- * Date: 05.12.12
- * Time: 15:21
+ * @author ginccc
  */
 @Singleton
 public class SendMailTask implements ILifecycleTask {

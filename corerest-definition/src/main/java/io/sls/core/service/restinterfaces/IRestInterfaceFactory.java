@@ -1,7 +1,7 @@
 package io.sls.core.service.restinterfaces;
 
 /**
- * Created by jariscgr on 22.08.2016.
+ * @author ginccc
  */
 public interface IRestInterfaceFactory {
     <T> T get(Class<T> clazz, String targetServerUri) throws RestInterfaceFactory.RestInterfaceFactoryException;

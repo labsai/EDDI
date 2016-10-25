@@ -4,9 +4,7 @@ import java.util.Collection;
 import java.util.Map;
 
 /**
- * User: jarisch
- * Date: 14.08.12
- * Time: 13:28
+ * @author ginccc
  */
 public class RuntimeUtilities {
     public static void checkNotNull(Object object, String name) {

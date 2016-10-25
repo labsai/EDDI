@@ -5,9 +5,7 @@ import java.util.LinkedList;
 import java.util.List;
 
 /**
- * User: jarisch
- * Date: 15.11.12
- * Time: 16:42
+ * @author ginccc
  */
 public class SimpleConversationMemorySnapshot {
     private String botId;

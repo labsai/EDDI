@@ -6,9 +6,7 @@ import java.util.LinkedList;
 import java.util.List;
 
 /**
- * User: jarisch
- * Date: 10.06.12
- * Time: 21:51
+ * @author ginccc
  */
 @JsonIgnoreProperties({"id", "children", "selected", "opened", "editable"})
 public class BehaviorGroupConfiguration {

@@ -4,9 +4,7 @@ package io.sls.persistence;
 import java.io.IOException;
 
 /**
- * User: Michael
- * Date: 14.08.12
- * Time: 13:52
+ * @author ginccc
  */
 public interface IResourceStorage<T> {
     IResource<T> newResource(T content) throws IOException;

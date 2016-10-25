@@ -12,9 +12,7 @@ import javax.ws.rs.core.MediaType;
 import javax.ws.rs.core.Response;
 
 /**
- * User: jarisch
- * Date: 22.08.12
- * Time: 10:03
+ * @author ginccc
  */
 @Path("/bots")
 public interface IRestBotEngine {

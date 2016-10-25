@@ -16,9 +16,7 @@ import javax.ws.rs.core.Response;
 import java.net.URI;
 
 /**
- * User: jarisch
- * Date: 21.01.13
- * Time: 16:52
+ * @author ginccc
  */
 @RequestScoped
 public class RestHtmlFaceStore implements IRestHtmlFaceStore {

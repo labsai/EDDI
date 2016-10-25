@@ -16,9 +16,7 @@ import javax.inject.Inject;
 import java.io.IOException;
 
 /**
- * User: jarisch
- * Date: 29.08.12
- * Time: 13:40
+ * @author ginccc
  */
 public class GroupStore implements IGroupStore {
     public static final String COLLECTION_GROUPS = "groups";

@@ -5,11 +5,7 @@ import io.sls.core.parser.model.IDictionary;
 import java.util.List;
 
 /**
- * Created with IntelliJ IDEA.
- * User: jarisch
- * Date: 15.09.12
- * Time: 12:55
- * To change this template use File | Settings | File Templates.
+ * @author ginccc
  */
 public interface ICorrection {
 

@@ -18,7 +18,7 @@ import java.util.ArrayList;
 import java.util.List;
 
 /**
- * Created by jariscgr on 09.08.2016.
+ * @author ginccc
  */
 public class StaticResourcesModule extends AbstractBaseModule {
     @Override

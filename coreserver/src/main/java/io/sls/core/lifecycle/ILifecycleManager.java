@@ -3,9 +3,7 @@ package io.sls.core.lifecycle;
 import io.sls.memory.IConversationMemory;
 
 /**
- * User: jarisch
- * Date: 10.02.2012
- * Time: 00:41:54
+ * @author ginccc
  */
 public interface ILifecycleManager {
     void executeLifecycle(final IConversationMemory conversation) throws LifecycleException;

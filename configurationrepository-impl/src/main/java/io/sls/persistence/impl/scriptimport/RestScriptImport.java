@@ -39,9 +39,7 @@ import java.text.SimpleDateFormat;
 import java.util.*;
 
 /**
- * User: jarisch
- * Date: 22.06.13
- * Time: 20:18
+ * @author ginccc
  */
 public class RestScriptImport implements IRestScriptImport {
     public static final String LINE_SEPARTOR_UNIX = "\n";

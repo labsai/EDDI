@@ -1,13 +1,11 @@
 package io.sls.core.runtime;
 
-import io.sls.memory.model.Deployment;
 import io.sls.core.lifecycle.LifecycleException;
 import io.sls.memory.IConversationMemory;
+import io.sls.memory.model.Deployment;
 
 /**
- * User: jarisch
- * Date: 23.06.12
- * Time: 20:20
+ * @author ginccc
  */
 public interface IBot {
     String getId();

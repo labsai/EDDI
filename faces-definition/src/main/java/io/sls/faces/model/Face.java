@@ -3,9 +3,7 @@ package io.sls.faces.model;
 import io.sls.memory.model.Deployment;
 
 /**
- * User: jarisch
- * Date: 18.01.13
- * Time: 21:51
+ * @author ginccc
  */
 public class Face {
     private Deployment.Environment environment;

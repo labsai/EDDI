@@ -4,9 +4,7 @@ import java.net.URI;
 import java.util.List;
 
 /**
- * User: jarisch
- * Date: 07.09.12
- * Time: 15:21
+ * @author ginccc
  */
 public class AuthorizedUser {
     private URI user;

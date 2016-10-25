@@ -7,9 +7,7 @@ import org.junit.Test;
 import java.util.Iterator;
 
 /**
- * User: jarisch
- * Date: 05.11.12
- * Time: 14:40
+ * @author ginccc
  */
 public class PermutationTest {
 

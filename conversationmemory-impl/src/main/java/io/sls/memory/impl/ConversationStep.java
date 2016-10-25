@@ -6,9 +6,7 @@ import io.sls.memory.IData;
 import java.util.*;
 
 /**
- * User: michael
- * Date: 20.02.2012
- * Time: 21:56:39
+ * @author ginccc
  */
 public class ConversationStep implements IConversationMemory.IWritableConversationStep {
     protected Map<IConversationMemory.IConversationContext, Map<String, IData>> store;

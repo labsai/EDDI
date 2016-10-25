@@ -5,9 +5,7 @@ import io.sls.memory.model.ConversationMemorySnapshot;
 import java.util.Date;
 
 /**
- * User: jarisch
- * Date: 22.11.12
- * Time: 14:30
+ * @author ginccc
  */
 public class TestCase {
     private String botId;

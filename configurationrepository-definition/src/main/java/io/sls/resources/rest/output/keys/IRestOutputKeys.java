@@ -7,9 +7,7 @@ import javax.ws.rs.core.MediaType;
 import java.util.List;
 
 /**
- * User: jarisch
- * Date: 26.11.12
- * Time: 16:16
+ * @author ginccc
  */
 @Path("/outputKeys")
 public interface IRestOutputKeys {

@@ -6,9 +6,7 @@ import io.sls.resources.rest.IRestVersionInfo;
 import javax.ws.rs.NotFoundException;
 
 /**
- * User: jarisch
- * Date: 17.08.12
- * Time: 15:09
+ * @author ginccc
  */
 public abstract class RestVersionInfo implements IRestVersionInfo {
     @Override

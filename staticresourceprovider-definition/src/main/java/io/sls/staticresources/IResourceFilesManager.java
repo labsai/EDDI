@@ -3,9 +3,7 @@ package io.sls.staticresources;
 import java.util.List;
 
 /**
- * User: jarisch
- * Date: 21.11.12
- * Time: 17:51
+ * @author ginccc
  */
 public interface IResourceFilesManager {
     Options getOptions();

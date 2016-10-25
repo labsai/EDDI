@@ -8,9 +8,7 @@ import javax.inject.Inject;
 import java.io.File;
 
 /**
- * User: jarisch
- * Date: 07.08.12
- * Time: 16:04
+ * @author ginccc
  */
 public class RestTextResource implements IRestTextResource {
 

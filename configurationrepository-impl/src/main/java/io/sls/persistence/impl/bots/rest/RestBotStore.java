@@ -18,9 +18,7 @@ import java.net.URI;
 import java.util.List;
 
 /**
- * User: jarisch
- * Date: 17.05.12
- * Time: 15:02
+ * @author ginccc
  */
 @Slf4j
 public class RestBotStore extends RestVersionInfo implements IRestBotStore {

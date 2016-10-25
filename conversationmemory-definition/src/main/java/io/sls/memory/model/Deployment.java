@@ -1,9 +1,7 @@
 package io.sls.memory.model;
 
 /**
- * User: jarisch
- * Date: 04.10.12
- * Time: 16:22
+ * @author ginccc
  */
 public class Deployment {
     public enum Environment {

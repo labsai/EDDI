@@ -18,9 +18,7 @@ import java.util.HashMap;
 import java.util.List;
 
 /**
- * User: jarisch
- * Date: 19.11.12
- * Time: 14:25
+ * @author ginccc
  */
 public class RemoveDeletedResources {
     private HashMap<String, IResourceDeletion> restInterfaces;

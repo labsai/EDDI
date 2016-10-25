@@ -12,9 +12,7 @@ import java.net.URI;
 import java.util.List;
 
 /**
- * User: jarisch
- * Date: 16.05.12
- * Time: 21:07
+ * @author ginccc
  */
 @Path("/packagestore/packages")
 public interface IRestPackageStore extends IRestVersionInfo {

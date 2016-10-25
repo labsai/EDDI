@@ -1,9 +1,7 @@
 package io.sls.core.lifecycle;
 
 /**
- * User: jarisch
- * Date: 13.09.12
- * Time: 16:08
+ * @author ginccc
  */
 public class IllegalExtensionConfigurationException extends Exception {
     public IllegalExtensionConfigurationException(String message) {

@@ -14,9 +14,7 @@ import javax.inject.Inject;
 import java.io.IOException;
 
 /**
- * User: jarisch
- * Date: 15.07.12
- * Time: 15:20
+ * @author ginccc
  */
 public class PackageStore implements IPackageStore {
     private HistorizedResourceStore<PackageConfiguration> packageResourceStore;

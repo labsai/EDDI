@@ -1,9 +1,7 @@
 package io.sls.resources.rest.patch;
 
 /**
- * User: jarisch
- * Date: 15.08.12
- * Time: 11:17
+ * @author ginccc
  */
 public class PatchInstruction<T> {
     public enum PatchOperation {

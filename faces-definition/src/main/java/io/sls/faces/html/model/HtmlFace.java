@@ -3,9 +3,7 @@ package io.sls.faces.html.model;
 import io.sls.faces.model.Face;
 
 /**
- * User: jarisch
- * Date: 18.01.13
- * Time: 21:52
+ * @author ginccc
  */
 public class HtmlFace extends Face {
     private String host;

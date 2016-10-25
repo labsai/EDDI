@@ -7,9 +7,7 @@ import javax.inject.Inject;
 import java.io.InputStream;
 
 /**
- * User: jarisch
- * Date: 26.01.13
- * Time: 21:19
+ * @author ginccc
  */
 public class RestClientLogging implements IRestClientLogging {
     private final IClientLogging clientLogging;

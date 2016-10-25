@@ -9,7 +9,7 @@ import java.io.InputStream;
 import java.util.Properties;
 
 /**
- * Created by jariscgr on 09.08.2016.
+ * @author ginccc
  */
 @Slf4j
 public abstract class AbstractBaseModule extends AbstractModule {

@@ -12,9 +12,7 @@ import java.util.List;
 import java.util.regex.Pattern;
 
 /**
- * User: jarisch
- * Date: 14.12.12
- * Time: 21:55
+ * @author ginccc
  */
 public class EmailDictionary implements IDictionary {
     public static final String ID = "EmailDictionary";

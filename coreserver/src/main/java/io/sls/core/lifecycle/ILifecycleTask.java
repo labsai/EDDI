@@ -6,9 +6,7 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * User: jarisch
- * Date: 20.01.2012
- * Time: 17:07:26
+ * @author ginccc
  */
 public interface ILifecycleTask {
     /**

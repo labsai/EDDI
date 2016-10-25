@@ -13,9 +13,7 @@ import java.net.URI;
 import java.util.List;
 
 /**
- * User: jarisch
- * Date: 22.11.12
- * Time: 14:29
+ * @author ginccc
  */
 @Path("/testcasestore/testcases")
 public interface IRestTestCaseStore {

@@ -8,9 +8,7 @@ import java.util.List;
 import java.util.Random;
 
 /**
- * User: jarisch
- * Date: 21.01.2012
- * Time: 18:57:25
+ * @author ginccc
  */
 public class Data implements IData {
     private final String key;

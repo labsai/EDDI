@@ -22,9 +22,7 @@ import java.net.URI;
 import java.util.*;
 
 /**
- * User: jarisch
- * Date: 11.06.12
- * Time: 17:55
+ * @author ginccc
  */
 public class InputParserTask extends AbstractLifecycleTask implements ILifecycleTask {
     private IInputParser sentenceParser;

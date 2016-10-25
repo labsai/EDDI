@@ -7,9 +7,7 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * User: jarisch
- * Date: 11.09.12
- * Time: 12:07
+ * @author ginccc
  */
 public class ExtensionDefinition {
     private URI type;

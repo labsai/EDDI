@@ -11,9 +11,7 @@ import javax.ws.rs.core.MediaType;
 import java.util.List;
 
 /**
- * User: jarisch
- * Date: 17.05.12
- * Time: 14:55
+ * @author ginccc
  */
 @Path("/descriptorstore/descriptors")
 public interface IRestDocumentDescriptorStore {

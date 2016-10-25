@@ -13,9 +13,7 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * User: jarisch
- * Date: 10.08.12
- * Time: 12:13
+ * @author ginccc
  */
 @Slf4j
 public class URIUtilities {

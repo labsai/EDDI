@@ -6,9 +6,7 @@ import java.util.ArrayList;
 import java.util.List;
 
 /**
- * User: jarisch
- * Date: 20.05.12
- * Time: 19:41
+ * @author ginccc
  */
 public class BotConfiguration {
     private boolean authenticationRequired;

@@ -6,9 +6,7 @@ import io.sls.runtime.DependencyInjector;
 import java.util.Arrays;
 
 /**
- * User: jarisch
- * Date: 26.01.13
- * Time: 01:00
+ * @author ginccc
  */
 public class Unknown extends Word {
     public Unknown(String value) {

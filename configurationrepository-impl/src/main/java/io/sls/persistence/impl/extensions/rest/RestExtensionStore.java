@@ -19,9 +19,7 @@ import java.util.LinkedList;
 import java.util.List;
 
 /**
- * User: jarisch
- * Date: 11.09.12
- * Time: 12:13
+ * @author ginccc
  */
 @Slf4j
 public class RestExtensionStore implements IRestExtensionStore {

@@ -11,9 +11,7 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * User: jarisch
- * Date: 09.02.2010
- * Time: 12:49:41
+ * @author ginccc
  */
 public class Occurrence implements IExtension {
     public static final String ID = "occurrence";

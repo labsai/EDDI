@@ -12,9 +12,7 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * User: jarisch
- * Date: 04.08.2009
- * Time: 13:43:25
+ * @author ginccc
  */
 @Slf4j
 public class Dependency implements IExtension {

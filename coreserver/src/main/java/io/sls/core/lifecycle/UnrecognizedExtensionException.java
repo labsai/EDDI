@@ -1,9 +1,7 @@
 package io.sls.core.lifecycle;
 
 /**
- * User: jarisch
- * Date: 13.09.12
- * Time: 16:06
+ * @author ginccc
  */
 public class UnrecognizedExtensionException extends Exception {
     public UnrecognizedExtensionException(String message) {

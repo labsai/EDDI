@@ -7,9 +7,7 @@ import java.util.LinkedList;
 import java.util.List;
 
 /**
- * User: Michael
- * Date: 24.03.12
- * Time: 18:37
+ * @author ginccc
  */
 @JsonIgnoreProperties({"default", "id", "producesOutput", "selected", "sequenceNumber", "opened"})
 public class BehaviorRuleConfiguration {

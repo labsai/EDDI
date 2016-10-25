@@ -3,9 +3,7 @@ package io.sls.core.parser.dictionaries;
 import io.sls.core.parser.internal.InputHolder;
 
 /**
- * User: jarisch
- * Date: 20.12.2010
- * Time: 20:22:48
+ * @author ginccc
  */
 public class LookupNumeral {
     private String[] numbers = new String[]{"null", "ein", "zwei", "drei", "vier", "fuenf",

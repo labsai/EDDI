@@ -19,9 +19,7 @@ import javax.servlet.ServletRequest;
 import java.security.Principal;
 
 /**
- * User: jarisch
- * Date: 28.08.12
- * Time: 18:01
+ * @author ginccc
  */
 @Slf4j
 public class MongoLoginService implements LoginService {

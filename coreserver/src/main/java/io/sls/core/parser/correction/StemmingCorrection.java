@@ -8,9 +8,7 @@ import java.util.*;
 
 
 /**
- * User: jarisch
- * Date: 11.11.2010
- * Time: 19:13:49
+ * @author ginccc
  */
 public class StemmingCorrection implements ICorrection {
     private boolean lookupIfKnown;

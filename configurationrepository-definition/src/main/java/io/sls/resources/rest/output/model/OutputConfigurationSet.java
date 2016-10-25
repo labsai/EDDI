@@ -4,9 +4,7 @@ import java.util.ArrayList;
 import java.util.List;
 
 /**
- * User: jarisch
- * Date: 04.06.12
- * Time: 20:38
+ * @author ginccc
  */
 public class OutputConfigurationSet {
     private List<OutputConfiguration> outputs;

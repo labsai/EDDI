@@ -7,9 +7,7 @@ import java.util.List;
 import java.util.Stack;
 
 /**
- * User: jarisch
- * Date: 23.08.12
- * Time: 15:03
+ * @author ginccc
  */
 public class ConversationMemorySnapshot {
     private String id;

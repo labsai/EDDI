@@ -4,9 +4,7 @@ import io.sls.group.model.Group;
 import io.sls.persistence.IResourceStore;
 
 /**
- * User: jarisch
- * Date: 29.08.12
- * Time: 13:43
+ * @author ginccc
  */
 public interface IGroupStore {
     Group readGroup(String groupId) throws IResourceStore.ResourceStoreException, IResourceStore.ResourceNotFoundException;

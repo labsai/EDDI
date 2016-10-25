@@ -5,9 +5,7 @@ import io.sls.expressions.Expression;
 import java.util.List;
 
 /**
- * User: jarisch
- * Date: 25.01.13
- * Time: 17:14
+ * @author ginccc
  */
 public class FoundDictionaryEntry extends DictionaryEntry {
     protected boolean isCorrected = false;

@@ -5,9 +5,7 @@ import javax.ws.rs.ext.ExceptionMapper;
 import javax.ws.rs.ext.Provider;
 
 /**
- * User: jarisch
- * Date: 22.08.12
- * Time: 16:04
+ * @author ginccc
  */
 @Provider
 public class IllegalArgumentExceptionMapper implements ExceptionMapper<IllegalArgumentException> {

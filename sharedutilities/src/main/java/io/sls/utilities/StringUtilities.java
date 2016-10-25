@@ -5,9 +5,7 @@ import java.util.List;
 import java.util.StringTokenizer;
 
 /**
- * User: jarisch
- * Date: 19.11.12
- * Time: 18:45
+ * @author ginccc
  */
 public final class StringUtilities {
     private static final String REGEX_WILDCARD = ".*";

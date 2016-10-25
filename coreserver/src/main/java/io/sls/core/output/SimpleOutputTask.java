@@ -21,9 +21,7 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * User: jarisch
- * Date: 12.03.12
- * Time: 16:36
+ * @author ginccc
  */
 public class SimpleOutputTask extends AbstractLifecycleTask implements ILifecycleTask {
     private static final String SEPARATOR = " ";

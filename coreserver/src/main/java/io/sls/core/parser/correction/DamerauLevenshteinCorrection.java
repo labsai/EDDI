@@ -11,9 +11,7 @@ import java.util.LinkedList;
 import java.util.List;
 
 /**
- * User: jarisch
- * Date: 26.11.2010
- * Time: 15:51:13
+ * @author ginccc
  */
 public class DamerauLevenshteinCorrection implements ICorrection {
     private static final String ID = "DamerauLevenshteinDistanceCorrected";

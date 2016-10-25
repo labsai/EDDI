@@ -13,9 +13,7 @@ import java.util.List;
 import java.util.NoSuchElementException;
 
 /**
- * User: jarisch
- * Date: 03.10.12
- * Time: 14:43
+ * @author ginccc
  */
 @Slf4j
 public class ResourceFilesManager implements IResourceFilesManager {

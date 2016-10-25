@@ -9,9 +9,7 @@ import javax.ws.rs.PathParam;
 import java.io.File;
 
 /**
- * User: jarisch
- * Date: 07.08.12
- * Time: 15:48
+ * @author ginccc
  */
 @Path("/text")
 public interface IRestTextResource {

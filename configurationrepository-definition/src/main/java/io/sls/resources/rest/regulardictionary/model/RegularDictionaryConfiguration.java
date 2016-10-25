@@ -6,9 +6,7 @@ import java.util.ArrayList;
 import java.util.List;
 
 /**
- * User: jarisch
- * Date: 04.06.12
- * Time: 20:18
+ * @author ginccc
  */
 public class RegularDictionaryConfiguration {
     private String language;

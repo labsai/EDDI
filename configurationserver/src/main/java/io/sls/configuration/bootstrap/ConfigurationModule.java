@@ -6,7 +6,7 @@ import io.sls.staticresources.rest.IRestEditor;
 import io.sls.staticresources.rest.impl.RestEditor;
 
 /**
- * Created by jariscgr on 16.08.2016.
+ * @author ginccc
  */
 public class ConfigurationModule extends AbstractBaseModule {
     @Override

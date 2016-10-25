@@ -14,9 +14,7 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * User: jarisch
- * Date: 27.12.2010
- * Time: 19:58:40
+ * @author ginccc
  */
 public class OutputReference implements IExtension {
     public static final String PART = "part";

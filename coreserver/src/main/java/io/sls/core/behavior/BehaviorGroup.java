@@ -4,9 +4,7 @@ import java.util.LinkedList;
 import java.util.List;
 
 /**
- * User: jarisch
- * Date: 16.11.2010
- * Time: 23:10:51
+ * @author ginccc
  */
 public class BehaviorGroup {
     private String name;

@@ -13,9 +13,7 @@ import java.net.URI;
 import java.util.Map;
 
 /**
- * User: jarisch
- * Date: 23.06.12
- * Time: 19:57
+ * @author ginccc
  */
 public class PackageStoreClientLibrary implements IPackageStoreClientLibrary {
     private final IPackageStoreService packageStoreService;

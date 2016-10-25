@@ -6,9 +6,7 @@ import java.util.LinkedList;
 import java.util.List;
 
 /**
- * User: jarisch
- * Date: 20.12.2010
- * Time: 18:34:22
+ * @author ginccc
  */
 public class NumeralConverter {
     public static NumeralConverter instance = null;

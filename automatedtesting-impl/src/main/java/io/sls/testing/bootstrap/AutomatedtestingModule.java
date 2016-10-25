@@ -12,7 +12,7 @@ import io.sls.testing.rest.IRestTestCaseRuntime;
 import io.sls.testing.rest.IRestTestCaseStore;
 
 /**
- * Created by jariscgr on 09.08.2016.
+ * @author ginccc
  */
 public class AutomatedtestingModule extends AbstractBaseModule {
 

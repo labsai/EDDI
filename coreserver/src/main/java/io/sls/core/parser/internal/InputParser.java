@@ -16,9 +16,7 @@ import java.util.*;
 import static io.sls.core.parser.model.IDictionary.*;
 
 /**
- * @author jarisch
- * @date 01.07.2009
- * @time 12:41:40
+ * @author ginccc
  */
 public class InputParser implements IInputParser {
     private List<IDictionary> dictionaries;

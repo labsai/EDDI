@@ -5,9 +5,7 @@ import io.sls.core.behavior.extensions.descriptor.ExtensionDescriptorBuilder;
 import io.sls.core.behavior.extensions.descriptor.IExtensionDescriptor;
 
 /**
- * User: jarisch
- * Date: 01.05.12
- * Time: 20:18
+ * @author ginccc
  */
 public class DeseralizeJsonBehaviorRulesTest {
 /*    @Test

@@ -20,9 +20,7 @@ import java.net.URI;
 import java.util.List;
 
 /**
- * User: jarisch
- * Date: 09.06.12
- * Time: 18:37
+ * @author ginccc
  */
 @Slf4j
 public class RestBehaviorStore extends RestVersionInfo implements IRestBehaviorStore {

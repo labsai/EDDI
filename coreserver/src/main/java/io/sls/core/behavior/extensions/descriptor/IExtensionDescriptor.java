@@ -3,9 +3,7 @@ package io.sls.core.behavior.extensions.descriptor;
 import java.util.List;
 
 /**
- * User: jarisch
- * Date: 01.05.12
- * Time: 15:54
+ * @author ginccc
  */
 public interface IExtensionDescriptor {
 

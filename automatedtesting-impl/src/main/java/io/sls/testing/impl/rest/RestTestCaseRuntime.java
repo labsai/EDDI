@@ -17,9 +17,7 @@ import javax.ws.rs.core.Context;
 import javax.ws.rs.core.Response;
 
 /**
- * User: jarisch
- * Date: 22.11.12
- * Time: 13:25
+ * @author ginccc
  */
 @RequestScoped
 @Slf4j

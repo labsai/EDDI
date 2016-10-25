@@ -7,9 +7,7 @@ import java.util.HashMap;
 import java.util.Map;
 
 /**
- * User: jarisch
- * Date: 28.08.12
- * Time: 12:13
+ * @author ginccc
  */
 public class Permissions implements IPermissions {
     private Map<IAuthorization.Type, AuthorizedSubjects> permissions;

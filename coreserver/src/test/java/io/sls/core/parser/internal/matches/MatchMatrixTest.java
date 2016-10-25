@@ -1,9 +1,7 @@
 package io.sls.core.parser.internal.matches;
 
 /**
- * User: jarisch
- * Date: 06.11.12
- * Time: 15:11
+ * @author ginccc
  */
 public class MatchMatrixTest {
     //TODO make DI work for tests

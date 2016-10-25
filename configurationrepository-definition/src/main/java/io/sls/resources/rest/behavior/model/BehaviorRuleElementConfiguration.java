@@ -10,9 +10,7 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * User: Michael
- * Date: 01.04.12
- * Time: 15:45
+ * @author ginccc
  */
 @JsonIgnoreProperties({"id", "behaviorRules", "editable", "opened", "name", "selected"})
 @JsonInclude(JsonInclude.Include.NON_NULL)

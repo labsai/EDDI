@@ -1,9 +1,7 @@
 package io.sls.memory.model;
 
 /**
- * User: jarisch
- * Date: 04.09.12
- * Time: 18:08
+ * @author ginccc
  */
 public enum ConversationState {
     READY,

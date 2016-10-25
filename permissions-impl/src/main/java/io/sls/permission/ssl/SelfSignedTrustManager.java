@@ -1,16 +1,12 @@
 package io.sls.permission.ssl;
 
-/**
- * User: jarisch
- * Date: 28.01.13
- * Time: 13:22
- */
 
 import javax.net.ssl.X509TrustManager;
 import java.security.cert.CertificateException;
 import java.security.cert.X509Certificate;
-
 /**
+ * @author ginccc
+ *
  * This Trust Manager is "naive" because it trusts everyone.
  */
 public class SelfSignedTrustManager implements X509TrustManager {

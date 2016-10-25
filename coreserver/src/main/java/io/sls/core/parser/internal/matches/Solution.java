@@ -7,9 +7,7 @@ import java.util.LinkedList;
 import java.util.List;
 
 /**
- * User: jarisch
- * Date: 25.01.13
- * Time: 16:43
+ * @author ginccc
  */
 public class Solution {
     public enum Match {

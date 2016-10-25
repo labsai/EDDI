@@ -17,9 +17,7 @@ import java.util.LinkedList;
 import java.util.List;
 
 /**
- * User: Michael
- * Date: 01.04.12
- * Time: 17:41
+ * @author ginccc
  */
 public class BehaviorSerialization {
     public static BehaviorSet deserialize(String json) throws DeserializationException {

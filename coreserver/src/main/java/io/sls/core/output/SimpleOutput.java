@@ -3,9 +3,7 @@ package io.sls.core.output;
 import java.util.*;
 
 /**
- * User: jarisch
- * Date: 22.02.12
- * Time: 20:27
+ * @author ginccc
  */
 public class SimpleOutput {
     private Map<String, List<OutputEntry>> outputMapper = new HashMap<>();

@@ -13,9 +13,7 @@ import java.util.Date;
 import java.util.List;
 
 /**
- * User: jarisch
- * Date: 14.06.2010
- * Time: 17:24:11
+ * @author ginccc
  */
 public class TimeExpressionDictionary implements IDictionary {
     public static final String ID = "TimeExpressionDictionary";

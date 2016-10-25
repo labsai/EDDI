@@ -3,9 +3,7 @@ package io.sls.resources.rest.extensions.model;
 import java.net.URI;
 
 /**
- * User: jarisch
- * Date: 12.09.12
- * Time: 14:55
+ * @author ginccc
  */
 public class ExtensionPoint {
     private URI namespace;

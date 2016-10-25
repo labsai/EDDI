@@ -19,9 +19,7 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * User: jarisch
- * Date: 26.11.12
- * Time: 14:59
+ * @author ginccc
  */
 @Slf4j
 public class RestExpression implements IRestExpressions {

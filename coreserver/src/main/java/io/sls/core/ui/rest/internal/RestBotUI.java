@@ -25,9 +25,7 @@ import java.io.File;
 import java.io.IOException;
 
 /**
- * User: jarisch
- * Date: 14.09.12
- * Time: 10:19
+ * @author ginccc
  */
 @RequestScoped
 @Slf4j

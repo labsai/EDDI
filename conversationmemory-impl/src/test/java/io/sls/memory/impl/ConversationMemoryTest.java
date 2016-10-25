@@ -9,9 +9,7 @@ import org.junit.Test;
 import java.util.LinkedList;
 
 /**
- * User: jarisch
- * Date: 11.02.2012
- * Time: 23:06:05
+ * @author ginccc
  */
 public class ConversationMemoryTest {
     private ConversationMemory memory;

@@ -11,9 +11,7 @@ import java.util.Comparator;
 import java.util.List;
 
 /**
- * User: jarisch
- * Date: 17.08.12
- * Time: 14:47
+ * @author ginccc
  */
 public class ResultManipulator<T> {
     public static final String ASCENDING = "asc";

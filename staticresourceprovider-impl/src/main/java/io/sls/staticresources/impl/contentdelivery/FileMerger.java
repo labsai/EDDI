@@ -7,11 +7,7 @@ import java.io.IOException;
 import java.util.*;
 
 /**
- * Created with IntelliJ IDEA.
- * User: jarisch
- * Date: 21.09.12
- * Time: 14:56
- * To change this template use File | Settings | File Templates.
+ * @author ginccc
  */
 public class FileMerger {
     public String mergeFiles(List<File> files) throws FileMergeException {

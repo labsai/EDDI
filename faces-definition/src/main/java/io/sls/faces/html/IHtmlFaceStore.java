@@ -4,9 +4,7 @@ import io.sls.faces.html.model.HtmlFace;
 import io.sls.persistence.IResourceStore;
 
 /**
- * User: jarisch
- * Date: 18.01.13
- * Time: 21:50
+ * @author ginccc
  */
 public interface IHtmlFaceStore {
     HtmlFace searchFaceByHost(String host) throws IResourceStore.ResourceNotFoundException, IResourceStore.ResourceStoreException;

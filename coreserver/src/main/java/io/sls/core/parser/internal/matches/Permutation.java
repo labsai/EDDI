@@ -5,9 +5,7 @@ import java.util.Iterator;
 import java.util.NoSuchElementException;
 
 /**
- * User: jarisch
- * Date: 05.11.12
- * Time: 14:36
+ * @author ginccc
  */
 public class Permutation implements Iterable<Integer[]> {
     private Integer[] values;

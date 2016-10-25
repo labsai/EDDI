@@ -11,9 +11,7 @@ import org.bson.types.ObjectId;
 import java.io.IOException;
 
 /**
- * User: Michael
- * Date: 14.08.12
- * Time: 14:30
+ * @author ginccc
  */
 public class MongoResourceStorage<T> implements IResourceStorage<T> {
     private static final String VERSION_FIELD = "_version";

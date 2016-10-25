@@ -3,9 +3,7 @@ package io.sls.core.parser.internal.matches;
 import java.util.*;
 
 /**
- * User: jarisch
- * Date: 02.11.12
- * Time: 14:31
+ * @author ginccc
  */
 class IterationCounter implements Iterator<IterationCounter.IterationPlan> {
     private IterationPlan next;

@@ -13,9 +13,7 @@ import java.net.URL;
 import java.util.List;
 
 /**
- * User: jarisch
- * Date: 20.01.13
- * Time: 18:18
+ * @author ginccc
  */
 @Slf4j
 public class RestBotmarklet implements IRestBotmarklet {

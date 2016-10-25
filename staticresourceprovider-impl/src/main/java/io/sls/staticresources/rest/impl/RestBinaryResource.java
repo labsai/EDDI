@@ -8,9 +8,7 @@ import javax.inject.Inject;
 import java.io.File;
 
 /**
- * User: jarisch
- * Date: 08.08.12
- * Time: 18:07
+ * @author ginccc
  */
 public class RestBinaryResource implements IRestBinaryResource {
 

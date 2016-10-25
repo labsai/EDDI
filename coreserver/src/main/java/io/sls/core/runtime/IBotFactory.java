@@ -1,12 +1,10 @@
 package io.sls.core.runtime;
 
-import io.sls.memory.model.Deployment;
 import io.sls.core.runtime.service.ServiceException;
+import io.sls.memory.model.Deployment;
 
 /**
- * User: jarisch
- * Date: 23.06.12
- * Time: 19:25
+ * @author ginccc
  */
 public interface IBotFactory {
     IBot getLatestBot(Deployment.Environment environment, String botId) throws ServiceException;

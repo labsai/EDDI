@@ -17,9 +17,7 @@ import java.io.IOException;
 import java.util.Date;
 
 /**
- * User: jarisch
- * Date: 22.11.12
- * Time: 15:57
+ * @author ginccc
  */
 public class TestCaseStore implements ITestCaseStore, IResourceStore<TestCase> {
     private static final String TESTCASE_COLLECTION = "testcases";

@@ -11,9 +11,7 @@ import java.util.LinkedList;
 import java.util.List;
 
 /**
- * User: jarisch
- * Date: 12.11.12
- * Time: 14:43
+ * @author ginccc
  */
 public class ConversationMemoryUtilities {
     public static ConversationMemorySnapshot convertConversationMemory(IConversationMemory conversationMemory) throws IResourceStore.ResourceStoreException {

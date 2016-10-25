@@ -24,9 +24,7 @@ import java.util.Objects;
 import java.util.concurrent.Callable;
 
 /**
- * User: jarisch
- * Date: 22.11.12
- * Time: 17:01
+ * @author ginccc
  */
 public class TestCaseRuntime {
     private final IRestInterfaceFactory restInterfaceFactory;

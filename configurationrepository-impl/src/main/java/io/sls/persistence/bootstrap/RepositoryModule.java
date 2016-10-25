@@ -44,7 +44,7 @@ import io.sls.user.IUserStore;
 import io.sls.user.impl.mongo.UserStore;
 
 /**
- * Created by jariscgr on 08.08.2016.
+ * @author ginccc
  */
 public class RepositoryModule extends AbstractBaseModule {
 

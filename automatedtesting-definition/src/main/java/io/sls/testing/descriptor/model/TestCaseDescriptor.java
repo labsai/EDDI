@@ -4,9 +4,7 @@ import io.sls.resources.rest.documentdescriptor.model.DocumentDescriptor;
 import io.sls.testing.model.TestCaseState;
 
 /**
- * User: jarisch
- * Date: 22.11.12
- * Time: 14:37
+ * @author ginccc
  */
 public class TestCaseDescriptor extends DocumentDescriptor {
     private TestCaseState testCaseState;

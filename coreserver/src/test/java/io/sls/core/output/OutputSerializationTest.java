@@ -9,11 +9,7 @@ import java.util.LinkedList;
 import java.util.List;
 
 /**
- * Created with IntelliJ IDEA.
- * User: jarisch
- * Date: 03.05.12
- * Time: 22:26
- * To change this template use File | Settings | File Templates.
+ * @author ginccc
  */
 public class OutputSerializationTest {
 

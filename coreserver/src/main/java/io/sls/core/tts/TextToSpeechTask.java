@@ -17,9 +17,7 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * User: jarisch
- * Date: 11.12.12
- * Time: 21:22
+ * @author ginccc
  */
 @Singleton
 public class TextToSpeechTask extends AbstractLifecycleTask implements ILifecycleTask {

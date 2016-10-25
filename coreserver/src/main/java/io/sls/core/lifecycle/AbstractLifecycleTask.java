@@ -3,9 +3,7 @@ package io.sls.core.lifecycle;
 import java.util.Map;
 
 /**
- * User: jarisch
- * Date: 18.05.12
- * Time: 17:13
+ * @author ginccc
  */
 public abstract class AbstractLifecycleTask implements ILifecycleTask {
 

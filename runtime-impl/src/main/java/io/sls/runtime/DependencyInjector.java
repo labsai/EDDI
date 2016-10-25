@@ -3,7 +3,7 @@ package io.sls.runtime;
 import com.google.inject.*;
 
 /**
- * Created by jariscgr on 08.08.2016.
+ * @author ginccc
  */
 public class DependencyInjector {
     public enum Environment {

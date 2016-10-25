@@ -13,9 +13,7 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * User: jarisch
- * Date: 14.09.12
- * Time: 16:25
+ * @author ginccc
  */
 @Provider
 @ServerInterceptor

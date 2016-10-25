@@ -1,7 +1,7 @@
 package io.sls.expressions;
 
 /**
- * Created by jariscgr on 09.08.2016.
+ * @author ginccc
  */
 public interface IExpressionFactory {
     Expression[] getExpression(Expression... expressions);

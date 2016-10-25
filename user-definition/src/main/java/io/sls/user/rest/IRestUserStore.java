@@ -9,9 +9,7 @@ import javax.ws.rs.core.Response;
 import java.net.URI;
 
 /**
- * User: jarisch
- * Date: 29.08.12
- * Time: 10:52
+ * @author ginccc
  */
 @Path("/userstore/users")
 public interface IRestUserStore {

@@ -8,7 +8,7 @@ import io.sls.logging.client.rest.impl.RestClientLogging;
 import io.sls.runtime.bootstrap.AbstractBaseModule;
 
 /**
- * Created by jariscgr on 09.08.2016.
+ * @author ginccc
  */
 public class ClientLoggingModule extends AbstractBaseModule {
     @Override

@@ -4,9 +4,7 @@ import java.util.ArrayList;
 import java.util.List;
 
 /**
- * User: jarisch
- * Date: 29.08.12
- * Time: 10:43
+ * @author ginccc
  */
 public class AuthorizedSubjects {
     private List<AuthorizedUser> users;

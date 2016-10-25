@@ -1,9 +1,7 @@
 package io.sls.testing.model;
 
 /**
- * User: jarisch
- * Date: 22.11.12
- * Time: 13:22
+ * @author ginccc
  */
 public enum TestCaseState {
     IN_PROGRESS,

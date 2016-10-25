@@ -4,9 +4,7 @@ import java.util.LinkedList;
 import java.util.List;
 
 /**
- * User: jarisch
- * Date: 09.06.12
- * Time: 16:21
+ * @author ginccc
  */
 public class BehaviorSetResult {
     private List<BehaviorRule> successRules;

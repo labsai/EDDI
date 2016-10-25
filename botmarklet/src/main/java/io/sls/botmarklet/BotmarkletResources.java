@@ -9,9 +9,7 @@ import java.util.LinkedList;
 import java.util.List;
 
 /**
- * User: jarisch
- * Date: 20.01.13
- * Time: 19:33
+ * @author ginccc
  */
 public class BotmarkletResources {
     private List<URL> jsResources;

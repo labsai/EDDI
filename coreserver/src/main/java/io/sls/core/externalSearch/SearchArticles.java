@@ -11,9 +11,7 @@ import java.util.LinkedList;
 import java.util.List;
 
 /**
- * User: Alex
- * Date: 15.06.2011
- * Time: 11:01:38
+ * @author ginccc
  */
 public class SearchArticles extends AbstractLifecycleTask implements ILifecycleTask {
     private List<Long> result;

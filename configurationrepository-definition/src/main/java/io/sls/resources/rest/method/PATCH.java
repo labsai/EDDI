@@ -7,9 +7,7 @@ import java.lang.annotation.RetentionPolicy;
 import java.lang.annotation.Target;
 
 /**
- * User: jarisch
- * Date: 14.08.12
- * Time: 16:00
+ * @author ginccc
  */
 @Target({ElementType.METHOD})
 @Retention(RetentionPolicy.RUNTIME)
