@@ -58,25 +58,7 @@ public class RestDocumentDescriptorStore extends RestVersionInfo implements IRes
 
     @Override
     public void patchDescriptor(String id, Integer version, PatchInstruction<DocumentDescriptor> patchInstruction) {
-        try {
-            DocumentDescriptor documentDescriptor = readDescriptor(id, version);
-            DocumentDescriptor simpleDescriptor = patchInstruction.getDocument();
-
-            if (patchInstruction.getOperation().equals(PatchInstruction.PatchOperation.SET)) {
-                documentDescriptor.setName(simpleDescriptor.getName());
-                documentDescriptor.setDescription(simpleDescriptor.getDescription());
-            } else {
-                documentDescriptor.setName("");
-                documentDescriptor.setDescription("");
-            }
-
-            documentDescriptorStore.setDescriptor(id, version, documentDescriptor);
-        } catch (IResourceStore.ResourceStoreException e) {
-            log.error(e.getLocalizedMessage(), e);
-            throw new InternalServerErrorException(e.getLocalizedMessage(), e);
-        } catch (IResourceStore.ResourceNotFoundException e) {
-            throw new NotFoundException(e.getLocalizedMessage(), e);
-        }
+        patch(documentDescriptorStore, id, version, patchInstruction);
     }
 
 

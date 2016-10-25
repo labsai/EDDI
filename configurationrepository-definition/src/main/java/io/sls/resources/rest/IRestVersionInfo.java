@@ -8,6 +8,8 @@ import javax.ws.rs.PathParam;
  * @author ginccc
  */
 public interface IRestVersionInfo {
+    String versionQueryParam = "?version=";
+
     @GET
     @Path("/{id}/currentversion")
     Integer getCurrentVersion(@PathParam("id") String id);

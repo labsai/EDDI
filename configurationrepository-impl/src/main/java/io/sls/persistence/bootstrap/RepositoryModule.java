@@ -10,7 +10,7 @@ import io.sls.persistence.impl.behavior.rest.RestBehaviorStore;
 import io.sls.persistence.impl.bots.mongo.BotStore;
 import io.sls.persistence.impl.bots.rest.RestBotStore;
 import io.sls.persistence.impl.descriptor.mongo.DocumentDescriptorStore;
-import io.sls.persistence.impl.documentdescriptor.rest.RestDocumentDescriptorStore;
+import io.sls.persistence.impl.descriptor.rest.RestDocumentDescriptorStore;
 import io.sls.persistence.impl.extensions.mongo.ExtensionStore;
 import io.sls.persistence.impl.extensions.rest.RestExtensionStore;
 import io.sls.persistence.impl.monitor.rest.RestMonitorStore;

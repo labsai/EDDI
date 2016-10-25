@@ -2,11 +2,11 @@ package io.sls.persistence.impl.output.rest;
 
 import io.sls.persistence.IResourceStore;
 import io.sls.persistence.impl.resources.rest.RestVersionInfo;
+import io.sls.resources.rest.IRestVersionInfo;
 import io.sls.resources.rest.documentdescriptor.IDocumentDescriptorStore;
 import io.sls.resources.rest.documentdescriptor.model.DocumentDescriptor;
 import io.sls.resources.rest.output.IOutputStore;
 import io.sls.resources.rest.output.IRestOutputStore;
-import io.sls.resources.rest.output.model.OutputConfiguration;
 import io.sls.resources.rest.output.model.OutputConfigurationSet;
 import io.sls.resources.rest.patch.PatchInstruction;
 import io.sls.utilities.RestUtilities;
@@ -19,7 +19,6 @@ import javax.ws.rs.WebApplicationException;
 import javax.ws.rs.core.Response;
 import java.net.URI;
 import java.util.Collections;
-import java.util.Comparator;
 import java.util.List;
 
 /**
@@ -76,20 +75,17 @@ public class RestOutputStore extends RestVersionInfo implements IRestOutputStore
     @Override
     public URI updateOutputSet(String id, Integer version, OutputConfigurationSet outputConfigurationSet) {
         try {
-            Collections.sort(outputConfigurationSet.getOutputs(), new Comparator<OutputConfiguration>() {
-                @Override
-                public int compare(OutputConfiguration o1, OutputConfiguration o2) {
-                    int comparisonOfKeys = o1.getKey().compareTo(o2.getKey());
-                    if (comparisonOfKeys == 0) {
-                        return o1.getOccurrence() < o2.getOccurrence() ? -1 : o1.getOccurrence() == o2.getOccurrence() ? 0 : 1;
-                    } else {
-                        return comparisonOfKeys;
-                    }
+            Collections.sort(outputConfigurationSet.getOutputs(), (o1, o2) -> {
+                int comparisonOfKeys = o1.getKey().compareTo(o2.getKey());
+                if (comparisonOfKeys == 0) {
+                    return o1.getOccurrence() < o2.getOccurrence() ? -1 : o1.getOccurrence() == o2.getOccurrence() ? 0 : 1;
+                } else {
+                    return comparisonOfKeys;
                 }
             });
 
             Integer newVersion = outputStore.update(id, version, outputConfigurationSet);
-            return RestUtilities.createURI(resourceURI, id, versionQueryParam, newVersion);
+            return RestUtilities.createURI(resourceURI, id, IRestVersionInfo.versionQueryParam, newVersion);
         } catch (IResourceStore.ResourceStoreException e) {
             log.error(e.getLocalizedMessage(), e);
             throw new InternalServerErrorException(e.getLocalizedMessage(), e);
@@ -107,33 +103,12 @@ public class RestOutputStore extends RestVersionInfo implements IRestOutputStore
 
     @Override
     public Response createOutputSet(OutputConfigurationSet outputConfigurationSet) {
-        try {
-            IResourceStore.IResourceId resourceId = outputStore.create(outputConfigurationSet);
-            URI createdUri = RestUtilities.createURI(resourceURI, resourceId.getId(), versionQueryParam, resourceId.getVersion());
-            return Response.created(createdUri).entity(createdUri).build();
-        } catch (IResourceStore.ResourceStoreException e) {
-            log.error(e.getLocalizedMessage(), e);
-            throw new InternalServerErrorException(e.getLocalizedMessage(), e);
-        }
+        return create(outputStore, resourceURI, outputConfigurationSet);
     }
 
     @Override
     public void deleteOutputSet(String id, Integer version) {
-        try {
-            outputStore.delete(id, version);
-        } catch (IResourceStore.ResourceStoreException e) {
-            log.error(e.getLocalizedMessage(), e);
-            throw new InternalServerErrorException(e.getLocalizedMessage(), e);
-        } catch (IResourceStore.ResourceModifiedException e) {
-            try {
-                IResourceStore.IResourceId currentId = outputStore.getCurrentResourceId(id);
-                throw RestUtilities.createConflictException(resourceURI, currentId);
-            } catch (IResourceStore.ResourceNotFoundException e1) {
-                throw new NotFoundException(e.getLocalizedMessage(), e);
-            }
-        } catch (IResourceStore.ResourceNotFoundException e) {
-            throw new NotFoundException(e.getLocalizedMessage(), e);
-        }
+        delete(outputStore, resourceURI, id, version);
     }
 
     @Override

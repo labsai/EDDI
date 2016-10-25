@@ -2,6 +2,7 @@ package io.sls.persistence.impl.behavior.rest;
 
 import io.sls.persistence.IResourceStore;
 import io.sls.persistence.impl.resources.rest.RestVersionInfo;
+import io.sls.resources.rest.IRestVersionInfo;
 import io.sls.resources.rest.behavior.IBehaviorStore;
 import io.sls.resources.rest.behavior.IRestBehaviorStore;
 import io.sls.resources.rest.behavior.model.BehaviorConfiguration;
@@ -48,21 +49,14 @@ public class RestBehaviorStore extends RestVersionInfo implements IRestBehaviorS
 
     @Override
     public BehaviorConfiguration readBehaviorRuleSet(String id, Integer version) {
-        try {
-            return behaviorStore.read(id, version);
-        } catch (IResourceStore.ResourceNotFoundException e) {
-            throw new NoLogWebApplicationException(Response.Status.NOT_FOUND);
-        } catch (IResourceStore.ResourceStoreException e) {
-            log.error(e.getLocalizedMessage(), e);
-            throw new InternalServerErrorException(e.getLocalizedMessage(), e);
-        }
+        return read(behaviorStore, id, version);
     }
 
     @Override
     public URI updateBehaviorRuleSet(String id, Integer version, BehaviorConfiguration behaviorConfiguration) {
         try {
             Integer newVersion = behaviorStore.update(id, version, behaviorConfiguration);
-            return RestUtilities.createURI(resourceURI, id, versionQueryParam, newVersion);
+            return RestUtilities.createURI(resourceURI, id, IRestVersionInfo.versionQueryParam, newVersion);
         } catch (IResourceStore.ResourceModifiedException e) {
             try {
                 IResourceStore.IResourceId currentId = behaviorStore.getCurrentResourceId(id);
@@ -80,33 +74,12 @@ public class RestBehaviorStore extends RestVersionInfo implements IRestBehaviorS
 
     @Override
     public Response createBehaviorRuleSet(BehaviorConfiguration behaviorConfiguration) {
-        try {
-            IResourceStore.IResourceId resourceId = behaviorStore.create(behaviorConfiguration);
-            URI createdUri = RestUtilities.createURI(resourceURI, resourceId.getId(), versionQueryParam, resourceId.getVersion());
-            return Response.created(createdUri).entity(createdUri).build();
-        } catch (IResourceStore.ResourceStoreException e) {
-            log.error(e.getLocalizedMessage(), e);
-            throw new InternalServerErrorException(e.getLocalizedMessage(), e);
-        }
+        return create(behaviorStore, resourceURI, behaviorConfiguration);
     }
 
     @Override
     public void deleteBehaviorRuleSet(String id, Integer version) {
-        try {
-            behaviorStore.delete(id, version);
-        } catch (IResourceStore.ResourceStoreException e) {
-            log.error(e.getLocalizedMessage(), e);
-            throw new InternalServerErrorException(e.getLocalizedMessage(), e);
-        } catch (IResourceStore.ResourceModifiedException e) {
-            try {
-                IResourceStore.IResourceId currentId = behaviorStore.getCurrentResourceId(id);
-                throw RestUtilities.createConflictException(resourceURI, currentId);
-            } catch (IResourceStore.ResourceNotFoundException e1) {
-                throw new NotFoundException(e.getLocalizedMessage(), e);
-            }
-        } catch (IResourceStore.ResourceNotFoundException e) {
-            throw new NoLogWebApplicationException(Response.Status.NOT_FOUND);
-        }
+        delete(behaviorStore, resourceURI, id, version);
     }
 
     @Override

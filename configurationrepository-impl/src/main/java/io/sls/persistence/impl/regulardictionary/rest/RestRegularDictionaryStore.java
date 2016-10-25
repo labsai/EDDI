@@ -8,7 +8,6 @@ import io.sls.resources.rest.patch.PatchInstruction;
 import io.sls.resources.rest.regulardictionary.IRegularDictionaryStore;
 import io.sls.resources.rest.regulardictionary.IRestRegularDictionaryStore;
 import io.sls.resources.rest.regulardictionary.model.RegularDictionaryConfiguration;
-import io.sls.utilities.RestUtilities;
 import lombok.extern.slf4j.Slf4j;
 
 import javax.inject.Inject;
@@ -48,14 +47,7 @@ public class RestRegularDictionaryStore extends RestVersionInfo implements IRest
 
     @Override
     public RegularDictionaryConfiguration readRegularDictionary(String id, Integer version, String filter, String order, Integer index, Integer limit) {
-        try {
-            return regularDictionaryStore.read(id, version, filter, order, index, limit);
-        } catch (IResourceStore.ResourceNotFoundException e) {
-            throw new NotFoundException(e.getLocalizedMessage(), e);
-        } catch (IResourceStore.ResourceStoreException e) {
-            log.error(e.getLocalizedMessage(), e);
-            throw new InternalServerErrorException(e.getLocalizedMessage(), e);
-        }
+        return read(regularDictionaryStore, id, version);
     }
 
     @Override
@@ -72,53 +64,17 @@ public class RestRegularDictionaryStore extends RestVersionInfo implements IRest
 
     @Override
     public URI updateRegularDictionary(String id, Integer version, RegularDictionaryConfiguration regularDictionaryConfiguration) {
-        try {
-            Integer newVersion = regularDictionaryStore.update(id, version, regularDictionaryConfiguration);
-            return RestUtilities.createURI(resourceURI, id, versionQueryParam, newVersion);
-        } catch (IResourceStore.ResourceStoreException e) {
-            log.error(e.getLocalizedMessage(), e);
-            throw new InternalServerErrorException(e.getLocalizedMessage(), e);
-        } catch (IResourceStore.ResourceModifiedException e) {
-            try {
-                IResourceStore.IResourceId currentId = regularDictionaryStore.getCurrentResourceId(id);
-                throw RestUtilities.createConflictException(resourceURI, currentId);
-            } catch (IResourceStore.ResourceNotFoundException e1) {
-                throw new NotFoundException(e.getLocalizedMessage(), e);
-            }
-        } catch (IResourceStore.ResourceNotFoundException e) {
-            throw new NotFoundException(e.getLocalizedMessage(), e);
-        }
+        return update(regularDictionaryStore, resourceURI, id, version, regularDictionaryConfiguration);
     }
 
     @Override
     public Response createRegularDictionary(RegularDictionaryConfiguration regularDictionaryConfiguration) {
-        try {
-            IResourceStore.IResourceId resourceId = regularDictionaryStore.create(regularDictionaryConfiguration);
-            URI createdUri = RestUtilities.createURI(resourceURI, resourceId.getId(), versionQueryParam, resourceId.getVersion());
-            return Response.created(createdUri).entity(createdUri).build();
-        } catch (IResourceStore.ResourceStoreException e) {
-            log.error(e.getLocalizedMessage(), e);
-            throw new InternalServerErrorException(e.getLocalizedMessage(), e);
-        }
+        return create(regularDictionaryStore, resourceURI, regularDictionaryConfiguration);
     }
 
     @Override
     public void deleteRegularDictionary(String id, Integer version) {
-        try {
-            regularDictionaryStore.delete(id, version);
-        } catch (IResourceStore.ResourceStoreException e) {
-            log.error(e.getLocalizedMessage(), e);
-            throw new InternalServerErrorException(e.getLocalizedMessage(), e);
-        } catch (IResourceStore.ResourceModifiedException e) {
-            try {
-                IResourceStore.IResourceId currentId = regularDictionaryStore.getCurrentResourceId(id);
-                throw RestUtilities.createConflictException(resourceURI, currentId);
-            } catch (IResourceStore.ResourceNotFoundException e1) {
-                throw new NotFoundException(e.getLocalizedMessage(), e);
-            }
-        } catch (IResourceStore.ResourceNotFoundException e) {
-            throw new NotFoundException(e.getLocalizedMessage(), e);
-        }
+        delete(regularDictionaryStore, resourceURI, id, version);
     }
 
     @Override

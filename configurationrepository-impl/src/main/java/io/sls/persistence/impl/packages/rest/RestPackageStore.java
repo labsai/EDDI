@@ -12,7 +12,6 @@ import lombok.extern.slf4j.Slf4j;
 
 import javax.inject.Inject;
 import javax.ws.rs.InternalServerErrorException;
-import javax.ws.rs.NotFoundException;
 import javax.ws.rs.WebApplicationException;
 import javax.ws.rs.core.Response;
 import java.net.URI;
@@ -21,7 +20,7 @@ import java.util.Map;
 
 @Slf4j
 public class RestPackageStore extends RestVersionInfo implements IRestPackageStore {
-    public static final String KEY_URI = "uri";
+    private static final String KEY_URI = "uri";
     private static final String KEY_CONFIG = "config";
     public static final String KEY_EXTENSIONS = "extensions";
     private final IPackageStore packageStore;
@@ -49,34 +48,12 @@ public class RestPackageStore extends RestVersionInfo implements IRestPackageSto
 
     @Override
     public PackageConfiguration readPackage(String id, Integer version) {
-        try {
-            return packageStore.read(id, version);
-        } catch (IResourceStore.ResourceNotFoundException e) {
-            throw new NotFoundException(e.getLocalizedMessage(), e);
-        } catch (IResourceStore.ResourceStoreException e) {
-            log.error(e.getLocalizedMessage(), e);
-            throw new InternalServerErrorException(e.getLocalizedMessage(), e);
-        }
+        return read(packageStore, id, version);
     }
 
     @Override
     public URI updatePackage(String id, Integer version, PackageConfiguration packageConfiguration) {
-        try {
-            Integer newVersion = packageStore.update(id, version, packageConfiguration);
-            return RestUtilities.createURI(resourceURI, id, versionQueryParam, newVersion);
-        } catch (IResourceStore.ResourceStoreException e) {
-            log.error(e.getLocalizedMessage(), e);
-            throw new InternalServerErrorException(e.getLocalizedMessage(), e);
-        } catch (IResourceStore.ResourceModifiedException e) {
-            try {
-                IResourceStore.IResourceId currentId = packageStore.getCurrentResourceId(id);
-                throw RestUtilities.createConflictException(resourceURI, currentId);
-            } catch (IResourceStore.ResourceNotFoundException e1) {
-                throw new NotFoundException(e.getLocalizedMessage(), e);
-            }
-        } catch (IResourceStore.ResourceNotFoundException e) {
-            throw new NotFoundException(e.getLocalizedMessage(), e);
-        }
+        return update(packageStore, resourceURI, id, version, packageConfiguration);
     }
 
     @Override
@@ -129,33 +106,12 @@ public class RestPackageStore extends RestVersionInfo implements IRestPackageSto
 
     @Override
     public Response createPackage(PackageConfiguration packageConfiguration) {
-        try {
-            IResourceStore.IResourceId resourceId = packageStore.create(packageConfiguration);
-            URI createdUri = RestUtilities.createURI(resourceURI, resourceId.getId(), versionQueryParam, resourceId.getVersion());
-            return Response.created(createdUri).entity(createdUri).build();
-        } catch (IResourceStore.ResourceStoreException e) {
-            log.error(e.getLocalizedMessage(), e);
-            throw new InternalServerErrorException(e.getLocalizedMessage(), e);
-        }
+        return create(packageStore, resourceURI, packageConfiguration);
     }
 
     @Override
     public void deletePackage(String id, Integer version) {
-        try {
-            packageStore.delete(id, version);
-        } catch (IResourceStore.ResourceStoreException e) {
-            log.error(e.getLocalizedMessage(), e);
-            throw new InternalServerErrorException(e.getLocalizedMessage(), e);
-        } catch (IResourceStore.ResourceModifiedException e) {
-            try {
-                IResourceStore.IResourceId currentId = packageStore.getCurrentResourceId(id);
-                throw RestUtilities.createConflictException(resourceURI, currentId);
-            } catch (IResourceStore.ResourceNotFoundException e1) {
-                throw new NotFoundException(e.getLocalizedMessage(), e);
-            }
-        } catch (IResourceStore.ResourceNotFoundException e) {
-            throw new NotFoundException(e.getLocalizedMessage(), e);
-        }
+        delete(packageStore, resourceURI, id, version);
     }
 
     @Override
