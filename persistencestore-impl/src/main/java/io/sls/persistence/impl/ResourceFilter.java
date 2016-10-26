@@ -34,16 +34,21 @@ public class ResourceFilter<T> implements IResourceFilter<T> {
     private DBCollection collection;
     private IResourceStore<T> resourceStore;
     private IPermissionStore permissionStore;
+    private Class<T> documentType;
     private Map<String, Pattern> regexCache;
     private final IDocumentBuilder documentBuilder;
     private IGroupStore groupStore;
     private final IUserStore userStore;
 
-    public ResourceFilter(DBCollection collection, IResourceStore<T> resourceStore, IPermissionStore permissionStore, IUserStore userStore, IGroupStore groupStore, IDocumentBuilder documentBuilder) {
+    public ResourceFilter(DBCollection collection, IResourceStore<T> resourceStore,
+                          IPermissionStore permissionStore, IUserStore userStore,
+                          IGroupStore groupStore, IDocumentBuilder documentBuilder, Class<T> documentType) {
         this.collection = collection;
         this.resourceStore = resourceStore;
         this.permissionStore = permissionStore;
+        this.documentType = documentType;
         this.regexCache = new HashMap<>();
+
         this.documentBuilder = documentBuilder;
         this.userStore = userStore;
         this.groupStore = groupStore;
@@ -109,7 +114,7 @@ public class ResourceFilter<T> implements IResourceFilter<T> {
         QueryBuilder retQuery = new QueryBuilder();
 
         for (QueryFilters queryFilters : allQueryFilters) {
-            List<DBObject> dbObjects = new LinkedList<DBObject>();
+            List<DBObject> dbObjects = new LinkedList<>();
             for (QueryFilter queryFilter : queryFilters.getQueryFilters()) {
                 if (queryFilter.getFilter() instanceof String) {
                     Pattern resourcePattern = getPatternForRegex((String) queryFilter.getFilter());
@@ -148,9 +153,7 @@ public class ResourceFilter<T> implements IResourceFilter<T> {
 
     private T buildDocument(DBObject descriptor) throws IResourceStore.ResourceStoreException, IResourceStore.ResourceNotFoundException, IOException {
         descriptor.removeField("_id");
-        T document = (T) documentBuilder.build(descriptor.toString());
-
-        return document;
+        return documentBuilder.build(descriptor.toString(), documentType);
     }
 
     private Permissions getPermissions(String id) throws IResourceStore.ResourceStoreException, IResourceStore.ResourceNotFoundException {

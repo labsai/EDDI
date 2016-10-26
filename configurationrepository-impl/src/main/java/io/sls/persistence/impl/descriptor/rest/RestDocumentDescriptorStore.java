@@ -1,7 +1,6 @@
 package io.sls.persistence.impl.descriptor.rest;
 
 import io.sls.persistence.IResourceStore;
-import io.sls.persistence.impl.resources.rest.RestVersionInfo;
 import io.sls.resources.rest.documentdescriptor.IDocumentDescriptorStore;
 import io.sls.resources.rest.documentdescriptor.IRestDocumentDescriptorStore;
 import io.sls.resources.rest.documentdescriptor.model.DocumentDescriptor;
@@ -18,7 +17,7 @@ import java.util.List;
  * @author ginccc
  */
 @Slf4j
-public class RestDocumentDescriptorStore extends RestVersionInfo implements IRestDocumentDescriptorStore {
+public class RestDocumentDescriptorStore implements IRestDocumentDescriptorStore {
     private final IDocumentDescriptorStore documentDescriptorStore;
 
     @Inject
@@ -58,12 +57,24 @@ public class RestDocumentDescriptorStore extends RestVersionInfo implements IRes
 
     @Override
     public void patchDescriptor(String id, Integer version, PatchInstruction<DocumentDescriptor> patchInstruction) {
-        patch(documentDescriptorStore, id, version, patchInstruction);
-    }
+        try {
+            DocumentDescriptor documentDescriptor = documentDescriptorStore.readDescriptor(id, version);
+            DocumentDescriptor simpleDescriptor = patchInstruction.getDocument();
 
+            if (patchInstruction.getOperation().equals(PatchInstruction.PatchOperation.SET)) {
+                documentDescriptor.setName(simpleDescriptor.getName());
+                documentDescriptor.setDescription(simpleDescriptor.getDescription());
+            } else {
+                documentDescriptor.setName("");
+                documentDescriptor.setDescription("");
+            }
 
-    @Override
-    protected IResourceStore.IResourceId getCurrentResourceId(String id) throws IResourceStore.ResourceNotFoundException {
-        return documentDescriptorStore.getCurrentResourceId(id);
+            documentDescriptorStore.setDescriptor(id, version, documentDescriptor);
+        } catch (IResourceStore.ResourceStoreException e) {
+            log.error(e.getLocalizedMessage(), e);
+            throw new InternalServerErrorException(e.getLocalizedMessage(), e);
+        } catch (IResourceStore.ResourceNotFoundException e) {
+            throw new NotFoundException(e.getLocalizedMessage(), e);
+        }
     }
 }

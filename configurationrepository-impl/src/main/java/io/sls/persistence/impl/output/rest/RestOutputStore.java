@@ -25,13 +25,14 @@ import java.util.List;
  * @author ginccc
  */
 @Slf4j
-public class RestOutputStore extends RestVersionInfo implements IRestOutputStore {
+public class RestOutputStore extends RestVersionInfo<OutputConfigurationSet> implements IRestOutputStore {
     private final IOutputStore outputStore;
     private final IDocumentDescriptorStore documentDescriptorStore;
 
     @Inject
     public RestOutputStore(IOutputStore outputStore,
                            IDocumentDescriptorStore documentDescriptorStore) {
+        super(resourceURI, outputStore);
         this.outputStore = outputStore;
         this.documentDescriptorStore = documentDescriptorStore;
     }
@@ -103,12 +104,12 @@ public class RestOutputStore extends RestVersionInfo implements IRestOutputStore
 
     @Override
     public Response createOutputSet(OutputConfigurationSet outputConfigurationSet) {
-        return create(outputStore, resourceURI, outputConfigurationSet);
+        return create(outputConfigurationSet);
     }
 
     @Override
     public void deleteOutputSet(String id, Integer version) {
-        delete(outputStore, resourceURI, id, version);
+        delete(id, version);
     }
 
     @Override

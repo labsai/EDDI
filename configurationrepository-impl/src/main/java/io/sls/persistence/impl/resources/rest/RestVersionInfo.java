@@ -2,9 +2,6 @@ package io.sls.persistence.impl.resources.rest;
 
 import io.sls.persistence.IResourceStore;
 import io.sls.resources.rest.IRestVersionInfo;
-import io.sls.resources.rest.documentdescriptor.IDocumentDescriptorStore;
-import io.sls.resources.rest.documentdescriptor.model.DocumentDescriptor;
-import io.sls.resources.rest.patch.PatchInstruction;
 import io.sls.utilities.RestUtilities;
 import lombok.extern.slf4j.Slf4j;
 
@@ -17,7 +14,15 @@ import java.net.URI;
  * @author ginccc
  */
 @Slf4j
-public abstract class RestVersionInfo implements IRestVersionInfo {
+public abstract class RestVersionInfo<T> implements IRestVersionInfo {
+    private final String resourceURI;
+    private final IResourceStore<T> resourceStore;
+
+    public RestVersionInfo(String resourceURI, IResourceStore<T> resourceStore) {
+        this.resourceURI = resourceURI;
+        this.resourceStore = resourceStore;
+    }
+
     @Override
     public Integer getCurrentVersion(String id) {
         try {
@@ -28,7 +33,7 @@ public abstract class RestVersionInfo implements IRestVersionInfo {
         }
     }
 
-    public Response create(IResourceStore resourceStore, String resourceURI, Object obj) {
+    public Response create(T obj) {
         try {
             IResourceStore.IResourceId resourceId = resourceStore.create(obj);
             URI createdUri = RestUtilities.createURI(resourceURI, resourceId.getId(), versionQueryParam, resourceId.getVersion());
@@ -39,7 +44,7 @@ public abstract class RestVersionInfo implements IRestVersionInfo {
         }
     }
 
-    protected <T> T read(IResourceStore<T> resourceStore, String id, Integer version) {
+    protected T read(String id, Integer version) {
         try {
             return resourceStore.read(id, version);
         } catch (IResourceStore.ResourceNotFoundException e) {
@@ -50,7 +55,7 @@ public abstract class RestVersionInfo implements IRestVersionInfo {
         }
     }
 
-    public URI update(IResourceStore resourceStore, String resourceURI, String id, Integer version, Object document) {
+    public URI update(String id, Integer version, T document) {
         try {
             Integer newVersion = resourceStore.update(id, version, document);
             return RestUtilities.createURI(resourceURI, id, versionQueryParam, newVersion);
@@ -69,7 +74,7 @@ public abstract class RestVersionInfo implements IRestVersionInfo {
         }
     }
 
-    public void delete(IResourceStore resourceStore, String resourceURI, String id, Integer version) {
+    public void delete(String id, Integer version) {
         try {
             resourceStore.delete(id, version);
         } catch (IResourceStore.ResourceStoreException e) {
@@ -82,28 +87,6 @@ public abstract class RestVersionInfo implements IRestVersionInfo {
             } catch (IResourceStore.ResourceNotFoundException e1) {
                 throw new NotFoundException(e.getLocalizedMessage(), e);
             }
-        } catch (IResourceStore.ResourceNotFoundException e) {
-            throw new NotFoundException(e.getLocalizedMessage(), e);
-        }
-    }
-
-    public void patch(IDocumentDescriptorStore documentDescriptorStore, String id, Integer version, PatchInstruction<DocumentDescriptor> patchInstruction) {
-        try {
-            DocumentDescriptor documentDescriptor = documentDescriptorStore.readDescriptor(id, version);
-            DocumentDescriptor simpleDescriptor = patchInstruction.getDocument();
-
-            if (patchInstruction.getOperation().equals(PatchInstruction.PatchOperation.SET)) {
-                documentDescriptor.setName(simpleDescriptor.getName());
-                documentDescriptor.setDescription(simpleDescriptor.getDescription());
-            } else {
-                documentDescriptor.setName("");
-                documentDescriptor.setDescription("");
-            }
-
-            documentDescriptorStore.setDescriptor(id, version, documentDescriptor);
-        } catch (IResourceStore.ResourceStoreException e) {
-            log.error(e.getLocalizedMessage(), e);
-            throw new InternalServerErrorException(e.getLocalizedMessage(), e);
         } catch (IResourceStore.ResourceNotFoundException e) {
             throw new NotFoundException(e.getLocalizedMessage(), e);
         }

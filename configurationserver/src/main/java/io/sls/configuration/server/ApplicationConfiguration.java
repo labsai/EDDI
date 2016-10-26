@@ -1,11 +1,11 @@
 package io.sls.configuration.server;
 
-import io.sls.configuration.jackson.JacksonContextResolver;
 import io.sls.permission.interceptor.PermissionRequestInterceptor;
 import io.sls.permission.interceptor.PermissionResponseInterceptor;
 import io.sls.persistence.interceptor.DocumentDescriptorInterceptor;
 import io.sls.server.exception.IllegalArgumentExceptionMapper;
 import io.sls.server.rest.providers.URIMessageBodyProvider;
+import io.sls.server.rest.resolvers.JacksonContextResolver;
 import io.sls.staticresources.impl.interceptor.ContentTypeInterceptor;
 
 import javax.ws.rs.core.Application;

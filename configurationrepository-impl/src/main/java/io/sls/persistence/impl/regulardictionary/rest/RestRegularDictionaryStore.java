@@ -22,13 +22,14 @@ import java.util.List;
  * @author ginccc
  */
 @Slf4j
-public class RestRegularDictionaryStore extends RestVersionInfo implements IRestRegularDictionaryStore {
+public class RestRegularDictionaryStore extends RestVersionInfo<RegularDictionaryConfiguration> implements IRestRegularDictionaryStore {
     private final IRegularDictionaryStore regularDictionaryStore;
     private final IDocumentDescriptorStore documentDescriptorStore;
 
     @Inject
     public RestRegularDictionaryStore(IRegularDictionaryStore regularDictionaryStore,
                                       IDocumentDescriptorStore documentDescriptorStore) {
+        super(resourceURI, regularDictionaryStore);
         this.regularDictionaryStore = regularDictionaryStore;
         this.documentDescriptorStore = documentDescriptorStore;
     }
@@ -47,7 +48,7 @@ public class RestRegularDictionaryStore extends RestVersionInfo implements IRest
 
     @Override
     public RegularDictionaryConfiguration readRegularDictionary(String id, Integer version, String filter, String order, Integer index, Integer limit) {
-        return read(regularDictionaryStore, id, version);
+        return read(id, version);
     }
 
     @Override
@@ -64,17 +65,17 @@ public class RestRegularDictionaryStore extends RestVersionInfo implements IRest
 
     @Override
     public URI updateRegularDictionary(String id, Integer version, RegularDictionaryConfiguration regularDictionaryConfiguration) {
-        return update(regularDictionaryStore, resourceURI, id, version, regularDictionaryConfiguration);
+        return update(id, version, regularDictionaryConfiguration);
     }
 
     @Override
     public Response createRegularDictionary(RegularDictionaryConfiguration regularDictionaryConfiguration) {
-        return create(regularDictionaryStore, resourceURI, regularDictionaryConfiguration);
+        return create(regularDictionaryConfiguration);
     }
 
     @Override
     public void deleteRegularDictionary(String id, Integer version) {
-        delete(regularDictionaryStore, resourceURI, id, version);
+        delete(id, version);
     }
 
     @Override

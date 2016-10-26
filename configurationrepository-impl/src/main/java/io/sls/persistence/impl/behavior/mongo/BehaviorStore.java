@@ -8,12 +8,9 @@ import io.sls.resources.rest.behavior.model.BehaviorConfiguration;
 import io.sls.resources.rest.behavior.model.BehaviorGroupConfiguration;
 import io.sls.resources.rest.behavior.model.BehaviorRuleConfiguration;
 import io.sls.serialization.IDocumentBuilder;
-import io.sls.serialization.JSONSerialization;
 import io.sls.utilities.RuntimeUtilities;
-import org.codehaus.jackson.type.TypeReference;
 
 import javax.inject.Inject;
-import java.io.IOException;
 import java.util.Collections;
 import java.util.LinkedList;
 import java.util.List;
@@ -27,17 +24,13 @@ public class BehaviorStore implements IBehaviorStore {
     private final String collectionName = "behaviorrulesets";
 
     @Inject
-    public BehaviorStore(DB database) {
+    public BehaviorStore(DB database, IDocumentBuilder documentBuilder) {
         RuntimeUtilities.checkNotNull(database, "database");
 
-        MongoResourceStorage<BehaviorConfiguration> resourceStorage = new MongoResourceStorage<BehaviorConfiguration>(database, collectionName, new IDocumentBuilder<BehaviorConfiguration>() {
-            @Override
-            public BehaviorConfiguration build(String doc) throws IOException {
-                return JSONSerialization.deserialize(doc, new TypeReference<BehaviorConfiguration>() {});
-            }
-        });
+        MongoResourceStorage<BehaviorConfiguration> resourceStorage =
+                new MongoResourceStorage<>(database, collectionName, documentBuilder, BehaviorConfiguration.class);
 
-        this.behaviorResourceStore = new HistorizedResourceStore<BehaviorConfiguration>(resourceStorage);
+        this.behaviorResourceStore = new HistorizedResourceStore<>(resourceStorage);
     }
 
     @Override
@@ -75,7 +68,7 @@ public class BehaviorStore implements IBehaviorStore {
 
     @Override
     public List<String> readBehaviorRuleNames(String id, Integer version, String filter, String order, Integer limit) throws ResourceStoreException, ResourceNotFoundException {
-        List<String> retBehaviorRuleNames = new LinkedList<String>();
+        List<String> retBehaviorRuleNames = new LinkedList<>();
         BehaviorConfiguration behaviorConfiguration = read(id, version);
         for (BehaviorGroupConfiguration groupConfiguration : behaviorConfiguration.getBehaviorGroups()) {
             List<BehaviorRuleConfiguration> behaviorRules = groupConfiguration.getBehaviorRules();

@@ -19,10 +19,9 @@ import java.util.List;
 import java.util.Map;
 
 @Slf4j
-public class RestPackageStore extends RestVersionInfo implements IRestPackageStore {
+public class RestPackageStore extends RestVersionInfo<PackageConfiguration> implements IRestPackageStore {
     private static final String KEY_URI = "uri";
     private static final String KEY_CONFIG = "config";
-    public static final String KEY_EXTENSIONS = "extensions";
     private final IPackageStore packageStore;
     private final IDocumentDescriptorStore documentDescriptorStore;
 
@@ -30,6 +29,7 @@ public class RestPackageStore extends RestVersionInfo implements IRestPackageSto
     @Inject
     public RestPackageStore(IPackageStore packageStore,
                             IDocumentDescriptorStore documentDescriptorStore) {
+        super(resourceURI, packageStore);
         this.packageStore = packageStore;
         this.documentDescriptorStore = documentDescriptorStore;
     }
@@ -48,12 +48,12 @@ public class RestPackageStore extends RestVersionInfo implements IRestPackageSto
 
     @Override
     public PackageConfiguration readPackage(String id, Integer version) {
-        return read(packageStore, id, version);
+        return read(id, version);
     }
 
     @Override
     public URI updatePackage(String id, Integer version, PackageConfiguration packageConfiguration) {
-        return update(packageStore, resourceURI, id, version, packageConfiguration);
+        return update(id, version, packageConfiguration);
     }
 
     @Override
@@ -106,12 +106,12 @@ public class RestPackageStore extends RestVersionInfo implements IRestPackageSto
 
     @Override
     public Response createPackage(PackageConfiguration packageConfiguration) {
-        return create(packageStore, resourceURI, packageConfiguration);
+        return create(packageConfiguration);
     }
 
     @Override
     public void deletePackage(String id, Integer version) {
-        delete(packageStore, resourceURI, id, version);
+        delete(id, version);
     }
 
     @Override

@@ -22,13 +22,14 @@ import java.util.List;
  * @author ginccc
  */
 @Slf4j
-public class RestBotStore extends RestVersionInfo implements IRestBotStore {
+public class RestBotStore extends RestVersionInfo<BotConfiguration> implements IRestBotStore {
     private final IBotStore botStore;
     private final IDocumentDescriptorStore documentDescriptorStore;
 
     @Inject
     public RestBotStore(IBotStore botStore,
                         IDocumentDescriptorStore documentDescriptorStore) {
+        super(resourceURI, botStore);
         this.botStore = botStore;
         this.documentDescriptorStore = documentDescriptorStore;
     }
@@ -47,12 +48,12 @@ public class RestBotStore extends RestVersionInfo implements IRestBotStore {
 
     @Override
     public BotConfiguration readBot(String id, Integer version) {
-        return read(botStore, id, version);
+        return read(id, version);
     }
 
     @Override
     public URI updateBot(String id, Integer version, BotConfiguration botConfiguration) {
-        return update(botStore, resourceURI, id, version, botConfiguration);
+        return update(id, version, botConfiguration);
     }
 
     @Override
@@ -81,12 +82,12 @@ public class RestBotStore extends RestVersionInfo implements IRestBotStore {
 
     @Override
     public Response createBot(BotConfiguration botConfiguration) {
-        return create(botStore, resourceURI, botConfiguration);
+        return create(botConfiguration);
     }
 
     @Override
     public void deleteBot(String id, Integer version) {
-        delete(botStore, resourceURI, id, version);
+        delete(id, version);
     }
 
     @Override

@@ -21,13 +21,14 @@ import java.util.List;
  * @author ginccc
  */
 @Slf4j
-public class RestExtensionStore extends RestVersionInfo implements IRestExtensionStore {
+public class RestExtensionStore extends RestVersionInfo<ExtensionDefinition> implements IRestExtensionStore {
     private final IExtensionStore extensionStore;
     private final IDocumentDescriptorStore documentDescriptorStore;
 
     @Inject
     public RestExtensionStore(IExtensionStore extensionStore,
                               IDocumentDescriptorStore documentDescriptorStore) {
+        super(resourceURI, extensionStore);
         this.extensionStore = extensionStore;
         this.documentDescriptorStore = documentDescriptorStore;
     }
@@ -55,22 +56,22 @@ public class RestExtensionStore extends RestVersionInfo implements IRestExtensio
 
     @Override
     public ExtensionDefinition readExtension(String id, Integer version) {
-        return read(extensionStore, id, version);
+        return read(id, version);
     }
 
     @Override
     public URI updateExtension(String id, Integer version, ExtensionDefinition extension) {
-        return update(extensionStore, resourceURI, id, version, extension);
+        return update(id, version, extension);
     }
 
     @Override
     public Response createExtension(ExtensionDefinition extension) {
-        return create(extensionStore, resourceURI, extension);
+        return create(extension);
     }
 
     @Override
     public void deleteExtension(String id, Integer version) {
-        delete(extensionStore, resourceURI, id, version);
+        delete(id, version);
     }
 
     @Override

@@ -4,7 +4,6 @@ import com.mongodb.*;
 import com.mongodb.util.JSON;
 import io.sls.persistence.IResourceStorage;
 import io.sls.serialization.IDocumentBuilder;
-import io.sls.serialization.JSONSerialization;
 import io.sls.utilities.RuntimeUtilities;
 import org.bson.types.ObjectId;
 
@@ -19,30 +18,33 @@ public class MongoResourceStorage<T> implements IResourceStorage<T> {
     private static final String DELETED_FIELD = "_deleted";
 
     private static final String HISTORY_POSTFIX = ".history";
+    private final Class<T> documentType;
 
     private DBCollection currentCollection;
     private DBCollection historyCollection;
-    private IDocumentBuilder<T> documentBuilder;
+    private IDocumentBuilder documentBuilder;
 
-    public MongoResourceStorage(DB database, String collectionName, IDocumentBuilder<T> documentBuilder) {
+    public MongoResourceStorage(DB database, String collectionName,
+                                IDocumentBuilder documentBuilder,
+                                Class<T> documentType) {
+        this.documentType = documentType;
         RuntimeUtilities.checkNotNull(database, "database");
 
         this.currentCollection = database.getCollection(collectionName);
         this.historyCollection = database.getCollection(collectionName + HISTORY_POSTFIX);
-
         this.documentBuilder = documentBuilder;
     }
 
     @Override
     public IResource<T> newResource(T content) throws IOException {
-        BasicDBObject doc = (BasicDBObject) JSON.parse(JSONSerialization.serialize(content));
+        BasicDBObject doc = (BasicDBObject) JSON.parse(documentBuilder.toString(content));
         doc.put(VERSION_FIELD, 1);
         return new Resource(doc);
     }
 
     @Override
     public IResource<T> newResource(String id, Integer version, T content) throws IOException {
-        BasicDBObject doc = (BasicDBObject) JSON.parse(JSONSerialization.serialize(content));
+        BasicDBObject doc = (BasicDBObject) JSON.parse(documentBuilder.toString(content));
 
         Resource resource = new Resource(doc);
         resource.setVersion(version);
@@ -202,7 +204,7 @@ public class MongoResourceStorage<T> implements IResourceStorage<T> {
 
         @Override
         public T getData() throws IOException {
-            return documentBuilder.build(doc.toString());
+            return documentBuilder.build(doc.toString(), documentType);
         }
 
         @Override
@@ -233,7 +235,7 @@ public class MongoResourceStorage<T> implements IResourceStorage<T> {
 
         @Override
         public T getData() throws IOException {
-            return documentBuilder.build(doc.toString());
+            return documentBuilder.build(doc.toString(), documentType);
         }
 
         @Override

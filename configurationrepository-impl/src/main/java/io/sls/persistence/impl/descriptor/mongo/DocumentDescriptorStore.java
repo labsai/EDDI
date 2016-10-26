@@ -6,9 +6,8 @@ import io.sls.permission.IPermissionStore;
 import io.sls.persistence.impl.DescriptorStore;
 import io.sls.resources.rest.documentdescriptor.IDocumentDescriptorStore;
 import io.sls.resources.rest.documentdescriptor.model.DocumentDescriptor;
-import io.sls.serialization.JSONSerialization;
+import io.sls.serialization.IDocumentBuilder;
 import io.sls.user.IUserStore;
-import org.codehaus.jackson.type.TypeReference;
 
 import javax.inject.Inject;
 
@@ -18,9 +17,7 @@ import javax.inject.Inject;
 public class DocumentDescriptorStore extends DescriptorStore<DocumentDescriptor> implements IDocumentDescriptorStore {
 
     @Inject
-    public DocumentDescriptorStore(DB database, IPermissionStore permissionStore, IUserStore userStore, IGroupStore groupStore) {
-        super(database, permissionStore, userStore, groupStore,
-                doc -> JSONSerialization.deserialize(doc, new TypeReference<DocumentDescriptor>() {
-                }));
+    public DocumentDescriptorStore(DB database, IPermissionStore permissionStore, IUserStore userStore, IGroupStore groupStore, IDocumentBuilder documentBuilder) {
+        super(database, permissionStore, userStore, groupStore, documentBuilder, DocumentDescriptor.class);
     }
 }

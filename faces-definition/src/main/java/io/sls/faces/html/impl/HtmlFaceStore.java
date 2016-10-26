@@ -8,9 +8,9 @@ import com.mongodb.util.JSON;
 import io.sls.faces.html.IHtmlFaceStore;
 import io.sls.faces.html.model.HtmlFace;
 import io.sls.persistence.IResourceStore;
-import io.sls.serialization.JSONSerialization;
+import io.sls.serialization.IJsonSerialization;
+import lombok.extern.slf4j.Slf4j;
 import org.bson.types.ObjectId;
-import org.codehaus.jackson.type.TypeReference;
 
 import javax.inject.Inject;
 import java.io.IOException;
@@ -18,13 +18,16 @@ import java.io.IOException;
 /**
  * @author ginccc
  */
+@Slf4j
 public class HtmlFaceStore implements IHtmlFaceStore {
-    public static final String COLLECTION_FACES = "faces";
+    private static final String COLLECTION_FACES = "faces";
     private final DBCollection collection;
+    private final IJsonSerialization jsonSerialization;
 
     @Inject
-    public HtmlFaceStore(DB database) {
+    public HtmlFaceStore(DB database, IJsonSerialization jsonSerialization) {
         collection = database.getCollection(COLLECTION_FACES);
+        this.jsonSerialization = jsonSerialization;
     }
 
     @Override
@@ -88,9 +91,10 @@ public class HtmlFaceStore implements IHtmlFaceStore {
 
     private String serialize(HtmlFace face) throws IResourceStore.ResourceStoreException {
         try {
-            return JSONSerialization.serialize(face);
+            return jsonSerialization.serialize(face);
         } catch (IOException e) {
-            throw new IResourceStore.ResourceStoreException("Cannot serialize HtmlFace entity into json.");
+            log.debug(e.getLocalizedMessage(), e);
+            throw new IResourceStore.ResourceStoreException("Cannot serialize HtmlFace entity into json.", e);
         }
     }
 
@@ -101,10 +105,10 @@ public class HtmlFaceStore implements IHtmlFaceStore {
 
     private HtmlFace convert(DBObject userDocument) throws IResourceStore.ResourceStoreException {
         try {
-            return JSONSerialization.deserialize(userDocument.toString(), new TypeReference<HtmlFace>() {
-            });
+            return jsonSerialization.deserialize(userDocument.toString(), HtmlFace.class);
         } catch (IOException e) {
-            throw new IResourceStore.ResourceStoreException("Cannot parse json structure into HtmlFace entity.");
+            log.debug(e.getLocalizedMessage(), e);
+            throw new IResourceStore.ResourceStoreException("Cannot parse json structure into HtmlFace entity.", e);
         }
     }
 }

@@ -14,12 +14,12 @@ import io.sls.permission.model.Permissions;
 import io.sls.permission.utilities.PermissionUtilities;
 import io.sls.persistence.IResourceStore;
 import io.sls.runtime.ThreadContext;
-import io.sls.serialization.JSONSerialization;
+import io.sls.serialization.IJsonSerialization;
 import io.sls.user.IUserStore;
 import io.sls.user.impl.utilities.UserUtilities;
 import io.sls.utilities.SecurityUtilities;
+import lombok.extern.slf4j.Slf4j;
 import org.bson.types.ObjectId;
-import org.codehaus.jackson.type.TypeReference;
 
 import javax.inject.Inject;
 import java.io.IOException;
@@ -30,15 +30,18 @@ import java.util.List;
 /**
  * @author ginccc
  */
+@Slf4j
 public class PermissionStore implements IPermissionStore {
-    public static final String COLLECTION_PERMISSIONS = "permissions";
+    private static final String COLLECTION_PERMISSIONS = "permissions";
     private final DBCollection collection;
+    private final IJsonSerialization jsonSerialization;
     private IUserStore userStore;
     private IGroupStore groupStore;
 
     @Inject
-    public PermissionStore(DB database, IUserStore userStore, IGroupStore groupStore) {
+    public PermissionStore(DB database, IJsonSerialization jsonSerialization, IUserStore userStore, IGroupStore groupStore) {
         collection = database.getCollection(COLLECTION_PERMISSIONS);
+        this.jsonSerialization = jsonSerialization;
         this.userStore = userStore;
         this.groupStore = groupStore;
     }
@@ -57,12 +60,10 @@ public class PermissionStore implements IPermissionStore {
 
             permissionsDocument.removeField("_id");
 
-            Permissions permissions = JSONSerialization.deserialize(permissionsDocument.toString(), new TypeReference<Permissions>() {
-            });
-
-            return permissions;
+            return jsonSerialization.deserialize(permissionsDocument.toString(), Permissions.class);
         } catch (IOException e) {
-            throw new IResourceStore.ResourceStoreException("Cannot parse json structure into Permissions entity.");
+            log.debug(e.getLocalizedMessage(), e);
+            throw new IResourceStore.ResourceStoreException("Cannot parse json structure into Permissions entity.", e);
         }
     }
 
@@ -117,12 +118,12 @@ public class PermissionStore implements IPermissionStore {
 
             permissionsDocument.removeField("_id");
 
-            Permissions permissions = JSONSerialization.deserialize(permissionsDocument.toString(), new TypeReference<Permissions>() {
-            });
+            Permissions permissions = jsonSerialization.deserialize(permissionsDocument.toString(), Permissions.class);
 
             createPermissions(toResourceId, permissions);
         } catch (IOException e) {
-            throw new IResourceStore.ResourceStoreException("Cannot parse json structure into Permissions entity.");
+            log.debug(e.getLocalizedMessage(), e);
+            throw new IResourceStore.ResourceStoreException("Cannot parse json structure into Permissions entity.", e);
         }
     }
 
@@ -138,9 +139,10 @@ public class PermissionStore implements IPermissionStore {
 
     private String serialize(Permissions permissions) throws IResourceStore.ResourceStoreException {
         try {
-            return JSONSerialization.serialize(permissions);
+            return jsonSerialization.serialize(permissions);
         } catch (IOException e) {
-            throw new IResourceStore.ResourceStoreException("Cannot serialize User entity into json.");
+            log.debug(e.getLocalizedMessage(), e);
+            throw new IResourceStore.ResourceStoreException("Cannot serialize User entity into json.", e);
         }
     }
 }

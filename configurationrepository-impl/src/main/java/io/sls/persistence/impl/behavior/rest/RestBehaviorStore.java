@@ -24,13 +24,14 @@ import java.util.List;
  * @author ginccc
  */
 @Slf4j
-public class RestBehaviorStore extends RestVersionInfo implements IRestBehaviorStore {
+public class RestBehaviorStore extends RestVersionInfo<BehaviorConfiguration> implements IRestBehaviorStore {
     private final IBehaviorStore behaviorStore;
     private final IDocumentDescriptorStore documentDescriptorStore;
 
     @Inject
     public RestBehaviorStore(IBehaviorStore behaviorStore,
                              IDocumentDescriptorStore documentDescriptorStore) {
+        super(resourceURI, behaviorStore);
         this.behaviorStore = behaviorStore;
         this.documentDescriptorStore = documentDescriptorStore;
     }
@@ -49,7 +50,7 @@ public class RestBehaviorStore extends RestVersionInfo implements IRestBehaviorS
 
     @Override
     public BehaviorConfiguration readBehaviorRuleSet(String id, Integer version) {
-        return read(behaviorStore, id, version);
+        return read(id, version);
     }
 
     @Override
@@ -74,12 +75,12 @@ public class RestBehaviorStore extends RestVersionInfo implements IRestBehaviorS
 
     @Override
     public Response createBehaviorRuleSet(BehaviorConfiguration behaviorConfiguration) {
-        return create(behaviorStore, resourceURI, behaviorConfiguration);
+        return create(behaviorConfiguration);
     }
 
     @Override
     public void deleteBehaviorRuleSet(String id, Integer version) {
-        delete(behaviorStore, resourceURI, id, version);
+        delete(id, version);
     }
 
     @Override
