@@ -17,7 +17,6 @@ import java.util.List;
 @Path("/packagestore/packages")
 public interface IRestPackageStore extends IRestVersionInfo {
     String resourceURI = "resource://io.sls.package/packagestore/packages/";
-    String versionQueryParam = "?version=";
 
     @GET
     @GZIP

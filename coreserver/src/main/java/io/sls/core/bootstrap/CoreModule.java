@@ -5,6 +5,8 @@ import com.google.inject.multibindings.MapBinder;
 import io.sls.botmarklet.rest.IRestBotmarklet;
 import io.sls.botmarklet.rest.impl.RestBotmarklet;
 import io.sls.core.behavior.BehaviorRulesEvaluationTask;
+import io.sls.core.behavior.BehaviorSerialization;
+import io.sls.core.behavior.IBehaviorSerialization;
 import io.sls.core.lifecycle.ILifecycleTask;
 import io.sls.core.media.MediaTask;
 import io.sls.core.normalizing.NormalizeInputTask;
@@ -55,6 +57,7 @@ public class CoreModule extends AbstractBaseModule {
         bind(IPackageStoreClientLibrary.class).to(PackageStoreClientLibrary.class).in(Scopes.SINGLETON);
         bind(IPackageStoreService.class).to(PackageStoreService.class).in(Scopes.SINGLETON);
         bind(IBotStoreService.class).to(BotStoreService.class).in(Scopes.SINGLETON);
+        bind(IBehaviorSerialization.class).to(BehaviorSerialization.class).in(Scopes.SINGLETON);
 
         bind(IBotFactory.class).to(BotFactory.class).in(Scopes.SINGLETON);
         bind(IPackageFactory.class).to(PackageFactory.class).in(Scopes.SINGLETON);

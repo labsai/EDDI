@@ -6,30 +6,24 @@ import io.sls.persistence.impl.mongo.MongoResourceStorage;
 import io.sls.resources.rest.packages.IPackageStore;
 import io.sls.resources.rest.packages.model.PackageConfiguration;
 import io.sls.serialization.IDocumentBuilder;
-import io.sls.serialization.JSONSerialization;
 import io.sls.utilities.RuntimeUtilities;
-import org.codehaus.jackson.type.TypeReference;
 
 import javax.inject.Inject;
-import java.io.IOException;
 
 /**
  * @author ginccc
  */
 public class PackageStore implements IPackageStore {
     private HistorizedResourceStore<PackageConfiguration> packageResourceStore;
-    private final String collectionName = "packages";
 
     @Inject
-    public PackageStore(DB database) {
+    public PackageStore(DB database, IDocumentBuilder documentBuilder) {
         RuntimeUtilities.checkNotNull(database, "database");
-        MongoResourceStorage<PackageConfiguration> mongoResourceStorage = new MongoResourceStorage<PackageConfiguration>(database, collectionName, new IDocumentBuilder<PackageConfiguration>() {
-            @Override
-            public PackageConfiguration build(String doc) throws IOException {
-                return JSONSerialization.deserialize(doc, new TypeReference<PackageConfiguration>() {});
-            }
-        });
-        packageResourceStore = new HistorizedResourceStore<PackageConfiguration>(mongoResourceStorage);
+
+        final String collectionName = "packages";
+        MongoResourceStorage<PackageConfiguration> mongoResourceStorage =
+                new MongoResourceStorage<>(database, collectionName, documentBuilder, PackageConfiguration.class);
+        packageResourceStore = new HistorizedResourceStore<>(mongoResourceStorage);
     }
 
     @Override

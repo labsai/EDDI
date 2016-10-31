@@ -6,11 +6,11 @@ import com.mongodb.DBCollection;
 import com.mongodb.DBObject;
 import com.mongodb.util.JSON;
 import io.sls.persistence.IResourceStore;
-import io.sls.serialization.JSONSerialization;
+import io.sls.serialization.IJsonSerialization;
 import io.sls.testing.model.TestCase;
 import io.sls.testing.model.TestCaseState;
+import lombok.extern.slf4j.Slf4j;
 import org.bson.types.ObjectId;
-import org.codehaus.jackson.type.TypeReference;
 
 import javax.inject.Inject;
 import java.io.IOException;
@@ -19,14 +19,17 @@ import java.util.Date;
 /**
  * @author ginccc
  */
+@Slf4j
 public class TestCaseStore implements ITestCaseStore, IResourceStore<TestCase> {
     private static final String TESTCASE_COLLECTION = "testcases";
-    public static final String TESTCASE_STATE_FIELD = "testCaseState";
+    private static final String TESTCASE_STATE_FIELD = "testCaseState";
     private final DBCollection testcaseCollection;
+    private IJsonSerialization jsonSerialization;
 
     @Inject
-    public TestCaseStore(DB database) {
+    public TestCaseStore(DB database, IJsonSerialization jsonSerialization) {
         testcaseCollection = database.getCollection(TESTCASE_COLLECTION);
+        this.jsonSerialization = jsonSerialization;
     }
 
     @Override
@@ -34,7 +37,7 @@ public class TestCaseStore implements ITestCaseStore, IResourceStore<TestCase> {
         try {
             testCase.setLastRun(new Date(System.currentTimeMillis()));
 
-            String json = JSONSerialization.serialize(testCase);
+            String json = jsonSerialization.serialize(testCase);
             DBObject document = (DBObject) JSON.parse(json);
 
             if (id != null) {
@@ -45,6 +48,7 @@ public class TestCaseStore implements ITestCaseStore, IResourceStore<TestCase> {
 
             return document.get("_id").toString();
         } catch (IOException e) {
+            log.debug(e.getLocalizedMessage(), e);
             throw new IResourceStore.ResourceStoreException(e.getLocalizedMessage(), e);
         }
     }
@@ -62,11 +66,9 @@ public class TestCaseStore implements ITestCaseStore, IResourceStore<TestCase> {
 
             document.removeField("_id");
 
-            TestCase testCase = JSONSerialization.deserialize(document.toString(), new TypeReference<TestCase>() {
-            });
-
-            return testCase;
+            return jsonSerialization.deserialize(document.toString(), TestCase.class);
         } catch (IOException e) {
+            log.debug(e.getLocalizedMessage(), e);
             throw new IResourceStore.ResourceStoreException(e.getLocalizedMessage(), e);
         }
     }

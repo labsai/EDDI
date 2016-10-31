@@ -6,30 +6,23 @@ import io.sls.persistence.impl.mongo.MongoResourceStorage;
 import io.sls.resources.rest.bots.IBotStore;
 import io.sls.resources.rest.bots.model.BotConfiguration;
 import io.sls.serialization.IDocumentBuilder;
-import io.sls.serialization.JSONSerialization;
 import io.sls.utilities.RuntimeUtilities;
-import org.codehaus.jackson.type.TypeReference;
 
 import javax.inject.Inject;
-import java.io.IOException;
 
 /**
  * @author ginccc
  */
 public class BotStore implements IBotStore {
-    private final String collectionName = "bots";
     private HistorizedResourceStore<BotConfiguration> botResourceStore;
 
     @Inject
-    public BotStore(DB database) {
+    public BotStore(DB database, IDocumentBuilder documentBuilder) {
         RuntimeUtilities.checkNotNull(database, "database");
-        MongoResourceStorage<BotConfiguration> resourceStorage = new MongoResourceStorage<BotConfiguration>(database, collectionName, new IDocumentBuilder<BotConfiguration>() {
-            @Override
-            public BotConfiguration build(String doc) throws IOException {
-                return JSONSerialization.deserialize(doc, new TypeReference<BotConfiguration>() {});
-            }
-        });
-        this.botResourceStore = new HistorizedResourceStore<BotConfiguration>(resourceStorage);
+        final String collectionName = "bots";
+        MongoResourceStorage<BotConfiguration> resourceStorage =
+                new MongoResourceStorage<>(database, collectionName, documentBuilder, BotConfiguration.class);
+        this.botResourceStore = new HistorizedResourceStore<>(resourceStorage);
     }
 
     @Override

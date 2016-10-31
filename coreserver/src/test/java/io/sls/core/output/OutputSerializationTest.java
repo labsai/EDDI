@@ -1,30 +1,32 @@
 package io.sls.core.output;
 
-import io.sls.serialization.JSONSerialization;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import io.sls.serialization.IJsonSerialization;
+import io.sls.serialization.JsonSerialization;
 import junit.framework.Assert;
-import org.codehaus.jackson.type.TypeReference;
+import org.junit.Before;
 import org.junit.Test;
-
-import java.util.LinkedList;
-import java.util.List;
 
 /**
  * @author ginccc
  */
 public class OutputSerializationTest {
 
-    private final String jsonTestString = "[{\"key\":\"key1\",\"text\":\"text1\",\"occurrence\":0},{\"key\":\"key2\",\"text\":\"text2\",\"occurrence\":1},{\"key\":\"key3\",\"text\":\"text3\",\"occurrence\":2}]";
+    private final String jsonTestString = "{\"key\":\"key\",\"text\":\"value\",\"occurrence\":0}";
+    private IJsonSerialization jsonSerialization;
+
+    @Before
+    public void setUp() throws Exception {
+        jsonSerialization = new JsonSerialization(new ObjectMapper());
+    }
 
     @Test
     public void testSerialize() throws Exception {
         //setup
-        List<OutputEntry> outputEntries = new LinkedList<OutputEntry>();
-        outputEntries.add(new OutputEntry("key1", "text1", 0));
-        outputEntries.add(new OutputEntry("key2", "text2", 1));
-        outputEntries.add(new OutputEntry("key3", "text3", 2));
+        OutputEntry outputEntry = new OutputEntry("key", "value", 0);
 
         //test
-        String result = JSONSerialization.serialize(outputEntries, false);
+        String result = jsonSerialization.serialize(outputEntry);
 
         //assert
         Assert.assertEquals(jsonTestString, result);
@@ -33,16 +35,13 @@ public class OutputSerializationTest {
     @Test
     public void testDeserialize() throws Exception {
         //setup
-        List<OutputEntry> outputEntries = new LinkedList<OutputEntry>();
-        outputEntries.add(new OutputEntry("key1", "text1", 0));
-        outputEntries.add(new OutputEntry("key2", "text2", 1));
-        outputEntries.add(new OutputEntry("key3", "text3", 2));
+        OutputEntry outputEntry = new OutputEntry("key", "value", 0);
+
 
         //test
-        List<OutputEntry> result = JSONSerialization.deserialize(jsonTestString, new TypeReference<List<OutputEntry>>() {
-        });
+        OutputEntry result = jsonSerialization.deserialize(jsonTestString, OutputEntry.class);
 
         //assert
-        Assert.assertEquals(outputEntries, result);
+        Assert.assertEquals(outputEntry, result);
     }
 }

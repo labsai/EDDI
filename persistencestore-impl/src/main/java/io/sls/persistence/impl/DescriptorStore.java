@@ -22,38 +22,40 @@ import java.util.List;
  */
 public class DescriptorStore<T> implements IDescriptorStore<T> {
     private static final String COLLECTION_DESCRIPTORS = "descriptors";
-    public static final String FIELD_RESOURCE = "resource";
-    public static final String FIELD_NAME = "name";
-    public static final String FIELD_DESCRIPTION = "description";
-    public static final String FIELD_AUTHOR = "author";
-    public static final String FIELD_LAST_MODIFIED = "lastModifiedOn";
-    public static final String FIELD_DELETED = "deleted";
+    private static final String FIELD_RESOURCE = "resource";
+    private static final String FIELD_NAME = "name";
+    private static final String FIELD_DESCRIPTION = "description";
+    private static final String FIELD_LAST_MODIFIED = "lastModifiedOn";
+    private static final String FIELD_DELETED = "deleted";
 
     private static final String collectionName = "descriptors";
     private ModifiableHistorizedResourceStore<T> descriptorResourceStore;
 
-    private DBCollection descriptorCollection;
     private IResourceFilter<T> resourceFilter;
 
-    public DescriptorStore(DB database, IPermissionStore permissionStore, IUserStore userStore, IGroupStore groupStore, IDocumentBuilder<T> documentBuilder) {
+    public DescriptorStore(DB database, IPermissionStore permissionStore, IUserStore userStore,
+                           IGroupStore groupStore, IDocumentBuilder documentBuilder, Class<T> documentType) {
         RuntimeUtilities.checkNotNull(database, "database");
         RuntimeUtilities.checkNotNull(permissionStore, "permissionStore");
 
-        descriptorCollection = database.getCollection(COLLECTION_DESCRIPTORS);
-        MongoResourceStorage<T> resourceStorage = new MongoResourceStorage<T>(database, collectionName, documentBuilder);
-        this.descriptorResourceStore = new ModifiableHistorizedResourceStore<T>(resourceStorage);
-        this.resourceFilter = new ResourceFilter<T>(descriptorCollection, descriptorResourceStore, permissionStore, userStore, groupStore, documentBuilder);
+        DBCollection descriptorCollection = database.getCollection(COLLECTION_DESCRIPTORS);
+        MongoResourceStorage<T> resourceStorage =
+                new MongoResourceStorage<>(database, collectionName, documentBuilder, documentType);
+        this.descriptorResourceStore = new ModifiableHistorizedResourceStore<>(resourceStorage);
+        this.resourceFilter = new ResourceFilter<>(descriptorCollection, descriptorResourceStore,
+                permissionStore, userStore, groupStore, documentBuilder, documentType);
     }
 
     @Override
-    public List<T> readDescriptors(String type, String filter, Integer index, Integer limit, boolean includeDeleted) throws IResourceStore.ResourceStoreException, IResourceStore.ResourceNotFoundException {
-        List<IResourceFilter.QueryFilter> queryFiltersRequired = new LinkedList<IResourceFilter.QueryFilter>();
+    public List<T> readDescriptors(String type, String filter, Integer index, Integer limit, boolean includeDeleted)
+            throws IResourceStore.ResourceStoreException, IResourceStore.ResourceNotFoundException {
+        List<IResourceFilter.QueryFilter> queryFiltersRequired = new LinkedList<>();
         String filterURI = "resource://" + type + ".*";
         queryFiltersRequired.add(new IResourceFilter.QueryFilter(FIELD_RESOURCE, filterURI));
         queryFiltersRequired.add(new IResourceFilter.QueryFilter(FIELD_DELETED, includeDeleted));
         IResourceFilter.QueryFilters required = new IResourceFilter.QueryFilters(queryFiltersRequired);
 
-        List<IResourceFilter.QueryFilter> queryFiltersOptional = new LinkedList<IResourceFilter.QueryFilter>();
+        List<IResourceFilter.QueryFilter> queryFiltersOptional = new LinkedList<>();
         if (filter != null) {
             filter = StringUtilities.convertToSearchString(filter);
             queryFiltersOptional.add(new IResourceFilter.QueryFilter(FIELD_NAME, filter));

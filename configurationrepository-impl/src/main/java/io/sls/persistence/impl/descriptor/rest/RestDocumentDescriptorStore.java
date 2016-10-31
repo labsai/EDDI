@@ -1,7 +1,6 @@
 package io.sls.persistence.impl.descriptor.rest;
 
 import io.sls.persistence.IResourceStore;
-import io.sls.persistence.impl.resources.rest.RestVersionInfo;
 import io.sls.resources.rest.documentdescriptor.IDocumentDescriptorStore;
 import io.sls.resources.rest.documentdescriptor.IRestDocumentDescriptorStore;
 import io.sls.resources.rest.documentdescriptor.model.DocumentDescriptor;
@@ -18,7 +17,7 @@ import java.util.List;
  * @author ginccc
  */
 @Slf4j
-public class RestDocumentDescriptorStore extends RestVersionInfo implements IRestDocumentDescriptorStore {
+public class RestDocumentDescriptorStore implements IRestDocumentDescriptorStore {
     private final IDocumentDescriptorStore documentDescriptorStore;
 
     @Inject
@@ -59,7 +58,7 @@ public class RestDocumentDescriptorStore extends RestVersionInfo implements IRes
     @Override
     public void patchDescriptor(String id, Integer version, PatchInstruction<DocumentDescriptor> patchInstruction) {
         try {
-            DocumentDescriptor documentDescriptor = readDescriptor(id, version);
+            DocumentDescriptor documentDescriptor = documentDescriptorStore.readDescriptor(id, version);
             DocumentDescriptor simpleDescriptor = patchInstruction.getDocument();
 
             if (patchInstruction.getOperation().equals(PatchInstruction.PatchOperation.SET)) {
@@ -77,11 +76,5 @@ public class RestDocumentDescriptorStore extends RestVersionInfo implements IRes
         } catch (IResourceStore.ResourceNotFoundException e) {
             throw new NotFoundException(e.getLocalizedMessage(), e);
         }
-    }
-
-
-    @Override
-    protected IResourceStore.IResourceId getCurrentResourceId(String id) throws IResourceStore.ResourceNotFoundException {
-        return documentDescriptorStore.getCurrentResourceId(id);
     }
 }

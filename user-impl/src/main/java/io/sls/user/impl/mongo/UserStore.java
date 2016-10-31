@@ -6,12 +6,12 @@ import com.mongodb.DBCollection;
 import com.mongodb.DBObject;
 import com.mongodb.util.JSON;
 import io.sls.persistence.IResourceStore;
-import io.sls.serialization.JSONSerialization;
+import io.sls.serialization.IJsonSerialization;
 import io.sls.user.IUserStore;
 import io.sls.user.model.User;
 import io.sls.utilities.SecurityUtilities;
+import lombok.extern.slf4j.Slf4j;
 import org.bson.types.ObjectId;
-import org.codehaus.jackson.type.TypeReference;
 
 import javax.inject.Inject;
 import java.io.IOException;
@@ -19,13 +19,16 @@ import java.io.IOException;
 /**
  * @author ginccc
  */
+@Slf4j
 public class UserStore implements IUserStore {
-    public static final String COLLECTION_USERS = "users";
+    private static final String COLLECTION_USERS = "users";
     private final DBCollection collection;
+    private IJsonSerialization jsonSerialization;
 
     @Inject
-    public UserStore(DB database) {
+    public UserStore(DB database, IJsonSerialization jsonSerialization) {
         collection = database.getCollection(COLLECTION_USERS);
+        this.jsonSerialization = jsonSerialization;
     }
 
     @Override
@@ -52,18 +55,16 @@ public class UserStore implements IUserStore {
 
         userDocument.removeField("_id");
 
-        User user = convert(userDocument);
-
-        return user;
+        return convert(userDocument);
 
     }
 
     private User convert(DBObject userDocument) throws IResourceStore.ResourceStoreException {
         try {
-            return JSONSerialization.deserialize(userDocument.toString(), new TypeReference<User>() {
-            });
+            return jsonSerialization.deserialize(userDocument.toString(), User.class);
         } catch (IOException e) {
-            throw new IResourceStore.ResourceStoreException("Cannot parse json structure into User entity.");
+            log.debug(e.getLocalizedMessage(), e);
+            throw new IResourceStore.ResourceStoreException(e.getLocalizedMessage(), e);
         }
     }
 
@@ -88,16 +89,15 @@ public class UserStore implements IUserStore {
 
         collection.insert(document);
 
-        String generatedId = document.get("_id").toString();
-
-        return generatedId;
+        return document.get("_id").toString();
     }
 
     private String serialize(User user) throws IResourceStore.ResourceStoreException {
         try {
-            return JSONSerialization.serialize(user);
+            return jsonSerialization.serialize(user);
         } catch (IOException e) {
-            throw new IResourceStore.ResourceStoreException("Cannot serialize User entity into json.");
+            log.debug(e.getLocalizedMessage(), e);
+            throw new IResourceStore.ResourceStoreException("Cannot serialize User entity into json.", e);
         }
     }
 

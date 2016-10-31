@@ -19,7 +19,6 @@ import java.util.List;
 @Path("/regulardictionarystore/regulardictionaries")
 public interface IRestRegularDictionaryStore extends IRestVersionInfo {
     String resourceURI = "resource://io.sls.regulardictionary/regulardictionarystore/regulardictionaries/";
-    String versionQueryParam = "?version=";
 
     @GET
     @GZIP

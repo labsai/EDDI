@@ -1,18 +1,17 @@
 package io.sls.persistence.impl.extensions.rest;
 
 import io.sls.persistence.IResourceStore;
+import io.sls.persistence.impl.resources.rest.RestVersionInfo;
 import io.sls.resources.rest.documentdescriptor.IDocumentDescriptorStore;
 import io.sls.resources.rest.documentdescriptor.model.DocumentDescriptor;
 import io.sls.resources.rest.extensions.IExtensionStore;
 import io.sls.resources.rest.extensions.IRestExtensionStore;
 import io.sls.resources.rest.extensions.model.ExtensionDefinition;
-import io.sls.utilities.RestUtilities;
 import lombok.extern.slf4j.Slf4j;
 import org.jboss.resteasy.spi.NoLogWebApplicationException;
 
 import javax.inject.Inject;
 import javax.ws.rs.InternalServerErrorException;
-import javax.ws.rs.NotFoundException;
 import javax.ws.rs.core.Response;
 import java.net.URI;
 import java.util.LinkedList;
@@ -22,20 +21,21 @@ import java.util.List;
  * @author ginccc
  */
 @Slf4j
-public class RestExtensionStore implements IRestExtensionStore {
+public class RestExtensionStore extends RestVersionInfo<ExtensionDefinition> implements IRestExtensionStore {
     private final IExtensionStore extensionStore;
     private final IDocumentDescriptorStore documentDescriptorStore;
 
     @Inject
     public RestExtensionStore(IExtensionStore extensionStore,
                               IDocumentDescriptorStore documentDescriptorStore) {
+        super(resourceURI, extensionStore);
         this.extensionStore = extensionStore;
         this.documentDescriptorStore = documentDescriptorStore;
     }
 
     @Override
     public List<DocumentDescriptor> readExtensionDescriptors(String filter, Integer index, Integer limit) {
-        List<DocumentDescriptor> ret = new LinkedList<DocumentDescriptor>();
+        List<DocumentDescriptor> ret = new LinkedList<>();
 
         try {
             List<ExtensionDefinition> extensionDefinitions = extensionStore.readExtensions(filter, index, limit);
@@ -56,64 +56,26 @@ public class RestExtensionStore implements IRestExtensionStore {
 
     @Override
     public ExtensionDefinition readExtension(String id, Integer version) {
-        try {
-            return extensionStore.read(id, version);
-        } catch (IResourceStore.ResourceNotFoundException e) {
-            throw new NoLogWebApplicationException(Response.Status.NOT_FOUND);
-        } catch (IResourceStore.ResourceStoreException e) {
-            log.error(e.getLocalizedMessage(), e);
-            throw new InternalServerErrorException(e.getLocalizedMessage(), e);
-        }
+        return read(id, version);
     }
 
     @Override
     public URI updateExtension(String id, Integer version, ExtensionDefinition extension) {
-        try {
-            Integer newVersion = extensionStore.update(id, version, extension);
-            return RestUtilities.createURI(resourceURI, id, versionQueryParam, newVersion);
-        } catch (IResourceStore.ResourceStoreException e) {
-            log.error(e.getLocalizedMessage(), e);
-            throw new InternalServerErrorException(e.getLocalizedMessage(), e);
-        } catch (IResourceStore.ResourceModifiedException e) {
-            try {
-                IResourceStore.IResourceId currentId = extensionStore.getCurrentResourceId(id);
-                throw RestUtilities.createConflictException(resourceURI, currentId);
-            } catch (IResourceStore.ResourceNotFoundException e1) {
-                throw new NotFoundException(e.getLocalizedMessage(), e);
-            }
-        } catch (IResourceStore.ResourceNotFoundException e) {
-            throw new NoLogWebApplicationException(Response.Status.NOT_FOUND);
-        }
+        return update(id, version, extension);
     }
 
     @Override
     public Response createExtension(ExtensionDefinition extension) {
-        try {
-            IResourceStore.IResourceId resourceId = extensionStore.create(extension);
-            URI createdUri = RestUtilities.createURI(resourceURI, resourceId.getId(), versionQueryParam, resourceId.getVersion());
-            return Response.created(createdUri).entity(createdUri).build();
-        } catch (IResourceStore.ResourceStoreException e) {
-            log.error(e.getLocalizedMessage(), e);
-            throw new InternalServerErrorException(e.getLocalizedMessage(), e);
-        }
+        return create(extension);
     }
 
     @Override
     public void deleteExtension(String id, Integer version) {
-        try {
-            extensionStore.delete(id, version);
-        } catch (IResourceStore.ResourceStoreException e) {
-            log.error(e.getLocalizedMessage(), e);
-            throw new InternalServerErrorException(e.getLocalizedMessage(), e);
-        } catch (IResourceStore.ResourceModifiedException e) {
-            try {
-                IResourceStore.IResourceId currentId = extensionStore.getCurrentResourceId(id);
-                throw RestUtilities.createConflictException(resourceURI, currentId);
-            } catch (IResourceStore.ResourceNotFoundException e1) {
-                throw new NotFoundException(e.getLocalizedMessage(), e);
-            }
-        } catch (IResourceStore.ResourceNotFoundException e) {
-            throw new NoLogWebApplicationException(Response.Status.NOT_FOUND);
-        }
+        delete(id, version);
+    }
+
+    @Override
+    protected IResourceStore.IResourceId getCurrentResourceId(String id) throws IResourceStore.ResourceNotFoundException {
+        return extensionStore.getCurrentResourceId(id);
     }
 }

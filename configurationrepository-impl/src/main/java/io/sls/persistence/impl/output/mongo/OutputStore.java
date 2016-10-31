@@ -8,12 +8,9 @@ import io.sls.resources.rest.output.IOutputStore;
 import io.sls.resources.rest.output.model.OutputConfiguration;
 import io.sls.resources.rest.output.model.OutputConfigurationSet;
 import io.sls.serialization.IDocumentBuilder;
-import io.sls.serialization.JSONSerialization;
 import io.sls.utilities.RuntimeUtilities;
-import org.codehaus.jackson.type.TypeReference;
 
 import javax.inject.Inject;
-import java.io.IOException;
 import java.util.Collections;
 import java.util.Comparator;
 import java.util.LinkedList;
@@ -28,15 +25,13 @@ public class OutputStore implements IOutputStore {
     private static final OutputComparator OUTPUT_COMPARATOR = new OutputComparator();
 
     @Inject
-    public OutputStore(DB database) {
+    public OutputStore(DB database, IDocumentBuilder documentBuilder) {
         RuntimeUtilities.checkNotNull(database, "database");
-        MongoResourceStorage<OutputConfigurationSet> resourceStorage = new MongoResourceStorage<OutputConfigurationSet>(database, collectionName, new IDocumentBuilder<OutputConfigurationSet>() {
-            @Override
-            public OutputConfigurationSet build(String doc) throws IOException {
-                return JSONSerialization.deserialize(doc, new TypeReference<OutputConfigurationSet>() {});
-            }
-        });
-        this.outputResourceStore = new HistorizedResourceStore<OutputConfigurationSet>(resourceStorage);
+        MongoResourceStorage<OutputConfigurationSet> resourceStorage =
+                new MongoResourceStorage<>(database, collectionName, documentBuilder, OutputConfigurationSet.class);
+
+
+        this.outputResourceStore = new HistorizedResourceStore<>(resourceStorage);
     }
 
     @Override
@@ -60,7 +55,7 @@ public class OutputStore implements IOutputStore {
         OutputConfigurationSet outputConfigurationSet = outputResourceStore.read(id, version);
 
         ResultManipulator<OutputConfiguration> outputManipulator;
-        outputManipulator = new ResultManipulator<OutputConfiguration>(outputConfigurationSet.getOutputs(), OutputConfiguration.class);
+        outputManipulator = new ResultManipulator<>(outputConfigurationSet.getOutputs(), OutputConfiguration.class);
 
         try {
             outputManipulator.filterEntities(filter);
@@ -76,7 +71,7 @@ public class OutputStore implements IOutputStore {
 
     @Override
     public List<String> readOutputKeys(String id, Integer version, String filter, String order, Integer limit) throws ResourceStoreException, ResourceNotFoundException {
-        List<String> retOutputKeys = new LinkedList<String>();
+        List<String> retOutputKeys = new LinkedList<>();
         OutputConfigurationSet outputSet = read(id, version);
         List<OutputConfiguration> outputs = outputSet.getOutputs();
         for (OutputConfiguration output : outputs) {

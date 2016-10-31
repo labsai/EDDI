@@ -1,10 +1,10 @@
 package io.sls.configuration.server;
 
-import io.sls.configuration.jackson.JacksonContextResolver;
 import io.sls.permission.interceptor.PermissionRequestInterceptor;
 import io.sls.permission.interceptor.PermissionResponseInterceptor;
 import io.sls.persistence.interceptor.DocumentDescriptorInterceptor;
 import io.sls.server.exception.IllegalArgumentExceptionMapper;
+import io.sls.server.rest.providers.JacksonConfig;
 import io.sls.server.rest.providers.URIMessageBodyProvider;
 import io.sls.staticresources.impl.interceptor.ContentTypeInterceptor;
 
@@ -27,8 +27,8 @@ public class ApplicationConfiguration extends Application {
         tmp.add(PermissionResponseInterceptor.class);
         tmp.add(DocumentDescriptorInterceptor.class);
         tmp.add(IllegalArgumentExceptionMapper.class);
+        tmp.add(JacksonConfig.class);
 
-        tmp.add(JacksonContextResolver.class);
         tmp.add(URIMessageBodyProvider.class);
 
         CLASSES = Collections.unmodifiableSet(tmp);

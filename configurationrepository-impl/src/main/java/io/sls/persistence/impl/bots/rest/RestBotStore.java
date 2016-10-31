@@ -2,6 +2,7 @@ package io.sls.persistence.impl.bots.rest;
 
 import io.sls.persistence.IResourceStore;
 import io.sls.persistence.impl.resources.rest.RestVersionInfo;
+import io.sls.resources.rest.IRestVersionInfo;
 import io.sls.resources.rest.bots.IBotStore;
 import io.sls.resources.rest.bots.IRestBotStore;
 import io.sls.resources.rest.bots.model.BotConfiguration;
@@ -21,13 +22,14 @@ import java.util.List;
  * @author ginccc
  */
 @Slf4j
-public class RestBotStore extends RestVersionInfo implements IRestBotStore {
+public class RestBotStore extends RestVersionInfo<BotConfiguration> implements IRestBotStore {
     private final IBotStore botStore;
     private final IDocumentDescriptorStore documentDescriptorStore;
 
     @Inject
     public RestBotStore(IBotStore botStore,
                         IDocumentDescriptorStore documentDescriptorStore) {
+        super(resourceURI, botStore);
         this.botStore = botStore;
         this.documentDescriptorStore = documentDescriptorStore;
     }
@@ -46,34 +48,12 @@ public class RestBotStore extends RestVersionInfo implements IRestBotStore {
 
     @Override
     public BotConfiguration readBot(String id, Integer version) {
-        try {
-            return botStore.read(id, version);
-        } catch (IResourceStore.ResourceNotFoundException e) {
-            throw new NotFoundException(e.getLocalizedMessage(), e);
-        } catch (IResourceStore.ResourceStoreException e) {
-            log.error(e.getLocalizedMessage(), e);
-            throw new InternalServerErrorException(e.getLocalizedMessage(), e);
-        }
+        return read(id, version);
     }
 
     @Override
     public URI updateBot(String id, Integer version, BotConfiguration botConfiguration) {
-        try {
-            Integer newVersion = botStore.update(id, version, botConfiguration);
-            return RestUtilities.createURI(resourceURI, id, versionQueryParam, newVersion);
-        } catch (IResourceStore.ResourceStoreException e) {
-            log.error(e.getLocalizedMessage(), e);
-            throw new InternalServerErrorException(e.getLocalizedMessage(), e);
-        } catch (IResourceStore.ResourceModifiedException e) {
-            try {
-                IResourceStore.IResourceId currentId = botStore.getCurrentResourceId(id);
-                throw RestUtilities.createConflictException(resourceURI, currentId);
-            } catch (IResourceStore.ResourceNotFoundException e1) {
-                throw new NotFoundException(e.getLocalizedMessage(), e);
-            }
-        } catch (IResourceStore.ResourceNotFoundException e) {
-            throw new NotFoundException(e.getLocalizedMessage(), e);
-        }
+        return update(id, version, botConfiguration);
     }
 
     @Override
@@ -95,40 +75,19 @@ public class RestBotStore extends RestVersionInfo implements IRestBotStore {
         if (updated) {
             return Response.ok(updateBot(id, version, botConfiguration)).build();
         } else {
-            URI uri = RestUtilities.createURI(RestBotStore.resourceURI, id, versionQueryParam, version);
+            URI uri = RestUtilities.createURI(RestBotStore.resourceURI, id, IRestVersionInfo.versionQueryParam, version);
             return Response.status(Response.Status.BAD_REQUEST).entity(uri).build();
         }
     }
 
     @Override
     public Response createBot(BotConfiguration botConfiguration) {
-        try {
-            IResourceStore.IResourceId resourceId = botStore.create(botConfiguration);
-            URI createdUri = RestUtilities.createURI(resourceURI, resourceId.getId(), versionQueryParam, resourceId.getVersion());
-            return Response.created(createdUri).entity(createdUri).build();
-        } catch (IResourceStore.ResourceStoreException e) {
-            log.error(e.getLocalizedMessage(), e);
-            throw new InternalServerErrorException(e.getLocalizedMessage(), e);
-        }
+        return create(botConfiguration);
     }
 
     @Override
     public void deleteBot(String id, Integer version) {
-        try {
-            botStore.delete(id, version);
-        } catch (IResourceStore.ResourceStoreException e) {
-            log.error(e.getLocalizedMessage(), e);
-            throw new InternalServerErrorException(e.getLocalizedMessage(), e);
-        } catch (IResourceStore.ResourceModifiedException e) {
-            try {
-                IResourceStore.IResourceId currentId = botStore.getCurrentResourceId(id);
-                throw RestUtilities.createConflictException(resourceURI, currentId);
-            } catch (IResourceStore.ResourceNotFoundException e1) {
-                throw new NotFoundException(e.getLocalizedMessage(), e);
-            }
-        } catch (IResourceStore.ResourceNotFoundException e) {
-            throw new NotFoundException(e.getLocalizedMessage(), e);
-        }
+        delete(id, version);
     }
 
     @Override

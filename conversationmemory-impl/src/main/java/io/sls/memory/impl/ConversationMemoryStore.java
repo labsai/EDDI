@@ -9,9 +9,8 @@ import io.sls.memory.IConversationMemoryStore;
 import io.sls.memory.model.ConversationMemorySnapshot;
 import io.sls.memory.model.ConversationState;
 import io.sls.persistence.IResourceStore;
-import io.sls.serialization.JSONSerialization;
+import io.sls.serialization.IJsonSerialization;
 import org.bson.types.ObjectId;
-import org.codehaus.jackson.type.TypeReference;
 
 import javax.inject.Inject;
 import java.io.IOException;
@@ -20,20 +19,21 @@ import java.io.IOException;
  * @author ginccc
  */
 public class ConversationMemoryStore implements IConversationMemoryStore, IResourceStore<ConversationMemorySnapshot> {
-
     private static final String CONVERSATION_COLLECTION = "conversationmemories";
-    public static final String CONVERSATION_STATE_FIELD = "conversationState";
+    private static final String CONVERSATION_STATE_FIELD = "conversationState";
     private final DBCollection conversationCollection;
+    private final IJsonSerialization jsonSerialization;
 
     @Inject
-    public ConversationMemoryStore(DB database) {
+    public ConversationMemoryStore(DB database, IJsonSerialization jsonSerialization) {
         conversationCollection = database.getCollection(CONVERSATION_COLLECTION);
+        this.jsonSerialization = jsonSerialization;
     }
 
     @Override
     public String storeConversationMemorySnapshot(ConversationMemorySnapshot snapshot) throws IResourceStore.ResourceStoreException {
         try {
-            String json = JSONSerialization.serialize(snapshot);
+            String json = jsonSerialization.serialize(snapshot);
             DBObject document = (DBObject) JSON.parse(json);
 
             if (snapshot.getId() != null) {
@@ -63,8 +63,7 @@ public class ConversationMemoryStore implements IConversationMemoryStore, IResou
 
             document.removeField("_id");
 
-            ConversationMemorySnapshot snapshot = JSONSerialization.deserialize(document.toString(), new TypeReference<ConversationMemorySnapshot>() {
-            });
+            ConversationMemorySnapshot snapshot = jsonSerialization.deserialize(document.toString(), ConversationMemorySnapshot.class);
 
             snapshot.setId(conversationId);
 

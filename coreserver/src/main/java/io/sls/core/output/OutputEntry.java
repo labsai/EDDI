@@ -1,16 +1,15 @@
 package io.sls.core.output;
 
+import lombok.NoArgsConstructor;
+
 /**
  * @author ginccc
  */
+@NoArgsConstructor
 public class OutputEntry implements Comparable<OutputEntry> {
     private String key;
     private String text;
     private int occurrence;
-
-    public OutputEntry() {
-        // empty contructor needed for serialization
-    }
 
     public OutputEntry(String key, String text, int occurrence) {
         this.key = key;

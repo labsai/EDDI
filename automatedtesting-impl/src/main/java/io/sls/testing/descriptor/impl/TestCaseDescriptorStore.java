@@ -4,11 +4,10 @@ import com.mongodb.DB;
 import io.sls.group.IGroupStore;
 import io.sls.permission.IPermissionStore;
 import io.sls.persistence.impl.DescriptorStore;
-import io.sls.serialization.JSONSerialization;
+import io.sls.serialization.IDocumentBuilder;
 import io.sls.testing.descriptor.ITestCaseDescriptorStore;
 import io.sls.testing.descriptor.model.TestCaseDescriptor;
 import io.sls.user.IUserStore;
-import org.codehaus.jackson.type.TypeReference;
 
 import javax.inject.Inject;
 
@@ -17,7 +16,8 @@ import javax.inject.Inject;
  */
 public class TestCaseDescriptorStore extends DescriptorStore<TestCaseDescriptor> implements ITestCaseDescriptorStore {
     @Inject
-    public TestCaseDescriptorStore(DB database, IPermissionStore permissionStore, IUserStore userStore, IGroupStore groupStore) {
-        super(database, permissionStore, userStore, groupStore, doc -> JSONSerialization.deserialize(doc, new TypeReference<TestCaseDescriptor>() {}));
+    public TestCaseDescriptorStore(DB database, IDocumentBuilder documentBuilder,
+                                   IPermissionStore permissionStore, IUserStore userStore, IGroupStore groupStore) {
+        super(database, permissionStore, userStore, groupStore, documentBuilder, TestCaseDescriptor.class);
     }
 }

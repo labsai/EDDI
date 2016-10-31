@@ -19,7 +19,25 @@
             <artifactId>resteasy-jackson2-provider</artifactId>
             <version>3.0.18.Final</version>
         </dependency>
-        <dependency>             <groupId>org.jboss.resteasy</groupId>             <artifactId>resteasy-jaxrs</artifactId>             <version>3.0.18.Final</version>             <exclusions>                 <exclusion>                     <artifactId>slf4j-simple</artifactId>                     <groupId>org.slf4j</groupId>                 </exclusion>                 <exclusion>                     <artifactId>jboss-annotations-api_1.1_spec</artifactId>                     <groupId>org.jboss.spec.javax.annotation</groupId>                 </exclusion>                 <exclusion>                     <artifactId>jcip-annotations</artifactId>                     <groupId>net.jcip</groupId>                 </exclusion>             </exclusions>         </dependency>
+        <dependency>
+            <groupId>org.jboss.resteasy</groupId>
+            <artifactId>resteasy-jaxrs</artifactId>
+            <version>3.0.18.Final</version>
+            <exclusions>
+                <exclusion>
+                    <artifactId>slf4j-simple</artifactId>
+                    <groupId>org.slf4j</groupId>
+                </exclusion>
+                <exclusion>
+                    <artifactId>jboss-annotations-api_1.1_spec</artifactId>
+                    <groupId>org.jboss.spec.javax.annotation</groupId>
+                </exclusion>
+                <exclusion>
+                    <artifactId>jcip-annotations</artifactId>
+                    <groupId>net.jcip</groupId>
+                </exclusion>
+            </exclusions>
+        </dependency>
         <dependency>
             <groupId>ai.labs</groupId>
             <artifactId>persistencestore-definition</artifactId>

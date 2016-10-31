@@ -98,6 +98,11 @@
         </dependency>
         <dependency>
             <groupId>ai.labs</groupId>
+            <artifactId>runtime-impl</artifactId>
+            <version>${project.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>ai.labs</groupId>
             <artifactId>persistencestore-definition</artifactId>
             <version>${project.version}</version>
         </dependency>

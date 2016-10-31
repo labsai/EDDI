@@ -11,6 +11,7 @@ import io.sls.persistence.bootstrap.RepositoryModule;
 import io.sls.persistence.impl.bootstrap.PersistenceModule;
 import io.sls.runtime.DependencyInjector;
 import io.sls.runtime.bootstrap.RuntimeModule;
+import io.sls.serialization.bootstrap.SerializationModule;
 import io.sls.server.IServerRuntime;
 import io.sls.server.bootstrap.ServerRuntimeModule;
 import io.sls.staticresources.bootstrap.StaticResourcesModule;
@@ -44,6 +45,7 @@ public class CoreServer {
                         new FileInputStream(configDir + "systemRuntime.properties")),
                 new RequestScopeModule(),
                 new RestInterfaceModule(),
+                new SerializationModule(),
                 new PersistenceModule(new FileInputStream(configDir + "mongodb.properties")),
                 new ConversationMemoryModule(),
                 new PermissionModule(),

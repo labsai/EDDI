@@ -1,5 +1,6 @@
 package io.sls.core.behavior;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
 import io.sls.core.behavior.extensions.IExtension;
 import io.sls.core.behavior.extensions.descriptor.BehaviorRuleExtensionRegistry;
 import io.sls.core.extensions.IExtensionRegistry;
@@ -8,9 +9,8 @@ import io.sls.resources.rest.behavior.model.BehaviorGroupConfiguration;
 import io.sls.resources.rest.behavior.model.BehaviorRuleConfiguration;
 import io.sls.resources.rest.behavior.model.BehaviorRuleElementConfiguration;
 import io.sls.serialization.DeserializationException;
-import io.sls.serialization.JSONSerialization;
-import org.codehaus.jackson.map.ObjectMapper;
 
+import javax.inject.Inject;
 import java.io.IOException;
 import java.io.StringWriter;
 import java.util.LinkedList;
@@ -19,12 +19,21 @@ import java.util.List;
 /**
  * @author ginccc
  */
-public class BehaviorSerialization {
-    public static BehaviorSet deserialize(String json) throws DeserializationException {
+public class BehaviorSerialization implements IBehaviorSerialization {
+
+    private final ObjectMapper objectMapper;
+
+    @Inject
+    public BehaviorSerialization(ObjectMapper objectMapper) {
+        this.objectMapper = objectMapper;
+    }
+
+    @Override
+    public BehaviorSet deserialize(String json) throws DeserializationException {
         try {
             BehaviorSet behaviorSet = new BehaviorSet();
 
-            BehaviorConfiguration behaviorJson = JSONSerialization.getObjectMapper().reader(BehaviorConfiguration.class).readValue(json);
+            BehaviorConfiguration behaviorJson = objectMapper.readerFor(BehaviorConfiguration.class).readValue(json);
             for (BehaviorGroupConfiguration groupConfiguration : behaviorJson.getBehaviorGroups()) {
                 BehaviorGroup behaviorGroup = new BehaviorGroup();
                 behaviorGroup.setName(groupConfiguration.getName());
@@ -63,7 +72,8 @@ public class BehaviorSerialization {
         return ret;
     }
 
-    public static String serialize(BehaviorSet set) throws IOException {
+    @Override
+    public String serialize(BehaviorSet set) throws IOException {
         BehaviorConfiguration result = new BehaviorConfiguration();
 
         for (BehaviorGroup group : set.getBehaviorGroups()) {
@@ -76,7 +86,6 @@ public class BehaviorSerialization {
         }
 
         StringWriter writer = new StringWriter();
-        ObjectMapper objectMapper = JSONSerialization.getObjectMapper();
         objectMapper.writeValue(writer, result);
 
         return writer.toString();

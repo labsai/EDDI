@@ -8,9 +8,9 @@ import com.mongodb.util.JSON;
 import io.sls.group.IGroupStore;
 import io.sls.group.model.Group;
 import io.sls.persistence.IResourceStore;
-import io.sls.serialization.JSONSerialization;
+import io.sls.serialization.IJsonSerialization;
+import lombok.extern.slf4j.Slf4j;
 import org.bson.types.ObjectId;
-import org.codehaus.jackson.type.TypeReference;
 
 import javax.inject.Inject;
 import java.io.IOException;
@@ -18,13 +18,16 @@ import java.io.IOException;
 /**
  * @author ginccc
  */
+@Slf4j
 public class GroupStore implements IGroupStore {
-    public static final String COLLECTION_GROUPS = "groups";
+    private static final String COLLECTION_GROUPS = "groups";
     private final DBCollection collection;
+    private final IJsonSerialization jsonSerialization;
 
     @Inject
-    public GroupStore(DB database) {
+    public GroupStore(DB database, IJsonSerialization jsonSerialization) {
         collection = database.getCollection(COLLECTION_GROUPS);
+        this.jsonSerialization = jsonSerialization;
     }
 
     public Group readGroup(String groupId) throws IResourceStore.ResourceStoreException, IResourceStore.ResourceNotFoundException {
@@ -39,12 +42,10 @@ public class GroupStore implements IGroupStore {
 
             groupDocument.removeField("_id");
 
-            Group group = JSONSerialization.deserialize(groupDocument.toString(), new TypeReference<Group>() {
-            });
-
-            return group;
+            return jsonSerialization.deserialize(groupDocument.toString(), Group.class);
         } catch (IOException e) {
-            throw new IResourceStore.ResourceStoreException("Cannot parse json structure into Group entity.");
+            log.debug(e.getLocalizedMessage(), e);
+            throw new IResourceStore.ResourceStoreException("Cannot parse json structure into Group entity.", e);
         }
     }
 
@@ -66,16 +67,15 @@ public class GroupStore implements IGroupStore {
 
         collection.insert(document);
 
-        String generatedId = document.get("_id").toString();
-
-        return generatedId;
+        return document.get("_id").toString();
     }
 
     private String serialize(Group group) throws IResourceStore.ResourceStoreException {
         try {
-            return JSONSerialization.serialize(group);
+            return jsonSerialization.serialize(group);
         } catch (IOException e) {
-            throw new IResourceStore.ResourceStoreException("Cannot serialize Group entity into json.");
+            log.debug(e.getLocalizedMessage(), e);
+            throw new IResourceStore.ResourceStoreException("Cannot serialize Group entity into json.", e);
         }
     }
 

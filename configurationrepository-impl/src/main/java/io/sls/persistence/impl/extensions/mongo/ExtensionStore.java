@@ -13,14 +13,11 @@ import io.sls.persistence.impl.mongo.MongoResourceStorage;
 import io.sls.resources.rest.extensions.IExtensionStore;
 import io.sls.resources.rest.extensions.model.ExtensionDefinition;
 import io.sls.serialization.IDocumentBuilder;
-import io.sls.serialization.JSONSerialization;
 import io.sls.user.IUserStore;
 import io.sls.utilities.RuntimeUtilities;
-import org.codehaus.jackson.type.TypeReference;
 
 import javax.inject.Inject;
-import java.io.IOException;
-import java.util.Arrays;
+import java.util.Collections;
 import java.util.List;
 
 /**
@@ -28,38 +25,24 @@ import java.util.List;
  */
 public class ExtensionStore implements IExtensionStore {
     private static final String COLLECTION_EXTENSIONS = "extensions";
-    private final IPermissionStore permissionStore;
-    private final IGroupStore groupStore;
-    private final IUserStore userStore;
     private DBCollection extensionCollection;
     private ModifiableHistorizedResourceStore<ExtensionDefinition> extensionResourceStore;
     private IResourceFilter<ExtensionDefinition> resourceFilter;
 
     @Inject
     public ExtensionStore(DB database,
+                          IDocumentBuilder documentBuilder,
                           IPermissionStore permissionStore,
                           IGroupStore groupStore,
                           IUserStore userStore) {
-        this.permissionStore = permissionStore;
-        this.groupStore = groupStore;
-        this.userStore = userStore;
         RuntimeUtilities.checkNotNull(database, "database");
 
         extensionCollection = database.getCollection(COLLECTION_EXTENSIONS);
-        MongoResourceStorage<ExtensionDefinition> resourceStorage = new MongoResourceStorage<ExtensionDefinition>(database, COLLECTION_EXTENSIONS, new IDocumentBuilder<ExtensionDefinition>() {
-            @Override
-            public ExtensionDefinition build(String doc) throws IOException {
-                return JSONSerialization.deserialize(doc, new TypeReference<ExtensionDefinition>() {});
-            }
-        });
+        MongoResourceStorage<ExtensionDefinition> resourceStorage =
+                new MongoResourceStorage<>(database, COLLECTION_EXTENSIONS, documentBuilder, ExtensionDefinition.class);
         this.extensionResourceStore = new ModifiableHistorizedResourceStore<>(resourceStorage);
-        this.resourceFilter = new ResourceFilter<>(extensionCollection, extensionResourceStore, permissionStore, userStore, groupStore, new IDocumentBuilder<ExtensionDefinition>() {
-            @Override
-            public ExtensionDefinition build(String doc) throws IOException {
-                return JSONSerialization.deserialize(doc, new TypeReference<ExtensionDefinition>() {
-                });
-            }
-        });
+        this.resourceFilter = new ResourceFilter<>(extensionCollection, extensionResourceStore, permissionStore,
+                userStore, groupStore, documentBuilder, ExtensionDefinition.class);
     }
 
     @Override
@@ -87,7 +70,7 @@ public class ExtensionStore implements IExtensionStore {
     public List<ExtensionDefinition> readExtensions(String filter, Integer index, Integer limit) throws ResourceNotFoundException, ResourceStoreException {
         filter = "^core://" + filter + ".?[a-zA-Z0-9]*$";
         IResourceFilter.QueryFilter queryFilter = new IResourceFilter.QueryFilter("type", filter);
-        IResourceFilter.QueryFilters queryFilters = new IResourceFilter.QueryFilters(Arrays.asList(queryFilter));
+        IResourceFilter.QueryFilters queryFilters = new IResourceFilter.QueryFilters(Collections.singletonList(queryFilter));
         return resourceFilter.readResources(new IResourceFilter.QueryFilters[]{queryFilters}, index, limit);
     }
 
