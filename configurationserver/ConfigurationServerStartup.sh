@@ -8,7 +8,7 @@ fi
 if [ "$1" = "production" ]; then
 
 read -d '' JAVA_OPTS <<EOF
-        -server -Xms1024m -Xmx1024m
+        -server -Xms512m -Xmx512m
         -XX:+UseConcMarkSweepGC
         -XX:+CMSParallelRemarkEnabled
         -XX:+UseCMSInitiatingOccupancyOnly
