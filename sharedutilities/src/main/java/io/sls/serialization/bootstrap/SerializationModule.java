@@ -3,7 +3,6 @@ package io.sls.serialization.bootstrap;
 import com.fasterxml.jackson.databind.DeserializationFeature;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.SerializationFeature;
-import com.fasterxml.jackson.jaxrs.json.JacksonJsonProvider;
 import com.google.inject.AbstractModule;
 import com.google.inject.Provides;
 import com.google.inject.Scopes;
@@ -33,9 +32,4 @@ public class SerializationModule extends AbstractModule {
         return objectMapper;
     }
 
-    @Provides
-    @Singleton
-    public JacksonJsonProvider jacksonJsonProvider(ObjectMapper mapper) {
-        return new JacksonJsonProvider(mapper);
-    }
 }
