@@ -1,0 +1,7 @@
+io.sls.core.media.MediaTaskProvider
+io.sls.core.tts.TextToSpeechTaskProvider
+io.sls.core.output.SimpleOutputTaskProvider
+io.sls.core.normalizing.NormalizeInputTaskProvider
+io.sls.core.behavior.BehaviourRulesEvaluationTaskProvider
+io.sls.core.sendmail.SendMailTaskProvider
+io.sls.core.parser.InputParserTaskProvider

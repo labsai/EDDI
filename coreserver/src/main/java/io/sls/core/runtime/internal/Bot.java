@@ -1,9 +1,9 @@
 package io.sls.core.runtime.internal;
 
-import io.sls.core.lifecycle.LifecycleException;
 import io.sls.core.runtime.IBot;
 import io.sls.core.runtime.IConversation;
 import io.sls.core.runtime.IExecutablePackage;
+import io.sls.lifecycle.LifecycleException;
 import io.sls.memory.IConversationMemory;
 import io.sls.memory.impl.ConversationMemory;
 import io.sls.memory.model.Deployment;

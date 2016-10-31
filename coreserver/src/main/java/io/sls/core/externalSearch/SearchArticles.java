@@ -1,9 +1,9 @@
 package io.sls.core.externalSearch;
 
 import io.sls.core.lifecycle.AbstractLifecycleTask;
-import io.sls.core.lifecycle.ILifecycleTask;
-import io.sls.core.lifecycle.LifecycleException;
 import io.sls.expressions.Expression;
+import io.sls.lifecycle.ILifecycleTask;
+import io.sls.lifecycle.LifecycleException;
 import io.sls.memory.IConversationMemory;
 import io.sls.memory.impl.Data;
 

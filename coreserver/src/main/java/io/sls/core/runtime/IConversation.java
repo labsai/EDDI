@@ -1,6 +1,6 @@
 package io.sls.core.runtime;
 
-import io.sls.core.lifecycle.LifecycleException;
+import io.sls.lifecycle.LifecycleException;
 import io.sls.memory.IConversationMemory;
 
 /**

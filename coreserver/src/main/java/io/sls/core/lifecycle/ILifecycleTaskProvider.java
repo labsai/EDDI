@@ -1,5 +1,7 @@
 package io.sls.core.lifecycle;
 
+import io.sls.lifecycle.ILifecycleTask;
+
 /**
  * @author ginccc
  */

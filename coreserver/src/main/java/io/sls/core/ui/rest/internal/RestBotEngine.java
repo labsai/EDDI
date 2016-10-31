@@ -1,11 +1,11 @@
 package io.sls.core.ui.rest.internal;
 
-import io.sls.core.lifecycle.LifecycleException;
 import io.sls.core.rest.IRestBotEngine;
 import io.sls.core.runtime.IBot;
 import io.sls.core.runtime.IBotFactory;
 import io.sls.core.runtime.IConversation;
 import io.sls.core.runtime.service.ServiceException;
+import io.sls.lifecycle.LifecycleException;
 import io.sls.memory.IConversationMemory;
 import io.sls.memory.IConversationMemoryStore;
 import io.sls.memory.impl.ConversationMemoryUtilities;

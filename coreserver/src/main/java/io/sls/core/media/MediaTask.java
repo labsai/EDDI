@@ -1,8 +1,8 @@
 package io.sls.core.media;
 
 import io.sls.core.lifecycle.AbstractLifecycleTask;
-import io.sls.core.lifecycle.ILifecycleTask;
-import io.sls.core.lifecycle.LifecycleException;
+import io.sls.lifecycle.ILifecycleTask;
+import io.sls.lifecycle.LifecycleException;
 import io.sls.memory.IConversationMemory;
 import io.sls.memory.IData;
 import io.sls.memory.impl.Data;

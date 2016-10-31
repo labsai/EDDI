@@ -37,6 +37,8 @@
         <module>webserver</module>
         <module>configurationserver</module>
         <module>coreserver</module>
+        <module>lifecycle-spi</module>
+        <module>lifecycle-definition</module>
     </modules>
 
     <build>

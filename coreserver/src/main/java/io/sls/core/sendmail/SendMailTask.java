@@ -1,6 +1,6 @@
 package io.sls.core.sendmail;
 
-import io.sls.core.lifecycle.*;
+import io.sls.lifecycle.*;
 import io.sls.memory.IConversationMemory;
 import io.sls.memory.IData;
 import io.sls.permission.IAuthorization;

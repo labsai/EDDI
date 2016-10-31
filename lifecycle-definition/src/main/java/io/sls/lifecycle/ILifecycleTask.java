@@ -1,4 +1,4 @@
-package io.sls.core.lifecycle;
+package io.sls.lifecycle;
 
 import io.sls.memory.IConversationMemory;
 
