@@ -63,9 +63,9 @@ REST.Request.prototype = {
                     + "=" + encodeURI(self.cookies[i][1]);
             }
             request.open(self.method, url, self.async, self.username, self.password);
-            var acceptSet = self;
-            var contentTypeSet = self;
-            var containsAuthorizationHeader = self;
+            var acceptSet = false;
+            var contentTypeSet = false;
+            var containsAuthorizationHeader = false;
             for (var i = 0; i < self.headers.length; i++) {
                 if (self.headers[i][0].toLowerCase() == 'accept')
                     acceptSet = self.headers[i][1];
