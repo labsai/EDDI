@@ -5,7 +5,6 @@ import io.sls.runtime.bootstrap.AbstractBaseModule;
 import io.sls.server.IServerRuntime;
 import io.sls.server.MongoLoginService;
 import io.sls.server.ServerRuntime;
-import io.sls.server.rest.resolvers.JacksonContextResolver;
 import org.eclipse.jetty.security.ConstraintMapping;
 import org.eclipse.jetty.security.ConstraintSecurityHandler;
 import org.eclipse.jetty.security.LoginService;
@@ -32,7 +31,6 @@ public class ServerRuntimeModule extends AbstractBaseModule {
     protected void configure() {
         registerConfigFiles(configFiles);
         bind(LoginService.class).to(MongoLoginService.class);
-        bind(JacksonContextResolver.class);
     }
 
     @Provides

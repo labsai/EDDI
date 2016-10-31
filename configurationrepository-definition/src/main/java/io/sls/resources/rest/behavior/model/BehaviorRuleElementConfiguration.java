@@ -1,7 +1,6 @@
 package io.sls.resources.rest.behavior.model;
 
 
-import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import com.fasterxml.jackson.annotation.JsonInclude;
 
 import java.util.HashMap;
@@ -12,7 +11,6 @@ import java.util.Map;
 /**
  * @author ginccc
  */
-@JsonIgnoreProperties({"id", "behaviorRules", "editable", "opened", "name", "selected"})
 @JsonInclude(JsonInclude.Include.NON_NULL)
 public class BehaviorRuleElementConfiguration {
     private String type;

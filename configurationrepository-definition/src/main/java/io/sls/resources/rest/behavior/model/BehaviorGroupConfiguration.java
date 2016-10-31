@@ -1,14 +1,11 @@
 package io.sls.resources.rest.behavior.model;
 
-import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
-
 import java.util.LinkedList;
 import java.util.List;
 
 /**
  * @author ginccc
  */
-@JsonIgnoreProperties({"id", "children", "selected", "opened", "editable"})
 public class BehaviorGroupConfiguration {
     private String name;
     private List<BehaviorRuleConfiguration> behaviorRules;
