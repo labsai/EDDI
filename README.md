@@ -83,6 +83,11 @@ Additionally, you have to supply the following system properties (via -D) for ru
 
 If your Keycloak URL is different from http://localhost:8080/auth then you need to change configurationserver/resources/keycloak/development/keycloak-adapter.json accordingly.
 
+The realm provides the following users which you can use to login to the configuration server:
+
+1. dev-admin / dev-admin
+2. dev-user / dev-user
+
 ### MongoDB
 ```
 docker run --name some-mongo -d mongo --auth
