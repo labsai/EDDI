@@ -9,26 +9,21 @@
     <!-- Insert here extra files as configs or, batch files, resources, docs etc-->
     <fileSets>
         <fileSet>
-                <outputDirectory>/</outputDirectory>
-                <includes>
-                        <include>config/*.*</include>
-                        <include>resources/**/*.*</include>
-                        <include>keystore/*.*</include>
-                        <include>*.sh</include>
-                        <include>*.bat</include>
-                </includes>
+            <outputDirectory>/</outputDirectory>
+            <includes>
+                <include>config/**/*.*</include>
+                <include>resources/**/*.*</include>
+                <include>*.sh</include>
+                <include>*.bat</include>
+            </includes>
         </fileSet>
     </fileSets>
-    <!-- This will scrub your dependencies and add them to your lib folder, I excluded
-         Test stuff as it is not needed, could have declared the resource as a test
-         only phase as well would not have had to exclude it here
-    -->
     <dependencySets>
         <dependencySet>
-                <outputDirectory>lib</outputDirectory>                  
-                <excludes>
-                        <exclude>junit:junit</exclude>
-                </excludes>
+            <outputDirectory>lib</outputDirectory>
+            <unpack>false</unpack>
+            <scope>runtime</scope>
+            <useProjectArtifact>true</useProjectArtifact>
         </dependencySet>
     </dependencySets>
 </assembly>
