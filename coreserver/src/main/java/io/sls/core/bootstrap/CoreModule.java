@@ -7,7 +7,6 @@ import io.sls.botmarklet.rest.impl.RestBotmarklet;
 import io.sls.core.behavior.BehaviorRulesEvaluationTask;
 import io.sls.core.behavior.BehaviorSerialization;
 import io.sls.core.behavior.IBehaviorSerialization;
-import io.sls.core.lifecycle.ILifecycleTask;
 import io.sls.core.media.MediaTask;
 import io.sls.core.normalizing.NormalizeInputTask;
 import io.sls.core.output.SimpleOutputTask;
@@ -37,11 +36,14 @@ import io.sls.core.ui.rest.internal.RestBotEngine;
 import io.sls.core.ui.rest.internal.RestBotUI;
 import io.sls.faces.html.IHtmlFaceStore;
 import io.sls.faces.html.impl.HtmlFaceStore;
+import io.sls.lifecycle.ILifecycleTask;
+import io.sls.lifecycle.spi.ILifecycleTaskProviderSpi;
 import io.sls.logging.client.rest.IRestClientLogging;
 import io.sls.logging.client.rest.impl.RestClientLogging;
 import io.sls.runtime.bootstrap.AbstractBaseModule;
 
 import java.io.InputStream;
+import java.util.ServiceLoader;
 
 public class CoreModule extends AbstractBaseModule {
     public CoreModule(InputStream... inputStream) {
@@ -72,14 +74,10 @@ public class CoreModule extends AbstractBaseModule {
 
         MapBinder<String, ILifecycleTask> lifecycleTaskPlugins
                 = MapBinder.newMapBinder(binder(), String.class, ILifecycleTask.class);
-        lifecycleTaskPlugins.addBinding("io.sls.normalizer").to(NormalizeInputTask.class);
-        lifecycleTaskPlugins.addBinding("io.sls.parser").to(InputParserTask.class);
-        lifecycleTaskPlugins.addBinding("io.sls.behavior").to(BehaviorRulesEvaluationTask.class);
-        lifecycleTaskPlugins.addBinding("io.sls.output").to(SimpleOutputTask.class);
-        lifecycleTaskPlugins.addBinding("io.sls.media").to(MediaTask.class);
-        lifecycleTaskPlugins.addBinding("io.sls.tts").to(TextToSpeechTask.class);
-        lifecycleTaskPlugins.addBinding("io.sls.sendmail").to(SendMailTask.class);
 
+        for (ILifecycleTaskProviderSpi lifecycleTaskProviderSpi : ServiceLoader.load(ILifecycleTaskProviderSpi.class)) {
+            lifecycleTaskPlugins.addBinding(lifecycleTaskProviderSpi.getLifecycleTaskId()).to(lifecycleTaskProviderSpi.getLifecycleTaskClass());
+        }
 
         bind(CoreRuntime.class).asEagerSingleton();
     }

@@ -1,9 +1,14 @@
 package io.sls.core.runtime.client.packages;
 
-import io.sls.core.lifecycle.*;
+import io.sls.core.lifecycle.ILifecycleManager;
+import io.sls.core.lifecycle.LifecycleManager;
 import io.sls.core.runtime.IExecutablePackage;
 import io.sls.core.runtime.service.IPackageStoreService;
 import io.sls.core.runtime.service.ServiceException;
+import io.sls.lifecycle.ILifecycleTask;
+import io.sls.lifecycle.IllegalExtensionConfigurationException;
+import io.sls.lifecycle.PackageConfigurationException;
+import io.sls.lifecycle.UnrecognizedExtensionException;
 import io.sls.resources.rest.documentdescriptor.model.DocumentDescriptor;
 import io.sls.resources.rest.packages.model.PackageConfiguration;
 

@@ -1,8 +1,7 @@
 package io.sls.core.tts;
 
 import io.sls.core.lifecycle.AbstractLifecycleTask;
-import io.sls.core.lifecycle.ILifecycleTask;
-import io.sls.core.lifecycle.LifecycleException;
+import io.sls.lifecycle.LifecycleException;
 import io.sls.memory.IConversationMemory;
 import io.sls.memory.IData;
 import io.sls.memory.impl.Data;
@@ -20,7 +19,7 @@ import java.util.Map;
  * @author ginccc
  */
 @Singleton
-public class TextToSpeechTask extends AbstractLifecycleTask implements ILifecycleTask {
+public class TextToSpeechTask extends AbstractLifecycleTask {
     private static final String OUTPUT_KEY = "output";
     private Map<String, URI> ttsResourceURIs = new HashMap<String, URI>();
 

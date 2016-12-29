@@ -1,6 +1,6 @@
 package io.sls.core.parser;
 
-import io.sls.core.lifecycle.*;
+import io.sls.core.lifecycle.AbstractLifecycleTask;
 import io.sls.core.parser.correction.*;
 import io.sls.core.parser.dictionaries.*;
 import io.sls.core.parser.internal.InputParser;
@@ -10,6 +10,7 @@ import io.sls.core.runtime.client.configuration.IResourceClientLibrary;
 import io.sls.core.runtime.service.ServiceException;
 import io.sls.expressions.Expression;
 import io.sls.expressions.utilities.IExpressionUtilities;
+import io.sls.lifecycle.*;
 import io.sls.memory.IConversationMemory;
 import io.sls.memory.IData;
 import io.sls.memory.impl.Data;

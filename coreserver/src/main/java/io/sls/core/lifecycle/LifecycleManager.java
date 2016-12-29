@@ -1,6 +1,8 @@
 package io.sls.core.lifecycle;
 
 
+import io.sls.lifecycle.ILifecycleTask;
+import io.sls.lifecycle.LifecycleException;
 import io.sls.memory.IConversationMemory;
 
 import java.util.LinkedList;

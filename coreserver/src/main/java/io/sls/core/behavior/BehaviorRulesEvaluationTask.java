@@ -1,11 +1,11 @@
 package io.sls.core.behavior;
 
 import io.sls.core.lifecycle.AbstractLifecycleTask;
-import io.sls.core.lifecycle.ILifecycleTask;
-import io.sls.core.lifecycle.LifecycleException;
-import io.sls.core.lifecycle.PackageConfigurationException;
 import io.sls.core.runtime.client.configuration.IResourceClientLibrary;
 import io.sls.core.runtime.service.ServiceException;
+import io.sls.lifecycle.ILifecycleTask;
+import io.sls.lifecycle.LifecycleException;
+import io.sls.lifecycle.PackageConfigurationException;
 import io.sls.memory.IConversationMemory;
 import io.sls.memory.impl.Data;
 import io.sls.resources.rest.behavior.model.BehaviorConfiguration;

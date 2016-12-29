@@ -1,5 +1,10 @@
 package io.sls.core.lifecycle;
 
+import io.sls.lifecycle.ILifecycleTask;
+import io.sls.lifecycle.IllegalExtensionConfigurationException;
+import io.sls.lifecycle.PackageConfigurationException;
+import io.sls.lifecycle.UnrecognizedExtensionException;
+
 import java.util.Map;
 
 /**
