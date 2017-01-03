@@ -170,12 +170,12 @@ io.sls.core.ui.rest.*
 
 Bootstrapping/Deploying
 ```java
-io.sls.core.runtime.*
+io.sls.runtime.runtime.*
 ```
 
 The conversation lifecycle between the bot and the human
 ```java
-io.sls.core.lifecycle.*
+ai.labs.lifecycle.*
 ```
 
 The one and only user specific (conversation) state in the whole application.
@@ -184,7 +184,7 @@ It is used for communication between the plugins.
 io.sls.memory.*
 ```
 
-Prepares the user input for the parser.
+Prepares the user input for the ai.labs.parser.
 ```java
 io.sls.core.normalizing.*
 ```
@@ -192,7 +192,7 @@ io.sls.core.normalizing.*
 Parses the input of the user and translates it to "Expressions", based on dictionaries and correction algorithms. Expression are meanings, e.g. day after tomorrow -> date(today+1), yes -> confirmation(true)
 Dictionaries and Corrections are plugins and therefore can be extended.
 ```java
-io.sls.core.parser.*
+ai.labs.ai.labs.parser.ai.labs.parser.*
 ```
 
 There are groups of Rules. Each rules holds an list of conditions that all need to pass true in order for the rule to be successful. As soon as one rule has passed true none of the other following group members is executed. Successful rules have a set of "actions" that should be executed later on. 

@@ -15,8 +15,6 @@ import io.sls.user.impl.utilities.UserUtilities;
 import io.sls.utilities.RestUtilities;
 import io.sls.utilities.SecurityUtilities;
 import lombok.extern.slf4j.Slf4j;
-import org.jboss.resteasy.annotations.interception.SecurityPrecedence;
-import org.jboss.resteasy.annotations.interception.ServerInterceptor;
 
 import javax.servlet.http.HttpServletRequest;
 import javax.ws.rs.InternalServerErrorException;
@@ -36,8 +34,6 @@ import java.security.Principal;
  * @author ginccc
  */
 @Provider
-@ServerInterceptor
-@SecurityPrecedence
 @Slf4j
 public class PermissionResponseInterceptor implements ContainerResponseFilter {
     public static final String METHOD_NAME_CREATE_USER = "createUser";

@@ -1,5 +1,5 @@
 function IntegerModel(lifecycle) {
-    this.type = "core://io.sls.parser.dictionaries.integer?version=1";
+    this.type = "core://io.sls.ai.labs.parser.dictionaries.integer?version=1";
 
     var instance = this;
     this.convertToJSON = function () {

@@ -1,14 +1,14 @@
 package io.sls.core.behavior;
 
-import io.sls.core.lifecycle.AbstractLifecycleTask;
-import io.sls.core.lifecycle.ILifecycleTask;
-import io.sls.core.lifecycle.LifecycleException;
-import io.sls.core.lifecycle.PackageConfigurationException;
-import io.sls.core.runtime.client.configuration.IResourceClientLibrary;
-import io.sls.core.runtime.service.ServiceException;
+import ai.labs.lifecycle.AbstractLifecycleTask;
+import ai.labs.lifecycle.ILifecycleTask;
+import ai.labs.lifecycle.LifecycleException;
+import ai.labs.lifecycle.PackageConfigurationException;
 import io.sls.memory.IConversationMemory;
 import io.sls.memory.impl.Data;
 import io.sls.resources.rest.behavior.model.BehaviorConfiguration;
+import io.sls.runtime.client.configuration.IResourceClientLibrary;
+import io.sls.runtime.service.ServiceException;
 import io.sls.serialization.DeserializationException;
 import io.sls.serialization.IJsonSerialization;
 import lombok.extern.slf4j.Slf4j;

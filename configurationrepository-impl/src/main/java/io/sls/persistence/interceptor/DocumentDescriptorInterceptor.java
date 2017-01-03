@@ -17,7 +17,6 @@ import io.sls.user.impl.utilities.UserUtilities;
 import io.sls.utilities.RestUtilities;
 import io.sls.utilities.SecurityUtilities;
 import lombok.extern.slf4j.Slf4j;
-import org.jboss.resteasy.annotations.interception.ServerInterceptor;
 
 import javax.ws.rs.DELETE;
 import javax.ws.rs.InternalServerErrorException;
@@ -39,7 +38,6 @@ import java.util.Date;
  * @author ginccc
  */
 @Provider
-@ServerInterceptor
 @Slf4j
 public class DocumentDescriptorInterceptor implements ContainerResponseFilter {
     private static final String METHOD_NAME_UPDATE_DESCRIPTOR = "updateDescriptor";

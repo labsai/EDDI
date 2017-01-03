@@ -1,12 +1,12 @@
 package io.sls.core.ui.rest.internal;
 
 import io.sls.core.rest.IRestBotAdministration;
-import io.sls.core.runtime.IBot;
-import io.sls.core.runtime.IBotFactory;
-import io.sls.core.runtime.service.ServiceException;
 import io.sls.memory.model.Deployment;
+import io.sls.runtime.IBot;
+import io.sls.runtime.IBotFactory;
 import io.sls.runtime.SystemRuntime;
 import io.sls.runtime.ThreadContext;
+import io.sls.runtime.service.ServiceException;
 import io.sls.utilities.RuntimeUtilities;
 import lombok.extern.slf4j.Slf4j;
 import org.jboss.resteasy.plugins.guice.RequestScoped;

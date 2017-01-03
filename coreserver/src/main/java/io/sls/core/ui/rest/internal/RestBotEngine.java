@@ -1,11 +1,8 @@
 package io.sls.core.ui.rest.internal;
 
-import io.sls.core.lifecycle.LifecycleException;
+import ai.labs.lifecycle.IConversation;
+import ai.labs.lifecycle.LifecycleException;
 import io.sls.core.rest.IRestBotEngine;
-import io.sls.core.runtime.IBot;
-import io.sls.core.runtime.IBotFactory;
-import io.sls.core.runtime.IConversation;
-import io.sls.core.runtime.service.ServiceException;
 import io.sls.memory.IConversationMemory;
 import io.sls.memory.IConversationMemoryStore;
 import io.sls.memory.impl.ConversationMemoryUtilities;
@@ -14,7 +11,10 @@ import io.sls.memory.model.ConversationState;
 import io.sls.memory.model.Deployment;
 import io.sls.memory.model.SimpleConversationMemorySnapshot;
 import io.sls.persistence.IResourceStore;
+import io.sls.runtime.IBot;
+import io.sls.runtime.IBotFactory;
 import io.sls.runtime.SystemRuntime;
+import io.sls.runtime.service.ServiceException;
 import io.sls.utilities.RestUtilities;
 import io.sls.utilities.RuntimeUtilities;
 import lombok.extern.slf4j.Slf4j;

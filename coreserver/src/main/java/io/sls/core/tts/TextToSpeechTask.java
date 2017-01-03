@@ -1,8 +1,8 @@
 package io.sls.core.tts;
 
-import io.sls.core.lifecycle.AbstractLifecycleTask;
-import io.sls.core.lifecycle.ILifecycleTask;
-import io.sls.core.lifecycle.LifecycleException;
+import ai.labs.lifecycle.AbstractLifecycleTask;
+import ai.labs.lifecycle.ILifecycleTask;
+import ai.labs.lifecycle.LifecycleException;
 import io.sls.memory.IConversationMemory;
 import io.sls.memory.IData;
 import io.sls.memory.impl.Data;

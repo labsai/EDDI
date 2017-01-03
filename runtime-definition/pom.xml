@@ -15,6 +15,21 @@
 
     <dependencies>
         <dependency>
+            <groupId>ai.labs</groupId>
+            <artifactId>configurationrepository-definition</artifactId>
+            <version>3.0-SNAPSHOT</version>
+        </dependency>
+        <dependency>
+            <groupId>ai.labs</groupId>
+            <artifactId>conversationmemory-definition</artifactId>
+            <version>3.0-SNAPSHOT</version>
+        </dependency>
+        <dependency>
+            <groupId>ai.labs</groupId>
+            <artifactId>conversationlifecycle-definition</artifactId>
+            <version>3.0-SNAPSHOT</version>
+        </dependency>
+        <dependency>
             <groupId>org.slf4j</groupId>
             <artifactId>slf4j-api</artifactId>
             <version>1.7.21</version>

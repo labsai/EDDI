@@ -16,8 +16,6 @@ import io.sls.user.impl.utilities.UserUtilities;
 import io.sls.user.model.User;
 import io.sls.utilities.RestUtilities;
 import io.sls.utilities.RuntimeUtilities;
-import org.jboss.resteasy.annotations.interception.SecurityPrecedence;
-import org.jboss.resteasy.annotations.interception.ServerInterceptor;
 
 import javax.ws.rs.InternalServerErrorException;
 import javax.ws.rs.WebApplicationException;
@@ -35,8 +33,6 @@ import java.security.Principal;
  * @author ginccc
  */
 @Provider
-@ServerInterceptor
-@SecurityPrecedence
 public class PermissionRequestInterceptor implements ContainerRequestFilter {
     private static final String POST = "POST";
     private static final String GET = "GET";

@@ -59,7 +59,7 @@
  * ---------------------------------------------------------------------------
  * OTHER PARTIES' CODE:
  *
- * Parser based on the Regex-based URI parser by Steven Levithan.
+ * Parser based on the Regex-based URI ai.labs.parser by Steven Levithan.
  * For more information visit http://blog.stevenlevithan.com/archives/parseuri
  *
  * Deparam taken from jQuery BBQ by Ben Alman. Dual licensed under the MIT and GPL licenses (http://benalman.com/about/license/)

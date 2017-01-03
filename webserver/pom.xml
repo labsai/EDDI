@@ -24,7 +24,7 @@
         <dependency>
             <groupId>org.jboss.resteasy</groupId>
             <artifactId>resteasy-jaxrs</artifactId>
-            <version>3.0.18.Final</version>
+            <version>3.1.0.Final</version>
             <exclusions>
                 <exclusion>
                     <artifactId>slf4j-simple</artifactId>
@@ -43,17 +43,17 @@
         <dependency>
             <groupId>org.jboss.resteasy</groupId>
             <artifactId>resteasy-guice</artifactId>
-            <version>3.0.18.Final</version>
+            <version>3.1.0.Final</version>
         </dependency>
         <dependency>
             <groupId>org.jboss.resteasy</groupId>
             <artifactId>resteasy-jsapi</artifactId>
-            <version>3.0.18.Final</version>
+            <version>3.1.0.Final</version>
         </dependency>
         <dependency>
             <groupId>org.jboss.resteasy</groupId>
             <artifactId>resteasy-cache-core</artifactId>
-            <version>3.0.18.Final</version>
+            <version>3.1.0.Final</version>
         </dependency>
         <!-- Jetty -->
         <dependency>

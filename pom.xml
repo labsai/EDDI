@@ -37,6 +37,11 @@
         <module>webserver</module>
         <module>configurationserver</module>
         <module>coreserver</module>
+        <module>semanticparser-definition</module>
+        <module>semanticparser-impl</module>
+        <module>conversationlifecycle-definition</module>
+        <module>conversationlifecycle-impl</module>
+        <module>ChatbotToolingServer</module>
     </modules>
 
     <build>

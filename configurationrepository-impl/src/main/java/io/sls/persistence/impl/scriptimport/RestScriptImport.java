@@ -140,10 +140,10 @@ public class RestScriptImport implements IRestScriptImport {
 
             List<PackageConfiguration.PackageExtension> packageExtensions = new LinkedList<PackageConfiguration.PackageExtension>();
 
-            //parser
+            //ai.labs.parser
             Map<String, Object> parserExtensions = createParserExtension(language, scriptGroups);
             Map<String, Object> parserConfig = Collections.emptyMap();
-            packageExtensions.add(createPackageExtension("core://io.sls.parser", parserExtensions, parserConfig));
+            packageExtensions.add(createPackageExtension("core://io.sls.ai.labs.parser", parserExtensions, parserConfig));
 
             //behavior
             Map<String, Object> behaviourExtensions = Collections.emptyMap();
@@ -272,7 +272,7 @@ public class RestScriptImport implements IRestScriptImport {
 
     private Map<String, Object> createParserExtension(String language, List<ScriptGroup> scriptGroups) throws RestInterfaceFactory.RestInterfaceFactoryException, IResourceStore.ResourceStoreException, IResourceStore.ResourceModifiedException, IResourceStore.ResourceNotFoundException {
         List<Map<String, Object>> dictionaryExtensions = new LinkedList<Map<String, Object>>();
-        //parser.dictionary.punctuation
+        //ai.labs.parser.dictionary.punctuation
         Map<String, Object> punctuationExtension = createPunctuationExtension();
         dictionaryExtensions.add(punctuationExtension);
         RegularDictionaryConfiguration regularDictionaryConfiguration;
@@ -280,16 +280,16 @@ public class RestScriptImport implements IRestScriptImport {
         URI regularDictionaryUri = createRemoteRegularDictionary("dict-" + "-" + currentDateFormatted, URI.create(""), regularDictionaryConfiguration);
         Map<String, Object> regularDictionaryExtension = createRegularDictionaryExtension(regularDictionaryUri);
         dictionaryExtensions.add(regularDictionaryExtension);
-        //parser.dictionary
+        //ai.labs.parser.dictionary
         Map<String, Object> parserExtension = new HashMap<String, Object>();
         parserExtension.put("dictionaries", dictionaryExtensions.toArray());
 
-        //parser.corrections
+        //ai.labs.parser.corrections
         List<Map<String, Object>> corrections = new LinkedList<Map<String, Object>>();
-        //parser.corrections.levenshtein
+        //ai.labs.parser.corrections.levenshtein
         Map<String, Object> levenstheinConfiguration = createLevenshteinDistanceCorrection();
         corrections.add(levenstheinConfiguration);
-        //parser.corrections.mergedTerms
+        //ai.labs.parser.corrections.mergedTerms
         Map<String, Object> mergedTermsConfiguration = createMergedTermsCorrection();
         corrections.add(mergedTermsConfiguration);
         parserExtension.put("corrections", corrections);
@@ -302,7 +302,7 @@ public class RestScriptImport implements IRestScriptImport {
         regularDictionaryConfiguration = new RegularDictionaryConfiguration();
         regularDictionaryConfiguration.setLanguage(language);
         for (ScriptGroup scriptGroup : scriptGroups) {
-            //parser.dictionary.regular
+            //ai.labs.parser.dictionary.regular
             List<String> questions;
             List<String> keywords;
             String semantic;
@@ -336,14 +336,14 @@ public class RestScriptImport implements IRestScriptImport {
 
     private Map<String, Object> createMergedTermsCorrection() {
         Map<String, Object> mergedTermsCorrectionExtension = new HashMap<String, Object>();
-        mergedTermsCorrectionExtension.put("type", "core://io.sls.parser.corrections.mergedTerms");
+        mergedTermsCorrectionExtension.put("type", "core://io.sls.ai.labs.parser.corrections.mergedTerms");
         mergedTermsCorrectionExtension.put("config", new HashMap<String, Object>());
         return mergedTermsCorrectionExtension;
     }
 
     private Map<String, Object> createLevenshteinDistanceCorrection() {
         Map<String, Object> levenshteinCorrectionExtension = new HashMap<String, Object>();
-        levenshteinCorrectionExtension.put("type", "core://io.sls.parser.corrections.levenshtein");
+        levenshteinCorrectionExtension.put("type", "core://io.sls.ai.labs.parser.corrections.levenshtein");
         Map<String, Object> config = new HashMap<String, Object>();
         config.put("distance", "2");
         levenshteinCorrectionExtension.put("config", config);
@@ -381,7 +381,7 @@ public class RestScriptImport implements IRestScriptImport {
 
     private Map<String, Object> createRegularDictionaryExtension(URI regularDictionaryUri) {
         Map<String, Object> regularDictionaryExtension = new HashMap<String, Object>();
-        regularDictionaryExtension.put("type", "core://io.sls.parser.dictionaries.regular");
+        regularDictionaryExtension.put("type", "core://io.sls.ai.labs.parser.dictionaries.regular");
         Map<String, Object> config = new HashMap<String, Object>();
         config.put("uri", regularDictionaryUri);
         regularDictionaryExtension.put("config", config);
@@ -390,7 +390,7 @@ public class RestScriptImport implements IRestScriptImport {
 
     private Map<String, Object> createPunctuationExtension() {
         Map<String, Object> punctuationExtension = new HashMap<String, Object>();
-        punctuationExtension.put("type", "core://io.sls.parser.dictionaries.punctuation");
+        punctuationExtension.put("type", "core://io.sls.ai.labs.parser.dictionaries.punctuation");
         return punctuationExtension;
     }
 

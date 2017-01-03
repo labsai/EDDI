@@ -1,7 +1,7 @@
 package io.sls.core.normalizing;
 
-import io.sls.core.lifecycle.AbstractLifecycleTask;
-import io.sls.core.lifecycle.ILifecycleTask;
+import ai.labs.lifecycle.AbstractLifecycleTask;
+import ai.labs.lifecycle.ILifecycleTask;
 import io.sls.memory.IConversationMemory;
 import io.sls.memory.IData;
 import io.sls.memory.impl.Data;

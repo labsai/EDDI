@@ -1,7 +1,6 @@
 package io.sls.staticresources.impl.interceptor;
 
 import io.sls.runtime.ThreadContext;
-import org.jboss.resteasy.annotations.interception.ServerInterceptor;
 
 import javax.ws.rs.container.ContainerRequestContext;
 import javax.ws.rs.container.ContainerResponseContext;
@@ -16,7 +15,6 @@ import java.util.Map;
  * @author ginccc
  */
 @Provider
-@ServerInterceptor
 public class ContentTypeInterceptor implements ContainerResponseFilter {
     private static final String CONTENT_TYPE_HEADER = "Content-Type";
     private static final String DEFAULT_MIME_TYPE = "application/octet-stream";
