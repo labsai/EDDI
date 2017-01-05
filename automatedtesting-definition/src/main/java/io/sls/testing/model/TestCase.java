@@ -1,12 +1,17 @@
 package io.sls.testing.model;
 
 import io.sls.memory.model.ConversationMemorySnapshot;
+import lombok.Getter;
+import lombok.Setter;
 
 import java.util.Date;
 
 /**
  * @author ginccc
  */
+
+@Getter
+@Setter
 public class TestCase {
     private String botId;
     private Integer botVersion;
@@ -14,52 +19,4 @@ public class TestCase {
     private Date lastRun;
     private ConversationMemorySnapshot expected;
     private ConversationMemorySnapshot actual;
-
-    public String getBotId() {
-        return botId;
-    }
-
-    public void setBotId(String botId) {
-        this.botId = botId;
-    }
-
-    public Integer getBotVersion() {
-        return botVersion;
-    }
-
-    public void setBotVersion(Integer botVersion) {
-        this.botVersion = botVersion;
-    }
-
-    public TestCaseState getTestCaseState() {
-        return testCaseState;
-    }
-
-    public void setTestCaseState(TestCaseState testCaseState) {
-        this.testCaseState = testCaseState;
-    }
-
-    public Date getLastRun() {
-        return lastRun;
-    }
-
-    public void setLastRun(Date lastRun) {
-        this.lastRun = lastRun;
-    }
-
-    public ConversationMemorySnapshot getExpected() {
-        return expected;
-    }
-
-    public void setExpected(ConversationMemorySnapshot expected) {
-        this.expected = expected;
-    }
-
-    public ConversationMemorySnapshot getActual() {
-        return actual;
-    }
-
-    public void setActual(ConversationMemorySnapshot actual) {
-        this.actual = actual;
-    }
 }

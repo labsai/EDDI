@@ -10,11 +10,11 @@ import io.sls.persistence.bootstrap.RepositoryModule;
 import io.sls.persistence.impl.bootstrap.PersistenceModule;
 import io.sls.runtime.DependencyInjector;
 import io.sls.runtime.bootstrap.RuntimeModule;
+import io.sls.runtime.bootstrap.SwaggerModule;
 import io.sls.serialization.bootstrap.SerializationModule;
 import io.sls.server.IServerRuntime;
 import io.sls.server.bootstrap.ServerRuntimeModule;
 import io.sls.utilities.FileUtilities;
-import org.jboss.resteasy.plugins.guice.ext.RequestScopeModule;
 
 import java.io.FileInputStream;
 
@@ -41,7 +41,7 @@ public class NlpServer {
                 new RuntimeModule(
                         new FileInputStream(configDir + "threads.properties"),
                         new FileInputStream(configDir + "systemRuntime.properties")),
-                new RequestScopeModule(),
+                /*new RequestScopeModule(),*/
                 new RestInterfaceModule(),
                 new SerializationModule(),
                 new PersistenceModule(new FileInputStream(configDir + "mongodb.properties")),
@@ -52,6 +52,7 @@ public class NlpServer {
                 new ConversationMemoryModule(),
                 new ClientLoggingModule(),
                 new UserModule(),
+                new SwaggerModule(new FileInputStream(configDir + "swagger.properties")),
                 new ServerRuntimeModule(new FileInputStream(configDir + "webServer.properties"),
                         new FileInputStream(configDir + "keycloak.properties")));
 

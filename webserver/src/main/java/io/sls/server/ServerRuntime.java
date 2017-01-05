@@ -1,16 +1,13 @@
 package io.sls.server;
 
+import io.sls.runtime.SwaggerServletContextListener;
 import io.sls.runtime.SystemRuntime;
 import io.sls.runtime.ThreadContext;
 import io.sls.utilities.RuntimeUtilities;
-import io.sls.utilities.StringUtilities;
 import lombok.extern.slf4j.Slf4j;
 import org.eclipse.jetty.http.HttpVersion;
-import org.eclipse.jetty.security.ConstraintMapping;
-import org.eclipse.jetty.security.ConstraintSecurityHandler;
 import org.eclipse.jetty.security.LoginService;
 import org.eclipse.jetty.security.SecurityHandler;
-import org.eclipse.jetty.security.authentication.BasicAuthenticator;
 import org.eclipse.jetty.server.*;
 import org.eclipse.jetty.server.handler.HandlerList;
 import org.eclipse.jetty.servlet.FilterHolder;
@@ -18,7 +15,6 @@ import org.eclipse.jetty.servlet.ServletContextHandler;
 import org.eclipse.jetty.servlet.ServletHolder;
 import org.eclipse.jetty.util.log.Log;
 import org.eclipse.jetty.util.log.Slf4jLog;
-import org.eclipse.jetty.util.security.Constraint;
 import org.eclipse.jetty.util.ssl.SslContextFactory;
 import org.eclipse.jetty.util.thread.ExecutorThreadPool;
 import org.eclipse.jetty.util.thread.ThreadPool;
@@ -56,7 +52,6 @@ public class ServerRuntime implements IServerRuntime {
         public String defaultPath;
         public String pathKeystore;
         public String passwordKeystore;
-        public String[] basicAuthPaths;
         public String[] virtualHosts;
         public boolean useCrossSiteScripting;
         public long responseDelayInMillis;
@@ -66,6 +61,7 @@ public class ServerRuntime implements IServerRuntime {
 
     private Options options;
     private final GuiceResteasyBootstrapServletContextListener resteasyContextListener;
+    private final SwaggerServletContextListener swaggerContextListener;
     private final HttpServletDispatcher httpServletDispatcher;
     private final SecurityHandler securityHandler;
     private final String environment;
@@ -73,19 +69,18 @@ public class ServerRuntime implements IServerRuntime {
 
     public ServerRuntime(Options options,
                          GuiceResteasyBootstrapServletContextListener resteasyContextListener,
+                         SwaggerServletContextListener swaggerContextListener,
                          HttpServletDispatcher httpServletDispatcher,
                          SecurityHandler securityHandler,
                          @Named("system.environment") String environment,
                          @Named("webServer.baseUri") String baseUri) {
         this.options = options;
         this.resteasyContextListener = resteasyContextListener;
+        this.swaggerContextListener = swaggerContextListener;
         this.httpServletDispatcher = httpServletDispatcher;
         this.securityHandler = securityHandler;
         this.environment = environment;
         this.baseUri = baseUri;
-        for (int i = 0; i < options.basicAuthPaths.length; i++) {
-            options.basicAuthPaths[i] = StringUtilities.convertSkipPermissionURIs(options.basicAuthPaths[i]);
-        }
         RegisterBuiltin.register(ResteasyProviderFactory.getInstance());
     }
 
@@ -101,7 +96,7 @@ public class ServerRuntime implements IServerRuntime {
                     contextParameter.put("javax.ws.rs.Application", options.applicationConfiguration.getName());
 
                     startupJetty(contextParameter,
-                            Arrays.asList(resteasyContextListener),
+                            Arrays.asList(resteasyContextListener, swaggerContextListener),
                             Arrays.asList(new Filter[0]),
                             Arrays.asList(new HttpServletHolder(httpServletDispatcher, "/*"),
                                     new HttpServletHolder(new JSAPIServlet(), "/rest-js")));
@@ -163,7 +158,9 @@ public class ServerRuntime implements IServerRuntime {
 
         ServletContextHandler servletHandler = new ServletContextHandler(ServletContextHandler.SESSIONS);
 
-        servletHandler.setSecurityHandler(securityHandler);
+        if (securityHandler != null) {
+            servletHandler.setSecurityHandler(securityHandler);
+        }
 
         handlers.addHandler(servletHandler);
 
@@ -189,11 +186,6 @@ public class ServerRuntime implements IServerRuntime {
 
         servletHandler.addFilter(new FilterHolder(createRedirectFilter(options.sslOnly, options.httpsPort, true, options.defaultPath)), ANY_PATH, getAllDispatcherTypes());
 
-        /*if (options.basicAuthPaths.length > 0) {
-            servletHandler.setSecurityHandler(basicAuth());
-            servletHandler.addFilter(new FilterHolder(createBasicAuthenticationFilter(options.basicAuthPaths)), ANY_PATH, getAllDispatcherTypes());
-            log.info("Basic Authentication has been enabled...");
-        }*/
         servletHandler.addFilter(new FilterHolder(createInitThreadBoundValuesFilter()), ANY_PATH, getAllDispatcherTypes());
 
         if (options.useCrossSiteScripting) {
@@ -284,40 +276,6 @@ public class ServerRuntime implements IServerRuntime {
         };
     }
 
-    private Filter createBasicAuthenticationFilter(final String[] basicAuthPaths) {
-        return new Filter() {
-            @Override
-            public void init(FilterConfig filterConfig) throws ServletException {
-                //not implemented
-            }
-
-            @Override
-            public void doFilter(ServletRequest servletRequest, ServletResponse servletResponse, FilterChain filterChain) throws IOException, ServletException {
-                HttpServletRequest httpServletRequest = (HttpServletRequest) servletRequest;
-                if (isBasicAuthRequired(httpServletRequest.getRequestURI()) && httpServletRequest.getRemoteUser() == null) {
-                    httpServletRequest.authenticate((HttpServletResponse) servletResponse);
-                    return;
-                }
-
-                filterChain.doFilter(servletRequest, servletResponse);
-            }
-
-            private boolean isBasicAuthRequired(String requestPath) {
-                for (String basicAuthPath : basicAuthPaths) {
-                    if (requestPath.matches(basicAuthPath)) {
-                        return true;
-                    }
-                }
-                return false;
-            }
-
-            @Override
-            public void destroy() {
-                //not implemented
-            }
-        };
-    }
-
     private Filter createInitThreadBoundValuesFilter() {
         return new Filter() {
             @Override
@@ -393,26 +351,6 @@ public class ServerRuntime implements IServerRuntime {
                 // not implemented
             }
         };
-    }
-
-    private SecurityHandler basicAuth() {
-        ConstraintSecurityHandler csh = new ConstraintSecurityHandler();
-        csh.setAuthenticator(new BasicAuthenticator());
-        csh.setRealmName("SLS");
-        csh.setLoginService(options.loginService);
-
-        Constraint basicAuthConstraint = new Constraint();
-        basicAuthConstraint.setName(Constraint.__BASIC_AUTH);
-        basicAuthConstraint.setRoles(new String[]{"user"});
-        basicAuthConstraint.setAuthenticate(true);
-        basicAuthConstraint.setDataConstraint(Constraint.DC_CONFIDENTIAL);
-
-        ConstraintMapping cm = new ConstraintMapping();
-        cm.setConstraint(basicAuthConstraint);
-        cm.setPathSpec("/jetty-required-placeholder-url-pattern");
-        csh.addConstraintMapping(cm);
-
-        return csh;
     }
 
     private static EnumSet<DispatcherType> getAllDispatcherTypes() {

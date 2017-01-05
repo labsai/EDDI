@@ -18,7 +18,7 @@ import java.util.List;
  */
 @Path("/outputstore/outputsets")
 public interface IRestOutputStore extends IRestVersionInfo {
-    String resourceURI = "resource://io.sls.output/outputstore/outputsets/";
+    String resourceURI = "resource://ai.labs.output/outputstore/outputsets/";
     String versionQueryParam = "?version=";
 
     @GET

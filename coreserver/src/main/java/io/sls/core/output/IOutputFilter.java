@@ -6,5 +6,5 @@ package io.sls.core.output;
 public interface IOutputFilter {
     String getKey();
 
-    int getOccurence();
+    int getOccurrence();
 }

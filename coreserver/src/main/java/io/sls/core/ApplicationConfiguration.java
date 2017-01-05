@@ -1,10 +1,10 @@
 package io.sls.core;
 
-import io.sls.core.rest.AuthorizationHeaderFilter;
 import io.sls.core.ui.rest.exception.IllegalArgumentExceptionMapper;
 import io.sls.permission.interceptor.PermissionRequestInterceptor;
 import io.sls.permission.interceptor.PermissionResponseInterceptor;
 import io.sls.persistence.interceptor.DocumentDescriptorInterceptor;
+import io.sls.server.rest.providers.AuthorizationHeaderFilter;
 import io.sls.server.rest.providers.JacksonConfig;
 import io.sls.server.rest.providers.URIMessageBodyProvider;
 import io.sls.staticresources.impl.interceptor.ContentTypeInterceptor;

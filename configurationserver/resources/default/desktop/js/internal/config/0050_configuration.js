@@ -151,8 +151,8 @@ function Configuration(url) {
          * The controls below are deprecated and have been replaced by the generic lifecyclecontrol.
          */
         /**"core://io.sls.ai.labs.parser?version=1":{ model:SentenceparserLifecycleModel, control:SentenceparserLifecycleControl },
-        "core://io.sls.behavior?version=1"       : { model:BehaviorLifecycleModel, control:BehaviorLifecycleControl },
-        "core://io.sls.output?version=1"         : { model:OutputLifecycleModel, control:OutputLifecycleControl },
+         "core://ai.labs.behavior?version=1"       : { model:BehaviorLifecycleModel, control:BehaviorLifecycleControl },
+         "core://ai.labs.output?version=1"         : { model:OutputLifecycleModel, control:OutputLifecycleControl },
          "core://io.sls.ai.labs.parser.dictionaries.integer?version=1":{model:IntegerModel, control:IntegerControl},
          "core://io.sls.ai.labs.parser.dictionaries.regular?version=1":{model:RegularModel, control:RegularControl},
          "core://io.sls.ai.labs.parser.corrections.levenshtein?version=1":{model:LevenshteinModel, control:LevenshteinControl},

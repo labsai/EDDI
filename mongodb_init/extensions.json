@@ -2,7 +2,7 @@
 	"_id": {
 		"$oid": "5803b3d028518d1ac481180a"
 	},
-	"type": "core://io.sls.normalizer",
+	"type": "core://ai.labs.normalizer",
 	"extensionPoints": [],
 	"configDefinition": {
 		"allowedChars": {
@@ -22,15 +22,15 @@
 	"_id": {
 		"$oid": "5803b3e228518d1ac481180b"
 	},
-	"type": "core://io.sls.parser",
+	"type": "core://ai.labs.parser",
 	"extensionPoints": [{
-		"namespace": "core://io.sls.parser.dictionaries",
-		"interfaceClass": "io.sls.parser.model.IDictionary",
+		"namespace": "core://ai.labs.parser.dictionaries",
+		"interfaceClass": "ai.labs.parser.model.IDictionary",
 		"displayKey": "DICTIONARIES"
 	},
 	{
-		"namespace": "core://io.sls.parser.corrections",
-		"interfaceClass": "io.sls.parser.model.ICorrection",
+		"namespace": "core://ai.labs.parser.corrections",
+		"interfaceClass": "ai.labs.parser.model.ICorrection",
 		"displayKey": "CORRECTIONS"
 	}],
 	"configDefinition": {
@@ -42,11 +42,11 @@
 	"_id": {
 		"$oid": "5803b3f028518d1ac481180c"
 	},
-	"type": "core://io.sls.behavior",
+	"type": "core://ai.labs.behavior",
 	"extensionPoints": [],
 	"configDefinition": {
 		"uri": {
-			"type": "resource://io.sls.behavior",
+			"type": "resource://ai.labs.behavior",
 			"defaultValue": "",
 			"displayKey": "BEHAVIOR_RULE_SET"
 		}
@@ -57,11 +57,11 @@
 	"_id": {
 		"$oid": "5803b3ff28518d1ac481180d"
 	},
-	"type": "core://io.sls.output",
+	"type": "core://ai.labs.output",
 	"extensionPoints": [],
 	"configDefinition": {
 		"uri": {
-			"type": "resource://io.sls.output",
+			"type": "resource://ai.labs.output",
 			"defaultValue": "",
 			"displayKey": "OUTPUT_SET"
 		}
@@ -72,7 +72,7 @@
 	"_id": {
 		"$oid": "5803b40e28518d1ac481180e"
 	},
-	"type": "core://io.sls.parser.dictionaries.integer",
+	"type": "core://ai.labs.parser.dictionaries.integer",
 	"extensionPoints": [],
 	"configDefinition": {
 		
@@ -83,11 +83,11 @@
 	"_id": {
 		"$oid": "5803b41b28518d1ac481180f"
 	},
-	"type": "core://io.sls.parser.dictionaries.regular",
+	"type": "core://ai.labs.parser.dictionaries.regular",
 	"extensionPoints": [],
 	"configDefinition": {
 		"uri": {
-			"type": "resource://io.sls.regulardictionary",
+			"type": "resource://ai.labs.regulardictionary",
 			"defaultValue": "",
 			"displayKey": "DICTIONARY_URI"
 		}
@@ -98,7 +98,7 @@
 	"_id": {
 		"$oid": "5803b42a28518d1ac4811810"
 	},
-	"type": "core://io.sls.parser.corrections.levenshtein",
+	"type": "core://ai.labs.parser.corrections.levenshtein",
 	"extensionPoints": [],
 	"configDefinition": {
 		"distance": {
@@ -113,7 +113,7 @@
 	"_id": {
 		"$oid": "5803b43728518d1ac4811811"
 	},
-	"type": "core://io.sls.parser.corrections.phonetic",
+	"type": "core://ai.labs.parser.corrections.phonetic",
 	"extensionPoints": [],
 	"configDefinition": {
 		"metaphone": {

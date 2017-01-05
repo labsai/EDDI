@@ -148,12 +148,12 @@ public class RestScriptImport implements IRestScriptImport {
             //behavior
             Map<String, Object> behaviourExtensions = Collections.emptyMap();
             Map<String, Object> behaviourConfig = createBehaviourConfig(scriptGroups);
-            packageExtensions.add(createPackageExtension("core://io.sls.behavior", behaviourExtensions, behaviourConfig));
+            packageExtensions.add(createPackageExtension("core://ai.labs.behavior", behaviourExtensions, behaviourConfig));
 
             //behavior
             Map<String, Object> outputExtensions = Collections.emptyMap();
             Map<String, Object> outputConfig = createOutputConfig(scriptGroups);
-            packageExtensions.add(createPackageExtension("core://io.sls.output", outputExtensions, outputConfig));
+            packageExtensions.add(createPackageExtension("core://ai.labs.output", outputExtensions, outputConfig));
 
             //package
             PackageConfiguration packageConfiguration = new PackageConfiguration();

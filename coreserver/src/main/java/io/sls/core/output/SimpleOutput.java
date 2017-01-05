@@ -5,9 +5,10 @@ import java.util.*;
 /**
  * @author ginccc
  */
-public class SimpleOutput {
+public class SimpleOutput implements ISimpleOutput {
     private Map<String, List<OutputEntry>> outputMapper = new HashMap<>();
 
+    @Override
     public void addOutputEntry(OutputEntry outputEntry) {
         String key = outputEntry.getKey();
         if (!outputMapper.containsKey(key)) {
@@ -21,6 +22,7 @@ public class SimpleOutput {
         }
     }
 
+    @Override
     public List<List<OutputEntry>> getOutputs(List<IOutputFilter> outputFilter) {
         List<List<OutputEntry>> outputs = new LinkedList<>();
 
@@ -33,7 +35,7 @@ public class SimpleOutput {
             List<OutputEntry> tmpOutputEntries = new LinkedList<>(entryList);
 
             List<OutputEntry> outputEntries;
-            int occurrence = filter.getOccurence();
+            int occurrence = filter.getOccurrence();
             do {
                 outputEntries = extractOutputEntryOfSameOccurrence(tmpOutputEntries, occurrence);
                 occurrence--;
@@ -69,10 +71,11 @@ public class SimpleOutput {
 
         for (int i = 0; i < outputEntries.size(); ) {
             OutputEntry outputEntry = outputEntries.get(i);
-            if (outputEntry.getOccurrence() != highestOccurrence)
+            if (outputEntry.getOccurrence() != highestOccurrence) {
                 outputEntries.remove(outputEntry);
-            else
+            } else {
                 i++;
+            }
         }
 
         return outputEntries;

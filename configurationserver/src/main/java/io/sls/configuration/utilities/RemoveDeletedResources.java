@@ -40,9 +40,9 @@ public class RemoveDeletedResources {
         this.restInterfaces = new HashMap<>();
         restInterfaces.put("io.sls.bot", botStore::deleteAllPermanently);
         restInterfaces.put("io.sls.package", packageStore::deleteAllPermanently);
-        restInterfaces.put("io.sls.regulardictionary", regularDictionaryStore::deleteAllPermanently);
-        restInterfaces.put("io.sls.behavior", behaviorStore::deleteAllPermanently);
-        restInterfaces.put("io.sls.output", outputStore::deleteAllPermanently);
+        restInterfaces.put("ai.labs.regulardictionary", regularDictionaryStore::deleteAllPermanently);
+        restInterfaces.put("ai.labs.behavior", behaviorStore::deleteAllPermanently);
+        restInterfaces.put("ai.labs.output", outputStore::deleteAllPermanently);
         restInterfaces.put("io.sls.conversation", conversationMemoryStore::deleteConversationMemorySnapshot);
     }
 

@@ -1,5 +1,8 @@
 package io.sls.resources.rest.output.model;
 
+import lombok.Getter;
+import lombok.Setter;
+
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
@@ -7,6 +10,9 @@ import java.util.List;
 /**
  * @author ginccc
  */
+
+@Getter
+@Setter
 public class OutputConfiguration {
     private String key;
     private List<String> outputValues;
@@ -15,36 +21,12 @@ public class OutputConfiguration {
     public OutputConfiguration(String key, int occurrence, String... values) {
         this.key = key;
         this.occurrence = occurrence;
-        this.outputValues = new ArrayList<String>();
+        this.outputValues = new ArrayList<>();
         outputValues.addAll(Arrays.asList(values));
     }
 
     public OutputConfiguration() {
-        this.outputValues = new ArrayList<String>();
-    }
-
-    public String getKey() {
-        return key;
-    }
-
-    public void setKey(String key) {
-        this.key = key;
-    }
-
-    public List<String> getOutputValues() {
-        return outputValues;
-    }
-
-    public void setOutputValues(List<String> outputValues) {
-        this.outputValues = outputValues;
-    }
-
-    public int getOccurrence() {
-        return occurrence;
-    }
-
-    public void setOccurrence(int occurrence) {
-        this.occurrence = occurrence;
+        this.outputValues = new ArrayList<>();
     }
 
     @Override

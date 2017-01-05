@@ -1,41 +1,33 @@
 package ai.labs.parser.rest;
 
-import io.swagger.annotations.*;
+import io.swagger.annotations.Api;
+import io.swagger.annotations.ApiParam;
+import io.swagger.annotations.ApiResponse;
+import io.swagger.annotations.ApiResponses;
 
-import javax.ws.rs.GET;
 import javax.ws.rs.POST;
 import javax.ws.rs.Path;
 import javax.ws.rs.PathParam;
-import javax.ws.rs.core.Response;
+import javax.ws.rs.Produces;
+import javax.ws.rs.container.AsyncResponse;
+import javax.ws.rs.container.Suspended;
+import javax.ws.rs.core.MediaType;
 
 /**
  * @author ginccc
  */
+
 @Api
-@Path("parser")
+@Path("/api/v1/parser")
 public interface IRestSemanticParser {
 
-    @ApiParam(name = "configId", example = "507f1f77bcf86cd799439011", required = true)
+    @ApiParam(name = "parserId", example = "507f1f77bcf86cd799439011", required = true)
     @ApiResponses({
-            @ApiResponse(code = 202, message = "parsing job has been received and will be executed",
-                    responseHeaders = {
-                            @ResponseHeader(name = "location", description = "uri of parsing job")
-                    }),
-            @ApiResponse(code = 400, message = "missing configId of parser configuration document")})
+            @ApiResponse(code = 200, message = "Solution result of the parsing job as json array"),
+            @ApiResponse(code = 400, message = "missing parserId of parser configuration document")})
     @POST
-    @Path("{configId}")
-    Response parse(@PathParam("configId") String configId, String sentence);
-
-
-    @ApiParam(name = "solutionId", example = "507f1f77bcf86cd799439011", required = true)
-    @ApiResponses({
-            @ApiResponse(code = 202, message = "parsing job is still in progress",
-                    responseHeaders = {
-                            @ResponseHeader(name = "location", description = "uri of parsing job")
-                    }),
-            @ApiResponse(code = 200, message = "parsing job has finished"),
-            @ApiResponse(code = 400, message = "missing solutionId")})
-    @GET
-    @Path("{solutionId}")
-    Response readSolution(@PathParam("solutionId") String solutionId);
+    @Path("{parserId}")
+    @Produces(MediaType.APPLICATION_JSON)
+    void parse(@PathParam("parserId") String parserId, String sentence,
+               @Suspended AsyncResponse asyncResponse);
 }

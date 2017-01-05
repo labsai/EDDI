@@ -33,6 +33,17 @@ public abstract class RestVersionInfo<T> implements IRestVersionInfo {
         }
     }
 
+    @Override
+    public Response redirectToLatestVersion(String id) {
+        try {
+            IResourceStore.IResourceId currentResourceId = getCurrentResourceId(id);
+            String path = URI.create(resourceURI).getPath();
+            return Response.seeOther(URI.create(path + id + versionQueryParam + currentResourceId.getVersion())).build();
+        } catch (IResourceStore.ResourceNotFoundException e) {
+            throw new NotFoundException(e.getLocalizedMessage());
+        }
+    }
+
     public Response create(T obj) {
         try {
             IResourceStore.IResourceId resourceId = resourceStore.create(obj);
@@ -63,12 +74,7 @@ public abstract class RestVersionInfo<T> implements IRestVersionInfo {
             log.error(e.getLocalizedMessage(), e);
             throw new InternalServerErrorException(e.getLocalizedMessage(), e);
         } catch (IResourceStore.ResourceModifiedException e) {
-            try {
-                IResourceStore.IResourceId currentId = resourceStore.getCurrentResourceId(id);
-                throw RestUtilities.createConflictException(resourceURI, currentId);
-            } catch (IResourceStore.ResourceNotFoundException e1) {
-                throw new NotFoundException(e.getLocalizedMessage(), e);
-            }
+            return throwConflictException(id, e);
         } catch (IResourceStore.ResourceNotFoundException e) {
             throw new NotFoundException(e.getLocalizedMessage(), e);
         }
@@ -81,13 +87,17 @@ public abstract class RestVersionInfo<T> implements IRestVersionInfo {
             log.error(e.getLocalizedMessage(), e);
             throw new InternalServerErrorException(e.getLocalizedMessage(), e);
         } catch (IResourceStore.ResourceModifiedException e) {
-            try {
-                IResourceStore.IResourceId currentId = resourceStore.getCurrentResourceId(id);
-                throw RestUtilities.createConflictException(resourceURI, currentId);
-            } catch (IResourceStore.ResourceNotFoundException e1) {
-                throw new NotFoundException(e.getLocalizedMessage(), e);
-            }
+            throwConflictException(id, e);
         } catch (IResourceStore.ResourceNotFoundException e) {
+            throw new NotFoundException(e.getLocalizedMessage(), e);
+        }
+    }
+
+    private URI throwConflictException(String id, IResourceStore.ResourceModifiedException e) {
+        try {
+            IResourceStore.IResourceId currentId = resourceStore.getCurrentResourceId(id);
+            throw RestUtilities.createConflictException(resourceURI, currentId);
+        } catch (IResourceStore.ResourceNotFoundException e1) {
             throw new NotFoundException(e.getLocalizedMessage(), e);
         }
     }

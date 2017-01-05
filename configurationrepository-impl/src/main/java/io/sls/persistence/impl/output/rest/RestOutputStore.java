@@ -40,7 +40,7 @@ public class RestOutputStore extends RestVersionInfo<OutputConfigurationSet> imp
     @Override
     public List<DocumentDescriptor> readOutputDescriptors(String filter, Integer index, Integer limit) {
         try {
-            return documentDescriptorStore.readDescriptors("io.sls.output", filter, index, limit, false);
+            return documentDescriptorStore.readDescriptors("ai.labs.output", filter, index, limit, false);
         } catch (IResourceStore.ResourceStoreException e) {
             log.error(e.getLocalizedMessage(), e);
             throw new InternalServerErrorException(e.getLocalizedMessage(), e);

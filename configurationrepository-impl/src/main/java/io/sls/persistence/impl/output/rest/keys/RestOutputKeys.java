@@ -88,7 +88,7 @@ public class RestOutputKeys implements IRestOutputKeys {
         List<IResourceStore.IResourceId> resourceIds = new LinkedList<IResourceStore.IResourceId>();
 
         for (PackageConfiguration.PackageExtension packageExtension : packageConfiguration.getPackageExtensions()) {
-            if (!packageExtension.getType().toString().startsWith("core://io.sls.behavior")) {
+            if (!packageExtension.getType().toString().startsWith("core://ai.labs.behavior")) {
                 continue;
             }
 
@@ -105,7 +105,7 @@ public class RestOutputKeys implements IRestOutputKeys {
         List<IResourceStore.IResourceId> resourceIds = new LinkedList<IResourceStore.IResourceId>();
 
         for (PackageConfiguration.PackageExtension packageExtension : packageConfiguration.getPackageExtensions()) {
-            if (!packageExtension.getType().toString().startsWith("core://io.sls.output")) {
+            if (!packageExtension.getType().toString().startsWith("core://ai.labs.output")) {
                 continue;
             }
 

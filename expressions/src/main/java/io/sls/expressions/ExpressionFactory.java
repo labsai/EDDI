@@ -6,7 +6,6 @@ import io.sls.expressions.value.Value;
 import io.sls.utilities.CharacterUtilities;
 import lombok.extern.slf4j.Slf4j;
 
-import javax.inject.Inject;
 import javax.inject.Singleton;
 import java.util.Hashtable;
 import java.util.LinkedList;
@@ -20,7 +19,6 @@ import java.util.List;
 public class ExpressionFactory implements IExpressionFactory {
     private Hashtable<String, Expression> expressions = new Hashtable<>();
 
-    @Inject
     public ExpressionFactory() {
         //		expressions.put("", new Parentheses());
         expressions.put("*", new AnyValue());

@@ -37,7 +37,7 @@ public class RestRegularDictionaryStore extends RestVersionInfo<RegularDictionar
     @Override
     public List<DocumentDescriptor> readRegularDictionaryDescriptors(String filter, Integer index, Integer limit) {
         try {
-            return documentDescriptorStore.readDescriptors("io.sls.regulardictionary", filter, index, limit, false);
+            return documentDescriptorStore.readDescriptors("ai.labs.regulardictionary", filter, index, limit, false);
         } catch (IResourceStore.ResourceStoreException e) {
             log.error(e.getLocalizedMessage(), e);
             throw new InternalServerErrorException(e.getLocalizedMessage(), e);

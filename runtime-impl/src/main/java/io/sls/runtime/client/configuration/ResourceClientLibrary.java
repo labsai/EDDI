@@ -4,6 +4,7 @@ import io.sls.core.service.restinterfaces.IRestInterfaceFactory;
 import io.sls.core.utilities.URIUtilities;
 import io.sls.resources.rest.behavior.IRestBehaviorStore;
 import io.sls.resources.rest.output.IRestOutputStore;
+import io.sls.resources.rest.parser.IRestParserStore;
 import io.sls.resources.rest.regulardictionary.IRestRegularDictionaryStore;
 import io.sls.runtime.service.ServiceException;
 
@@ -32,27 +33,40 @@ public class ResourceClientLibrary implements IResourceClientLibrary {
     @Override
     public void init() throws ResourceClientLibraryException {
         this.restInterfaces = new HashMap<>();
-        restInterfaces.put("io.sls.regulardictionary", (id, version) -> {
+        restInterfaces.put("ai.labs.parser", (id, version) -> {
             try {
-                IRestRegularDictionaryStore dictionaryStore = restInterfaceFactory.get(IRestRegularDictionaryStore.class, configurationServerURI);
+                IRestParserStore parserStore = restInterfaceFactory.get(IRestParserStore.class,
+                        configurationServerURI);
+                return parserStore.readParser(id, version);
+            } catch (Exception e) {
+                throw new ServiceException(e.getLocalizedMessage(), e);
+            }
+        });
+
+        restInterfaces.put("ai.labs.regulardictionary", (id, version) -> {
+            try {
+                IRestRegularDictionaryStore dictionaryStore = restInterfaceFactory.get(IRestRegularDictionaryStore.class,
+                        configurationServerURI);
                 return dictionaryStore.readRegularDictionary(id, version, "", "", 0, 0);
             } catch (Exception e) {
                 throw new ServiceException(e.getLocalizedMessage(), e);
             }
         });
 
-        restInterfaces.put("io.sls.behavior", (id, version) -> {
+        restInterfaces.put("ai.labs.behavior", (id, version) -> {
             try {
-                IRestBehaviorStore behaviorStore = restInterfaceFactory.get(IRestBehaviorStore.class, configurationServerURI);
+                IRestBehaviorStore behaviorStore = restInterfaceFactory.get(IRestBehaviorStore.class,
+                        configurationServerURI);
                 return behaviorStore.readBehaviorRuleSet(id, version);
             } catch (Exception e) {
                 throw new ServiceException(e.getLocalizedMessage(), e);
             }
         });
 
-        restInterfaces.put("io.sls.output", (id, version) -> {
+        restInterfaces.put("ai.labs.output", (id, version) -> {
             try {
-                IRestOutputStore outputStore = restInterfaceFactory.get(IRestOutputStore.class, configurationServerURI);
+                IRestOutputStore outputStore = restInterfaceFactory.get(IRestOutputStore.class,
+                        configurationServerURI);
                 return outputStore.readOutputSet(id, version, "", "", 0, 0);
             } catch (Exception e) {
                 throw new ServiceException(e.getLocalizedMessage(), e);

@@ -39,7 +39,7 @@ public class RestBehaviorStore extends RestVersionInfo<BehaviorConfiguration> im
     @Override
     public List<DocumentDescriptor> readBehaviorDescriptors(String filter, Integer index, Integer limit) {
         try {
-            return documentDescriptorStore.readDescriptors("io.sls.behavior", filter, index, limit, false);
+            return documentDescriptorStore.readDescriptors("ai.labs.behavior", filter, index, limit, false);
         } catch (IResourceStore.ResourceStoreException e) {
             log.error(e.getLocalizedMessage(), e);
             throw new InternalServerErrorException(e.getLocalizedMessage(), e);

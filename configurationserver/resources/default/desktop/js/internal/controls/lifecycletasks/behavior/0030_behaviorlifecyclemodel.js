@@ -1,5 +1,5 @@
 function BehaviorLifecycleModel(lifecycle) {
-    this.type = "core://io.sls.behavior?version=1";
+    this.type = "core://ai.labs.behavior?version=1";
     var instance = this;
 
     this.convertToJSON = function () {
@@ -31,7 +31,7 @@ function BehaviorLifecycleModel(lifecycle) {
 
     var behaviorDescriptions = application.networkCacheManager.cachedNetworkCall(behaviorDescriptionsCacheId,
         application.dataProvider, application.dataProvider.readDocumentDescriptions,
-        ['io.sls.behavior', 0, 0, '', 'asc']
+        ['ai.labs.behavior', 0, 0, '', 'asc']
     );
 
     this.id = application.dataProvider.getNextIdGlobal();

@@ -19,7 +19,7 @@
         <dependency>
             <groupId>org.slf4j</groupId>
             <artifactId>slf4j-api</artifactId>
-            <version>1.7.21</version>
+            <version>1.7.22</version>
         </dependency>
         <dependency>
             <groupId>org.jboss.resteasy</groupId>
@@ -59,32 +59,32 @@
         <dependency>
             <groupId>org.eclipse.jetty</groupId>
             <artifactId>jetty-server</artifactId>
-            <version>9.3.11.v20160721</version>
+            <version>9.3.15.v20161220</version>
         </dependency>
         <dependency>
             <groupId>org.eclipse.jetty</groupId>
             <artifactId>jetty-security</artifactId>
-            <version>9.3.11.v20160721</version>
+            <version>9.3.15.v20161220</version>
         </dependency>
         <dependency>
             <groupId>org.eclipse.jetty</groupId>
             <artifactId>jetty-servlet</artifactId>
-            <version>9.3.11.v20160721</version>
+            <version>9.3.15.v20161220</version>
         </dependency>
         <dependency>
             <groupId>org.eclipse.jetty</groupId>
             <artifactId>jetty-servlets</artifactId>
-            <version>9.3.11.v20160721</version>
+            <version>9.3.15.v20161220</version>
         </dependency>
         <dependency>
             <groupId>org.eclipse.jetty</groupId>
             <artifactId>jetty-rewrite</artifactId>
-            <version>9.3.11.v20160721</version>
+            <version>9.3.15.v20161220</version>
         </dependency>
         <dependency>
             <groupId>org.eclipse.jetty</groupId>
             <artifactId>jetty-util</artifactId>
-            <version>9.3.11.v20160721</version>
+            <version>9.3.15.v20161220</version>
         </dependency>
         <dependency>
             <groupId>org.keycloak</groupId>
@@ -120,6 +120,10 @@
             <groupId>javax.inject</groupId>
             <artifactId>javax.inject</artifactId>
             <version>1</version>
+        </dependency>
+        <dependency>
+            <groupId>io.swagger</groupId>
+            <artifactId></artifactId>
         </dependency>
     </dependencies>
 

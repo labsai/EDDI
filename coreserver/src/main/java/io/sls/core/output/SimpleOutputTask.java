@@ -38,7 +38,7 @@ public class SimpleOutputTask extends AbstractLifecycleTask implements ILifecycl
 
     @Override
     public String getId() {
-        return "io.sls.output.SimpleOutput";
+        return "ai.labs.output.SimpleOutput";
     }
 
     @Override
@@ -76,7 +76,8 @@ public class SimpleOutputTask extends AbstractLifecycleTask implements ILifecycl
         }
 
         for (List<OutputEntry> possibleOutput : possibleOutputs) {
-            memory.getCurrentStep().storeData(new Data("output:action:" + possibleOutput.get(0).getKey(), null, simpleOutput.convert(possibleOutput)));
+            String key = "output:action:" + possibleOutput.get(0).getKey();
+            memory.getCurrentStep().storeData(new Data(key, null, simpleOutput.convert(possibleOutput)));
         }
 
         List<IData> allOutputParts = memory.getCurrentStep().getAllData("output:action");

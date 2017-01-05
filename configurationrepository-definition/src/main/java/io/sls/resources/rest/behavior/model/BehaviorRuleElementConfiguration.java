@@ -2,6 +2,8 @@ package io.sls.resources.rest.behavior.model;
 
 
 import com.fasterxml.jackson.annotation.JsonInclude;
+import lombok.Getter;
+import lombok.Setter;
 
 import java.util.HashMap;
 import java.util.LinkedList;
@@ -12,6 +14,8 @@ import java.util.Map;
  * @author ginccc
  */
 @JsonInclude(JsonInclude.Include.NON_NULL)
+@Getter
+@Setter
 public class BehaviorRuleElementConfiguration {
     private String type;
     private Map<String, String> values;
@@ -20,21 +24,5 @@ public class BehaviorRuleElementConfiguration {
     public BehaviorRuleElementConfiguration() {
         values = new HashMap<>();
         children = new LinkedList<>();
-    }
-
-    public void setType(String type) {
-        this.type = type;
-    }
-
-    public String getType() {
-        return type;
-    }
-
-    public Map<String, String> getValues() {
-        return values;
-    }
-
-    public List<BehaviorRuleElementConfiguration> getChildren() {
-        return children;
     }
 }

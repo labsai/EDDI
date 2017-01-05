@@ -10,14 +10,12 @@ import io.sls.core.CoreRuntime;
 import io.sls.core.behavior.BehaviorRulesEvaluationTask;
 import io.sls.core.behavior.BehaviorSerialization;
 import io.sls.core.behavior.IBehaviorSerialization;
-import io.sls.core.media.MediaTask;
 import io.sls.core.normalizing.NormalizeInputTask;
 import io.sls.core.output.SimpleOutputTask;
 import io.sls.core.rest.IRestBotAdministration;
 import io.sls.core.rest.IRestBotEngine;
 import io.sls.core.rest.IRestBotUI;
 import io.sls.core.sendmail.SendMailTask;
-import io.sls.core.tts.TextToSpeechTask;
 import io.sls.core.ui.rest.internal.RestBotAdministration;
 import io.sls.core.ui.rest.internal.RestBotEngine;
 import io.sls.core.ui.rest.internal.RestBotUI;
@@ -72,13 +70,11 @@ public class CoreModule extends AbstractBaseModule {
 
         MapBinder<String, ILifecycleTask> lifecycleTaskPlugins
                 = MapBinder.newMapBinder(binder(), String.class, ILifecycleTask.class);
-        lifecycleTaskPlugins.addBinding("io.sls.normalizer").to(NormalizeInputTask.class);
-        lifecycleTaskPlugins.addBinding("io.sls.ai.labs.parser").to(InputParserTask.class);
-        lifecycleTaskPlugins.addBinding("io.sls.behavior").to(BehaviorRulesEvaluationTask.class);
-        lifecycleTaskPlugins.addBinding("io.sls.output").to(SimpleOutputTask.class);
-        lifecycleTaskPlugins.addBinding("io.sls.media").to(MediaTask.class);
-        lifecycleTaskPlugins.addBinding("io.sls.tts").to(TextToSpeechTask.class);
-        lifecycleTaskPlugins.addBinding("io.sls.sendmail").to(SendMailTask.class);
+        lifecycleTaskPlugins.addBinding("ai.labs.normalizer").to(NormalizeInputTask.class);
+        lifecycleTaskPlugins.addBinding("ai.labs.parser").to(InputParserTask.class);
+        lifecycleTaskPlugins.addBinding("ai.labs.behavior").to(BehaviorRulesEvaluationTask.class);
+        lifecycleTaskPlugins.addBinding("ai.labs.output").to(SimpleOutputTask.class);
+        lifecycleTaskPlugins.addBinding("ai.labs.sendmail").to(SendMailTask.class);
 
 
         bind(CoreRuntime.class).asEagerSingleton();

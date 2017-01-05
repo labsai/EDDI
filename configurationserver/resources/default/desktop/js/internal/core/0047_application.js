@@ -408,13 +408,13 @@ function URLManipulator() {
             case 'io.sls.bot':
                 editorScreen = 'bots';
                 break;
-            case 'io.sls.behavior':
+            case 'ai.labs.behavior':
                 editorScreen = 'dialogs';
                 break;
-            case 'io.sls.output':
+            case 'ai.labs.output':
                 editorScreen = 'outputs';
                 break;
-            case 'io.sls.regulardictionary':
+            case 'ai.labs.regulardictionary':
                 editorScreen = 'dictionaries';
                 break;
             default:

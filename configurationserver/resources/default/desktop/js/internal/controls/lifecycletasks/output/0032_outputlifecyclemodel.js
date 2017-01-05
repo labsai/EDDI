@@ -1,5 +1,5 @@
 function OutputLifecycleModel(lifecycle) {
-    this.type = "core://io.sls.output?version=1"
+    this.type = "core://ai.labs.output?version=1"
     var instance = this;
 
     this.convertToJSON = function () {
@@ -31,7 +31,7 @@ function OutputLifecycleModel(lifecycle) {
 
     var outputDescriptions = application.networkCacheManager.cachedNetworkCall(outputDescriptionsCacheId,
         application.dataProvider, application.dataProvider.readDocumentDescriptions,
-        ['io.sls.output', 0, 0, '', 'asc']
+        ['ai.labs.output', 0, 0, '', 'asc']
     );
 
     this.id = application.dataProvider.getNextIdGlobal();

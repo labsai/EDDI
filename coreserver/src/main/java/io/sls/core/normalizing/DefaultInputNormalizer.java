@@ -4,7 +4,9 @@ import io.sls.core.utilities.WordSplitter;
 import io.sls.utilities.CharacterUtilities;
 
 public class DefaultInputNormalizer implements InputNormalizer {
-    public static final String DEFINED_CHARS = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz <=>#€+&.,:;!?1234567890äÄüÜöÖßéáß";
+    private static final String DEFINED_CHARS =
+            "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz <=>" +
+                    "#€+&.,:;!?1234567890äÄüÜöÖßéáß";
 
     @Override
     public String normalizeInput(String sentence) {

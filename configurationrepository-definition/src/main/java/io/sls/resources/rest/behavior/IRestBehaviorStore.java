@@ -16,7 +16,7 @@ import java.util.List;
  */
 @Path("/behaviorstore/behaviorsets")
 public interface IRestBehaviorStore extends IRestVersionInfo {
-    String resourceURI = "resource://io.sls.behavior/behaviorstore/behaviorsets/";
+    String resourceURI = "resource://ai.labs.behavior/behaviorstore/behaviorsets/";
     String versionQueryParam = "?version=";
 
     @GET

@@ -1,23 +1,21 @@
 package io.sls.resources.rest.output.model;
 
+import lombok.Getter;
+import lombok.Setter;
+
 import java.util.ArrayList;
 import java.util.List;
 
 /**
  * @author ginccc
  */
+
+@Getter
+@Setter
 public class OutputConfigurationSet {
     private List<OutputConfiguration> outputs;
 
     public OutputConfigurationSet() {
-        this.outputs = new ArrayList<OutputConfiguration>();
-    }
-
-    public List<OutputConfiguration> getOutputs() {
-        return outputs;
-    }
-
-    public void setOutputs(List<OutputConfiguration> outputs) {
-        this.outputs = outputs;
+        this.outputs = new ArrayList<>();
     }
 }

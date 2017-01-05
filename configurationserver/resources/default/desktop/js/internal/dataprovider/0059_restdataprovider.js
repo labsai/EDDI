@@ -514,13 +514,13 @@ function DataProvider() {
             case 'io.sls.bot':
                 retVal = IRestBotStore.getCurrentVersion({id:params.id});
                 break;
-            case 'io.sls.behavior':
+            case 'ai.labs.behavior':
                 retVal = IRestBehaviorStore.getCurrentVersion({id:params.id});
                 break;
-            case 'io.sls.output':
+            case 'ai.labs.output':
                 retVal = IRestOutputStore.getCurrentVersion({id:params.id});
                 break;
-            case 'io.sls.regulardictionary':
+            case 'ai.labs.regulardictionary':
                 retVal = IRestRegularDictionaryStore.getCurrentVersion({id:params.id});
                 break;
             default:

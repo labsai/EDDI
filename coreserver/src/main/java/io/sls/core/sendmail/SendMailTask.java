@@ -60,7 +60,7 @@ public class SendMailTask implements ILifecycleTask {
 
     @Override
     public String getId() {
-        return "io.sls.sendmail";
+        return "ai.labs.sendmail";
     }
 
     @Override

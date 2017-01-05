@@ -1,6 +1,8 @@
 package io.sls.core.utilities;
 
 import io.sls.utilities.CharacterUtilities;
+import lombok.AccessLevel;
+import lombok.NoArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 
 import java.sql.Time;
@@ -9,16 +11,13 @@ import java.util.List;
 import java.util.regex.Pattern;
 
 @Slf4j
+@NoArgsConstructor(access = AccessLevel.PRIVATE)
 public class LanguageUtilities {
-
-    private LanguageUtilities() {
-    }
-
-    private static class TimeRecognition {
-        private static final Pattern p1 = Pattern.compile("^(([0-1]?[0-9]|[2]?2[0-3])(h)([0-5][0-9]))$", Pattern.CASE_INSENSITIVE | Pattern.DOTALL); //e.g. 12h10
-        private static final Pattern p2 = Pattern.compile("^(([0-1]?[0-9]|[2]?2[0-3])(h))$", Pattern.CASE_INSENSITIVE | Pattern.DOTALL);             //e.g. 15h
-        private static final Pattern p3 = Pattern.compile("^([0-1]?[0-9]|[2][0-3]):([0-5][0-9])$", Pattern.CASE_INSENSITIVE | Pattern.DOTALL); // e.g. 19:50
-        private static final Pattern p4 = Pattern.compile("(([0-1][0-9])|([2][0-3])):([0-5][0-9]):([0-5][0-9])", Pattern.CASE_INSENSITIVE | Pattern.DOTALL);  // e.g. 13:50:12
+    private interface TimeRecognition {
+        Pattern p1 = Pattern.compile("^(([0-1]?[0-9]|[2]?2[0-3])(h)([0-5][0-9]))$", Pattern.CASE_INSENSITIVE | Pattern.DOTALL); //e.g. 12h10
+        Pattern p2 = Pattern.compile("^(([0-1]?[0-9]|[2]?2[0-3])(h))$", Pattern.CASE_INSENSITIVE | Pattern.DOTALL);             //e.g. 15h
+        Pattern p3 = Pattern.compile("^([0-1]?[0-9]|[2][0-3]):([0-5][0-9])$", Pattern.CASE_INSENSITIVE | Pattern.DOTALL); // e.g. 19:50
+        Pattern p4 = Pattern.compile("(([0-1][0-9])|([2][0-3])):([0-5][0-9]):([0-5][0-9])", Pattern.CASE_INSENSITIVE | Pattern.DOTALL);  // e.g. 13:50:12
     }
 
     public static Date isTimeExpression(String value) {

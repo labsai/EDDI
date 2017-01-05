@@ -101,7 +101,7 @@ public class ConversationMemorySnapshot {
         private List<PackageRunSnapshot> packages;
 
         public ConversationStepSnapshot() {
-            this.packages = new LinkedList<PackageRunSnapshot>();
+            this.packages = new LinkedList<>();
         }
 
         public List<PackageRunSnapshot> getPackages() {
@@ -134,7 +134,7 @@ public class ConversationMemorySnapshot {
         private List<ResultSnapshot> lifecycleTasks;
 
         public PackageRunSnapshot() {
-            this.lifecycleTasks = new LinkedList<ResultSnapshot>();
+            this.lifecycleTasks = new LinkedList<>();
         }
 
         public List<ResultSnapshot> getLifecycleTasks() {
@@ -160,8 +160,10 @@ public class ConversationMemorySnapshot {
 
             PackageRunSnapshot that = (PackageRunSnapshot) o;
 
-            if (context != null ? !context.equals(that.context) : that.context != null) return false;
-            return lifecycleTasks != null ? lifecycleTasks.equals(that.lifecycleTasks) : that.lifecycleTasks == null;
+            if (context != null ? context.equals(that.context) : that.context == null)
+                if (lifecycleTasks != null ? lifecycleTasks.equals(that.lifecycleTasks) : that.lifecycleTasks == null)
+                    return true;
+            return false;
 
         }
 
@@ -238,8 +240,10 @@ public class ConversationMemorySnapshot {
 
             ResultSnapshot that = (ResultSnapshot) o;
 
-            if (key != null ? !key.equals(that.key) : that.key != null) return false;
-            return possibleResults != null ? possibleResults.equals(that.possibleResults) : that.possibleResults == null;
+            if (key != null ? key.equals(that.key) : that.key == null)
+                if (possibleResults != null ? possibleResults.equals(that.possibleResults) : that.possibleResults == null)
+                    return true;
+            return false;
 
         }
 
@@ -252,9 +256,7 @@ public class ConversationMemorySnapshot {
 
         @Override
         public String toString() {
-            final StringBuilder sb = new StringBuilder();
-            sb.append("{lifecycleTasks=").append(result).append('}');
-            return sb.toString();
+            return "{lifecycleTasks=" + result + '}';
         }
     }
 }

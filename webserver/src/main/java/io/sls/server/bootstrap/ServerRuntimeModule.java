@@ -1,6 +1,7 @@
 package io.sls.server.bootstrap;
 
 import com.google.inject.Provides;
+import io.sls.runtime.SwaggerServletContextListener;
 import io.sls.runtime.bootstrap.AbstractBaseModule;
 import io.sls.server.IServerRuntime;
 import io.sls.server.MongoLoginService;
@@ -16,6 +17,7 @@ import org.keycloak.adapters.jetty.KeycloakJettyAuthenticator;
 import org.keycloak.representations.adapters.config.AdapterConfig;
 
 import javax.inject.Named;
+import javax.inject.Provider;
 import javax.inject.Singleton;
 import java.io.InputStream;
 
@@ -44,14 +46,15 @@ public class ServerRuntimeModule extends AbstractBaseModule {
                                                @Named("webServer.relativePathKeystore") String relativePathKeystore,
                                                @Named("webServer.passwordKeystore") String passwordKeystore,
                                                @Named("webServer.responseDelayInMillis") Long responseDelayInMillis,
-                                               @Named("webServer.basicAuthPaths") String basicAuthPaths,
                                                @Named("webServer.virtualHosts") String virtualHosts,
                                                @Named("webServer.useCrossSiteScriptingHeaderParam") Boolean useCrossSiteScriptingHeaderParam,
                                                @Named("webServer.baseUri") String baseUri,
                                                @Named("webServer.applicationConfigurationClass") String applicationConfigurationClass,
+                                               @Named("webServer.enableKeycloakSSO") Boolean enableKeycloakSSO,
                                                GuiceResteasyBootstrapServletContextListener contextListener,
+                                               SwaggerServletContextListener swaggerContextListener,
                                                HttpServletDispatcher httpServletDispatcher,
-                                               SecurityHandler securityHandler,
+                                               Provider<SecurityHandler> securityHandlerProvider,
                                                LoginService mongoLoginService) {
 
         try {
@@ -66,11 +69,16 @@ public class ServerRuntimeModule extends AbstractBaseModule {
             options.pathKeystore = System.getProperty("user.dir") + relativePathKeystore;
             options.passwordKeystore = passwordKeystore;
             options.responseDelayInMillis = responseDelayInMillis;
-            options.basicAuthPaths = basicAuthPaths.split(";");
             options.virtualHosts = virtualHosts.split(";");
             options.useCrossSiteScripting = useCrossSiteScriptingHeaderParam;
 
-            return new ServerRuntime(options, contextListener, httpServletDispatcher, securityHandler, environment, baseUri);
+            SecurityHandler securityHandler = null;
+            if (enableKeycloakSSO) {
+                securityHandler = securityHandlerProvider.get();
+            }
+
+            return new ServerRuntime(options, contextListener, swaggerContextListener, httpServletDispatcher,
+                    securityHandler, environment, baseUri);
         } catch (ClassNotFoundException e) {
             throw new RuntimeException(e.getLocalizedMessage(), e);
         }
