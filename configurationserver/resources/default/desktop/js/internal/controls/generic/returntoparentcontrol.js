@@ -21,10 +21,10 @@ function ReturnToParentControl(model) {
     }
 
     var makeHrefToBot = function() {
-        var host = 'io.sls.bot/botstore/bots/';
+        var host = 'ai.labs.bot/botstore/bots/';
 
         var anchorParams = application.url.serializeAnchors();
-        var resource = 'resource://' + host + anchorParams[application.configuration.botParentIdHashKey] +
+        var resource = 'eddi://' + host + anchorParams[application.configuration.botParentIdHashKey] +
             '?version=' + anchorParams[application.configuration.botParentVersionHashKey];
         var href = application.url.getEditorUriForResourceUri(resource);
 
@@ -35,16 +35,16 @@ function ReturnToParentControl(model) {
         var host;
         switch(model.pageIdentifier) {
             case 'bots':
-                host = 'io.sls.bot/botstore/bots/';
+                host = 'ai.labs.bot/botstore/bots/';
                 break;
             case 'packages':
-                host = 'io.sls.package/packagestore/packages/'
+                host = 'ai.labs.package/packagestore/packages/'
                 break;
             default:
                 throw 'Cant make href attribute for pageIdentifier: ' + model.pageIdentifier + '.';
         }
 
-        var resource = 'resource://' + host + model.resourceId + '?version=' + model.resourceVersion;
+        var resource = 'eddi://' + host + model.resourceId + '?version=' + model.resourceVersion;
         var href = application.url.getEditorUriForResourceUri(resource);
 
         /** Preserve bot anchors if both anchors are present. */

@@ -114,7 +114,7 @@ function BotActionHandler(contentBuilder, dataProvider) {
             case 'VersionChanged':
                 var uri = event.sender.getModel().resourceUri;
 
-                if (SLSUriParser(uri).host == "io.sls.bot") {
+                if (SLSUriParser(uri).host == "ai.labs.bot") {
                     break;
                 }
 

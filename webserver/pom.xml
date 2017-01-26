@@ -13,7 +13,6 @@
     <artifactId>webserver</artifactId>
     <packaging>jar</packaging>
 
-
     <dependencies>
         <!-- Logging -->
         <dependency>
@@ -120,10 +119,6 @@
             <groupId>javax.inject</groupId>
             <artifactId>javax.inject</artifactId>
             <version>1</version>
-        </dependency>
-        <dependency>
-            <groupId>io.swagger</groupId>
-            <artifactId></artifactId>
         </dependency>
     </dependencies>
 

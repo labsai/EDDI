@@ -1,8 +1,8 @@
 package ai.labs.lifecycle;
 
 
-import io.sls.memory.IConversationMemory;
-import io.sls.utilities.RuntimeUtilities;
+import ai.labs.memory.IConversationMemory;
+import ai.labs.utilities.RuntimeUtilities;
 
 import java.util.LinkedList;
 import java.util.List;

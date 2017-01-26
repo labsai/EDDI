@@ -1,8 +1,8 @@
 package ai.labs.parser.model;
 
-import io.sls.expressions.Expression;
+import ai.labs.expressions.Expression;
 
-import java.util.Arrays;
+import java.util.Collections;
 import java.util.LinkedList;
 import java.util.List;
 
@@ -10,16 +10,18 @@ import java.util.List;
  * @author ginccc
  */
 public class Phrase extends DictionaryEntry implements IDictionary.IPhrase {
+
     public Phrase(String value, List<Expression> expressions, String identifier) {
         super(value, expressions, identifier, 0);
     }
 
     @Override
     public IDictionary.IWord[] getWords() {
-        String[] splittedPhrase = value.split(" ");
+        String[] splitPhrase = value.split(" ");
         List<IDictionary.IWord> words = new LinkedList<IDictionary.IWord>();
-        for (final String word : splittedPhrase) {
-            words.add(new Word(word, Arrays.asList(expressionUtilities.createExpression("unused", word)), null, 0, true));
+        for (final String word : splitPhrase) {
+            Expression unusedExp = new Expression("unused", new Expression(word));
+            words.add(new Word(word, Collections.singletonList(unusedExp), null, 0, true));
         }
 
         return words.toArray(new IDictionary.IWord[words.size()]);

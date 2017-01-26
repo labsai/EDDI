@@ -1,11 +1,11 @@
 package ai.labs.parser.dictionaries;
 
+import ai.labs.expressions.Expression;
+import ai.labs.expressions.utilities.IExpressionProvider;
 import ai.labs.parser.model.FoundWord;
 import ai.labs.parser.model.IDictionary;
 import ai.labs.parser.model.Word;
-import io.sls.core.utilities.LanguageUtilities;
-import io.sls.expressions.Expression;
-import io.sls.expressions.utilities.IExpressionUtilities;
+import ai.labs.utilities.LanguageUtilities;
 
 import javax.inject.Inject;
 import java.util.Collections;
@@ -17,10 +17,10 @@ import java.util.List;
  */
 public class TimeExpressionDictionary implements IDictionary {
     private static final String ID = "TimeExpressionDictionary";
-    private final IExpressionUtilities expressionUtilities;
+    private final IExpressionProvider expressionUtilities;
 
     @Inject
-    public TimeExpressionDictionary(IExpressionUtilities expressionUtilities) {
+    public TimeExpressionDictionary(IExpressionProvider expressionUtilities) {
         this.expressionUtilities = expressionUtilities;
     }
 

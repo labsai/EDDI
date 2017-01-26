@@ -1,13 +1,14 @@
 package ai.labs.parser;
 
+import ai.labs.expressions.ExpressionFactory;
+import ai.labs.expressions.utilities.ExpressionProvider;
+import ai.labs.expressions.utilities.IExpressionProvider;
 import ai.labs.parser.internal.InputParser;
 import ai.labs.parser.internal.matches.Solution;
 import ai.labs.parser.model.IDictionary;
 import ai.labs.parser.model.Phrase;
 import ai.labs.parser.model.Word;
-import io.sls.expressions.ExpressionFactory;
-import io.sls.expressions.utilities.ExpressionUtilities;
-import io.sls.expressions.utilities.IExpressionUtilities;
+import lombok.extern.slf4j.Slf4j;
 import org.junit.Assert;
 import org.junit.Before;
 import org.junit.Test;
@@ -18,12 +19,13 @@ import java.util.List;
 /**
  * @author ginccc
  */
+@Slf4j
 public class InputParserTest {
-    private IExpressionUtilities expressionUtilities;
+    private IExpressionProvider expressionUtilities;
 
     @Before
     public void setup() {
-        expressionUtilities = new ExpressionUtilities(new ExpressionFactory());
+        expressionUtilities = new ExpressionProvider(new ExpressionFactory());
     }
 
     @Test
@@ -50,7 +52,7 @@ public class InputParserTest {
         String lookupString = "day after tomorrow";
         TestDictionary testDictionary = new TestDictionary();
         testDictionary.addPhrase(new Phrase("day after tomorrow", expressionUtilities.parseExpressions("phrase(day_after_tomorrow)"), ""));
-        InputParser inputParser = new InputParser(Collections.singletonList(testDictionary));
+        InputParser inputParser = new InputParser(Collections.singletonList(testDictionary), Collections.emptyList());
 
         //test
         List<Solution> suggestions = inputParser.parse(lookupString);
@@ -181,7 +183,7 @@ public class InputParserTest {
         TestDictionary testDictionary = new TestDictionary();
         testDictionary.addPhrase(new Phrase("another phrase", expressionUtilities.parseExpressions("phrase(another_phrase)"), ""));
         testDictionary.addPhrase(new Phrase("day after tomorrow", expressionUtilities.parseExpressions("phrase(day_after_tomorrow)"), ""));
-        InputParser inputParser = new InputParser(Collections.singletonList(testDictionary));
+        InputParser inputParser = new InputParser(Collections.singletonList(testDictionary), Collections.emptyList());
 
         //test
         List<Solution> suggestions = inputParser.parse(lookupString);

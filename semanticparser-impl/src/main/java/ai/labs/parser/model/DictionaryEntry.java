@@ -1,8 +1,6 @@
 package ai.labs.parser.model;
 
-import io.sls.expressions.Expression;
-import io.sls.expressions.utilities.IExpressionUtilities;
-import io.sls.runtime.DependencyInjector;
+import ai.labs.expressions.Expression;
 
 import java.util.List;
 
@@ -10,7 +8,6 @@ import java.util.List;
  * @author ginccc
  */
 public class DictionaryEntry implements IDictionary.IDictionaryEntry {
-    protected final IExpressionUtilities expressionUtilities;
 
     protected String value;
 
@@ -28,7 +25,6 @@ public class DictionaryEntry implements IDictionary.IDictionaryEntry {
     }
 
     public DictionaryEntry(String value, List<Expression> expressions, String identifier, int rating) {
-        expressionUtilities = DependencyInjector.getInstance().getInstance(IExpressionUtilities.class);
         this.value = value;
         this.expressions = expressions;
         this.identifier = identifier;

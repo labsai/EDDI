@@ -1,12 +1,13 @@
 package ai.labs.parser.correction;
 
+import ai.labs.expressions.Expression;
+import ai.labs.expressions.ExpressionFactory;
+import ai.labs.expressions.utilities.ExpressionProvider;
+import ai.labs.expressions.utilities.IExpressionProvider;
 import ai.labs.parser.model.IDictionary;
 import ai.labs.parser.model.Phrase;
 import ai.labs.parser.model.Word;
-import io.sls.expressions.Expression;
-import io.sls.expressions.ExpressionFactory;
-import io.sls.expressions.utilities.ExpressionUtilities;
-import io.sls.expressions.utilities.IExpressionUtilities;
+import lombok.extern.slf4j.Slf4j;
 import org.junit.Assert;
 import org.junit.Before;
 import org.junit.Test;
@@ -17,12 +18,13 @@ import java.util.List;
 /**
  * @author ginccc
  */
+@Slf4j
 public class DamerauLevenshteinCorrectionTest {
-    private IExpressionUtilities expressionUtilities;
+    private IExpressionProvider expressionUtilities;
 
     @Before
     public void setup() {
-        expressionUtilities = new ExpressionUtilities(new ExpressionFactory());
+        expressionUtilities = new ExpressionProvider(new ExpressionFactory());
     }
 
     @Test

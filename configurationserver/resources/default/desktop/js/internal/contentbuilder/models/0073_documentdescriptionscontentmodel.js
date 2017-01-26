@@ -40,10 +40,10 @@ function DocumentDescriptionsContentModel(dataProvider, actionHandler, page) {
         var documentDescriptionType;
         switch (page) {
             case 'bots':
-                documentDescriptionType = 'io.sls.bot';
+                documentDescriptionType = 'ai.labs.bot';
                 break;
             case 'packages':
-                documentDescriptionType = 'io.sls.package';
+                documentDescriptionType = 'ai.labs.package';
                 break;
             case 'outputs':
                 documentDescriptionType = 'ai.labs.output';

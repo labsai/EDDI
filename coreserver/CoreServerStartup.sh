@@ -31,4 +31,4 @@ else
     echo "Invalid environment $1"
     exit
 fi
-java $JAVA_OPTS -classpath '.:lib/*' -DEDDI_ENV=$1 io.sls.core.CoreServer
+java $JAVA_OPTS -classpath '.:lib/*' -DEDDI_ENV=$1 ai.labs.core.CoreServer

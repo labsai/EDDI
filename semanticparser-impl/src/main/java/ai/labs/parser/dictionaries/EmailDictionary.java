@@ -1,10 +1,10 @@
 package ai.labs.parser.dictionaries;
 
+import ai.labs.expressions.Expression;
+import ai.labs.expressions.utilities.IExpressionProvider;
 import ai.labs.parser.model.FoundWord;
 import ai.labs.parser.model.IDictionary;
 import ai.labs.parser.model.Word;
-import io.sls.expressions.Expression;
-import io.sls.expressions.utilities.IExpressionUtilities;
 
 import javax.inject.Inject;
 import java.util.Collections;
@@ -16,13 +16,13 @@ import java.util.regex.Pattern;
  */
 public class EmailDictionary implements IDictionary {
     private static final String ID = "EmailDictionary";
-    private final IExpressionUtilities expressionUtilities;
+    private final IExpressionProvider expressionUtilities;
     private static final Pattern emailPattern =
             Pattern.compile("\\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\\.[A-Z]{2,4}\\b",
                     Pattern.CASE_INSENSITIVE | Pattern.DOTALL);
 
     @Inject
-    public EmailDictionary(IExpressionUtilities expressionUtilities) {
+    public EmailDictionary(IExpressionProvider expressionUtilities) {
         this.expressionUtilities = expressionUtilities;
     }
 

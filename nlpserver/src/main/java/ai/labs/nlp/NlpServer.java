@@ -1,20 +1,23 @@
 package ai.labs.nlp;
 
-import io.sls.bootstrap.UserModule;
-import io.sls.core.bootstrap.RestInterfaceModule;
-import io.sls.expressions.bootstrap.ExpressionModule;
-import io.sls.logging.client.bootstrap.ClientLoggingModule;
-import io.sls.memory.bootstrap.ConversationMemoryModule;
-import io.sls.permission.bootstrap.PermissionModule;
-import io.sls.persistence.bootstrap.RepositoryModule;
-import io.sls.persistence.impl.bootstrap.PersistenceModule;
-import io.sls.runtime.DependencyInjector;
-import io.sls.runtime.bootstrap.RuntimeModule;
-import io.sls.runtime.bootstrap.SwaggerModule;
-import io.sls.serialization.bootstrap.SerializationModule;
-import io.sls.server.IServerRuntime;
-import io.sls.server.bootstrap.ServerRuntimeModule;
-import io.sls.utilities.FileUtilities;
+import ai.labs.bootstrap.UserModule;
+import ai.labs.caching.bootstrap.CachingModule;
+import ai.labs.core.bootstrap.CoreModule;
+import ai.labs.expressions.bootstrap.ExpressionModule;
+import ai.labs.memory.bootstrap.ConversationMemoryModule;
+import ai.labs.parser.bootstrap.SemanticParserModule;
+import ai.labs.permission.bootstrap.PermissionModule;
+import ai.labs.persistence.bootstrap.PersistenceModule;
+import ai.labs.resources.RepositoryModule;
+import ai.labs.rest.bootstrap.RestInterfaceModule;
+import ai.labs.runtime.DependencyInjector;
+import ai.labs.runtime.bootstrap.RuntimeModule;
+import ai.labs.runtime.bootstrap.SwaggerModule;
+import ai.labs.serialization.bootstrap.SerializationModule;
+import ai.labs.server.IServerRuntime;
+import ai.labs.server.bootstrap.ServerRuntimeModule;
+import ai.labs.utilities.FileUtilities;
+import org.jboss.resteasy.plugins.guice.ext.RequestScopeModule;
 
 import java.io.FileInputStream;
 
@@ -41,7 +44,7 @@ public class NlpServer {
                 new RuntimeModule(
                         new FileInputStream(configDir + "threads.properties"),
                         new FileInputStream(configDir + "systemRuntime.properties")),
-                /*new RequestScopeModule(),*/
+                new RequestScopeModule(),
                 new RestInterfaceModule(),
                 new SerializationModule(),
                 new PersistenceModule(new FileInputStream(configDir + "mongodb.properties")),
@@ -50,8 +53,10 @@ public class NlpServer {
                 new ExpressionModule(),
                 new RepositoryModule(),
                 new ConversationMemoryModule(),
-                new ClientLoggingModule(),
                 new UserModule(),
+                new CachingModule(new FileInputStream(configDir + "infinispan.xml")),
+                new SemanticParserModule(),
+                new CoreModule(),
                 new SwaggerModule(new FileInputStream(configDir + "swagger.properties")),
                 new ServerRuntimeModule(new FileInputStream(configDir + "webServer.properties"),
                         new FileInputStream(configDir + "keycloak.properties")));

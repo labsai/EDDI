@@ -9,7 +9,7 @@ import ai.labs.parser.model.FoundPhrase;
 import ai.labs.parser.model.FoundUnknown;
 import ai.labs.parser.model.IDictionary;
 import ai.labs.parser.model.Unknown;
-import io.sls.core.utilities.LanguageUtilities;
+import ai.labs.utilities.LanguageUtilities;
 
 import java.util.*;
 
@@ -22,7 +22,7 @@ public class InputParser implements IInputParser {
     private Map<IDictionary.IWord, List<IDictionary.IPhrase>> phrasesMap;
 
     public InputParser(List<IDictionary> dictionaries) {
-        this(dictionaries, new LinkedList<>());
+        this(dictionaries, Collections.emptyList());
     }
 
     public InputParser(List<IDictionary> dictionaries, List<ICorrection> corrections) {
@@ -144,7 +144,7 @@ public class InputParser implements IInputParser {
             for (IDictionary.IPhrase phrase : phrasesContainingFoundWords) {
                 if (phrase.getWords().length <= foundWords.size()) {
                     foundWords = lookForMatch(foundWords, phrase);
-                    if (foundWords.contains(new FoundPhrase(phrase, false, 1.0))) {
+                    if (foundWords.contains(createPhrase(phrase, false, 1.0))) {
                         solution = new Solution(Solution.Match.FULLY);
                     }
 
@@ -166,7 +166,7 @@ public class InputParser implements IInputParser {
             for (IDictionary.IPhrase phrase : phrasesContainingFoundWords) {
                 if (phrase.getWords().length > foundWords.size()) {
                     foundWords = lookForPartlyMatch(foundWords, phrase);
-                    if (foundWords.contains(new FoundPhrase(phrase, false, 0.5))) {
+                    if (foundWords.contains(createPhrase(phrase, false, 0.5))) {
                         if (solution == null) {
                             solution = new Solution(Solution.Match.PARTLY);
                         }
@@ -218,9 +218,9 @@ public class InputParser implements IInputParser {
 
     /**
      * @param foundWords all inputEntries
-     * @param phrase to be checked for a match with foundWords
+     * @param phrase     to be checked for a match with foundWords
      * @return the list of IDictionaryEntry which does NOT FULLY match the phrase, will be returned for further lookup.
-     *         In case a phrase has been found, it will be substituted with the range of matching foundWords
+     * In case a phrase has been found, it will be substituted with the range of matching foundWords
      */
     private List<IDictionary.IFoundWord> lookForMatch(List<IDictionary.IFoundWord> foundWords, IDictionary.IPhrase phrase) {
         IDictionary.IWord[] words = convert(foundWords);
@@ -231,7 +231,7 @@ public class InputParser implements IInputParser {
             if (startOfMatch > 0) {
                 ret.addAll(foundWords.subList(0, startOfMatch));
             }
-            ret.add(new FoundPhrase(phrase, false, 1.0));
+            ret.add(createPhrase(phrase, false, 1.0));
             int rangeOfMatch = startOfMatch + phrase.getWords().length;
             if (rangeOfMatch < foundWords.size()) {
                 ret.addAll(foundWords.subList(rangeOfMatch, foundWords.size()));
@@ -242,6 +242,10 @@ public class InputParser implements IInputParser {
             // does not match
             return foundWords;
         }
+    }
+
+    private IDictionary.IFoundWord createPhrase(IDictionary.IPhrase phrase, boolean corrected, double matchingAccuracy) {
+        return new FoundPhrase(phrase, corrected, matchingAccuracy);
     }
 
     private IDictionary.IWord[] convert(List<IDictionary.IFoundWord> foundWords) {
@@ -263,7 +267,7 @@ public class InputParser implements IInputParser {
             if (startOfMatch > 0) {
                 ret.addAll(dictionaryEntries.subList(0, startOfMatch - 1));
             }
-            ret.add(new FoundPhrase(phrase, false, 1.0));
+            ret.add(createPhrase(phrase, false, 1.0));
             int rangeOfMatch = startOfMatch + phraseWords.length;
             if (rangeOfMatch < dictionaryEntries.size()) {
                 ret.addAll(dictionaryEntries.subList(rangeOfMatch, dictionaryEntries.size()));

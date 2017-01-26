@@ -1,10 +1,10 @@
 package ai.labs.parser.dictionaries;
 
+import ai.labs.expressions.Expression;
 import ai.labs.parser.model.FoundWord;
 import ai.labs.parser.model.IDictionary;
 import ai.labs.parser.model.Phrase;
 import ai.labs.parser.model.Word;
-import io.sls.expressions.Expression;
 
 import java.util.*;
 

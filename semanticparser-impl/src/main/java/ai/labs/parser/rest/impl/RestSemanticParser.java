@@ -6,15 +6,16 @@ import ai.labs.lifecycle.ILifecycleTask;
 import ai.labs.parser.IInputParser;
 import ai.labs.parser.internal.matches.Solution;
 import ai.labs.parser.rest.IRestSemanticParser;
-import io.sls.resources.rest.parser.IRestParserStore;
-import io.sls.resources.rest.parser.model.ParserConfiguration;
-import io.sls.runtime.SystemRuntime;
-import io.sls.runtime.client.configuration.IResourceClientLibrary;
-import io.sls.runtime.service.ServiceException;
+import ai.labs.resources.rest.parser.IRestParserStore;
+import ai.labs.resources.rest.parser.model.ParserConfiguration;
+import ai.labs.runtime.SystemRuntime;
+import ai.labs.runtime.client.configuration.IResourceClientLibrary;
+import ai.labs.runtime.service.ServiceException;
 import lombok.extern.slf4j.Slf4j;
 
 import javax.inject.Inject;
 import javax.inject.Provider;
+import javax.ws.rs.InternalServerErrorException;
 import javax.ws.rs.container.AsyncResponse;
 import java.net.URI;
 import java.util.List;
@@ -54,30 +55,30 @@ public class RestSemanticParser implements IRestSemanticParser {
                 asyncResponse.resume(solutions);
             } catch (Exception e) {
                 log.error(e.getLocalizedMessage(), e);
-                asyncResponse.resume(e);
+                asyncResponse.resume(new InternalServerErrorException());
             }
 
             return null;
         }, null);
     }
 
-    private IInputParser getParser(String parserId) throws Exception {
-        createParserIfAbsent(parserId);
-        return cache.get(parserId);
+    private IInputParser getParser(String configId) throws Exception {
+        createParserIfAbsent(configId);
+        return cache.get(configId);
     }
 
-    private void createParserIfAbsent(String parserId) throws Exception {
-        if (!cache.containsKey(parserId)) {
+    private void createParserIfAbsent(String configId) throws Exception {
+        if (!cache.containsKey(configId)) {
             ILifecycleTask parserTask = parserProvider.get();
-            ParserConfiguration parserConfiguration = fetchParserConfiguration(parserId);
+            ParserConfiguration parserConfiguration = fetchParserConfiguration(configId);
             parserTask.configure(parserConfiguration.getConfig());
             parserTask.setExtensions(parserConfiguration.getExtensions());
-            cache.put(parserId, (IInputParser) parserTask.getComponent());
+            cache.put(configId, (IInputParser) parserTask.getComponent());
         }
     }
 
-    private ParserConfiguration fetchParserConfiguration(String parserId) throws ServiceException {
-        URI resourceUri = URI.create(IRestParserStore.resourceURI + parserId);
+    private ParserConfiguration fetchParserConfiguration(String configId) throws ServiceException {
+        URI resourceUri = URI.create(IRestParserStore.resourceURI + configId);
         return resourceClientLibrary.getResource(resourceUri, ParserConfiguration.class);
     }
 }

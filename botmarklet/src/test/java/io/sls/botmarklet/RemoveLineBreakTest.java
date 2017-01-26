@@ -1,4 +1,4 @@
-package io.sls.botmarklet;
+package ai.labs.botmarklet;
 
 import org.junit.Assert;
 import org.junit.Test;

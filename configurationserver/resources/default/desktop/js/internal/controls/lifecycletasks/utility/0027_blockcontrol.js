@@ -25,9 +25,9 @@ function BlockControl(model) {
     }
 
     var isResourceUriKey = function(configEntry) {
-        var kResourceIdentifier = 'resource://';
+        var kResourceIdentifier = 'eddi://';
 
-        /** A configElement is a uri-selector if it starts with the __resource://__ identifier. */
+        /** A configElement is a uri-selector if it starts with the __eddi://__ identifier. */
         if(configEntry.type.indexOf(kResourceIdentifier) === 0) {
             return true;
         } else {

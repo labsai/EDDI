@@ -1,10 +1,10 @@
 package ai.labs.parser.dictionaries;
 
+import ai.labs.expressions.Expression;
+import ai.labs.expressions.utilities.IExpressionProvider;
 import ai.labs.parser.model.FoundWord;
 import ai.labs.parser.model.IDictionary;
 import ai.labs.parser.model.Word;
-import io.sls.expressions.Expression;
-import io.sls.expressions.utilities.IExpressionUtilities;
 
 import java.util.Collections;
 import java.util.HashMap;
@@ -16,10 +16,10 @@ import java.util.List;
  */
 public class PunctuationDictionary implements IDictionary {
     private static final String ID = "punctuation";
-    private final IExpressionUtilities expressionUtilities;
+    private final IExpressionProvider expressionUtilities;
     private HashMap<String, String> punctuations = new HashMap<>();
 
-    public PunctuationDictionary(IExpressionUtilities expressionUtilities) {
+    public PunctuationDictionary(IExpressionProvider expressionUtilities) {
         this.expressionUtilities = expressionUtilities;
 
         punctuations.put("!", "exclamation_mark");

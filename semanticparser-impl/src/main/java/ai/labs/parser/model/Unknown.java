@@ -1,15 +1,14 @@
 package ai.labs.parser.model;
 
-import io.sls.expressions.utilities.IExpressionUtilities;
-import io.sls.runtime.DependencyInjector;
+import ai.labs.expressions.Expression;
 
-import java.util.Arrays;
+import java.util.Collections;
 
 /**
  * @author ginccc
  */
 public class Unknown extends Word {
     public Unknown(String value) {
-        super(value, Arrays.asList(DependencyInjector.getInstance().getInstance(IExpressionUtilities.class).createExpression("unknown", value)), null);
+        super(value, Collections.singletonList(new Expression("unknown", new Expression(value))), null);
     }
 }

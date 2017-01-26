@@ -1,6 +1,6 @@
 package ai.labs.lifecycle;
 
-import io.sls.memory.IConversationMemory;
+import ai.labs.memory.IConversationMemory;
 
 import java.util.List;
 import java.util.Map;

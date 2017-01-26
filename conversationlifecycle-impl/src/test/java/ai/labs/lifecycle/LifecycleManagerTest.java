@@ -1,6 +1,6 @@
 package ai.labs.lifecycle;
 
-import io.sls.memory.IConversationMemory;
+import ai.labs.memory.IConversationMemory;
 import org.junit.Assert;
 import org.junit.Before;
 import org.junit.Test;

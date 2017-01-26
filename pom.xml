@@ -20,7 +20,6 @@
         <module>conversationmemory-definition</module>
         <module>automatedtesting-definition</module>
         <module>corerest-definition</module>
-        <module>faces-definition</module>
         <module>staticresourceprovider-definition</module>
         <module>user-impl</module>
         <module>permissions-impl</module>

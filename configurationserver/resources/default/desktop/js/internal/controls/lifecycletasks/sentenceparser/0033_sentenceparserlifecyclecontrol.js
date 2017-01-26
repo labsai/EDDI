@@ -33,7 +33,7 @@ function SentenceparserLifecycleControl(model) {
     var correctionControl = groupControlBuilder.createStandardUneditableGroupControl(model.id, correctionIdPrefix,
         window.lang.convert('SENTENCEPARSERLIFECYCLE_CORRECTION_NAME'), false, false, true, lifecycleGroupControlCSSClass, true);
 
-    correctionControl.getModel().context = {namespace: 'io.sls.ai.labs.parser.corrections'};
+    correctionControl.getModel().context = {namespace: 'ai.labs.parser.corrections'};
 
     for (var i = 0; i < model.correction.length; ++i) {
         var correction = model.correction[i];
@@ -51,7 +51,7 @@ function SentenceparserLifecycleControl(model) {
     var dictionaryControl = groupControlBuilder.createStandardUneditableGroupControl(model.id, dictionaryIdPrefix,
         window.lang.convert('SENTENCEPARSERLIFECYCLE_DICTIONARY_NAME'), false, false, true, lifecycleGroupControlCSSClass, true);
 
-    dictionaryControl.getModel().context = {namespace: 'io.sls.ai.labs.parser.dictionaries'};
+    dictionaryControl.getModel().context = {namespace: 'ai.labs.parser.dictionaries'};
 
     for (var i = 0; i < model.dictionaries.length; ++i) {
         var dictionary = model.dictionaries[i];

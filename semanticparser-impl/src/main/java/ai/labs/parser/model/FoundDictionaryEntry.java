@@ -1,6 +1,6 @@
 package ai.labs.parser.model;
 
-import io.sls.expressions.Expression;
+import ai.labs.expressions.Expression;
 
 import java.util.List;
 

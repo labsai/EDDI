@@ -1,21 +1,21 @@
 package ai.labs.parser;
 
+import ai.labs.expressions.Expression;
+import ai.labs.expressions.utilities.IExpressionProvider;
 import ai.labs.lifecycle.*;
+import ai.labs.memory.Data;
+import ai.labs.memory.IConversationMemory;
+import ai.labs.memory.IData;
 import ai.labs.parser.correction.*;
 import ai.labs.parser.dictionaries.*;
 import ai.labs.parser.internal.InputParser;
 import ai.labs.parser.internal.matches.Solution;
 import ai.labs.parser.model.IDictionary;
-import io.sls.expressions.Expression;
-import io.sls.expressions.utilities.IExpressionUtilities;
-import io.sls.memory.IConversationMemory;
-import io.sls.memory.IData;
-import io.sls.memory.impl.Data;
-import io.sls.resources.rest.regulardictionary.model.RegularDictionaryConfiguration;
-import io.sls.runtime.client.configuration.IResourceClientLibrary;
-import io.sls.runtime.service.ServiceException;
-import io.sls.utilities.CharacterUtilities;
-import io.sls.utilities.RuntimeUtilities;
+import ai.labs.resources.rest.regulardictionary.model.RegularDictionaryConfiguration;
+import ai.labs.runtime.client.configuration.IResourceClientLibrary;
+import ai.labs.runtime.service.ServiceException;
+import ai.labs.utilities.CharacterUtilities;
+import ai.labs.utilities.RuntimeUtilities;
 
 import javax.inject.Inject;
 import java.net.URI;
@@ -29,29 +29,29 @@ public class InputParserTask extends AbstractLifecycleTask implements ILifecycle
     private List<IDictionary> dictionaries;
     private List<ICorrection> corrections;
     private IResourceClientLibrary resourceClientLibrary;
-    private final String regularDictionaryURI = "core://io.sls.ai.labs.parser.dictionaries.regular";
-    private final String damerauLevenshteinURI = "core://io.sls.ai.labs.parser.corrections.levenshtein";
-    private final String integerDictionaryURI = "core://io.sls.ai.labs.parser.dictionaries.integer";
-    private final String decimalDictionaryURI = "core://io.sls.ai.labs.parser.dictionaries.decimal";
-    private final String emailDictionaryURI = "core://io.sls.ai.labs.parser.dictionaries.email";
-    private final String punctuationDictionaryURI = "core://io.sls.ai.labs.parser.dictionaries.punctuation";
-    private final String timeExpressionDictionaryURI = "core://io.sls.ai.labs.parser.dictionaries.time";
+    private final String regularDictionaryURI = "core://ai.labs.parser.dictionaries.regular";
+    private final String damerauLevenshteinURI = "core://ai.labs.parser.corrections.levenshtein";
+    private final String integerDictionaryURI = "core://ai.labs.parser.dictionaries.integer";
+    private final String decimalDictionaryURI = "core://ai.labs.parser.dictionaries.decimal";
+    private final String emailDictionaryURI = "core://ai.labs.parser.dictionaries.email";
+    private final String punctuationDictionaryURI = "core://ai.labs.parser.dictionaries.punctuation";
+    private final String timeExpressionDictionaryURI = "core://ai.labs.parser.dictionaries.time";
 
-    private final String ordinalNumberDictionaryURI = "core://io.sls.ai.labs.parser.dictionaries.ordinalNumber";
-    private final String stemmingCorrectionURI = "core://io.sls.ai.labs.parser.corrections.stemming";
-    private final String phoneticCorrectionURI = "core://io.sls.ai.labs.parser.corrections.phonetic";
-    private final String mergedTermsCorrectionURI = "core://io.sls.ai.labs.parser.corrections.mergedTerms";
+    private final String ordinalNumberDictionaryURI = "core://ai.labs.parser.dictionaries.ordinalNumber";
+    private final String stemmingCorrectionURI = "core://ai.labs.parser.corrections.stemming";
+    private final String phoneticCorrectionURI = "core://ai.labs.parser.corrections.phonetic";
+    private final String mergedTermsCorrectionURI = "core://ai.labs.parser.corrections.mergedTerms";
     private final String KEY_TYPE = "type";
     private final String KEY_CONFIG = "config";
     private final String KEY_URI = "uri";
     private final String KEY_DISTANCE = "distance";
     private final String KEY_LOOKUP_IF_KNOWN = "lookupIfKnown";
     private final String KEY_LANGUAGE = "language";
-    private IExpressionUtilities expressionUtilities;
+    private IExpressionProvider expressionUtilities;
 
     @Inject
     public InputParserTask(IResourceClientLibrary resourceClientLibrary,
-                           IExpressionUtilities expressionUtilities) {
+                           IExpressionProvider expressionUtilities) {
         this.resourceClientLibrary = resourceClientLibrary;
         this.expressionUtilities = expressionUtilities;
     }

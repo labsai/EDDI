@@ -1,6 +1,7 @@
 package ai.labs.parser.internal.matches;
 
 
+import lombok.extern.slf4j.Slf4j;
 import org.junit.Assert;
 import org.junit.Test;
 
@@ -9,6 +10,7 @@ import java.util.Iterator;
 /**
  * @author ginccc
  */
+@Slf4j
 public class PermutationTest {
 
     @Test

@@ -1,5 +1,5 @@
 function RegularModel(lifecycle) {
-    this.type = "core://io.sls.ai.labs.parser.dictionaries.regular?version=1";
+    this.type = "core://ai.labs.parser.dictionaries.regular?version=1";
     var instance = this;
 
     this.convertToJSON = function () {

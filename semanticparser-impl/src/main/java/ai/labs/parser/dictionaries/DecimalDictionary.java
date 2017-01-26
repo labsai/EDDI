@@ -1,11 +1,11 @@
 package ai.labs.parser.dictionaries;
 
+import ai.labs.expressions.Expression;
+import ai.labs.expressions.utilities.IExpressionProvider;
 import ai.labs.parser.model.FoundWord;
 import ai.labs.parser.model.IDictionary;
 import ai.labs.parser.model.Word;
-import io.sls.expressions.Expression;
-import io.sls.expressions.utilities.IExpressionUtilities;
-import io.sls.utilities.CharacterUtilities;
+import ai.labs.utilities.CharacterUtilities;
 
 import javax.inject.Inject;
 import java.util.Collections;
@@ -17,10 +17,10 @@ import java.util.List;
  */
 public class DecimalDictionary implements IDictionary {
     private static final String ID = "decimal_dictionary";
-    private final IExpressionUtilities expressionUtilities;
+    private final IExpressionProvider expressionUtilities;
 
     @Inject
-    public DecimalDictionary(IExpressionUtilities expressionUtilities) {
+    public DecimalDictionary(IExpressionProvider expressionUtilities) {
         this.expressionUtilities = expressionUtilities;
     }
 

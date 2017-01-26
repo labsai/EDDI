@@ -402,10 +402,10 @@ function URLManipulator() {
 
         var editorScreen;
         switch (resourceObject.host) {
-            case 'io.sls.package':
+            case 'ai.labs.package':
                 editorScreen = 'packages';
                 break;
-            case 'io.sls.bot':
+            case 'ai.labs.bot':
                 editorScreen = 'bots';
                 break;
             case 'ai.labs.behavior':

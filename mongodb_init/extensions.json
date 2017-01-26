@@ -46,7 +46,7 @@
 	"extensionPoints": [],
 	"configDefinition": {
 		"uri": {
-			"type": "resource://ai.labs.behavior",
+          "type": "eddi://ai.labs.behavior",
 			"defaultValue": "",
 			"displayKey": "BEHAVIOR_RULE_SET"
 		}
@@ -61,7 +61,7 @@
 	"extensionPoints": [],
 	"configDefinition": {
 		"uri": {
-			"type": "resource://ai.labs.output",
+          "type": "eddi://ai.labs.output",
 			"defaultValue": "",
 			"displayKey": "OUTPUT_SET"
 		}
@@ -87,7 +87,7 @@
 	"extensionPoints": [],
 	"configDefinition": {
 		"uri": {
-			"type": "resource://ai.labs.regulardictionary",
+          "type": "eddi://ai.labs.regulardictionary",
 			"defaultValue": "",
 			"displayKey": "DICTIONARY_URI"
 		}

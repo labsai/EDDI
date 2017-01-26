@@ -1,12 +1,14 @@
 package ai.labs.nlp;
 
-import io.sls.permission.interceptor.PermissionRequestInterceptor;
-import io.sls.permission.interceptor.PermissionResponseInterceptor;
-import io.sls.persistence.interceptor.DocumentDescriptorInterceptor;
-import io.sls.server.exception.IllegalArgumentExceptionMapper;
-import io.sls.server.rest.providers.JacksonConfig;
-import io.sls.server.rest.providers.URIMessageBodyProvider;
-import io.sls.staticresources.impl.interceptor.ContentTypeInterceptor;
+import ai.labs.permission.interceptor.PermissionRequestInterceptor;
+import ai.labs.permission.interceptor.PermissionResponseInterceptor;
+import ai.labs.resources.impl.interceptors.DocumentDescriptorInterceptor;
+import ai.labs.server.JacksonConfig;
+import ai.labs.server.exception.IllegalArgumentExceptionMapper;
+import ai.labs.server.providers.URIMessageBodyProvider;
+import ai.labs.staticresources.impl.interceptor.ContentTypeInterceptor;
+import io.swagger.jaxrs.listing.ApiListingResource;
+import io.swagger.jaxrs.listing.SwaggerSerializers;
 
 import javax.ws.rs.core.Application;
 import java.util.Collections;
@@ -30,6 +32,9 @@ public class ApplicationConfiguration extends Application {
         tmp.add(JacksonConfig.class);
 
         /*todo tmp.add(AuthorizationHeaderFilter.class);*/
+
+        tmp.add(ApiListingResource.class);
+        tmp.add(SwaggerSerializers.class);
         tmp.add(URIMessageBodyProvider.class);
 
         CLASSES = Collections.unmodifiableSet(tmp);
