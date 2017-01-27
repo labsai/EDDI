@@ -38,7 +38,7 @@
         <module>semanticparser-impl</module>
         <module>conversationlifecycle-definition</module>
         <module>conversationlifecycle-impl</module>
-        <module>NlpServer</module>
+        <module>nlpserver</module>
         <module>caching-definition</module>
         <module>caching-impl-infinispan</module>
     </modules>
