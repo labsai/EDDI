@@ -5,7 +5,6 @@ import ai.labs.resources.rest.documentdescriptor.model.DocumentDescriptor;
 import ai.labs.resources.rest.method.PATCH;
 import ai.labs.resources.rest.output.model.OutputConfigurationSet;
 import ai.labs.resources.rest.patch.PatchInstruction;
-import org.jboss.resteasy.annotations.GZIP;
 
 import javax.ws.rs.*;
 import javax.ws.rs.core.MediaType;
@@ -22,14 +21,12 @@ public interface IRestOutputStore extends IRestVersionInfo {
     String versionQueryParam = "?version=";
 
     @GET
-    @GZIP
     @Produces(MediaType.APPLICATION_JSON)
     List<DocumentDescriptor> readOutputDescriptors(@QueryParam("filter") @DefaultValue("") String filter,
                                                    @QueryParam("index") @DefaultValue("0") Integer index,
                                                    @QueryParam("limit") @DefaultValue("20") Integer limit);
 
     @GET
-    @GZIP
     @Path("/{id}")
     @Produces(MediaType.APPLICATION_JSON)
     OutputConfigurationSet readOutputSet(@PathParam("id") String id, @QueryParam("version") Integer version,
@@ -39,7 +36,6 @@ public interface IRestOutputStore extends IRestVersionInfo {
                                          @QueryParam("limit") @DefaultValue("20") Integer limit) throws Exception;
 
     @GET
-    @GZIP
     @Path("/{id}/outputKeys")
     @Produces(MediaType.APPLICATION_JSON)
     List<String> readOutputKeys(@PathParam("id") String id, @QueryParam("version") Integer version,
@@ -50,11 +46,11 @@ public interface IRestOutputStore extends IRestVersionInfo {
     @PUT
     @Path("/{id}")
     @Consumes(MediaType.APPLICATION_JSON)
-    URI updateOutputSet(@PathParam("id") String id, @QueryParam("version") Integer version, @GZIP OutputConfigurationSet outputConfigurationSet);
+    URI updateOutputSet(@PathParam("id") String id, @QueryParam("version") Integer version, OutputConfigurationSet outputConfigurationSet);
 
     @POST
     @Consumes(MediaType.APPLICATION_JSON)
-    Response createOutputSet(@GZIP OutputConfigurationSet outputConfigurationSet);
+    Response createOutputSet(OutputConfigurationSet outputConfigurationSet);
 
     @DELETE
     @Path("/{id}")
@@ -63,5 +59,5 @@ public interface IRestOutputStore extends IRestVersionInfo {
     @PATCH
     @Path("/{id}")
     @Consumes(MediaType.APPLICATION_JSON)
-    URI patchOutputSet(@PathParam("id") String id, @QueryParam("version") Integer version, @GZIP PatchInstruction<OutputConfigurationSet>[] patchInstructions);
+    URI patchOutputSet(@PathParam("id") String id, @QueryParam("version") Integer version, PatchInstruction<OutputConfigurationSet>[] patchInstructions);
 }

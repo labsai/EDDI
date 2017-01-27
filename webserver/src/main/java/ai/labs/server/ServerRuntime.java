@@ -287,7 +287,7 @@ public class ServerRuntime implements IServerRuntime {
             public void doFilter(ServletRequest servletRequest, ServletResponse servletResponse, FilterChain filterChain) throws IOException, ServletException {
                 HttpServletRequest httpservletRequest = (HttpServletRequest) servletRequest;
                 URL requestURL = URI.create(httpservletRequest.getRequestURL().toString()).toURL();
-                String currentResourceURI = ((Request) httpservletRequest).getHttpURI().getPath();
+                String currentResourceURI = ((Request) httpservletRequest).getHttpURI().getPathQuery();
                 ThreadContext.put("currentResourceURI", currentResourceURI);
                 ThreadContext.put("currentURLProtocol", requestURL.getProtocol());
                 ThreadContext.put("currentURLHost", requestURL.getHost());

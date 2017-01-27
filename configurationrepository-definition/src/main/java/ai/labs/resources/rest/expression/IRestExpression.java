@@ -1,7 +1,5 @@
 package ai.labs.resources.rest.expression;
 
-import org.jboss.resteasy.annotations.GZIP;
-
 import javax.ws.rs.*;
 import javax.ws.rs.core.MediaType;
 import java.util.List;
@@ -12,7 +10,6 @@ import java.util.List;
 @Path("/expressions")
 public interface IRestExpression {
     @GET
-    @GZIP
     @Produces(MediaType.APPLICATION_JSON)
     List<String> readExpressions(@QueryParam("packageId") String packageId,
                                  @QueryParam("packageVersion") Integer packageVersion,

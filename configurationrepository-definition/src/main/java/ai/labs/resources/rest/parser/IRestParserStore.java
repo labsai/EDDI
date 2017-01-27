@@ -7,7 +7,6 @@ import io.swagger.annotations.Api;
 import io.swagger.annotations.ApiImplicitParam;
 import io.swagger.annotations.ApiImplicitParams;
 import io.swagger.annotations.ApiResponse;
-import org.jboss.resteasy.annotations.GZIP;
 
 import javax.ws.rs.*;
 import javax.ws.rs.core.MediaType;
@@ -26,7 +25,6 @@ public interface IRestParserStore extends IRestVersionInfo {
 
 
     @GET
-    @GZIP
     @Produces(MediaType.APPLICATION_JSON)
     @ApiImplicitParams({
             @ApiImplicitParam(name = "filter", format = "string", example = "<name_of_parser>"),
@@ -40,7 +38,6 @@ public interface IRestParserStore extends IRestVersionInfo {
 
 
     @GET
-    @GZIP
     @Path("/{id}")
     @Produces(MediaType.APPLICATION_JSON)
     @ApiResponse(code = 200, response = ParserConfiguration.class, message = "configuration of parser")
@@ -50,11 +47,11 @@ public interface IRestParserStore extends IRestVersionInfo {
     @Path("/{id}")
     @Consumes(MediaType.APPLICATION_JSON)
     URI updateParser(@PathParam("id") String id, @QueryParam("version") @DefaultValue("-1") Integer version,
-                     @GZIP ParserConfiguration parserConfiguration);
+                     ParserConfiguration parserConfiguration);
 
     @POST
     @Consumes(MediaType.APPLICATION_JSON)
-    Response createParser(@GZIP ParserConfiguration parserConfiguration);
+    Response createParser(ParserConfiguration parserConfiguration);
 
     @DELETE
     @Path("/{id}")

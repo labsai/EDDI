@@ -1,6 +1,5 @@
 package ai.labs.staticresources.rest;
 
-import org.jboss.resteasy.annotations.GZIP;
 import org.jboss.resteasy.annotations.cache.NoCache;
 
 import javax.ws.rs.*;
@@ -12,7 +11,6 @@ import javax.ws.rs.core.MediaType;
 @Path("/editor")
 public interface IRestEditor {
     @GET
-    @GZIP
     @NoCache
     @Path("/{path:.*}")
     @Produces(MediaType.TEXT_HTML)

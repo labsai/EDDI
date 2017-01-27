@@ -1,7 +1,6 @@
 package ai.labs.user.rest;
 
 import ai.labs.user.model.User;
-import org.jboss.resteasy.annotations.GZIP;
 
 import javax.ws.rs.*;
 import javax.ws.rs.core.MediaType;
@@ -16,12 +15,10 @@ public interface IRestUserStore {
     String resourceURI = "eddi://ai.labs.user/userstore/users/";
 
     @GET
-    @GZIP
     @Produces(MediaType.APPLICATION_JSON)
     URI searchUser(@QueryParam("username") String username);
 
     @GET
-    @GZIP
     @Path("/{userId}")
     @Produces(MediaType.APPLICATION_JSON)
     User readUser(@PathParam("userId") String userId);
@@ -29,11 +26,11 @@ public interface IRestUserStore {
     @PUT
     @Path("/{userId}")
     @Consumes(MediaType.APPLICATION_JSON)
-    void updateUser(@PathParam("userId") String userId, @GZIP User user);
+    void updateUser(@PathParam("userId") String userId, User user);
 
     @POST
     @Consumes(MediaType.APPLICATION_JSON)
-    Response createUser(@GZIP User user);
+    Response createUser(User user);
 
     @DELETE
     @Path("/{userId}")

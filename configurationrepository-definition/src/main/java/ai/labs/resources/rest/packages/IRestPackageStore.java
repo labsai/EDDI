@@ -3,7 +3,6 @@ package ai.labs.resources.rest.packages;
 import ai.labs.resources.rest.IRestVersionInfo;
 import ai.labs.resources.rest.documentdescriptor.model.DocumentDescriptor;
 import ai.labs.resources.rest.packages.model.PackageConfiguration;
-import org.jboss.resteasy.annotations.GZIP;
 
 import javax.ws.rs.*;
 import javax.ws.rs.core.MediaType;
@@ -19,14 +18,12 @@ public interface IRestPackageStore extends IRestVersionInfo {
     String resourceURI = "eddi://ai.labs.package/packagestore/packages/";
 
     @GET
-    @GZIP
     @Produces(MediaType.APPLICATION_JSON)
     List<DocumentDescriptor> readPackageDescriptors(@QueryParam("filter") @DefaultValue("") String filter,
                                                     @QueryParam("index") @DefaultValue("0") Integer index,
                                                     @QueryParam("limit") @DefaultValue("20") Integer limit);
 
     @GET
-    @GZIP
     @Path("/{id}")
     @Produces(MediaType.APPLICATION_JSON)
     PackageConfiguration readPackage(@PathParam("id") String id, @QueryParam("version") Integer version) throws Exception;
@@ -34,16 +31,16 @@ public interface IRestPackageStore extends IRestVersionInfo {
     @PUT
     @Path("/{id}")
     @Consumes(MediaType.APPLICATION_JSON)
-    URI updatePackage(@PathParam("id") String id, @QueryParam("version") Integer version, @GZIP PackageConfiguration packageConfiguration);
+    URI updatePackage(@PathParam("id") String id, @QueryParam("version") Integer version, PackageConfiguration packageConfiguration);
 
     @PUT
     @Path("/{id}")
     @Consumes(MediaType.TEXT_PLAIN)
-    Response updateResourceInPackage(@PathParam("id") String id, @QueryParam("version") Integer version, @GZIP URI resourceURI);
+    Response updateResourceInPackage(@PathParam("id") String id, @QueryParam("version") Integer version, URI resourceURI);
 
     @POST
     @Consumes(MediaType.APPLICATION_JSON)
-    Response createPackage(@GZIP PackageConfiguration packageConfiguration);
+    Response createPackage(PackageConfiguration packageConfiguration);
 
     @DELETE
     @Path("/{id}")

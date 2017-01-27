@@ -5,7 +5,6 @@ import ai.labs.resources.rest.patch.PatchInstruction;
 import ai.labs.testing.descriptor.model.SimpleTestCaseDescriptor;
 import ai.labs.testing.descriptor.model.TestCaseDescriptor;
 import ai.labs.testing.model.TestCase;
-import org.jboss.resteasy.annotations.GZIP;
 
 import javax.ws.rs.*;
 import javax.ws.rs.core.MediaType;
@@ -21,7 +20,6 @@ public interface IRestTestCaseStore {
     String versionQueryParam = "?version=";
 
     @GET
-    @GZIP
     @Produces(MediaType.APPLICATION_JSON)
     List<TestCaseDescriptor> readTestCaseDescriptors(@QueryParam("botId") String botId,
                                                      @QueryParam("botVersion") Integer botVersion,
@@ -31,11 +29,10 @@ public interface IRestTestCaseStore {
     @PATCH
     @Path("/{id}")
     @Consumes(MediaType.APPLICATION_JSON)
-    void patchDescriptor(@PathParam("id") String id, @QueryParam("version") Integer version, @GZIP PatchInstruction<SimpleTestCaseDescriptor> patchInstruction);
+    void patchDescriptor(@PathParam("id") String id, @QueryParam("version") Integer version, PatchInstruction<SimpleTestCaseDescriptor> patchInstruction);
 
 
     @GET
-    @GZIP
     @Path("/{id}")
     @Produces(MediaType.APPLICATION_JSON)
     TestCase readTestCase(@PathParam("id") String id);
@@ -45,7 +42,7 @@ public interface IRestTestCaseStore {
 
     @PUT
     @Path("/{id}")
-    URI updateTestCase(@PathParam("id") String id, @GZIP TestCase testCase);
+    URI updateTestCase(@PathParam("id") String id, TestCase testCase);
 
     @DELETE
     @Path("/{id}")

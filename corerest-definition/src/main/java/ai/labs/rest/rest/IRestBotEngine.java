@@ -4,7 +4,6 @@ package ai.labs.rest.rest;
 import ai.labs.memory.model.ConversationState;
 import ai.labs.memory.model.Deployment;
 import ai.labs.memory.model.SimpleConversationMemorySnapshot;
-import org.jboss.resteasy.annotations.GZIP;
 import org.jboss.resteasy.annotations.cache.NoCache;
 
 import javax.ws.rs.*;
@@ -29,7 +28,6 @@ public interface IRestBotEngine {
                                @PathParam("botId") String botId);
 
     @GET
-    @GZIP
     @NoCache
     @Path("/{environment}/{botId}/{conversationId}")
     @Produces(MediaType.APPLICATION_JSON)

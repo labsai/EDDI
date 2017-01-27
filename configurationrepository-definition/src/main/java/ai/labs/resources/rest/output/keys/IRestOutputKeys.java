@@ -1,7 +1,5 @@
 package ai.labs.resources.rest.output.keys;
 
-import org.jboss.resteasy.annotations.GZIP;
-
 import javax.ws.rs.*;
 import javax.ws.rs.core.MediaType;
 import java.util.List;
@@ -12,7 +10,6 @@ import java.util.List;
 @Path("/outputKeys")
 public interface IRestOutputKeys {
     @GET
-    @GZIP
     @Produces(MediaType.APPLICATION_JSON)
     List<String> readOutputKeys(@QueryParam("packageId") String packageId,
                                 @QueryParam("packageVersion") Integer packageVersion,

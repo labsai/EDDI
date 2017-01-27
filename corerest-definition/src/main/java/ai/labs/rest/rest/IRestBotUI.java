@@ -1,7 +1,6 @@
 package ai.labs.rest.rest;
 
 import ai.labs.memory.model.Deployment;
-import org.jboss.resteasy.annotations.GZIP;
 import org.jboss.resteasy.annotations.cache.NoCache;
 
 import javax.ws.rs.*;
@@ -13,7 +12,6 @@ import javax.ws.rs.core.MediaType;
 @Path("/ui")
 public interface IRestBotUI {
     @GET
-    @GZIP
     @NoCache
     @Path("/{environment}/{botId}")
     @Produces(MediaType.TEXT_HTML)
@@ -25,7 +23,6 @@ public interface IRestBotUI {
                      @QueryParam("targetDevice") String targetDevice);
 
     @GET
-    @GZIP
     @NoCache
     @Path("/{environment}")
     @Produces(MediaType.TEXT_HTML)
@@ -35,7 +32,6 @@ public interface IRestBotUI {
                   @QueryParam("targetDevice") String targetDevice);
 
     @GET
-    @GZIP
     @NoCache
     @Path("/")
     @Produces(MediaType.TEXT_HTML)

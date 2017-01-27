@@ -5,7 +5,6 @@ import ai.labs.resources.rest.documentdescriptor.model.DocumentDescriptor;
 import ai.labs.resources.rest.method.PATCH;
 import ai.labs.resources.rest.patch.PatchInstruction;
 import ai.labs.resources.rest.regulardictionary.model.RegularDictionaryConfiguration;
-import org.jboss.resteasy.annotations.GZIP;
 
 import javax.ws.rs.*;
 import javax.ws.rs.core.MediaType;
@@ -21,14 +20,12 @@ public interface IRestRegularDictionaryStore extends IRestVersionInfo {
     String resourceURI = "eddi://ai.labs.regulardictionary/regulardictionarystore/regulardictionaries/";
 
     @GET
-    @GZIP
     @Produces(MediaType.APPLICATION_JSON)
     List<DocumentDescriptor> readRegularDictionaryDescriptors(@QueryParam("filter") @DefaultValue("") String filter,
                                                               @QueryParam("index") @DefaultValue("0") Integer index,
                                                               @QueryParam("limit") @DefaultValue("20") Integer limit);
 
     @GET
-    @GZIP
     @Path("/{id}")
     @Produces(MediaType.APPLICATION_JSON)
     RegularDictionaryConfiguration readRegularDictionary(@PathParam("id") String id, @QueryParam("version") Integer version,
@@ -38,7 +35,6 @@ public interface IRestRegularDictionaryStore extends IRestVersionInfo {
                                                          @QueryParam("limit") @DefaultValue("20") Integer limit);
 
     @GET
-    @GZIP
     @Path("/{id}/expressions")
     @Produces(MediaType.APPLICATION_JSON)
     List<String> readExpressions(@PathParam("id") String id, @QueryParam("version") Integer version,
@@ -50,11 +46,11 @@ public interface IRestRegularDictionaryStore extends IRestVersionInfo {
     @PUT
     @Path("/{id}")
     @Consumes(MediaType.APPLICATION_JSON)
-    URI updateRegularDictionary(@PathParam("id") String id, @QueryParam("version") Integer version, @GZIP RegularDictionaryConfiguration regularDictionaryConfiguration);
+    URI updateRegularDictionary(@PathParam("id") String id, @QueryParam("version") Integer version, RegularDictionaryConfiguration regularDictionaryConfiguration);
 
     @POST
     @Consumes(MediaType.APPLICATION_JSON)
-    Response createRegularDictionary(@GZIP RegularDictionaryConfiguration regularDictionaryConfiguration);
+    Response createRegularDictionary(RegularDictionaryConfiguration regularDictionaryConfiguration);
 
     @DELETE
     @Path("/{id}")
@@ -63,5 +59,5 @@ public interface IRestRegularDictionaryStore extends IRestVersionInfo {
     @PATCH
     @Path("/{id}")
     @Consumes(MediaType.APPLICATION_JSON)
-    URI patchRegularDictionary(@PathParam("id") String id, @QueryParam("version") Integer version, @GZIP PatchInstruction<RegularDictionaryConfiguration>[] patchInstructions);
+    URI patchRegularDictionary(@PathParam("id") String id, @QueryParam("version") Integer version, PatchInstruction<RegularDictionaryConfiguration>[] patchInstructions);
 }
