@@ -18,6 +18,7 @@ import ai.labs.utilities.RestUtilities;
 import ai.labs.utilities.SecurityUtilities;
 import lombok.extern.slf4j.Slf4j;
 
+import javax.inject.Inject;
 import javax.ws.rs.DELETE;
 import javax.ws.rs.InternalServerErrorException;
 import javax.ws.rs.POST;
@@ -45,16 +46,18 @@ public class DocumentDescriptorInterceptor implements ContainerResponseFilter {
     private final IDocumentDescriptorStore documentDescriptorStore;
     private final IConversationDescriptorStore conversationDescriptorStore;
     private final IUserStore userStore;
+    private final ITestCaseDescriptorStore testCaseDescriptorStore;
 
+    @Inject
     @Context
     private ResourceInfo resourceInfo;
-    private final DependencyInjector injector;
 
     public DocumentDescriptorInterceptor() {
-        injector = DependencyInjector.getInstance();
+        DependencyInjector injector = DependencyInjector.getInstance();
         this.userStore = injector.getInstance(IUserStore.class);
         this.documentDescriptorStore = injector.getInstance(IDocumentDescriptorStore.class);
         this.conversationDescriptorStore = injector.getInstance(IConversationDescriptorStore.class);
+        this.testCaseDescriptorStore = injector.getInstance(ITestCaseDescriptorStore.class);
     }
     
     @Override
@@ -75,7 +78,7 @@ public class DocumentDescriptorInterceptor implements ContainerResponseFilter {
                         // the resource was created successfully
                         if (httpStatus == 201) {
                             if (createdResourceURIString.startsWith("eddi://ai.labs.testcases")) {
-                                injector.getInstance(ITestCaseDescriptorStore.class).createDescriptor(resourceId.getId(), resourceId.getVersion(), createTestCaseDescriptor(createdResourceURI, userURI));
+                                testCaseDescriptorStore.createDescriptor(resourceId.getId(), resourceId.getVersion(), createTestCaseDescriptor(createdResourceURI, userURI));
                             } else if (createdResourceURIString.startsWith("eddi://ai.labsconversation")) {
                                 conversationDescriptorStore.createDescriptor(resourceId.getId(), resourceId.getVersion(), createConversationDescriptor(createdResourceURI, userURI));
                             } else {
@@ -116,7 +119,7 @@ public class DocumentDescriptorInterceptor implements ContainerResponseFilter {
     private IDescriptorStore getDescriptorStore(String createdResourceURIString) {
         IDescriptorStore descriptorStore;
         if (createdResourceURIString.startsWith("eddi://ai.labs.testcases")) {
-            descriptorStore = injector.getInstance(ITestCaseDescriptorStore.class);
+            descriptorStore = testCaseDescriptorStore;
         } else if (createdResourceURIString.startsWith("eddi://ai.labsconversation")) {
             descriptorStore = conversationDescriptorStore;
         } else {
@@ -199,7 +202,7 @@ public class DocumentDescriptorInterceptor implements ContainerResponseFilter {
         return resourceMethod.isAnnotationPresent(POST.class);
     }
 
-    public boolean isDELETE(Method resourceMethod) {
+    private boolean isDELETE(Method resourceMethod) {
         return resourceMethod.isAnnotationPresent(DELETE.class);
     }
 }
