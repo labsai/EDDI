@@ -16,13 +16,11 @@ import ai.labs.utilities.RestUtilities;
 import ai.labs.utilities.RuntimeUtilities;
 import lombok.extern.slf4j.Slf4j;
 import org.jboss.resteasy.plugins.guice.RequestScoped;
-import org.jboss.resteasy.spi.HttpResponse;
 import org.jboss.resteasy.spi.NoLogWebApplicationException;
 
 import javax.inject.Inject;
 import javax.ws.rs.InternalServerErrorException;
 import javax.ws.rs.NotFoundException;
-import javax.ws.rs.core.Context;
 import javax.ws.rs.core.Response;
 import java.net.URI;
 import java.util.LinkedList;
@@ -34,17 +32,14 @@ import java.util.List;
 @RequestScoped
 @Slf4j
 public class RestTestCaseStore implements IRestTestCaseStore {
-    private final HttpResponse httpResponse;
     private final ITestCaseStore testCaseStore;
     private final ITestCaseDescriptorStore testCaseDescriptorStore;
     private final IConversationMemoryStore conversationMemoryStore;
 
     @Inject
-    public RestTestCaseStore(@Context HttpResponse httpResponse,
-                             ITestCaseStore testCaseStore,
+    public RestTestCaseStore(ITestCaseStore testCaseStore,
                              ITestCaseDescriptorStore testCaseDescriptorStore,
                              IConversationMemoryStore conversationMemoryStore) {
-        this.httpResponse = httpResponse;
         this.testCaseStore = testCaseStore;
         this.testCaseDescriptorStore = testCaseDescriptorStore;
         this.conversationMemoryStore = conversationMemoryStore;
@@ -135,7 +130,7 @@ public class RestTestCaseStore implements IRestTestCaseStore {
     }
 
     @Override
-    public URI createTestCase(String conversationId) {
+    public Response createTestCase(String conversationId) {
         try {
             ConversationMemorySnapshot conversationMemorySnapshot = conversationMemoryStore.loadConversationMemorySnapshot(conversationId);
 
@@ -147,8 +142,8 @@ public class RestTestCaseStore implements IRestTestCaseStore {
             testCase.setExpected(conversationMemorySnapshot);
 
             IResourceStore.IResourceId resourceId = testCaseStore.create(testCase);
-            httpResponse.setStatus(Response.Status.CREATED.getStatusCode());
-            return RestUtilities.createURI(resourceURI, resourceId.getId(), versionQueryParam, 0);
+            URI createdUri = RestUtilities.createURI(resourceURI, resourceId.getId(), versionQueryParam, 0);
+            return Response.created(createdUri).build();
         } catch (IResourceStore.ResourceStoreException e) {
             log.error(e.getLocalizedMessage(), e);
             throw new InternalServerErrorException(e);

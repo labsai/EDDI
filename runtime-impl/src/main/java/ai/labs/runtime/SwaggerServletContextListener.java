@@ -40,6 +40,7 @@ public class SwaggerServletContextListener implements ServletContextListener {
     private BeanConfig getBeanConfig() {
         BeanConfig beanConfig = new BeanConfig();
         beanConfig.setHost(getConfig("swagger.host"));
+        beanConfig.setSchemes(getConfig("swagger.schemes").split(","));
         beanConfig.setTitle(getConfig("swagger.title"));
         beanConfig.setVersion(getConfig("swagger.version"));
         beanConfig.setContact(getConfig("swagger.contact"));

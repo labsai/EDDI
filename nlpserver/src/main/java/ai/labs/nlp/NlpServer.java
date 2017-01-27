@@ -16,6 +16,7 @@ import ai.labs.runtime.bootstrap.SwaggerModule;
 import ai.labs.serialization.bootstrap.SerializationModule;
 import ai.labs.server.IServerRuntime;
 import ai.labs.server.bootstrap.ServerRuntimeModule;
+import ai.labs.testing.bootstrap.AutomatedtestingModule;
 import ai.labs.utilities.FileUtilities;
 import org.jboss.resteasy.plugins.guice.ext.RequestScopeModule;
 
@@ -56,6 +57,7 @@ public class NlpServer {
                 new UserModule(),
                 new CachingModule(new FileInputStream(configDir + "infinispan.xml")),
                 new SemanticParserModule(),
+                new AutomatedtestingModule(),
                 new CoreModule(),
                 new SwaggerModule(new FileInputStream(configDir + "swagger.properties")),
                 new ServerRuntimeModule(new FileInputStream(configDir + "webServer.properties"),

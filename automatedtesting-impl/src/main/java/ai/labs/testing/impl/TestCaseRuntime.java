@@ -43,27 +43,24 @@ public class TestCaseRuntime {
     }
 
     public void executeTestCase(final String id, final TestCase testCase) throws Exception {
-        SystemRuntime.getRuntime().submitCallable(new Callable<Void>() {
-            @Override
-            public Void call() throws Exception {
-                try {
-                    testCaseStore.setTestCaseState(id, TestCaseState.IN_PROGRESS);
+        SystemRuntime.getRuntime().submitCallable((Callable<Void>) () -> {
+            try {
+                testCaseStore.setTestCaseState(id, TestCaseState.IN_PROGRESS);
 
-                    if (!isBotDeployed(testCase.getBotId(), testCase.getBotVersion())) {
-                        deployBot(testCase.getBotId(), testCase.getBotVersion());
-                    }
-
-                    ConversationMemorySnapshot actual = runTestCase(testCase.getBotId(), testCase);
-                    testCase.setActual(actual);
-                    testCase.setLastRun(new Date(System.currentTimeMillis()));
-                    testCase.setTestCaseState(testCase.getExpected().equals(testCase.getActual()) ? TestCaseState.SUCCESS : TestCaseState.FAILED);
-                    testCaseStore.storeTestCase(id, testCase);
-                } catch (Exception e) {
-                    testCaseStore.setTestCaseState(id, TestCaseState.ERROR);
-                    throw e;
+                if (!isBotDeployed(testCase.getBotId(), testCase.getBotVersion())) {
+                    deployBot(testCase.getBotId(), testCase.getBotVersion());
                 }
-                return null;
+
+                ConversationMemorySnapshot actual = runTestCase(testCase.getBotId(), testCase);
+                testCase.setActual(actual);
+                testCase.setLastRun(new Date(System.currentTimeMillis()));
+                testCase.setTestCaseState(testCase.getExpected().equals(testCase.getActual()) ? TestCaseState.SUCCESS : TestCaseState.FAILED);
+                testCaseStore.storeTestCase(id, testCase);
+            } catch (Exception e) {
+                testCaseStore.setTestCaseState(id, TestCaseState.ERROR);
+                throw e;
             }
+            return null;
         }, ThreadContext.getResources());
     }
 

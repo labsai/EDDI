@@ -25,6 +25,7 @@ public interface IRestParserStore extends IRestVersionInfo {
 
 
     @GET
+    @Path("/descriptors")
     @Produces(MediaType.APPLICATION_JSON)
     @ApiImplicitParams({
             @ApiImplicitParam(name = "filter", format = "string", example = "<name_of_parser>"),

@@ -18,5 +18,5 @@ public interface IRestVersionInfo {
     @GET
     @Path("/{id}/currentversion")
     @Produces(MediaType.TEXT_PLAIN)
-    Integer getCurrentVersion(@PathParam("id") String id);
+    Response getCurrentVersion(@PathParam("id") String id);
 }

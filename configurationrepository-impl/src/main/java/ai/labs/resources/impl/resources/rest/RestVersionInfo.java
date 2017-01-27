@@ -42,10 +42,10 @@ public abstract class RestVersionInfo<T> implements IRestVersionInfo {
     }
 
     @Override
-    public Integer getCurrentVersion(String id) {
+    public Response getCurrentVersion(String id) {
         try {
             IResourceStore.IResourceId currentResourceId = getCurrentResourceId(id);
-            return currentResourceId.getVersion();
+            return Response.ok(currentResourceId.getVersion()).build();
         } catch (IResourceStore.ResourceNotFoundException e) {
             throw new NotFoundException(e.getLocalizedMessage(), e);
         }

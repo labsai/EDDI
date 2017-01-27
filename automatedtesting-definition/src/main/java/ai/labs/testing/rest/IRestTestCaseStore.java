@@ -8,6 +8,7 @@ import ai.labs.testing.model.TestCase;
 
 import javax.ws.rs.*;
 import javax.ws.rs.core.MediaType;
+import javax.ws.rs.core.Response;
 import java.net.URI;
 import java.util.List;
 
@@ -38,7 +39,7 @@ public interface IRestTestCaseStore {
     TestCase readTestCase(@PathParam("id") String id);
 
     @POST
-    URI createTestCase(String conversationId);
+    Response createTestCase(String conversationId);
 
     @PUT
     @Path("/{id}")
