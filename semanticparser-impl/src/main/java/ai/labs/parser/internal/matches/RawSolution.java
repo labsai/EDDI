@@ -11,7 +11,7 @@ import java.util.List;
 /**
  * @author ginccc
  */
-public class Solution {
+public class RawSolution {
     public enum Match {
         FULLY,
         PARTLY,
@@ -25,7 +25,7 @@ public class Solution {
     @Setter
     private List<IDictionary.IFoundWord> dictionaryEntries;
 
-    public Solution(Match match) {
+    public RawSolution(Match match) {
         this.match = match;
         this.dictionaryEntries = new LinkedList<>();
     }

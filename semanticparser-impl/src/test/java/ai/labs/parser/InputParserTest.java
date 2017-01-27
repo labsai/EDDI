@@ -4,7 +4,7 @@ import ai.labs.expressions.ExpressionFactory;
 import ai.labs.expressions.utilities.ExpressionProvider;
 import ai.labs.expressions.utilities.IExpressionProvider;
 import ai.labs.parser.internal.InputParser;
-import ai.labs.parser.internal.matches.Solution;
+import ai.labs.parser.internal.matches.RawSolution;
 import ai.labs.parser.model.IDictionary;
 import ai.labs.parser.model.Phrase;
 import ai.labs.parser.model.Word;
@@ -38,7 +38,7 @@ public class InputParserTest {
         InputParser inputParser = new InputParser(Collections.singletonList(testDictionary));
 
         //test
-        List<Solution> suggestions = inputParser.parse(lookupString);
+        List<RawSolution> suggestions = inputParser.parse(lookupString);
 
         //assert
         Assert.assertEquals(1, suggestions.size());
@@ -55,7 +55,7 @@ public class InputParserTest {
         InputParser inputParser = new InputParser(Collections.singletonList(testDictionary), Collections.emptyList());
 
         //test
-        List<Solution> suggestions = inputParser.parse(lookupString);
+        List<RawSolution> suggestions = inputParser.parse(lookupString);
 
         //assert
         Assert.assertEquals("day after tomorrow", suggestions.get(0).getDictionaryEntries().get(0).getValue());
@@ -71,7 +71,7 @@ public class InputParserTest {
         InputParser inputParser = new InputParser(Collections.singletonList(testDictionary));
 
         //test
-        List<Solution> suggestions = inputParser.parse(lookupString);
+        List<RawSolution> suggestions = inputParser.parse(lookupString);
 
         //assert
         List<IDictionary.IFoundWord> found = suggestions.get(0).getDictionaryEntries();
@@ -92,7 +92,7 @@ public class InputParserTest {
         InputParser inputParser = new InputParser(Collections.singletonList(testDictionary));
 
         //test
-        List<Solution> suggestions = inputParser.parse(lookupString);
+        List<RawSolution> suggestions = inputParser.parse(lookupString);
 
         //assert
         Assert.assertEquals("day after tomorrow", suggestions.get(0).getDictionaryEntries().get(0).getValue());
@@ -108,7 +108,7 @@ public class InputParserTest {
         InputParser inputParser = new InputParser(Collections.singletonList(testDictionary));
 
         //test
-        List<Solution> suggestions = inputParser.parse(lookupString);
+        List<RawSolution> suggestions = inputParser.parse(lookupString);
 
         //assert
         Assert.assertEquals("day after tomorrow", suggestions.get(0).getDictionaryEntries().get(1).getValue());
@@ -124,7 +124,7 @@ public class InputParserTest {
         InputParser inputParser = new InputParser(Collections.singletonList(testDictionary));
 
         //test
-        List<Solution> suggestions = inputParser.parse(lookupString);
+        List<RawSolution> suggestions = inputParser.parse(lookupString);
 
         //assert
         Assert.assertNotSame("day after tomorrow", suggestions.get(0).getDictionaryEntries().get(0).getValue());
@@ -144,7 +144,7 @@ public class InputParserTest {
         InputParser inputParser = new InputParser(Collections.singletonList(testDictionary));
 
         //test
-        List<Solution> suggestions = inputParser.parse(lookupString);
+        List<RawSolution> suggestions = inputParser.parse(lookupString);
 
         //assert
         Assert.assertEquals("day after tomorrow", suggestions.get(0).getDictionaryEntries().get(0).getValue());
@@ -165,7 +165,7 @@ public class InputParserTest {
         InputParser inputParser = new InputParser(Collections.singletonList(testDictionary));
 
         //test
-        List<Solution> suggestions = inputParser.parse(lookupString);
+        List<RawSolution> suggestions = inputParser.parse(lookupString);
 
         //assert
         Assert.assertEquals(1, suggestions.size());
@@ -186,7 +186,7 @@ public class InputParserTest {
         InputParser inputParser = new InputParser(Collections.singletonList(testDictionary), Collections.emptyList());
 
         //test
-        List<Solution> suggestions = inputParser.parse(lookupString);
+        List<RawSolution> suggestions = inputParser.parse(lookupString);
 
         //assert
         Assert.assertEquals(1, suggestions.size());

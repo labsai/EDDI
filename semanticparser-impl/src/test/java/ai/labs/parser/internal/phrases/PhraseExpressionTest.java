@@ -5,7 +5,7 @@ import ai.labs.expressions.utilities.ExpressionProvider;
 import ai.labs.expressions.utilities.IExpressionProvider;
 import ai.labs.parser.TestDictionary;
 import ai.labs.parser.internal.InputParser;
-import ai.labs.parser.internal.matches.Solution;
+import ai.labs.parser.internal.matches.RawSolution;
 import ai.labs.parser.model.IDictionary;
 import ai.labs.parser.model.Phrase;
 import ai.labs.parser.model.Word;
@@ -40,10 +40,10 @@ public class PhraseExpressionTest {
         InputParser inputParser = new InputParser(Collections.singletonList(testDictionary), Collections.emptyList());
 
         //test
-        List<Solution> solutions = inputParser.parse(lookupString);
+        List<RawSolution> rawSolutions = inputParser.parse(lookupString);
 
         //assert
-        Assert.assertEquals("day after tomorrow", convert(solutions.get(0).getDictionaryEntries()));
+        Assert.assertEquals("day after tomorrow", convert(rawSolutions.get(0).getDictionaryEntries()));
     }
 
     @Test
@@ -56,10 +56,10 @@ public class PhraseExpressionTest {
         InputParser inputParser = new InputParser(Collections.singletonList(testDictionary), Collections.emptyList());
 
         //test
-        List<Solution> solutions = inputParser.parse(lookupString);
+        List<RawSolution> rawSolutions = inputParser.parse(lookupString);
 
         //assert
-        Assert.assertEquals("day after tomorrow", convert(solutions.get(0).getDictionaryEntries()));
+        Assert.assertEquals("day after tomorrow", convert(rawSolutions.get(0).getDictionaryEntries()));
     }
 
     private String convert(List<IDictionary.IFoundWord> dictionaryEntries) {

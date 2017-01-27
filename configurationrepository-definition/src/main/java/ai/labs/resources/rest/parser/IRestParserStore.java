@@ -50,6 +50,60 @@ public interface IRestParserStore extends IRestVersionInfo {
     URI updateParser(@PathParam("id") String id, @QueryParam("version") @DefaultValue("-1") Integer version,
                      ParserConfiguration parserConfiguration);
 
+    /**
+     * example parser json config:
+     * <p>
+     * {
+     * "extensions": {
+     * "dictionaries": [
+     * {
+     * "type": "eddi://ai.labs.parser.dictionaries.integer"
+     * },
+     * {
+     * "type": "eddi://ai.labs.parser.dictionaries.decimal"
+     * },
+     * {
+     * "type": "eddi://ai.labs.parser.dictionaries.punctuation"
+     * },
+     * {
+     * "type": "eddi://ai.labs.parser.dictionaries.email"
+     * },
+     * {
+     * "type": "eddi://ai.labs.parser.dictionaries.time"
+     * },
+     * {
+     * "type": "eddi://ai.labs.parser.dictionaries.ordinalNumber"
+     * },
+     * {
+     * "type": "eddi://ai.labs.parser.dictionaries.regular",
+     * "config": {
+     * "uri": "eddi://ai.labs.regulardictionary/regulardictionarystore/regulardictionaries/<INSERT_ID_OF_DICTIONARY>?version=<VERSION_NUMBER>"
+     * }
+     * }
+     * ],
+     * "corrections": [
+     * {
+     * "type": "eddi://ai.labs.parser.corrections.stemming",
+     * "config": {
+     * "language": "english",
+     * "lookupIfKnown": "false"
+     * }
+     * },
+     * {
+     * "type": "eddi://ai.labs.parser.corrections.levenshtein",
+     * "config": {
+     * "distance": "2"
+     * }
+     * },
+     * {
+     * "type": "eddi://ai.labs.parser.corrections.mergedTerms"
+     * }
+     * ]}
+     * }
+     *
+     * @param parserConfiguration configuration of parser (which dictionaries and which correction algorithms in which order)
+     * @return an array of expressions representing the found solutions
+     */
     @POST
     @Consumes(MediaType.APPLICATION_JSON)
     Response createParser(ParserConfiguration parserConfiguration);

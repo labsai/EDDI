@@ -39,7 +39,7 @@ public class RestParserStore extends RestVersionInfo<ParserConfiguration> implem
 
     @Override
     public URI updateParser(String id, Integer version, ParserConfiguration parserConfiguration) {
-        return updateParser(id, version, parserConfiguration);
+        return update(id, version, parserConfiguration);
     }
 
     @Override

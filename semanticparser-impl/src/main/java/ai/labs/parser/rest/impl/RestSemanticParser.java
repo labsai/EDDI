@@ -4,8 +4,10 @@ import ai.labs.caching.ICache;
 import ai.labs.caching.ICacheFactory;
 import ai.labs.lifecycle.ILifecycleTask;
 import ai.labs.parser.IInputParser;
-import ai.labs.parser.internal.matches.Solution;
+import ai.labs.parser.InputParserTask;
+import ai.labs.parser.internal.matches.RawSolution;
 import ai.labs.parser.rest.IRestSemanticParser;
+import ai.labs.parser.rest.model.Solution;
 import ai.labs.resources.rest.parser.IRestParserStore;
 import ai.labs.resources.rest.parser.model.ParserConfiguration;
 import ai.labs.runtime.SystemRuntime;
@@ -31,7 +33,7 @@ public class RestSemanticParser implements IRestSemanticParser {
     private final SystemRuntime.IRuntime runtime;
     private final IResourceClientLibrary resourceClientLibrary;
     private final Provider<ILifecycleTask> parserProvider;
-    private final ICache<URI, IInputParser> cache;
+    private final ICache<URI, InputParserTask> cache;
 
     @Inject
     public RestSemanticParser(SystemRuntime.IRuntime runtime,
@@ -52,9 +54,11 @@ public class RestSemanticParser implements IRestSemanticParser {
             try {
                 URI resourceUri = URI.create(IRestParserStore.resourceURI + configId +
                         IRestParserStore.versionQueryParam + version);
-                IInputParser inputParser = getParser(resourceUri);
-                List<Solution> solutions = inputParser.parse(sentence);
-                asyncResponse.resume(solutions);
+                InputParserTask inputParserTask = getParser(resourceUri);
+                IInputParser inputParser = (IInputParser) inputParserTask.getComponent();
+                List<RawSolution> rawSolutions = inputParser.parse(sentence);
+                List<Solution> solutionExpressions = inputParserTask.extractExpressions(rawSolutions);
+                asyncResponse.resume(solutionExpressions);
             } catch (Exception e) {
                 log.error(e.getLocalizedMessage(), e);
                 asyncResponse.resume(new InternalServerErrorException());
@@ -64,7 +68,7 @@ public class RestSemanticParser implements IRestSemanticParser {
         }, null);
     }
 
-    private IInputParser getParser(URI resourceUri) throws Exception {
+    private InputParserTask getParser(URI resourceUri) throws Exception {
         createParserIfAbsent(resourceUri);
         return cache.get(resourceUri);
     }
@@ -75,7 +79,8 @@ public class RestSemanticParser implements IRestSemanticParser {
             ParserConfiguration parserConfiguration = fetchParserConfiguration(resourceUri);
             parserTask.configure(parserConfiguration.getConfig());
             parserTask.setExtensions(parserConfiguration.getExtensions());
-            cache.put(resourceUri, (IInputParser) parserTask.getComponent());
+            parserTask.init();
+            cache.put(resourceUri, (InputParserTask) parserTask);
         }
     }
 

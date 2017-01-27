@@ -1,9 +1,7 @@
 package ai.labs.parser.rest;
 
-import io.swagger.annotations.Api;
-import io.swagger.annotations.ApiParam;
-import io.swagger.annotations.ApiResponse;
-import io.swagger.annotations.ApiResponses;
+import ai.labs.parser.rest.model.Solution;
+import io.swagger.annotations.*;
 
 import javax.ws.rs.*;
 import javax.ws.rs.container.AsyncResponse;
@@ -25,6 +23,7 @@ public interface IRestSemanticParser {
     @POST
     @Path("{parserId}")
     @Produces(MediaType.APPLICATION_JSON)
+    @ApiOperation(value = "returns an array of found solutions", response = Solution.class, responseContainer = "List")
     void parse(@PathParam("parserId") String parserId, @QueryParam("version") Integer version,
                String sentence, @Suspended AsyncResponse asyncResponse);
 }

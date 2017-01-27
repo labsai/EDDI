@@ -3,7 +3,7 @@ package ai.labs.parser.internal;
 import ai.labs.parser.IInputParser;
 import ai.labs.parser.correction.ICorrection;
 import ai.labs.parser.internal.matches.MatchingResult;
-import ai.labs.parser.internal.matches.Solution;
+import ai.labs.parser.internal.matches.RawSolution;
 import ai.labs.parser.internal.matches.Suggestion;
 import ai.labs.parser.model.FoundPhrase;
 import ai.labs.parser.model.FoundUnknown;
@@ -66,7 +66,7 @@ public class InputParser implements IInputParser {
     }
 
     @Override
-    public List<Solution> parse(String sentence) {
+    public List<RawSolution> parse(String sentence) {
         InputHolder holder = new InputHolder();
         holder.input = sentence.split(" ");
 
@@ -121,8 +121,8 @@ public class InputParser implements IInputParser {
         }
     }
 
-    private List<Solution> lookupPhrases(InputHolder holder) {
-        List<Solution> possibleSolutions = new LinkedList<>();
+    private List<RawSolution> lookupPhrases(InputHolder holder) {
+        List<RawSolution> possibleSolutions = new LinkedList<>();
         Iterator<Suggestion> suggestionIterator = holder.createSolutionIterator();
 
         int maxIterations = 2;
@@ -137,7 +137,7 @@ public class InputParser implements IInputParser {
             List<IDictionary.IFoundWord> foundWords = suggestion.build();
             List<IDictionary.IPhrase> phrasesContainingFoundWords = getPhrasesContainingFoundWords(foundWords);
 
-            Solution solution = null;
+            RawSolution rawSolution = null;
             boolean matchingCompleted = false;
 
             //first try: look for full matches (one/more phrases)
@@ -145,7 +145,7 @@ public class InputParser implements IInputParser {
                 if (phrase.getWords().length <= foundWords.size()) {
                     foundWords = lookForMatch(foundWords, phrase);
                     if (foundWords.contains(createPhrase(phrase, false, 1.0))) {
-                        solution = new Solution(Solution.Match.FULLY);
+                        rawSolution = new RawSolution(RawSolution.Match.FULLY);
                     }
 
                     if (!anyWordsLeft(foundWords)) {
@@ -156,9 +156,9 @@ public class InputParser implements IInputParser {
             }
 
             //if we could match ALL the foundWords to phrase(s) we return
-            if (solution != null && matchingCompleted) {
-                solution.setDictionaryEntries(foundWords);
-                possibleSolutions.add(solution);
+            if (rawSolution != null && matchingCompleted) {
+                rawSolution.setDictionaryEntries(foundWords);
+                possibleSolutions.add(rawSolution);
                 return possibleSolutions;
             }
 
@@ -167,8 +167,8 @@ public class InputParser implements IInputParser {
                 if (phrase.getWords().length > foundWords.size()) {
                     foundWords = lookForPartlyMatch(foundWords, phrase);
                     if (foundWords.contains(createPhrase(phrase, false, 0.5))) {
-                        if (solution == null) {
-                            solution = new Solution(Solution.Match.PARTLY);
+                        if (rawSolution == null) {
+                            rawSolution = new RawSolution(RawSolution.Match.PARTLY);
                         }
                     }
 
@@ -179,12 +179,12 @@ public class InputParser implements IInputParser {
                 }
             }
 
-            if (solution != null) {
-                solution.setDictionaryEntries(foundWords);
-                if (solution.getMatch() == Solution.Match.FULLY) {
-                    possibleSolutions.add(0, solution);
+            if (rawSolution != null) {
+                rawSolution.setDictionaryEntries(foundWords);
+                if (rawSolution.getMatch() == RawSolution.Match.FULLY) {
+                    possibleSolutions.add(0, rawSolution);
                 } else {
-                    possibleSolutions.add(solution);
+                    possibleSolutions.add(rawSolution);
                 }
 
                 if (matchingCompleted) {
@@ -193,9 +193,9 @@ public class InputParser implements IInputParser {
             }
 
             if (possibleSolutions.isEmpty()) {
-                solution = new Solution(Solution.Match.NOTHING);
-                solution.setDictionaryEntries(foundWords);
-                possibleSolutions.add(solution);
+                rawSolution = new RawSolution(RawSolution.Match.NOTHING);
+                rawSolution.setDictionaryEntries(foundWords);
+                possibleSolutions.add(rawSolution);
             }
 
             if (currentIteration > maxIterations) {

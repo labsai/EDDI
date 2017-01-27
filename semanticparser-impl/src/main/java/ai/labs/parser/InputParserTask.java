@@ -9,12 +9,12 @@ import ai.labs.memory.IData;
 import ai.labs.parser.correction.*;
 import ai.labs.parser.dictionaries.*;
 import ai.labs.parser.internal.InputParser;
-import ai.labs.parser.internal.matches.Solution;
+import ai.labs.parser.internal.matches.RawSolution;
 import ai.labs.parser.model.IDictionary;
+import ai.labs.parser.rest.model.Solution;
 import ai.labs.resources.rest.regulardictionary.model.RegularDictionaryConfiguration;
 import ai.labs.runtime.client.configuration.IResourceClientLibrary;
 import ai.labs.runtime.service.ServiceException;
-import ai.labs.utilities.CharacterUtilities;
 import ai.labs.utilities.RuntimeUtilities;
 
 import javax.inject.Inject;
@@ -47,13 +47,13 @@ public class InputParserTask extends AbstractLifecycleTask implements ILifecycle
     private final String KEY_DISTANCE = "distance";
     private final String KEY_LOOKUP_IF_KNOWN = "lookupIfKnown";
     private final String KEY_LANGUAGE = "language";
-    private IExpressionProvider expressionUtilities;
+    private IExpressionProvider expressionProvider;
 
     @Inject
     public InputParserTask(IResourceClientLibrary resourceClientLibrary,
-                           IExpressionProvider expressionUtilities) {
+                           IExpressionProvider expressionProvider) {
         this.resourceClientLibrary = resourceClientLibrary;
-        this.expressionUtilities = expressionUtilities;
+        this.expressionProvider = expressionProvider;
     }
 
     @Override
@@ -89,24 +89,14 @@ public class InputParserTask extends AbstractLifecycleTask implements ILifecycle
             return;
         }
         String input = (String) data.getResult();
-        List<Solution> parsedSuggestions = sentenceParser.parse(input);
+        List<RawSolution> parsedSolutions = sentenceParser.parse(input);
 
         //store result in memory
-        if (!parsedSuggestions.isEmpty()) {
-            List<Expression> expressions = convertDictionaryEntriesToExpressions(parsedSuggestions.get(0).getDictionaryEntries());
-            data = new Data("expressions:parsed", CharacterUtilities.arrayToString(expressions));
+        if (!parsedSolutions.isEmpty()) {
+            Solution solution = extractExpressions(parsedSolutions).get(0);
+            data = new Data("expressions:parsed", solution.getExpressions());
             memory.getCurrentStep().storeData(data);
         }
-    }
-
-    private List<Expression> convertDictionaryEntriesToExpressions(List<IDictionary.IFoundWord> dictionaryEntries) {
-        List<Expression> expressions = new LinkedList<>();
-
-        for (IDictionary.IDictionaryEntry dictionaryEntry : dictionaryEntries) {
-            expressions.addAll(dictionaryEntry.getExpressions());
-        }
-
-        return expressions;
     }
 
     @Override
@@ -132,17 +122,17 @@ public class InputParserTask extends AbstractLifecycleTask implements ILifecycle
             if (dictionaryType.startsWith(regularDictionaryURI)) {
                 dictionary = createRegularDictionary(dictionaryMap);
             } else if (dictionaryType.startsWith(integerDictionaryURI)) {
-                dictionary = new IntegerDictionary(expressionUtilities);
+                dictionary = new IntegerDictionary(expressionProvider);
             } else if (dictionaryType.startsWith(decimalDictionaryURI)) {
-                dictionary = new DecimalDictionary(expressionUtilities);
+                dictionary = new DecimalDictionary(expressionProvider);
             } else if (dictionaryType.startsWith(emailDictionaryURI)) {
-                dictionary = new EmailDictionary(expressionUtilities);
+                dictionary = new EmailDictionary(expressionProvider);
             } else if (dictionaryType.startsWith(punctuationDictionaryURI)) {
-                dictionary = new PunctuationDictionary(expressionUtilities);
+                dictionary = new PunctuationDictionary(expressionProvider);
             } else if (dictionaryType.startsWith(ordinalNumberDictionaryURI)) {
-                dictionary = new OrdinalNumbersDictionary(expressionUtilities);
+                dictionary = new OrdinalNumbersDictionary(expressionProvider);
             } else if (dictionaryType.startsWith(timeExpressionDictionaryURI)) {
-                dictionary = new TimeExpressionDictionary(expressionUtilities);
+                dictionary = new TimeExpressionDictionary(expressionProvider);
             }
 
             if (dictionary == null) {
@@ -164,7 +154,7 @@ public class InputParserTask extends AbstractLifecycleTask implements ILifecycle
         try {
             Map<String, Object> configMap = (Map<String, Object>) config;
             String uriString = configMap.get(KEY_URI).toString();
-            if (uriString.startsWith("resource")) {
+            if (uriString.startsWith("eddi")) {
                 URI regDictURI = URI.create(uriString);
                 RegularDictionaryConfiguration regularDictionaryConfiguration = fetchRegularDictionaryConfiguration(regDictURI);
                 dictionary = convert(regularDictionaryConfiguration);
@@ -283,7 +273,6 @@ public class InputParserTask extends AbstractLifecycleTask implements ILifecycle
         return lookupIfKnown;
     }
 
-
     private void checkIfConfigExists(Map<String, Object> map, String type) throws IllegalExtensionConfigurationException {
         if (!map.containsKey(KEY_CONFIG)) {
             String message = "Key: 'config' does not exist! [%s]";
@@ -291,6 +280,7 @@ public class InputParserTask extends AbstractLifecycleTask implements ILifecycle
             throw new IllegalExtensionConfigurationException(message);
         }
     }
+
 
     private void checkIfMap(Object obj, String key, String type) throws IllegalExtensionConfigurationException {
         if (!(obj instanceof Map)) {
@@ -307,10 +297,31 @@ public class InputParserTask extends AbstractLifecycleTask implements ILifecycle
 
     private List<Expression> createDefaultExpressionIfNull(String value, String exp) {
         if (RuntimeUtilities.isNullOrEmpty(exp)) {
-            return Arrays.asList(expressionUtilities.createExpression("unused", value));
+            return Collections.singletonList(expressionProvider.createExpression("unused", value));
         }
 
-        return expressionUtilities.parseExpressions(exp);
+        return expressionProvider.parseExpressions(exp);
+    }
+
+    private List<Expression> convertDictionaryEntriesToExpressions(List<IDictionary.IFoundWord> dictionaryEntries) {
+        List<Expression> expressions = new LinkedList<>();
+
+        for (IDictionary.IDictionaryEntry dictionaryEntry : dictionaryEntries) {
+            expressions.addAll(dictionaryEntry.getExpressions());
+        }
+
+        return expressions;
+    }
+
+    public List<Solution> extractExpressions(List<RawSolution> rawSolutions) {
+        List<Solution> solutionExpressions = new ArrayList<>();
+
+        for (RawSolution rawSolution : rawSolutions) {
+            List<Expression> expressions = convertDictionaryEntriesToExpressions(rawSolution.getDictionaryEntries());
+            solutionExpressions.add(new Solution(expressionProvider.toString(expressions)));
+        }
+
+        return solutionExpressions;
     }
 
     private class UnrecognizedDictionaryException extends UnrecognizedExtensionException {

@@ -68,34 +68,36 @@ public class DocumentDescriptorInterceptor implements ContainerResponseFilter {
             Method resourceMethod = resourceInfo.getResourceMethod();
             if (resourceMethod != null && (isPUT(resourceMethod) || isPATCH(resourceMethod) || isPOST(resourceMethod) || isDELETE(resourceMethod)) && httpStatus >= 200 && httpStatus < 300) {
                 if (entity != null) {
-                    String createdResourceURIString = entity.toString();
-                    URI createdResourceURI = URI.create(createdResourceURIString);
-                    IResourceStore.IResourceId resourceId = RestUtilities.extractResourceId(createdResourceURI);
-                    Principal userPrincipal = SecurityUtilities.getPrincipal(ThreadContext.getSubject());
-                    URI userURI = UserUtilities.getUserURI(userStore, userPrincipal);
+                    String entityString = entity.toString();
+                    if (entityString.contains("://")) {
+                        URI createdResourceURI = URI.create(entityString);
+                        IResourceStore.IResourceId resourceId = RestUtilities.extractResourceId(createdResourceURI);
+                        Principal userPrincipal = SecurityUtilities.getPrincipal(ThreadContext.getSubject());
+                        URI userURI = UserUtilities.getUserURI(userStore, userPrincipal);
 
-                    if (isPOST(resourceMethod)) {
-                        // the resource was created successfully
-                        if (httpStatus == 201) {
-                            if (createdResourceURIString.startsWith("eddi://ai.labs.testcases")) {
-                                testCaseDescriptorStore.createDescriptor(resourceId.getId(), resourceId.getVersion(), createTestCaseDescriptor(createdResourceURI, userURI));
-                            } else if (createdResourceURIString.startsWith("eddi://ai.labsconversation")) {
-                                conversationDescriptorStore.createDescriptor(resourceId.getId(), resourceId.getVersion(), createConversationDescriptor(createdResourceURI, userURI));
-                            } else {
-                                documentDescriptorStore.createDescriptor(resourceId.getId(), resourceId.getVersion(), createDocumentDescriptor(createdResourceURI, userURI));
+                        if (isPOST(resourceMethod)) {
+                            // the resource was created successfully
+                            if (httpStatus == 201) {
+                                if (entityString.startsWith("eddi://ai.labs.testcases")) {
+                                    testCaseDescriptorStore.createDescriptor(resourceId.getId(), resourceId.getVersion(), createTestCaseDescriptor(createdResourceURI, userURI));
+                                } else if (entityString.startsWith("eddi://ai.labsconversation")) {
+                                    conversationDescriptorStore.createDescriptor(resourceId.getId(), resourceId.getVersion(), createConversationDescriptor(createdResourceURI, userURI));
+                                } else {
+                                    documentDescriptorStore.createDescriptor(resourceId.getId(), resourceId.getVersion(), createDocumentDescriptor(createdResourceURI, userURI));
+                                }
                             }
+
+                            return;
                         }
 
-                        return;
-                    }
-
-                    if ((isPUT(resourceMethod) || isPATCH(resourceMethod)) && !isUpdateDescriptor(resourceMethod) && !isUpdatePermissions(resourceMethod)) {
-                        IDescriptorStore descriptorStore = getDescriptorStore(createdResourceURIString);
-                        ResourceDescriptor resourceDescriptor = (ResourceDescriptor) descriptorStore.readDescriptor(resourceId.getId(), resourceId.getVersion() - 1);
-                        resourceDescriptor.setLastModifiedOn(new Date(System.currentTimeMillis()));
-                        resourceDescriptor.setLastModifiedBy(UserUtilities.getUserURI(userStore, SecurityUtilities.getPrincipal(ThreadContext.getSubject())));
-                        resourceDescriptor.setResource(createNewVersionOfResource(resourceDescriptor.getResource(), resourceId.getVersion()));
-                        descriptorStore.updateDescriptor(resourceId.getId(), resourceId.getVersion() - 1, resourceDescriptor);
+                        if ((isPUT(resourceMethod) || isPATCH(resourceMethod)) && !isUpdateDescriptor(resourceMethod) && !isUpdatePermissions(resourceMethod)) {
+                            IDescriptorStore descriptorStore = getDescriptorStore(entityString);
+                            ResourceDescriptor resourceDescriptor = (ResourceDescriptor) descriptorStore.readDescriptor(resourceId.getId(), resourceId.getVersion() - 1);
+                            resourceDescriptor.setLastModifiedOn(new Date(System.currentTimeMillis()));
+                            resourceDescriptor.setLastModifiedBy(UserUtilities.getUserURI(userStore, SecurityUtilities.getPrincipal(ThreadContext.getSubject())));
+                            resourceDescriptor.setResource(createNewVersionOfResource(resourceDescriptor.getResource(), resourceId.getVersion()));
+                            descriptorStore.updateDescriptor(resourceId.getId(), resourceId.getVersion() - 1, resourceDescriptor);
+                        }
                     }
                 }
 
