@@ -31,7 +31,7 @@ public class RestSemanticParser implements IRestSemanticParser {
     private final SystemRuntime.IRuntime runtime;
     private final IResourceClientLibrary resourceClientLibrary;
     private final Provider<ILifecycleTask> parserProvider;
-    private final ICache<String, IInputParser> cache;
+    private final ICache<URI, IInputParser> cache;
 
     @Inject
     public RestSemanticParser(SystemRuntime.IRuntime runtime,
@@ -45,12 +45,14 @@ public class RestSemanticParser implements IRestSemanticParser {
     }
 
     @Override
-    public void parse(String configId, String sentence, AsyncResponse asyncResponse) {
+    public void parse(String configId, Integer version, String sentence, AsyncResponse asyncResponse) {
         asyncResponse.setTimeout(30, TimeUnit.SECONDS);
 
         runtime.submitCallable((Callable<Void>) () -> {
             try {
-                IInputParser inputParser = getParser(configId);
+                URI resourceUri = URI.create(IRestParserStore.resourceURI + configId +
+                        IRestParserStore.versionQueryParam + version);
+                IInputParser inputParser = getParser(resourceUri);
                 List<Solution> solutions = inputParser.parse(sentence);
                 asyncResponse.resume(solutions);
             } catch (Exception e) {
@@ -62,23 +64,22 @@ public class RestSemanticParser implements IRestSemanticParser {
         }, null);
     }
 
-    private IInputParser getParser(String configId) throws Exception {
-        createParserIfAbsent(configId);
-        return cache.get(configId);
+    private IInputParser getParser(URI resourceUri) throws Exception {
+        createParserIfAbsent(resourceUri);
+        return cache.get(resourceUri);
     }
 
-    private void createParserIfAbsent(String configId) throws Exception {
-        if (!cache.containsKey(configId)) {
+    private void createParserIfAbsent(URI resourceUri) throws Exception {
+        if (!cache.containsKey(resourceUri)) {
             ILifecycleTask parserTask = parserProvider.get();
-            ParserConfiguration parserConfiguration = fetchParserConfiguration(configId);
+            ParserConfiguration parserConfiguration = fetchParserConfiguration(resourceUri);
             parserTask.configure(parserConfiguration.getConfig());
             parserTask.setExtensions(parserConfiguration.getExtensions());
-            cache.put(configId, (IInputParser) parserTask.getComponent());
+            cache.put(resourceUri, (IInputParser) parserTask.getComponent());
         }
     }
 
-    private ParserConfiguration fetchParserConfiguration(String configId) throws ServiceException {
-        URI resourceUri = URI.create(IRestParserStore.resourceURI + configId);
+    private ParserConfiguration fetchParserConfiguration(URI resourceUri) throws ServiceException {
         return resourceClientLibrary.getResource(resourceUri, ParserConfiguration.class);
     }
 }

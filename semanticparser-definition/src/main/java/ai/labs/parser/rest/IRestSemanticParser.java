@@ -5,10 +5,7 @@ import io.swagger.annotations.ApiParam;
 import io.swagger.annotations.ApiResponse;
 import io.swagger.annotations.ApiResponses;
 
-import javax.ws.rs.POST;
-import javax.ws.rs.Path;
-import javax.ws.rs.PathParam;
-import javax.ws.rs.Produces;
+import javax.ws.rs.*;
 import javax.ws.rs.container.AsyncResponse;
 import javax.ws.rs.container.Suspended;
 import javax.ws.rs.core.MediaType;
@@ -28,6 +25,6 @@ public interface IRestSemanticParser {
     @POST
     @Path("{parserId}")
     @Produces(MediaType.APPLICATION_JSON)
-    void parse(@PathParam("parserId") String parserId, String sentence,
-               @Suspended AsyncResponse asyncResponse);
+    void parse(@PathParam("parserId") String parserId, @QueryParam("version") Integer version,
+               String sentence, @Suspended AsyncResponse asyncResponse);
 }
