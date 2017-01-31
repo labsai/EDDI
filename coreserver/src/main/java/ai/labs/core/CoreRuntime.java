@@ -6,16 +6,9 @@ import ai.labs.core.behavior.extensions.descriptor.ExtensionDescriptorBuilder;
 import ai.labs.core.behavior.extensions.descriptor.IExtensionDescriptor;
 import ai.labs.permission.ssl.SelfSignedTrustProvider;
 import ai.labs.runtime.SystemRuntime;
-import ai.labs.staticresources.IResourceDirectory;
-import ai.labs.staticresources.IResourceFilesManager;
-import ai.labs.staticresources.impl.ResourceDirectory;
-import ai.labs.staticresources.impl.ResourceFilesManager;
 
 import javax.inject.Inject;
 import javax.inject.Named;
-import java.io.File;
-import java.util.LinkedList;
-import java.util.List;
 
 /**
  * @author ginccc
@@ -58,38 +51,9 @@ public final class CoreRuntime {
             SelfSignedTrustProvider.setAlwaysTrust(true);
         }
 
-        initResourceFiles();
         initializeBehaviourRuleRegistry();
     }
 
-    private void initResourceFiles() {
-        ResourceFilesManager.Options options = new ResourceFilesManager.Options(
-                "https",
-                host,
-                httpsPort,
-                runtime.getResourceDir(), runtime.getWebDir(),
-                mergeResourceFiles,
-                addFingerprintToResources,
-                alwaysReloadResourcesFile);
-
-        File resourceDir = new File(runtime.getResourceDir());
-        List<IResourceDirectory> resourceDirectories = new LinkedList<>();
-        if (resourceDir.exists() && resourceDir.isDirectory() && resourceDir.listFiles() != null) {
-            IResourceDirectory resourceDirectory;
-            for (File dir : resourceDir.listFiles()) {
-                for (File targetDeviceDir : dir.listFiles()) {
-                    String dirName = dir.getName();
-                    resourceDirectory = new ResourceDirectory(dirName, targetDeviceDir.getName(), runtime.getResourceDir(), runtime.getWebDir(), environment);
-                    if (SNIPPET_IDENTIFIER.equals(dirName)) {
-                    }
-                    resourceDirectories.add(resourceDirectory);
-                }
-            }
-        }
-
-        IResourceFilesManager resourceFilesManager = new ResourceFilesManager(options, resourceDirectories);
-        resourceFilesManager.reloadResourceFiles();
-    }
 
     public static void initializeBehaviourRuleRegistry() {
         //TODO change to DI MapBinder

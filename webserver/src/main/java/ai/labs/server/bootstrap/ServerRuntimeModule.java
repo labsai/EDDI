@@ -38,6 +38,7 @@ public class ServerRuntimeModule extends AbstractBaseModule {
     @Provides
     @Singleton
     public IServerRuntime provideServerRuntime(@Named("system.environment") String environment,
+                                               @Named("systemRuntime.resourceDir") String resourceDir,
                                                @Named("webServer.host") String host,
                                                @Named("webServer.httpPort") Integer httpPort,
                                                @Named("webServer.httpsPort") Integer httpsPort,
@@ -78,7 +79,7 @@ public class ServerRuntimeModule extends AbstractBaseModule {
             }
 
             return new ServerRuntime(options, contextListener, swaggerContextListener, httpServletDispatcher,
-                    securityHandler, environment, baseUri);
+                    securityHandler, environment, resourceDir, baseUri);
         } catch (ClassNotFoundException e) {
             throw new RuntimeException(e.getLocalizedMessage(), e);
         }

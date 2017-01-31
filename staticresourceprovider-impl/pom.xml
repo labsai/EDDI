@@ -44,6 +44,11 @@
             <artifactId>resteasy-guice</artifactId>
             <version>3.1.0.Final</version>
         </dependency>
+        <dependency>
+            <groupId>ai.labs</groupId>
+            <artifactId>staticresourceprovider-definition</artifactId>
+            <version>3.0-SNAPSHOT</version>
+        </dependency>
     </dependencies>
 
     <build>

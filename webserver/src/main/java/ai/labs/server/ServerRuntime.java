@@ -3,7 +3,9 @@ package ai.labs.server;
 import ai.labs.runtime.SwaggerServletContextListener;
 import ai.labs.runtime.SystemRuntime;
 import ai.labs.runtime.ThreadContext;
+import ai.labs.utilities.FileUtilities;
 import ai.labs.utilities.RuntimeUtilities;
+import lombok.AllArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.eclipse.jetty.http.HttpVersion;
 import org.eclipse.jetty.security.LoginService;
@@ -23,6 +25,7 @@ import org.jboss.resteasy.plugins.guice.GuiceResteasyBootstrapServletContextList
 import org.jboss.resteasy.plugins.providers.RegisterBuiltin;
 import org.jboss.resteasy.plugins.server.servlet.HttpServletDispatcher;
 import org.jboss.resteasy.spi.ResteasyProviderFactory;
+import ro.isdc.wro.http.WroFilter;
 
 import javax.inject.Named;
 import javax.inject.Singleton;
@@ -65,6 +68,7 @@ public class ServerRuntime implements IServerRuntime {
     private final HttpServletDispatcher httpServletDispatcher;
     private final SecurityHandler securityHandler;
     private final String environment;
+    private final String resourceDir;
     private final String baseUri;
 
     public ServerRuntime(Options options,
@@ -73,6 +77,7 @@ public class ServerRuntime implements IServerRuntime {
                          HttpServletDispatcher httpServletDispatcher,
                          SecurityHandler securityHandler,
                          @Named("system.environment") String environment,
+                         @Named("systemRuntime.resourceDir") String resourceDir,
                          @Named("webServer.baseUri") String baseUri) {
         this.options = options;
         this.resteasyContextListener = resteasyContextListener;
@@ -80,6 +85,7 @@ public class ServerRuntime implements IServerRuntime {
         this.httpServletDispatcher = httpServletDispatcher;
         this.securityHandler = securityHandler;
         this.environment = environment;
+        this.resourceDir = resourceDir;
         this.baseUri = baseUri;
         RegisterBuiltin.register(ResteasyProviderFactory.getInstance());
     }
@@ -97,9 +103,12 @@ public class ServerRuntime implements IServerRuntime {
 
                     startupJetty(contextParameter,
                             Arrays.asList(resteasyContextListener, swaggerContextListener),
-                            Arrays.asList(new Filter[0]),
+                            Arrays.asList(new FilterMappingHolder(new WroFilter() {
+
+                            }, "/text/*")),
                             Arrays.asList(new HttpServletHolder(httpServletDispatcher, "/*"),
-                                    new HttpServletHolder(new JSAPIServlet(), "/rest-js")));
+                                    new HttpServletHolder(new JSAPIServlet(), "/rest-js")),
+                            FileUtilities.buildPath(System.getProperty("user.dir"), resourceDir));
                     log.info("Jetty has successfully started.");
                 } catch (Exception e) {
                     log.error(e.getLocalizedMessage(), e);
@@ -110,8 +119,9 @@ public class ServerRuntime implements IServerRuntime {
 
     private void startupJetty(Map<String, String> contextParameters,
                               List<EventListener> eventListeners,
-                              final List<Filter> filters,
-                              final List<HttpServletHolder> servlets) throws Exception {
+                              final List<FilterMappingHolder> filters,
+                              final List<HttpServletHolder> servlets,
+                              final String resourcePath) throws Exception {
 
         Log.setLog(new Slf4jLog());
         Server server = new Server(createThreadPool());
@@ -157,6 +167,7 @@ public class ServerRuntime implements IServerRuntime {
         final HandlerList handlers = new HandlerList();
 
         ServletContextHandler servletHandler = new ServletContextHandler(ServletContextHandler.SESSIONS);
+        servletHandler.setResourceBase(resourcePath);
 
         if (securityHandler != null) {
             servletHandler.setSecurityHandler(securityHandler);
@@ -173,8 +184,10 @@ public class ServerRuntime implements IServerRuntime {
         //set event listeners
         eventListeners.forEach(servletHandler::addEventListener);
 
-        for (Filter filter : filters) {
-            servletHandler.addFilter(new FilterHolder(filter), ANY_PATH, getAllDispatcherTypes());
+
+        for (FilterMappingHolder filter : filters) {
+            servletHandler.addFilter(new FilterHolder(filter.filter), filter.mappingPath, getAllDispatcherTypes());
+
         }
 
         for (HttpServletHolder httpServletHolder : servlets) {
@@ -359,5 +372,11 @@ public class ServerRuntime implements IServerRuntime {
 
     private ThreadPool createThreadPool() {
         return new ExecutorThreadPool(SystemRuntime.getRuntime().getExecutorService());
+    }
+
+    @AllArgsConstructor
+    private static class FilterMappingHolder {
+        private Filter filter;
+        private String mappingPath;
     }
 }

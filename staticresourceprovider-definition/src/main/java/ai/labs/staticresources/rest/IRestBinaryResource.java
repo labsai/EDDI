@@ -5,7 +5,7 @@ import org.jboss.resteasy.annotations.cache.Cache;
 import javax.ws.rs.GET;
 import javax.ws.rs.Path;
 import javax.ws.rs.PathParam;
-import java.io.File;
+import javax.ws.rs.core.Response;
 
 /**
  * @author ginccc
@@ -17,5 +17,5 @@ public interface IRestBinaryResource {
     @GET
     @Cache(maxAge = ONE_DAY_IN_SECONDS, sMaxAge = ONE_DAY_IN_SECONDS, isPrivate = true)
     @Path("/{path:.*}")
-    File getBinary(@PathParam("path") String path);
+    Response getBinary(@PathParam("path") String path);
 }

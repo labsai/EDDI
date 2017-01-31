@@ -91,6 +91,11 @@
             <version>2.1.0.Final</version>
         </dependency>
         <dependency>
+            <groupId>ro.isdc.wro4j</groupId>
+            <artifactId>wro4j-core</artifactId>
+            <version>1.8.0</version>
+        </dependency>
+        <dependency>
             <groupId>ai.labs</groupId>
             <artifactId>runtime-definition</artifactId>
             <version>${project.version}</version>
