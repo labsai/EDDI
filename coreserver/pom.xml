@@ -142,11 +142,6 @@
         </dependency>
         <dependency>
             <groupId>ai.labs</groupId>
-            <artifactId>clientlogging-impl</artifactId>
-            <version>${project.version}</version>
-        </dependency>
-        <dependency>
-            <groupId>ai.labs</groupId>
             <artifactId>permissions-impl</artifactId>
             <version>${project.version}</version>
         </dependency>
