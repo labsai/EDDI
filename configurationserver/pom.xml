@@ -75,11 +75,6 @@
         </dependency>
         <dependency>
             <groupId>ai.labs</groupId>
-            <artifactId>faces-definition</artifactId>
-            <version>${project.version}</version>
-        </dependency>
-        <dependency>
-            <groupId>ai.labs</groupId>
             <artifactId>permissions-impl</artifactId>
             <version>${project.version}</version>
         </dependency>
