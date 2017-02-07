@@ -24,6 +24,7 @@ import javax.ws.rs.container.ContainerResponseContext;
 import javax.ws.rs.container.ContainerResponseFilter;
 import javax.ws.rs.container.ResourceInfo;
 import javax.ws.rs.core.Context;
+import javax.ws.rs.core.HttpHeaders;
 import javax.ws.rs.ext.Provider;
 import java.io.IOException;
 import java.net.URI;
@@ -64,7 +65,7 @@ public class PermissionResponseInterceptor implements ContainerResponseFilter {
                 String methodName = resourceInfo.getResourceMethod().getName();
                 // the resource was created successfully
                 if (httpStatus == 201) {
-                    String respondedResourceURIString = response.getEntity().toString();
+                    String respondedResourceURIString = response.getHeaderString(HttpHeaders.LOCATION);
                     URI respondedResourceURI = URI.create(respondedResourceURIString);
                     IResourceStore.IResourceId respondedResourceId = RestUtilities.extractResourceId(respondedResourceURI);
 

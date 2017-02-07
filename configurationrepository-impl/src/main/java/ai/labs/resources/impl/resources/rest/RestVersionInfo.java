@@ -66,7 +66,7 @@ public abstract class RestVersionInfo<T> implements IRestVersionInfo {
         try {
             IResourceStore.IResourceId resourceId = resourceStore.create(obj);
             URI createdUri = RestUtilities.createURI(resourceURI, resourceId.getId(), versionQueryParam, resourceId.getVersion());
-            return Response.created(createdUri).location(createdUri).entity(createdUri).build();
+            return Response.created(createdUri).location(createdUri).build();
         } catch (IResourceStore.ResourceStoreException e) {
             log.error(e.getLocalizedMessage(), e);
             throw new InternalServerErrorException(e.getLocalizedMessage(), e);
