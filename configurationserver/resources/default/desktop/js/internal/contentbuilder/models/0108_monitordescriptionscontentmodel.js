@@ -61,7 +61,7 @@ function MonitorDescriptionsContentModel(dataProvider, actionHandler) {
 
         var botMaxVersion;
 
-        var botDocumentDescriptions = dataProvider.readDocumentDescriptions('io.sls.bot', 0, 0, undefined, undefined);
+        var botDocumentDescriptions = dataProvider.readDocumentDescriptions('ai.labs.bot', 0, 0, undefined, undefined);
         var botDropDownValues = [];
         botDropDownValues.push(this.defaultBotDropDownValue);
         for (var i = 0; i < botDocumentDescriptions.length; ++i) {

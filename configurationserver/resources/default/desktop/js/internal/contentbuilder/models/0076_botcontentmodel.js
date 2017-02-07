@@ -308,7 +308,7 @@ function BotContentModel(dataProvider, actionHandler) {
     this.addChildControl = function (parentControl) {
         var text = window.lang.convert('ASK_PACKAGE_SELECTION');
 
-        var formElements = dataProvider.readDocumentDescriptions('io.sls.package', 0, 0, '', 'asc');
+        var formElements = dataProvider.readDocumentDescriptions('ai.labs.package', 0, 0, '', 'asc');
 
         var callback = function (success, callbackEvent) {
             if (success) {

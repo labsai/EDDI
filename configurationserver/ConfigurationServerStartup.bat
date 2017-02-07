@@ -28,5 +28,5 @@ SET JAVA_OPTS= ^
 	goto end
 )
 
-java %JAVA_OPTS% -classpath .;lib/* -DEDDI_ENV=%1 io.sls.configuration.ConfigurationServer
+java %JAVA_OPTS% -classpath .;lib/* -DEDDI_ENV=%1 ai.labs.configuration.ConfigurationServer
 :end

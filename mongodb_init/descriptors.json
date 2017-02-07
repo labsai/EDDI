@@ -2,7 +2,7 @@
 	"_id": {
 		"$oid": "5803b3d028518d1ac481180a"
 	},
-	"resource": "resource://io.sls.extensions/extensionstore/extensions/5803b3d028518d1ac481180a?version=1",
+  "resource": "eddi://ai.labs.extensions/extensionstore/extensions/5803b3d028518d1ac481180a?version=1",
 	"createdBy": null,
 	"createdOn": {
 		"$numberLong": "1476637648651"
@@ -20,7 +20,7 @@
 	"_id": {
 		"$oid": "5803b3e228518d1ac481180b"
 	},
-	"resource": "resource://io.sls.extensions/extensionstore/extensions/5803b3e228518d1ac481180b?version=1",
+  "resource": "eddi://ai.labs.extensions/extensionstore/extensions/5803b3e228518d1ac481180b?version=1",
 	"createdBy": null,
 	"createdOn": {
 		"$numberLong": "1476637666498"
@@ -38,7 +38,7 @@
 	"_id": {
 		"$oid": "5803b3f028518d1ac481180c"
 	},
-	"resource": "resource://io.sls.extensions/extensionstore/extensions/5803b3f028518d1ac481180c?version=1",
+  "resource": "eddi://ai.labs.extensions/extensionstore/extensions/5803b3f028518d1ac481180c?version=1",
 	"createdBy": null,
 	"createdOn": {
 		"$numberLong": "1476637680343"
@@ -56,7 +56,7 @@
 	"_id": {
 		"$oid": "5803b3ff28518d1ac481180d"
 	},
-	"resource": "resource://io.sls.extensions/extensionstore/extensions/5803b3ff28518d1ac481180d?version=1",
+  "resource": "eddi://ai.labs.extensions/extensionstore/extensions/5803b3ff28518d1ac481180d?version=1",
 	"createdBy": null,
 	"createdOn": {
 		"$numberLong": "1476637695283"
@@ -74,7 +74,7 @@
 	"_id": {
 		"$oid": "5803b40e28518d1ac481180e"
 	},
-	"resource": "resource://io.sls.extensions/extensionstore/extensions/5803b40e28518d1ac481180e?version=1",
+  "resource": "eddi://ai.labs.extensions/extensionstore/extensions/5803b40e28518d1ac481180e?version=1",
 	"createdBy": null,
 	"createdOn": {
 		"$numberLong": "1476637710651"
@@ -92,7 +92,7 @@
 	"_id": {
 		"$oid": "5803b41b28518d1ac481180f"
 	},
-	"resource": "resource://io.sls.extensions/extensionstore/extensions/5803b41b28518d1ac481180f?version=1",
+  "resource": "eddi://ai.labs.extensions/extensionstore/extensions/5803b41b28518d1ac481180f?version=1",
 	"createdBy": null,
 	"createdOn": {
 		"$numberLong": "1476637723451"
@@ -110,7 +110,7 @@
 	"_id": {
 		"$oid": "5803b42a28518d1ac4811810"
 	},
-	"resource": "resource://io.sls.extensions/extensionstore/extensions/5803b42a28518d1ac4811810?version=1",
+  "resource": "eddi://ai.labs.extensions/extensionstore/extensions/5803b42a28518d1ac4811810?version=1",
 	"createdBy": null,
 	"createdOn": {
 		"$numberLong": "1476637738667"
@@ -128,7 +128,7 @@
 	"_id": {
 		"$oid": "5803b43728518d1ac4811811"
 	},
-	"resource": "resource://io.sls.extensions/extensionstore/extensions/5803b43728518d1ac4811811?version=1",
+  "resource": "eddi://ai.labs.extensions/extensionstore/extensions/5803b43728518d1ac4811811?version=1",
 	"createdBy": null,
 	"createdOn": {
 		"$numberLong": "1476637751891"

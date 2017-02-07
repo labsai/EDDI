@@ -16,7 +16,7 @@ function PackageEditHelper() {
         for (var key in definition) {
             var representation;
 
-            if (definition[key].type.indexOf('resource://') === 0) {
+            if (definition[key].type.indexOf('eddi://') === 0) {
                 var kBlockControlCSSClassBase = 'resourceuri';
                 representation = new ResourceURIFormElement(kBlockControlCSSClassBase, false, key, definition[key].type,
                                                             definition[key].displayKey, model[key]);

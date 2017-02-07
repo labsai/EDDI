@@ -1,6 +1,6 @@
 function LevenshteinModel(lifecycle) {
     var instance = this;
-    this.type = "core://io.sls.parser.corrections.levenshtein?version=1";
+    this.type = "core://ai.labs.parser.corrections.levenshtein?version=1";
 
     this.convertToJSON = function () {
         return {

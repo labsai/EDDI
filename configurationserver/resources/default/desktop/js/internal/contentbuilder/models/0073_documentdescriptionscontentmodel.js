@@ -40,19 +40,19 @@ function DocumentDescriptionsContentModel(dataProvider, actionHandler, page) {
         var documentDescriptionType;
         switch (page) {
             case 'bots':
-                documentDescriptionType = 'io.sls.bot';
+                documentDescriptionType = 'ai.labs.bot';
                 break;
             case 'packages':
-                documentDescriptionType = 'io.sls.package';
+                documentDescriptionType = 'ai.labs.package';
                 break;
             case 'outputs':
-                documentDescriptionType = 'io.sls.output';
+                documentDescriptionType = 'ai.labs.output';
                 break;
             case 'dialogs':
-                documentDescriptionType = 'io.sls.behavior';
+                documentDescriptionType = 'ai.labs.behavior';
                 break;
             case 'dictionaries':
-                documentDescriptionType = 'io.sls.regulardictionary';
+                documentDescriptionType = 'ai.labs.regulardictionary';
                 break;
             default:
 //                throw new MalformedURLException('Navigation error: No such page: ' + page);

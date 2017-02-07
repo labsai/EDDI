@@ -1,5 +1,5 @@
 function SentenceparserLifecycleModel(lifecycle) {
-    this.type = "core://io.sls.parser?version=1";
+    this.type = "core://ai.labs.parser?version=1";
     var instance = this;
 
     this.convertToJSON = function () {

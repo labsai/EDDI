@@ -50,8 +50,8 @@ Go to the root directory and execute
 2.1 import documents from folder 'mongodb_init'
 3. There are two executable main classes that need to be launched (2 Jetty servers)
 launch with VM options `-DEDDI_ENV=[development/production] -Duser.dir=[LOCAL_PATH_TO_EDDI]\configurationserver`
-    1. io.sls.core.CoreServer
-    2. io.sls.configuration.ConfigurationServer
+    1. ai.labs.core.CoreServer
+    2. ai.labs.configuration.ConfigurationServer
 4. Go to Browser --> http://localhost:8181
 5. You will be redirect to an single-sign-on server where you can login or register an account
 6. You will be redirected back --> http://localhost:8181
@@ -119,8 +119,8 @@ Additionally, you have to supply the following system properties (via -D) for ru
 All REST Interfaces start with 'IRest' as IRestBotAdministration for instance
 
 ### Rest Entry Points
-io.sls.core.rest.IRestBotAdministration
-io.sls.core.rest.IRestBotEngine
+ai.labs.rest.rest.IRestBotAdministration
+ai.labs.rest.rest.IRestBotEngine
 
 ### Dependency Injection
 
@@ -165,67 +165,67 @@ IRestBotAdministration: deploy bot
 
 Main Bot Communication Endpoint
 ```java
-io.sls.core.ui.rest.*
+ai.labs.core.rest.*
 ```
 
 Bootstrapping/Deploying
 ```java
-io.sls.core.runtime.*
+ai.labs.runtime.runtime.*
 ```
 
 The conversation lifecycle between the bot and the human
 ```java
-io.sls.core.lifecycle.*
+ai.labs.lifecycle.*
 ```
 
 The one and only user specific (conversation) state in the whole application.
 It is used for communication between the plugins.
 ```java
-io.sls.memory.*
+ai.labsmemory.*
 ```
 
-Prepares the user input for the parser.
+Prepares the user input for the ai.labs.parser.
 ```java
-io.sls.core.normalizing.*
+ai.labs.core.normalizing.*
 ```
 
 Parses the input of the user and translates it to "Expressions", based on dictionaries and correction algorithms. Expression are meanings, e.g. day after tomorrow -> date(today+1), yes -> confirmation(true)
 Dictionaries and Corrections are plugins and therefore can be extended.
 ```java
-io.sls.core.parser.*
+ai.labs.ai.labs.parser.ai.labs.parser.*
 ```
 
 There are groups of Rules. Each rules holds an list of conditions that all need to pass true in order for the rule to be successful. As soon as one rule has passed true none of the other following group members is executed. Successful rules have a set of "actions" that should be executed later on. 
 Conditions are plugins, thus extendable. 
 ```java
-io.sls.core.behavior.*
+ai.labs.core.behavior.*
 ```
 
 Based on the actions an matching output will be selected. 
 ```java
-io.sls.core.output.*
+ai.labs.core.output.*
 ```
 
 ----------------
 
 Auto testing bot conversations, kind of integration testing
 ```java
-io.sls.testing.*
+ai.labs.testing.*
 ```
 
 Rest interfaces
 ```java
-io.sls.resources.rest.*
+ai.labs.resources.rest.*
 ```
 
 Data storage
 ```java
-io.sls.persistence.*
+ai.labs.persistence.*
 ```
 
 Authorization for chatbot resources (dictionaries, packages, behavior rules, etc.)
 ```java
-io.sls.permission.*
+ai.labs.permission.*
 ``` 
 
 ### Application Documents
@@ -255,7 +255,7 @@ Bots contain (Knowledge-)Packages. A JSON of a bot may look like this:
 
     "packages" : [
 
-        "resource://io.sls.package/packagestore/packages/51059b15e4b087c8e3554bd1?version=1"
+        "eddi://ai.labs.package/packagestore/packages/51059b15e4b087c8e3554bd1?version=1"
 
     ],
 

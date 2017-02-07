@@ -508,19 +508,19 @@ function DataProvider() {
         var retVal;
 
         switch (params.host) {
-            case 'io.sls.package':
+            case 'ai.labs.package':
                 retVal = IRestPackageStore.getCurrentVersion({id:params.id});
                 break;
-            case 'io.sls.bot':
+            case 'ai.labs.bot':
                 retVal = IRestBotStore.getCurrentVersion({id:params.id});
                 break;
-            case 'io.sls.behavior':
+            case 'ai.labs.behavior':
                 retVal = IRestBehaviorStore.getCurrentVersion({id:params.id});
                 break;
-            case 'io.sls.output':
+            case 'ai.labs.output':
                 retVal = IRestOutputStore.getCurrentVersion({id:params.id});
                 break;
-            case 'io.sls.regulardictionary':
+            case 'ai.labs.regulardictionary':
                 retVal = IRestRegularDictionaryStore.getCurrentVersion({id:params.id});
                 break;
             default:
@@ -597,8 +597,8 @@ function DataProvider() {
         }
 
 //        return [
-//            { "_id":{ "$oid":"50530211d2b8b3b97721495a" }, "name":"TestCase1", "resource":"resource://io.sls.testcases/testcasestore/testcases/50530311d2c8b3b97721495a?version=1", "lastModified":1347617297734, "description":"TestCase1 Desc.", "deleted":false, "author":"resource://io.sls.user/userstore/users/505301b9d2b8d8f272f92f19", "lastModifiedBy":"resource://io.sls.user/userstore/users/505301b9d2b8d8f272f92f19", "created":1347617297734, "lastRun":1347617307734, "lastRunResult":"SUCCESS", "_version":1 },
-//            { "_id":{ "$oid":"50530211d2b8b3b97721495a" }, "name":"TestCase2", "resource":"resource://io.sls.testcases/testcasestore/testcases/50530311d2c8b3b97721495b?version=1", "lastModified":1347617297734, "description":"TestCase2 Desc.", "deleted":false, "author":"resource://io.sls.user/userstore/users/505301b9d2b8d8f272f92f19", "lastModifiedBy":"resource://io.sls.user/userstore/users/505301b9d2b8d8f272f92f19", "created":1347617297734, "lastRun":1347617307734, "lastRunResult":"SUCCESS", "_version":1 }
+//            { "_id":{ "$oid":"50530211d2b8b3b97721495a" }, "name":"TestCase1", "resource":"eddi://ai.labs.testcases/testcasestore/testcases/50530311d2c8b3b97721495a?version=1", "lastModified":1347617297734, "description":"TestCase1 Desc.", "deleted":false, "author":"eddi://ai.labs.user/userstore/users/505301b9d2b8d8f272f92f19", "lastModifiedBy":"eddi://ai.labs.user/userstore/users/505301b9d2b8d8f272f92f19", "created":1347617297734, "lastRun":1347617307734, "lastRunResult":"SUCCESS", "_version":1 },
+//            { "_id":{ "$oid":"50530211d2b8b3b97721495a" }, "name":"TestCase2", "resource":"eddi://ai.labs.testcases/testcasestore/testcases/50530311d2c8b3b97721495b?version=1", "lastModified":1347617297734, "description":"TestCase2 Desc.", "deleted":false, "author":"eddi://ai.labs.user/userstore/users/505301b9d2b8d8f272f92f19", "lastModifiedBy":"eddi://ai.labs.user/userstore/users/505301b9d2b8d8f272f92f19", "created":1347617297734, "lastRun":1347617307734, "lastRunResult":"SUCCESS", "_version":1 }
 //        ];
 
         var testCaseDescriptors = IRestTestCaseStore.readTestCaseDescriptors(request);

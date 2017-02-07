@@ -150,13 +150,13 @@ function Configuration(url) {
          *
          * The controls below are deprecated and have been replaced by the generic lifecyclecontrol.
          */
-        /**"core://io.sls.parser?version=1":{ model:SentenceparserLifecycleModel, control:SentenceparserLifecycleControl },
-        "core://io.sls.behavior?version=1"       : { model:BehaviorLifecycleModel, control:BehaviorLifecycleControl },
-        "core://io.sls.output?version=1"         : { model:OutputLifecycleModel, control:OutputLifecycleControl },
-        "core://io.sls.parser.dictionaries.integer?version=1":{model:IntegerModel, control:IntegerControl},
-        "core://io.sls.parser.dictionaries.regular?version=1":{model:RegularModel, control:RegularControl},
-        "core://io.sls.parser.corrections.levenshtein?version=1":{model:LevenshteinModel, control:LevenshteinControl},
-        "core://io.sls.parser.corrections.phonetic?version=1":{model:PhoneticModel, control:PhoneticControl}*/
+        /**"core://ai.labs.parser?version=1":{ model:SentenceparserLifecycleModel, control:SentenceparserLifecycleControl },
+         "core://ai.labs.behavior?version=1"       : { model:BehaviorLifecycleModel, control:BehaviorLifecycleControl },
+         "core://ai.labs.output?version=1"         : { model:OutputLifecycleModel, control:OutputLifecycleControl },
+         "core://ai.labs.parser.dictionaries.integer?version=1":{model:IntegerModel, control:IntegerControl},
+         "core://ai.labs.parser.dictionaries.regular?version=1":{model:RegularModel, control:RegularControl},
+         "core://ai.labs.parser.corrections.levenshtein?version=1":{model:LevenshteinModel, control:LevenshteinControl},
+         "core://ai.labs.parser.corrections.phonetic?version=1":{model:PhoneticModel, control:PhoneticControl}*/
     }
 
     /* Table Controls */

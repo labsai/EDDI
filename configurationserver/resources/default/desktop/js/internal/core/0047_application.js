@@ -402,19 +402,19 @@ function URLManipulator() {
 
         var editorScreen;
         switch (resourceObject.host) {
-            case 'io.sls.package':
+            case 'ai.labs.package':
                 editorScreen = 'packages';
                 break;
-            case 'io.sls.bot':
+            case 'ai.labs.bot':
                 editorScreen = 'bots';
                 break;
-            case 'io.sls.behavior':
+            case 'ai.labs.behavior':
                 editorScreen = 'dialogs';
                 break;
-            case 'io.sls.output':
+            case 'ai.labs.output':
                 editorScreen = 'outputs';
                 break;
-            case 'io.sls.regulardictionary':
+            case 'ai.labs.regulardictionary':
                 editorScreen = 'dictionaries';
                 break;
             default:

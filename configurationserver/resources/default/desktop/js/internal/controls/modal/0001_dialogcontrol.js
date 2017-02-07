@@ -17,7 +17,7 @@ function DialogControl(model) {
     var instance = this;
 
     var showAddMenu = function () {
-        var type = 'io.sls.package';
+        var type = 'ai.labs.package';
         var resourceCreationModel = new ResourceCreationModel(application.dataProvider.getNextIdGlobal(), 'resourcecreation_',
             'resourcecreation',
             type,
@@ -67,7 +67,7 @@ function DialogControl(model) {
                                     var dc = new DialogControl(dcm);
                                     dc.showDialog();
                                 } else {
-                                    model.formElements = application.dataProvider.readDocumentDescriptions('io.sls.package', 0, 0, '', 'asc');
+                                    model.formElements = application.dataProvider.readDocumentDescriptions('ai.labs.package', 0, 0, '', 'asc');
 
                                     if (model.context) {
                                         model.context["preselectedUri"] = newUri;
