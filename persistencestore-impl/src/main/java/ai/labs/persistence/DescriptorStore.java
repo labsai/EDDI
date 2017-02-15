@@ -8,8 +8,9 @@ import ai.labs.serialization.IDocumentBuilder;
 import ai.labs.user.IUserStore;
 import ai.labs.utilities.RuntimeUtilities;
 import ai.labs.utilities.StringUtilities;
-import com.mongodb.DB;
-import com.mongodb.DBCollection;
+import com.mongodb.client.MongoCollection;
+import com.mongodb.client.MongoDatabase;
+import org.bson.Document;
 
 import java.util.LinkedList;
 import java.util.List;
@@ -30,12 +31,12 @@ public class DescriptorStore<T> implements IDescriptorStore<T> {
 
     private IResourceFilter<T> resourceFilter;
 
-    public DescriptorStore(DB database, IPermissionStore permissionStore, IUserStore userStore,
+    public DescriptorStore(MongoDatabase database, IPermissionStore permissionStore, IUserStore userStore,
                            IGroupStore groupStore, IDocumentBuilder documentBuilder, Class<T> documentType) {
         RuntimeUtilities.checkNotNull(database, "database");
         RuntimeUtilities.checkNotNull(permissionStore, "permissionStore");
 
-        DBCollection descriptorCollection = database.getCollection(COLLECTION_DESCRIPTORS);
+        MongoCollection<Document> descriptorCollection = database.getCollection(COLLECTION_DESCRIPTORS);
         MongoResourceStorage<T> resourceStorage =
                 new MongoResourceStorage<>(database, collectionName, documentBuilder, documentType);
         this.descriptorResourceStore = new ModifiableHistorizedResourceStore<>(resourceStorage);

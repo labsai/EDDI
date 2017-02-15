@@ -7,7 +7,7 @@ import ai.labs.resources.rest.regulardictionary.IRegularDictionaryStore;
 import ai.labs.resources.rest.regulardictionary.model.RegularDictionaryConfiguration;
 import ai.labs.serialization.IDocumentBuilder;
 import ai.labs.utilities.RuntimeUtilities;
-import com.mongodb.DB;
+import com.mongodb.client.MongoDatabase;
 
 import javax.inject.Inject;
 import java.util.Comparator;
@@ -24,7 +24,7 @@ public class RegularDictionaryStore implements IRegularDictionaryStore {
     private static final PhraseComparator PHRASE_COMPARATOR = new PhraseComparator();
 
     @Inject
-    public RegularDictionaryStore(DB database, IDocumentBuilder documentBuilder) {
+    public RegularDictionaryStore(MongoDatabase database, IDocumentBuilder documentBuilder) {
         RuntimeUtilities.checkNotNull(database, "database");
 
         final String collectionName = "regulardictionaries";

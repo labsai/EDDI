@@ -8,7 +8,7 @@ import ai.labs.resources.rest.behavior.model.BehaviorGroupConfiguration;
 import ai.labs.resources.rest.behavior.model.BehaviorRuleConfiguration;
 import ai.labs.serialization.IDocumentBuilder;
 import ai.labs.utilities.RuntimeUtilities;
-import com.mongodb.DB;
+import com.mongodb.client.MongoDatabase;
 
 import javax.inject.Inject;
 import java.util.Collections;
@@ -24,7 +24,7 @@ public class BehaviorStore implements IBehaviorStore {
     private final String collectionName = "behaviorrulesets";
 
     @Inject
-    public BehaviorStore(DB database, IDocumentBuilder documentBuilder) {
+    public BehaviorStore(MongoDatabase database, IDocumentBuilder documentBuilder) {
         RuntimeUtilities.checkNotNull(database, "database");
 
         MongoResourceStorage<BehaviorConfiguration> resourceStorage =

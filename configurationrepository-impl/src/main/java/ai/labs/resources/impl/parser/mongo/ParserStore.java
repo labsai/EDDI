@@ -6,7 +6,7 @@ import ai.labs.resources.rest.parser.IParserStore;
 import ai.labs.resources.rest.parser.model.ParserConfiguration;
 import ai.labs.serialization.IDocumentBuilder;
 import ai.labs.utilities.RuntimeUtilities;
-import com.mongodb.DB;
+import com.mongodb.client.MongoDatabase;
 
 import javax.inject.Inject;
 
@@ -17,7 +17,7 @@ public class ParserStore implements IParserStore {
     private HistorizedResourceStore<ParserConfiguration> parserResourceStore;
 
     @Inject
-    public ParserStore(DB database, IDocumentBuilder documentBuilder) {
+    public ParserStore(MongoDatabase database, IDocumentBuilder documentBuilder) {
         RuntimeUtilities.checkNotNull(database, "database");
 
         final String collectionName = "parsers";

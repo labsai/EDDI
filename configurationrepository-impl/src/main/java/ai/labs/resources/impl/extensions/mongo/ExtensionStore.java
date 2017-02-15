@@ -12,9 +12,9 @@ import ai.labs.serialization.IDocumentBuilder;
 import ai.labs.user.IUserStore;
 import ai.labs.utilities.RuntimeUtilities;
 import com.mongodb.BasicDBObject;
-import com.mongodb.DB;
-import com.mongodb.DBCollection;
-import com.mongodb.DBObject;
+import com.mongodb.client.MongoCollection;
+import com.mongodb.client.MongoDatabase;
+import org.bson.Document;
 
 import javax.inject.Inject;
 import java.util.Collections;
@@ -25,12 +25,12 @@ import java.util.List;
  */
 public class ExtensionStore implements IExtensionStore {
     private static final String COLLECTION_EXTENSIONS = "extensions";
-    private DBCollection extensionCollection;
+    private MongoCollection<Document> extensionCollection;
     private ModifiableHistorizedResourceStore<ExtensionDefinition> extensionResourceStore;
     private IResourceFilter<ExtensionDefinition> resourceFilter;
 
     @Inject
-    public ExtensionStore(DB database,
+    public ExtensionStore(MongoDatabase database,
                           IDocumentBuilder documentBuilder,
                           IPermissionStore permissionStore,
                           IGroupStore groupStore,
@@ -47,7 +47,7 @@ public class ExtensionStore implements IExtensionStore {
 
     @Override
     public IResourceId searchExtension(String uri) {
-        final DBObject document = extensionCollection.findOne(new BasicDBObject("type", uri));
+        final Document document = extensionCollection.find(new BasicDBObject("type", uri)).first();
 
         if (document == null) {
             return null;
