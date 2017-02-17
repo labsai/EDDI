@@ -9,11 +9,10 @@ import ai.labs.permission.model.Permissions;
 import ai.labs.permission.utilities.PermissionUtilities;
 import ai.labs.persistence.IResourceStore;
 import ai.labs.runtime.ThreadContext;
-import ai.labs.serialization.IJsonSerialization;
+import ai.labs.serialization.IDocumentBuilder;
 import ai.labs.user.IUserStore;
 import ai.labs.user.impl.utilities.UserUtilities;
 import ai.labs.utilities.SecurityUtilities;
-import com.mongodb.BasicDBObject;
 import com.mongodb.client.MongoCollection;
 import com.mongodb.client.MongoDatabase;
 import lombok.extern.slf4j.Slf4j;
@@ -33,14 +32,14 @@ import java.util.List;
 public class PermissionStore implements IPermissionStore {
     private static final String COLLECTION_PERMISSIONS = "permissions";
     private final MongoCollection<Document> collection;
-    private final IJsonSerialization jsonSerialization;
+    private final IDocumentBuilder documentBuilder;
     private IUserStore userStore;
     private IGroupStore groupStore;
 
     @Inject
-    public PermissionStore(MongoDatabase database, IJsonSerialization jsonSerialization, IUserStore userStore, IGroupStore groupStore) {
+    public PermissionStore(MongoDatabase database, IDocumentBuilder documentBuilder, IUserStore userStore, IGroupStore groupStore) {
         collection = database.getCollection(COLLECTION_PERMISSIONS);
-        this.jsonSerialization = jsonSerialization;
+        this.documentBuilder = documentBuilder;
         this.userStore = userStore;
         this.groupStore = groupStore;
     }
@@ -59,7 +58,7 @@ public class PermissionStore implements IPermissionStore {
 
             permissionsDocument.remove("_id");
 
-            return jsonSerialization.deserialize(permissionsDocument.toString(), Permissions.class);
+            return documentBuilder.build(permissionsDocument, Permissions.class);
         } catch (IOException e) {
             log.debug(e.getLocalizedMessage(), e);
             throw new IResourceStore.ResourceStoreException("Cannot parse json structure into Permissions entity.", e);
@@ -117,7 +116,7 @@ public class PermissionStore implements IPermissionStore {
 
             permissionsDocument.remove("_id");
 
-            Permissions permissions = jsonSerialization.deserialize(permissionsDocument.toString(), Permissions.class);
+            Permissions permissions = documentBuilder.build(permissionsDocument, Permissions.class);
 
             createPermissions(toResourceId, permissions);
         } catch (IOException e) {
@@ -128,7 +127,7 @@ public class PermissionStore implements IPermissionStore {
 
     @Override
     public void deletePermissions(String resourceId) throws IResourceStore.ResourceStoreException, IResourceStore.ResourceNotFoundException {
-        collection.deleteOne(new BasicDBObject("_id", new ObjectId(resourceId)));
+        collection.deleteOne(new Document("_id", new ObjectId(resourceId)));
     }
 
     @Override
@@ -138,7 +137,7 @@ public class PermissionStore implements IPermissionStore {
 
     private String serialize(Permissions permissions) throws IResourceStore.ResourceStoreException {
         try {
-            return jsonSerialization.serialize(permissions);
+            return documentBuilder.toString(permissions);
         } catch (IOException e) {
             log.debug(e.getLocalizedMessage(), e);
             throw new IResourceStore.ResourceStoreException("Cannot serialize User entity into json.", e);

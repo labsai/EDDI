@@ -53,11 +53,6 @@ public class RestParserStore extends RestVersionInfo<ParserConfiguration> implem
     }
 
     @Override
-    public Response redirectToLatestVersion(String id) {
-        return redirectToLatestVersion(id);
-    }
-
-    @Override
     protected IResourceStore.IResourceId getCurrentResourceId(String id) throws IResourceStore.ResourceNotFoundException {
         return parserStore.getCurrentResourceId(id);
     }
