@@ -1,0 +1,24 @@
+version: '2'
+services:
+  eddi:
+    build: .
+    ports:
+      - "7070:7070"
+    depends_on:
+      - mongodb
+    environment:
+      EDDI_VERSION: 3.0-SNAPSHOT
+      EDDI_ENV: development
+      EDDI_DB: mongodb
+      EDDI_AUTH: unknown
+  mongodb:
+    image: mongo:3.2
+    #ports:       #see docker-compose.override.yml on each deployed machine for CRITICAL DATA (not suitable for GIT)
+    volumes_from:
+        - mongodata       #see docker-compose.override.yml on each deployed machine for CRITICAL DATA (not suitable for GIT)
+    restart: always
+  mongodata:
+    image: ubuntu
+    volumes:
+      - "/persistence/eddimongodb:/data/db"
+    command: echo Persistence for Mongo

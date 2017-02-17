@@ -7,6 +7,10 @@
     </formats>
     <includeBaseDirectory>false</includeBaseDirectory>
     <!-- Insert here extra files as configs or, batch files, resources, docs etc-->
+    <!--<configuration>
+        <finalName>eddi_artifact</finalName>
+    </configuration>
+-->
     <fileSets>
         <fileSet>
             <outputDirectory>/</outputDirectory>
