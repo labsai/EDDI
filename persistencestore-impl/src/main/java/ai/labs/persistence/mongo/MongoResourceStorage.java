@@ -208,7 +208,7 @@ public class MongoResourceStorage<T> implements IResourceStorage<T> {
 
         @Override
         public T getData() throws IOException {
-            return documentBuilder.build(doc.toString(), documentType);
+            return documentBuilder.build(doc, documentType);
         }
 
         @Override
@@ -235,7 +235,7 @@ public class MongoResourceStorage<T> implements IResourceStorage<T> {
 
         @Override
         public T getData() throws IOException {
-            return documentBuilder.build(doc.toString(), documentType);
+            return documentBuilder.build(doc, documentType);
         }
 
         @Override

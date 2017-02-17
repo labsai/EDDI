@@ -42,15 +42,7 @@ public class HistorizedResourceStore<T> implements IResourceStore<T> {
 
         IResourceStorage.IResource resource = resourceStorage.read(id, version);
 
-        if (resource == null) {
-            IResourceStorage.IHistoryResource historyLatest = resourceStorage.readHistoryLatest(id);
-
-            if (historyLatest == null || historyLatest.isDeleted() || version > historyLatest.getVersion()) {
-                throw createResourceNotFoundException(id, version);
-            }
-
-            throw createResourceAlreadyModifiedException(id, version);
-        }
+        checkIfFoundAndLatest(id, version, resource);
 
         IResourceStorage.IHistoryResource history = resourceStorage.newHistoryResourceFor(resource, false);
         resourceStorage.store(history);
@@ -86,6 +78,15 @@ public class HistorizedResourceStore<T> implements IResourceStore<T> {
 
         IResourceStorage.IResource resource = resourceStorage.read(id, version);
 
+        checkIfFoundAndLatest(id, version, resource);
+
+        IResourceStorage.IHistoryResource historyResource = resourceStorage.newHistoryResourceFor(resource, true);
+        resourceStorage.store(historyResource);
+
+        resourceStorage.remove(id);
+    }
+
+    private void checkIfFoundAndLatest(String id, Integer version, IResourceStorage.IResource resource) throws ResourceNotFoundException, ResourceModifiedException {
         if (resource == null) {
             IResourceStorage.IHistoryResource historyLatest = resourceStorage.readHistoryLatest(id);
 
@@ -95,11 +96,6 @@ public class HistorizedResourceStore<T> implements IResourceStore<T> {
 
             throw createResourceAlreadyModifiedException(id, version);
         }
-
-        IResourceStorage.IHistoryResource historyResource = resourceStorage.newHistoryResourceFor(resource, true);
-        resourceStorage.store(historyResource);
-
-        resourceStorage.remove(id);
     }
 
     @Override

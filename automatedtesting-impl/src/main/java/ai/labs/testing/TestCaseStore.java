@@ -5,11 +5,10 @@ import ai.labs.serialization.IJsonSerialization;
 import ai.labs.testing.model.TestCase;
 import ai.labs.testing.model.TestCaseState;
 import com.mongodb.BasicDBObject;
-import com.mongodb.DB;
-import com.mongodb.DBCollection;
-import com.mongodb.DBObject;
-import com.mongodb.util.JSON;
+import com.mongodb.client.MongoCollection;
+import com.mongodb.client.MongoDatabase;
 import lombok.extern.slf4j.Slf4j;
+import org.bson.Document;
 import org.bson.types.ObjectId;
 
 import javax.inject.Inject;
@@ -23,11 +22,11 @@ import java.util.Date;
 public class TestCaseStore implements ITestCaseStore, IResourceStore<TestCase> {
     private static final String TESTCASE_COLLECTION = "testcases";
     private static final String TESTCASE_STATE_FIELD = "testCaseState";
-    private final DBCollection testcaseCollection;
+    private final MongoCollection<Document> testcaseCollection;
     private IJsonSerialization jsonSerialization;
 
     @Inject
-    public TestCaseStore(DB database, IJsonSerialization jsonSerialization) {
+    public TestCaseStore(MongoDatabase database, IJsonSerialization jsonSerialization) {
         testcaseCollection = database.getCollection(TESTCASE_COLLECTION);
         this.jsonSerialization = jsonSerialization;
     }
@@ -38,13 +37,13 @@ public class TestCaseStore implements ITestCaseStore, IResourceStore<TestCase> {
             testCase.setLastRun(new Date(System.currentTimeMillis()));
 
             String json = jsonSerialization.serialize(testCase);
-            DBObject document = (DBObject) JSON.parse(json);
+            Document document = Document.parse(json);
 
             if (id != null) {
                 document.put("_id", new ObjectId(id));
             }
 
-            testcaseCollection.save(document);
+            testcaseCollection.insertOne(document);
 
             return document.get("_id").toString();
         } catch (IOException e) {
@@ -55,7 +54,7 @@ public class TestCaseStore implements ITestCaseStore, IResourceStore<TestCase> {
 
     @Override
     public TestCase loadTestCase(String id) throws IResourceStore.ResourceNotFoundException, IResourceStore.ResourceStoreException {
-        DBObject document = testcaseCollection.findOne(new BasicDBObject("_id", new ObjectId(id)));
+        Document document = testcaseCollection.find(new Document("_id", new ObjectId(id))).first();
 
         try {
             if (document == null) {
@@ -64,7 +63,7 @@ public class TestCaseStore implements ITestCaseStore, IResourceStore<TestCase> {
                 throw new IResourceStore.ResourceNotFoundException(message);
             }
 
-            document.removeField("_id");
+            document.remove("_id");
 
             return jsonSerialization.deserialize(document.toString(), TestCase.class);
         } catch (IOException e) {
@@ -75,15 +74,15 @@ public class TestCaseStore implements ITestCaseStore, IResourceStore<TestCase> {
 
     public void setTestCaseState(String conversationId, TestCaseState testCaseState) {
         BasicDBObject updateTestCaseField = new BasicDBObject("$set", new BasicDBObject(TESTCASE_STATE_FIELD, testCaseState.name()));
-        testcaseCollection.update(new BasicDBObject("_id", new ObjectId(conversationId)), updateTestCaseField);
+        testcaseCollection.updateOne(new BasicDBObject("_id", new ObjectId(conversationId)), updateTestCaseField);
     }
 
     public void deleteTestCase(String conversationId) throws ResourceStoreException, ResourceNotFoundException {
-        testcaseCollection.remove(new BasicDBObject("_id", new ObjectId(conversationId)));
+        testcaseCollection.deleteOne(new BasicDBObject("_id", new ObjectId(conversationId)));
     }
 
     public TestCaseState getTestCaseState(String conversationId) {
-        DBObject conversationMemoryDocument = testcaseCollection.findOne(new BasicDBObject("_id", new ObjectId(conversationId)));
+        Document conversationMemoryDocument = testcaseCollection.find(new Document("_id", new ObjectId(conversationId))).first();
         if (conversationMemoryDocument != null) {
             return TestCaseState.valueOf(conversationMemoryDocument.get(TESTCASE_STATE_FIELD).toString());
         }

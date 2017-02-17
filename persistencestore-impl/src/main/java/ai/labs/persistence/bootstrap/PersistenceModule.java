@@ -8,6 +8,7 @@ import com.mongodb.client.MongoDatabase;
 import com.mongodb.connection.ServerVersion;
 
 import javax.inject.Named;
+import javax.inject.Singleton;
 import java.io.InputStream;
 import java.net.UnknownHostException;
 import java.util.Collections;
@@ -30,6 +31,7 @@ public class PersistenceModule extends AbstractBaseModule {
     }
 
     @Provides
+    @Singleton
     public MongoDatabase provideMongoDB(@Named("mongodb.hosts") String hosts,
                                         @Named("mongodb.port") Integer port,
                                         @Named("mongodb.database") String database,
@@ -40,6 +42,7 @@ public class PersistenceModule extends AbstractBaseModule {
         try {
 
             List<ServerAddress> seeds = hostsToServerAddress(hosts, port);
+
             MongoClient mongoClient;
             MongoClientOptions mongoClientOptions = buildMongoClientOptions(connectionsPerHost);
             if (inMemoryOnly) {

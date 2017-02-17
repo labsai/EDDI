@@ -152,7 +152,7 @@ public class ResourceFilter<T> implements IResourceFilter<T> {
 
     private T buildDocument(Document descriptor) throws IResourceStore.ResourceStoreException, IResourceStore.ResourceNotFoundException, IOException {
         descriptor.remove("_id");
-        return documentBuilder.build(descriptor.toString(), documentType);
+        return documentBuilder.build(descriptor, documentType);
     }
 
     private Permissions getPermissions(String id) throws IResourceStore.ResourceStoreException, IResourceStore.ResourceNotFoundException {

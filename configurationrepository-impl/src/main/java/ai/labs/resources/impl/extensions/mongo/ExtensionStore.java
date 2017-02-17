@@ -11,7 +11,6 @@ import ai.labs.resources.rest.extensions.model.ExtensionDefinition;
 import ai.labs.serialization.IDocumentBuilder;
 import ai.labs.user.IUserStore;
 import ai.labs.utilities.RuntimeUtilities;
-import com.mongodb.BasicDBObject;
 import com.mongodb.client.MongoCollection;
 import com.mongodb.client.MongoDatabase;
 import org.bson.Document;
@@ -47,7 +46,7 @@ public class ExtensionStore implements IExtensionStore {
 
     @Override
     public IResourceId searchExtension(String uri) {
-        final Document document = extensionCollection.find(new BasicDBObject("type", uri)).first();
+        final Document document = extensionCollection.find(new Document("type", uri)).first();
 
         if (document == null) {
             return null;

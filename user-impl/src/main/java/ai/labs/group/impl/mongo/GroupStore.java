@@ -5,11 +5,11 @@ import ai.labs.group.model.Group;
 import ai.labs.persistence.IResourceStore;
 import ai.labs.serialization.IJsonSerialization;
 import com.mongodb.BasicDBObject;
-import com.mongodb.DB;
-import com.mongodb.DBCollection;
-import com.mongodb.DBObject;
+import com.mongodb.client.MongoCollection;
+import com.mongodb.client.MongoDatabase;
 import com.mongodb.util.JSON;
 import lombok.extern.slf4j.Slf4j;
+import org.bson.Document;
 import org.bson.types.ObjectId;
 
 import javax.inject.Inject;
@@ -21,17 +21,17 @@ import java.io.IOException;
 @Slf4j
 public class GroupStore implements IGroupStore {
     private static final String COLLECTION_GROUPS = "groups";
-    private final DBCollection collection;
+    private final MongoCollection<Document> collection;
     private final IJsonSerialization jsonSerialization;
 
     @Inject
-    public GroupStore(DB database, IJsonSerialization jsonSerialization) {
+    public GroupStore(MongoDatabase database, IJsonSerialization jsonSerialization) {
         collection = database.getCollection(COLLECTION_GROUPS);
         this.jsonSerialization = jsonSerialization;
     }
 
     public Group readGroup(String groupId) throws IResourceStore.ResourceStoreException, IResourceStore.ResourceNotFoundException {
-        DBObject groupDocument = collection.findOne(new BasicDBObject("_id", new ObjectId(groupId)));
+        Document groupDocument = collection.find(new Document("_id", new ObjectId(groupId))).first();
 
         try {
             if (groupDocument == null) {
@@ -40,7 +40,7 @@ public class GroupStore implements IGroupStore {
                 throw new IResourceStore.ResourceNotFoundException(message);
             }
 
-            groupDocument.removeField("_id");
+            groupDocument.remove("_id");
 
             return jsonSerialization.deserialize(groupDocument.toString(), Group.class);
         } catch (IOException e) {
@@ -53,19 +53,19 @@ public class GroupStore implements IGroupStore {
     @Override
     public void updateGroup(String groupId, Group group) {
         String jsonGroup = JSON.serialize(group);
-        DBObject document = (DBObject) JSON.parse(jsonGroup);
+        Document document = Document.parse(jsonGroup);
 
         document.put("_id", new ObjectId(groupId));
 
-        collection.save(document);
+        collection.insertOne(document);
     }
 
     @Override
     public String createGroup(Group group) throws IResourceStore.ResourceStoreException {
         String jsonGroup = serialize(group);
-        DBObject document = (DBObject) JSON.parse(jsonGroup);
+        Document document = Document.parse(jsonGroup);
 
-        collection.insert(document);
+        collection.insertOne(document);
 
         return document.get("_id").toString();
     }
@@ -81,6 +81,6 @@ public class GroupStore implements IGroupStore {
 
     @Override
     public void deleteGroup(String groupId) {
-        collection.remove(new BasicDBObject("_id", new ObjectId(groupId)));
+        collection.deleteOne(new BasicDBObject("_id", new ObjectId(groupId)));
     }
 }
