@@ -3,9 +3,9 @@ FROM java:8-jre
 #TODO move the env to docker-compose
 EXPOSE 7070
 ENV EDDI_VERSION 3.0-SNAPSHOT
-ENV EDDI_ENV: development
-ENV EDDI_DB: mongodb
-ENV EDDI_AUTH: unknown
+ENV EDDI_ENV development
+ENV EDDI_DB mongodb
+ENV EDDI_AUTH unknown
 #create workdir
 RUN mkdir -p /nlpserver/
 WORKDIR /nlpserver/
