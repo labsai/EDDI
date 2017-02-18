@@ -3,8 +3,11 @@ package ai.labs.persistence.mongo;
 import ai.labs.persistence.IResourceStorage;
 import ai.labs.serialization.IDocumentBuilder;
 import ai.labs.utilities.RuntimeUtilities;
-import com.mongodb.*;
+import com.mongodb.client.FindIterable;
+import com.mongodb.client.MongoCollection;
+import com.mongodb.client.MongoDatabase;
 import com.mongodb.util.JSON;
+import org.bson.Document;
 import org.bson.types.ObjectId;
 
 import java.io.IOException;
@@ -20,11 +23,11 @@ public class MongoResourceStorage<T> implements IResourceStorage<T> {
     private static final String HISTORY_POSTFIX = ".history";
     private final Class<T> documentType;
 
-    private DBCollection currentCollection;
-    private DBCollection historyCollection;
+    private MongoCollection<Document> currentCollection;
+    private MongoCollection<Document> historyCollection;
     private IDocumentBuilder documentBuilder;
 
-    public MongoResourceStorage(DB database, String collectionName,
+    public MongoResourceStorage(MongoDatabase database, String collectionName,
                                 IDocumentBuilder documentBuilder,
                                 Class<T> documentType) {
         this.documentType = documentType;
@@ -37,16 +40,16 @@ public class MongoResourceStorage<T> implements IResourceStorage<T> {
 
     @Override
     public IResource<T> newResource(T content) throws IOException {
-        BasicDBObject doc = (BasicDBObject) JSON.parse(documentBuilder.toString(content));
+        Document doc = (Document) JSON.parse(documentBuilder.toString(content));
         doc.put(VERSION_FIELD, 1);
-        return new Resource(doc);
+        return new Resource(new Document(doc));
     }
 
     @Override
     public IResource<T> newResource(String id, Integer version, T content) throws IOException {
-        BasicDBObject doc = (BasicDBObject) JSON.parse(documentBuilder.toString(content));
+        Document doc = (Document) JSON.parse(documentBuilder.toString(content));
 
-        Resource resource = new Resource(doc);
+        Resource resource = new Resource(new Document(doc));
         resource.setVersion(version);
         resource.setId(id);
 
@@ -56,55 +59,55 @@ public class MongoResourceStorage<T> implements IResourceStorage<T> {
     @Override
     public void store(IResource currentResource) {
         Resource resource = checkInternalResource(currentResource);
-        currentCollection.save(resource.getDBObject());
+        currentCollection.insertOne(resource.getMongoDocument());
     }
 
     @Override
     public IResource<T> read(String id, Integer version) {
-        BasicDBObject query = new BasicDBObject(ID_FIELD, new ObjectId(id));
+        Document query = new Document(ID_FIELD, new ObjectId(id));
         query.put(VERSION_FIELD, version);
 
-        DBObject object = currentCollection.findOne(query);
+        Document document = currentCollection.find(query).first();
 
-        if (object == null) {
+        if (document == null) {
             return null;
         }
 
-        return new Resource(new BasicDBObject(object.toMap()));
+        return new Resource(document);
     }
 
     @Override
     public void remove(String id) {
-        currentCollection.remove(new BasicDBObject(ID_FIELD, new ObjectId(id)));
+        currentCollection.deleteOne(new Document(ID_FIELD, new ObjectId(id)));
     }
 
     @Override
     public void removeAllPermanently(String id) {
         remove(id);
 
-        DBObject beginId = new BasicDBObject();
+        Document beginId = new Document();
         beginId.put(ID_FIELD, new ObjectId(id));
         beginId.put(VERSION_FIELD, 0);
 
-        DBObject endId = new BasicDBObject();
+        Document endId = new Document();
         endId.put(ID_FIELD, new ObjectId(id));
         endId.put(VERSION_FIELD, Integer.MAX_VALUE);
 
-        DBObject query = new BasicDBObject();
+        Document query = new Document();
         query.put("$gt", beginId);
         query.put("$lt", endId);
-        DBObject object = new BasicDBObject();
+        Document object = new Document();
         object.put(ID_FIELD, query);
-        historyCollection.remove(object);
+        historyCollection.deleteOne(object);
     }
 
     @Override
     public IHistoryResource<T> readHistory(String id, Integer version) {
-        BasicDBObject objectId = new BasicDBObject(ID_FIELD, new ObjectId(id));
+        Document objectId = new Document(ID_FIELD, new ObjectId(id));
         objectId.put(VERSION_FIELD, version);
-        BasicDBObject query = new BasicDBObject(ID_FIELD, objectId);
+        Document query = new Document(ID_FIELD, objectId);
 
-        DBObject doc = historyCollection.findOne(query);
+        Document doc = historyCollection.find(query).first();
 
         if (doc == null) {
             return null;
@@ -115,35 +118,34 @@ public class MongoResourceStorage<T> implements IResourceStorage<T> {
 
     @Override
     public IHistoryResource<T> readHistoryLatest(String id) {
-        DBObject beginId = new BasicDBObject();
+        Document beginId = new Document();
         beginId.put(ID_FIELD, new ObjectId(id));
         beginId.put(VERSION_FIELD, 0);
 
-        DBObject endId = new BasicDBObject();
+        Document endId = new Document();
         endId.put(ID_FIELD, new ObjectId(id));
         endId.put(VERSION_FIELD, Integer.MAX_VALUE);
 
-        DBObject query = new BasicDBObject();
+        Document query = new Document();
         query.put("$gt", beginId);
         query.put("$lt", endId);
-        DBObject object = new BasicDBObject();
+        Document object = new Document();
         object.put(ID_FIELD, query);
 
-        DBCursor objects = historyCollection.find(object).sort(new BasicDBObject(ID_FIELD, -1)).limit(1);
-
-        if (objects.size() == 0) {
+        if (historyCollection.count(object) == 0) {
             return null;
         }
 
-        return new HistoryResource(objects.next());
+        FindIterable<Document> documents = historyCollection.find(object).sort(new Document(ID_FIELD, -1)).limit(1);
+        return new HistoryResource(documents.iterator().next());
     }
 
     @Override
     public IHistoryResource<T> newHistoryResourceFor(IResource resource, boolean deleted) {
         Resource mongoResource = checkInternalResource(resource);
-        BasicDBObject historyObject = (BasicDBObject) mongoResource.getDBObject().copy();
+        Document historyObject = mongoResource.getMongoDocument();
 
-        BasicDBObject idObject = new BasicDBObject();
+        Document idObject = new Document();
         idObject.put(ID_FIELD, new ObjectId(resource.getId()));
         idObject.put(VERSION_FIELD, resource.getVersion());
         historyObject.put(ID_FIELD, idObject);
@@ -156,8 +158,8 @@ public class MongoResourceStorage<T> implements IResourceStorage<T> {
 
     @Override
     public Integer getCurrentVersion(String id) {
-        BasicDBObject query = new BasicDBObject(ID_FIELD, new ObjectId(id));
-        DBObject one = currentCollection.findOne(query);
+        Document query = new Document(ID_FIELD, new ObjectId(id));
+        Document one = currentCollection.find(query).first();
         if (one != null) {
             return (Integer) one.get(VERSION_FIELD);
         } else {
@@ -168,7 +170,7 @@ public class MongoResourceStorage<T> implements IResourceStorage<T> {
     @Override
     public void store(IHistoryResource resource) {
         HistoryResource historyResource = checkInternalHistoryResource(resource);
-        historyCollection.save(historyResource.getDBObject());
+        historyCollection.insertOne(historyResource.getMongoDocument());
     }
 
     private Resource checkInternalResource(IResource currentResource) {
@@ -187,9 +189,9 @@ public class MongoResourceStorage<T> implements IResourceStorage<T> {
     }
 
     private class Resource implements IResource<T> {
-        private BasicDBObject doc;
+        private Document doc;
 
-        Resource(BasicDBObject doc) {
+        Resource(Document doc) {
             this.doc = doc;
         }
 
@@ -204,7 +206,7 @@ public class MongoResourceStorage<T> implements IResourceStorage<T> {
 
         @Override
         public T getData() throws IOException {
-            return documentBuilder.build(doc.toString(), documentType);
+            return documentBuilder.build(doc, documentType);
         }
 
         @Override
@@ -216,38 +218,34 @@ public class MongoResourceStorage<T> implements IResourceStorage<T> {
             doc.put("_id", new ObjectId(id));
         }
 
-        BasicDBObject getDBObject() {
+        Document getMongoDocument() {
             return doc;
         }
 
     }
 
     private class HistoryResource implements IHistoryResource<T> {
-        private BasicDBObject doc;
+        private Document doc;
 
-        HistoryResource(BasicDBObject doc) {
+        HistoryResource(Document doc) {
             this.doc = doc;
-        }
-
-        HistoryResource(DBObject doc) {
-            this.doc = new BasicDBObject(doc.toMap());
         }
 
         @Override
         public T getData() throws IOException {
-            return documentBuilder.build(doc.toString(), documentType);
+            return documentBuilder.build(doc, documentType);
         }
 
         @Override
         public String getId() {
-            DBObject idObject = (DBObject) doc.get(ID_FIELD);
+            Document idObject = (Document) doc.get(ID_FIELD);
             ObjectId id = (ObjectId) idObject.get(ID_FIELD);
             return id.toString();
         }
 
         @Override
         public Integer getVersion() {
-            DBObject idObject = (DBObject) doc.get(ID_FIELD);
+            Document idObject = (Document) doc.get(ID_FIELD);
             return (Integer) idObject.get(VERSION_FIELD);
         }
 
@@ -258,7 +256,7 @@ public class MongoResourceStorage<T> implements IResourceStorage<T> {
             return deleted != null && deleted;
         }
 
-        BasicDBObject getDBObject() {
+        Document getMongoDocument() {
             return doc;
         }
     }

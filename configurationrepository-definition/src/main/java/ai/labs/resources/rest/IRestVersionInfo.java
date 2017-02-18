@@ -12,7 +12,6 @@ public interface IRestVersionInfo {
 
     @POST
     @Path("/{id}/currentversion")
-    @Produces(MediaType.TEXT_PLAIN)
     Response redirectToLatestVersion(@PathParam("id") String id);
 
     @GET

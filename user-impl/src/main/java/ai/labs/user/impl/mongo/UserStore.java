@@ -6,11 +6,10 @@ import ai.labs.user.IUserStore;
 import ai.labs.user.model.User;
 import ai.labs.utilities.SecurityUtilities;
 import com.mongodb.BasicDBObject;
-import com.mongodb.DB;
-import com.mongodb.DBCollection;
-import com.mongodb.DBObject;
-import com.mongodb.util.JSON;
+import com.mongodb.client.MongoCollection;
+import com.mongodb.client.MongoDatabase;
 import lombok.extern.slf4j.Slf4j;
+import org.bson.Document;
 import org.bson.types.ObjectId;
 
 import javax.inject.Inject;
@@ -22,18 +21,18 @@ import java.io.IOException;
 @Slf4j
 public class UserStore implements IUserStore {
     private static final String COLLECTION_USERS = "users";
-    private final DBCollection collection;
+    private final MongoCollection<Document> collection;
     private IJsonSerialization jsonSerialization;
 
     @Inject
-    public UserStore(DB database, IJsonSerialization jsonSerialization) {
+    public UserStore(MongoDatabase database, IJsonSerialization jsonSerialization) {
         collection = database.getCollection(COLLECTION_USERS);
         this.jsonSerialization = jsonSerialization;
     }
 
     @Override
     public String searchUser(String username) throws IResourceStore.ResourceStoreException, IResourceStore.ResourceNotFoundException {
-        DBObject userDocument = collection.findOne(new BasicDBObject("username", username));
+        Document userDocument = collection.find(new Document("username", username)).first();
 
         if (userDocument == null) {
             String message = "Resource 'User' not found. (username=%s)";
@@ -45,7 +44,7 @@ public class UserStore implements IUserStore {
     }
 
     public User readUser(String userId) throws IResourceStore.ResourceStoreException, IResourceStore.ResourceNotFoundException {
-        DBObject userDocument = collection.findOne(new BasicDBObject("_id", new ObjectId(userId)));
+        Document userDocument = collection.find(new Document("_id", new ObjectId(userId))).first();
 
         if (userDocument == null) {
             String message = "Resource 'User' not found. (userId=%s)";
@@ -53,13 +52,13 @@ public class UserStore implements IUserStore {
             throw new IResourceStore.ResourceNotFoundException(message);
         }
 
-        userDocument.removeField("_id");
+        userDocument.remove("_id");
 
         return convert(userDocument);
 
     }
 
-    private User convert(DBObject userDocument) throws IResourceStore.ResourceStoreException {
+    private User convert(Document userDocument) throws IResourceStore.ResourceStoreException {
         try {
             return jsonSerialization.deserialize(userDocument.toString(), User.class);
         } catch (IOException e) {
@@ -72,11 +71,11 @@ public class UserStore implements IUserStore {
     @Override
     public void updateUser(String userId, User user) throws IResourceStore.ResourceStoreException {
         String jsonUser = serialize(user);
-        DBObject document = (DBObject) JSON.parse(jsonUser);
+        Document document = Document.parse(jsonUser);
 
         document.put("_id", new ObjectId(userId));
 
-        collection.save(document);
+        collection.insertOne(document);
     }
 
     @Override
@@ -85,9 +84,9 @@ public class UserStore implements IUserStore {
         user.setPassword(SecurityUtilities.hashPassword(user.getPassword(), user.getSalt()));
 
         String jsonUser = serialize(user);
-        DBObject document = (DBObject) JSON.parse(jsonUser);
+        Document document = Document.parse(jsonUser);
 
-        collection.insert(document);
+        collection.insertOne(document);
 
         return document.get("_id").toString();
     }
@@ -103,6 +102,6 @@ public class UserStore implements IUserStore {
 
     @Override
     public void deleteUser(String userId) {
-        collection.remove(new BasicDBObject("_id", new ObjectId(userId)));
+        collection.deleteOne(new BasicDBObject("_id", new ObjectId(userId)));
     }
 }

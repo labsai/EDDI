@@ -7,8 +7,6 @@ import ai.labs.server.JacksonConfig;
 import ai.labs.server.exception.IllegalArgumentExceptionMapper;
 import ai.labs.server.providers.URIMessageBodyProvider;
 import ai.labs.staticresources.impl.interceptor.ContentTypeInterceptor;
-import io.swagger.jaxrs.listing.ApiListingResource;
-import io.swagger.jaxrs.listing.SwaggerSerializers;
 
 import javax.ws.rs.core.Application;
 import java.util.Collections;
@@ -33,8 +31,6 @@ public class ApplicationConfiguration extends Application {
 
         /*todo tmp.add(AuthorizationHeaderFilter.class);*/
 
-        tmp.add(ApiListingResource.class);
-        tmp.add(SwaggerSerializers.class);
         tmp.add(URIMessageBodyProvider.class);
 
         CLASSES = Collections.unmodifiableSet(tmp);

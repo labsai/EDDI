@@ -37,7 +37,7 @@ public class BehaviorRulesEvaluator {
                 if (behaviorRule.getExtensions().isEmpty()) {
                     state = IExtension.ExecutionState.SUCCESS;
                 } else {
-                    state = behaviorRule.execute(memory, new LinkedList<BehaviorRule>());
+                    state = behaviorRule.execute(memory, new LinkedList<>());
                 }
 
                 if (state == IExtension.ExecutionState.SUCCESS) {

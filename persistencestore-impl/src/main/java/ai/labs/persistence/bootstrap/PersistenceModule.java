@@ -1,10 +1,14 @@
 package ai.labs.persistence.bootstrap;
 
 import ai.labs.runtime.bootstrap.AbstractBaseModule;
+import com.github.fakemongo.Fongo;
 import com.google.inject.Provides;
 import com.mongodb.*;
+import com.mongodb.client.MongoDatabase;
+import com.mongodb.connection.ServerVersion;
 
 import javax.inject.Named;
+import javax.inject.Singleton;
 import java.io.InputStream;
 import java.net.UnknownHostException;
 import java.util.Collections;
@@ -27,17 +31,24 @@ public class PersistenceModule extends AbstractBaseModule {
     }
 
     @Provides
-    public DB provideMongoDB(@Named("mongodb.hosts") String hosts,
-                             @Named("mongodb.port") Integer port,
-                             @Named("mongodb.database") String database,
-                             @Named("mongodb.username") String username,
-                             @Named("mongodb.password") String password,
-                             @Named("mongodb.connectionsPerHost") Integer connectionsPerHost) {
+    @Singleton
+    public MongoDatabase provideMongoDB(@Named("mongodb.hosts") String hosts,
+                                        @Named("mongodb.port") Integer port,
+                                        @Named("mongodb.database") String database,
+                                        @Named("mongodb.username") String username,
+                                        @Named("mongodb.password") String password,
+                                        @Named("mongodb.connectionsPerHost") Integer connectionsPerHost,
+                                        @Named("mongodb.testing.inMemoryOnly") boolean inMemoryOnly) {
         try {
+
             List<ServerAddress> seeds = hostsToServerAddress(hosts, port);
+
             MongoClient mongoClient;
             MongoClientOptions mongoClientOptions = buildMongoClientOptions(connectionsPerHost);
-            if ("".equals(username) || "".equals(password)) {
+            if (inMemoryOnly) {
+                Fongo fongo = new Fongo("FakeMongoInstance", new ServerVersion(3, 2));
+                mongoClient = fongo.getMongo();
+            } else if ("".equals(username) || "".equals(password)) {
                 mongoClient = new MongoClient(seeds, mongoClientOptions);
             } else {
                 MongoCredential credential = MongoCredential.createCredential(username, database, password.toCharArray());
@@ -48,7 +59,7 @@ public class PersistenceModule extends AbstractBaseModule {
 
             registerMongoClientShutdownHook(mongoClient);
 
-            return mongoClient.getDB(database);
+            return mongoClient.getDatabase(database);
         } catch (UnknownHostException e) {
             throw new RuntimeException(e.getLocalizedMessage(), e);
         }

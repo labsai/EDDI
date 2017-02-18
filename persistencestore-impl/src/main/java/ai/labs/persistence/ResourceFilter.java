@@ -11,8 +11,12 @@ import ai.labs.runtime.ThreadContext;
 import ai.labs.serialization.IDocumentBuilder;
 import ai.labs.user.IUserStore;
 import ai.labs.utilities.RuntimeUtilities;
-import com.mongodb.*;
+import com.mongodb.DBObject;
+import com.mongodb.QueryBuilder;
+import com.mongodb.client.FindIterable;
+import com.mongodb.client.MongoCollection;
 import lombok.extern.slf4j.Slf4j;
+import org.bson.Document;
 
 import java.io.IOException;
 import java.util.HashMap;
@@ -29,7 +33,7 @@ public class ResourceFilter<T> implements IResourceFilter<T> {
     private static final String FIELD_ID = "_id";
     private static final String FIELD_VERSION = "_version";
 
-    private DBCollection collection;
+    private MongoCollection<Document> collection;
     private IResourceStore<T> resourceStore;
     private IPermissionStore permissionStore;
     private Class<T> documentType;
@@ -38,7 +42,7 @@ public class ResourceFilter<T> implements IResourceFilter<T> {
     private IGroupStore groupStore;
     private final IUserStore userStore;
 
-    public ResourceFilter(DBCollection collection, IResourceStore<T> resourceStore,
+    public ResourceFilter(MongoCollection<Document> collection, IResourceStore<T> resourceStore,
                           IPermissionStore permissionStore, IUserStore userStore,
                           IGroupStore groupStore, IDocumentBuilder documentBuilder, Class<T> documentType) {
         this.collection = collection;
@@ -53,28 +57,29 @@ public class ResourceFilter<T> implements IResourceFilter<T> {
     }
 
     @Override
-    public List<T> readResources(QueryFilters[] queryFilters, Integer index, Integer limit, String... sortTypes) throws IResourceStore.ResourceStoreException, IResourceStore.ResourceNotFoundException {
+    public List<T> readResources(QueryFilters[] queryFilters, Integer index, Integer limit, String... sortTypes)
+            throws IResourceStore.ResourceStoreException, IResourceStore.ResourceNotFoundException {
         List<T> ret = new LinkedList<>();
 
-        DBCursor dbCursor = null;
         try {
-            DBObject query = createQuery(queryFilters);
-            dbCursor = collection.find(query);
-            DBObject sort = createSortQuery(sortTypes);
-            dbCursor = dbCursor.sort(sort);
+            Document query = createQuery(queryFilters);
+            FindIterable<Document> results = collection.find(query);
+            Document sort = createSortQuery(sortTypes);
+            results = results.sort(sort);
+
             if (limit > 0) {
-                dbCursor = dbCursor.skip(index * limit);
+                results = results.skip(index * limit);
             } else {
-                dbCursor = dbCursor.skip(index);
+                results = results.skip(index);
             }
-            while (dbCursor.hasNext()) {
+
+            for (Document result : results) {
                 if (limit > 0 && ret.size() >= limit) {
                     break;
                 }
 
-                DBObject next = dbCursor.next();
-                String id = next.get(FIELD_ID).toString();
-                T document = buildDocument(next);
+                String id = result.get(FIELD_ID).toString();
+                T model = buildDocument(result);
                 Permissions permissions = null;
                 try {
                     permissions = getPermissions(id);
@@ -86,29 +91,25 @@ public class ResourceFilter<T> implements IResourceFilter<T> {
                     continue;
                 }
 
-                Object versionField = next.get(FIELD_VERSION);
+                Object versionField = result.get(FIELD_VERSION);
                 if (versionField != null && permissions != null) {
                     Integer currentVersion = Integer.parseInt(versionField.toString());
                     Integer highestPermittedVersion = getHighestPermittedVersion(currentVersion, permissions.getPermissions());
                     if (highestPermittedVersion < currentVersion) {
-                        document = resourceStore.read(id, highestPermittedVersion);
+                        model = resourceStore.read(id, highestPermittedVersion);
                     }
                 }
 
-                ret.add(document);
+                ret.add(model);
             }
         } catch (IOException e) {
             throw new IResourceStore.ResourceStoreException(e.getLocalizedMessage(), e);
-        } finally {
-            if (dbCursor != null) {
-                dbCursor.close();
-            }
         }
 
         return ret;
     }
 
-    private DBObject createQuery(QueryFilters[] allQueryFilters) {
+    private Document createQuery(QueryFilters[] allQueryFilters) {
         QueryBuilder retQuery = new QueryBuilder();
 
         for (QueryFilters queryFilters : allQueryFilters) {
@@ -137,21 +138,21 @@ public class ResourceFilter<T> implements IResourceFilter<T> {
 
         }
 
-        return retQuery.get();
+        return new Document(retQuery.get().toMap());
     }
 
-    private DBObject createSortQuery(String... sortTypes) {
-        BasicDBObjectBuilder objectBuilder = new BasicDBObjectBuilder();
+    private Document createSortQuery(String... sortTypes) {
+        Document document = new Document();
         for (String sortType : sortTypes) {
-            objectBuilder.add(sortType, -1);
+            document.put(sortType, -1);
         }
 
-        return objectBuilder.get();
+        return document;
     }
 
-    private T buildDocument(DBObject descriptor) throws IResourceStore.ResourceStoreException, IResourceStore.ResourceNotFoundException, IOException {
-        descriptor.removeField("_id");
-        return documentBuilder.build(descriptor.toString(), documentType);
+    private T buildDocument(Document descriptor) throws IResourceStore.ResourceStoreException, IResourceStore.ResourceNotFoundException, IOException {
+        descriptor.remove("_id");
+        return documentBuilder.build(descriptor, documentType);
     }
 
     private Permissions getPermissions(String id) throws IResourceStore.ResourceStoreException, IResourceStore.ResourceNotFoundException {
@@ -187,11 +188,6 @@ public class ResourceFilter<T> implements IResourceFilter<T> {
     }
 
     private Pattern getPatternForRegex(String regex) {
-        Pattern pattern = regexCache.get(regex);
-        if (pattern == null) {
-            pattern = Pattern.compile(regex);
-            regexCache.put(regex, pattern);
-        }
-        return pattern;
+        return regexCache.computeIfAbsent(regex, k -> Pattern.compile(regex));
     }
 }

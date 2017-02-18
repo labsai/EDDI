@@ -23,7 +23,6 @@ import java.util.List;
 public interface IRestParserStore extends IRestVersionInfo {
     String resourceURI = "eddi://ai.labs.parser/parserstore/parsers/";
 
-
     @GET
     @Path("/descriptors")
     @Produces(MediaType.APPLICATION_JSON)

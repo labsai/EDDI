@@ -6,7 +6,7 @@ import ai.labs.resources.rest.packages.IPackageStore;
 import ai.labs.resources.rest.packages.model.PackageConfiguration;
 import ai.labs.serialization.IDocumentBuilder;
 import ai.labs.utilities.RuntimeUtilities;
-import com.mongodb.DB;
+import com.mongodb.client.MongoDatabase;
 
 import javax.inject.Inject;
 
@@ -17,7 +17,7 @@ public class PackageStore implements IPackageStore {
     private HistorizedResourceStore<PackageConfiguration> packageResourceStore;
 
     @Inject
-    public PackageStore(DB database, IDocumentBuilder documentBuilder) {
+    public PackageStore(MongoDatabase database, IDocumentBuilder documentBuilder) {
         RuntimeUtilities.checkNotNull(database, "database");
 
         final String collectionName = "packages";

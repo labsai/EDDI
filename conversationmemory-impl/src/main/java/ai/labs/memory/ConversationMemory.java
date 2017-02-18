@@ -14,7 +14,7 @@ public class ConversationMemory implements IConversationMemory {
 
     private IWritableConversationStep currentStep;
     private Stack<IConversationStep> previousSteps;
-    private Stack<IConversationStep> redoCache = new Stack<IConversationStep>();
+    private Stack<IConversationStep> redoCache = new Stack<>();
     private IConversationMemory.IConversationContext context;
     private ConversationState conversationState;
 
@@ -28,7 +28,7 @@ public class ConversationMemory implements IConversationMemory {
         this.botVersion = botVersion;
         this.context = new ConversationContext();
         this.currentStep = new ConversationStep(context);
-        this.previousSteps = new Stack<IConversationStep>();
+        this.previousSteps = new Stack<>();
     }
 
     @Override
@@ -126,7 +126,7 @@ public class ConversationMemory implements IConversationMemory {
     }
 
     public final class ConversationStepStack implements IConversationStepStack {
-        private List<IConversationStep> conversationSteps = new ArrayList<IConversationStep>();
+        private List<IConversationStep> conversationSteps = new ArrayList<>();
 
         public ConversationStepStack(IConversationStep step) {
             conversationSteps.add(step);
@@ -153,7 +153,7 @@ public class ConversationMemory implements IConversationMemory {
 
         @Override
         public List<List<IData>> getAllData(String prefix) {
-            List<List<IData>> allData = new LinkedList<List<IData>>();
+            List<List<IData>> allData = new LinkedList<>();
 
             for (int i = conversationSteps.size() - 1; i >= 0; i--) {
                 IConversationStep step = conversationSteps.get(i);

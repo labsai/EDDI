@@ -6,7 +6,7 @@ import ai.labs.resources.rest.bots.IBotStore;
 import ai.labs.resources.rest.bots.model.BotConfiguration;
 import ai.labs.serialization.IDocumentBuilder;
 import ai.labs.utilities.RuntimeUtilities;
-import com.mongodb.DB;
+import com.mongodb.client.MongoDatabase;
 
 import javax.inject.Inject;
 
@@ -17,7 +17,7 @@ public class BotStore implements IBotStore {
     private HistorizedResourceStore<BotConfiguration> botResourceStore;
 
     @Inject
-    public BotStore(DB database, IDocumentBuilder documentBuilder) {
+    public BotStore(MongoDatabase database, IDocumentBuilder documentBuilder) {
         RuntimeUtilities.checkNotNull(database, "database");
         final String collectionName = "bots";
         MongoResourceStorage<BotConfiguration> resourceStorage =

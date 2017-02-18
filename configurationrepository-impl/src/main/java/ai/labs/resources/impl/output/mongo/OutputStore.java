@@ -8,7 +8,7 @@ import ai.labs.resources.rest.output.model.OutputConfiguration;
 import ai.labs.resources.rest.output.model.OutputConfigurationSet;
 import ai.labs.serialization.IDocumentBuilder;
 import ai.labs.utilities.RuntimeUtilities;
-import com.mongodb.DB;
+import com.mongodb.client.MongoDatabase;
 
 import javax.inject.Inject;
 import java.util.Collections;
@@ -25,7 +25,7 @@ public class OutputStore implements IOutputStore {
     private static final OutputComparator OUTPUT_COMPARATOR = new OutputComparator();
 
     @Inject
-    public OutputStore(DB database, IDocumentBuilder documentBuilder) {
+    public OutputStore(MongoDatabase database, IDocumentBuilder documentBuilder) {
         RuntimeUtilities.checkNotNull(database, "database");
         MongoResourceStorage<OutputConfigurationSet> resourceStorage =
                 new MongoResourceStorage<>(database, collectionName, documentBuilder, OutputConfigurationSet.class);
