@@ -4,6 +4,8 @@ A Platform for creating, running and maintaining chatbots of all kinds.
 
 License: Apache License 2.0
 
+[![CircleCI](https://circleci.com/gh/labsai/EDDI/tree/master.svg?style=svg)](https://circleci.com/gh/labsai/EDDI/tree/master)
+
 ## Intro
 
 The Chatbot System - E.D.D.I. (Enhanced Dialog Driven Intelligence), has been developed with the focus on the use in enterprise applications as well as the ease of connecting it to other resources (such as databases or other Services). 
