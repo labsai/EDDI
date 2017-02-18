@@ -18,7 +18,7 @@ import java.util.List;
  * @author ginccc
  */
 
-@Api
+@Api(value = "parserstore")
 @Path("/parserstore/parsers")
 public interface IRestParserStore extends IRestVersionInfo {
     String resourceURI = "eddi://ai.labs.parser/parserstore/parsers/";

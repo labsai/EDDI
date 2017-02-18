@@ -1,6 +1,7 @@
 package ai.labs.user.rest;
 
 import ai.labs.user.model.User;
+import io.swagger.annotations.Api;
 
 import javax.ws.rs.*;
 import javax.ws.rs.core.MediaType;
@@ -10,6 +11,7 @@ import java.net.URI;
 /**
  * @author ginccc
  */
+@Api(value = "users")
 @Path("/userstore/users")
 public interface IRestUserStore {
     String resourceURI = "eddi://ai.labs.user/userstore/users/";

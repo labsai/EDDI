@@ -4,6 +4,7 @@ package ai.labs.rest.rest;
 import ai.labs.memory.model.ConversationState;
 import ai.labs.memory.model.Deployment;
 import ai.labs.memory.model.SimpleConversationMemorySnapshot;
+import io.swagger.annotations.Api;
 import org.jboss.resteasy.annotations.cache.NoCache;
 
 import javax.ws.rs.*;
@@ -13,6 +14,7 @@ import javax.ws.rs.core.Response;
 /**
  * @author ginccc
  */
+@Api(value = "bot engine")
 @Path("/bots")
 public interface IRestBotEngine {
     /**

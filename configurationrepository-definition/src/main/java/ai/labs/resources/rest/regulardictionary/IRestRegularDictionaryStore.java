@@ -19,8 +19,8 @@ import java.util.List;
 /**
  * @author ginccc
  */
+@Api(value = "regulardictionarystore")
 @Path("/regulardictionarystore/regulardictionaries")
-@Api
 public interface IRestRegularDictionaryStore extends IRestVersionInfo {
     String resourceURI = "eddi://ai.labs.regulardictionary/regulardictionarystore/regulardictionaries/";
 

@@ -5,6 +5,7 @@ import ai.labs.resources.rest.patch.PatchInstruction;
 import ai.labs.testing.descriptor.model.SimpleTestCaseDescriptor;
 import ai.labs.testing.descriptor.model.TestCaseDescriptor;
 import ai.labs.testing.model.TestCase;
+import io.swagger.annotations.Api;
 
 import javax.ws.rs.*;
 import javax.ws.rs.core.MediaType;
@@ -15,6 +16,7 @@ import java.util.List;
 /**
  * @author ginccc
  */
+@Api(value = "testcases")
 @Path("/testcasestore/testcases")
 public interface IRestTestCaseStore {
     String resourceURI = "eddi://ai.labs.testcases/testcasestore/testcases/";

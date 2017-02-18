@@ -1,6 +1,7 @@
 package ai.labs.rest.rest;
 
 import ai.labs.memory.model.Deployment;
+import io.swagger.annotations.Api;
 
 import javax.ws.rs.*;
 import javax.ws.rs.core.MediaType;
@@ -9,6 +10,7 @@ import javax.ws.rs.core.Response;
 /**
  * @author ginccc
  */
+@Api(value = "bot administration")
 @Path("/administration")
 public interface IRestBotAdministration {
     @POST

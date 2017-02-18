@@ -5,6 +5,7 @@ import ai.labs.resources.rest.documentdescriptor.model.DocumentDescriptor;
 import ai.labs.resources.rest.method.PATCH;
 import ai.labs.resources.rest.output.model.OutputConfigurationSet;
 import ai.labs.resources.rest.patch.PatchInstruction;
+import io.swagger.annotations.Api;
 
 import javax.ws.rs.*;
 import javax.ws.rs.core.MediaType;
@@ -15,6 +16,7 @@ import java.util.List;
 /**
  * @author ginccc
  */
+@Api(value = "outputstore")
 @Path("/outputstore/outputsets")
 public interface IRestOutputStore extends IRestVersionInfo {
     String resourceURI = "eddi://ai.labs.output/outputstore/outputsets/";
