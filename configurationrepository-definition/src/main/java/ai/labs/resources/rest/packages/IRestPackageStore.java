@@ -3,6 +3,7 @@ package ai.labs.resources.rest.packages;
 import ai.labs.resources.rest.IRestVersionInfo;
 import ai.labs.resources.rest.documentdescriptor.model.DocumentDescriptor;
 import ai.labs.resources.rest.packages.model.PackageConfiguration;
+import io.swagger.annotations.Api;
 
 import javax.ws.rs.*;
 import javax.ws.rs.core.MediaType;
@@ -13,6 +14,7 @@ import java.util.List;
 /**
  * @author ginccc
  */
+@Api(value = "packagestore")
 @Path("/packagestore/packages")
 public interface IRestPackageStore extends IRestVersionInfo {
     String resourceURI = "eddi://ai.labs.package/packagestore/packages/";

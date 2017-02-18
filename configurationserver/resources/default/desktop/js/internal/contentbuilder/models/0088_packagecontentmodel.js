@@ -71,7 +71,7 @@ function PackageContentModel(dataProvider, actionHandler) {
             footerControls, false, true, null, false, false);
 
         retVal.headerControls = headerControls;
-        retVal.context = {namespace:'io.sls'};
+        retVal.context = {namespace: 'ai.labs'};
 
         return retVal;
     }

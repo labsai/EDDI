@@ -12,7 +12,7 @@ import javax.ws.rs.core.MediaType;
  * @author ginccc
  */
 
-@Api
+@Api(value = "semantic parser")
 @Path("/api/v1/parser")
 public interface IRestSemanticParser {
 

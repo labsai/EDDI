@@ -1,6 +1,7 @@
 package ai.labs.permission.rest;
 
 import ai.labs.permission.model.Permissions;
+import io.swagger.annotations.Api;
 
 import javax.ws.rs.*;
 import javax.ws.rs.core.MediaType;
@@ -8,6 +9,7 @@ import javax.ws.rs.core.MediaType;
 /**
  * @author ginccc
  */
+@Api(value = "permissionstore")
 @Path("/permissionstore/permissions")
 public interface IRestPermissionStore {
     @GET

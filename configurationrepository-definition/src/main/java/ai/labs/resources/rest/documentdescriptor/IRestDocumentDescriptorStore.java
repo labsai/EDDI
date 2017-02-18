@@ -4,6 +4,7 @@ import ai.labs.resources.rest.documentdescriptor.model.DocumentDescriptor;
 import ai.labs.resources.rest.documentdescriptor.model.SimpleDocumentDescriptor;
 import ai.labs.resources.rest.method.PATCH;
 import ai.labs.resources.rest.patch.PatchInstruction;
+import io.swagger.annotations.Api;
 
 import javax.ws.rs.*;
 import javax.ws.rs.core.MediaType;
@@ -12,6 +13,7 @@ import java.util.List;
 /**
  * @author ginccc
  */
+@Api(value = "descriptorstore")
 @Path("/descriptorstore/descriptors")
 public interface IRestDocumentDescriptorStore {
     String resourceURI = "eddi://ai.labs.descriptor/descriptorstore/descriptors/";

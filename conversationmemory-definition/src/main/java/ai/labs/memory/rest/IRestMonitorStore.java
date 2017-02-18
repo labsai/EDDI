@@ -4,6 +4,7 @@ import ai.labs.memory.descriptor.model.ConversationDescriptor;
 import ai.labs.memory.model.ConversationMemorySnapshot;
 import ai.labs.memory.model.ConversationState;
 import ai.labs.persistence.IResourceStore;
+import io.swagger.annotations.Api;
 
 import javax.ws.rs.*;
 import javax.ws.rs.core.MediaType;
@@ -12,6 +13,7 @@ import java.util.List;
 /**
  * @author ginccc
  */
+@Api(value = "conversationstore")
 @Path("/conversationstore/conversations")
 public interface IRestMonitorStore {
     @GET

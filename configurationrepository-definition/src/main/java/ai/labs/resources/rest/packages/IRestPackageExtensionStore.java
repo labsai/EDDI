@@ -1,6 +1,7 @@
 package ai.labs.resources.rest.packages;
 
 import ai.labs.resources.rest.packages.model.PackageConfiguration;
+import io.swagger.annotations.Api;
 
 import javax.ws.rs.GET;
 import javax.ws.rs.Path;
@@ -11,6 +12,7 @@ import java.util.List;
 /**
  * @author ginccc
  */
+@Api(value = "package extensions")
 @Path("/packagestore/extensions")
 public interface IRestPackageExtensionStore {
     @GET

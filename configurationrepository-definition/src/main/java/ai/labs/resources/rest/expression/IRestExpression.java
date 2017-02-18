@@ -1,5 +1,7 @@
 package ai.labs.resources.rest.expression;
 
+import io.swagger.annotations.Api;
+
 import javax.ws.rs.*;
 import javax.ws.rs.core.MediaType;
 import java.util.List;
@@ -7,6 +9,7 @@ import java.util.List;
 /**
  * @author ginccc
  */
+@Api(value = "expressions")
 @Path("/expressions")
 public interface IRestExpression {
     @GET
