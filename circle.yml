@@ -1,6 +1,8 @@
 machine:
   java:
-      version: openjdk8
+    version: openjdk8
+  services:
+    - docker
 
 dependencies:
   override:
