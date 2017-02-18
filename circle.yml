@@ -14,3 +14,14 @@ test:
   post:
     - mkdir -p $CIRCLE_TEST_REPORTS/junit/
     - find . -type f -regex ".*/target/surefire-reports/.*xml" -exec cp {} $CIRCLE_TEST_REPORTS/junit/ \;
+
+deployment:
+  staging:
+    branch: master
+    commands:
+      - docker login -e $DOCKER_EMAIL -u $DOCKER_USER -p $DOCKER_PASS
+
+      - docker build -t ginc/eddi:$CIRCLE_BUILD_NUM .
+      - docker push ginc/eddi:$CIRCLE_BUILD_NUM
+      - docker build -t ginc/eddi:latest .
+      - docker push ginc/eddi:latest
