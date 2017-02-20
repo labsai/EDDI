@@ -42,10 +42,9 @@ public class BotFactory implements IBotFactory {
 
         Map<BotId, IBot> bots = getBotEnvironment(environment);
         botVersions.addAll(bots.keySet().stream().filter(id -> id.getId().equals(botId)).collect(Collectors.toList()));
-        Collections.sort(botVersions,
-                Collections.reverseOrder((botId1, botId2) ->
-                        botId1.getVersion() < botId2.getVersion() ?
-                                -1 : botId1.getVersion().equals(botId2.getVersion()) ? 0 : 1));
+        botVersions.sort(Collections.reverseOrder((botId1, botId2) ->
+                botId1.getVersion() < botId2.getVersion() ?
+                        -1 : botId1.getVersion().equals(botId2.getVersion()) ? 0 : 1));
 
         IBot latestBot = null;
 

@@ -18,7 +18,7 @@ import java.util.Map;
 public class PackageStoreClientLibrary implements IPackageStoreClientLibrary {
     private final IPackageStoreService packageStoreService;
     private final Map<String, Provider<ILifecycleTask>> lifecycleExtensionsProvider;
-    private static final String CORE = "core";
+    private static final String URI_SCHEME_ID = "eddi";
 
     @Inject
     public PackageStoreClientLibrary(IPackageStoreService packageStoreService,
@@ -46,7 +46,7 @@ public class PackageStoreClientLibrary implements IPackageStoreClientLibrary {
         try {
             for (PackageConfiguration.PackageExtension packageExtension : packageConfiguration.getPackageExtensions()) {
                 URI type = packageExtension.getType();
-                if (CORE.equals(type.getScheme())) {
+                if (URI_SCHEME_ID.equals(type.getScheme())) {
                     ILifecycleTask lifecycleTask = lifecycleExtensionsProvider.get(type.getHost()).get();
                     lifecycleTask.setExtensions(packageExtension.getExtensions());
                     lifecycleTask.configure(packageExtension.getConfig());

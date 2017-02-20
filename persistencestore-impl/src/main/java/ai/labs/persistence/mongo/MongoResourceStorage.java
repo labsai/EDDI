@@ -6,7 +6,6 @@ import ai.labs.utilities.RuntimeUtilities;
 import com.mongodb.client.FindIterable;
 import com.mongodb.client.MongoCollection;
 import com.mongodb.client.MongoDatabase;
-import com.mongodb.util.JSON;
 import org.bson.Document;
 import org.bson.types.ObjectId;
 
@@ -40,14 +39,14 @@ public class MongoResourceStorage<T> implements IResourceStorage<T> {
 
     @Override
     public IResource<T> newResource(T content) throws IOException {
-        Document doc = (Document) JSON.parse(documentBuilder.toString(content));
+        Document doc = Document.parse(documentBuilder.toString(content));
         doc.put(VERSION_FIELD, 1);
         return new Resource(new Document(doc));
     }
 
     @Override
     public IResource<T> newResource(String id, Integer version, T content) throws IOException {
-        Document doc = (Document) JSON.parse(documentBuilder.toString(content));
+        Document doc = Document.parse(documentBuilder.toString(content));
 
         Resource resource = new Resource(new Document(doc));
         resource.setVersion(version);

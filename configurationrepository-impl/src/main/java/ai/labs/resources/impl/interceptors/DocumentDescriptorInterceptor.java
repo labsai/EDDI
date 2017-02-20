@@ -28,6 +28,7 @@ import javax.ws.rs.container.ContainerResponseContext;
 import javax.ws.rs.container.ContainerResponseFilter;
 import javax.ws.rs.container.ResourceInfo;
 import javax.ws.rs.core.Context;
+import javax.ws.rs.core.HttpHeaders;
 import javax.ws.rs.ext.Provider;
 import java.io.IOException;
 import java.lang.reflect.Method;
@@ -64,13 +65,12 @@ public class DocumentDescriptorInterceptor implements ContainerResponseFilter {
     public void filter(ContainerRequestContext contextRequest, ContainerResponseContext contextResponse) throws IOException {
         try {
             int httpStatus = contextResponse.getStatus();
-            Object entity = contextResponse.getEntity();
             Method resourceMethod = resourceInfo.getResourceMethod();
             if (resourceMethod != null && (isPUT(resourceMethod) || isPATCH(resourceMethod) || isPOST(resourceMethod) || isDELETE(resourceMethod)) && httpStatus >= 200 && httpStatus < 300) {
-                if (entity != null) {
-                    String entityString = entity.toString();
-                    if (entityString.contains("://")) {
-                        URI createdResourceURI = URI.create(entityString);
+                String resourceLocationUri = contextResponse.getHeaderString(HttpHeaders.LOCATION);
+                if (resourceLocationUri != null) {
+                    if (resourceLocationUri.contains("://")) {
+                        URI createdResourceURI = URI.create(resourceLocationUri);
                         IResourceStore.IResourceId resourceId = RestUtilities.extractResourceId(createdResourceURI);
                         Principal userPrincipal = SecurityUtilities.getPrincipal(ThreadContext.getSubject());
                         URI userURI = UserUtilities.getUserURI(userStore, userPrincipal);
@@ -78,9 +78,9 @@ public class DocumentDescriptorInterceptor implements ContainerResponseFilter {
                         if (isPOST(resourceMethod)) {
                             // the resource was created successfully
                             if (httpStatus == 201) {
-                                if (entityString.startsWith("eddi://ai.labs.testcases")) {
+                                if (resourceLocationUri.startsWith("eddi://ai.labs.testcases")) {
                                     testCaseDescriptorStore.createDescriptor(resourceId.getId(), resourceId.getVersion(), createTestCaseDescriptor(createdResourceURI, userURI));
-                                } else if (entityString.startsWith("eddi://ai.labsconversation")) {
+                                } else if (resourceLocationUri.startsWith("eddi://ai.labs.conversation")) {
                                     conversationDescriptorStore.createDescriptor(resourceId.getId(), resourceId.getVersion(), createConversationDescriptor(createdResourceURI, userURI));
                                 } else {
                                     documentDescriptorStore.createDescriptor(resourceId.getId(), resourceId.getVersion(), createDocumentDescriptor(createdResourceURI, userURI));
@@ -91,7 +91,7 @@ public class DocumentDescriptorInterceptor implements ContainerResponseFilter {
                         }
 
                         if ((isPUT(resourceMethod) || isPATCH(resourceMethod)) && !isUpdateDescriptor(resourceMethod) && !isUpdatePermissions(resourceMethod)) {
-                            IDescriptorStore descriptorStore = getDescriptorStore(entityString);
+                            IDescriptorStore descriptorStore = getDescriptorStore(resourceLocationUri);
                             ResourceDescriptor resourceDescriptor = (ResourceDescriptor) descriptorStore.readDescriptor(resourceId.getId(), resourceId.getVersion() - 1);
                             resourceDescriptor.setLastModifiedOn(new Date(System.currentTimeMillis()));
                             resourceDescriptor.setLastModifiedBy(UserUtilities.getUserURI(userStore, SecurityUtilities.getPrincipal(ThreadContext.getSubject())));
