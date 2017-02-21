@@ -3,10 +3,11 @@ package ai.labs.memory;
 import ai.labs.memory.model.ConversationMemorySnapshot;
 import ai.labs.memory.model.ConversationState;
 import ai.labs.persistence.IResourceStore;
-import ai.labs.serialization.IJsonSerialization;
+import ai.labs.serialization.IDocumentBuilder;
 import com.mongodb.BasicDBObject;
 import com.mongodb.client.MongoCollection;
 import com.mongodb.client.MongoDatabase;
+import com.mongodb.client.model.UpdateOptions;
 import org.bson.Document;
 import org.bson.types.ObjectId;
 
@@ -20,27 +21,30 @@ public class ConversationMemoryStore implements IConversationMemoryStore, IResou
     private static final String CONVERSATION_COLLECTION = "conversationmemories";
     private static final String CONVERSATION_STATE_FIELD = "conversationState";
     private final MongoCollection<Document> conversationCollection;
-    private final IJsonSerialization jsonSerialization;
+    private final IDocumentBuilder documentBuilder;
 
     @Inject
-    public ConversationMemoryStore(MongoDatabase database, IJsonSerialization jsonSerialization) {
+    public ConversationMemoryStore(MongoDatabase database, IDocumentBuilder documentBuilder) {
         conversationCollection = database.getCollection(CONVERSATION_COLLECTION);
-        this.jsonSerialization = jsonSerialization;
+        this.documentBuilder = documentBuilder;
     }
 
     @Override
     public String storeConversationMemorySnapshot(ConversationMemorySnapshot snapshot) throws IResourceStore.ResourceStoreException {
         try {
-            String json = jsonSerialization.serialize(snapshot);
+            String json = documentBuilder.toString(snapshot);
             Document document = Document.parse(json);
-
-            if (snapshot.getId() != null) {
-                document.put("_id", new ObjectId(snapshot.getId()));
-            }
 
             document.remove("id");
 
-            conversationCollection.insertOne(document);
+            if (snapshot.getId() != null) {
+                document.put("_id", new ObjectId(snapshot.getId()));
+                conversationCollection.updateOne(new Document("_id", new ObjectId(snapshot.getId())),
+                        new Document("$set", document),
+                        new UpdateOptions().upsert(true));
+            } else {
+                conversationCollection.insertOne(document);
+            }
 
             return document.get("_id").toString();
         } catch (IOException e) {
@@ -61,8 +65,8 @@ public class ConversationMemoryStore implements IConversationMemoryStore, IResou
 
             document.remove("_id");
 
-            ConversationMemorySnapshot snapshot = jsonSerialization.deserialize(document.toString(), ConversationMemorySnapshot.class);
-
+            ConversationMemorySnapshot snapshot = documentBuilder.build(document, ConversationMemorySnapshot.class);
+            
             snapshot.setId(conversationId);
 
             return snapshot;
@@ -73,13 +77,13 @@ public class ConversationMemoryStore implements IConversationMemoryStore, IResou
 
     @Override
     public void setConversationState(String conversationId, ConversationState conversationState) {
-        BasicDBObject updateConversationStateField = new BasicDBObject("$set", new BasicDBObject(CONVERSATION_STATE_FIELD, conversationState.name()));
-        conversationCollection.updateMany(new BasicDBObject("_id", new ObjectId(conversationId)), updateConversationStateField);
+        Document updateConversationStateField = new Document("$set", new BasicDBObject(CONVERSATION_STATE_FIELD, conversationState.name()));
+        conversationCollection.updateMany(new Document("_id", new ObjectId(conversationId)), updateConversationStateField);
     }
 
     @Override
     public void deleteConversationMemorySnapshot(String conversationId) throws ResourceStoreException, ResourceNotFoundException {
-        conversationCollection.deleteOne(new BasicDBObject("_id", new ObjectId(conversationId)));
+        conversationCollection.deleteOne(new Document("_id", new ObjectId(conversationId)));
     }
 
     @Override

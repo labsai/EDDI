@@ -90,10 +90,6 @@ public class PermissionResponseInterceptor implements ContainerResponseFilter {
                             permissionStore.createPermissions(respondedResourceId.getId(), PermissionUtilities.createDefaultPermissions(userURI));
                         }
                     }
-                } else if (httpStatus >= 200 && httpStatus < 300 && httpStatus != 202) {
-                    String message = "A POST request was successfully executed, but didn't return http code 201 or 202). [methodName=%s]";
-                    message = String.format(message, methodName);
-                    log.error(message);
                 }
             }
         } catch (IResourceStore.ResourceStoreException | IResourceStore.ResourceNotFoundException e) {

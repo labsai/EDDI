@@ -18,7 +18,7 @@ public class SimpleConversationMemorySnapshot {
 
 
     public SimpleConversationMemorySnapshot() {
-        this.conversationSteps = new LinkedList<SimpleConversationStep>();
+        this.conversationSteps = new LinkedList<>();
     }
 
     public String getBotId() {
@@ -74,7 +74,7 @@ public class SimpleConversationMemorySnapshot {
         private Date timestamp;
 
         public SimpleConversationStep() {
-            this.data = new LinkedList<SimpleData>();
+            this.data = new LinkedList<>();
         }
 
         public List<SimpleData> getData() {
@@ -97,9 +97,6 @@ public class SimpleConversationMemorySnapshot {
     public static class SimpleData {
         private String key;
         private String value;
-
-        private SimpleData() {
-        }
 
         public SimpleData(String key, String value) {
             this.key = key;

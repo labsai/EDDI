@@ -8,6 +8,8 @@ import io.swagger.annotations.Api;
 import org.jboss.resteasy.annotations.cache.NoCache;
 
 import javax.ws.rs.*;
+import javax.ws.rs.container.AsyncResponse;
+import javax.ws.rs.container.Suspended;
 import javax.ws.rs.core.MediaType;
 import javax.ws.rs.core.Response;
 
@@ -33,9 +35,10 @@ public interface IRestBotEngine {
     @NoCache
     @Path("/{environment}/{botId}/{conversationId}")
     @Produces(MediaType.APPLICATION_JSON)
-    SimpleConversationMemorySnapshot readConversationLog(@PathParam("environment") Deployment.Environment environment,
-                                                         @PathParam("botId") String botId,
-                                                         @PathParam("conversationId") String conversationId) throws Exception;
+    SimpleConversationMemorySnapshot readConversation(@PathParam("environment") Deployment.Environment environment,
+                                                      @PathParam("botId") String botId,
+                                                      @PathParam("conversationId") String conversationId,
+                                                      @QueryParam("includeAll") @DefaultValue("false") Boolean includeAll) throws Exception;
 
     @GET
     @Path("/{environment}/conversationstatus/{conversationId}")
@@ -55,10 +58,11 @@ public interface IRestBotEngine {
     @POST
     @Path("/{environment}/{botId}/{conversationId}")
     @Consumes(MediaType.TEXT_PLAIN)
-    Response say(@PathParam("environment") Deployment.Environment environment,
-                 @PathParam("botId") String botId,
-                 @PathParam("conversationId") String conversationId,
-                 @DefaultValue("") String message) throws Exception;
+    void say(@PathParam("environment") Deployment.Environment environment,
+             @PathParam("botId") String botId,
+             @PathParam("conversationId") String conversationId,
+             @DefaultValue("") String message,
+             @Suspended final AsyncResponse response) throws Exception;
 
     @GET
     @Path("/{environment}/{botId}/undo/{conversationId}")

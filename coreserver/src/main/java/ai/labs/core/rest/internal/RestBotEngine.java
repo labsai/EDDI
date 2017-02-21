@@ -22,9 +22,11 @@ import org.jboss.resteasy.spi.NoLogWebApplicationException;
 
 import javax.inject.Inject;
 import javax.ws.rs.InternalServerErrorException;
+import javax.ws.rs.container.AsyncResponse;
 import javax.ws.rs.core.Response;
 import java.net.URI;
 import java.util.concurrent.Callable;
+import java.util.concurrent.TimeUnit;
 
 /**
  * @author ginccc
@@ -71,7 +73,7 @@ public class RestBotEngine implements IRestBotEngine {
     }
 
     @Override
-    public SimpleConversationMemorySnapshot readConversationLog(Deployment.Environment environment, String botId, String conversationId) {
+    public SimpleConversationMemorySnapshot readConversation(Deployment.Environment environment, String botId, String conversationId, Boolean includeAll) {
         RuntimeUtilities.checkNotNull(environment, "environment");
         RuntimeUtilities.checkNotNull(botId, "botId");
         RuntimeUtilities.checkNotNull(conversationId, "conversationId");
@@ -82,8 +84,7 @@ public class RestBotEngine implements IRestBotEngine {
                 message = String.format(message, conversationId, botId);
                 throw new IllegalAccessException(message);
             }
-            SimpleConversationMemorySnapshot simpleConversationMemorySnapshot = ConversationMemoryUtilities.convertSimpleConversationMemory(conversationMemorySnapshot);
-            return simpleConversationMemorySnapshot;
+            return ConversationMemoryUtilities.convertSimpleConversationMemory(conversationMemorySnapshot, includeAll);
         } catch (IResourceStore.ResourceStoreException | IllegalAccessException e) {
             log.error(e.getLocalizedMessage(), e);
             throw new InternalServerErrorException(e.getLocalizedMessage(), e);
@@ -108,11 +109,15 @@ public class RestBotEngine implements IRestBotEngine {
     }
 
     @Override
-    public Response say(final Deployment.Environment environment, String botId, final String conversationId, final String message) {
+    public void say(final Deployment.Environment environment,
+                    final String botId, final String conversationId,
+                    final String message, final AsyncResponse response) {
         RuntimeUtilities.checkNotNull(environment, "environment");
         RuntimeUtilities.checkNotNull(botId, "botId");
         RuntimeUtilities.checkNotNull(conversationId, "conversationId");
         RuntimeUtilities.checkNotNull(message, "message");
+
+        response.setTimeout(60, TimeUnit.SECONDS);
 
         try {
             final IConversationMemory conversationMemory = loadConversationMemory(conversationId);
@@ -133,7 +138,8 @@ public class RestBotEngine implements IRestBotEngine {
                 msg = String.format(msg, conversationMemory.getBotId());
                 throw new Exception(msg);
             }
-            final IConversation conversation = bot.continueConversation(conversationMemory, null);
+            final IConversation conversation = bot.continueConversation(conversationMemory, response::resume);
+
             if (conversation.isEnded()) {
                 throw new NoLogWebApplicationException(new Throwable("Conversation has ended!"), Response.Status.GONE);
             }
@@ -156,7 +162,6 @@ public class RestBotEngine implements IRestBotEngine {
             };
 
             SystemRuntime.getRuntime().submitCallable(processUserInput, null);
-            return Response.accepted().build();
         } catch (InstantiationException | IllegalAccessException e) {
             String errorMsg = "Error while processing message!";
             log.error(errorMsg, e);

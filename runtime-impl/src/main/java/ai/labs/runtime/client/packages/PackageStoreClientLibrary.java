@@ -47,7 +47,12 @@ public class PackageStoreClientLibrary implements IPackageStoreClientLibrary {
             for (PackageConfiguration.PackageExtension packageExtension : packageConfiguration.getPackageExtensions()) {
                 URI type = packageExtension.getType();
                 if (URI_SCHEME_ID.equals(type.getScheme())) {
-                    ILifecycleTask lifecycleTask = lifecycleExtensionsProvider.get(type.getHost()).get();
+                    String host = type.getHost();
+                    if (!lifecycleExtensionsProvider.containsKey(host)) {
+                        throw new UnrecognizedExtensionException(String.format("Extension '%s' not found", host));
+                    }
+
+                    ILifecycleTask lifecycleTask = lifecycleExtensionsProvider.get(host).get();
                     lifecycleTask.setExtensions(packageExtension.getExtensions());
                     lifecycleTask.configure(packageExtension.getConfig());
                     lifecycleTask.init();

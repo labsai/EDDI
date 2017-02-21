@@ -23,7 +23,8 @@ public class Conversation implements IConversation {
 
     private final IConversation.IConversationOutputRenderer outputProvider;
 
-    public Conversation(List<IExecutablePackage> executablePackages, IConversationMemory conversationMemory, IConversationOutputRenderer outputProvider) {
+    public Conversation(List<IExecutablePackage> executablePackages, IConversationMemory conversationMemory,
+                        IConversationOutputRenderer outputProvider) {
         this.executablePackages = executablePackages;
         this.conversationMemory = conversationMemory;
         this.outputProvider = outputProvider;

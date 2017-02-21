@@ -16,12 +16,13 @@ import ai.labs.utilities.RuntimeUtilities;
 
 import javax.inject.Inject;
 import javax.inject.Named;
+import javax.ws.rs.container.AsyncResponse;
+import javax.ws.rs.container.TimeoutHandler;
 import javax.ws.rs.core.Response;
 import java.net.URI;
-import java.util.Date;
-import java.util.List;
-import java.util.Objects;
+import java.util.*;
 import java.util.concurrent.Callable;
+import java.util.concurrent.TimeUnit;
 
 /**
  * @author ginccc
@@ -108,7 +109,7 @@ public class TestCaseRuntime {
             if (RuntimeUtilities.isNullOrEmpty(input)) {
                 input = " ";
             }
-            botEngine.say(Deployment.Environment.test, botId, conversationId, input);
+            botEngine.say(Deployment.Environment.test, botId, conversationId, input, new MockAsyncResponse());
             while (botEngine.getConversationState(Deployment.Environment.test, conversationId) == ConversationState.IN_PROGRESS) {
                 Thread.sleep(1000);
             }
@@ -127,6 +128,79 @@ public class TestCaseRuntime {
         }
 
         return null;
+    }
+
+    private static class MockAsyncResponse implements AsyncResponse {
+
+        @Override
+        public boolean resume(Object response) {
+            return false;
+        }
+
+        @Override
+        public boolean resume(Throwable response) {
+            return false;
+        }
+
+        @Override
+        public boolean cancel() {
+            return false;
+        }
+
+        @Override
+        public boolean cancel(int retryAfter) {
+            return false;
+        }
+
+        @Override
+        public boolean cancel(Date retryAfter) {
+            return false;
+        }
+
+        @Override
+        public boolean isSuspended() {
+            return false;
+        }
+
+        @Override
+        public boolean isCancelled() {
+            return false;
+        }
+
+        @Override
+        public boolean isDone() {
+            return false;
+        }
+
+        @Override
+        public boolean setTimeout(long time, TimeUnit unit) {
+            return false;
+        }
+
+        @Override
+        public void setTimeoutHandler(TimeoutHandler handler) {
+
+        }
+
+        @Override
+        public Collection<Class<?>> register(Class<?> callback) {
+            return null;
+        }
+
+        @Override
+        public Map<Class<?>, Collection<Class<?>>> register(Class<?> callback, Class<?>[] callbacks) {
+            return null;
+        }
+
+        @Override
+        public Collection<Class<?>> register(Object callback) {
+            return null;
+        }
+
+        @Override
+        public Map<Class<?>, Collection<Class<?>>> register(Object callback, Object... callbacks) {
+            return null;
+        }
     }
 }
 
