@@ -1,6 +1,5 @@
-package ai.labs.configuration.utilities;
+package ai.labs.persistence;
 
-import ai.labs.persistence.ResultManipulator;
 import org.junit.Assert;
 import org.junit.Before;
 import org.junit.Test;

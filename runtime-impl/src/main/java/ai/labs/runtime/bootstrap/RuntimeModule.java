@@ -1,8 +1,23 @@
 package ai.labs.runtime.bootstrap;
 
 import ai.labs.runtime.BaseRuntime;
+import ai.labs.runtime.IBotFactory;
+import ai.labs.runtime.IPackageFactory;
 import ai.labs.runtime.SystemRuntime;
+import ai.labs.runtime.client.bots.BotStoreClientLibrary;
+import ai.labs.runtime.client.bots.IBotStoreClientLibrary;
+import ai.labs.runtime.client.configuration.IResourceClientLibrary;
+import ai.labs.runtime.client.configuration.ResourceClientLibrary;
+import ai.labs.runtime.client.packages.IPackageStoreClientLibrary;
+import ai.labs.runtime.client.packages.PackageStoreClientLibrary;
+import ai.labs.runtime.internal.BotFactory;
+import ai.labs.runtime.internal.PackageFactory;
+import ai.labs.runtime.service.BotStoreService;
+import ai.labs.runtime.service.IBotStoreService;
+import ai.labs.runtime.service.IPackageStoreService;
+import ai.labs.runtime.service.PackageStoreService;
 import com.google.inject.Provides;
+import com.google.inject.Scopes;
 import com.google.inject.TypeLiteral;
 import com.google.inject.matcher.AbstractMatcher;
 import com.google.inject.spi.InjectionListener;
@@ -34,6 +49,15 @@ public class RuntimeModule extends AbstractBaseModule {
 
         //init system runtime eagerly
         bind(SystemRuntime.IRuntime.class).to(BaseRuntime.class).asEagerSingleton();
+
+        bind(IResourceClientLibrary.class).to(ResourceClientLibrary.class).in(Scopes.SINGLETON);
+        bind(IBotStoreClientLibrary.class).to(BotStoreClientLibrary.class).in(Scopes.SINGLETON);
+        bind(IPackageStoreClientLibrary.class).to(PackageStoreClientLibrary.class).in(Scopes.SINGLETON);
+        bind(IPackageStoreService.class).to(PackageStoreService.class).in(Scopes.SINGLETON);
+        bind(IBotStoreService.class).to(BotStoreService.class).in(Scopes.SINGLETON);
+
+        bind(IBotFactory.class).to(BotFactory.class).in(Scopes.SINGLETON);
+        bind(IPackageFactory.class).to(PackageFactory.class).in(Scopes.SINGLETON);
 
         //call init method of system runtime after creation
         bindListener(HasInitMethod.INSTANCE, new TypeListener() {

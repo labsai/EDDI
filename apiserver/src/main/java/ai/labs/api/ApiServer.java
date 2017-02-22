@@ -19,6 +19,7 @@ import ai.labs.server.bootstrap.ServerRuntimeModule;
 import ai.labs.staticresources.bootstrap.StaticResourcesModule;
 import ai.labs.testing.bootstrap.AutomatedtestingModule;
 import ai.labs.utilities.FileUtilities;
+import com.google.inject.Module;
 import org.jboss.resteasy.plugins.guice.ext.RequestScopeModule;
 
 import java.io.FileInputStream;
@@ -41,7 +42,7 @@ public class ApiServer {
 
         //bootstrapping modules
         DependencyInjector.Environment environment = DependencyInjector.Environment.valueOf(eddiEnv.toUpperCase());
-        final DependencyInjector injector = DependencyInjector.init(environment,
+        Module[] modules = {
                 new RuntimeModule(
                         new FileInputStream(configDir + "threads.properties"),
                         new FileInputStream(configDir + "systemRuntime.properties")),
@@ -62,7 +63,11 @@ public class ApiServer {
                 new CoreModule(),
                 new SwaggerModule(new FileInputStream(configDir + "swagger.properties")),
                 new ServerRuntimeModule(new FileInputStream(configDir + "webServer.properties"),
-                        new FileInputStream(configDir + "keycloak.properties")));
+                        new FileInputStream(configDir + "keycloak.properties"))
+        };
+
+        //init modules
+        final DependencyInjector injector = DependencyInjector.init(environment, modules);
 
         //init webserver
         injector.getInstance(IServerRuntime.class).startup();
