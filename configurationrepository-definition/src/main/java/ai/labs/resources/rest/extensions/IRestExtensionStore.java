@@ -28,7 +28,7 @@ public interface IRestExtensionStore {
     @GET
     @Path("/{id}")
     @Produces(MediaType.APPLICATION_JSON)
-    ExtensionDefinition readExtension(@PathParam("id") String id, @QueryParam("version") Integer version) throws Exception;
+    ExtensionDefinition readExtension(@PathParam("id") String id, @QueryParam("version") Integer version);
 
     @PUT
     @Path("/{id}")

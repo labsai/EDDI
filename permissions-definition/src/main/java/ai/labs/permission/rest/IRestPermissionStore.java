@@ -15,7 +15,7 @@ public interface IRestPermissionStore {
     @GET
     @Path("/{resourceId}")
     @Produces(MediaType.APPLICATION_JSON)
-    Permissions readPermissions(@PathParam("resourceId") String resourceId) throws Exception;
+    Permissions readPermissions(@PathParam("resourceId") String resourceId);
 
     @PUT
     @Path("/{resourceId}")

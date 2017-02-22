@@ -22,6 +22,7 @@ import org.jboss.resteasy.spi.NoLogWebApplicationException;
 
 import javax.inject.Inject;
 import javax.ws.rs.InternalServerErrorException;
+import javax.ws.rs.NotFoundException;
 import javax.ws.rs.container.AsyncResponse;
 import javax.ws.rs.core.Response;
 import java.net.URI;
@@ -33,7 +34,7 @@ import java.util.concurrent.TimeUnit;
  */
 @Slf4j
 public class RestBotEngine implements IRestBotEngine {
-    final String resourceURI = "eddi://ai.labsconversation/conversationstore/conversations/";
+    private static final String resourceURI = "eddi://ai.labsconversation/conversationstore/conversations/";
     private final IBotFactory botFactory;
     private final IConversationMemoryStore conversationMemoryStore;
 
@@ -178,16 +179,24 @@ public class RestBotEngine implements IRestBotEngine {
     }
 
     @Override
-    public Boolean isUndoAvailable(Deployment.Environment environment, String botId, String conversationId) throws Exception {
+    public Boolean isUndoAvailable(Deployment.Environment environment, String botId, String conversationId) {
         RuntimeUtilities.checkNotNull(environment, "environment");
         RuntimeUtilities.checkNotNull(botId, "botId");
         RuntimeUtilities.checkNotNull(conversationId, "conversationId");
-        final IConversationMemory conversationMemory = loadConversationMemory(conversationId);
-        return conversationMemory.isUndoAvailable();
+        final IConversationMemory conversationMemory;
+        try {
+            conversationMemory = loadConversationMemory(conversationId);
+            return conversationMemory.isUndoAvailable();
+        } catch (IResourceStore.ResourceStoreException e) {
+            log.error(e.getLocalizedMessage(), e);
+            throw new InternalServerErrorException();
+        } catch (IResourceStore.ResourceNotFoundException e) {
+            throw new NoLogWebApplicationException(Response.Status.NOT_FOUND);
+        }
     }
 
     @Override
-    public Response undo(final Deployment.Environment environment, String botId, final String conversationId) throws Exception {
+    public Response undo(final Deployment.Environment environment, String botId, final String conversationId) {
         RuntimeUtilities.checkNotNull(environment, "environment");
         RuntimeUtilities.checkNotNull(botId, "botId");
         RuntimeUtilities.checkNotNull(conversationId, "conversationId");
@@ -238,16 +247,24 @@ public class RestBotEngine implements IRestBotEngine {
     }
 
     @Override
-    public Boolean isRedoAvailable(final Deployment.Environment environment, String botId, String conversationId) throws Exception {
+    public Boolean isRedoAvailable(final Deployment.Environment environment, String botId, String conversationId) {
         RuntimeUtilities.checkNotNull(environment, "environment");
         RuntimeUtilities.checkNotNull(botId, "botId");
         RuntimeUtilities.checkNotNull(conversationId, "conversationId");
-        final IConversationMemory conversationMemory = loadConversationMemory(conversationId);
-        return conversationMemory.isRedoAvailable();
+        final IConversationMemory conversationMemory;
+        try {
+            conversationMemory = loadConversationMemory(conversationId);
+            return conversationMemory.isRedoAvailable();
+        } catch (IResourceStore.ResourceStoreException e) {
+            throw new NoLogWebApplicationException(Response.Status.NOT_FOUND);
+        } catch (IResourceStore.ResourceNotFoundException e) {
+            log.error(e.getLocalizedMessage(), e);
+            throw new InternalServerErrorException();
+        }
     }
 
     @Override
-    public Response redo(final Deployment.Environment environment, String botId, final String conversationId) throws Exception {
+    public Response redo(final Deployment.Environment environment, String botId, final String conversationId) {
         RuntimeUtilities.checkNotNull(environment, "environment");
         RuntimeUtilities.checkNotNull(botId, "botId");
         RuntimeUtilities.checkNotNull(conversationId, "conversationId");
@@ -311,8 +328,8 @@ public class RestBotEngine implements IRestBotEngine {
         return conversationMemoryStore.storeConversationMemorySnapshot(memorySnapshot);
     }
 
-    private class BotNotFoundException extends Throwable {
-        public BotNotFoundException(String message) {
+    private class BotNotFoundException extends NotFoundException {
+        BotNotFoundException(String message) {
             super(message);
         }
     }

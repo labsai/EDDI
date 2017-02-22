@@ -16,7 +16,7 @@ public interface IRestGroupStore {
     @GET
     @Path("/{groupId}")
     @Produces(MediaType.APPLICATION_JSON)
-    Group readGroup(@PathParam("groupId") String groupId) throws Exception;
+    Group readGroup(@PathParam("groupId") String groupId);
 
     @PUT
     @Path("/{groupId}")

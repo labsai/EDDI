@@ -28,7 +28,7 @@ public interface IRestPackageStore extends IRestVersionInfo {
     @GET
     @Path("/{id}")
     @Produces(MediaType.APPLICATION_JSON)
-    PackageConfiguration readPackage(@PathParam("id") String id, @QueryParam("version") Integer version) throws Exception;
+    PackageConfiguration readPackage(@PathParam("id") String id, @QueryParam("version") Integer version);
 
     @PUT
     @Path("/{id}")

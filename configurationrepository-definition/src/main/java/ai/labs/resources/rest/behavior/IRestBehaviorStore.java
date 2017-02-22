@@ -39,7 +39,7 @@ public interface IRestBehaviorStore extends IRestVersionInfo {
     @GET
     @Path("/{id}")
     @Produces(MediaType.APPLICATION_JSON)
-    BehaviorConfiguration readBehaviorRuleSet(@PathParam("id") String id, @QueryParam("version") Integer version) throws Exception;
+    BehaviorConfiguration readBehaviorRuleSet(@PathParam("id") String id, @QueryParam("version") Integer version);
 
     @PUT
     @Path("/{id}")

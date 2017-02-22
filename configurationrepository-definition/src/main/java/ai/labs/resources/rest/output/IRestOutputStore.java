@@ -35,7 +35,7 @@ public interface IRestOutputStore extends IRestVersionInfo {
                                          @QueryParam("filter") @DefaultValue("") String filter,
                                          @QueryParam("order") @DefaultValue("") String order,
                                          @QueryParam("index") @DefaultValue("0") Integer index,
-                                         @QueryParam("limit") @DefaultValue("20") Integer limit) throws Exception;
+                                         @QueryParam("limit") @DefaultValue("20") Integer limit);
 
     @GET
     @Path("/{id}/outputKeys")

@@ -38,12 +38,12 @@ public interface IRestBotEngine {
     SimpleConversationMemorySnapshot readConversation(@PathParam("environment") Deployment.Environment environment,
                                                       @PathParam("botId") String botId,
                                                       @PathParam("conversationId") String conversationId,
-                                                      @QueryParam("includeAll") @DefaultValue("false") Boolean includeAll) throws Exception;
+                                                      @QueryParam("includeAll") @DefaultValue("false") Boolean includeAll);
 
     @GET
     @Path("/{environment}/conversationstatus/{conversationId}")
     ConversationState getConversationState(@PathParam("environment") Deployment.Environment environment,
-                                           @PathParam("conversationId") String conversationId) throws Exception;
+                                           @PathParam("conversationId") String conversationId);
 
     /**
      * talk to bot
@@ -62,31 +62,31 @@ public interface IRestBotEngine {
              @PathParam("botId") String botId,
              @PathParam("conversationId") String conversationId,
              @DefaultValue("") String message,
-             @Suspended final AsyncResponse response) throws Exception;
+             @Suspended final AsyncResponse response);
 
     @GET
     @Path("/{environment}/{botId}/undo/{conversationId}")
     @Produces(MediaType.TEXT_PLAIN)
     Boolean isUndoAvailable(@PathParam("environment") Deployment.Environment environment,
                             @PathParam("botId") String botId,
-                            @PathParam("conversationId") String conversationId) throws Exception;
+                            @PathParam("conversationId") String conversationId);
 
     @POST
     @Path("/{environment}/{botId}/undo/{conversationId}")
     Response undo(@PathParam("environment") Deployment.Environment environment,
                   @PathParam("botId") String botId,
-                  @PathParam("conversationId") String conversationId) throws Exception;
+                  @PathParam("conversationId") String conversationId);
 
     @GET
     @Path("/{environment}/{botId}/redo/{conversationId}")
     @Produces(MediaType.TEXT_PLAIN)
     Boolean isRedoAvailable(@PathParam("environment") Deployment.Environment environment,
                             @PathParam("botId") String botId,
-                            @PathParam("conversationId") String conversationId) throws Exception;
+                            @PathParam("conversationId") String conversationId);
 
     @POST
     @Path("/{environment}/{botId}/redo/{conversationId}")
     Response redo(@PathParam("environment") Deployment.Environment environment,
                   @PathParam("botId") String botId,
-                  @PathParam("conversationId") String conversationId) throws Exception;
+                  @PathParam("conversationId") String conversationId);
 }

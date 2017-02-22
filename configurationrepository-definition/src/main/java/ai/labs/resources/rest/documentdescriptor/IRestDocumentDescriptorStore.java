@@ -29,7 +29,7 @@ public interface IRestDocumentDescriptorStore {
     @GET
     @Path("/{id}")
     @Produces(MediaType.APPLICATION_JSON)
-    DocumentDescriptor readDescriptor(@PathParam("id") String id, @QueryParam("version") Integer version) throws Exception;
+    DocumentDescriptor readDescriptor(@PathParam("id") String id, @QueryParam("version") Integer version);
 
     @GET
     @Path("/{id}/simple")
