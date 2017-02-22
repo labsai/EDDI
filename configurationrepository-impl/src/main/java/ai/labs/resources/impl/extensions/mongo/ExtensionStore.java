@@ -67,7 +67,7 @@ public class ExtensionStore implements IExtensionStore {
 
     @Override
     public List<ExtensionDefinition> readExtensions(String filter, Integer index, Integer limit) throws ResourceNotFoundException, ResourceStoreException {
-        filter = "^core://" + filter + ".?[a-zA-Z0-9]*$";
+        filter = "^eddi://" + filter + ".?[a-zA-Z0-9]*$";
         IResourceFilter.QueryFilter queryFilter = new IResourceFilter.QueryFilter("type", filter);
         IResourceFilter.QueryFilters queryFilters = new IResourceFilter.QueryFilters(Collections.singletonList(queryFilter));
         return resourceFilter.readResources(new IResourceFilter.QueryFilters[]{queryFilters}, index, limit);

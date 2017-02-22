@@ -5,7 +5,7 @@
     <parent>
         <artifactId>eddi</artifactId>
         <groupId>ai.labs</groupId>
-        <version>3.0-SNAPSHOT</version>
+        <version>4.0-SNAPSHOT</version>
     </parent>
     <modelVersion>4.0.0</modelVersion>
 
@@ -15,7 +15,7 @@
         <dependency>
             <groupId>ai.labs</groupId>
             <artifactId>conversationmemory-definition</artifactId>
-            <version>3.0-SNAPSHOT</version>
+            <version>4.0-SNAPSHOT</version>
         </dependency>
     </dependencies>
 

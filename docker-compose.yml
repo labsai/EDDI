@@ -7,7 +7,7 @@ services:
     depends_on:
       - mongodb
     environment:
-      EDDI_VERSION: 3.0-SNAPSHOT
+      EDDI_VERSION: 4.0-SNAPSHOT
       EDDI_ENV: development
       EDDI_DB: mongodb
       EDDI_AUTH: unknown

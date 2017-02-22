@@ -1,4 +1,4 @@
-package ai.labs.nlp;
+package ai.labs.api;
 
 import ai.labs.bootstrap.UserModule;
 import ai.labs.caching.bootstrap.CachingModule;
@@ -26,7 +26,7 @@ import java.io.FileInputStream;
 /**
  * @author ginccc
  */
-public class NlpServer {
+public class ApiServer {
     private static final String ENVIRONMENT_KEY = "EDDI_ENV";
     private static final String USER_DIR = System.getProperty("user.dir");
 

@@ -2,7 +2,7 @@ FROM java:8-jre
 
 #TODO move the env to docker-compose
 EXPOSE 7070
-ENV EDDI_VERSION 3.0-SNAPSHOT
+ENV EDDI_VERSION 4.0-SNAPSHOT
 ENV EDDI_ENV development
 ENV EDDI_DB mongodb
 ENV EDDI_AUTH unknown
@@ -26,7 +26,7 @@ RUN unzip /nlpserver/install/nlpserver-$EDDI_VERSION-package.zip -d /nlpserver
 #CMD exec ls -la
 #make sure all file (after unzip) have the right rights(executable) for one file use RUN chmod +x <file>
 RUN chmod -R 777 /nlpserver/
-ENTRYPOINT java -classpath '.:lib/*' -DEDDI_ENV=$EDDI_ENV -DEDDI_AUTH=$EDDI_AUTH -DEDDI_DB=$EDDI_DB ai.labs.nlp.NlpServer
+ENTRYPOINT java -classpath '.:lib/*' -DEDDI_ENV=$EDDI_ENV -DEDDI_AUTH=$EDDI_AUTH -DEDDI_DB=$EDDI_DB ai.labs.api.ApiServer
 
 #for using a script as entrypoint the file NlpServerStartup.sh is not found.
 #specify the sh

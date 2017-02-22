@@ -7,7 +7,7 @@
     <groupId>ai.labs</groupId>
     <artifactId>eddi</artifactId>
     <packaging>pom</packaging>
-    <version>3.0-SNAPSHOT</version>
+    <version>4.0-SNAPSHOT</version>
 
     <modules>
         <module>expressions</module>
@@ -38,7 +38,7 @@
         <module>semanticparser-impl</module>
         <module>conversationlifecycle-definition</module>
         <module>conversationlifecycle-impl</module>
-        <module>nlpserver</module>
+        <module>apiserver</module>
         <module>caching-definition</module>
         <module>caching-impl-infinispan</module>
     </modules>

@@ -56,7 +56,7 @@ public class RestExpression implements IRestExpression {
         List<IResourceStore.IResourceId> resourceIds = new LinkedList<>();
 
         for (PackageConfiguration.PackageExtension packageExtension : packageConfiguration.getPackageExtensions()) {
-            if (!packageExtension.getType().toString().startsWith("core://ai.labs.parser")) {
+            if (!packageExtension.getType().toString().startsWith("eddi://ai.labs.parser")) {
                 continue;
             }
 
@@ -68,7 +68,7 @@ public class RestExpression implements IRestExpression {
 
                 List<Map<String, Object>> extensions = (List<Map<String, Object>>) extensionTypes.get(extensionKey);
                 for (Map<String, Object> extension : extensions) {
-                    if (!extension.containsKey("type") || !extension.get("type").toString().startsWith("core://ai.labs.parser.dictionaries.regular")) {
+                    if (!extension.containsKey("type") || !extension.get("type").toString().startsWith("eddi://ai.labs.parser.dictionaries.regular")) {
                         continue;
                     }
 

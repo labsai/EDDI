@@ -1,4 +1,4 @@
-package ai.labs.nlp;
+package ai.labs.api;
 
 import ai.labs.permission.interceptor.PermissionRequestInterceptor;
 import ai.labs.permission.interceptor.PermissionResponseInterceptor;

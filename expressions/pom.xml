@@ -7,7 +7,7 @@
     <parent>
         <groupId>ai.labs</groupId>
         <artifactId>eddi</artifactId>
-        <version>3.0-SNAPSHOT</version>
+        <version>4.0-SNAPSHOT</version>
         <relativePath>../pom.xml</relativePath>
     </parent>
     <artifactId>expressions</artifactId>
@@ -28,12 +28,12 @@
         <dependency>
             <groupId>ai.labs</groupId>
             <artifactId>runtime-definition</artifactId>
-            <version>3.0-SNAPSHOT</version>
+            <version>4.0-SNAPSHOT</version>
         </dependency>
         <dependency>
             <groupId>ai.labs</groupId>
             <artifactId>runtime-impl</artifactId>
-            <version>3.0-SNAPSHOT</version>
+            <version>4.0-SNAPSHOT</version>
         </dependency>
     </dependencies>
     <properties>
