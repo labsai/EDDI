@@ -14,19 +14,19 @@ import javax.inject.Named;
  */
 public class PackageStoreService implements IPackageStoreService {
     private final IRestInterfaceFactory restInterfaceFactory;
-    private String configurationServerURI;
+    private String apiServerURI;
 
     @Inject
     public PackageStoreService(IRestInterfaceFactory restInterfaceFactory,
-                               @Named("system.configurationServerURI") String configurationServerURI) {
+                               @Named("system.apiServerURI") String apiServerURI) {
         this.restInterfaceFactory = restInterfaceFactory;
-        this.configurationServerURI = configurationServerURI;
+        this.apiServerURI = apiServerURI;
     }
 
     @Override
     public PackageConfiguration getKnowledgePackage(String packageId, Integer packageVersion) throws ServiceException {
         try {
-            IRestPackageStore serviceProxy = restInterfaceFactory.get(IRestPackageStore.class, configurationServerURI);
+            IRestPackageStore serviceProxy = restInterfaceFactory.get(IRestPackageStore.class, apiServerURI);
             return serviceProxy.readPackage(packageId, packageVersion);
         } catch (Exception e) {
             throw new ServiceException(e.getLocalizedMessage(), e);
@@ -36,7 +36,7 @@ public class PackageStoreService implements IPackageStoreService {
     @Override
     public DocumentDescriptor getPackageDocumentDescriptor(String packageId, Integer packageVersion) throws ServiceException {
         try {
-            IRestDocumentDescriptorStore serviceProxy = restInterfaceFactory.get(IRestDocumentDescriptorStore.class, configurationServerURI);
+            IRestDocumentDescriptorStore serviceProxy = restInterfaceFactory.get(IRestDocumentDescriptorStore.class, apiServerURI);
             return serviceProxy.readDescriptor(packageId, packageVersion);
         } catch (Exception e) {
             throw new ServiceException(e.getLocalizedMessage(), e);

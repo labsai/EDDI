@@ -39,6 +39,7 @@ public class ServerRuntimeModule extends AbstractBaseModule {
     @Singleton
     public IServerRuntime provideServerRuntime(@Named("system.environment") String environment,
                                                @Named("systemRuntime.resourceDir") String resourceDir,
+                                               @Named("webServer.applicationConfigurationClass") String applicationConfigurationClass,
                                                @Named("webServer.host") String host,
                                                @Named("webServer.httpPort") Integer httpPort,
                                                @Named("webServer.httpsPort") Integer httpsPort,
@@ -55,9 +56,10 @@ public class ServerRuntimeModule extends AbstractBaseModule {
                                                SwaggerServletContextListener swaggerContextListener,
                                                HttpServletDispatcher httpServletDispatcher,
                                                Provider<SecurityHandler> securityHandlerProvider,
-                                               LoginService mongoLoginService) {
+                                               LoginService mongoLoginService) throws ClassNotFoundException {
 
         ServerRuntime.Options options = new ServerRuntime.Options();
+        options.applicationConfiguration = Class.forName(applicationConfigurationClass);
         options.loginService = mongoLoginService;
         options.host = host;
         options.httpPort = httpPort;

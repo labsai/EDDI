@@ -24,7 +24,7 @@ public class ResourceClientLibrary implements IResourceClientLibrary {
 
     @Inject
     public ResourceClientLibrary(IRestInterfaceFactory restInterfaceFactory,
-                                 @Named("system.configurationServerURI") String configurationServerURI) {
+                                 @Named("system.apiServerURI") String configurationServerURI) {
         this.restInterfaceFactory = restInterfaceFactory;
         this.configurationServerURI = configurationServerURI;
         init();

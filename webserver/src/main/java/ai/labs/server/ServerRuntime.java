@@ -46,6 +46,7 @@ import java.util.*;
 public class ServerRuntime implements IServerRuntime {
 
     public static class Options {
+        public Class<?> applicationConfiguration;
         public LoginService loginService;
         public String host;
         public int httpPort;
@@ -98,6 +99,7 @@ public class ServerRuntime implements IServerRuntime {
                     contextParameter.put("resteasy.guice.stage", environment.toUpperCase());
                     contextParameter.put("resteasy.logger.type", "SLF4J");
                     contextParameter.put("resteasy.servlet.mapping.prefix", "/");
+                    contextParameter.put("javax.ws.rs.Application", options.applicationConfiguration.getName());
 
                     startupJetty(contextParameter,
                             Arrays.asList(resteasyContextListener, swaggerContextListener),
