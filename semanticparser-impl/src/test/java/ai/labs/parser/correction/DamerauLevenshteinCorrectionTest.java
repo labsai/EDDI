@@ -7,7 +7,6 @@ import ai.labs.expressions.utilities.IExpressionProvider;
 import ai.labs.parser.model.IDictionary;
 import ai.labs.parser.model.Phrase;
 import ai.labs.parser.model.Word;
-import lombok.extern.slf4j.Slf4j;
 import org.junit.Assert;
 import org.junit.Before;
 import org.junit.Test;
@@ -18,7 +17,6 @@ import java.util.List;
 /**
  * @author ginccc
  */
-@Slf4j
 public class DamerauLevenshteinCorrectionTest {
     private IExpressionProvider expressionUtilities;
 
