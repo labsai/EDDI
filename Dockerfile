@@ -1,4 +1,4 @@
-FROM java:8-jre
+FROM openjdk:8-jre
 
 #TODO move the env to docker-compose
 EXPOSE 7070
