@@ -48,7 +48,7 @@ public class RestMonitorStore implements IRestMonitorStore {
             List<ConversationDescriptor> conversationDescriptors;
             List<ConversationDescriptor> retConversationDescriptors = new LinkedList<ConversationDescriptor>();
             do {
-                conversationDescriptors = conversationDescriptorStore.readDescriptors("ai.labsconversation", null, index, limit, false);
+                conversationDescriptors = conversationDescriptorStore.readDescriptors("ai.labs.conversation", null, index, limit, false);
                 for (ConversationDescriptor conversationDescriptor : conversationDescriptors) {
                     ConversationMemorySnapshot memorySnapshot = readConversationLog(RestUtilities.extractResourceId(conversationDescriptor.getResource()).getId());
                     if (!RuntimeUtilities.isNullOrEmpty(botId)) {

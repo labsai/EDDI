@@ -34,7 +34,7 @@ import java.util.concurrent.TimeUnit;
  */
 @Slf4j
 public class RestBotEngine implements IRestBotEngine {
-    private static final String resourceURI = "eddi://ai.labsconversation/conversationstore/conversations/";
+    private static final String resourceURI = "eddi://ai.labs.conversation/conversationstore/conversations/";
     private final IBotFactory botFactory;
     private final IConversationMemoryStore conversationMemoryStore;
 

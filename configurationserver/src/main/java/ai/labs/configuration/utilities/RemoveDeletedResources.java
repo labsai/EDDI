@@ -43,7 +43,7 @@ public class RemoveDeletedResources {
         restInterfaces.put("ai.labs.regulardictionary", regularDictionaryStore::deleteAllPermanently);
         restInterfaces.put("ai.labs.behavior", behaviorStore::deleteAllPermanently);
         restInterfaces.put("ai.labs.output", outputStore::deleteAllPermanently);
-        restInterfaces.put("ai.labsconversation", conversationMemoryStore::deleteConversationMemorySnapshot);
+        restInterfaces.put("ai.labs.conversation", conversationMemoryStore::deleteConversationMemorySnapshot);
     }
 
 

@@ -122,7 +122,7 @@ public class DocumentDescriptorInterceptor implements ContainerResponseFilter {
         IDescriptorStore descriptorStore;
         if (createdResourceURIString.startsWith("eddi://ai.labs.testcases")) {
             descriptorStore = testCaseDescriptorStore;
-        } else if (createdResourceURIString.startsWith("eddi://ai.labsconversation")) {
+        } else if (createdResourceURIString.startsWith("eddi://ai.labs.conversation")) {
             descriptorStore = conversationDescriptorStore;
         } else {
             descriptorStore = documentDescriptorStore;

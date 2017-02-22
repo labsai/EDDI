@@ -41,8 +41,7 @@ public class ApiServer {
 
         //bootstrapping modules
         DependencyInjector.Environment environment = DependencyInjector.Environment.valueOf(eddiEnv.toUpperCase());
-        //TODO check why production mode does not work
-        final DependencyInjector injector = DependencyInjector.init(DependencyInjector.Environment.DEVELOPMENT,
+        final DependencyInjector injector = DependencyInjector.init(environment,
                 new RuntimeModule(
                         new FileInputStream(configDir + "threads.properties"),
                         new FileInputStream(configDir + "systemRuntime.properties")),
