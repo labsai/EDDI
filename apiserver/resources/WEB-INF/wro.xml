@@ -5,11 +5,13 @@
         <css>/css/typography.css</css>
         <css>/css/reset.css</css>
         <css>/css/screen.css</css>
+        <css>/css/eddi.css</css>
     </group>
 
     <group name="print">
         <css>/css/reset.css</css>
         <css>/css/print.css</css>
+        <css>/css/eddi.css</css>
     </group>
 
     <group name="all">
