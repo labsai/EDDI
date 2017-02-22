@@ -103,9 +103,7 @@ public class ServerRuntime implements IServerRuntime {
 
                     startupJetty(contextParameter,
                             Arrays.asList(resteasyContextListener, swaggerContextListener),
-                            Arrays.asList(new FilterMappingHolder(new WroFilter() {
-
-                            }, "/text/*")),
+                            Arrays.asList(new FilterMappingHolder(new WroFilter(), "/text/*")),
                             Arrays.asList(new HttpServletHolder(httpServletDispatcher, "/*"),
                                     new HttpServletHolder(new JSAPIServlet(), "/rest-js")),
                             FileUtilities.buildPath(System.getProperty("user.dir"), resourceDir));
