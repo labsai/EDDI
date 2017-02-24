@@ -1,7 +1,5 @@
 package ai.labs.staticresources.impl.interceptor;
 
-import ai.labs.runtime.ThreadContext;
-
 import javax.ws.rs.container.ContainerRequestContext;
 import javax.ws.rs.container.ContainerResponseContext;
 import javax.ws.rs.container.ContainerResponseFilter;
@@ -38,7 +36,7 @@ public class ContentTypeInterceptor implements ContainerResponseFilter {
 
     @Override
     public void filter(ContainerRequestContext requestContext, ContainerResponseContext responseContext) throws IOException {
-        String currentResourceURI = ThreadContext.get("currentResourceURI").toString();
+        String currentResourceURI = requestContext.getUriInfo().getPath();
 
         if (currentResourceURI.startsWith("/editor") ||
                 currentResourceURI.startsWith("/text") ||

@@ -16,7 +16,7 @@
 
     <group name="all">
         <js>/js/object-assign-pollyfill.js</js>
-        <js>/js/jquery-1.8.0.min.js</js>
+        <group-ref>jquery</group-ref>
         <js>/js/jquery.slideto.min.js</js>
         <js>/js/jquery.wiggle.min.js</js>
         <js>/js/jquery.ba-bbq.min.js</js>
@@ -29,5 +29,16 @@
         <js>/js/jsoneditor.min.js</js>
         <js>/js/marked.js</js>
         <js>/js/swagger-oauth.js</js>
+    </group>
+
+    <group name="chat">
+        <group-ref>jquery</group-ref>
+        <js>/js/chat.js</js>
+        <css>/css/chat.css</css>
+    </group>
+
+    <group name="jquery">
+        <js>/js/jquery-1.8.0.min.js</js>
+        <js>/js/jquery.urldecoder.edited.js</js>
     </group>
 </groups>

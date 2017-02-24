@@ -1,7 +1,7 @@
 package ai.labs.staticresources.rest.impl;
 
 import ai.labs.staticresources.rest.IResourceFileManager;
-import ai.labs.staticresources.rest.IRestHtmlResource;
+import ai.labs.staticresources.rest.IRestHtmlApiResource;
 import org.jboss.resteasy.spi.NoLogWebApplicationException;
 
 import javax.inject.Inject;
@@ -10,11 +10,11 @@ import javax.ws.rs.core.Response;
 /**
  * @author ginccc
  */
-public class RestHtmlResource implements IRestHtmlResource {
+public class RestHtmlApiResource implements IRestHtmlApiResource {
     private final IResourceFileManager resourceFileManager;
 
     @Inject
-    public RestHtmlResource(IResourceFileManager resourceFileManager) {
+    public RestHtmlApiResource(IResourceFileManager resourceFileManager) {
         this.resourceFileManager = resourceFileManager;
     }
 
