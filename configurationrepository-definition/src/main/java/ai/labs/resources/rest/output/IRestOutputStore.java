@@ -23,6 +23,7 @@ public interface IRestOutputStore extends IRestVersionInfo {
     String versionQueryParam = "?version=";
 
     @GET
+    @Path("descriptors")
     @Produces(MediaType.APPLICATION_JSON)
     List<DocumentDescriptor> readOutputDescriptors(@QueryParam("filter") @DefaultValue("") String filter,
                                                    @QueryParam("index") @DefaultValue("0") Integer index,

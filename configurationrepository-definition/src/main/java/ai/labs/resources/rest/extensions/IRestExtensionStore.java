@@ -20,6 +20,7 @@ public interface IRestExtensionStore {
     String versionQueryParam = "?version=";
 
     @GET
+    @Path("descriptors")
     @Produces(MediaType.APPLICATION_JSON)
     List<DocumentDescriptor> readExtensionDescriptors(@QueryParam("filter") @DefaultValue("") String filter,
                                                       @QueryParam("index") @DefaultValue("0") Integer index,

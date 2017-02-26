@@ -82,8 +82,8 @@ public interface IRestRegularDictionaryStore extends IRestVersionInfo {
      * ]
      * }
      *
-     * @param regularDictionaryConfiguration
-     * @return
+     * @param regularDictionaryConfiguration dictionary resource to be created
+     * @return no content, http code 201, see Location header for URI of the created resource
      */
 
     @POST

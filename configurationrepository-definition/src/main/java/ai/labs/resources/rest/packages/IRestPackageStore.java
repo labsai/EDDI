@@ -20,6 +20,7 @@ public interface IRestPackageStore extends IRestVersionInfo {
     String resourceURI = "eddi://ai.labs.package/packagestore/packages/";
 
     @GET
+    @Path("descriptors")
     @Produces(MediaType.APPLICATION_JSON)
     List<DocumentDescriptor> readPackageDescriptors(@QueryParam("filter") @DefaultValue("") String filter,
                                                     @QueryParam("index") @DefaultValue("0") Integer index,

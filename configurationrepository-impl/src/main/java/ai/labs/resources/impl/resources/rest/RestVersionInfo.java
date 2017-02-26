@@ -62,7 +62,7 @@ public abstract class RestVersionInfo<T> implements IRestVersionInfo {
         }
     }
 
-    public Response create(T obj) {
+    protected Response create(T obj) {
         try {
             IResourceStore.IResourceId resourceId = resourceStore.create(obj);
             URI createdUri = RestUtilities.createURI(resourceURI, resourceId.getId(), versionQueryParam, resourceId.getVersion());
@@ -84,7 +84,7 @@ public abstract class RestVersionInfo<T> implements IRestVersionInfo {
         }
     }
 
-    public URI update(String id, Integer version, T document) {
+    protected URI update(String id, Integer version, T document) {
         try {
             Integer newVersion = resourceStore.update(id, version, document);
             return RestUtilities.createURI(resourceURI, id, versionQueryParam, newVersion);
@@ -98,7 +98,7 @@ public abstract class RestVersionInfo<T> implements IRestVersionInfo {
         }
     }
 
-    public void delete(String id, Integer version) {
+    protected void delete(String id, Integer version) {
         try {
             resourceStore.delete(id, version);
         } catch (IResourceStore.ResourceStoreException e) {
