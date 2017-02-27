@@ -1,11 +1,11 @@
-FROM openjdk:8-jre
+FROM openjdk:8-jre-alpine
 
 #TODO move the env to docker-compose
 EXPOSE 7070
 ENV EDDI_VERSION 4.0-SNAPSHOT
 ENV EDDI_ENV production
-ENV EDDI_DB mongodb
-ENV EDDI_AUTH unknown
+#ENV EDDI_DB mongodb
+#ENV EDDI_AUTH unknown
 #create workdir
 RUN mkdir -p /apiserver/
 WORKDIR /apiserver/
@@ -26,7 +26,7 @@ RUN unzip /apiserver/install/apiserver-$EDDI_VERSION-package.zip -d /apiserver
 #CMD exec ls -la
 #make sure all file (after unzip) have the right rights(executable) for one file use RUN chmod +x <file>
 RUN chmod -R 777 /apiserver/
-ENTRYPOINT java -classpath '.:lib/*' -DEDDI_ENV=$EDDI_ENV -DEDDI_AUTH=$EDDI_AUTH -DEDDI_DB=$EDDI_DB ai.labs.api.ApiServer
+ENTRYPOINT java -classpath '.:lib/*' -DEDDI_ENV=$EDDI_ENV ai.labs.api.ApiServer
 
 #for using a script as entrypoint the file NlpServerStartup.sh is not found.
 #specify the sh
