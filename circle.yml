@@ -23,7 +23,9 @@ deployment:
     commands:
       - docker login -e $DOCKER_EMAIL -u $DOCKER_USER -p $DOCKER_PASS
 
-      - docker build -t labsai/eddi:4.0.0-b$CIRCLE_BUILD_NUM .
-      - docker push labsai/eddi:4.0.0-b$CIRCLE_BUILD_NUM
-      - docker build -t labsai/eddi:latest .
+      - docker build -t labsai/eddi:latest -t labsai/eddi:4.0.0-b$CIRCLE_BUILD_NUM -t labsai/eddi:4.0.0 -t labsai/eddi:4.0 -t labsai/eddi:4 .
       - docker push labsai/eddi:latest
+      - docker push labsai/eddi:4.0.0-b$CIRCLE_BUILD_NUM
+      - docker push labsai/eddi:4.0.0
+      - docker push labsai/eddi:4.0
+      - docker push labsai/eddi:4
