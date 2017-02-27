@@ -23,7 +23,7 @@ deployment:
     commands:
       - docker login -e $DOCKER_EMAIL -u $DOCKER_USER -p $DOCKER_PASS
 
-      - docker build -t ginc/eddi:$CIRCLE_BUILD_NUM .
-      - docker push ginc/eddi:$CIRCLE_BUILD_NUM
-      - docker build -t ginc/eddi:latest .
-      - docker push ginc/eddi:latest
+      - docker build -t labsai/eddi:4.0.0-b$CIRCLE_BUILD_NUM .
+      - docker push labsai/eddi:4.0.0-b$CIRCLE_BUILD_NUM
+      - docker build -t labsai/eddi:latest .
+      - docker push labsai/eddi:latest
