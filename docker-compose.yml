@@ -1,9 +1,11 @@
 version: '2'
 services:
   eddi:
-    build: .
+    image: labsai/eddi
     ports:
       - "7070:7070"
+    links:
+      - mongodb
     depends_on:
       - mongodb
     environment:
