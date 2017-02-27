@@ -7,7 +7,7 @@
     <parent>
         <groupId>ai.labs</groupId>
         <artifactId>eddi</artifactId>
-        <version>4.0-SNAPSHOT</version>
+        <version>4.0</version>
         <relativePath>../pom.xml</relativePath>
     </parent>
     <artifactId>coreserver</artifactId>
@@ -98,12 +98,12 @@
         <dependency>
             <groupId>ai.labs</groupId>
             <artifactId>conversationlifecycle-definition</artifactId>
-            <version>4.0-SNAPSHOT</version>
+            <version>4.0</version>
         </dependency>
         <dependency>
             <groupId>ai.labs</groupId>
             <artifactId>conversationlifecycle-impl</artifactId>
-            <version>4.0-SNAPSHOT</version>
+            <version>4.0</version>
         </dependency>
         <dependency>
             <groupId>ai.labs</groupId>
@@ -173,7 +173,7 @@
         <dependency>
             <groupId>ai.labs</groupId>
             <artifactId>semanticparser-impl</artifactId>
-            <version>4.0-SNAPSHOT</version>
+            <version>4.0</version>
         </dependency>
 
         <dependency>

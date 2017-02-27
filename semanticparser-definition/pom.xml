@@ -5,7 +5,7 @@
     <parent>
         <artifactId>eddi</artifactId>
         <groupId>ai.labs</groupId>
-        <version>4.0-SNAPSHOT</version>
+        <version>4.0</version>
     </parent>
     <modelVersion>4.0.0</modelVersion>
 
@@ -31,7 +31,7 @@
         <dependency>
             <groupId>ai.labs</groupId>
             <artifactId>expressions</artifactId>
-            <version>4.0-SNAPSHOT</version>
+            <version>4.0</version>
         </dependency>
     </dependencies>
 

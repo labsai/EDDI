@@ -2,7 +2,7 @@ FROM openjdk:8-jre-alpine
 
 #TODO move the env to docker-compose
 EXPOSE 7070
-ENV EDDI_VERSION 4.0-SNAPSHOT
+ENV EDDI_VERSION 4.0
 ENV EDDI_ENV production
 #ENV EDDI_DB mongodb
 #ENV EDDI_AUTH unknown

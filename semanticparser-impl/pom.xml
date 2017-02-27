@@ -5,7 +5,7 @@
     <parent>
         <artifactId>eddi</artifactId>
         <groupId>ai.labs</groupId>
-        <version>4.0-SNAPSHOT</version>
+        <version>4.0</version>
     </parent>
     <modelVersion>4.0.0</modelVersion>
 
@@ -16,32 +16,32 @@
         <dependency>
             <groupId>ai.labs</groupId>
             <artifactId>expressions</artifactId>
-            <version>4.0-SNAPSHOT</version>
+            <version>4.0</version>
         </dependency>
         <dependency>
             <groupId>ai.labs</groupId>
             <artifactId>coreutilities</artifactId>
-            <version>4.0-SNAPSHOT</version>
+            <version>4.0</version>
         </dependency>
         <dependency>
             <groupId>ai.labs</groupId>
             <artifactId>configurationrepository-definition</artifactId>
-            <version>4.0-SNAPSHOT</version>
+            <version>4.0</version>
         </dependency>
         <dependency>
             <groupId>ai.labs</groupId>
             <artifactId>conversationlifecycle-definition</artifactId>
-            <version>4.0-SNAPSHOT</version>
+            <version>4.0</version>
         </dependency>
         <dependency>
             <groupId>ai.labs</groupId>
             <artifactId>conversationlifecycle-impl</artifactId>
-            <version>4.0-SNAPSHOT</version>
+            <version>4.0</version>
         </dependency>
         <dependency>
             <groupId>ai.labs</groupId>
             <artifactId>conversationmemory-impl</artifactId>
-            <version>4.0-SNAPSHOT</version>
+            <version>4.0</version>
         </dependency>
         <!-- https://mvnrepository.com/artifact/com.github.rholder/snowball-stemmer -->
         <dependency>
@@ -58,12 +58,12 @@
         <dependency>
             <groupId>ai.labs</groupId>
             <artifactId>semanticparser-definition</artifactId>
-            <version>4.0-SNAPSHOT</version>
+            <version>4.0</version>
         </dependency>
         <dependency>
             <groupId>ai.labs</groupId>
             <artifactId>caching-definition</artifactId>
-            <version>4.0-SNAPSHOT</version>
+            <version>4.0</version>
         </dependency>
     </dependencies>
 
