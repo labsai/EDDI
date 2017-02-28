@@ -23,7 +23,7 @@ h6 {
 }
 
 h4, h5 {
-    color: #0581c4;
+    color: #1e99dc;
     font-weight: 600;
     letter-spacing: 2px;
 }
@@ -33,7 +33,7 @@ h4, h5 {
 }
 
 nav a, footer a {
-    color: #0581c4 !important;
+    color: #1e99dc !important;
     text-shadow: 2px 2px 3px rgba(0, 0, 0, 0.1);
 }
 
@@ -49,6 +49,14 @@ nav a, footer a {
     font-weight: lighter;
     letter-spacing: 1px;
     text-shadow: 2px 2px 3px rgba(0, 0, 0, 0.1);
+}
+
+.project-name-long {
+    display: block;
+}
+
+.project-name-short {
+    display: none;
 }
 
 .lead {
@@ -113,7 +121,7 @@ nav a, footer a {
 }
 
 .tech-icons {
-    color: #0581c4 !important;
+    color: #1e99dc !important;
     text-shadow: 2px 2px 3px rgba(0, 0, 0, 0.1);
     margin: 0 5%;
 }
@@ -176,6 +184,14 @@ nav a, footer a {
 }
 
 @media (max-width: 767px) {
+    .project-name-long {
+        display: none;
+    }
+
+    .project-name-short {
+        display: block;
+    }
+
     .banner h2 {
         margin: 0;
         text-shadow: 2px 2px 3px rgba(0, 0, 0, 0.6);
