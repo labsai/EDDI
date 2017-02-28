@@ -53,7 +53,7 @@ public class RestExtensionStore extends RestVersionInfo<ExtensionDefinition> imp
     }
 
     @Override
-    public ExtensionDefinition readExtension(String id, Integer version) {
+    public Response readExtension(String id, Integer version) {
         return read(id, version);
     }
 

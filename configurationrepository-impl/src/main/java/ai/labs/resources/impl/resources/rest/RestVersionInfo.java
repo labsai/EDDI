@@ -5,6 +5,7 @@ import ai.labs.resources.rest.IRestVersionInfo;
 import ai.labs.resources.rest.documentdescriptor.IDocumentDescriptorStore;
 import ai.labs.resources.rest.documentdescriptor.model.DocumentDescriptor;
 import ai.labs.utilities.RestUtilities;
+import ai.labs.utilities.RuntimeUtilities;
 import lombok.extern.slf4j.Slf4j;
 
 import javax.ws.rs.InternalServerErrorException;
@@ -42,10 +43,10 @@ public abstract class RestVersionInfo<T> implements IRestVersionInfo {
     }
 
     @Override
-    public Response getCurrentVersion(String id) {
+    public Integer getCurrentVersion(String id) {
         try {
             IResourceStore.IResourceId currentResourceId = getCurrentResourceId(id);
-            return Response.ok(currentResourceId.getVersion()).build();
+            return currentResourceId.getVersion();
         } catch (IResourceStore.ResourceNotFoundException e) {
             throw new NotFoundException(e.getLocalizedMessage(), e);
         }
@@ -73,9 +74,16 @@ public abstract class RestVersionInfo<T> implements IRestVersionInfo {
         }
     }
 
-    protected T read(String id, Integer version) {
+    protected Response read(String id, Integer version) {
+        RuntimeUtilities.checkNotNull(id, "id");
+        RuntimeUtilities.checkNotNull(version, "version");
+        RuntimeUtilities.checkNotNegative(version, "version");
+        if (version == 0) {
+            return redirectToLatestVersion(id);
+        }
+
         try {
-            return resourceStore.read(id, version);
+            return Response.ok(resourceStore.read(id, version)).build();
         } catch (IResourceStore.ResourceNotFoundException e) {
             throw new NotFoundException(e.getLocalizedMessage(), e);
         } catch (IResourceStore.ResourceStoreException e) {
@@ -85,6 +93,9 @@ public abstract class RestVersionInfo<T> implements IRestVersionInfo {
     }
 
     protected URI update(String id, Integer version, T document) {
+        version = validateParameters(id, version);
+        RuntimeUtilities.checkNotNull(document, "document");
+
         try {
             Integer newVersion = resourceStore.update(id, version, document);
             return RestUtilities.createURI(resourceURI, id, versionQueryParam, newVersion);
@@ -99,6 +110,8 @@ public abstract class RestVersionInfo<T> implements IRestVersionInfo {
     }
 
     protected void delete(String id, Integer version) {
+        version = validateParameters(id, version);
+
         try {
             resourceStore.delete(id, version);
         } catch (IResourceStore.ResourceStoreException e) {
@@ -109,6 +122,17 @@ public abstract class RestVersionInfo<T> implements IRestVersionInfo {
         } catch (IResourceStore.ResourceNotFoundException e) {
             throw new NotFoundException(e.getLocalizedMessage(), e);
         }
+    }
+
+    private Integer validateParameters(String id, Integer version) {
+        RuntimeUtilities.checkNotNull(id, "id");
+        RuntimeUtilities.checkNotNull(version, "version");
+        RuntimeUtilities.checkNotNegative(version, "version");
+
+        if (version == 0) {
+            version = getCurrentVersion(id);
+        }
+        return version;
     }
 
     private URI throwConflictException(String id, IResourceStore.ResourceModifiedException e) {

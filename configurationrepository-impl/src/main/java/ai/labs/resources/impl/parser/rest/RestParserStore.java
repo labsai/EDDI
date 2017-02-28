@@ -33,7 +33,7 @@ public class RestParserStore extends RestVersionInfo<ParserConfiguration> implem
     }
 
     @Override
-    public ParserConfiguration readParser(String id, Integer version) {
+    public Response readParser(String id, Integer version) {
         return read(id, version);
     }
 

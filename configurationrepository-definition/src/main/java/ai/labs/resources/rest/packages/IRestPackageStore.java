@@ -4,6 +4,7 @@ import ai.labs.resources.rest.IRestVersionInfo;
 import ai.labs.resources.rest.documentdescriptor.model.DocumentDescriptor;
 import ai.labs.resources.rest.packages.model.PackageConfiguration;
 import io.swagger.annotations.Api;
+import io.swagger.annotations.ApiParam;
 
 import javax.ws.rs.*;
 import javax.ws.rs.core.MediaType;
@@ -29,17 +30,23 @@ public interface IRestPackageStore extends IRestVersionInfo {
     @GET
     @Path("/{id}")
     @Produces(MediaType.APPLICATION_JSON)
-    PackageConfiguration readPackage(@PathParam("id") String id, @QueryParam("version") Integer version);
+    Response readPackage(@PathParam("id") String id,
+                         @ApiParam(name = "version", required = true, format = "integer", example = "1")
+                         @QueryParam("version") Integer version);
 
     @PUT
     @Path("/{id}")
     @Consumes(MediaType.APPLICATION_JSON)
-    URI updatePackage(@PathParam("id") String id, @QueryParam("version") Integer version, PackageConfiguration packageConfiguration);
+    URI updatePackage(@PathParam("id") String id,
+                      @ApiParam(name = "version", required = true, format = "integer", example = "1")
+                      @QueryParam("version") Integer version, PackageConfiguration packageConfiguration);
 
     @PUT
     @Path("/{id}")
     @Consumes(MediaType.TEXT_PLAIN)
-    Response updateResourceInPackage(@PathParam("id") String id, @QueryParam("version") Integer version, URI resourceURI);
+    Response updateResourceInPackage(@PathParam("id") String id,
+                                     @ApiParam(name = "version", required = true, format = "integer", example = "1")
+                                     @QueryParam("version") Integer version, URI resourceURI);
 
     @POST
     @Consumes(MediaType.APPLICATION_JSON)
@@ -47,5 +54,7 @@ public interface IRestPackageStore extends IRestVersionInfo {
 
     @DELETE
     @Path("/{id}")
-    void deletePackage(@PathParam("id") String id, @QueryParam("version") Integer version);
+    void deletePackage(@PathParam("id") String id,
+                       @ApiParam(name = "version", required = true, format = "integer", example = "1")
+                       @QueryParam("version") Integer version);
 }

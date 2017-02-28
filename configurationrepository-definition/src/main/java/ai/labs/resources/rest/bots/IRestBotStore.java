@@ -4,6 +4,7 @@ import ai.labs.resources.rest.IRestVersionInfo;
 import ai.labs.resources.rest.bots.model.BotConfiguration;
 import ai.labs.resources.rest.documentdescriptor.model.DocumentDescriptor;
 import io.swagger.annotations.Api;
+import io.swagger.annotations.ApiParam;
 
 import javax.ws.rs.*;
 import javax.ws.rs.core.MediaType;
@@ -30,17 +31,23 @@ public interface IRestBotStore extends IRestVersionInfo {
     @GET
     @Path("/{id}")
     @Produces(MediaType.APPLICATION_JSON)
-    BotConfiguration readBot(@PathParam("id") String id, @QueryParam("version") Integer version);
+    Response readBot(@PathParam("id") String id,
+                     @ApiParam(name = "version", required = true, format = "integer", example = "1")
+                     @QueryParam("version") Integer version);
 
     @PUT
     @Path("/{id}")
     @Consumes(MediaType.APPLICATION_JSON)
-    URI updateBot(@PathParam("id") String id, @QueryParam("version") Integer version, BotConfiguration botConfiguration);
+    URI updateBot(@PathParam("id") String id,
+                  @ApiParam(name = "version", required = true, format = "integer", example = "1")
+                  @QueryParam("version") Integer version, BotConfiguration botConfiguration);
 
     @PUT
     @Path("/{id}")
     @Consumes(MediaType.TEXT_PLAIN)
-    Response updateResourceInBot(@PathParam("id") String id, @QueryParam("version") Integer version, URI resourceURI);
+    Response updateResourceInBot(@PathParam("id") String id,
+                                 @ApiParam(name = "version", required = true, format = "integer", example = "1")
+                                 @QueryParam("version") Integer version, URI resourceURI);
 
     @POST
     @Consumes(MediaType.APPLICATION_JSON)
@@ -48,5 +55,7 @@ public interface IRestBotStore extends IRestVersionInfo {
 
     @DELETE
     @Path("/{id}")
-    void deleteBot(@PathParam("id") String id, @QueryParam("version") Integer version);
+    void deleteBot(@PathParam("id") String id,
+                   @ApiParam(name = "version", required = true, format = "integer", example = "1")
+                   @QueryParam("version") Integer version);
 }

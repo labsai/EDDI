@@ -3,6 +3,7 @@ package ai.labs.resources.rest.extensions;
 import ai.labs.resources.rest.documentdescriptor.model.DocumentDescriptor;
 import ai.labs.resources.rest.extensions.model.ExtensionDefinition;
 import io.swagger.annotations.Api;
+import io.swagger.annotations.ApiParam;
 
 import javax.ws.rs.*;
 import javax.ws.rs.core.MediaType;
@@ -29,12 +30,16 @@ public interface IRestExtensionStore {
     @GET
     @Path("/{id}")
     @Produces(MediaType.APPLICATION_JSON)
-    ExtensionDefinition readExtension(@PathParam("id") String id, @QueryParam("version") Integer version);
+    Response readExtension(@PathParam("id") String id,
+                           @ApiParam(name = "version", required = true, format = "integer", example = "1")
+                           @QueryParam("version") Integer version);
 
     @PUT
     @Path("/{id}")
     @Consumes(MediaType.APPLICATION_JSON)
-    URI updateExtension(@PathParam("id") String id, @QueryParam("version") Integer version, ExtensionDefinition extension);
+    URI updateExtension(@PathParam("id") String id,
+                        @ApiParam(name = "version", required = true, format = "integer", example = "1")
+                        @QueryParam("version") Integer version, ExtensionDefinition extension);
 
     @POST
     @Consumes(MediaType.APPLICATION_JSON)
@@ -42,5 +47,7 @@ public interface IRestExtensionStore {
 
     @DELETE
     @Path("/{id}")
-    void deleteExtension(@PathParam("id") String id, @QueryParam("version") Integer version);
+    void deleteExtension(@PathParam("id") String id,
+                         @ApiParam(name = "version", required = true, format = "integer", example = "1")
+                         @QueryParam("version") Integer version);
 }

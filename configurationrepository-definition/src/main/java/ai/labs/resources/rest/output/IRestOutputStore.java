@@ -6,6 +6,7 @@ import ai.labs.resources.rest.method.PATCH;
 import ai.labs.resources.rest.output.model.OutputConfigurationSet;
 import ai.labs.resources.rest.patch.PatchInstruction;
 import io.swagger.annotations.Api;
+import io.swagger.annotations.ApiParam;
 
 import javax.ws.rs.*;
 import javax.ws.rs.core.MediaType;
@@ -32,7 +33,9 @@ public interface IRestOutputStore extends IRestVersionInfo {
     @GET
     @Path("/{id}")
     @Produces(MediaType.APPLICATION_JSON)
-    OutputConfigurationSet readOutputSet(@PathParam("id") String id, @QueryParam("version") Integer version,
+    OutputConfigurationSet readOutputSet(@PathParam("id") String id,
+                                         @ApiParam(name = "version", required = true, format = "integer", example = "1")
+                                         @QueryParam("version") Integer version,
                                          @QueryParam("filter") @DefaultValue("") String filter,
                                          @QueryParam("order") @DefaultValue("") String order,
                                          @QueryParam("index") @DefaultValue("0") Integer index,
@@ -41,7 +44,9 @@ public interface IRestOutputStore extends IRestVersionInfo {
     @GET
     @Path("/{id}/outputKeys")
     @Produces(MediaType.APPLICATION_JSON)
-    List<String> readOutputKeys(@PathParam("id") String id, @QueryParam("version") Integer version,
+    List<String> readOutputKeys(@PathParam("id") String id,
+                                @ApiParam(name = "version", required = true, format = "integer", example = "1")
+                                @QueryParam("version") Integer version,
                                 @QueryParam("filter") @DefaultValue("") String filter,
                                 @QueryParam("order") @DefaultValue("") String order,
                                 @QueryParam("limit") @DefaultValue("20") Integer limit);
@@ -49,7 +54,9 @@ public interface IRestOutputStore extends IRestVersionInfo {
     @PUT
     @Path("/{id}")
     @Consumes(MediaType.APPLICATION_JSON)
-    URI updateOutputSet(@PathParam("id") String id, @QueryParam("version") Integer version, OutputConfigurationSet outputConfigurationSet);
+    URI updateOutputSet(@PathParam("id") String id,
+                        @ApiParam(name = "version", required = true, format = "integer", example = "1")
+                        @QueryParam("version") Integer version, OutputConfigurationSet outputConfigurationSet);
 
     @POST
     @Consumes(MediaType.APPLICATION_JSON)
@@ -57,10 +64,14 @@ public interface IRestOutputStore extends IRestVersionInfo {
 
     @DELETE
     @Path("/{id}")
-    void deleteOutputSet(@PathParam("id") String id, @QueryParam("version") Integer version);
+    void deleteOutputSet(@PathParam("id") String id,
+                         @ApiParam(name = "version", required = true, format = "integer", example = "1")
+                         @QueryParam("version") Integer version);
 
     @PATCH
     @Path("/{id}")
     @Consumes(MediaType.APPLICATION_JSON)
-    URI patchOutputSet(@PathParam("id") String id, @QueryParam("version") Integer version, PatchInstruction<OutputConfigurationSet>[] patchInstructions);
+    URI patchOutputSet(@PathParam("id") String id,
+                       @ApiParam(name = "version", required = true, format = "integer", example = "1")
+                       @QueryParam("version") Integer version, PatchInstruction<OutputConfigurationSet>[] patchInstructions);
 }

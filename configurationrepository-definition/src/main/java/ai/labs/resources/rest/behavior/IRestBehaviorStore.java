@@ -3,10 +3,7 @@ package ai.labs.resources.rest.behavior;
 import ai.labs.resources.rest.IRestVersionInfo;
 import ai.labs.resources.rest.behavior.model.BehaviorConfiguration;
 import ai.labs.resources.rest.documentdescriptor.model.DocumentDescriptor;
-import io.swagger.annotations.Api;
-import io.swagger.annotations.ApiImplicitParam;
-import io.swagger.annotations.ApiImplicitParams;
-import io.swagger.annotations.ApiResponse;
+import io.swagger.annotations.*;
 
 import javax.ws.rs.*;
 import javax.ws.rs.core.MediaType;
@@ -39,12 +36,16 @@ public interface IRestBehaviorStore extends IRestVersionInfo {
     @GET
     @Path("/{id}")
     @Produces(MediaType.APPLICATION_JSON)
-    BehaviorConfiguration readBehaviorRuleSet(@PathParam("id") String id, @QueryParam("version") Integer version);
+    Response readBehaviorRuleSet(@PathParam("id") String id,
+                                 @ApiParam(name = "version", required = true, format = "integer", example = "1")
+                                 @QueryParam("version") Integer version);
 
     @PUT
     @Path("/{id}")
     @Consumes(MediaType.APPLICATION_JSON)
-    URI updateBehaviorRuleSet(@PathParam("id") String id, @QueryParam("version") Integer version, BehaviorConfiguration behaviorConfiguration);
+    URI updateBehaviorRuleSet(@PathParam("id") String id,
+                              @ApiParam(name = "version", required = true, format = "integer", example = "1")
+                              @QueryParam("version") Integer version, BehaviorConfiguration behaviorConfiguration);
 
     @POST
     @Consumes(MediaType.APPLICATION_JSON)
@@ -52,5 +53,7 @@ public interface IRestBehaviorStore extends IRestVersionInfo {
 
     @DELETE
     @Path("/{id}")
-    void deleteBehaviorRuleSet(@PathParam("id") String id, @QueryParam("version") Integer version);
+    void deleteBehaviorRuleSet(@PathParam("id") String id,
+                               @ApiParam(name = "version", required = true, format = "integer", example = "1")
+                               @QueryParam("version") Integer version);
 }

@@ -37,7 +37,7 @@ public class RestRegularDictionaryStore extends RestVersionInfo<RegularDictionar
     }
 
     @Override
-    public RegularDictionaryConfiguration readRegularDictionary(String id, Integer version, String filter, String order, Integer index, Integer limit) {
+    public Response readRegularDictionary(String id, Integer version, String filter, String order, Integer index, Integer limit) {
         return read(id, version);
     }
 

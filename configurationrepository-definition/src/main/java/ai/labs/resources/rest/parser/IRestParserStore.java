@@ -3,10 +3,7 @@ package ai.labs.resources.rest.parser;
 import ai.labs.resources.rest.IRestVersionInfo;
 import ai.labs.resources.rest.documentdescriptor.model.DocumentDescriptor;
 import ai.labs.resources.rest.parser.model.ParserConfiguration;
-import io.swagger.annotations.Api;
-import io.swagger.annotations.ApiImplicitParam;
-import io.swagger.annotations.ApiImplicitParams;
-import io.swagger.annotations.ApiResponse;
+import io.swagger.annotations.*;
 
 import javax.ws.rs.*;
 import javax.ws.rs.core.MediaType;
@@ -41,12 +38,16 @@ public interface IRestParserStore extends IRestVersionInfo {
     @Path("/{id}")
     @Produces(MediaType.APPLICATION_JSON)
     @ApiResponse(code = 200, response = ParserConfiguration.class, message = "configuration of parser")
-    ParserConfiguration readParser(@PathParam("id") String id, @QueryParam("version") @DefaultValue("-1") Integer version);
+    Response readParser(@PathParam("id") String id,
+                        @ApiParam(name = "version", required = true, format = "integer", example = "1")
+                        @QueryParam("version") Integer version);
 
     @PUT
     @Path("/{id}")
     @Consumes(MediaType.APPLICATION_JSON)
-    URI updateParser(@PathParam("id") String id, @QueryParam("version") @DefaultValue("-1") Integer version,
+    URI updateParser(@PathParam("id") String id,
+                     @ApiParam(name = "version", required = true, format = "integer", example = "1")
+                     @QueryParam("version") Integer version,
                      ParserConfiguration parserConfiguration);
 
     /**
@@ -109,5 +110,7 @@ public interface IRestParserStore extends IRestVersionInfo {
 
     @DELETE
     @Path("/{id}")
-    void deleteParser(@PathParam("id") String id, @QueryParam("version") @DefaultValue("-1") Integer version);
+    void deleteParser(@PathParam("id") String id,
+                      @ApiParam(name = "version", required = true, format = "integer", example = "1")
+                      @QueryParam("version") Integer version);
 }

@@ -5,6 +5,7 @@ import ai.labs.resources.rest.documentdescriptor.model.SimpleDocumentDescriptor;
 import ai.labs.resources.rest.method.PATCH;
 import ai.labs.resources.rest.patch.PatchInstruction;
 import io.swagger.annotations.Api;
+import io.swagger.annotations.ApiParam;
 
 import javax.ws.rs.*;
 import javax.ws.rs.core.MediaType;
@@ -29,15 +30,21 @@ public interface IRestDocumentDescriptorStore {
     @GET
     @Path("/{id}")
     @Produces(MediaType.APPLICATION_JSON)
-    DocumentDescriptor readDescriptor(@PathParam("id") String id, @QueryParam("version") Integer version);
+    DocumentDescriptor readDescriptor(@PathParam("id") String id,
+                                      @ApiParam(name = "version", required = true, format = "integer", example = "1")
+                                      @QueryParam("version") Integer version);
 
     @GET
     @Path("/{id}/simple")
     @Produces(MediaType.APPLICATION_JSON)
-    SimpleDocumentDescriptor readSimpleDescriptor(@PathParam("id") String id, @QueryParam("version") Integer version);
+    SimpleDocumentDescriptor readSimpleDescriptor(@PathParam("id") String id,
+                                                  @ApiParam(name = "version", required = true, format = "integer", example = "1")
+                                                  @QueryParam("version") Integer version);
 
     @PATCH
     @Path("/{id}")
     @Consumes(MediaType.APPLICATION_JSON)
-    void patchDescriptor(@PathParam("id") String id, @QueryParam("version") Integer version, PatchInstruction<DocumentDescriptor> patchInstruction);
+    void patchDescriptor(@PathParam("id") String id,
+                         @ApiParam(name = "version", required = true, format = "integer", example = "1")
+                         @QueryParam("version") Integer version, PatchInstruction<DocumentDescriptor> patchInstruction);
 }

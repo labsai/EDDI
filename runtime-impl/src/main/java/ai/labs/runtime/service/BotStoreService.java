@@ -27,7 +27,7 @@ public class BotStoreService implements IBotStoreService {
     public BotConfiguration getBotConfiguration(String botId, Integer version) throws ServiceException {
         try {
             IRestBotStore restBotStore = restInterfaceFactory.get(IRestBotStore.class, configurationServerURI);
-            return restBotStore.readBot(botId, version);
+            return (BotConfiguration) restBotStore.readBot(botId, version).getEntity();
         } catch (Exception e) {
             throw new ServiceException(e.getLocalizedMessage(), e);
         }
