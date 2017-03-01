@@ -49,7 +49,7 @@ Go to the root directory and execute
 ## Start Servers
 1. Setup a local mongodb (> v3.0)
 2. launch with VM options 
-    ~~~
+    ```
     -DEDDI_ENV=[development/production] -Duser.dir=[LOCAL_PATH_TO_EDDI]\apiserver ai.labs.api.ApiServer
-    ~~~
+    ```
 3. Go to Browser --> http://localhost:7070
