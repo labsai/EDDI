@@ -6,7 +6,9 @@ v4.0.0
 
 License: Apache License 2.0
 
-Visit http://eddi.labs.ai for further references
+Visit http://eddi.labs.ai for further references.
+
+Check out the full documentation [here](https://labsai.atlassian.net/wiki/display/EDDI/).
 
 [![CircleCI](https://circleci.com/gh/labsai/EDDI/tree/master.svg?style=svg)](https://circleci.com/gh/labsai/EDDI/tree/master)
 
@@ -40,7 +42,7 @@ technical spec:
 - Maven 3
 
 
-## build project with maven
+## Build project with maven
 Go to the root directory and execute
 
     mvn clean install
@@ -53,3 +55,13 @@ Go to the root directory and execute
     -DEDDI_ENV=[development/production] -Duser.dir=[LOCAL_PATH_TO_EDDI]\apiserver ai.labs.api.ApiServer
     ```
 3. Go to Browser --> http://localhost:7070
+
+## Docker
+
+For development, use
+
+```
+docker-compose -f docker-compose.yml -f docker-compose.local.yml up
+```
+
+after running `mvn package`. This builds a local image of EDDI.
