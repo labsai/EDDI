@@ -229,3 +229,21 @@ footer {
 p.copyright {
     margin: 15px 0 0;
 }
+
+.stats {
+    font-size: 2em;
+    font-weight: 200;
+    text-shadow: 2px 2px 3px rgba(0, 0, 0, 0.1);
+}
+
+.left {
+    text-align: left;
+}
+
+.center {
+    text-align: center;
+}
+
+.right {
+    text-align: right;
+}
