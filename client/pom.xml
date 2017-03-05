@@ -1,0 +1,82 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <parent>
+        <artifactId>eddi</artifactId>
+        <groupId>ai.labs</groupId>
+        <version>4.0</version>
+    </parent>
+    <modelVersion>4.0.0</modelVersion>
+
+    <artifactId>client</artifactId>
+
+    <profiles>
+        <profile>
+            <id>generate-client</id>
+            <build>
+                <plugins>
+                    <plugin>
+                        <groupId>io.fabric8</groupId>
+                        <artifactId>docker-maven-plugin</artifactId>
+                        <version>0.20.0</version>
+                        <configuration>
+                            <machine>
+                                <name>default</name>
+                                <autoCreate>true</autoCreate>
+                            </machine>
+                            <images>
+                                <image>
+                                    <alias>eddi</alias>
+                                    <external>
+                                        <type>compose</type>
+                                        <composeFile>${project.parent.basedir}/docker-compose.yml</composeFile>
+                                    </external>
+
+                                    <run>
+                                        <namingStrategy>alias</namingStrategy>
+                                        <wait>
+                                            <time>20000</time>
+                                            <log>Started @</log>
+                                        </wait>
+                                    </run>
+                                </image>
+
+                                <image>
+                                    <alias>generate-client</alias>
+                                    <name>jimschubert/swagger-codegen-cli</name>
+                                    <run>
+                                        <dependsOn>
+                                            <container>eddi</container>
+                                        </dependsOn>
+                                        <volumes>
+                                            <bind>
+                                                <volume>${project.build.directory}:/target</volume>
+                                            </bind>
+                                        </volumes>
+                                        <links>
+                                            <link>eddi:eddi</link>
+                                        </links>
+                                        <cmd>generate -i http://eddi:7070/swagger.json -l ${client.lang} -o /target/${client.lang}</cmd>
+                                        <wait>
+                                            <time>20000</time>
+                                        </wait>
+                                    </run>
+                                </image>
+                            </images>
+                        </configuration>
+                        <executions>
+                            <execution>
+                                <phase>package</phase>
+                                <goals>
+                                    <goal>start</goal>
+                                    <goal>stop</goal>
+                                </goals>
+                            </execution>
+                        </executions>
+                    </plugin>
+                </plugins>
+            </build>
+        </profile>
+    </profiles>
+</project>

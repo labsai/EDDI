@@ -41,6 +41,7 @@
         <module>apiserver</module>
         <module>caching-definition</module>
         <module>caching-impl-infinispan</module>
+        <module>client</module>
     </modules>
 
     <build>
