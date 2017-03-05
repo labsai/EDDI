@@ -9,7 +9,7 @@ services:
     depends_on:
       - mongodb
     environment:
-      EDDI_VERSION: 4.0
+      EDDI_VERSION: "4.0"
       EDDI_ENV: production
   mongodb:
     image: mongo:3
