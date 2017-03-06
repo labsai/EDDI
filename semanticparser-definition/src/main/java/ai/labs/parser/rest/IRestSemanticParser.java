@@ -13,7 +13,7 @@ import javax.ws.rs.core.MediaType;
  */
 
 @Api(value = "semantic parser")
-@Path("/api/v1/parser")
+@Path("/parser")
 public interface IRestSemanticParser {
 
     @ApiParam(name = "parserId", example = "507f1f77bcf86cd799439011", required = true)

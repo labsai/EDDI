@@ -32,7 +32,6 @@
         <module>runtime-impl</module>
         <module>staticresourceprovider-impl</module>
         <module>webserver</module>
-        <module>configurationserver</module>
         <module>coreserver</module>
         <module>semanticparser-definition</module>
         <module>semanticparser-impl</module>
