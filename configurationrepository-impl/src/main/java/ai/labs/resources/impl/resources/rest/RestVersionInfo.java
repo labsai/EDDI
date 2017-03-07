@@ -74,16 +74,13 @@ public abstract class RestVersionInfo<T> implements IRestVersionInfo {
         }
     }
 
-    protected Response read(String id, Integer version) {
+    protected T read(String id, Integer version) {
         RuntimeUtilities.checkNotNull(id, "id");
         RuntimeUtilities.checkNotNull(version, "version");
         RuntimeUtilities.checkNotNegative(version, "version");
-        if (version == 0) {
-            return redirectToLatestVersion(id);
-        }
 
         try {
-            return Response.ok(resourceStore.read(id, version)).build();
+            return resourceStore.read(id, version);
         } catch (IResourceStore.ResourceNotFoundException e) {
             throw new NotFoundException(e.getLocalizedMessage(), e);
         } catch (IResourceStore.ResourceStoreException e) {

@@ -30,8 +30,8 @@ public interface IRestExtensionStore {
     @GET
     @Path("/{id}")
     @Produces(MediaType.APPLICATION_JSON)
-    Response readExtension(@PathParam("id") String id,
-                           @ApiParam(name = "version", required = true, format = "integer", example = "1")
+    ExtensionDefinition readExtension(@PathParam("id") String id,
+                                      @ApiParam(name = "version", required = true, format = "integer", example = "1")
                            @QueryParam("version") Integer version);
 
     @PUT

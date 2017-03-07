@@ -38,8 +38,8 @@ public interface IRestParserStore extends IRestVersionInfo {
     @Path("/{id}")
     @Produces(MediaType.APPLICATION_JSON)
     @ApiResponse(code = 200, response = ParserConfiguration.class, message = "configuration of parser")
-    Response readParser(@PathParam("id") String id,
-                        @ApiParam(name = "version", required = true, format = "integer", example = "1")
+    ParserConfiguration readParser(@PathParam("id") String id,
+                                   @ApiParam(name = "version", required = true, format = "integer", example = "1")
                         @QueryParam("version") Integer version);
 
     @PUT

@@ -36,7 +36,7 @@ public class RestBotStore extends RestVersionInfo<BotConfiguration> implements I
     }
 
     @Override
-    public Response readBot(String id, Integer version) {
+    public BotConfiguration readBot(String id, Integer version) {
         return read(id, version);
     }
 
@@ -51,7 +51,7 @@ public class RestBotStore extends RestVersionInfo<BotConfiguration> implements I
         String resourceURIWithoutVersion = resourceURIString.substring(0, resourceURIString.lastIndexOf("?"));
 
         boolean updated = false;
-        BotConfiguration botConfiguration = (BotConfiguration) readBot(id, version).getEntity();
+        BotConfiguration botConfiguration = readBot(id, version);
         List<URI> packages = botConfiguration.getPackages();
         for (int i = 0; i < packages.size(); i++) {
             URI packageURI = packages.get(i);

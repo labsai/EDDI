@@ -27,7 +27,7 @@ public class PackageStoreService implements IPackageStoreService {
     public PackageConfiguration getKnowledgePackage(String packageId, Integer packageVersion) throws ServiceException {
         try {
             IRestPackageStore serviceProxy = restInterfaceFactory.get(IRestPackageStore.class, apiServerURI);
-            return (PackageConfiguration) serviceProxy.readPackage(packageId, packageVersion).getEntity();
+            return serviceProxy.readPackage(packageId, packageVersion);
         } catch (Exception e) {
             throw new ServiceException(e.getLocalizedMessage(), e);
         }

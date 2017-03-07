@@ -39,7 +39,7 @@ public class RestBehaviorStore extends RestVersionInfo<BehaviorConfiguration> im
     }
 
     @Override
-    public Response readBehaviorRuleSet(String id, Integer version) {
+    public BehaviorConfiguration readBehaviorRuleSet(String id, Integer version) {
         return read(id, version);
     }
 

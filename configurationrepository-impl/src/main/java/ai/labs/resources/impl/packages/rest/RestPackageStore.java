@@ -35,7 +35,7 @@ public class RestPackageStore extends RestVersionInfo<PackageConfiguration> impl
     }
 
     @Override
-    public Response readPackage(String id, Integer version) {
+    public PackageConfiguration readPackage(String id, Integer version) {
         return read(id, version);
     }
 
@@ -50,7 +50,7 @@ public class RestPackageStore extends RestVersionInfo<PackageConfiguration> impl
         String resourceURIWithoutVersion = resourceURIString.substring(0, resourceURIString.lastIndexOf("?"));
 
         boolean updated = false;
-        PackageConfiguration packageConfiguration = (PackageConfiguration) readPackage(id, version).getEntity();
+        PackageConfiguration packageConfiguration = readPackage(id, version);
         for (PackageConfiguration.PackageExtension packageExtension : packageConfiguration.getPackageExtensions()) {
             Map<String, Object> packageConfig = packageExtension.getConfig();
             if (updateResourceURI(resourceURI, resourceURIWithoutVersion, packageConfig)) {

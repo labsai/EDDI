@@ -31,8 +31,8 @@ public interface IRestBotStore extends IRestVersionInfo {
     @GET
     @Path("/{id}")
     @Produces(MediaType.APPLICATION_JSON)
-    Response readBot(@PathParam("id") String id,
-                     @ApiParam(name = "version", required = true, format = "integer", example = "1")
+    BotConfiguration readBot(@PathParam("id") String id,
+                             @ApiParam(name = "version", required = true, format = "integer", example = "1")
                      @QueryParam("version") Integer version);
 
     @PUT
