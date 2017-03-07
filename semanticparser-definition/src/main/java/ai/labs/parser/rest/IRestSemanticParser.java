@@ -24,6 +24,8 @@ public interface IRestSemanticParser {
     @Path("{parserId}")
     @Produces(MediaType.APPLICATION_JSON)
     @ApiOperation(value = "returns an array of found solutions", response = Solution.class, responseContainer = "List")
-    void parse(@PathParam("parserId") String parserId, @QueryParam("version") Integer version,
+    void parse(@PathParam("parserId") String parserId,
+               @ApiParam(name = "version", required = true, format = "integer", example = "1")
+               @QueryParam("version") Integer version,
                String sentence, @Suspended AsyncResponse asyncResponse);
 }

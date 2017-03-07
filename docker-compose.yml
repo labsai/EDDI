@@ -1,7 +1,7 @@
 version: '2'
 services:
   eddi:
-    image: labsai/eddi
+    image: labsai/eddi:latest
     ports:
       - "7070:7070"
     links:
