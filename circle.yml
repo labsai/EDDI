@@ -30,6 +30,9 @@ deployment:
       - docker build -t labsai/eddi:4.0.0-b$CIRCLE_BUILD_NUM .
       - docker push labsai/eddi:4.0.0-b$CIRCLE_BUILD_NUM
 
+      - docker build -t labsai/eddi:4.0.0 .
+      - docker push labsai/eddi:4.0.0
+
       - docker build -t labsai/eddi:4.0 .
       - docker push labsai/eddi:4.0
 
