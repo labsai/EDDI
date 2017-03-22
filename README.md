@@ -1,7 +1,5 @@
 # EDDI - Enhanced Dialog Driven Intelligence
 
-[![Join the chat at https://gitter.im/EDDI-labs-ai/Lobby](https://badges.gitter.im/EDDI-labs-ai/Lobby.svg)](https://gitter.im/EDDI-labs-ai/Lobby?utm_source=badge&utm_medium=badge&utm_campaign=pr-badge&utm_content=badge)
-
 A Platform for creating, running and maintaining chatbots of all kinds.
 
 v4.0.0
@@ -13,6 +11,8 @@ Visit http://eddi.labs.ai for further references.
 Check out the full documentation [here](https://labsai.atlassian.net/wiki/display/EDDI/).
 
 [![CircleCI](https://circleci.com/gh/labsai/EDDI/tree/master.svg?style=svg)](https://circleci.com/gh/labsai/EDDI/tree/master)
+
+[![Join the chat at https://gitter.im/EDDI-labs-ai/Lobby](https://badges.gitter.im/EDDI-labs-ai/Lobby.svg)](https://gitter.im/EDDI-labs-ai/Lobby?utm_source=badge&utm_medium=badge&utm_campaign=pr-badge&utm_content=badge)
 
 ## Intro
 
