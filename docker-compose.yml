@@ -9,16 +9,16 @@ services:
     depends_on:
       - mongodb
     environment:
-      EDDI_VERSION: "4.0"
+      EDDI_VERSION: 4.0
       EDDI_ENV: production
   mongodb:
-    image: mongo:3
+    image: mongo:3.4
     #ports:       #see override in your own repository with docker-compose.override.yml on each deployed machine for CRITICAL DATA
     volumes_from:
-        - mongodata       #see override in your own repositorywith  docker-compose.override.yml on each deployed machine for CRITICAL DATA
+        - mongodata       #see override in your own repository with  docker-compose.override.yml on each deployed machine for CRITICAL DATA
     restart: always
   mongodata:
-    image: alpine
+    image: alpine:3.5
     volumes:
       - "/persistence/eddimongodb:/data/db"
     command: echo Persistence for Mongo
