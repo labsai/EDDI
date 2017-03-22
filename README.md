@@ -1,5 +1,7 @@
 # EDDI - Enhanced Dialog Driven Intelligence
 
+[![Join the chat at https://gitter.im/EDDI-labs-ai/Lobby](https://badges.gitter.im/EDDI-labs-ai/Lobby.svg)](https://gitter.im/EDDI-labs-ai/Lobby?utm_source=badge&utm_medium=badge&utm_campaign=pr-badge&utm_content=badge)
+
 A Platform for creating, running and maintaining chatbots of all kinds.
 
 v4.0.0
