@@ -24,6 +24,7 @@ import javax.inject.Inject;
 import javax.ws.rs.InternalServerErrorException;
 import javax.ws.rs.NotFoundException;
 import javax.ws.rs.container.AsyncResponse;
+import javax.ws.rs.core.MediaType;
 import javax.ws.rs.core.Response;
 import java.net.URI;
 import java.util.concurrent.Callable;
@@ -53,9 +54,10 @@ public class RestBotEngine implements IRestBotEngine {
         try {
             IBot latestBot = botFactory.getLatestBot(environment, botId);
             if (latestBot == null) {
-                String message = "No instance of bot (botId=%s) deployed!";
-                message = String.format(message, botId);
-                throw new BotNotFoundException(message);
+                String message = "No instance of bot (botId=%s) deployed in environment (environment=%s)!";
+                message = String.format(message, botId, environment);
+                return Response.status(Response.Status.NOT_FOUND).
+                        type(MediaType.TEXT_PLAIN_TYPE).entity(message).build();
             }
 
             IConversation conversation = latestBot.startConversation(null);
@@ -64,7 +66,6 @@ public class RestBotEngine implements IRestBotEngine {
             return Response.created(createdUri).build();
         } catch (ServiceException |
                 IResourceStore.ResourceStoreException |
-                BotNotFoundException |
                 InstantiationException |
                 LifecycleException |
                 IllegalAccessException e) {
@@ -123,7 +124,7 @@ public class RestBotEngine implements IRestBotEngine {
         try {
             final IConversationMemory conversationMemory = loadConversationMemory(conversationId);
             if (conversationMemory == null) {
-                String msg = "No converation found with id: %s";
+                String msg = "No conversation found with id: %s";
                 msg = String.format(msg, conversationId);
                 throw new IllegalAccessException(msg);
             }
