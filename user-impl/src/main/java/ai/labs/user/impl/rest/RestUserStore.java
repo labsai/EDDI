@@ -63,7 +63,7 @@ public class RestUserStore implements IRestUserStore {
         try {
             String id = userStore.createUser(user);
             URI createdUri = RestUtilities.createURI(resourceURI, id);
-            return Response.created(createdUri).entity(createdUri).build();
+            return Response.created(createdUri).build();
         } catch (IResourceStore.ResourceStoreException e) {
             throw new InternalServerErrorException(e.getLocalizedMessage(), e);
         }

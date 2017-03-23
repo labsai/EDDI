@@ -46,7 +46,7 @@ public class RestGroupStore implements IRestGroupStore {
         try {
             String id = groupStore.createGroup(group);
             URI createdUri = RestUtilities.createURI(resourceURI, id);
-            return Response.created(createdUri).entity(createdUri).build();
+            return Response.created(createdUri).build();
         } catch (IResourceStore.ResourceStoreException e) {
             throw new InternalServerErrorException(e.getLocalizedMessage(), e);
         }
