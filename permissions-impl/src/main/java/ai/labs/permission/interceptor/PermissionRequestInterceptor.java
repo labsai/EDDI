@@ -18,6 +18,7 @@ import com.google.inject.Key;
 import com.google.inject.name.Names;
 
 import javax.ws.rs.InternalServerErrorException;
+import javax.ws.rs.NotFoundException;
 import javax.ws.rs.WebApplicationException;
 import javax.ws.rs.container.ContainerRequestContext;
 import javax.ws.rs.container.ContainerRequestFilter;
@@ -78,17 +79,24 @@ public class PermissionRequestInterceptor implements ContainerRequestFilter {
                     Principal principal = securityContext.getUserPrincipal();
                     URI user = getUser(principal);
 
-                    if (!authorizationManager.isUserAuthorized(resourceId.getId(), resourceId.getVersion(), user, authorizationType)) {
-                        String username = principal == null ? "anonymous" : principal.getName();
-                        String message = "User %s does not have %s permission to access the requested resource.";
-                        message = String.format(message, username, authorizationType);
-                        throw new WebApplicationException(new Throwable(message), Response.Status.FORBIDDEN);
+                    try {
+                        if (!authorizationManager.isUserAuthorized(resourceId.getId(), resourceId.getVersion(), user, authorizationType)) {
+                            String username = principal == null ? "anonymous" : principal.getName();
+                            String message = "User %s does not have %s permission to access the requested resource.";
+                            message = String.format(message, username, authorizationType);
+                            throw new WebApplicationException(new Throwable(message), Response.Status.FORBIDDEN);
+                        }
+                    } catch (IResourceStore.ResourceNotFoundException e) {
+                        String message = "Resource (id=%s) does not exist!";
+                        message = String.format(message, resourceId.getId());
+                        throw new NotFoundException(message);
                     }
                 }
                 //no specific resource has been targeted --> allow access
             }
-        } catch (IResourceStore.ResourceStoreException | IResourceStore.ResourceNotFoundException e) {
+        } catch (IResourceStore.ResourceStoreException e) {
             throw new InternalServerErrorException(e.getLocalizedMessage(), e);
+
         }
     }
 
