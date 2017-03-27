@@ -42,15 +42,10 @@ public class ServerRuntimeModule extends AbstractBaseModule {
                                                @Named("webServer.applicationConfigurationClass") String applicationConfigurationClass,
                                                @Named("webServer.host") String host,
                                                @Named("webServer.httpPort") Integer httpPort,
-                                               @Named("webServer.httpsPort") Integer httpsPort,
-                                               @Named("webServer.sslOnly") Boolean sslOnly,
                                                @Named("webServer.defaultPath") String defaultPath,
-                                               @Named("webServer.relativePathKeystore") String relativePathKeystore,
-                                               @Named("webServer.passwordKeystore") String passwordKeystore,
                                                @Named("webServer.responseDelayInMillis") Long responseDelayInMillis,
                                                @Named("webServer.virtualHosts") String virtualHosts,
                                                @Named("webServer.useCrossSiteScriptingHeaderParam") Boolean useCrossSiteScriptingHeaderParam,
-                                               @Named("webServer.baseUri") String baseUri,
                                                @Named("webServer.enableKeycloakSSO") Boolean enableKeycloakSSO,
                                                GuiceResteasyBootstrapServletContextListener contextListener,
                                                SwaggerServletContextListener swaggerContextListener,
@@ -63,11 +58,7 @@ public class ServerRuntimeModule extends AbstractBaseModule {
         options.loginService = mongoLoginService;
         options.host = host;
         options.httpPort = httpPort;
-        options.httpsPort = httpsPort;
-        options.sslOnly = sslOnly;
         options.defaultPath = defaultPath;
-        options.pathKeystore = System.getProperty("user.dir") + relativePathKeystore;
-        options.passwordKeystore = passwordKeystore;
         options.responseDelayInMillis = responseDelayInMillis;
         options.virtualHosts = virtualHosts.split(";");
         options.useCrossSiteScripting = useCrossSiteScriptingHeaderParam;
@@ -78,7 +69,7 @@ public class ServerRuntimeModule extends AbstractBaseModule {
         }
 
         return new ServerRuntime(options, contextListener, swaggerContextListener, httpServletDispatcher,
-                securityHandler, environment, resourceDir, baseUri);
+                securityHandler, environment, resourceDir);
     }
 
     @Provides

@@ -1,10 +1,10 @@
 package ai.labs.serialization;
 
 import lombok.extern.slf4j.Slf4j;
-import org.bson.Document;
 
 import javax.inject.Inject;
 import java.io.IOException;
+import java.util.Map;
 
 /**
  * @author ginccc
@@ -19,7 +19,7 @@ public class DocumentBuilder implements IDocumentBuilder {
     }
 
     @Override
-    public <T> T build(Document doc, Class<T> type) throws IOException {
+    public <T> T build(Map doc, Class<T> type) throws IOException {
         return jsonSerialization.deserialize(toString(doc), type);
     }
 

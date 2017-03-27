@@ -4,10 +4,8 @@ import ai.labs.runtime.SwaggerServletContextListener;
 import ai.labs.runtime.SystemRuntime;
 import ai.labs.runtime.ThreadContext;
 import ai.labs.utilities.FileUtilities;
-import ai.labs.utilities.RuntimeUtilities;
 import lombok.AllArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.eclipse.jetty.http.HttpVersion;
 import org.eclipse.jetty.security.LoginService;
 import org.eclipse.jetty.security.SecurityHandler;
 import org.eclipse.jetty.server.*;
@@ -17,7 +15,6 @@ import org.eclipse.jetty.servlet.ServletContextHandler;
 import org.eclipse.jetty.servlet.ServletHolder;
 import org.eclipse.jetty.util.log.Log;
 import org.eclipse.jetty.util.log.Slf4jLog;
-import org.eclipse.jetty.util.ssl.SslContextFactory;
 import org.eclipse.jetty.util.thread.ExecutorThreadPool;
 import org.eclipse.jetty.util.thread.ThreadPool;
 import org.jboss.resteasy.jsapi.JSAPIServlet;
@@ -50,11 +47,7 @@ public class ServerRuntime implements IServerRuntime {
         public LoginService loginService;
         public String host;
         public int httpPort;
-        public int httpsPort;
-        public boolean sslOnly;
         public String defaultPath;
-        public String pathKeystore;
-        public String passwordKeystore;
         public String[] virtualHosts;
         public boolean useCrossSiteScripting;
         public long responseDelayInMillis;
@@ -69,7 +62,6 @@ public class ServerRuntime implements IServerRuntime {
     private final SecurityHandler securityHandler;
     private final String environment;
     private final String resourceDir;
-    private final String baseUri;
 
     public ServerRuntime(Options options,
                          GuiceResteasyBootstrapServletContextListener resteasyContextListener,
@@ -77,8 +69,7 @@ public class ServerRuntime implements IServerRuntime {
                          HttpServletDispatcher httpServletDispatcher,
                          SecurityHandler securityHandler,
                          @Named("system.environment") String environment,
-                         @Named("systemRuntime.resourceDir") String resourceDir,
-                         @Named("webServer.baseUri") String baseUri) {
+                         @Named("systemRuntime.resourceDir") String resourceDir) {
         this.options = options;
         this.resteasyContextListener = resteasyContextListener;
         this.swaggerContextListener = swaggerContextListener;
@@ -86,7 +77,6 @@ public class ServerRuntime implements IServerRuntime {
         this.securityHandler = securityHandler;
         this.environment = environment;
         this.resourceDir = resourceDir;
-        this.baseUri = baseUri;
         RegisterBuiltin.register(ResteasyProviderFactory.getInstance());
     }
 
@@ -103,7 +93,7 @@ public class ServerRuntime implements IServerRuntime {
 
                     startupJetty(contextParameter,
                             Arrays.asList(resteasyContextListener, swaggerContextListener),
-                            Arrays.asList(new FilterMappingHolder(new WroFilter(), "/text/*")),
+                            Collections.singletonList(new FilterMappingHolder(new WroFilter(), "/text/*")),
                             Arrays.asList(new HttpServletHolder(httpServletDispatcher, "/*"),
                                     new HttpServletHolder(new JSAPIServlet(), "/rest-js")),
                             FileUtilities.buildPath(System.getProperty("user.dir"), resourceDir));
@@ -126,40 +116,15 @@ public class ServerRuntime implements IServerRuntime {
 
         HttpConfiguration httpConfig = new HttpConfiguration();
         httpConfig.setSendServerVersion(false);
-        httpConfig.setSecureScheme("https");
-        httpConfig.setSecurePort(options.httpsPort);
         httpConfig.setOutputBufferSize(32768);
 
         ServerConnector httpConnector = new ServerConnector(server, new HttpConnectionFactory(httpConfig));
         httpConnector.setPort(options.httpPort);
         httpConnector.setIdleTimeout(30000);
 
-        if ("development".equals(environment)) {
-            // skip the HTTPS connector for development
-            server.setConnectors(new Connector[]{httpConnector});
-        } else {
-            SslContextFactory sslContextFactory = new SslContextFactory();
-            sslContextFactory.setKeyStorePath(options.pathKeystore);
 
-            if (!RuntimeUtilities.isNullOrEmpty(options.passwordKeystore)) {
-                sslContextFactory.setKeyStorePassword(options.passwordKeystore);
-                sslContextFactory.setKeyManagerPassword(options.passwordKeystore);
-                sslContextFactory.setTrustStorePassword(options.passwordKeystore);
-            }
+        server.setConnectors(new Connector[]{httpConnector});
 
-            HttpConfiguration httpsConfig = new HttpConfiguration(httpConfig);
-            SecureRequestCustomizer requestCustomizer = new SecureRequestCustomizer();
-            requestCustomizer.setStsMaxAge(2000);
-            requestCustomizer.setStsIncludeSubDomains(true);
-            httpsConfig.addCustomizer(requestCustomizer);
-
-            ServerConnector httpsConnector = new ServerConnector(server,
-                    new SslConnectionFactory(sslContextFactory, HttpVersion.HTTP_1_1.asString()),
-                    new HttpConnectionFactory(httpsConfig));
-            httpsConnector.setPort(options.httpsPort);
-            httpsConnector.setIdleTimeout(500000);
-            server.setConnectors(new Connector[]{httpConnector, httpsConnector});
-        }
 
         // Set a handler
         final HandlerList handlers = new HandlerList();
@@ -195,7 +160,7 @@ public class ServerRuntime implements IServerRuntime {
             servletHandler.addServlet(servletHolder, httpServletHolder.getPath());
         }
 
-        servletHandler.addFilter(new FilterHolder(createRedirectFilter(options.sslOnly, options.httpsPort, true, options.defaultPath)), ANY_PATH, getAllDispatcherTypes());
+        servletHandler.addFilter(new FilterHolder(createRedirectFilter(options.defaultPath)), ANY_PATH, getAllDispatcherTypes());
 
         servletHandler.addFilter(new FilterHolder(createInitThreadBoundValuesFilter()), ANY_PATH, getAllDispatcherTypes());
 
@@ -214,9 +179,8 @@ public class ServerRuntime implements IServerRuntime {
 
     }
 
-    private Filter createRedirectFilter(final boolean useSSLOnly, final int httpsPort, final boolean redirectToDefaultPath, final String defaultPath) {
+    private Filter createRedirectFilter(final String defaultPath) {
         return new Filter() {
-            private static final String HTTPS = "https";
 
             @Override
             public void init(FilterConfig filterConfig) throws ServletException {
@@ -229,34 +193,17 @@ public class ServerRuntime implements IServerRuntime {
                 StringBuffer requestURL = httpServletRequest.getRequestURL();
 
                 if (requestURL != null) {
-                    boolean changedProtocol = false;
-                    if (useSSLOnly) {
-                        changedProtocol = makeUriUseSsl(requestURL, httpsPort);
-                    }
 
-                    boolean changedPath = false;
-                    if (redirectToDefaultPath) {
-                        changedPath = changeDefaultPath(requestURL, httpServletRequest, defaultPath);
-                    }
+                    boolean changedPath;
+                    changedPath = changeDefaultPath(requestURL, httpServletRequest, defaultPath);
 
-                    if (changedProtocol || changedPath) {
+                    if (changedPath) {
                         ((HttpServletResponse) servletResponse).sendRedirect(requestURL.toString());
                         return;
                     }
                 }
 
                 filterChain.doFilter(servletRequest, servletResponse);
-            }
-
-            private boolean makeUriUseSsl(StringBuffer requestURL, int httpsPort) throws IOException {
-                if (requestURL.indexOf(HTTPS) != 0) {
-                    URL url = URI.create(requestURL.toString()).toURL();
-                    URL newUrl = new URL(HTTPS, url.getHost(), httpsPort, url.getPath());
-                    requestURL.replace(0, requestURL.length(), newUrl.toString());
-                    return true;
-                }
-
-                return false;
             }
 
             private boolean changeDefaultPath(StringBuffer requestURL, HttpServletRequest request, String defaultPath) throws MalformedURLException {
@@ -330,31 +277,6 @@ public class ServerRuntime implements IServerRuntime {
                 httpResponse.setHeader("Access-Control-Request-Method", "GET, PUT, POST, DELETE, PATCH, OPTIONS");
                 httpResponse.setHeader("Access-Control-Allow-Headers", "authorization");
                 filterChain.doFilter(request, response);
-            }
-
-            @Override
-            public void destroy() {
-                // not implemented
-            }
-        };
-    }
-
-    private Filter createDelayResponseFilter(final long responseDelayInMillis) {
-        return new Filter() {
-            @Override
-            public void init(FilterConfig filterConfig) throws ServletException {
-                // not implemented
-            }
-
-            @Override
-            public void doFilter(ServletRequest request, ServletResponse response, FilterChain filterChain) throws IOException, ServletException {
-                try {
-                    Thread.sleep(responseDelayInMillis);
-                } catch (InterruptedException e) {
-                    log.error(e.getLocalizedMessage(), e);
-                } finally {
-                    filterChain.doFilter(request, response);
-                }
             }
 
             @Override

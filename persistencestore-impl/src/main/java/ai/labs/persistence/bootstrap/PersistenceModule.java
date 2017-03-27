@@ -44,17 +44,17 @@ public class PersistenceModule extends AbstractBaseModule {
             List<ServerAddress> seeds = hostsToServerAddress(hosts, port);
 
             MongoClient mongoClient;
-            MongoClientOptions mongoClientOptions = buildMongoClientOptions(connectionsPerHost);
+            MongoClientOptions mongoClientOptions = buildMongoClientOptions(connectionsPerHost,
+                    WriteConcern.MAJORITY,
+                    ReadPreference.nearest());
             if (inMemoryOnly) {
-                Fongo fongo = new Fongo("FakeMongoInstance", new ServerVersion(3, 2));
+                Fongo fongo = new Fongo("FakeMongoInstance", new ServerVersion(3, 4));
                 mongoClient = fongo.getMongo();
             } else if ("".equals(username) || "".equals(password)) {
                 mongoClient = new MongoClient(seeds, mongoClientOptions);
             } else {
                 MongoCredential credential = MongoCredential.createCredential(username, database, password.toCharArray());
                 mongoClient = new MongoClient(seeds, Collections.singletonList(credential), mongoClientOptions);
-                mongoClient.setWriteConcern(WriteConcern.MAJORITY);
-                mongoClient.setReadPreference(ReadPreference.nearest());
             }
 
             registerMongoClientShutdownHook(mongoClient);
@@ -65,8 +65,11 @@ public class PersistenceModule extends AbstractBaseModule {
         }
     }
 
-    private MongoClientOptions buildMongoClientOptions(Integer connectionsPerHost) {
+    private MongoClientOptions buildMongoClientOptions(Integer connectionsPerHost,
+                                                       WriteConcern writeConcern, ReadPreference readPreference) {
         MongoClientOptions.Builder builder = MongoClientOptions.builder();
+        builder.writeConcern(writeConcern);
+        builder.readPreference(readPreference);
         builder.connectionsPerHost(connectionsPerHost);
         return builder.build();
     }
