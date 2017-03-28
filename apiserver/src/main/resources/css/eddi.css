@@ -5,3 +5,7 @@
 .logo__title {
     color: #1e99dc !important;
 }
+
+span.response_throbber {
+    background-image: url("/binary/img/throbber.gif") !important;
+}

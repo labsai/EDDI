@@ -16,7 +16,6 @@ import org.jboss.resteasy.client.jaxrs.engines.ApacheHttpClient4Engine;
 import javax.inject.Inject;
 import javax.inject.Singleton;
 import javax.net.ssl.*;
-import javax.ws.rs.client.ClientRequestContext;
 import javax.ws.rs.client.ClientRequestFilter;
 import java.io.IOException;
 import java.net.URI;
@@ -51,12 +50,8 @@ public class RestInterfaceFactory implements IRestInterfaceFactory {
         ResteasyWebTarget target = client.target(targetServerUri);
 
         if (securityToken != null) {
-            target.register(new ClientRequestFilter() {
-                @Override
-                public void filter(ClientRequestContext requestContext) throws IOException {
-                    requestContext.getHeaders().add("Authorization", "Bearer " + securityToken);
-                }
-            });
+            target.register((ClientRequestFilter) requestContext ->
+                    requestContext.getHeaders().add("Authorization", "Bearer " + securityToken));
         }
 
         return target.proxy(clazz);
