@@ -10,6 +10,7 @@ import ai.labs.memory.model.ConversationState;
 import ai.labs.memory.model.Deployment;
 import ai.labs.memory.model.SimpleConversationMemorySnapshot;
 import ai.labs.persistence.IResourceStore;
+import ai.labs.rest.rest.IFacebookEndpoint;
 import ai.labs.rest.rest.IRestBotEngine;
 import ai.labs.runtime.IBot;
 import ai.labs.runtime.IBotFactory;
@@ -38,12 +39,15 @@ public class RestBotEngine implements IRestBotEngine {
     private static final String resourceURI = "eddi://ai.labs.conversation/conversationstore/conversations/";
     private final IBotFactory botFactory;
     private final IConversationMemoryStore conversationMemoryStore;
+    private final FacebookEndpointFactory facebookEndpointFactory;
 
     @Inject
     public RestBotEngine(IBotFactory botFactory,
-                         IConversationMemoryStore conversationMemoryStore) {
+                         IConversationMemoryStore conversationMemoryStore,
+                         FacebookEndpointFactory facebookEndpointFactory) {
         this.botFactory = botFactory;
         this.conversationMemoryStore = conversationMemoryStore;
+        this.facebookEndpointFactory = facebookEndpointFactory;
     }
 
     @Override
@@ -72,6 +76,11 @@ public class RestBotEngine implements IRestBotEngine {
             log.error(e.getLocalizedMessage(), e);
             throw new InternalServerErrorException(e.getLocalizedMessage(), e);
         }
+    }
+
+    @Override
+    public IFacebookEndpoint getFacebookEndpoint(Deployment.Environment environment, String botId) {
+        return facebookEndpointFactory.create(botId);
     }
 
     @Override

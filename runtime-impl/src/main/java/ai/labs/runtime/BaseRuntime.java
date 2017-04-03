@@ -9,10 +9,7 @@ import javax.inject.Inject;
 import javax.inject.Named;
 import java.io.File;
 import java.util.Map;
-import java.util.concurrent.Callable;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Future;
-import java.util.concurrent.TimeUnit;
+import java.util.concurrent.*;
 
 /**
  * @author ginccc
@@ -128,6 +125,26 @@ public class BaseRuntime implements SystemRuntime.IRuntime {
                 log.error(t.getLocalizedMessage(), t);
                 callback.onFailure(t);
                 throw new Exception("Error while executing callable.", t);
+            } finally {
+                ThreadContext.remove();
+            }
+        });
+    }
+
+    @Override
+    public void submitRunable(final Runnable runnable, final IFinishedExecution<?> callback, final Map<Object, Object> threadBindings) {
+        getExecutorService().submit(() -> {
+            try {
+                if (threadBindings != null) {
+                    ThreadContext.setResources(threadBindings);
+                }
+
+                runnable.run();
+                callback.onComplete(null);
+            } catch (Throwable t) {
+                log.error(t.getLocalizedMessage(), t);
+                callback.onFailure(t);
+                throw new RuntimeException("Error while executing callable.", t);
             } finally {
                 ThreadContext.remove();
             }

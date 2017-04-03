@@ -6,14 +6,18 @@ import ai.labs.core.behavior.BehaviorSerialization;
 import ai.labs.core.behavior.IBehaviorSerialization;
 import ai.labs.core.normalizing.NormalizeInputTask;
 import ai.labs.core.output.SimpleOutputTask;
+import ai.labs.core.rest.internal.FacebookEndpoint;
+import ai.labs.core.rest.internal.FacebookEndpointFactory;
 import ai.labs.core.rest.internal.RestBotAdministration;
 import ai.labs.core.rest.internal.RestBotEngine;
 import ai.labs.lifecycle.ILifecycleTask;
 import ai.labs.parser.InputParserTask;
+import ai.labs.rest.rest.IFacebookEndpoint;
 import ai.labs.rest.rest.IRestBotAdministration;
 import ai.labs.rest.rest.IRestBotEngine;
 import ai.labs.runtime.bootstrap.AbstractBaseModule;
 import com.google.inject.Scopes;
+import com.google.inject.assistedinject.FactoryModuleBuilder;
 import com.google.inject.multibindings.MapBinder;
 
 import java.io.InputStream;
@@ -31,6 +35,7 @@ public class CoreModule extends AbstractBaseModule {
 
         bind(IRestBotEngine.class).to(RestBotEngine.class);
         bind(IRestBotAdministration.class).to(RestBotAdministration.class);
+        install(new FactoryModuleBuilder().implement(IFacebookEndpoint.class, FacebookEndpoint.class).build(FacebookEndpointFactory.class));
         /*bind(IRestBotUI.class).to(RestBotUI.class);
         bind(IRestBotmarklet.class).to(RestBotmarklet.class);*/
 
