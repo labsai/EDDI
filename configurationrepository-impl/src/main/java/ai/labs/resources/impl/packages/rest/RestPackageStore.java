@@ -40,7 +40,7 @@ public class RestPackageStore extends RestVersionInfo<PackageConfiguration> impl
     }
 
     @Override
-    public URI updatePackage(String id, Integer version, PackageConfiguration packageConfiguration) {
+    public Response updatePackage(String id, Integer version, PackageConfiguration packageConfiguration) {
         return update(id, version, packageConfiguration);
     }
 

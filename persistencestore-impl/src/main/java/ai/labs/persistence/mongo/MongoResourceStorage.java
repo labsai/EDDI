@@ -6,6 +6,8 @@ import ai.labs.utilities.RuntimeUtilities;
 import com.mongodb.client.FindIterable;
 import com.mongodb.client.MongoCollection;
 import com.mongodb.client.MongoDatabase;
+import com.mongodb.client.model.Filters;
+import com.mongodb.client.model.UpdateOptions;
 import org.bson.Document;
 import org.bson.types.ObjectId;
 
@@ -34,6 +36,7 @@ public class MongoResourceStorage<T> implements IResourceStorage<T> {
 
         this.currentCollection = database.getCollection(collectionName);
         this.historyCollection = database.getCollection(collectionName + HISTORY_POSTFIX);
+        //this.historyCollection.createIndex(Indexes.ascending(ID_FIELD, VERSION_FIELD));
         this.documentBuilder = documentBuilder;
     }
 
@@ -41,14 +44,14 @@ public class MongoResourceStorage<T> implements IResourceStorage<T> {
     public IResource<T> newResource(T content) throws IOException {
         Document doc = Document.parse(documentBuilder.toString(content));
         doc.put(VERSION_FIELD, 1);
-        return new Resource(new Document(doc));
+        return new Resource(doc);
     }
 
     @Override
     public IResource<T> newResource(String id, Integer version, T content) throws IOException {
         Document doc = Document.parse(documentBuilder.toString(content));
 
-        Resource resource = new Resource(new Document(doc));
+        Resource resource = new Resource(doc);
         resource.setVersion(version);
         resource.setId(id);
 
@@ -58,7 +61,9 @@ public class MongoResourceStorage<T> implements IResourceStorage<T> {
     @Override
     public void store(IResource currentResource) {
         Resource resource = checkInternalResource(currentResource);
-        currentCollection.insertOne(resource.getMongoDocument());
+        currentCollection.updateOne(Filters.eq("_id", new ObjectId(resource.getId())),
+                new Document("$set", resource.getMongoDocument()),
+                new UpdateOptions().upsert(true));
     }
 
     @Override
@@ -106,7 +111,7 @@ public class MongoResourceStorage<T> implements IResourceStorage<T> {
         objectId.put(VERSION_FIELD, version);
         Document query = new Document(ID_FIELD, objectId);
 
-        Document doc = historyCollection.find(query).first();
+        Document doc = historyCollection.find(Filters.eq(query)).first();
 
         if (doc == null) {
             return null;
@@ -142,7 +147,7 @@ public class MongoResourceStorage<T> implements IResourceStorage<T> {
     @Override
     public IHistoryResource<T> newHistoryResourceFor(IResource resource, boolean deleted) {
         Resource mongoResource = checkInternalResource(resource);
-        Document historyObject = mongoResource.getMongoDocument();
+        Document historyObject = new Document(mongoResource.getMongoDocument());
 
         Document idObject = new Document();
         idObject.put(ID_FIELD, new ObjectId(resource.getId()));

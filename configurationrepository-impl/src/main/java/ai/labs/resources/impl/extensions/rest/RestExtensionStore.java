@@ -13,7 +13,6 @@ import org.jboss.resteasy.spi.NoLogWebApplicationException;
 import javax.inject.Inject;
 import javax.ws.rs.InternalServerErrorException;
 import javax.ws.rs.core.Response;
-import java.net.URI;
 import java.util.LinkedList;
 import java.util.List;
 
@@ -58,7 +57,7 @@ public class RestExtensionStore extends RestVersionInfo<ExtensionDefinition> imp
     }
 
     @Override
-    public URI updateExtension(String id, Integer version, ExtensionDefinition extension) {
+    public Response updateExtension(String id, Integer version, ExtensionDefinition extension) {
         return update(id, version, extension);
     }
 

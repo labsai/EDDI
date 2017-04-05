@@ -11,7 +11,6 @@ import lombok.extern.slf4j.Slf4j;
 
 import javax.inject.Inject;
 import javax.ws.rs.core.Response;
-import java.net.URI;
 import java.util.List;
 
 /**
@@ -38,7 +37,7 @@ public class RestParserStore extends RestVersionInfo<ParserConfiguration> implem
     }
 
     @Override
-    public URI updateParser(String id, Integer version, ParserConfiguration parserConfiguration) {
+    public Response updateParser(String id, Integer version, ParserConfiguration parserConfiguration) {
         return update(id, version, parserConfiguration);
     }
 

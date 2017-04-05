@@ -11,7 +11,7 @@ import java.net.URI;
 /**
  * @author ginccc
  */
-@Api(value = "users")
+@Api(value = "user management")
 @Path("/userstore/users")
 public interface IRestUserStore {
     String resourceURI = "eddi://ai.labs.user/userstore/users/";

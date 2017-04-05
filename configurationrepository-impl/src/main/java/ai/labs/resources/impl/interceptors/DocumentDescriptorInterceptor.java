@@ -19,10 +19,7 @@ import ai.labs.utilities.SecurityUtilities;
 import lombok.extern.slf4j.Slf4j;
 
 import javax.inject.Inject;
-import javax.ws.rs.DELETE;
-import javax.ws.rs.InternalServerErrorException;
-import javax.ws.rs.POST;
-import javax.ws.rs.PUT;
+import javax.ws.rs.*;
 import javax.ws.rs.container.ContainerRequestContext;
 import javax.ws.rs.container.ContainerResponseContext;
 import javax.ws.rs.container.ContainerResponseFilter;
@@ -110,11 +107,15 @@ public class DocumentDescriptorInterceptor implements ContainerResponseFilter {
                     descriptorStore.setDescriptor(resourceId.getId(), resourceId.getVersion(), resourceDescriptor);
                 }
             }
-        } catch (IResourceStore.ResourceStoreException |
-                IResourceStore.ResourceNotFoundException |
-                IResourceStore.ResourceModifiedException e) {
+        } catch (IResourceStore.ResourceStoreException e) {
             log.error(e.getLocalizedMessage(), e);
-            throw new InternalServerErrorException(e.getLocalizedMessage(), e);
+            throw new InternalServerErrorException();
+        } catch (IResourceStore.ResourceNotFoundException e) {
+            log.debug(e.getLocalizedMessage(), e);
+            throw new NotFoundException(e.getLocalizedMessage());
+        } catch (IResourceStore.ResourceModifiedException e) {
+            log.debug(e.getLocalizedMessage(), e);
+            throw new BadRequestException(e.getLocalizedMessage());
         }
     }
 

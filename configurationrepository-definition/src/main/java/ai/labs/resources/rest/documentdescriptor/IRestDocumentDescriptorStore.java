@@ -14,7 +14,7 @@ import java.util.List;
 /**
  * @author ginccc
  */
-@Api(value = "descriptorstore")
+@Api(value = "configurations")
 @Path("/descriptorstore/descriptors")
 public interface IRestDocumentDescriptorStore {
     String resourceURI = "eddi://ai.labs.descriptor/descriptorstore/descriptors/";

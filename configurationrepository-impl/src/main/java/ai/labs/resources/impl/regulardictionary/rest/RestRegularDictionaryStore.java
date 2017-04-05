@@ -54,7 +54,7 @@ public class RestRegularDictionaryStore extends RestVersionInfo<RegularDictionar
     }
 
     @Override
-    public URI updateRegularDictionary(String id, Integer version, RegularDictionaryConfiguration regularDictionaryConfiguration) {
+    public Response updateRegularDictionary(String id, Integer version, RegularDictionaryConfiguration regularDictionaryConfiguration) {
         return update(id, version, regularDictionaryConfiguration);
     }
 
@@ -74,7 +74,7 @@ public class RestRegularDictionaryStore extends RestVersionInfo<RegularDictionar
             RegularDictionaryConfiguration currentRegularDictionaryConfiguration = regularDictionaryStore.read(id, version);
             RegularDictionaryConfiguration patchedRegularDictionaryConfiguration = patchDocument(currentRegularDictionaryConfiguration, patchInstructions);
 
-            return updateRegularDictionary(id, version, patchedRegularDictionaryConfiguration);
+            return updateRegularDictionary(id, version, patchedRegularDictionaryConfiguration).getLocation();
 
         } catch (IResourceStore.ResourceStoreException e) {
             log.error(e.getLocalizedMessage(), e);

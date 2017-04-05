@@ -41,7 +41,7 @@ public class RestBotStore extends RestVersionInfo<BotConfiguration> implements I
     }
 
     @Override
-    public URI updateBot(String id, Integer version, BotConfiguration botConfiguration) {
+    public Response updateBot(String id, Integer version, BotConfiguration botConfiguration) {
         return update(id, version, botConfiguration);
     }
 

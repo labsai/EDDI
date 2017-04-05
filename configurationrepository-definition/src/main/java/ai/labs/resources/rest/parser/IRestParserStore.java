@@ -8,14 +8,13 @@ import io.swagger.annotations.*;
 import javax.ws.rs.*;
 import javax.ws.rs.core.MediaType;
 import javax.ws.rs.core.Response;
-import java.net.URI;
 import java.util.List;
 
 /**
  * @author ginccc
  */
 
-@Api(value = "parserstore")
+@Api(value = "configurations")
 @Path("/parserstore/parsers")
 public interface IRestParserStore extends IRestVersionInfo {
     String resourceURI = "eddi://ai.labs.parser/parserstore/parsers/";
@@ -45,10 +44,10 @@ public interface IRestParserStore extends IRestVersionInfo {
     @PUT
     @Path("/{id}")
     @Consumes(MediaType.APPLICATION_JSON)
-    URI updateParser(@PathParam("id") String id,
-                     @ApiParam(name = "version", required = true, format = "integer", example = "1")
+    Response updateParser(@PathParam("id") String id,
+                          @ApiParam(name = "version", required = true, format = "integer", example = "1")
                      @QueryParam("version") Integer version,
-                     ParserConfiguration parserConfiguration);
+                          ParserConfiguration parserConfiguration);
 
     /**
      * example parser json config:

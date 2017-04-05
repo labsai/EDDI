@@ -8,13 +8,12 @@ import io.swagger.annotations.ApiParam;
 import javax.ws.rs.*;
 import javax.ws.rs.core.MediaType;
 import javax.ws.rs.core.Response;
-import java.net.URI;
 import java.util.List;
 
 /**
  * @author ginccc
  */
-@Api(value = "extensionstore")
+@Api(value = "configurations")
 @Path("/extensionstore/extensions")
 public interface IRestExtensionStore {
     String resourceURI = "eddi://ai.labs.extensions/extensionstore/extensions/";
@@ -37,8 +36,8 @@ public interface IRestExtensionStore {
     @PUT
     @Path("/{id}")
     @Consumes(MediaType.APPLICATION_JSON)
-    URI updateExtension(@PathParam("id") String id,
-                        @ApiParam(name = "version", required = true, format = "integer", example = "1")
+    Response updateExtension(@PathParam("id") String id,
+                             @ApiParam(name = "version", required = true, format = "integer", example = "1")
                         @QueryParam("version") Integer version, ExtensionDefinition extension);
 
     @POST

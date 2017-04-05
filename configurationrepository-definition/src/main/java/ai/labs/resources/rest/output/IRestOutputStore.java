@@ -17,7 +17,7 @@ import java.util.List;
 /**
  * @author ginccc
  */
-@Api(value = "outputstore")
+@Api(value = "configurations")
 @Path("/outputstore/outputsets")
 public interface IRestOutputStore extends IRestVersionInfo {
     String resourceURI = "eddi://ai.labs.output/outputstore/outputsets/";

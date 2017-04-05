@@ -13,7 +13,7 @@ import java.util.List;
 /**
  * @author ginccc
  */
-@Api(value = "conversationstore")
+@Api(value = "configurations")
 @Path("/conversationstore/conversations")
 public interface IRestMonitorStore {
     @GET

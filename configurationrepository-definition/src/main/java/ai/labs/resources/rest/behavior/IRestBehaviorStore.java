@@ -14,7 +14,7 @@ import java.util.List;
 /**
  * @author ginccc
  */
-@Api(value = "behaviorstore")
+@Api(value = "configurations")
 @Path("/behaviorstore/behaviorsets")
 public interface IRestBehaviorStore extends IRestVersionInfo {
     String resourceURI = "eddi://ai.labs.behavior/behaviorstore/behaviorsets/";
