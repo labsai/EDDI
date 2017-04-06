@@ -34,11 +34,11 @@ public abstract class RestVersionInfo<T> implements IRestVersionInfo {
     protected List<DocumentDescriptor> readDescriptors(String type, String filter, Integer index, Integer limit) {
         try {
             return documentDescriptorStore.readDescriptors(type, filter, index, limit, false);
-        } catch (IResourceStore.ResourceStoreException e) {
-            log.error(e.getLocalizedMessage(), e);
-            throw new InternalServerErrorException(e.getLocalizedMessage(), e);
         } catch (IResourceStore.ResourceNotFoundException e) {
             throw new WebApplicationException(Response.Status.NOT_FOUND);
+        } catch (Exception e) {
+            log.error(e.getLocalizedMessage(), e);
+            throw new InternalServerErrorException();
         }
     }
 
@@ -68,9 +68,9 @@ public abstract class RestVersionInfo<T> implements IRestVersionInfo {
             IResourceStore.IResourceId resourceId = resourceStore.create(obj);
             URI createdUri = RestUtilities.createURI(resourceURI, resourceId.getId(), versionQueryParam, resourceId.getVersion());
             return Response.created(createdUri).location(createdUri).build();
-        } catch (IResourceStore.ResourceStoreException e) {
+        } catch (Exception e) {
             log.error(e.getLocalizedMessage(), e);
-            throw new InternalServerErrorException(e.getLocalizedMessage(), e);
+            throw new InternalServerErrorException();
         }
     }
 
@@ -89,35 +89,38 @@ public abstract class RestVersionInfo<T> implements IRestVersionInfo {
         }
     }
 
-    protected URI update(String id, Integer version, T document) {
+    protected Response update(String id, Integer version, T document) {
         version = validateParameters(id, version);
         RuntimeUtilities.checkNotNull(document, "document");
 
         try {
             Integer newVersion = resourceStore.update(id, version, document);
-            return RestUtilities.createURI(resourceURI, id, versionQueryParam, newVersion);
-        } catch (IResourceStore.ResourceStoreException e) {
-            log.error(e.getLocalizedMessage(), e);
-            throw new InternalServerErrorException(e.getLocalizedMessage(), e);
+            URI newResourceUri = RestUtilities.createURI(resourceURI, id, versionQueryParam, newVersion);
+            return Response.ok().location(newResourceUri).build();
         } catch (IResourceStore.ResourceModifiedException e) {
             return throwConflictException(id, e);
         } catch (IResourceStore.ResourceNotFoundException e) {
             throw new NotFoundException(e.getLocalizedMessage(), e);
+        } catch (Exception e) {
+            log.error(e.getLocalizedMessage(), e);
+            throw new InternalServerErrorException();
         }
     }
 
-    protected void delete(String id, Integer version) {
+    protected Response delete(String id, Integer version) {
         version = validateParameters(id, version);
 
         try {
             resourceStore.delete(id, version);
-        } catch (IResourceStore.ResourceStoreException e) {
-            log.error(e.getLocalizedMessage(), e);
-            throw new InternalServerErrorException(e.getLocalizedMessage(), e);
+            return Response.ok().build();
         } catch (IResourceStore.ResourceModifiedException e) {
             throwConflictException(id, e);
+            return null;
         } catch (IResourceStore.ResourceNotFoundException e) {
             throw new NotFoundException(e.getLocalizedMessage(), e);
+        } catch (Exception e) {
+            log.error(e.getLocalizedMessage(), e);
+            throw new InternalServerErrorException();
         }
     }
 
@@ -132,7 +135,7 @@ public abstract class RestVersionInfo<T> implements IRestVersionInfo {
         return version;
     }
 
-    private URI throwConflictException(String id, IResourceStore.ResourceModifiedException e) {
+    private Response throwConflictException(String id, IResourceStore.ResourceModifiedException e) {
         try {
             IResourceStore.IResourceId currentId = resourceStore.getCurrentResourceId(id);
             throw RestUtilities.createConflictException(resourceURI, currentId);

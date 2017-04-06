@@ -15,7 +15,7 @@ import java.util.List;
 /**
  * @author ginccc
  */
-@Api(value = "packagestore")
+@Api(value = "configurations")
 @Path("/packagestore/packages")
 public interface IRestPackageStore extends IRestVersionInfo {
     String resourceURI = "eddi://ai.labs.package/packagestore/packages/";
@@ -37,8 +37,8 @@ public interface IRestPackageStore extends IRestVersionInfo {
     @PUT
     @Path("/{id}")
     @Consumes(MediaType.APPLICATION_JSON)
-    URI updatePackage(@PathParam("id") String id,
-                      @ApiParam(name = "version", required = true, format = "integer", example = "1")
+    Response updatePackage(@PathParam("id") String id,
+                           @ApiParam(name = "version", required = true, format = "integer", example = "1")
                       @QueryParam("version") Integer version, PackageConfiguration packageConfiguration);
 
     @PUT
@@ -54,7 +54,7 @@ public interface IRestPackageStore extends IRestVersionInfo {
 
     @DELETE
     @Path("/{id}")
-    void deletePackage(@PathParam("id") String id,
-                       @ApiParam(name = "version", required = true, format = "integer", example = "1")
+    Response deletePackage(@PathParam("id") String id,
+                           @ApiParam(name = "version", required = true, format = "integer", example = "1")
                        @QueryParam("version") Integer version);
 }

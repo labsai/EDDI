@@ -4,6 +4,7 @@ import ai.labs.persistence.IResourceStore;
 import org.jboss.resteasy.specimpl.ResponseBuilderImpl;
 import org.jboss.resteasy.spi.NoLogWebApplicationException;
 
+import javax.ws.rs.core.MediaType;
 import javax.ws.rs.core.Response;
 import java.net.URI;
 import java.util.HashMap;
@@ -21,6 +22,7 @@ public class RestUtilities {
         ResponseBuilderImpl builder = new ResponseBuilderImpl();
         builder.status(Response.Status.CONFLICT);
         builder.entity(resourceUri.toString());
+        builder.type(MediaType.TEXT_PLAIN);
 
         return new NoLogWebApplicationException(builder.build());
     }

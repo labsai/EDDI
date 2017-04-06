@@ -10,7 +10,7 @@ import javax.ws.rs.core.Response;
 /**
  * @author ginccc
  */
-@Api(value = "groups")
+@Api(value = "user management")
 @Path("/groupstore/groups")
 public interface IRestGroupStore {
     @GET

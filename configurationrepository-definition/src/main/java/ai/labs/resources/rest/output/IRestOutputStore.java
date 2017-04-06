@@ -17,7 +17,7 @@ import java.util.List;
 /**
  * @author ginccc
  */
-@Api(value = "outputstore")
+@Api(value = "configurations")
 @Path("/outputstore/outputsets")
 public interface IRestOutputStore extends IRestVersionInfo {
     String resourceURI = "eddi://ai.labs.output/outputstore/outputsets/";
@@ -64,8 +64,8 @@ public interface IRestOutputStore extends IRestVersionInfo {
 
     @DELETE
     @Path("/{id}")
-    void deleteOutputSet(@PathParam("id") String id,
-                         @ApiParam(name = "version", required = true, format = "integer", example = "1")
+    Response deleteOutputSet(@PathParam("id") String id,
+                             @ApiParam(name = "version", required = true, format = "integer", example = "1")
                          @QueryParam("version") Integer version);
 
     @PATCH

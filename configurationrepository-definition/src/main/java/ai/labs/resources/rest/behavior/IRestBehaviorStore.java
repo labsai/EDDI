@@ -14,7 +14,7 @@ import java.util.List;
 /**
  * @author ginccc
  */
-@Api(value = "behaviorstore")
+@Api(value = "configurations")
 @Path("/behaviorstore/behaviorsets")
 public interface IRestBehaviorStore extends IRestVersionInfo {
     String resourceURI = "eddi://ai.labs.behavior/behaviorstore/behaviorsets/";
@@ -53,7 +53,7 @@ public interface IRestBehaviorStore extends IRestVersionInfo {
 
     @DELETE
     @Path("/{id}")
-    void deleteBehaviorRuleSet(@PathParam("id") String id,
-                               @ApiParam(name = "version", required = true, format = "integer", example = "1")
+    Response deleteBehaviorRuleSet(@PathParam("id") String id,
+                                   @ApiParam(name = "version", required = true, format = "integer", example = "1")
                                @QueryParam("version") Integer version);
 }

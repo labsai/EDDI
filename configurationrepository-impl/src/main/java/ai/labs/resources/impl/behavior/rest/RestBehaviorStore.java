@@ -69,8 +69,8 @@ public class RestBehaviorStore extends RestVersionInfo<BehaviorConfiguration> im
     }
 
     @Override
-    public void deleteBehaviorRuleSet(String id, Integer version) {
-        delete(id, version);
+    public Response deleteBehaviorRuleSet(String id, Integer version) {
+        return delete(id, version);
     }
 
     @Override

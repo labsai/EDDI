@@ -15,7 +15,7 @@ import java.util.List;
 /**
  * @author ginccc
  */
-@Api(value = "botstore")
+@Api(value = "configurations")
 @Path("/botstore/bots")
 public interface IRestBotStore extends IRestVersionInfo {
     String resourceURI = "eddi://ai.labs.bot/botstore/bots/";
@@ -38,8 +38,8 @@ public interface IRestBotStore extends IRestVersionInfo {
     @PUT
     @Path("/{id}")
     @Consumes(MediaType.APPLICATION_JSON)
-    URI updateBot(@PathParam("id") String id,
-                  @ApiParam(name = "version", required = true, format = "integer", example = "1")
+    Response updateBot(@PathParam("id") String id,
+                       @ApiParam(name = "version", required = true, format = "integer", example = "1")
                   @QueryParam("version") Integer version, BotConfiguration botConfiguration);
 
     @PUT
@@ -55,7 +55,7 @@ public interface IRestBotStore extends IRestVersionInfo {
 
     @DELETE
     @Path("/{id}")
-    void deleteBot(@PathParam("id") String id,
-                   @ApiParam(name = "version", required = true, format = "integer", example = "1")
+    Response deleteBot(@PathParam("id") String id,
+                       @ApiParam(name = "version", required = true, format = "integer", example = "1")
                    @QueryParam("version") Integer version);
 }

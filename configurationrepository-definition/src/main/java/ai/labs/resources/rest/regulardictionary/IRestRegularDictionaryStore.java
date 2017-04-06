@@ -16,7 +16,7 @@ import java.util.List;
 /**
  * @author ginccc
  */
-@Api(value = "regulardictionarystore")
+@Api(value = "configurations")
 @Path("/regulardictionarystore/regulardictionaries")
 public interface IRestRegularDictionaryStore extends IRestVersionInfo {
     String resourceURI = "eddi://ai.labs.regulardictionary/regulardictionarystore/regulardictionaries/";
@@ -60,8 +60,8 @@ public interface IRestRegularDictionaryStore extends IRestVersionInfo {
     @PUT
     @Path("/{id}")
     @Consumes(MediaType.APPLICATION_JSON)
-    URI updateRegularDictionary(@PathParam("id") String id,
-                                @ApiParam(name = "version", required = true, format = "integer", example = "1")
+    Response updateRegularDictionary(@PathParam("id") String id,
+                                     @ApiParam(name = "version", required = true, format = "integer", example = "1")
                                 @QueryParam("version") Integer version, RegularDictionaryConfiguration regularDictionaryConfiguration);
 
 
@@ -95,8 +95,8 @@ public interface IRestRegularDictionaryStore extends IRestVersionInfo {
 
     @DELETE
     @Path("/{id}")
-    void deleteRegularDictionary(@PathParam("id") String id,
-                                 @ApiParam(name = "version", required = true, format = "integer", example = "1")
+    Response deleteRegularDictionary(@PathParam("id") String id,
+                                     @ApiParam(name = "version", required = true, format = "integer", example = "1")
                                  @QueryParam("version") Integer version);
 
     @PATCH
