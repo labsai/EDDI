@@ -64,8 +64,8 @@ public class RestRegularDictionaryStore extends RestVersionInfo<RegularDictionar
     }
 
     @Override
-    public void deleteRegularDictionary(String id, Integer version) {
-        delete(id, version);
+    public Response deleteRegularDictionary(String id, Integer version) {
+        return delete(id, version);
     }
 
     @Override

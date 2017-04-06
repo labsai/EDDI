@@ -67,8 +67,8 @@ public class RestExtensionStore extends RestVersionInfo<ExtensionDefinition> imp
     }
 
     @Override
-    public void deleteExtension(String id, Integer version) {
-        delete(id, version);
+    public Response deleteExtension(String id, Integer version) {
+        return delete(id, version);
     }
 
     @Override

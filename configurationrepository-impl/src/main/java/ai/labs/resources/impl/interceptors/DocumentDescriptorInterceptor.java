@@ -57,7 +57,7 @@ public class DocumentDescriptorInterceptor implements ContainerResponseFilter {
         this.conversationDescriptorStore = injector.getInstance(IConversationDescriptorStore.class);
         this.testCaseDescriptorStore = injector.getInstance(ITestCaseDescriptorStore.class);
     }
-    
+
     @Override
     public void filter(ContainerRequestContext contextRequest, ContainerResponseContext contextResponse) throws IOException {
         try {

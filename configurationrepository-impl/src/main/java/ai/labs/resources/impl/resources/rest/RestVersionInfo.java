@@ -107,13 +107,15 @@ public abstract class RestVersionInfo<T> implements IRestVersionInfo {
         }
     }
 
-    protected void delete(String id, Integer version) {
+    protected Response delete(String id, Integer version) {
         version = validateParameters(id, version);
 
         try {
             resourceStore.delete(id, version);
+            return Response.ok().build();
         } catch (IResourceStore.ResourceModifiedException e) {
             throwConflictException(id, e);
+            return null;
         } catch (IResourceStore.ResourceNotFoundException e) {
             throw new NotFoundException(e.getLocalizedMessage(), e);
         } catch (Exception e) {

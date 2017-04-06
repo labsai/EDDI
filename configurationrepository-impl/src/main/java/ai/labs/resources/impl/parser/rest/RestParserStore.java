@@ -47,8 +47,8 @@ public class RestParserStore extends RestVersionInfo<ParserConfiguration> implem
     }
 
     @Override
-    public void deleteParser(String id, Integer version) {
-        delete(id, version);
+    public Response deleteParser(String id, Integer version) {
+        return delete(id, version);
     }
 
     @Override

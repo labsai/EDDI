@@ -75,8 +75,8 @@ public class RestBotStore extends RestVersionInfo<BotConfiguration> implements I
     }
 
     @Override
-    public void deleteBot(String id, Integer version) {
-        delete(id, version);
+    public Response deleteBot(String id, Integer version) {
+        return delete(id, version);
     }
 
     @Override

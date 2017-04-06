@@ -64,8 +64,8 @@ public interface IRestOutputStore extends IRestVersionInfo {
 
     @DELETE
     @Path("/{id}")
-    void deleteOutputSet(@PathParam("id") String id,
-                         @ApiParam(name = "version", required = true, format = "integer", example = "1")
+    Response deleteOutputSet(@PathParam("id") String id,
+                             @ApiParam(name = "version", required = true, format = "integer", example = "1")
                          @QueryParam("version") Integer version);
 
     @PATCH

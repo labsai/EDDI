@@ -55,7 +55,7 @@ public interface IRestBotStore extends IRestVersionInfo {
 
     @DELETE
     @Path("/{id}")
-    void deleteBot(@PathParam("id") String id,
-                   @ApiParam(name = "version", required = true, format = "integer", example = "1")
+    Response deleteBot(@PathParam("id") String id,
+                       @ApiParam(name = "version", required = true, format = "integer", example = "1")
                    @QueryParam("version") Integer version);
 }

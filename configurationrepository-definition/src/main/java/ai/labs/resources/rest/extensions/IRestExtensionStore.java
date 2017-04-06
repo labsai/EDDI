@@ -46,7 +46,7 @@ public interface IRestExtensionStore {
 
     @DELETE
     @Path("/{id}")
-    void deleteExtension(@PathParam("id") String id,
-                         @ApiParam(name = "version", required = true, format = "integer", example = "1")
+    Response deleteExtension(@PathParam("id") String id,
+                             @ApiParam(name = "version", required = true, format = "integer", example = "1")
                          @QueryParam("version") Integer version);
 }

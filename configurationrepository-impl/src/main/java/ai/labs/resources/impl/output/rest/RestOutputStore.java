@@ -98,8 +98,8 @@ public class RestOutputStore extends RestVersionInfo<OutputConfigurationSet> imp
     }
 
     @Override
-    public void deleteOutputSet(String id, Integer version) {
-        delete(id, version);
+    public Response deleteOutputSet(String id, Integer version) {
+        return delete(id, version);
     }
 
     @Override

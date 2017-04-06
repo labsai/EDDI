@@ -98,8 +98,8 @@ public class RestPackageStore extends RestVersionInfo<PackageConfiguration> impl
     }
 
     @Override
-    public void deletePackage(String id, Integer version) {
-        delete(id, version);
+    public Response deletePackage(String id, Integer version) {
+        return delete(id, version);
     }
 
     @Override

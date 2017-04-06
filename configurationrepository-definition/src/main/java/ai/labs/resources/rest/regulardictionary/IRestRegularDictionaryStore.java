@@ -95,8 +95,8 @@ public interface IRestRegularDictionaryStore extends IRestVersionInfo {
 
     @DELETE
     @Path("/{id}")
-    void deleteRegularDictionary(@PathParam("id") String id,
-                                 @ApiParam(name = "version", required = true, format = "integer", example = "1")
+    Response deleteRegularDictionary(@PathParam("id") String id,
+                                     @ApiParam(name = "version", required = true, format = "integer", example = "1")
                                  @QueryParam("version") Integer version);
 
     @PATCH

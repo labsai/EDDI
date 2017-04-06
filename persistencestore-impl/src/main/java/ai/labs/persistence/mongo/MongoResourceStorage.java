@@ -61,9 +61,14 @@ public class MongoResourceStorage<T> implements IResourceStorage<T> {
     @Override
     public void store(IResource currentResource) {
         Resource resource = checkInternalResource(currentResource);
-        currentCollection.updateOne(Filters.eq("_id", new ObjectId(resource.getId())),
-                new Document("$set", resource.getMongoDocument()),
-                new UpdateOptions().upsert(true));
+        if (resource.getId() == null) {
+            currentCollection.insertOne(resource.getMongoDocument());
+        } else {
+            currentCollection.updateOne(
+                    Filters.eq("_id", new ObjectId(resource.getId())),
+                    new Document("$set", resource.getMongoDocument()),
+                    new UpdateOptions().upsert(true));
+        }
     }
 
     @Override
@@ -215,7 +220,8 @@ public class MongoResourceStorage<T> implements IResourceStorage<T> {
 
         @Override
         public String getId() {
-            return doc.get("_id").toString();
+            Object id = doc.get("_id");
+            return id != null ? id.toString() : null;
         }
 
         public void setId(String id) {
