@@ -6,7 +6,6 @@ jobs:
   build:
     docker:
       - image: maven:3.3-jdk-8-alpine
-      - image: docker:1.13.1-git
     working_directory: ~/eddi
     steps:
       - checkout
@@ -42,12 +41,11 @@ jobs:
             curl -L https://github.com/docker/compose/releases/download/1.11.2/docker-compose-`uname -s`-`uname -m` > /usr/local/bin/docker-compose
             chmod +x /usr/local/bin/docker-compose
 
-      - setup_remote_docker
-
       - run:
           name: Start container and verify it's working
           command: |
             set -x
+            cd ~/eddi
             docker-compose -f docker-compose.yml -f docker-compose.local.yml build
             docker-compose -f docker-compose.yml -f docker-compose.local.yml -f docker-compose.testing.yml up
 
