@@ -11,7 +11,7 @@ jobs:
       - checkout
 
       - restore_cache:
-          key: eddi-{{ checksum "pom.xml" }}
+          key: eddi
           paths:
             - /root/.m2
 
@@ -21,7 +21,7 @@ jobs:
       - run: find . -type f -regex ".*/target/surefire-reports/.*xml" -exec cp {} $CIRCLE_TEST_REPORTS/junit/ \;
 
       - save_cache:
-          key: eddi-{{ checksum "pom.xml" }}
+          key: eddi
 
       - setup_remote_docker
 
