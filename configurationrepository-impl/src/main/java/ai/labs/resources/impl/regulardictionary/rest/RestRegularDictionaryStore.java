@@ -14,7 +14,6 @@ import javax.inject.Inject;
 import javax.ws.rs.InternalServerErrorException;
 import javax.ws.rs.NotFoundException;
 import javax.ws.rs.core.Response;
-import java.net.URI;
 import java.util.List;
 
 /**
@@ -69,12 +68,12 @@ public class RestRegularDictionaryStore extends RestVersionInfo<RegularDictionar
     }
 
     @Override
-    public URI patchRegularDictionary(String id, Integer version, PatchInstruction<RegularDictionaryConfiguration>[] patchInstructions) {
+    public Response patchRegularDictionary(String id, Integer version, PatchInstruction<RegularDictionaryConfiguration>[] patchInstructions) {
         try {
             RegularDictionaryConfiguration currentRegularDictionaryConfiguration = regularDictionaryStore.read(id, version);
             RegularDictionaryConfiguration patchedRegularDictionaryConfiguration = patchDocument(currentRegularDictionaryConfiguration, patchInstructions);
 
-            return updateRegularDictionary(id, version, patchedRegularDictionaryConfiguration).getLocation();
+            return updateRegularDictionary(id, version, patchedRegularDictionaryConfiguration);
 
         } catch (IResourceStore.ResourceStoreException e) {
             log.error(e.getLocalizedMessage(), e);

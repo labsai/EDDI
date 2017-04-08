@@ -103,12 +103,12 @@ public class RestOutputStore extends RestVersionInfo<OutputConfigurationSet> imp
     }
 
     @Override
-    public URI patchOutputSet(String id, Integer version, PatchInstruction<OutputConfigurationSet>[] patchInstructions) {
+    public Response patchOutputSet(String id, Integer version, PatchInstruction<OutputConfigurationSet>[] patchInstructions) {
         try {
             OutputConfigurationSet currentOutputConfigurationSet = outputStore.read(id, version);
             OutputConfigurationSet patchedOutputConfigurationSet = patchDocument(currentOutputConfigurationSet, patchInstructions);
 
-            return updateOutputSet(id, version, patchedOutputConfigurationSet);
+            return Response.ok().location(updateOutputSet(id, version, patchedOutputConfigurationSet)).build();
 
         } catch (IResourceStore.ResourceStoreException e) {
             log.error(e.getLocalizedMessage(), e);

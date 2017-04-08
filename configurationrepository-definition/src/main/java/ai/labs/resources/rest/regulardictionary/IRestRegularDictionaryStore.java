@@ -10,7 +10,6 @@ import io.swagger.annotations.*;
 import javax.ws.rs.*;
 import javax.ws.rs.core.MediaType;
 import javax.ws.rs.core.Response;
-import java.net.URI;
 import java.util.List;
 
 /**
@@ -102,7 +101,7 @@ public interface IRestRegularDictionaryStore extends IRestVersionInfo {
     @PATCH
     @Path("/{id}")
     @Consumes(MediaType.APPLICATION_JSON)
-    URI patchRegularDictionary(@PathParam("id") String id,
-                               @ApiParam(name = "version", required = true, format = "integer", example = "1")
+    Response patchRegularDictionary(@PathParam("id") String id,
+                                    @ApiParam(name = "version", required = true, format = "integer", example = "1")
                                @QueryParam("version") Integer version, PatchInstruction<RegularDictionaryConfiguration>[] patchInstructions);
 }
