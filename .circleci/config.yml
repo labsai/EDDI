@@ -26,14 +26,14 @@ jobs:
       - run: docker-compose -f docker-compose.yml -f docker-compose.local.yml build
       - run: docker-compose -f docker-compose.yml -f docker-compose.local.yml -f docker-compose.testing.yml up
 
-      - run: |
+      - run:
+          command: |
+            if [ "${CIRCLE_BRANCH}" == "master" ]; then
+            docker login -e $DOCKER_EMAIL -u $DOCKER_USER -p $DOCKER_PASS
 
-        if [ "${CIRCLE_BRANCH}" == "master" ]; then
-        docker login -e $DOCKER_EMAIL -u $DOCKER_USER -p $DOCKER_PASS
+            docker build -t labsai/eddi:b$CIRCLE_BUILD_NUM .
+            docker push labsai/eddi:b$CIRCLE_BUILD_NUM
 
-        docker build -t labsai/eddi:b$CIRCLE_BUILD_NUM .
-        docker push labsai/eddi:b$CIRCLE_BUILD_NUM
-
-        docker build -t labsai/eddi:latest .
-        docker push labsai/eddi:latest
-        fi
+            docker build -t labsai/eddi:latest .
+            docker push labsai/eddi:latest
+            fi
