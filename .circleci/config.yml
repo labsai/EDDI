@@ -22,6 +22,8 @@ jobs:
 
       - save_cache:
           key: eddi
+          paths:
+            - /root/.m2
 
       - setup_remote_docker
 
