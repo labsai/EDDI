@@ -1,0 +1,39 @@
+version: 2
+branches:
+  ignore:
+    - gh-pages
+jobs:
+  build:
+    docker:
+      - image: maven:3.3-jdk-8-alpine
+    steps:
+      - checkout
+
+       - restore_cache:
+          keys:
+            - eddi-{{ checksum "pom.xml" }}
+          paths:
+            - /root/.m2
+
+      - run: mvn clean install
+
+      - restore_cache:
+            key:
+              - eddi-{{ checksum "pom.xml" }}
+
+      - setup_remote_docker
+
+      - run: docker-compose -f docker-compose.yml -f docker-compose.local.yml build
+      - run: docker-compose -f docker-compose.yml -f docker-compose.local.yml -f docker-compose.testing.yml up
+
+      - run: |
+
+        if [ "${CIRCLE_BRANCH}" == "master" ]; then
+        docker login -e $DOCKER_EMAIL -u $DOCKER_USER -p $DOCKER_PASS
+
+        docker build -t labsai/eddi:b$CIRCLE_BUILD_NUM .
+        docker push labsai/eddi:b$CIRCLE_BUILD_NUM
+
+        docker build -t labsai/eddi:latest .
+        docker push labsai/eddi:latest
+        fi
