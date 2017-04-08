@@ -6,6 +6,7 @@ jobs:
   build:
     docker:
       - image: maven:3.3-jdk-8-alpine
+    working_directory: ~/
     steps:
       - checkout
 
@@ -16,6 +17,9 @@ jobs:
             - /root/.m2
 
       - run: mvn clean install
+
+      - run: mkdir -p $CIRCLE_TEST_REPORTS/junit/
+      - run: find . -type f -regex ".*/target/surefire-reports/.*xml" -exec cp {} $CIRCLE_TEST_REPORTS/junit/ \;
 
       - save_cache:
           key:
