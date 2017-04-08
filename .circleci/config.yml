@@ -16,7 +16,7 @@ jobs:
           paths:
             - /root/.m2
 
-      - run: mvn clean install
+      - run: mvn clean package
 
       - run: mkdir -p $CIRCLE_TEST_REPORTS/junit/
       - run: find . -type f -regex ".*/target/surefire-reports/.*xml" -exec cp {} $CIRCLE_TEST_REPORTS/junit/ \;
