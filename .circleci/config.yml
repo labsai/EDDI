@@ -9,17 +9,17 @@ jobs:
     steps:
       - checkout
 
-       - restore_cache:
-          keys:
+      - restore_cache:
+          key:
             - eddi-{{ checksum "pom.xml" }}
           paths:
             - /root/.m2
 
       - run: mvn clean install
 
-      - restore_cache:
-            key:
-              - eddi-{{ checksum "pom.xml" }}
+      - save_cache:
+          key:
+            - eddi-{{ checksum "pom.xml" }}
 
       - setup_remote_docker
 
