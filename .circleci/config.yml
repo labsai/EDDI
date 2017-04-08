@@ -28,11 +28,37 @@ jobs:
 
       - setup_remote_docker
 
-      - run: docker-compose -f docker-compose.yml -f docker-compose.local.yml build
-      - run: docker-compose -f docker-compose.yml -f docker-compose.local.yml -f docker-compose.testing.yml up
+      - run:
+          name: Install Docker client
+          command: |
+            set -x
+            VER="17.03.0-ce"
+            curl -L -o /tmp/docker-$VER.tgz https://get.docker.com/builds/Linux/x86_64/docker-$VER.tgz
+            tar -xz -C /tmp -f /tmp/docker-$VER.tgz
+            mv /tmp/docker/* /usr/bin
 
       - run:
+          name: Install Docker Compose
           command: |
+            set -x
+            curl -L https://github.com/docker/compose/releases/download/1.11.2/docker-compose-`uname -s`-`uname -m` > /usr/local/bin/docker-compose
+            chmod +x /usr/local/bin/docker-compose
+
+      - run:
+          name: Build service
+          command: make
+
+      - run:
+          name: Start container and verify it's working
+          command: |
+            set -x
+            docker-compose -f docker-compose.yml -f docker-compose.local.yml build
+            docker-compose -f docker-compose.yml -f docker-compose.local.yml -f docker-compose.testing.yml up
+
+      - deploy:
+          name: Build and push Docker image
+          command: |
+            set -x
             if [ "${CIRCLE_BRANCH}" == "master" ]; then
             docker login -e $DOCKER_EMAIL -u $DOCKER_USER -p $DOCKER_PASS
 
@@ -42,3 +68,7 @@ jobs:
             docker build -t labsai/eddi:latest .
             docker push labsai/eddi:latest
             fi
+
+      - store_artifacts:
+          path: /tmp/test-results
+          destination: raw-test-output
