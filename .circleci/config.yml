@@ -45,10 +45,6 @@ jobs:
             chmod +x /usr/local/bin/docker-compose
 
       - run:
-          name: Build service
-          command: make
-
-      - run:
           name: Start container and verify it's working
           command: |
             set -x
