@@ -46,7 +46,7 @@
         <dependency>
             <groupId>org.eclipse.jetty</groupId>
             <artifactId>jetty-servlet</artifactId>
-            <version>9.3.15.v20161220</version>
+            <version>9.3.18.v20170406</version>
         </dependency>
         <dependency>
             <groupId>org.keycloak</groupId>
