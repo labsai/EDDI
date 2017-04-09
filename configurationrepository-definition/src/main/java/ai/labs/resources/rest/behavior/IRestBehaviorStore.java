@@ -8,7 +8,6 @@ import io.swagger.annotations.*;
 import javax.ws.rs.*;
 import javax.ws.rs.core.MediaType;
 import javax.ws.rs.core.Response;
-import java.net.URI;
 import java.util.List;
 
 /**
@@ -43,8 +42,8 @@ public interface IRestBehaviorStore extends IRestVersionInfo {
     @PUT
     @Path("/{id}")
     @Consumes(MediaType.APPLICATION_JSON)
-    URI updateBehaviorRuleSet(@PathParam("id") String id,
-                              @ApiParam(name = "version", required = true, format = "integer", example = "1")
+    Response updateBehaviorRuleSet(@PathParam("id") String id,
+                                   @ApiParam(name = "version", required = true, format = "integer", example = "1")
                               @QueryParam("version") Integer version, BehaviorConfiguration behaviorConfiguration);
 
     @POST
