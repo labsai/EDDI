@@ -11,7 +11,6 @@ import io.swagger.annotations.ApiParam;
 import javax.ws.rs.*;
 import javax.ws.rs.core.MediaType;
 import javax.ws.rs.core.Response;
-import java.net.URI;
 import java.util.List;
 
 /**
@@ -54,8 +53,8 @@ public interface IRestOutputStore extends IRestVersionInfo {
     @PUT
     @Path("/{id}")
     @Consumes(MediaType.APPLICATION_JSON)
-    URI updateOutputSet(@PathParam("id") String id,
-                        @ApiParam(name = "version", required = true, format = "integer", example = "1")
+    Response updateOutputSet(@PathParam("id") String id,
+                             @ApiParam(name = "version", required = true, format = "integer", example = "1")
                         @QueryParam("version") Integer version, OutputConfigurationSet outputConfigurationSet);
 
     @POST

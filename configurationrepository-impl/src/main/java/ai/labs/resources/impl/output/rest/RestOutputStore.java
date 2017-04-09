@@ -2,22 +2,18 @@ package ai.labs.resources.impl.output.rest;
 
 import ai.labs.persistence.IResourceStore;
 import ai.labs.resources.impl.resources.rest.RestVersionInfo;
-import ai.labs.resources.rest.IRestVersionInfo;
 import ai.labs.resources.rest.documentdescriptor.IDocumentDescriptorStore;
 import ai.labs.resources.rest.documentdescriptor.model.DocumentDescriptor;
 import ai.labs.resources.rest.output.IOutputStore;
 import ai.labs.resources.rest.output.IRestOutputStore;
 import ai.labs.resources.rest.output.model.OutputConfigurationSet;
 import ai.labs.resources.rest.patch.PatchInstruction;
-import ai.labs.utilities.RestUtilities;
 import lombok.extern.slf4j.Slf4j;
 
 import javax.inject.Inject;
 import javax.ws.rs.InternalServerErrorException;
 import javax.ws.rs.NotFoundException;
 import javax.ws.rs.core.Response;
-import java.net.URI;
-import java.util.Collections;
 import java.util.List;
 
 /**
@@ -64,32 +60,17 @@ public class RestOutputStore extends RestVersionInfo<OutputConfigurationSet> imp
     }
 
     @Override
-    public URI updateOutputSet(String id, Integer version, OutputConfigurationSet outputConfigurationSet) {
-        try {
-            Collections.sort(outputConfigurationSet.getOutputs(), (o1, o2) -> {
-                int comparisonOfKeys = o1.getKey().compareTo(o2.getKey());
-                if (comparisonOfKeys == 0) {
-                    return o1.getOccurrence() < o2.getOccurrence() ? -1 : o1.getOccurrence() == o2.getOccurrence() ? 0 : 1;
-                } else {
-                    return comparisonOfKeys;
-                }
-            });
-
-            Integer newVersion = outputStore.update(id, version, outputConfigurationSet);
-            return RestUtilities.createURI(resourceURI, id, IRestVersionInfo.versionQueryParam, newVersion);
-        } catch (IResourceStore.ResourceStoreException e) {
-            log.error(e.getLocalizedMessage(), e);
-            throw new InternalServerErrorException(e.getLocalizedMessage(), e);
-        } catch (IResourceStore.ResourceModifiedException e) {
-            try {
-                IResourceStore.IResourceId currentId = outputStore.getCurrentResourceId(id);
-                throw RestUtilities.createConflictException(resourceURI, currentId);
-            } catch (IResourceStore.ResourceNotFoundException e1) {
-                throw new NotFoundException(e.getLocalizedMessage(), e);
+    public Response updateOutputSet(String id, Integer version, OutputConfigurationSet outputConfigurationSet) {
+        outputConfigurationSet.getOutputs().sort((o1, o2) -> {
+            int comparisonOfKeys = o1.getKey().compareTo(o2.getKey());
+            if (comparisonOfKeys == 0) {
+                return o1.getOccurrence() < o2.getOccurrence() ? -1 : o1.getOccurrence() == o2.getOccurrence() ? 0 : 1;
+            } else {
+                return comparisonOfKeys;
             }
-        } catch (IResourceStore.ResourceNotFoundException e) {
-            throw new NotFoundException(e.getLocalizedMessage(), e);
-        }
+        });
+
+        return update(id, version, outputConfigurationSet);
     }
 
     @Override
@@ -108,7 +89,7 @@ public class RestOutputStore extends RestVersionInfo<OutputConfigurationSet> imp
             OutputConfigurationSet currentOutputConfigurationSet = outputStore.read(id, version);
             OutputConfigurationSet patchedOutputConfigurationSet = patchDocument(currentOutputConfigurationSet, patchInstructions);
 
-            return Response.ok().location(updateOutputSet(id, version, patchedOutputConfigurationSet)).build();
+            return updateOutputSet(id, version, patchedOutputConfigurationSet);
 
         } catch (IResourceStore.ResourceStoreException e) {
             log.error(e.getLocalizedMessage(), e);
