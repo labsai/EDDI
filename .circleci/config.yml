@@ -46,8 +46,8 @@ jobs:
           command: |
             set -x
             cd ~/eddi
-            docker-compose -f docker-compose.yml -f docker-compose.local.yml build
-            docker-compose -f docker-compose.yml -f docker-compose.local.yml -f docker-compose.testing.yml up
+            docker-compose -f ~/eddi/docker-compose.yml -f ~/eddi/docker-compose.local.yml build
+            docker-compose -f ~/eddi/docker-compose.yml -f ~/eddi/docker-compose.local.yml -f ~/eddi/docker-compose.testing.yml up
 
       - deploy:
           name: Build and push Docker image
