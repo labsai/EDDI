@@ -38,16 +38,26 @@ jobs:
           name: Install Docker Compose
           command: |
             set -x
-            curl -L https://github.com/docker/compose/releases/download/1.11.2/docker-compose-`uname -s`-`uname -m` > /usr/local/bin/docker-compose
+            apk --no-cache add python py-pip git &&\
+                git clone --branch 1.8.0 https://github.com/docker/compose.git /code/compose &&\
+                cd /code/compose &&\
+                pip --no-cache-dir install -r requirements.txt -r requirements-dev.txt pyinstaller==3.1.1 &&\
+                git rev-parse --short HEAD > compose/GITSHA &&\
+                ln -s /lib /lib64 && ln -s /lib/libc.musl-x86_64.so.1 ldd && ln -s /lib/ld-musl-x86_64.so.1 /lib64/ld-linux-x86-64.so.2 && \
+                pyinstaller docker-compose.spec &&\
+                unlink /lib/ld-linux-x86-64.so.2 /lib64 ldd ||true &&\
+                mv dist/docker-compose /usr/local/bin/docker-compose &&\
+                pip freeze | xargs pip uninstall -y &&\
+                apk del python py-pip git &&\
+                rm -rf /code /usr/lib/python2.7/ /root/.cache /var/cache/apk/* &&\
             chmod +x /usr/local/bin/docker-compose
 
       - run:
           name: Start container and verify it's working
           command: |
             set -x
-            cd ~/eddi
-            docker-compose -f ~/eddi/docker-compose.yml -f ~/eddi/docker-compose.local.yml build
-            docker-compose -f ~/eddi/docker-compose.yml -f ~/eddi/docker-compose.local.yml -f ~/eddi/docker-compose.testing.yml up
+            docker-compose -f docker-compose.yml -f docker-compose.local.yml build
+            docker-compose -f docker-compose.yml -f docker-compose.local.yml -f docker-compose.testing.yml up
 
       - deploy:
           name: Build and push Docker image
