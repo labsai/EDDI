@@ -7,7 +7,7 @@ import java.util.StringTokenizer;
 public class CharacterUtilities {
     private static final String REGULAR_CHARS = "1234567890abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ";
 
-    public static boolean isStringPositiveInteger(String lookup) {
+    public static boolean isStringInteger(String lookup) {
         for (int i = 0; i < lookup.length(); i++)
             if (!Character.isDigit(lookup.charAt(i))) {
                 return false;
