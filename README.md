@@ -67,3 +67,12 @@ docker-compose -f docker-compose.yml -f docker-compose.local.yml up
 ```
 
 after running `mvn package`. This builds a local image of EDDI.
+
+For integration testing run 
+```
+./integration-tests.sh
+```
+or
+```
+docker-compose -f docker-compose.yml -f docker-compose.local.yml -f docker-compose.testing.yml -p ci up -d
+```
