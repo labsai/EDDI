@@ -1,0 +1,52 @@
+version: 2
+branches:
+  ignore:
+    - gh-pages
+jobs:
+  build:
+    docker:
+      - image: labsai/ci-build
+    working_directory: ~/eddi
+    steps:
+      - checkout
+      - setup_remote_docker
+
+      - restore_cache:
+          key: eddi
+          paths:
+            - /root/.m2
+
+      - run: mvn clean package
+
+      - run: mkdir -p $CIRCLE_TEST_REPORTS/junit/
+      - run: find . -type f -regex ".*/target/surefire-reports/.*xml" -exec cp {} $CIRCLE_TEST_REPORTS/junit/ \;
+
+      - save_cache:
+          key: eddi
+          paths:
+            - /root/.m2
+
+      - run:
+          name: Start container and verify it's working
+          command: |
+            set -x
+            docker-compose -f docker-compose.yml -f docker-compose.local.yml build
+            docker-compose -f docker-compose.yml -f docker-compose.local.yml -f docker-compose.testing.yml up
+
+      - deploy:
+          name: Build and push Docker image
+          command: |
+            set -x
+            if [ "${CIRCLE_BRANCH}" == "master" ]; then
+            docker login -u $DOCKER_USER -p $DOCKER_PASS
+
+            docker build -t labsai/eddi:b$CIRCLE_BUILD_NUM .
+            docker push labsai/eddi:b$CIRCLE_BUILD_NUM
+
+            docker build -t labsai/eddi:latest .
+            docker push labsai/eddi:latest
+            fi
+
+      - store_artifacts:
+          path: /tmp/test-results
+          destination: raw-test-output

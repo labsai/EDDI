@@ -1,0 +1,9 @@
+version: '2'
+services:
+  integration-tests:
+    image: labsai/eddi-integration-tests:latest
+    depends_on:
+      - eddi
+    environment:
+          EDDI_BASEURI: http://eddi
+          EDDI_PORT: 7070
