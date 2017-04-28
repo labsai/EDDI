@@ -9,6 +9,7 @@ jobs:
     working_directory: ~/eddi
     steps:
       - checkout
+      - setup_remote_docker
 
       - restore_cache:
           key: eddi
@@ -37,7 +38,7 @@ jobs:
           command: |
             set -x
             if [ "${CIRCLE_BRANCH}" == "master" ]; then
-            docker login -e $DOCKER_EMAIL -u $DOCKER_USER -p $DOCKER_PASS
+            docker login -u $DOCKER_USER -p $DOCKER_PASS
 
             docker build -t labsai/eddi:b$CIRCLE_BUILD_NUM .
             docker push labsai/eddi:b$CIRCLE_BUILD_NUM
