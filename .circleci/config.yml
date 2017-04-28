@@ -30,8 +30,8 @@ jobs:
           name: Start container and verify it's working
           command: |
             set -x
-            docker-compose -f docker-compose.yml -f docker-compose.local.yml build
-            docker-compose -f docker-compose.yml -f docker-compose.local.yml -f docker-compose.testing.yml up
+            chmod +x integration-tests.sh
+            ./integration-tests.sh
 
       - deploy:
           name: Build and push Docker image
@@ -46,7 +46,3 @@ jobs:
             docker build -t labsai/eddi:latest .
             docker push labsai/eddi:latest
             fi
-
-      - store_artifacts:
-          path: /tmp/test-results
-          destination: raw-test-output
