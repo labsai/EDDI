@@ -17,9 +17,11 @@ import java.util.List;
 public class BotConfiguration {
     private boolean authenticationRequired;
     private List<URI> packages;
+    private List<ChannelConnector> channels;
 
     public BotConfiguration() {
         authenticationRequired = true;
         this.packages = new ArrayList<>();
+        this.channels = new ArrayList<>();
     }
 }
