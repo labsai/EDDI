@@ -5,6 +5,7 @@ import ai.labs.lifecycle.LifecycleException;
 import ai.labs.memory.ConversationMemoryUtilities;
 import ai.labs.memory.IConversationMemory;
 import ai.labs.memory.IConversationMemoryStore;
+import ai.labs.memory.IData;
 import ai.labs.memory.model.ConversationMemorySnapshot;
 import ai.labs.memory.model.ConversationState;
 import ai.labs.memory.model.Deployment;
@@ -60,8 +61,7 @@ public class RestBotEngine implements IRestBotEngine {
             if (latestBot == null) {
                 String message = "No instance of bot (botId=%s) deployed in environment (environment=%s)!";
                 message = String.format(message, botId, environment);
-                return Response.status(Response.Status.NOT_FOUND).
-                        type(MediaType.TEXT_PLAIN_TYPE).entity(message).build();
+                return Response.status(Response.Status.NOT_FOUND).type(MediaType.TEXT_PLAIN).entity(message).build();
             }
 
             IConversation conversation = latestBot.startConversation(null);
@@ -149,14 +149,21 @@ public class RestBotEngine implements IRestBotEngine {
                 msg = String.format(msg, conversationMemory.getBotId());
                 throw new Exception(msg);
             }
-            final IConversation conversation = bot.continueConversation(conversationMemory, response::resume);
+            final IConversation conversation = bot.continueConversation(conversationMemory,
+                    conversationStep -> {
+                        IData latestData = conversationStep.getLatestData("output");
+                        final String output = latestData == null ? "" : (String) latestData.getResult();
+                        response.resume(output);
+                    });
 
             if (conversation.isEnded()) {
-                throw new NoLogWebApplicationException(new Throwable("Conversation has ended!"), Response.Status.GONE);
+                throw new NoLogWebApplicationException(
+                        new Throwable("Conversation has ended!"), Response.Status.GONE);
             }
 
             if (conversation.isInProgress()) {
-                throw new NoLogWebApplicationException(new Throwable("Conversation is in Progress!"), Response.Status.FORBIDDEN);
+                throw new NoLogWebApplicationException(
+                        new Throwable("Conversation is in Progress!"), Response.Status.FORBIDDEN);
             }
 
             Callable<Void> processUserInput = () -> {
