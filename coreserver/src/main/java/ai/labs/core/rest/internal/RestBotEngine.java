@@ -330,10 +330,4 @@ public class RestBotEngine implements IRestBotEngine {
         memorySnapshot.setEnvironment(environment);
         return conversationMemoryStore.storeConversationMemorySnapshot(memorySnapshot);
     }
-
-    private class BotNotFoundException extends NotFoundException {
-        BotNotFoundException(String message) {
-            super(message);
-        }
-    }
 }
