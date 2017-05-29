@@ -88,12 +88,6 @@
             <version>1.2</version>
         </dependency>
 
-        <dependency>
-            <groupId>com.github.messenger4j</groupId>
-            <artifactId>messenger4j</artifactId>
-            <version>0.8.0</version>
-        </dependency>
-
         <!-- apache-commons-codec -->
         <dependency>
             <groupId>commons-codec</groupId>
@@ -192,6 +186,16 @@
             <artifactId>junit</artifactId>
             <version>4.10</version>
             <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>ai.labs</groupId>
+            <artifactId>httpclient-definition</artifactId>
+            <version>4.0</version>
+        </dependency>
+        <dependency>
+            <groupId>ai.labs</groupId>
+            <artifactId>callback-impl</artifactId>
+            <version>4.0</version>
         </dependency>
     </dependencies>
 

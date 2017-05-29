@@ -200,6 +200,11 @@
             <artifactId>callback-impl</artifactId>
             <version>4.0</version>
         </dependency>
+        <dependency>
+            <groupId>ai.labs</groupId>
+            <artifactId>facebookmessenger-impl</artifactId>
+            <version>4.0</version>
+        </dependency>
     </dependencies>
 
     <build>

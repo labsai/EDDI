@@ -31,10 +31,6 @@ public interface IRestBotEngine {
     Response startConversation(@PathParam("environment") Deployment.Environment environment,
                                @PathParam("botId") String botId);
 
-    @Path("/{environment}/{botId}/facebook")
-    IFacebookEndpoint getFacebookEndpoint(@PathParam("environment") Deployment.Environment environment,
-                                          @PathParam("botId") String botId);
-
     @GET
     @NoCache
     @Path("/{environment}/{botId}/{conversationId}")

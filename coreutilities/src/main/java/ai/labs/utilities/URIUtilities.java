@@ -22,7 +22,12 @@ public class URIUtilities {
         String[] queryParamVersion = uriString.split("\\?");
         Integer version = -1;
         if (queryParamVersion.length > 1) {
-            version = Integer.parseInt(queryParamVersion[1].split("=")[1]);
+            try {
+                version = Integer.parseInt(queryParamVersion[1].split("=")[1]);
+            } catch (NumberFormatException e) {
+                throw new IllegalArgumentException("resourceId must contain a version information. " +
+                        "(e.g. <resourceUri>?version=1)");
+            }
         }
 
         return new ResourceId(id, version);

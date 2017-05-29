@@ -41,6 +41,8 @@
         <module>caching-definition</module>
         <module>caching-impl-infinispan</module>
         <module>client</module>
+        <module>facebookmessenger-definition</module>
+        <module>facebookmessenger-impl</module>
     </modules>
 
     <build>

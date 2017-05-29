@@ -1,5 +1,6 @@
-package ai.labs.core.rest.internal;
+package ai.labs.runtime.internal;
 
+import ai.labs.runtime.IConversationCoordinator;
 import ai.labs.runtime.SystemRuntime;
 
 import javax.inject.Singleton;
@@ -9,9 +10,10 @@ import java.util.Queue;
 import java.util.concurrent.*;
 
 @Singleton
-public class ConversationCoordinator {
+public class ConversationCoordinator implements IConversationCoordinator {
     private final Map<String, Queue<FutureTask<?>>> conversationQueues = new ConcurrentHashMap<>();
 
+    @Override
     public Future<?> submitInOrder(String conversationId, Callable<?> callable) {
         final Queue<FutureTask<?>> queue = conversationQueues.
                 computeIfAbsent(conversationId, (key) -> new LinkedTransferQueue<>());

@@ -5,16 +5,15 @@ import ai.labs.lifecycle.LifecycleException;
 import ai.labs.memory.ConversationMemoryUtilities;
 import ai.labs.memory.IConversationMemory;
 import ai.labs.memory.IConversationMemoryStore;
-import ai.labs.memory.IData;
 import ai.labs.memory.model.ConversationMemorySnapshot;
 import ai.labs.memory.model.ConversationState;
 import ai.labs.memory.model.Deployment;
 import ai.labs.memory.model.SimpleConversationMemorySnapshot;
 import ai.labs.persistence.IResourceStore;
-import ai.labs.rest.rest.IFacebookEndpoint;
 import ai.labs.rest.rest.IRestBotEngine;
 import ai.labs.runtime.IBot;
 import ai.labs.runtime.IBotFactory;
+import ai.labs.runtime.IConversationCoordinator;
 import ai.labs.runtime.SystemRuntime;
 import ai.labs.runtime.service.ServiceException;
 import ai.labs.utilities.RestUtilities;
@@ -24,7 +23,6 @@ import org.jboss.resteasy.spi.NoLogWebApplicationException;
 
 import javax.inject.Inject;
 import javax.ws.rs.InternalServerErrorException;
-import javax.ws.rs.NotFoundException;
 import javax.ws.rs.container.AsyncResponse;
 import javax.ws.rs.core.MediaType;
 import javax.ws.rs.core.Response;
@@ -40,15 +38,15 @@ public class RestBotEngine implements IRestBotEngine {
     private static final String resourceURI = "eddi://ai.labs.conversation/conversationstore/conversations/";
     private final IBotFactory botFactory;
     private final IConversationMemoryStore conversationMemoryStore;
-    private final FacebookEndpointFactory facebookEndpointFactory;
+    private final IConversationCoordinator conversationCoordinator;
 
     @Inject
     public RestBotEngine(IBotFactory botFactory,
                          IConversationMemoryStore conversationMemoryStore,
-                         FacebookEndpointFactory facebookEndpointFactory) {
+                         IConversationCoordinator conversationCoordinator) {
         this.botFactory = botFactory;
         this.conversationMemoryStore = conversationMemoryStore;
-        this.facebookEndpointFactory = facebookEndpointFactory;
+        this.conversationCoordinator = conversationCoordinator;
     }
 
     @Override
@@ -76,11 +74,6 @@ public class RestBotEngine implements IRestBotEngine {
             log.error(e.getLocalizedMessage(), e);
             throw new InternalServerErrorException(e.getLocalizedMessage(), e);
         }
-    }
-
-    @Override
-    public IFacebookEndpoint getFacebookEndpoint(Deployment.Environment environment, String botId) {
-        return facebookEndpointFactory.create(botId);
     }
 
     @Override
@@ -151,9 +144,11 @@ public class RestBotEngine implements IRestBotEngine {
             }
             final IConversation conversation = bot.continueConversation(conversationMemory,
                     conversationStep -> {
-                        IData latestData = conversationStep.getLatestData("output");
-                        final String output = latestData == null ? "" : (String) latestData.getResult();
-                        response.resume(output);
+                        SimpleConversationMemorySnapshot memorySnapshot = ConversationMemoryUtilities.
+                                convertSimpleConversationMemory(
+                                        (ConversationMemorySnapshot) conversationMemory, true);
+
+                        response.resume(memorySnapshot);
                     });
 
             if (conversation.isEnded()) {
@@ -161,25 +156,9 @@ public class RestBotEngine implements IRestBotEngine {
                         new Throwable("Conversation has ended!"), Response.Status.GONE);
             }
 
-            if (conversation.isInProgress()) {
-                throw new NoLogWebApplicationException(
-                        new Throwable("Conversation is in Progress!"), Response.Status.FORBIDDEN);
-            }
-
-            Callable<Void> processUserInput = () -> {
-                try {
-                    conversation.say(message);
-                    storeConversationMemory(conversationMemory, environment);
-                } catch (Exception e) {
-                    setConversationState(conversationId, ConversationState.ERROR);
-                    log.error("Error while processing user input", e);
-                    throw e;
-                }
-
-                return null;
-            };
-
-            SystemRuntime.getRuntime().submitCallable(processUserInput, null);
+            Callable<Void> processUserInput =
+                    processUserInput(environment, conversationId, message, conversationMemory, conversation);
+            conversationCoordinator.submitInOrder(conversationId, processUserInput);
         } catch (InstantiationException | IllegalAccessException e) {
             String errorMsg = "Error while processing message!";
             log.error(errorMsg, e);
@@ -193,6 +172,24 @@ public class RestBotEngine implements IRestBotEngine {
             log.error(e.getLocalizedMessage(), e);
             throw new InternalServerErrorException(e.getLocalizedMessage(), e);
         }
+    }
+
+    private Callable<Void> processUserInput(Deployment.Environment environment,
+                                            String conversationId, String message,
+                                            IConversationMemory conversationMemory,
+                                            IConversation conversation) {
+        return () -> {
+            try {
+                conversation.say(message);
+                storeConversationMemory(conversationMemory, environment);
+            } catch (Exception e) {
+                setConversationState(conversationId, ConversationState.ERROR);
+                log.error("Error while processing user input", e);
+                throw e;
+            }
+
+            return null;
+        };
     }
 
     @Override
@@ -343,11 +340,5 @@ public class RestBotEngine implements IRestBotEngine {
         ConversationMemorySnapshot memorySnapshot = ConversationMemoryUtilities.convertConversationMemory(conversationMemory);
         memorySnapshot.setEnvironment(environment);
         return conversationMemoryStore.storeConversationMemorySnapshot(memorySnapshot);
-    }
-
-    private class BotNotFoundException extends NotFoundException {
-        BotNotFoundException(String message) {
-            super(message);
-        }
     }
 }

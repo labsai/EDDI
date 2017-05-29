@@ -49,7 +49,8 @@ public class RestBotAdministration implements IRestBotAdministration {
     private void deploy(final Deployment.Environment environment, final String botId, final Integer version) {
         Callable<Void> deployBot = () -> {
             try {
-                if (EnumSet.of(Deployment.Status.NOT_FOUND, Deployment.Status.ERROR).contains(getStatus(environment, botId, version))) {
+                if (EnumSet.of(Deployment.Status.NOT_FOUND, Deployment.Status.ERROR).
+                        contains(getStatus(environment, botId, version))) {
                     botFactory.deployBot(environment, botId, version);
                 }
             } catch (ServiceException e) {

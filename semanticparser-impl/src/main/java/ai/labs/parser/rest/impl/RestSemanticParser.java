@@ -17,6 +17,7 @@ import lombok.extern.slf4j.Slf4j;
 
 import javax.inject.Inject;
 import javax.inject.Provider;
+import javax.ws.rs.BadRequestException;
 import javax.ws.rs.InternalServerErrorException;
 import javax.ws.rs.container.AsyncResponse;
 import java.net.URI;
@@ -59,6 +60,8 @@ public class RestSemanticParser implements IRestSemanticParser {
                 List<RawSolution> rawSolutions = inputParser.parse(sentence);
                 List<Solution> solutionExpressions = inputParserTask.extractExpressions(rawSolutions);
                 asyncResponse.resume(solutionExpressions);
+            } catch (IllegalArgumentException e) {
+                asyncResponse.resume(new BadRequestException(e.getLocalizedMessage()));
             } catch (Exception e) {
                 log.error(e.getLocalizedMessage(), e);
                 asyncResponse.resume(new InternalServerErrorException());
