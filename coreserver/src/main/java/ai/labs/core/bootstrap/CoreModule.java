@@ -1,5 +1,6 @@
 package ai.labs.core.bootstrap;
 
+import ai.labs.callback.impl.ConversationCallbackTask;
 import ai.labs.core.CoreRuntime;
 import ai.labs.core.behavior.BehaviorRulesEvaluationTask;
 import ai.labs.core.behavior.BehaviorSerialization;
@@ -40,6 +41,7 @@ public class CoreModule extends AbstractBaseModule {
         lifecycleTaskPlugins.addBinding("ai.labs.parser").to(InputParserTask.class);
         lifecycleTaskPlugins.addBinding("ai.labs.behavior").to(BehaviorRulesEvaluationTask.class);
         lifecycleTaskPlugins.addBinding("ai.labs.output").to(SimpleOutputTask.class);
+        lifecycleTaskPlugins.addBinding("ai.labs.callback").to(ConversationCallbackTask.class);
 
         bind(CoreRuntime.class).asEagerSingleton();
     }
