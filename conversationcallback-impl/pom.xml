@@ -12,11 +12,6 @@
     <artifactId>callback-impl</artifactId>
     <dependencies>
         <dependency>
-            <groupId>org.eclipse.jetty</groupId>
-            <artifactId>jetty-client</artifactId>
-            <version>9.3.18.v20170406</version>
-        </dependency>
-        <dependency>
             <groupId>ai.labs</groupId>
             <artifactId>conversationmemory-definition</artifactId>
             <version>4.0</version>
@@ -34,6 +29,16 @@
         <dependency>
             <groupId>ai.labs</groupId>
             <artifactId>runtime-definition</artifactId>
+            <version>4.0</version>
+        </dependency>
+        <dependency>
+            <groupId>ai.labs</groupId>
+            <artifactId>conversationmemory-impl</artifactId>
+            <version>4.0</version>
+        </dependency>
+        <dependency>
+            <groupId>ai.labs</groupId>
+            <artifactId>httpclient-definition</artifactId>
             <version>4.0</version>
         </dependency>
     </dependencies>

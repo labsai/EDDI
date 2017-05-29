@@ -2,8 +2,10 @@ package ai.labs.api;
 
 import ai.labs.bootstrap.UserModule;
 import ai.labs.caching.bootstrap.CachingModule;
+import ai.labs.callback.bootstrap.ConversationCallbackModule;
 import ai.labs.core.bootstrap.CoreModule;
 import ai.labs.expressions.bootstrap.ExpressionModule;
+import ai.labs.httpclient.guice.HttpClientModule;
 import ai.labs.memory.bootstrap.ConversationMemoryModule;
 import ai.labs.parser.bootstrap.SemanticParserModule;
 import ai.labs.permission.bootstrap.PermissionModule;
@@ -54,12 +56,13 @@ public class ApiServer {
                 new PermissionModule(),
                 new ExpressionModule(),
                 new RepositoryModule(),
-                new ConversationMemoryModule(),
                 new UserModule(),
                 new CachingModule(new FileInputStream(configDir + "infinispan.xml")),
                 new SemanticParserModule(),
                 new AutomatedtestingModule(),
                 new StaticResourcesModule(),
+                new HttpClientModule(),
+                new ConversationCallbackModule(new FileInputStream(configDir + "httpClient.properties")),
                 new CoreModule(),
                 new SwaggerModule(new FileInputStream(configDir + "swagger.properties")),
                 new ServerRuntimeModule(new FileInputStream(configDir + "webServer.properties"),

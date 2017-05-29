@@ -1,30 +1,18 @@
 package ai.labs.callback.model;
 
-import ai.labs.memory.IData;
+import ai.labs.memory.model.ConversationMemorySnapshot;
+import lombok.Getter;
+import lombok.Setter;
 
-import java.util.List;
+import java.util.Map;
 
 /**
  * Created by rpi on 08.02.2017.
  */
+@Getter
+@Setter
 public class ConversationDataResponse {
-
-    private long errorcode;
-    private List<IData> conversationMemory;
-
-    public long getErrorcode() {
-        return errorcode;
-    }
-
-    public void setErrorcode(long errorcode) {
-        this.errorcode = errorcode;
-    }
-
-    public List<IData> getConversationMemory() {
-        return conversationMemory;
-    }
-
-    public void setConversationMemory(List<IData> conversationMemory) {
-        this.conversationMemory = conversationMemory;
-    }
+    private long httpCode;
+    private Map<String, String> header;
+    private ConversationMemorySnapshot conversationMemorySnapshot;
 }

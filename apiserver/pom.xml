@@ -190,6 +190,16 @@
             <artifactId>automatedtesting-impl</artifactId>
             <version>4.0</version>
         </dependency>
+        <dependency>
+            <groupId>ai.labs</groupId>
+            <artifactId>httpclient-impl-jetty</artifactId>
+            <version>4.0</version>
+        </dependency>
+        <dependency>
+            <groupId>ai.labs</groupId>
+            <artifactId>callback-impl</artifactId>
+            <version>4.0</version>
+        </dependency>
     </dependencies>
 
     <build>
