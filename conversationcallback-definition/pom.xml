@@ -9,13 +9,13 @@
     </parent>
     <modelVersion>4.0.0</modelVersion>
 
-    <artifactId>callback-definition</artifactId>
+    <artifactId>conversationcallback-definition</artifactId>
 
     <dependencies>
         <dependency>
             <groupId>ai.labs</groupId>
             <artifactId>conversationmemory-definition</artifactId>
-            <version>4.0</version>
+            <version>${project.version}</version>
         </dependency>
     </dependencies>
 
