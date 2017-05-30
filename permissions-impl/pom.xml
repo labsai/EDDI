@@ -47,7 +47,7 @@
         <dependency>
             <groupId>ai.labs</groupId>
             <artifactId>runtime-impl</artifactId>
-            <version>4.0</version>
+            <version>${project.version}</version>
         </dependency>
         <dependency>
             <groupId>javax.servlet</groupId>

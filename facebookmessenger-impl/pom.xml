@@ -15,32 +15,32 @@
         <dependency>
             <groupId>ai.labs</groupId>
             <artifactId>facebookmessenger-definition</artifactId>
-            <version>4.0</version>
+            <version>${project.version}</version>
         </dependency>
         <dependency>
             <groupId>ai.labs</groupId>
             <artifactId>configurationrepository-definition</artifactId>
-            <version>4.0</version>
+            <version>${project.version}</version>
         </dependency>
         <dependency>
             <groupId>ai.labs</groupId>
             <artifactId>httpclient-definition</artifactId>
-            <version>4.0</version>
+            <version>${project.version}</version>
         </dependency>
         <dependency>
             <groupId>ai.labs</groupId>
             <artifactId>sharedutilities</artifactId>
-            <version>4.0</version>
+            <version>${project.version}</version>
         </dependency>
         <dependency>
             <groupId>ai.labs</groupId>
             <artifactId>corerest-definition</artifactId>
-            <version>4.0</version>
+            <version>${project.version}</version>
         </dependency>
         <dependency>
             <groupId>ai.labs</groupId>
             <artifactId>caching-definition</artifactId>
-            <version>4.0</version>
+            <version>${project.version}</version>
         </dependency>
         <dependency>
             <groupId>com.github.messenger4j</groupId>
@@ -50,7 +50,7 @@
         <dependency>
             <groupId>ai.labs</groupId>
             <artifactId>coreutilities</artifactId>
-            <version>4.0</version>
+            <version>${project.version}</version>
         </dependency>
         <dependency>
             <groupId>org.jboss.resteasy</groupId>

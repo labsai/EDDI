@@ -28,12 +28,12 @@
         <dependency>
             <groupId>ai.labs</groupId>
             <artifactId>runtime-definition</artifactId>
-            <version>4.0</version>
+            <version>${project.version}</version>
         </dependency>
         <dependency>
             <groupId>ai.labs</groupId>
             <artifactId>runtime-impl</artifactId>
-            <version>4.0</version>
+            <version>${project.version}</version>
         </dependency>
     </dependencies>
     <properties>

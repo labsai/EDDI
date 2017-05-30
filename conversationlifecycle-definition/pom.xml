@@ -15,7 +15,7 @@
         <dependency>
             <groupId>ai.labs</groupId>
             <artifactId>conversationmemory-definition</artifactId>
-            <version>4.0</version>
+            <version>${project.version}</version>
         </dependency>
     </dependencies>
 
