@@ -142,30 +142,23 @@ public class RestBotEngine implements IRestBotEngine {
                 msg = String.format(msg, conversationMemory.getBotId());
                 throw new Exception(msg);
             }
-            final IConversation conversation = bot.continueConversation(conversationMemory, response::resume);
+            final IConversation conversation = bot.continueConversation(conversationMemory,
+                    conversationStep -> {
+                        SimpleConversationMemorySnapshot memorySnapshot = ConversationMemoryUtilities.
+                                convertSimpleConversationMemory(
+                                        (ConversationMemorySnapshot) conversationMemory, true);
+
+                        response.resume(memorySnapshot);
+                    });
 
             if (conversation.isEnded()) {
-                throw new NoLogWebApplicationException(new Throwable("Conversation has ended!"), Response.Status.GONE);
+                throw new NoLogWebApplicationException(
+                        new Throwable("Conversation has ended!"), Response.Status.GONE);
             }
 
-            if (conversation.isInProgress()) {
-                throw new NoLogWebApplicationException(new Throwable("Conversation is in Progress!"), Response.Status.FORBIDDEN);
-            }
-
-            Callable<Void> processUserInput = () -> {
-                try {
-                    conversation.say(message);
-                    storeConversationMemory(conversationMemory, environment);
-                } catch (Exception e) {
-                    setConversationState(conversationId, ConversationState.ERROR);
-                    log.error("Error while processing user input", e);
-                    throw e;
-                }
-
-                return null;
-            };
-
-            SystemRuntime.getRuntime().submitCallable(processUserInput, null);
+            Callable<Void> processUserInput =
+                    processUserInput(environment, conversationId, message, conversationMemory, conversation);
+            conversationCoordinator.submitInOrder(conversationId, processUserInput);
         } catch (InstantiationException | IllegalAccessException e) {
             String errorMsg = "Error while processing message!";
             log.error(errorMsg, e);
@@ -179,6 +172,24 @@ public class RestBotEngine implements IRestBotEngine {
             log.error(e.getLocalizedMessage(), e);
             throw new InternalServerErrorException(e.getLocalizedMessage(), e);
         }
+    }
+
+    private Callable<Void> processUserInput(Deployment.Environment environment,
+                                            String conversationId, String message,
+                                            IConversationMemory conversationMemory,
+                                            IConversation conversation) {
+        return () -> {
+            try {
+                conversation.say(message);
+                storeConversationMemory(conversationMemory, environment);
+            } catch (Exception e) {
+                setConversationState(conversationId, ConversationState.ERROR);
+                log.error("Error while processing user input", e);
+                throw e;
+            }
+
+            return null;
+        };
     }
 
     @Override
