@@ -35,6 +35,7 @@ public class PersistenceModule extends AbstractBaseModule {
     public MongoDatabase provideMongoDB(@Named("mongodb.hosts") String hosts,
                                         @Named("mongodb.port") Integer port,
                                         @Named("mongodb.database") String database,
+                                        @Named("mongodb.source") String source,
                                         @Named("mongodb.username") String username,
                                         @Named("mongodb.password") String password,
                                         @Named("mongodb.connectionsPerHost") Integer connectionsPerHost,
@@ -53,7 +54,7 @@ public class PersistenceModule extends AbstractBaseModule {
             } else if ("".equals(username) || "".equals(password)) {
                 mongoClient = new MongoClient(seeds, mongoClientOptions);
             } else {
-                MongoCredential credential = MongoCredential.createCredential(username, database, password.toCharArray());
+                MongoCredential credential = MongoCredential.createCredential(username, source, password.toCharArray());
                 mongoClient = new MongoClient(seeds, Collections.singletonList(credential), mongoClientOptions);
             }
 
