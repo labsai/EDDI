@@ -1,11 +1,10 @@
 package ai.labs.persistence.bootstrap;
 
 import ai.labs.runtime.bootstrap.AbstractBaseModule;
-import com.github.fakemongo.Fongo;
+import ai.labs.utilities.RuntimeUtilities;
 import com.google.inject.Provides;
 import com.mongodb.*;
 import com.mongodb.client.MongoDatabase;
-import com.mongodb.connection.ServerVersion;
 
 import javax.inject.Named;
 import javax.inject.Singleton;
@@ -38,19 +37,18 @@ public class PersistenceModule extends AbstractBaseModule {
                                         @Named("mongodb.username") String username,
                                         @Named("mongodb.password") String password,
                                         @Named("mongodb.connectionsPerHost") Integer connectionsPerHost,
-                                        @Named("mongodb.testing.inMemoryOnly") boolean inMemoryOnly) {
+                                        @Named("mongodb.socketKeepAlive") Boolean socketKeepAlive,
+                                        @Named("mongodb.sslEnabled") Boolean sslEnabled,
+                                        @Named("mongodb.requiredReplicaSetName") String requiredReplicaSetName) {
         try {
 
             List<ServerAddress> seeds = hostsToServerAddress(hosts, port);
 
             MongoClient mongoClient;
             MongoClientOptions mongoClientOptions = buildMongoClientOptions(connectionsPerHost,
-                    WriteConcern.MAJORITY,
-                    ReadPreference.nearest());
-            if (inMemoryOnly) {
-                Fongo fongo = new Fongo("FakeMongoInstance", new ServerVersion(3, 4));
-                mongoClient = fongo.getMongo();
-            } else if ("".equals(username) || "".equals(password)) {
+                    WriteConcern.MAJORITY, ReadPreference.nearest(),
+                    socketKeepAlive, sslEnabled, requiredReplicaSetName);
+            if ("".equals(username) || "".equals(password)) {
                 mongoClient = new MongoClient(seeds, mongoClientOptions);
             } else {
                 MongoCredential credential = MongoCredential.createCredential(username, database, password.toCharArray());
@@ -66,11 +64,18 @@ public class PersistenceModule extends AbstractBaseModule {
     }
 
     private MongoClientOptions buildMongoClientOptions(Integer connectionsPerHost,
-                                                       WriteConcern writeConcern, ReadPreference readPreference) {
+                                                       WriteConcern writeConcern, ReadPreference readPreference,
+                                                       Boolean socketKeepAlive, Boolean sslEnabled,
+                                                       String requiredReplicaSetName) {
         MongoClientOptions.Builder builder = MongoClientOptions.builder();
         builder.writeConcern(writeConcern);
         builder.readPreference(readPreference);
         builder.connectionsPerHost(connectionsPerHost);
+        builder.socketKeepAlive(socketKeepAlive);
+        builder.sslEnabled(sslEnabled);
+        if (!RuntimeUtilities.isNullOrEmpty(requiredReplicaSetName)) {
+            builder.requiredReplicaSetName(requiredReplicaSetName);
+        }
         return builder.build();
     }
 
