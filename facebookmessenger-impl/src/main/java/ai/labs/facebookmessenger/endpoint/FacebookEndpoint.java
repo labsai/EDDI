@@ -85,11 +85,9 @@ public class FacebookEndpoint implements IFacebookEndpoint {
         try {
             Integer botVersion = botStore.getCurrentResourceId(botId).getVersion();
             String cacheKey = botId + ":" + botVersion;
-            if (!botConfigCache.containsKey(cacheKey)) {
+            if ((botConfiguration = botConfigCache.get(cacheKey)) == null) {
                 botConfiguration = botStore.read(botId, botVersion);
                 botConfigCache.put(cacheKey, botConfiguration);
-            } else {
-                botConfiguration = botConfigCache.get(cacheKey);
             }
         } catch (Exception e) {
             throw new WebApplicationException("Could not read bot configuration", e);
@@ -199,11 +197,9 @@ public class FacebookEndpoint implements IFacebookEndpoint {
             throws RestInterfaceFactoryException {
 
         String conversationId;
-        if (!conversationIdCache.containsKey(senderId)) {
+        if ((conversationId = conversationIdCache.get(senderId)) == null) {
             conversationId = createConversation(environment, botId, senderId);
             conversationIdCache.put(senderId, conversationId);
-        } else {
-            conversationId = conversationIdCache.get(senderId);
         }
 
         return conversationId;

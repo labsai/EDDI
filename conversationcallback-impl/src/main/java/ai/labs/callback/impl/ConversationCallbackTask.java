@@ -12,6 +12,7 @@ import ai.labs.memory.ConversationMemoryUtilities;
 import ai.labs.memory.IConversationMemory;
 import ai.labs.memory.model.ConversationMemorySnapshot;
 import ai.labs.persistence.IResourceStore;
+import lombok.extern.slf4j.Slf4j;
 
 import javax.inject.Inject;
 import java.net.URI;
@@ -23,6 +24,7 @@ import java.util.Set;
 /**
  * Created by rpi on 08.02.2017.
  */
+@Slf4j
 public class ConversationCallbackTask extends AbstractLifecycleTask implements ILifecycleTask {
     private static final String KEY_CALLBACK_URI = "callbackUri";
     private static final String KEY_TIMEOUT_IN_MILLIS = "timeoutInMillis";
@@ -64,8 +66,12 @@ public class ConversationCallbackTask extends AbstractLifecycleTask implements I
             ConversationDataResponse response =
                     conversationCallback.doExternalCall(callback, request, timeoutInMillis);
 
-            if (response.getHttpCode() == 200) {
+            if (String.valueOf(response.getHttpCode()).startsWith("2")) { //check for success, http code 2xx
                 mergeConversationMemory(memory, response.getConversationMemorySnapshot());
+            } else {
+                String msg = "ConversationCallback was (%s) but should have been 2xx. Return value as been ignored";
+                msg = String.format(msg, response.getHttpCode());
+                log.warn(msg);
             }
         } catch (IResourceStore.ResourceStoreException | IResourceStore.ResourceNotFoundException e) {
             throw new LifecycleException(e.getLocalizedMessage(), e);
