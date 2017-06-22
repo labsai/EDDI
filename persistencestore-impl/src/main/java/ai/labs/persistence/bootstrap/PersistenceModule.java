@@ -38,17 +38,35 @@ public class PersistenceModule extends AbstractBaseModule {
                                         @Named("mongodb.username") String username,
                                         @Named("mongodb.password") String password,
                                         @Named("mongodb.connectionsPerHost") Integer connectionsPerHost,
+                                        @Named("mongodb.connectTimeout") Integer connectTimeout,
+                                        @Named("mongodb.heartbeatConnectTimeout") Integer heartbeatConnectTimeout,
+                                        @Named("mongodb.heartbeatFrequency") Integer heartbeatFrequency,
+                                        @Named("mongodb.heartbeatSocketTimeout") Integer heartbeatSocketTimeout,
+                                        @Named("mongodb.localThreshold") Integer localThreshold,
+                                        @Named("mongodb.maxConnectionIdleTime") Integer maxConnectionIdleTime,
+                                        @Named("mongodb.maxConnectionLifeTime") Integer maxConnectionLifeTime,
+                                        @Named("mongodb.maxWaitTime") Integer maxWaitTime,
+                                        @Named("mongodb.minConnectionsPerHost") Integer minConnectionsPerHost,
+                                        @Named("mongodb.minHeartbeatFrequency") Integer minHeartbeatFrequency,
+                                        @Named("mongodb.requiredReplicaSetName") String requiredReplicaSetName,
+                                        @Named("mongodb.serverSelectionTimeout") Integer serverSelectionTimeout,
                                         @Named("mongodb.socketKeepAlive") Boolean socketKeepAlive,
+                                        @Named("mongodb.socketTimeout") Integer socketTimeout,
                                         @Named("mongodb.sslEnabled") Boolean sslEnabled,
-                                        @Named("mongodb.requiredReplicaSetName") String requiredReplicaSetName) {
+                                        @Named("mongodb.threadsAllowedToBlockForConnectionMultiplier") Integer threadsAllowedToBlockForConnectionMultiplier) {
         try {
 
             List<ServerAddress> seeds = hostsToServerAddress(hosts, port);
 
             MongoClient mongoClient;
-            MongoClientOptions mongoClientOptions = buildMongoClientOptions(connectionsPerHost,
+            MongoClientOptions mongoClientOptions = buildMongoClientOptions(
                     WriteConcern.MAJORITY, ReadPreference.nearest(),
-                    socketKeepAlive, sslEnabled, requiredReplicaSetName);
+                    connectionsPerHost, connectTimeout, heartbeatConnectTimeout,
+                    heartbeatFrequency, heartbeatSocketTimeout, localThreshold,
+                    maxConnectionIdleTime, maxConnectionLifeTime, maxWaitTime,
+                    minConnectionsPerHost, minHeartbeatFrequency, requiredReplicaSetName,
+                    serverSelectionTimeout, socketKeepAlive, socketTimeout,
+                    sslEnabled, threadsAllowedToBlockForConnectionMultiplier);
             if ("".equals(username) || "".equals(password)) {
                 mongoClient = new MongoClient(seeds, mongoClientOptions);
             } else {
@@ -64,19 +82,44 @@ public class PersistenceModule extends AbstractBaseModule {
         }
     }
 
-    private MongoClientOptions buildMongoClientOptions(Integer connectionsPerHost,
-                                                       WriteConcern writeConcern, ReadPreference readPreference,
-                                                       Boolean socketKeepAlive, Boolean sslEnabled,
-                                                       String requiredReplicaSetName) {
+    private MongoClientOptions buildMongoClientOptions(WriteConcern writeConcern, ReadPreference readPreference,
+                                                       Integer connectionsPerHost, Integer connectTimeout,
+                                                       Integer heartbeatConnectTimeout, Integer heartbeatFrequency,
+                                                       Integer heartbeatSocketTimeout, Integer localThreshold,
+                                                       Integer maxConnectionIdleTime, Integer maxConnectionLifeTime,
+                                                       Integer maxWaitTime, Integer minConnectionsPerHost,
+                                                       Integer minHeartbeatFrequency, String requiredReplicaSetName,
+                                                       Integer serverSelectionTimeout, Boolean socketKeepAlive,
+                                                       Integer socketTimeout, Boolean sslEnabled,
+                                                       Integer threadsAllowedToBlockForConnectionMultiplier) {
         MongoClientOptions.Builder builder = MongoClientOptions.builder();
         builder.writeConcern(writeConcern);
         builder.readPreference(readPreference);
         builder.connectionsPerHost(connectionsPerHost);
-        builder.socketKeepAlive(socketKeepAlive);
-        builder.sslEnabled(sslEnabled);
+        builder.connectTimeout(connectTimeout);
+        builder.heartbeatConnectTimeout(heartbeatConnectTimeout);
+        builder.heartbeatFrequency(heartbeatFrequency);
+        builder.heartbeatSocketTimeout(heartbeatSocketTimeout);
+        builder.localThreshold(localThreshold);
+        if (!RuntimeUtilities.isNullOrEmpty(maxConnectionIdleTime)) {
+            builder.maxConnectionIdleTime(maxConnectionIdleTime);
+        }
+        if (!RuntimeUtilities.isNullOrEmpty(maxConnectionLifeTime)) {
+            builder.maxConnectionLifeTime(maxConnectionLifeTime);
+        }
+        builder.maxWaitTime(maxWaitTime);
+        if (!RuntimeUtilities.isNullOrEmpty(minConnectionsPerHost)) {
+            builder.minConnectionsPerHost(minConnectionsPerHost);
+        }
+        builder.minHeartbeatFrequency(minHeartbeatFrequency);
         if (!RuntimeUtilities.isNullOrEmpty(requiredReplicaSetName)) {
             builder.requiredReplicaSetName(requiredReplicaSetName);
         }
+        builder.serverSelectionTimeout(serverSelectionTimeout);
+        builder.socketKeepAlive(socketKeepAlive);
+        builder.socketTimeout(socketTimeout);
+        builder.sslEnabled(sslEnabled);
+        builder.threadsAllowedToBlockForConnectionMultiplier(threadsAllowedToBlockForConnectionMultiplier);
         return builder.build();
     }
 
