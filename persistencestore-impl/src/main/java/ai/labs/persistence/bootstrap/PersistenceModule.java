@@ -101,14 +101,14 @@ public class PersistenceModule extends AbstractBaseModule {
         builder.heartbeatFrequency(heartbeatFrequency);
         builder.heartbeatSocketTimeout(heartbeatSocketTimeout);
         builder.localThreshold(localThreshold);
-        if (!RuntimeUtilities.isNullOrEmpty(maxConnectionIdleTime)) {
+        if (maxConnectionIdleTime >= 0) {
             builder.maxConnectionIdleTime(maxConnectionIdleTime);
         }
-        if (!RuntimeUtilities.isNullOrEmpty(maxConnectionLifeTime)) {
+        if (maxConnectionLifeTime >= 0) {
             builder.maxConnectionLifeTime(maxConnectionLifeTime);
         }
         builder.maxWaitTime(maxWaitTime);
-        if (!RuntimeUtilities.isNullOrEmpty(minConnectionsPerHost)) {
+        if (minConnectionsPerHost >= 0) {
             builder.minConnectionsPerHost(minConnectionsPerHost);
         }
         builder.minHeartbeatFrequency(minHeartbeatFrequency);
