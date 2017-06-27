@@ -60,13 +60,6 @@
                 </configuration>
             </plugin>
         </plugins>
-        <extensions>
-            <extension>
-                <groupId>org.springframework.build</groupId>
-                <artifactId>aws-maven</artifactId>
-                <version>5.0.0.RELEASE</version>
-            </extension>
-        </extensions>
     </build>
 
     <dependencies>
@@ -78,24 +71,6 @@
             <version>1.16.10</version>
         </dependency>
     </dependencies>
-
-    <distributionManagement>
-        <snapshotRepository>
-            <id>snapshot</id>
-            <url>s3://mvnrepo.eddi/snapshot</url>
-        </snapshotRepository>
-        <repository>
-            <id>release</id>
-            <url>s3://mvnrepo.eddi/release</url>
-        </repository>
-    </distributionManagement>
-
-    <repositories>
-        <repository>
-            <id>mvnrepo.eddi</id>
-            <url>s3://mvnrepo.eddi/release</url>
-        </repository>
-    </repositories>
 
     <reporting>
         <plugins>
