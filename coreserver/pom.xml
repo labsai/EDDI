@@ -94,16 +94,10 @@
             <artifactId>joda-time</artifactId>
             <version>2.1</version>
         </dependency>
-
-        <dependency>
-            <groupId>ai.labs</groupId>
-            <artifactId>conversationlifecycle-definition</artifactId>
-            <version>4.0</version>
-        </dependency>
         <dependency>
             <groupId>ai.labs</groupId>
             <artifactId>conversationlifecycle-impl</artifactId>
-            <version>4.0</version>
+            <version>${project.version}</version>
         </dependency>
         <dependency>
             <groupId>ai.labs</groupId>
@@ -173,7 +167,12 @@
         <dependency>
             <groupId>ai.labs</groupId>
             <artifactId>semanticparser-impl</artifactId>
-            <version>4.0</version>
+            <version>${project.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>ai.labs</groupId>
+            <artifactId>conversationcallback-impl</artifactId>
+            <version>${project.version}</version>
         </dependency>
 
         <dependency>

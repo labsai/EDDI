@@ -173,22 +173,32 @@
         <dependency>
             <groupId>ai.labs</groupId>
             <artifactId>semanticparser-impl</artifactId>
-            <version>4.0</version>
+            <version>${project.version}</version>
         </dependency>
         <dependency>
             <groupId>ai.labs</groupId>
             <artifactId>caching-impl-infinispan</artifactId>
-            <version>4.0</version>
+            <version>${project.version}</version>
         </dependency>
         <dependency>
             <groupId>ai.labs</groupId>
             <artifactId>coreserver</artifactId>
-            <version>4.0</version>
+            <version>${project.version}</version>
         </dependency>
         <dependency>
             <groupId>ai.labs</groupId>
             <artifactId>automatedtesting-impl</artifactId>
-            <version>4.0</version>
+            <version>${project.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>ai.labs</groupId>
+            <artifactId>httpclient-impl-jetty</artifactId>
+            <version>${project.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>ai.labs</groupId>
+            <artifactId>conversationcallback-impl</artifactId>
+            <version>${project.version}</version>
         </dependency>
     </dependencies>
 
