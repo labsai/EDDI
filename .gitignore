@@ -1,0 +1,7 @@
+/*/logs/
+/*/target/
+/**/web/
+
+# ignore intellij files
+.idea/
+*.iml
