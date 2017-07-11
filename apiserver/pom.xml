@@ -96,12 +96,12 @@
         <dependency>
             <groupId>ai.labs</groupId>
             <artifactId>conversationlifecycle-definition</artifactId>
-            <version>4.0</version>
+            <version>${project.version}</version>
         </dependency>
         <dependency>
             <groupId>ai.labs</groupId>
             <artifactId>conversationlifecycle-impl</artifactId>
-            <version>4.0</version>
+            <version>${project.version}</version>
         </dependency>
         <dependency>
             <groupId>ai.labs</groupId>
@@ -199,6 +199,10 @@
             <groupId>ai.labs</groupId>
             <artifactId>conversationcallback-impl</artifactId>
             <version>${project.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>ai.labs</groupId>
+            <artifactId>facebookmessenger-impl</artifactId>
         </dependency>
     </dependencies>
 

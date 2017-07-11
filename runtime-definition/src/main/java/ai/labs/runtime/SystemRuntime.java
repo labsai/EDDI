@@ -42,6 +42,8 @@ public final class SystemRuntime {
                                      IFinishedExecution<T> callableCompleted,
                                      Map<Object, Object> threadBindings);
 
+        void submitRunable(final Runnable runnable, final IFinishedExecution<?> callback, final Map<Object, Object> threadBindings);
+
         interface IFinishedExecution<T> {
             void onComplete(T result);
 

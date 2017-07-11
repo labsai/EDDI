@@ -5,6 +5,7 @@ import ai.labs.caching.bootstrap.CachingModule;
 import ai.labs.callback.bootstrap.ConversationCallbackModule;
 import ai.labs.core.bootstrap.CoreModule;
 import ai.labs.expressions.bootstrap.ExpressionModule;
+import ai.labs.facebookmessenger.bootstrap.FacebookMessengerModule;
 import ai.labs.httpclient.guice.HttpClientModule;
 import ai.labs.memory.bootstrap.ConversationMemoryModule;
 import ai.labs.parser.bootstrap.SemanticParserModule;
@@ -66,7 +67,8 @@ public class ApiServer {
                 new CoreModule(),
                 new SwaggerModule(new FileInputStream(configDir + "swagger.properties")),
                 new ServerRuntimeModule(new FileInputStream(configDir + "webServer.properties"),
-                        new FileInputStream(configDir + "keycloak.properties"))
+                        new FileInputStream(configDir + "keycloak.properties")),
+                new FacebookMessengerModule()
         };
 
         //init modules

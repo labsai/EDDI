@@ -41,10 +41,12 @@
         <module>caching-definition</module>
         <module>caching-impl-infinispan</module>
         <module>client</module>
-        <module>httpclient-definition</module>
-        <module>httpclient-impl-jetty</module>
         <module>conversationcallback-definition</module>
         <module>conversationcallback-impl</module>
+        <module>httpclient-definition</module>
+        <module>httpclient-impl-jetty</module>
+        <module>facebookmessenger-definition</module>
+        <module>facebookmessenger-impl</module>
     </modules>
 
     <build>

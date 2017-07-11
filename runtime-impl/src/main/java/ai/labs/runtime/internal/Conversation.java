@@ -86,10 +86,8 @@ public class Conversation implements IConversation {
 
             // get final output
             IConversationMemory.IWritableConversationStep currentStep = conversationMemory.getCurrentStep();
-            IData latestData = currentStep.getLatestData("output");
-            final String output = latestData == null ? "" : (String) latestData.getResult();
             if (outputProvider != null) {
-                outputProvider.renderOutput(output);
+                outputProvider.renderOutput(currentStep);
             }
 
             IData actionData = currentStep.getLatestData("action");

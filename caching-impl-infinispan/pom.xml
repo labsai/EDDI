@@ -14,7 +14,7 @@
         <dependency>
             <groupId>ai.labs</groupId>
             <artifactId>caching-definition</artifactId>
-            <version>4.0</version>
+            <version>${project.version}</version>
         </dependency>
         <dependency>
             <groupId>org.infinispan</groupId>
@@ -24,7 +24,7 @@
         <dependency>
             <groupId>ai.labs</groupId>
             <artifactId>runtime-definition</artifactId>
-            <version>4.0</version>
+            <version>${project.version}</version>
         </dependency>
     </dependencies>
 

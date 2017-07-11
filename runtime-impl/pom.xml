@@ -22,27 +22,27 @@
         <dependency>
             <groupId>ai.labs</groupId>
             <artifactId>corerest-definition</artifactId>
-            <version>4.0</version>
+            <version>${project.version}</version>
         </dependency>
         <dependency>
             <groupId>ai.labs</groupId>
             <artifactId>coreutilities</artifactId>
-            <version>4.0</version>
+            <version>${project.version}</version>
         </dependency>
         <dependency>
             <groupId>ai.labs</groupId>
             <artifactId>conversationmemory-impl</artifactId>
-            <version>4.0</version>
+            <version>${project.version}</version>
         </dependency>
         <dependency>
             <groupId>ai.labs</groupId>
             <artifactId>conversationlifecycle-definition</artifactId>
-            <version>4.0</version>
+            <version>${project.version}</version>
         </dependency>
         <dependency>
             <groupId>ai.labs</groupId>
             <artifactId>conversationlifecycle-impl</artifactId>
-            <version>4.0</version>
+            <version>${project.version}</version>
         </dependency>
         <dependency>
             <groupId>javax.inject</groupId>
@@ -114,7 +114,7 @@
         <dependency>
             <groupId>ai.labs</groupId>
             <artifactId>sharedutilities</artifactId>
-            <version>4.0</version>
+            <version>${project.version}</version>
         </dependency>
         <!-- LOGGING END -->
     </dependencies>

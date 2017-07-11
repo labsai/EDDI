@@ -13,7 +13,9 @@ import ai.labs.lifecycle.ILifecycleTask;
 import ai.labs.parser.InputParserTask;
 import ai.labs.rest.rest.IRestBotAdministration;
 import ai.labs.rest.rest.IRestBotEngine;
+import ai.labs.runtime.IConversationCoordinator;
 import ai.labs.runtime.bootstrap.AbstractBaseModule;
+import ai.labs.runtime.internal.ConversationCoordinator;
 import com.google.inject.Scopes;
 import com.google.inject.multibindings.MapBinder;
 
@@ -32,6 +34,7 @@ public class CoreModule extends AbstractBaseModule {
 
         bind(IRestBotEngine.class).to(RestBotEngine.class);
         bind(IRestBotAdministration.class).to(RestBotAdministration.class);
+        bind(IConversationCoordinator.class).to(ConversationCoordinator.class).in(Scopes.SINGLETON);
         /*bind(IRestBotUI.class).to(RestBotUI.class);
         bind(IRestBotmarklet.class).to(RestBotmarklet.class);*/
 
