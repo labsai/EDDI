@@ -203,6 +203,7 @@
         <dependency>
             <groupId>ai.labs</groupId>
             <artifactId>facebookmessenger-impl</artifactId>
+            <version>${project.version}</version>
         </dependency>
     </dependencies>
 
