@@ -1,6 +1,5 @@
 package ai.labs.core.bootstrap;
 
-import ai.labs.callback.impl.ConversationCallbackTask;
 import ai.labs.core.CoreRuntime;
 import ai.labs.core.behavior.BehaviorRulesEvaluationTask;
 import ai.labs.core.behavior.BehaviorSerialization;
@@ -10,7 +9,6 @@ import ai.labs.core.output.SimpleOutputTask;
 import ai.labs.core.rest.internal.RestBotAdministration;
 import ai.labs.core.rest.internal.RestBotEngine;
 import ai.labs.lifecycle.ILifecycleTask;
-import ai.labs.parser.InputParserTask;
 import ai.labs.rest.rest.IRestBotAdministration;
 import ai.labs.rest.rest.IRestBotEngine;
 import ai.labs.runtime.IConversationCoordinator;
@@ -41,10 +39,8 @@ public class CoreModule extends AbstractBaseModule {
         MapBinder<String, ILifecycleTask> lifecycleTaskPlugins
                 = MapBinder.newMapBinder(binder(), String.class, ILifecycleTask.class);
         lifecycleTaskPlugins.addBinding("ai.labs.normalizer").to(NormalizeInputTask.class);
-        lifecycleTaskPlugins.addBinding("ai.labs.parser").to(InputParserTask.class);
         lifecycleTaskPlugins.addBinding("ai.labs.behavior").to(BehaviorRulesEvaluationTask.class);
         lifecycleTaskPlugins.addBinding("ai.labs.output").to(SimpleOutputTask.class);
-        lifecycleTaskPlugins.addBinding("ai.labs.callback").to(ConversationCallbackTask.class);
 
         bind(CoreRuntime.class).asEagerSingleton();
     }
