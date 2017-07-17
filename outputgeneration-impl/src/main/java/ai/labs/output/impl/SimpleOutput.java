@@ -1,4 +1,8 @@
-package ai.labs.core.output;
+package ai.labs.output.impl;
+
+import ai.labs.output.IOutputFilter;
+import ai.labs.output.ISimpleOutput;
+import ai.labs.output.model.OutputEntry;
 
 import java.util.*;
 
@@ -47,8 +51,8 @@ public class SimpleOutput implements ISimpleOutput {
         return outputs;
     }
 
-    public List<String> convert(List<OutputEntry> outputEntries) {
-        List<String> ret = new LinkedList<>();
+    public List<Object> convert(List<OutputEntry> outputEntries) {
+        List<Object> ret = new LinkedList<>();
         for (OutputEntry outputEntry : outputEntries) {
             ret.add(outputEntry.getText());
         }

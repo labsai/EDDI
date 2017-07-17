@@ -1,5 +1,8 @@
 package ai.labs.memory;
 
+import lombok.Getter;
+import lombok.Setter;
+
 import java.util.Arrays;
 import java.util.Date;
 import java.util.List;
@@ -8,6 +11,8 @@ import java.util.Random;
 /**
  * @author ginccc
  */
+@Getter
+@Setter
 public class Data implements IData {
     private final String key;
     private List possibleResults;
@@ -37,46 +42,6 @@ public class Data implements IData {
         this.result = result == null ? chooseRandomResult(possibleResults) : result;
         this.possibleResults = possibleResults;
         this.timestamp = timestamp;
-        this.isPublic = isPublic;
-    }
-
-    @Override
-    public String getKey() {
-        return key;
-    }
-
-    @Override
-    public void setPossibleResults(List possibleResults) {
-        this.possibleResults = possibleResults;
-    }
-
-    @Override
-    public List getPossibleResults() {
-        return possibleResults;
-    }
-
-    @Override
-    public void setResult(Object result) {
-        this.result = result;
-    }
-
-    @Override
-    public Object getResult() {
-        return result;
-    }
-
-    @Override
-    public Date getTimestamp() {
-        return timestamp;
-    }
-
-    @Override
-    public boolean isPublic() {
-        return isPublic;
-    }
-
-    @Override
-    public void setPublic(boolean isPublic) {
         this.isPublic = isPublic;
     }
 

@@ -1,6 +1,8 @@
-package ai.labs.core.output;
+package ai.labs.output.model;
 
 import lombok.*;
+
+import java.util.List;
 
 /**
  * @author ginccc
@@ -15,6 +17,7 @@ import lombok.*;
 public class OutputEntry implements Comparable<OutputEntry> {
     private String key;
     private String text;
+    private List<String> quickReplies;
     private int occurrence;
 
     @Override

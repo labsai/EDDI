@@ -1,5 +1,6 @@
-package ai.labs.core.output;
+package ai.labs.output.impl;
 
+import ai.labs.output.IOutputFilter;
 import lombok.AllArgsConstructor;
 import lombok.Getter;
 

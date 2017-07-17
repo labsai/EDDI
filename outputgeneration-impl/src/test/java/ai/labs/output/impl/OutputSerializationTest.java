@@ -1,5 +1,6 @@
-package ai.labs.core.output;
+package ai.labs.output.impl;
 
+import ai.labs.output.model.OutputEntry;
 import ai.labs.serialization.IJsonSerialization;
 import ai.labs.serialization.JsonSerialization;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -23,7 +24,7 @@ public class OutputSerializationTest {
     @Test
     public void testSerialize() throws Exception {
         //setup
-        OutputEntry outputEntry = new OutputEntry("key", "value", 0);
+        OutputEntry outputEntry = new OutputEntry("key", "value", null, 0);
 
         //test
         String result = jsonSerialization.serialize(outputEntry);
@@ -35,7 +36,7 @@ public class OutputSerializationTest {
     @Test
     public void testDeserialize() throws Exception {
         //setup
-        OutputEntry outputEntry = new OutputEntry("key", "value", 0);
+        OutputEntry outputEntry = new OutputEntry("key", "value", null, 0);
 
 
         //test

@@ -6,7 +6,6 @@ import ai.labs.core.behavior.BehaviorRulesEvaluationTask;
 import ai.labs.core.behavior.BehaviorSerialization;
 import ai.labs.core.behavior.IBehaviorSerialization;
 import ai.labs.core.normalizing.NormalizeInputTask;
-import ai.labs.core.output.SimpleOutputTask;
 import ai.labs.core.rest.internal.RestBotAdministration;
 import ai.labs.core.rest.internal.RestBotEngine;
 import ai.labs.lifecycle.ILifecycleTask;
@@ -43,7 +42,6 @@ public class CoreModule extends AbstractBaseModule {
         lifecycleTaskPlugins.addBinding("ai.labs.normalizer").to(NormalizeInputTask.class);
         lifecycleTaskPlugins.addBinding("ai.labs.parser").to(InputParserTask.class);
         lifecycleTaskPlugins.addBinding("ai.labs.behavior").to(BehaviorRulesEvaluationTask.class);
-        lifecycleTaskPlugins.addBinding("ai.labs.output").to(SimpleOutputTask.class);
         lifecycleTaskPlugins.addBinding("ai.labs.callback").to(ConversationCallbackTask.class);
 
         bind(CoreRuntime.class).asEagerSingleton();

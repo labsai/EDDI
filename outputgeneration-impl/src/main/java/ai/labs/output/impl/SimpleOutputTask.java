@@ -1,12 +1,11 @@
-package ai.labs.core.output;
+package ai.labs.output.impl;
 
-import ai.labs.lifecycle.AbstractLifecycleTask;
-import ai.labs.lifecycle.ILifecycleTask;
-import ai.labs.lifecycle.LifecycleException;
-import ai.labs.lifecycle.PackageConfigurationException;
-import ai.labs.memory.Data;
+import ai.labs.lifecycle.*;
 import ai.labs.memory.IConversationMemory;
 import ai.labs.memory.IData;
+import ai.labs.memory.IDataFactory;
+import ai.labs.output.IOutputFilter;
+import ai.labs.output.model.OutputEntry;
 import ai.labs.resources.rest.output.model.OutputConfiguration;
 import ai.labs.resources.rest.output.model.OutputConfigurationSet;
 import ai.labs.runtime.client.configuration.IResourceClientLibrary;
@@ -23,17 +22,24 @@ import java.util.Map;
 /**
  * @author ginccc
  */
-public class SimpleOutputTask extends AbstractLifecycleTask implements ILifecycleTask {
+public class SimpleOutputTask implements ILifecycleTask {
     private static final String SEPARATOR = " ";
     private static final String ACTION_KEY = "action";
     private SimpleOutput simpleOutput;
     private IResourceClientLibrary resourceClientLibrary;
+    private final IDataFactory dataFactory;
 
     @Inject
-    public SimpleOutputTask(IResourceClientLibrary resourceClientLibrary) {
+    public SimpleOutputTask(IResourceClientLibrary resourceClientLibrary, IDataFactory dataFactory) {
         this.resourceClientLibrary = resourceClientLibrary;
+        this.dataFactory = dataFactory;
         this.simpleOutput = new SimpleOutput();
 
+    }
+
+    @Override
+    public void init() {
+        // not implemented
     }
 
     @Override
@@ -77,7 +83,7 @@ public class SimpleOutputTask extends AbstractLifecycleTask implements ILifecycl
 
         for (List<OutputEntry> possibleOutput : possibleOutputs) {
             String key = "output:action:" + possibleOutput.get(0).getKey();
-            memory.getCurrentStep().storeData(new Data(key, null, simpleOutput.convert(possibleOutput)));
+            memory.getCurrentStep().storeData(dataFactory.createData(key, null, simpleOutput.convert(possibleOutput)));
         }
 
         List<IData> allOutputParts = memory.getCurrentStep().getAllData("output:action");
@@ -90,7 +96,7 @@ public class SimpleOutputTask extends AbstractLifecycleTask implements ILifecycl
             finalOutput.delete(finalOutput.length() - SEPARATOR.length(), finalOutput.length());
         }
 
-        Data finalOutputData = new Data("output:final", finalOutput.toString());
+        IData finalOutputData = dataFactory.createData("output:final", finalOutput.toString());
         finalOutputData.setPublic(true);
         memory.getCurrentStep().storeData(finalOutputData);
     }
@@ -122,14 +128,20 @@ public class SimpleOutputTask extends AbstractLifecycleTask implements ILifecycl
 
             for (OutputConfiguration outputConfiguration : outputConfigurationSet.getOutputs()) {
                 String key = outputConfiguration.getKey();
+                List<String> quickReplies = outputConfiguration.getQuickReplies();
                 int occurrence = outputConfiguration.getOccurrence();
                 outputConfiguration.getOutputValues().stream().filter(
                         text -> !RuntimeUtilities.isNullOrEmpty(text)).forEachOrdered(
-                        text -> simpleOutput.addOutputEntry(new OutputEntry(key, text, occurrence)));
+                        text -> simpleOutput.addOutputEntry(new OutputEntry(key, text, quickReplies, occurrence)));
             }
         } catch (ServiceException e) {
             String message = "Error while fetching OutputConfigurationSet!\n" + e.getLocalizedMessage();
             throw new PackageConfigurationException(message, e);
         }
+    }
+
+    @Override
+    public void setExtensions(Map<String, Object> extensions) throws UnrecognizedExtensionException, IllegalExtensionConfigurationException {
+
     }
 }

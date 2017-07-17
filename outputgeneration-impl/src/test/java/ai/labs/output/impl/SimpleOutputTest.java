@@ -1,5 +1,7 @@
-package ai.labs.core.output;
+package ai.labs.output.impl;
 
+import ai.labs.output.IOutputFilter;
+import ai.labs.output.model.OutputEntry;
 import org.junit.Assert;
 import org.junit.Test;
 
@@ -14,7 +16,7 @@ public class SimpleOutputTest {
     public void testGetOutputOccurrence0() throws Exception {
         //setup
         SimpleOutput simpleOutput = new SimpleOutput();
-        simpleOutput.addOutputEntry(new OutputEntry("greeting", "Hallo!", 0));
+        simpleOutput.addOutputEntry(new OutputEntry("greeting", "Hallo!", null, 0));
 
         //test
         List<List<OutputEntry>> outputs = simpleOutput.getOutputs(Arrays.asList(new IOutputFilter[]{new OutputFilter("greeting", 0)}));
@@ -27,8 +29,8 @@ public class SimpleOutputTest {
     public void testGetOutputOccurrence0_1() throws Exception {
         //setup
         SimpleOutput simpleOutput = new SimpleOutput();
-        simpleOutput.addOutputEntry(new OutputEntry("greeting", "Hallo!", 0));
-        simpleOutput.addOutputEntry(new OutputEntry("greeting", "Hallo", 0));
+        simpleOutput.addOutputEntry(new OutputEntry("greeting", "Hallo!", null,  0));
+        simpleOutput.addOutputEntry(new OutputEntry("greeting", "Hallo", null, 0));
 
         //test
         List<List<OutputEntry>> outputs = simpleOutput.getOutputs(Arrays.asList(new IOutputFilter[]{new OutputFilter("greeting", 0)}));
@@ -42,8 +44,8 @@ public class SimpleOutputTest {
     public void testGetOutputOccurrence1() throws Exception {
         //setup
         SimpleOutput simpleOutput = new SimpleOutput();
-        simpleOutput.addOutputEntry(new OutputEntry("greeting", "Hallo!", 0));
-        simpleOutput.addOutputEntry(new OutputEntry("greeting", "Second Hello!", 1));
+        simpleOutput.addOutputEntry(new OutputEntry("greeting", "Hallo!", null, 0));
+        simpleOutput.addOutputEntry(new OutputEntry("greeting", "Second Hello!", null, 1));
 
         //test
         List<List<OutputEntry>> outputs1 = simpleOutput.getOutputs(Arrays.asList(new IOutputFilter[]{new OutputFilter("greeting", 0)}));
