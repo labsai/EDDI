@@ -31,7 +31,7 @@
         <dependency>
             <groupId>ai.labs</groupId>
             <artifactId>sharedutilities</artifactId>
-            <version>4.0</version>
+            <version>${project.version}</version>
         </dependency>
 
     </dependencies>

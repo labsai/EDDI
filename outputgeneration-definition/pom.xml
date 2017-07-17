@@ -12,6 +12,14 @@
     <packaging>jar</packaging>
     <artifactId>outputgeneration-definition</artifactId>
 
+    <dependencies>
+        <dependency>
+            <groupId>ai.labs</groupId>
+            <artifactId>expressions</artifactId>
+            <version>${project.version}</version>
+        </dependency>
+    </dependencies>
+
     <properties>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
     </properties>

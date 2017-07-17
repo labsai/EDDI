@@ -15,16 +15,16 @@ import java.util.List;
 public class OutputConfiguration {
     private String key;
     private List<String> outputValues;
-    private List<String> quickReplies;
+    private List<QuickReply> quickReplies;
     private int occurrence;
 
-    public OutputConfiguration(String key, int occurrence, List<String> outputValues, List<String> quickReplies) {
+    public OutputConfiguration(String key, int occurrence, List<String> outputValues, List<QuickReply> quickReplies) {
         this.key = key;
         this.occurrence = occurrence;
         this.outputValues = new ArrayList<>();
         this.outputValues.addAll(outputValues);
         this.quickReplies = new ArrayList<>();
-        this.quickReplies.addAll(outputValues);
+        this.quickReplies.addAll(quickReplies);
     }
 
     public OutputConfiguration() {
@@ -47,5 +47,13 @@ public class OutputConfiguration {
         int result = key.hashCode();
         result = 31 * result + occurrence;
         return result;
+    }
+
+    @Getter
+    @Setter
+    public static class QuickReply {
+        private String value;
+        private String expressions;
+
     }
 }
