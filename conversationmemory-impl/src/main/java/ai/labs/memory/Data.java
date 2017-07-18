@@ -3,7 +3,7 @@ package ai.labs.memory;
 import lombok.Getter;
 import lombok.Setter;
 
-import java.util.Arrays;
+import java.util.Collections;
 import java.util.Date;
 import java.util.List;
 import java.util.Random;
@@ -13,31 +13,31 @@ import java.util.Random;
  */
 @Getter
 @Setter
-public class Data implements IData {
+public class Data<T> implements IData<T> {
     private final String key;
     private List possibleResults;
-    private Object result;
+    private T result;
     private final Date timestamp;
     private boolean isPublic;
 
-    public Data(IData data) {
+    public Data(IData<T> data) {
         this(data.getKey(), data.getResult(), data.getPossibleResults(), data.getTimestamp(), data.isPublic());
         this.result = data.getResult();
     }
 
-    public Data(String key, Object result) {
-        this(key, result, Arrays.asList(result), new Date(System.currentTimeMillis()));
+    public Data(String key, T result) {
+        this(key, result, Collections.singletonList(result), new Date(System.currentTimeMillis()));
     }
 
-    public Data(String key, Object result, List possibleResults) {
+    public Data(String key, T result, List<T> possibleResults) {
         this(key, result, possibleResults, new Date(System.currentTimeMillis()));
     }
 
-    public Data(String key, Object result, List possibleResults, Date timestamp) {
+    public Data(String key, T result, List<T> possibleResults, Date timestamp) {
         this(key, result, possibleResults, timestamp, false);
     }
 
-    public Data(String key, Object result, List possibleResults, Date timestamp, boolean isPublic) {
+    public Data(String key, T result, List<T> possibleResults, Date timestamp, boolean isPublic) {
         this.key = key;
         this.result = result == null ? chooseRandomResult(possibleResults) : result;
         this.possibleResults = possibleResults;
@@ -45,7 +45,7 @@ public class Data implements IData {
         this.isPublic = isPublic;
     }
 
-    private Object chooseRandomResult(List results) {
+    private T chooseRandomResult(List<T> results) {
         if (!results.isEmpty()) {
             Random random = new Random();
             int randNumber = random.nextInt(results.size());

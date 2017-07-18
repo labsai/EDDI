@@ -40,11 +40,17 @@ public interface ILifecycleTask {
      */
     List<String> getOutputDependencies();
 
-    void init();
+    default void init() {
+        //to be overridden if needed
+    }
 
     void executeTask(IConversationMemory memory) throws LifecycleException;
 
-    void configure(Map<String, Object> configuration) throws PackageConfigurationException;
+    default void configure(Map<String, Object> configuration) throws PackageConfigurationException {
+        //to be overridden if needed
+    }
 
-    void setExtensions(Map<String, Object> extensions) throws UnrecognizedExtensionException, IllegalExtensionConfigurationException;
+    default void setExtensions(Map<String, Object> extensions) throws UnrecognizedExtensionException, IllegalExtensionConfigurationException {
+        //to be overridden if needed
+    }
 }

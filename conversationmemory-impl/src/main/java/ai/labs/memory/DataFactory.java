@@ -7,12 +7,12 @@ import java.util.List;
  */
 public class DataFactory implements IDataFactory {
     @Override
-    public IData createData(String key, Object value) {
-        return new Data(key, value);
+    public <T> IData<T> createData(String key, T value) {
+        return new Data<>(key, value);
     }
 
     @Override
-    public IData createData(String key, Object value, List<Object> possibleValues) {
-        return new Data(key, value, possibleValues);
+    public <T> IData<T> createData(String key, T value, List<T> possibleValues) {
+        return new Data<>(key, value, possibleValues);
     }
 }

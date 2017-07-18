@@ -2,7 +2,10 @@ package ai.labs.memory;
 
 import ai.labs.memory.model.ConversationState;
 
-import java.util.*;
+import java.util.ArrayList;
+import java.util.LinkedList;
+import java.util.List;
+import java.util.Stack;
 
 /**
  * @author ginccc
@@ -18,7 +21,7 @@ public class ConversationMemory implements IConversationMemory {
     private IConversationMemory.IConversationContext context;
     private ConversationState conversationState;
 
-    public ConversationMemory(String id, String botId, Integer botVersion) {
+    ConversationMemory(String id, String botId, Integer botVersion) {
         this(botId, botVersion);
         this.id = id;
     }
@@ -128,20 +131,12 @@ public class ConversationMemory implements IConversationMemory {
     public final class ConversationStepStack implements IConversationStepStack {
         private List<IConversationStep> conversationSteps = new ArrayList<>();
 
-        public ConversationStepStack(IConversationStep step) {
-            conversationSteps.add(step);
-        }
-
-        public ConversationStepStack(IConversationStep... steps) {
-            conversationSteps.addAll(Arrays.asList(steps));
-        }
-
-        public ConversationStepStack(List<IConversationStep> steps) {
+        ConversationStepStack(List<IConversationStep> steps) {
             conversationSteps.addAll(steps);
         }
 
         @Override
-        public IData getLatestData(String key) {
+        public <T> IData<T> getLatestData(String key) {
             for (int i = conversationSteps.size() - 1; i >= 0; --i) {
                 IConversationStep step = conversationSteps.get(i);
                 if (step.getData(key) != null) {
@@ -152,12 +147,12 @@ public class ConversationMemory implements IConversationMemory {
         }
 
         @Override
-        public List<List<IData>> getAllData(String prefix) {
-            List<List<IData>> allData = new LinkedList<>();
+        public <T> List<List<IData<T>>> getAllData(String prefix) {
+            List<List<IData<T>>> allData = new LinkedList<>();
 
             for (int i = conversationSteps.size() - 1; i >= 0; i--) {
                 IConversationStep step = conversationSteps.get(i);
-                List<IData> dataList = step.getAllData(prefix);
+                List<IData<T>> dataList = step.getAllData(prefix);
                 if (!dataList.isEmpty()) {
                     allData.add(dataList);
                 }
@@ -193,15 +188,15 @@ public class ConversationMemory implements IConversationMemory {
     public static class ConversationContext implements IConversationContext {
         private String context;
 
-        public ConversationContext() {
+        ConversationContext() {
             this.context = "";
         }
 
-        public ConversationContext(String context) {
+        ConversationContext(String context) {
             this.context = context;
         }
 
-        public ConversationContext(IConversationContext context) {
+        ConversationContext(IConversationContext context) {
             this.context = context.getContext();
         }
 

@@ -6,11 +6,11 @@ import java.util.*;
  * @author ginccc
  */
 public class MatchMatrix implements Iterable<Suggestion> {
-    private Map<String, List<MatchingResult>> mappedMatchMatrix = new LinkedHashMap<String, List<MatchingResult>>();
+    private Map<String, List<MatchingResult>> mappedMatchMatrix = new LinkedHashMap<>();
 
     public void addMatchingResult(String inputTerm, MatchingResult matchingResult) {
         if (!mappedMatchMatrix.containsKey(inputTerm)) {
-            mappedMatchMatrix.put(inputTerm, new LinkedList<MatchingResult>());
+            mappedMatchMatrix.put(inputTerm, new LinkedList<>());
         }
 
         mappedMatchMatrix.get(inputTerm).add(matchingResult);
@@ -27,7 +27,7 @@ public class MatchMatrix implements Iterable<Suggestion> {
     public List<MatchingResult> getMatchingResults(int index) {
         Collection<List<MatchingResult>> allMatchingResults = mappedMatchMatrix.values();
         if (index < allMatchingResults.size()) {
-            return (List<MatchingResult>) allMatchingResults.toArray()[index];
+            return new ArrayList<>(allMatchingResults).get(index);
         }
 
         return null;
@@ -43,7 +43,7 @@ public class MatchMatrix implements Iterable<Suggestion> {
         private Suggestion nextSuggestion = null;
         private final Integer[] resultLengths;
 
-        public SolutionIterator() {
+        SolutionIterator() {
             resultLengths = createResultLengths(mappedMatchMatrix.values());
             iterationCounter = new IterationCounter(mappedMatchMatrix.size(), resultLengths);
             if (iterationCounter.hasNext()) {
@@ -98,10 +98,6 @@ public class MatchMatrix implements Iterable<Suggestion> {
 
                     MatchingResult result = listOfMatchingResults.get(iterationIndex);
                     nextSuggestion.addMatchingResult(result);
-                }
-
-                if (nextSuggestion != null) {
-                    return nextSuggestion;
                 }
             }
 

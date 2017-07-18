@@ -55,7 +55,7 @@ public class ConversationMemoryUtilities {
     }
 
     private static List<IConversationMemory.IConversationStep> iterateRedoCache(List<ConversationMemorySnapshot.ConversationStepSnapshot> redoSteps) {
-        List<IConversationMemory.IConversationStep> conversationSteps = new LinkedList<IConversationMemory.IConversationStep>();
+        List<IConversationMemory.IConversationStep> conversationSteps = new LinkedList<>();
         for (ConversationMemorySnapshot.ConversationStepSnapshot redoStep : redoSteps) {
             IConversationMemory.IWritableConversationStep conversationStep = new ConversationStep(new ConversationMemory.ConversationContext());
             conversationSteps.add(conversationStep);

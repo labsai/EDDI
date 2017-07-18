@@ -6,7 +6,7 @@ import java.util.List;
  * @author ginccc
  */
 public interface IDataFactory {
-    IData createData(String key, Object value);
+    <T> IData<T> createData(String key, T value);
 
-    IData createData(String key, Object value, List<Object> possibleValues);
+    <T> IData<T> createData(String key, T value, List<T> possibleValues);
 }

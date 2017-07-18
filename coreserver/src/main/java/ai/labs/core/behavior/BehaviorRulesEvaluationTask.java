@@ -1,6 +1,5 @@
 package ai.labs.core.behavior;
 
-import ai.labs.lifecycle.AbstractLifecycleTask;
 import ai.labs.lifecycle.ILifecycleTask;
 import ai.labs.lifecycle.LifecycleException;
 import ai.labs.lifecycle.PackageConfigurationException;
@@ -28,7 +27,7 @@ import java.util.stream.Collectors;
  */
 @Singleton
 @Slf4j
-public class BehaviorRulesEvaluationTask extends AbstractLifecycleTask implements ILifecycleTask {
+public class BehaviorRulesEvaluationTask implements ILifecycleTask {
     private BehaviorRulesEvaluator evaluator;
     private static final String BEHAVIOR_CONFIG = "uri";
     private final IResourceClientLibrary resourceClientLibrary;
@@ -90,14 +89,14 @@ public class BehaviorRulesEvaluationTask extends AbstractLifecycleTask implement
             allActions.addAll(successRule.getActions());
         }
 
-        Data actions = new Data("actions", allActions);
+        Data actions = new Data<>("actions", allActions);
         actions.setPublic(true);
         memory.getCurrentStep().storeData(actions);
     }
 
     private void storeResultIfNotEmpty(IConversationMemory memory, String key, List<BehaviorRule> result) {
         if (!result.isEmpty()) {
-            memory.getCurrentStep().storeData(new Data(key, convert(result)));
+            memory.getCurrentStep().storeData(new Data<>(key, convert(result)));
         }
     }
 
