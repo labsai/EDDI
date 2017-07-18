@@ -6,6 +6,7 @@ import ai.labs.lifecycle.*;
 import ai.labs.memory.Data;
 import ai.labs.memory.IConversationMemory;
 import ai.labs.memory.IData;
+import ai.labs.output.IQuickReply;
 import ai.labs.parser.correction.*;
 import ai.labs.parser.dictionaries.*;
 import ai.labs.parser.internal.InputParser;
@@ -24,7 +25,7 @@ import java.util.*;
 /**
  * @author ginccc
  */
-public class InputParserTask extends AbstractLifecycleTask implements ILifecycleTask {
+public class InputParserTask implements ILifecycleTask {
     private IInputParser sentenceParser;
     private List<IDictionary> dictionaries;
     private List<ICorrection> corrections;
@@ -84,19 +85,40 @@ public class InputParserTask extends AbstractLifecycleTask implements ILifecycle
     @Override
     public void executeTask(IConversationMemory memory) throws LifecycleException {
         //parse user input to meanings
-        IData data = memory.getCurrentStep().getLatestData("input");
+        IData<String> data = memory.getCurrentStep().getLatestData("input");
         if (data == null) {
             return;
         }
-        String input = (String) data.getResult();
-        List<RawSolution> parsedSolutions = sentenceParser.parse(input);
+
+        IData<QuickReplyList> latestData = memory.getPreviousSteps().
+                getLatestData("output:quickReplies");
+        List<IQuickReply> quickReplies = latestData.getResult();
+
+        String input = data.getResult();
+        List<RawSolution> parsedSolutions = sentenceParser.parse(input, convertQuickReplies(quickReplies));
 
         //store result in memory
         if (!parsedSolutions.isEmpty()) {
             Solution solution = extractExpressions(parsedSolutions).get(0);
-            data = new Data("expressions:parsed", solution.getExpressions());
+            data = new Data<>("expressions:parsed", solution.getExpressions());
             memory.getCurrentStep().storeData(data);
         }
+    }
+
+    private List<IDictionary> convertQuickReplies(List<IQuickReply> quickReplies) {
+        List<IDictionary> ret = new LinkedList<>();
+
+        for (IQuickReply quickReply : quickReplies) {
+            RegularDictionary dictionary = new RegularDictionary(null, false);
+            String quickReplyValue = quickReply.getValue();
+            if (quickReplyValue.contains(" ")) {
+                dictionary.addPhrase(quickReplyValue, quickReply.getExpressions());
+            }
+
+            ret.add(dictionary);
+        }
+
+        return ret;
     }
 
     @Override
@@ -340,5 +362,9 @@ public class InputParserTask extends AbstractLifecycleTask implements ILifecycle
         public ConfigParamMissingException(String message) {
             super(message);
         }
+    }
+
+    private static class QuickReplyList extends ArrayList<IQuickReply> implements List<IQuickReply> {
+        //reflection purpose only
     }
 }

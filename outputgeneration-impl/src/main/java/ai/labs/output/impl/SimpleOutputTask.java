@@ -67,11 +67,11 @@ public class SimpleOutputTask implements ILifecycleTask {
     @Override
     public void executeTask(IConversationMemory memory) throws LifecycleException {
         List<IOutputFilter> outputFilters = new LinkedList<>();
-        IData latestData = memory.getCurrentStep().getLatestData(ACTION_KEY);
+        IData<List<String>> latestData = memory.getCurrentStep().getLatestData(ACTION_KEY);
         if (latestData == null) {
             return;
         }
-        List<String> actions = (List<String>) latestData.getResult();
+        List<String> actions = latestData.getResult();
         for (String action : actions) {
             int occurrence = countActionOccurrence(memory.getPreviousSteps(), action);
             outputFilters.add(new OutputFilter(action, occurrence));
@@ -84,12 +84,18 @@ public class SimpleOutputTask implements ILifecycleTask {
         }
 
         for (List<OutputEntry> possibleOutput : possibleOutputs) {
-            String key = "output:action:" + possibleOutput.get(0).getKey();
-            IData data = dataFactory.createData(key, null, simpleOutput.convert(possibleOutput));
-            memory.getCurrentStep().storeData(data);
+            String outputTextKey = "output:action:" + possibleOutput.get(0).getKey();
+            IData outputText = dataFactory.createData(outputTextKey, null,
+                    simpleOutput.convertOutputText(possibleOutput));
+            memory.getCurrentStep().storeData(outputText);
+
+            String outputQuickReplyKey = "output:quickReply" + possibleOutput.get(0).getKey();
+            IData outputQuickReplies = dataFactory.createData(outputQuickReplyKey, null,
+                    simpleOutput.convertQuickReplies(possibleOutput));
+            memory.getCurrentStep().storeData(outputQuickReplies);
         }
 
-        List<IData> allOutputParts = memory.getCurrentStep().getAllData("output:action");
+        List<IData<String>> allOutputParts = memory.getCurrentStep().getAllData("output:action");
         StringBuilder finalOutput = new StringBuilder();
         for (IData outputPart : allOutputParts) {
             finalOutput.append(outputPart.getResult()).append(SEPARATOR);
@@ -109,9 +115,9 @@ public class SimpleOutputTask implements ILifecycleTask {
         int count = 0;
         for (int i = 0; i < conversationStepStack.size(); i++) {
             IConversationMemory.IConversationStep conversationStep = conversationStepStack.get(i);
-            IData actionsData = conversationStep.getLatestData(ACTION_KEY);
+            IData<List<String>> actionsData = conversationStep.getLatestData(ACTION_KEY);
             if (actionsData != null) {
-                List<String> actions = (List<String>) actionsData.getResult();
+                List<String> actions = actionsData.getResult();
                 if (actions.contains(action)) {
                     count++;
                 }
