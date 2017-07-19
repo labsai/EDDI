@@ -30,6 +30,9 @@ import java.net.URI;
 import java.util.concurrent.Callable;
 import java.util.concurrent.TimeUnit;
 
+import static ai.labs.memory.ConversationMemoryUtilities.convertConversationMemory;
+import static ai.labs.memory.ConversationMemoryUtilities.convertSimpleConversationMemory;
+
 /**
  * @author ginccc
  */
@@ -88,7 +91,7 @@ public class RestBotEngine implements IRestBotEngine {
                 message = String.format(message, conversationId, botId);
                 throw new IllegalAccessException(message);
             }
-            return ConversationMemoryUtilities.convertSimpleConversationMemory(conversationMemorySnapshot, includeAll);
+            return convertSimpleConversationMemory(conversationMemorySnapshot, includeAll);
         } catch (IResourceStore.ResourceStoreException | IllegalAccessException e) {
             log.error(e.getLocalizedMessage(), e);
             throw new InternalServerErrorException(e.getLocalizedMessage(), e);
@@ -144,9 +147,9 @@ public class RestBotEngine implements IRestBotEngine {
             }
             final IConversation conversation = bot.continueConversation(conversationMemory,
                     conversationStep -> {
-                        SimpleConversationMemorySnapshot memorySnapshot = ConversationMemoryUtilities.
-                                convertSimpleConversationMemory(
-                                        (ConversationMemorySnapshot) conversationMemory, true);
+                        SimpleConversationMemorySnapshot memorySnapshot = convertSimpleConversationMemory(
+                                convertConversationMemory(conversationMemory),
+                                true);
 
                         response.resume(memorySnapshot);
                     });
@@ -337,7 +340,7 @@ public class RestBotEngine implements IRestBotEngine {
     }
 
     private String storeConversationMemory(IConversationMemory conversationMemory, Deployment.Environment environment) throws IResourceStore.ResourceStoreException {
-        ConversationMemorySnapshot memorySnapshot = ConversationMemoryUtilities.convertConversationMemory(conversationMemory);
+        ConversationMemorySnapshot memorySnapshot = convertConversationMemory(conversationMemory);
         memorySnapshot.setEnvironment(environment);
         return conversationMemoryStore.storeConversationMemorySnapshot(memorySnapshot);
     }
