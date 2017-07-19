@@ -12,7 +12,7 @@ import java.util.Map;
 public class BehaviorRuleExtensionRegistry implements IExtensionRegistry<IExtensionDescriptor, IExtension> {
 
     private static BehaviorRuleExtensionRegistry instance;
-    private Map<String, IExtensionDescriptor> descriptorMap = new HashMap<String, IExtensionDescriptor>();
+    private Map<String, IExtensionDescriptor> descriptorMap = new HashMap<>();
 
     public static BehaviorRuleExtensionRegistry getInstance() {
         if (instance == null) {
@@ -39,11 +39,7 @@ public class BehaviorRuleExtensionRegistry implements IExtensionRegistry<IExtens
             }
 
             throw new ExtensionRegistryException("No behavior extension found for id: " + id);
-        } catch (ClassNotFoundException e) {
-            throw new ExtensionRegistryException(e.getLocalizedMessage(), e);
-        } catch (InstantiationException e) {
-            throw new ExtensionRegistryException(e.getLocalizedMessage(), e);
-        } catch (IllegalAccessException e) {
+        } catch (ClassNotFoundException | InstantiationException | IllegalAccessException e) {
             throw new ExtensionRegistryException(e.getLocalizedMessage(), e);
         }
     }

@@ -2,9 +2,9 @@ package ai.labs.core.bootstrap;
 
 import ai.labs.callback.impl.ConversationCallbackTask;
 import ai.labs.core.CoreRuntime;
+import ai.labs.core.behavior.BehaviorDeserialization;
 import ai.labs.core.behavior.BehaviorRulesEvaluationTask;
-import ai.labs.core.behavior.BehaviorSerialization;
-import ai.labs.core.behavior.IBehaviorSerialization;
+import ai.labs.core.behavior.IBehaviorDeserialization;
 import ai.labs.core.normalizing.NormalizeInputTask;
 import ai.labs.core.rest.internal.RestBotAdministration;
 import ai.labs.core.rest.internal.RestBotEngine;
@@ -29,7 +29,7 @@ public class CoreModule extends AbstractBaseModule {
     protected void configure() {
         registerConfigFiles(configFiles);
 
-        bind(IBehaviorSerialization.class).to(BehaviorSerialization.class).in(Scopes.SINGLETON);
+        bind(IBehaviorDeserialization.class).to(BehaviorDeserialization.class).in(Scopes.SINGLETON);
 
         bind(IRestBotEngine.class).to(RestBotEngine.class);
         bind(IRestBotAdministration.class).to(RestBotAdministration.class);

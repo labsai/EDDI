@@ -1,9 +1,9 @@
 package ai.labs.core.behavior.extensions;
 
 import ai.labs.core.behavior.BehaviorRule;
-import ai.labs.core.behavior.BehaviorSet;
 import ai.labs.memory.IConversationMemory;
 import ai.labs.memory.IData;
+import lombok.NoArgsConstructor;
 
 import java.util.HashMap;
 import java.util.LinkedList;
@@ -13,6 +13,7 @@ import java.util.Map;
 /**
  * @author ginccc
  */
+@NoArgsConstructor
 public class Occurrence implements IExtension {
     public static final String ID = "occurrence";
     private static final String BEHAVIOR_RULES_SUCCESS = "behavior_rules:success";
@@ -24,9 +25,6 @@ public class Occurrence implements IExtension {
     private int maxOccurrence = 1;
 
     private ExecutionState state = ExecutionState.NOT_EXECUTED;
-
-    private Occurrence() {
-    }
 
     public void setBehaviorRuleName(String behaviorRuleName) {
         this.behaviorRuleName = behaviorRuleName;
@@ -92,16 +90,6 @@ public class Occurrence implements IExtension {
     }
 
     @Override
-    public IExtension[] getChildren() {
-        return new IExtension[0];
-    }
-
-    @Override
-    public void setChildren(IExtension... extensions) {
-        //not implemented
-    }
-
-    @Override
     public ExecutionState execute(IConversationMemory memory, List<BehaviorRule> trace) {
         boolean success;
         List<List<IData<List<String>>>> allData = memory.getAllSteps().getAllData(BEHAVIOR_RULES_SUCCESS);
@@ -137,10 +125,5 @@ public class Occurrence implements IExtension {
         occurrence.setValues(getValues());
 
         return occurrence;
-    }
-
-    @Override
-    public void setContainingBehaviorRuleSet(BehaviorSet behaviorSet) {
-        //not implemented
     }
 }

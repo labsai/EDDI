@@ -16,7 +16,6 @@ import javax.inject.Inject;
 import javax.inject.Singleton;
 import java.io.IOException;
 import java.net.URI;
-import java.util.Collections;
 import java.util.LinkedList;
 import java.util.List;
 import java.util.Map;
@@ -32,16 +31,15 @@ public class BehaviorRulesEvaluationTask implements ILifecycleTask {
     private static final String BEHAVIOR_CONFIG = "uri";
     private final IResourceClientLibrary resourceClientLibrary;
     private final IJsonSerialization jsonSerialization;
-    private final IBehaviorSerialization behaviorSerialization;
+    private final IBehaviorDeserialization behaviorSerialization;
 
     @Inject
     public BehaviorRulesEvaluationTask(IResourceClientLibrary resourceClientLibrary,
                                        IJsonSerialization jsonSerialization,
-                                       IBehaviorSerialization behaviorSerialization) {
+                                       IBehaviorDeserialization behaviorSerialization) {
         this.resourceClientLibrary = resourceClientLibrary;
         this.jsonSerialization = jsonSerialization;
         this.behaviorSerialization = behaviorSerialization;
-        this.evaluator = new BehaviorRulesEvaluator();
     }
 
     @Override
@@ -52,16 +50,6 @@ public class BehaviorRulesEvaluationTask implements ILifecycleTask {
     @Override
     public Object getComponent() {
         return evaluator;
-    }
-
-    @Override
-    public List<String> getComponentDependencies() {
-        return Collections.emptyList();
-    }
-
-    @Override
-    public List<String> getOutputDependencies() {
-        return Collections.emptyList();
     }
 
     @Override
@@ -115,7 +103,7 @@ public class BehaviorRulesEvaluationTask implements ILifecycleTask {
             String behaviorConfigJson = jsonSerialization.serialize(behaviorConfiguration);
             BehaviorSet behaviorSet = behaviorSerialization.deserialize(behaviorConfigJson);
 
-            evaluator.setBehaviorSet(behaviorSet);
+            evaluator = new BehaviorRulesEvaluator(behaviorSet);
 
         } catch (IOException | DeserializationException e) {
             String message = "Error while configuring BehaviorRuleLifecycleTask!";

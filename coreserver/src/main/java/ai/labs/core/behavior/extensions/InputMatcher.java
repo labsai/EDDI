@@ -1,7 +1,6 @@
 package ai.labs.core.behavior.extensions;
 
 import ai.labs.core.behavior.BehaviorRule;
-import ai.labs.core.behavior.BehaviorSet;
 import ai.labs.expressions.Expression;
 import ai.labs.expressions.utilities.IExpressionProvider;
 import ai.labs.memory.IConversationMemory;
@@ -28,10 +27,10 @@ public class InputMatcher implements IExtension {
     private boolean ignorePunctuationExpressions = false;
     private ExecutionState state = ExecutionState.NOT_EXECUTED;
     private final String expressionsQualifier = "expressions";
-    private IExpressionProvider expressionUtilities;
+    private IExpressionProvider expressionProvider;
 
     public InputMatcher() {
-        expressionUtilities = DependencyInjector.getInstance().getInstance(IExpressionProvider.class);
+        expressionProvider = DependencyInjector.getInstance().getInstance(IExpressionProvider.class);
     }
 
     public InputMatcher(List<Expression> expression) {
@@ -64,7 +63,7 @@ public class InputMatcher implements IExtension {
     public void setValues(Map<String, String> values) {
         if (values != null && !values.isEmpty()) {
             if (values.containsKey(expressionsQualifier)) {
-                expressions = expressionUtilities.parseExpressions(values.get(expressionsQualifier));
+                expressions = expressionProvider.parseExpressions(values.get(expressionsQualifier));
             }
 
             /*if (values.containsKey(contextQualifier))
@@ -83,16 +82,11 @@ public class InputMatcher implements IExtension {
     }
 
     @Override
-    public IExtension[] getChildren() {
-        return new IExtension[0];
-    }
-
-    @Override
     public ExecutionState execute(IConversationMemory memory, List<BehaviorRule> trace) {
         List<Expression> inputExpressions;
 
         IData data = memory.getCurrentStep().getLatestData("expression");
-        inputExpressions = data != null ? expressionUtilities.parseExpressions(data.getResult().toString()) : new LinkedList<>();
+        inputExpressions = data != null ? expressionProvider.parseExpressions(data.getResult().toString()) : new LinkedList<>();
         inputExpressions = filterExpressions(inputExpressions);
 
         boolean isInputEmpty = expressions.size() == 1 &&
@@ -153,15 +147,5 @@ public class InputMatcher implements IExtension {
         IExtension clone = new InputMatcher();
         clone.setValues(getValues());
         return clone;
-    }
-
-    @Override
-    public void setChildren(IExtension... extensions) {
-        //not implemented
-    }
-
-    @Override
-    public void setContainingBehaviorRuleSet(BehaviorSet behaviorSet) {
-        //not implemented
     }
 }

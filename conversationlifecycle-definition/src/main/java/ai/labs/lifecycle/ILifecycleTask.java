@@ -2,6 +2,7 @@ package ai.labs.lifecycle;
 
 import ai.labs.memory.IConversationMemory;
 
+import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 
@@ -29,7 +30,9 @@ public interface ILifecycleTask {
      *
      * @return a List of Task IDs
      */
-    List<String> getComponentDependencies();
+    default List<String> getComponentDependencies() {
+        return Collections.emptyList();
+    }
 
     /**
      * Returns a List representing all Task which have to be executed in lifecycle
@@ -38,7 +41,9 @@ public interface ILifecycleTask {
      *
      * @return a List of Task IDs
      */
-    List<String> getOutputDependencies();
+    default List<String> getOutputDependencies() {
+        return Collections.emptyList();
+    }
 
     default void init() {
         //to be overridden if needed

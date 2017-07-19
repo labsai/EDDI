@@ -16,19 +16,14 @@ public class ExtensionDescriptorBuilder {
     private String description;
     private String className;
 
-    private Map<String, String> attributeDescriptions = new HashMap<String, String>();
-    private Map<String, String> attributeTypes = new HashMap<String, String>();
+    private Map<String, String> attributeDescriptions = new HashMap<>();
+    private Map<String, String> attributeTypes = new HashMap<>();
     private int maxChildCount = -1;
 
     private ExtensionDescriptorBuilder(String id, String description, String className) {
         this.id = id;
         this.description = description;
         this.className = className;
-    }
-
-    public ExtensionDescriptorBuilder maxChildCount(int maxChildCount) {
-        this.maxChildCount = maxChildCount;
-        return this;
     }
 
     public ExtensionDescriptorBuilder attribute(String name, String type, String description) {
@@ -58,7 +53,7 @@ public class ExtensionDescriptorBuilder {
             @Override
             public List<Attribute> getAttributes() {
 
-                List<Attribute> result = new ArrayList<Attribute>();
+                List<Attribute> result = new ArrayList<>();
 
                 for (final Map.Entry<String, String> descriptionEntry : attributeDescriptions.entrySet()) {
                     result.add(new Attribute() {

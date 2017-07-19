@@ -243,8 +243,9 @@ $(function () {
         $.get("/administration/" + eddi.environment + "/deploymentstatus/" + eddi.botId + "?version=" + eddi.botVersion)
             .done(function (data) {
                 if (data === 'NOT_FOUND') {
-                    alert('Bot is not deployed at the moment.. Deploy NOW?');
-                    deployBot(eddi.environment, eddi.botId, eddi.botVersion);
+                    if (confirm('Bot is not deployed at the moment.. Deploy latest version NOW?')) {
+                        deployBot(eddi.environment, eddi.botId, eddi.botVersion);
+                    }
                 }
 
                 if (data === 'ERROR') {
