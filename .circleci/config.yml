@@ -39,6 +39,9 @@ jobs:
             if [ "${CIRCLE_BRANCH}" == "release/4.0.1" ]; then
             docker login -u $DOCKER_USER -p $DOCKER_PASS
 
-            docker build -t labsai/eddi:4.0.1 .
-            docker push labsai/eddi:4.0.1
+            docker build -t labsai/eddi:4.0 .
+            docker push labsai/eddi:4.0
+
+            docker build -t labsai/eddi:4 .
+            docker push labsai/eddi:4
             fi
