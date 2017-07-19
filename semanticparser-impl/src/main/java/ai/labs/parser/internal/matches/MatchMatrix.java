@@ -82,7 +82,7 @@ public class MatchMatrix implements Iterable<Suggestion> {
         }
 
         private Suggestion calculateNext() {
-            Suggestion nextSuggestion = null;
+            Suggestion nextSuggestion;
             while (iterationCounter.hasNext()) {
                 IterationCounter.IterationPlan iterationPlan = iterationCounter.next();
 
@@ -99,9 +99,13 @@ public class MatchMatrix implements Iterable<Suggestion> {
                     MatchingResult result = listOfMatchingResults.get(iterationIndex);
                     nextSuggestion.addMatchingResult(result);
                 }
+
+                if (nextSuggestion != null) {
+                    return nextSuggestion;
+                }
             }
 
-            return nextSuggestion;
+            return null;
         }
 
         @Override

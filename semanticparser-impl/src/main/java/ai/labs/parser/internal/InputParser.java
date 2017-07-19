@@ -75,7 +75,7 @@ public class InputParser implements IInputParser {
         for (IDictionary dictionary : dictionaries) {
             if (!dictionary.lookupIfKnown() && holder.getMatchingResultSize(holder.index) != 0) {
                 //skipped lookup because input part is already known.
-                return;
+                continue;
             }
 
             //lookup input part in dictionary
