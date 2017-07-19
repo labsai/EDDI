@@ -44,17 +44,19 @@ public class BaseRuntime implements SystemRuntime.IRuntime {
 
     public void init() {
         if (!isInit) {
-            if (projectName == null || projectName.isEmpty()) {
-                throw new RuntimeException("ProjectName cannot be null nor empty.");
-            }
-            initProjectName(projectName);
             initLogging();
+            if (projectName == null || projectName.isEmpty()) {
+                log.error("ProjectName should be defined in systemRuntime.properties as 'systemRuntime.projectName'");
+            } else {
+                initProjectName(projectName);
+            }
+
             logVersion();
             initExecutorServiceShutdownHook();
             SystemRuntime.setRuntime(this);
             isInit = true;
         } else {
-            throw new RuntimeException("SystemRuntime has already been initialized!");
+            log.warn("SystemRuntime has already been initialized!");
         }
     }
 
