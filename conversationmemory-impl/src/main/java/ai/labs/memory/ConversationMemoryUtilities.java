@@ -12,7 +12,7 @@ import java.util.List;
  * @author ginccc
  */
 public class ConversationMemoryUtilities {
-    public static ConversationMemorySnapshot convertConversationMemory(IConversationMemory conversationMemory) throws IResourceStore.ResourceStoreException {
+    public static ConversationMemorySnapshot convertConversationMemory(IConversationMemory conversationMemory) {
         ConversationMemorySnapshot snapshot = new ConversationMemorySnapshot();
 
         if (conversationMemory.getId() != null) {
