@@ -1,11 +1,14 @@
 package ai.labs.output.impl;
 
 import ai.labs.expressions.utilities.IExpressionProvider;
-import ai.labs.lifecycle.*;
+import ai.labs.lifecycle.ILifecycleTask;
+import ai.labs.lifecycle.LifecycleException;
+import ai.labs.lifecycle.PackageConfigurationException;
 import ai.labs.memory.IConversationMemory;
 import ai.labs.memory.IData;
 import ai.labs.memory.IDataFactory;
 import ai.labs.output.IOutputFilter;
+import ai.labs.output.IQuickReply;
 import ai.labs.output.model.OutputEntry;
 import ai.labs.resources.rest.output.model.OutputConfiguration;
 import ai.labs.resources.rest.output.model.OutputConfigurationSet;
@@ -89,10 +92,13 @@ public class SimpleOutputTask implements ILifecycleTask {
                     simpleOutput.convertOutputText(possibleOutput));
             memory.getCurrentStep().storeData(outputText);
 
-            String outputQuickReplyKey = "output:quickReply" + possibleOutput.get(0).getKey();
-            IData outputQuickReplies = dataFactory.createData(outputQuickReplyKey, null,
-                    simpleOutput.convertQuickReplies(possibleOutput));
-            memory.getCurrentStep().storeData(outputQuickReplies);
+            String outputQuickReplyKey = "output:quickreply:" + possibleOutput.get(0).getKey();
+            List<IQuickReply> quickReplies = convertQuickReplies(possibleOutput);
+            if (!quickReplies.isEmpty()) {
+                IData outputQuickReplies = dataFactory.createData(outputQuickReplyKey, null, quickReplies);
+                outputQuickReplies.setPublic(true);
+                memory.getCurrentStep().storeData(outputQuickReplies);
+            }
         }
 
         List<IData<String>> allOutputParts = memory.getCurrentStep().getAllData("output:action");
@@ -164,8 +170,25 @@ public class SimpleOutputTask implements ILifecycleTask {
         return quickReplies;
     }
 
-    @Override
-    public void setExtensions(Map<String, Object> extensions) throws UnrecognizedExtensionException, IllegalExtensionConfigurationException {
+    private List<IQuickReply> convertQuickReplies(List<OutputEntry> possibleOutput) {
+        List<IQuickReply> ret = new LinkedList<>();
+        for (OutputEntry outputEntry : possibleOutput) {
+            for (OutputEntry.QuickReply quickReply : outputEntry.getQuickReplies()) {
+                ret.add(new IQuickReply() {
+                    @Override
+                    public String getValue() {
+                        return quickReply.getValue();
+                    }
 
+                    @Override
+                    public String getExpressions() {
+                        return expressionProvider.toString(quickReply.getExpressions());
+                    }
+                });
+            }
+        }
+
+        return ret;
     }
+
 }

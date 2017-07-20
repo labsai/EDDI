@@ -33,7 +33,6 @@
             <artifactId>sharedutilities</artifactId>
             <version>${project.version}</version>
         </dependency>
-
     </dependencies>
 
     <properties>

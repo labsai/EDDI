@@ -12,7 +12,7 @@ import java.util.List;
  * @author ginccc
  */
 public class ConversationMemoryUtilities {
-    public static ConversationMemorySnapshot convertConversationMemory(IConversationMemory conversationMemory) throws IResourceStore.ResourceStoreException {
+    public static ConversationMemorySnapshot convertConversationMemory(IConversationMemory conversationMemory) {
         ConversationMemorySnapshot snapshot = new ConversationMemorySnapshot();
 
         if (conversationMemory.getId() != null) {
@@ -116,7 +116,14 @@ public class ConversationMemoryUtilities {
                 for (ConversationMemorySnapshot.ResultSnapshot resultSnapshot : packageRunSnapshot.getLifecycleTasks()) {
                     if (includeAll || resultSnapshot.isPublic()) {
                         Object result = resultSnapshot.getResult();
-                        String value = result instanceof List ? CharacterUtilities.arrayToString((List) result, ",") : result.toString();
+                        Object value;
+                        if (result instanceof List) {
+                            value = CharacterUtilities.arrayToString((List) result, ",");
+                        } else if (result instanceof String) {
+                            value = result.toString();
+                        } else {
+                            value = result;
+                        }
                         simpleConversationStep.getData().add(new SimpleConversationMemorySnapshot.SimpleData(resultSnapshot.getKey(), value));
                     } else {
                         continue;

@@ -1,8 +1,6 @@
 package ai.labs.output.impl;
 
-import ai.labs.expressions.Expression;
 import ai.labs.output.IOutputFilter;
-import ai.labs.output.IQuickReply;
 import ai.labs.output.ISimpleOutput;
 import ai.labs.output.model.OutputEntry;
 
@@ -82,27 +80,6 @@ public class SimpleOutput implements ISimpleOutput {
         List<String> ret = new LinkedList<>();
         for (OutputEntry outputEntry : outputEntries) {
             ret.add(outputEntry.getText());
-        }
-
-        return ret;
-    }
-
-    List<IQuickReply> convertQuickReplies(List<OutputEntry> possibleOutput) {
-        List<IQuickReply> ret = new LinkedList<>();
-        for (OutputEntry outputEntry : possibleOutput) {
-            for (OutputEntry.QuickReply quickReply : outputEntry.getQuickReplies()) {
-                ret.add(new IQuickReply() {
-                    @Override
-                    public String getValue() {
-                        return quickReply.getValue();
-                    }
-
-                    @Override
-                    public List<Expression> getExpressions() {
-                        return quickReply.getExpressions();
-                    }
-                });
-            }
         }
 
         return ret;
