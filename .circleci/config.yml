@@ -36,7 +36,7 @@ jobs:
       - deploy:
           name: Build and push Docker image
           command: |
-          if [ "${CIRCLE_BRANCH}" == "master" ]; then
+            if [ "${CIRCLE_BRANCH}" == "master" ]; then
             docker login -u $DOCKER_USER -p $DOCKER_PASS
 
             docker build -t labsai/eddi:4.1.0-b$CIRCLE_BUILD_NUM .
@@ -53,4 +53,4 @@ jobs:
 
           # docker build -t labsai/eddi:4 .
           # docker push labsai/eddi:4
-          fi
+            fi
