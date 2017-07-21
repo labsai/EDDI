@@ -29,7 +29,8 @@ import java.net.URI;
 import java.util.concurrent.Callable;
 import java.util.concurrent.TimeUnit;
 
-import static ai.labs.memory.ConversationMemoryUtilities.*;
+import static ai.labs.memory.ConversationMemoryUtilities.convertConversationMemory;
+import static ai.labs.memory.ConversationMemoryUtilities.convertSimpleConversationMemory;
 
 /**
  * @author ginccc
@@ -147,7 +148,6 @@ public class RestBotEngine implements IRestBotEngine {
                     conversationStep -> {
                         SimpleConversationMemorySnapshot memorySnapshot = convertSimpleConversationMemory(
                                 convertConversationMemory(conversationMemory), true);
-
                         response.resume(memorySnapshot);
                     });
 
