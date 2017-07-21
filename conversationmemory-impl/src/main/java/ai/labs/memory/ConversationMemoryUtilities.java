@@ -3,7 +3,6 @@ package ai.labs.memory;
 import ai.labs.memory.model.ConversationMemorySnapshot;
 import ai.labs.memory.model.SimpleConversationMemorySnapshot;
 import ai.labs.persistence.IResourceStore;
-import ai.labs.utilities.CharacterUtilities;
 
 import java.util.LinkedList;
 import java.util.List;
@@ -116,15 +115,8 @@ public class ConversationMemoryUtilities {
                 for (ConversationMemorySnapshot.ResultSnapshot resultSnapshot : packageRunSnapshot.getLifecycleTasks()) {
                     if (includeAll || resultSnapshot.isPublic()) {
                         Object result = resultSnapshot.getResult();
-                        Object value;
-                        if (result instanceof List) {
-                            value = CharacterUtilities.arrayToString((List) result, ",");
-                        } else if (result instanceof String) {
-                            value = result.toString();
-                        } else {
-                            value = result;
-                        }
-                        simpleConversationStep.getData().add(new SimpleConversationMemorySnapshot.SimpleData(resultSnapshot.getKey(), value));
+                        simpleConversationStep.getData().add(
+                                new SimpleConversationMemorySnapshot.SimpleData(resultSnapshot.getKey(), result));
                     } else {
                         continue;
                     }

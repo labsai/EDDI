@@ -2,7 +2,8 @@ var eddi = {};
 
 var Message;
 Message = function (arg) {
-    this.text = arg.text, this.message_side = arg.message_side;
+    this.text = arg.text;
+    this.message_side = arg.message_side;
     this.draw = function (_this) {
         return function () {
             var $message;
@@ -16,15 +17,41 @@ Message = function (arg) {
     }(this);
     return this;
 };
+var QuickReply;
+QuickReply = function (arg) {
+    this.text = arg.text;
+    this.message_side = arg.message_side;
+    this.draw = function (_this) {
+        return function () {
+            var $quickReply;
+            $quickReply = $('<button/>', {
+                text: _this.text,
+                click: function () {
+                    eddi.submitUserMessage(_this.text);
+                    eddi.displayMessage(_this.text, 'right');
+                    $('.quick_reply').remove();
+                }
+            });
+            $quickReply.addClass(_this.message_side);
+            $quickReply.addClass('quick_reply');
+            $('.messages').append($quickReply);
+            return setTimeout(function () {
+                return $quickReply.addClass('appeared');
+            }, 0);
+        };
+    }(this);
+    return this;
+};
+
 $(function () {
-    var getMessageText, message_side, displayMessage;
+    var getMessageText, message_side, displayQuickReplies;
     message_side = 'right';
     getMessageText = function () {
         var $message_input;
         $message_input = $('.message_input');
         return $message_input.val();
     };
-    displayMessage = function (text, side) {
+    eddi.displayMessage = function (text, side) {
         var $messages, message;
         if (text.trim() === '') {
             return;
@@ -39,20 +66,36 @@ $(function () {
         message.draw();
         return $messages.animate({scrollTop: $messages.prop('scrollHeight')}, 300);
     };
+    displayQuickReplies = function (quickReplies) {
+        var $messages, quickReply;
+        if (quickReplies.length === 0) {
+            return;
+        }
+
+        $messages = $('.messages');
+        for (var i = 0; i < quickReplies.length; i++) {
+            quickReply = new QuickReply({
+                text: quickReplies[i].value,
+                message_side: 'left'
+            });
+            quickReply.draw();
+        }
+        return $messages.animate({scrollTop: $messages.prop('scrollHeight')}, 300);
+    };
     $('.send_message').click(function (e) {
         var userMessage = getMessageText();
-        submitUserMessage(userMessage);
-        return displayMessage(userMessage, 'right');
+        eddi.submitUserMessage(userMessage);
+        return eddi.displayMessage(userMessage, 'right');
     });
     $('.message_input').keyup(function (e) {
         if (e.which === 13) {
             var userMessage = getMessageText();
-            submitUserMessage(userMessage);
-            return displayMessage(userMessage, 'right');
+            eddi.submitUserMessage(userMessage);
+            return eddi.displayMessage(userMessage, 'right');
         }
     });
 
-    var submitUserMessage = function (userMessage) {
+    eddi.submitUserMessage = function (userMessage) {
         $.ajax({
             type: "POST",
             url: "/bots/" + eddi.environment + "/" + eddi.botId + "/" + eddi.conversationId,
@@ -73,12 +116,12 @@ $(function () {
     var refreshConversationLog = function (conversationMemory) {
         var conversationState = conversationMemory.conversationState;
 
-        if (conversationState == 'ERROR') {
+        if (conversationState === 'ERROR') {
             log('ERROR', "An Error has occurred. Please contact the administrator!");
             return;
         }
 
-        if (conversationState == 'ENDED') {
+        /*if (conversationState === 'ENDED') {
             $("#ended_dialog").dialog({
                 modal: true,
                 buttons: [
@@ -98,9 +141,9 @@ $(function () {
             $('#user_input_button_submit').addClass('ui-disabled');
             $('#redo').hide();
             $('#undo').hide();
-        }
+        }*/
 
-        if (conversationState == 'IN_PROGRESS') {
+        if (conversationState === 'IN_PROGRESS') {
             setTimeout(loadConversationLog, 1000);
             return;
         }
@@ -112,19 +155,24 @@ $(function () {
             var input = null;
             var output = null;
             var media = null;
+            var action = null;
+            var quickReplies = [];
             for (var x = 0; x < step.data.length; x++) {
                 var obj = step.data[x];
-                if (obj.key.indexOf('input') == 0) {
+                if (obj.key.indexOf('input') === 0) {
                     input = obj.value;
-                } else if (obj.key.indexOf('output') == 0) {
-                    output = obj.value;
-                } else if (obj.key.indexOf('media') == 0) {
+                } else if (obj.key.indexOf('media') === 0) {
                     media = obj.value;
-                } else if (obj.key.indexOf('actions') == 0) {
+                } else if (obj.key.indexOf('actions') === 0) {
+                    action = obj.value;
+                } else if (obj.key.indexOf('output:quickreply') === 0) {
+                    pushArray(quickReplies, obj.value);
+                } else if (obj.key.indexOf('output') === 0) {
+                    output = obj.value;
                 }
             }
 
-            ioList.push({input: input, output: output, media: media});
+            ioList.push({input: input, output: output, media: media, quickReplies: quickReplies});
         }
 
         if (ioList.length > 0) {
@@ -145,7 +193,7 @@ $(function () {
              $('#desktop').html('<div style="text-align: center;width: 100%; height: 100%;">Nothing to show at the moment..</div>');
              }*/
 
-            if (latestInteraction.output == null) {
+            if (latestInteraction.output === null) {
                 latestInteraction.output = '';
             }
 
@@ -162,10 +210,15 @@ $(function () {
              }
              }*/
 
-            displayMessage(latestInteraction.output, 'left');
+            eddi.displayMessage(latestInteraction.output, 'left');
+            displayQuickReplies(latestInteraction.quickReplies);
 
             $('.message_input').focus();
         }
+    };
+
+    var pushArray = function (arr, arr2) {
+        arr.push.apply(arr, arr2);
     };
 
     var deployBot = function (environment, botId, botVersion) {

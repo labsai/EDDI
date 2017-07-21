@@ -95,7 +95,7 @@ public class SimpleOutputTask implements ILifecycleTask {
             String outputQuickReplyKey = "output:quickreply:" + possibleOutput.get(0).getKey();
             List<IQuickReply> quickReplies = convertQuickReplies(possibleOutput);
             if (!quickReplies.isEmpty()) {
-                IData outputQuickReplies = dataFactory.createData(outputQuickReplyKey, null, quickReplies);
+                IData outputQuickReplies = dataFactory.createData(outputQuickReplyKey, quickReplies);
                 outputQuickReplies.setPublic(true);
                 memory.getCurrentStep().storeData(outputQuickReplies);
             }
@@ -174,17 +174,7 @@ public class SimpleOutputTask implements ILifecycleTask {
         List<IQuickReply> ret = new LinkedList<>();
         for (OutputEntry outputEntry : possibleOutput) {
             for (OutputEntry.QuickReply quickReply : outputEntry.getQuickReplies()) {
-                ret.add(new IQuickReply() {
-                    @Override
-                    public String getValue() {
-                        return quickReply.getValue();
-                    }
-
-                    @Override
-                    public String getExpressions() {
-                        return expressionProvider.toString(quickReply.getExpressions());
-                    }
-                });
+                ret.add(new QuickReply(quickReply.getValue(), expressionProvider.toString(quickReply.getExpressions())));
             }
         }
 
