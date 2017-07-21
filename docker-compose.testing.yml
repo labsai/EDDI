@@ -1,7 +1,7 @@
 version: '2'
 services:
   integration-tests:
-    image: labsai/eddi-integration-tests:latest
+    image: labsai/eddi-integration-tests:1.0.0
     depends_on:
       - eddi
     environment:
