@@ -29,8 +29,7 @@ import java.net.URI;
 import java.util.concurrent.Callable;
 import java.util.concurrent.TimeUnit;
 
-import static ai.labs.memory.ConversationMemoryUtilities.convertConversationMemory;
-import static ai.labs.memory.ConversationMemoryUtilities.convertSimpleConversationMemory;
+import static ai.labs.memory.ConversationMemoryUtilities.*;
 
 /**
  * @author ginccc
