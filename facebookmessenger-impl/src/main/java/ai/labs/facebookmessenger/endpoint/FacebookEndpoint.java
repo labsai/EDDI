@@ -8,6 +8,7 @@ import ai.labs.memory.model.Deployment;
 import ai.labs.memory.model.SimpleConversationMemorySnapshot;
 import ai.labs.resources.rest.bots.IBotStore;
 import ai.labs.resources.rest.bots.model.BotConfiguration;
+import ai.labs.resources.rest.bots.model.ChannelConnector;
 import ai.labs.rest.rest.IRestBotEngine;
 import ai.labs.rest.restinterfaces.IRestInterfaceFactory;
 import ai.labs.runtime.SystemRuntime;
@@ -95,7 +96,7 @@ public class FacebookEndpoint implements IFacebookEndpoint {
         String appSecret = null;
         String verificationToken = null;
         String pageAccessToken = null;
-        for (BotConfiguration.ChannelConnector channelConnector : botConfiguration.getChannels()) {
+        for (ChannelConnector channelConnector : botConfiguration.getChannels()) {
             if (channelConnector.getType().toString().equals(RESOURCE_URI_CHANNELCONNECTOR)) {
                 Map<String, String> channelConnectorConfig = channelConnector.getConfig();
                 appSecret = channelConnectorConfig.get("appSecret");
@@ -183,8 +184,8 @@ public class FacebookEndpoint implements IFacebookEndpoint {
     private String extractOutput(SimpleConversationMemorySnapshot memorySnapshot) {
         for (SimpleConversationStep conversationStep : memorySnapshot.getConversationSteps()) {
             for (SimpleData simpleData : conversationStep.getData()) {
-                if (simpleData.getKey().startsWith("output:final")) {
-                    return simpleData.getValue().toString();
+                if (simpleData.getKey().startsWith("output")) {
+                    return simpleData.getValue();
                 }
             }
         }

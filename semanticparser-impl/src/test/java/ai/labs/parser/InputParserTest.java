@@ -21,11 +21,11 @@ import java.util.List;
  */
 @Slf4j
 public class InputParserTest {
-    private IExpressionProvider expressionProvider;
+    private IExpressionProvider expressionUtilities;
 
     @Before
     public void setup() {
-        expressionProvider = new ExpressionProvider(new ExpressionFactory());
+        expressionUtilities = new ExpressionProvider(new ExpressionFactory());
     }
 
     @Test
@@ -33,8 +33,8 @@ public class InputParserTest {
         //setup
         String lookupString = "test1 test2";
         TestDictionary testDictionary = new TestDictionary();
-        testDictionary.addWord(new Word("test1", expressionProvider.parseExpressions("expression1"), "exp1", 0, false));
-        testDictionary.addWord(new Word("test2", expressionProvider.parseExpressions("expression2"), "exp2", 0, false));
+        testDictionary.addWord(new Word("test1", expressionUtilities.parseExpressions("expression1"), "exp1", 0, false));
+        testDictionary.addWord(new Word("test2", expressionUtilities.parseExpressions("expression2"), "exp2", 0, false));
         InputParser inputParser = new InputParser(Collections.singletonList(testDictionary));
 
         //test
@@ -51,7 +51,7 @@ public class InputParserTest {
         //setup
         String lookupString = "day after tomorrow";
         TestDictionary testDictionary = new TestDictionary();
-        testDictionary.addPhrase(new Phrase("day after tomorrow", expressionProvider.parseExpressions("phrase(day_after_tomorrow)"), ""));
+        testDictionary.addPhrase(new Phrase("day after tomorrow", expressionUtilities.parseExpressions("phrase(day_after_tomorrow)"), ""));
         InputParser inputParser = new InputParser(Collections.singletonList(testDictionary), Collections.emptyList());
 
         //test
@@ -59,7 +59,7 @@ public class InputParserTest {
 
         //assert
         Assert.assertEquals("day after tomorrow", suggestions.get(0).getDictionaryEntries().get(0).getValue());
-        Assert.assertEquals("phrase(day_after_tomorrow)", expressionProvider.toString(suggestions.get(0).getDictionaryEntries().get(0).getExpressions()));
+        Assert.assertEquals("phrase(day_after_tomorrow)", expressionUtilities.toString(suggestions.get(0).getDictionaryEntries().get(0).getExpressions()));
     }
 
     @Test
@@ -67,7 +67,7 @@ public class InputParserTest {
         //setup
         String lookupString = "someword day after tomorrow";
         TestDictionary testDictionary = new TestDictionary();
-        testDictionary.addPhrase(new Phrase("day after tomorrow", expressionProvider.parseExpressions("phrase(day_after_tomorrow)"), ""));
+        testDictionary.addPhrase(new Phrase("day after tomorrow", expressionUtilities.parseExpressions("phrase(day_after_tomorrow)"), ""));
         InputParser inputParser = new InputParser(Collections.singletonList(testDictionary));
 
         //test
@@ -78,9 +78,9 @@ public class InputParserTest {
         Assert.assertEquals(1, suggestions.size());
         Assert.assertEquals(2, found.size());
         Assert.assertEquals("someword", found.get(0).getValue());
-        Assert.assertEquals("unknown(someword)", expressionProvider.toString(found.get(0).getExpressions()));
+        Assert.assertEquals("unknown(someword)", expressionUtilities.toString(found.get(0).getExpressions()));
         Assert.assertEquals("day after tomorrow", found.get(1).getValue());
-        Assert.assertEquals("phrase(day_after_tomorrow)", expressionProvider.toString(found.get(1).getExpressions()));
+        Assert.assertEquals("phrase(day_after_tomorrow)", expressionUtilities.toString(found.get(1).getExpressions()));
     }
 
     @Test
@@ -88,7 +88,7 @@ public class InputParserTest {
         //setup
         String lookupString = "day after tomorrow someword";
         TestDictionary testDictionary = new TestDictionary();
-        testDictionary.addPhrase(new Phrase("day after tomorrow", expressionProvider.parseExpressions("phrase(day_after_tomorrow)"), ""));
+        testDictionary.addPhrase(new Phrase("day after tomorrow", expressionUtilities.parseExpressions("phrase(day_after_tomorrow)"), ""));
         InputParser inputParser = new InputParser(Collections.singletonList(testDictionary));
 
         //test
@@ -96,7 +96,7 @@ public class InputParserTest {
 
         //assert
         Assert.assertEquals("day after tomorrow", suggestions.get(0).getDictionaryEntries().get(0).getValue());
-        Assert.assertEquals("phrase(day_after_tomorrow)", expressionProvider.toString(suggestions.get(0).getDictionaryEntries().get(0).getExpressions()));
+        Assert.assertEquals("phrase(day_after_tomorrow)", expressionUtilities.toString(suggestions.get(0).getDictionaryEntries().get(0).getExpressions()));
     }
 
     @Test
@@ -104,7 +104,7 @@ public class InputParserTest {
         //setup
         String lookupString = "someword day after tomorrow someword";
         TestDictionary testDictionary = new TestDictionary();
-        testDictionary.addPhrase(new Phrase("day after tomorrow", expressionProvider.parseExpressions("phrase(day_after_tomorrow)"), ""));
+        testDictionary.addPhrase(new Phrase("day after tomorrow", expressionUtilities.parseExpressions("phrase(day_after_tomorrow)"), ""));
         InputParser inputParser = new InputParser(Collections.singletonList(testDictionary));
 
         //test
@@ -112,7 +112,7 @@ public class InputParserTest {
 
         //assert
         Assert.assertEquals("day after tomorrow", suggestions.get(0).getDictionaryEntries().get(1).getValue());
-        Assert.assertEquals("phrase(day_after_tomorrow)", expressionProvider.toString(suggestions.get(0).getDictionaryEntries().get(1).getExpressions()));
+        Assert.assertEquals("phrase(day_after_tomorrow)", expressionUtilities.toString(suggestions.get(0).getDictionaryEntries().get(1).getExpressions()));
     }
 
     @Test
@@ -120,7 +120,7 @@ public class InputParserTest {
         //setup
         String lookupString = "day someword after tomorrow";
         TestDictionary testDictionary = new TestDictionary();
-        testDictionary.addPhrase(new Phrase("day after tomorrow", expressionProvider.parseExpressions("phrase(day_after_tomorrow)"), ""));
+        testDictionary.addPhrase(new Phrase("day after tomorrow", expressionUtilities.parseExpressions("phrase(day_after_tomorrow)"), ""));
         InputParser inputParser = new InputParser(Collections.singletonList(testDictionary));
 
         //test
@@ -139,8 +139,8 @@ public class InputParserTest {
         //setup
         String lookupString = "day after tomorrow";
         TestDictionary testDictionary = new TestDictionary();
-        testDictionary.addPhrase(new Phrase("day after", expressionProvider.parseExpressions("phrase(day_after)"), ""));
-        testDictionary.addPhrase(new Phrase("day after tomorrow", expressionProvider.parseExpressions("phrase(day_after_tomorrow)"), ""));
+        testDictionary.addPhrase(new Phrase("day after", expressionUtilities.parseExpressions("phrase(day_after)"), ""));
+        testDictionary.addPhrase(new Phrase("day after tomorrow", expressionUtilities.parseExpressions("phrase(day_after_tomorrow)"), ""));
         InputParser inputParser = new InputParser(Collections.singletonList(testDictionary));
 
         //test
@@ -148,7 +148,7 @@ public class InputParserTest {
 
         //assert
         Assert.assertEquals("day after tomorrow", suggestions.get(0).getDictionaryEntries().get(0).getValue());
-        Assert.assertEquals("phrase(day_after_tomorrow)", expressionProvider.toString(suggestions.get(0).getDictionaryEntries().get(0).getExpressions()));
+        Assert.assertEquals("phrase(day_after_tomorrow)", expressionUtilities.toString(suggestions.get(0).getDictionaryEntries().get(0).getExpressions()));
     }
 
     @Test
@@ -156,12 +156,12 @@ public class InputParserTest {
         //setup
         String lookupString = "day after tomorrow";
         TestDictionary testDictionary = new TestDictionary();
-        testDictionary.addWord(new Word("day", expressionProvider.parseExpressions("unused(day)"), "", 0, false));
-        testDictionary.addWord(new Word("day", expressionProvider.parseExpressions("unused(day1)"), "", 0, false));
-        testDictionary.addWord(new Word("after", expressionProvider.parseExpressions("unused(after)"), "", 0, false));
-        testDictionary.addWord(new Word("after", expressionProvider.parseExpressions("unused(after1)"), "", 0, false));
-        testDictionary.addWord(new Word("tomorrow", expressionProvider.parseExpressions("unused(tomorrow)"), "", 0, false));
-        testDictionary.addWord(new Word("tomorrow", expressionProvider.parseExpressions("unused(tomorrow1)"), "", 0, false));
+        testDictionary.addWord(new Word("day", expressionUtilities.parseExpressions("unused(day)"), "", 0, false));
+        testDictionary.addWord(new Word("day", expressionUtilities.parseExpressions("unused(day1)"), "", 0, false));
+        testDictionary.addWord(new Word("after", expressionUtilities.parseExpressions("unused(after)"), "", 0, false));
+        testDictionary.addWord(new Word("after", expressionUtilities.parseExpressions("unused(after1)"), "", 0, false));
+        testDictionary.addWord(new Word("tomorrow", expressionUtilities.parseExpressions("unused(tomorrow)"), "", 0, false));
+        testDictionary.addWord(new Word("tomorrow", expressionUtilities.parseExpressions("unused(tomorrow1)"), "", 0, false));
         InputParser inputParser = new InputParser(Collections.singletonList(testDictionary));
 
         //test
@@ -181,8 +181,8 @@ public class InputParserTest {
         //setup
         String lookupString = "day after tomorrow another phrase";
         TestDictionary testDictionary = new TestDictionary();
-        testDictionary.addPhrase(new Phrase("another phrase", expressionProvider.parseExpressions("phrase(another_phrase)"), ""));
-        testDictionary.addPhrase(new Phrase("day after tomorrow", expressionProvider.parseExpressions("phrase(day_after_tomorrow)"), ""));
+        testDictionary.addPhrase(new Phrase("another phrase", expressionUtilities.parseExpressions("phrase(another_phrase)"), ""));
+        testDictionary.addPhrase(new Phrase("day after tomorrow", expressionUtilities.parseExpressions("phrase(day_after_tomorrow)"), ""));
         InputParser inputParser = new InputParser(Collections.singletonList(testDictionary), Collections.emptyList());
 
         //test
@@ -193,8 +193,8 @@ public class InputParserTest {
         List<IDictionary.IFoundWord> foundWords = suggestions.get(0).getDictionaryEntries();
         Assert.assertEquals(2, foundWords.size());
         Assert.assertEquals("day after tomorrow", foundWords.get(0).getValue());
-        Assert.assertEquals("phrase(day_after_tomorrow)", expressionProvider.toString(foundWords.get(0).getExpressions()));
+        Assert.assertEquals("phrase(day_after_tomorrow)", expressionUtilities.toString(foundWords.get(0).getExpressions()));
         Assert.assertEquals("another phrase", foundWords.get(1).getValue());
-        Assert.assertEquals("phrase(another_phrase)", expressionProvider.toString(foundWords.get(1).getExpressions()));
+                Assert.assertEquals("phrase(another_phrase)", expressionUtilities.toString(foundWords.get(1).getExpressions()));
     }
 }

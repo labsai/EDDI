@@ -17,17 +17,11 @@ public interface IExtension extends Cloneable {
 
     void setValues(Map<String, String> values);
 
-    default IExtension[] getChildren() {
-        return new IExtension[0];
-    }
+    IExtension[] getChildren();
 
-    default void setChildren(IExtension... extensions) {
-        // not implemented
-    }
+    void setChildren(IExtension... extensions);
 
-    default void setContainingBehaviorRuleSet(BehaviorSet behaviorSet) {
-        // not implemented
-    }
+    void setContainingBehaviorRuleSet(BehaviorSet behaviorSet);
 
     enum ExecutionState {
         SUCCESS,
@@ -36,7 +30,7 @@ public interface IExtension extends Cloneable {
         ERROR
     }
 
-    ExecutionState execute(IConversationMemory memory, List<BehaviorRule> trace) throws BehaviorRule.InfiniteLoopException;
+    ExecutionState execute(IConversationMemory memory, List<BehaviorRule> trace);
 
     ExecutionState getExecutionState();
 

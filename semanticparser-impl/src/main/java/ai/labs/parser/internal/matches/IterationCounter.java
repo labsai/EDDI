@@ -9,7 +9,7 @@ class IterationCounter implements Iterator<IterationCounter.IterationPlan> {
     private IterationPlan next;
     private Integer[] indexes;
     private Iterator<Integer[]> permutationIterator;
-    private List<IterationPlan> previousIterationPlans = new LinkedList<>();
+    private List<IterationPlan> previousIterationPlans = new LinkedList<IterationPlan>();
     private Integer inputLength;
     private Integer[] resultLengths;
     private int overallIterations;
@@ -156,7 +156,7 @@ class IterationCounter implements Iterator<IterationCounter.IterationPlan> {
             System.arraycopy(indexes, 0, this.indexes, 0, indexes.length);
         }
 
-        Integer[] getIndexes() {
+        public Integer[] getIndexes() {
             return indexes;
         }
 

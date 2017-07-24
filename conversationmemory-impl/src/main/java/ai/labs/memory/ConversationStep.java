@@ -6,34 +6,34 @@ import java.util.*;
  * @author ginccc
  */
 public class ConversationStep implements IConversationMemory.IWritableConversationStep {
-    private Map<IConversationMemory.IConversationContext, Map<String, IData>> store;
+    protected Map<IConversationMemory.IConversationContext, Map<String, IData>> store;
     private IConversationMemory.IConversationContext conversationContext;
-    int conversationStepNumber;
+    protected int conversationStepNumber;
 
-    ConversationStep(IConversationMemory.IConversationContext conversationContext) {
+    public ConversationStep(IConversationMemory.IConversationContext conversationContext) {
         this.conversationContext = conversationContext;
-        store = new LinkedHashMap<>();
+        store = new LinkedHashMap<IConversationMemory.IConversationContext, Map<String, IData>>();
     }
 
     @Override
-    public <T> IData<T> getData(String key) {
+    public IData getData(String key) {
         return getCurrentContext().get(key);
     }
 
     private Map<String, IData> getCurrentContext() {
         if (!store.containsKey(conversationContext)) {
-            store.put(new ConversationMemory.ConversationContext(conversationContext), new LinkedHashMap<>());
+            store.put(new ConversationMemory.ConversationContext(conversationContext), new LinkedHashMap<String, IData>());
         }
 
         return store.get(conversationContext);
     }
 
     @Override
-    public <T> List<IData<T>> getAllData(String prefix) {
-        List<IData<T>> dataList = new ArrayList<>();
+    public List<IData> getAllData(String prefix) {
+        List<IData> dataList = new ArrayList<IData>();
 
         for (String key : getCurrentContext().keySet()) {
-            IData<T> data = getData(key);
+            IData data = getData(key);
             if (data != null) {
                 if (key.startsWith(prefix))
                     dataList.add(data);
@@ -45,7 +45,8 @@ public class ConversationStep implements IConversationMemory.IWritableConversati
 
     @Override
     public void storeData(IData data) {
-        getCurrentContext().put(data.getKey(), data);
+        Data value = new Data(data);
+        getCurrentContext().put(data.getKey(), value);
     }
 
     @Override
@@ -56,7 +57,7 @@ public class ConversationStep implements IConversationMemory.IWritableConversati
     @Override
     public List<IData> getAllElements(IConversationMemory.IConversationContext context) {
         Map<String, IData> contextMap = store.get(context);
-        return contextMap != null ? new ArrayList<>(contextMap.values()) : new ArrayList<>();
+        return contextMap != null ? new ArrayList<IData>(contextMap.values()) : new ArrayList<IData>();
     }
 
     @Override
@@ -75,13 +76,21 @@ public class ConversationStep implements IConversationMemory.IWritableConversati
     }
 
     @Override
-    public <T> IData<T> getLatestData(String prefix) {
+    public IData getLatestData() {
+        List<IData> elements = getAllElements(conversationContext);
+        if (elements.isEmpty())
+            return null;
+
+        return elements.get(elements.size() - 1);
+    }
+
+    @Override
+    public IData getLatestData(String prefix) {
         List<IData> elements = getAllElements(conversationContext);
         Collections.reverse(elements);
         for (IData element : elements) {
-            if (element.getKey().startsWith(prefix)) {
+            if (element.getKey().startsWith(prefix))
                 return element;
-            }
         }
 
         return null;
@@ -114,9 +123,11 @@ public class ConversationStep implements IConversationMemory.IWritableConversati
 
     @Override
     public String toString() {
-        return "ConversationStep" +
-                "{input=" + getLatestData("input") +
-                ", output=" + getLatestData("output") +
-                '}';
+        final StringBuilder sb = new StringBuilder();
+        sb.append("ConversationStep");
+        sb.append("{input=").append(getLatestData("input"));
+        sb.append(", output=").append(getLatestData("output"));
+        sb.append('}');
+        return sb.toString();
     }
 }

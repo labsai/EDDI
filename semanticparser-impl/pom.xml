@@ -43,11 +43,6 @@
             <artifactId>conversationmemory-impl</artifactId>
             <version>${project.version}</version>
         </dependency>
-        <dependency>
-            <groupId>ai.labs</groupId>
-            <artifactId>outputgeneration-definition</artifactId>
-            <version>${project.version}</version>
-        </dependency>
         <!-- https://mvnrepository.com/artifact/com.github.rholder/snowball-stemmer -->
         <dependency>
             <groupId>com.github.rholder</groupId>

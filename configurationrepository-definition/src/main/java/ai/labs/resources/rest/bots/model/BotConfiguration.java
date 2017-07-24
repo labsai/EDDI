@@ -6,9 +6,7 @@ import lombok.Setter;
 
 import java.net.URI;
 import java.util.ArrayList;
-import java.util.HashMap;
 import java.util.List;
-import java.util.Map;
 
 /**
  * @author ginccc
@@ -17,14 +15,13 @@ import java.util.Map;
 @Getter
 @Setter
 public class BotConfiguration {
-    private boolean authenticationRequired = true;
-    private List<URI> packages = new ArrayList<>();
-    private List<ChannelConnector> channels = new ArrayList<>();
+    private boolean authenticationRequired;
+    private List<URI> packages;
+    private List<ChannelConnector> channels;
 
-    @Getter
-    @Setter
-    public static class ChannelConnector {
-        private URI type;
-        private Map<String, String> config = new HashMap<>();
+    public BotConfiguration() {
+        authenticationRequired = true;
+        this.packages = new ArrayList<>();
+        this.channels = new ArrayList<>();
     }
 }

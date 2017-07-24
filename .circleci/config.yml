@@ -39,18 +39,9 @@ jobs:
             if [ "${CIRCLE_BRANCH}" == "master" ]; then
             docker login -u $DOCKER_USER -p $DOCKER_PASS
 
-            docker build -t labsai/eddi:4.1.0-b$CIRCLE_BUILD_NUM .
-            docker push labsai/eddi:4.1.0-b$CIRCLE_BUILD_NUM
+            docker build -t labsai/eddi:4.0.1-b$CIRCLE_BUILD_NUM .
+            docker push labsai/eddi:4.0.1-b$CIRCLE_BUILD_NUM
 
             docker build -t labsai/eddi:latest .
             docker push labsai/eddi:latest
-
-            # docker build -t labsai/eddi:4.1.0 .
-            # docker push labsai/eddi:4.1.0
-
-            # docker build -t labsai/eddi:4.1 .
-            # docker push labsai/eddi:4.1
-
-            # docker build -t labsai/eddi:4 .
-            # docker push labsai/eddi:4
             fi

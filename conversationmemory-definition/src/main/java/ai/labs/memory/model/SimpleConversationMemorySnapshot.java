@@ -96,9 +96,9 @@ public class SimpleConversationMemorySnapshot {
 
     public static class SimpleData {
         private String key;
-        private Object value;
+        private String value;
 
-        public SimpleData(String key, Object value) {
+        public SimpleData(String key, String value) {
             this.key = key;
             this.value = value;
         }
@@ -111,7 +111,7 @@ public class SimpleConversationMemorySnapshot {
             this.key = key;
         }
 
-        public Object getValue() {
+        public String getValue() {
             return value;
         }
 

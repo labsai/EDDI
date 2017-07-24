@@ -2,14 +2,10 @@ package ai.labs.parser;
 
 import ai.labs.expressions.Expression;
 import ai.labs.expressions.utilities.IExpressionProvider;
-import ai.labs.lifecycle.ILifecycleTask;
-import ai.labs.lifecycle.IllegalExtensionConfigurationException;
-import ai.labs.lifecycle.LifecycleException;
-import ai.labs.lifecycle.UnrecognizedExtensionException;
+import ai.labs.lifecycle.*;
 import ai.labs.memory.Data;
 import ai.labs.memory.IConversationMemory;
 import ai.labs.memory.IData;
-import ai.labs.output.IQuickReply;
 import ai.labs.parser.correction.*;
 import ai.labs.parser.dictionaries.*;
 import ai.labs.parser.internal.InputParser;
@@ -25,13 +21,10 @@ import javax.inject.Inject;
 import java.net.URI;
 import java.util.*;
 
-import static ai.labs.parser.DictionaryUtilities.convertQuickReplies;
-import static ai.labs.parser.DictionaryUtilities.extractExpressions;
-
 /**
  * @author ginccc
  */
-public class InputParserTask implements ILifecycleTask {
+public class InputParserTask extends AbstractLifecycleTask implements ILifecycleTask {
     private IInputParser sentenceParser;
     private List<IDictionary> dictionaries;
     private List<ICorrection> corrections;
@@ -74,6 +67,16 @@ public class InputParserTask implements ILifecycleTask {
     }
 
     @Override
+    public List<String> getComponentDependencies() {
+        return Collections.emptyList();
+    }
+
+    @Override
+    public List<String> getOutputDependencies() {
+        return Collections.emptyList();
+    }
+
+    @Override
     public void init() {
         this.sentenceParser = new InputParser(dictionaries, corrections);
     }
@@ -81,27 +84,17 @@ public class InputParserTask implements ILifecycleTask {
     @Override
     public void executeTask(IConversationMemory memory) throws LifecycleException {
         //parse user input to meanings
-        IData<String> data = memory.getCurrentStep().getLatestData("input");
+        IData data = memory.getCurrentStep().getLatestData("input");
         if (data == null) {
             return;
         }
-
-        IData<QuickReplyList> replyListData = memory.getPreviousSteps().
-                getLatestData("output:quickReplies");
-        List<IQuickReply> quickReplies;
-        if (replyListData != null) {
-            quickReplies = replyListData.getResult();
-        } else {
-            quickReplies = Collections.emptyList();
-        }
-
-        String input = data.getResult();
-        List<RawSolution> parsedSolutions = sentenceParser.parse(input, convertQuickReplies(quickReplies, expressionProvider));
+        String input = (String) data.getResult();
+        List<RawSolution> parsedSolutions = sentenceParser.parse(input);
 
         //store result in memory
         if (!parsedSolutions.isEmpty()) {
-            Solution solution = extractExpressions(parsedSolutions, expressionProvider).get(0);
-            data = new Data<>("expressions:parsed", solution.getExpressions());
+            Solution solution = extractExpressions(parsedSolutions).get(0);
+            data = new Data("expressions:parsed", solution.getExpressions());
             memory.getCurrentStep().storeData(data);
         }
     }
@@ -297,6 +290,11 @@ public class InputParserTask implements ILifecycleTask {
         }
     }
 
+    @Override
+    public void configure(Map<String, Object> configuration) throws PackageConfigurationException {
+        //no configurations for sentenceParser
+    }
+
     private List<Expression> createDefaultExpressionIfNull(String value, String exp) {
         if (RuntimeUtilities.isNullOrEmpty(exp)) {
             return Collections.singletonList(expressionProvider.createExpression("unused", value));
@@ -305,25 +303,42 @@ public class InputParserTask implements ILifecycleTask {
         return expressionProvider.parseExpressions(exp);
     }
 
+    private List<Expression> convertDictionaryEntriesToExpressions(List<IDictionary.IFoundWord> dictionaryEntries) {
+        List<Expression> expressions = new LinkedList<>();
+
+        for (IDictionary.IDictionaryEntry dictionaryEntry : dictionaryEntries) {
+            expressions.addAll(dictionaryEntry.getExpressions());
+        }
+
+        return expressions;
+    }
+
+    public List<Solution> extractExpressions(List<RawSolution> rawSolutions) {
+        List<Solution> solutionExpressions = new ArrayList<>();
+
+        for (RawSolution rawSolution : rawSolutions) {
+            List<Expression> expressions = convertDictionaryEntriesToExpressions(rawSolution.getDictionaryEntries());
+            solutionExpressions.add(new Solution(expressionProvider.toString(expressions)));
+        }
+
+        return solutionExpressions;
+    }
+
     private class UnrecognizedDictionaryException extends UnrecognizedExtensionException {
-        UnrecognizedDictionaryException(String message) {
+        public UnrecognizedDictionaryException(String message) {
             super(message);
         }
     }
 
     private class UnrecognizedCorrectionException extends UnrecognizedExtensionException {
-        UnrecognizedCorrectionException(String message) {
+        public UnrecognizedCorrectionException(String message) {
             super(message);
         }
     }
 
     private class ConfigParamMissingException extends IllegalExtensionConfigurationException {
-        ConfigParamMissingException(String message) {
+        public ConfigParamMissingException(String message) {
             super(message);
         }
-    }
-
-    private static class QuickReplyList extends ArrayList<IQuickReply> implements List<IQuickReply> {
-        //reflection purpose only
     }
 }

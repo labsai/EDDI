@@ -1,8 +1,4 @@
-package ai.labs.output.impl;
-
-import ai.labs.output.IOutputFilter;
-import ai.labs.output.ISimpleOutput;
-import ai.labs.output.model.OutputEntry;
+package ai.labs.core.output;
 
 import java.util.*;
 
@@ -51,6 +47,15 @@ public class SimpleOutput implements ISimpleOutput {
         return outputs;
     }
 
+    public List<String> convert(List<OutputEntry> outputEntries) {
+        List<String> ret = new LinkedList<>();
+        for (OutputEntry outputEntry : outputEntries) {
+            ret.add(outputEntry.getText());
+        }
+
+        return ret;
+    }
+
     private List<OutputEntry> extractOutputEntryOfSameOccurrence(List<OutputEntry> outputEntries, int occurrence) {
         int highestOccurrence = -1;
         for (OutputEntry outputEntry : outputEntries) {
@@ -74,14 +79,5 @@ public class SimpleOutput implements ISimpleOutput {
         }
 
         return outputEntries;
-    }
-
-    List<String> convertOutputText(List<OutputEntry> outputEntries) {
-        List<String> ret = new LinkedList<>();
-        for (OutputEntry outputEntry : outputEntries) {
-            ret.add(outputEntry.getText());
-        }
-
-        return ret;
     }
 }

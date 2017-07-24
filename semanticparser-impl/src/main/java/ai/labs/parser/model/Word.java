@@ -45,6 +45,6 @@ public class Word extends DictionaryEntry implements IDictionary.IWord {
 
     @Override
     public int compareTo(IDictionary.IDictionaryEntry o) {
-        return Integer.compare(frequency, o.getFrequency());
+        return frequency < o.getFrequency() ? -1 : frequency == o.getFrequency() ? 0 : 1;
     }
 }

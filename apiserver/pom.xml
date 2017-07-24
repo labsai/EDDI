@@ -177,11 +177,6 @@
         </dependency>
         <dependency>
             <groupId>ai.labs</groupId>
-            <artifactId>outputgeneration-impl</artifactId>
-            <version>${project.version}</version>
-        </dependency>
-        <dependency>
-            <groupId>ai.labs</groupId>
             <artifactId>caching-impl-infinispan</artifactId>
             <version>${project.version}</version>
         </dependency>

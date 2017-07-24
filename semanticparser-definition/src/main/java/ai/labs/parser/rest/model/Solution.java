@@ -1,6 +1,8 @@
 package ai.labs.parser.rest.model;
 
-import lombok.*;
+import lombok.AllArgsConstructor;
+import lombok.Getter;
+import lombok.Setter;
 
 /**
  * @author ginccc
@@ -9,8 +11,6 @@ import lombok.*;
 @Setter
 @Getter
 @AllArgsConstructor
-@EqualsAndHashCode
-@ToString
 public class Solution {
     private String expressions;
 }

@@ -4,6 +4,7 @@ import ai.labs.callback.IConversationCallback;
 import ai.labs.callback.http.ConversationCallback;
 import ai.labs.callback.model.ConversationDataRequest;
 import ai.labs.callback.model.ConversationDataResponse;
+import ai.labs.lifecycle.AbstractLifecycleTask;
 import ai.labs.lifecycle.ILifecycleTask;
 import ai.labs.lifecycle.LifecycleException;
 import ai.labs.lifecycle.PackageConfigurationException;
@@ -24,7 +25,7 @@ import java.util.Set;
  * Created by rpi on 08.02.2017.
  */
 @Slf4j
-public class ConversationCallbackTask implements ILifecycleTask {
+public class ConversationCallbackTask extends AbstractLifecycleTask implements ILifecycleTask {
     private static final String KEY_CALLBACK_URI = "callbackUri";
     private static final String KEY_TIMEOUT_IN_MILLIS = "timeoutInMillis";
 

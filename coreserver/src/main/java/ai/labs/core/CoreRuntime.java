@@ -63,6 +63,10 @@ public final class CoreRuntime {
                 attribute("expressions", "List<Expression>", "").build();
         behaviorRuleExtensionRegistry.register(inputMatcherDescriptor.getId(), inputMatcherDescriptor);
 
+        IExtensionDescriptor propertyMatcherDescriptor = ExtensionDescriptorBuilder.create(PropertyMatcher.ID, "", "ai.labs.core.behavior.extensions.PropertyMatcher").
+                attribute("expressions", "List<Expression>", "").build();
+        behaviorRuleExtensionRegistry.register(propertyMatcherDescriptor.getId(), propertyMatcherDescriptor);
+
         IExtensionDescriptor connectorDescriptor = ExtensionDescriptorBuilder.create(Connector.ID, "", "ai.labs.core.behavior.extensions.Connector").
                 attribute("operator", "String", "").build();
         behaviorRuleExtensionRegistry.register(connectorDescriptor.getId(), connectorDescriptor);
@@ -79,6 +83,12 @@ public final class CoreRuntime {
                 attribute("maxOccurrence", "String", "").
                 attribute("behaviorRuleName", "String", "").build();
         behaviorRuleExtensionRegistry.register(occurrenceDescriptor.getId(), occurrenceDescriptor);
+
+        IExtensionDescriptor outputReferenceDescriptor = ExtensionDescriptorBuilder.create(OutputReference.ID, "", "ai.labs.core.behavior.extensions.OutputReference").
+                attribute("inputValue", "String", "").
+                attribute("sessionValue", "String", "").
+                attribute("filter", "String", "").build();
+        behaviorRuleExtensionRegistry.register(outputReferenceDescriptor.getId(), outputReferenceDescriptor);
 
         IExtensionDescriptor resultSizeDescriptor = ExtensionDescriptorBuilder.create(ResultSize.ID, "", "ai.labs.core.behavior.extensions.ResultSize").
                 attribute("max", "Integer", "").
