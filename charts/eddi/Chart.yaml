@@ -1,0 +1,14 @@
+apiVersion: v1
+description: A Helm chart for the EDDI bot service
+name: eddi
+version: 1.1.2
+tier: api
+engine: gotpl
+keywords:
+- microservice
+- java
+- bot
+- nosql
+maintainers:
+- email: hello@edtechfoundry.com
+  name: Edtech Foundry

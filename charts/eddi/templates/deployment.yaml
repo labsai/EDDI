@@ -1,0 +1,36 @@
+apiVersion: extensions/v1beta1
+kind: Deployment
+metadata:
+  name: {{ .Values.appName }}
+  namespace: {{ .Values.namespace }}
+  labels:
+    app: {{ .Values.appName }}
+    chart: "{{ .Chart.Name }}-{{ .Chart.Version }}"
+    tier: api
+spec:
+  replicas: {{ .Values.replicaCount }}
+  strategy:
+    type: RollingUpdate
+  template:
+    metadata:
+      labels:
+        app: {{ .Values.appName }}
+        chart: "{{ .Chart.Name }}-{{ .Chart.Version }}"
+        tier: api
+    spec:
+      containers:
+      - name: {{ .Chart.Name }}
+        image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+        imagePullPolicy: {{ .Values.image.pullPolicy }}
+        ports:
+        - containerPort: {{ .Values.containers.internalPort }}
+        env:
+{{ toYaml .Values.env | indent 12 }}
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: {{ .Values.containers.internalPort }}
+          initialDelaySeconds: 50
+          timeoutSeconds: 5
+        resources:
+{{ toYaml .Values.resources | indent 12 }}
