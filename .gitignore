@@ -5,3 +5,6 @@
 # ignore intellij files
 .idea/
 *.iml
+
+charts/eddi/charts
+charts/eddi/requirements.lock

@@ -1,0 +1,33 @@
+appName: eddi
+namespace: default
+replicaCount: 1
+image:
+  repository: eu.gcr.io/differ-140008/etf-service-bot-eddi
+  tag: latest
+  pullPolicy: IfNotPresent
+containers:
+  internalPort: 7070
+resources:
+  limits:
+    cpu: 100m
+    # nodejs heap limit
+    memory: 1536Mi
+  requests:
+    cpu: 20m
+    memory: 64Mi
+env:
+  - name: GET_HOSTS_FROM
+    value: dns
+  - name: GCLOUD_PROJECT
+    value: 'differ-140008'
+  - name: MONGODB_HOST
+    value: 'mongodb://eddi-storage-0.eddi-storage'
+mongodb:
+  appName: eddi-storage
+  namespace: default
+  mongodbVersion: 3.4
+  imagePullPolicy: IfNotPresent
+  resources:
+    requests:
+      memory: 128Mi
+      cpu: 20m
