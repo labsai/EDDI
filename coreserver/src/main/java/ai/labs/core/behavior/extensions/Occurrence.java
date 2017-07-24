@@ -1,9 +1,9 @@
 package ai.labs.core.behavior.extensions;
 
 import ai.labs.core.behavior.BehaviorRule;
-import ai.labs.core.behavior.BehaviorSet;
 import ai.labs.memory.IConversationMemory;
 import ai.labs.memory.IData;
+import lombok.NoArgsConstructor;
 
 import java.util.HashMap;
 import java.util.LinkedList;
@@ -13,6 +13,7 @@ import java.util.Map;
 /**
  * @author ginccc
  */
+@NoArgsConstructor
 public class Occurrence implements IExtension {
     public static final String ID = "occurrence";
     private static final String BEHAVIOR_RULES_SUCCESS = "behavior_rules:success";
@@ -25,18 +26,15 @@ public class Occurrence implements IExtension {
 
     private ExecutionState state = ExecutionState.NOT_EXECUTED;
 
-    public Occurrence() {
-    }
-
     public void setBehaviorRuleName(String behaviorRuleName) {
         this.behaviorRuleName = behaviorRuleName;
     }
 
-    public void setMaxOccurrence(int maxOccurrence) {
+    private void setMaxOccurrence(int maxOccurrence) {
         this.maxOccurrence = maxOccurrence;
     }
 
-    public int countOccurrences(List<List<String>> allBehaviorRulesHistorical) {
+    private int countOccurrences(List<List<String>> allBehaviorRulesHistorical) {
         int occurrences = 0;
         for (List<String> history : allBehaviorRulesHistorical) {
             for (String behaviorRuleName : history) {
@@ -49,11 +47,11 @@ public class Occurrence implements IExtension {
         return occurrences;
     }
 
-    private List<List<String>> getAllBehaviorRules(List<List<IData>> allData) {
-        List<List<String>> allBehaviorRules = new LinkedList<List<String>>();
-        for (List<IData> dataList : allData) {
-            for (IData data : dataList) {
-                allBehaviorRules.add((List<String>) data.getResult());
+    private List<List<String>> getAllBehaviorRules(List<List<IData<List<String>>>> allData) {
+        List<List<String>> allBehaviorRules = new LinkedList<>();
+        for (List<IData<List<String>>> dataList : allData) {
+            for (IData<List<String>> data : dataList) {
+                allBehaviorRules.add(data.getResult());
             }
         }
 
@@ -67,7 +65,7 @@ public class Occurrence implements IExtension {
 
     @Override
     public Map<String, String> getValues() {
-        HashMap<String, String> result = new HashMap<String, String>();
+        HashMap<String, String> result = new HashMap<>();
         result.put(maxOccurrenceQualifier, String.valueOf(maxOccurrence));
         result.put(behaviorRuleNameQualifier, behaviorRuleName);
         return result;
@@ -92,19 +90,9 @@ public class Occurrence implements IExtension {
     }
 
     @Override
-    public IExtension[] getChildren() {
-        return new IExtension[0];
-    }
-
-    @Override
-    public void setChildren(IExtension... extensions) {
-        //not implemented
-    }
-
-    @Override
     public ExecutionState execute(IConversationMemory memory, List<BehaviorRule> trace) {
         boolean success;
-        List<List<IData>> allData = memory.getAllSteps().getAllData(BEHAVIOR_RULES_SUCCESS);
+        List<List<IData<List<String>>>> allData = memory.getAllSteps().getAllData(BEHAVIOR_RULES_SUCCESS);
         if (allData != null) {
             int actualOccurrences = countOccurrences(getAllBehaviorRules(allData));
             if (maxOccurrence == -1) {
@@ -137,10 +125,5 @@ public class Occurrence implements IExtension {
         occurrence.setValues(getValues());
 
         return occurrence;
-    }
-
-    @Override
-    public void setContainingBehaviorRuleSet(BehaviorSet behaviorSet) {
-        //not implemented
     }
 }

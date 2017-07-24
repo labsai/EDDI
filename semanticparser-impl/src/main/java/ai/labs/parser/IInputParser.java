@@ -1,6 +1,7 @@
 package ai.labs.parser;
 
 import ai.labs.parser.internal.matches.RawSolution;
+import ai.labs.parser.model.IDictionary;
 
 import java.util.List;
 
@@ -9,4 +10,6 @@ import java.util.List;
  */
 public interface IInputParser {
     List<RawSolution> parse(String sentence);
+
+    List<RawSolution> parse(String sentence, List<IDictionary> temporaryDictionaries);
 }

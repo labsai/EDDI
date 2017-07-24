@@ -1,4 +1,4 @@
-package ai.labs.core.output;
+package ai.labs.output;
 
 /**
  * @author ginccc

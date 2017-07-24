@@ -1,6 +1,5 @@
 package ai.labs.core.normalizing;
 
-import ai.labs.lifecycle.AbstractLifecycleTask;
 import ai.labs.lifecycle.ILifecycleTask;
 import ai.labs.memory.Data;
 import ai.labs.memory.IConversationMemory;
@@ -14,7 +13,7 @@ import java.util.List;
  * @author ginccc
  */
 @Singleton
-public class NormalizeInputTask extends AbstractLifecycleTask implements ILifecycleTask {
+public class NormalizeInputTask implements ILifecycleTask {
     private InputNormalizer normalizer;
 
     public NormalizeInputTask() {
@@ -46,12 +45,12 @@ public class NormalizeInputTask extends AbstractLifecycleTask implements ILifecy
 
     @Override
     public void executeTask(IConversationMemory memory) {
-        IData latestInput = memory.getCurrentStep().getLatestData("input");
+        IData<String> latestInput = memory.getCurrentStep().getLatestData("input");
         if (latestInput == null) {
             return;
         }
-        String input = (String) latestInput.getResult();
+        String input = latestInput.getResult();
         String formattedInput = normalizer.normalizeInput(input);
-        memory.getCurrentStep().storeData(new Data("input:formatted", formattedInput));
+        memory.getCurrentStep().storeData(new Data<>("input:formatted", formattedInput));
     }
 }

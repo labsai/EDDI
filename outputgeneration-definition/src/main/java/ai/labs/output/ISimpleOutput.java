@@ -1,4 +1,6 @@
-package ai.labs.core.output;
+package ai.labs.output;
+
+import ai.labs.output.model.OutputEntry;
 
 import java.util.List;
 

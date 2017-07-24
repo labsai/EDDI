@@ -31,42 +31,13 @@ public class InputParser implements IInputParser {
         phrasesMap = preparePhrases(dictionaries);
     }
 
-    private Map<IDictionary.IWord, List<IDictionary.IPhrase>> preparePhrases(List<IDictionary> dictionaries) {
-        Map<IDictionary.IWord, List<IDictionary.IPhrase>> phrasesMap = new HashMap<>();
-        for (IDictionary dictionary : dictionaries) {
-            List<IDictionary.IPhrase> dictionaryPhrases = dictionary.getPhrases();
-            for (IDictionary.IPhrase phrase : dictionaryPhrases) {
-                for (IDictionary.IWord wordOfPhrase : phrase.getWords()) {
-                    List<IDictionary.IPhrase> phrases = phrasesMap.computeIfAbsent(wordOfPhrase, k -> new LinkedList<>());
-                    phrases.add(phrase);
-                }
-            }
-        }
-
-        for (IDictionary.IWord word : phrasesMap.keySet()) {
-            List<IDictionary.IPhrase> phrases = phrasesMap.get(word);
-            if (phrases.size() > 1) {
-                orderPhrasesByLength(phrases);
-            }
-        }
-
-        return phrasesMap;
-    }
-
-    private void orderPhrasesByLength(List<IDictionary.IPhrase> phrases) {
-        phrases.sort(Collections.reverseOrder((o1, o2) -> {
-            int lengthWord1 = o1.getWords().length;
-            int lengthWord2 = o2.getWords().length;
-            if (lengthWord1 != lengthWord2) {
-                return lengthWord1 < lengthWord2 ? -1 : lengthWord1 > lengthWord2 ? 1 : 0;
-            } else {
-                return o1.getValue().compareTo(o2.getValue());
-            }
-        }));
+    @Override
+    public List<RawSolution> parse(String sentence) {
+        return parse(sentence, Collections.emptyList());
     }
 
     @Override
-    public List<RawSolution> parse(String sentence) {
+    public List<RawSolution> parse(String sentence, List<IDictionary> temporaryDictionaries) {
         InputHolder holder = new InputHolder();
         holder.input = sentence.split(" ");
 
@@ -76,19 +47,8 @@ public class InputParser implements IInputParser {
                 continue;
             }
 
-            for (IDictionary dictionary : dictionaries) {
-                if (!dictionary.lookupIfKnown() && holder.getMatchingResultSize(holder.index) != 0) {
-                    //skipped lookup because input part is already known.
-                    continue;
-                }
-
-                //lookup input part in dictionary
-                IDictionary.IFoundWord[] dictionaryEntries = dictionary.lookupTerm(currentInputPart);
-                if (dictionaryEntries.length > 0) {
-                    //add dictionary entries to final result list
-                    addDictionaryEntriesTo(holder, currentInputPart, dictionaryEntries);
-                }
-            }
+            iterateDictionaries(holder, currentInputPart, temporaryDictionaries);
+            iterateDictionaries(holder, currentInputPart, dictionaries);
 
             for (ICorrection correction : corrections) {
                 if (!correction.lookupIfKnown() && holder.getMatchingResultSize(holder.index) != 0) {
@@ -108,7 +68,23 @@ public class InputParser implements IInputParser {
             }
         }
 
-        return lookupPhrases(holder);
+        return lookupPhrases(holder, preparePhrases(temporaryDictionaries));
+    }
+
+    private void iterateDictionaries(InputHolder holder, String currentInputPart, List<IDictionary> dictionaries) {
+        for (IDictionary dictionary : dictionaries) {
+            if (!dictionary.lookupIfKnown() && holder.getMatchingResultSize(holder.index) != 0) {
+                //skipped lookup because input part is already known.
+                continue;
+            }
+
+            //lookup input part in dictionary
+            IDictionary.IFoundWord[] dictionaryEntries = dictionary.lookupTerm(currentInputPart);
+            if (dictionaryEntries.length > 0) {
+                //add dictionary entries to final result list
+                addDictionaryEntriesTo(holder, currentInputPart, dictionaryEntries);
+            }
+        }
     }
 
     private void addDictionaryEntriesTo(InputHolder holder, String matchedInputValue, IDictionary.IFoundWord... foundWords) {
@@ -121,7 +97,9 @@ public class InputParser implements IInputParser {
         }
     }
 
-    private List<RawSolution> lookupPhrases(InputHolder holder) {
+    private List<RawSolution> lookupPhrases(InputHolder holder,
+                                            Map<IDictionary.IWord, List<IDictionary.IPhrase>> tmpPhrasesMap) {
+
         List<RawSolution> possibleSolutions = new LinkedList<>();
         Iterator<Suggestion> suggestionIterator = holder.createSolutionIterator();
 
@@ -135,7 +113,8 @@ public class InputParser implements IInputParser {
                 return possibleSolutions;
             }
             List<IDictionary.IFoundWord> foundWords = suggestion.build();
-            List<IDictionary.IPhrase> phrasesContainingFoundWords = getPhrasesContainingFoundWords(foundWords);
+            List<IDictionary.IPhrase> phrasesContainingFoundWords =
+                    getPhrasesContainingFoundWords(foundWords, Arrays.asList(phrasesMap, tmpPhrasesMap));
 
             RawSolution rawSolution = null;
             boolean matchingCompleted = false;
@@ -144,7 +123,7 @@ public class InputParser implements IInputParser {
             for (IDictionary.IPhrase phrase : phrasesContainingFoundWords) {
                 if (phrase.getWords().length <= foundWords.size()) {
                     foundWords = lookForMatch(foundWords, phrase);
-                    if (foundWords.contains(createPhrase(phrase, false, 1.0))) {
+                    if (foundWords.contains(createPhrase(phrase, 1.0))) {
                         rawSolution = new RawSolution(RawSolution.Match.FULLY);
                     }
 
@@ -166,7 +145,7 @@ public class InputParser implements IInputParser {
             for (IDictionary.IPhrase phrase : phrasesContainingFoundWords) {
                 if (phrase.getWords().length > foundWords.size()) {
                     foundWords = lookForPartlyMatch(foundWords, phrase);
-                    if (foundWords.contains(createPhrase(phrase, false, 0.5))) {
+                    if (foundWords.contains(createPhrase(phrase, 0.5))) {
                         if (rawSolution == null) {
                             rawSolution = new RawSolution(RawSolution.Match.PARTLY);
                         }
@@ -231,7 +210,7 @@ public class InputParser implements IInputParser {
             if (startOfMatch > 0) {
                 ret.addAll(foundWords.subList(0, startOfMatch));
             }
-            ret.add(createPhrase(phrase, false, 1.0));
+            ret.add(createPhrase(phrase, 1.0));
             int rangeOfMatch = startOfMatch + phrase.getWords().length;
             if (rangeOfMatch < foundWords.size()) {
                 ret.addAll(foundWords.subList(rangeOfMatch, foundWords.size()));
@@ -244,10 +223,6 @@ public class InputParser implements IInputParser {
         }
     }
 
-    private IDictionary.IFoundWord createPhrase(IDictionary.IPhrase phrase, boolean corrected, double matchingAccuracy) {
-        return new FoundPhrase(phrase, corrected, matchingAccuracy);
-    }
-
     private IDictionary.IWord[] convert(List<IDictionary.IFoundWord> foundWords) {
         IDictionary.IWord[] ret = new IDictionary.IWord[foundWords.size()];
 
@@ -258,7 +233,12 @@ public class InputParser implements IInputParser {
         return ret;
     }
 
-    private List<IDictionary.IFoundWord> lookForPartlyMatch(List<IDictionary.IFoundWord> dictionaryEntries, IDictionary.IPhrase phrase) {
+    private IDictionary.IFoundWord createPhrase(IDictionary.IPhrase phrase, double matchingAccuracy) {
+        return new FoundPhrase(phrase, false, matchingAccuracy);
+    }
+
+    private List<IDictionary.IFoundWord> lookForPartlyMatch(List<IDictionary.IFoundWord> dictionaryEntries,
+                                                            IDictionary.IPhrase phrase) {
         IDictionary.IWord[] phraseWords = phrase.getWords();
         int startOfMatch = LanguageUtilities.containsArray(dictionaryEntries.toArray(), phraseWords);
         if (startOfMatch > -1) {
@@ -267,7 +247,7 @@ public class InputParser implements IInputParser {
             if (startOfMatch > 0) {
                 ret.addAll(dictionaryEntries.subList(0, startOfMatch - 1));
             }
-            ret.add(createPhrase(phrase, false, 1.0));
+            ret.add(createPhrase(phrase, 1.0));
             int rangeOfMatch = startOfMatch + phraseWords.length;
             if (rangeOfMatch < dictionaryEntries.size()) {
                 ret.addAll(dictionaryEntries.subList(rangeOfMatch, dictionaryEntries.size()));
@@ -280,15 +260,54 @@ public class InputParser implements IInputParser {
         }
     }
 
-    private List<IDictionary.IPhrase> getPhrasesContainingFoundWords(List<IDictionary.IFoundWord> foundWords) {
+    private Map<IDictionary.IWord, List<IDictionary.IPhrase>> preparePhrases(List<IDictionary> dictionaries) {
+        Map<IDictionary.IWord, List<IDictionary.IPhrase>> phrasesMap = new HashMap<>();
+        for (IDictionary dictionary : dictionaries) {
+            List<IDictionary.IPhrase> dictionaryPhrases = dictionary.getPhrases();
+            for (IDictionary.IPhrase phrase : dictionaryPhrases) {
+                for (IDictionary.IWord wordOfPhrase : phrase.getWords()) {
+                    List<IDictionary.IPhrase> phrases = phrasesMap.computeIfAbsent(wordOfPhrase, k -> new LinkedList<>());
+                    phrases.add(phrase);
+                }
+            }
+        }
+
+        for (IDictionary.IWord word : phrasesMap.keySet()) {
+            List<IDictionary.IPhrase> phrases = phrasesMap.get(word);
+            if (phrases.size() > 1) {
+                orderPhrasesByLength(phrases);
+            }
+        }
+
+        return phrasesMap;
+    }
+
+    private void orderPhrasesByLength(List<IDictionary.IPhrase> phrases) {
+        phrases.sort(Collections.reverseOrder((o1, o2) -> {
+            int lengthWord1 = o1.getWords().length;
+            int lengthWord2 = o2.getWords().length;
+            if (lengthWord1 != lengthWord2) {
+                return Integer.compare(lengthWord1, lengthWord2);
+            } else {
+                return o1.getValue().compareTo(o2.getValue());
+            }
+        }));
+    }
+
+    private List<IDictionary.IPhrase> getPhrasesContainingFoundWords(
+            List<IDictionary.IFoundWord> foundWords,
+            List<Map<IDictionary.IWord, List<IDictionary.IPhrase>>> phrasesMaps) {
+
         List<IDictionary.IPhrase> ret = new LinkedList<>();
         for (IDictionary.IFoundWord foundWord : foundWords) {
             if (foundWord.isPhrase()) continue;
-            List<IDictionary.IPhrase> phrases = phrasesMap.get(foundWord.getFoundWord());
-            if (phrases != null) {
-                for (IDictionary.IPhrase phrase : phrases) {
-                    if (!ret.contains(phrase)) {
-                        ret.add(phrase);
+            for (Map<IDictionary.IWord, List<IDictionary.IPhrase>> phrasesMap : phrasesMaps) {
+                List<IDictionary.IPhrase> phrases = phrasesMap.get(foundWord.getFoundWord());
+                if (phrases != null) {
+                    for (IDictionary.IPhrase phrase : phrases) {
+                        if (!ret.contains(phrase)) {
+                            ret.add(phrase);
+                        }
                     }
                 }
             }
