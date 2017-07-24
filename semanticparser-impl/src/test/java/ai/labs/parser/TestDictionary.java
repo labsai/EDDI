@@ -2,6 +2,7 @@ package ai.labs.parser;
 
 import ai.labs.parser.model.FoundWord;
 import ai.labs.parser.model.IDictionary;
+import lombok.NoArgsConstructor;
 
 import java.util.Arrays;
 import java.util.LinkedList;
@@ -10,13 +11,19 @@ import java.util.List;
 /**
  * @author ginccc
  */
+@NoArgsConstructor
 public class TestDictionary implements IDictionary {
-    private List<IWord> words = new LinkedList<IWord>();
-    private List<IPhrase> phrases = new LinkedList<IPhrase>();
+    private List<IWord> words = new LinkedList<>();
+    private List<IPhrase> phrases = new LinkedList<>();
+    private boolean lookupIfKnow = false;
+
+    TestDictionary(boolean lookupIfKnow) {
+        this.lookupIfKnow = lookupIfKnow;
+    }
 
     @Override
     public List<IWord> getWords() {
-        LinkedList<IWord> words = new LinkedList<IWord>(this.words);
+        LinkedList<IWord> words = new LinkedList<>(this.words);
         for (IPhrase phrase : phrases) {
             words.addAll(Arrays.asList(phrase.getWords()));
         }
@@ -30,7 +37,7 @@ public class TestDictionary implements IDictionary {
 
     @Override
     public IFoundWord[] lookupTerm(String value) {
-        List<IFoundWord> foundWords = new LinkedList<IFoundWord>();
+        List<IFoundWord> foundWords = new LinkedList<>();
 
         for (IWord word : getWords()) {
             if (word.getValue().equals(value))  {
@@ -48,14 +55,14 @@ public class TestDictionary implements IDictionary {
 
     @Override
     public boolean lookupIfKnown() {
-        return false;
+        return lookupIfKnow;
     }
 
-    public void addWord(IWord word) {
+    void addWord(IWord word) {
         this.words.add(word);
     }
 
-    public void addPhrase(IPhrase phrase) {
+    void addPhrase(IPhrase phrase) {
         this.phrases.add(phrase);
     }
 }

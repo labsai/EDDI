@@ -1,12 +1,15 @@
-package ai.labs.core.output;
+package ai.labs.output.impl;
 
-import ai.labs.lifecycle.AbstractLifecycleTask;
+import ai.labs.expressions.utilities.IExpressionProvider;
 import ai.labs.lifecycle.ILifecycleTask;
 import ai.labs.lifecycle.LifecycleException;
 import ai.labs.lifecycle.PackageConfigurationException;
-import ai.labs.memory.Data;
 import ai.labs.memory.IConversationMemory;
 import ai.labs.memory.IData;
+import ai.labs.memory.IDataFactory;
+import ai.labs.output.IOutputFilter;
+import ai.labs.output.IQuickReply;
+import ai.labs.output.model.OutputEntry;
 import ai.labs.resources.rest.output.model.OutputConfiguration;
 import ai.labs.resources.rest.output.model.OutputConfigurationSet;
 import ai.labs.runtime.client.configuration.IResourceClientLibrary;
@@ -15,25 +18,33 @@ import ai.labs.utilities.RuntimeUtilities;
 
 import javax.inject.Inject;
 import java.net.URI;
-import java.util.Collections;
-import java.util.LinkedList;
-import java.util.List;
-import java.util.Map;
+import java.util.*;
 
 /**
  * @author ginccc
  */
-public class SimpleOutputTask extends AbstractLifecycleTask implements ILifecycleTask {
+public class SimpleOutputTask implements ILifecycleTask {
     private static final String SEPARATOR = " ";
     private static final String ACTION_KEY = "action";
     private SimpleOutput simpleOutput;
     private IResourceClientLibrary resourceClientLibrary;
+    private final IDataFactory dataFactory;
+    private final IExpressionProvider expressionProvider;
 
     @Inject
-    public SimpleOutputTask(IResourceClientLibrary resourceClientLibrary) {
+    public SimpleOutputTask(IResourceClientLibrary resourceClientLibrary,
+                            IDataFactory dataFactory,
+                            IExpressionProvider expressionProvider) {
         this.resourceClientLibrary = resourceClientLibrary;
+        this.dataFactory = dataFactory;
+        this.expressionProvider = expressionProvider;
         this.simpleOutput = new SimpleOutput();
 
+    }
+
+    @Override
+    public void init() {
+        // not implemented
     }
 
     @Override
@@ -59,11 +70,11 @@ public class SimpleOutputTask extends AbstractLifecycleTask implements ILifecycl
     @Override
     public void executeTask(IConversationMemory memory) throws LifecycleException {
         List<IOutputFilter> outputFilters = new LinkedList<>();
-        IData latestData = memory.getCurrentStep().getLatestData(ACTION_KEY);
+        IData<List<String>> latestData = memory.getCurrentStep().getLatestData(ACTION_KEY);
         if (latestData == null) {
             return;
         }
-        List<String> actions = (List<String>) latestData.getResult();
+        List<String> actions = latestData.getResult();
         for (String action : actions) {
             int occurrence = countActionOccurrence(memory.getPreviousSteps(), action);
             outputFilters.add(new OutputFilter(action, occurrence));
@@ -76,11 +87,21 @@ public class SimpleOutputTask extends AbstractLifecycleTask implements ILifecycl
         }
 
         for (List<OutputEntry> possibleOutput : possibleOutputs) {
-            String key = "output:action:" + possibleOutput.get(0).getKey();
-            memory.getCurrentStep().storeData(new Data(key, null, simpleOutput.convert(possibleOutput)));
+            String outputTextKey = "output:action:" + possibleOutput.get(0).getKey();
+            IData outputText = dataFactory.createData(outputTextKey, null,
+                    simpleOutput.convertOutputText(possibleOutput));
+            memory.getCurrentStep().storeData(outputText);
+
+            String outputQuickReplyKey = "output:quickreply:" + possibleOutput.get(0).getKey();
+            List<IQuickReply> quickReplies = convertQuickReplies(possibleOutput);
+            if (!quickReplies.isEmpty()) {
+                IData outputQuickReplies = dataFactory.createData(outputQuickReplyKey, quickReplies);
+                outputQuickReplies.setPublic(true);
+                memory.getCurrentStep().storeData(outputQuickReplies);
+            }
         }
 
-        List<IData> allOutputParts = memory.getCurrentStep().getAllData("output:action");
+        List<IData<String>> allOutputParts = memory.getCurrentStep().getAllData("output:action");
         StringBuilder finalOutput = new StringBuilder();
         for (IData outputPart : allOutputParts) {
             finalOutput.append(outputPart.getResult()).append(SEPARATOR);
@@ -90,7 +111,7 @@ public class SimpleOutputTask extends AbstractLifecycleTask implements ILifecycl
             finalOutput.delete(finalOutput.length() - SEPARATOR.length(), finalOutput.length());
         }
 
-        Data finalOutputData = new Data("output:final", finalOutput.toString());
+        IData finalOutputData = dataFactory.createData("output:final", finalOutput.toString());
         finalOutputData.setPublic(true);
         memory.getCurrentStep().storeData(finalOutputData);
     }
@@ -100,9 +121,9 @@ public class SimpleOutputTask extends AbstractLifecycleTask implements ILifecycl
         int count = 0;
         for (int i = 0; i < conversationStepStack.size(); i++) {
             IConversationMemory.IConversationStep conversationStep = conversationStepStack.get(i);
-            IData actionsData = conversationStep.getLatestData(ACTION_KEY);
+            IData<List<String>> actionsData = conversationStep.getLatestData(ACTION_KEY);
             if (actionsData != null) {
-                List<String> actions = (List<String>) actionsData.getResult();
+                List<String> actions = actionsData.getResult();
                 if (actions.contains(action)) {
                     count++;
                 }
@@ -122,14 +143,42 @@ public class SimpleOutputTask extends AbstractLifecycleTask implements ILifecycl
 
             for (OutputConfiguration outputConfiguration : outputConfigurationSet.getOutputs()) {
                 String key = outputConfiguration.getKey();
+                List<OutputConfiguration.QuickReply> configQuickReplies = outputConfiguration.getQuickReplies();
+                List<OutputEntry.QuickReply> quickReplies = convert(configQuickReplies);
+
                 int occurrence = outputConfiguration.getOccurrence();
                 outputConfiguration.getOutputValues().stream().filter(
                         text -> !RuntimeUtilities.isNullOrEmpty(text)).forEachOrdered(
-                        text -> simpleOutput.addOutputEntry(new OutputEntry(key, text, occurrence)));
+                        text -> simpleOutput.addOutputEntry(new OutputEntry(key, text, quickReplies, occurrence)));
             }
         } catch (ServiceException e) {
             String message = "Error while fetching OutputConfigurationSet!\n" + e.getLocalizedMessage();
             throw new PackageConfigurationException(message, e);
         }
     }
+
+    private List<OutputEntry.QuickReply> convert(List<OutputConfiguration.QuickReply> configQuickReplies) {
+        List<OutputEntry.QuickReply> quickReplies = new ArrayList<>();
+
+        for (OutputConfiguration.QuickReply configQuickReply : configQuickReplies) {
+            OutputEntry.QuickReply quickReply = new OutputEntry.QuickReply();
+            quickReply.setValue(configQuickReply.getValue());
+            quickReply.setExpressions(expressionProvider.parseExpressions(configQuickReply.getExpressions()));
+            quickReplies.add(quickReply);
+        }
+
+        return quickReplies;
+    }
+
+    private List<IQuickReply> convertQuickReplies(List<OutputEntry> possibleOutput) {
+        List<IQuickReply> ret = new LinkedList<>();
+        for (OutputEntry outputEntry : possibleOutput) {
+            for (OutputEntry.QuickReply quickReply : outputEntry.getQuickReplies()) {
+                ret.add(new QuickReply(quickReply.getValue(), expressionProvider.toString(quickReply.getExpressions())));
+            }
+        }
+
+        return ret;
+    }
+
 }

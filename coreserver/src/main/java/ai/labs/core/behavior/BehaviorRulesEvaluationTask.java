@@ -1,6 +1,5 @@
 package ai.labs.core.behavior;
 
-import ai.labs.lifecycle.AbstractLifecycleTask;
 import ai.labs.lifecycle.ILifecycleTask;
 import ai.labs.lifecycle.LifecycleException;
 import ai.labs.lifecycle.PackageConfigurationException;
@@ -17,7 +16,6 @@ import javax.inject.Inject;
 import javax.inject.Singleton;
 import java.io.IOException;
 import java.net.URI;
-import java.util.Collections;
 import java.util.LinkedList;
 import java.util.List;
 import java.util.Map;
@@ -28,21 +26,20 @@ import java.util.stream.Collectors;
  */
 @Singleton
 @Slf4j
-public class BehaviorRulesEvaluationTask extends AbstractLifecycleTask implements ILifecycleTask {
+public class BehaviorRulesEvaluationTask implements ILifecycleTask {
     private BehaviorRulesEvaluator evaluator;
     private static final String BEHAVIOR_CONFIG = "uri";
     private final IResourceClientLibrary resourceClientLibrary;
     private final IJsonSerialization jsonSerialization;
-    private final IBehaviorSerialization behaviorSerialization;
+    private final IBehaviorDeserialization behaviorSerialization;
 
     @Inject
     public BehaviorRulesEvaluationTask(IResourceClientLibrary resourceClientLibrary,
                                        IJsonSerialization jsonSerialization,
-                                       IBehaviorSerialization behaviorSerialization) {
+                                       IBehaviorDeserialization behaviorSerialization) {
         this.resourceClientLibrary = resourceClientLibrary;
         this.jsonSerialization = jsonSerialization;
         this.behaviorSerialization = behaviorSerialization;
-        this.evaluator = new BehaviorRulesEvaluator();
     }
 
     @Override
@@ -53,16 +50,6 @@ public class BehaviorRulesEvaluationTask extends AbstractLifecycleTask implement
     @Override
     public Object getComponent() {
         return evaluator;
-    }
-
-    @Override
-    public List<String> getComponentDependencies() {
-        return Collections.emptyList();
-    }
-
-    @Override
-    public List<String> getOutputDependencies() {
-        return Collections.emptyList();
     }
 
     @Override
@@ -90,14 +77,14 @@ public class BehaviorRulesEvaluationTask extends AbstractLifecycleTask implement
             allActions.addAll(successRule.getActions());
         }
 
-        Data actions = new Data("actions", allActions);
+        Data actions = new Data<>("actions", allActions);
         actions.setPublic(true);
         memory.getCurrentStep().storeData(actions);
     }
 
     private void storeResultIfNotEmpty(IConversationMemory memory, String key, List<BehaviorRule> result) {
         if (!result.isEmpty()) {
-            memory.getCurrentStep().storeData(new Data(key, convert(result)));
+            memory.getCurrentStep().storeData(new Data<>(key, convert(result)));
         }
     }
 
@@ -116,7 +103,7 @@ public class BehaviorRulesEvaluationTask extends AbstractLifecycleTask implement
             String behaviorConfigJson = jsonSerialization.serialize(behaviorConfiguration);
             BehaviorSet behaviorSet = behaviorSerialization.deserialize(behaviorConfigJson);
 
-            evaluator.setBehaviorSet(behaviorSet);
+            evaluator = new BehaviorRulesEvaluator(behaviorSet);
 
         } catch (IOException | DeserializationException e) {
             String message = "Error while configuring BehaviorRuleLifecycleTask!";

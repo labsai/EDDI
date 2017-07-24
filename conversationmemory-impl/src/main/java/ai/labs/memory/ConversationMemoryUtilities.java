@@ -3,7 +3,6 @@ package ai.labs.memory;
 import ai.labs.memory.model.ConversationMemorySnapshot;
 import ai.labs.memory.model.SimpleConversationMemorySnapshot;
 import ai.labs.persistence.IResourceStore;
-import ai.labs.utilities.CharacterUtilities;
 
 import java.util.LinkedList;
 import java.util.List;
@@ -55,7 +54,7 @@ public class ConversationMemoryUtilities {
     }
 
     private static List<IConversationMemory.IConversationStep> iterateRedoCache(List<ConversationMemorySnapshot.ConversationStepSnapshot> redoSteps) {
-        List<IConversationMemory.IConversationStep> conversationSteps = new LinkedList<IConversationMemory.IConversationStep>();
+        List<IConversationMemory.IConversationStep> conversationSteps = new LinkedList<>();
         for (ConversationMemorySnapshot.ConversationStepSnapshot redoStep : redoSteps) {
             IConversationMemory.IWritableConversationStep conversationStep = new ConversationStep(new ConversationMemory.ConversationContext());
             conversationSteps.add(conversationStep);
@@ -116,8 +115,8 @@ public class ConversationMemoryUtilities {
                 for (ConversationMemorySnapshot.ResultSnapshot resultSnapshot : packageRunSnapshot.getLifecycleTasks()) {
                     if (includeAll || resultSnapshot.isPublic()) {
                         Object result = resultSnapshot.getResult();
-                        String value = result instanceof List ? CharacterUtilities.arrayToString((List) result, ",") : result.toString();
-                        simpleConversationStep.getData().add(new SimpleConversationMemorySnapshot.SimpleData(resultSnapshot.getKey(), value));
+                        simpleConversationStep.getData().add(
+                                new SimpleConversationMemorySnapshot.SimpleData(resultSnapshot.getKey(), result));
                     } else {
                         continue;
                     }

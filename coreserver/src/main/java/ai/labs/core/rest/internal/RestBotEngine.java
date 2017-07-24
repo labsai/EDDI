@@ -2,7 +2,6 @@ package ai.labs.core.rest.internal;
 
 import ai.labs.lifecycle.IConversation;
 import ai.labs.lifecycle.LifecycleException;
-import ai.labs.memory.ConversationMemoryUtilities;
 import ai.labs.memory.IConversationMemory;
 import ai.labs.memory.IConversationMemoryStore;
 import ai.labs.memory.model.ConversationMemorySnapshot;
@@ -30,8 +29,7 @@ import java.net.URI;
 import java.util.concurrent.Callable;
 import java.util.concurrent.TimeUnit;
 
-import static ai.labs.memory.ConversationMemoryUtilities.convertConversationMemory;
-import static ai.labs.memory.ConversationMemoryUtilities.convertSimpleConversationMemory;
+import static ai.labs.memory.ConversationMemoryUtilities.*;
 
 /**
  * @author ginccc
@@ -148,9 +146,7 @@ public class RestBotEngine implements IRestBotEngine {
             final IConversation conversation = bot.continueConversation(conversationMemory,
                     conversationStep -> {
                         SimpleConversationMemorySnapshot memorySnapshot = convertSimpleConversationMemory(
-                                convertConversationMemory(conversationMemory),
-                                true);
-
+                                convertConversationMemory(conversationMemory), true);
                         response.resume(memorySnapshot);
                     });
 
@@ -332,7 +328,7 @@ public class RestBotEngine implements IRestBotEngine {
 
     private IConversationMemory loadConversationMemory(String conversationId) throws IResourceStore.ResourceStoreException, IResourceStore.ResourceNotFoundException {
         ConversationMemorySnapshot conversationMemorySnapshot = conversationMemoryStore.loadConversationMemorySnapshot(conversationId);
-        return ConversationMemoryUtilities.convertConversationMemorySnapshot(conversationMemorySnapshot);
+        return convertConversationMemorySnapshot(conversationMemorySnapshot);
     }
 
     private void setConversationState(String conversationId, ConversationState conversationState) {

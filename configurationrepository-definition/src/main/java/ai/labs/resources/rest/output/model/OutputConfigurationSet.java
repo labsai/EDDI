@@ -1,5 +1,6 @@
 package ai.labs.resources.rest.output.model;
 
+import lombok.EqualsAndHashCode;
 import lombok.Getter;
 import lombok.Setter;
 
@@ -12,6 +13,7 @@ import java.util.List;
 
 @Getter
 @Setter
+@EqualsAndHashCode
 public class OutputConfigurationSet {
     private List<OutputConfiguration> outputs;
 

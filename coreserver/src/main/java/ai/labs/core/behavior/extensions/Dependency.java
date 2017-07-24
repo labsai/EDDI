@@ -4,6 +4,7 @@ import ai.labs.core.behavior.BehaviorGroup;
 import ai.labs.core.behavior.BehaviorRule;
 import ai.labs.core.behavior.BehaviorSet;
 import ai.labs.memory.IConversationMemory;
+import lombok.NoArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 
 import java.util.HashMap;
@@ -15,6 +16,7 @@ import java.util.Map;
  * @author ginccc
  */
 @Slf4j
+@NoArgsConstructor
 public class Dependency implements IExtension {
     public static final String ID = "dependency";
 
@@ -24,11 +26,7 @@ public class Dependency implements IExtension {
     private final String referenceQualifier = "reference";
     private BehaviorSet behaviorSet;
 
-    public Dependency() {
-        // empty default constructor
-    }
-
-    public Dependency(String referencedRuleName) {
+    private Dependency(String referencedRuleName) {
         this.reference = referencedRuleName;
     }
 
@@ -54,12 +52,8 @@ public class Dependency implements IExtension {
     }
 
     @Override
-    public IExtension[] getChildren() {
-        return new IExtension[0];
-    }
-
-    @Override
-    public ExecutionState execute(IConversationMemory memory, List<BehaviorRule> trace) {
+    public ExecutionState execute(IConversationMemory memory, List<BehaviorRule> trace)
+            throws BehaviorRule.InfiniteLoopException {
 
         //before we execute the behavior rules we make deep copies, so that we don't change the rules in conversation memory!
         List<BehaviorRule> filteredBehaviorRules = new LinkedList<BehaviorRule>();
@@ -120,11 +114,6 @@ public class Dependency implements IExtension {
         }
 
         return clone;
-    }
-
-    @Override
-    public void setChildren(IExtension... extensions) {
-        //not
     }
 
     @Override

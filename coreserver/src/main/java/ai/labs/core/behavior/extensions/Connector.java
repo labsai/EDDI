@@ -1,8 +1,10 @@
 package ai.labs.core.behavior.extensions;
 
 import ai.labs.core.behavior.BehaviorRule;
-import ai.labs.core.behavior.BehaviorSet;
 import ai.labs.memory.IConversationMemory;
+import lombok.Getter;
+import lombok.NoArgsConstructor;
+import lombok.Setter;
 
 import java.util.*;
 
@@ -10,6 +12,7 @@ import java.util.*;
 /**
  * @author ginccc
  */
+@NoArgsConstructor
 public class Connector implements IExtension {
     public static final String ID = "connector";
     private final String operatorQualifier = "operator";
@@ -18,30 +21,16 @@ public class Connector implements IExtension {
         OR, AND
     }
 
-    protected Operator operator;
+    private Operator operator;
 
-    private List<IExtension> extensions = new LinkedList<IExtension>();
+    @Getter
+    @Setter
+    private List<IExtension> extensions = new LinkedList<>();
 
     private ExecutionState state = ExecutionState.NOT_EXECUTED;
 
-    public Connector() {
-        this(Operator.OR); // default: OR
-    }
-
-    public Connector(String operator) {
-        this(operator.equals("or") ? Operator.OR : Operator.AND);
-    }
-
-    public Connector(Operator operator) {
+    private Connector(Operator operator) {
         this.operator = operator;
-    }
-
-    public void setExtensions(List<IExtension> extensions) {
-        this.extensions = extensions;
-    }
-
-    public void addExecutable(IExtension extension) {
-        extensions.add(extension);
     }
 
     @Override
@@ -51,7 +40,7 @@ public class Connector implements IExtension {
 
     @Override
     public Map<String, String> getValues() {
-        Map<String, String> values = new HashMap<String, String>();
+        Map<String, String> values = new HashMap<>();
         values.put(operatorQualifier, operator.name());
         return values;
     }
@@ -76,7 +65,8 @@ public class Connector implements IExtension {
         return extensions.toArray(new IExtension[extensions.size()]);
     }
 
-    public ExecutionState execute(IConversationMemory memory, List<BehaviorRule> trace) {
+    public ExecutionState execute(IConversationMemory memory, List<BehaviorRule> trace)
+            throws BehaviorRule.InfiniteLoopException {
         if (operator == Operator.OR) {
             state = ExecutionState.FAIL;
 
@@ -122,7 +112,7 @@ public class Connector implements IExtension {
     public IExtension clone() throws CloneNotSupportedException {
         Connector clone = new Connector(operator);
 
-        List<IExtension> extensionClone = new LinkedList<IExtension>();
+        List<IExtension> extensionClone = new LinkedList<>();
         for (IExtension extension : extensions) {
             extensionClone.add(extension.clone());
         }
@@ -136,10 +126,5 @@ public class Connector implements IExtension {
     @Override
     public void setChildren(IExtension... extensions) {
         this.extensions.addAll(Arrays.asList(extensions));
-    }
-
-    @Override
-    public void setContainingBehaviorRuleSet(BehaviorSet behaviorSet) {
-        //not implemented
     }
 }
