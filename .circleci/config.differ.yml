@@ -54,7 +54,7 @@ jobs:
 
             sudo /opt/google-cloud-sdk/bin/gcloud docker build -t $DOCKER_IMAGE:$version-$CIRCLE_BUILD_NUM .
             sudo /opt/google-cloud-sdk/bin/gcloud docker build -t $DOCKER_IMAGE:latest .
-            
+
             sudo /opt/google-cloud-sdk/bin/gcloud docker push $DOCKER_IMAGE:$version-$CIRCLE_BUILD_NUM
             sudo /opt/google-cloud-sdk/bin/gcloud docker push $DOCKER_IMAGE:latest
 
