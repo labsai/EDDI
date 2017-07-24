@@ -8,11 +8,11 @@ jobs:
       - image: labsai/ci-build
       - environment:
           ACCT_AUTH: ${ACCT_AUTH}
-          APP_NAME: differ-bot-eddi
-          DOCKER_IMAGE: eu.gcr.io/differ-140008/etf-service-eddi
-          PROJECT_NAME: differ-140008
-          CLUSTER_NAME: differ-dev
-          CLOUDSDK_COMPUTE_ZONE: europe-west1-d
+          APP_NAME: eddi
+          DOCKER_IMAGE: ${DOCKER_IMAGE}
+          PROJECT_NAME: ${PROJECT_NAME}
+          CLUSTER_NAME: ${CLUSTER_NAME}
+          CLOUDSDK_COMPUTE_ZONE: ${CLOUDSDK_COMPUTE_ZONE}
     working_directory: ~/eddi
     steps:
       - checkout
