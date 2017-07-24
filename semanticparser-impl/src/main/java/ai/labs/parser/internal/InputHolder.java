@@ -13,11 +13,11 @@ public class InputHolder {
     public Integer index = 0;
     private MatchMatrix matchMatrix = new MatchMatrix();
 
-    public void addMatch(String inputTerm, MatchingResult matchingResult) {
+    void addMatch(String inputTerm, MatchingResult matchingResult) {
         matchMatrix.addMatchingResult(inputTerm, matchingResult);
     }
 
-    public boolean equalsMatchingTerm(String inputTerm, IDictionary.IDictionaryEntry[] dictionaryEntries) {
+    boolean equalsMatchingTerm(String inputTerm, IDictionary.IDictionaryEntry[] dictionaryEntries) {
         List<MatchingResult> matchingResults = matchMatrix.getMatchingResults(inputTerm);
         if (matchingResults != null) {
             for (MatchingResult matchingResult : matchingResults) {
@@ -45,12 +45,12 @@ public class InputHolder {
         return false;
     }
 
-    public int getMatchingResultSize(int index) {
+    int getMatchingResultSize(int index) {
         List<MatchingResult> matchingResults = matchMatrix.getMatchingResults(index);
         return matchingResults != null ? matchingResults.size() : 0;
     }
 
-    public Iterator<Suggestion> createSolutionIterator() {
+    Iterator<Suggestion> createSolutionIterator() {
         return matchMatrix.iterator();
     }
 }

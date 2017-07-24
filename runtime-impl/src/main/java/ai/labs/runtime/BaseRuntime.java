@@ -9,7 +9,10 @@ import javax.inject.Inject;
 import javax.inject.Named;
 import java.io.File;
 import java.util.Map;
-import java.util.concurrent.*;
+import java.util.concurrent.Callable;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
 
 /**
  * @author ginccc
@@ -41,17 +44,19 @@ public class BaseRuntime implements SystemRuntime.IRuntime {
 
     public void init() {
         if (!isInit) {
-            if (projectName == null || projectName.isEmpty()) {
-                throw new RuntimeException("ProjectName cannot be null nor empty.");
-            }
-            initProjectName(projectName);
             initLogging();
+            if (projectName == null || projectName.isEmpty()) {
+                log.error("ProjectName should be defined in systemRuntime.properties as 'systemRuntime.projectName'");
+            } else {
+                initProjectName(projectName);
+            }
+
             logVersion();
             initExecutorServiceShutdownHook();
             SystemRuntime.setRuntime(this);
             isInit = true;
         } else {
-            throw new RuntimeException("SystemRuntime has already been initialized!");
+            log.warn("SystemRuntime has already been initialized!");
         }
     }
 
@@ -64,7 +69,7 @@ public class BaseRuntime implements SystemRuntime.IRuntime {
         log.info(projectName + " v" + getVersion());
     }
 
-    protected void initLogging() {
+    private void initLogging() {
         System.setProperty("systemRuntime.logDir", getLogDir());
         Configurator.initialize("Logging", null, new File(getConfigDir() + lowerCaseFirstLetter(projectName) + ".log4j.xml").toURI());
         log = LoggerFactory.getLogger(BaseRuntime.class);

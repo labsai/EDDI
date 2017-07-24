@@ -3,6 +3,7 @@ package ai.labs.core.behavior.extensions;
 import ai.labs.core.behavior.BehaviorRule;
 import ai.labs.core.behavior.BehaviorSet;
 import ai.labs.memory.IConversationMemory;
+import lombok.NoArgsConstructor;
 
 import java.util.Collections;
 import java.util.List;
@@ -11,17 +12,11 @@ import java.util.Map;
 /**
  * @author ginccc
  */
+@NoArgsConstructor
 public class Negation implements IExtension {
     public static final String ID = "negation";
     private IExtension extension;
     private ExecutionState state = ExecutionState.NOT_EXECUTED;
-
-    public Negation() {
-    }
-
-    public Negation(IExtension extension) {
-        this.extension = extension;
-    }
 
     @Override
     public String getId() {
@@ -44,7 +39,8 @@ public class Negation implements IExtension {
     }
 
     @Override
-    public ExecutionState execute(IConversationMemory memory, List<BehaviorRule> trace) {
+    public ExecutionState execute(IConversationMemory memory, List<BehaviorRule> trace)
+            throws BehaviorRule.InfiniteLoopException {
         if (extension != null) {
             ExecutionState stateOfExecutable = extension.execute(memory, trace);
 
@@ -63,7 +59,7 @@ public class Negation implements IExtension {
         return state;
     }
 
-    public void setExtension(IExtension extension) {
+    private void setExtension(IExtension extension) {
         this.extension = extension;
     }
 

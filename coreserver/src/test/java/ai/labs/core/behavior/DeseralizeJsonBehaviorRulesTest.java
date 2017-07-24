@@ -15,7 +15,7 @@ public class DeseralizeJsonBehaviorRulesTest {
 
         // test
         createInputMatcherDummy();
-        BehaviorSet result = BehaviorSerialization.deserialize(jsonString);
+        BehaviorSet result = BehaviorDeserialization.deserialize(jsonString);
 
         // assert
         BehaviorRule resultBehaviorRule = result.getBehaviorGroups().get(0).getBehaviorRules().get(0);
@@ -36,7 +36,7 @@ public class DeseralizeJsonBehaviorRulesTest {
 
         // test
         createOccurenceDummy();
-        BehaviorSet result = BehaviorSerialization.deserialize(jsonString);
+        BehaviorSet result = BehaviorDeserialization.deserialize(jsonString);
 
         // assert
         BehaviorRule resultBehaviorRule = result.getBehaviorGroups().get(0).getBehaviorRules().get(0);

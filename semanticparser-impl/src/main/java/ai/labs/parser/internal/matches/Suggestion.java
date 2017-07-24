@@ -9,14 +9,14 @@ import java.util.List;
  * @author ginccc
  */
 public class Suggestion {
-    private List<MatchingResult> rawSolution = new LinkedList<MatchingResult>();
+    private List<MatchingResult> rawSolution = new LinkedList<>();
 
-    public void addMatchingResult(MatchingResult matchingResult) {
+    void addMatchingResult(MatchingResult matchingResult) {
         rawSolution.add(matchingResult);
     }
 
     public List<IDictionary.IFoundWord> build() {
-        List<IDictionary.IFoundWord> dictionaryEntries = new LinkedList<IDictionary.IFoundWord>();
+        List<IDictionary.IFoundWord> dictionaryEntries = new LinkedList<>();
         for (MatchingResult matchingResult : rawSolution) {
             dictionaryEntries.addAll(matchingResult.getResult());
         }
