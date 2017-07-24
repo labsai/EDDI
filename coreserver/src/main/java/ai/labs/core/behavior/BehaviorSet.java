@@ -1,23 +1,19 @@
 package ai.labs.core.behavior;
 
-import lombok.Getter;
-import lombok.NoArgsConstructor;
-import lombok.Setter;
-
 import java.util.LinkedList;
 import java.util.List;
 
 /**
  * @author ginccc
  */
-@NoArgsConstructor
-@Getter
-@Setter
 public class BehaviorSet {
-    private List<BehaviorGroup> behaviorGroups = new LinkedList<>();
+    private List<BehaviorGroup> behaviorGroups = new LinkedList<BehaviorGroup>();
+
+    public BehaviorSet() {
+    }
 
     public List<BehaviorRule> getBehaviorRule(String behaviorRule) {
-        List<BehaviorRule> ret = new LinkedList<>();
+        List<BehaviorRule> ret = new LinkedList<BehaviorRule>();
         for (BehaviorGroup behaviorGroup : behaviorGroups) {
             for (BehaviorRule status : behaviorGroup.getBehaviorRules()) {
                 if (status.getName().equals(behaviorRule)) {
@@ -27,5 +23,13 @@ public class BehaviorSet {
         }
 
         return ret;
+    }
+
+    public List<BehaviorGroup> getBehaviorGroups() {
+        return behaviorGroups;
+    }
+
+    public void setBehaviorGroups(List<BehaviorGroup> behaviorGroups) {
+        this.behaviorGroups = behaviorGroups;
     }
 }

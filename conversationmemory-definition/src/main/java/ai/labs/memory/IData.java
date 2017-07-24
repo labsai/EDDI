@@ -7,12 +7,12 @@ import java.util.List;
 /**
  * @author ginccc
  */
-public interface IData<T> extends Serializable {
+public interface IData extends Serializable {
     String getKey();
 
-    List<T> getPossibleResults();
+    List getPossibleResults();
 
-    T getResult();
+    Object getResult();
 
     Date getTimestamp();
 
@@ -25,7 +25,7 @@ public interface IData<T> extends Serializable {
 
     void setPossibleResults(List possibleResults);
 
-    void setResult(T result);
+    void setResult(Object result);
 
     void setPublic(boolean isPublic);
 }

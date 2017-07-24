@@ -1,0 +1,62 @@
+version: 2
+branches:
+  ignore:
+    - gh-pages
+jobs:
+  build:
+    docker:
+      - image: labsai/ci-build
+      - environment:
+          ACCT_AUTH: ${ACCT_AUTH}
+          APP_NAME: differ-bot-eddi
+          DOCKER_IMAGE: eu.gcr.io/differ-140008/etf-service-eddi
+          PROJECT_NAME: differ-140008
+          CLUSTER_NAME: differ-dev
+          CLOUDSDK_COMPUTE_ZONE: europe-west1-d
+    working_directory: ~/eddi
+    steps:
+      - checkout
+      - setup_remote_docker
+
+      - restore_cache:
+          key: eddi
+          paths:
+            - /root/.m2
+
+      - run: ./tools/ensure-gcloud-installed.sh
+
+      - run: ./tools/ensure-helm-installed.sh
+
+      - run: mvn clean package
+
+      - run: mkdir -p $CIRCLE_TEST_REPORTS/junit/
+      - run: find . -type f -regex ".*/target/surefire-reports/.*xml" -exec cp {} $CIRCLE_TEST_REPORTS/junit/ \;
+
+      - save_cache:
+          key: eddi
+          paths:
+            - /root/.m2
+
+      - run:
+          name: Start container and verify it's working
+          command: |
+            set -x
+            chmod +x integration-tests.sh
+            ./integration-tests.sh
+
+      - deploy:
+          name: Build and push Docker image
+          command: |
+            if [ "${CIRCLE_BRANCH}" == "master" ]; then
+
+            # todo: get version dynamically?
+            export version=4.0.1
+
+            sudo /opt/google-cloud-sdk/bin/gcloud docker build -t $DOCKER_IMAGE:$version-$CIRCLE_BUILD_NUM .
+            sudo /opt/google-cloud-sdk/bin/gcloud docker build -t $DOCKER_IMAGE:latest .
+
+            sudo /opt/google-cloud-sdk/bin/gcloud docker push $DOCKER_IMAGE:$version-$CIRCLE_BUILD_NUM
+            sudo /opt/google-cloud-sdk/bin/gcloud docker push $DOCKER_IMAGE:latest
+
+            sudo helm upgrade $APP_NAME charts/$APP_NAME --set image.tag=$version-$IMAGE_TAG --install
+            fi

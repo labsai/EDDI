@@ -2,9 +2,6 @@ package ai.labs.core.behavior;
 
 import ai.labs.core.behavior.extensions.IExtension;
 import ai.labs.memory.IConversationMemory;
-import lombok.Getter;
-import lombok.NoArgsConstructor;
-import lombok.Setter;
 import lombok.extern.slf4j.Slf4j;
 
 import java.util.LinkedList;
@@ -14,23 +11,56 @@ import java.util.List;
  * @author ginccc
  */
 @Slf4j
-@NoArgsConstructor
-@Getter
-@Setter
 public class BehaviorRule implements Cloneable {
     private String name;
-    private List<String> actions = new LinkedList<>();
-    private List<IExtension> extensions = new LinkedList<>();
+    private List<String> actions;
+    private List<IExtension> extensions;
+
+    public BehaviorRule() {
+        actions = new LinkedList<>();
+        extensions = new LinkedList<>();
+    }
 
     public BehaviorRule(String name) {
         this.name = name;
+        actions = new LinkedList<>();
+        extensions = new LinkedList<>();
     }
 
-    public IExtension.ExecutionState execute(IConversationMemory memory, List<BehaviorRule> trace)
-            throws InfiniteLoopException {
+    public String getName() {
+        return name;
+    }
+
+    public void setName(String name) {
+        this.name = name;
+    }
+
+    public List<String> getActions() {
+        return actions;
+    }
+
+    public void setActions(List<String> actions) {
+        this.actions = actions;
+    }
+
+    public void setExtensions(List<IExtension> extensions) {
+        this.extensions = extensions;
+    }
+
+    public List<IExtension> getExtensions() {
+        return extensions;
+    }
+
+    public IExtension.ExecutionState execute(IConversationMemory memory, List<BehaviorRule> trace) {
         if (trace.contains(this)) {
-            // this is an infinite loop, thus throw error
-            throw throwInfiniteLoopError(trace);
+            List<BehaviorRule> endlessLoop = trace.subList(trace.indexOf(this), trace.size());
+            endlessLoop.add(this);
+
+            log.error("reached endless loop:");
+            for (BehaviorRule status : trace)
+                log.error(" -> " + status.getName());
+
+            return IExtension.ExecutionState.ERROR;
         } else {
             trace.add(this);
 
@@ -46,7 +76,7 @@ public class BehaviorRule implements Cloneable {
                 }
             }
 
-            List<BehaviorRule> tmp = new LinkedList<>(trace);
+            List<BehaviorRule> tmp = new LinkedList<BehaviorRule>(trace);
             trace.clear();
             trace.addAll(tmp.subList(0, tmp.indexOf(this)));
 
@@ -55,18 +85,6 @@ public class BehaviorRule implements Cloneable {
 
             return IExtension.ExecutionState.SUCCESS;
         }
-    }
-
-    private InfiniteLoopException throwInfiniteLoopError(List<BehaviorRule> trace)
-            throws InfiniteLoopException {
-        StringBuilder errorMessage = new StringBuilder();
-
-        errorMessage.append("reached infinite  loop:\n");
-        for (BehaviorRule status : trace) {
-            errorMessage.append(" -> ").append(status.getName()).append("\n");
-        }
-
-        return new InfiniteLoopException(errorMessage.toString());
     }
 
     @Override
@@ -83,7 +101,7 @@ public class BehaviorRule implements Cloneable {
     public BehaviorRule clone() throws CloneNotSupportedException {
         BehaviorRule clone = new BehaviorRule(name);
 
-        List<IExtension> executablesClone = new LinkedList<>();
+        List<IExtension> executablesClone = new LinkedList<IExtension>();
         for (IExtension extension : extensions) {
             IExtension exClone = extension.clone();
             executablesClone.add(exClone);
@@ -96,11 +114,5 @@ public class BehaviorRule implements Cloneable {
     @Override
     public String toString() {
         return name;
-    }
-
-    public class InfiniteLoopException extends Exception {
-        InfiniteLoopException(String message) {
-            super(message);
-        }
     }
 }

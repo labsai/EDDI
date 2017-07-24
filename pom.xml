@@ -47,8 +47,6 @@
         <module>httpclient-impl-jetty</module>
         <module>facebookmessenger-definition</module>
         <module>facebookmessenger-impl</module>
-        <module>outputgeneration-definition</module>
-        <module>outputgeneration-impl</module>
     </modules>
 
     <build>

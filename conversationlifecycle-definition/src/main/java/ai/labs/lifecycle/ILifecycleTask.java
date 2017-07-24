@@ -2,7 +2,6 @@ package ai.labs.lifecycle;
 
 import ai.labs.memory.IConversationMemory;
 
-import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 
@@ -30,9 +29,7 @@ public interface ILifecycleTask {
      *
      * @return a List of Task IDs
      */
-    default List<String> getComponentDependencies() {
-        return Collections.emptyList();
-    }
+    List<String> getComponentDependencies();
 
     /**
      * Returns a List representing all Task which have to be executed in lifecycle
@@ -41,21 +38,13 @@ public interface ILifecycleTask {
      *
      * @return a List of Task IDs
      */
-    default List<String> getOutputDependencies() {
-        return Collections.emptyList();
-    }
+    List<String> getOutputDependencies();
 
-    default void init() {
-        //to be overridden if needed
-    }
+    void init();
 
     void executeTask(IConversationMemory memory) throws LifecycleException;
 
-    default void configure(Map<String, Object> configuration) throws PackageConfigurationException {
-        //to be overridden if needed
-    }
+    void configure(Map<String, Object> configuration) throws PackageConfigurationException;
 
-    default void setExtensions(Map<String, Object> extensions) throws UnrecognizedExtensionException, IllegalExtensionConfigurationException {
-        //to be overridden if needed
-    }
+    void setExtensions(Map<String, Object> extensions) throws UnrecognizedExtensionException, IllegalExtensionConfigurationException;
 }

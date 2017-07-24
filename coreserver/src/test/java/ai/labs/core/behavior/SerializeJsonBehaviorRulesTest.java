@@ -150,7 +150,7 @@ public class SerializeJsonBehaviorRulesTest {
         behaviorGroup.getBehaviorRules().add(behaviorRule);
 
         // test
-        String result = BehaviorDeserialization.serialize(behaviorSet);
+        String result = BehaviorSerialization.serialize(behaviorSet);
 
         // assert
         Assert.assertEquals("{\"behaviorGroups\":[{\"name\":null,\"behaviorRules\":[{\"name\":\"rule1\",\"actions\":[],\"children\":[{\"type\":\"inputmatcher\",\"values\":{\"expressions\":\"predicate(value1, value2)\"},\"children\":[]}]}]}]}", result);
@@ -169,7 +169,7 @@ public class SerializeJsonBehaviorRulesTest {
         behaviorGroup.getBehaviorRules().add(behaviorRule);
 
         //test
-        String result = BehaviorDeserialization.serialize(behaviorSet);
+        String result = BehaviorSerialization.serialize(behaviorSet);
 
         //assert
         Assert.assertEquals("{\"behaviorGroups\":[{\"name\":null,\"behaviorRules\":[{\"name\":\"rule1\",\"actions\":[],\"children\":[{\"type\":\"propertymatcher\",\"values\":{\"expressions\":\"test\"},\"children\":[]}]}]}]}", result);
@@ -187,7 +187,7 @@ public class SerializeJsonBehaviorRulesTest {
         behaviorGroup.getBehaviorRules().add(behaviorRule);
 
         // test
-        String result = BehaviorDeserialization.serialize(behaviorSet);
+        String result = BehaviorSerialization.serialize(behaviorSet);
 
         // assert
         Assert.assertEquals("{\"behaviorGroups\":[{\"name\":null,\"behaviorRules\":[{\"name\":\"rule1\",\"actions\":[],\"children\":[{\"type\":\"dependency\",\"values\":{\"reference\":\"referenceName\"},\"children\":[]}]}]}]}", result);
@@ -207,7 +207,7 @@ public class SerializeJsonBehaviorRulesTest {
         behaviorGroup.getBehaviorRules().add(behaviorRule);
 
         //test
-        String result = BehaviorDeserialization.serialize(behaviorSet);
+        String result = BehaviorSerialization.serialize(behaviorSet);
 
         //assert
         Assert.assertEquals("{\"behaviorGroups\":[{\"name\":null,\"behaviorRules\":[{\"name\":\"rule1\",\"actions\":[],\"children\":[{\"type\":\"occurrence\",\"values\":{\"behaviorRuleName\":\"test1\",\"maxOccurrence\":\"1\"},\"children\":[]}]}]}]}", result);
@@ -228,7 +228,7 @@ public class SerializeJsonBehaviorRulesTest {
         behaviorGroup.getBehaviorRules().add(behaviorRule);
 
         //test
-        String result = BehaviorDeserialization.serialize(behaviorSet);
+        String result = BehaviorSerialization.serialize(behaviorSet);
 
         //assert
         Assert.assertEquals("{\"behaviorGroups\":[{\"name\":null,\"behaviorRules\":[{\"name\":\"rule1\",\"actions\":[],\"children\":[{\"type\":\"connector\",\"values\":{\"operator\":\"AND\"},\"children\":[{\"type\":\"occurrence\",\"values\":{\"behaviorRuleName\":null,\"maxOccurrence\":\"1\"},\"children\":[]},{\"type\":\"occurrence\",\"values\":{\"behaviorRuleName\":null,\"maxOccurrence\":\"1\"},\"children\":[]}]}]}]}]}", result);
@@ -250,7 +250,7 @@ public class SerializeJsonBehaviorRulesTest {
         behaviorGroup.getBehaviorRules().add(behaviorRule);
 
         //test
-        String result = BehaviorDeserialization.serialize(behaviorSet);
+        String result = BehaviorSerialization.serialize(behaviorSet);
 
         //assert
         Assert.assertEquals("{\"behaviorGroups\":[{\"name\":null,\"behaviorRules\":[{\"name\":\"rule1\",\"actions\":[],\"children\":[{\"type\":\"negation\",\"values\":{},\"children\":[{\"type\":\"occurrence\",\"values\":{\"behaviorRuleName\":\"rule2\",\"maxOccurrence\":\"1\"},\"children\":[]}]}]}]}]}", result);
@@ -272,7 +272,7 @@ public class SerializeJsonBehaviorRulesTest {
         behaviorGroup.getBehaviorRules().add(behaviorRule);
 
         //test
-        String result = BehaviorDeserialization.serialize(behaviorSet);
+        String result = BehaviorSerialization.serialize(behaviorSet);
 
         //assert
         Assert.assertEquals("{\"behaviorGroups\":[{\"name\":null,\"behaviorRules\":[{\"name\":\"rule1\",\"actions\":[],\"children\":[{\"type\":\"resultSize\",\"values\":{\"equal\":\"1\",\"min\":\"3\",\"max\":\"2\"},\"children\":[]}]}]}]}", result);
@@ -291,7 +291,7 @@ public class SerializeJsonBehaviorRulesTest {
         behaviorGroup.getBehaviorRules().add(behaviorRule);
 
         //test
-        String result = BehaviorDeserialization.serialize(behaviorSet);
+        String result = BehaviorSerialization.serialize(behaviorSet);
 
         //assert
         Assert.assertEquals("{\"behaviorGroups\":[{\"name\":null,\"behaviorRules\":[{\"name\":\"rule1\",\"actions\":[],\"children\":[{\"type\":\"outputReference\",\"values\":{\"filter\":\"test\",\"inputValue\":\"inputValue\",\"sessionValue\":\"sessionValue\"},\"children\":[]}]}]}]}", result);

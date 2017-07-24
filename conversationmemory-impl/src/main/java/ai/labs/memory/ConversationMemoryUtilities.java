@@ -3,6 +3,7 @@ package ai.labs.memory;
 import ai.labs.memory.model.ConversationMemorySnapshot;
 import ai.labs.memory.model.SimpleConversationMemorySnapshot;
 import ai.labs.persistence.IResourceStore;
+import ai.labs.utilities.CharacterUtilities;
 
 import java.util.LinkedList;
 import java.util.List;
@@ -11,7 +12,7 @@ import java.util.List;
  * @author ginccc
  */
 public class ConversationMemoryUtilities {
-    public static ConversationMemorySnapshot convertConversationMemory(IConversationMemory conversationMemory) {
+    public static ConversationMemorySnapshot convertConversationMemory(IConversationMemory conversationMemory) throws IResourceStore.ResourceStoreException {
         ConversationMemorySnapshot snapshot = new ConversationMemorySnapshot();
 
         if (conversationMemory.getId() != null) {
@@ -54,7 +55,7 @@ public class ConversationMemoryUtilities {
     }
 
     private static List<IConversationMemory.IConversationStep> iterateRedoCache(List<ConversationMemorySnapshot.ConversationStepSnapshot> redoSteps) {
-        List<IConversationMemory.IConversationStep> conversationSteps = new LinkedList<>();
+        List<IConversationMemory.IConversationStep> conversationSteps = new LinkedList<IConversationMemory.IConversationStep>();
         for (ConversationMemorySnapshot.ConversationStepSnapshot redoStep : redoSteps) {
             IConversationMemory.IWritableConversationStep conversationStep = new ConversationStep(new ConversationMemory.ConversationContext());
             conversationSteps.add(conversationStep);
@@ -115,8 +116,8 @@ public class ConversationMemoryUtilities {
                 for (ConversationMemorySnapshot.ResultSnapshot resultSnapshot : packageRunSnapshot.getLifecycleTasks()) {
                     if (includeAll || resultSnapshot.isPublic()) {
                         Object result = resultSnapshot.getResult();
-                        simpleConversationStep.getData().add(
-                                new SimpleConversationMemorySnapshot.SimpleData(resultSnapshot.getKey(), result));
+                        String value = result instanceof List ? CharacterUtilities.arrayToString((List) result, ",") : result.toString();
+                        simpleConversationStep.getData().add(new SimpleConversationMemorySnapshot.SimpleData(resultSnapshot.getKey(), value));
                     } else {
                         continue;
                     }

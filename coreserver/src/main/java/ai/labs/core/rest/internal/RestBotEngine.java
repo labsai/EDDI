@@ -2,6 +2,7 @@ package ai.labs.core.rest.internal;
 
 import ai.labs.lifecycle.IConversation;
 import ai.labs.lifecycle.LifecycleException;
+import ai.labs.memory.ConversationMemoryUtilities;
 import ai.labs.memory.IConversationMemory;
 import ai.labs.memory.IConversationMemoryStore;
 import ai.labs.memory.model.ConversationMemorySnapshot;
@@ -28,8 +29,6 @@ import javax.ws.rs.core.Response;
 import java.net.URI;
 import java.util.concurrent.Callable;
 import java.util.concurrent.TimeUnit;
-
-import static ai.labs.memory.ConversationMemoryUtilities.*;
 
 /**
  * @author ginccc
@@ -89,7 +88,7 @@ public class RestBotEngine implements IRestBotEngine {
                 message = String.format(message, conversationId, botId);
                 throw new IllegalAccessException(message);
             }
-            return convertSimpleConversationMemory(conversationMemorySnapshot, includeAll);
+            return ConversationMemoryUtilities.convertSimpleConversationMemory(conversationMemorySnapshot, includeAll);
         } catch (IResourceStore.ResourceStoreException | IllegalAccessException e) {
             log.error(e.getLocalizedMessage(), e);
             throw new InternalServerErrorException(e.getLocalizedMessage(), e);
@@ -145,8 +144,10 @@ public class RestBotEngine implements IRestBotEngine {
             }
             final IConversation conversation = bot.continueConversation(conversationMemory,
                     conversationStep -> {
-                        SimpleConversationMemorySnapshot memorySnapshot = convertSimpleConversationMemory(
-                                convertConversationMemory(conversationMemory), true);
+                        SimpleConversationMemorySnapshot memorySnapshot = ConversationMemoryUtilities.
+                                convertSimpleConversationMemory(
+                                        (ConversationMemorySnapshot) conversationMemory, true);
+
                         response.resume(memorySnapshot);
                     });
 
@@ -328,7 +329,7 @@ public class RestBotEngine implements IRestBotEngine {
 
     private IConversationMemory loadConversationMemory(String conversationId) throws IResourceStore.ResourceStoreException, IResourceStore.ResourceNotFoundException {
         ConversationMemorySnapshot conversationMemorySnapshot = conversationMemoryStore.loadConversationMemorySnapshot(conversationId);
-        return convertConversationMemorySnapshot(conversationMemorySnapshot);
+        return ConversationMemoryUtilities.convertConversationMemorySnapshot(conversationMemorySnapshot);
     }
 
     private void setConversationState(String conversationId, ConversationState conversationState) {
@@ -336,7 +337,7 @@ public class RestBotEngine implements IRestBotEngine {
     }
 
     private String storeConversationMemory(IConversationMemory conversationMemory, Deployment.Environment environment) throws IResourceStore.ResourceStoreException {
-        ConversationMemorySnapshot memorySnapshot = convertConversationMemory(conversationMemory);
+        ConversationMemorySnapshot memorySnapshot = ConversationMemoryUtilities.convertConversationMemory(conversationMemory);
         memorySnapshot.setEnvironment(environment);
         return conversationMemoryStore.storeConversationMemorySnapshot(memorySnapshot);
     }

@@ -5,8 +5,6 @@ import lombok.NoArgsConstructor;
 import lombok.Setter;
 
 import java.net.URI;
-import java.util.HashMap;
-import java.util.LinkedList;
 import java.util.List;
 import java.util.Map;
 
@@ -18,13 +16,13 @@ import java.util.Map;
 @Setter
 @NoArgsConstructor
 public class PackageConfiguration {
-    private List<PackageExtension> packageExtensions = new LinkedList<>();
+    private List<PackageExtension> packageExtensions;
 
     @Getter
     @Setter
     public static class PackageExtension {
         private URI type;
-        private Map<String, Object> extensions = new HashMap<>();
-        private Map<String, Object> config = new HashMap<>();
+        private Map<String, Object> extensions;
+        private Map<String, Object> config;
     }
 }

@@ -1,10 +1,9 @@
 package ai.labs.core.behavior.extensions;
 
 import ai.labs.core.behavior.BehaviorRule;
+import ai.labs.core.behavior.BehaviorSet;
 import ai.labs.memory.IConversationMemory;
 import ai.labs.memory.IData;
-import lombok.NoArgsConstructor;
-import lombok.Setter;
 
 import java.util.HashMap;
 import java.util.LinkedList;
@@ -14,20 +13,32 @@ import java.util.Map;
 /**
  * @author ginccc
  */
-@NoArgsConstructor
 public class ResultSize implements IExtension {
-    @Setter
     private int max = -1;
-    @Setter
     private int min = -1;
-    @Setter
     private int equal = -1;
 
     private ExecutionState state = ExecutionState.NOT_EXECUTED;
+    private IConversationMemory memory;
     public static final String ID = "resultSize";
     private final String minQualifier = "min";
     private final String maxQualifier = "max";
     private final String equalQualifier = "equal";
+
+    public ResultSize() {
+    }
+
+    public void setMax(int max) {
+        this.max = max;
+    }
+
+    public void setMin(int min) {
+        this.min = min;
+    }
+
+    public void setEqual(int equal) {
+        this.equal = equal;
+    }
 
     @Override
     public String getId() {
@@ -36,7 +47,7 @@ public class ResultSize implements IExtension {
 
     @Override
     public Map<String, String> getValues() {
-        Map<String, String> values = new HashMap<>();
+        Map<String, String> values = new HashMap<String, String>();
 
         values.put(minQualifier, String.valueOf(min));
         values.put(maxQualifier, String.valueOf(max));
@@ -63,12 +74,17 @@ public class ResultSize implements IExtension {
     }
 
     @Override
+    public IExtension[] getChildren() {
+        return new IExtension[0];
+    }
+
+    @Override
     public ExecutionState execute(final IConversationMemory memory, final List<BehaviorRule> trace) {
         if (min == -1 && max == -1 && equal == -1) {
             return ExecutionState.NOT_EXECUTED;
         }
 
-        IData data = memory.getCurrentStep().getLatestData("result_size");
+        IData data = memory.getCurrentStep().getLatestData("external_search");
         List result;
         if (data != null) {
             result = (List) data.getResult();
@@ -114,5 +130,15 @@ public class ResultSize implements IExtension {
         IExtension clone = new ResultSize();
         clone.setValues(getValues());
         return clone;
+    }
+
+    @Override
+    public void setChildren(IExtension... extensions) {
+        //not implemented
+    }
+
+    @Override
+    public void setContainingBehaviorRuleSet(BehaviorSet behaviorSet) {
+        //not implemented
     }
 }

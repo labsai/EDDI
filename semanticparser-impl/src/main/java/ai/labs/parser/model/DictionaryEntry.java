@@ -12,19 +12,19 @@ public class DictionaryEntry implements IDictionary.IDictionaryEntry {
     protected String value;
 
     protected List<Expression> expressions;
-    private String identifier;
-    private int rating;
+    protected String identifier;
+    protected int rating;
 
-    boolean isWord = false;
-    boolean isPhrase = false;
+    protected boolean isWord = false;
+    protected boolean isPhrase = false;
 
-    int frequency;
+    protected int frequency;
 
-    DictionaryEntry(String value, List<Expression> expressions) {
+    public DictionaryEntry(String value, List<Expression> expressions) {
         this(value, expressions, "", 0);
     }
 
-    DictionaryEntry(String value, List<Expression> expressions, String identifier, int rating) {
+    public DictionaryEntry(String value, List<Expression> expressions, String identifier, int rating) {
         this.value = value;
         this.expressions = expressions;
         this.identifier = identifier;
@@ -45,6 +45,10 @@ public class DictionaryEntry implements IDictionary.IDictionaryEntry {
 
     public String getIdentifier() {
         return identifier;
+    }
+
+    public int getRating() {
+        return rating;
     }
 
     public boolean isWord() {
@@ -95,7 +99,7 @@ public class DictionaryEntry implements IDictionary.IDictionaryEntry {
         if (frequency == dictionaryEntry.getFrequency()) {
             return value.compareTo(dictionaryEntry.getValue());
         } else {
-            return Integer.compare(frequency, dictionaryEntry.getFrequency());
+            return frequency < dictionaryEntry.getFrequency() ? -1 : frequency == dictionaryEntry.getFrequency() ? 0 : 1;
         }
     }
 }

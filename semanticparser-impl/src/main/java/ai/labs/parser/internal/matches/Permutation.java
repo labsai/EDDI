@@ -10,7 +10,7 @@ import java.util.NoSuchElementException;
 public class Permutation implements Iterable<Integer[]> {
     private Integer[] values;
 
-    Permutation(Integer[] values) {
+    public Permutation(Integer[] values) {
         this.values = values;
     }
 
@@ -27,7 +27,7 @@ public class Permutation implements Iterable<Integer[]> {
 
         private Integer[] next = null;
 
-        PermutationIterator(Integer[] values) {
+        public PermutationIterator(Integer[] values) {
             this.values = values;
 
             Arrays.sort(this.values);
@@ -69,7 +69,7 @@ public class Permutation implements Iterable<Integer[]> {
                 int firstNonDecreasingIndex = -1, swapPoint = -1;
 
                 for (int i = values.length - 1; i > 0; i--) {
-                    if (values[i - 1].compareTo(values[i]) < 0) {
+                    if (values[i - 1].compareTo(values[i]) == -1) {
                         firstNonDecreasingIndex = i - 1;
                         break;
                     } else if (i == 1) {
@@ -78,7 +78,7 @@ public class Permutation implements Iterable<Integer[]> {
                 }//from the end, find first index that arrayToPermute[index]<arrayToPermute[index+1]
 
                 for (int i = values.length - 1; i > firstNonDecreasingIndex; i--) {
-                    if (values[firstNonDecreasingIndex].compareTo(values[i]) < 0) {
+                    if (values[firstNonDecreasingIndex].compareTo(values[i]) == -1) {
                         swapPoint = i;
                         break;
                     }//finding the first numthat arrayToPermute[swapPoint]>arrayToPermute[index]

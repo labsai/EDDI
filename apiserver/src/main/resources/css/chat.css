@@ -65,30 +65,6 @@ body {
     opacity: 0;
 }
 
-.messages .quick_reply {
-    position: relative;
-    clear: both;
-    overflow: hidden;
-    transition: all 0.5s linear;
-    opacity: 0;
-    background-color: #ffe6cb;
-    color: #c48843;
-    border: 2px dashed #c48843;
-    padding: 15px 32px;
-    text-align: center;
-    text-decoration: none;
-    display: inline-block;
-    font-size: 16px;
-    border-radius: 6px;
-    cursor: pointer;
-    box-shadow: 2px 2px gray;
-    margin: 5px;
-}
-
-.messages .quick_reply.appeared {
-    opacity: 1;
-}
-
 .typing {
     background-color: #8c8c8c;
     font-weight: bolder;

@@ -1,99 +1,58 @@
-const eddi = {};
+var eddi = {};
 
-class Message {
-    constructor(text, message_side) {
-        this.text = text;
-        this.message_side = message_side;
-    }
-
-    get draw() {
+var Message;
+Message = function (arg) {
+    this.text = arg.text, this.message_side = arg.message_side;
+    this.draw = function (_this) {
         return function () {
-            const $message = $($('.message_template').clone().html());
-            $message.addClass(this.message_side).find('.text').html(this.text);
+            var $message;
+            $message = $($('.message_template').clone().html());
+            $message.addClass(_this.message_side).find('.text').html(_this.text);
             $('.messages').append($message);
             return setTimeout(function () {
                 return $message.addClass('appeared');
             }, 0);
         };
-    }
-}
-
-class QuickReply {
-    constructor(text, message_side) {
-        this.text = text;
-        this.message_side = message_side;
-    }
-
-    get draw() {
-        return function () {
-            const _this = this;
-            const $quickReply = $('<button/>', {
-                text: this.text,
-                click: function () {
-                    eddi.submitUserMessage(_this.text);
-                    eddi.displayMessage(_this.text, 'right');
-                    $('.quick_reply').remove();
-                }
-            });
-            $quickReply.addClass(this.message_side);
-            $quickReply.addClass('quick_reply');
-            $('.messages').append($quickReply);
-            return setTimeout(function () {
-                return $quickReply.addClass('appeared');
-            }, 0);
-        };
-    }
-}
-
+    }(this);
+    return this;
+};
 $(function () {
-    let message_side = 'right';
-
-    function getMessageText() {
-        const $message_input = $('.message_input');
+    var getMessageText, message_side, displayMessage;
+    message_side = 'right';
+    getMessageText = function () {
+        var $message_input;
+        $message_input = $('.message_input');
         return $message_input.val();
-    }
-
-    eddi.displayMessage = function (text, side) {
-        let $messages, message;
+    };
+    displayMessage = function (text, side) {
+        var $messages, message;
         if (text.trim() === '') {
             return;
         }
         $('.message_input').val('');
         $messages = $('.messages');
         message_side = side ? 'right' : 'left';
-        message = new Message(text, side);
+        message = new Message({
+            text: text,
+            message_side: side
+        });
         message.draw();
         return $messages.animate({scrollTop: $messages.prop('scrollHeight')}, 300);
     };
-
-    function displayQuickReplies(quickReplies) {
-        let $messages, quickReply;
-        if (quickReplies.length === 0) {
-            return;
-        }
-
-        $messages = $('.messages');
-        for (let i = 0; i < quickReplies.length; i++) {
-            quickReply = new QuickReply(quickReplies[i].value, 'left');
-            quickReply.draw();
-        }
-        return $messages.animate({scrollTop: $messages.prop('scrollHeight')}, 300);
-    }
-
-    $('.send_message').click(function () {
-        const userMessage = getMessageText();
-        eddi.submitUserMessage(userMessage);
-        return eddi.displayMessage(userMessage, 'right');
+    $('.send_message').click(function (e) {
+        var userMessage = getMessageText();
+        submitUserMessage(userMessage);
+        return displayMessage(userMessage, 'right');
     });
     $('.message_input').keyup(function (e) {
         if (e.which === 13) {
-            const userMessage = getMessageText();
-            eddi.submitUserMessage(userMessage);
-            return eddi.displayMessage(userMessage, 'right');
+            var userMessage = getMessageText();
+            submitUserMessage(userMessage);
+            return displayMessage(userMessage, 'right');
         }
     });
 
-    eddi.submitUserMessage = function (userMessage) {
+    var submitUserMessage = function (userMessage) {
         $.ajax({
             type: "POST",
             url: "/bots/" + eddi.environment + "/" + eddi.botId + "/" + eddi.conversationId,
@@ -105,80 +64,117 @@ $(function () {
         });
     };
 
-    const loadConversationLog = function () {
+    var loadConversationLog = function () {
         $.get("/bots/" + eddi.environment + "/" + eddi.botId + "/" + eddi.conversationId).done(function (data) {
             refreshConversationLog(data);
         });
     };
 
-    const refreshConversationLog = function (conversationMemory) {
-        const conversationState = conversationMemory.conversationState;
+    var refreshConversationLog = function (conversationMemory) {
+        var conversationState = conversationMemory.conversationState;
 
-        if (conversationState === 'ERROR') {
+        if (conversationState == 'ERROR') {
             log('ERROR', "An Error has occurred. Please contact the administrator!");
             return;
         }
 
-        if (conversationState === 'IN_PROGRESS') {
+        if (conversationState == 'ENDED') {
+            $("#ended_dialog").dialog({
+                modal: true,
+                buttons: [
+                    {
+                        text: "New Conversation!",
+                        click: function () {
+                            $(this).dialog("close");
+                            startNewConversation();
+                        }
+                    }
+                ],
+                position: {my: "top"},
+                width: 300
+            });
+            $("#ended_dialog").dialog("option", "closeOnEscape", false);
+            $('#status_indicator').css('visibility', 'hidden');
+            $('#user_input_button_submit').addClass('ui-disabled');
+            $('#redo').hide();
+            $('#undo').hide();
+        }
+
+        if (conversationState == 'IN_PROGRESS') {
             setTimeout(loadConversationLog, 1000);
             return;
         }
 
-        let ioList = [];
-        for (let i = 0; i < conversationMemory.conversationSteps.length; i++) {
-            let step = conversationMemory.conversationSteps[i];
+        var ioList = [];
+        for (var i = 0; i < conversationMemory.conversationSteps.length; i++) {
+            var step = conversationMemory.conversationSteps[i];
 
-            let input = null;
-            let output = null;
-            let media = null;
-            let action = null;
-            let quickReplies = [];
-            for (let x = 0; x < step.data.length; x++) {
-                let obj = step.data[x];
-                if (obj.key.indexOf('input') === 0) {
+            var input = null;
+            var output = null;
+            var media = null;
+            for (var x = 0; x < step.data.length; x++) {
+                var obj = step.data[x];
+                if (obj.key.indexOf('input') == 0) {
                     input = obj.value;
-                } else if (obj.key.indexOf('media') === 0) {
-                    media = obj.value;
-                } else if (obj.key.indexOf('actions') === 0) {
-                    action = obj.value;
-                } else if (obj.key.indexOf('output:quickreply') === 0) {
-                    pushArray(quickReplies, obj.value);
-                } else if (obj.key.indexOf('output') === 0) {
+                } else if (obj.key.indexOf('output') == 0) {
                     output = obj.value;
+                } else if (obj.key.indexOf('media') == 0) {
+                    media = obj.value;
+                } else if (obj.key.indexOf('actions') == 0) {
                 }
             }
 
-            ioList.push({input: input, output: output, media: media, quickReplies: quickReplies});
+            ioList.push({input: input, output: output, media: media});
         }
 
         if (ioList.length > 0) {
-            let latestInteraction = ioList[ioList.length - 1];
+            var latestInteraction = ioList[ioList.length - 1];
             if (latestInteraction === 'undefined') {
                 latestInteraction = {};
             }
 
-            if (latestInteraction.output === null) {
+            //apply media/images
+            //var mediaURI = latestInteraction.media;
+            /*if (typeof mediaURI !== 'undefined' && mediaURI.indexOf('image') == 0) {
+             var mediaURL = baseURL + '/binary/default/mobile/images' + mediaURI.substring(mediaURI.lastIndexOf('/'));
+             var img = $('<img id="' + mediaURI.substring(mediaURI.lastIndexOf('/' + 1, mediaURI.lastIndexOf('.'))) + '">');
+             img.attr('src', mediaURL);
+             img.attr('class', 'media_img');
+             $('#desktop').html(img);
+             } else {
+             $('#desktop').html('<div style="text-align: center;width: 100%; height: 100%;">Nothing to show at the moment..</div>');
+             }*/
+
+            if (latestInteraction.output == null) {
                 latestInteraction.output = '';
             }
 
-            eddi.displayMessage(latestInteraction.output, 'left');
-            displayQuickReplies(latestInteraction.quickReplies);
+            /*var mediaURIsString = latestInteraction.media;
+             if (mediaURIsString != null) {
+             var mediaURIs = mediaURIsString.split(',');
+             for (var n = 0; n < mediaURIs.length; n++) {
+             var mediaURI = mediaURIs[n];
+             if (mediaURI.indexOf('pdf') == 0) {
+             var fileName = mediaURI.substring(mediaURI.lastIndexOf('/') + 1);
+             var mediaURL = baseURL + '/binary/default/desktop/binary/' + fileName;
+             latestInteraction.output += '<br /><a target="_blank" href="' + mediaURL + '">' + fileName + '</a>'
+             }
+             }
+             }*/
+
+            displayMessage(latestInteraction.output, 'left');
 
             $('.message_input').focus();
         }
     };
 
-    const pushArray = function (arr, arr2) {
-        arr.push.apply(arr, arr2);
-    };
-
-    const deployBot = function (environment, botId, botVersion) {
+    var deployBot = function (environment, botId, botVersion) {
         $.post("/administration/" + environment + "/deploy/" + botId + "?version=" + botVersion).done(function () {
             checkBotDeploymentStatus();
         });
     };
 
-    const checkBotDeploymentStatus = function () {
+    var checkBotDeploymentStatus = function () {
         $.get("/administration/" + eddi.environment + "/deploymentstatus/" + eddi.botId + "?version=" + eddi.botVersion).done(function (data) {
             if (data === 'IN_PROGRESS') {
                 setTimeout(checkBotDeploymentStatus, 1000);
@@ -190,16 +186,16 @@ $(function () {
         });
     };
 
-    const createConversation = function (environment, botId) {
+    var createConversation = function (environment, botId) {
         $.post("/bots/" + environment + "/" + botId).done(function (data, status, xhr) {
-            const conversationUriArray = xhr.getResponseHeader('Location').split("/");
+            var conversationUriArray = xhr.getResponseHeader('Location').split("/");
             eddi.conversationId = conversationUriArray[conversationUriArray.length - 1];
             proceedConversation();
         });
     };
 
-    const checkConversationStatus = function (environment, botId, conversationId) {
-        $.get("/bots/" + environment + "/" + botId + "/" + conversationId).always(function (data, status) {
+    var checkConversationStatus = function (environment, botId, conversationId) {
+        $.get("/bots/" + environment + "/" + botId + "/" + conversationId).always(function (data, status, xhr) {
             if (status === "error") {
                 alert("Checking conversation has yield into an error.. ");
             } else if (status === "success") {
@@ -213,16 +209,16 @@ $(function () {
         });
     };
 
-    const getQueryParts = function (href) {
-        const query = $.url.parse(href);
-        const path = query.path;
+    var getQueryParts = function (href) {
+        var query = $.url.parse(href);
+        var path = query.path;
 
-        const parts = path.split("/");
+        var parts = path.split("/");
 
-        let environment = null;
-        let botId = null;
-        let conversationId = null;
-        let botVersion = null;
+        var environment = null;
+        var botId = null;
+        var conversationId = null;
+        var botVersion = null;
 
         environment = typeof parts[2] !== 'undefined' ? decodeURIComponent(parts[2]) : environment;
         botId = typeof parts[3] !== 'undefined' ? decodeURIComponent(parts[3]) : botId;
@@ -234,7 +230,7 @@ $(function () {
         return {conversationId: conversationId, environment: environment, botId: botId, botVersion: botVersion};
     };
 
-    const proceedConversation = function () {
+    var proceedConversation = function () {
         if (!eddi.conversationId) {
             createConversation(eddi.environment, eddi.botId);
         } else {
@@ -242,14 +238,13 @@ $(function () {
         }
     };
 
-    const checkBotDeployment = function () {
+    var checkBotDeployment = function () {
         //check if bot is deployed
         $.get("/administration/" + eddi.environment + "/deploymentstatus/" + eddi.botId + "?version=" + eddi.botVersion)
             .done(function (data) {
                 if (data === 'NOT_FOUND') {
-                    if (confirm('Bot is not deployed at the moment.. Deploy latest version NOW?')) {
-                        deployBot(eddi.environment, eddi.botId, eddi.botVersion);
-                    }
+                    alert('Bot is not deployed at the moment.. Deploy NOW?');
+                    deployBot(eddi.environment, eddi.botId, eddi.botVersion);
                 }
 
                 if (data === 'ERROR') {
@@ -267,7 +262,7 @@ $(function () {
     };
 
     $(document).ready(function () {
-        const extractedParams = getQueryParts(window.location.href);
+        var extractedParams = getQueryParts(window.location.href);
         //extract environment from URL
         if (extractedParams.environment !== null) {
             eddi.environment = extractedParams.environment;
@@ -294,4 +289,12 @@ $(function () {
             });
         }
     });
+
+    /*displayMessage('Hello Philip! :)', 'left');
+     setTimeout(function () {
+     return displayMessage('Hi Sandy! How are you?', 'right');
+     }, 1000);
+     return setTimeout(function () {
+     return displayMessage('I\'m fine, thank you!', 'left');
+     }, 2000);*/
 });

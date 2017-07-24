@@ -1,0 +1,22 @@
+namespace: default
+env:
+  - name: GET_HOSTS_FROM
+    value: dns
+  - name: GCLOUD_PROJECT
+    value: 'differ-140008'
+  - name: MONGODB_HOST
+    value: 'mongodb://eddi-storage-0.eddi-storage'
+resources:
+  limits:
+    cpu: 200m
+    # nodejs heap limit
+    memory: 1536Mi
+  requests:
+    cpu: 100m
+    memory: 128Mi
+mongodb:
+  diskSize: 20G
+  resources:
+    requests:
+      memory: 256Mi
+      cpu: 100m

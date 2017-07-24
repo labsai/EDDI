@@ -43,9 +43,9 @@ public interface IConversationMemory extends Serializable {
 
 
     interface IConversationStepStack {
-        <T> IData<T> getLatestData(String key);
+        IData getLatestData(String key);
 
-        <T> List<List<IData<T>>> getAllData(String prefix);
+        List<List<IData>> getAllData(String prefix);
 
         int size();
 
@@ -55,9 +55,9 @@ public interface IConversationMemory extends Serializable {
     }
 
     interface IConversationStep extends Serializable {
-        <T> IData<T> getData(String key);
+        IData getData(String key);
 
-        <T> List<IData<T>> getAllData(String prefix);
+        List<IData> getAllData(String prefix);
 
         Set<String> getAllKeys();
 
@@ -73,7 +73,9 @@ public interface IConversationMemory extends Serializable {
 
         boolean isEmpty();
 
-        <T> IData<T> getLatestData(String prefix);
+        IData getLatestData();
+
+        IData getLatestData(String prefix);
     }
 
     interface IWritableConversationStep extends IConversationStep {
