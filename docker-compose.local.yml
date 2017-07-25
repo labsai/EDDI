@@ -1,5 +1,12 @@
 version: '2'
 services:
   eddi:
-    build: .
+    build:
+      context: .
+      args:
+        EDDI_VERSION: 4.0
+        EDDI_ENV: production
     image: labsai/eddi:local
+    environment:
+      EDDI_VERSION: 4.0
+      EDDI_ENV: production
