@@ -20,8 +20,8 @@ env:
     value: dns
   - name: GCLOUD_PROJECT
     value: 'differ-140008'
-  - name: MONGODB_HOST
-    value: 'mongodb://eddi-storage-0.eddi-storage'
+  - name: EDDI_JAVA_ENV_MONGODB_HOST
+    value: 'mongodb.hosts=eddi-storage-0.eddi-storage'
 mongodb:
   appName: eddi-storage
   namespace: default
