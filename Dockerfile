@@ -1,11 +1,14 @@
 FROM openjdk:8-jre-alpine
 
-#TODO move the env to docker-compose
+ARG EDDI_VERSION
+ARG EDDI_ENV
+
 EXPOSE 7070
-ENV EDDI_VERSION 4.0
-ENV EDDI_ENV production
-#ENV EDDI_DB mongodb
-#ENV EDDI_AUTH unknown
+
+#install bash
+RUN apk update
+RUN apk add bash
+
 #create workdir
 RUN mkdir -p /apiserver/
 WORKDIR /apiserver/
@@ -15,6 +18,7 @@ RUN mkdir /apiserver/logs
 RUN mkdir /apiserver/install
 #COPY not ADD the artifact (the current eddi structure is assumed)
 COPY /apiserver/target/apiserver-$EDDI_VERSION-package.zip /apiserver/install
+COPY /start_eddi.sh /apiserver
 #COPY not ADD the artifact (artifact is in the root folder)
 #COPY apiserver-$EDDI_VERSION-package.zip /
 #un
@@ -26,7 +30,7 @@ RUN unzip /apiserver/install/apiserver-$EDDI_VERSION-package.zip -d /apiserver
 #CMD exec ls -la
 #make sure all file (after unzip) have the right rights(executable) for one file use RUN chmod +x <file>
 RUN chmod -R 777 /apiserver/
-ENTRYPOINT java -classpath '.:lib/*' -DEDDI_ENV=$EDDI_ENV ai.labs.api.ApiServer
+ENTRYPOINT /apiserver/start_eddi.sh
 
 #for using a script as entrypoint the file NlpServerStartup.sh is not found.
 #specify the sh
