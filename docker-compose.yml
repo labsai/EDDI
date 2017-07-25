@@ -9,8 +9,9 @@ services:
     depends_on:
       - mongodb
     environment:
-      EDDI_VERSION: 4.0
+      EDDI_VERSION: 4.1
       EDDI_ENV: production
+      #EDDI_JAVA_ENV_MONGODB_HOST: mongodb.hosts=mongodb
   mongodb:
     image: mongo:3.4
     #ports:       #see override in your own repository with docker-compose.override.yml on each deployed machine for CRITICAL DATA
