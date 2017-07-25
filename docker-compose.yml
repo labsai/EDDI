@@ -9,7 +9,7 @@ services:
     depends_on:
       - mongodb
     environment:
-      EDDI_VERSION: 4.0
+      EDDI_VERSION: 4.1
       EDDI_ENV: production
       #EDDI_JAVA_ENV_MONGODB_HOST: mongodb.hosts=mongodb
   mongodb:

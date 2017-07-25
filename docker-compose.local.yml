@@ -4,9 +4,9 @@ services:
     build:
       context: .
       args:
-        EDDI_VERSION: 4.0
+        EDDI_VERSION: 4.1
         EDDI_ENV: production
     image: labsai/eddi:local
     environment:
-      EDDI_VERSION: 4.0
+      EDDI_VERSION: 4.1
       EDDI_ENV: production
