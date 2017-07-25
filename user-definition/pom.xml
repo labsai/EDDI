@@ -7,7 +7,7 @@
     <parent>
         <artifactId>eddi</artifactId>
         <groupId>ai.labs</groupId>
-        <version>4.0</version>
+        <version>4.1</version>
     </parent>
 
     <artifactId>user-definition</artifactId>
