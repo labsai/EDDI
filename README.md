@@ -2,7 +2,7 @@
 
 A Platform for creating, running and maintaining chatbots of all kinds.
 
-v4.0.0
+v4.0.2
 
 License: Apache License 2.0
 
@@ -21,7 +21,7 @@ has been developed with the focus on the use in enterprise applications as well 
 the ease of connecting it to other resources (such as databases or other Services). 
 
 This platform has been developed for over six years and completely restructured from scratch four times 
-because of logical "dead ends" in the art of building chatbots - thus version 4.0.0.
+because of logical "dead ends" in the art of building chatbots - thus version 4.
 
 The most outstanding features are: 
 * it is highly extensible (plugins), 

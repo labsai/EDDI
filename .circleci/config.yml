@@ -36,11 +36,11 @@ jobs:
       - deploy:
           name: Build and push Docker image
           command: |
-            if [ "${CIRCLE_BRANCH}" == "release/4.0.1" ]; then
+            if [ "${CIRCLE_BRANCH}" == "release/4.0.2" ]; then
             docker login -u $DOCKER_USER -p $DOCKER_PASS
 
-            docker build -t labsai/eddi:4.0.1 .
-            docker push labsai/eddi:4.0.1
+            docker build -t labsai/eddi:4.0.2 .
+            docker push labsai/eddi:4.0.2
 
             docker build -t labsai/eddi:4.0 .
             docker push labsai/eddi:4.0

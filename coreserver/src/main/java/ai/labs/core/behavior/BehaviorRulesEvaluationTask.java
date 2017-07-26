@@ -14,7 +14,6 @@ import ai.labs.serialization.IJsonSerialization;
 import lombok.extern.slf4j.Slf4j;
 
 import javax.inject.Inject;
-import javax.inject.Singleton;
 import java.io.IOException;
 import java.net.URI;
 import java.util.Collections;
@@ -26,7 +25,6 @@ import java.util.stream.Collectors;
 /**
  * @author ginccc
  */
-@Singleton
 @Slf4j
 public class BehaviorRulesEvaluationTask extends AbstractLifecycleTask implements ILifecycleTask {
     private BehaviorRulesEvaluator evaluator;
