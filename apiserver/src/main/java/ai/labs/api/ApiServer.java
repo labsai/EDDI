@@ -1,5 +1,6 @@
 package ai.labs.api;
 
+import ai.labs.behavior.bootstrap.BehaviorModule;
 import ai.labs.bootstrap.UserModule;
 import ai.labs.caching.bootstrap.CachingModule;
 import ai.labs.callback.bootstrap.ConversationCallbackModule;
@@ -61,6 +62,7 @@ public class ApiServer {
                 new UserModule(),
                 new CachingModule(new FileInputStream(configDir + "infinispan.xml")),
                 new SemanticParserModule(),
+                new BehaviorModule(),
                 new OutputGenerationModule(),
                 new AutomatedtestingModule(),
                 new StaticResourcesModule(),
