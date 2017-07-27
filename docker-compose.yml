@@ -20,5 +20,5 @@ services:
   mongodata:
     image: alpine:3.5
     volumes:
-      - "/persistence/eddimongodb:/data/db"
+      - "./persistence:/data/db"
     command: echo Persistence for Mongo
