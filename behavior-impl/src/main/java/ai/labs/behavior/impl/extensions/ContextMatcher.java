@@ -6,14 +6,17 @@ import ai.labs.expressions.utilities.IExpressionProvider;
 import ai.labs.lifecycle.model.Context;
 import ai.labs.memory.IConversationMemory;
 import ai.labs.memory.IData;
+import ai.labs.serialization.IJsonSerialization;
 import ai.labs.utilities.CharacterUtilities;
 import ai.labs.utilities.LanguageUtilities;
 import io.restassured.path.json.JsonPath;
 import lombok.AllArgsConstructor;
 import lombok.Getter;
 import lombok.Setter;
+import lombok.extern.slf4j.Slf4j;
 
 import javax.inject.Inject;
+import java.io.IOException;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -21,6 +24,7 @@ import java.util.Map;
 /**
  * @author ginccc
  */
+@Slf4j
 public class ContextMatcher implements IBehaviorExtension {
     private static final String ID = "contextmatcher";
 
@@ -37,11 +41,14 @@ public class ContextMatcher implements IBehaviorExtension {
     private final String objectKeyPathQualifier = "objectKeyPath";
     private final String objectValueQualifier = "objectValue";
     private final String stringQualifier = "string"; // string or expressions
-    private IExpressionProvider expressionProvider;
+    private final IExpressionProvider expressionProvider;
+    private final IJsonSerialization jsonSerialization;
 
     @Inject
-    private ContextMatcher(IExpressionProvider expressionProvider) {
+    private ContextMatcher(IExpressionProvider expressionProvider,
+                           IJsonSerialization jsonSerialization) {
         this.expressionProvider = expressionProvider;
+        this.jsonSerialization = jsonSerialization;
     }
 
     @Override
@@ -56,6 +63,14 @@ public class ContextMatcher implements IBehaviorExtension {
         result.put(contextTypeQualifier, contextType);
         if (expressions != null) {
             result.put(expressionsQualifier, CharacterUtilities.arrayToString(expressions, ","));
+        }
+
+        if (object != null) {
+            try {
+                result.put(objectQualifier, jsonSerialization.serialize(object));
+            } catch (IOException e) {
+                log.error(e.getLocalizedMessage(), e);
+            }
         }
 
         if (string != null) {
@@ -126,7 +141,7 @@ public class ContextMatcher implements IBehaviorExtension {
 
     @Override
     public IBehaviorExtension clone() throws CloneNotSupportedException {
-        IBehaviorExtension clone = new ContextMatcher(expressionProvider);
+        IBehaviorExtension clone = new ContextMatcher(expressionProvider, jsonSerialization);
         clone.setValues(getValues());
         return clone;
     }
