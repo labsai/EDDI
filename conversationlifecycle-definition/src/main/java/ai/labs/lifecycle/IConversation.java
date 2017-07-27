@@ -1,6 +1,9 @@
 package ai.labs.lifecycle;
 
+import ai.labs.lifecycle.model.Context;
 import ai.labs.memory.IConversationMemory;
+
+import java.util.List;
 
 /**
  * @author ginccc
@@ -23,7 +26,7 @@ public interface IConversation {
 
     void endConversation();
 
-    void say(final String message) throws LifecycleException, ConversationNotReadyException;
+    void say(final String message, List<Context> contexts) throws LifecycleException, ConversationNotReadyException;
 
     interface IConversationOutputRenderer {
         void renderOutput(IConversationMemory.IConversationStep conversationStep);
