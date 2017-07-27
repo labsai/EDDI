@@ -5,8 +5,8 @@ import lombok.Getter;
 import lombok.NoArgsConstructor;
 import lombok.Setter;
 
-import java.util.LinkedList;
-import java.util.List;
+import java.util.HashMap;
+import java.util.Map;
 
 /**
  * @author ginccc
@@ -17,7 +17,7 @@ import java.util.List;
 @Setter
 public class InputData {
     private String input = "";
-    private List<Context> context = new LinkedList<>();
+    private Map<String, Context> context = new HashMap<>();
 
     @NoArgsConstructor
     @AllArgsConstructor
@@ -31,7 +31,6 @@ public class InputData {
         }
 
         private ContextType type;
-        private String contextKey;
-        private Object contextValue;
+        private Object value;
     }
 }

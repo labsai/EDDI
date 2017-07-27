@@ -23,11 +23,6 @@ class BehaviorRulesEvaluator {
 
         IBehaviorExtension.ExecutionState state;
         for (BehaviorGroup behaviorGroup : behaviorSet.getBehaviorGroups()) {
-            if (!resultSet.getSuccessRules().isEmpty()) {
-                //if one rule of one group applied, we do not check further
-                break;
-            }
-
             for (BehaviorRule behaviorRule : behaviorGroup.getBehaviorRules()) {
                 if (behaviorRule.getExtensions().isEmpty()) {
                     state = IBehaviorExtension.ExecutionState.SUCCESS;

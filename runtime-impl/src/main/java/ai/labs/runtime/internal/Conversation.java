@@ -13,6 +13,7 @@ import ai.labs.runtime.IExecutablePackage;
 
 import java.util.LinkedList;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 
 /**
@@ -67,7 +68,7 @@ public class Conversation implements IConversation {
     }
 
     @Override
-    public void say(final String message, final List<Context> contexts)
+    public void say(final String message, final Map<String, Context> contexts)
             throws LifecycleException, ConversationNotReadyException {
         if (conversationState != ConversationState.READY) {
             String errorMessage = "Conversation is *NOT* ready. Current Status: %s";
@@ -91,8 +92,10 @@ public class Conversation implements IConversation {
 
             //store context data
             List<IData<Context>> contextData = new LinkedList<>();
-            for (Context context : contexts) {
-                contextData.add(new Data<>("context:" + context.getContextKey(), context));
+            for (String key : contexts.keySet()) {
+                Context context = contexts.get(key);
+                contextData.add(new Data<>("context:" + key, context));
+
             }
             data.addAll(contextData);
 

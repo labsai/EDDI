@@ -28,8 +28,8 @@ import javax.ws.rs.container.AsyncResponse;
 import javax.ws.rs.core.MediaType;
 import javax.ws.rs.core.Response;
 import java.net.URI;
-import java.util.LinkedList;
-import java.util.List;
+import java.util.HashMap;
+import java.util.Map;
 import java.util.concurrent.Callable;
 import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
@@ -123,7 +123,7 @@ public class RestBotEngine implements IRestBotEngine {
                     final String botId, final String conversationId,
                     final String message, final AsyncResponse response) {
         sayWithinContext(environment, botId, conversationId,
-                new InputData(message, new LinkedList<>()), response);
+                new InputData(message, new HashMap<>()), response);
     }
 
     @Override
@@ -190,7 +190,7 @@ public class RestBotEngine implements IRestBotEngine {
 
     private Callable<Void> processUserInput(Deployment.Environment environment,
                                             String conversationId, String message,
-                                            List<InputData.Context> inputDataContext,
+                                            Map<String, InputData.Context> inputDataContext,
                                             IConversationMemory conversationMemory,
                                             IConversation conversation) {
         return () -> {
@@ -207,15 +207,17 @@ public class RestBotEngine implements IRestBotEngine {
         };
     }
 
-    private List<Context> convertContext(List<InputData.Context> inputDataContext) {
-        return inputDataContext.stream().map(
-                inputContext -> {
-                    Context.ContextType contextType = Context.ContextType.valueOf(
-                            inputContext.getType().toString());
-                    return new Context(contextType,
-                            inputContext.getContextKey(),
-                            inputContext.getContextValue());
-                }).collect(Collectors.toList());
+    private Map<String, Context> convertContext(Map<String, InputData.Context> inputDataContext) {
+        return inputDataContext.entrySet()
+                .stream()
+                .collect(Collectors.toMap(Map.Entry::getKey,
+                        e -> {
+                            InputData.Context context = e.getValue();
+                            return new Context(
+                                    Context.ContextType.valueOf(context.getType().toString()),
+                                    context.getValue());
+                        }));
+
     }
 
     @Override

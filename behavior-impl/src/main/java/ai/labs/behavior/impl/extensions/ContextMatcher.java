@@ -8,6 +8,10 @@ import ai.labs.memory.IConversationMemory;
 import ai.labs.memory.IData;
 import ai.labs.utilities.CharacterUtilities;
 import ai.labs.utilities.LanguageUtilities;
+import io.restassured.path.json.JsonPath;
+import lombok.AllArgsConstructor;
+import lombok.Getter;
+import lombok.Setter;
 
 import javax.inject.Inject;
 import java.util.HashMap;
@@ -23,11 +27,15 @@ public class ContextMatcher implements IBehaviorExtension {
     private String contextKey;
     private String contextType;
     private List<Expression> expressions;
-    private String value;
+    private ObjectValue object;
+    private String string;
     private ExecutionState state = ExecutionState.NOT_EXECUTED;
     private final String contextKeyQualifier = "contextKey";
     private final String contextTypeQualifier = "contextType"; // string or expressions
     private final String expressionsQualifier = "expressions"; // string or expressions
+    private final String objectQualifier = "object";
+    private final String objectKeyPathQualifier = "objectKeyPath";
+    private final String objectValueQualifier = "objectValue";
     private final String stringQualifier = "string"; // string or expressions
     private IExpressionProvider expressionProvider;
 
@@ -50,8 +58,8 @@ public class ContextMatcher implements IBehaviorExtension {
             result.put(expressionsQualifier, CharacterUtilities.arrayToString(expressions, ","));
         }
 
-        if (value != null) {
-            result.put(stringQualifier, value);
+        if (string != null) {
+            result.put(stringQualifier, string);
         }
 
         return result;
@@ -66,10 +74,13 @@ public class ContextMatcher implements IBehaviorExtension {
 
             if (values.containsKey(contextTypeQualifier)) {
                 contextType = values.get(contextTypeQualifier);
-                if (values.get(contextTypeQualifier).equals("expressions")) {
+                if (values.get(contextTypeQualifier).equals(expressionsQualifier)) {
                     expressions = expressionProvider.parseExpressions(values.get(expressionsQualifier));
+                } else if (values.get(contextTypeQualifier).equals(objectQualifier)) {
+                    object = new ObjectValue(values.get(objectQualifier),
+                            values.get(objectKeyPathQualifier), values.get(objectValueQualifier));
                 } else {
-                    value = values.get(stringQualifier);
+                    string = values.get(stringQualifier);
                 }
             }
         }
@@ -83,20 +94,21 @@ public class ContextMatcher implements IBehaviorExtension {
         boolean success = false;
         for (IData<Context> contextDatum : contextData) {
             Context context = contextDatum.getResult();
-            if (context.getContextKey().equals(contextKey)) {
+            if (contextDatum.getKey().equals("context:" + contextKey)) {
                 switch (context.getType()) {
                     case expressions:
                         success = LanguageUtilities.containsArray(expressions,
                                 expressionProvider.parseExpressions(
-                                        context.getContextValue().toString())) != -1;
+                                        context.getValue().toString())) != -1;
                         break;
                     case object:
-                        //todo resolve object
+                        success = object.getObjectValue().equals(
+                                JsonPath.with(object.getObject()).get(object.getObjectKeyPath()).toString());
                         break;
 
                     default:
                     case string:
-                        success = value.equals(context.getContextValue().toString());
+                        success = string.equals(context.getValue().toString());
                         break;
                 }
             }
@@ -117,5 +129,14 @@ public class ContextMatcher implements IBehaviorExtension {
         IBehaviorExtension clone = new ContextMatcher(expressionProvider);
         clone.setValues(getValues());
         return clone;
+    }
+
+    @AllArgsConstructor
+    @Getter
+    @Setter
+    private static class ObjectValue {
+        private String object;
+        private String objectKeyPath;
+        private String objectValue;
     }
 }

@@ -20,6 +20,5 @@ public class Context {
     }
 
     private ContextType type;
-    private String contextKey;
-    private Object contextValue;
+    private Object value;
 }
