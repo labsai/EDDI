@@ -23,7 +23,7 @@
         <dependency>
             <groupId>org.jboss.resteasy</groupId>
             <artifactId>resteasy-jaxrs</artifactId>
-            <version>3.1.0.Final</version>
+            <version>3.1.4.Final</version>
             <exclusions>
                 <exclusion>
                     <artifactId>slf4j-simple</artifactId>
@@ -42,48 +42,48 @@
         <dependency>
             <groupId>org.jboss.resteasy</groupId>
             <artifactId>resteasy-guice</artifactId>
-            <version>3.1.0.Final</version>
+            <version>3.1.4.Final</version>
         </dependency>
         <dependency>
             <groupId>org.jboss.resteasy</groupId>
             <artifactId>resteasy-jsapi</artifactId>
-            <version>3.1.0.Final</version>
+            <version>3.1.4.Final</version>
         </dependency>
         <dependency>
             <groupId>org.jboss.resteasy</groupId>
             <artifactId>resteasy-cache-core</artifactId>
-            <version>3.1.0.Final</version>
+            <version>3.1.4.Final</version>
         </dependency>
         <!-- Jetty -->
         <dependency>
             <groupId>org.eclipse.jetty</groupId>
             <artifactId>jetty-server</artifactId>
-            <version>9.3.18.v20170406</version>
+            <version>9.4.6.v20170531</version>
         </dependency>
         <dependency>
             <groupId>org.eclipse.jetty</groupId>
             <artifactId>jetty-security</artifactId>
-            <version>9.3.18.v20170406</version>
+            <version>9.4.6.v20170531</version>
         </dependency>
         <dependency>
             <groupId>org.eclipse.jetty</groupId>
             <artifactId>jetty-servlet</artifactId>
-            <version>9.3.18.v20170406</version>
+            <version>9.4.6.v20170531</version>
         </dependency>
         <dependency>
             <groupId>org.eclipse.jetty</groupId>
             <artifactId>jetty-servlets</artifactId>
-            <version>9.3.18.v20170406</version>
+            <version>9.4.6.v20170531</version>
         </dependency>
         <dependency>
             <groupId>org.eclipse.jetty</groupId>
             <artifactId>jetty-rewrite</artifactId>
-            <version>9.3.18.v20170406</version>
+            <version>9.4.6.v20170531</version>
         </dependency>
         <dependency>
             <groupId>org.eclipse.jetty</groupId>
             <artifactId>jetty-util</artifactId>
-            <version>9.3.18.v20170406</version>
+            <version>9.4.6.v20170531</version>
         </dependency>
         <dependency>
             <groupId>org.keycloak</groupId>

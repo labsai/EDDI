@@ -4,24 +4,12 @@ import ai.labs.utilities.CharacterUtilities;
 import ai.labs.utilities.WordSplitter;
 
 public class DefaultInputNormalizer implements InputNormalizer {
-    private static final String DEFINED_CHARS =
-            "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz <=>" +
-                    "#€+&.,:;!?1234567890äÄüÜöÖßéáß";
-
-    @Override
-    public String normalizeInput(String sentence) {
-        return normalizeInput(sentence, DEFINED_CHARS);
-    }
-
-    @Override
-    public String normalizeInput(String sentence, String definedChars) {
-        return normalizeInput(sentence, definedChars, true);
-    }
-
-    public String normalizeInput(String sentence, String definedChars, boolean splitWords) {
+    public String normalizeInput(String sentence, String definedChars, boolean splitWords, boolean convertSpecialCharacter) {
         StringBuilder sb = new StringBuilder(sentence);
 
-        CharacterUtilities.convertSpecialCharacter(sb);
+        if (convertSpecialCharacter) {
+            CharacterUtilities.convertSpecialCharacter(sb);
+        }
         CharacterUtilities.deleteUndefinedChars(sb, definedChars);
 
         sb.trimToSize();

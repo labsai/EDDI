@@ -1,9 +1,5 @@
 package ai.labs.core.bootstrap;
 
-import ai.labs.core.CoreRuntime;
-import ai.labs.core.behavior.BehaviorDeserialization;
-import ai.labs.core.behavior.BehaviorRulesEvaluationTask;
-import ai.labs.core.behavior.IBehaviorDeserialization;
 import ai.labs.core.normalizing.NormalizeInputTask;
 import ai.labs.core.rest.internal.RestBotAdministration;
 import ai.labs.core.rest.internal.RestBotEngine;
@@ -27,8 +23,6 @@ public class CoreModule extends AbstractBaseModule {
     protected void configure() {
         registerConfigFiles(configFiles);
 
-        bind(IBehaviorDeserialization.class).to(BehaviorDeserialization.class).in(Scopes.SINGLETON);
-
         bind(IRestBotEngine.class).to(RestBotEngine.class);
         bind(IRestBotAdministration.class).to(RestBotAdministration.class);
         bind(IConversationCoordinator.class).to(ConversationCoordinator.class).in(Scopes.SINGLETON);
@@ -36,8 +30,5 @@ public class CoreModule extends AbstractBaseModule {
         MapBinder<String, ILifecycleTask> lifecycleTaskPlugins
                 = MapBinder.newMapBinder(binder(), String.class, ILifecycleTask.class);
         lifecycleTaskPlugins.addBinding("ai.labs.normalizer").to(NormalizeInputTask.class);
-        lifecycleTaskPlugins.addBinding("ai.labs.behavior").to(BehaviorRulesEvaluationTask.class);
-
-        bind(CoreRuntime.class).asEagerSingleton();
     }
 }
