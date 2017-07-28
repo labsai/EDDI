@@ -8,6 +8,7 @@
         <artifactId>eddi</artifactId>
         <groupId>ai.labs</groupId>
         <version>4.1</version>
+        <relativePath>../pom.xml</relativePath>
     </parent>
 
     <artifactId>user-definition</artifactId>
