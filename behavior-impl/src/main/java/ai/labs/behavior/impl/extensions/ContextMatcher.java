@@ -28,6 +28,12 @@ import java.util.Map;
 public class ContextMatcher implements IBehaviorExtension {
     private static final String ID = "contextmatcher";
 
+    enum ContextType {
+        expressions,
+        object,
+        string
+    }
+
     private String contextKey;
     private String contextType;
     private List<Expression> expressions;
@@ -35,12 +41,12 @@ public class ContextMatcher implements IBehaviorExtension {
     private String string;
     private ExecutionState state = ExecutionState.NOT_EXECUTED;
     private final String contextKeyQualifier = "contextKey";
-    private final String contextTypeQualifier = "contextType"; // string or expressions
-    private final String expressionsQualifier = "expressions"; // string or expressions
-    private final String objectQualifier = "object";
+    private final String contextTypeQualifier = "contextType";
+    private final String expressionsQualifier = ContextType.expressions.toString();
+    private final String objectQualifier = ContextType.object.toString();
     private final String objectKeyPathQualifier = "objectKeyPath";
     private final String objectValueQualifier = "objectValue";
-    private final String stringQualifier = "string"; // string or expressions
+    private final String stringQualifier = ContextType.string.toString();
     private final IExpressionProvider expressionProvider;
     private final IJsonSerialization jsonSerialization;
 
