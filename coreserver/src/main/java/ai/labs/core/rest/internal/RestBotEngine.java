@@ -2,6 +2,7 @@ package ai.labs.core.rest.internal;
 
 import ai.labs.lifecycle.IConversation;
 import ai.labs.lifecycle.LifecycleException;
+import ai.labs.lifecycle.model.Context;
 import ai.labs.memory.IConversationMemory;
 import ai.labs.memory.IConversationMemoryStore;
 import ai.labs.memory.model.ConversationMemorySnapshot;
@@ -9,6 +10,7 @@ import ai.labs.memory.model.ConversationState;
 import ai.labs.memory.model.Deployment;
 import ai.labs.memory.model.SimpleConversationMemorySnapshot;
 import ai.labs.persistence.IResourceStore;
+import ai.labs.rest.model.InputData;
 import ai.labs.rest.rest.IRestBotEngine;
 import ai.labs.runtime.IBot;
 import ai.labs.runtime.IBotFactory;
@@ -26,8 +28,11 @@ import javax.ws.rs.container.AsyncResponse;
 import javax.ws.rs.core.MediaType;
 import javax.ws.rs.core.Response;
 import java.net.URI;
+import java.util.HashMap;
+import java.util.Map;
 import java.util.concurrent.Callable;
 import java.util.concurrent.TimeUnit;
+import java.util.stream.Collectors;
 
 import static ai.labs.memory.ConversationMemoryUtilities.*;
 
@@ -117,10 +122,18 @@ public class RestBotEngine implements IRestBotEngine {
     public void say(final Deployment.Environment environment,
                     final String botId, final String conversationId,
                     final String message, final AsyncResponse response) {
+        sayWithinContext(environment, botId, conversationId,
+                new InputData(message, new HashMap<>()), response);
+    }
+
+    @Override
+    public void sayWithinContext(final Deployment.Environment environment,
+                                 final String botId, final String conversationId,
+                                 final InputData inputData, final AsyncResponse response) {
         RuntimeUtilities.checkNotNull(environment, "environment");
         RuntimeUtilities.checkNotNull(botId, "botId");
         RuntimeUtilities.checkNotNull(conversationId, "conversationId");
-        RuntimeUtilities.checkNotNull(message, "message");
+        RuntimeUtilities.checkNotNull(inputData, "inputData");
 
         response.setTimeout(60, TimeUnit.SECONDS);
 
@@ -156,7 +169,9 @@ public class RestBotEngine implements IRestBotEngine {
             }
 
             Callable<Void> processUserInput =
-                    processUserInput(environment, conversationId, message, conversationMemory, conversation);
+                    processUserInput(environment, conversationId,
+                            inputData.getInput(), inputData.getContext(),
+                            conversationMemory, conversation);
             conversationCoordinator.submitInOrder(conversationId, processUserInput);
         } catch (InstantiationException | IllegalAccessException e) {
             String errorMsg = "Error while processing message!";
@@ -175,11 +190,12 @@ public class RestBotEngine implements IRestBotEngine {
 
     private Callable<Void> processUserInput(Deployment.Environment environment,
                                             String conversationId, String message,
+                                            Map<String, InputData.Context> inputDataContext,
                                             IConversationMemory conversationMemory,
                                             IConversation conversation) {
         return () -> {
             try {
-                conversation.say(message);
+                conversation.say(message, convertContext(inputDataContext));
                 storeConversationMemory(conversationMemory, environment);
             } catch (Exception e) {
                 setConversationState(conversationId, ConversationState.ERROR);
@@ -189,6 +205,19 @@ public class RestBotEngine implements IRestBotEngine {
 
             return null;
         };
+    }
+
+    private Map<String, Context> convertContext(Map<String, InputData.Context> inputDataContext) {
+        return inputDataContext.entrySet()
+                .stream()
+                .collect(Collectors.toMap(Map.Entry::getKey,
+                        e -> {
+                            InputData.Context context = e.getValue();
+                            return new Context(
+                                    Context.ContextType.valueOf(context.getType().toString()),
+                                    context.getValue());
+                        }));
+
     }
 
     @Override

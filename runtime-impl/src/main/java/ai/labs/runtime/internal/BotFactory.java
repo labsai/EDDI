@@ -8,6 +8,7 @@ import ai.labs.runtime.IBotFactory;
 import ai.labs.runtime.IExecutablePackage;
 import ai.labs.runtime.client.bots.IBotStoreClientLibrary;
 import ai.labs.runtime.service.ServiceException;
+import lombok.*;
 
 import javax.inject.Inject;
 import java.util.*;
@@ -123,47 +124,13 @@ public class BotFactory implements IBotFactory {
         return environments.get(environment);
     }
 
+    @AllArgsConstructor
+    @Getter
+    @Setter
+    @EqualsAndHashCode
+    @ToString
     private class BotId {
         private String id;
         private Integer version;
-
-        private BotId(String id, Integer version) {
-            this.id = id;
-            this.version = version;
-        }
-
-        public String getId() {
-            return id;
-        }
-
-        public void setId(String id) {
-            this.id = id;
-        }
-
-        public Integer getVersion() {
-            return version;
-        }
-
-        public void setVersion(Integer version) {
-            this.version = version;
-        }
-
-        @Override
-        public boolean equals(Object o) {
-            if (this == o) return true;
-            if (o == null || getClass() != o.getClass()) return false;
-
-            BotId botId = (BotId) o;
-
-            return id.equals(botId.id) && version.equals(botId.version);
-
-        }
-
-        @Override
-        public int hashCode() {
-            int result = (id != null ? id.hashCode() : 0);
-            result = 31 * result + (version != null ? version.hashCode() : 0);
-            return result;
-        }
     }
 }

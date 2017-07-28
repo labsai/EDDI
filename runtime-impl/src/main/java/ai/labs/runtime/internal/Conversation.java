@@ -3,6 +3,7 @@ package ai.labs.runtime.internal;
 import ai.labs.lifecycle.IConversation;
 import ai.labs.lifecycle.ILifecycleManager;
 import ai.labs.lifecycle.LifecycleException;
+import ai.labs.lifecycle.model.Context;
 import ai.labs.memory.ConversationMemory;
 import ai.labs.memory.Data;
 import ai.labs.memory.IConversationMemory;
@@ -10,12 +11,16 @@ import ai.labs.memory.IData;
 import ai.labs.memory.model.ConversationState;
 import ai.labs.runtime.IExecutablePackage;
 
+import java.util.LinkedList;
 import java.util.List;
+import java.util.Map;
+import java.util.Objects;
 
 /**
  * @author ginccc
  */
 public class Conversation implements IConversation {
+    private static final String CONVERSATION_END = "CONVERSATION_END";
     private ConversationState conversationState;
     private final IConversationMemory conversationMemory;
 
@@ -23,8 +28,9 @@ public class Conversation implements IConversation {
 
     private final IConversation.IConversationOutputRenderer outputProvider;
 
-    public Conversation(List<IExecutablePackage> executablePackages, IConversationMemory conversationMemory,
-                        IConversationOutputRenderer outputProvider) {
+    Conversation(List<IExecutablePackage> executablePackages,
+                 IConversationMemory conversationMemory,
+                 IConversationOutputRenderer outputProvider) {
         this.executablePackages = executablePackages;
         this.conversationMemory = conversationMemory;
         this.outputProvider = outputProvider;
@@ -53,7 +59,7 @@ public class Conversation implements IConversation {
 
     @Override
     public void init() throws LifecycleException {
-        executePackages(null);
+        executePackages(new LinkedList<>());
     }
 
     private void setConversationState(ConversationState conversationState) {
@@ -62,7 +68,8 @@ public class Conversation implements IConversation {
     }
 
     @Override
-    public void say(final String message) throws LifecycleException, ConversationNotReadyException {
+    public void say(final String message, final Map<String, Context> contexts)
+            throws LifecycleException, ConversationNotReadyException {
         if (conversationState != ConversationState.READY) {
             String errorMessage = "Conversation is *NOT* ready. Current Status: %s";
             errorMessage = String.format(errorMessage, conversationState);
@@ -73,16 +80,27 @@ public class Conversation implements IConversation {
             setConversationState(ConversationState.IN_PROGRESS);
 
             ((ConversationMemory) conversationMemory).startNextStep();
+            List<IData> data = new LinkedList<>();
 
             //store user input in memory
-            IData initialData = null;
+            IData initialData;
             if (!"".equals(message.trim())) {
-                initialData = new Data("input:initial", message);
+                initialData = new Data<>("input:initial", message);
                 initialData.setPublic(true);
+                data.add(initialData);
             }
 
+            //store context data
+            List<IData<Context>> contextData = new LinkedList<>();
+            for (String key : contexts.keySet()) {
+                Context context = contexts.get(key);
+                contextData.add(new Data<>("context:" + key, context));
+
+            }
+            data.addAll(contextData);
+
             //execute input processing
-            executePackages(initialData);
+            executePackages(data);
 
             // get final output
             IConversationMemory.IWritableConversationStep currentStep = conversationMemory.getCurrentStep();
@@ -93,7 +111,7 @@ public class Conversation implements IConversation {
             IData actionData = currentStep.getLatestData("action");
             if (actionData != null) {
                 Object result = actionData.getResult();
-                if (result instanceof List && ((List) result).contains("CONVERSATION_END")) {
+                if (result instanceof List && ((List) result).contains(CONVERSATION_END)) {
                     endConversation();
                 }
             }
@@ -107,12 +125,11 @@ public class Conversation implements IConversation {
         }
     }
 
-    private void executePackages(IData initialData) throws LifecycleException {
+    private void executePackages(List<IData> data) throws LifecycleException {
         for (IExecutablePackage executablePackage : executablePackages) {
-            conversationMemory.setCurrentContext(executablePackage.getContext());
-            if (initialData != null) {
-                conversationMemory.getCurrentStep().storeData(initialData);
-            }
+            conversationMemory.setCurrentContext(executablePackage.getName());
+            data.stream().filter(Objects::nonNull).
+                    forEach(datum -> conversationMemory.getCurrentStep().storeData(datum));
             ILifecycleManager lifecycleManager = executablePackage.getLifecycleManager();
             lifecycleManager.executeLifecycle(conversationMemory);
         }

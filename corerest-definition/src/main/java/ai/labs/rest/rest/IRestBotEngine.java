@@ -4,6 +4,7 @@ package ai.labs.rest.rest;
 import ai.labs.memory.model.ConversationState;
 import ai.labs.memory.model.Deployment;
 import ai.labs.memory.model.SimpleConversationMemorySnapshot;
+import ai.labs.rest.model.InputData;
 import io.swagger.annotations.Api;
 import org.jboss.resteasy.annotations.cache.NoCache;
 
@@ -63,6 +64,25 @@ public interface IRestBotEngine {
              @PathParam("conversationId") String conversationId,
              @DefaultValue("") String message,
              @Suspended final AsyncResponse response);
+
+    /**
+     * talk to bot with adding context information to it
+     *
+     * @param environment
+     * @param botId
+     * @param conversationId
+     * @param inputData      of type ai.labs.rest.model.InputData
+     * @return
+     * @throws Exception
+     */
+    @POST
+    @Path("/{environment}/{botId}/{conversationId}")
+    @Consumes(MediaType.APPLICATION_JSON)
+    void sayWithinContext(@PathParam("environment") Deployment.Environment environment,
+                          @PathParam("botId") String botId,
+                          @PathParam("conversationId") String conversationId,
+                          InputData inputData,
+                          @Suspended final AsyncResponse response);
 
     @GET
     @Path("/{environment}/{botId}/undo/{conversationId}")
