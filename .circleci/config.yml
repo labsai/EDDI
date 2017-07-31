@@ -13,6 +13,7 @@ jobs:
           PROJECT_NAME: ${PROJECT_NAME}
           CLUSTER_NAME: ${CLUSTER_NAME}
           CLOUDSDK_COMPUTE_ZONE: ${CLOUDSDK_COMPUTE_ZONE}
+          EDDI_JAVA_ENV_MONGODB_HOSTS: mongodb.hosts=localhost
     working_directory: ~/eddi
     steps:
       - checkout
@@ -50,11 +51,11 @@ jobs:
             if [ "${CIRCLE_BRANCH}" == "master" ]; then
 
             # todo: get version dynamically?
-            export version=4.0.1
+            export version=4.1.0
 
             sudo /opt/google-cloud-sdk/bin/gcloud docker build -t $DOCKER_IMAGE:$version-$CIRCLE_BUILD_NUM .
             sudo /opt/google-cloud-sdk/bin/gcloud docker build -t $DOCKER_IMAGE:latest .
-            
+
             sudo /opt/google-cloud-sdk/bin/gcloud docker push $DOCKER_IMAGE:$version-$CIRCLE_BUILD_NUM
             sudo /opt/google-cloud-sdk/bin/gcloud docker push $DOCKER_IMAGE:latest
 
