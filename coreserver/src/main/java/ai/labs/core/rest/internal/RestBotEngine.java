@@ -134,6 +134,7 @@ public class RestBotEngine implements IRestBotEngine {
         RuntimeUtilities.checkNotNull(botId, "botId");
         RuntimeUtilities.checkNotNull(conversationId, "conversationId");
         RuntimeUtilities.checkNotNull(inputData, "inputData");
+        RuntimeUtilities.checkNotNull(inputData.getInput(), "inputData.input");
 
         response.setTimeout(60, TimeUnit.SECONDS);
 
@@ -208,15 +209,19 @@ public class RestBotEngine implements IRestBotEngine {
     }
 
     private Map<String, Context> convertContext(Map<String, InputData.Context> inputDataContext) {
-        return inputDataContext.entrySet()
-                .stream()
-                .collect(Collectors.toMap(Map.Entry::getKey,
-                        e -> {
-                            InputData.Context context = e.getValue();
-                            return new Context(
-                                    Context.ContextType.valueOf(context.getType().toString()),
-                                    context.getValue());
-                        }));
+        if (inputDataContext == null) {
+            return new HashMap<>();
+        } else {
+            return inputDataContext.entrySet()
+                    .stream()
+                    .collect(Collectors.toMap(Map.Entry::getKey,
+                            e -> {
+                                InputData.Context context = e.getValue();
+                                return new Context(
+                                        Context.ContextType.valueOf(context.getType().toString()),
+                                        context.getValue());
+                            }));
+        }
 
     }
 
