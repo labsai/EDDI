@@ -49,6 +49,8 @@
         <module>facebookmessenger-impl</module>
         <module>outputgeneration-definition</module>
         <module>outputgeneration-impl</module>
+        <module>behavior-definition</module>
+        <module>behavior-impl</module>
     </modules>
 
     <build>

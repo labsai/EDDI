@@ -34,9 +34,9 @@ public class PackageStoreClientLibrary implements IPackageStoreClientLibrary {
             PackageConfiguration knowledgePackage = packageStoreService.getKnowledgePackage(packageId, packageVersion);
             return createExecutablePackage(packageDocumentDescriptor, knowledgePackage);
         } catch (PackageInitializationException e) {
-            throw new ServiceException("Error while creating ExecuablePackage!", e);
+            throw new ServiceException("Error while creating ExecutablePackage!", e);
         } catch (PackageConfigurationException e) {
-            throw new ServiceException("Error while configuring ExecuablePackage!", e);
+            throw new ServiceException("Error while configuring ExecutablePackage!", e);
         }
     }
 
@@ -66,8 +66,13 @@ public class PackageStoreClientLibrary implements IPackageStoreClientLibrary {
 
         return new IExecutablePackage() {
             @Override
-            public String getContext() {
+            public String getName() {
                 return documentDescriptor.getName();
+            }
+
+            @Override
+            public String getDescription() {
+                return documentDescriptor.getDescription();
             }
 
             @Override
@@ -78,7 +83,7 @@ public class PackageStoreClientLibrary implements IPackageStoreClientLibrary {
     }
 
     public class PackageInitializationException extends Exception {
-        public PackageInitializationException(String message, Throwable e) {
+        PackageInitializationException(String message, Throwable e) {
             super(message, e);
         }
     }
