@@ -13,7 +13,7 @@ jobs:
           PROJECT_NAME: ${PROJECT_NAME}
           CLUSTER_NAME: ${CLUSTER_NAME}
           CLOUDSDK_COMPUTE_ZONE: ${CLOUDSDK_COMPUTE_ZONE}
-          EDDI_JAVA_ENV_MONGODB_HOSTS: mongodb.hosts=localhost
+          EDDI_JAVA_ENV_MONGODB_HOSTS: mongodb.hosts=eddi-storage-0.eddi-storage
     working_directory: ~/eddi
     steps:
       - checkout
