@@ -22,7 +22,7 @@
         <dependency>
             <groupId>org.eclipse.jetty</groupId>
             <artifactId>jetty-servlet</artifactId>
-            <version>9.3.18.v20170406</version>
+            <version>9.4.6.v20170531</version>
         </dependency>
         <dependency>
             <groupId>ai.labs</groupId>
@@ -42,7 +42,7 @@
         <dependency>
             <groupId>org.jboss.resteasy</groupId>
             <artifactId>resteasy-guice</artifactId>
-            <version>3.1.0.Final</version>
+            <version>3.1.4.Final</version>
         </dependency>
     </dependencies>
 
