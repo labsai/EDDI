@@ -6,7 +6,7 @@ jobs:
   build:
     docker:
       - image: labsai/ci-build
-      - environment:
+        environment:
           ACCT_AUTH: ${ACCT_AUTH}
           APP_NAME: eddi
           DOCKER_IMAGE: ${DOCKER_IMAGE}
