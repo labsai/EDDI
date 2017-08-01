@@ -58,18 +58,19 @@ public class RestInterfaceFactory implements IRestInterfaceFactory {
     }
 
     private ResteasyClient getResteasyClient(String targetServerUri) throws RestInterfaceFactoryException {
-        //ResteasyClient client = clients.get(targetServerUri);
-        //if(client == null) {
+        ResteasyClient client = clients.get(targetServerUri);
+        if(client == null) {
             HttpClient httpClient = targetServerUri.startsWith("https") ?
                     prepareClientForSSL(this.httpClient, URI.create(targetServerUri)) : this.httpClient;
 
             ApacheHttpClient4Engine engine = new ApacheHttpClient4Engine(httpClient);
             ResteasyClientBuilder clientBuilder = new ResteasyClientBuilder();
+            clientBuilder.connectionPoolSize(20);
             clientBuilder.httpEngine(engine);
 
-            ResteasyClient client = clientBuilder.build();
-            //clients.put(targetServerUri, client);
-        //}
+            client = clientBuilder.build();
+            clients.put(targetServerUri, client);
+        }
 
         return client;
     }
