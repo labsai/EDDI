@@ -214,6 +214,7 @@ public class FacebookEndpoint implements IFacebookEndpoint {
             Response response = restInterfaceFactory.get(IRestBotEngine.class, apiServerURI).
                     startConversation(environment, botId);
             if (response != null) {
+                log.info("responselocation:{}", response.getLocation());
                 URIUtilities.ResourceId resourceIdConversation =
                         URIUtilities.extractResourceId(response.getLocation());
                 conversationId = resourceIdConversation.getId();

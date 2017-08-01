@@ -70,7 +70,9 @@ public class RestBotEngine implements IRestBotEngine {
 
             IConversation conversation = latestBot.startConversation(null);
             String conversationId = storeConversationMemory(conversation.getConversationMemory(), environment);
+            log.info("conversationid:{}", conversationId);
             URI createdUri = RestUtilities.createURI(resourceURI, conversationId);
+            log.info("uri:{}", createdUri.toString());
             return Response.created(createdUri).build();
         } catch (ServiceException |
                 IResourceStore.ResourceStoreException |
