@@ -118,6 +118,7 @@ public class FacebookEndpoint implements IFacebookEndpoint {
     private TextMessageEventHandler getTextMessageEventHandler(String botId, Deployment.Environment environment) {
         return event -> {
             try {
+                log.info("got text:{}", event.getText());
                 String message = event.getText();
                 String senderId = event.getSender().getId();
                 final String conversationId = getConversationId(environment, botId, senderId);
@@ -145,6 +146,7 @@ public class FacebookEndpoint implements IFacebookEndpoint {
                 setBodyEntity(message, "utf-8", MediaType.TEXT_PLAIN).
                 send(response -> {
                     try {
+                        log.info("httpresponse:{}" + response.getHttpCode());
                         switch (response.getHttpCode()) {
                             case 410: //gone
                             case 404: //not there
@@ -153,6 +155,7 @@ public class FacebookEndpoint implements IFacebookEndpoint {
                                 break;
                             case 200:
                                 String responseJson = response.getContentAsString();
+                                log.info("responseJson:{}",responseJson);
                                 SimpleConversationMemorySnapshot memorySnapshot = jsonSerialization
                                         .deserialize(responseJson, SimpleConversationMemorySnapshot.class);
 
@@ -208,25 +211,17 @@ public class FacebookEndpoint implements IFacebookEndpoint {
             throws RestInterfaceFactoryException {
         String conversationId;
         try {
-            log.info("apiServerURI:{}", apiServerURI);
-            log.info("environment:{}", environment);
-            log.info("botid:{}", botId);
             Response response = restInterfaceFactory.get(IRestBotEngine.class, apiServerURI).
                     startConversation(environment, botId);
-            if (response != null) {
-                log.info("response_status:{}", response.getStatus());
-                log.info("response_status:{}", response.toString());
+            if (response.getStatus() == 201) {
                 URIUtilities.ResourceId resourceIdConversation =
                         URIUtilities.extractResourceId(response.getLocation());
                 conversationId = resourceIdConversation.getId();
                 conversationIdCache.put(senderId, conversationId);
                 return conversationId;
-            } else {
-                log.info("response is null, conversation not created");
-                Exception exception = new Exception("response is null");
-                throw new RestInterfaceFactoryException("response is null", exception);
             }
-
+            Exception e = new Exception("bot (id:" + botId + ") is not deployed");
+            throw new RestInterfaceFactoryException(e.getLocalizedMessage(), e);
         } catch (RestInterfaceFactoryException e) {
             log.error(e.getLocalizedMessage(), e);
             throw e;
@@ -237,6 +232,7 @@ public class FacebookEndpoint implements IFacebookEndpoint {
     public Response webHook(final String botId, final String callbackPayload, final String sha1PayloadSignature) {
         SystemRuntime.getRuntime().submitCallable((Callable<Void>) () -> {
             try {
+                log.info("webhook called");
                 getMessageClient(botId).getReceiveClient().
                         processCallbackPayload(callbackPayload, sha1PayloadSignature);
             } catch (MessengerVerificationException e) {
