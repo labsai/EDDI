@@ -29,7 +29,7 @@ public class TemplateEngineModule extends AbstractBaseModule {
 
     @Provides
     @Singleton
-    private TemplateEngine provideTemplateEngine() {
+    public TemplateEngine provideTemplateEngine() {
         TemplateEngine templateEngine = new TemplateEngine();
         StringTemplateResolver templateResolver = new StringTemplateResolver();
         templateResolver.setTemplateMode(TemplateMode.HTML);
