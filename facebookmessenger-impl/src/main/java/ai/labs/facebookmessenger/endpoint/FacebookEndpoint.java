@@ -4,6 +4,7 @@ import ai.labs.caching.ICache;
 import ai.labs.caching.ICacheFactory;
 import ai.labs.httpclient.IHttpClient;
 import ai.labs.httpclient.IRequest;
+import ai.labs.httpclient.IResponse;
 import ai.labs.memory.model.Deployment;
 import ai.labs.memory.model.SimpleConversationMemorySnapshot;
 import ai.labs.resources.rest.bots.IBotStore;
@@ -25,6 +26,7 @@ import lombok.AllArgsConstructor;
 import lombok.Getter;
 import lombok.Setter;
 import lombok.extern.slf4j.Slf4j;
+import org.apache.http.impl.client.DefaultHttpClient;
 import org.jboss.resteasy.plugins.guice.RequestScoped;
 
 import javax.inject.Inject;
@@ -145,47 +147,47 @@ public class FacebookEndpoint implements IFacebookEndpoint {
                 conversationId);
         log.info("uri:{}",uri.toString());
         log.info("message:{}", message);
-        httpClient.newRequest(
+
+        IResponse response = httpClient.newRequest(
                 uri, IHttpClient.Method.POST).
                 setBodyEntity(message, "utf-8", MediaType.TEXT_PLAIN).
-                send(response -> {
-                    try {
-                        log.info("response:{}",response.getContentAsString());
-                        log.info("httpresponse:{}", response.getHttpCode());
-                        switch (response.getHttpCode()) {
-                            case 410: //gone
-                            case 404: //not there
-                                createConversation(environment, botId, senderId);
-                                say(environment, botId, conversationId, senderId, message);
-                                break;
-                            case 200:
-                                String responseJson = response.getContentAsString();
-                                log.info("responseJson:{}",responseJson);
-                                SimpleConversationMemorySnapshot memorySnapshot = jsonSerialization
-                                        .deserialize(responseJson, SimpleConversationMemorySnapshot.class);
+                send();
+        try {
+            log.info("response:{}",response.getContentAsString());
+            log.info("httpresponse:{}", response.getHttpCode());
+            switch (response.getHttpCode()) {
+                case 410: //gone
+                case 404: //not there
+                    createConversation(environment, botId, senderId);
+                    say(environment, botId, conversationId, senderId, message);
+                    break;
+                case 200:
+                    String responseJson = response.getContentAsString();
+                    log.info("responseJson:{}",responseJson);
+                    SimpleConversationMemorySnapshot memorySnapshot = jsonSerialization
+                            .deserialize(responseJson, SimpleConversationMemorySnapshot.class);
 
-                                String output = extractOutput(memorySnapshot);
-                                if (output != null) {
-                                    messengerClientCache.get(botId).getSendClient().
-                                            sendTextMessage(senderId, output);
-                                }
-
-                                //todo send message to facebook based on content-type
-                                //images
-                                //audio
-                                //quick-replies
-                                break;
-                        }
-                    } catch (RestInterfaceFactoryException |
-                            IRequest.HttpRequestException |
-                            MessengerApiException |
-                            MessengerIOException |
-                            IOException e) {
-                        log.error(String.format("HttpCode: %s , Message: %s" +
-                                response.getHttpCode(), response.getHttpCodeMessage()));
-                        log.error(e.getLocalizedMessage(), e);
+                    String output = extractOutput(memorySnapshot);
+                    if (output != null) {
+                        messengerClientCache.get(botId).getSendClient().
+                                sendTextMessage(senderId, output);
                     }
-                });
+
+                    //todo send message to facebook based on content-type
+                    //images
+                    //audio
+                    //quick-replies
+                    break;
+            }
+        } catch (RestInterfaceFactoryException |
+                IRequest.HttpRequestException |
+                MessengerApiException |
+                MessengerIOException |
+                IOException e) {
+            log.error(String.format("HttpCode: %s , Message: %s" +
+                    response.getHttpCode(), response.getHttpCodeMessage()));
+            log.error(e.getLocalizedMessage(), e);
+        }
     }
 
     private String extractOutput(SimpleConversationMemorySnapshot memorySnapshot) {
