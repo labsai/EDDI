@@ -34,6 +34,7 @@ import javax.ws.rs.WebApplicationException;
 import javax.ws.rs.core.MediaType;
 import javax.ws.rs.core.Response;
 import java.io.IOException;
+import java.net.URI;
 import java.util.Map;
 import java.util.concurrent.Callable;
 
@@ -137,15 +138,19 @@ public class FacebookEndpoint implements IFacebookEndpoint {
                      String senderId,
                      String message) throws IRequest.HttpRequestException {
 
+        URI uri = RestUtilities.createURI(
+                apiServerURI, "/bots/",
+                environment, "/",
+                botId, "/",
+                conversationId);
+        log.info("uri:{}",uri.toString());
+        log.info("message:{}", message);
         httpClient.newRequest(
-                RestUtilities.createURI(
-                        apiServerURI, "/bots/",
-                        environment, "/",
-                        botId, "/",
-                        conversationId)).
+                uri).
                 setBodyEntity(message, "utf-8", MediaType.TEXT_PLAIN).
                 send(response -> {
                     try {
+                        log.info("response:{}",response.getContentAsString());
                         log.info("httpresponse:{}", response.getHttpCode());
                         switch (response.getHttpCode()) {
                             case 410: //gone
