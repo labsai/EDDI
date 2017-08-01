@@ -122,7 +122,7 @@ public class FacebookEndpoint implements IFacebookEndpoint {
                 String message = event.getText();
                 String senderId = event.getSender().getId();
                 final String conversationId = getConversationId(environment, botId, senderId);
-
+                log.info("current conversationid:{}", conversationId);
                 say(environment, botId, conversationId, senderId, message);
 
             } catch (RestInterfaceFactoryException | IRequest.HttpRequestException e) {
@@ -139,14 +139,14 @@ public class FacebookEndpoint implements IFacebookEndpoint {
 
         httpClient.newRequest(
                 RestUtilities.createURI(
-                        apiServerURI, "/",
+                        apiServerURI, "/bots/",
                         environment, "/",
                         botId, "/",
                         conversationId)).
                 setBodyEntity(message, "utf-8", MediaType.TEXT_PLAIN).
                 send(response -> {
                     try {
-                        log.info("httpresponse:{}" + response.getHttpCode());
+                        log.info("httpresponse:{}", response.getHttpCode());
                         switch (response.getHttpCode()) {
                             case 410: //gone
                             case 404: //not there
