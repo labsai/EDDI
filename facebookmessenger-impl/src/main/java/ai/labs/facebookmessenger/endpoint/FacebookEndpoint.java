@@ -208,13 +208,22 @@ public class FacebookEndpoint implements IFacebookEndpoint {
             throws RestInterfaceFactoryException {
         String conversationId;
         try {
+            log.info("apiServerURI:{}", apiServerURI);
+            log.info("environment:{}", environment);
+            log.info("botid:{}", botId);
             Response response = restInterfaceFactory.get(IRestBotEngine.class, apiServerURI).
                     startConversation(environment, botId);
-            URIUtilities.ResourceId resourceIdConversation =
-                    URIUtilities.extractResourceId(response.getLocation());
-            conversationId = resourceIdConversation.getId();
-            conversationIdCache.put(senderId, conversationId);
-            return conversationId;
+            if (response != null) {
+                URIUtilities.ResourceId resourceIdConversation =
+                        URIUtilities.extractResourceId(response.getLocation());
+                conversationId = resourceIdConversation.getId();
+                conversationIdCache.put(senderId, conversationId);
+                return conversationId;
+            } else {
+                log.info("response is null, conversation not created");
+                Exception exception = new Exception("response is null");
+                throw new RestInterfaceFactoryException("response is null", exception);
+            }
 
         } catch (RestInterfaceFactoryException e) {
             log.error(e.getLocalizedMessage(), e);
