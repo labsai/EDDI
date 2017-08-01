@@ -27,6 +27,7 @@ import lombok.Getter;
 import lombok.Setter;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.http.impl.client.DefaultHttpClient;
+import org.apache.http.util.EntityUtils;
 import org.jboss.resteasy.plugins.guice.RequestScoped;
 
 import javax.inject.Inject;
