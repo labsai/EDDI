@@ -33,12 +33,17 @@ import javax.inject.Inject;
 import javax.inject.Named;
 import javax.ws.rs.InternalServerErrorException;
 import javax.ws.rs.WebApplicationException;
+import javax.ws.rs.container.AsyncResponse;
+import javax.ws.rs.container.TimeoutHandler;
 import javax.ws.rs.core.MediaType;
 import javax.ws.rs.core.Response;
 import java.io.IOException;
 import java.net.URI;
+import java.util.Collection;
+import java.util.Date;
 import java.util.Map;
 import java.util.concurrent.Callable;
+import java.util.concurrent.TimeUnit;
 
 import static ai.labs.memory.model.SimpleConversationMemorySnapshot.SimpleConversationStep;
 import static ai.labs.memory.model.SimpleConversationMemorySnapshot.SimpleData;
@@ -148,44 +153,99 @@ public class FacebookEndpoint implements IFacebookEndpoint {
         log.info("uri:{}",uri.toString());
         log.info("message:{}", message);
 
-        IResponse response = httpClient.newRequest(
-                uri, IHttpClient.Method.POST).
-                setBodyEntity(message, "utf-8", MediaType.TEXT_PLAIN).
-                send();
         try {
-            log.info("response:{}",response.getContentAsString());
-            log.info("httpresponse:{}", response.getHttpCode());
-            switch (response.getHttpCode()) {
-                case 410: //gone
-                case 404: //not there
-                    createConversation(environment, botId, senderId);
-                    say(environment, botId, conversationId, senderId, message);
-                    break;
-                case 200:
-                    String responseJson = response.getContentAsString();
-                    log.info("responseJson:{}",responseJson);
-                    SimpleConversationMemorySnapshot memorySnapshot = jsonSerialization
-                            .deserialize(responseJson, SimpleConversationMemorySnapshot.class);
+            restInterfaceFactory.get(IRestBotEngine.class, apiServerURI).say(environment, botId, conversationId, message, new AsyncResponse() {
+                @Override
+                public boolean resume(Object o) {
+                    return false;
+                }
 
-                    String output = extractOutput(memorySnapshot);
-                    if (output != null) {
-                        messengerClientCache.get(botId).getSendClient().
-                                sendTextMessage(senderId, output);
-                    }
+                @Override
+                public boolean resume(Throwable throwable) {
+                    return false;
+                }
 
-                    //todo send message to facebook based on content-type
-                    //images
-                    //audio
-                    //quick-replies
-                    break;
+                @Override
+                public boolean cancel() {
+                    return false;
+                }
+
+                @Override
+                public boolean cancel(int i) {
+                    return false;
+                }
+
+                @Override
+                public boolean cancel(Date date) {
+                    return false;
+                }
+
+                @Override
+                public boolean isSuspended() {
+                    return false;
+                }
+
+                @Override
+                public boolean isCancelled() {
+                    return false;
+                }
+
+                @Override
+                public boolean isDone() {
+                    return false;
+                }
+
+                @Override
+                public boolean setTimeout(long l, TimeUnit timeUnit) {
+                    return false;
+                }
+
+                @Override
+                public void setTimeoutHandler(TimeoutHandler timeoutHandler) {
+
+                }
+
+                @Override
+                public Collection<Class<?>> register(Class<?> aClass) {
+                    return null;
+                }
+
+                @Override
+                public Map<Class<?>, Collection<Class<?>>> register(Class<?> aClass, Class<?>[] classes) {
+                    return null;
+                }
+
+                @Override
+                public Collection<Class<?>> register(Object o) {
+                    return null;
+                }
+
+                @Override
+                public Map<Class<?>, Collection<Class<?>>> register(Object o, Object... objects) {
+                    return null;
+                }
+            });
+        } catch (RestInterfaceFactoryException e) {
+            e.printStackTrace();
+        }
+        try {
+            Thread.sleep(1000l);
+        } catch (InterruptedException e) {
+            e.printStackTrace();
+        }
+        try {
+            SimpleConversationMemorySnapshot memorySnapshot = restInterfaceFactory.get(IRestBotEngine.class, apiServerURI).readConversation(environment, botId, conversationId, false);
+            String output = extractOutput(memorySnapshot);
+            if (output != null) {
+                messengerClientCache.get(botId).getSendClient().
+                        sendTextMessage(senderId, output);
             }
-        } catch (RestInterfaceFactoryException |
-                IRequest.HttpRequestException |
-                MessengerApiException |
-                MessengerIOException |
-                IOException e) {
-            log.error(String.format("HttpCode: %s , Message: %s" +
-                    response.getHttpCode(), response.getHttpCodeMessage()));
+
+        } catch (RestInterfaceFactoryException e) {
+            log.error(e.getLocalizedMessage(), e);
+        } catch (MessengerIOException e) {
+            log.error(e.getLocalizedMessage(), e);
+        } catch (MessengerApiException e) {
             log.error(e.getLocalizedMessage(), e);
         }
     }
