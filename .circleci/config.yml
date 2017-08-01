@@ -5,7 +5,11 @@ branches:
 jobs:
   build:
     docker:
-      - image: labsai/ci-build
+      - image: eu.gcr.io/differ-140008/eddi-ci-build
+        args:
+          CLUSTER_NAME: ${CLUSTER_NAME}
+          GOOGLE_COMPUTE_ZONE: ${CLOUDSDK_COMPUTE_ZONE}
+          PROJECT_NAME: ${PROJECT_NAME}
         environment:
           ACCT_AUTH: ${ACCT_AUTH}
           APP_NAME: eddi
@@ -23,8 +27,6 @@ jobs:
           key: eddi
           paths:
             - /root/.m2
-
-      - run: ./tools/ensure-gcloud-installed.sh
 
       - run: ./tools/ensure-helm-installed.sh
 
