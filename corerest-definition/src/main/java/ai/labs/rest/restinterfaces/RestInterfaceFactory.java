@@ -7,7 +7,10 @@ import org.apache.http.conn.scheme.Scheme;
 import org.apache.http.conn.scheme.SchemeRegistry;
 import org.apache.http.conn.ssl.SSLSocketFactory;
 import org.apache.http.conn.ssl.X509HostnameVerifier;
+import org.apache.http.impl.client.CloseableHttpClient;
 import org.apache.http.impl.client.DefaultHttpClient;
+import org.apache.http.impl.client.HttpClients;
+import org.apache.http.impl.conn.PoolingHttpClientConnectionManager;
 import org.jboss.resteasy.client.jaxrs.ResteasyClient;
 import org.jboss.resteasy.client.jaxrs.ResteasyClientBuilder;
 import org.jboss.resteasy.client.jaxrs.ResteasyWebTarget;
@@ -60,9 +63,13 @@ public class RestInterfaceFactory implements IRestInterfaceFactory {
     private ResteasyClient getResteasyClient(String targetServerUri) throws RestInterfaceFactoryException {
         ResteasyClient client = clients.get(targetServerUri);
         if(client == null) {
-            HttpClient httpClient = targetServerUri.startsWith("https") ?
-                    prepareClientForSSL(this.httpClient, URI.create(targetServerUri)) : this.httpClient;
+            //CloseableHttpClient httpClient = targetServerUri.startsWith("https") ?
+            //        prepareClientForSSL(this.httpClient, URI.create(targetServerUri)) : this.httpClient;
 
+            PoolingHttpClientConnectionManager cm = new PoolingHttpClientConnectionManager();
+            CloseableHttpClient httpClient = HttpClients.custom().setConnectionManager(cm).build();
+            cm.setMaxTotal(200); // Increase max total connection to 200
+            cm.setDefaultMaxPerRoute(20); // Increase default max connection per route to 20
             ApacheHttpClient4Engine engine = new ApacheHttpClient4Engine(httpClient);
             ResteasyClientBuilder clientBuilder = new ResteasyClientBuilder();
             clientBuilder.connectionPoolSize(20);
