@@ -235,8 +235,7 @@ public class FacebookEndpoint implements IFacebookEndpoint {
             e.printStackTrace();
         }
         try {
-            SimpleConversationMemorySnapshot memorySnapshot = restInterfaceFactory.get(IRestBotEngine.class, apiServerURI).readConversation(environment, botId, conversationId, false);
-            String output = extractOutput(memorySnapshot);
+            String output = restInterfaceFactory.get(IRestBotEngine.class, apiServerURI).readConversation(environment, botId, conversationId);
             if (output != null) {
                 messengerClientCache.get(botId).getSendClient().
                         sendTextMessage(senderId, output);
@@ -251,17 +250,6 @@ public class FacebookEndpoint implements IFacebookEndpoint {
         }
     }
 
-    private String extractOutput(SimpleConversationMemorySnapshot memorySnapshot) {
-        for (SimpleConversationStep conversationStep : memorySnapshot.getConversationSteps()) {
-            for (SimpleData simpleData : conversationStep.getData()) {
-                if (simpleData.getKey().startsWith("output:final")) {
-                    return simpleData.getValue().toString();
-                }
-            }
-        }
-
-        return null;
-    }
 
     private String getConversationId(Deployment.Environment environment, String botId, String senderId)
             throws RestInterfaceFactoryException {

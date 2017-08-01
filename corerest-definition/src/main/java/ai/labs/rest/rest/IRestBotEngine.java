@@ -42,6 +42,15 @@ public interface IRestBotEngine {
                                                       @QueryParam("includeAll") @DefaultValue("false") Boolean includeAll);
 
     @GET
+    @NoCache
+    @Path("/{environment}/{botId}/{conversationId}")
+    @Produces(MediaType.TEXT_PLAIN)
+    String readConversation(@PathParam("environment") Deployment.Environment environment,
+                                                      @PathParam("botId") String botId,
+                                                      @PathParam("conversationId") String conversationId);
+
+
+    @GET
     @Path("/{environment}/conversationstatus/{conversationId}")
     ConversationState getConversationState(@PathParam("environment") Deployment.Environment environment,
                                            @PathParam("conversationId") String conversationId);
