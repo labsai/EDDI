@@ -95,6 +95,10 @@ public class SimpleConversationMemorySnapshot {
     }
 
     public static class SimpleData {
+
+        // Empty Constructor needed for deserialization
+        public SimpleData() {}
+
         private String key;
         private Object value;
 
