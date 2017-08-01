@@ -146,7 +146,7 @@ public class FacebookEndpoint implements IFacebookEndpoint {
         log.info("uri:{}",uri.toString());
         log.info("message:{}", message);
         httpClient.newRequest(
-                uri).
+                uri, IHttpClient.Method.POST).
                 setBodyEntity(message, "utf-8", MediaType.TEXT_PLAIN).
                 send(response -> {
                     try {
