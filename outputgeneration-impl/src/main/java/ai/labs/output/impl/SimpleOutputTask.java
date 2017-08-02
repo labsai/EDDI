@@ -87,12 +87,12 @@ public class SimpleOutputTask implements ILifecycleTask {
         }
 
         for (List<OutputEntry> possibleOutput : possibleOutputs) {
-            String outputTextKey = "output:action:" + possibleOutput.get(0).getKey();
+            String outputTextKey = "output:" + possibleOutput.get(0).getKey();
             IData outputText = dataFactory.createData(outputTextKey, null,
                     simpleOutput.convertOutputText(possibleOutput));
             memory.getCurrentStep().storeData(outputText);
 
-            String outputQuickReplyKey = "output:quickreply:" + possibleOutput.get(0).getKey();
+            String outputQuickReplyKey = "quickreply:" + possibleOutput.get(0).getKey();
             List<IQuickReply> quickReplies = convertQuickReplies(possibleOutput);
             if (!quickReplies.isEmpty()) {
                 IData outputQuickReplies = dataFactory.createData(outputQuickReplyKey, quickReplies);
@@ -101,7 +101,7 @@ public class SimpleOutputTask implements ILifecycleTask {
             }
         }
 
-        List<IData<String>> allOutputParts = memory.getCurrentStep().getAllData("output:action");
+        List<IData<String>> allOutputParts = memory.getCurrentStep().getAllData("output");
         StringBuilder finalOutput = new StringBuilder();
         for (IData outputPart : allOutputParts) {
             finalOutput.append(outputPart.getResult()).append(SEPARATOR);
@@ -111,7 +111,7 @@ public class SimpleOutputTask implements ILifecycleTask {
             finalOutput.delete(finalOutput.length() - SEPARATOR.length(), finalOutput.length());
         }
 
-        IData finalOutputData = dataFactory.createData("output:final", finalOutput.toString());
+        IData finalOutputData = dataFactory.createData("output:concat", finalOutput.toString());
         finalOutputData.setPublic(true);
         memory.getCurrentStep().storeData(finalOutputData);
     }

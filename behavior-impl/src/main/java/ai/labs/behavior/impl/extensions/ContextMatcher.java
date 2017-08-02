@@ -98,8 +98,7 @@ public class ContextMatcher implements IBehaviorExtension {
                 if (values.get(contextTypeQualifier).equals(expressionsQualifier)) {
                     expressions = expressionProvider.parseExpressions(values.get(expressionsQualifier));
                 } else if (values.get(contextTypeQualifier).equals(objectQualifier)) {
-                    object = new ObjectValue(values.get(objectQualifier),
-                            values.get(objectKeyPathQualifier), values.get(objectValueQualifier));
+                    object = new ObjectValue(values.get(objectKeyPathQualifier), values.get(objectValueQualifier));
                 } else {
                     string = values.get(stringQualifier);
                 }
@@ -123,8 +122,19 @@ public class ContextMatcher implements IBehaviorExtension {
                                         context.getValue().toString())) != -1;
                         break;
                     case object:
-                        success = object.getObjectValue().equals(
-                                JsonPath.with(object.getObject()).get(object.getObjectKeyPath()).toString());
+                        try {
+                            final String contextObjectAsJson = jsonSerialization.serialize(context.getValue());
+                            if (object.getObjectValue() == null) {
+                                success = jsonSerialization.deserialize(contextObjectAsJson, Map.class).
+                                        containsKey(object.objectKeyPath);
+                            } else {
+                                success = object.getObjectValue().equals(
+                                        JsonPath.with(contextObjectAsJson).get(object.getObjectKeyPath()).toString());
+                            }
+                        } catch (IOException e) {
+                            log.error(e.getLocalizedMessage(), e);
+                            success = false;
+                        }
                         break;
 
                     default:
@@ -156,7 +166,6 @@ public class ContextMatcher implements IBehaviorExtension {
     @Getter
     @Setter
     private static class ObjectValue {
-        private String object;
         private String objectKeyPath;
         private String objectValue;
     }
