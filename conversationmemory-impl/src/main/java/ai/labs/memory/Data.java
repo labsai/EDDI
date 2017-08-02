@@ -15,15 +15,10 @@ import java.util.Random;
 @Setter
 public class Data<T> implements IData<T> {
     private final String key;
-    private List possibleResults;
+    private List<T> possibleResults;
     private T result;
     private final Date timestamp;
     private boolean isPublic;
-
-    public Data(IData<T> data) {
-        this(data.getKey(), data.getResult(), data.getPossibleResults(), data.getTimestamp(), data.isPublic());
-        this.result = data.getResult();
-    }
 
     public Data(String key, T result) {
         this(key, result, Collections.singletonList(result), new Date(System.currentTimeMillis()));
@@ -67,11 +62,9 @@ public class Data<T> implements IData<T> {
 
     @Override
     public String toString() {
-        final StringBuilder sb = new StringBuilder();
-        sb.append("result");
-        sb.append("{key='").append(key).append('\'');
-        sb.append(", result=").append(result);
-        sb.append('}');
-        return sb.toString();
+        return "result" +
+                "{key='" + key + '\'' +
+                ", result=" + result +
+                '}';
     }
 }

@@ -52,9 +52,10 @@ public class OutputTemplateTask implements ILifecycleTask {
         }
 
         for (IData<String> output : outputs) {
+            String outputKey = output.getKey();
             String outputTemplate = output.getResult();
             String processedTemplate = templatingEngine.processTemplate(outputTemplate, dynamicAttributesMap);
-            String processedOutputKey = "output:templated:" + output.getKey();
+            String processedOutputKey = "output:templated:" + outputKey.substring(outputKey.indexOf(":") + 1);
             IData<String> processedData = dataFactory.createData(processedOutputKey, processedTemplate);
             memory.getCurrentStep().storeData(processedData);
         }
