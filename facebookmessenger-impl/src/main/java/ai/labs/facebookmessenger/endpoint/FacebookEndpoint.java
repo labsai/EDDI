@@ -239,7 +239,7 @@ public class FacebookEndpoint implements IFacebookEndpoint {
             message = message.toLowerCase().trim();
             if (message.equals("hi")) output = "Hi, I am the Med Bot, please ask me about medicine";
             else if (message.equals("bye")) output = "Good bye, see you soon";
-            else if (message.contains("Afinitor")) output = "Here is a in depth description of Afinitor: https://www.us.afinitor.com/";
+            else if (message.contains("afinitor")) output = "Here is a in depth description of Afinitor: https://www.us.afinitor.com/";
             else output = "Sorry, I don't understand";
             if (output != null) {
                 messengerClientCache.get(botId).getSendClient().
