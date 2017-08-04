@@ -216,6 +216,11 @@
             <artifactId>behavior-impl</artifactId>
             <version>${project.version}</version>
         </dependency>
+        <dependency>
+            <groupId>ai.labs</groupId>
+            <artifactId>templateengine-impl-thymeleaf</artifactId>
+            <version>${project.version}</version>
+        </dependency>
     </dependencies>
 
     <build>

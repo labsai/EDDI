@@ -22,6 +22,7 @@ import ai.labs.serialization.bootstrap.SerializationModule;
 import ai.labs.server.IServerRuntime;
 import ai.labs.server.bootstrap.ServerRuntimeModule;
 import ai.labs.staticresources.bootstrap.StaticResourcesModule;
+import ai.labs.templateengine.bootstrap.TemplateEngineModule;
 import ai.labs.testing.bootstrap.AutomatedtestingModule;
 import ai.labs.utilities.FileUtilities;
 import com.google.inject.Module;
@@ -64,6 +65,7 @@ public class ApiServer {
                 new SemanticParserModule(),
                 new BehaviorModule(),
                 new OutputGenerationModule(),
+                new TemplateEngineModule(),
                 new AutomatedtestingModule(),
                 new StaticResourcesModule(),
                 new HttpClientModule(),
