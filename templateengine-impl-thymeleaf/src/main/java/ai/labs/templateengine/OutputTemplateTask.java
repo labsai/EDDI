@@ -42,22 +42,22 @@ public class OutputTemplateTask implements ILifecycleTask {
         List<IData<Context>> contexts = memory.getCurrentStep().getAllData("context");
 
         HashMap<String, Object> dynamicAttributesMap = new HashMap<>();
-        for (IData<Context> contextData : contexts) {
+        contexts.forEach(contextData -> {
             Context context = contextData.getResult();
             ContextType contextType = context.getType();
             if (contextType.equals(ContextType.object) || contextType.equals(ContextType.string)) {
                 String dataKey = contextData.getKey();
                 dynamicAttributesMap.put(dataKey.substring(dataKey.indexOf(":") + 1), context.getValue());
             }
-        }
+        });
 
-        for (IData<String> output : outputs) {
+        outputs.forEach(output -> {
             String outputKey = output.getKey();
             String outputTemplate = output.getResult();
             String processedTemplate = templatingEngine.processTemplate(outputTemplate, dynamicAttributesMap);
             String processedOutputKey = "output:templated:" + outputKey.substring(outputKey.indexOf(":") + 1);
             IData<String> processedData = dataFactory.createData(processedOutputKey, processedTemplate);
             memory.getCurrentStep().storeData(processedData);
-        }
+        });
     }
 }
