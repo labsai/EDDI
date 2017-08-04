@@ -51,6 +51,8 @@
         <module>outputgeneration-impl</module>
         <module>behavior-definition</module>
         <module>behavior-impl</module>
+        <module>templateengine-definition</module>
+        <module>templateengine-impl-thymeleaf</module>
     </modules>
 
     <build>

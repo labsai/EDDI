@@ -23,7 +23,7 @@ public interface IData<T> extends Serializable {
      */
     boolean isPublic();
 
-    void setPossibleResults(List possibleResults);
+    void setPossibleResults(List<T> possibleResults);
 
     void setResult(T result);
 

@@ -59,6 +59,7 @@ public interface IRestBotEngine {
     @POST
     @Path("/{environment}/{botId}/{conversationId}")
     @Consumes(MediaType.TEXT_PLAIN)
+    @Produces(MediaType.APPLICATION_JSON)
     void say(@PathParam("environment") Deployment.Environment environment,
              @PathParam("botId") String botId,
              @PathParam("conversationId") String conversationId,
@@ -78,6 +79,7 @@ public interface IRestBotEngine {
     @POST
     @Path("/{environment}/{botId}/{conversationId}")
     @Consumes(MediaType.APPLICATION_JSON)
+    @Produces(MediaType.APPLICATION_JSON)
     void sayWithinContext(@PathParam("environment") Deployment.Environment environment,
                           @PathParam("botId") String botId,
                           @PathParam("conversationId") String conversationId,
