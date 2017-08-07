@@ -30,8 +30,9 @@ jobs:
           paths:
             - /root/.m2
 
-
-      - run: apk add --update curl
+      - run: apk update
+      - run: apk add bash
+      - run: apk add curl
       - run: ./tools/ensure-helm-installed.sh
 
       - run: mvn clean package
