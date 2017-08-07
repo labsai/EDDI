@@ -18,7 +18,7 @@ jobs:
           CLUSTER_NAME: ${CLUSTER_NAME}
           CLOUDSDK_COMPUTE_ZONE: ${CLOUDSDK_COMPUTE_ZONE}
           EDDI_JAVA_ENV_MONGODB_HOSTS: mongodb.hosts=eddi-storage-0.eddi-storage
-          PATH: ${PATH}:/usr/local/gcloud/google-cloud-sdk/bin
+          #PATH: ${PATH}:/usr/local/gcloud/google-cloud-sdk/bin
           CLOUD_SDK_VERSION: 120.0.0
     working_directory: ~/eddi
     steps:
