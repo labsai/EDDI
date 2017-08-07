@@ -30,8 +30,6 @@ jobs:
           paths:
             - /root/.m2
 
-      - run: ./tools/ensure-helm-installed.sh
-
       - run: mvn clean package
 
       - run: mkdir -p $CIRCLE_TEST_REPORTS/junit/
@@ -62,6 +60,8 @@ jobs:
                          gcloud --quiet config set container/cluster $CLUSTER_NAME \
                          gcloud config set compute/zone ${GOOGLE_COMPUTE_ZONE} \
                          gcloud --quiet container clusters get-credentials $CLUSTER_NAME
+
+      - run: ./tools/ensure-helm-installed.sh
 
       - deploy:
           name: Build and push Docker image
