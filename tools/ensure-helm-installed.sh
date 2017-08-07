@@ -7,4 +7,5 @@ chmod 700 get_helm.sh
 ./get_helm.sh
 helm init
 helm repo add differ-charts https://differ-charts.storage.googleapis.com
+helm repo remove local
 helm repo update
