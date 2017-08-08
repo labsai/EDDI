@@ -15,9 +15,5 @@ import java.util.List;
 @Setter
 @EqualsAndHashCode
 public class OutputConfigurationSet {
-    private List<OutputConfiguration> outputs;
-
-    public OutputConfigurationSet() {
-        this.outputs = new ArrayList<>();
-    }
+    private List<OutputConfiguration> outputSet = new ArrayList<>();
 }

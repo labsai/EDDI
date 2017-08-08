@@ -1,7 +1,7 @@
 package ai.labs.output.bootstrap;
 
 import ai.labs.lifecycle.ILifecycleTask;
-import ai.labs.output.impl.SimpleOutputTask;
+import ai.labs.output.impl.OutputGenerationTask;
 import ai.labs.runtime.bootstrap.AbstractBaseModule;
 import com.google.inject.multibindings.MapBinder;
 
@@ -13,6 +13,6 @@ public class OutputGenerationModule extends AbstractBaseModule {
     protected void configure() {
         MapBinder<String, ILifecycleTask> lifecycleTaskPlugins
                 = MapBinder.newMapBinder(binder(), String.class, ILifecycleTask.class);
-        lifecycleTaskPlugins.addBinding("ai.labs.output").to(SimpleOutputTask.class);
+        lifecycleTaskPlugins.addBinding("ai.labs.output").to(OutputGenerationTask.class);
     }
 }
