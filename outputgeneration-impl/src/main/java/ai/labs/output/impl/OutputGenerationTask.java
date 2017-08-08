@@ -1,6 +1,5 @@
 package ai.labs.output.impl;
 
-import ai.labs.expressions.utilities.IExpressionProvider;
 import ai.labs.lifecycle.ILifecycleTask;
 import ai.labs.lifecycle.LifecycleException;
 import ai.labs.lifecycle.PackageConfigurationException;
@@ -8,8 +7,10 @@ import ai.labs.memory.IConversationMemory;
 import ai.labs.memory.IData;
 import ai.labs.memory.IDataFactory;
 import ai.labs.output.IOutputFilter;
-import ai.labs.output.IQuickReply;
+import ai.labs.output.IOutputGeneration;
 import ai.labs.output.model.OutputEntry;
+import ai.labs.output.model.OutputValue;
+import ai.labs.output.model.QuickReply;
 import ai.labs.resources.rest.output.model.OutputConfiguration;
 import ai.labs.resources.rest.output.model.OutputConfigurationSet;
 import ai.labs.runtime.client.configuration.IResourceClientLibrary;
@@ -28,19 +29,17 @@ import java.util.stream.Collectors;
  */
 public class OutputGenerationTask implements ILifecycleTask {
     private static final String ACTION_KEY = "action";
-    private OutputGeneration outputGeneration;
-    private IResourceClientLibrary resourceClientLibrary;
+    private final IResourceClientLibrary resourceClientLibrary;
     private final IDataFactory dataFactory;
-    private final IExpressionProvider expressionProvider;
+    private final IOutputGeneration outputGeneration;
 
     @Inject
     public OutputGenerationTask(IResourceClientLibrary resourceClientLibrary,
                                 IDataFactory dataFactory,
-                                IExpressionProvider expressionProvider) {
+                                IOutputGeneration outputGeneration) {
         this.resourceClientLibrary = resourceClientLibrary;
         this.dataFactory = dataFactory;
-        this.expressionProvider = expressionProvider;
-        this.outputGeneration = new OutputGeneration();
+        this.outputGeneration = outputGeneration;
 
     }
 
@@ -77,7 +76,7 @@ public class OutputGenerationTask implements ILifecycleTask {
                     memory.getCurrentStep().storeData(outputData);
                 });
 
-                List<IQuickReply> quickReplies = convertQuickReplies(outputEntry.getQuickReplies());
+                List<QuickReply> quickReplies = convertQuickReplies(outputEntry.getQuickReplies());
                 if (!quickReplies.isEmpty()) {
                     String outputQuickReplyKey = "quickReply:".concat(outputEntry.getAction());
                     IData outputQuickReplies = dataFactory.createData(outputQuickReplyKey, quickReplies);
@@ -131,28 +130,27 @@ public class OutputGenerationTask implements ILifecycleTask {
         return count;
     }
 
-    private List<OutputEntry.OutputValue> convertOutputTypesConfig(List<OutputConfiguration.OutputType> configOutputs) {
+    private List<OutputValue> convertOutputTypesConfig(List<OutputConfiguration.OutputType> configOutputs) {
         return configOutputs.stream().map(configOutput -> {
-            OutputEntry.OutputValue outputValue = new OutputEntry.OutputValue();
-            outputValue.setType(OutputEntry.OutputValue.Type.valueOf(configOutput.getType()));
+            OutputValue outputValue = new OutputValue();
+            outputValue.setType(OutputValue.Type.valueOf(configOutput.getType()));
             outputValue.setValueAlternatives(configOutput.getValueAlternatives());
             return outputValue;
         }).collect(Collectors.toCollection(LinkedList::new));
     }
 
-    private List<OutputEntry.QuickReply> convertQuickRepliesConfig(List<OutputConfiguration.QuickReply> configQuickReplies) {
+    private List<QuickReply> convertQuickRepliesConfig(List<OutputConfiguration.QuickReply> configQuickReplies) {
         return configQuickReplies.stream().map(configQuickReply -> {
-            OutputEntry.QuickReply quickReply = new OutputEntry.QuickReply();
+            QuickReply quickReply = new QuickReply();
             quickReply.setValue(configQuickReply.getValue());
-            quickReply.setExpressions(expressionProvider.parseExpressions(configQuickReply.getExpressions()));
+            quickReply.setExpressions(configQuickReply.getExpressions());
             return quickReply;
         }).collect(Collectors.toCollection(LinkedList::new));
     }
 
-    private List<IQuickReply> convertQuickReplies(List<OutputEntry.QuickReply> outputQuickReplies) {
+    private List<QuickReply> convertQuickReplies(List<QuickReply> outputQuickReplies) {
         return outputQuickReplies.stream().map(quickReply ->
-                new QuickReply(quickReply.getValue(),
-                        expressionProvider.toString(quickReply.getExpressions()))
+                new QuickReply(quickReply.getValue(), quickReply.getExpressions())
         ).collect(Collectors.toList());
     }
 }

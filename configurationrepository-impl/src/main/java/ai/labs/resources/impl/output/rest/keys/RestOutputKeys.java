@@ -63,7 +63,7 @@ public class RestOutputKeys implements IRestOutputKeys {
 
             resourceIds = readOutputSetResourceIds(packageConfiguration);
             for (IResourceStore.IResourceId resourceId : resourceIds) {
-                List<String> outputKeys = outputStore.readOutputKeys(resourceId.getId(), resourceId.getVersion(), filter, "asc", limit);
+                List<String> outputKeys = outputStore.readOutputActions(resourceId.getId(), resourceId.getVersion(), filter, "asc", limit);
                 CollectionUtilities.addAllWithoutDuplicates(retOutputKeys, outputKeys);
                 if (retOutputKeys.size() >= limit) {
                     return sortedOutputKeys(retOutputKeys);

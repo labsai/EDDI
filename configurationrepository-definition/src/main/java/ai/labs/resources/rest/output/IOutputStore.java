@@ -11,5 +11,5 @@ import java.util.List;
 public interface IOutputStore extends IResourceStore<OutputConfigurationSet> {
     OutputConfigurationSet read(String id, Integer version, String filter, String order, Integer index, Integer limit) throws IResourceStore.ResourceNotFoundException, ResourceStoreException;
 
-    List<String> readOutputKeys(String id, Integer version, String filter, String order, Integer limit) throws ResourceStoreException, ResourceNotFoundException;
+    List<String> readOutputActions(String id, Integer version, String filter, String order, Integer limit) throws ResourceStoreException, ResourceNotFoundException;
 }

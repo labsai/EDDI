@@ -1,15 +1,17 @@
 package ai.labs.output.impl;
 
-import ai.labs.expressions.Expression;
 import ai.labs.output.IOutputFilter;
 import ai.labs.output.model.OutputEntry;
-import ai.labs.output.model.OutputEntry.OutputValue;
-import ai.labs.output.model.OutputEntry.QuickReply;
+import ai.labs.output.model.OutputValue;
+import ai.labs.output.model.QuickReply;
 import org.junit.Assert;
 import org.junit.Before;
 import org.junit.Test;
 
-import java.util.*;
+import java.util.Arrays;
+import java.util.LinkedList;
+import java.util.List;
+import java.util.Map;
 
 /**
  * @author ginccc
@@ -107,9 +109,8 @@ public class OutputGenerationTest {
         List<String> valueAlternatives2 = Arrays.asList("Text2 Alternative 1", "Text2 Alternative 2");
         List<OutputValue> outputValues = Arrays.asList(new OutputValue(OutputValue.Type.text, valueAlternatives1),
                 new OutputValue(OutputValue.Type.text, valueAlternatives2));
-        List<Expression> expressions = Collections.singletonList(new Expression("someExpression"));
-        List<QuickReply> quickReply = Arrays.asList(new QuickReply("Some QuickReply", expressions),
-                new QuickReply("Some Other QuickReply", expressions));
+        List<QuickReply> quickReply = Arrays.asList(new QuickReply("Some QuickReply", "some(Expression)"),
+                new QuickReply("Some Other QuickReply", "someOther(Expression"));
 
         outputEntries.add(new OutputEntry("action3", 4, outputValues, quickReply));
         outputEntries.add(new OutputEntry("action3", 2, outputValues, quickReply));
