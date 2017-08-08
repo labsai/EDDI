@@ -1,4 +1,0 @@
-dependencies:
-  - name: mongodb
-    version: 4.0.0
-    repository: https://differ-charts.storage.googleapis.com
