@@ -6,20 +6,6 @@ jobs:
   build:
     docker:
       - image: labsai/ci-build
-        args:
-          CLUSTER_NAME: ${CLUSTER_NAME}
-          GOOGLE_COMPUTE_ZONE: ${CLOUDSDK_COMPUTE_ZONE}
-          PROJECT_NAME: ${PROJECT_NAME}
-        environment:
-          ACCT_AUTH: ${ACCT_AUTH}
-          APP_NAME: eddi
-          DOCKER_IMAGE: ${DOCKER_IMAGE}
-          PROJECT_NAME: ${PROJECT_NAME}
-          CLUSTER_NAME: ${CLUSTER_NAME}
-          CLOUDSDK_COMPUTE_ZONE: ${CLOUDSDK_COMPUTE_ZONE}
-          EDDI_JAVA_ENV_MONGODB_HOSTS: mongodb.hosts=eddi-storage-0.eddi-storage
-          #PATH: ${PATH}:/usr/local/gcloud/google-cloud-sdk/bin
-          CLOUD_SDK_VERSION: 120.0.0
     working_directory: ~/eddi
     steps:
       - checkout
@@ -47,35 +33,24 @@ jobs:
             chmod +x integration-tests.sh
             ./integration-tests.sh
 
-      - run: curl -sSL https://sdk.cloud.google.com | bash
-      - run: env PATH $PATH:/root/google-cloud-sdk/bin
-      - run: gcloud --quiet components update
-      - run: gcloud --quiet components update kubectl
-      - run: |
-          cat <<EOF >account-auth.json
-          ${ACCOUNT_AUTH}
-          EOF
-      - run: gcloud auth activate-service-account --key-file account-auth.json
-      - run: gcloud config set project $PROJECT_NAME \
-                         gcloud --quiet config set container/cluster $CLUSTER_NAME \
-                         gcloud config set compute/zone ${GOOGLE_COMPUTE_ZONE} \
-                         gcloud --quiet container clusters get-credentials $CLUSTER_NAME
-
-      - run: ./tools/ensure-helm-installed.sh
-
       - deploy:
           name: Build and push Docker image
           command: |
             if [ "${CIRCLE_BRANCH}" == "master" ]; then
+            docker login -u $DOCKER_USER -p $DOCKER_PASS
 
-            # todo: get version dynamically?
-            export version=4.1.0
+            docker build --build-arg EDDI_VERSION=4.1 --build-arg EDDI_ENV=production -t labsai/eddi:4.1.0-b$CIRCLE_BUILD_NUM .
+            docker push labsai/eddi:4.1.0-b$CIRCLE_BUILD_NUM
 
-            sudo /opt/google-cloud-sdk/bin/gcloud docker build -t $DOCKER_IMAGE:$version-$CIRCLE_BUILD_NUM .
-            sudo /opt/google-cloud-sdk/bin/gcloud docker build -t $DOCKER_IMAGE:latest .
+            docker build --build-arg EDDI_VERSION=4.1 --build-arg EDDI_ENV=production -t labsai/eddi:latest .
+            docker push labsai/eddi:latest
 
-            sudo /opt/google-cloud-sdk/bin/gcloud docker push $DOCKER_IMAGE:$version-$CIRCLE_BUILD_NUM
-            sudo /opt/google-cloud-sdk/bin/gcloud docker push $DOCKER_IMAGE:latest
+            # docker build --build-arg EDDI_VERSION=4.1 --build-arg EDDI_ENV=production -t labsai/eddi:4.1.0 .
+            # docker push labsai/eddi:4.1.0
 
-            sudo helm upgrade $APP_NAME charts/$APP_NAME --set image.tag=$version-$IMAGE_TAG --install
+            # docker build --build-arg EDDI_VERSION=4.1 --build-arg EDDI_ENV=production -t labsai/eddi:4.1 .
+            # docker push labsai/eddi:4.1
+
+            # docker build --build-arg EDDI_VERSION=4.1 --build-arg EDDI_ENV=production -t labsai/eddi:4 .
+            # docker push --build-arg EDDI_VERSION=4.1 EDDI_VERSION EDDI_ENV=production labsai/eddi:4
             fi
