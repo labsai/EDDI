@@ -15,6 +15,7 @@ import ai.labs.resources.rest.output.model.OutputConfiguration;
 import ai.labs.resources.rest.output.model.OutputConfigurationSet;
 import ai.labs.runtime.client.configuration.IResourceClientLibrary;
 import ai.labs.runtime.service.ServiceException;
+import ai.labs.utilities.StringUtilities;
 
 import javax.inject.Inject;
 import java.net.URI;
@@ -23,6 +24,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Random;
 import java.util.stream.Collectors;
+import java.util.stream.IntStream;
 
 /**
  * @author ginccc
@@ -45,7 +47,7 @@ public class OutputGenerationTask implements ILifecycleTask {
 
     @Override
     public String getId() {
-        return "ai.labs.output.OutputGeneration";
+        return "ai.labs.output";
     }
 
     @Override
@@ -60,34 +62,44 @@ public class OutputGenerationTask implements ILifecycleTask {
             return;
         }
         List<String> actions = latestData.getResult();
-        List<IOutputFilter> outputFilters = actions.stream().map(action ->
-                new OutputFilter(action, countActionOccurrence(memory.getPreviousSteps(), action))).
-                collect(Collectors.toCollection(LinkedList::new));
+        List<IOutputFilter> outputFilters = createOutputFilters(memory, actions);
 
         Map<String, List<OutputEntry>> outputs = outputGeneration.getOutputs(outputFilters);
-        outputs.forEach((action, outputEntries) -> {
-            outputEntries.forEach(outputEntry -> {
-                outputEntry.getOutputs().forEach(output -> {
-                    List<String> possibleValues = output.getValueAlternatives();
-                    String randomValue = randomValue(possibleValues);
-                    String outputKey = "output:".concat(output.getType().toString()).concat(":").concat(action);
-                    IData<String> outputData = dataFactory.createData(outputKey, randomValue, possibleValues);
-                    outputData.setPublic(true);
-                    memory.getCurrentStep().storeData(outputData);
-                });
+        outputs.forEach((action, outputEntries) ->
+                outputEntries.forEach(outputEntry -> {
+                    List<OutputValue> outputValues = outputEntry.getOutputs();
+                    selectAndStoreOutput(memory, action, outputValues);
+                    storeQuickReplies(memory, outputEntry);
+                }));
+    }
 
-                List<QuickReply> quickReplies = convertQuickReplies(outputEntry.getQuickReplies());
-                if (!quickReplies.isEmpty()) {
-                    String outputQuickReplyKey = "quickReply:".concat(outputEntry.getAction());
-                    IData outputQuickReplies = dataFactory.createData(outputQuickReplyKey, quickReplies);
-                    outputQuickReplies.setPublic(true);
-                    memory.getCurrentStep().storeData(outputQuickReplies);
-                }
-
-            });
-            String outputTextKey = "output:" + action;
-            dataFactory.createData(outputTextKey, outputEntries);
+    private void selectAndStoreOutput(IConversationMemory memory, String action, List<OutputValue> outputValues) {
+        IntStream.range(0, outputValues.size()).forEach(index -> {
+            OutputValue outputValue = outputValues.get(index);
+            List<String> possibleValueAlternatives = outputValue.getValueAlternatives();
+            String randomValue = chooseRandomly(possibleValueAlternatives);
+            String outputKey = createOutputKey(action, outputValues, outputValue, index);
+            IData<String> outputData = dataFactory.createData(outputKey, randomValue, possibleValueAlternatives);
+            outputData.setPublic(true);
+            memory.getCurrentStep().storeData(outputData);
         });
+    }
+
+    private void storeQuickReplies(IConversationMemory memory, OutputEntry outputEntry) {
+        List<QuickReply> quickReplies = convertQuickReplies(outputEntry.getQuickReplies());
+        if (!quickReplies.isEmpty()) {
+            String outputQuickReplyKey = StringUtilities.
+                    joinStrings(":", "quickReply", outputEntry.getAction());
+            IData outputQuickReplies = dataFactory.createData(outputQuickReplyKey, quickReplies);
+            outputQuickReplies.setPublic(true);
+            memory.getCurrentStep().storeData(outputQuickReplies);
+        }
+    }
+
+    private LinkedList<IOutputFilter> createOutputFilters(IConversationMemory memory, List<String> actions) {
+        return actions.stream().map(action ->
+                new OutputFilter(action, countActionOccurrence(memory.getPreviousSteps(), action))).
+                collect(Collectors.toCollection(LinkedList::new));
     }
 
     @Override
@@ -109,7 +121,15 @@ public class OutputGenerationTask implements ILifecycleTask {
         }
     }
 
-    private String randomValue(List<String> possibleValues) {
+    private String createOutputKey(String action, List<OutputValue> outputValues, OutputValue outputValue, int idx) {
+        if (outputValues.size() > 1) {
+            return StringUtilities.joinStrings(":", "output", outputValue.getType(), action, idx);
+        } else {
+            return StringUtilities.joinStrings(":", "output", outputValue.getType(), action);
+        }
+    }
+
+    private String chooseRandomly(List<String> possibleValues) {
         return possibleValues.get(new Random().nextInt(possibleValues.size()));
     }
 
