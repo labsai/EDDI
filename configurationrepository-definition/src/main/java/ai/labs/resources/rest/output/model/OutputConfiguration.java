@@ -3,6 +3,7 @@ package ai.labs.resources.rest.output.model;
 import lombok.Getter;
 import lombok.Setter;
 
+import java.util.LinkedList;
 import java.util.List;
 
 /**
@@ -14,8 +15,8 @@ import java.util.List;
 public class OutputConfiguration {
     private String action;
     private int occurred;
-    private List<OutputType> outputs;
-    private List<QuickReply> quickReplies;
+    private List<OutputType> outputs = new LinkedList<>();
+    private List<QuickReply> quickReplies = new LinkedList<>();
 
     @Override
     public boolean equals(Object o) {
@@ -38,14 +39,13 @@ public class OutputConfiguration {
     @Setter
     public static class OutputType {
         private String type;
-        private List<String> valueAlternatives;
+        private List<String> valueAlternatives = new LinkedList<>();
     }
 
     @Getter
     @Setter
     public static class QuickReply {
         private String value;
-
         private String expressions;
 
     }
