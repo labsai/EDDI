@@ -14,23 +14,36 @@
     <packaging>jar</packaging>
 
     <dependencies>
-        <!-- Logging -->
+        <dependency>
+            <groupId>ai.labs</groupId>
+            <artifactId>runtime-definition</artifactId>
+            <version>${project.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>ai.labs</groupId>
+            <artifactId>runtime-impl</artifactId>
+            <version>${project.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>ai.labs</groupId>
+            <artifactId>persistencestore-definition</artifactId>
+            <version>${project.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>ai.labs</groupId>
+            <artifactId>user-definition</artifactId>
+            <version>${project.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>ai.labs</groupId>
+            <artifactId>sharedutilities</artifactId>
+            <version>${project.version}</version>
+        </dependency>
+
         <dependency>
             <groupId>org.jboss.resteasy</groupId>
             <artifactId>resteasy-jsapi</artifactId>
             <version>3.1.4.Final</version>
-        </dependency>
-        <dependency>
-            <groupId>org.jboss.resteasy</groupId>
-            <artifactId>resteasy-cache-core</artifactId>
-            <version>3.1.4.Final</version>
-            <!--<exclusions>
-                <exclusion>
-                    <groupId>org.infinispan</groupId>
-                    <artifactId>infinispan-core</artifactId>
-                </exclusion>
-            </exclusions>-->
-            <scope>provided</scope>
         </dependency>
         <!-- Jetty -->
         <dependency>
@@ -63,41 +76,17 @@
             <artifactId>jetty-util</artifactId>
             <version>9.4.6.v20170531</version>
         </dependency>
+
         <dependency>
             <groupId>ro.isdc.wro4j</groupId>
             <artifactId>wro4j-core</artifactId>
             <version>1.8.0</version>
-            <!--<exclusions>
+            <exclusions>
                 <exclusion>
                     <groupId>commons-io</groupId>
                     <artifactId>commons-io</artifactId>
                 </exclusion>
-            </exclusions>-->
-        </dependency>
-        <dependency>
-            <groupId>ai.labs</groupId>
-            <artifactId>runtime-definition</artifactId>
-            <version>${project.version}</version>
-        </dependency>
-        <dependency>
-            <groupId>ai.labs</groupId>
-            <artifactId>runtime-impl</artifactId>
-            <version>${project.version}</version>
-        </dependency>
-        <dependency>
-            <groupId>ai.labs</groupId>
-            <artifactId>persistencestore-definition</artifactId>
-            <version>${project.version}</version>
-        </dependency>
-        <dependency>
-            <groupId>ai.labs</groupId>
-            <artifactId>user-definition</artifactId>
-            <version>${project.version}</version>
-        </dependency>
-        <dependency>
-            <groupId>ai.labs</groupId>
-            <artifactId>sharedutilities</artifactId>
-            <version>${project.version}</version>
+            </exclusions>
         </dependency>
     </dependencies>
 
