@@ -1,9 +1,11 @@
 package ai.labs.templateengine;
 
 import ai.labs.lifecycle.model.Context;
+import ai.labs.memory.Data;
 import ai.labs.memory.IConversationMemory;
 import ai.labs.memory.IData;
 import ai.labs.memory.IDataFactory;
+import ai.labs.output.model.QuickReply;
 import lombok.AllArgsConstructor;
 import lombok.EqualsAndHashCode;
 import lombok.Getter;
@@ -27,68 +29,102 @@ public class OutputTemplateTaskTest {
     private String templateString = "This is some output with context such as [[${context}]]";
     private OutputTemplateTask outputTemplateTask;
     private final String expectedOutputString = "This is some output with context such as someContextValue";
+    private ITemplatingEngine templatingEngine;
 
     @Before
     public void setUp() throws Exception {
-        final ITemplatingEngine templatingEngine = mock(ITemplatingEngine.class);
+        templatingEngine = mock(ITemplatingEngine.class);
         dataFactory = mock(IDataFactory.class);
         conversationMemory = mock(IConversationMemory.class);
         currentStep = mock(IConversationMemory.IWritableConversationStep.class);
         when(conversationMemory.getCurrentStep()).then(invocation -> currentStep);
-        when(currentStep.getAllData("output")).then(invocation -> {
-            LinkedList<IData<String>> ret = new LinkedList<>();
-            ret.add(new MockData<>("output:someOutput", templateString));
-            return ret;
-        });
-
         outputTemplateTask = new OutputTemplateTask(templatingEngine, dataFactory);
-        when(templatingEngine.processTemplate(eq(templateString), anyMap())).then(invocation ->
-                expectedOutputString);
     }
 
     @Test
     public void executeTaskWithContextString() throws Exception {
         //setup
-        final IData<String> expectedDataObject = new MockData<>("output:templated:someOutput", expectedOutputString);
         when(currentStep.getAllData(eq("context"))).then(invocation -> {
             LinkedList<IData<Context>> ret = new LinkedList<>();
             ret.add(new MockData<>("context:someContext",
                     new Context(Context.ContextType.string, "someContextValue")));
             return ret;
         });
-        when(dataFactory.createData(eq("output:templated:someOutput"), eq(expectedOutputString)))
-                .then(invocation -> expectedDataObject);
+        List<QuickReply> expectedPostQuickReplies = setupTask();
 
         //test
         outputTemplateTask.executeTask(conversationMemory);
 
         //assert
-        verify(currentStep).getAllData("output");
-        verify(currentStep).getAllData("context");
-        verify(currentStep).storeData(expectedDataObject);
+        verifyTask(expectedPostQuickReplies);
     }
 
     @Test
     public void executeTaskWithContextObject() throws Exception {
         //setup
         final TestContextObject testContextObject = new TestContextObject("someContext", "someContextValue");
-        final IData<Object> expectedDataObject = new MockData<>("output:templated:someOutput", testContextObject);
         when(currentStep.getAllData(eq("context"))).then(invocation -> {
             LinkedList<IData<Context>> ret = new LinkedList<>();
             ret.add(new MockData<>("context:someContext",
                     new Context(Context.ContextType.object, testContextObject)));
             return ret;
         });
-        when(dataFactory.createData(eq("output:templated:someOutput"), eq(expectedOutputString)))
-                .then(invocation -> expectedDataObject);
+        List<QuickReply> expectedPostQuickReplies = setupTask();
 
         //test
         outputTemplateTask.executeTask(conversationMemory);
 
         //assert
+        verifyTask(expectedPostQuickReplies);
+    }
+
+    private List<QuickReply> setupTask() {
+        when(currentStep.getAllData(eq("output"))).then(invocation -> {
+            LinkedList<IData<String>> ret = new LinkedList<>();
+            ret.add(new MockData<>("output:text:someAction", templateString));
+            return ret;
+        });
+        List<QuickReply> expectedPreQuickReplies = new LinkedList<>();
+        expectedPreQuickReplies.add(new QuickReply(
+                "Quick Reply Value [[${context}]]",
+                "quickReply(expression)"));
+        List<QuickReply> expectedPostQuickReplies = new LinkedList<>();
+        expectedPostQuickReplies.add(new QuickReply(
+                "Quick Reply Value someContextValue",
+                "quickReply(expression)"));
+        when(currentStep.getAllData(eq("quickReplies"))).then(invocation -> {
+            LinkedList<IData<List<QuickReply>>> ret = new LinkedList<>();
+            ret.add(new MockData<>("quickReply:someAction", expectedPreQuickReplies));
+            return ret;
+        });
+        when(dataFactory.createData(eq("output:text:someAction:preTemplated"), eq(templateString)))
+                .then(invocation -> new Data<>("output:text:someAction:preTemplated", templateString));
+
+        when(dataFactory.createData(eq("output:text:someAction:postTemplated"), eq(expectedOutputString)))
+                .then(invocation -> new Data<>("output:text:someAction:postTemplated", expectedOutputString));
+
+        when(dataFactory.createData(eq("quickReply:someAction:preTemplated"), anyList()))
+                .then(invocation -> new Data<>("quickReply:someAction:preTemplated", expectedPreQuickReplies));
+
+        when(dataFactory.createData(eq("quickReply:someAction:postTemplated"), anyList()))
+                .then(invocation -> new Data<>("quickReply:someAction:postTemplated", expectedPostQuickReplies));
+
+        when(templatingEngine.processTemplate(eq(templateString), anyMap())).then(invocation ->
+                expectedOutputString);
+        when(templatingEngine.processTemplate(eq(expectedPreQuickReplies.get(0).getValue()), anyMap())).
+                then(invocation -> expectedPostQuickReplies.get(0).getValue());
+        return expectedPostQuickReplies;
+    }
+
+    private void verifyTask(List<QuickReply> expectedPostQuickReplies) {
         verify(currentStep).getAllData("output");
+        verify(currentStep).getAllData("quickReplies");
         verify(currentStep).getAllData("context");
-        verify(currentStep).storeData(expectedDataObject);
+        verify(dataFactory).createData(eq("output:text:someAction:preTemplated"), eq(templateString));
+        verify(dataFactory).createData(eq("output:text:someAction:postTemplated"), eq(expectedOutputString));
+        verify(dataFactory).createData(eq("quickReply:someAction:preTemplated"), anyList());
+        verify(dataFactory).createData(eq("quickReply:someAction:postTemplated"), eq(expectedPostQuickReplies));
+        verify(currentStep, times(6)).storeData(any(IData.class));
     }
 
 
