@@ -89,7 +89,7 @@ public class OutputGenerationTask implements ILifecycleTask {
         List<QuickReply> quickReplies = convertQuickReplies(outputEntry.getQuickReplies());
         if (!quickReplies.isEmpty()) {
             String outputQuickReplyKey = StringUtilities.
-                    joinStrings(":", "quickReply", outputEntry.getAction());
+                    joinStrings(":", "quickReplies", outputEntry.getAction());
             IData outputQuickReplies = dataFactory.createData(outputQuickReplyKey, quickReplies);
             outputQuickReplies.setPublic(true);
             memory.getCurrentStep().storeData(outputQuickReplies);

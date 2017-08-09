@@ -65,8 +65,8 @@ public class OutputGenerationTaskTest {
                 eq(Arrays.asList("Answer Alternative 1", "Answer Alternative 2")))).thenAnswer(invocation -> expectedOutputData);
         List<QuickReply> quickReplies = Arrays.asList(new QuickReply("Some Quick Reply", "some(Expression)"),
                 new QuickReply("Some Other Quick Reply", "someOther(Expression)"));
-        IData<List<QuickReply>> expectedQuickReplyData = new Data<>("quickReply:action1", quickReplies);
-        when(dataFactory.createData(eq("quickReply:action1"), anyListOf(QuickReply.class))).
+        IData<List<QuickReply>> expectedQuickReplyData = new Data<>("quickReplies:action1", quickReplies);
+        when(dataFactory.createData(eq("quickReplies:action1"), anyListOf(QuickReply.class))).
                 thenAnswer(invocation -> expectedQuickReplyData);
 
         //test
@@ -137,5 +137,4 @@ public class OutputGenerationTaskTest {
         quickReply.setExpressions(expression);
         return quickReply;
     }
-
 }
