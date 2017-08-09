@@ -17,12 +17,7 @@
         <dependency>
             <groupId>org.mongodb</groupId>
             <artifactId>mongo-java-driver</artifactId>
-            <version>3.4.2</version>
-        </dependency>
-        <dependency>
-            <groupId>com.github.fakemongo</groupId>
-            <artifactId>fongo</artifactId>
-            <version>2.0.12</version>
+            <version>3.4.3</version>
         </dependency>
         <dependency>
             <groupId>ai.labs</groupId>
@@ -33,11 +28,6 @@
             <groupId>ai.labs</groupId>
             <artifactId>permissions-definition</artifactId>
             <version>${project.version}</version>
-        </dependency>
-        <dependency>
-            <groupId>com.google.inject</groupId>
-            <artifactId>guice</artifactId>
-            <version>4.1.0</version>
         </dependency>
     </dependencies>
 

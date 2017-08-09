@@ -5,7 +5,7 @@ import ai.labs.resources.rest.output.model.OutputConfigurationSet;
 import ai.labs.serialization.IJsonSerialization;
 import ai.labs.serialization.JsonSerialization;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import junit.framework.Assert;
+import org.junit.Assert;
 import org.junit.Before;
 import org.junit.Test;
 

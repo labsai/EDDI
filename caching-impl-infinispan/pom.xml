@@ -20,7 +20,7 @@
         <dependency>
             <groupId>org.infinispan</groupId>
             <artifactId>infinispan-core</artifactId>
-            <version>8.2.5.Final</version>
+            <version>9.1.0.Final</version>
         </dependency>
         <dependency>
             <groupId>ai.labs</groupId>
