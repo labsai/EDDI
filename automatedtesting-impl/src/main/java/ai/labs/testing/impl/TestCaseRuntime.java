@@ -109,7 +109,7 @@ public class TestCaseRuntime {
             if (RuntimeUtilities.isNullOrEmpty(input)) {
                 input = " ";
             }
-            botEngine.say(Deployment.Environment.test, botId, conversationId, input, new MockAsyncResponse());
+            botEngine.say(Deployment.Environment.test, botId, conversationId, true, input, new MockAsyncResponse());
             while (botEngine.getConversationState(Deployment.Environment.test, conversationId) == ConversationState.IN_PROGRESS) {
                 Thread.sleep(1000);
             }

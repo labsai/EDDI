@@ -38,7 +38,7 @@ import java.util.Map;
 import java.util.concurrent.Callable;
 
 import static ai.labs.memory.model.SimpleConversationMemorySnapshot.SimpleConversationStep;
-import static ai.labs.memory.model.SimpleConversationMemorySnapshot.SimpleData;
+import static ai.labs.memory.model.SimpleConversationMemorySnapshot.ConversationStepData;
 import static ai.labs.rest.restinterfaces.RestInterfaceFactory.RestInterfaceFactoryException;
 
 @RequestScoped
@@ -182,9 +182,9 @@ public class FacebookEndpoint implements IFacebookEndpoint {
 
     private String extractOutput(SimpleConversationMemorySnapshot memorySnapshot) {
         for (SimpleConversationStep conversationStep : memorySnapshot.getConversationSteps()) {
-            for (SimpleData simpleData : conversationStep.getData()) {
-                if (simpleData.getKey().startsWith("output:final")) {
-                    return simpleData.getValue().toString();
+            for (ConversationStepData conversationStepData : conversationStep.getConversationStep()) {
+                if (conversationStepData.getKey().startsWith("output:final")) {
+                    return conversationStepData.getValue().toString();
                 }
             }
         }

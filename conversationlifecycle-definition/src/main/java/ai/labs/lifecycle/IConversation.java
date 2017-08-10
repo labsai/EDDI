@@ -13,15 +13,6 @@ public interface IConversation {
 
     void init() throws LifecycleException;
 
-    interface IConversationHistory {
-
-        void undoLastStatement();
-
-        void redoLastStatement();
-    }
-
-    boolean isInProgress();
-
     boolean isEnded();
 
     void endConversation();

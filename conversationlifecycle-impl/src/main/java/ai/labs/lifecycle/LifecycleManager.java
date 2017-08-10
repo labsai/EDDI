@@ -1,6 +1,5 @@
 package ai.labs.lifecycle;
 
-
 import ai.labs.memory.IConversationMemory;
 import ai.labs.utilities.RuntimeUtilities;
 
@@ -21,7 +20,6 @@ public class LifecycleManager implements ILifecycleManager {
             for (ILifecycleTask task : lifecycleTasks) {
                 task.executeTask(conversationMemory);
             }
-
         } catch (LifecycleException e) {
             throw new LifecycleException("Error while executing lifecycle!", e);
         }
@@ -30,7 +28,6 @@ public class LifecycleManager implements ILifecycleManager {
     @Override
     public void addLifecycleTask(ILifecycleTask lifecycleTask) {
         RuntimeUtilities.checkNotNull(lifecycleTask, "lifecycleTask");
-
         lifecycleTasks.add(lifecycleTask);
     }
 }

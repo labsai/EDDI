@@ -21,12 +21,10 @@ import java.util.Objects;
  */
 public class Conversation implements IConversation {
     private static final String CONVERSATION_END = "CONVERSATION_END";
-    private ConversationState conversationState;
+    private final List<IExecutablePackage> executablePackages;
     private final IConversationMemory conversationMemory;
-
-    private List<IExecutablePackage> executablePackages;
-
     private final IConversation.IConversationOutputRenderer outputProvider;
+    private ConversationState conversationState;
 
     Conversation(List<IExecutablePackage> executablePackages,
                  IConversationMemory conversationMemory,
@@ -35,11 +33,6 @@ public class Conversation implements IConversation {
         this.conversationMemory = conversationMemory;
         this.outputProvider = outputProvider;
         setConversationState(ConversationState.READY);
-    }
-
-    @Override
-    public boolean isInProgress() {
-        return conversationState == ConversationState.IN_PROGRESS;
     }
 
     @Override
@@ -103,10 +96,10 @@ public class Conversation implements IConversation {
             //execute input processing
             executePackages(data);
 
-            IData actionData = currentStep.getLatestData("action");
+            IData<List<String>> actionData = currentStep.getLatestData("action");
             if (actionData != null) {
-                Object result = actionData.getResult();
-                if (result instanceof List && ((List) result).contains(CONVERSATION_END)) {
+                List<String> result = actionData.getResult();
+                if (result != null && result.contains(CONVERSATION_END)) {
                     endConversation();
                 }
             }

@@ -93,7 +93,8 @@ public class RestBotEngine implements IRestBotEngine {
         RuntimeUtilities.checkNotNull(botId, "botId");
         RuntimeUtilities.checkNotNull(conversationId, "conversationId");
         try {
-            ConversationMemorySnapshot conversationMemorySnapshot = conversationMemoryStore.loadConversationMemorySnapshot(conversationId);
+            ConversationMemorySnapshot conversationMemorySnapshot =
+                    conversationMemoryStore.loadConversationMemorySnapshot(conversationId);
             if (!botId.equals(conversationMemorySnapshot.getBotId())) {
                 String message = "conversationId: %s does not belong to bot with id: %s";
                 message = String.format(message, conversationId, botId);
@@ -152,7 +153,8 @@ public class RestBotEngine implements IRestBotEngine {
 
             setConversationState(conversationId, ConversationState.IN_PROGRESS);
 
-            IBot bot = botFactory.getBot(environment, conversationMemory.getBotId(), conversationMemory.getBotVersion());
+            IBot bot = botFactory.getBot(environment,
+                    conversationMemory.getBotId(), conversationMemory.getBotVersion());
             if (bot == null) {
                 String msg = "No Version of bot %s deployed.";
                 msg = String.format(msg, conversationMemory.getBotId());

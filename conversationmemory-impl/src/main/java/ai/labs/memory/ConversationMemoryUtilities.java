@@ -115,8 +115,8 @@ public class ConversationMemoryUtilities {
                 for (ConversationMemorySnapshot.ResultSnapshot resultSnapshot : packageRunSnapshot.getLifecycleTasks()) {
                     if (returnDetailed || resultSnapshot.isPublic()) {
                         Object result = resultSnapshot.getResult();
-                        simpleConversationStep.getData().add(
-                                new SimpleConversationMemorySnapshot.SimpleData(resultSnapshot.getKey(), result));
+                        simpleConversationStep.getConversationStep().add(
+                                new SimpleConversationMemorySnapshot.ConversationStepData(resultSnapshot.getKey(), result));
                     } else {
                         continue;
                     }
