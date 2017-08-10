@@ -25,7 +25,21 @@ import static org.mockito.Mockito.*;
  * @author ginccc
  */
 public class OutputGenerationTaskTest {
-
+    private static final String ACTION_1 = "action1";
+    private static final String ACTION_2 = "action2";
+    private static final String ACTION = "action";
+    private static final String SOME_ACTION_1 = "someAction1";
+    private static final String SOME_ACTION_2 = "someAction2";
+    private static final String SOME_OTHER_ACTION_1 = "someOtherAction1";
+    private static final String SOME_OTHER_ACTION_2 = "someOtherAction2";
+    private static final String ANSWER_ALTERNATIVE_1 = "Answer Alternative 1";
+    private static final String ANSWER_ALTERNATIVE_2 = "Answer Alternative 2";
+    private static final String SOME_QUICK_REPLY = "Some Quick Reply";
+    private static final String SOME_OTHER_QUICK_REPLY = "Some Other Quick Reply";
+    private static final String SOME_EXPRESSION = "some(Expression)";
+    private static final String SOME_OTHER_EXPRESSION = "someOther(Expression)";
+    private static final String OUTPUT_TEXT = "output:text:";
+    private static final String QUICK_REPLIES = "quickReplies:";
     private OutputGenerationTask outputGenerationTask;
     private IResourceClientLibrary resourceClientLibrary;
     private IOutputGeneration outputGeneration;
@@ -45,28 +59,28 @@ public class OutputGenerationTaskTest {
         when(outputGeneration.getOutputs(anyListOf(IOutputFilter.class))).thenAnswer(invocation -> {
             Map<String, List<OutputEntry>> ret = new LinkedHashMap<>();
             OutputEntry outputEntry = createOutputEntry();
-            ret.put("action1", Collections.singletonList(outputEntry));
+            ret.put(ACTION_1, Collections.singletonList(outputEntry));
             return ret;
         });
         IConversationMemory conversationMemory = mock(IConversationMemory.class);
         IConversationMemory.IWritableConversationStep currentStep = mock(IConversationMemory.IWritableConversationStep.class);
         when(conversationMemory.getCurrentStep()).thenAnswer(invocation -> currentStep);
-        when(currentStep.getLatestData(eq("action"))).thenAnswer(invocation ->
-                new Data<>("action1", Arrays.asList("someAction1", "someOtherAction1")));
+        when(currentStep.getLatestData(eq(ACTION))).thenAnswer(invocation ->
+                new Data<>(ACTION_1, Arrays.asList(SOME_ACTION_1, SOME_OTHER_ACTION_1)));
         IConversationMemory.IConversationStepStack conversationStepStack = mock(IConversationMemory.IConversationStepStack.class);
         when(conversationMemory.getPreviousSteps()).then(invocation -> conversationStepStack);
         IConversationMemory.IConversationStep conversationStep = mock(IConversationMemory.IConversationStep.class);
         when(conversationStepStack.get(anyInt())).then(invocation -> conversationStep);
-        when(conversationStep.getLatestData(eq("action"))).then(invocation ->
-                new Data<>("action2", Arrays.asList("someAction2", "someOtherAction2")));
-        IData<String> expectedOutputData = new Data<>("output:text:action1", "Answer Alternative 1",
-                Arrays.asList("someAction2", "someOtherAction2"));
-        when(dataFactory.createData(eq("output:text:action1"), anyString(),
-                eq(Arrays.asList("Answer Alternative 1", "Answer Alternative 2")))).thenAnswer(invocation -> expectedOutputData);
-        List<QuickReply> quickReplies = Arrays.asList(new QuickReply("Some Quick Reply", "some(Expression)"),
-                new QuickReply("Some Other Quick Reply", "someOther(Expression)"));
-        IData<List<QuickReply>> expectedQuickReplyData = new Data<>("quickReplies:action1", quickReplies);
-        when(dataFactory.createData(eq("quickReplies:action1"), anyListOf(QuickReply.class))).
+        when(conversationStep.getLatestData(eq(ACTION))).then(invocation ->
+                new Data<>(ACTION_2, Arrays.asList(SOME_ACTION_2, SOME_OTHER_ACTION_2)));
+        IData<String> expectedOutputData = new Data<>(OUTPUT_TEXT + ACTION_1, ANSWER_ALTERNATIVE_1,
+                Arrays.asList(SOME_ACTION_2, SOME_OTHER_ACTION_2));
+        when(dataFactory.createData(eq(OUTPUT_TEXT + ACTION_1), anyString(),
+                eq(Arrays.asList(ANSWER_ALTERNATIVE_1, ANSWER_ALTERNATIVE_2)))).thenAnswer(invocation -> expectedOutputData);
+        List<QuickReply> quickReplies = Arrays.asList(new QuickReply(SOME_QUICK_REPLY, SOME_EXPRESSION),
+                new QuickReply(SOME_OTHER_QUICK_REPLY, SOME_OTHER_EXPRESSION));
+        IData<List<QuickReply>> expectedQuickReplyData = new Data<>(QUICK_REPLIES + ACTION_1, quickReplies);
+        when(dataFactory.createData(eq(QUICK_REPLIES + ACTION_1), anyListOf(QuickReply.class))).
                 thenAnswer(invocation -> expectedQuickReplyData);
 
         //test
@@ -96,11 +110,11 @@ public class OutputGenerationTaskTest {
 
     private OutputEntry createOutputEntry() {
         List<OutputValue> outputs = new LinkedList<>();
-        outputs.add(new OutputValue(OutputValue.Type.text, Arrays.asList("Answer Alternative 1", "Answer Alternative 2")));
+        outputs.add(new OutputValue(OutputValue.Type.text, Arrays.asList(ANSWER_ALTERNATIVE_1, ANSWER_ALTERNATIVE_2)));
         List<QuickReply> quickReplies = new LinkedList<>();
-        quickReplies.add(new QuickReply("Some Quick Reply", "some(Expression)"));
-        quickReplies.add(new QuickReply("Some Other Quick Reply", "someOther(Expression)"));
-        return new OutputEntry("action1", 0, outputs, quickReplies);
+        quickReplies.add(new QuickReply(SOME_QUICK_REPLY, SOME_EXPRESSION));
+        quickReplies.add(new QuickReply(SOME_OTHER_QUICK_REPLY, SOME_OTHER_EXPRESSION));
+        return new OutputEntry(ACTION_1, 0, outputs, quickReplies);
     }
 
     private OutputConfigurationSet createOutputConfigurationSet() {
@@ -113,20 +127,20 @@ public class OutputGenerationTaskTest {
 
     private OutputConfiguration createOutputConfiguration() {
         OutputConfiguration outputConfiguration = new OutputConfiguration();
-        outputConfiguration.setAction("action1");
+        outputConfiguration.setAction(ACTION_1);
         outputConfiguration.setOccurred(0);
         LinkedList<OutputConfiguration.OutputType> outputs = new LinkedList<>();
         OutputConfiguration.OutputType outputType = new OutputConfiguration.OutputType();
         outputType.setType(OutputValue.Type.text.toString());
         LinkedList<String> valueAlternatives = new LinkedList<>();
-        valueAlternatives.add("Answer Alternative 1");
-        valueAlternatives.add("Answer Alternative 2");
+        valueAlternatives.add(ANSWER_ALTERNATIVE_1);
+        valueAlternatives.add(ANSWER_ALTERNATIVE_2);
         outputType.setValueAlternatives(valueAlternatives);
         outputs.add(outputType);
         outputConfiguration.setOutputs(outputs);
         LinkedList<OutputConfiguration.QuickReply> quickReplies = new LinkedList<>();
-        quickReplies.add(createConfigQuickReply("Some Quick Reply", "some(Expression)"));
-        quickReplies.add(createConfigQuickReply("Some Other Quick Reply", "someOther(Expression)"));
+        quickReplies.add(createConfigQuickReply(SOME_QUICK_REPLY, SOME_EXPRESSION));
+        quickReplies.add(createConfigQuickReply(SOME_OTHER_QUICK_REPLY, SOME_OTHER_EXPRESSION));
         outputConfiguration.setQuickReplies(quickReplies);
         return outputConfiguration;
     }

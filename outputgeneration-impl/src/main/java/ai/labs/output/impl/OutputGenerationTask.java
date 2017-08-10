@@ -31,6 +31,8 @@ import java.util.stream.IntStream;
  */
 public class OutputGenerationTask implements ILifecycleTask {
     private static final String ACTION_KEY = "action";
+    private static final String MEMORY_OUTPUT_IDENTIFIER = "output";
+    private static final String MEMORY_QUICK_REPLIES_IDENTIFIER = "quickReplies";
     private final IResourceClientLibrary resourceClientLibrary;
     private final IDataFactory dataFactory;
     private final IOutputGeneration outputGeneration;
@@ -42,7 +44,6 @@ public class OutputGenerationTask implements ILifecycleTask {
         this.resourceClientLibrary = resourceClientLibrary;
         this.dataFactory = dataFactory;
         this.outputGeneration = outputGeneration;
-
     }
 
     @Override
@@ -86,10 +87,10 @@ public class OutputGenerationTask implements ILifecycleTask {
     }
 
     private void storeQuickReplies(IConversationMemory memory, OutputEntry outputEntry) {
-        List<QuickReply> quickReplies = convertQuickReplies(outputEntry.getQuickReplies());
+        List<QuickReply> quickReplies = outputEntry.getQuickReplies();
         if (!quickReplies.isEmpty()) {
             String outputQuickReplyKey = StringUtilities.
-                    joinStrings(":", "quickReplies", outputEntry.getAction());
+                    joinStrings(":", MEMORY_QUICK_REPLIES_IDENTIFIER, outputEntry.getAction());
             IData outputQuickReplies = dataFactory.createData(outputQuickReplyKey, quickReplies);
             outputQuickReplies.setPublic(true);
             memory.getCurrentStep().storeData(outputQuickReplies);
@@ -98,7 +99,7 @@ public class OutputGenerationTask implements ILifecycleTask {
 
     private LinkedList<IOutputFilter> createOutputFilters(IConversationMemory memory, List<String> actions) {
         return actions.stream().map(action ->
-                new OutputFilter(action, countActionOccurrence(memory.getPreviousSteps(), action))).
+                new OutputFilter(action, countActionOccurrences(memory.getPreviousSteps(), action))).
                 collect(Collectors.toCollection(LinkedList::new));
     }
 
@@ -108,7 +109,8 @@ public class OutputGenerationTask implements ILifecycleTask {
         URI uri = URI.create(uriObj.toString());
 
         try {
-            OutputConfigurationSet outputConfigurationSet = resourceClientLibrary.getResource(uri, OutputConfigurationSet.class);
+            OutputConfigurationSet outputConfigurationSet =
+                    resourceClientLibrary.getResource(uri, OutputConfigurationSet.class);
 
             outputConfigurationSet.getOutputSet().forEach(outputConfig -> outputGeneration.addOutputEntry(
                     new OutputEntry(outputConfig.getAction(),
@@ -123,9 +125,11 @@ public class OutputGenerationTask implements ILifecycleTask {
 
     private String createOutputKey(String action, List<OutputValue> outputValues, OutputValue outputValue, int idx) {
         if (outputValues.size() > 1) {
-            return StringUtilities.joinStrings(":", "output", outputValue.getType(), action, idx);
+            return StringUtilities.joinStrings(":", MEMORY_OUTPUT_IDENTIFIER,
+                    outputValue.getType(), action, idx);
         } else {
-            return StringUtilities.joinStrings(":", "output", outputValue.getType(), action);
+            return StringUtilities.joinStrings(":", MEMORY_OUTPUT_IDENTIFIER,
+                    outputValue.getType(), action);
         }
     }
 
@@ -133,8 +137,8 @@ public class OutputGenerationTask implements ILifecycleTask {
         return possibleValues.get(new Random().nextInt(possibleValues.size()));
     }
 
-    private int countActionOccurrence(IConversationMemory.IConversationStepStack conversationStepStack,
-                                      String action) {
+    private int countActionOccurrences(IConversationMemory.IConversationStepStack conversationStepStack,
+                                       String action) {
         int count = 0;
         for (int i = 0; i < conversationStepStack.size(); i++) {
             IConversationMemory.IConversationStep conversationStep = conversationStepStack.get(i);
@@ -150,6 +154,12 @@ public class OutputGenerationTask implements ILifecycleTask {
         return count;
     }
 
+    /**
+     * helper method to convert from OutputConfiguration to internal Output Value
+     *
+     * @param configOutputs List<OutputConfiguration.OutputType> as it comes from the configuration repository
+     * @return List<OutputValue> as it is used in the internal system
+     */
     private List<OutputValue> convertOutputTypesConfig(List<OutputConfiguration.OutputType> configOutputs) {
         return configOutputs.stream().map(configOutput -> {
             OutputValue outputValue = new OutputValue();
@@ -159,6 +169,11 @@ public class OutputGenerationTask implements ILifecycleTask {
         }).collect(Collectors.toCollection(LinkedList::new));
     }
 
+    /**
+     * helper method to convert from OutputConfiguration to internal QuickReply
+     * @param configQuickReplies List<OutputConfiguration.QuickReply> as it comes from the configuration repository
+     * @return List<QuickReply> as it is used in the internal system
+     */
     private List<QuickReply> convertQuickRepliesConfig(List<OutputConfiguration.QuickReply> configQuickReplies) {
         return configQuickReplies.stream().map(configQuickReply -> {
             QuickReply quickReply = new QuickReply();
@@ -166,11 +181,5 @@ public class OutputGenerationTask implements ILifecycleTask {
             quickReply.setExpressions(configQuickReply.getExpressions());
             return quickReply;
         }).collect(Collectors.toCollection(LinkedList::new));
-    }
-
-    private List<QuickReply> convertQuickReplies(List<QuickReply> outputQuickReplies) {
-        return outputQuickReplies.stream().map(quickReply ->
-                new QuickReply(quickReply.getValue(), quickReply.getExpressions())
-        ).collect(Collectors.toList());
     }
 }
