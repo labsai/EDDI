@@ -69,9 +69,7 @@ public class RestBotEngine implements IRestBotEngine {
             }
 
             IConversation conversation = latestBot.startConversation(null);
-            ConversationMemorySnapshot memorySnapshot = convertConversationMemory(conversation.getConversationMemory());
-            memorySnapshot.setEnvironment(environment);
-            String conversationId = conversationMemoryStore.storeConversationMemorySnapshot(memorySnapshot);
+            String conversationId = storeConversationMemory(conversation.getConversationMemory(), environment);
             URI createdUri = RestUtilities.createURI(resourceURI, conversationId);
             return Response.created(createdUri).build();
         } catch (ServiceException |
@@ -173,7 +171,8 @@ public class RestBotEngine implements IRestBotEngine {
             }
 
             Callable<Void> processUserInput =
-                    processUserInput(conversationId,
+                    processUserInput(environment,
+                            conversationId,
                             inputData.getInput(),
                             inputData.getContext(),
                             conversationMemory,
@@ -195,14 +194,15 @@ public class RestBotEngine implements IRestBotEngine {
         }
     }
 
-    private Callable<Void> processUserInput(String conversationId, String message,
+    private Callable<Void> processUserInput(Deployment.Environment environment,
+                                            String conversationId, String message,
                                             Map<String, InputData.Context> inputDataContext,
                                             IConversationMemory conversationMemory,
                                             IConversation conversation) {
         return () -> {
             try {
                 conversation.say(message, convertContext(inputDataContext));
-                storeConversationMemory(conversationMemory);
+                storeConversationMemory(conversationMemory, environment);
             } catch (Exception e) {
                 setConversationState(conversationId, ConversationState.ERROR);
                 log.error("Error while processing user input", e);
@@ -266,7 +266,7 @@ public class RestBotEngine implements IRestBotEngine {
                 try {
                     if (conversationMemory.isUndoAvailable()) {
                         conversationMemory.undoLastStep();
-                        storeConversationMemory(conversationMemory);
+                        storeConversationMemory(conversationMemory, environment);
                     }
                 } catch (Exception e) {
                     log.error("Error while Undo!", e);
@@ -329,7 +329,7 @@ public class RestBotEngine implements IRestBotEngine {
                 try {
                     if (conversationMemory.isRedoAvailable()) {
                         conversationMemory.redoLastStep();
-                        storeConversationMemory(conversationMemory);
+                        storeConversationMemory(conversationMemory, environment);
                     }
                 } catch (Exception e) {
                     log.error("Error while Redo!", e);
@@ -367,10 +367,11 @@ public class RestBotEngine implements IRestBotEngine {
         conversationMemoryStore.setConversationState(conversationId, conversationState);
     }
 
-    private void storeConversationMemory(IConversationMemory conversationMemory)
+    private String storeConversationMemory(IConversationMemory conversationMemory, Deployment.Environment environment)
             throws IResourceStore.ResourceStoreException {
         ConversationMemorySnapshot memorySnapshot = convertConversationMemory(conversationMemory);
-        conversationMemoryStore.storeConversationMemorySnapshot(memorySnapshot);
+        memorySnapshot.setEnvironment(environment);
+        return conversationMemoryStore.storeConversationMemorySnapshot(memorySnapshot);
     }
 
     private static void checkConversationMemoryNotNull(IConversationMemory conversationMemory, String conversationId)
