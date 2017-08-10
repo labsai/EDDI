@@ -20,13 +20,13 @@ import java.util.List;
  * @author ginccc
  */
 public class OutputStore implements IOutputStore {
-    private final String collectionName = "outputs";
     private HistorizedResourceStore<OutputConfigurationSet> outputResourceStore;
     private static final OutputComparator OUTPUT_COMPARATOR = new OutputComparator();
 
     @Inject
     public OutputStore(MongoDatabase database, IDocumentBuilder documentBuilder) {
         RuntimeUtilities.checkNotNull(database, "database");
+        final String collectionName = "outputs";
         MongoResourceStorage<OutputConfigurationSet> resourceStorage =
                 new MongoResourceStorage<>(database, collectionName, documentBuilder, OutputConfigurationSet.class);
 
@@ -36,7 +36,7 @@ public class OutputStore implements IOutputStore {
 
     @Override
     public IResourceId create(OutputConfigurationSet outputConfigurationSet) throws ResourceStoreException {
-        RuntimeUtilities.checkCollectionNoNullElements(outputConfigurationSet.getOutputs(), "outputs");
+        RuntimeUtilities.checkCollectionNoNullElements(outputConfigurationSet.getOutputSet(), "outputSets");
         return outputResourceStore.create(outputConfigurationSet);
     }
 
@@ -55,7 +55,7 @@ public class OutputStore implements IOutputStore {
         OutputConfigurationSet outputConfigurationSet = outputResourceStore.read(id, version);
 
         ResultManipulator<OutputConfiguration> outputManipulator;
-        outputManipulator = new ResultManipulator<>(outputConfigurationSet.getOutputs(), OutputConfiguration.class);
+        outputManipulator = new ResultManipulator<>(outputConfigurationSet.getOutputSet(), OutputConfiguration.class);
 
         try {
             outputManipulator.filterEntities(filter);
@@ -70,12 +70,12 @@ public class OutputStore implements IOutputStore {
     }
 
     @Override
-    public List<String> readOutputKeys(String id, Integer version, String filter, String order, Integer limit) throws ResourceStoreException, ResourceNotFoundException {
+    public List<String> readOutputActions(String id, Integer version, String filter, String order, Integer limit) throws ResourceStoreException, ResourceNotFoundException {
         List<String> retOutputKeys = new LinkedList<>();
         OutputConfigurationSet outputSet = read(id, version);
-        List<OutputConfiguration> outputs = outputSet.getOutputs();
+        List<OutputConfiguration> outputs = outputSet.getOutputSet();
         for (OutputConfiguration output : outputs) {
-            String key = output.getKey();
+            String key = output.getAction();
             if (key.contains(filter)) {
                 retOutputKeys.add(key);
                 if (retOutputKeys.size() >= limit) {
@@ -87,7 +87,7 @@ public class OutputStore implements IOutputStore {
         if ("asc".equals(order)) {
             Collections.sort(retOutputKeys);
         } else {
-            Collections.sort(retOutputKeys, Collections.reverseOrder());
+            retOutputKeys.sort(Collections.reverseOrder());
         }
 
         return retOutputKeys;
@@ -95,7 +95,7 @@ public class OutputStore implements IOutputStore {
 
     @Override
     public Integer update(String id, Integer version, OutputConfigurationSet outputConfigurationSet) throws ResourceStoreException, ResourceModifiedException, ResourceNotFoundException {
-        RuntimeUtilities.checkCollectionNoNullElements(outputConfigurationSet.getOutputs(), "outputs");
+        RuntimeUtilities.checkCollectionNoNullElements(outputConfigurationSet.getOutputSet(), "outputSets");
         return outputResourceStore.update(id, version, outputConfigurationSet);
     }
 
@@ -117,7 +117,7 @@ public class OutputStore implements IOutputStore {
     private static class OutputComparator implements Comparator<OutputConfiguration> {
         @Override
         public int compare(OutputConfiguration o1, OutputConfiguration o2) {
-            return o1.getKey().compareTo(o2.getKey());
+            return o1.getAction().compareTo(o2.getAction());
         }
     }
 }

@@ -10,7 +10,7 @@ import lombok.Getter;
 
 @AllArgsConstructor
 @Getter
-public class OutputFilter implements IOutputFilter {
-    private String key;
-    private int occurrence;
+class OutputFilter implements IOutputFilter {
+    private String action;
+    private int occurred;
 }
