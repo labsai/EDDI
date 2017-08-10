@@ -15,12 +15,6 @@
 
     <dependencies>
         <dependency>
-            <groupId>junit</groupId>
-            <artifactId>junit</artifactId>
-            <version>4.10</version>
-            <scope>test</scope>
-        </dependency>
-        <dependency>
             <groupId>ai.labs</groupId>
             <artifactId>persistencestore-definition</artifactId>
             <version>${project.version}</version>
@@ -44,11 +38,6 @@
             <groupId>ai.labs</groupId>
             <artifactId>persistencestore-impl</artifactId>
             <version>${project.version}</version>
-        </dependency>
-        <dependency>
-            <groupId>javax.inject</groupId>
-            <artifactId>javax.inject</artifactId>
-            <version>1</version>
         </dependency>
     </dependencies>
 

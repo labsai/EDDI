@@ -42,7 +42,7 @@ public interface IRestPackageStore extends IRestVersionInfo {
                       @QueryParam("version") Integer version, PackageConfiguration packageConfiguration);
 
     @PUT
-    @Path("/{id}")
+    @Path("/{id}/updateResourceUri")
     @Consumes(MediaType.TEXT_PLAIN)
     Response updateResourceInPackage(@PathParam("id") String id,
                                      @ApiParam(name = "version", required = true, format = "integer", example = "1")

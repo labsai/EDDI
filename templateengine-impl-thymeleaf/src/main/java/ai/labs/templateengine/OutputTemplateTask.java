@@ -7,28 +7,36 @@ import ai.labs.lifecycle.model.Context.ContextType;
 import ai.labs.memory.IConversationMemory;
 import ai.labs.memory.IData;
 import ai.labs.memory.IDataFactory;
+import ai.labs.output.model.QuickReply;
 
 import javax.inject.Inject;
 import java.util.HashMap;
+import java.util.LinkedList;
 import java.util.List;
+import java.util.Map;
+import java.util.stream.Collectors;
+
+import static ai.labs.utilities.StringUtilities.joinStrings;
 
 /**
  * @author ginccc
  */
 public class OutputTemplateTask implements ILifecycleTask {
+    private static final String OUTPUT_TEXT = "output:text";
+    private static final String PRE_TEMPLATED = "preTemplated";
+    private static final String POST_TEMPLATED = "postTemplated";
     private final ITemplatingEngine templatingEngine;
     private final IDataFactory dataFactory;
 
     @Inject
-    public OutputTemplateTask(ITemplatingEngine templatingEngine,
-                              IDataFactory dataFactory) {
+    public OutputTemplateTask(ITemplatingEngine templatingEngine, IDataFactory dataFactory) {
         this.templatingEngine = templatingEngine;
         this.dataFactory = dataFactory;
     }
 
     @Override
     public String getId() {
-        return templatingEngine.getClass().getSimpleName();
+        return "ai.labs.templating";
     }
 
     @Override
@@ -38,11 +46,21 @@ public class OutputTemplateTask implements ILifecycleTask {
 
     @Override
     public void executeTask(IConversationMemory memory) throws LifecycleException {
-        List<IData<String>> outputs = memory.getCurrentStep().getAllData("output");
-        List<IData<Context>> contexts = memory.getCurrentStep().getAllData("context");
+        IConversationMemory.IWritableConversationStep currentStep = memory.getCurrentStep();
+        List<IData<String>> outputDataList = currentStep.getAllData("output");
+        List<IData<List<QuickReply>>> quickReplyDataList = currentStep.getAllData("quickReplies");
+        List<IData<Context>> contextDataList = currentStep.getAllData("context");
 
+        Map<String, Object> contextMap = prepareContext(contextDataList);
+
+        templateOutputTexts(memory, outputDataList, contextMap);
+
+        templatingQuickReplies(memory, quickReplyDataList, contextMap);
+    }
+
+    private HashMap<String, Object> prepareContext(List<IData<Context>> contextDataList) {
         HashMap<String, Object> dynamicAttributesMap = new HashMap<>();
-        contexts.forEach(contextData -> {
+        contextDataList.forEach(contextData -> {
             Context context = contextData.getResult();
             ContextType contextType = context.getType();
             if (contextType.equals(ContextType.object) || contextType.equals(ContextType.string)) {
@@ -50,14 +68,64 @@ public class OutputTemplateTask implements ILifecycleTask {
                 dynamicAttributesMap.put(dataKey.substring(dataKey.indexOf(":") + 1), context.getValue());
             }
         });
+        return dynamicAttributesMap;
+    }
 
-        outputs.forEach(output -> {
+    private void templateOutputTexts(IConversationMemory memory,
+                                     List<IData<String>> outputDataList,
+                                     Map<String, Object> ContextMap) {
+        outputDataList.forEach(output -> {
             String outputKey = output.getKey();
-            String outputTemplate = output.getResult();
-            String processedTemplate = templatingEngine.processTemplate(outputTemplate, dynamicAttributesMap);
-            String processedOutputKey = "output:templated:" + outputKey.substring(outputKey.indexOf(":") + 1);
-            IData<String> processedData = dataFactory.createData(processedOutputKey, processedTemplate);
-            memory.getCurrentStep().storeData(processedData);
+            if (outputKey.startsWith(OUTPUT_TEXT)) {
+                String preTemplated = output.getResult();
+                String postTemplated = templatingEngine.processTemplate(preTemplated, ContextMap);
+                output.setResult(postTemplated);
+                templateData(memory, output, outputKey, preTemplated, postTemplated);
+            }
         });
+    }
+
+    private void templatingQuickReplies(IConversationMemory memory,
+                                        List<IData<List<QuickReply>>> quickReplyDataList,
+                                        Map<String, Object> contextMap) {
+        quickReplyDataList.forEach(quickReplyData -> {
+            List<QuickReply> quickReplies = quickReplyData.getResult();
+            List<QuickReply> preTemplatedQuickReplies = copyQuickReplies(quickReplies);
+
+            quickReplies.forEach(quickReply -> {
+                String preTemplatedValue = quickReply.getValue();
+                String postTemplatedValue = templatingEngine.processTemplate(preTemplatedValue, contextMap);
+                quickReply.setValue(postTemplatedValue);
+            });
+
+            templateData(memory, quickReplyData, quickReplyData.getKey(), preTemplatedQuickReplies, quickReplies);
+        });
+    }
+
+    private List<QuickReply> copyQuickReplies(List<QuickReply> source) {
+        return source.stream().map(quickReply ->
+                new QuickReply(quickReply.getValue(), quickReply.getExpressions())).
+                collect(Collectors.toCollection(LinkedList::new));
+    }
+
+    private void templateData(IConversationMemory memory,
+                              IData dataText,
+                              String dataKey,
+                              Object preTemplated,
+                              Object postTemplated) {
+
+        storeTemplatedData(memory, dataKey, PRE_TEMPLATED, preTemplated);
+        storeTemplatedData(memory, dataKey, POST_TEMPLATED, postTemplated);
+        memory.getCurrentStep().storeData(dataText);
+    }
+
+    private void storeTemplatedData(IConversationMemory memory,
+                                    String originalKey,
+                                    String templateAppendix,
+                                    Object dataValue) {
+
+        String newOutputKey = joinStrings(":", originalKey, templateAppendix);
+        IData processedData = dataFactory.createData(newOutputKey, dataValue);
+        memory.getCurrentStep().storeData(processedData);
     }
 }

@@ -1,8 +1,7 @@
 package ai.labs.utilities;
 
-import java.util.LinkedList;
-import java.util.List;
-import java.util.StringTokenizer;
+import java.util.Arrays;
+import java.util.StringJoiner;
 
 /**
  * @author ginccc
@@ -28,21 +27,9 @@ public final class StringUtilities {
         return filter;
     }
 
-    public static String[] extractPaths(String paths) {
-        List<String> extractedPaths = new LinkedList<String>();
-        StringTokenizer token = new StringTokenizer(paths, ";");
-
-        while (token.hasMoreElements()) {
-            String path = token.nextToken();
-            if (!path.isEmpty()) {
-                extractedPaths.add(path);
-            }
-        }
-
-        return extractedPaths.toArray(new String[extractedPaths.size()]);
-    }
-
-    public static String convertSkipPermissionURIs(String skipPermissionCheckOnURIs) {
-        return skipPermissionCheckOnURIs.replaceAll("\\*", ".*");
+    public static String joinStrings(String delimiter, Object... values) {
+        StringJoiner stringJoiner = new StringJoiner(delimiter);
+        Arrays.stream(values).map(Object::toString).forEach(stringJoiner::add);
+        return stringJoiner.toString();
     }
 }

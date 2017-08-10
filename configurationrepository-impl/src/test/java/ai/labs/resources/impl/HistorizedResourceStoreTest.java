@@ -10,6 +10,7 @@ import org.junit.Test;
 import java.io.IOException;
 import java.util.HashMap;
 import java.util.Map;
+import java.util.Objects;
 
 /**
  * @author ginccc
@@ -21,11 +22,11 @@ public class HistorizedResourceStoreTest {
     private class DataClass {
         private String data;
 
-        public String getData() {
+        String getData() {
             return data;
         }
 
-        public void setData(String data) {
+        void setData(String data) {
             this.data = data;
         }
 
@@ -34,17 +35,17 @@ public class HistorizedResourceStoreTest {
     private class TestResourceStorage implements IResourceStorage<DataClass> {
         private int highestId = 1;
 
-        private Map<String, IResource> resources = new HashMap<String, IResource>();
+        private Map<String, IResource> resources = new HashMap<>();
 
-        public Map<String, Map<Integer, IHistoryResource>> getHistory() {
+        Map<String, Map<Integer, IHistoryResource>> getHistory() {
             return history;
         }
 
-        public Map<Integer, IHistoryResource> getHistory(String id) {
+        Map<Integer, IHistoryResource> getHistory(String id) {
             return history.get(id);
         }
 
-        private Map<String, Map<Integer, IHistoryResource>> history = new HashMap<String, Map<Integer, IHistoryResource>>();
+        private Map<String, Map<Integer, IHistoryResource>> history = new HashMap<>();
 
         @Override
         public IResource newResource(DataClass content) throws IOException {
@@ -60,7 +61,7 @@ public class HistorizedResourceStoreTest {
             return String.valueOf(highestId++);
         }
 
-        public Map<String, IResource> getResources() {
+        Map<String, IResource> getResources() {
             return resources;
         }
 
@@ -80,7 +81,7 @@ public class HistorizedResourceStoreTest {
                 return null;
             }
 
-            if (version != resource.getVersion()) {
+            if (!Objects.equals(version, resource.getVersion())) {
                 return null;
             }
 
@@ -170,7 +171,6 @@ public class HistorizedResourceStoreTest {
         IResourceStore.IResourceId id = testResourceStore.create(dataClass);
 
         // test
-        DataClass dataClass1 = new DataClass();
         Integer newVersion = testResourceStore.update(id.getId(), id.getVersion(), dataClass);
 
         // assert
@@ -250,7 +250,7 @@ public class HistorizedResourceStoreTest {
 
         private boolean deleted;
 
-        public TestHistoryResource(String id, int version, boolean deleted, Object content) {
+        TestHistoryResource(String id, int version, boolean deleted, Object content) {
             super(id, version, content);
             this.deleted = deleted;
         }
@@ -267,7 +267,7 @@ public class HistorizedResourceStoreTest {
 
         private Object data;
 
-        public TestResource(String id, int version, Object content) {
+        TestResource(String id, int version, Object content) {
             this.id = id;
             this.version = version;
             this.data = content;

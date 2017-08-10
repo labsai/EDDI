@@ -85,7 +85,7 @@ public class RuntimeModule extends AbstractBaseModule {
     }
 
     static class HasInitMethod extends AbstractMatcher<TypeLiteral<?>> {
-        public static final HasInitMethod INSTANCE = new HasInitMethod();
+        static final HasInitMethod INSTANCE = new HasInitMethod();
 
         public boolean matches(TypeLiteral<?> tpe) {
             try {
@@ -97,7 +97,7 @@ public class RuntimeModule extends AbstractBaseModule {
     }
 
     static class InitInvoker implements InjectionListener {
-        public static final InitInvoker INSTANCE = new InitInvoker();
+        static final InitInvoker INSTANCE = new InitInvoker();
 
         public void afterInjection(Object injectee) {
             try {

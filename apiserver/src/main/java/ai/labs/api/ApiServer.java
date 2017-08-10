@@ -72,8 +72,7 @@ public class ApiServer {
                 new ConversationCallbackModule(new FileInputStream(configDir + "httpClient.properties")),
                 new CoreModule(),
                 new SwaggerModule(new FileInputStream(configDir + "swagger.properties")),
-                new ServerRuntimeModule(new FileInputStream(configDir + "webServer.properties"),
-                        new FileInputStream(configDir + "keycloak.properties")),
+                new ServerRuntimeModule(new FileInputStream(configDir + "webServer.properties")),
                 new FacebookMessengerModule()
         };
 
