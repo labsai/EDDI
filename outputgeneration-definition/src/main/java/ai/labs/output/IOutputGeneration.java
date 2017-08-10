@@ -3,12 +3,13 @@ package ai.labs.output;
 import ai.labs.output.model.OutputEntry;
 
 import java.util.List;
+import java.util.Map;
 
 /**
  * @author ginccc
  */
-public interface ISimpleOutput {
+public interface IOutputGeneration {
     void addOutputEntry(OutputEntry outputEntry);
 
-    List<List<OutputEntry>> getOutputs(List<IOutputFilter> outputFilter);
+    Map<String, List<OutputEntry>> getOutputs(List<IOutputFilter> outputFilter);
 }

@@ -9,7 +9,7 @@ import ai.labs.lifecycle.UnrecognizedExtensionException;
 import ai.labs.memory.Data;
 import ai.labs.memory.IConversationMemory;
 import ai.labs.memory.IData;
-import ai.labs.output.IQuickReply;
+import ai.labs.output.model.QuickReply;
 import ai.labs.parser.correction.*;
 import ai.labs.parser.dictionaries.*;
 import ai.labs.parser.internal.InputParser;
@@ -88,7 +88,7 @@ public class InputParserTask implements ILifecycleTask {
 
         IData<QuickReplyList> replyListData = memory.getPreviousSteps().
                 getLatestData("output:quickReplies");
-        List<IQuickReply> quickReplies;
+        List<QuickReply> quickReplies;
         if (replyListData != null) {
             quickReplies = replyListData.getResult();
         } else {
@@ -323,7 +323,7 @@ public class InputParserTask implements ILifecycleTask {
         }
     }
 
-    private static class QuickReplyList extends ArrayList<IQuickReply> implements List<IQuickReply> {
+    private static class QuickReplyList extends ArrayList<QuickReply> implements List<QuickReply> {
         //reflection purpose only
     }
 }
