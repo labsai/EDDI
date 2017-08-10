@@ -47,6 +47,5 @@ public class OutputConfiguration {
     public static class QuickReply {
         private String value;
         private String expressions;
-
     }
 }
