@@ -99,7 +99,7 @@ public class ConversationMemoryUtilities {
         return conversationMemory;
     }
 
-    public static SimpleConversationMemorySnapshot convertSimpleConversationMemory(ConversationMemorySnapshot conversationMemorySnapshot, boolean includeAll) {
+    public static SimpleConversationMemorySnapshot convertSimpleConversationMemory(ConversationMemorySnapshot conversationMemorySnapshot, boolean returnDetailed) {
         SimpleConversationMemorySnapshot simpleSnapshot = new SimpleConversationMemorySnapshot();
 
         simpleSnapshot.setBotId(conversationMemorySnapshot.getBotId());
@@ -113,7 +113,7 @@ public class ConversationMemoryUtilities {
             simpleSnapshot.getConversationSteps().add(simpleConversationStep);
             for (ConversationMemorySnapshot.PackageRunSnapshot packageRunSnapshot : conversationStepSnapshot.getPackages()) {
                 for (ConversationMemorySnapshot.ResultSnapshot resultSnapshot : packageRunSnapshot.getLifecycleTasks()) {
-                    if (includeAll || resultSnapshot.isPublic()) {
+                    if (returnDetailed || resultSnapshot.isPublic()) {
                         Object result = resultSnapshot.getResult();
                         simpleConversationStep.getData().add(
                                 new SimpleConversationMemorySnapshot.SimpleData(resultSnapshot.getKey(), result));

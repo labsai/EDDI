@@ -69,7 +69,9 @@ public class RestBotEngine implements IRestBotEngine {
             }
 
             IConversation conversation = latestBot.startConversation(null);
-            String conversationId = storeConversationMemory(conversation.getConversationMemory(), environment);
+            ConversationMemorySnapshot memorySnapshot = convertConversationMemory(conversation.getConversationMemory());
+            memorySnapshot.setEnvironment(environment);
+            String conversationId = conversationMemoryStore.storeConversationMemorySnapshot(memorySnapshot);
             URI createdUri = RestUtilities.createURI(resourceURI, conversationId);
             return Response.created(createdUri).build();
         } catch (ServiceException |
@@ -83,7 +85,10 @@ public class RestBotEngine implements IRestBotEngine {
     }
 
     @Override
-    public SimpleConversationMemorySnapshot readConversation(Deployment.Environment environment, String botId, String conversationId, Boolean includeAll) {
+    public SimpleConversationMemorySnapshot readConversation(Deployment.Environment environment,
+                                                             String botId,
+                                                             String conversationId,
+                                                             Boolean returnDetailed) {
         RuntimeUtilities.checkNotNull(environment, "environment");
         RuntimeUtilities.checkNotNull(botId, "botId");
         RuntimeUtilities.checkNotNull(conversationId, "conversationId");
@@ -94,7 +99,7 @@ public class RestBotEngine implements IRestBotEngine {
                 message = String.format(message, conversationId, botId);
                 throw new IllegalAccessException(message);
             }
-            return convertSimpleConversationMemory(conversationMemorySnapshot, includeAll);
+            return convertSimpleConversationMemory(conversationMemorySnapshot, returnDetailed);
         } catch (IResourceStore.ResourceStoreException | IllegalAccessException e) {
             log.error(e.getLocalizedMessage(), e);
             throw new InternalServerErrorException(e.getLocalizedMessage(), e);
@@ -120,15 +125,15 @@ public class RestBotEngine implements IRestBotEngine {
 
     @Override
     public void say(final Deployment.Environment environment,
-                    final String botId, final String conversationId,
+                    final String botId, final String conversationId, final Boolean returnDetailed,
                     final String message, final AsyncResponse response) {
-        sayWithinContext(environment, botId, conversationId,
+        sayWithinContext(environment, botId, conversationId, returnDetailed,
                 new InputData(message, new HashMap<>()), response);
     }
 
     @Override
     public void sayWithinContext(final Deployment.Environment environment,
-                                 final String botId, final String conversationId,
+                                 final String botId, final String conversationId, final Boolean returnDetailed,
                                  final InputData inputData, final AsyncResponse response) {
         RuntimeUtilities.checkNotNull(environment, "environment");
         RuntimeUtilities.checkNotNull(botId, "botId");
@@ -140,11 +145,7 @@ public class RestBotEngine implements IRestBotEngine {
 
         try {
             final IConversationMemory conversationMemory = loadConversationMemory(conversationId);
-            if (conversationMemory == null) {
-                String msg = "No conversation found with id: %s";
-                msg = String.format(msg, conversationId);
-                throw new IllegalAccessException(msg);
-            }
+            checkConversationMemoryNotNull(conversationMemory, conversationId);
             if (!botId.equals(conversationMemory.getBotId())) {
                 throw new IllegalAccessException("Supplied botId is incompatible to conversationId");
             }
@@ -160,7 +161,7 @@ public class RestBotEngine implements IRestBotEngine {
             final IConversation conversation = bot.continueConversation(conversationMemory,
                     conversationStep -> {
                         SimpleConversationMemorySnapshot memorySnapshot = convertSimpleConversationMemory(
-                                convertConversationMemory(conversationMemory), true);
+                                convertConversationMemory(conversationMemory), returnDetailed);
                         response.resume(memorySnapshot);
                     });
 
@@ -170,9 +171,12 @@ public class RestBotEngine implements IRestBotEngine {
             }
 
             Callable<Void> processUserInput =
-                    processUserInput(environment, conversationId,
-                            inputData.getInput(), inputData.getContext(),
-                            conversationMemory, conversation);
+                    processUserInput(conversationId,
+                            inputData.getInput(),
+                            inputData.getContext(),
+                            conversationMemory,
+                            conversation);
+
             conversationCoordinator.submitInOrder(conversationId, processUserInput);
         } catch (InstantiationException | IllegalAccessException e) {
             String errorMsg = "Error while processing message!";
@@ -189,15 +193,14 @@ public class RestBotEngine implements IRestBotEngine {
         }
     }
 
-    private Callable<Void> processUserInput(Deployment.Environment environment,
-                                            String conversationId, String message,
+    private Callable<Void> processUserInput(String conversationId, String message,
                                             Map<String, InputData.Context> inputDataContext,
                                             IConversationMemory conversationMemory,
                                             IConversation conversation) {
         return () -> {
             try {
                 conversation.say(message, convertContext(inputDataContext));
-                storeConversationMemory(conversationMemory, environment);
+                storeConversationMemory(conversationMemory);
             } catch (Exception e) {
                 setConversationState(conversationId, ConversationState.ERROR);
                 log.error("Error while processing user input", e);
@@ -250,11 +253,7 @@ public class RestBotEngine implements IRestBotEngine {
 
         try {
             final IConversationMemory conversationMemory = loadConversationMemory(conversationId);
-            if (conversationMemory == null) {
-                String message = "No converation found with id: %s";
-                message = String.format(message, conversationId);
-                throw new IllegalAccessException(message);
-            }
+            checkConversationMemoryNotNull(conversationMemory, conversationId);
 
             if (!botId.equals(conversationMemory.getBotId())) {
                 throw new IllegalAccessException("Supplied botId is incompatible to conversationId");
@@ -265,7 +264,7 @@ public class RestBotEngine implements IRestBotEngine {
                 try {
                     if (conversationMemory.isUndoAvailable()) {
                         conversationMemory.undoLastStep();
-                        storeConversationMemory(conversationMemory, environment);
+                        storeConversationMemory(conversationMemory);
                     }
                 } catch (Exception e) {
                     log.error("Error while Undo!", e);
@@ -318,22 +317,17 @@ public class RestBotEngine implements IRestBotEngine {
 
         try {
             final IConversationMemory conversationMemory = loadConversationMemory(conversationId);
-            if (conversationMemory == null) {
-                String message = "No converation found with id: %s";
-                message = String.format(message, conversationId);
-                throw new IllegalAccessException(message);
-            }
+            checkConversationMemoryNotNull(conversationMemory, conversationId);
 
             if (!botId.equals(conversationMemory.getBotId())) {
                 throw new IllegalAccessException("Supplied botId is incompatible to conversationId");
             }
 
             Callable<Void> processUserInput = () -> {
-
                 try {
                     if (conversationMemory.isRedoAvailable()) {
                         conversationMemory.redoLastStep();
-                        storeConversationMemory(conversationMemory, environment);
+                        storeConversationMemory(conversationMemory);
                     }
                 } catch (Exception e) {
                     log.error("Error while Redo!", e);
@@ -360,8 +354,10 @@ public class RestBotEngine implements IRestBotEngine {
         }
     }
 
-    private IConversationMemory loadConversationMemory(String conversationId) throws IResourceStore.ResourceStoreException, IResourceStore.ResourceNotFoundException {
-        ConversationMemorySnapshot conversationMemorySnapshot = conversationMemoryStore.loadConversationMemorySnapshot(conversationId);
+    private IConversationMemory loadConversationMemory(String conversationId)
+            throws IResourceStore.ResourceStoreException, IResourceStore.ResourceNotFoundException {
+        ConversationMemorySnapshot conversationMemorySnapshot =
+                conversationMemoryStore.loadConversationMemorySnapshot(conversationId);
         return convertConversationMemorySnapshot(conversationMemorySnapshot);
     }
 
@@ -369,9 +365,18 @@ public class RestBotEngine implements IRestBotEngine {
         conversationMemoryStore.setConversationState(conversationId, conversationState);
     }
 
-    private String storeConversationMemory(IConversationMemory conversationMemory, Deployment.Environment environment) throws IResourceStore.ResourceStoreException {
+    private void storeConversationMemory(IConversationMemory conversationMemory)
+            throws IResourceStore.ResourceStoreException {
         ConversationMemorySnapshot memorySnapshot = convertConversationMemory(conversationMemory);
-        memorySnapshot.setEnvironment(environment);
-        return conversationMemoryStore.storeConversationMemorySnapshot(memorySnapshot);
+        conversationMemoryStore.storeConversationMemorySnapshot(memorySnapshot);
+    }
+
+    private static void checkConversationMemoryNotNull(IConversationMemory conversationMemory, String conversationId)
+            throws IllegalAccessException {
+        if (conversationMemory == null) {
+            String message = "No conversation found with id: %s";
+            message = String.format(message, conversationId);
+            throw new IllegalAccessException(message);
+        }
     }
 }

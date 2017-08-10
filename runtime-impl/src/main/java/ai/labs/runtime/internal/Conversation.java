@@ -76,6 +76,7 @@ public class Conversation implements IConversation {
             throw new ConversationNotReadyException(errorMessage);
         }
 
+        final IConversationMemory.IWritableConversationStep currentStep = conversationMemory.getCurrentStep();
         try {
             setConversationState(ConversationState.IN_PROGRESS);
 
@@ -102,12 +103,6 @@ public class Conversation implements IConversation {
             //execute input processing
             executePackages(data);
 
-            // get final output
-            IConversationMemory.IWritableConversationStep currentStep = conversationMemory.getCurrentStep();
-            if (outputProvider != null) {
-                outputProvider.renderOutput(currentStep);
-            }
-
             IData actionData = currentStep.getLatestData("action");
             if (actionData != null) {
                 Object result = actionData.getResult();
@@ -121,6 +116,10 @@ public class Conversation implements IConversation {
         } finally {
             if (conversationState == ConversationState.IN_PROGRESS) {
                 setConversationState(ConversationState.READY);
+            }
+
+            if (outputProvider != null) {
+                outputProvider.renderOutput(currentStep);
             }
         }
     }
