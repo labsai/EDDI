@@ -128,7 +128,7 @@ public class OutputGenerationTaskTest {
     private OutputConfiguration createOutputConfiguration() {
         OutputConfiguration outputConfiguration = new OutputConfiguration();
         outputConfiguration.setAction(ACTION_1);
-        outputConfiguration.setOccurred(0);
+        outputConfiguration.setTimesOccurred(0);
         LinkedList<OutputConfiguration.OutputType> outputs = new LinkedList<>();
         OutputConfiguration.OutputType outputType = new OutputConfiguration.OutputType();
         outputType.setType(OutputValue.Type.text.toString());

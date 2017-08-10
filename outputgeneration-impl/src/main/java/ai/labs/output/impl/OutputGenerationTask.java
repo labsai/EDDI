@@ -114,7 +114,7 @@ public class OutputGenerationTask implements ILifecycleTask {
 
             outputConfigurationSet.getOutputSet().forEach(outputConfig -> outputGeneration.addOutputEntry(
                     new OutputEntry(outputConfig.getAction(),
-                            outputConfig.getOccurred(),
+                            outputConfig.getTimesOccurred(),
                             convertOutputTypesConfig(outputConfig.getOutputs()),
                             convertQuickRepliesConfig(outputConfig.getQuickReplies()))));
         } catch (ServiceException e) {
