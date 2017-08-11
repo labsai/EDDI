@@ -8,6 +8,7 @@ import ai.labs.memory.IConversationMemory;
 import ai.labs.memory.IData;
 import ai.labs.memory.IDataFactory;
 import ai.labs.output.model.QuickReply;
+import lombok.extern.slf4j.Slf4j;
 
 import javax.inject.Inject;
 import java.util.HashMap;
@@ -21,6 +22,7 @@ import static ai.labs.utilities.StringUtilities.joinStrings;
 /**
  * @author ginccc
  */
+@Slf4j
 public class OutputTemplateTask implements ILifecycleTask {
     private static final String OUTPUT_TEXT = "output:text";
     private static final String PRE_TEMPLATED = "preTemplated";
@@ -78,9 +80,14 @@ public class OutputTemplateTask implements ILifecycleTask {
             String outputKey = output.getKey();
             if (outputKey.startsWith(OUTPUT_TEXT)) {
                 String preTemplated = output.getResult();
-                String postTemplated = templatingEngine.processTemplate(preTemplated, ContextMap);
-                output.setResult(postTemplated);
-                templateData(memory, output, outputKey, preTemplated, postTemplated);
+
+                try {
+                    String postTemplated = templatingEngine.processTemplate(preTemplated, ContextMap);
+                    output.setResult(postTemplated);
+                    templateData(memory, output, outputKey, preTemplated, postTemplated);
+                } catch (ITemplatingEngine.TemplateEngineException e) {
+                    log.error(e.getLocalizedMessage(), e);
+                }
             }
         });
     }
@@ -94,8 +101,12 @@ public class OutputTemplateTask implements ILifecycleTask {
 
             quickReplies.forEach(quickReply -> {
                 String preTemplatedValue = quickReply.getValue();
-                String postTemplatedValue = templatingEngine.processTemplate(preTemplatedValue, contextMap);
-                quickReply.setValue(postTemplatedValue);
+                try {
+                    String postTemplatedValue = templatingEngine.processTemplate(preTemplatedValue, contextMap);
+                    quickReply.setValue(postTemplatedValue);
+                } catch (ITemplatingEngine.TemplateEngineException e) {
+                    log.error(e.getLocalizedMessage(), e);
+                }
             });
 
             templateData(memory, quickReplyData, quickReplyData.getKey(), preTemplatedQuickReplies, quickReplies);

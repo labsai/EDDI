@@ -78,7 +78,7 @@ public class OutputTemplateTaskTest {
         verifyTask(expectedPostQuickReplies);
     }
 
-    private List<QuickReply> setupTask() {
+    private List<QuickReply> setupTask() throws ITemplatingEngine.TemplateEngineException {
         when(currentStep.getAllData(eq("output"))).then(invocation -> {
             LinkedList<IData<String>> ret = new LinkedList<>();
             ret.add(new MockData<>("output:text:someAction", templateString));

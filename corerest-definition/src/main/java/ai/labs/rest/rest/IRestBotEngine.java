@@ -39,7 +39,7 @@ public interface IRestBotEngine {
     SimpleConversationMemorySnapshot readConversation(@PathParam("environment") Deployment.Environment environment,
                                                       @PathParam("botId") String botId,
                                                       @PathParam("conversationId") String conversationId,
-                                                      @QueryParam("includeAll") @DefaultValue("false") Boolean includeAll);
+                                                      @QueryParam("returnDetailed") @DefaultValue("false") Boolean returnDetailed);
 
     @GET
     @Path("/{environment}/conversationstatus/{conversationId}")
@@ -63,6 +63,8 @@ public interface IRestBotEngine {
     void say(@PathParam("environment") Deployment.Environment environment,
              @PathParam("botId") String botId,
              @PathParam("conversationId") String conversationId,
+             @QueryParam("returnDetailed") @DefaultValue("false") Boolean returnDetailed,
+             @QueryParam("returnCurrentStepOnly") @DefaultValue("true") Boolean returnCurrentStepOnly,
              @DefaultValue("") String message,
              @Suspended final AsyncResponse response);
 
@@ -83,6 +85,8 @@ public interface IRestBotEngine {
     void sayWithinContext(@PathParam("environment") Deployment.Environment environment,
                           @PathParam("botId") String botId,
                           @PathParam("conversationId") String conversationId,
+                          @QueryParam("returnDetailed") @DefaultValue("false") Boolean returnDetailed,
+                          @QueryParam("returnCurrentStepOnly") @DefaultValue("true") Boolean returnCurrentStepOnly,
                           InputData inputData,
                           @Suspended final AsyncResponse response);
 
