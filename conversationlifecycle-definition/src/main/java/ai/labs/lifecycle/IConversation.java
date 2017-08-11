@@ -21,7 +21,7 @@ public interface IConversation {
             throws LifecycleException, ConversationNotReadyException;
 
     interface IConversationOutputRenderer {
-        void renderOutput(IConversationMemory.IConversationStep conversationStep);
+        void renderOutput(IConversationMemory conversationMemory);
     }
 
     class ConversationNotReadyException extends Exception {

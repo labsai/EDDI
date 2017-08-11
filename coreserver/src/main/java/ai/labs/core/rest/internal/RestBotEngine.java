@@ -5,10 +5,7 @@ import ai.labs.lifecycle.LifecycleException;
 import ai.labs.lifecycle.model.Context;
 import ai.labs.memory.IConversationMemory;
 import ai.labs.memory.IConversationMemoryStore;
-import ai.labs.memory.model.ConversationMemorySnapshot;
-import ai.labs.memory.model.ConversationState;
-import ai.labs.memory.model.Deployment;
-import ai.labs.memory.model.SimpleConversationMemorySnapshot;
+import ai.labs.memory.model.*;
 import ai.labs.persistence.IResourceStore;
 import ai.labs.rest.model.InputData;
 import ai.labs.rest.rest.IRestBotEngine;
@@ -29,6 +26,7 @@ import javax.ws.rs.core.MediaType;
 import javax.ws.rs.core.Response;
 import java.net.URI;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.concurrent.Callable;
 import java.util.concurrent.TimeUnit;
@@ -124,15 +122,17 @@ public class RestBotEngine implements IRestBotEngine {
 
     @Override
     public void say(final Deployment.Environment environment,
-                    final String botId, final String conversationId, final Boolean returnDetailed,
+                    final String botId, final String conversationId,
+                    final Boolean returnDetailed, final Boolean returnCurrentStepOnly,
                     final String message, final AsyncResponse response) {
-        sayWithinContext(environment, botId, conversationId, returnDetailed,
+        sayWithinContext(environment, botId, conversationId, returnDetailed, returnCurrentStepOnly,
                 new InputData(message, new HashMap<>()), response);
     }
 
     @Override
     public void sayWithinContext(final Deployment.Environment environment,
-                                 final String botId, final String conversationId, final Boolean returnDetailed,
+                                 final String botId, final String conversationId,
+                                 final Boolean returnDetailed, final Boolean returnCurrentStepOnly,
                                  final InputData inputData, final AsyncResponse response) {
         RuntimeUtilities.checkNotNull(environment, "environment");
         RuntimeUtilities.checkNotNull(botId, "botId");
@@ -159,9 +159,12 @@ public class RestBotEngine implements IRestBotEngine {
                 throw new Exception(msg);
             }
             final IConversation conversation = bot.continueConversation(conversationMemory,
-                    conversationStep -> {
-                        SimpleConversationMemorySnapshot memorySnapshot = convertSimpleConversationMemory(
-                                convertConversationMemory(conversationMemory), returnDetailed);
+                    returnConversationMemory -> {
+                        SimpleConversationMemorySnapshot memorySnapshot =
+                                getSimpleConversationMemorySnapshot(returnConversationMemory,
+                                        returnDetailed,
+                                        returnCurrentStepOnly);
+                        memorySnapshot.setEnvironment(environment);
                         response.resume(memorySnapshot);
                     });
 
@@ -372,6 +375,23 @@ public class RestBotEngine implements IRestBotEngine {
         ConversationMemorySnapshot memorySnapshot = convertConversationMemory(conversationMemory);
         memorySnapshot.setEnvironment(environment);
         return conversationMemoryStore.storeConversationMemorySnapshot(memorySnapshot);
+    }
+
+    private SimpleConversationMemorySnapshot getSimpleConversationMemorySnapshot(
+            IConversationMemory returnConversationMemory,
+            Boolean returnDetailed,
+            Boolean returnCurrentStepOnly) {
+        SimpleConversationMemorySnapshot memorySnapshot = convertSimpleConversationMemory(
+                convertConversationMemory(returnConversationMemory), returnDetailed);
+        if (returnCurrentStepOnly) {
+            List<SimpleConversationMemorySnapshot.SimpleConversationStep> conversationSteps =
+                    memorySnapshot.getConversationSteps();
+            SimpleConversationMemorySnapshot.SimpleConversationStep currentConversationStep =
+                    conversationSteps.get(conversationSteps.size() - 1);
+            conversationSteps.clear();
+            conversationSteps.add(currentConversationStep);
+        }
+        return memorySnapshot;
     }
 
     private static void checkConversationMemoryNotNull(IConversationMemory conversationMemory, String conversationId)

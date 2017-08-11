@@ -97,7 +97,7 @@ public class TestCaseRuntime {
         IRestBotEngine botEngine = restInterfaceFactory.get(IRestBotEngine.class, coreServerURI);
 
         Response ConversationResponse = botEngine.startConversation(Deployment.Environment.test, botId);
-        URI conversationURI =   ConversationResponse.getLocation();
+        URI conversationURI = ConversationResponse.getLocation();
         String conversationURIPath = conversationURI.getPath();
         String conversationId = conversationURIPath.substring(conversationURIPath.lastIndexOf("/") + 1);
         ConversationMemorySnapshot expected = testCase.getExpected();
@@ -109,7 +109,7 @@ public class TestCaseRuntime {
             if (RuntimeUtilities.isNullOrEmpty(input)) {
                 input = " ";
             }
-            botEngine.say(Deployment.Environment.test, botId, conversationId, true, input, new MockAsyncResponse());
+            botEngine.say(Deployment.Environment.test, botId, conversationId, true, false, input, new MockAsyncResponse());
             while (botEngine.getConversationState(Deployment.Environment.test, conversationId) == ConversationState.IN_PROGRESS) {
                 Thread.sleep(1000);
             }
