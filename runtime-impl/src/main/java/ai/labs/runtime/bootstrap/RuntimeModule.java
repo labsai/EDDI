@@ -102,7 +102,9 @@ public class RuntimeModule extends AbstractBaseModule {
         public void afterInjection(Object injectee) {
             try {
                 Class<?> clazz = injectee.getClass();
-                clazz.getMethod("init").invoke(injectee);
+                if (clazz.equals(BaseRuntime.class)) {
+                    clazz.getMethod("init").invoke(injectee);
+                }
             } catch (Exception e) {
                 System.out.println(Arrays.toString(e.getStackTrace()));
             }
