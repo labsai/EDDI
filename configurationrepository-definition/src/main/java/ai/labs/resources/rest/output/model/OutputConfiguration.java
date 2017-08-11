@@ -14,7 +14,7 @@ import java.util.List;
 @Setter
 public class OutputConfiguration {
     private String action;
-    private int occurred;
+    private int timesOccurred;
     private List<OutputType> outputs = new LinkedList<>();
     private List<QuickReply> quickReplies = new LinkedList<>();
 
@@ -25,13 +25,13 @@ public class OutputConfiguration {
 
         OutputConfiguration that = (OutputConfiguration) o;
 
-        return action.equals(that.action) && occurred == that.occurred;
+        return action.equals(that.action) && timesOccurred == that.timesOccurred;
     }
 
     @Override
     public int hashCode() {
         int result = action.hashCode();
-        result = 31 * result + occurred;
+        result = 31 * result + timesOccurred;
         return result;
     }
 
@@ -47,6 +47,5 @@ public class OutputConfiguration {
     public static class QuickReply {
         private String value;
         private String expressions;
-
     }
 }
