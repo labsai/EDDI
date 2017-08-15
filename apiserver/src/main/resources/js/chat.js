@@ -94,28 +94,51 @@ $(function () {
     });
 
     eddi.submitUserMessage = function (userMessage) {
+        let requestBody = null;
+        let contextType = $('#contextType option:selected').text();
+        let contextName = $('#contextName').val();
+        let contextValue = $('#contextValue').val().trim();
+        if (contextValue !== null && contextValue !== '') {
+            let context = {};
+            let value = contextType === 'object' ? JSON.parse(contextValue) : contextValue;
+            context[contextName] = {
+                type: contextType,
+                value: value
+            };
+            requestBody = {
+                input: userMessage,
+                context: context
+            }
+        } else {
+            requestBody = {
+                input: userMessage
+            }
+        }
+
         $.ajax({
-            type: "POST",
-            url: "/bots/" + eddi.environment + "/" + eddi.botId + "/" + eddi.conversationId,
-            data: userMessage,
-            contentType: "text/plain",
-            success: function () {
-                setTimeout(loadConversationLog, 2000);
+            type: 'POST',
+            url: '/bots/' + eddi.environment + '/' + eddi.botId + '/' + eddi.conversationId,
+            data: JSON.stringify(requestBody),
+            contentType: 'application/json; charset=utf-8',
+            dataType: 'json',
+            success: function (conversationMemory) {
+                refreshConversationLog(conversationMemory);
             }
         });
     };
 
     const loadConversationLog = function () {
-        $.get("/bots/" + eddi.environment + "/" + eddi.botId + "/" + eddi.conversationId).done(function (data) {
-            refreshConversationLog(data);
-        });
+        $.get('/bots/' + eddi.environment + '/' + eddi.botId + '/' + eddi.conversationId).done(
+            function (conversationMemory) {
+                refreshConversationLog(conversationMemory);
+            });
     };
 
     const refreshConversationLog = function (conversationMemory) {
         const conversationState = conversationMemory.conversationState;
 
         if (conversationState === 'ERROR') {
-            log('ERROR', "An Error has occurred. Please contact the administrator!");
+            log('ERROR', 'An Error has occurred. Please contact the administrator!');
             return;
         }
 
@@ -129,26 +152,26 @@ $(function () {
             let step = conversationMemory.conversationSteps[i];
 
             let input = null;
-            let output = null;
-            let media = null;
             let action = null;
+            let outputs = [];
+            let images = [];
             let quickReplies = [];
-            for (let x = 0; x < step.data.length; x++) {
-                let obj = step.data[x];
+            for (let x = 0; x < step.conversationStep.length; x++) {
+                let obj = step.conversationStep[x];
                 if (obj.key.indexOf('input') === 0) {
                     input = obj.value;
-                } else if (obj.key.indexOf('media') === 0) {
-                    media = obj.value;
                 } else if (obj.key.indexOf('actions') === 0) {
                     action = obj.value;
-                } else if (obj.key.indexOf('output:quickreply') === 0) {
+                } else if (obj.key.indexOf('output:text') === 0) {
+                    outputs.push(obj.value);
+                } else if (obj.key.indexOf('output:image') === 0) {
+                    images.push(obj.value);
+                } else if (obj.key.indexOf('quickReplies') === 0) {
                     pushArray(quickReplies, obj.value);
-                } else if (obj.key.indexOf('output') === 0) {
-                    output = obj.value;
                 }
             }
 
-            ioList.push({input: input, output: output, media: media, quickReplies: quickReplies});
+            ioList.push({input: input, outputs: outputs, images: images, quickReplies: quickReplies});
         }
 
         if (ioList.length > 0) {
@@ -157,11 +180,12 @@ $(function () {
                 latestInteraction = {};
             }
 
-            if (latestInteraction.output === null) {
-                latestInteraction.output = '';
+            for (let output of latestInteraction.outputs) {
+                eddi.displayMessage(output, 'left');
             }
-
-            eddi.displayMessage(latestInteraction.output, 'left');
+            for (let image of latestInteraction.images) {
+                eddi.displayMessage('<img src="/binary/img/' + image + '" alt="" />', 'left');
+            }
             displayQuickReplies(latestInteraction.quickReplies);
 
             $('.message_input').focus();
@@ -173,13 +197,13 @@ $(function () {
     };
 
     const deployBot = function (environment, botId, botVersion) {
-        $.post("/administration/" + environment + "/deploy/" + botId + "?version=" + botVersion).done(function () {
+        $.post('/administration/' + environment + '/deploy/' + botId + '?version=' + botVersion).done(function () {
             checkBotDeploymentStatus();
         });
     };
 
     const checkBotDeploymentStatus = function () {
-        $.get("/administration/" + eddi.environment + "/deploymentstatus/" + eddi.botId + "?version=" + eddi.botVersion).done(function (data) {
+        $.get('/administration/' + eddi.environment + '/deploymentstatus/' + eddi.botId + '?version=' + eddi.botVersion).done(function (data) {
             if (data === 'IN_PROGRESS') {
                 setTimeout(checkBotDeploymentStatus, 1000);
             } else if (data === 'ERROR') {
@@ -191,21 +215,21 @@ $(function () {
     };
 
     const createConversation = function (environment, botId) {
-        $.post("/bots/" + environment + "/" + botId).done(function (data, status, xhr) {
-            const conversationUriArray = xhr.getResponseHeader('Location').split("/");
+        $.post('/bots/' + environment + '/' + botId).done(function (data, status, xhr) {
+            const conversationUriArray = xhr.getResponseHeader('Location').split('/');
             eddi.conversationId = conversationUriArray[conversationUriArray.length - 1];
             proceedConversation();
         });
     };
 
     const checkConversationStatus = function (environment, botId, conversationId) {
-        $.get("/bots/" + environment + "/" + botId + "/" + conversationId).always(function (data, status) {
-            if (status === "error") {
-                alert("Checking conversation has yield into an error.. ");
-            } else if (status === "success") {
+        $.get('/bots/' + environment + '/' + botId + '/' + conversationId).always(function (data, status) {
+            if (status === 'error') {
+                alert('Checking conversation has yield into an error.. ');
+            } else if (status === 'success') {
                 eddi.conversationState = data.conversationState;
                 if (eddi.conversationState !== 'READY') {
-                    alert("Conversation is not Ready... (state=" + eddi.conversationState + ")");
+                    alert('Conversation is not Ready... (state=' + eddi.conversationState + ')');
                 }
 
                 loadConversationLog();
@@ -217,7 +241,7 @@ $(function () {
         const query = $.url.parse(href);
         const path = query.path;
 
-        const parts = path.split("/");
+        const parts = path.split('/');
 
         let environment = null;
         let botId = null;
@@ -244,7 +268,7 @@ $(function () {
 
     const checkBotDeployment = function () {
         //check if bot is deployed
-        $.get("/administration/" + eddi.environment + "/deploymentstatus/" + eddi.botId + "?version=" + eddi.botVersion)
+        $.get('/administration/' + eddi.environment + '/deploymentstatus/' + eddi.botId + '?version=' + eddi.botVersion)
             .done(function (data) {
                 if (data === 'NOT_FOUND') {
                     if (confirm('Bot is not deployed at the moment.. Deploy latest version NOW?')) {
@@ -288,7 +312,7 @@ $(function () {
             eddi.botVersion = extractedParams.botVersion;
             checkBotDeployment();
         } else {
-            $.get("/botstore/bots/" + eddi.botId + "/currentversion", function (data) {
+            $.get('/botstore/bots/' + eddi.botId + '/currentversion', function (data) {
                 eddi.botVersion = data;
                 checkBotDeployment();
             });
