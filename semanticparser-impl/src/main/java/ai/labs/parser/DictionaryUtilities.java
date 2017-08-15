@@ -38,18 +38,19 @@ public class DictionaryUtilities {
         return solutionExpressions;
     }
 
-    static List<IDictionary> convertQuickReplies(List<QuickReply> quickReplies, IExpressionProvider expressionProvider) {
+    static List<IDictionary> convertQuickReplies(List<List<QuickReply>> quickRepliesList, IExpressionProvider expressionProvider) {
         List<IDictionary> ret = new LinkedList<>();
 
-        for (QuickReply quickReply : quickReplies) {
+        quickRepliesList.forEach(quickReplies -> {
             RegularDictionary dictionary = new RegularDictionary(null, false);
-            String quickReplyValue = quickReply.getValue();
-            if (quickReplyValue.contains(" ")) {
-                dictionary.addPhrase(quickReplyValue, expressionProvider.parseExpressions(quickReply.getExpressions()));
-            }
-
+            quickReplies.forEach(quickReply -> {
+                String quickReplyValue = quickReply.getValue();
+                if (quickReplyValue.contains(" ")) {
+                    dictionary.addPhrase(quickReplyValue, expressionProvider.parseExpressions(quickReply.getExpressions()));
+                }
+            });
             ret.add(dictionary);
-        }
+        });
 
         return ret;
     }

@@ -7,6 +7,20 @@
     <script src="/text/js/chat.js" type="text/javascript"></script>
 </head>
 <body>
+
+<div style="position: absolute">
+    <label for="contextType">Context Type:</label>
+    <select id="contextType">
+        <option value="string">string</option>
+        <option value="expressions">expressions</option>
+        <option value="json">object</option>
+    </select>
+    <label for="contextValue">Context Name:</label>
+    <input id="contextName" name="contextName" placeholder="context name...">
+    <label for="contextValue">Context Value:</label>
+    <textarea id="contextValue" name="contextValue" placeholder="context value to be send..."></textarea>
+</div>
+
 <div class="chat_window">
     <div class="top_menu">
         <div class="buttons">
