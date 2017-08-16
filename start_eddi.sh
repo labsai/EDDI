@@ -6,7 +6,8 @@ argument_string=""
 
 for item in ${env_vars[*]}
 do
-    argument_string="${argument_string} -D${item}"
+    value=${item#*=}
+    argument_string="${argument_string} -D${value}"
 done
 
 echo "dynamically set java arguments: ${argument_string}"
