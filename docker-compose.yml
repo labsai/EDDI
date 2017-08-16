@@ -11,6 +11,8 @@ services:
     environment:
       EDDI_VERSION: 4.1
       EDDI_ENV: production
+      EDDI_MIN_MEMORY: 1G
+      EDDI_MAX_MEMORY: 1G
       #EDDI_JAVA_ENV_MONGODB_HOST: mongodb.hosts=mongodb
   mongodb:
     image: mongo:3.4

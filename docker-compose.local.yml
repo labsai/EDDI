@@ -6,7 +6,11 @@ services:
       args:
         EDDI_VERSION: 4.1
         EDDI_ENV: production
+        EDDI_MIN_MEMORY: 128m
+        EDDI_MAX_MEMORY: 128m
     image: labsai/eddi:local
     environment:
       EDDI_VERSION: 4.1
       EDDI_ENV: production
+      EDDI_MIN_MEMORY: 128m
+      EDDI_MAX_MEMORY: 128m

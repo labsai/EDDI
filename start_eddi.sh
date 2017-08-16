@@ -9,4 +9,6 @@ do
     argument_string="${argument_string} -D${item}"
 done
 
-java -classpath '.:lib/*' -DEDDI_ENV=$EDDI_ENV ${argument_string} ai.labs.api.ApiServer
+echo "dynamically set java arguments: ${argument_string}"
+
+java -server -XX:+UseG1GC -Xms$EDDI_MIN_MEMORY -Xmx$EDDI_MAX_MEMORY -classpath '.:lib/*' -DEDDI_ENV=$EDDI_ENV ${argument_string} ai.labs.api.ApiServer
