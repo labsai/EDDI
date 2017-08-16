@@ -57,7 +57,7 @@ public class BehaviorRulesEvaluationTask implements ILifecycleTask {
             results = evaluator.evaluate(memory);
             storeResultIfNotEmpty(memory, "behavior_rules:success", results.getSuccessRules());
             storeResultIfNotEmpty(memory, "behavior_rules:droppedSuccess", results.getDroppedSuccessRules());
-            //storeResultIfNotEmpty(memory, "behavior_rules:fail", results.getFailRules()); //not ideal for auto testing
+            storeResultIfNotEmpty(memory, "behavior_rules:fail", results.getFailRules());
 
             if (!results.getSuccessRules().isEmpty()) {
                 addActionsToConversationMemory(memory, results.getSuccessRules());
@@ -71,9 +71,8 @@ public class BehaviorRulesEvaluationTask implements ILifecycleTask {
 
     private void addActionsToConversationMemory(IConversationMemory memory, List<BehaviorRule> successRules) {
         List<String> allActions = new LinkedList<>();
-        for (BehaviorRule successRule : successRules) {
-            allActions.addAll(successRule.getActions());
-        }
+        successRules.forEach(successRule -> successRule.getActions().stream().
+                filter(action -> !allActions.contains(action)).forEach(allActions::add));
 
         Data actions = new Data<>("actions", allActions);
         actions.setPublic(true);

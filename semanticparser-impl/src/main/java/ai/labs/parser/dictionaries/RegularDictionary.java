@@ -14,7 +14,7 @@ import java.util.*;
 public class RegularDictionary implements IDictionary {
     private String language;
 
-    private LinkedHashMap<String, IWord> words = new LinkedHashMap<>();
+    private Map<String, IWord> words = new TreeMap<>(String.CASE_INSENSITIVE_ORDER);
     private List<IPhrase> phrases = new ArrayList<>();
     private boolean lookupIfKnown;
 
@@ -52,12 +52,15 @@ public class RegularDictionary implements IDictionary {
             }
         }
 
-        if (words.containsKey(lookup)) {
-            ret.add(new FoundWord(words.get(lookup.toLowerCase()), false, 1.0));
+        IWord word;
+        if ((word = words.get(lookup)) != null) {
+            boolean isCaseSensitiveMatch = words.keySet().stream().parallel().anyMatch(key -> key.equals(lookup));
+            ret.add(new FoundWord(word, !isCaseSensitiveMatch, isCaseSensitiveMatch ? 1.0 : 0.9));
         }
 
         return ret.toArray(new IFoundWord[ret.size()]);
     }
+
 
     @Override
     public String getLanguage() {
