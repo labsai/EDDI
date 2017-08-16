@@ -45,8 +45,11 @@ public class DictionaryUtilities {
             RegularDictionary dictionary = new RegularDictionary(null, false);
             quickReplies.forEach(quickReply -> {
                 String quickReplyValue = quickReply.getValue();
+                List<Expression> expressions = expressionProvider.parseExpressions(quickReply.getExpressions());
                 if (quickReplyValue.contains(" ")) {
-                    dictionary.addPhrase(quickReplyValue, expressionProvider.parseExpressions(quickReply.getExpressions()));
+                    dictionary.addPhrase(quickReplyValue, expressions);
+                } else {
+                    dictionary.addWord(quickReplyValue, expressions, 0);
                 }
             });
             ret.add(dictionary);

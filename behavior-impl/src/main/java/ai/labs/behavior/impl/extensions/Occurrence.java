@@ -16,20 +16,23 @@ import java.util.Map;
  */
 @NoArgsConstructor
 public class Occurrence implements IBehaviorExtension {
-    public static final String ID = "occurrence";
+    private static final String ID = "occurrence";
     private static final String BEHAVIOR_RULES_SUCCESS = "behavior_rules:success";
 
     private final String behaviorRuleNameQualifier = "behaviorRuleName";
     private String behaviorRuleName;
 
-    private final String maxOccurrenceQualifier = "maxOccurrence";
+    private final String maxTimesOccurredQualifier = "maxTimesOccurred";
+    private final String minTimesOccurredQualifier = "minTimesOccurred";
     @Setter
-    private int maxOccurrence = 1;
+    private int maxTimesOccurred = -1;
+    @Setter
+    private int minTimesOccurred = -1;
 
     private ExecutionState state = ExecutionState.NOT_EXECUTED;
 
 
-    private int countOccurrences(List<List<String>> allBehaviorRulesHistorical) {
+    private int countTimesOccurred(List<List<String>> allBehaviorRulesHistorical) {
         int occurrences = 0;
         for (List<String> history : allBehaviorRulesHistorical) {
             for (String behaviorRuleName : history) {
@@ -61,7 +64,8 @@ public class Occurrence implements IBehaviorExtension {
     @Override
     public Map<String, String> getValues() {
         HashMap<String, String> result = new HashMap<>();
-        result.put(maxOccurrenceQualifier, String.valueOf(maxOccurrence));
+        result.put(maxTimesOccurredQualifier, String.valueOf(maxTimesOccurred));
+        result.put(minTimesOccurredQualifier, String.valueOf(minTimesOccurred));
         result.put(behaviorRuleNameQualifier, behaviorRuleName);
         return result;
     }
@@ -73,14 +77,16 @@ public class Occurrence implements IBehaviorExtension {
                 behaviorRuleName = values.get(behaviorRuleNameQualifier);
             }
 
-            if (values.containsKey(maxOccurrenceQualifier)) {
-                String occurrenceValue = values.get(maxOccurrenceQualifier);
-                if ("ever".equals(occurrenceValue)) {
-                    setMaxOccurrence(-1);
-                } else {
-                    setMaxOccurrence(Integer.parseInt(occurrenceValue));
-                }
+            if (values.containsKey(maxTimesOccurredQualifier)) {
+                Integer timesOccurred = Integer.parseInt(values.get(maxTimesOccurredQualifier));
+                setMaxTimesOccurred(timesOccurred);
             }
+
+            if (values.containsKey(minTimesOccurredQualifier)) {
+                Integer timesOccurred = Integer.parseInt(values.get(minTimesOccurredQualifier));
+                setMinTimesOccurred(timesOccurred);
+            }
+
         }
     }
 
@@ -89,13 +95,19 @@ public class Occurrence implements IBehaviorExtension {
         boolean success;
         List<List<IData<List<String>>>> allData = memory.getAllSteps().getAllData(BEHAVIOR_RULES_SUCCESS);
         if (allData != null) {
-            int actualOccurrences = countOccurrences(getAllBehaviorRules(allData));
-            if (maxOccurrence == -1) {
-                //it did occurred at least once
-                success = actualOccurrences > 0;
-            } else {
-                success = maxOccurrence >= actualOccurrences;
+            final int actualTimesOccurred = countTimesOccurred(getAllBehaviorRules(allData));
+            boolean isMin = true;
+            boolean isMax = true;
+
+            if (minTimesOccurred != -1) {
+                isMin = actualTimesOccurred >= minTimesOccurred;
             }
+
+            if (maxTimesOccurred != -1) {
+                isMax = actualTimesOccurred <= maxTimesOccurred;
+            }
+
+            success = isMin && isMax;
         } else {
             success = false;
         }
