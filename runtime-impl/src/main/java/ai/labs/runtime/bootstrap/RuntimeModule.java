@@ -1,15 +1,13 @@
 package ai.labs.runtime.bootstrap;
 
-import ai.labs.runtime.BaseRuntime;
-import ai.labs.runtime.IBotFactory;
-import ai.labs.runtime.IPackageFactory;
-import ai.labs.runtime.SystemRuntime;
+import ai.labs.runtime.*;
 import ai.labs.runtime.client.bots.BotStoreClientLibrary;
 import ai.labs.runtime.client.bots.IBotStoreClientLibrary;
 import ai.labs.runtime.client.configuration.IResourceClientLibrary;
 import ai.labs.runtime.client.configuration.ResourceClientLibrary;
 import ai.labs.runtime.client.packages.IPackageStoreClientLibrary;
 import ai.labs.runtime.client.packages.PackageStoreClientLibrary;
+import ai.labs.runtime.internal.AutoBotDeployment;
 import ai.labs.runtime.internal.BotFactory;
 import ai.labs.runtime.internal.PackageFactory;
 import ai.labs.runtime.service.BotStoreService;
@@ -58,6 +56,8 @@ public class RuntimeModule extends AbstractBaseModule {
 
         bind(IBotFactory.class).to(BotFactory.class).in(Scopes.SINGLETON);
         bind(IPackageFactory.class).to(PackageFactory.class).in(Scopes.SINGLETON);
+
+        bind(IAutoBotDeployment.class).to(AutoBotDeployment.class).in(Scopes.SINGLETON);
 
         //call init method of system runtime after creation
         bindListener(HasInitMethod.INSTANCE, new TypeListener() {

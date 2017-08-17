@@ -17,7 +17,6 @@ import java.util.Map;
 @Getter
 @Setter
 public class BotConfiguration {
-    private boolean authenticationRequired = true;
     private List<URI> packages = new ArrayList<>();
     private List<ChannelConnector> channels = new ArrayList<>();
 

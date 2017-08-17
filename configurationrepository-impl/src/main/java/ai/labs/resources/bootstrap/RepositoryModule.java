@@ -1,4 +1,4 @@
-package ai.labs.resources;
+package ai.labs.resources.bootstrap;
 
 import ai.labs.group.IGroupStore;
 import ai.labs.group.impl.mongo.GroupStore;
@@ -8,6 +8,8 @@ import ai.labs.resources.impl.behavior.mongo.BehaviorStore;
 import ai.labs.resources.impl.behavior.rest.RestBehaviorStore;
 import ai.labs.resources.impl.bots.mongo.BotStore;
 import ai.labs.resources.impl.bots.rest.RestBotStore;
+import ai.labs.resources.impl.deployment.mongo.DeploymentStore;
+import ai.labs.resources.impl.deployment.rest.RestDeploymentStore;
 import ai.labs.resources.impl.descriptor.mongo.DocumentDescriptorStore;
 import ai.labs.resources.impl.descriptor.rest.RestDocumentDescriptorStore;
 import ai.labs.resources.impl.expression.RestExpression;
@@ -28,6 +30,8 @@ import ai.labs.resources.rest.behavior.IBehaviorStore;
 import ai.labs.resources.rest.behavior.IRestBehaviorStore;
 import ai.labs.resources.rest.bots.IBotStore;
 import ai.labs.resources.rest.bots.IRestBotStore;
+import ai.labs.resources.rest.deployment.IDeploymentStore;
+import ai.labs.resources.rest.deployment.IRestDeploymentStore;
 import ai.labs.resources.rest.documentdescriptor.IDocumentDescriptorStore;
 import ai.labs.resources.rest.documentdescriptor.IRestDocumentDescriptorStore;
 import ai.labs.resources.rest.expression.IRestExpression;
@@ -65,11 +69,13 @@ public class RepositoryModule extends AbstractBaseModule {
         bind(IRegularDictionaryStore.class).to(RegularDictionaryStore.class).in(Scopes.SINGLETON);
         bind(IBehaviorStore.class).to(BehaviorStore.class).in(Scopes.SINGLETON);
         bind(IOutputStore.class).to(OutputStore.class).in(Scopes.SINGLETON);
+        bind(IDeploymentStore.class).to(DeploymentStore.class).in(Scopes.SINGLETON);
 
         bind(IRestPermissionStore.class).to(RestPermissionStore.class);
         bind(IRestDocumentDescriptorStore.class).to(RestDocumentDescriptorStore.class);
         bind(IRestExtensionStore.class).to(RestExtensionStore.class);
         bind(IRestExpression.class).to(RestExpression.class);
+        bind(IRestDeploymentStore.class).to(RestDeploymentStore.class);
 
         bind(IRestBotStore.class).to(RestBotStore.class);
         bind(IRestPackageStore.class).to(RestPackageStore.class);
