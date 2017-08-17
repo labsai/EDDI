@@ -12,4 +12,16 @@ done
 
 echo "dynamically set java arguments: ${argument_string}"
 
-java -server -XX:+UseG1GC -Xms$EDDI_MIN_MEMORY -Xmx$EDDI_MAX_MEMORY -classpath '.:lib/*' -DEDDI_ENV=$EDDI_ENV ${argument_string} ai.labs.api.ApiServer
+memory_string=""
+
+if ! [[ -z "${EDDI_MEMORY_MIN}" ]]; then
+    memory_string="${memory_string} -Xms${EDDI_MEMORY_MIN}"
+fi
+
+if ! [[ -z "${EDDI_MEMORY_MAX}" ]]; then
+    memory_string="${memory_string} -Xmx${EDDI_MEMORY_MAX}"
+fi
+
+echo "memory params: ${memory_string}"
+
+java -server -XX:+UseG1GC ${memory_string} -classpath '.:lib/*' -DEDDI_ENV=$EDDI_ENV ${argument_string} ai.labs.api.ApiServer
