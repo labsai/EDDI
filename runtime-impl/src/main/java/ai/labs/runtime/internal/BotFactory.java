@@ -116,25 +116,29 @@ public class BotFactory implements IBotFactory {
         Bot bot = new Bot(botId, version) {
             @Override
             public void addPackage(IExecutablePackage executablePackage) throws IllegalAccessException {
-                throw new IllegalAccessException("Bot deployment is still in progress!");
+                throw createBotInProgressException();
             }
 
             @Override
             public IConversation startConversation(IConversation.IConversationOutputRenderer outputProvider)
                     throws InstantiationException, IllegalAccessException {
-                throw new IllegalAccessException("Bot deployment is still in progress!");
+                throw createBotInProgressException();
             }
 
             @Override
             public IConversation continueConversation(IConversationMemory conversationMemory,
                                                       IConversation.IConversationOutputRenderer outputProvider)
                     throws InstantiationException, IllegalAccessException {
-                throw new IllegalAccessException("Bot deployment is still in progress!");
+                throw createBotInProgressException();
             }
         };
 
         bot.setDeploymentStatus(Deployment.Status.IN_PROGRESS);
         return bot;
+    }
+
+    private static IllegalAccessException createBotInProgressException() {
+        return new IllegalAccessException("Bot deployment is still in progress!");
     }
 
     @AllArgsConstructor
