@@ -69,43 +69,31 @@ public class BotFactory implements IBotFactory {
     }
 
     @Override
-    public void deployBot(Deployment.Environment environment, final String botId, final Integer version) throws ServiceException, IllegalAccessException {
+    public void deployBot(Deployment.Environment environment, final String botId, final Integer version,
+                          DeploymentProcess deploymentProcess) throws ServiceException, IllegalAccessException {
         BotId id = new BotId(botId, version);
         ConcurrentHashMap<BotId, IBot> botEnvironment = getBotEnvironment(environment);
         // fast path
         if (!botEnvironment.containsKey(id)) {
-            Bot emptyBot = new Bot(botId, version) {
-                @Override
-                public void addPackage(IExecutablePackage executablePackage) throws IllegalAccessException {
-                    throw new IllegalAccessException("Bot deployment is still in progress!");
-                }
-
-                @Override
-                public IConversation startConversation(IConversation.IConversationOutputRenderer outputProvider) throws InstantiationException, IllegalAccessException {
-                    throw new IllegalAccessException("Bot deployment is still in progress!");
-                }
-
-                @Override
-                public IConversation continueConversation(IConversationMemory conversationMemory, IConversation.IConversationOutputRenderer outputProvider) throws InstantiationException, IllegalAccessException {
-                    throw new IllegalAccessException("Bot deployment is still in progress!");
-                }
-            };
-            emptyBot.setDeploymentStatus(Deployment.Status.IN_PROGRESS);
-
+            Bot progressDummyBot = createInProgressDummyBot(botId, version);
             // atomically register dummy bot in environment
-            if (botEnvironment.putIfAbsent(id, emptyBot) == null) {
+            if (botEnvironment.putIfAbsent(id, progressDummyBot) == null) {
                 IBot bot;
                 try {
                     bot = botStoreClientLibrary.getBot(botId, version);
                 } catch (ServiceException e) {
-                    emptyBot.setDeploymentStatus(Deployment.Status.ERROR);
+                    Deployment.Status error = Deployment.Status.ERROR;
+                    progressDummyBot.setDeploymentStatus(error);
                     // on failure, remove any entry from environment to allow redeployment
                     botEnvironment.remove(id);
+                    deploymentProcess.completed(error);
                     throw e;
                 }
 
-                ((Bot) bot).setDeploymentStatus(Deployment.Status.READY);
+                Deployment.Status ready = Deployment.Status.READY;
+                ((Bot) bot).setDeploymentStatus(ready);
                 botEnvironment.put(id, bot);
+                deploymentProcess.completed(ready);
             }
         }
     }
@@ -122,6 +110,35 @@ public class BotFactory implements IBotFactory {
 
     private ConcurrentHashMap<BotId, IBot> getBotEnvironment(Deployment.Environment environment) {
         return environments.get(environment);
+    }
+
+    private Bot createInProgressDummyBot(String botId, Integer version) throws IllegalAccessException {
+        Bot bot = new Bot(botId, version) {
+            @Override
+            public void addPackage(IExecutablePackage executablePackage) throws IllegalAccessException {
+                throw createBotInProgressException();
+            }
+
+            @Override
+            public IConversation startConversation(IConversation.IConversationOutputRenderer outputProvider)
+                    throws InstantiationException, IllegalAccessException {
+                throw createBotInProgressException();
+            }
+
+            @Override
+            public IConversation continueConversation(IConversationMemory conversationMemory,
+                                                      IConversation.IConversationOutputRenderer outputProvider)
+                    throws InstantiationException, IllegalAccessException {
+                throw createBotInProgressException();
+            }
+        };
+
+        bot.setDeploymentStatus(Deployment.Status.IN_PROGRESS);
+        return bot;
+    }
+
+    private static IllegalAccessException createBotInProgressException() {
+        return new IllegalAccessException("Bot deployment is still in progress!");
     }
 
     @AllArgsConstructor

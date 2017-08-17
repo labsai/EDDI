@@ -11,7 +11,13 @@ public interface IBotFactory {
 
     IBot getBot(Deployment.Environment environment, String botId, Integer version) throws ServiceException;
 
-    void deployBot(Deployment.Environment environment, String botId, Integer version) throws ServiceException, IllegalAccessException;
+    void deployBot(Deployment.Environment environment, String botId, Integer version, DeploymentProcess deploymentProcess)
+            throws ServiceException, IllegalAccessException;
 
-    void undeployBot(Deployment.Environment environment, String botId, Integer version) throws ServiceException, IllegalAccessException;
+    void undeployBot(Deployment.Environment environment, String botId, Integer version)
+            throws ServiceException, IllegalAccessException;
+
+    interface DeploymentProcess {
+        void completed(Deployment.Status status);
+    }
 }

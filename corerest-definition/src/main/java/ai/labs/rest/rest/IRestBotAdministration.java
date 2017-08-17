@@ -19,7 +19,15 @@ public interface IRestBotAdministration {
     Response deployBot(@PathParam("environment") Deployment.Environment environment,
                        @PathParam("botId") String botId,
                        @ApiParam(name = "version", required = true, format = "integer", example = "1")
-                       @QueryParam("version") Integer version);
+                       @QueryParam("version") Integer version,
+                       @QueryParam("autoDeploy") @DefaultValue("true") Boolean autoDeploy);
+
+    @POST
+    @Path("/{environment}/undeploy/{botId}")
+    Response undeployBot(@PathParam("environment") Deployment.Environment environment,
+                         @PathParam("botId") String botId,
+                         @ApiParam(name = "version", required = true, format = "integer", example = "1")
+                         @QueryParam("version") Integer version);
 
     @GET
     @Path("/{environment}/deploymentstatus/{botId}")

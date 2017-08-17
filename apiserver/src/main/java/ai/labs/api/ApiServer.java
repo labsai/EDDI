@@ -13,9 +13,10 @@ import ai.labs.output.bootstrap.OutputGenerationModule;
 import ai.labs.parser.bootstrap.SemanticParserModule;
 import ai.labs.permission.bootstrap.PermissionModule;
 import ai.labs.persistence.bootstrap.PersistenceModule;
-import ai.labs.resources.RepositoryModule;
+import ai.labs.resources.bootstrap.RepositoryModule;
 import ai.labs.rest.bootstrap.RestInterfaceModule;
 import ai.labs.runtime.DependencyInjector;
+import ai.labs.runtime.IAutoBotDeployment;
 import ai.labs.runtime.bootstrap.RuntimeModule;
 import ai.labs.runtime.bootstrap.SwaggerModule;
 import ai.labs.serialization.bootstrap.SerializationModule;
@@ -80,6 +81,9 @@ public class ApiServer {
         final DependencyInjector injector = DependencyInjector.init(environment, modules);
 
         //init webserver
-        injector.getInstance(IServerRuntime.class).startup();
+        injector.getInstance(IServerRuntime.class).startup(() -> {
+            //auto re-deploy bots
+            injector.getInstance(IAutoBotDeployment.class).autoDeployBots();
+        });
     }
 }
