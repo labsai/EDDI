@@ -6,7 +6,24 @@ argument_string=""
 
 for item in ${env_vars[*]}
 do
-    argument_string="${argument_string} -D${item}"
+    value=${item#*=}
+    argument_string="${argument_string} -D${value}"
 done
 
-java -classpath '.:lib/*' -DEDDI_ENV=$EDDI_ENV ${argument_string} ai.labs.api.ApiServer
+echo "dynamically set java arguments: ${argument_string}"
+
+memory_string=""
+
+if ! [[ -z "${EDDI_MEMORY_MIN}" ]]; then
+    memory_string="${memory_string} -Xms${EDDI_MEMORY_MIN}"
+fi
+
+if ! [[ -z "${EDDI_MEMORY_MAX}" ]]; then
+    memory_string="${memory_string} -Xmx${EDDI_MEMORY_MAX}"
+fi
+
+echo "memory params: ${memory_string}"
+echo $EDDI_MEMORY_MIN
+echo $EDDI_MEMORY_MAX
+
+java -server -XX:+UseG1GC ${memory_string} -classpath '.:lib/*' -DEDDI_ENV=$EDDI_ENV ${argument_string} ai.labs.api.ApiServer

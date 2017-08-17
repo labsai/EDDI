@@ -82,7 +82,7 @@ public class TestCaseRuntime {
 
     private void deployBot(String botId, Integer botVersion) throws Exception {
         IRestBotAdministration restBotAdministration = restInterfaceFactory.get(IRestBotAdministration.class, coreServerURI);
-        restBotAdministration.deployBot(Deployment.Environment.test, botId, botVersion);
+        restBotAdministration.deployBot(Deployment.Environment.test, botId, botVersion, false);
         while (true) {
             //wait until deployment has finished
             if (!Objects.equals(restBotAdministration.getDeploymentStatus(Deployment.Environment.test, botId, botVersion), Deployment.Status.IN_PROGRESS.toString())) {
