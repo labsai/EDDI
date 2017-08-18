@@ -5,7 +5,10 @@ import ai.labs.lifecycle.LifecycleException;
 import ai.labs.lifecycle.model.Context;
 import ai.labs.memory.IConversationMemory;
 import ai.labs.memory.IConversationMemoryStore;
-import ai.labs.memory.model.*;
+import ai.labs.memory.model.ConversationMemorySnapshot;
+import ai.labs.memory.model.ConversationState;
+import ai.labs.memory.model.Deployment;
+import ai.labs.memory.model.SimpleConversationMemorySnapshot;
 import ai.labs.persistence.IResourceStore;
 import ai.labs.rest.model.InputData;
 import ai.labs.rest.rest.IRestBotEngine;
@@ -169,8 +172,8 @@ public class RestBotEngine implements IRestBotEngine {
                     });
 
             if (conversation.isEnded()) {
-                throw new NoLogWebApplicationException(
-                        new Throwable("Conversation has ended!"), Response.Status.GONE);
+                response.resume(Response.status(Response.Status.GONE).entity("Conversation has ended!").build());
+                return;
             }
 
             Callable<Void> processUserInput =
