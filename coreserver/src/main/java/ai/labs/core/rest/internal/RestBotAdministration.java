@@ -1,8 +1,8 @@
 package ai.labs.core.rest.internal;
 
 import ai.labs.memory.model.Deployment;
+import ai.labs.memory.model.Deployment.Status;
 import ai.labs.resources.rest.deployment.IDeploymentStore;
-import ai.labs.resources.rest.deployment.model.DeploymentInfo;
 import ai.labs.rest.rest.IRestBotAdministration;
 import ai.labs.runtime.IBot;
 import ai.labs.runtime.IBotFactory;
@@ -19,6 +19,8 @@ import javax.ws.rs.InternalServerErrorException;
 import javax.ws.rs.core.Response;
 import java.util.EnumSet;
 import java.util.concurrent.Callable;
+
+import static ai.labs.resources.rest.deployment.model.DeploymentInfo.DeploymentStatus;
 
 /**
  * @author ginccc
@@ -56,14 +58,14 @@ public class RestBotAdministration implements IRestBotAdministration {
                         final String botId, final Integer version, final Boolean autoDeploy) {
         Callable<Void> deployBot = () -> {
             try {
-                if (EnumSet.of(Deployment.Status.NOT_FOUND, Deployment.Status.ERROR).
-                        contains(getStatus(environment, botId, version))) {
+                if (EnumSet.of(Status.NOT_FOUND, Status.ERROR).contains(getStatus(environment, botId, version))) {
                     botFactory.deployBot(environment, botId, version,
-                            status -> logBotDeploymentStatus(environment, botId, version, status));
-                    if (autoDeploy) {
-                        deploymentStore.setDeploymentInfo(environment.toString(),
-                                botId, version, DeploymentInfo.DeploymentStatus.deployed);
-                    }
+                            status -> {
+                                if (status == Status.READY && autoDeploy) {
+                                    deploymentStore.setDeploymentInfo(environment.toString(),
+                                            botId, version, DeploymentStatus.deployed);
+                                }
+                            });
                 }
             } catch (ServiceException e) {
                 String message = "Error while deploying bot! (botId=%s , version=%s)";
@@ -85,11 +87,6 @@ public class RestBotAdministration implements IRestBotAdministration {
         SystemRuntime.getRuntime().submitCallable(deployBot, ThreadContext.getResources());
     }
 
-    private void logBotDeploymentStatus(Deployment.Environment environment, String botId, Integer version, Deployment.Status status) {
-        log.info(String.format("Bot deployed with Status: %s (environment=%s, id=%s , version=%s)",
-                status, environment, botId, version));
-    }
-
     @Override
     public Response undeployBot(Deployment.Environment environment, String botId, Integer version) {
         RuntimeUtilities.checkNotNull(environment, "environment");
@@ -97,6 +94,7 @@ public class RestBotAdministration implements IRestBotAdministration {
         RuntimeUtilities.checkNotNull(version, "version");
 
         try {
+            //todo check if there are still active (READY) conversation going on with this botId/botVersion
             undeploy(environment, botId, version);
             return Response.accepted().build();
         } catch (Exception e) {
@@ -110,7 +108,7 @@ public class RestBotAdministration implements IRestBotAdministration {
             try {
                 botFactory.undeployBot(environment, botId, version);
                 deploymentStore.setDeploymentInfo(environment.toString(),
-                        botId, version, DeploymentInfo.DeploymentStatus.undeployed);
+                        botId, version, DeploymentStatus.undeployed);
             } catch (ServiceException e) {
                 String message = "Error while undeploying bot! (botId=%s , version=%s)";
                 message = String.format(message, botId, version);
@@ -140,13 +138,13 @@ public class RestBotAdministration implements IRestBotAdministration {
         return getStatus(environment, botId, version).toString();
     }
 
-    private Deployment.Status getStatus(Deployment.Environment environment, String botId, Integer version) {
+    private Status getStatus(Deployment.Environment environment, String botId, Integer version) {
         try {
             IBot bot = botFactory.getBot(environment, botId, version);
             if (bot != null) {
                 return bot.getDeploymentStatus();
             } else {
-                return Deployment.Status.NOT_FOUND;
+                return Status.NOT_FOUND;
             }
         } catch (ServiceException e) {
             String message = "Error while deploying bot! (botId=%s , version=%s)";

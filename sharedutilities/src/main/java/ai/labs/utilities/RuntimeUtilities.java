@@ -38,9 +38,18 @@ public class RuntimeUtilities {
     }
 
     public static boolean isNullOrEmpty(Object obj) {
-        return obj == null ||
-                (obj instanceof String && obj.equals("")) ||
-                (obj instanceof Collection && ((Collection) obj).isEmpty()) ||
-                (obj instanceof Map && ((Map) obj).isEmpty());
+        if (obj == null) {
+            return true;
+        }
+
+        if (obj instanceof String) {
+            return ((String) obj).isEmpty();
+        }
+
+        if (obj instanceof Collection) {
+            return ((Collection) obj).isEmpty();
+        }
+
+        return obj instanceof Map && ((Map) obj).isEmpty();
     }
 }

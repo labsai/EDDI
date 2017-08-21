@@ -1,6 +1,6 @@
 package ai.labs.runtime.internal;
 
-import ai.labs.memory.model.Deployment;
+import ai.labs.memory.model.Deployment.Environment;
 import ai.labs.persistence.IResourceStore;
 import ai.labs.resources.rest.deployment.IDeploymentStore;
 import ai.labs.resources.rest.deployment.model.DeploymentInfo;
@@ -28,32 +28,24 @@ public class AutoBotDeployment implements IAutoBotDeployment {
     @Override
     public void autoDeployBots() throws AutoDeploymentException {
         try {
+            log.info("Starting auto deployment of bots...");
             deploymentStore.readDeploymentInfos().stream().filter(
                     deploymentInfo -> deploymentInfo.getDeploymentStatus() == DeploymentInfo.DeploymentStatus.deployed).
                     forEach(deploymentInfo -> {
+                        Environment environment = Environment.valueOf(deploymentInfo.getEnvironment().toString());
+                        String botId = deploymentInfo.getBotId();
+                        Integer botVersion = deploymentInfo.getBotVersion();
                         try {
-                            logBotDeployment(deploymentInfo, null);
-                            botFactory.deployBot(
-                                    Deployment.Environment.valueOf(deploymentInfo.getEnvironment().toString()),
-                                    deploymentInfo.getBotId(), deploymentInfo.getBotVersion(),
-                                    status -> logBotDeployment(deploymentInfo, status)
-                            );
+                            botFactory.deployBot(environment, botId, botVersion, null);
                         } catch (ServiceException | IllegalAccessException | IllegalArgumentException e) {
-                            log.error("Error while auto deploying bots!\n" + e.getLocalizedMessage(), e);
+                            String message = "Error while auto deploying bot (environment=%s, id=%s, version=&s)!\n";
+                            log.error(String.format(message, environment, botId, botVersion));
+                            log.error(e.getLocalizedMessage(), e);
                         }
                     });
+            log.info("Finished auto deployment of bots.");
         } catch (IResourceStore.ResourceStoreException e) {
             throw new AutoDeploymentException(e.getLocalizedMessage(), e);
-        }
-    }
-
-    private void logBotDeployment(DeploymentInfo deploymentInfo, Deployment.Status status) {
-        if (status == null) {
-            log.info(String.format("Deploying Bot... (environment=%s, id=%s , version=%s)",
-                    deploymentInfo.getEnvironment(), deploymentInfo.getBotId(), deploymentInfo.getBotVersion()));
-        } else {
-            log.info(String.format("Bot is deployed. (environment=%s, id=%s , version=%s)  Status: %s",
-                    deploymentInfo.getEnvironment(), deploymentInfo.getBotId(), deploymentInfo.getBotVersion(), status));
         }
     }
 }
