@@ -81,8 +81,9 @@ public class InputMatcher implements IBehaviorExtension {
     public ExecutionState execute(IConversationMemory memory, List<BehaviorRule> trace) {
         List<Expression> inputExpressions;
 
-        IData data = memory.getCurrentStep().getLatestData("expression");
-        inputExpressions = data != null ? expressionProvider.parseExpressions(data.getResult().toString()) : new LinkedList<>();
+        IData data = memory.getCurrentStep().getLatestData("expressions");
+        inputExpressions = data != null && data.getResult() != null ?
+                expressionProvider.parseExpressions(data.getResult().toString()) : new LinkedList<>();
         inputExpressions = filterExpressions(inputExpressions);
 
         boolean isInputEmpty = expressions.size() == 1 &&
@@ -91,12 +92,13 @@ public class InputMatcher implements IBehaviorExtension {
 
 
         state = isInputEmpty ||
-                LanguageUtilities.containsArray(expressions, inputExpressions) > -1 ? ExecutionState.SUCCESS : ExecutionState.FAIL;
+                LanguageUtilities.containsArray(expressions, inputExpressions) > -1 ?
+                ExecutionState.SUCCESS : ExecutionState.FAIL;
 
         return state;
     }
 
-    public List<Expression> filterExpressions(List<Expression> expressions) {
+    private List<Expression> filterExpressions(List<Expression> expressions) {
         for (int i = 0; i < expressions.size(); i++) {
             Expression exp = expressions.get(i);
             if ((ignoreUnusedExpressions && exp.getExpressionName().equals("unused")) ||

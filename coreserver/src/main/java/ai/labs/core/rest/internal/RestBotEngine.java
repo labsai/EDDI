@@ -157,8 +157,8 @@ public class RestBotEngine implements IRestBotEngine {
             IBot bot = botFactory.getBot(environment,
                     conversationMemory.getBotId(), conversationMemory.getBotVersion());
             if (bot == null) {
-                String msg = "No Version of bot %s deployed.";
-                msg = String.format(msg, conversationMemory.getBotId());
+                String msg = "Bot not deployed (environment=%s, id=%s, version=%s)";
+                msg = String.format(msg, environment, conversationMemory.getBotId(), conversationMemory.getBotVersion());
                 throw new Exception(msg);
             }
             final IConversation conversation = bot.continueConversation(conversationMemory,
