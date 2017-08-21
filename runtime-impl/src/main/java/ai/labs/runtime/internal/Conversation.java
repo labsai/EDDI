@@ -24,7 +24,6 @@ public class Conversation implements IConversation {
     private final List<IExecutablePackage> executablePackages;
     private final IConversationMemory conversationMemory;
     private final IConversation.IConversationOutputRenderer outputProvider;
-    private ConversationState conversationState;
 
     Conversation(List<IExecutablePackage> executablePackages,
                  IConversationMemory conversationMemory,
@@ -32,12 +31,11 @@ public class Conversation implements IConversation {
         this.executablePackages = executablePackages;
         this.conversationMemory = conversationMemory;
         this.outputProvider = outputProvider;
-        setConversationState(ConversationState.READY);
     }
 
     @Override
     public boolean isEnded() {
-        return conversationState == ConversationState.ENDED;
+        return getConversationState() == ConversationState.ENDED;
     }
 
     @Override
@@ -52,20 +50,24 @@ public class Conversation implements IConversation {
 
     @Override
     public void init() throws LifecycleException {
+        setConversationState(ConversationState.READY);
         executePackages(new LinkedList<>());
     }
 
     private void setConversationState(ConversationState conversationState) {
-        this.conversationState = conversationState;
-        conversationMemory.setConversationState(conversationState);
+        this.conversationMemory.setConversationState(conversationState);
+    }
+
+    private ConversationState getConversationState() {
+        return this.conversationMemory.getConversationState();
     }
 
     @Override
     public void say(final String message, final Map<String, Context> contexts)
             throws LifecycleException, ConversationNotReadyException {
-        if (conversationState != ConversationState.READY) {
+        if (getConversationState() != ConversationState.READY) {
             String errorMessage = "Conversation is *NOT* ready. Current Status: %s";
-            errorMessage = String.format(errorMessage, conversationState);
+            errorMessage = String.format(errorMessage, getConversationState());
             throw new ConversationNotReadyException(errorMessage);
         }
 
@@ -107,7 +109,7 @@ public class Conversation implements IConversation {
             setConversationState(ConversationState.ERROR);
             throw new LifecycleException(e.getLocalizedMessage(), e);
         } finally {
-            if (conversationState == ConversationState.IN_PROGRESS) {
+            if (getConversationState() == ConversationState.IN_PROGRESS) {
                 setConversationState(ConversationState.READY);
             }
 

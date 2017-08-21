@@ -23,7 +23,5 @@ if ! [[ -z "${EDDI_MEMORY_MAX}" ]]; then
 fi
 
 echo "memory params: ${memory_string}"
-echo $EDDI_MEMORY_MIN
-echo $EDDI_MEMORY_MAX
 
 java -server -XX:+UseG1GC ${memory_string} -classpath '.:lib/*' -DEDDI_ENV=$EDDI_ENV ${argument_string} ai.labs.api.ApiServer

@@ -4,12 +4,13 @@ import ai.labs.expressions.Connector;
 import ai.labs.expressions.Expression;
 import ai.labs.expressions.IExpressionFactory;
 import ai.labs.expressions.value.Value;
+import ai.labs.utilities.RuntimeUtilities;
 import lombok.extern.slf4j.Slf4j;
 
 import javax.inject.Inject;
 import javax.inject.Singleton;
 import java.util.ArrayList;
-import java.util.LinkedList;
+import java.util.Arrays;
 import java.util.List;
 import java.util.stream.Collectors;
 
@@ -26,13 +27,13 @@ public class ExpressionProvider implements IExpressionProvider {
     @Override
     public List<Expression> deepCopyExpressions(List<Expression> listReferencesToCopy) {
         List<Expression> listCopy = new ArrayList<>();
-        for (Expression expToCopy : listReferencesToCopy) {
+        listReferencesToCopy.forEach(expToCopy -> {
             try {
                 listCopy.add((Expression) expToCopy.clone());
             } catch (CloneNotSupportedException e) {
                 log.error("Clone failed!", e);
             }
-        }
+        });
         return listCopy;
     }
 
@@ -83,8 +84,7 @@ public class ExpressionProvider implements IExpressionProvider {
         if (values != null && values.length > 0) {
             sb.append("(");
 
-            for (Object value : values)
-                sb.append(value).append(",");
+            Arrays.stream(values).forEach(value -> sb.append(value).append(","));
 
             sb.deleteCharAt(sb.length() - 1);
             sb.append(")");
@@ -95,42 +95,59 @@ public class ExpressionProvider implements IExpressionProvider {
 
     @Override
     public List<Expression> parseExpressions(String expressions) {
-        expressions = expressions.trim();
+        if (RuntimeUtilities.isNullOrEmpty(expressions)) {
+            return new ArrayList<>();
+        }
 
-        LinkedList<String> listStringExps = new LinkedList<>();
-        LinkedList<Expression> listExpression = new LinkedList<>();
+        List<Expression> retExpression = new ArrayList<>();
+        List<String> listStringExpressions = new ArrayList<>();
+
+        expressions = expressions.trim();
 
         int lastPos = 0;
         int parenthesis = -1;
+        String expressionPart;
         for (int i = 0; i < expressions.length(); i++) {
-            if (expressions.charAt(i) == ',' && i != 0 && expressions.charAt(i - 1) != ')' && parenthesis < 1) {
-                listStringExps.add(expressions.substring(lastPos, i));
+            if (i != 0 && parenthesis < 1 && expressions.charAt(i) == ',' && expressions.charAt(i - 1) != ')') {
+                expressionPart = expressions.substring(lastPos, i);
+                if (!expressionPart.isEmpty()) {
+                    listStringExpressions.add(expressionPart);
+                }
                 lastPos = i + 1;
             }
 
             if (expressions.charAt(i) == '(') {
-                if (parenthesis == -1)
+                if (parenthesis == -1) {
                     parenthesis = 0;
+                }
                 parenthesis++;
             }
 
-            if (expressions.charAt(i) == ')')
+            if (expressions.charAt(i) == ')') {
                 parenthesis--;
+            }
 
             if (parenthesis == 0) {
-                listStringExps.add(expressions.substring(lastPos, i + 1));
+                expressionPart = expressions.substring(lastPos, i + 1);
+                if (!expressionPart.isEmpty()) {
+                    listStringExpressions.add(expressionPart);
+                }
                 parenthesis = -1;
                 lastPos = i + 2;
             }
         }
 
-        if (lastPos < expressions.length())
-            listStringExps.add(expressions.substring(lastPos, expressions.length()));
+        if (lastPos < expressions.length()) {
+            expressionPart = expressions.substring(lastPos, expressions.length());
+            if (!expressionPart.isEmpty()) {
+                listStringExpressions.add(expressionPart);
+            }
+        }
 
-        listExpression.addAll(listStringExps.stream().map(this::parseExpression).collect(Collectors.toList()));
+        retExpression.addAll(listStringExpressions.stream().map(this::parseExpression).collect(Collectors.toList()));
 
 
-        return listExpression;
+        return retExpression;
 
     }
 
@@ -156,9 +173,7 @@ public class ExpressionProvider implements IExpressionProvider {
     @Override
     public String toString(List<Expression> expressions) {
         StringBuilder ret = new StringBuilder();
-        for (Expression expression : expressions) {
-            ret.append(expression.toString()).append(", ");
-        }
+        expressions.forEach(expression -> ret.append(expression.toString()).append(", "));
 
         if (expressions.size() > 0) {
             ret.delete(ret.length() - 2, ret.length());
@@ -174,11 +189,13 @@ public class ExpressionProvider implements IExpressionProvider {
         } else {
             Expression[] values = exp.getSubExpressions();
 
-            for (Expression value : values)
-                if (!(value instanceof Value))
+            Arrays.stream(values).forEach(value -> {
+                if (!(value instanceof Value)) {
                     extractAllValues(value, ret);
-                else
+                } else {
                     ret.add((Value) value);
+                }
+            });
         }
 
     }
