@@ -206,13 +206,19 @@ public class RestBotEngine implements IRestBotEngine {
                                             IConversationMemory conversationMemory,
                                             IConversation conversation) {
         return () -> {
+
             try {
                 conversation.say(message, convertContext(inputDataContext));
                 storeConversationMemory(conversationMemory, environment);
-            } catch (Exception e) {
+            } catch (LifecycleException | IResourceStore.ResourceStoreException e) {
                 setConversationState(conversationId, ConversationState.ERROR);
-                log.error("Error while processing user input", e);
-                throw e;
+                String msg = "Error while processing user input (conversationId=%s , conversationState=%s)";
+                msg = String.format(msg, conversationId, ConversationState.ERROR);
+                log.error(msg, e);
+            } catch (IConversation.ConversationNotReadyException e) {
+                String msg = "Conversation not ready! (conversationId=%s)";
+                msg = String.format(msg, conversationId);
+                log.error(msg + "\n" + e.getLocalizedMessage(), e);
             }
 
             return null;
