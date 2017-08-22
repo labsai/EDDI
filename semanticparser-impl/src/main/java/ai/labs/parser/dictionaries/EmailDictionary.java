@@ -41,11 +41,11 @@ public class EmailDictionary implements IDictionary {
     }
 
     @Override
-    public IFoundWord[] lookupTerm(String value) {
+    public List<IFoundWord> lookupTerm(String value) {
         if (isEmailAddress(value)) {
             Expression emailExp = expressionUtilities.createExpression("email", value);
             IWord emailExpression = new Word(value, Collections.singletonList(emailExp), ID);
-            return new IFoundWord[]{new FoundWord(emailExpression, false, 1.0)};
+            return Collections.singletonList(new FoundWord(emailExpression, false, 1.0));
         }
 
         return IDictionary.NO_WORDS_FOUND;

@@ -4,7 +4,6 @@ import ai.labs.parser.model.FoundWord;
 import ai.labs.parser.model.IDictionary;
 import lombok.NoArgsConstructor;
 
-import java.util.Arrays;
 import java.util.LinkedList;
 import java.util.List;
 
@@ -24,9 +23,7 @@ public class TestDictionary implements IDictionary {
     @Override
     public List<IWord> getWords() {
         LinkedList<IWord> words = new LinkedList<>(this.words);
-        for (IPhrase phrase : phrases) {
-            words.addAll(Arrays.asList(phrase.getWords()));
-        }
+        phrases.stream().map(IPhrase::getWords).forEach(words::addAll);
         return words;
     }
 
@@ -36,7 +33,7 @@ public class TestDictionary implements IDictionary {
     }
 
     @Override
-    public IFoundWord[] lookupTerm(String value) {
+    public List<IFoundWord> lookupTerm(String value) {
         List<IFoundWord> foundWords = new LinkedList<>();
 
         for (IWord word : getWords()) {
@@ -45,7 +42,7 @@ public class TestDictionary implements IDictionary {
             }
         }
 
-        return foundWords.toArray(new IFoundWord[foundWords.size()]);
+        return foundWords;
     }
 
     @Override

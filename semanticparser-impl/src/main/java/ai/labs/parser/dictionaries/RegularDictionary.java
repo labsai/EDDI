@@ -7,6 +7,7 @@ import ai.labs.parser.model.Phrase;
 import ai.labs.parser.model.Word;
 
 import java.util.*;
+import java.util.stream.Collectors;
 
 /**
  * @author ginccc
@@ -15,7 +16,7 @@ public class RegularDictionary implements IDictionary {
     private String language;
 
     private Map<String, IWord> words = new TreeMap<>(String.CASE_INSENSITIVE_ORDER);
-    private List<IPhrase> phrases = new ArrayList<>();
+    private List<IPhrase> phrases = new LinkedList<>();
     private boolean lookupIfKnown;
 
     public RegularDictionary(String language, boolean lookupIfKnown) {
@@ -28,9 +29,7 @@ public class RegularDictionary implements IDictionary {
         List<IWord> allWords = new LinkedList<>();
         allWords.addAll(words.values());
 
-        for (IPhrase phrase : phrases) {
-            Collections.addAll(allWords, phrase.getWords());
-        }
+        phrases.stream().map(IPhrase::getWords).forEach(allWords::addAll);
 
         return Collections.unmodifiableList(allWords);
     }
@@ -41,16 +40,11 @@ public class RegularDictionary implements IDictionary {
     }
 
     @Override
-    public IFoundWord[] lookupTerm(String lookup) {
-        List<IFoundWord> ret = new ArrayList<>();
-
-        for (IPhrase phrase : phrases) {
-            for (IWord partOfPhrase : phrase.getWords()) {
-                if (partOfPhrase.getValue().equalsIgnoreCase(lookup)) {
-                    ret.add(new FoundWord(partOfPhrase, false, 1.0));
-                }
-            }
-        }
+    public List<IFoundWord> lookupTerm(String lookup) {
+        List<IFoundWord> ret = phrases.stream().flatMap(phrase -> phrase.getWords().stream()).
+                filter(partOfPhrase -> partOfPhrase.getValue().equalsIgnoreCase(lookup)).
+                map(partOfPhrase -> new FoundWord(partOfPhrase, false, 1.0)).
+                collect(Collectors.toList());
 
         IWord word;
         if ((word = words.get(lookup)) != null) {
@@ -58,7 +52,7 @@ public class RegularDictionary implements IDictionary {
             ret.add(new FoundWord(word, !isCaseSensitiveMatch, isCaseSensitiveMatch ? 1.0 : 0.9));
         }
 
-        return ret.toArray(new IFoundWord[ret.size()]);
+        return ret;
     }
 
 

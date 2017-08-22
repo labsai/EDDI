@@ -35,14 +35,14 @@ public class TimeExpressionDictionary implements IDictionary {
     }
 
     @Override
-    public IFoundWord[] lookupTerm(String value) {
+    public List<IFoundWord> lookupTerm(String value) {
         final Date timeAsDate = LanguageUtilities.isTimeExpression(value);
 
         if (timeAsDate != null) {
             final String timeString = timeAsDate.toString();
             Expression timeExp = expressionUtilities.createExpression("time", timeAsDate.getTime());
             IWord timeExpression = new Word(timeString, Collections.singletonList(timeExp), ID);
-            return new IFoundWord[]{new FoundWord(timeExpression, false, 1.0)};
+            return Collections.singletonList(new FoundWord(timeExpression, false, 1.0));
         }
 
         return IDictionary.NO_WORDS_FOUND;

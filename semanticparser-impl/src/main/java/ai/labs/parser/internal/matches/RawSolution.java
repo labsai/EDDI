@@ -4,7 +4,7 @@ import ai.labs.parser.model.IDictionary;
 import lombok.Getter;
 import lombok.Setter;
 
-import java.util.LinkedList;
+import java.util.ArrayList;
 import java.util.List;
 
 /**
@@ -26,6 +26,6 @@ public class RawSolution {
 
     public RawSolution(Match match) {
         this.match = match;
-        this.dictionaryEntries = new LinkedList<>();
+        this.dictionaryEntries = new ArrayList<>();
     }
 }

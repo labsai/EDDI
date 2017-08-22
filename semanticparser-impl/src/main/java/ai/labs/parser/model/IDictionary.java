@@ -2,21 +2,20 @@ package ai.labs.parser.model;
 
 import ai.labs.expressions.Expression;
 
+import java.util.Collections;
 import java.util.List;
 
 /**
  * @author ginccc
  */
 public interface IDictionary {
-    IFoundWord[] NO_WORDS_FOUND = new IFoundWord[0];
-
-    IFoundPhrase[] NO_PHRASES_FOUND = new IFoundPhrase[0];
+    List<IFoundWord> NO_WORDS_FOUND = Collections.emptyList();
 
     List<IWord> getWords();
 
     List<IPhrase> getPhrases();
 
-    IFoundWord[] lookupTerm(String value);
+    List<IFoundWord> lookupTerm(String value);
 
     String getLanguage();
 
@@ -43,7 +42,7 @@ public interface IDictionary {
     }
 
     interface IPhrase extends IWord {
-        IWord[] getWords();
+        List<IWord> getWords();
     }
 
     interface IFoundDictionaryEntry extends IDictionaryEntry {

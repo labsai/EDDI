@@ -1,11 +1,21 @@
 package ai.labs.parser.internal.matches;
 
+import ai.labs.expressions.Expression;
+import ai.labs.parser.model.FoundWord;
+import ai.labs.parser.model.IDictionary;
+import ai.labs.parser.model.Word;
+import org.junit.Assert;
+import org.junit.Test;
+
+import java.util.Arrays;
+import java.util.Iterator;
+import java.util.List;
+
 /**
  * @author ginccc
  */
 public class MatchMatrixTest {
-    //TODO make DI work for tests
-    /*@Test
+    @Test
     public void testCreatePossibleSolutions() throws Exception {
         //setup
         MatchMatrix matchMatrix = new MatchMatrix();
@@ -22,5 +32,5 @@ public class MatchMatrixTest {
         Assert.assertTrue(possibleSolutions.hasNext());
         Assert.assertArrayEquals(new IDictionary.IFoundWord[]{new FoundWord(word, false, 1.0)}, possibleSolutions.next().build().toArray());
         Assert.assertFalse(possibleSolutions.hasNext());
-    }*/
+    }
 }

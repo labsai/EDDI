@@ -23,7 +23,10 @@ import ai.labs.utilities.RuntimeUtilities;
 
 import javax.inject.Inject;
 import java.net.URI;
-import java.util.*;
+import java.util.Collections;
+import java.util.LinkedList;
+import java.util.List;
+import java.util.Map;
 import java.util.stream.Collectors;
 
 import static ai.labs.parser.DictionaryUtilities.convertQuickReplies;
@@ -337,9 +340,5 @@ public class InputParserTask implements ILifecycleTask {
         ConfigParamMissingException(String message) {
             super(message);
         }
-    }
-
-    private static class QuickReplyList extends ArrayList<QuickReply> implements List<QuickReply> {
-        //reflection purpose only
     }
 }

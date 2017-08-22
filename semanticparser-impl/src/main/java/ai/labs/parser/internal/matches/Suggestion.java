@@ -17,10 +17,7 @@ public class Suggestion {
 
     public List<IDictionary.IFoundWord> build() {
         List<IDictionary.IFoundWord> dictionaryEntries = new LinkedList<>();
-        for (MatchingResult matchingResult : rawSolution) {
-            dictionaryEntries.addAll(matchingResult.getResult());
-        }
-
+        rawSolution.stream().map(MatchingResult::getResult).forEach(dictionaryEntries::addAll);
         return dictionaryEntries;
     }
 }

@@ -2,8 +2,7 @@ package ai.labs.parser.correction;
 
 import ai.labs.parser.model.IDictionary;
 
-import java.util.Collections;
-import java.util.LinkedList;
+import java.util.ArrayList;
 import java.util.List;
 
 /**
@@ -18,14 +17,14 @@ public class MergedTermsCorrection implements ICorrection {
     }
 
     @Override
-    public IDictionary.IFoundWord[] correctWord(String word) {
-        LinkedList<IDictionary.IFoundWord> possibleTerms = new LinkedList<>();
+    public List<IDictionary.IFoundWord> correctWord(String word) {
+        List<IDictionary.IFoundWord> possibleTerms = new ArrayList<>();
         String part;
         for (int i = word.length(); i > 0; i--) {
             part = word.substring(0, i);
-            IDictionary.IFoundWord[] match = matchWord(part);
-            if (match.length > 0) {
-                Collections.addAll(possibleTerms, match);
+            List<IDictionary.IFoundWord> match = matchWord(part);
+            if (match.size() > 0) {
+                possibleTerms.addAll(match);
                 word = word.substring(i, word.length());
                 i = word.length() + 1;
             }
@@ -35,9 +34,9 @@ public class MergedTermsCorrection implements ICorrection {
             possibleTerms.clear();
             for (int i = 0; i < word.length(); i++) {
                 part = word.substring(i, word.length());
-                IDictionary.IFoundWord[] match = matchWord(part);
-                if (match.length > 0) {
-                    Collections.addAll(possibleTerms, match);
+                List<IDictionary.IFoundWord> match = matchWord(part);
+                if (match.size() > 0) {
+                    possibleTerms.addAll(match);
                     word = word.substring(0, i);
                     i = word.length();
                 }
@@ -46,21 +45,18 @@ public class MergedTermsCorrection implements ICorrection {
 
         if (word.isEmpty() &&   // all terms are known
                 !possibleTerms.isEmpty()) {
-           return possibleTerms.toArray(new IDictionary.IFoundWord[possibleTerms.size()]);
-        }else {
-            return new IDictionary.IFoundWord[0];
+            return possibleTerms;
+        } else {
+            return IDictionary.NO_WORDS_FOUND;
         }
     }
 
-    private IDictionary.IFoundWord[] matchWord(String part) {
-        for (IDictionary dictionary : dictionaries) {
-            IDictionary.IFoundWord[] result = dictionary.lookupTerm(part);
-            if(result.length > 0) {
-                return result;
-            }
-        }
+    private List<IDictionary.IFoundWord> matchWord(String part) {
+        return dictionaries.stream().
+                map(dictionary -> dictionary.lookupTerm(part)).
+                filter(result -> result.size() > 0).
+                findFirst().orElse(IDictionary.NO_WORDS_FOUND);
 
-        return IDictionary.NO_WORDS_FOUND;
     }
 
     @Override

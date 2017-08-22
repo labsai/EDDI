@@ -17,12 +17,12 @@ public class InputHolder {
         matchMatrix.addMatchingResult(inputTerm, matchingResult);
     }
 
-    boolean equalsMatchingTerm(String inputTerm, IDictionary.IDictionaryEntry[] dictionaryEntries) {
+    boolean equalsMatchingTerm(String inputTerm, List<? extends IDictionary.IFoundDictionaryEntry> dictionaryEntries) {
         List<MatchingResult> matchingResults = matchMatrix.getMatchingResults(inputTerm);
         if (matchingResults != null) {
             for (MatchingResult matchingResult : matchingResults) {
                 List<IDictionary.IFoundWord> result = matchingResult.getResult();
-                if (result.size() != dictionaryEntries.length) {
+                if (result.size() != dictionaryEntries.size()) {
                     return false;
                 }
 
@@ -30,7 +30,8 @@ public class InputHolder {
                 for (int i = 0; i < result.size(); i++) {
                     IDictionary.IDictionaryEntry dictionaryEntry = result.get(i);
                     String dictionaryEntryValue = dictionaryEntry.getValue();
-                    if (dictionaryEntryValue != null && dictionaryEntryValue.equals(dictionaryEntries[i].getValue())) {
+                    if (dictionaryEntryValue != null &&
+                            dictionaryEntryValue.equals(dictionaryEntries.get(i).getValue())) {
                         isSame = true;
                         break;
                     }

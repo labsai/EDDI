@@ -2,6 +2,7 @@ package ai.labs.parser.model;
 
 import ai.labs.expressions.Expression;
 
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.LinkedList;
 import java.util.List;
@@ -16,15 +17,15 @@ public class Phrase extends DictionaryEntry implements IDictionary.IPhrase {
     }
 
     @Override
-    public IDictionary.IWord[] getWords() {
+    public List<IDictionary.IWord> getWords() {
         String[] splitPhrase = value.split(" ");
-        List<IDictionary.IWord> words = new LinkedList<IDictionary.IWord>();
-        for (final String word : splitPhrase) {
+        List<IDictionary.IWord> words = new LinkedList<>();
+        Arrays.stream(splitPhrase).forEach(word -> {
             Expression unusedExp = new Expression("unused", new Expression(word));
             words.add(new Word(word, Collections.singletonList(unusedExp), null, 0, true));
-        }
+        });
 
-        return words.toArray(new IDictionary.IWord[words.size()]);
+        return words;
     }
 
     @Override
