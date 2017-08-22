@@ -6,15 +6,11 @@ import ai.labs.expressions.utilities.IExpressionProvider;
 import ai.labs.memory.IConversationMemory;
 import ai.labs.memory.IData;
 import ai.labs.utilities.CharacterUtilities;
-import ai.labs.utilities.LanguageUtilities;
 import lombok.Getter;
 import lombok.Setter;
 
 import javax.inject.Inject;
-import java.util.HashMap;
-import java.util.LinkedList;
-import java.util.List;
-import java.util.Map;
+import java.util.*;
 
 /**
  * @author ginccc
@@ -92,7 +88,7 @@ public class InputMatcher implements IBehaviorExtension {
 
 
         state = isInputEmpty ||
-                LanguageUtilities.containsArray(expressions, inputExpressions) > -1 ?
+                Collections.indexOfSubList(inputExpressions, expressions) > -1 ?
                 ExecutionState.SUCCESS : ExecutionState.FAIL;
 
         return state;

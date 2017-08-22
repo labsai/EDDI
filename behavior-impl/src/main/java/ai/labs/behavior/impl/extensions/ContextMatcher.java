@@ -8,7 +8,6 @@ import ai.labs.memory.IConversationMemory;
 import ai.labs.memory.IData;
 import ai.labs.serialization.IJsonSerialization;
 import ai.labs.utilities.CharacterUtilities;
-import ai.labs.utilities.LanguageUtilities;
 import com.jayway.jsonpath.JsonPath;
 import com.jayway.jsonpath.PathNotFoundException;
 import lombok.AllArgsConstructor;
@@ -19,6 +18,7 @@ import lombok.extern.slf4j.Slf4j;
 
 import javax.inject.Inject;
 import java.io.IOException;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -115,9 +115,9 @@ public class ContextMatcher implements IBehaviorExtension {
             if (contextDatum.getKey().equals("context:" + contextKey)) {
                 switch (context.getType()) {
                     case expressions:
-                        success = LanguageUtilities.containsArray(expressions,
-                                expressionProvider.parseExpressions(
-                                        context.getValue().toString())) != -1;
+                        List<Expression> contextExpressions = expressionProvider.
+                                parseExpressions(context.getValue().toString());
+                        success = Collections.indexOfSubList(contextExpressions, expressions) != -1;
                         break;
                     case object:
                         try {
