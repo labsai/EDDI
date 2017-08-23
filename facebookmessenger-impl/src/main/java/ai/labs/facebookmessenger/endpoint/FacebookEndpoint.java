@@ -262,6 +262,7 @@ public class FacebookEndpoint implements IFacebookEndpoint {
     public Response webHookSetup(final String botId, final String mode,
                                  final String verificationToken, final String challenge) {
         try {
+            log.info("webhook setup called");
             return Response.ok(getMessageClient(botId).getReceiveClient().
                     verifyWebhook(mode, verificationToken, challenge)).build();
         } catch (MessengerVerificationException e) {
