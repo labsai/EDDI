@@ -2,7 +2,7 @@ package ai.labs.parser;
 
 import ai.labs.expressions.Expression;
 import ai.labs.expressions.utilities.IExpressionProvider;
-import ai.labs.output.IQuickReply;
+import ai.labs.output.model.QuickReply;
 import ai.labs.parser.dictionaries.RegularDictionary;
 import ai.labs.parser.internal.matches.RawSolution;
 import ai.labs.parser.model.IDictionary;
@@ -38,18 +38,22 @@ public class DictionaryUtilities {
         return solutionExpressions;
     }
 
-    static List<IDictionary> convertQuickReplies(List<IQuickReply> quickReplies, IExpressionProvider expressionProvider) {
+    static List<IDictionary> convertQuickReplies(List<List<QuickReply>> quickRepliesList, IExpressionProvider expressionProvider) {
         List<IDictionary> ret = new LinkedList<>();
 
-        for (IQuickReply quickReply : quickReplies) {
+        quickRepliesList.forEach(quickReplies -> {
             RegularDictionary dictionary = new RegularDictionary(null, false);
-            String quickReplyValue = quickReply.getValue();
-            if (quickReplyValue.contains(" ")) {
-                dictionary.addPhrase(quickReplyValue, expressionProvider.parseExpressions(quickReply.getExpressions()));
-            }
-
+            quickReplies.forEach(quickReply -> {
+                String quickReplyValue = quickReply.getValue();
+                List<Expression> expressions = expressionProvider.parseExpressions(quickReply.getExpressions());
+                if (quickReplyValue.contains(" ")) {
+                    dictionary.addPhrase(quickReplyValue, expressions);
+                } else {
+                    dictionary.addWord(quickReplyValue, expressions, 0);
+                }
+            });
             ret.add(dictionary);
-        }
+        });
 
         return ret;
     }

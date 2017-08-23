@@ -35,16 +35,6 @@
             <version>${project.version}</version>
         </dependency>
         <dependency>
-            <groupId>org.jboss.resteasy</groupId>
-            <artifactId>resteasy-guice</artifactId>
-            <version>3.1.4.Final</version>
-        </dependency>
-        <dependency>
-            <groupId>org.jboss.resteasy</groupId>
-            <artifactId>resteasy-jaxrs</artifactId>
-            <version>3.1.4.Final</version>
-        </dependency>
-        <dependency>
             <groupId>ai.labs</groupId>
             <artifactId>runtime-impl</artifactId>
             <version>${project.version}</version>
@@ -53,6 +43,7 @@
             <groupId>javax.servlet</groupId>
             <artifactId>javax.servlet-api</artifactId>
             <version>3.1.0</version>
+            <scope>provided</scope>
         </dependency>
     </dependencies>
 

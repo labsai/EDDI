@@ -43,7 +43,7 @@ public interface IRestBotStore extends IRestVersionInfo {
                   @QueryParam("version") Integer version, BotConfiguration botConfiguration);
 
     @PUT
-    @Path("/{id}")
+    @Path("/{id}/updateResourceUri")
     @Consumes(MediaType.TEXT_PLAIN)
     Response updateResourceInBot(@PathParam("id") String id,
                                  @ApiParam(name = "version", required = true, format = "integer", example = "1")

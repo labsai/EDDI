@@ -12,34 +12,6 @@
 
     <artifactId>facebookmessenger-definition</artifactId>
 
-    <dependencies>
-        <dependency>
-            <groupId>org.jboss.resteasy</groupId>
-            <artifactId>resteasy-jaxrs</artifactId>
-            <version>3.1.4.Final</version>
-            <exclusions>
-                <exclusion>
-                    <artifactId>slf4j-simple</artifactId>
-                    <groupId>org.slf4j</groupId>
-                </exclusion>
-                <exclusion>
-                    <artifactId>jboss-annotations-api_1.1_spec</artifactId>
-                    <groupId>org.jboss.spec.javax.annotation</groupId>
-                </exclusion>
-                <exclusion>
-                    <artifactId>jcip-annotations</artifactId>
-                    <groupId>net.jcip</groupId>
-                </exclusion>
-            </exclusions>
-        </dependency>
-        <dependency>
-            <groupId>io.swagger</groupId>
-            <artifactId>swagger-annotations</artifactId>
-            <version>1.5.8</version>
-            <scope>provided</scope>
-        </dependency>
-    </dependencies>
-
     <properties>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
     </properties>

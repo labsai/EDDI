@@ -53,11 +53,6 @@
             <artifactId>coreutilities</artifactId>
             <version>${project.version}</version>
         </dependency>
-        <dependency>
-            <groupId>org.jboss.resteasy</groupId>
-            <artifactId>resteasy-guice</artifactId>
-            <version>3.1.4.Final</version>
-        </dependency>
     </dependencies>
 
 

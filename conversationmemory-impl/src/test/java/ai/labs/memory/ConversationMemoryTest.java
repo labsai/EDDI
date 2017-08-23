@@ -84,7 +84,7 @@ public class ConversationMemoryTest {
         //setup
         IConversationMemory.IWritableConversationStep entry = memory.getCurrentStep();
 
-        final Data data = new Data("testkey", new LinkedList());
+        final Data data = new Data<>("testkey", new LinkedList());
         entry.storeData(data);
 
         //test
@@ -100,7 +100,7 @@ public class ConversationMemoryTest {
     public void testUndo() {
         //setup
         IConversationMemory.IWritableConversationStep entry = memory.getCurrentStep();
-        final Data data = new Data("testkey", new LinkedList());
+        final Data data = new Data<>("testkey", new LinkedList());
         entry.storeData(data);
         memory.startNextStep();
 
@@ -118,7 +118,7 @@ public class ConversationMemoryTest {
         memory.startNextStep();
 
         IConversationMemory.IWritableConversationStep entry = memory.getCurrentStep();
-        final Data data = new Data("testkey", new LinkedList());
+        final Data data = new Data<>("testkey", new LinkedList());
         entry.storeData(data);
 
         memory.undoLastStep();

@@ -9,7 +9,7 @@ import ai.labs.lifecycle.UnrecognizedExtensionException;
 import ai.labs.memory.Data;
 import ai.labs.memory.IConversationMemory;
 import ai.labs.memory.IData;
-import ai.labs.output.IQuickReply;
+import ai.labs.output.model.QuickReply;
 import ai.labs.parser.correction.*;
 import ai.labs.parser.dictionaries.*;
 import ai.labs.parser.internal.InputParser;
@@ -24,6 +24,7 @@ import ai.labs.utilities.RuntimeUtilities;
 import javax.inject.Inject;
 import java.net.URI;
 import java.util.*;
+import java.util.stream.Collectors;
 
 import static ai.labs.parser.DictionaryUtilities.convertQuickReplies;
 import static ai.labs.parser.DictionaryUtilities.extractExpressions;
@@ -81,29 +82,44 @@ public class InputParserTask implements ILifecycleTask {
     @Override
     public void executeTask(IConversationMemory memory) throws LifecycleException {
         //parse user input to meanings
-        IData<String> data = memory.getCurrentStep().getLatestData("input");
-        if (data == null) {
+        IData<String> inputData = memory.getCurrentStep().getLatestData("input");
+        if (inputData == null) {
             return;
         }
 
-        IData<QuickReplyList> replyListData = memory.getPreviousSteps().
-                getLatestData("output:quickReplies");
-        List<IQuickReply> quickReplies;
-        if (replyListData != null) {
-            quickReplies = replyListData.getResult();
-        } else {
-            quickReplies = Collections.emptyList();
-        }
-
-        String input = data.getResult();
-        List<RawSolution> parsedSolutions = sentenceParser.parse(input, convertQuickReplies(quickReplies, expressionProvider));
+        List<List<QuickReply>> quickReplies = extractQuickReplies(memory.getPreviousSteps().getAllData("quickReplies"));
+        List<RawSolution> parsedSolutions = sentenceParser.parse(
+                inputData.getResult(),
+                convertQuickReplies(quickReplies, expressionProvider)
+        );
 
         //store result in memory
         if (!parsedSolutions.isEmpty()) {
             Solution solution = extractExpressions(parsedSolutions, expressionProvider).get(0);
-            data = new Data<>("expressions:parsed", solution.getExpressions());
-            memory.getCurrentStep().storeData(data);
+            inputData = new Data<>("expressions:parsed", solution.getExpressions());
+            memory.getCurrentStep().storeData(inputData);
         }
+    }
+
+    private List<List<QuickReply>> extractQuickReplies(List<List<IData<List<Map<String, String>>>>> replyListData) {
+        List<List<QuickReply>> quickRepliesList = new LinkedList<>();
+        if (replyListData != null) {
+            for (List<IData<List<Map<String, String>>>> replyListDatum : replyListData) {
+                for (IData<List<Map<String, String>>> quickReplyList : replyListDatum) {
+                    if (quickReplyList.isPublic()) {
+                        List<Map<String, String>> resultList = quickReplyList.getResult();
+                        List<QuickReply> quickReplies = resultList.stream().map(
+                                result -> new QuickReply(result.get("value"), result.get("expressions"))).
+                                collect(Collectors.toCollection(LinkedList::new));
+                        quickRepliesList.add(quickReplies);
+                    }
+                }
+            }
+        } else {
+            quickRepliesList = Collections.emptyList();
+        }
+
+        return quickRepliesList;
     }
 
     @Override
@@ -323,7 +339,7 @@ public class InputParserTask implements ILifecycleTask {
         }
     }
 
-    private static class QuickReplyList extends ArrayList<IQuickReply> implements List<IQuickReply> {
+    private static class QuickReplyList extends ArrayList<QuickReply> implements List<QuickReply> {
         //reflection purpose only
     }
 }

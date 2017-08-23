@@ -1,6 +1,6 @@
 package ai.labs.utilities;
 
-import java.util.Collection;
+import java.util.List;
 
 /**
  * @author ginccc
@@ -10,10 +10,10 @@ public final class CollectionUtilities {
         //utility class constructor
     }
 
-    public static void addAllWithoutDuplicates(Collection collection, Collection addTo) {
-        for (Object obj : addTo) {
-            if (!collection.contains(obj)) {
-                collection.add(obj);
+    public static void addAllWithoutDuplicates(List<String> collection, List<String> addTo) {
+        for (String value : addTo) {
+            if (!collection.contains(value)) {
+                collection.add(value);
             }
         }
     }

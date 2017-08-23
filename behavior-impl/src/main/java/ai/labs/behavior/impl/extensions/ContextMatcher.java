@@ -9,8 +9,10 @@ import ai.labs.memory.IData;
 import ai.labs.serialization.IJsonSerialization;
 import ai.labs.utilities.CharacterUtilities;
 import ai.labs.utilities.LanguageUtilities;
-import io.restassured.path.json.JsonPath;
+import com.jayway.jsonpath.JsonPath;
+import com.jayway.jsonpath.PathNotFoundException;
 import lombok.AllArgsConstructor;
+import lombok.EqualsAndHashCode;
 import lombok.Getter;
 import lombok.Setter;
 import lombok.extern.slf4j.Slf4j;
@@ -51,8 +53,8 @@ public class ContextMatcher implements IBehaviorExtension {
     private final IJsonSerialization jsonSerialization;
 
     @Inject
-    private ContextMatcher(IExpressionProvider expressionProvider,
-                           IJsonSerialization jsonSerialization) {
+    ContextMatcher(IExpressionProvider expressionProvider,
+                   IJsonSerialization jsonSerialization) {
         this.expressionProvider = expressionProvider;
         this.jsonSerialization = jsonSerialization;
     }
@@ -72,11 +74,8 @@ public class ContextMatcher implements IBehaviorExtension {
         }
 
         if (object != null) {
-            try {
-                result.put(objectQualifier, jsonSerialization.serialize(object));
-            } catch (IOException e) {
-                log.error(e.getLocalizedMessage(), e);
-            }
+            result.put(objectKeyPathQualifier, object.objectKeyPath);
+            result.put(objectValueQualifier, object.objectValue);
         }
 
         if (string != null) {
@@ -98,8 +97,7 @@ public class ContextMatcher implements IBehaviorExtension {
                 if (values.get(contextTypeQualifier).equals(expressionsQualifier)) {
                     expressions = expressionProvider.parseExpressions(values.get(expressionsQualifier));
                 } else if (values.get(contextTypeQualifier).equals(objectQualifier)) {
-                    object = new ObjectValue(values.get(objectQualifier),
-                            values.get(objectKeyPathQualifier), values.get(objectValueQualifier));
+                    object = new ObjectValue(values.get(objectKeyPathQualifier), values.get(objectValueQualifier));
                 } else {
                     string = values.get(stringQualifier);
                 }
@@ -109,7 +107,6 @@ public class ContextMatcher implements IBehaviorExtension {
 
     @Override
     public ExecutionState execute(IConversationMemory memory, List<BehaviorRule> trace) {
-
         List<IData<Context>> contextData = memory.getCurrentStep().getAllData("context");
 
         boolean success = false;
@@ -123,8 +120,19 @@ public class ContextMatcher implements IBehaviorExtension {
                                         context.getValue().toString())) != -1;
                         break;
                     case object:
-                        success = object.getObjectValue().equals(
-                                JsonPath.with(object.getObject()).get(object.getObjectKeyPath()).toString());
+                        try {
+                            if (object.getObjectKeyPath() != null) {
+                                final String contextObjectAsJson = jsonSerialization.serialize(context.getValue());
+                                Object foundObjectValue = findObjectValue(contextObjectAsJson);
+                                if (foundObjectValue != null) { // key exists in context, so we continue
+                                    success = object.getObjectValue() == null ||
+                                            object.getObjectValue().equals(foundObjectValue.toString());
+                                }
+                            }
+                        } catch (IOException e) {
+                            log.error(e.getLocalizedMessage(), e);
+                            success = false;
+                        }
                         break;
 
                     default:
@@ -137,6 +145,14 @@ public class ContextMatcher implements IBehaviorExtension {
 
         state = success ? ExecutionState.SUCCESS : ExecutionState.FAIL;
         return state;
+    }
+
+    private Object findObjectValue(String contextObjectAsJson) {
+        try {
+            return JsonPath.parse(contextObjectAsJson).read(object.getObjectKeyPath());
+        } catch (PathNotFoundException e) {
+            return null;
+        }
     }
 
 
@@ -155,8 +171,8 @@ public class ContextMatcher implements IBehaviorExtension {
     @AllArgsConstructor
     @Getter
     @Setter
-    private static class ObjectValue {
-        private String object;
+    @EqualsAndHashCode
+    static class ObjectValue {
         private String objectKeyPath;
         private String objectValue;
     }

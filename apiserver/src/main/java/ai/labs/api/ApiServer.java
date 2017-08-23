@@ -13,15 +13,17 @@ import ai.labs.output.bootstrap.OutputGenerationModule;
 import ai.labs.parser.bootstrap.SemanticParserModule;
 import ai.labs.permission.bootstrap.PermissionModule;
 import ai.labs.persistence.bootstrap.PersistenceModule;
-import ai.labs.resources.RepositoryModule;
+import ai.labs.resources.bootstrap.RepositoryModule;
 import ai.labs.rest.bootstrap.RestInterfaceModule;
 import ai.labs.runtime.DependencyInjector;
+import ai.labs.runtime.IAutoBotDeployment;
 import ai.labs.runtime.bootstrap.RuntimeModule;
 import ai.labs.runtime.bootstrap.SwaggerModule;
 import ai.labs.serialization.bootstrap.SerializationModule;
 import ai.labs.server.IServerRuntime;
 import ai.labs.server.bootstrap.ServerRuntimeModule;
 import ai.labs.staticresources.bootstrap.StaticResourcesModule;
+import ai.labs.templateengine.bootstrap.TemplateEngineModule;
 import ai.labs.testing.bootstrap.AutomatedtestingModule;
 import ai.labs.utilities.FileUtilities;
 import com.google.inject.Module;
@@ -64,14 +66,14 @@ public class ApiServer {
                 new SemanticParserModule(),
                 new BehaviorModule(),
                 new OutputGenerationModule(),
+                new TemplateEngineModule(),
                 new AutomatedtestingModule(),
                 new StaticResourcesModule(),
                 new HttpClientModule(),
                 new ConversationCallbackModule(new FileInputStream(configDir + "httpClient.properties")),
                 new CoreModule(),
                 new SwaggerModule(new FileInputStream(configDir + "swagger.properties")),
-                new ServerRuntimeModule(new FileInputStream(configDir + "webServer.properties"),
-                        new FileInputStream(configDir + "keycloak.properties")),
+                new ServerRuntimeModule(new FileInputStream(configDir + "webServer.properties")),
                 new FacebookMessengerModule()
         };
 
@@ -79,6 +81,9 @@ public class ApiServer {
         final DependencyInjector injector = DependencyInjector.init(environment, modules);
 
         //init webserver
-        injector.getInstance(IServerRuntime.class).startup();
+        injector.getInstance(IServerRuntime.class).startup(() -> {
+            //auto re-deploy bots
+            injector.getInstance(IAutoBotDeployment.class).autoDeployBots();
+        });
     }
 }

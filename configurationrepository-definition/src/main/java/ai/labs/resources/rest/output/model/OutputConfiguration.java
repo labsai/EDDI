@@ -3,7 +3,7 @@ package ai.labs.resources.rest.output.model;
 import lombok.Getter;
 import lombok.Setter;
 
-import java.util.ArrayList;
+import java.util.LinkedList;
 import java.util.List;
 
 /**
@@ -13,24 +13,10 @@ import java.util.List;
 @Getter
 @Setter
 public class OutputConfiguration {
-    private String key;
-    private List<String> outputValues;
-    private List<QuickReply> quickReplies;
-    private int occurrence;
-
-    public OutputConfiguration(String key, int occurrence, List<String> outputValues, List<QuickReply> quickReplies) {
-        this.key = key;
-        this.occurrence = occurrence;
-        this.outputValues = new ArrayList<>();
-        this.outputValues.addAll(outputValues);
-        this.quickReplies = new ArrayList<>();
-        this.quickReplies.addAll(quickReplies);
-    }
-
-    public OutputConfiguration() {
-        this.outputValues = new ArrayList<>();
-        this.quickReplies = new ArrayList<>();
-    }
+    private String action;
+    private int timesOccurred;
+    private List<OutputType> outputs = new LinkedList<>();
+    private List<QuickReply> quickReplies = new LinkedList<>();
 
     @Override
     public boolean equals(Object o) {
@@ -39,14 +25,21 @@ public class OutputConfiguration {
 
         OutputConfiguration that = (OutputConfiguration) o;
 
-        return key.equals(that.key) && occurrence == that.occurrence;
+        return action.equals(that.action) && timesOccurred == that.timesOccurred;
     }
 
     @Override
     public int hashCode() {
-        int result = key.hashCode();
-        result = 31 * result + occurrence;
+        int result = action.hashCode();
+        result = 31 * result + timesOccurred;
         return result;
+    }
+
+    @Getter
+    @Setter
+    public static class OutputType {
+        private String type;
+        private List<String> valueAlternatives = new LinkedList<>();
     }
 
     @Getter
@@ -54,6 +47,5 @@ public class OutputConfiguration {
     public static class QuickReply {
         private String value;
         private String expressions;
-
     }
 }

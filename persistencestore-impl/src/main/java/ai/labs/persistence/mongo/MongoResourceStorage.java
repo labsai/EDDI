@@ -114,9 +114,8 @@ public class MongoResourceStorage<T> implements IResourceStorage<T> {
     public IHistoryResource<T> readHistory(String id, Integer version) {
         Document objectId = new Document(ID_FIELD, new ObjectId(id));
         objectId.put(VERSION_FIELD, version);
-        Document query = new Document(ID_FIELD, objectId);
 
-        Document doc = historyCollection.find(Filters.eq(query)).first();
+        Document doc = historyCollection.find(Filters.eq(ID_FIELD, objectId)).first();
 
         if (doc == null) {
             return null;

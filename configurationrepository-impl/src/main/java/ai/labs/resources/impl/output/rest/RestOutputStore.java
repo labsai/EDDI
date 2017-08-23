@@ -50,7 +50,7 @@ public class RestOutputStore extends RestVersionInfo<OutputConfigurationSet> imp
     @Override
     public List<String> readOutputKeys(String id, Integer version, String filter, String order, Integer limit) {
         try {
-            return outputStore.readOutputKeys(id, version, filter, order, limit);
+            return outputStore.readOutputActions(id, version, filter, order, limit);
         } catch (IResourceStore.ResourceStoreException e) {
             log.error(e.getLocalizedMessage(), e);
             throw new InternalServerErrorException(e.getLocalizedMessage(), e);
@@ -61,10 +61,10 @@ public class RestOutputStore extends RestVersionInfo<OutputConfigurationSet> imp
 
     @Override
     public Response updateOutputSet(String id, Integer version, OutputConfigurationSet outputConfigurationSet) {
-        outputConfigurationSet.getOutputs().sort((o1, o2) -> {
-            int comparisonOfKeys = o1.getKey().compareTo(o2.getKey());
+        outputConfigurationSet.getOutputSet().sort((o1, o2) -> {
+            int comparisonOfKeys = o1.getAction().compareTo(o2.getAction());
             if (comparisonOfKeys == 0) {
-                return o1.getOccurrence() < o2.getOccurrence() ? -1 : o1.getOccurrence() == o2.getOccurrence() ? 0 : 1;
+                return Integer.compare(o1.getTimesOccurred(), o2.getTimesOccurred());
             } else {
                 return comparisonOfKeys;
             }
@@ -104,11 +104,11 @@ public class RestOutputStore extends RestVersionInfo<OutputConfigurationSet> imp
             OutputConfigurationSet outputConfigurationSetPatch = patchInstruction.getDocument();
             switch (patchInstruction.getOperation()) {
                 case SET:
-                    currentOutputConfigurationSet.getOutputs().removeAll(outputConfigurationSetPatch.getOutputs());
-                    currentOutputConfigurationSet.getOutputs().addAll(outputConfigurationSetPatch.getOutputs());
+                    currentOutputConfigurationSet.getOutputSet().removeAll(outputConfigurationSetPatch.getOutputSet());
+                    currentOutputConfigurationSet.getOutputSet().addAll(outputConfigurationSetPatch.getOutputSet());
                     break;
                 case DELETE:
-                    currentOutputConfigurationSet.getOutputs().removeAll(outputConfigurationSetPatch.getOutputs());
+                    currentOutputConfigurationSet.getOutputSet().removeAll(outputConfigurationSetPatch.getOutputSet());
                     break;
                 default:
                     throw new IResourceStore.ResourceStoreException("Patch operation must be either SET or DELETE!");

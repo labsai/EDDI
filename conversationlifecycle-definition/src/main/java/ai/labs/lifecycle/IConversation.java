@@ -13,15 +13,6 @@ public interface IConversation {
 
     void init() throws LifecycleException;
 
-    interface IConversationHistory {
-
-        void undoLastStatement();
-
-        void redoLastStatement();
-    }
-
-    boolean isInProgress();
-
     boolean isEnded();
 
     void endConversation();
@@ -30,7 +21,7 @@ public interface IConversation {
             throws LifecycleException, ConversationNotReadyException;
 
     interface IConversationOutputRenderer {
-        void renderOutput(IConversationMemory.IConversationStep conversationStep);
+        void renderOutput(IConversationMemory conversationMemory);
     }
 
     class ConversationNotReadyException extends Exception {
