@@ -22,6 +22,8 @@ import com.github.messenger4j.exceptions.MessengerVerificationException;
 import com.github.messenger4j.receive.MessengerReceiveClient;
 import com.github.messenger4j.receive.handlers.TextMessageEventHandler;
 import com.github.messenger4j.send.MessengerSendClient;
+import com.github.messenger4j.send.NotificationType;
+import com.github.messenger4j.send.SenderAction;
 import lombok.AllArgsConstructor;
 import lombok.Getter;
 import lombok.Setter;
@@ -54,6 +56,11 @@ import static ai.labs.rest.restinterfaces.RestInterfaceFactory.RestInterfaceFact
 @Slf4j
 public class FacebookEndpoint implements IFacebookEndpoint {
     private static final String RESOURCE_URI_CHANNELCONNECTOR = "eddi://ai.labs.channel.facebook";
+    private static final String AI_LABS_USER_AGENT = "Jetty 9.3/HTTP CLIENT - AI.LABS.EDDI";
+    private static final String ENCODING = "UTF-8";
+    private static final long timeoutInMillis = 10000;
+
+
     private final IBotStore botStore;
     private final IHttpClient httpClient;
     private final IJsonSerialization jsonSerialization;
@@ -155,104 +162,49 @@ public class FacebookEndpoint implements IFacebookEndpoint {
         log.info("message:{}", message);
 
         try {
-            restInterfaceFactory.get(IRestBotEngine.class, apiServerURI).say(environment, botId, conversationId, message, new AsyncResponse() {
-                @Override
-                public boolean resume(Object o) {
-                    return false;
-                }
-
-                @Override
-                public boolean resume(Throwable throwable) {
-                    return false;
-                }
-
-                @Override
-                public boolean cancel() {
-                    return false;
-                }
-
-                @Override
-                public boolean cancel(int i) {
-                    return false;
-                }
-
-                @Override
-                public boolean cancel(Date date) {
-                    return false;
-                }
-
-                @Override
-                public boolean isSuspended() {
-                    return false;
-                }
-
-                @Override
-                public boolean isCancelled() {
-                    return false;
-                }
-
-                @Override
-                public boolean isDone() {
-                    return false;
-                }
-
-                @Override
-                public boolean setTimeout(long l, TimeUnit timeUnit) {
-                    return false;
-                }
-
-                @Override
-                public void setTimeoutHandler(TimeoutHandler timeoutHandler) {
-
-                }
-
-                @Override
-                public Collection<Class<?>> register(Class<?> aClass) {
-                    return null;
-                }
-
-                @Override
-                public Map<Class<?>, Collection<Class<?>>> register(Class<?> aClass, Class<?>[] classes) {
-                    return null;
-                }
-
-                @Override
-                public Collection<Class<?>> register(Object o) {
-                    return null;
-                }
-
-                @Override
-                public Map<Class<?>, Collection<Class<?>>> register(Object o, Object... objects) {
-                    return null;
-                }
-            });
-        } catch (RestInterfaceFactoryException e) {
+            messengerClientCache.get(botId).getSendClient().sendSenderAction(senderId, SenderAction.TYPING_ON);
+        } catch (MessengerApiException e) {
+            e.printStackTrace();
+        } catch (MessengerIOException e) {
             e.printStackTrace();
         }
+
         try {
             Thread.sleep(1000l);
         } catch (InterruptedException e) {
             e.printStackTrace();
         }
+
+        final String jsonRequestBody = "{ \"input\": \"" + message + "\", \"context\": {}";
         try {
-            String output = restInterfaceFactory.get(IRestBotEngine.class, apiServerURI).readConversation(environment, botId, conversationId);
-            message = message.toLowerCase().trim();
-            if (message.equals("hi")) output = "Hi, I am the Med Bot, please ask me about medicine";
-            else if (message.equals("bye")) output = "Good bye, see you soon";
-            else if (message.contains("afinitor")) output = "Here is a in depth description of Afinitor: https://www.us.afinitor.com/";
-            else output = "Sorry, I don't understand";
+            IResponse httpResponse = httpClient.newRequest(uri, IHttpClient.Method.POST)
+                    .setUserAgent(AI_LABS_USER_AGENT)
+                    .setTimeout(10000, TimeUnit.MILLISECONDS)
+                    .setBodyEntity(jsonRequestBody, ENCODING, MediaType.APPLICATION_JSON)
+                    .send();
+
+            String output = httpResponse.getContentAsString();
+            try {
+                messengerClientCache.get(botId).getSendClient().sendSenderAction(senderId, SenderAction.TYPING_OFF);
+            } catch (MessengerApiException e) {
+                e.printStackTrace();
+            } catch (MessengerIOException e) {
+                e.printStackTrace();
+            }
+
+
             if (output != null) {
                 messengerClientCache.get(botId).getSendClient().
                         sendTextMessage(senderId, output);
-            }
 
-        } catch (RestInterfaceFactoryException e) {
-            log.error(e.getLocalizedMessage(), e);
+            }
         } catch (MessengerIOException e) {
             log.error(e.getLocalizedMessage(), e);
         } catch (MessengerApiException e) {
             log.error(e.getLocalizedMessage(), e);
         }
+
+
     }
 
 
