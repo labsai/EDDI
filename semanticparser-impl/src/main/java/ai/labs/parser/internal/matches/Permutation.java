@@ -99,10 +99,5 @@ public class Permutation implements Iterable<Integer[]> {
 
             return null;
         }
-
-        @Override
-        public void remove() {
-            //not implemented
-        }
     }
 }
