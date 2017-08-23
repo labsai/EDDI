@@ -169,13 +169,8 @@ public class FacebookEndpoint implements IFacebookEndpoint {
             e.printStackTrace();
         }
 
-        try {
-            Thread.sleep(1000l);
-        } catch (InterruptedException e) {
-            e.printStackTrace();
-        }
 
-        final String jsonRequestBody = "{ \"input\": \"" + message + "\", \"context\": {}";
+        final String jsonRequestBody = "{ \"input\": \"" + message + "\", \"context\": {} }";
         try {
             IResponse httpResponse = httpClient.newRequest(uri, IHttpClient.Method.POST)
                     .setUserAgent(AI_LABS_USER_AGENT)
