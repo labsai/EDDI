@@ -50,8 +50,6 @@ import java.util.Map;
 import java.util.concurrent.Callable;
 import java.util.concurrent.TimeUnit;
 
-import static ai.labs.memory.model.SimpleConversationMemorySnapshot.SimpleConversationStep;
-import static ai.labs.memory.model.SimpleConversationMemorySnapshot.SimpleData;
 import static ai.labs.rest.restinterfaces.RestInterfaceFactory.RestInterfaceFactoryException;
 
 @RequestScoped
@@ -197,7 +195,7 @@ public class FacebookEndpoint implements IFacebookEndpoint {
             final String state = getConversationState(httpResponse.getContentAsString());
             log.info("conversation state: " + state);
             if (state != null && !state.equals("READY")) {
-                conversationIdCache.remove(conversationId);
+                conversationIdCache.remove(senderId);
             }
         } catch (MessengerIOException e) {
             log.error(e.getLocalizedMessage(), e);
