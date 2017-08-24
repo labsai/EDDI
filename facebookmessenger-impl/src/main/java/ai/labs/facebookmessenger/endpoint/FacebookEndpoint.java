@@ -134,11 +134,9 @@ public class FacebookEndpoint implements IFacebookEndpoint {
     private TextMessageEventHandler getTextMessageEventHandler(String botId, Deployment.Environment environment) {
         return event -> {
             try {
-                log.info("got text:{}", event.getText());
                 String message = event.getText();
                 String senderId = event.getSender().getId();
                 final String conversationId = getConversationId(environment, botId, senderId);
-                log.info("current conversationid:{}", conversationId);
                 say(environment, botId, conversationId, senderId, message);
 
             } catch (RestInterfaceFactoryException | IRequest.HttpRequestException e) {
@@ -159,8 +157,6 @@ public class FacebookEndpoint implements IFacebookEndpoint {
                 botId, "/",
                 conversationId,
                 "?returnDetails=true");
-        log.info("uri:{}",uri.toString());
-        log.info("message:{}", message);
 
         try {
             messengerClientCache.get(botId).getSendClient().sendSenderAction(senderId, SenderAction.TYPING_ON);
@@ -193,7 +189,6 @@ public class FacebookEndpoint implements IFacebookEndpoint {
             }
 
             final String state = getConversationState(httpResponse.getContentAsString());
-            log.info("conversation state: " + state);
             if (state != null && !state.equals("READY")) {
                 conversationIdCache.remove(senderId);
             }
