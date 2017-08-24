@@ -193,6 +193,12 @@ public class FacebookEndpoint implements IFacebookEndpoint {
                         sendTextMessage(senderId, output);
 
             }
+
+            final String state = getConversationState(httpResponse.getContentAsString());
+            log.info("conversation state: " + state);
+            if (state != null && !state.equals("READY")) {
+                conversationIdCache.remove(conversationId);
+            }
         } catch (MessengerIOException e) {
             log.error(e.getLocalizedMessage(), e);
         } catch (MessengerApiException e) {
@@ -222,6 +228,24 @@ public class FacebookEndpoint implements IFacebookEndpoint {
         }
 
         return output;
+    }
+
+    private String getConversationState(String json) {
+
+        String state = null;
+
+        ObjectMapper mapper = new ObjectMapper();
+        try {
+            JsonNode rootNode = mapper.readValue(json, JsonNode.class);
+            JsonNode conversationState = rootNode.path("conversationState");
+            if (conversationState != null) {
+                state = conversationState.asText();
+            }
+        } catch (IOException e) {
+            log.error("json parsing error", e);
+        }
+
+        return state;
     }
 
 
