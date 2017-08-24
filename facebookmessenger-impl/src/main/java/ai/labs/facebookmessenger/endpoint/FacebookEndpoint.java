@@ -15,6 +15,8 @@ import ai.labs.runtime.SystemRuntime;
 import ai.labs.serialization.IJsonSerialization;
 import ai.labs.utilities.RestUtilities;
 import ai.labs.utilities.URIUtilities;
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.github.messenger4j.MessengerPlatform;
 import com.github.messenger4j.exceptions.MessengerApiException;
 import com.github.messenger4j.exceptions.MessengerIOException;
@@ -177,8 +179,8 @@ public class FacebookEndpoint implements IFacebookEndpoint {
                     .setTimeout(10000, TimeUnit.MILLISECONDS)
                     .setBodyEntity(jsonRequestBody, ENCODING, MediaType.APPLICATION_JSON)
                     .send();
+            final String output = getOutputText(httpResponse.getContentAsString());
 
-            ai.labs.memory.model.SimpleConversationMemorySnapshot conversationMemorySnapshot = jsonSerialization.deserialize(httpResponse.getContentAsString(), ai.labs.memory.model.SimpleConversationMemorySnapshot.class);
             try {
                 messengerClientCache.get(botId).getSendClient().sendSenderAction(senderId, SenderAction.TYPING_OFF);
             } catch (MessengerApiException e) {
@@ -186,27 +188,40 @@ public class FacebookEndpoint implements IFacebookEndpoint {
             } catch (MessengerIOException e) {
                 e.printStackTrace();
             }
-
-            for (SimpleData data : conversationMemorySnapshot.getConversationSteps().get(conversationMemorySnapshot.getConversationSteps().size()-1).getData()) {
-                messengerClientCache.get(botId).getSendClient().
-                        sendTextMessage(senderId, data.getKey() + ":" + data.getValue().toString());
-            }
-
-
-            /*if (output != null) {
+            if (output != null) {
                 messengerClientCache.get(botId).getSendClient().
                         sendTextMessage(senderId, output);
 
-            }*/
+            }
         } catch (MessengerIOException e) {
             log.error(e.getLocalizedMessage(), e);
         } catch (MessengerApiException e) {
             log.error(e.getLocalizedMessage(), e);
-        } catch (IOException e) {
-            log.error(e.getLocalizedMessage(), e);
         }
 
 
+    }
+
+    private String getOutputText(String json) {
+
+        String output = "I don't understand, please rephrase your question";
+
+        ObjectMapper mapper = new ObjectMapper();
+        try {
+            JsonNode rootNode = mapper.readValue(json, JsonNode.class);
+            JsonNode conversationStepsArray = rootNode.path("conversationSteps");
+            for (JsonNode conversationStep : conversationStepsArray) {
+                for (JsonNode data : conversationStep.get("data")) {
+                    if (data.get("key") != null && data.get("key").asText().startsWith("output")) {
+                        output = data.get("value").asText();
+                    }
+                }
+            }
+        } catch (IOException e) {
+            log.error("json parsing error", e);
+        }
+
+        return output;
     }
 
 
