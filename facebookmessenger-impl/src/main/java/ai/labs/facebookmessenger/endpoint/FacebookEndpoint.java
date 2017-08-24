@@ -178,7 +178,7 @@ public class FacebookEndpoint implements IFacebookEndpoint {
                     .setBodyEntity(jsonRequestBody, ENCODING, MediaType.APPLICATION_JSON)
                     .send();
 
-            String output = httpResponse.getContentAsString();
+            ai.labs.memory.model.SimpleConversationMemorySnapshot conversationMemorySnapshot = jsonSerialization.deserialize(httpResponse.getContentAsString(), ai.labs.memory.model.SimpleConversationMemorySnapshot.class);
             try {
                 messengerClientCache.get(botId).getSendClient().sendSenderAction(senderId, SenderAction.TYPING_OFF);
             } catch (MessengerApiException e) {
@@ -187,15 +187,22 @@ public class FacebookEndpoint implements IFacebookEndpoint {
                 e.printStackTrace();
             }
 
+            for (SimpleData data : conversationMemorySnapshot.getConversationSteps().get(conversationMemorySnapshot.getConversationSteps().size()-1).getData()) {
+                messengerClientCache.get(botId).getSendClient().
+                        sendTextMessage(senderId, data.getKey() + ":" + data.getValue().toString());
+            }
 
-            if (output != null) {
+
+            /*if (output != null) {
                 messengerClientCache.get(botId).getSendClient().
                         sendTextMessage(senderId, output);
 
-            }
+            }*/
         } catch (MessengerIOException e) {
             log.error(e.getLocalizedMessage(), e);
         } catch (MessengerApiException e) {
+            log.error(e.getLocalizedMessage(), e);
+        } catch (IOException e) {
             log.error(e.getLocalizedMessage(), e);
         }
 
