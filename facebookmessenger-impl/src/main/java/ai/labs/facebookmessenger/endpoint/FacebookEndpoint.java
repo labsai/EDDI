@@ -157,7 +157,8 @@ public class FacebookEndpoint implements IFacebookEndpoint {
                 apiServerURI, "/bots/",
                 environment, "/",
                 botId, "/",
-                conversationId);
+                conversationId,
+                "?returnDetails=true");
         log.info("uri:{}",uri.toString());
         log.info("message:{}", message);
 
@@ -168,7 +169,6 @@ public class FacebookEndpoint implements IFacebookEndpoint {
         } catch (MessengerIOException e) {
             e.printStackTrace();
         }
-
 
         final String jsonRequestBody = "{ \"input\": \"" + message + "\", \"context\": {} }";
         try {
