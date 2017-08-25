@@ -11,7 +11,6 @@ import lombok.Setter;
 
 import javax.inject.Inject;
 import java.util.*;
-import java.util.stream.Collectors;
 
 import static ai.labs.behavior.impl.extensions.IBehaviorExtension.ExecutionState.*;
 import static ai.labs.behavior.impl.extensions.InputMatcher.ConversationStepOccurrence.*;
@@ -22,8 +21,6 @@ import static ai.labs.behavior.impl.extensions.InputMatcher.ConversationStepOccu
 public class InputMatcher implements IBehaviorExtension {
     private static final String ID = "inputmatcher";
     private static final String KEY_EXPRESSIONS = "expressions";
-    private static final String KEY_UNUSED = "unused";
-    private static final String KEY_PUNCTUATION = "punctuation";
     private static final String KEY_EMPTY = "empty";
     private static final String KEY_OCCURRENCE = "occurrence";
 
@@ -36,14 +33,6 @@ public class InputMatcher implements IBehaviorExtension {
     @Setter
     private ConversationStepOccurrence occurrence = currentStep;
     private final String conversationOccurrenceQualifier = KEY_OCCURRENCE;
-
-    @Getter
-    @Setter
-    private boolean ignoreUnusedExpressions = false;
-
-    @Getter
-    @Setter
-    private boolean ignorePunctuationExpressions = false;
 
     private ExecutionState state = NOT_EXECUTED;
 
@@ -143,8 +132,6 @@ public class InputMatcher implements IBehaviorExtension {
             inputExpressions = expressionProvider.parseExpressions(data.getResult());
         }
 
-        inputExpressions = filterExpressions(inputExpressions);
-
         if (isInputEmpty(inputExpressions) ||
                 Collections.indexOfSubList(inputExpressions, expressions) > -1) {
             return SUCCESS;
@@ -157,16 +144,6 @@ public class InputMatcher implements IBehaviorExtension {
         return expressions.size() == 1 &&
                 expressions.get(0).getExpressionName().equals(KEY_EMPTY) &&
                 inputExpressions.size() == 0;
-    }
-
-    private List<Expression> filterExpressions(List<Expression> expressions) {
-        return expressions.stream().
-                filter(expression -> {
-                    String expressionName = expression.getExpressionName();
-                    return !(ignoreUnusedExpressions && expressionName.equals(KEY_UNUSED) ||
-                            ignorePunctuationExpressions && expressionName.equals(KEY_PUNCTUATION));
-                }).
-                collect(Collectors.toList());
     }
 
     @Override
