@@ -6,10 +6,10 @@ import ai.labs.parser.model.FoundWord;
 import ai.labs.parser.model.IDictionary;
 import ai.labs.parser.model.Word;
 
-import java.util.ArrayList;
 import java.util.Collections;
 import java.util.LinkedList;
 import java.util.List;
+import java.util.stream.Collectors;
 
 /**
  * @author ginccc
@@ -57,13 +57,10 @@ public class DamerauLevenshteinCorrection implements ICorrection {
 
         Collections.sort(foundWords);
 
-        List<IDictionary.IFoundWord> ret = new ArrayList<>();
-        foundWords.forEach(foundWord -> {
+        return foundWords.stream().map(foundWord -> {
             double matchingAccuracy = 1.0 - foundWord.distance;
-            ret.add(new FoundWord(foundWord.word, true, matchingAccuracy));
-        });
-
-        return ret;
+            return new FoundWord(foundWord.word, true, matchingAccuracy);
+        }).collect(Collectors.toList());
     }
 
     @Override
