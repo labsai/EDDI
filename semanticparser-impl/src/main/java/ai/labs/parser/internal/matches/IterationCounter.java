@@ -1,5 +1,8 @@
 package ai.labs.parser.internal.matches;
 
+import lombok.EqualsAndHashCode;
+import lombok.Getter;
+
 import java.util.*;
 
 /**
@@ -113,7 +116,7 @@ class IterationCounter implements Iterator<IterationCounter.IterationPlan> {
 
     private IterationPlan incrementNextIndex() {
         if (index > 0) {
-            while (index > 0) {
+            while (index > 0 && indexes[index] < resultLengths[index]) {
                 indexes[index]++;
                 index--;
                 if (!contains(previousIterationPlans, indexes)) {
@@ -143,37 +146,14 @@ class IterationCounter implements Iterator<IterationCounter.IterationPlan> {
         return false;
     }
 
-    @Override
-    public void remove() {
-        //not implemented
-    }
-
-    public class IterationPlan {
+    @Getter
+    @EqualsAndHashCode
+    class IterationPlan {
         private Integer[] indexes;
 
         private IterationPlan(Integer[] indexes) {
             this.indexes = new Integer[indexes.length];
             System.arraycopy(indexes, 0, this.indexes, 0, indexes.length);
-        }
-
-        Integer[] getIndexes() {
-            return indexes;
-        }
-
-        @Override
-        public boolean equals(Object o) {
-            if (this == o) return true;
-            if (o == null || getClass() != o.getClass()) return false;
-
-            IterationPlan that = (IterationPlan) o;
-
-            return Arrays.equals(indexes, that.indexes);
-
-        }
-
-        @Override
-        public int hashCode() {
-            return indexes != null ? Arrays.hashCode(indexes) : 0;
         }
     }
 }

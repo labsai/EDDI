@@ -34,12 +34,12 @@ public class IntegerDictionary implements IDictionary {
     }
 
     @Override
-    public IFoundWord[] lookupTerm(final String value) {
+    public List<IFoundWord> lookupTerm(final String value) {
         if (CharacterUtilities.isStringInteger(value)) {
             Expression integerExp = expressionUtilities.createExpression("integer", value);
             IWord word = new Word(value, Collections.singletonList(integerExp), ID);
 
-            return new IFoundWord[]{new FoundWord(word, false, 1.0)};
+            return Collections.singletonList(new FoundWord(word, false, 1.0));
         }
 
         return IDictionary.NO_WORDS_FOUND;

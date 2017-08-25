@@ -41,13 +41,13 @@ public class PunctuationDictionary implements IDictionary {
     }
 
     @Override
-    public IFoundWord[] lookupTerm(final String value) {
+    public List<IFoundWord> lookupTerm(final String value) {
         if (punctuations.containsKey(value)) {
             Expression punctuationExp = expressionUtilities.createExpression("punctuation", punctuations.get(value));
             List<Expression> expressions = Collections.singletonList(punctuationExp);
             IDictionary.IWord word = new Word(value, expressions, ID);
 
-            return new IFoundWord[]{new FoundWord(word, false, 1.0)};
+            return Collections.singletonList(new FoundWord(word, false, 1.0));
         }
 
         return IDictionary.NO_WORDS_FOUND;

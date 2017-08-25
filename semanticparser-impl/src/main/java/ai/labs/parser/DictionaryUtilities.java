@@ -16,8 +16,8 @@ import java.util.List;
  * @author ginccc
  */
 public class DictionaryUtilities {
-    static List<Expression> convertDictionaryEntriesToExpressions(List<IDictionary.IFoundWord>
-                                                                          dictionaryEntries) {
+    private static List<Expression> convertDictionaryEntriesToExpressions(List<IDictionary.IFoundWord>
+                                                                                  dictionaryEntries) {
         List<Expression> expressions = new LinkedList<>();
 
         for (IDictionary.IDictionaryEntry dictionaryEntry : dictionaryEntries) {
@@ -38,22 +38,20 @@ public class DictionaryUtilities {
         return solutionExpressions;
     }
 
-    static List<IDictionary> convertQuickReplies(List<List<QuickReply>> quickRepliesList, IExpressionProvider expressionProvider) {
+    static List<IDictionary> convertQuickReplies(List<QuickReply> quickReplies, IExpressionProvider expressionProvider) {
         List<IDictionary> ret = new LinkedList<>();
 
-        quickRepliesList.forEach(quickReplies -> {
-            RegularDictionary dictionary = new RegularDictionary(null, false);
-            quickReplies.forEach(quickReply -> {
-                String quickReplyValue = quickReply.getValue();
-                List<Expression> expressions = expressionProvider.parseExpressions(quickReply.getExpressions());
-                if (quickReplyValue.contains(" ")) {
-                    dictionary.addPhrase(quickReplyValue, expressions);
-                } else {
-                    dictionary.addWord(quickReplyValue, expressions, 0);
-                }
-            });
-            ret.add(dictionary);
+        RegularDictionary dictionary = new RegularDictionary(null, false);
+        quickReplies.forEach(quickReply -> {
+            String quickReplyValue = quickReply.getValue();
+            List<Expression> expressions = expressionProvider.parseExpressions(quickReply.getExpressions());
+            if (quickReplyValue.contains(" ")) {
+                dictionary.addPhrase(quickReplyValue, expressions);
+            } else {
+                dictionary.addWord(quickReplyValue, expressions, 0);
+            }
         });
+        ret.add(dictionary);
 
         return ret;
     }

@@ -12,6 +12,7 @@ import org.junit.Before;
 import org.junit.Test;
 
 import java.util.Arrays;
+import java.util.Collections;
 import java.util.List;
 
 /**
@@ -33,10 +34,10 @@ public class DamerauLevenshteinCorrectionTest {
         levenshteinCorrection.init(Arrays.asList(new IDictionary[]{testDictionary}));
 
         //test
-        IDictionary.IFoundWord[] foundWords = levenshteinCorrection.correctWord("helo");
+        List<IDictionary.IFoundWord> foundWords = levenshteinCorrection.correctWord("helo");
 
         //assert
-        Assert.assertEquals(1, foundWords.length);
+        Assert.assertEquals(1, foundWords.size());
     }
 
     @Test
@@ -47,10 +48,10 @@ public class DamerauLevenshteinCorrectionTest {
         levenshteinCorrection.init(Arrays.asList(new IDictionary[]{testDictionary}));
 
         //test
-        IDictionary.IFoundWord[] foundWords = levenshteinCorrection.correctWord("heo");
+        List<IDictionary.IFoundWord> foundWords = levenshteinCorrection.correctWord("heo");
 
         //assert
-        Assert.assertEquals(1, foundWords.length);
+        Assert.assertEquals(1, foundWords.size());
     }
 
     @Test
@@ -61,10 +62,10 @@ public class DamerauLevenshteinCorrectionTest {
         levenshteinCorrection.init(Arrays.asList(new IDictionary[]{testDictionary}));
 
         //test
-        IDictionary.IFoundWord[] foundWords = levenshteinCorrection.correctWord("he");
+        List<IDictionary.IFoundWord> foundWords = levenshteinCorrection.correctWord("he");
 
         //assert
-        Assert.assertEquals(0, foundWords.length);
+        Assert.assertEquals(0, foundWords.size());
     }
 
     private class TestDictionary implements IDictionary {
@@ -87,8 +88,8 @@ public class DamerauLevenshteinCorrectionTest {
         }
 
         @Override
-        public IFoundWord[] lookupTerm(String value) {
-            return new IFoundWord[0];
+        public List<IFoundWord> lookupTerm(String value) {
+            return Collections.emptyList();
         }
 
         @Override

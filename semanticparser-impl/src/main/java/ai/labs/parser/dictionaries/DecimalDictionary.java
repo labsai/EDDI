@@ -35,7 +35,7 @@ public class DecimalDictionary implements IDictionary {
     }
 
     @Override
-    public IFoundWord[] lookupTerm(String value) {
+    public List<IFoundWord> lookupTerm(String value) {
         if (CharacterUtilities.isNumber(value, true)) {
             if (value.contains(",")) {
                 value = value.replace(',', '.');
@@ -44,7 +44,7 @@ public class DecimalDictionary implements IDictionary {
             Expression decimalExp = expressionUtilities.createExpression("decimal", value);
             IWord word = new Word(value, Collections.singletonList(decimalExp), ID);
 
-            return new IFoundWord[]{new FoundWord(word, false, 1.0)};
+            return Collections.singletonList(new FoundWord(word, false, 1.0));
         }
 
         return IDictionary.NO_WORDS_FOUND;
