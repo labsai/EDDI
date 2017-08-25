@@ -107,11 +107,5 @@ public class MatchMatrix implements Iterable<Suggestion> {
 
             return null;
         }
-
-        @Override
-        public void remove() {
-            //not implemented
-        }
     }
-
 }

@@ -35,12 +35,12 @@ public class OrdinalNumbersDictionary implements IDictionary {
     }
 
     @Override
-    public IFoundWord[] lookupTerm(String value) {
+    public List<IFoundWord> lookupTerm(String value) {
         final String ordinalNumber = LanguageUtilities.isOrdinalNumber(value.toLowerCase());
         if (!RuntimeUtilities.isNullOrEmpty(ordinalNumber)) {
             Expression ordinalNumberExp = expressionUtilities.createExpression("ordinal_number", ordinalNumber);
             IWord word = new Word(ordinalNumber, Collections.singletonList(ordinalNumberExp), ID);
-            return new IFoundWord[]{new FoundWord(word, false, 1.0)};
+            return Collections.singletonList(new FoundWord(word, false, 1.0));
         }
 
         return IDictionary.NO_WORDS_FOUND;

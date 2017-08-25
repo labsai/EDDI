@@ -6,7 +6,7 @@ import org.apache.commons.codec.language.DoubleMetaphone;
 import org.apache.commons.codec.language.RefinedSoundex;
 
 import java.util.ArrayList;
-import java.util.Arrays;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 
@@ -32,13 +32,13 @@ public class PhoneticCorrection implements ICorrection {
 
     @Override
     public void init(List<IDictionary> dictionaries) {
-        for (IDictionary dictionary : dictionaries) {
-            for (IDictionary.IWord word : dictionary.getWords()) {
-                List<IDictionary.IFoundWord> foundWords = Arrays.asList(new IDictionary.IFoundWord[]{new FoundWord(word, true, 0.3)});
-                soundexCodes.put(calculateSoundexCode(word.getValue()), foundWords);
-                metaphoneCodes.put(calculateMetaphoneCode(word.getValue()), foundWords);
-            }
-        }
+        dictionaries.forEach(dictionary -> dictionary.getWords().
+                forEach(word -> {
+                    List<IDictionary.IFoundWord> foundWords =
+                            Collections.singletonList(new FoundWord(word, true, 0.3));
+                    soundexCodes.put(calculateSoundexCode(word.getValue()), foundWords);
+                    metaphoneCodes.put(calculateMetaphoneCode(word.getValue()), foundWords);
+                }));
     }
 
     private String calculateMetaphoneCode(String word) {
@@ -49,7 +49,7 @@ public class PhoneticCorrection implements ICorrection {
         return refinedSoundex.soundex(word);
     }
 
-    private IDictionary.IFoundWord[] lookupPhonetic(String word) {
+    private List<IDictionary.IFoundWord> lookupPhonetic(String word) {
         List<IDictionary.IFoundWord> foundWords = new ArrayList<>();
 
         String soundexCode = calculateSoundexCode(word);
@@ -58,11 +58,11 @@ public class PhoneticCorrection implements ICorrection {
         String metaphoneCode = calculateMetaphoneCode(word);
         foundWords.addAll(metaphoneCodes.get(metaphoneCode));
 
-        return foundWords.toArray(new IDictionary.IFoundWord[foundWords.size()]);
+        return foundWords;
     }
 
     @Override
-    public IDictionary.IFoundWord[] correctWord(String word) {
+    public List<IDictionary.IFoundWord> correctWord(String word) {
         return lookupPhonetic(word);
     }
 

@@ -9,6 +9,7 @@ import ai.labs.parser.model.Word;
 import java.util.Collections;
 import java.util.LinkedList;
 import java.util.List;
+import java.util.stream.Collectors;
 
 /**
  * @author ginccc
@@ -34,7 +35,7 @@ public class DamerauLevenshteinCorrection implements ICorrection {
     }
 
     @Override
-    public IDictionary.IFoundWord[] correctWord(String lookup) {
+    public List<IDictionary.IFoundWord> correctWord(String lookup) {
         List<WordDistanceWrapper> foundWords = new LinkedList<>();
         lookup = lookup.toLowerCase();
 
@@ -56,13 +57,10 @@ public class DamerauLevenshteinCorrection implements ICorrection {
 
         Collections.sort(foundWords);
 
-        List<IDictionary.IFoundWord> ret = new LinkedList<>();
-        for (WordDistanceWrapper foundWord : foundWords) {
+        return foundWords.stream().map(foundWord -> {
             double matchingAccuracy = 1.0 - foundWord.distance;
-            ret.add(new FoundWord(foundWord.word, true, matchingAccuracy));
-        }
-
-        return ret.toArray(new IDictionary.IFoundWord[ret.size()]);
+            return new FoundWord(foundWord.word, true, matchingAccuracy);
+        }).collect(Collectors.toList());
     }
 
     @Override
@@ -93,7 +91,7 @@ public class DamerauLevenshteinCorrection implements ICorrection {
 
         @Override
         public int compareTo(WordDistanceWrapper o) {
-            return distance < o.distance ? -1 : distance == o.distance ? 0 : 1;
+            return Integer.compare(distance, o.distance);
         }
     }
 }

@@ -24,18 +24,16 @@ public class StemmingCorrection implements ICorrection {
     @Override
     public void init(List<IDictionary> dictionaries) {
         stemmer = createNewStemmer();
-        for (IDictionary dictionary : dictionaries) {
-            for (IDictionary.IWord word : dictionary.getWords()) {
-                stemmer.setCurrent(word.getValue().toLowerCase());
-                stemmer.stem();
-                String stemmedWord = stemmer.getCurrent();
-                if (!this.stemmedWordMap.containsKey(stemmedWord)) {
-                    this.stemmedWordMap.put(stemmedWord, new LinkedList<>());
-                }
-
-                this.stemmedWordMap.get(stemmedWord).add(new FoundWord(word, true, 0.5));
-            }
-        }
+        dictionaries.stream().flatMap(dictionary -> dictionary.getWords().stream()).
+                forEach(word -> {
+                    stemmer.setCurrent(word.getValue().toLowerCase());
+                    stemmer.stem();
+                    String stemmedWord = stemmer.getCurrent();
+                    if (!this.stemmedWordMap.containsKey(stemmedWord)) {
+                        this.stemmedWordMap.put(stemmedWord, new ArrayList<>());
+                    }
+                    this.stemmedWordMap.get(stemmedWord).add(new FoundWord(word, true, 0.5));
+                });
     }
 
     private SnowballStemmer createNewStemmer() {
@@ -48,7 +46,7 @@ public class StemmingCorrection implements ICorrection {
     }
 
     @Override
-    public IDictionary.IFoundWord[] correctWord(String word) {
+    public List<IDictionary.IFoundWord> correctWord(String word) {
         stemmer = createNewStemmer();
         stemmer.setCurrent(word.toLowerCase());
         stemmer.stem();
@@ -58,7 +56,7 @@ public class StemmingCorrection implements ICorrection {
 
         if (foundWords != null && !foundWords.isEmpty()) {
             Collections.sort(foundWords);
-            return foundWords.toArray(new IDictionary.IFoundWord[foundWords.size()]);
+            return foundWords;
         }
 
         return IDictionary.NO_WORDS_FOUND;
