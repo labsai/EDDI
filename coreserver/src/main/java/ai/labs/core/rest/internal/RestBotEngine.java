@@ -17,6 +17,7 @@ import ai.labs.runtime.IBotFactory;
 import ai.labs.runtime.IConversationCoordinator;
 import ai.labs.runtime.SystemRuntime;
 import ai.labs.runtime.service.ServiceException;
+import ai.labs.serialization.IJsonSerialization;
 import ai.labs.utilities.RestUtilities;
 import ai.labs.utilities.RuntimeUtilities;
 import lombok.extern.slf4j.Slf4j;
@@ -27,6 +28,7 @@ import javax.ws.rs.InternalServerErrorException;
 import javax.ws.rs.container.AsyncResponse;
 import javax.ws.rs.core.MediaType;
 import javax.ws.rs.core.Response;
+import java.io.IOException;
 import java.net.URI;
 import java.util.HashMap;
 import java.util.List;
@@ -71,7 +73,9 @@ public class RestBotEngine implements IRestBotEngine {
 
             IConversation conversation = latestBot.startConversation(null);
             String conversationId = storeConversationMemory(conversation.getConversationMemory(), environment);
+            log.info("conversationid:{}", conversationId);
             URI createdUri = RestUtilities.createURI(resourceURI, conversationId);
+            log.info("uri:{}", createdUri.toString());
             return Response.created(createdUri).build();
         } catch (ServiceException |
                 IResourceStore.ResourceStoreException |
@@ -107,6 +111,39 @@ public class RestBotEngine implements IRestBotEngine {
             throw new NoLogWebApplicationException(Response.Status.NOT_FOUND);
         }
     }
+
+    @Override
+    public String readConversation(Deployment.Environment environment, String botId, String conversationId) {
+        RuntimeUtilities.checkNotNull(environment, "environment");
+        RuntimeUtilities.checkNotNull(botId, "botId");
+        RuntimeUtilities.checkNotNull(conversationId, "conversationId");
+        try {
+            ConversationMemorySnapshot conversationMemorySnapshot = conversationMemoryStore.loadConversationMemorySnapshot(conversationId);
+            if (!botId.equals(conversationMemorySnapshot.getBotId())) {
+                String message = "conversationId: %s does not belong to bot with id: %s";
+                message = String.format(message, conversationId, botId);
+                throw new IllegalAccessException(message);
+            }
+            String returnString = "Sorry, I did not understand";
+            for (ConversationMemorySnapshot.ConversationStepSnapshot conversationStep : conversationMemorySnapshot.getConversationSteps()) {
+                for (ConversationMemorySnapshot.PackageRunSnapshot packageRunSnapshot : conversationStep.getPackages()) {
+                    for (ConversationMemorySnapshot.ResultSnapshot resultSnapshot : packageRunSnapshot.getLifecycleTasks()) {
+                        if (resultSnapshot.getKey().equals("output:final")) {
+                            returnString =  (String)resultSnapshot.getResult();
+                        }
+                    }
+                }
+            }
+
+            return returnString;
+        } catch (IResourceStore.ResourceStoreException | IllegalAccessException e) {
+            log.error(e.getLocalizedMessage(), e);
+            throw new InternalServerErrorException(e.getLocalizedMessage(), e);
+        } catch (IResourceStore.ResourceNotFoundException e) {
+            throw new NoLogWebApplicationException(Response.Status.NOT_FOUND);
+        }
+    }
+
 
     @Override
     public ConversationState getConversationState(Deployment.Environment environment, String conversationId) {
