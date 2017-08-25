@@ -129,10 +129,10 @@ public class ConversationMemory implements IConversationMemory {
         return redoCache;
     }
 
-    public final class ConversationStepStack implements IConversationStepStack {
+    public final static class ConversationStepStack implements IConversationStepStack {
         private List<IConversationStep> conversationSteps = new ArrayList<>();
 
-        ConversationStepStack(List<IConversationStep> steps) {
+        public ConversationStepStack(List<IConversationStep> steps) {
             conversationSteps.addAll(steps);
         }
 

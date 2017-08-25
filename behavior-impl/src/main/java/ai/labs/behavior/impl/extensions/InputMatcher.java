@@ -99,7 +99,7 @@ public class InputMatcher implements IBehaviorExtension {
                         break;
                     default:
                         String errorMessage = "InputMatcher config param: " + conversationOccurrenceQualifier +
-                                "needs to have one of the following values: %s, actual value: %s";
+                                ". Needs to have one of the following values: %s, actual value: %s";
                         errorMessage = String.format(errorMessage,
                                 Arrays.toString(ConversationStepOccurrence.values()), conversationOccurrence);
                         throw new IllegalArgumentException(errorMessage);
