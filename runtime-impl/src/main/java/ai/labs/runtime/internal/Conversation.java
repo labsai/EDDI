@@ -10,27 +10,34 @@ import ai.labs.memory.IConversationMemory;
 import ai.labs.memory.IData;
 import ai.labs.memory.model.ConversationState;
 import ai.labs.runtime.IExecutablePackage;
+import ai.labs.runtime.SystemRuntime;
 
 import java.util.LinkedList;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 
 /**
  * @author ginccc
  */
 public class Conversation implements IConversation {
+    private static final int TIMEOUT = 30;
     private static final String CONVERSATION_END = "CONVERSATION_END";
     private final List<IExecutablePackage> executablePackages;
     private final IConversationMemory conversationMemory;
     private final IConversation.IConversationOutputRenderer outputProvider;
+    private final SystemRuntime.IRuntime runtime;
 
     Conversation(List<IExecutablePackage> executablePackages,
                  IConversationMemory conversationMemory,
-                 IConversationOutputRenderer outputProvider) {
+                 IConversationOutputRenderer outputProvider,
+                 SystemRuntime.IRuntime runtime) {
         this.executablePackages = executablePackages;
         this.conversationMemory = conversationMemory;
         this.outputProvider = outputProvider;
+        this.runtime = runtime;
     }
 
     @Override
@@ -95,7 +102,10 @@ public class Conversation implements IConversation {
             data.addAll(contextData);
 
             //execute input processing
-            executePackages(data);
+            runtime.submitCallable(() -> {
+                executePackages(data);
+                return null;
+            }, null).get(TIMEOUT, TimeUnit.SECONDS);
 
             IConversationMemory.IWritableConversationStep currentStep = conversationMemory.getCurrentStep();
             IData<List<String>> actionData = currentStep.getLatestData("action");
@@ -105,6 +115,10 @@ public class Conversation implements IConversation {
                     endConversation();
                 }
             }
+        } catch (TimeoutException | InterruptedException e) {
+            setConversationState(ConversationState.EXECUTION_INTERRUPTED);
+            String errorMessage = "Execution of Packages interrupted or timed out.";
+            throw new LifecycleException.LifecycleInterruptedException(errorMessage, e);
         } catch (Exception e) {
             setConversationState(ConversationState.ERROR);
             throw new LifecycleException(e.getLocalizedMessage(), e);

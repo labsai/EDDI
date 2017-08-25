@@ -36,6 +36,7 @@ import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
 
 import static ai.labs.memory.ConversationMemoryUtilities.*;
+import static ai.labs.memory.model.ConversationState.IN_PROGRESS;
 
 /**
  * @author ginccc
@@ -144,7 +145,8 @@ public class RestBotEngine implements IRestBotEngine {
         RuntimeUtilities.checkNotNull(inputData.getInput(), "inputData.input");
 
         response.setTimeout(60, TimeUnit.SECONDS);
-
+        response.setTimeoutHandler((asyncResp) ->
+                asyncResp.resume(Response.status(Response.Status.REQUEST_TIMEOUT).build()));
         try {
             final IConversationMemory conversationMemory = loadConversationMemory(conversationId);
             checkConversationMemoryNotNull(conversationMemory, conversationId);
@@ -152,7 +154,7 @@ public class RestBotEngine implements IRestBotEngine {
                 throw new IllegalAccessException("Supplied botId is incompatible to conversationId");
             }
 
-            setConversationState(conversationId, ConversationState.IN_PROGRESS);
+            setConversationState(conversationId, IN_PROGRESS);
 
             IBot bot = botFactory.getBot(environment,
                     conversationMemory.getBotId(), conversationMemory.getBotVersion());
@@ -210,6 +212,11 @@ public class RestBotEngine implements IRestBotEngine {
             try {
                 conversation.say(message, convertContext(inputDataContext));
                 storeConversationMemory(conversationMemory, environment);
+            } catch (LifecycleException.LifecycleInterruptedException e) {
+                setConversationState(conversationId, ConversationState.EXECUTION_INTERRUPTED);
+                String errorMessage = "Conversation processing got interrupted! (conversationId=%s)\n";
+                errorMessage = String.format(errorMessage, conversationId);
+                log.warn(errorMessage + e.getLocalizedMessage(), e);
             } catch (LifecycleException | IResourceStore.ResourceStoreException e) {
                 setConversationState(conversationId, ConversationState.ERROR);
                 String msg = "Error while processing user input (conversationId=%s , conversationState=%s)";

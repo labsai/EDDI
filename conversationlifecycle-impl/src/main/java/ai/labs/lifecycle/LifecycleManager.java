@@ -18,6 +18,9 @@ public class LifecycleManager implements ILifecycleManager {
 
         try {
             for (ILifecycleTask task : lifecycleTasks) {
+                if (Thread.currentThread().isInterrupted()) {
+                    throw new LifecycleException.LifecycleInterruptedException("Execution was interrupted!");
+                }
                 task.executeTask(conversationMemory);
             }
         } catch (LifecycleException e) {

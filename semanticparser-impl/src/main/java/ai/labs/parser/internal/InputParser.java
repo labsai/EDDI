@@ -34,34 +34,40 @@ public class InputParser implements IInputParser {
     }
 
     @Override
-    public List<RawSolution> parse(String sentence) {
+    public List<RawSolution> parse(String sentence) throws InterruptedException {
         return parse(sentence, Collections.emptyList());
     }
 
     @Override
-    public List<RawSolution> parse(String sentence, List<IDictionary> temporaryDictionaries) {
+    public List<RawSolution> parse(String sentence, List<IDictionary> temporaryDictionaries)
+            throws InterruptedException {
         InputHolder holder = new InputHolder();
         holder.input = sentence.split(" ");
 
         for (; holder.index < holder.input.length; holder.index++) {
-            if (isInterrupted()) {
-                log.warn("Parsing process of words has been interrupted. (It probably took to much time...)");
-                //probably it took too long, so we return what we have...
-                return new LinkedList<>();
-            }
             final String currentInputPart = holder.input[holder.index];
-            if (currentInputPart.isEmpty()) {
-                continue;
-            }
 
             iterateDictionaries(holder, currentInputPart, temporaryDictionaries);
             iterateDictionaries(holder, currentInputPart, dictionaries);
 
-            for (ICorrection correction : corrections) {
-                if (!correction.lookupIfKnown() && holder.getMatchingResultSize(holder.index) != 0) {
-                    //skipped correction because input part is already known.
-                    continue;
-                }
+            iterateCorrections(holder, currentInputPart);
+
+            if (holder.getMatchingResultSize(holder.index) == 0) {
+                FoundUnknown foundUnknown = new FoundUnknown(new Unknown(currentInputPart));
+                addDictionaryEntriesTo(holder, currentInputPart, Collections.singletonList(foundUnknown));
+            }
+        }
+
+        return lookupPhrases(holder, preparePhrases(temporaryDictionaries));
+    }
+
+    private void iterateCorrections(InputHolder holder, String currentInputPart) throws InterruptedException {
+        for (ICorrection correction : corrections) {
+            throwExceptionIfInterrupted("corrections");
+            if (!correction.lookupIfKnown() && holder.getMatchingResultSize(holder.index) != 0) {
+                //skipped correction because input part is already known.
+                continue;
+            }
 
                 List<IDictionary.IFoundWord> correctedWords = correction.correctWord(currentInputPart);
                 if (correctedWords.size() > 0) {
@@ -75,19 +81,10 @@ public class InputParser implements IInputParser {
             }
         }
 
-        return lookupPhrases(holder, preparePhrases(temporaryDictionaries));
-    }
-
-    private void iterateDictionaries(InputHolder holder, String currentInputPart, List<IDictionary> dictionaries) {
+    private void iterateDictionaries(InputHolder holder, String currentInputPart, List<IDictionary> dictionaries)
+            throws InterruptedException {
         for (IDictionary dictionary : dictionaries) {
-            if (isInterrupted()) {
-                break;
-            }
-
-            if (!dictionary.lookupIfKnown() && holder.getMatchingResultSize(holder.index) != 0) {
-                //skipped lookup because input part is already known.
-                continue;
-            }
+            throwExceptionIfInterrupted("dictionaries");
 
             //lookup input part in dictionary
             List<IDictionary.IFoundWord> dictionaryEntries = dictionary.lookupTerm(currentInputPart);
@@ -98,8 +95,15 @@ public class InputParser implements IInputParser {
         }
     }
 
+    private void throwExceptionIfInterrupted(String currentOperation) throws InterruptedException {
+        if (Thread.currentThread().isInterrupted()) {
+            String message = String.format("Parser was interrupted while processing %s.", currentOperation);
+            throw new InterruptedException(message);
+        }
+    }
+
     private void addDictionaryEntriesTo(InputHolder holder, String matchedInputValue,
-                                        List<? extends IDictionary.IFoundWord> foundWords) {
+                                        List<IDictionary.IFoundWord> foundWords) {
         if (!holder.equalsMatchingTerm(matchedInputValue, foundWords)) {
             for (IDictionary.IFoundWord foundWord : foundWords) {
                 MatchingResult matchingResult = new MatchingResult();
@@ -110,7 +114,8 @@ public class InputParser implements IInputParser {
     }
 
     private List<RawSolution> lookupPhrases(InputHolder holder,
-                                            Map<IDictionary.IWord, List<IDictionary.IPhrase>> tmpPhrasesMap) {
+                                            Map<IDictionary.IWord, List<IDictionary.IPhrase>> tmpPhrasesMap)
+            throws InterruptedException {
 
         List<RawSolution> possibleSolutions = new LinkedList<>();
         Iterator<Suggestion> suggestionIterator = holder.createSolutionIterator();
@@ -118,11 +123,7 @@ public class InputParser implements IInputParser {
         int maxIterations = 2;
         int currentIteration = 0;
         while (suggestionIterator.hasNext()) {
-            if (isInterrupted()) {
-                log.warn("Parsing process of phrases has been interrupted. (It probably took to much time...)");
-                //probably it took too long, so we return what we have...
-                return possibleSolutions;
-            }
+            throwExceptionIfInterrupted("phrases");
             currentIteration++;
             Suggestion suggestion = suggestionIterator.next();
             List<IDictionary.IFoundWord> foundWords = suggestion.build();
