@@ -58,7 +58,7 @@ public class InputMatcher implements IBehaviorExtension {
     @Override
     public Map<String, String> getValues() {
         HashMap<String, String> result = new HashMap<>();
-        result.put(expressionsQualifier, StringUtilities.joinStrings(",", expressions));
+        result.put(expressionsQualifier, StringUtilities.joinStrings(",", expressions.toArray()));
         result.put(conversationOccurrenceQualifier, occurrence.toString());
 
         return result;
