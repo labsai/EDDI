@@ -7,7 +7,7 @@ import ai.labs.lifecycle.model.Context;
 import ai.labs.memory.IConversationMemory;
 import ai.labs.memory.IData;
 import ai.labs.serialization.IJsonSerialization;
-import ai.labs.utilities.CharacterUtilities;
+import ai.labs.utilities.StringUtilities;
 import com.jayway.jsonpath.JsonPath;
 import com.jayway.jsonpath.PathNotFoundException;
 import lombok.AllArgsConstructor;
@@ -70,7 +70,7 @@ public class ContextMatcher implements IBehaviorExtension {
         result.put(contextKeyQualifier, contextKey);
         result.put(contextTypeQualifier, contextType);
         if (expressions != null) {
-            result.put(expressionsQualifier, CharacterUtilities.arrayToString(expressions, ","));
+            result.put(expressionsQualifier, StringUtilities.joinStrings(",", expressions));
         }
 
         if (object != null) {

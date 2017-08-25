@@ -11,10 +11,6 @@ public final class CollectionUtilities {
     }
 
     public static void addAllWithoutDuplicates(List<String> collection, List<String> addTo) {
-        for (String value : addTo) {
-            if (!collection.contains(value)) {
-                collection.add(value);
-            }
-        }
+        addTo.stream().filter(value -> !collection.contains(value)).forEach(collection::add);
     }
 }

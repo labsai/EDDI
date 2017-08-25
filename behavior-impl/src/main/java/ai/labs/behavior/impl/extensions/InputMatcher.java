@@ -5,32 +5,56 @@ import ai.labs.expressions.Expression;
 import ai.labs.expressions.utilities.IExpressionProvider;
 import ai.labs.memory.IConversationMemory;
 import ai.labs.memory.IData;
-import ai.labs.utilities.CharacterUtilities;
+import ai.labs.utilities.StringUtilities;
 import lombok.Getter;
 import lombok.Setter;
 
 import javax.inject.Inject;
 import java.util.*;
+import java.util.stream.Collectors;
+
+import static ai.labs.behavior.impl.extensions.IBehaviorExtension.ExecutionState.*;
+import static ai.labs.behavior.impl.extensions.InputMatcher.ConversationStepOccurrence.*;
 
 /**
  * @author ginccc
  */
 public class InputMatcher implements IBehaviorExtension {
     private static final String ID = "inputmatcher";
+    private static final String KEY_EXPRESSIONS = "expressions";
+    private static final String KEY_UNUSED = "unused";
+    private static final String KEY_PUNCTUATION = "punctuation";
+    private static final String KEY_EMPTY = "empty";
+    private static final String KEY_OCCURRENCE = "occurrence";
 
-    //todo add occurrence attribute
     @Getter
     @Setter
-    private List<Expression> expressions;
+    private List<Expression> expressions = Collections.emptyList();
+    private final String expressionsQualifier = KEY_EXPRESSIONS;
+
+    @Getter
+    @Setter
+    private ConversationStepOccurrence occurrence = currentStep;
+    private final String conversationOccurrenceQualifier = KEY_OCCURRENCE;
+
     @Getter
     @Setter
     private boolean ignoreUnusedExpressions = false;
+
     @Getter
     @Setter
     private boolean ignorePunctuationExpressions = false;
-    private ExecutionState state = ExecutionState.NOT_EXECUTED;
-    private final String expressionsQualifier = "expressions";
+
+    private ExecutionState state = NOT_EXECUTED;
+
     private IExpressionProvider expressionProvider;
+
+    enum ConversationStepOccurrence {
+        currentStep,
+        lastStep,
+        anyStep,
+        never
+    }
 
     @Inject
     public InputMatcher(IExpressionProvider expressionProvider) {
@@ -45,8 +69,8 @@ public class InputMatcher implements IBehaviorExtension {
     @Override
     public Map<String, String> getValues() {
         HashMap<String, String> result = new HashMap<>();
-        result.put(expressionsQualifier, CharacterUtilities.arrayToString(expressions, ","));
-        //result.put("occurrence", ... );
+        result.put(expressionsQualifier, StringUtilities.joinStrings(",", expressions));
+        result.put(conversationOccurrenceQualifier, occurrence.toString());
 
         return result;
     }
@@ -58,53 +82,91 @@ public class InputMatcher implements IBehaviorExtension {
                 expressions = expressionProvider.parseExpressions(values.get(expressionsQualifier));
             }
 
-            /*if (values.containsKey(contextQualifier))
-            {
-                String context = values.get(contextQualifier);
-                if(context.equals(OccurrenceEnum.last.name()))
-                {
-                    this.context = OccurrenceEnum.last;
+            if (values.containsKey(conversationOccurrenceQualifier)) {
+                String conversationOccurrence = values.get(conversationOccurrenceQualifier);
+                switch (conversationOccurrence) {
+                    case "currentStep":
+                        occurrence = currentStep;
+                        break;
+                    case "lastStep":
+                        occurrence = lastStep;
+                        break;
+                    case "anyStep":
+                        occurrence = anyStep;
+                        break;
+                    case "never":
+                        occurrence = never;
+                        break;
+                    default:
+                        String errorMessage = "InputMatcher config param: " + conversationOccurrenceQualifier +
+                                "needs to have one of the following values: %s, actual value: %s";
+                        errorMessage = String.format(errorMessage,
+                                Arrays.toString(ConversationStepOccurrence.values()), conversationOccurrence);
+                        throw new IllegalArgumentException(errorMessage);
                 }
-                else
-                {
-                    this.context = OccurrenceEnum.all;
-                }
-            }*/
+            }
         }
     }
 
     @Override
     public ExecutionState execute(IConversationMemory memory, List<BehaviorRule> trace) {
-        List<Expression> inputExpressions;
+        IData<String> data;
+        switch (occurrence) {
+            case currentStep:
+                data = memory.getCurrentStep().getLatestData(KEY_EXPRESSIONS);
+                state = evaluateInputExpressions(data);
+                break;
+            case lastStep:
+                data = memory.getPreviousSteps().get(0).getLatestData(KEY_EXPRESSIONS);
+                state = evaluateInputExpressions(data);
+                break;
+            case anyStep:
+                state = occurredInAnyStep(memory) ? SUCCESS : FAIL;
+                break;
+            case never:
+                state = occurredInAnyStep(memory) ? FAIL : SUCCESS;
+                break;
 
-        IData data = memory.getCurrentStep().getLatestData("expressions");
-        inputExpressions = data != null && data.getResult() != null ?
-                expressionProvider.parseExpressions(data.getResult().toString()) : new LinkedList<>();
-        inputExpressions = filterExpressions(inputExpressions);
-
-        boolean isInputEmpty = expressions.size() == 1 &&
-                expressions.get(0).getExpressionName().equals("empty") &&
-                inputExpressions.size() == 0;
-
-
-        state = isInputEmpty ||
-                Collections.indexOfSubList(inputExpressions, expressions) > -1 ?
-                ExecutionState.SUCCESS : ExecutionState.FAIL;
+        }
 
         return state;
     }
 
-    private List<Expression> filterExpressions(List<Expression> expressions) {
-        for (int i = 0; i < expressions.size(); i++) {
-            Expression exp = expressions.get(i);
-            if ((ignoreUnusedExpressions && exp.getExpressionName().equals("unused")) ||
-                    (ignorePunctuationExpressions && exp.getExpressionName().equals("punctuation"))) {
-                expressions.remove(i);
-                i--;
-            }
+    private boolean occurredInAnyStep(IConversationMemory memory) {
+        List<IData<String>> allLatestData = memory.getAllSteps().getAllLatestData(KEY_EXPRESSIONS);
+        return allLatestData.stream().anyMatch(latestData -> evaluateInputExpressions(latestData) == SUCCESS);
+    }
+
+    private ExecutionState evaluateInputExpressions(IData<String> data) {
+        List<Expression> inputExpressions = Collections.emptyList();
+        if (data != null && data.getResult() != null) {
+            inputExpressions = expressionProvider.parseExpressions(data.getResult());
         }
 
-        return expressions;
+        inputExpressions = filterExpressions(inputExpressions);
+
+        if (isInputEmpty(inputExpressions) ||
+                Collections.indexOfSubList(inputExpressions, expressions) > -1) {
+            return SUCCESS;
+        } else {
+            return FAIL;
+        }
+    }
+
+    private boolean isInputEmpty(List<Expression> inputExpressions) {
+        return expressions.size() == 1 &&
+                expressions.get(0).getExpressionName().equals(KEY_EMPTY) &&
+                inputExpressions.size() == 0;
+    }
+
+    private List<Expression> filterExpressions(List<Expression> expressions) {
+        return expressions.stream().
+                filter(expression -> {
+                    String expressionName = expression.getExpressionName();
+                    return !(ignoreUnusedExpressions && expressionName.equals(KEY_UNUSED) ||
+                            ignorePunctuationExpressions && expressionName.equals(KEY_PUNCTUATION));
+                }).
+                collect(Collectors.toList());
     }
 
     @Override
