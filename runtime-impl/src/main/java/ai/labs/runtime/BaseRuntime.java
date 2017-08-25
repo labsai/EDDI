@@ -21,8 +21,6 @@ public class BaseRuntime implements SystemRuntime.IRuntime {
     private final String projectVersion;
     private final String CONFIG_DIR;
     private final String LOG_DIR = FileUtilities.buildPath(System.getProperty("user.dir"), "logs");
-    private final String RESOURCE_DIR = FileUtilities.buildPath(System.getProperty("user.dir"), "resources");
-    private final String WEB_DIR = FileUtilities.buildPath(System.getProperty("user.dir"), "web");
 
     private final ExecutorService executorService;
     private final String projectName;
@@ -90,16 +88,6 @@ public class BaseRuntime implements SystemRuntime.IRuntime {
         return LOG_DIR;
     }
 
-    @Override
-    public String getResourceDir() {
-        return RESOURCE_DIR;
-    }
-
-    @Override
-    public String getWebDir() {
-        return WEB_DIR;
-    }
-
     private static String lowerCaseFirstLetter(String value) {
         char chars[] = value.toCharArray();
         chars[0] = Character.toLowerCase(chars[0]);
@@ -130,26 +118,6 @@ public class BaseRuntime implements SystemRuntime.IRuntime {
                 log.error(t.getLocalizedMessage(), t);
                 callback.onFailure(t);
                 throw new Exception("Error while executing callable.", t);
-            } finally {
-                ThreadContext.remove();
-            }
-        });
-    }
-
-    @Override
-    public void submitRunable(final Runnable runnable, final IFinishedExecution<?> callback, final Map<Object, Object> threadBindings) {
-        getExecutorService().submit(() -> {
-            try {
-                if (threadBindings != null) {
-                    ThreadContext.setResources(threadBindings);
-                }
-
-                runnable.run();
-                callback.onComplete(null);
-            } catch (Throwable t) {
-                log.error(t.getLocalizedMessage(), t);
-                callback.onFailure(t);
-                throw new RuntimeException("Error while executing callable.", t);
             } finally {
                 ThreadContext.remove();
             }
