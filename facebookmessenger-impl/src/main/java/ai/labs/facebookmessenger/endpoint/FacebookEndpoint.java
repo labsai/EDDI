@@ -205,8 +205,10 @@ public class FacebookEndpoint implements IFacebookEndpoint {
             JsonNode rootNode = mapper.readValue(json, JsonNode.class);
             JsonNode conversationStepsArray = rootNode.path("conversationSteps");
             for (JsonNode conversationStep : conversationStepsArray) {
-                if (conversationStep.get("key") != null && conversationStep.get("key").asText().startsWith("output:text")) {
-                    output = conversationStep.get("value").asText();
+                for (JsonNode conversationStepValues : conversationStep.get("conversationStep")) {
+                    if (conversationStepValues.get("key") != null && conversationStepValues.get("key").asText().startsWith("output:text")) {
+                        output = conversationStepValues.get("value").asText();
+                    }
                 }
             }
         } catch (IOException e) {
