@@ -197,7 +197,7 @@ public class FacebookEndpoint implements IFacebookEndpoint {
 
     private String getOutputText(String json) {
 
-        String output = "I don't understand, please rephrase your question";
+        String output = null;
 
         ObjectMapper mapper = new ObjectMapper();
         try {
