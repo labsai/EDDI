@@ -171,6 +171,7 @@ public class FacebookEndpoint implements IFacebookEndpoint {
                     .setTimeout(10000, TimeUnit.MILLISECONDS)
                     .setBodyEntity(jsonRequestBody, ENCODING, MediaType.APPLICATION_JSON)
                     .send();
+            log.debug("response: {}", httpResponse.getContentAsString());
             final String output = getOutputText(httpResponse.getContentAsString());
 
             try {
