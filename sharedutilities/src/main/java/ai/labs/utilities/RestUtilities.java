@@ -87,7 +87,7 @@ public class RestUtilities {
         };
     }
 
-    public static boolean isValidId(String s) {
+    private static boolean isValidId(String s) {
         if (s == null || s.length() < 18) {
             return false;
         }
@@ -113,7 +113,7 @@ public class RestUtilities {
         return true;
     }
 
-    public static Map<String, String> getQueryMap(String query) {
+    private static Map<String, String> getQueryMap(String query) {
         String[] params = query.split("&");
         Map<String, String> map = new HashMap<>();
         for (String param : params) {
