@@ -44,9 +44,7 @@ import javax.ws.rs.core.MediaType;
 import javax.ws.rs.core.Response;
 import java.io.IOException;
 import java.net.URI;
-import java.util.Collection;
-import java.util.Date;
-import java.util.Map;
+import java.util.*;
 import java.util.concurrent.Callable;
 import java.util.concurrent.TimeUnit;
 
@@ -56,7 +54,7 @@ import static ai.labs.rest.restinterfaces.RestInterfaceFactory.RestInterfaceFact
 @Slf4j
 public class FacebookEndpoint implements IFacebookEndpoint {
     private static final String RESOURCE_URI_CHANNELCONNECTOR = "eddi://ai.labs.channel.facebook";
-    private static final String AI_LABS_USER_AGENT = "Jetty 9.3/HTTP CLIENT - AI.LABS.EDDI";
+    private static final String AI_LABS_USER_AGENT = "Jetty 9.4/HTTP CLIENT - AI.LABS.EDDI";
     private static final String ENCODING = "UTF-8";
     private static final long timeoutInMillis = 10000;
 
@@ -155,13 +153,12 @@ public class FacebookEndpoint implements IFacebookEndpoint {
                 apiServerURI, "/bots/",
                 environment, "/",
                 botId, "/",
-                conversationId,
-                "?returnDetails=true");
+                conversationId);
 
         try {
             messengerClientCache.get(botId).getSendClient().sendSenderAction(senderId, SenderAction.TYPING_ON);
         } catch (MessengerApiException | MessengerIOException e) {
-            log.error(e.getMessage(), e);
+            log.error(e.getLocalizedMessage(), e);
         }
 
         final String jsonRequestBody = "{ \"input\": \"" + message + "\", \"context\": {} }";
@@ -172,17 +169,16 @@ public class FacebookEndpoint implements IFacebookEndpoint {
                     .setBodyEntity(jsonRequestBody, ENCODING, MediaType.APPLICATION_JSON)
                     .send();
             log.debug("response: {}", httpResponse.getContentAsString());
-            final String output = getOutputText(httpResponse.getContentAsString());
+            final List<String> output = getOutputText(httpResponse.getContentAsString());
 
             try {
                 messengerClientCache.get(botId).getSendClient().sendSenderAction(senderId, SenderAction.TYPING_OFF);
             } catch (MessengerApiException | MessengerIOException e) {
-                log.error(e.getMessage(), e);
+                log.error(e.getLocalizedMessage(), e);
             }
-            if (output != null) {
+            for (String outputText : output) {
                 messengerClientCache.get(botId).getSendClient().
-                        sendTextMessage(senderId, output);
-
+                        sendTextMessage(senderId, outputText);
             }
 
             final String state = getConversationState(httpResponse.getContentAsString());
@@ -196,9 +192,9 @@ public class FacebookEndpoint implements IFacebookEndpoint {
 
     }
 
-    private String getOutputText(String json) {
+    private List<String> getOutputText(String json) {
 
-        String output = null;
+        List<String> output = new ArrayList<>();
 
         ObjectMapper mapper = new ObjectMapper();
         try {
@@ -207,7 +203,7 @@ public class FacebookEndpoint implements IFacebookEndpoint {
             for (JsonNode conversationStep : conversationStepsArray) {
                 for (JsonNode conversationStepValues : conversationStep.get("conversationStep")) {
                     if (conversationStepValues.get("key") != null && conversationStepValues.get("key").asText().startsWith("output:text")) {
-                        output = conversationStepValues.get("value").asText();
+                        output.add(conversationStepValues.get("value").asText());
                     }
                 }
             }
