@@ -35,10 +35,15 @@ public class ServerRuntimeModule extends AbstractBaseModule {
                                                @Named("webServer.applicationConfigurationClass") String applicationConfigurationClass,
                                                @Named("webServer.host") String host,
                                                @Named("webServer.httpPort") Integer httpPort,
+                                               @Named("webServer.httpsPort") Integer httpsPort,
+                                               @Named("webServer.keyStorePassword") String keyStorePassword,
+                                               @Named("webServer.keyStorePath") String keyStorePath,
                                                @Named("webServer.defaultPath") String defaultPath,
                                                @Named("webServer.responseDelayInMillis") Long responseDelayInMillis,
                                                @Named("webServer.virtualHosts") String virtualHosts,
                                                @Named("webServer.useCrossSiteScriptingHeaderParam") Boolean useCrossSiteScriptingHeaderParam,
+                                               @Named("webServer.idleTime") Long idleTime,
+                                               @Named("webServer.outputBufferSize") Integer outputBufferSize,
                                                GuiceResteasyBootstrapServletContextListener contextListener,
                                                SwaggerServletContextListener swaggerContextListener,
                                                HttpServletDispatcher httpServletDispatcher,
@@ -49,10 +54,15 @@ public class ServerRuntimeModule extends AbstractBaseModule {
         options.loginService = mongoLoginService;
         options.host = host;
         options.httpPort = httpPort;
+        options.httpsPort = httpsPort;
+        options.keyStorePassword = keyStorePassword;
+        options.keyStorePath = keyStorePath;
         options.defaultPath = defaultPath;
         options.responseDelayInMillis = responseDelayInMillis;
         options.virtualHosts = virtualHosts.split(";");
         options.useCrossSiteScripting = useCrossSiteScriptingHeaderParam;
+        options.idleTime = idleTime;
+        options.outputBufferSize = outputBufferSize;
 
         return new ServerRuntime(options, contextListener, swaggerContextListener, httpServletDispatcher,
                 null, environment, resourceDir);

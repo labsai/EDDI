@@ -24,4 +24,4 @@ fi
 
 echo "memory params: ${memory_string}"
 
-java -server -XX:+UseG1GC ${memory_string} -classpath '.:lib/*' -DEDDI_ENV=$EDDI_ENV ${argument_string} ai.labs.api.ApiServer
+java -server -XX:+UseG1GC ${memory_string} -Xbootclasspath/p:'.:lib/alpn-boot-8.1.11.v20170118.jar' -classpath '.:lib/*' -DEDDI_ENV=$EDDI_ENV ${argument_string} ai.labs.api.ApiServer

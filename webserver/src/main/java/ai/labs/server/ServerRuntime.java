@@ -6,6 +6,9 @@ import ai.labs.runtime.ThreadContext;
 import ai.labs.utilities.FileUtilities;
 import lombok.AllArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.eclipse.jetty.alpn.server.ALPNServerConnectionFactory;
+import org.eclipse.jetty.http2.HTTP2Cipher;
+import org.eclipse.jetty.http2.server.HTTP2ServerConnectionFactory;
 import org.eclipse.jetty.security.LoginService;
 import org.eclipse.jetty.security.SecurityHandler;
 import org.eclipse.jetty.server.*;
@@ -15,6 +18,7 @@ import org.eclipse.jetty.servlet.ServletContextHandler;
 import org.eclipse.jetty.servlet.ServletHolder;
 import org.eclipse.jetty.util.log.Log;
 import org.eclipse.jetty.util.log.Slf4jLog;
+import org.eclipse.jetty.util.ssl.SslContextFactory;
 import org.eclipse.jetty.util.thread.ExecutorThreadPool;
 import org.eclipse.jetty.util.thread.ThreadPool;
 import org.jboss.resteasy.jsapi.JSAPIServlet;
@@ -47,10 +51,15 @@ public class ServerRuntime implements IServerRuntime {
         public LoginService loginService;
         public String host;
         public int httpPort;
+        public int httpsPort;
+        public String keyStorePath;
+        public String keyStorePassword;
         public String defaultPath;
         public String[] virtualHosts;
         public boolean useCrossSiteScripting;
         public long responseDelayInMillis;
+        public long idleTime;
+        public int outputBufferSize;
     }
 
     private static final String ANY_PATH = "/*";
@@ -114,19 +123,39 @@ public class ServerRuntime implements IServerRuntime {
                               final IStartupCompleteListener completeListener) throws Exception {
 
         Log.setLog(new Slf4jLog());
+
+        HttpConfiguration config = new HttpConfiguration();
+        config.addCustomizer(new SecureRequestCustomizer());
+        config.setSendServerVersion(false);
+        config.setOutputBufferSize(options.outputBufferSize);
+
+        HttpConnectionFactory http1 = new HttpConnectionFactory(config);
+        HTTP2ServerConnectionFactory http2 = new HTTP2ServerConnectionFactory(config);
+
+        NegotiatingServerConnectionFactory.checkProtocolNegotiationAvailable();
+        ALPNServerConnectionFactory alpn = new ALPNServerConnectionFactory();
+        alpn.setDefaultProtocol(http1.getProtocol()); // sets default protocol to HTTP 1.1
+
+        // SSL Connection Factory
+        SslContextFactory sslContextFactory = new SslContextFactory();
+        sslContextFactory.setKeyStorePath(options.keyStorePath);
+        sslContextFactory.setKeyStorePassword(options.keyStorePassword);
+        sslContextFactory.setCipherComparator(HTTP2Cipher.COMPARATOR);
+        sslContextFactory.setUseCipherSuitesOrder(true);
+        SslConnectionFactory ssl = new SslConnectionFactory(sslContextFactory, alpn.getProtocol());
+
         Server server = new Server(createThreadPool());
 
-        HttpConfiguration httpConfig = new HttpConfiguration();
-        httpConfig.setSendServerVersion(false);
-        httpConfig.setOutputBufferSize(32768);
 
-        ServerConnector httpConnector = new ServerConnector(server, new HttpConnectionFactory(httpConfig));
+        ServerConnector httpsConnector = new ServerConnector(server, ssl, alpn, http2, http1);
+        httpsConnector.setPort(options.httpsPort);
+        httpsConnector.setIdleTimeout(options.idleTime);
+
+        ServerConnector httpConnector = new ServerConnector(server, new HttpConnectionFactory(config));
         httpConnector.setPort(options.httpPort);
-        httpConnector.setIdleTimeout(30000);
+        httpConnector.setIdleTimeout(options.idleTime);
 
-
-        server.setConnectors(new Connector[]{httpConnector});
-
+        server.setConnectors(new Connector[]{httpsConnector, httpConnector});
 
         // Set a handler
         final HandlerList handlers = new HandlerList();
@@ -149,18 +178,15 @@ public class ServerRuntime implements IServerRuntime {
         //set event listeners
         eventListeners.forEach(servletHandler::addEventListener);
 
+        filters.forEach(filter -> servletHandler.addFilter(
+                new FilterHolder(filter.filter), filter.mappingPath, getAllDispatcherTypes()));
 
-        for (FilterMappingHolder filter : filters) {
-            servletHandler.addFilter(new FilterHolder(filter.filter), filter.mappingPath, getAllDispatcherTypes());
-
-        }
-
-        for (HttpServletHolder httpServletHolder : servlets) {
+        servlets.forEach(httpServletHolder -> {
             Servlet servlet = httpServletHolder.getServlet();
             ServletHolder servletHolder = new ServletHolder(servlet);
             servletHolder.setInitParameters(httpServletHolder.getInitParameter());
             servletHandler.addServlet(servletHolder, httpServletHolder.getPath());
-        }
+        });
 
         servletHandler.addFilter(new FilterHolder(createRedirectFilter(options.defaultPath)), ANY_PATH, getAllDispatcherTypes());
 
