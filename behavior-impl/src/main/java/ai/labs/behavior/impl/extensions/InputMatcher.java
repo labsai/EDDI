@@ -8,6 +8,7 @@ import ai.labs.memory.IData;
 import ai.labs.utilities.StringUtilities;
 import lombok.Getter;
 import lombok.Setter;
+import lombok.extern.slf4j.Slf4j;
 
 import javax.inject.Inject;
 import java.util.*;
@@ -18,6 +19,7 @@ import static ai.labs.behavior.impl.extensions.InputMatcher.ConversationStepOccu
 /**
  * @author ginccc
  */
+@Slf4j
 public class InputMatcher implements IBehaviorExtension {
     private static final String ID = "inputmatcher";
     private static final String KEY_EXPRESSIONS = "expressions";
@@ -88,10 +90,11 @@ public class InputMatcher implements IBehaviorExtension {
                         break;
                     default:
                         String errorMessage = "InputMatcher config param: " + conversationOccurrenceQualifier +
-                                ". Needs to have one of the following values: %s, actual value: %s";
+                                ". Needs to have one of the following values: %s, actual value: '%s'.\n" +
+                                "'currentStep' has been set as default now.";
                         errorMessage = String.format(errorMessage,
                                 Arrays.toString(ConversationStepOccurrence.values()), conversationOccurrence);
-                        throw new IllegalArgumentException(errorMessage);
+                        log.error(errorMessage, new IllegalArgumentException(errorMessage));
                 }
             }
         }
