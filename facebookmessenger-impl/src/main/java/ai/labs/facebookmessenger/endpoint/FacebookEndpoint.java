@@ -4,6 +4,7 @@ import ai.labs.caching.ICache;
 import ai.labs.caching.ICacheFactory;
 import ai.labs.httpclient.IHttpClient;
 import ai.labs.httpclient.IRequest;
+import ai.labs.httpclient.IResponse;
 import ai.labs.memory.model.Deployment;
 import ai.labs.memory.model.SimpleConversationMemorySnapshot;
 import ai.labs.resources.rest.bots.IBotStore;
@@ -14,6 +15,8 @@ import ai.labs.runtime.SystemRuntime;
 import ai.labs.serialization.IJsonSerialization;
 import ai.labs.utilities.RestUtilities;
 import ai.labs.utilities.URIUtilities;
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.github.messenger4j.MessengerPlatform;
 import com.github.messenger4j.exceptions.MessengerApiException;
 import com.github.messenger4j.exceptions.MessengerIOException;
@@ -21,30 +24,41 @@ import com.github.messenger4j.exceptions.MessengerVerificationException;
 import com.github.messenger4j.receive.MessengerReceiveClient;
 import com.github.messenger4j.receive.handlers.TextMessageEventHandler;
 import com.github.messenger4j.send.MessengerSendClient;
+import com.github.messenger4j.send.NotificationType;
+import com.github.messenger4j.send.SenderAction;
 import lombok.AllArgsConstructor;
 import lombok.Getter;
 import lombok.Setter;
 import lombok.extern.slf4j.Slf4j;
+import org.apache.http.impl.client.DefaultHttpClient;
+import org.apache.http.util.EntityUtils;
 import org.jboss.resteasy.plugins.guice.RequestScoped;
 
 import javax.inject.Inject;
 import javax.inject.Named;
 import javax.ws.rs.InternalServerErrorException;
 import javax.ws.rs.WebApplicationException;
+import javax.ws.rs.container.AsyncResponse;
+import javax.ws.rs.container.TimeoutHandler;
 import javax.ws.rs.core.MediaType;
 import javax.ws.rs.core.Response;
 import java.io.IOException;
-import java.util.Map;
+import java.net.URI;
+import java.util.*;
 import java.util.concurrent.Callable;
+import java.util.concurrent.TimeUnit;
 
-import static ai.labs.memory.model.SimpleConversationMemorySnapshot.SimpleConversationStep;
-import static ai.labs.memory.model.SimpleConversationMemorySnapshot.ConversationStepData;
 import static ai.labs.rest.restinterfaces.RestInterfaceFactory.RestInterfaceFactoryException;
 
 @RequestScoped
 @Slf4j
 public class FacebookEndpoint implements IFacebookEndpoint {
     private static final String RESOURCE_URI_CHANNELCONNECTOR = "eddi://ai.labs.channel.facebook";
+    private static final String AI_LABS_USER_AGENT = "Jetty 9.4/HTTP CLIENT - AI.LABS.EDDI";
+    private static final String ENCODING = "UTF-8";
+    private static final long timeoutInMillis = 10000;
+
+
     private final IBotStore botStore;
     private final IHttpClient httpClient;
     private final IJsonSerialization jsonSerialization;
@@ -121,7 +135,6 @@ public class FacebookEndpoint implements IFacebookEndpoint {
                 String message = event.getText();
                 String senderId = event.getSender().getId();
                 final String conversationId = getConversationId(environment, botId, senderId);
-
                 say(environment, botId, conversationId, senderId, message);
 
             } catch (RestInterfaceFactoryException | IRequest.HttpRequestException e) {
@@ -136,61 +149,89 @@ public class FacebookEndpoint implements IFacebookEndpoint {
                      String senderId,
                      String message) throws IRequest.HttpRequestException {
 
-        httpClient.newRequest(
-                RestUtilities.createURI(
-                        apiServerURI, "/",
-                        environment, "/",
-                        botId, "/",
-                        conversationId)).
-                setBodyEntity(message, "utf-8", MediaType.TEXT_PLAIN).
-                send(response -> {
-                    try {
-                        switch (response.getHttpCode()) {
-                            case 410: //gone
-                            case 404: //not there
-                                createConversation(environment, botId, senderId);
-                                say(environment, botId, conversationId, senderId, message);
-                                break;
-                            case 200:
-                                String responseJson = response.getContentAsString();
-                                SimpleConversationMemorySnapshot memorySnapshot = jsonSerialization
-                                        .deserialize(responseJson, SimpleConversationMemorySnapshot.class);
+        URI uri = RestUtilities.createURI(
+                apiServerURI, "/bots/",
+                environment, "/",
+                botId, "/",
+                conversationId);
 
-                                String output = extractOutput(memorySnapshot);
-                                if (output != null) {
-                                    messengerClientCache.get(botId).getSendClient().
-                                            sendTextMessage(senderId, output);
-                                }
-
-                                //todo send message to facebook based on content-type
-                                //images
-                                //audio
-                                //quick-replies
-                                break;
-                        }
-                    } catch (RestInterfaceFactoryException |
-                            IRequest.HttpRequestException |
-                            MessengerApiException |
-                            MessengerIOException |
-                            IOException e) {
-                        log.error(String.format("HttpCode: %s , Message: %s" +
-                                response.getHttpCode(), response.getHttpCodeMessage()));
-                        log.error(e.getLocalizedMessage(), e);
-                    }
-                });
-    }
-
-    private String extractOutput(SimpleConversationMemorySnapshot memorySnapshot) {
-        for (SimpleConversationStep conversationStep : memorySnapshot.getConversationSteps()) {
-            for (ConversationStepData conversationStepData : conversationStep.getConversationStep()) {
-                if (conversationStepData.getKey().startsWith("output:final")) {
-                    return conversationStepData.getValue().toString();
-                }
-            }
+        try {
+            messengerClientCache.get(botId).getSendClient().sendSenderAction(senderId, SenderAction.TYPING_ON);
+        } catch (MessengerApiException | MessengerIOException e) {
+            log.error(e.getLocalizedMessage(), e);
         }
 
-        return null;
+        final String jsonRequestBody = "{ \"input\": \"" + message + "\", \"context\": {} }";
+        try {
+            IResponse httpResponse = httpClient.newRequest(uri, IHttpClient.Method.POST)
+                    .setUserAgent(AI_LABS_USER_AGENT)
+                    .setTimeout(10000, TimeUnit.MILLISECONDS)
+                    .setBodyEntity(jsonRequestBody, ENCODING, MediaType.APPLICATION_JSON)
+                    .send();
+            log.debug("response: {}", httpResponse.getContentAsString());
+            final List<String> output = getOutputText(httpResponse.getContentAsString());
+
+            try {
+                messengerClientCache.get(botId).getSendClient().sendSenderAction(senderId, SenderAction.TYPING_OFF);
+            } catch (MessengerApiException | MessengerIOException e) {
+                log.error(e.getLocalizedMessage(), e);
+            }
+            for (String outputText : output) {
+                messengerClientCache.get(botId).getSendClient().
+                        sendTextMessage(senderId, outputText);
+            }
+
+            final String state = getConversationState(httpResponse.getContentAsString());
+            if (state != null && !state.equals("READY")) {
+                conversationIdCache.remove(senderId);
+            }
+        } catch (MessengerIOException | MessengerApiException e) {
+            log.error(e.getLocalizedMessage(), e);
+        }
+
+
     }
+
+    private List<String> getOutputText(String json) {
+
+        List<String> output = new ArrayList<>();
+
+        ObjectMapper mapper = new ObjectMapper();
+        try {
+            JsonNode rootNode = mapper.readValue(json, JsonNode.class);
+            JsonNode conversationStepsArray = rootNode.path("conversationSteps");
+            for (JsonNode conversationStep : conversationStepsArray) {
+                for (JsonNode conversationStepValues : conversationStep.get("conversationStep")) {
+                    if (conversationStepValues.get("key") != null && conversationStepValues.get("key").asText().startsWith("output:text")) {
+                        output.add(conversationStepValues.get("value").asText());
+                    }
+                }
+            }
+        } catch (IOException e) {
+            log.error("json parsing error", e);
+        }
+
+        return output;
+    }
+
+    private String getConversationState(String json) {
+
+        String state = null;
+
+        ObjectMapper mapper = new ObjectMapper();
+        try {
+            JsonNode rootNode = mapper.readValue(json, JsonNode.class);
+            JsonNode conversationState = rootNode.path("conversationState");
+            if (conversationState != null) {
+                state = conversationState.asText();
+            }
+        } catch (IOException e) {
+            log.error("json parsing error", e);
+        }
+
+        return state;
+    }
+
 
     private String getConversationId(Deployment.Environment environment, String botId, String senderId)
             throws RestInterfaceFactoryException {
@@ -210,12 +251,15 @@ public class FacebookEndpoint implements IFacebookEndpoint {
         try {
             Response response = restInterfaceFactory.get(IRestBotEngine.class, apiServerURI).
                     startConversation(environment, botId);
-            URIUtilities.ResourceId resourceIdConversation =
-                    URIUtilities.extractResourceId(response.getLocation());
-            conversationId = resourceIdConversation.getId();
-            conversationIdCache.put(senderId, conversationId);
-            return conversationId;
-
+            if (response.getStatus() == 201) {
+                URIUtilities.ResourceId resourceIdConversation =
+                        URIUtilities.extractResourceId(response.getLocation());
+                conversationId = resourceIdConversation.getId();
+                conversationIdCache.put(senderId, conversationId);
+                return conversationId;
+            }
+            Exception e = new Exception("bot (id:" + botId + ") is not deployed");
+            throw new RestInterfaceFactoryException(e.getLocalizedMessage(), e);
         } catch (RestInterfaceFactoryException e) {
             log.error(e.getLocalizedMessage(), e);
             throw e;
@@ -226,6 +270,7 @@ public class FacebookEndpoint implements IFacebookEndpoint {
     public Response webHook(final String botId, final String callbackPayload, final String sha1PayloadSignature) {
         SystemRuntime.getRuntime().submitCallable((Callable<Void>) () -> {
             try {
+                log.info("webhook called");
                 getMessageClient(botId).getReceiveClient().
                         processCallbackPayload(callbackPayload, sha1PayloadSignature);
             } catch (MessengerVerificationException e) {
@@ -242,6 +287,7 @@ public class FacebookEndpoint implements IFacebookEndpoint {
     public Response webHookSetup(final String botId, final String mode,
                                  final String verificationToken, final String challenge) {
         try {
+            log.info("webhook setup called");
             return Response.ok(getMessageClient(botId).getReceiveClient().
                     verifyWebhook(mode, verificationToken, challenge)).build();
         } catch (MessengerVerificationException e) {
