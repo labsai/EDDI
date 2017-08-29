@@ -111,24 +111,6 @@ public class InputMatcherTest {
     }
 
     @Test
-    public void setValues_invalidOccurrenceValue() throws Exception {
-        //setup
-        Map<String, String> values = new HashMap<>();
-        values.put(KEY_OCCURRENCE, "someInvalidOccurrenceValue");
-
-        //test
-        try {
-            inputMatcher.setValues(values);
-            Assert.fail();
-        } catch (IllegalArgumentException e) {
-            Assert.assertEquals("InputMatcher config param: occurrence. " +
-                            "Needs to have one of the following values: [currentStep, lastStep, anyStep, never], " +
-                            "actual value: someInvalidOccurrenceValue",
-                    e.getLocalizedMessage());
-        }
-    }
-
-    @Test
     public void execute_occurrence_currentStep() throws Exception {
         //setup
         Map<String, String> values = new HashMap<>();
