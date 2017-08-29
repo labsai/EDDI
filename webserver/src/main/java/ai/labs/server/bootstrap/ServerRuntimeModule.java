@@ -5,6 +5,7 @@ import ai.labs.runtime.bootstrap.AbstractBaseModule;
 import ai.labs.server.IServerRuntime;
 import ai.labs.server.MongoLoginService;
 import ai.labs.server.ServerRuntime;
+import ai.labs.utilities.StringUtilities;
 import com.google.inject.Provides;
 import org.eclipse.jetty.security.LoginService;
 import org.jboss.resteasy.plugins.guice.GuiceResteasyBootstrapServletContextListener;
@@ -12,6 +13,7 @@ import org.jboss.resteasy.plugins.server.servlet.HttpServletDispatcher;
 
 import javax.inject.Named;
 import javax.inject.Singleton;
+import java.io.File;
 import java.io.InputStream;
 
 /**
@@ -56,7 +58,9 @@ public class ServerRuntimeModule extends AbstractBaseModule {
         options.httpPort = httpPort;
         options.httpsPort = httpsPort;
         options.keyStorePassword = keyStorePassword;
-        options.keyStorePath = keyStorePath;
+        options.keyStorePath = StringUtilities.joinStrings(File.separator,
+                System.getProperty("user.dir"), "resources",
+                keyStorePath);
         options.defaultPath = defaultPath;
         options.responseDelayInMillis = responseDelayInMillis;
         options.virtualHosts = virtualHosts.split(";");

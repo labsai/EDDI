@@ -126,26 +126,29 @@ public class ServerRuntime implements IServerRuntime {
 
         HttpConfiguration config = new HttpConfiguration();
         config.addCustomizer(new SecureRequestCustomizer());
+        config.setSecurePort(options.httpsPort);
+        config.setSecureScheme("https");
         config.setSendServerVersion(false);
         config.setOutputBufferSize(options.outputBufferSize);
 
-        HttpConnectionFactory http1 = new HttpConnectionFactory(config);
         HTTP2ServerConnectionFactory http2 = new HTTP2ServerConnectionFactory(config);
 
         NegotiatingServerConnectionFactory.checkProtocolNegotiationAvailable();
         ALPNServerConnectionFactory alpn = new ALPNServerConnectionFactory();
-        alpn.setDefaultProtocol(http1.getProtocol()); // sets default protocol to HTTP 1.1
+        alpn.setDefaultProtocol("h2");
 
         // SSL Connection Factory
         SslContextFactory sslContextFactory = new SslContextFactory();
         sslContextFactory.setKeyStorePath(options.keyStorePath);
         sslContextFactory.setKeyStorePassword(options.keyStorePassword);
+        sslContextFactory.setKeyManagerPassword(options.keyStorePassword);
         sslContextFactory.setCipherComparator(HTTP2Cipher.COMPARATOR);
         sslContextFactory.setUseCipherSuitesOrder(true);
         SslConnectionFactory ssl = new SslConnectionFactory(sslContextFactory, alpn.getProtocol());
 
-        Server server = new Server(createThreadPool());
+        HttpConnectionFactory http1 = new HttpConnectionFactory(config);
 
+        Server server = new Server(createThreadPool());
 
         ServerConnector httpsConnector = new ServerConnector(server, ssl, alpn, http2, http1);
         httpsConnector.setPort(options.httpsPort);
@@ -170,10 +173,10 @@ public class ServerRuntime implements IServerRuntime {
         handlers.addHandler(servletHandler);
 
         //set context params
-        for (String contextKey : contextParameters.keySet()) {
+        contextParameters.keySet().forEach(contextKey -> {
             final String contextValue = contextParameters.get(contextKey);
             servletHandler.setInitParameter(contextKey, contextValue);
-        }
+        });
 
         //set event listeners
         eventListeners.forEach(servletHandler::addEventListener);
