@@ -9,7 +9,6 @@ import ai.labs.parser.model.FoundPhrase;
 import ai.labs.parser.model.FoundUnknown;
 import ai.labs.parser.model.IDictionary;
 import ai.labs.parser.model.Unknown;
-import lombok.extern.slf4j.Slf4j;
 
 import java.util.*;
 import java.util.stream.Collectors;
@@ -17,7 +16,6 @@ import java.util.stream.Collectors;
 /**
  * @author ginccc
  */
-@Slf4j
 public class InputParser implements IInputParser {
     private List<IDictionary> dictionaries;
     private List<ICorrection> corrections;
@@ -61,26 +59,6 @@ public class InputParser implements IInputParser {
         return lookupPhrases(holder, preparePhrases(temporaryDictionaries));
     }
 
-    private void iterateCorrections(InputHolder holder, String currentInputPart) throws InterruptedException {
-        for (ICorrection correction : corrections) {
-            throwExceptionIfInterrupted("corrections");
-            if (!correction.lookupIfKnown() && holder.getMatchingResultSize(holder.index) != 0) {
-                //skipped correction because input part is already known.
-                continue;
-            }
-
-                List<IDictionary.IFoundWord> correctedWords = correction.correctWord(currentInputPart);
-                if (correctedWords.size() > 0) {
-                    addDictionaryEntriesTo(holder, currentInputPart, correctedWords);
-                }
-            }
-
-            if (holder.getMatchingResultSize(holder.index) == 0) {
-                FoundUnknown foundUnknown = new FoundUnknown(new Unknown(currentInputPart));
-                addDictionaryEntriesTo(holder, currentInputPart, Collections.singletonList(foundUnknown));
-            }
-        }
-
     private void iterateDictionaries(InputHolder holder, String currentInputPart, List<IDictionary> dictionaries)
             throws InterruptedException {
         for (IDictionary dictionary : dictionaries) {
@@ -92,6 +70,26 @@ public class InputParser implements IInputParser {
                 //add dictionary entries to final result list
                 addDictionaryEntriesTo(holder, currentInputPart, dictionaryEntries);
             }
+        }
+    }
+
+    private void iterateCorrections(InputHolder holder, String currentInputPart) throws InterruptedException {
+        for (ICorrection correction : corrections) {
+            throwExceptionIfInterrupted("corrections");
+            if (!correction.lookupIfKnown() && holder.getMatchingResultSize(holder.index) != 0) {
+                //skipped correction because input part is already known.
+                continue;
+            }
+
+            List<IDictionary.IFoundWord> correctedWords = correction.correctWord(currentInputPart);
+            if (correctedWords.size() > 0) {
+                addDictionaryEntriesTo(holder, currentInputPart, correctedWords);
+            }
+        }
+
+        if (holder.getMatchingResultSize(holder.index) == 0) {
+            FoundUnknown foundUnknown = new FoundUnknown(new Unknown(currentInputPart));
+            addDictionaryEntriesTo(holder, currentInputPart, Collections.singletonList(foundUnknown));
         }
     }
 
@@ -212,13 +210,7 @@ public class InputParser implements IInputParser {
     }
 
     private boolean anyWordsLeft(List<IDictionary.IFoundWord> foundWords) {
-        for (IDictionary.IFoundWord foundWord : foundWords) {
-            if (foundWord.getFoundWord().isPartOfPhrase()) {
-                return true;
-            }
-        }
-
-        return false;
+        return foundWords.stream().anyMatch(foundWord -> foundWord.getFoundWord().isPartOfPhrase());
     }
 
     /**
@@ -227,7 +219,8 @@ public class InputParser implements IInputParser {
      * @return the list of IDictionaryEntry which does NOT FULLY match the phrase, will be returned for further lookup.
      * In case a phrase has been found, it will be substituted with the range of matching foundWords
      */
-    private List<IDictionary.IFoundWord> lookForMatch(List<IDictionary.IFoundWord> foundWords, IDictionary.IPhrase phrase) {
+    private List<IDictionary.IFoundWord> lookForMatch(List<IDictionary.IFoundWord> foundWords,
+                                                      IDictionary.IPhrase phrase) {
         List<IDictionary.IWord> words = convert(foundWords);
         int startOfMatch = Collections.indexOfSubList(words, phrase.getWords());
         if (startOfMatch > -1) {
