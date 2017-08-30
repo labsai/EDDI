@@ -52,6 +52,8 @@ public interface IConversationMemory extends Serializable {
         IConversationStep get(int index);
 
         IConversationStep peek();
+
+        <T> List<IData<T>> getAllLatestData(String prefix);
     }
 
     interface IConversationStep extends Serializable {
