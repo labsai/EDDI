@@ -16,15 +16,17 @@ public class LifecycleManager implements ILifecycleManager {
     public void executeLifecycle(final IConversationMemory conversationMemory) throws LifecycleException {
         RuntimeUtilities.checkNotNull(conversationMemory, "conversationMemory");
 
-        try {
-            for (ILifecycleTask task : lifecycleTasks) {
-                if (Thread.currentThread().isInterrupted()) {
-                    throw new LifecycleException.LifecycleInterruptedException("Execution was interrupted!");
-                }
-                task.executeTask(conversationMemory);
+
+        for (ILifecycleTask task : lifecycleTasks) {
+            if (Thread.currentThread().isInterrupted()) {
+                throw new LifecycleException.LifecycleInterruptedException("Execution was interrupted!");
             }
-        } catch (LifecycleException e) {
-            throw new LifecycleException("Error while executing lifecycle!", e);
+
+            try {
+                task.executeTask(conversationMemory);
+            } catch (LifecycleException e) {
+                throw new LifecycleException("Error while executing lifecycle!", e);
+            }
         }
     }
 

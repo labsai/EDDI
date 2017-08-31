@@ -117,7 +117,7 @@ public class BaseRuntime implements SystemRuntime.IRuntime {
             } catch (Throwable t) {
                 log.error(t.getLocalizedMessage(), t);
                 callback.onFailure(t);
-                throw new Exception("Error while executing callable.", t);
+                return null;
             } finally {
                 ThreadContext.remove();
             }

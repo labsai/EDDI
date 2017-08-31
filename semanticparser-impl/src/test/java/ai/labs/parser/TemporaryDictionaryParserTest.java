@@ -34,7 +34,7 @@ public class TemporaryDictionaryParserTest {
     }
 
     @Test
-    public void testRecognitionOfTemporaryDictionaryWord() {
+    public void testRecognitionOfTemporaryDictionaryWord() throws InterruptedException {
         //setup
         TestDictionary temporaryTestDictionary = new TestDictionary();
         temporaryTestDictionary.addWord(new Word("tmp1", expressionProvider.parseExpressions("tmpExp1"), "tmpExp1", 0, false));
@@ -51,7 +51,7 @@ public class TemporaryDictionaryParserTest {
     }
 
     @Test
-    public void testRecognitionOfTemporaryDictionaryPhrase() {
+    public void testRecognitionOfTemporaryDictionaryPhrase() throws InterruptedException {
         //setup
         TestDictionary temporaryTestDictionary = new TestDictionary();
         temporaryTestDictionary.addPhrase(new Phrase("test tmp phrase", expressionProvider.parseExpressions
@@ -68,7 +68,7 @@ public class TemporaryDictionaryParserTest {
     }
 
     @Test
-    public void testPreferTmpDictionaryWordOverPredefinedDictionaryWords() {
+    public void testPreferTmpDictionaryWordOverPredefinedDictionaryWords() throws InterruptedException {
         //setup
         TestDictionary temporaryTestDictionary = new TestDictionary();
         temporaryTestDictionary.addWord(new Word("test1", expressionProvider.parseExpressions("tmpExp1"), "tmpExp1",
