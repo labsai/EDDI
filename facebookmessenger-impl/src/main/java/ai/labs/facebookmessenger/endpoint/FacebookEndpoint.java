@@ -22,6 +22,7 @@ import com.github.messenger4j.exceptions.MessengerApiException;
 import com.github.messenger4j.exceptions.MessengerIOException;
 import com.github.messenger4j.exceptions.MessengerVerificationException;
 import com.github.messenger4j.receive.MessengerReceiveClient;
+import com.github.messenger4j.receive.handlers.QuickReplyMessageEventHandler;
 import com.github.messenger4j.receive.handlers.TextMessageEventHandler;
 import com.github.messenger4j.send.MessengerSendClient;
 import com.github.messenger4j.send.NotificationType;
@@ -127,6 +128,7 @@ public class FacebookEndpoint implements IFacebookEndpoint {
         return new MessengerClient(MessengerPlatform.newSendClientBuilder(pageAccessToken).build(),
                 MessengerPlatform.newReceiveClientBuilder(appSecret, verificationToken)
                         .onTextMessageEvent(getTextMessageEventHandler(botId, Deployment.Environment.unrestricted))
+                        .onQuickReplyMessageEvent(getQuickMessageEventHandler(botId, Deployment.Environment.unrestricted))
                         .build());
     }
 
@@ -143,6 +145,21 @@ public class FacebookEndpoint implements IFacebookEndpoint {
             }
         };
     }
+
+    private QuickReplyMessageEventHandler getQuickMessageEventHandler(String botId, Deployment.Environment environment) {
+        return event -> {
+            try {
+                String message = event.getQuickReply().getPayload();
+                String senderId = event.getSender().getId();
+                final String conversationId = getConversationId(environment, botId, senderId);
+                say(environment, botId, conversationId, senderId, message);
+
+            } catch (RestInterfaceFactoryException | IRequest.HttpRequestException e) {
+                log.error(e.getLocalizedMessage(), e);
+            }
+        };
+    }
+
 
     private void say(Deployment.Environment environment,
                      String botId,
