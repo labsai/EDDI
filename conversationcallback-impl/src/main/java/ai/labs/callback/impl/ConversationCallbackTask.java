@@ -66,6 +66,13 @@ public class ConversationCallbackTask implements ILifecycleTask {
                     conversationCallback.doExternalCall(callback, request, timeoutInMillis);
 
             if (String.valueOf(response.getHttpCode()).startsWith("2")) { //check for success, http code 2xx
+                for (ConversationMemorySnapshot.ConversationStepSnapshot snapshot : response.getConversationMemorySnapshot().getConversationSteps()) {
+                    for (ConversationMemorySnapshot.PackageRunSnapshot runSnapshot : snapshot.getPackages()) {
+                        for (ConversationMemorySnapshot.ResultSnapshot resultSnapshot : runSnapshot.getLifecycleTasks()) {
+                            log.info("key: " + resultSnapshot.getKey() + " value: " + resultSnapshot.getResult().toString());
+                        }
+                    }
+                }
                 mergeConversationMemory(memory, response.getConversationMemorySnapshot());
             } else {
                 String msg = "ConversationCallback was (%s) but should have been 2xx. Return value as been ignored";
