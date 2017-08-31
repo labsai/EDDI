@@ -25,6 +25,7 @@ import com.github.messenger4j.receive.MessengerReceiveClient;
 import com.github.messenger4j.receive.handlers.TextMessageEventHandler;
 import com.github.messenger4j.send.MessengerSendClient;
 import com.github.messenger4j.send.NotificationType;
+import com.github.messenger4j.send.QuickReply;
 import com.github.messenger4j.send.SenderAction;
 import lombok.AllArgsConstructor;
 import lombok.Getter;
@@ -170,16 +171,28 @@ public class FacebookEndpoint implements IFacebookEndpoint {
                     .send();
             log.debug("response: {}", httpResponse.getContentAsString());
             final List<String> output = getOutputText(httpResponse.getContentAsString());
+            final List<String> quickReplies = getQuickReplies(httpResponse.getContentAsString());
 
             try {
                 messengerClientCache.get(botId).getSendClient().sendSenderAction(senderId, SenderAction.TYPING_OFF);
             } catch (MessengerApiException | MessengerIOException e) {
                 log.error(e.getLocalizedMessage(), e);
             }
+
+            List<QuickReply> fbQuickReplies = new ArrayList<>();
+            if (quickReplies != null && quickReplies.size() > 0) {
+                QuickReply.ListBuilder listBuilder = QuickReply.newListBuilder();
+                for (String quickReply : quickReplies) {
+                    listBuilder.addTextQuickReply(quickReply, quickReply).toList();
+                }
+               fbQuickReplies = listBuilder.build();
+            }
+
             for (String outputText : output) {
                 messengerClientCache.get(botId).getSendClient().
-                        sendTextMessage(senderId, outputText);
+                        sendTextMessage(senderId, outputText, fbQuickReplies);
             }
+
 
             final String state = getConversationState(httpResponse.getContentAsString());
             if (state != null && !state.equals("READY")) {
@@ -190,6 +203,31 @@ public class FacebookEndpoint implements IFacebookEndpoint {
         }
 
 
+    }
+
+    private List<String> getQuickReplies(String json) {
+        List<String> output = new ArrayList<>();
+
+        ObjectMapper mapper = new ObjectMapper();
+        try {
+            JsonNode rootNode = mapper.readValue(json, JsonNode.class);
+            JsonNode conversationStepsArray = rootNode.path("conversationSteps");
+            for (JsonNode conversationStep : conversationStepsArray) {
+                for (JsonNode conversationStepValues : conversationStep.get("conversationStep")) {
+                    if (conversationStepValues.get("key") != null && conversationStepValues.get("key").asText().startsWith("quickReplies")) {
+                        if (conversationStepValues.get("value").isArray()) {
+                            for (JsonNode node : conversationStepValues.get("value")) {
+                                output.add(node.asText());
+                            }
+                        }
+                    }
+                }
+            }
+        } catch (IOException e) {
+            log.error("json parsing error", e);
+        }
+
+        return output;
     }
 
     private List<String> getOutputText(String json) {

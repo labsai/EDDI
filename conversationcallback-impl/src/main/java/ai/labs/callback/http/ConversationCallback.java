@@ -49,7 +49,6 @@ public class ConversationCallback implements IConversationCallback {
 
             dataResponse.setHttpCode(httpResponse.getHttpCode());
             dataResponse.setHeader(httpResponse.getHttpHeader());
-            log.info("content as string: " + httpResponse.getContentAsString());
             ConversationDataResponseHolder responseHolder = jsonSerialization.deserialize(httpResponse.getContentAsString(), ConversationDataResponseHolder.class);
             dataResponse.setConversationMemorySnapshot(responseHolder.getConversationMemorySnapshot());
 
