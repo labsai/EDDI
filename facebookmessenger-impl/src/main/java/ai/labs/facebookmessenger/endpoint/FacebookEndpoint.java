@@ -171,7 +171,7 @@ public class FacebookEndpoint implements IFacebookEndpoint {
                     .send();
             log.debug("response: {}", httpResponse.getContentAsString());
             final List<String> output = getOutputText(httpResponse.getContentAsString());
-            final List<String> quickReplies = getQuickReplies(httpResponse.getContentAsString());
+            final List<Map<String, String>> quickReplies = getQuickReplies(httpResponse.getContentAsString());
 
             try {
                 messengerClientCache.get(botId).getSendClient().sendSenderAction(senderId, SenderAction.TYPING_OFF);
@@ -182,8 +182,8 @@ public class FacebookEndpoint implements IFacebookEndpoint {
             List<QuickReply> fbQuickReplies = new ArrayList<>();
             if (quickReplies != null && quickReplies.size() > 0) {
                 QuickReply.ListBuilder listBuilder = QuickReply.newListBuilder();
-                for (String quickReply : quickReplies) {
-                    listBuilder.addTextQuickReply(quickReply, quickReply).toList();
+                for (Map<String, String> quickReply : quickReplies) {
+                    listBuilder.addTextQuickReply(quickReply.get("value"), quickReply.get("expressions")).toList();
                 }
                fbQuickReplies = listBuilder.build();
             }
@@ -210,8 +210,8 @@ public class FacebookEndpoint implements IFacebookEndpoint {
 
     }
 
-    private List<String> getQuickReplies(String json) {
-        List<String> output = new ArrayList<>();
+    private List<Map<String,String>> getQuickReplies(String json) {
+        List<Map<String,String>> output = new ArrayList<>();
 
         ObjectMapper mapper = new ObjectMapper();
         try {
@@ -222,7 +222,10 @@ public class FacebookEndpoint implements IFacebookEndpoint {
                     if (conversationStepValues.get("key") != null && conversationStepValues.get("key").asText().startsWith("quickReplies")) {
                         if (conversationStepValues.get("value").isArray()) {
                             for (JsonNode node : conversationStepValues.get("value")) {
-                                output.add(node.asText());
+                                HashMap<String, String> map = new HashMap<>();
+                                map.put("value", node.get("value").asText());
+                                map.put("expressions", node.get("expressions").asText());
+                                output.add(map);
                             }
                         }
                     }
