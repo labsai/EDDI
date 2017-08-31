@@ -189,8 +189,13 @@ public class FacebookEndpoint implements IFacebookEndpoint {
             }
 
             for (String outputText : output) {
-                messengerClientCache.get(botId).getSendClient().
-                        sendTextMessage(senderId, outputText, fbQuickReplies);
+                if (fbQuickReplies != null && !fbQuickReplies.isEmpty()) {
+                    messengerClientCache.get(botId).getSendClient().
+                            sendTextMessage(senderId, outputText, fbQuickReplies);
+                } else {
+                    messengerClientCache.get(botId).getSendClient().
+                            sendTextMessage(senderId, outputText);
+                }
             }
 
 
