@@ -90,7 +90,13 @@ public class InputParserTask implements ILifecycleTask {
         }
 
         List<IDictionary> temporaryDictionaries = prepareTemporaryDictionaries(memory);
-        List<RawSolution> parsedSolutions = sentenceParser.parse(inputData.getResult(), temporaryDictionaries);
+        List<RawSolution> parsedSolutions;
+        try {
+            parsedSolutions = sentenceParser.parse(inputData.getResult(), temporaryDictionaries);
+        } catch (InterruptedException e) {
+            log.warn(e.getLocalizedMessage(), e);
+            return;
+        }
         storeResultInMemory(memory, parsedSolutions);
     }
 

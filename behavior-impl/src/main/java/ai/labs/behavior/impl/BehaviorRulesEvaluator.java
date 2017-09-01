@@ -16,7 +16,7 @@ import java.util.LinkedList;
 class BehaviorRulesEvaluator {
     private BehaviorSet behaviorSet;
 
-    BehaviorSetResult evaluate(IConversationMemory memory) throws BehaviorRuleExecutionException {
+    BehaviorSetResult evaluate(IConversationMemory memory) throws BehaviorRuleExecutionException, InterruptedException {
         RuntimeUtilities.checkNotNull(behaviorSet, "behaviorSet");
 
         BehaviorSetResult resultSet = new BehaviorSetResult();
@@ -24,6 +24,7 @@ class BehaviorRulesEvaluator {
         IBehaviorExtension.ExecutionState state;
         for (BehaviorGroup behaviorGroup : behaviorSet.getBehaviorGroups()) {
             for (BehaviorRule behaviorRule : behaviorGroup.getBehaviorRules()) {
+                throwExceptionIfInterrupted();
                 if (behaviorRule.getExtensions().isEmpty()) {
                     state = IBehaviorExtension.ExecutionState.SUCCESS;
                 } else {
@@ -62,6 +63,12 @@ class BehaviorRulesEvaluator {
         return resultSet;
     }
 
+    private void throwExceptionIfInterrupted() throws InterruptedException {
+        if (Thread.currentThread().isInterrupted()) {
+            throw new InterruptedException("Execution was interrupted!");
+        }
+    }
+
     class BehaviorRuleExecutionException extends Exception {
         private BehaviorRuleExecutionException(String message) {
             super(message);
@@ -69,6 +76,10 @@ class BehaviorRulesEvaluator {
 
         BehaviorRuleExecutionException(String message, Exception e) {
             super(message, e);
+        }
+
+        BehaviorRuleExecutionException(Exception e) {
+            super(e);
         }
     }
 }

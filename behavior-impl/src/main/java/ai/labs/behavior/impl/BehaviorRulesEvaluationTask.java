@@ -66,6 +66,8 @@ public class BehaviorRulesEvaluationTask implements ILifecycleTask {
             String msg = "Error while evaluating behavior rules!";
             log.error(msg, e);
             throw new LifecycleException(msg, e);
+        } catch (InterruptedException e) {
+            log.warn(e.getLocalizedMessage(), e);
         }
     }
 

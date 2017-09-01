@@ -28,10 +28,6 @@ public final class SystemRuntime {
 
         String getLogDir();
 
-        String getResourceDir();
-
-        String getWebDir();
-
         ExecutorService getExecutorService();
 
         void logVersion();
@@ -41,8 +37,6 @@ public final class SystemRuntime {
         <T> Future<T> submitCallable(Callable<T> callable,
                                      IFinishedExecution<T> callableCompleted,
                                      Map<Object, Object> threadBindings);
-
-        void submitRunable(final Runnable runnable, final IFinishedExecution<?> callback, final Map<Object, Object> threadBindings);
 
         interface IFinishedExecution<T> {
             void onComplete(T result);

@@ -16,6 +16,7 @@ import ai.labs.runtime.IBot;
 import ai.labs.runtime.IBotFactory;
 import ai.labs.runtime.IConversationCoordinator;
 import ai.labs.runtime.SystemRuntime;
+import ai.labs.runtime.SystemRuntime.IRuntime.IFinishedExecution;
 import ai.labs.runtime.service.ServiceException;
 import ai.labs.utilities.RestUtilities;
 import ai.labs.utilities.RuntimeUtilities;
@@ -23,6 +24,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.jboss.resteasy.spi.NoLogWebApplicationException;
 
 import javax.inject.Inject;
+import javax.inject.Named;
 import javax.ws.rs.InternalServerErrorException;
 import javax.ws.rs.container.AsyncResponse;
 import javax.ws.rs.core.MediaType;
@@ -31,11 +33,11 @@ import java.net.URI;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.concurrent.Callable;
-import java.util.concurrent.TimeUnit;
+import java.util.concurrent.*;
 import java.util.stream.Collectors;
 
 import static ai.labs.memory.ConversationMemoryUtilities.*;
+import static ai.labs.memory.model.ConversationState.IN_PROGRESS;
 
 /**
  * @author ginccc
@@ -46,14 +48,20 @@ public class RestBotEngine implements IRestBotEngine {
     private final IBotFactory botFactory;
     private final IConversationMemoryStore conversationMemoryStore;
     private final IConversationCoordinator conversationCoordinator;
+    private final SystemRuntime.IRuntime runtime;
+    private final int botTimeout;
 
     @Inject
     public RestBotEngine(IBotFactory botFactory,
                          IConversationMemoryStore conversationMemoryStore,
-                         IConversationCoordinator conversationCoordinator) {
+                         IConversationCoordinator conversationCoordinator,
+                         SystemRuntime.IRuntime runtime,
+                         @Named("system.botTimeoutInSeconds") int botTimeout) {
         this.botFactory = botFactory;
         this.conversationMemoryStore = conversationMemoryStore;
         this.conversationCoordinator = conversationCoordinator;
+        this.runtime = runtime;
+        this.botTimeout = botTimeout;
     }
 
     @Override
@@ -144,7 +152,8 @@ public class RestBotEngine implements IRestBotEngine {
         RuntimeUtilities.checkNotNull(inputData.getInput(), "inputData.input");
 
         response.setTimeout(60, TimeUnit.SECONDS);
-
+        response.setTimeoutHandler((asyncResp) ->
+                asyncResp.resume(Response.status(Response.Status.REQUEST_TIMEOUT).build()));
         try {
             final IConversationMemory conversationMemory = loadConversationMemory(conversationId);
             checkConversationMemoryNotNull(conversationMemory, conversationId);
@@ -152,7 +161,7 @@ public class RestBotEngine implements IRestBotEngine {
                 throw new IllegalAccessException("Supplied botId is incompatible to conversationId");
             }
 
-            setConversationState(conversationId, ConversationState.IN_PROGRESS);
+            setConversationState(conversationId, IN_PROGRESS);
 
             IBot bot = botFactory.getBot(environment,
                     conversationMemory.getBotId(), conversationMemory.getBotVersion());
@@ -206,23 +215,57 @@ public class RestBotEngine implements IRestBotEngine {
                                             IConversationMemory conversationMemory,
                                             IConversation conversation) {
         return () -> {
+            waitForExecutionFinishOrTimeout(conversationId, runtime.submitCallable(() -> {
+                        conversation.say(message, convertContext(inputDataContext));
+                        return null;
+                    },
+                    new IFinishedExecution<Void>() {
+                        @Override
+                        public void onComplete(Void result) {
+                            try {
+                                storeConversationMemory(conversationMemory, environment);
+                            } catch (IResourceStore.ResourceStoreException e) {
+                                logConversationError(conversationId, e);
+                            }
+                        }
 
-            try {
-                conversation.say(message, convertContext(inputDataContext));
-                storeConversationMemory(conversationMemory, environment);
-            } catch (LifecycleException | IResourceStore.ResourceStoreException e) {
-                setConversationState(conversationId, ConversationState.ERROR);
-                String msg = "Error while processing user input (conversationId=%s , conversationState=%s)";
-                msg = String.format(msg, conversationId, ConversationState.ERROR);
-                log.error(msg, e);
-            } catch (IConversation.ConversationNotReadyException e) {
-                String msg = "Conversation not ready! (conversationId=%s)";
-                msg = String.format(msg, conversationId);
-                log.error(msg + "\n" + e.getLocalizedMessage(), e);
-            }
-
+                        @Override
+                        public void onFailure(Throwable t) {
+                            if (t instanceof LifecycleException.LifecycleInterruptedException) {
+                                String errorMessage = "Conversation processing got interrupted! (conversationId=%s)";
+                                errorMessage = String.format(errorMessage, conversationId);
+                                log.warn(errorMessage, t);
+                            } else if (t instanceof IConversation.ConversationNotReadyException) {
+                                String msg = "Conversation not ready! (conversationId=%s)";
+                                msg = String.format(msg, conversationId);
+                                log.error(msg + "\n" + t.getLocalizedMessage(), t);
+                            } else {
+                                logConversationError(conversationId, t);
+                            }
+                        }
+                    }, null));
             return null;
         };
+    }
+
+    private void waitForExecutionFinishOrTimeout(String conversationId, Future<Void> future) {
+        try {
+            future.get(botTimeout, TimeUnit.SECONDS);
+        } catch (TimeoutException | InterruptedException e) {
+            setConversationState(conversationId, ConversationState.EXECUTION_INTERRUPTED);
+            String errorMessage = "Execution of Packages interrupted or timed out.";
+            log.error(errorMessage, e);
+            future.cancel(true);
+        } catch (ExecutionException e) {
+            logConversationError(conversationId, e);
+        }
+    }
+
+    private void logConversationError(String conversationId, Throwable t) {
+        setConversationState(conversationId, ConversationState.ERROR);
+        String msg = "Error while processing user input (conversationId=%s , conversationState=%s)";
+        msg = String.format(msg, conversationId, ConversationState.ERROR);
+        log.error(msg, t);
     }
 
     private Map<String, Context> convertContext(Map<String, InputData.Context> inputDataContext) {

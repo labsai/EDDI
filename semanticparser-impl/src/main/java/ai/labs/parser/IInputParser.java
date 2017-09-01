@@ -9,7 +9,7 @@ import java.util.List;
  * @author ginccc
  */
 public interface IInputParser {
-    List<RawSolution> parse(String sentence);
+    List<RawSolution> parse(String sentence) throws InterruptedException;
 
-    List<RawSolution> parse(String sentence, List<IDictionary> temporaryDictionaries);
+    List<RawSolution> parse(String sentence, List<IDictionary> temporaryDictionaries) throws InterruptedException;
 }

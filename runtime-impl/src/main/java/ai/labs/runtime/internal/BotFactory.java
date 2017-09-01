@@ -158,8 +158,8 @@ public class BotFactory implements IBotFactory {
             log.info(String.format("Deploying Bot... (environment=%s, id=%s , version=%s)",
                     environment, botId, botVersion));
         } else {
-            log.info(String.format("Bot is deployed. (environment=%s, id=%s , version=%s)  Status: %s",
-                    environment, botId, botVersion, status));
+            log.info(String.format("Bot deployed with status: %s (environment=%s, id=%s , version=%s)", status,
+                    environment, botId, botVersion));
         }
     }
 
