@@ -7,6 +7,8 @@ import ai.labs.memory.IConversationMemory;
 import ai.labs.memory.model.Deployment;
 import ai.labs.runtime.IBot;
 import ai.labs.runtime.IExecutablePackage;
+import lombok.Getter;
+import lombok.Setter;
 
 import java.util.LinkedList;
 import java.util.List;
@@ -15,35 +17,20 @@ import java.util.List;
  * @author ginccc
  */
 public class Bot implements IBot {
+    @Getter
     private String id;
+    @Getter
     private Integer version;
     private List<IExecutablePackage> executablePackages;
 
+    @Getter
+    @Setter
     private Deployment.Status deploymentStatus;
 
     public Bot(String id, Integer version) {
         this.id = id;
         this.version = version;
         executablePackages = new LinkedList<>();
-    }
-
-    @Override
-    public String getId() {
-        return id;
-    }
-
-    @Override
-    public Integer getVersion() {
-        return version;
-    }
-
-    @Override
-    public Deployment.Status getDeploymentStatus() {
-        return deploymentStatus;
-    }
-
-    void setDeploymentStatus(Deployment.Status deploymentStatus) {
-        this.deploymentStatus = deploymentStatus;
     }
 
     @Override

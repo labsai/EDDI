@@ -1,51 +1,59 @@
 package ai.labs.runtime.internal;
 
 import ai.labs.runtime.IConversationCoordinator;
-import ai.labs.runtime.SystemRuntime;
+import lombok.extern.slf4j.Slf4j;
 
+import javax.inject.Inject;
 import javax.inject.Singleton;
 import java.util.Collections;
 import java.util.Map;
-import java.util.Queue;
-import java.util.concurrent.*;
+import java.util.concurrent.BlockingQueue;
+import java.util.concurrent.Callable;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.LinkedTransferQueue;
+
+import static ai.labs.runtime.SystemRuntime.IRuntime;
 
 @Singleton
+@Slf4j
 public class ConversationCoordinator implements IConversationCoordinator {
-    private final Map<String, Queue<FutureTask<?>>> conversationQueues = new ConcurrentHashMap<>();
+    private final Map<String, BlockingQueue<Callable<Void>>> conversationQueues = new ConcurrentHashMap<>();
+    private final IRuntime runtime;
+
+    @Inject
+    public ConversationCoordinator(IRuntime runtime) {
+        this.runtime = runtime;
+    }
 
     @Override
-    public Future<?> submitInOrder(String conversationId, Callable<?> callable) {
-        final Queue<FutureTask<?>> queue = conversationQueues.
+    public void submitInOrder(String conversationId, Callable<Void> callable) {
+        final BlockingQueue<Callable<Void>> queue = conversationQueues.
                 computeIfAbsent(conversationId, (key) -> new LinkedTransferQueue<>());
 
-        FutureTask<?> futureTask = new FutureTask<>(callable);
-        synchronized (queue) {
-            if (queue.isEmpty()) {
-                queue.offer(futureTask);
-                SystemRuntime.getRuntime().submitRunable(futureTask, new SystemRuntime.IRuntime.IFinishedExecution<Object>() {
-                    @Override
-                    public void onComplete(Object result) {
-                        submitNext();
-                    }
+        if (queue.isEmpty()) {
+            queue.offer(callable);
+            runtime.submitCallable(callable,
+                    new IRuntime.IFinishedExecution<Void>() {
+                        @Override
+                        public void onComplete(Void result) {
+                            submitNext();
+                        }
 
-                    @Override
-                    public void onFailure(Throwable t) {
-                        submitNext();
-                    }
+                        @Override
+                        public void onFailure(Throwable t) {
+                            log.error(t.getLocalizedMessage(), t);
+                            submitNext();
+                        }
 
-                    private void submitNext() {
-                        synchronized (queue) {
+                        private void submitNext() {
                             queue.remove();
                             if (!queue.isEmpty()) {
-                                SystemRuntime.getRuntime().submitRunable(queue.element(), this, null);
+                                runtime.submitCallable(queue.element(), this, null);
                             }
                         }
-                    }
-                }, Collections.emptyMap());
-            } else {
-                queue.offer(futureTask);
-            }
+                    }, Collections.emptyMap());
+        } else {
+            queue.offer(callable);
         }
-        return futureTask;
     }
 }

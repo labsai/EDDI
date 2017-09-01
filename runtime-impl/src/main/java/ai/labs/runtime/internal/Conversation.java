@@ -20,6 +20,7 @@ import java.util.Objects;
  * @author ginccc
  */
 public class Conversation implements IConversation {
+    private static final int TIMEOUT = 30;
     private static final String CONVERSATION_END = "CONVERSATION_END";
     private final List<IExecutablePackage> executablePackages;
     private final IConversationMemory conversationMemory;
@@ -65,8 +66,8 @@ public class Conversation implements IConversation {
     @Override
     public void say(final String message, final Map<String, Context> contexts)
             throws LifecycleException, ConversationNotReadyException {
-        if (getConversationState() != ConversationState.READY) {
-            String errorMessage = "Conversation is *NOT* ready. Current Status: %s";
+        if (getConversationState() == ConversationState.IN_PROGRESS) {
+            String errorMessage = "Conversation is currently IN_PROGRESS! Please try again later!";
             errorMessage = String.format(errorMessage, getConversationState());
             throw new ConversationNotReadyException(errorMessage);
         }
@@ -97,6 +98,7 @@ public class Conversation implements IConversation {
             //execute input processing
             executePackages(data);
 
+
             IConversationMemory.IWritableConversationStep currentStep = conversationMemory.getCurrentStep();
             IData<List<String>> actionData = currentStep.getLatestData("action");
             if (actionData != null) {
@@ -105,6 +107,9 @@ public class Conversation implements IConversation {
                     endConversation();
                 }
             }
+        } catch (LifecycleException.LifecycleInterruptedException e) {
+            setConversationState(ConversationState.EXECUTION_INTERRUPTED);
+            throw e;
         } catch (Exception e) {
             setConversationState(ConversationState.ERROR);
             throw new LifecycleException(e.getLocalizedMessage(), e);
