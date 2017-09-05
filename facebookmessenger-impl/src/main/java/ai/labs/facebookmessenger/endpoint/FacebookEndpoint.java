@@ -22,9 +22,11 @@ import com.github.messenger4j.exceptions.MessengerApiException;
 import com.github.messenger4j.exceptions.MessengerIOException;
 import com.github.messenger4j.exceptions.MessengerVerificationException;
 import com.github.messenger4j.receive.MessengerReceiveClient;
+import com.github.messenger4j.receive.handlers.QuickReplyMessageEventHandler;
 import com.github.messenger4j.receive.handlers.TextMessageEventHandler;
 import com.github.messenger4j.send.MessengerSendClient;
 import com.github.messenger4j.send.NotificationType;
+import com.github.messenger4j.send.QuickReply;
 import com.github.messenger4j.send.SenderAction;
 import lombok.AllArgsConstructor;
 import lombok.Getter;
@@ -126,6 +128,7 @@ public class FacebookEndpoint implements IFacebookEndpoint {
         return new MessengerClient(MessengerPlatform.newSendClientBuilder(pageAccessToken).build(),
                 MessengerPlatform.newReceiveClientBuilder(appSecret, verificationToken)
                         .onTextMessageEvent(getTextMessageEventHandler(botId, Deployment.Environment.unrestricted))
+                        .onQuickReplyMessageEvent(getQuickMessageEventHandler(botId, Deployment.Environment.unrestricted))
                         .build());
     }
 
@@ -142,6 +145,21 @@ public class FacebookEndpoint implements IFacebookEndpoint {
             }
         };
     }
+
+    private QuickReplyMessageEventHandler getQuickMessageEventHandler(String botId, Deployment.Environment environment) {
+        return event -> {
+            try {
+                String message = event.getQuickReply().getPayload();
+                String senderId = event.getSender().getId();
+                final String conversationId = getConversationId(environment, botId, senderId);
+                say(environment, botId, conversationId, senderId, message);
+
+            } catch (RestInterfaceFactoryException | IRequest.HttpRequestException e) {
+                log.error(e.getLocalizedMessage(), e);
+            }
+        };
+    }
+
 
     private void say(Deployment.Environment environment,
                      String botId,
@@ -170,16 +188,33 @@ public class FacebookEndpoint implements IFacebookEndpoint {
                     .send();
             log.debug("response: {}", httpResponse.getContentAsString());
             final List<String> output = getOutputText(httpResponse.getContentAsString());
+            final List<Map<String, String>> quickReplies = getQuickReplies(httpResponse.getContentAsString());
 
             try {
                 messengerClientCache.get(botId).getSendClient().sendSenderAction(senderId, SenderAction.TYPING_OFF);
             } catch (MessengerApiException | MessengerIOException e) {
                 log.error(e.getLocalizedMessage(), e);
             }
-            for (String outputText : output) {
-                messengerClientCache.get(botId).getSendClient().
-                        sendTextMessage(senderId, outputText);
+
+            List<QuickReply> fbQuickReplies = new ArrayList<>();
+            if (quickReplies != null && quickReplies.size() > 0) {
+                QuickReply.ListBuilder listBuilder = QuickReply.newListBuilder();
+                for (Map<String, String> quickReply : quickReplies) {
+                    listBuilder.addTextQuickReply(quickReply.get("value"), quickReply.get("expressions")).toList();
+                }
+               fbQuickReplies = listBuilder.build();
             }
+
+            for (String outputText : output) {
+                if (fbQuickReplies != null && !fbQuickReplies.isEmpty()) {
+                    messengerClientCache.get(botId).getSendClient().
+                            sendTextMessage(senderId, outputText, fbQuickReplies);
+                } else {
+                    messengerClientCache.get(botId).getSendClient().
+                            sendTextMessage(senderId, outputText);
+                }
+            }
+
 
             final String state = getConversationState(httpResponse.getContentAsString());
             if (state != null && !state.equals("READY")) {
@@ -190,6 +225,34 @@ public class FacebookEndpoint implements IFacebookEndpoint {
         }
 
 
+    }
+
+    private List<Map<String,String>> getQuickReplies(String json) {
+        List<Map<String,String>> output = new ArrayList<>();
+
+        ObjectMapper mapper = new ObjectMapper();
+        try {
+            JsonNode rootNode = mapper.readValue(json, JsonNode.class);
+            JsonNode conversationStepsArray = rootNode.path("conversationSteps");
+            for (JsonNode conversationStep : conversationStepsArray) {
+                for (JsonNode conversationStepValues : conversationStep.get("conversationStep")) {
+                    if (conversationStepValues.get("key") != null && conversationStepValues.get("key").asText().startsWith("quickReplies")) {
+                        if (conversationStepValues.get("value").isArray()) {
+                            for (JsonNode node : conversationStepValues.get("value")) {
+                                HashMap<String, String> map = new HashMap<>();
+                                map.put("value", node.get("value").asText());
+                                map.put("expressions", node.get("expressions").asText());
+                                output.add(map);
+                            }
+                        }
+                    }
+                }
+            }
+        } catch (IOException e) {
+            log.error("json parsing error", e);
+        }
+
+        return output;
     }
 
     private List<String> getOutputText(String json) {
