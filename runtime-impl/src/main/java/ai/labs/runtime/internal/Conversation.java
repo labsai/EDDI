@@ -20,7 +20,6 @@ import java.util.Objects;
  * @author ginccc
  */
 public class Conversation implements IConversation {
-    private static final int TIMEOUT = 30;
     private static final String CONVERSATION_END = "CONVERSATION_END";
     private final List<IExecutablePackage> executablePackages;
     private final IConversationMemory conversationMemory;

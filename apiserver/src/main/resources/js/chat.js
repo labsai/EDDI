@@ -134,6 +134,10 @@ $(function () {
             });
     };
 
+    const displayImage = function (imageUrl) {
+        eddi.displayMessage('<img src="' + imageUrl + '" alt="" style="max-width: 100%" />', 'left');
+    };
+
     const refreshConversationLog = function (conversationMemory) {
         const conversationState = conversationMemory.conversationState;
 
@@ -181,14 +185,27 @@ $(function () {
             }
 
             for (let output of latestInteraction.outputs) {
-                eddi.displayMessage(output, 'left');
+                if (output.indexOf("http://") === 0 || output.indexOf("https://") === 0) {
+                    let indexEnd = output.indexOf(" ");
+                    if (indexEnd === -1) {
+                        indexEnd = output.length;
+                    }
+                    displayImage(output.substr(0, indexEnd));
+                } else {
+                    eddi.displayMessage(output, 'left');
+                }
             }
             for (let image of latestInteraction.images) {
-                eddi.displayMessage('<img src="/binary/img/' + image + '" alt="" />', 'left');
+                displayImage('/binary/img/' + image);
             }
             displayQuickReplies(latestInteraction.quickReplies);
 
             $('.message_input').focus();
+        }
+
+        if (conversationState === 'ENDED') {
+            $('<div style="padding-bottom: 1rem; color:darkgray;"><hr>Conversation Ended</div>').appendTo($('.messages'));
+            createConversation(eddi.environment, eddi.botId);
         }
     };
 

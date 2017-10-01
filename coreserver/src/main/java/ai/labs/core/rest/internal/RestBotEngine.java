@@ -26,6 +26,7 @@ import org.jboss.resteasy.spi.NoLogWebApplicationException;
 import javax.inject.Inject;
 import javax.inject.Named;
 import javax.ws.rs.InternalServerErrorException;
+import javax.ws.rs.NotFoundException;
 import javax.ws.rs.container.AsyncResponse;
 import javax.ws.rs.core.MediaType;
 import javax.ws.rs.core.Response;
@@ -161,14 +162,12 @@ public class RestBotEngine implements IRestBotEngine {
                 throw new IllegalAccessException("Supplied botId is incompatible to conversationId");
             }
 
-            setConversationState(conversationId, IN_PROGRESS);
-
             IBot bot = botFactory.getBot(environment,
                     conversationMemory.getBotId(), conversationMemory.getBotVersion());
             if (bot == null) {
                 String msg = "Bot not deployed (environment=%s, id=%s, version=%s)";
                 msg = String.format(msg, environment, conversationMemory.getBotId(), conversationMemory.getBotVersion());
-                throw new Exception(msg);
+                throw new NotFoundException(msg);
             }
             final IConversation conversation = bot.continueConversation(conversationMemory,
                     returnConversationMemory -> {
@@ -184,6 +183,8 @@ public class RestBotEngine implements IRestBotEngine {
                 response.resume(Response.status(Response.Status.GONE).entity("Conversation has ended!").build());
                 return;
             }
+
+            setConversationState(conversationId, IN_PROGRESS);
 
             Callable<Void> processUserInput =
                     processUserInput(environment,
