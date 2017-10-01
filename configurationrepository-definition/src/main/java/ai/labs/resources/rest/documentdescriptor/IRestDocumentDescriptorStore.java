@@ -21,7 +21,6 @@ public interface IRestDocumentDescriptorStore {
 
     @GET
     @Produces(MediaType.APPLICATION_JSON)
-    @Deprecated
     List<DocumentDescriptor> readDescriptors(@QueryParam("type") @DefaultValue("") String type,
                                              @QueryParam("filter") @DefaultValue("") String filter,
                                              @QueryParam("index") @DefaultValue("0") Integer index,

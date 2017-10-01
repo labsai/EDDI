@@ -1,8 +1,8 @@
 package ai.labs.resources.impl.bots.rest;
 
 import ai.labs.persistence.IResourceStore;
+import ai.labs.resources.impl.packages.rest.RestPackageStore;
 import ai.labs.resources.impl.resources.rest.RestVersionInfo;
-import ai.labs.resources.rest.IRestVersionInfo;
 import ai.labs.resources.rest.bots.IBotStore;
 import ai.labs.resources.rest.bots.IRestBotStore;
 import ai.labs.resources.rest.bots.model.BotConfiguration;
@@ -12,6 +12,7 @@ import ai.labs.utilities.RestUtilities;
 import lombok.extern.slf4j.Slf4j;
 
 import javax.inject.Inject;
+import javax.ws.rs.core.MediaType;
 import javax.ws.rs.core.Response;
 import java.net.URI;
 import java.util.List;
@@ -53,19 +54,19 @@ public class RestBotStore extends RestVersionInfo<BotConfiguration> implements I
         boolean updated = false;
         BotConfiguration botConfiguration = readBot(id, version);
         List<URI> packages = botConfiguration.getPackages();
-        for (int i = 0; i < packages.size(); i++) {
-            URI packageURI = packages.get(i);
+        for (int index = 0; index < packages.size(); index++) {
+            URI packageURI = packages.get(index);
             if (packageURI.toString().startsWith(resourceURIWithoutVersion)) {
-                packages.set(i, resourceURI);
+                packages.set(index, resourceURI);
                 updated = true;
             }
         }
 
         if (updated) {
-            return Response.ok(updateBot(id, version, botConfiguration)).build();
+            return updateBot(id, version, botConfiguration);
         } else {
-            URI uri = RestUtilities.createURI(RestBotStore.resourceURI, id, IRestVersionInfo.versionQueryParam, version);
-            return Response.status(Response.Status.BAD_REQUEST).entity(uri).build();
+            URI uri = RestUtilities.createURI(RestPackageStore.resourceURI, id, versionQueryParam, version);
+            return Response.status(Response.Status.BAD_REQUEST).entity(uri).type(MediaType.TEXT_PLAIN).build();
         }
     }
 

@@ -11,6 +11,7 @@ import ai.labs.utilities.RestUtilities;
 import lombok.extern.slf4j.Slf4j;
 
 import javax.inject.Inject;
+import javax.ws.rs.core.MediaType;
 import javax.ws.rs.core.Response;
 import java.net.URI;
 import java.util.List;
@@ -72,10 +73,10 @@ public class RestPackageStore extends RestVersionInfo<PackageConfiguration> impl
         }
 
         if (updated) {
-            return Response.ok(updatePackage(id, version, packageConfiguration)).build();
+            return updatePackage(id, version, packageConfiguration);
         } else {
             URI uri = RestUtilities.createURI(RestPackageStore.resourceURI, id, versionQueryParam, version);
-            return Response.status(Response.Status.BAD_REQUEST).entity(uri).build();
+            return Response.status(Response.Status.BAD_REQUEST).entity(uri).type(MediaType.TEXT_PLAIN).build();
         }
     }
 
