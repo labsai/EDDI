@@ -38,7 +38,6 @@ import java.util.concurrent.*;
 import java.util.stream.Collectors;
 
 import static ai.labs.memory.ConversationMemoryUtilities.*;
-import static ai.labs.memory.model.ConversationState.IN_PROGRESS;
 
 /**
  * @author ginccc
@@ -159,7 +158,8 @@ public class RestBotEngine implements IRestBotEngine {
             final IConversationMemory conversationMemory = loadConversationMemory(conversationId);
             checkConversationMemoryNotNull(conversationMemory, conversationId);
             if (!botId.equals(conversationMemory.getBotId())) {
-                throw new IllegalAccessException("Supplied botId is incompatible to conversationId");
+                response.resume(new IllegalAccessException("Supplied botId is incompatible to conversationId"));
+                return;
             }
 
             IBot bot = botFactory.getBot(environment,
@@ -167,7 +167,8 @@ public class RestBotEngine implements IRestBotEngine {
             if (bot == null) {
                 String msg = "Bot not deployed (environment=%s, id=%s, version=%s)";
                 msg = String.format(msg, environment, conversationMemory.getBotId(), conversationMemory.getBotVersion());
-                throw new NotFoundException(msg);
+                response.resume(new NotFoundException(msg));
+                return;
             }
             final IConversation conversation = bot.continueConversation(conversationMemory,
                     returnConversationMemory -> {
@@ -183,8 +184,6 @@ public class RestBotEngine implements IRestBotEngine {
                 response.resume(Response.status(Response.Status.GONE).entity("Conversation has ended!").build());
                 return;
             }
-
-            setConversationState(conversationId, IN_PROGRESS);
 
             Callable<Void> processUserInput =
                     processUserInput(environment,

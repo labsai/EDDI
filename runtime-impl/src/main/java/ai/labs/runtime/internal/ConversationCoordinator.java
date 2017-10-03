@@ -46,9 +46,11 @@ public class ConversationCoordinator implements IConversationCoordinator {
                         }
 
                         private void submitNext() {
-                            queue.remove();
-                            if (!queue.isEmpty()) {
-                                runtime.submitCallable(queue.element(), this, null);
+                            synchronized (queue) {
+                                queue.remove();
+                                if (!queue.isEmpty()) {
+                                    runtime.submitCallable(queue.element(), this, null);
+                                }
                             }
                         }
                     }, Collections.emptyMap());
