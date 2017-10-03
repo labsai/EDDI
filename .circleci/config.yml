@@ -52,5 +52,5 @@ jobs:
             docker push labsai/eddi:4.1
 
             docker build --build-arg EDDI_VERSION=4.1 --build-arg EDDI_ENV=production -t labsai/eddi:4 .
-            docker push --build-arg EDDI_VERSION=4.1 EDDI_VERSION EDDI_ENV=production labsai/eddi:4
+            docker push labsai/eddi:4
             fi
