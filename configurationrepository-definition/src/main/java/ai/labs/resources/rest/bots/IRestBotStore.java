@@ -19,7 +19,6 @@ import java.util.List;
 @Path("/botstore/bots")
 public interface IRestBotStore extends IRestVersionInfo {
     String resourceURI = "eddi://ai.labs.bot/botstore/bots/";
-    String versionQueryParam = "?version=";
 
     @GET
     @Path("descriptors")

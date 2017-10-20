@@ -26,6 +26,7 @@ import org.jboss.resteasy.spi.NoLogWebApplicationException;
 import javax.inject.Inject;
 import javax.inject.Named;
 import javax.ws.rs.InternalServerErrorException;
+import javax.ws.rs.NotFoundException;
 import javax.ws.rs.container.AsyncResponse;
 import javax.ws.rs.core.MediaType;
 import javax.ws.rs.core.Response;
@@ -37,7 +38,6 @@ import java.util.concurrent.*;
 import java.util.stream.Collectors;
 
 import static ai.labs.memory.ConversationMemoryUtilities.*;
-import static ai.labs.memory.model.ConversationState.IN_PROGRESS;
 
 /**
  * @author ginccc
@@ -158,17 +158,17 @@ public class RestBotEngine implements IRestBotEngine {
             final IConversationMemory conversationMemory = loadConversationMemory(conversationId);
             checkConversationMemoryNotNull(conversationMemory, conversationId);
             if (!botId.equals(conversationMemory.getBotId())) {
-                throw new IllegalAccessException("Supplied botId is incompatible to conversationId");
+                response.resume(new IllegalAccessException("Supplied botId is incompatible to conversationId"));
+                return;
             }
-
-            setConversationState(conversationId, IN_PROGRESS);
 
             IBot bot = botFactory.getBot(environment,
                     conversationMemory.getBotId(), conversationMemory.getBotVersion());
             if (bot == null) {
                 String msg = "Bot not deployed (environment=%s, id=%s, version=%s)";
                 msg = String.format(msg, environment, conversationMemory.getBotId(), conversationMemory.getBotVersion());
-                throw new Exception(msg);
+                response.resume(new NotFoundException(msg));
+                return;
             }
             final IConversation conversation = bot.continueConversation(conversationMemory,
                     returnConversationMemory -> {

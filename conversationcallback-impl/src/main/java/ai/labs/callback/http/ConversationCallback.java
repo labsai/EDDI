@@ -3,6 +3,7 @@ package ai.labs.callback.http;
 import ai.labs.callback.IConversationCallback;
 import ai.labs.callback.model.ConversationDataRequest;
 import ai.labs.callback.model.ConversationDataResponse;
+import ai.labs.callback.model.ConversationDataResponseHolder;
 import ai.labs.httpclient.IHttpClient;
 import ai.labs.httpclient.IRequest;
 import ai.labs.httpclient.IResponse;
@@ -48,9 +49,9 @@ public class ConversationCallback implements IConversationCallback {
 
             dataResponse.setHttpCode(httpResponse.getHttpCode());
             dataResponse.setHeader(httpResponse.getHttpHeader());
-            dataResponse.setConversationMemorySnapshot(
-                    jsonSerialization.deserialize(httpResponse.getContentAsString(),
-                            ConversationMemorySnapshot.class));
+            ConversationDataResponseHolder responseHolder = jsonSerialization.deserialize(httpResponse.getContentAsString(), ConversationDataResponseHolder.class);
+            dataResponse.setConversationMemorySnapshot(responseHolder.getConversationMemorySnapshot());
+
 
         } catch (IRequest.HttpRequestException | IOException e) {
             log.error(e.getLocalizedMessage(), e);
