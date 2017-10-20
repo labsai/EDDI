@@ -6,13 +6,11 @@ import ai.labs.httpclient.IHttpClient;
 import ai.labs.httpclient.IRequest;
 import ai.labs.httpclient.IResponse;
 import ai.labs.memory.model.Deployment;
-import ai.labs.memory.model.SimpleConversationMemorySnapshot;
 import ai.labs.resources.rest.bots.IBotStore;
 import ai.labs.resources.rest.bots.model.BotConfiguration;
 import ai.labs.rest.rest.IRestBotEngine;
 import ai.labs.rest.restinterfaces.IRestInterfaceFactory;
 import ai.labs.runtime.SystemRuntime;
-import ai.labs.serialization.IJsonSerialization;
 import ai.labs.utilities.RestUtilities;
 import ai.labs.utilities.URIUtilities;
 import com.fasterxml.jackson.databind.JsonNode;
@@ -25,28 +23,26 @@ import com.github.messenger4j.receive.MessengerReceiveClient;
 import com.github.messenger4j.receive.handlers.QuickReplyMessageEventHandler;
 import com.github.messenger4j.receive.handlers.TextMessageEventHandler;
 import com.github.messenger4j.send.MessengerSendClient;
-import com.github.messenger4j.send.NotificationType;
 import com.github.messenger4j.send.QuickReply;
 import com.github.messenger4j.send.SenderAction;
 import lombok.AllArgsConstructor;
 import lombok.Getter;
 import lombok.Setter;
 import lombok.extern.slf4j.Slf4j;
-import org.apache.http.impl.client.DefaultHttpClient;
-import org.apache.http.util.EntityUtils;
 import org.jboss.resteasy.plugins.guice.RequestScoped;
 
 import javax.inject.Inject;
 import javax.inject.Named;
 import javax.ws.rs.InternalServerErrorException;
 import javax.ws.rs.WebApplicationException;
-import javax.ws.rs.container.AsyncResponse;
-import javax.ws.rs.container.TimeoutHandler;
 import javax.ws.rs.core.MediaType;
 import javax.ws.rs.core.Response;
 import java.io.IOException;
 import java.net.URI;
-import java.util.*;
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
 import java.util.concurrent.Callable;
 import java.util.concurrent.TimeUnit;
 
@@ -58,12 +54,9 @@ public class FacebookEndpoint implements IFacebookEndpoint {
     private static final String RESOURCE_URI_CHANNELCONNECTOR = "eddi://ai.labs.channel.facebook";
     private static final String AI_LABS_USER_AGENT = "Jetty 9.4/HTTP CLIENT - AI.LABS.EDDI";
     private static final String ENCODING = "UTF-8";
-    private static final long timeoutInMillis = 10000;
-
 
     private final IBotStore botStore;
     private final IHttpClient httpClient;
-    private final IJsonSerialization jsonSerialization;
     private final IRestInterfaceFactory restInterfaceFactory;
     private final String apiServerURI;
     private final ICache<String, BotConfiguration> botConfigCache;
@@ -73,13 +66,11 @@ public class FacebookEndpoint implements IFacebookEndpoint {
     @Inject
     public FacebookEndpoint(IBotStore botStore,
                             IHttpClient httpClient,
-                            IJsonSerialization jsonSerialization,
                             IRestInterfaceFactory restInterfaceFactory,
                             @Named("system.apiServerURI") String apiServerURI,
                             ICacheFactory cacheFactory) {
         this.botStore = botStore;
         this.httpClient = httpClient;
-        this.jsonSerialization = jsonSerialization;
         this.restInterfaceFactory = restInterfaceFactory;
         this.apiServerURI = apiServerURI;
         this.botConfigCache = cacheFactory.getCache("facebook.botConfiguration");
@@ -160,7 +151,6 @@ public class FacebookEndpoint implements IFacebookEndpoint {
         };
     }
 
-
     private void say(Deployment.Environment environment,
                      String botId,
                      String conversationId,
@@ -206,7 +196,7 @@ public class FacebookEndpoint implements IFacebookEndpoint {
             }
 
             for (String outputText : output) {
-                if (fbQuickReplies != null && !fbQuickReplies.isEmpty()) {
+                if (!fbQuickReplies.isEmpty()) {
                     messengerClientCache.get(botId).getSendClient().
                             sendTextMessage(senderId, outputText, fbQuickReplies);
                 } else {
@@ -215,7 +205,6 @@ public class FacebookEndpoint implements IFacebookEndpoint {
                 }
             }
 
-
             final String state = getConversationState(httpResponse.getContentAsString());
             if (state != null && !state.equals("READY")) {
                 conversationIdCache.remove(senderId);
@@ -223,8 +212,6 @@ public class FacebookEndpoint implements IFacebookEndpoint {
         } catch (MessengerIOException | MessengerApiException e) {
             log.error(e.getLocalizedMessage(), e);
         }
-
-
     }
 
     private List<Map<String,String>> getQuickReplies(String json) {
