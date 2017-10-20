@@ -3,6 +3,7 @@ package ai.labs.output.impl;
 import ai.labs.lifecycle.ILifecycleTask;
 import ai.labs.lifecycle.LifecycleException;
 import ai.labs.lifecycle.PackageConfigurationException;
+import ai.labs.lifecycle.model.Context;
 import ai.labs.memory.IConversationMemory;
 import ai.labs.memory.IData;
 import ai.labs.memory.IDataFactory;
@@ -33,6 +34,8 @@ public class OutputGenerationTask implements ILifecycleTask {
     private static final String ACTION_KEY = "action";
     private static final String MEMORY_OUTPUT_IDENTIFIER = "output";
     private static final String MEMORY_QUICK_REPLIES_IDENTIFIER = "quickReplies";
+    private static final String CONTEXT_IDENTIFIER = "context";
+    private static final String QUICK_REPLIES_IDENTIFIER = "quickReplies";
     private final IResourceClientLibrary resourceClientLibrary;
     private final IDataFactory dataFactory;
     private final IOutputGeneration outputGeneration;
@@ -58,6 +61,9 @@ public class OutputGenerationTask implements ILifecycleTask {
 
     @Override
     public void executeTask(IConversationMemory memory) throws LifecycleException {
+        List<IData<Context>> contextDataList = memory.getCurrentStep().getAllData("context");
+        storeContextQuickReplies(memory, contextDataList);
+
         IData<List<String>> latestData = memory.getCurrentStep().getLatestData(ACTION_KEY);
         if (latestData == null) {
             return;
@@ -70,8 +76,34 @@ public class OutputGenerationTask implements ILifecycleTask {
                 outputEntries.forEach(outputEntry -> {
                     List<OutputValue> outputValues = outputEntry.getOutputs();
                     selectAndStoreOutput(memory, action, outputValues);
-                    storeQuickReplies(memory, outputEntry);
+                    storeQuickReplies(memory, outputEntry.getQuickReplies(), outputEntry.getAction());
                 }));
+    }
+
+    private void storeContextQuickReplies(IConversationMemory memory, List<IData<Context>> contextDataList) {
+        contextDataList.forEach(contextData -> {
+            String contextKey = contextData.getKey();
+            Context context = contextData.getResult();
+            String key = contextKey.substring((CONTEXT_IDENTIFIER + ":").length(), contextKey.length());
+            if (key.startsWith(QUICK_REPLIES_IDENTIFIER) && context.getType().equals(Context.ContextType.object)) {
+                String contextQuickReplyKey = CONTEXT_IDENTIFIER + ":" + QUICK_REPLIES_IDENTIFIER + ":";
+                String quickRepliesKey = "context";
+                if (contextKey.contains(contextQuickReplyKey)) {
+                    quickRepliesKey = contextKey.substring(contextQuickReplyKey.length(), contextKey.length());
+                }
+
+                if (context.getType().equals(Context.ContextType.object)) {
+                    List<QuickReply> quickReplies = convertMapToObjects((List<Map<String, String>>) context.getValue());
+                    storeQuickReplies(memory, quickReplies, quickRepliesKey);
+                }
+            }
+        });
+    }
+
+    private List<QuickReply> convertMapToObjects(List<Map<String, String>> quickRepliesListMap) {
+        return quickRepliesListMap.stream().map(map ->
+                new QuickReply(map.get("value"), map.get("expressions"))).
+                collect(Collectors.toCollection(LinkedList::new));
     }
 
     private void selectAndStoreOutput(IConversationMemory memory, String action, List<OutputValue> outputValues) {
@@ -86,11 +118,10 @@ public class OutputGenerationTask implements ILifecycleTask {
         });
     }
 
-    private void storeQuickReplies(IConversationMemory memory, OutputEntry outputEntry) {
-        List<QuickReply> quickReplies = outputEntry.getQuickReplies();
+    private void storeQuickReplies(IConversationMemory memory, List<QuickReply> quickReplies, String action) {
         if (!quickReplies.isEmpty()) {
             String outputQuickReplyKey = StringUtilities.
-                    joinStrings(":", MEMORY_QUICK_REPLIES_IDENTIFIER, outputEntry.getAction());
+                    joinStrings(":", MEMORY_QUICK_REPLIES_IDENTIFIER, action);
             IData outputQuickReplies = dataFactory.createData(outputQuickReplyKey, quickReplies);
             outputQuickReplies.setPublic(true);
             memory.getCurrentStep().storeData(outputQuickReplies);
