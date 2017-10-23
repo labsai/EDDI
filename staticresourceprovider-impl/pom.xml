@@ -7,7 +7,7 @@
     <parent>
         <groupId>ai.labs</groupId>
         <artifactId>eddi</artifactId>
-        <version>4.1</version>
+        <version>4.2</version>
         <relativePath>../pom.xml</relativePath>
     </parent>
     <artifactId>staticresourceprovider-impl</artifactId>
@@ -17,7 +17,7 @@
         <dependency>
             <groupId>org.eclipse.jetty</groupId>
             <artifactId>jetty-servlet</artifactId>
-            <version>9.4.6.v20170531</version>
+            <version>9.4.7.v20170914</version>
             <scope>provided</scope>
         </dependency>
         <dependency>
