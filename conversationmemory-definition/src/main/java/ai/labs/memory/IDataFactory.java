@@ -8,5 +8,7 @@ import java.util.List;
 public interface IDataFactory {
     <T> IData<T> createData(String key, T value);
 
+    <T> IData<T> createData(String key, T value, boolean isPublic);
+
     <T> IData<T> createData(String key, T value, List<T> possibleValues);
 }

@@ -54,6 +54,6 @@ public class PropertyDisposerTask implements ILifecycleTask {
             }
         }
 
-        memory.getCurrentStep().storeData(dataFactory.createData("properties:extracted", properties));
+        memory.getCurrentStep().storeData(dataFactory.createData("properties:extracted", properties, true));
     }
 }

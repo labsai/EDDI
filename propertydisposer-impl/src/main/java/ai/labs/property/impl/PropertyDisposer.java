@@ -34,7 +34,7 @@ public class PropertyDisposer implements IPropertyDisposer {
                     Value value = new Value();
                     extractMeanings(meanings, value, expression.getSubExpressions()[0]);
                     return new PropertyEntry(meanings, value.getExpressionName());
-                }).collect(Collectors.toList());
+                }).collect(Collectors.toCollection(LinkedList::new));
     }
 
     private void extractMeanings(List<String> meanings, Value value, Expression expression) {
