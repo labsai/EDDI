@@ -38,7 +38,7 @@ public class PropertyDisposer implements IPropertyDisposer {
     }
 
     private void extractMeanings(List<String> meanings, Value value, Expression expression) {
-        if (!(expression instanceof Value)) {
+        if (expression.getSubExpressions().length > 0) {
             meanings.add(expression.getExpressionName());
             extractMeanings(meanings, value, expression.getSubExpressions()[0]);
         } else {
