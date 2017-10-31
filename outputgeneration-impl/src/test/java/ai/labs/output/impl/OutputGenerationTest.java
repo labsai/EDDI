@@ -111,8 +111,8 @@ public class OutputGenerationTest {
         List<String> valueAlternatives2 = Arrays.asList("Text2 Alternative 1", "Text2 Alternative 2");
         List<OutputValue> outputValues = Arrays.asList(new OutputValue(OutputValue.Type.text, valueAlternatives1),
                 new OutputValue(OutputValue.Type.text, valueAlternatives2));
-        List<QuickReply> quickReply = Arrays.asList(new QuickReply("Some QuickReply", "some(Expression)"),
-                new QuickReply("Some Other QuickReply", "someOther(Expression"));
+        List<QuickReply> quickReply = Arrays.asList(new QuickReply("Some QuickReply", "some(Expression)", false),
+                new QuickReply("Some Other QuickReply", "someOther(Expression", false));
 
         outputEntries.add(new OutputEntry(ACTION_3, 4, outputValues, quickReply));
         outputEntries.add(new OutputEntry(ACTION_3, 2, outputValues, quickReply));

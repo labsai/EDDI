@@ -102,7 +102,7 @@ public class OutputGenerationTask implements ILifecycleTask {
 
     private List<QuickReply> convertMapToObjects(List<Map<String, String>> quickRepliesListMap) {
         return quickRepliesListMap.stream().map(map ->
-                new QuickReply(map.get("value"), map.get("expressions"))).
+                new QuickReply(map.get("value"), map.get("expressions"), Boolean.parseBoolean(map.get("isDefault")))).
                 collect(Collectors.toCollection(LinkedList::new));
     }
 
