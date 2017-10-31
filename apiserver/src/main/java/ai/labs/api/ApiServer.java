@@ -13,6 +13,7 @@ import ai.labs.output.bootstrap.OutputGenerationModule;
 import ai.labs.parser.bootstrap.SemanticParserModule;
 import ai.labs.permission.bootstrap.PermissionModule;
 import ai.labs.persistence.bootstrap.PersistenceModule;
+import ai.labs.property.bootstrap.PropertyDisposerModule;
 import ai.labs.resources.bootstrap.RepositoryModule;
 import ai.labs.rest.bootstrap.RestInterfaceModule;
 import ai.labs.runtime.DependencyInjector;
@@ -67,6 +68,7 @@ public class ApiServer {
                 new BehaviorModule(),
                 new OutputGenerationModule(),
                 new TemplateEngineModule(),
+                new PropertyDisposerModule(),
                 new AutomatedtestingModule(),
                 new StaticResourcesModule(),
                 new HttpClientModule(),

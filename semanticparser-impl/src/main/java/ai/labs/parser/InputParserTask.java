@@ -121,7 +121,8 @@ public class InputParserTask implements ILifecycleTask {
                 forEach((quickReplyData) -> {
                     List<Map<String, String>> resultList = quickReplyData.getResult();
                     ret.addAll(resultList.stream().
-                            map((resultMap) -> new QuickReply(resultMap.get("value"), resultMap.get("expressions"))).
+                            map((resultMap) -> new QuickReply(resultMap.get("value"),
+                                    resultMap.get("expressions"), Boolean.parseBoolean(resultMap.get("isDefault")))).
                             collect(Collectors.toList()));
 
                 });

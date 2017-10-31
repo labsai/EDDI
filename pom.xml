@@ -52,6 +52,8 @@
         <module>behavior-impl</module>
         <module>templateengine-definition</module>
         <module>templateengine-impl-thymeleaf</module>
+        <module>propertydisposer-definition</module>
+        <module>propertydisposer-impl</module>
     </modules>
 
     <build>
