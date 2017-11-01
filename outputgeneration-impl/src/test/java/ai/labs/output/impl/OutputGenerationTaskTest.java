@@ -77,8 +77,8 @@ public class OutputGenerationTaskTest {
                 Arrays.asList(SOME_ACTION_2, SOME_OTHER_ACTION_2));
         when(dataFactory.createData(eq(OUTPUT_TEXT + ACTION_1), anyString(),
                 eq(Arrays.asList(ANSWER_ALTERNATIVE_1, ANSWER_ALTERNATIVE_2)))).thenAnswer(invocation -> expectedOutputData);
-        List<QuickReply> quickReplies = Arrays.asList(new QuickReply(SOME_QUICK_REPLY, SOME_EXPRESSION),
-                new QuickReply(SOME_OTHER_QUICK_REPLY, SOME_OTHER_EXPRESSION));
+        List<QuickReply> quickReplies = Arrays.asList(new QuickReply(SOME_QUICK_REPLY, SOME_EXPRESSION, false),
+                new QuickReply(SOME_OTHER_QUICK_REPLY, SOME_OTHER_EXPRESSION, false));
         IData<List<QuickReply>> expectedQuickReplyData = new Data<>(QUICK_REPLIES + ACTION_1, quickReplies);
         when(dataFactory.createData(eq(QUICK_REPLIES + ACTION_1), anyListOf(QuickReply.class))).
                 thenAnswer(invocation -> expectedQuickReplyData);
@@ -112,8 +112,8 @@ public class OutputGenerationTaskTest {
         List<OutputValue> outputs = new LinkedList<>();
         outputs.add(new OutputValue(OutputValue.Type.text, Arrays.asList(ANSWER_ALTERNATIVE_1, ANSWER_ALTERNATIVE_2)));
         List<QuickReply> quickReplies = new LinkedList<>();
-        quickReplies.add(new QuickReply(SOME_QUICK_REPLY, SOME_EXPRESSION));
-        quickReplies.add(new QuickReply(SOME_OTHER_QUICK_REPLY, SOME_OTHER_EXPRESSION));
+        quickReplies.add(new QuickReply(SOME_QUICK_REPLY, SOME_EXPRESSION, false));
+        quickReplies.add(new QuickReply(SOME_OTHER_QUICK_REPLY, SOME_OTHER_EXPRESSION, false));
         return new OutputEntry(ACTION_1, 0, outputs, quickReplies);
     }
 

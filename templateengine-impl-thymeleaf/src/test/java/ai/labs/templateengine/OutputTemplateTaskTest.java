@@ -87,11 +87,11 @@ public class OutputTemplateTaskTest {
         List<QuickReply> expectedPreQuickReplies = new LinkedList<>();
         expectedPreQuickReplies.add(new QuickReply(
                 "Quick Reply Value [[${context}]]",
-                "quickReply(expression)"));
+                "quickReply(expression)", false));
         List<QuickReply> expectedPostQuickReplies = new LinkedList<>();
         expectedPostQuickReplies.add(new QuickReply(
                 "Quick Reply Value someContextValue",
-                "quickReply(expression)"));
+                "quickReply(expression)", false));
         when(currentStep.getAllData(eq("quickReplies"))).then(invocation -> {
             LinkedList<IData<List<QuickReply>>> ret = new LinkedList<>();
             ret.add(new MockData<>("quickReply:someAction", expectedPreQuickReplies));
