@@ -1,7 +1,7 @@
 package ai.labs.behavior.impl.extensions;
 
+import ai.labs.behavior.impl.extensions.BaseMatcher.ConversationStepOccurrence;
 import ai.labs.behavior.impl.extensions.IBehaviorExtension.ExecutionState;
-import ai.labs.behavior.impl.extensions.InputMatcher.ConversationStepOccurrence;
 import ai.labs.expressions.Expression;
 import ai.labs.expressions.utilities.IExpressionProvider;
 import ai.labs.expressions.value.Value;
@@ -22,11 +22,9 @@ import static org.mockito.Mockito.*;
 /**
  * @author ginccc
  */
-public class InputMatcherTest {
+public class InputMatcherTest extends BaseMatcherTest {
     private static final String KEY_EXPRESSIONS = "expressions";
-    private static final String KEY_OCCURRENCE = "occurrence";
     private final String inputExpressions = "someExpression(someValue),someOtherExpression(SomeOtherValue),someThirdExpression(someNotNeededValue)";
-    private InputMatcher inputMatcher;
     private final String expressionsValue = "someExpression(someValue),someOtherExpression(SomeOtherValue)";
     private List<Expression> expectedExpressions;
     private IExpressionProvider expressionProvider;
@@ -38,7 +36,7 @@ public class InputMatcherTest {
                 new Expression("someExpression", new Value("someValue")),
                 new Expression("someOtherExpression", new Value("someOtherValue")));
         when(expressionProvider.parseExpressions(eq(expressionsValue))).thenAnswer(invocation -> expectedExpressions);
-        inputMatcher = new InputMatcher(expressionProvider);
+        matcher = new InputMatcher(expressionProvider);
     }
 
     @Test
@@ -48,66 +46,10 @@ public class InputMatcherTest {
         values.put(KEY_EXPRESSIONS, expressionsValue);
 
         //test
-        inputMatcher.setValues(values);
+        matcher.setValues(values);
 
         //assert
-        Assert.assertEquals(expectedExpressions, inputMatcher.getExpressions());
-    }
-
-    @Test
-    public void setValues_currentStep() throws Exception {
-        //setup
-        Map<String, String> values = new HashMap<>();
-        ConversationStepOccurrence expectedOccurrence = ConversationStepOccurrence.currentStep;
-        values.put(KEY_OCCURRENCE, expectedOccurrence.toString());
-
-        //test
-        inputMatcher.setValues(values);
-
-        //assert
-        Assert.assertEquals(expectedOccurrence, inputMatcher.getOccurrence());
-    }
-
-    @Test
-    public void setValues_lastStep() throws Exception {
-        //setup
-        Map<String, String> values = new HashMap<>();
-        ConversationStepOccurrence expectedOccurrence = ConversationStepOccurrence.lastStep;
-        values.put(KEY_OCCURRENCE, expectedOccurrence.toString());
-
-        //test
-        inputMatcher.setValues(values);
-
-        //assert
-        Assert.assertEquals(expectedOccurrence, inputMatcher.getOccurrence());
-    }
-
-    @Test
-    public void setValues_anyStep() throws Exception {
-        //setup
-        Map<String, String> values = new HashMap<>();
-        ConversationStepOccurrence expectedOccurrence = ConversationStepOccurrence.anyStep;
-        values.put(KEY_OCCURRENCE, expectedOccurrence.toString());
-
-        //test
-        inputMatcher.setValues(values);
-
-        //assert
-        Assert.assertEquals(expectedOccurrence, inputMatcher.getOccurrence());
-    }
-
-    @Test
-    public void setValues_never() throws Exception {
-        //setup
-        Map<String, String> values = new HashMap<>();
-        ConversationStepOccurrence expectedOccurrence = ConversationStepOccurrence.never;
-        values.put(KEY_OCCURRENCE, expectedOccurrence.toString());
-
-        //test
-        inputMatcher.setValues(values);
-
-        //assert
-        Assert.assertEquals(expectedOccurrence, inputMatcher.getOccurrence());
+        Assert.assertEquals(expectedExpressions, ((InputMatcher) matcher).getExpressions());
     }
 
     @Test
@@ -116,7 +58,7 @@ public class InputMatcherTest {
         Map<String, String> values = new HashMap<>();
         values.put(KEY_EXPRESSIONS, expressionsValue);
         values.put(KEY_OCCURRENCE, ConversationStepOccurrence.currentStep.toString());
-        inputMatcher.setValues(values);
+        matcher.setValues(values);
         IConversationMemory memory = mock(IConversationMemory.class);
         IWritableConversationStep currentConversationStep = mock(IWritableConversationStep.class);
         when(currentConversationStep.getLatestData(eq(KEY_EXPRESSIONS))).thenAnswer(invocation ->
@@ -129,10 +71,10 @@ public class InputMatcherTest {
         when(expressionProvider.parseExpressions(eq(inputExpressions))).thenAnswer(invocation -> expectedInputExpressions);
 
         //test
-        ExecutionState actualExecutionState = inputMatcher.execute(memory, new LinkedList<>());
+        ExecutionState actualExecutionState = matcher.execute(memory, new LinkedList<>());
 
         //assert
-        Assert.assertEquals(ExecutionState.SUCCESS, inputMatcher.getExecutionState());
+        Assert.assertEquals(ExecutionState.SUCCESS, matcher.getExecutionState());
         Assert.assertEquals(ExecutionState.SUCCESS, actualExecutionState);
         verify(memory).getCurrentStep();
         verify(currentConversationStep).getLatestData(KEY_EXPRESSIONS);
@@ -144,7 +86,7 @@ public class InputMatcherTest {
         Map<String, String> values = new HashMap<>();
         values.put(KEY_EXPRESSIONS, expressionsValue);
         values.put(KEY_OCCURRENCE, ConversationStepOccurrence.lastStep.toString());
-        inputMatcher.setValues(values);
+        matcher.setValues(values);
         IConversationMemory memory = mock(IConversationMemory.class);
         IConversationStep previousConversationStep = mock(IConversationStep.class);
         when(previousConversationStep.getLatestData(eq(KEY_EXPRESSIONS))).thenAnswer(invocation ->
@@ -158,10 +100,10 @@ public class InputMatcherTest {
         when(expressionProvider.parseExpressions(eq(inputExpressions))).thenAnswer(invocation -> expectedInputExpressions);
 
         //test
-        ExecutionState actualExecutionState = inputMatcher.execute(memory, new LinkedList<>());
+        ExecutionState actualExecutionState = matcher.execute(memory, new LinkedList<>());
 
         //assert
-        Assert.assertEquals(ExecutionState.SUCCESS, inputMatcher.getExecutionState());
+        Assert.assertEquals(ExecutionState.SUCCESS, matcher.getExecutionState());
         Assert.assertEquals(ExecutionState.SUCCESS, actualExecutionState);
         verify(memory).getPreviousSteps();
         verify(previousConversationStep).getLatestData(KEY_EXPRESSIONS);
@@ -173,7 +115,7 @@ public class InputMatcherTest {
         Map<String, String> values = new HashMap<>();
         values.put(KEY_EXPRESSIONS, expressionsValue);
         values.put(KEY_OCCURRENCE, ConversationStepOccurrence.anyStep.toString());
-        inputMatcher.setValues(values);
+        matcher.setValues(values);
         IConversationMemory memory = mock(IConversationMemory.class);
         IConversationStep previousConversationStep1 = mock(IConversationStep.class);
         IConversationStep previousConversationStep2 = mock(IConversationStep.class);
@@ -191,10 +133,10 @@ public class InputMatcherTest {
         when(expressionProvider.parseExpressions(eq(inputExpressions))).thenAnswer(invocation -> expectedInputExpressions);
 
         //test
-        ExecutionState actualExecutionState = inputMatcher.execute(memory, new LinkedList<>());
+        ExecutionState actualExecutionState = matcher.execute(memory, new LinkedList<>());
 
         //assert
-        Assert.assertEquals(ExecutionState.SUCCESS, inputMatcher.getExecutionState());
+        Assert.assertEquals(ExecutionState.SUCCESS, matcher.getExecutionState());
         Assert.assertEquals(ExecutionState.SUCCESS, actualExecutionState);
         verify(memory).getAllSteps();
         verify(previousConversationStep1).getLatestData(KEY_EXPRESSIONS);
@@ -216,7 +158,7 @@ public class InputMatcherTest {
                         Collections.singletonList(
                                 new Expression("nonMatchingExpression",
                                         new Value("nonMatchingValue"))));
-        inputMatcher.setValues(values);
+        matcher.setValues(values);
 
         when(expressionProvider.parseExpressions(eq("someNonMatchingExpression"))).
                 thenAnswer(invocation ->
@@ -235,10 +177,10 @@ public class InputMatcherTest {
         when(expressionProvider.parseExpressions(eq(inputExpressions))).thenAnswer(invocation -> expectedInputExpressions);
 
         //test
-        ExecutionState actualExecutionState = inputMatcher.execute(memory, new LinkedList<>());
+        ExecutionState actualExecutionState = matcher.execute(memory, new LinkedList<>());
 
         //assert
-        Assert.assertEquals(ExecutionState.SUCCESS, inputMatcher.getExecutionState());
+        Assert.assertEquals(ExecutionState.SUCCESS, matcher.getExecutionState());
         Assert.assertEquals(ExecutionState.SUCCESS, actualExecutionState);
         verify(memory).getAllSteps();
         verify(previousConversationStep1).getLatestData(KEY_EXPRESSIONS);
