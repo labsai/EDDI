@@ -61,9 +61,10 @@ public class PropertyDisposerTaskTest {
             ret.add(new PropertyEntry(Collections.singletonList("someMeaning"), "someValue"));
             return ret;
         });
+        when(conversationMemory.getPreviousSteps().size()).thenAnswer(invocation -> 1);
         when(previousStep.getLatestData(eq(KEY_ACTIONS))).thenAnswer(invocation ->
                 new Data<>(KEY_ACTIONS, Arrays.asList("CATCH_ANY_INPUT_AS_PROPERTY", "someOtherAction")));
-        when(previousStep.getLatestData(eq(KEY_INPUT_INITIAL))).thenAnswer(invocation ->
+        when(currentStep.getLatestData(eq(KEY_INPUT_INITIAL))).thenAnswer(invocation ->
                 new Data<>(KEY_INPUT_INITIAL, userInput));
         when(dataFactory.createData(eq("properties:extracted"), any(List.class), eq(true))).
                 thenAnswer(invocation -> {
@@ -78,7 +79,7 @@ public class PropertyDisposerTaskTest {
         //assert
         verify(currentStep, times(1)).getLatestData(KEY_EXPRESSIONS_PARSED);
         verify(previousStep, times(1)).getLatestData(KEY_ACTIONS);
-        verify(previousStep, times(1)).getLatestData(KEY_INPUT_INITIAL);
+        verify(currentStep, times(1)).getLatestData(KEY_INPUT_INITIAL);
         verify(currentStep).storeData(expectedPropertyData);
     }
 

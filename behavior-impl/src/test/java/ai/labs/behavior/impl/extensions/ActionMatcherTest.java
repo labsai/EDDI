@@ -21,13 +21,14 @@ import static org.mockito.Mockito.*;
  */
 public class ActionMatcherTest extends BaseMatcherTest {
     private static final String KEY_ACTIONS = "actions";
-    private final String inputActions = "someAction,someOtherAction,someNotNeededAction";
     private final String actionsValue = "someAction,someOtherAction";
     private List<String> expectedActions;
+    private List<String> inputActions;
 
     @Before
     public void setUp() throws Exception {
         expectedActions = Arrays.asList("someAction", "someOtherAction");
+        inputActions = Arrays.asList("someAction", "someOtherAction", "someNotNeededAction");
         matcher = new ActionMatcher();
     }
 
@@ -102,7 +103,7 @@ public class ActionMatcherTest extends BaseMatcherTest {
         IConversationStep previousConversationStep1 = mock(IConversationStep.class);
         IConversationStep previousConversationStep2 = mock(IConversationStep.class);
         when(previousConversationStep1.getLatestData(eq(KEY_ACTIONS))).thenAnswer(invocation ->
-                new Data<>(KEY_ACTIONS, "someNonMatchingAction"));
+                new Data<>(KEY_ACTIONS, Collections.singletonList("someNonMatchingAction")));
         when(previousConversationStep2.getLatestData(eq(KEY_ACTIONS))).thenAnswer(invocation ->
                 new Data<>(KEY_ACTIONS, inputActions));
         when(memory.getAllSteps()).thenAnswer(invocation ->
@@ -133,7 +134,7 @@ public class ActionMatcherTest extends BaseMatcherTest {
         matcher.setValues(values);
 
         when(previousConversationStep1.getLatestData(eq(KEY_ACTIONS))).thenAnswer(invocation ->
-                new Data<>(KEY_ACTIONS, "someNonMatchingAction"));
+                new Data<>(KEY_ACTIONS, Collections.singletonList("someNonMatchingAction")));
         when(previousConversationStep2.getLatestData(eq(KEY_ACTIONS))).thenAnswer(invocation ->
                 new Data<>(KEY_ACTIONS, inputActions));
         when(memory.getAllSteps()).thenAnswer(invocation ->
