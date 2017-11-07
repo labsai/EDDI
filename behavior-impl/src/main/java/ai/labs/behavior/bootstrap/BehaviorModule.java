@@ -20,11 +20,12 @@ public class BehaviorModule extends AbstractBaseModule {
                 = MapBinder.newMapBinder(binder(), String.class, ILifecycleTask.class);
         lifecycleTaskPlugins.addBinding("ai.labs.behavior").to(BehaviorRulesEvaluationTask.class);
 
-
         MapBinder<String, IBehaviorExtension> behaviorExtensionPlugins
                 = MapBinder.newMapBinder(binder(), String.class, IBehaviorExtension.class);
         behaviorExtensionPlugins.addBinding("ai.labs.behavior.extension.inputmatcher").
                 to(InputMatcher.class);
+        behaviorExtensionPlugins.addBinding("ai.labs.behavior.extension.actionmatcher").
+                to(ActionMatcher.class);
         behaviorExtensionPlugins.addBinding("ai.labs.behavior.extension.contextmatcher").
                 to(ContextMatcher.class);
         behaviorExtensionPlugins.addBinding("ai.labs.behavior.extension.connector").
