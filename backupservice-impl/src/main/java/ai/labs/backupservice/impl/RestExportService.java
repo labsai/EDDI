@@ -115,7 +115,7 @@ public class RestExportService implements IRestExportService {
             String zipFilename = botId + "-" + botVersion + ".zip";
             String targetZipPath = FileUtilities.buildPath(tmpPath.toString(), zipFilename);
             this.zipArchive.createZip(botPath.toString(), targetZipPath);
-            return Response.created(URI.create("/backup/export/" + zipFilename)).build();
+            return Response.ok().location(URI.create("/backup/export/" + zipFilename)).build();
         } catch (IResourceStore.ResourceNotFoundException e) {
             throw new NoLogWebApplicationException(Response.Status.NOT_FOUND);
         } catch (IResourceStore.ResourceStoreException | IOException e) {

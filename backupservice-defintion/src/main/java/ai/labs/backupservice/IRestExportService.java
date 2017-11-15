@@ -15,5 +15,5 @@ public interface IRestExportService {
 
     @POST
     @Path("{botId}")
-    Response exportBot(@PathParam("botId") String botId, @QueryParam("botVersion") Integer botVersion);
+    Response exportBot(@PathParam("botId") String botId, @QueryParam("botVersion") @DefaultValue("1") Integer botVersion);
 }
