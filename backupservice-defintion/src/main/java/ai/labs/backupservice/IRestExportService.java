@@ -10,6 +10,10 @@ import javax.ws.rs.core.Response;
 public interface IRestExportService {
     @GET
     @Produces("application/zip")
+    @Path("{botFilename}")
+    Response getBotZipArchive(@PathParam("botFilename") String botFilename);
+
+    @POST
     @Path("{botId}")
     Response exportBot(@PathParam("botId") String botId, @QueryParam("botVersion") Integer botVersion);
 }

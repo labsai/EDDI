@@ -1,6 +1,7 @@
 package ai.labs.backupservice.impl;
 
 import ai.labs.backupservice.IRestExportService;
+import ai.labs.backupservice.IZipArchive;
 import ai.labs.persistence.IResourceStore;
 import ai.labs.persistence.IResourceStore.IResourceId;
 import ai.labs.resources.rest.behavior.IBehaviorStore;
@@ -21,8 +22,7 @@ import org.jboss.resteasy.spi.NoLogWebApplicationException;
 import javax.inject.Inject;
 import javax.ws.rs.InternalServerErrorException;
 import javax.ws.rs.core.Response;
-import java.io.BufferedWriter;
-import java.io.IOException;
+import java.io.*;
 import java.net.URI;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -32,6 +32,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.stream.Collectors;
+import java.util.stream.Stream;
 
 /**
  * @author ginccc
@@ -55,6 +56,7 @@ public class RestExportService implements IRestExportService {
     private final IBehaviorStore behaviorStore;
     private final IOutputStore outputStore;
     private final IJsonSerialization jsonSerialization;
+    private final IZipArchive zipArchive;
     private final Path tmpPath = Paths.get(FileUtilities.buildPath(System.getProperty("user.dir"), "tmp"));
 
     @Inject
@@ -64,7 +66,8 @@ public class RestExportService implements IRestExportService {
                              IRegularDictionaryStore regularDictionaryStore,
                              IBehaviorStore behaviorStore,
                              IOutputStore outputStore,
-                             IJsonSerialization jsonSerialization) {
+                             IJsonSerialization jsonSerialization,
+                             IZipArchive zipArchive) {
         this.documentDescriptorStore = documentDescriptorStore;
         this.botStore = botStore;
         this.packageStore = packageStore;
@@ -72,6 +75,17 @@ public class RestExportService implements IRestExportService {
         this.behaviorStore = behaviorStore;
         this.outputStore = outputStore;
         this.jsonSerialization = jsonSerialization;
+        this.zipArchive = zipArchive;
+    }
+
+    @Override
+    public Response getBotZipArchive(String botFilename) {
+        try {
+            String zipFilePath = FileUtilities.buildPath(tmpPath.toString(), botFilename);
+            return Response.ok(new BufferedInputStream(new FileInputStream(zipFilePath))).build();
+        } catch (FileNotFoundException e) {
+            throw new NoLogWebApplicationException(Response.Status.NOT_FOUND);
+        }
     }
 
     @Override
@@ -98,9 +112,10 @@ public class RestExportService implements IRestExportService {
                         extractResources(packageConfiguration, OUTPUT_URI))), OUTPUT_EXT);
             }
 
-
-            //todo zip files
-            return null;
+            String zipFilename = botId + "-" + botVersion + ".zip";
+            String targetZipPath = FileUtilities.buildPath(tmpPath.toString(), zipFilename);
+            this.zipArchive.createZip(botPath.toString(), targetZipPath);
+            return Response.created(URI.create("/backup/export/" + zipFilename)).build();
         } catch (IResourceStore.ResourceNotFoundException e) {
             throw new NoLogWebApplicationException(Response.Status.NOT_FOUND);
         } catch (IResourceStore.ResourceStoreException | IOException e) {
@@ -123,37 +138,28 @@ public class RestExportService implements IRestExportService {
         ));
     }
 
-    private void writeConfigs(Path path, Map<IResourceId, String> configs, String fileExtension) {
-        configs.forEach((resourceId, value) -> {
-            String filename = MessageFormat.format("{0}.{1}.json", resourceId.getId(), fileExtension);
-            try (BufferedWriter writer = Files.newBufferedWriter(Paths.get(path.toString(), filename))) {
-                writer.write(value);
-                writeDocumentDescriptor(path, resourceId.getId(), resourceId.getVersion(), fileExtension);
-            } catch (IOException | IResourceStore.ResourceStoreException | IResourceStore.ResourceNotFoundException e) {
-                log.error(e.getLocalizedMessage(), e);
-            }
-        });
-    }
-
     private List<URI> extractRegularDictionaries(PackageConfiguration packageConfiguration) {
         return packageConfiguration.getPackageExtensions().stream().
                 filter(packageExtension ->
                         packageExtension.getType().toString().startsWith(PARSER_URI) &&
                                 packageExtension.getExtensions().containsKey("dictionaries")).
-                map(packageExtension -> {
+                flatMap(packageExtension -> {
                     Map<String, Object> extensions = packageExtension.getExtensions();
                     for (String extensionKey : extensions.keySet()) {
                         List<Map<String, Object>> extensionElements = (List<Map<String, Object>>) extensions.get(extensionKey);
                         for (Map<String, Object> extensionElement : extensionElements) {
-                            if (extensionElement.containsKey(CONFIG_KEY_URI)) {
-                                Map<String, Object> config = (Map<String, Object>) extensionElement.get(CONFIG_KEY_URI);
-                                //Todo
+                            if (DICTIONARY_URI.equals(extensionElement.get("type")) &&
+                                    extensionElement.containsKey("config")) {
+                                Map<String, String> config = (Map<String, String>) extensionElement.get("config");
+                                if (config.containsKey(CONFIG_KEY_URI)) {
+                                    return Stream.of(URI.create(config.get(CONFIG_KEY_URI)));
+                                }
                             }
                         }
                     }
-                    return URI.create("");
-                }).
-                collect(Collectors.toList());
+
+                    return Stream.empty();
+                }).collect(Collectors.toList());
     }
 
     private List<URI> extractResources(PackageConfiguration packageConfiguration, String type) {
@@ -166,6 +172,22 @@ public class RestExportService implements IRestExportService {
                 collect(Collectors.toList());
     }
 
+    private void writeConfigs(Path path, Map<IResourceId, String> configs, String fileExtension) {
+        configs.forEach((resourceId, value) -> {
+            String filename = MessageFormat.format("{0}.{1}.json", resourceId.getId(), fileExtension);
+            Path filePath = Paths.get(path.toString(), filename);
+            try {
+                deleteFileIfExists(filePath);
+                try (BufferedWriter writer = Files.newBufferedWriter(filePath)) {
+                    writer.write(value);
+                    writeDocumentDescriptor(path, resourceId.getId(), resourceId.getVersion());
+                }
+            } catch (IOException | IResourceStore.ResourceStoreException | IResourceStore.ResourceNotFoundException e) {
+                log.error(e.getLocalizedMessage(), e);
+            }
+        });
+    }
+
     private Path writeDirAndDocument(String documentId, Integer documentVersion,
                                      String configurationString, Path tmpPath, String fileExtension)
             throws IOException, IResourceStore.ResourceStoreException, IResourceStore.ResourceNotFoundException {
@@ -173,7 +195,9 @@ public class RestExportService implements IRestExportService {
         Path dir = Files.createDirectories(Paths.get(tmpPath.toString(), documentId, String.valueOf(documentVersion)));
 
         String filename = MessageFormat.format("{0}.{1}.json", documentId, fileExtension);
-        Path botConfigFilePath = Files.createFile(Paths.get(dir.toString(), filename));
+        Path filePath = Paths.get(dir.toString(), filename);
+        deleteFileIfExists(filePath);
+        Path botConfigFilePath = Files.createFile(filePath);
         try (BufferedWriter writer = Files.newBufferedWriter(botConfigFilePath)) {
             writer.write(configurationString);
         }
@@ -181,11 +205,13 @@ public class RestExportService implements IRestExportService {
         return dir;
     }
 
-    private void writeDocumentDescriptor(Path path, String documentId, Integer documentVersion, String fileExtension)
+    private void writeDocumentDescriptor(Path path, String documentId, Integer documentVersion)
             throws IResourceStore.ResourceStoreException, IResourceStore.ResourceNotFoundException, IOException {
         DocumentDescriptor documentDescriptor = documentDescriptorStore.readDescriptor(documentId, documentVersion);
-        String filename = MessageFormat.format("{0}.{1}.json", documentId, fileExtension);
-        try (BufferedWriter writer = Files.newBufferedWriter(Paths.get(path.toString(), filename))) {
+        String filename = MessageFormat.format("{0}.descriptor.json", documentId);
+        Path filePath = Paths.get(path.toString(), filename);
+        deleteFileIfExists(filePath);
+        try (BufferedWriter writer = Files.newBufferedWriter(filePath)) {
             writer.write(jsonSerialization.serialize(documentDescriptor));
         }
     }
@@ -199,5 +225,11 @@ public class RestExportService implements IRestExportService {
         }
 
         return ret;
+    }
+
+    private void deleteFileIfExists(Path path) throws IOException {
+        if (Files.exists(path)) {
+            Files.delete(path);
+        }
     }
 }
