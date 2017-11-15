@@ -56,15 +56,20 @@ public class ActionMatcher extends BaseMatcher implements IBehaviorExtension {
 
     @Override
     public ExecutionState execute(IConversationMemory memory, List<BehaviorRule> trace) {
-        IData<String> data;
+        IData<List<String>> data;
         switch (occurrence) {
             case currentStep:
                 data = memory.getCurrentStep().getLatestData(KEY_ACTIONS);
                 state = evaluateActions(data);
                 break;
             case lastStep:
-                data = memory.getPreviousSteps().get(0).getLatestData(KEY_ACTIONS);
-                state = evaluateActions(data);
+                IConversationMemory.IConversationStepStack previousSteps = memory.getPreviousSteps();
+                if (previousSteps.size() > 0) {
+                    data = previousSteps.get(0).getLatestData(KEY_ACTIONS);
+                    state = evaluateActions(data);
+                } else {
+                    state = FAIL;
+                }
                 break;
             case anyStep:
                 state = occurredInAnyStep(memory, KEY_ACTIONS, this::evaluateActions) ? SUCCESS : FAIL;
@@ -77,10 +82,10 @@ public class ActionMatcher extends BaseMatcher implements IBehaviorExtension {
         return state;
     }
 
-    private ExecutionState evaluateActions(IData<String> data) {
+    private ExecutionState evaluateActions(IData<List<String>> data) {
         List<String> actions = Collections.emptyList();
         if (data != null && data.getResult() != null) {
-            actions = convertToActions(data.getResult());
+            actions = data.getResult();
         }
 
         if (isActionEmpty(actions) ||

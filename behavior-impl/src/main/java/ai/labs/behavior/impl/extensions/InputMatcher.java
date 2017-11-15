@@ -17,6 +17,7 @@ import java.util.Map;
 
 import static ai.labs.behavior.impl.extensions.IBehaviorExtension.ExecutionState.FAIL;
 import static ai.labs.behavior.impl.extensions.IBehaviorExtension.ExecutionState.SUCCESS;
+import static ai.labs.memory.IConversationMemory.IConversationStepStack;
 
 /**
  * @author ginccc
@@ -71,8 +72,13 @@ public class InputMatcher extends BaseMatcher implements IBehaviorExtension {
                 state = evaluateInputExpressions(data);
                 break;
             case lastStep:
-                data = memory.getPreviousSteps().get(0).getLatestData(KEY_EXPRESSIONS);
-                state = evaluateInputExpressions(data);
+                IConversationStepStack previousSteps = memory.getPreviousSteps();
+                if (previousSteps.size() > 0) {
+                    data = previousSteps.get(0).getLatestData(KEY_EXPRESSIONS);
+                    state = evaluateInputExpressions(data);
+                } else {
+                    state = FAIL;
+                }
                 break;
             case anyStep:
                 state = occurredInAnyStep(memory, KEY_EXPRESSIONS, this::evaluateInputExpressions) ? SUCCESS : FAIL;

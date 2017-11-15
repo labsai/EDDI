@@ -12,6 +12,8 @@ import javax.inject.Inject;
 import java.util.Collections;
 import java.util.List;
 
+import static ai.labs.memory.IConversationMemory.IConversationStepStack;
+
 /**
  * @author ginccc
  */
@@ -52,17 +54,21 @@ public class PropertyDisposerTask implements ILifecycleTask {
         List<PropertyEntry> properties = propertyDisposer.extractProperties(expressionsData.getResult());
 
         // see if action "CATCH_ANY_INPUT_AS_PROPERTY" was in the last step, so we take last user input into account
-        IConversationMemory.IConversationStep lastStep = memory.getPreviousSteps().get(0);
-        IData<List<String>> actionsData = lastStep.getLatestData(ACTIONS_IDENTIFIER);
-        List<String> actions = actionsData.getResult();
-        if (actions != null && actions.contains(CATCH_ANY_INPUT_AS_PROPERTY_ACTION)) {
-            IData<String> initialInputData = lastStep.getLatestData(INPUT_INITIAL_IDENTIFIER);
-            String initialInput = initialInputData.getResult();
-            if (!initialInput.isEmpty()) {
-                properties.add(new PropertyEntry(Collections.singletonList(EXPRESSION_MEANING_USER_INPUT), initialInput));
+        IConversationStepStack previousSteps = memory.getPreviousSteps();
+        if (previousSteps.size() > 0) {
+            IData<List<String>> actionsData = previousSteps.get(0).getLatestData(ACTIONS_IDENTIFIER);
+            List<String> actions = actionsData.getResult();
+            if (actions != null && actions.contains(CATCH_ANY_INPUT_AS_PROPERTY_ACTION)) {
+                IData<String> initialInputData = memory.getCurrentStep().getLatestData(INPUT_INITIAL_IDENTIFIER);
+                String initialInput = initialInputData.getResult();
+                if (!initialInput.isEmpty()) {
+                    properties.add(new PropertyEntry(Collections.singletonList(EXPRESSION_MEANING_USER_INPUT), initialInput));
+                }
             }
         }
 
-        memory.getCurrentStep().storeData(dataFactory.createData(PROPERTIES_EXTRACTED_IDENTIFIER, properties, true));
+        if (!properties.isEmpty()) {
+            memory.getCurrentStep().storeData(dataFactory.createData(PROPERTIES_EXTRACTED_IDENTIFIER, properties, true));
+        }
     }
 }
