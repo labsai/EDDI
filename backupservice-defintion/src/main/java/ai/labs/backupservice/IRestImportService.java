@@ -13,5 +13,5 @@ import java.io.InputStream;
 public interface IRestImportService {
     @POST
     @Consumes("application/zip")
-    Response exportBot(InputStream zippedBotConfigFiles);
+    Response importBot(InputStream zippedBotConfigFiles);
 }

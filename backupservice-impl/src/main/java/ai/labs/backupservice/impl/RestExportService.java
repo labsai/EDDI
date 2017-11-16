@@ -35,18 +35,12 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.stream.Collectors;
-import java.util.stream.Stream;
 
 /**
  * @author ginccc
  */
 @Slf4j
-public class RestExportService implements IRestExportService {
-    private static final String CONFIG_KEY_URI = "uri";
-    private static final String PARSER_URI = "eddi://ai.labs.parser";
-    private static final String DICTIONARY_URI = "eddi://ai.labs.parser.dictionaries.regular";
-    private static final String BEHAVIOR_URI = "eddi://ai.labs.behavior";
-    private static final String OUTPUT_URI = "eddi://ai.labs.output";
+public class RestExportService extends AbstractBackupService implements IRestExportService {
     private static final String BOT_EXT = "bot";
     private static final String PACKAGE_EXT = "package";
     private static final String DICTIONARY_EXT = "regulardictionary";
@@ -152,40 +146,6 @@ public class RestExportService implements IRestExportService {
                     }
                 }
         ));
-    }
-
-    private List<URI> extractRegularDictionaries(PackageConfiguration packageConfiguration) {
-        return packageConfiguration.getPackageExtensions().stream().
-                filter(packageExtension ->
-                        packageExtension.getType().toString().startsWith(PARSER_URI) &&
-                                packageExtension.getExtensions().containsKey("dictionaries")).
-                flatMap(packageExtension -> {
-                    Map<String, Object> extensions = packageExtension.getExtensions();
-                    for (String extensionKey : extensions.keySet()) {
-                        List<Map<String, Object>> extensionElements = (List<Map<String, Object>>) extensions.get(extensionKey);
-                        for (Map<String, Object> extensionElement : extensionElements) {
-                            if (DICTIONARY_URI.equals(extensionElement.get("type")) &&
-                                    extensionElement.containsKey("config")) {
-                                Map<String, String> config = (Map<String, String>) extensionElement.get("config");
-                                if (config.containsKey(CONFIG_KEY_URI)) {
-                                    return Stream.of(URI.create(config.get(CONFIG_KEY_URI)));
-                                }
-                            }
-                        }
-                    }
-
-                    return Stream.empty();
-                }).collect(Collectors.toList());
-    }
-
-    private List<URI> extractResources(PackageConfiguration packageConfiguration, String type) {
-        return packageConfiguration.getPackageExtensions().stream().
-                filter(packageExtension ->
-                        packageExtension.getType().toString().startsWith(type) &&
-                                packageExtension.getConfig().containsKey(CONFIG_KEY_URI)).
-                map(packageExtension ->
-                        URI.create(packageExtension.getConfig().get(CONFIG_KEY_URI).toString())).
-                collect(Collectors.toList());
     }
 
     private void writeConfigs(Path path, Map<IResourceId, String> configs, String fileExtension) {
