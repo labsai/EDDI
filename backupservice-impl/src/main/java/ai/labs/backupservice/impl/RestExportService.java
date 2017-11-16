@@ -16,6 +16,7 @@ import ai.labs.resources.rest.regulardictionary.IRegularDictionaryStore;
 import ai.labs.serialization.IJsonSerialization;
 import ai.labs.utilities.FileUtilities;
 import ai.labs.utilities.RestUtilities;
+import ai.labs.utilities.RuntimeUtilities;
 import lombok.extern.slf4j.Slf4j;
 import org.jboss.resteasy.spi.NoLogWebApplicationException;
 
@@ -24,6 +25,8 @@ import javax.ws.rs.InternalServerErrorException;
 import javax.ws.rs.core.Response;
 import java.io.*;
 import java.net.URI;
+import java.net.URLEncoder;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
@@ -96,11 +99,14 @@ public class RestExportService implements IRestExportService {
             Map<IResourceId, PackageConfiguration> packageConfigurations =
                     readConfigs(packageStore, botConfiguration.getPackages());
 
+            DocumentDescriptor botDocumentDescriptor = writeDocumentDescriptor(botPath, botId, botVersion);
+
             for (IResourceId resourceId : packageConfigurations.keySet()) {
                 PackageConfiguration packageConfiguration = packageConfigurations.get(resourceId);
                 String packageConfigurationString = jsonSerialization.serialize(packageConfiguration);
                 Path packagePath = writeDirAndDocument(resourceId.getId(), resourceId.getVersion(),
                         packageConfigurationString, botPath, PACKAGE_EXT);
+                writeDocumentDescriptor(packagePath, resourceId.getId(), resourceId.getVersion());
 
                 writeConfigs(packagePath, convertConfigsToString(readConfigs(regularDictionaryStore,
                         extractRegularDictionaries(packageConfiguration))), DICTIONARY_EXT);
@@ -112,7 +118,7 @@ public class RestExportService implements IRestExportService {
                         extractResources(packageConfiguration, OUTPUT_URI))), OUTPUT_EXT);
             }
 
-            String zipFilename = botId + "-" + botVersion + ".zip";
+            String zipFilename = prepareZipFilename(botDocumentDescriptor, botId, botVersion);
             String targetZipPath = FileUtilities.buildPath(tmpPath.toString(), zipFilename);
             this.zipArchive.createZip(botPath.toString(), targetZipPath);
             return Response.ok().location(URI.create("/backup/export/" + zipFilename)).build();
@@ -122,6 +128,16 @@ public class RestExportService implements IRestExportService {
             log.error(e.getLocalizedMessage(), e);
             throw new InternalServerErrorException();
         }
+    }
+
+    private String prepareZipFilename(DocumentDescriptor botDocumentDescriptor, String botId, Integer botVersion)
+            throws UnsupportedEncodingException {
+        String zipFilename = "";
+        if (!RuntimeUtilities.isNullOrEmpty(botDocumentDescriptor.getName())) {
+            zipFilename = URLEncoder.encode(botDocumentDescriptor.getName() + "-", StandardCharsets.UTF_8.toString());
+        }
+        zipFilename += botId + "-" + botVersion + ".zip";
+        return zipFilename;
     }
 
     private Map<IResourceId, String> convertConfigsToString(Map<IResourceId, ?> configurationMap) {
@@ -205,7 +221,7 @@ public class RestExportService implements IRestExportService {
         return dir;
     }
 
-    private void writeDocumentDescriptor(Path path, String documentId, Integer documentVersion)
+    private DocumentDescriptor writeDocumentDescriptor(Path path, String documentId, Integer documentVersion)
             throws IResourceStore.ResourceStoreException, IResourceStore.ResourceNotFoundException, IOException {
         DocumentDescriptor documentDescriptor = documentDescriptorStore.readDescriptor(documentId, documentVersion);
         String filename = MessageFormat.format("{0}.descriptor.json", documentId);
@@ -214,6 +230,8 @@ public class RestExportService implements IRestExportService {
         try (BufferedWriter writer = Files.newBufferedWriter(filePath)) {
             writer.write(jsonSerialization.serialize(documentDescriptor));
         }
+
+        return documentDescriptor;
     }
 
     private static <T> Map<IResourceId, T> readConfigs(IResourceStore<T> store, List<URI> configUris)
