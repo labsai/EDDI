@@ -1,54 +1,36 @@
 package ai.labs.backupservice.impl;
 
-import ai.labs.resources.rest.packages.model.PackageConfiguration;
-
 import java.net.URI;
+import java.util.LinkedList;
 import java.util.List;
-import java.util.Map;
-import java.util.stream.Collectors;
-import java.util.stream.Stream;
+import java.util.regex.Pattern;
 
 /**
  * @author ginccc
  */
 abstract class AbstractBackupService {
-    private static final String CONFIG_KEY_URI = "uri";
-    private static final String PARSER_URI = "eddi://ai.labs.parser";
-    private static final String DICTIONARY_URI = "eddi://ai.labs.parser.dictionaries.regular";
-    static final String BEHAVIOR_URI = "eddi://ai.labs.behavior";
-    static final String OUTPUT_URI = "eddi://ai.labs.output";
+    static final String BOT_EXT = "bot";
+    static final String PACKAGE_EXT = "package";
+    static final String DICTIONARY_EXT = "regulardictionary";
+    static final String BEHAVIOR_EXT = "behavior";
+    static final String OUTPUT_EXT = "output";
+    static final Pattern DICTIONARY_URI_PATTERN =
+            Pattern.compile("\"eddi://ai.labs.regulardictionary/regulardictionarystore/regulardictionaries/.*?\"");
+    static final Pattern BEHAVIOR_URI_PATTERN =
+            Pattern.compile("\"eddi://ai.labs.behavior/behaviorstore/behaviorsets/.*?\"");
+    static final Pattern OUTPUT_URI_PATTERN =
+            Pattern.compile("\"eddi://ai.labs.output/outputstore/outputsets/.*?\"");
 
-    List<URI> extractResources(PackageConfiguration packageConfiguration, String type) {
-        return packageConfiguration.getPackageExtensions().stream().
-                filter(packageExtension ->
-                        packageExtension.getType().toString().startsWith(type) &&
-                                packageExtension.getConfig().containsKey(CONFIG_KEY_URI)).
-                map(packageExtension ->
-                        URI.create(packageExtension.getConfig().get(CONFIG_KEY_URI).toString())).
-                collect(Collectors.toList());
-    }
+    List<URI> extractResourcesUris(String resourceConfigString, Pattern uriPattern) throws CallbackMatcher.CallbackMatcherException {
+        List<URI> ret = new LinkedList<>();
 
-    List<URI> extractRegularDictionaries(PackageConfiguration packageConfiguration) {
-        return packageConfiguration.getPackageExtensions().stream().
-                filter(packageExtension ->
-                        packageExtension.getType().toString().startsWith(PARSER_URI) &&
-                                packageExtension.getExtensions().containsKey("dictionaries")).
-                flatMap(packageExtension -> {
-                    Map<String, Object> extensions = packageExtension.getExtensions();
-                    for (String extensionKey : extensions.keySet()) {
-                        List<Map<String, Object>> extensionElements = (List<Map<String, Object>>) extensions.get(extensionKey);
-                        for (Map<String, Object> extensionElement : extensionElements) {
-                            if (DICTIONARY_URI.equals(extensionElement.get("type")) &&
-                                    extensionElement.containsKey("config")) {
-                                Map<String, String> config = (Map<String, String>) extensionElement.get("config");
-                                if (config.containsKey(CONFIG_KEY_URI)) {
-                                    return Stream.of(URI.create(config.get(CONFIG_KEY_URI)));
-                                }
-                            }
-                        }
-                    }
-
-                    return Stream.empty();
-                }).collect(Collectors.toList());
+        CallbackMatcher callbackMatcher = new CallbackMatcher(uriPattern);
+        callbackMatcher.replaceMatches(resourceConfigString, matchResult -> {
+            String match = matchResult.group();
+            String uri = match.substring(1, match.length() - 1);
+            ret.add(URI.create(uri));
+            return null;
+        });
+        return ret;
     }
 }

@@ -12,6 +12,7 @@ import java.util.zip.ZipOutputStream;
 /**
  * @author ginccc
  */
+@SuppressWarnings("ResultOfMethodCallIgnored")
 public class ZipArchive implements IZipArchive {
     private static final int BUFFER_SIZE = 4096;
 
@@ -48,7 +49,6 @@ public class ZipArchive implements IZipArchive {
 
         zos.close();
         fos.close();
-
     }
 
     private static void addToZip(File directoryToZip, File file, ZipOutputStream zos) throws IOException {
@@ -84,11 +84,9 @@ public class ZipArchive implements IZipArchive {
                 // if the entry is a file, extracts it
                 new File(filePath).getParentFile().mkdirs();
                 extractFile(zipIn, filePath);
-                System.out.println(filePath);
             } else {
                 // if the entry is a directory, make the directory
                 File dir = new File(filePath);
-                System.out.println(filePath);
                 dir.mkdirs();
             }
             zipIn.closeEntry();
@@ -97,17 +95,10 @@ public class ZipArchive implements IZipArchive {
         zipIn.close();
     }
 
-    /**
-     * Extracts a zip entry (file entry)
-     *
-     * @param zipIn
-     * @param filePath
-     * @throws IOException
-     */
     private void extractFile(ZipInputStream zipIn, String filePath) throws IOException {
         BufferedOutputStream bos = new BufferedOutputStream(new FileOutputStream(filePath));
         byte[] bytesIn = new byte[BUFFER_SIZE];
-        int read = 0;
+        int read;
         while ((read = zipIn.read(bytesIn)) != -1) {
             bos.write(bytesIn, 0, read);
         }

@@ -41,11 +41,6 @@ import java.util.stream.Collectors;
  */
 @Slf4j
 public class RestExportService extends AbstractBackupService implements IRestExportService {
-    private static final String BOT_EXT = "bot";
-    private static final String PACKAGE_EXT = "package";
-    private static final String DICTIONARY_EXT = "regulardictionary";
-    private static final String BEHAVIOR_EXT = "behavior";
-    private static final String OUTPUT_EXT = "output";
     private final IDocumentDescriptorStore documentDescriptorStore;
     private final IBotStore botStore;
     private final IPackageStore packageStore;
@@ -103,13 +98,13 @@ public class RestExportService extends AbstractBackupService implements IRestExp
                 writeDocumentDescriptor(packagePath, resourceId.getId(), resourceId.getVersion());
 
                 writeConfigs(packagePath, convertConfigsToString(readConfigs(regularDictionaryStore,
-                        extractRegularDictionaries(packageConfiguration))), DICTIONARY_EXT);
+                        extractResourcesUris(packageConfigurationString, DICTIONARY_URI_PATTERN))), DICTIONARY_EXT);
 
                 writeConfigs(packagePath, convertConfigsToString(readConfigs(behaviorStore,
-                        extractResources(packageConfiguration, BEHAVIOR_URI))), BEHAVIOR_EXT);
+                        extractResourcesUris(packageConfigurationString, BEHAVIOR_URI_PATTERN))), BEHAVIOR_EXT);
 
                 writeConfigs(packagePath, convertConfigsToString(readConfigs(outputStore,
-                        extractResources(packageConfiguration, OUTPUT_URI))), OUTPUT_EXT);
+                        extractResourcesUris(packageConfigurationString, OUTPUT_URI_PATTERN))), OUTPUT_EXT);
             }
 
             String zipFilename = prepareZipFilename(botDocumentDescriptor, botId, botVersion);
@@ -118,7 +113,7 @@ public class RestExportService extends AbstractBackupService implements IRestExp
             return Response.ok().location(URI.create("/backup/export/" + zipFilename)).build();
         } catch (IResourceStore.ResourceNotFoundException e) {
             throw new NoLogWebApplicationException(Response.Status.NOT_FOUND);
-        } catch (IResourceStore.ResourceStoreException | IOException e) {
+        } catch (IResourceStore.ResourceStoreException | IOException | CallbackMatcher.CallbackMatcherException e) {
             log.error(e.getLocalizedMessage(), e);
             throw new InternalServerErrorException();
         }

@@ -33,6 +33,11 @@
             <artifactId>runtime-definition</artifactId>
             <version>${project.version}</version>
         </dependency>
+        <dependency>
+            <groupId>ai.labs</groupId>
+            <artifactId>corerest-definition</artifactId>
+            <version>${project.version}</version>
+        </dependency>
     </dependencies>
 
     <properties>
