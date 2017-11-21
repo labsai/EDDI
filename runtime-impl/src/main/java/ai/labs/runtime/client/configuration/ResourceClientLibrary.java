@@ -19,14 +19,14 @@ import java.util.Map;
  */
 public class ResourceClientLibrary implements IResourceClientLibrary {
     private final IRestInterfaceFactory restInterfaceFactory;
-    private final String configurationServerURI;
+    private final String apiServerURI;
     private Map<String, IResourceService> restInterfaces;
 
     @Inject
     public ResourceClientLibrary(IRestInterfaceFactory restInterfaceFactory,
-                                 @Named("system.apiServerURI") String configurationServerURI) {
+                                 @Named("system.apiServerURI") String apiServerURI) {
         this.restInterfaceFactory = restInterfaceFactory;
-        this.configurationServerURI = configurationServerURI;
+        this.apiServerURI = apiServerURI;
         init();
     }
 
@@ -36,7 +36,7 @@ public class ResourceClientLibrary implements IResourceClientLibrary {
         restInterfaces.put("ai.labs.parser", (id, version) -> {
             try {
                 IRestParserStore parserStore = restInterfaceFactory.get(IRestParserStore.class,
-                        configurationServerURI);
+                        apiServerURI);
                 return parserStore.readParser(id, version);
             } catch (Exception e) {
                 throw new ServiceException(e.getLocalizedMessage(), e);
@@ -46,7 +46,7 @@ public class ResourceClientLibrary implements IResourceClientLibrary {
         restInterfaces.put("ai.labs.regulardictionary", (id, version) -> {
             try {
                 IRestRegularDictionaryStore dictionaryStore = restInterfaceFactory.get(IRestRegularDictionaryStore.class,
-                        configurationServerURI);
+                        apiServerURI);
                 return dictionaryStore.readRegularDictionary(id, version, "", "", 0, 0);
             } catch (Exception e) {
                 throw new ServiceException(e.getLocalizedMessage(), e);
@@ -56,7 +56,7 @@ public class ResourceClientLibrary implements IResourceClientLibrary {
         restInterfaces.put("ai.labs.behavior", (id, version) -> {
             try {
                 IRestBehaviorStore behaviorStore = restInterfaceFactory.get(IRestBehaviorStore.class,
-                        configurationServerURI);
+                        apiServerURI);
                 return behaviorStore.readBehaviorRuleSet(id, version);
             } catch (Exception e) {
                 throw new ServiceException(e.getLocalizedMessage(), e);
@@ -66,7 +66,7 @@ public class ResourceClientLibrary implements IResourceClientLibrary {
         restInterfaces.put("ai.labs.output", (id, version) -> {
             try {
                 IRestOutputStore outputStore = restInterfaceFactory.get(IRestOutputStore.class,
-                        configurationServerURI);
+                        apiServerURI);
                 return outputStore.readOutputSet(id, version, "", "", 0, 0);
             } catch (Exception e) {
                 throw new ServiceException(e.getLocalizedMessage(), e);

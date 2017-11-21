@@ -1,5 +1,6 @@
 package ai.labs.api;
 
+import ai.labs.backupservice.bootstrap.BackupServiceModule;
 import ai.labs.behavior.bootstrap.BehaviorModule;
 import ai.labs.bootstrap.UserModule;
 import ai.labs.caching.bootstrap.CachingModule;
@@ -76,7 +77,8 @@ public class ApiServer {
                 new CoreModule(),
                 new SwaggerModule(new FileInputStream(configDir + "swagger.properties")),
                 new ServerRuntimeModule(new FileInputStream(configDir + "webServer.properties")),
-                new FacebookMessengerModule()
+                new FacebookMessengerModule(),
+                new BackupServiceModule(),
         };
 
         //init modules

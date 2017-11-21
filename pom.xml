@@ -54,6 +54,8 @@
         <module>templateengine-impl-thymeleaf</module>
         <module>propertydisposer-definition</module>
         <module>propertydisposer-impl</module>
+        <module>backupservice-defintion</module>
+        <module>backupservice-impl</module>
     </modules>
 
     <build>
