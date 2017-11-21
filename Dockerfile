@@ -14,6 +14,10 @@ RUN apk add bash
 #create workdir
 RUN mkdir -p /apiserver/
 WORKDIR /apiserver/
+
+#copy licences information of open source components
+COPY /licenses/ /apiserver/licences
+
 #create log dir
 RUN mkdir /apiserver/logs
 #create distribution/target dir (artifact used for deployment)
