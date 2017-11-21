@@ -1,11 +1,14 @@
 package ai.labs.backupservice;
 
+import io.swagger.annotations.Api;
+
 import javax.ws.rs.*;
 import javax.ws.rs.core.Response;
 
 /**
  * @author ginccc
  */
+@Api(value = "backup")
 @Path("/backup/export")
 public interface IRestExportService {
     @GET

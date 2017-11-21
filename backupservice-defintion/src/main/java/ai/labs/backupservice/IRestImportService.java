@@ -1,5 +1,7 @@
 package ai.labs.backupservice;
 
+import io.swagger.annotations.Api;
+
 import javax.ws.rs.Consumes;
 import javax.ws.rs.POST;
 import javax.ws.rs.Path;
@@ -10,6 +12,7 @@ import java.io.InputStream;
 /**
  * @author ginccc
  */
+@Api(value = "backup")
 @Path("backup/import")
 public interface IRestImportService {
     @POST
