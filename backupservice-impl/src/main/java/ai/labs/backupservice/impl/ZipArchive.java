@@ -55,7 +55,7 @@ public class ZipArchive implements IZipArchive {
         FileInputStream fis = new FileInputStream(file);
 
         String zipFilePath = file.getCanonicalPath().substring(directoryToZip.getCanonicalPath().length() + 1,
-                file.getCanonicalPath().length());
+                file.getCanonicalPath().length()).replace('\\', '/');
         ZipEntry zipEntry = new ZipEntry(zipFilePath);
         zos.putNextEntry(zipEntry);
 

@@ -83,18 +83,19 @@ public class RestImportService extends AbstractBackupService implements IRestImp
                             BotConfiguration botConfiguration =
                                     jsonSerialization.deserialize(botFileString, BotConfiguration.class);
                             botConfiguration.getPackages().forEach(packageUri ->
-                                    parsePackage(targetDirPath, packageUri, botConfiguration));
+                                    parsePackage(targetDirPath, packageUri, botConfiguration, response));
 
                             URI newBotUri = createNewBot(botConfiguration);
                             updateDocumentDescriptor(Paths.get(targetDirPath), buildOldBotUri(botFilePath), newBotUri);
                             response.resume(Response.ok().location(newBotUri).build());
                         } catch (IOException | RestInterfaceFactory.RestInterfaceFactoryException e) {
                             log.error(e.getLocalizedMessage(), e);
+                            response.resume(new InternalServerErrorException());
                         }
                     });
         } catch (IOException e) {
             log.error(e.getLocalizedMessage(), e);
-            throw new InternalServerErrorException();
+            response.resume(new InternalServerErrorException());
         }
     }
 
@@ -106,7 +107,7 @@ public class RestImportService extends AbstractBackupService implements IRestImp
         return URI.create(IRestBotStore.resourceURI + oldBotId + IRestBotStore.versionQueryParam + "1");
     }
 
-    private void parsePackage(String targetDirPath, URI packageUri, BotConfiguration botConfiguration) {
+    private void parsePackage(String targetDirPath, URI packageUri, BotConfiguration botConfiguration, AsyncResponse response) {
         try {
             IResourceId packageResourceId = RestUtilities.extractResourceId(packageUri);
             String packageId = packageResourceId.getId();
@@ -159,10 +160,12 @@ public class RestImportService extends AbstractBackupService implements IRestImp
                         } catch (IOException | RestInterfaceFactory.RestInterfaceFactoryException |
                                 CallbackMatcher.CallbackMatcherException e) {
                             log.error(e.getLocalizedMessage(), e);
+                            response.resume(new InternalServerErrorException());
                         }
                     });
         } catch (IOException e) {
             log.error(e.getLocalizedMessage(), e);
+            response.resume(new InternalServerErrorException());
         }
     }
 
