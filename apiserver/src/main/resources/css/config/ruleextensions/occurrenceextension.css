@@ -1,0 +1,57 @@
+.occurrence_control {
+    background-color: white;
+    padding: 3px;
+    margin: 5px;
+    text-overflow: ellipsis;
+    -o-text-overflow: ellipsis; /* required for Opera */
+    -ms-text-overflow: ellipsis; /* required for IE8, allegedly */
+    -moz-box-shadow: 0 0 10px 1px #ccc;
+    -webkit-box-shadow: 0 0 10px 1px #ccc;
+    box-shadow: 0 0 10px 1px #ccc;
+}
+
+.occurrence_control_context {
+    cursor: pointer;
+    float: left;
+    background-color: #84c7f5;
+    padding-top: 3px;
+    padding-bottom: 3px;
+    min-width: 45px;
+    margin: 5px;
+    border-radius: 3px;
+    text-overflow: ellipsis;
+    -o-text-overflow: ellipsis; /* required for Opera */
+    -ms-text-overflow: ellipsis; /* required for IE8, allegedly */
+    border-width: 1px;
+    border-color: #aaaaaa;
+    border-style: solid;
+}
+
+.occurrence_control_rulerow {
+    padding: 3px;
+    margin: 5px;
+}
+
+.occurrence_control_rulenamedescriptor {
+    float: left;
+    width: 20%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    -o-text-overflow: ellipsis; /* required for Opera */
+    -ms-text-overflow: ellipsis; /* required for IE8, allegedly */
+}
+
+.occurrence_control_rulename {
+    background-color: #84c7f5;
+    padding-top: 3px;
+    padding-bottom: 3px;
+    float: right;
+    width: 75%;
+    text-overflow: ellipsis;
+    -o-text-overflow: ellipsis; /* required for Opera */
+    -ms-text-overflow: ellipsis; /* required for IE8, allegedly */
+    border-radius: 3px;
+    border-width: 1px;
+    border-color: #aaaaaa;
+    border-style: solid;
+}

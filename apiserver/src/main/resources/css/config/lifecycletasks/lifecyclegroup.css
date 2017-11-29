@@ -1,0 +1,131 @@
+.lifecyclegroup_closed {
+    width: 90%;
+    background-color: white;
+    margin: 15px 15px 0px 15px;
+    -moz-box-shadow: 0 0 10px 1px #ccc;
+    -webkit-box-shadow: 0 0 10px 1px #ccc;
+    box-shadow: 0 0 10px 1px #ccc;
+}
+
+.lifecyclegroup_opened {
+    width: 90%;
+    background-color: white;
+    margin: 15px 15px 0px 15px;
+    -moz-box-shadow: 0 0 10px 1px #ccc;
+    -webkit-box-shadow: 0 0 10px 1px #ccc;
+    box-shadow: 0 0 10px 1px #ccc;
+    padding-bottom: 8px;
+}
+
+.lifecyclegroup_rightbutton {
+    cursor: pointer;
+    width: 23px;
+    height: 40px;
+    background-repeat: no-repeat;
+    margin-right: 12px;
+    float: right;
+    background-image: url('/binary/img/config/headeritem_add.png');
+    background-size: contain;
+}
+
+.lifecyclegroup_leftbutton_closed {
+    cursor: pointer;
+    width: 2em;
+    height: 2em;
+    margin: 8px;
+    float: left;
+    background-image: url('/binary/img/config/arrowright.png');
+    background-repeat: no-repeat;
+    background-size: contain;
+}
+
+.lifecyclegroup_leftbutton_opened {
+    cursor: pointer;
+    width: 2em;
+    height: 2em;
+    margin: 8px;
+    float: left;
+    background-image: url('/binary/img/config/arrowright.png');
+    background-size: contain;
+    background-repeat: no-repeat;
+    -moz-transform: rotate(90deg); /* FF3.5+ */
+    -o-transform: rotate(90deg); /* Opera 10.5 */
+    -webkit-transform: rotate(90deg); /* Saf3.1+, Chrome */
+    filter: progid:DXImageTransform.Microsoft.BasicImage(rotation=1.57); /* IE6,IE7 */
+    -ms-filter: "progid:DXImageTransform.Microsoft.BasicImage(rotation=1.57)"; /* IE8 */
+    -ms-transform: rotate(90deg); /* IE9 */
+}
+
+.lifecyclegroup_text_opened {
+    max-width: 250px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    -o-text-overflow: ellipsis; /* required for Opera */
+    -ms-text-overflow: ellipsis; /* required for IE8, allegedly */
+    display: block;
+    font-size: 18px;
+    margin-top: 12px;
+    float: left;
+}
+
+.lifecyclegroup_text_closed {
+    max-width: 300px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    -o-text-overflow: ellipsis; /* required for Opera */
+    -ms-text-overflow: ellipsis; /* required for IE8, allegedly */
+    display: block;
+    font-size: 18px;
+    margin-top: 12px;
+    float: left;
+}
+
+.lifecyclegroup_footer {
+    height: 48px;
+}
+
+.lifecyclegroup_sortable_inner {
+    min-height: 100px;
+}
+
+.lifecyclegroup_sequencenumber {
+    margin: 8px;
+    padding-left: 2px;
+    float: right;
+    background-image: -moz-radial-gradient(25px 25px 45deg, circle cover, yellow 0%, orange 100%, red 95%);
+    background-image: -webkit-radial-gradient(25px 25px, circle cover, yellow, orange);
+    background-image: radial-gradient(25px 25px 45deg, circle cover, yellow 0%, orange 100%, red 95%);
+    border-radius: 50%;
+    width: 2em;
+    height: 2em;
+    /* width and height can be anything, as long as they're equal */
+}
+
+.lifecyclegroup_sequencenumbertext {
+    margin-top: 0.5em;
+    margin-left: 0.7em;
+}
+
+.lifecyclegroup_closed_placeholder {
+    padding: 8px;
+    width: 90%;
+    background-color: #f08080;
+    float: left;
+    margin: 15px 15px 0px 15px;
+    border-radius: 8px;
+    border-bottom-color: black;
+    border-width: medium;
+    border-style: dashed;
+}
+
+.lifecyclegroup_opened_placeholder {
+    padding: 8px;
+    width: 90%;
+    background-color: #ffa07a;
+    float: left;
+    margin: 15px 15px 0px 15px;
+    border-radius: 8px;
+    border-bottom-color: black;
+    border-width: medium;
+    border-style: dashed;
+}

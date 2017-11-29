@@ -1,0 +1,8 @@
+.unknownextension_control {
+    background-color: white;
+    padding: 3px;
+    margin: 5px;
+    -moz-box-shadow: 0 0 10px 1px #ccc;
+    -webkit-box-shadow: 0 0 10px 1px #ccc;
+    box-shadow: 0 0 10px 1px #ccc;
+}

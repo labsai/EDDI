@@ -1,0 +1,129 @@
+.documentdescriptioncontrol_closed {
+    width: 90%;
+    background-color: white;
+    margin: 15px 15px 0px 15px;
+    -moz-box-shadow: 0 0 10px 1px #ccc;
+    -webkit-box-shadow: 0 0 10px 1px #ccc;
+    box-shadow: 0 0 10px 1px #ccc;
+}
+
+.documentdescriptioncontrol_opened {
+    width: 90%;
+    background-color: white;
+    margin: 15px 15px 0px 15px;
+    -moz-box-shadow: 0 0 10px 1px #ccc;
+    -webkit-box-shadow: 0 0 10px 1px #ccc;
+    box-shadow: 0 0 10px 1px #ccc;
+}
+
+.documentdescriptioncontrol_rightbutton {
+    cursor: pointer;
+    width: 23px;
+    height: 40px;
+    background-repeat: no-repeat;
+    margin-right: 12px;
+    float: right;
+    background-image: url('/binary/img/config/headeritem_add.png');
+    background-size: contain;
+}
+
+.documentdescriptioncontrol_leftbutton_closed {
+    cursor: pointer;
+    width: 2em;
+    height: 2em;
+    margin: 8px;
+    float: left;
+    background-image: url('/binary/img/config/arrowright.png');
+    background-repeat: no-repeat;
+    background-size: contain;
+}
+
+.documentdescriptioncontrol_leftbutton_opened {
+    cursor: pointer;
+    width: 2em;
+    height: 2em;
+    margin: 8px;
+    float: left;
+    background-image: url('/binary/img/config/arrowright.png');
+    background-size: contain;
+    background-repeat: no-repeat;
+    -moz-transform: rotate(90deg); /* FF3.5+ */
+    -o-transform: rotate(90deg); /* Opera 10.5 */
+    -webkit-transform: rotate(90deg); /* Saf3.1+, Chrome */
+    filter: progid:DXImageTransform.Microsoft.BasicImage(rotation=1.57); /* IE6,IE7 */
+    -ms-filter: "progid:DXImageTransform.Microsoft.BasicImage(rotation=1.57)"; /* IE8 */
+    -ms-transform: rotate(90deg); /* IE9 */
+}
+
+.documentdescriptioncontrol_title_opened {
+    max-width: 250px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    -o-text-overflow: ellipsis; /* required for Opera */
+    -ms-text-overflow: ellipsis; /* required for IE8, allegedly */
+    display: block;
+    font-size: 18px;
+    font-family: Isonorm;
+    margin-top: 12px;
+    float: left;
+}
+
+.documentdescriptioncontrol_title_closed {
+    max-width: 300px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    -o-text-overflow: ellipsis; /* required for Opera */
+    -ms-text-overflow: ellipsis; /* required for IE8, allegedly */
+    display: block;
+    font-size: 18px;
+    font-family: Isonorm;
+    margin-top: 12px;
+    float: left;
+}
+
+.documentdescriptioncontrol_footer {
+
+}
+
+.documentdescriptioncontrol_sortable_inner {
+    min-height: 100px;
+}
+
+.documentdescriptioncontrol_sortable_inner:last-child:after {
+    content: ".";
+    display: block;
+    height: 0;
+    clear: both;
+    visibility: hidden;
+}
+
+.documentdescriptioncontrol_sequencenumbertext {
+    line-height: 40px;
+    text-align: center;
+}
+
+.documentdescriptioncontrol_closed_placeholder {
+    width: 90%;
+    margin-left: 15px;
+    margin-top: 15px;
+    overflow-y: hidden;
+    -moz-box-shadow: 0 0 10px 1px #ccc;
+    -webkit-box-shadow: 0 0 10px 1px #ccc;
+    box-shadow: 0 0 10px 1px #ccc;
+    border-color: #e4bac5;
+    border-width: medium;
+    border-style: dashed;
+}
+
+.documentdescriptioncontrol_opened_placeholder {
+    width: 90%;
+    margin-left: 15px;
+    margin-top: 15px;
+    overflow-y: hidden;
+    -moz-box-shadow: 0 0 10px 1px #ccc;
+    -webkit-box-shadow: 0 0 10px 1px #ccc;
+    box-shadow: 0 0 10px 1px #ccc;
+    border-color: #e4bac5;
+    border-width: medium;
+    border-style: dashed;
+}
