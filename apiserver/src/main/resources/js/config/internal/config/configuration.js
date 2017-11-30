@@ -126,6 +126,8 @@ function Configuration(url) {
             "connector": {model: ConnectorModel, control: ConnectorControl},
             "occurrence": {model: OccurrenceModel, control: OccurrenceControl},
             "inputmatcher": {model: InputmatcherModel, control: InputmatcherControl},
+            "contextmatcher": {model: InputmatcherModel, control: InputmatcherControl},
+            "actionmatcher": {model: InputmatcherModel, control: InputmatcherControl},
             "negation": {model: NegationModel, control: NegationControl},
             "dependency": {model: DependencyModel, control: DependencyControl},
             "resultSize": {model: ResultSizeModel, control: ResultSizeControl},
