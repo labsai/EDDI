@@ -1,6 +1,6 @@
 function UnknownExtensionControl(model) {
     this.createRepresentation = function () {
-        var representation = '<div id="' + model.idPrefix + model.id + '" class="' + model.CSSClassBase + '">' + window.lang.convert('UNKNOWN_EXTENSION') + '<b>' +
+        let representation = '<div id="' + model.idPrefix + model.id + '" class="' + model.CSSClassBase + '">' + window.lang.convert('UNKNOWN_EXTENSION') + '<b>' +
             model.type + '</b>' + '.' + '</div>';
 
         return representation;
@@ -16,7 +16,7 @@ function UnknownExtensionControl(model) {
 
     this.registerButtonEvents = function () {
         /** Preserve additional state classes. */
-        for (var i = 0; i < model.additionalClasses.length; ++i) {
+        for (let i = 0; i < model.additionalClasses.length; ++i) {
             $('#' + model.idPrefix + model.id).addClass(model.additionalClasses[i]);
         }
     }

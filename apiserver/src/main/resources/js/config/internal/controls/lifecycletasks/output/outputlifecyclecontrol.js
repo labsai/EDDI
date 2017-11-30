@@ -1,49 +1,47 @@
 function OutputLifecycleControl(model) {
-    var groupControlIdPrefix = model.idPrefix + 'backinggroupcontrol_';
-    var selectionControlIdPrefix = model.idPrefix + 'selectioncontrol_';
-    var selectionControlCSSClassBase = 'selectioncontrol';
+    let groupControlIdPrefix = model.idPrefix + 'backinggroupcontrol_';
+    let selectionControlIdPrefix = model.idPrefix + 'selectioncontrol_';
+    let selectionControlCSSClassBase = 'selectioncontrol';
 
-    var groupControlBuilder = new GroupControlBuilder();
-    var groupControl = groupControlBuilder.createStandardUneditableGroupControl(model.id, groupControlIdPrefix,
+    let groupControlBuilder = new GroupControlBuilder();
+    let groupControl = groupControlBuilder.createStandardUneditableGroupControl(model.id, groupControlIdPrefix,
         window.lang.convert('OUTPUTLIFECYCLE_NAME'), true, true, false, 'packagecontrol', false);
 
-    var instance = this;
+    let instance = this;
     /** Configure the OutputLifecycleControl to act as a transparent proxy for its backing groupControl. */
     this.observer = new Observer(function (event) {
-        var newEvent = jQuery.extend(true, {}, event);
+        let newEvent = jQuery.extend(true, {}, event);
         newEvent.sender = instance;
         instance.observable.notify(newEvent);
     });
     this.observable = new Observable();
     groupControl.observable.addObserver(this.observer);
 
-    var nameArray = [];
+    let nameArray = [];
 
-    for (var i = 0; i < model.backingArray.length; ++i) {
+    for (let i = 0; i < model.backingArray.length; ++i) {
         nameArray.push(model.backingArray[i].name);
     }
 
-    var selectionModel = new ArraySelectionControlModel(model.id, selectionControlIdPrefix,
+    let selectionModel = new ArraySelectionControlModel(model.id, selectionControlIdPrefix,
         selectionControlCSSClassBase, nameArray,
         model.selectedItemIndex);
 
-    var selectionControl = new ArraySelectionControl(selectionModel);
+    let selectionControl = new ArraySelectionControl(selectionModel);
     groupControl.getModel().addChild(selectionControl);
     model.children.push(groupControl);
 
     this.createRepresentation = function () {
-        var representation = '<div id="' + model.idPrefix + model.id + '">' + groupControl.createRepresentation() + '<div class="clear"></div></div>';
-
-        return representation;
-    }
+        return '<div id="' + model.idPrefix + model.id + '">' + groupControl.createRepresentation() + '<div class="clear"></div></div>';
+    };
 
     this.getModel = function () {
         return model;
-    }
+    };
 
     this.getHeight = function () {
         return $('#' + model.idPrefix + model.id).outerHeight(true);
-    }
+    };
 
     this.registerButtonEvents = function () {
         groupControl.registerButtonEvents();

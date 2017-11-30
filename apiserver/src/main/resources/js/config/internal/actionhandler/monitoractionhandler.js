@@ -1,18 +1,18 @@
 function MonitorActionHandler(contentBuilder, dataProvider) {
-    var instance = this;
+    let instance = this;
     this.observer = new Observer(function (event) {
         switch (event.command) {
             case 'CreateTestCase':
                 dataProvider.createTestCase(application.dataProvider.dataProviderState.getActiveId());
 
-                var query = $.url.parse(application.url.getUriForPage('testcases'));
+                let query = $.url.parse(application.url.getUriForPage('testcases'));
 
                 if (typeof query.params === 'undefined') {
                     query.params = {};
                 }
 
-                var botId = application.contentModelProvider.getBotId();
-                var botVersion = application.contentModelProvider.getBotVersion();
+                let botId = application.contentModelProvider.getBotId();
+                let botVersion = application.contentModelProvider.getBotVersion();
 
                 if (typeof botId !== 'undefined') {
                     query.params.botId = botId;

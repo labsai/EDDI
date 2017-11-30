@@ -1,12 +1,12 @@
 function ContextButton(contextButtonModelCtr) {
-    var idPrefix = 'contextbuttonid_';
-    var CSSClassBase = 'contextbutton';
-    var textPostfix = '_text';
-    var iconPostfix = '_icon';
-    var contextButtonModel = contextButtonModelCtr;
+    let idPrefix = 'contextbuttonid_';
+    let CSSClassBase = 'contextbutton';
+    let textPostfix = '_text';
+    let iconPostfix = '_icon';
+    let contextButtonModel = contextButtonModelCtr;
 
     this.createRepresentation = function () {
-        var representation;
+        let representation;
 
         representation = '<div id="' + idPrefix + contextButtonModel.id + '" class="' + CSSClassBase + '"> \
             <div class="' + CSSClassBase + iconPostfix + ' ' + contextButtonModel.imageClass + '"></div> \
@@ -14,13 +14,13 @@ function ContextButton(contextButtonModelCtr) {
             </div>';
 
         return representation;
-    }
+    };
 
     this.registerButtonEvents = function () {
         $('#' + idPrefix + contextButtonModel.id).click(function (e) {
             contextButtonModel.action.call(contextButtonModel.actionInstance);
         });
-    }
+    };
 
     this.getModel = function () {
         return contextButtonModel;

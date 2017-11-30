@@ -1,7 +1,7 @@
 function ErrorHelper() {
     this.showError = function (params) {
-        var text = window.lang.convert('ERROR_GENERAL');
-        var callback = function (success) {
+        let text = window.lang.convert('ERROR_GENERAL');
+        let callback = function (success) {
             if (success) {
                 window.location.assign(application.url.getUriForPage(application.url.getCurrentPage()));
             }
@@ -17,9 +17,9 @@ function ErrorHelper() {
             }
         }
 
-        var dialogModel = new DialogControlModel(text, callback, window.lang.convert('OK_BUTTON'));
+        let dialogModel = new DialogControlModel(text, callback, window.lang.convert('OK_BUTTON'));
 
-        var dialogControl = new DialogControl(dialogModel);
+        let dialogControl = new DialogControl(dialogModel);
 
         dialogControl.showDialog();
     }

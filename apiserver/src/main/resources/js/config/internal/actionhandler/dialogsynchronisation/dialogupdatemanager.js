@@ -1,28 +1,28 @@
 function DialogUpdateManager(dataProvider, animated) {
-    var synchronisationHelper = new DialogSynchronisationHelper(dataProvider);
-    var newStateClassName = application.configuration.newStateClassName;
-    var editedStateClassName = application.configuration.editedStateClassName;
-    var idResolver = new HTMLIDResolver();
+    let synchronisationHelper = new DialogSynchronisationHelper(dataProvider);
+    let newStateClassName = application.configuration.newStateClassName;
+    let editedStateClassName = application.configuration.editedStateClassName;
+    let idResolver = new HTMLIDResolver();
 
 
-    var moveItemControlTree = function (event) {
-        var item = event.item;
-        var sender = event.sender;
-        var receiver = event.receiver;
-        var newIndex = event.newIndex;
+    let moveItemControlTree = function (event) {
+        let item = event.item;
+        let sender = event.sender;
+        let receiver = event.receiver;
+        let newIndex = event.newIndex;
 
-        var children = sender.getModel().children;
+        let children = sender.getModel().children;
 
         children.removeElement(item);
         receiver.getModel().children.splice(newIndex, 0, item);
-    }
+    };
 
-    var moveItemJSONTree = function (event, manager) {
-        var item = event.item;
-        var sender = event.sender;
-        var receiver = event.receiver;
+    let moveItemJSONTree = function (event, manager) {
+        let item = event.item;
+        let sender = event.sender;
+        let receiver = event.receiver;
 
-        var itemJSON = manager.getElementWithId(item.getModel().id);
+        let itemJSON = manager.getElementWithId(item.getModel().id);
         manager.deleteElementWithId(item.getModel().id);
 
         if (receiver == application.configuration.rootElementReceiver) {
@@ -30,19 +30,19 @@ function DialogUpdateManager(dataProvider, animated) {
         } else {
             manager.addChildElementAtIdAndIndex(receiver.getModel().id, event.newIndex, itemJSON);
         }
-    }
+    };
 
     this.sortableUpdatedItem = function (event) {
-        var oldIndex = event.ui.item.data('old_index');
-        var newIndex = event.ui.item.data('new_index');
+        let oldIndex = event.ui.item.data('old_index');
+        let newIndex = event.ui.item.data('new_index');
 
-        var moveItemIndexArray = function (array, oldIndexParam, newIndexParam) {
-            var tmp = array.splice(oldIndexParam, 1)[0];
+        let moveItemIndexArray = function (array, oldIndexParam, newIndexParam) {
+            let tmp = array.splice(oldIndexParam, 1)[0];
             array.splice(newIndexParam, 0, tmp);
         };
 
-        var isRootLevel = false;
-        var parentControl;
+        let isRootLevel = false;
+        let parentControl;
         try {
             parentControl = idResolver.resolveId($(event.sender).attr('id'));
         } catch (ex) {
@@ -53,7 +53,7 @@ function DialogUpdateManager(dataProvider, animated) {
             }
         }
 
-        var htmlId;
+        let htmlId;
         if (!isRootLevel) {
             moveItemIndexArray(parentControl.getModel().children, oldIndex, newIndex);
 
@@ -78,19 +78,19 @@ function DialogUpdateManager(dataProvider, animated) {
         $(htmlId).addClass(application.configuration.editedStateClassName);
 
         application.reloadManager.changesHappened();
-    }
+    };
 
     this.sortableReceivedItem = function (event) {
-        var item = event.item;
-        var sender = event.sender;
-        var receiver = event.receiver;
+        let item = event.item;
+        let sender = event.sender;
+        let receiver = event.receiver;
 
-        var tmpRepresentation = application.jsonRepresentationManager.clone();
+        let tmpRepresentation = application.jsonRepresentationManager.clone();
         moveItemJSONTree(event, tmpRepresentation);
 
-        var tmpSet = tmpRepresentation.getRuleSetView();
+        let tmpSet = tmpRepresentation.getRuleSetView();
 
-        var htmlId = '#' + item.getModel().idPrefix + item.getModel().id;
+        let htmlId = '#' + item.getModel().idPrefix + item.getModel().id;
 
         if (animated) {
             $(htmlId).showLoadingIndicator();
@@ -148,47 +148,47 @@ function DialogUpdateManager(dataProvider, animated) {
                     });
                 }
             });
-    }
+    };
 
-    var updatePropertyJSON = function (event, boundValue, manager) {
+    let updatePropertyJSON = function (event, boundValue, manager) {
         if (event.mappingPropertyJSON === "groupName") {
             manager.updateGroupName(event.oldValue, boundValue);
         } else {
-            if (boundValue instanceof Array && event.mappingPropertyJSON != 'actions') {
-                for (var i = 0; i < boundValue.length; ++i) {
+            if (boundValue instanceof Array && event.mappingPropertyJSON !== 'actions') {
+                for (let i = 0; i < boundValue.length; ++i) {
                     manager.updateElementWithId(event.sender.getModel().id, event.mappingPropertyJSON[i], boundValue[i]);
                 }
             } else {
                 manager.updateElementWithId(event.sender.getModel().id, event.mappingPropertyJSON, boundValue);
             }
         }
-    }
+    };
 
-    var updatePropertyControlTree = function (event, boundValue) {
+    let updatePropertyControlTree = function (event, boundValue) {
         if (boundValue instanceof Array) {
-            for (var i = 0; i < boundValue.length; ++i) {
+            for (let i = 0; i < boundValue.length; ++i) {
                 event.sender.getModel()[event.mappingPropertyControl[i]] = boundValue[i];
             }
         } else {
             event.sender.getModel()[event.mappingPropertyControl] = boundValue;
         }
-    }
+    };
 
     this.valueChanged = function (event) {
-        var boundValue;
+        let boundValue;
         if (event.isUserInput) {
             boundValue = application.bindingManager.bindFromString(event.value);
 
-            if (event.mappingPropertyControl == 'actions') {
+            if (event.mappingPropertyControl === 'actions') {
                 boundValue = boundValue.split(',');
 
-                var tmp = [];
-                for (var i = 0; i < boundValue.length; ++i) {
+                let tmp = [];
+                for (let i = 0; i < boundValue.length; ++i) {
                     /** Trim values. */
                     boundValue[i] = jQuery.trim(boundValue[i]);
 
                     /** Remove empty strings. */
-                    if (boundValue[i] != '') {
+                    if (boundValue[i] !== '') {
                         tmp.push(boundValue[i]);
                     }
                 }
@@ -199,13 +199,13 @@ function DialogUpdateManager(dataProvider, animated) {
             boundValue = event.value;
         }
 
-        var tmpRepresentation = application.jsonRepresentationManager.clone();
+        let tmpRepresentation = application.jsonRepresentationManager.clone();
 
         updatePropertyJSON(event, boundValue, tmpRepresentation);
 
-        var tmpSet = tmpRepresentation.getRuleSetView();
+        let tmpSet = tmpRepresentation.getRuleSetView();
 
-        var htmlId = '#' + event.sender.getModel().idPrefix + event.sender.getModel().id;
+        let htmlId = '#' + event.sender.getModel().idPrefix + event.sender.getModel().id;
 
         if (animated) {
             $(htmlId).showLoadingIndicator();

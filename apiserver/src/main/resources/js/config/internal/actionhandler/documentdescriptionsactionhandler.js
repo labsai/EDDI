@@ -1,9 +1,9 @@
 function DocumentDescriptionsActionHandler(contentBuilder, dataProvider, page) {
-    var instance = this;
-    var synchronisationHelper = new DialogSynchronisationHelper(dataProvider);
+    let instance = this;
+    let synchronisationHelper = new DialogSynchronisationHelper(dataProvider);
 
     this.valueChanged = function (id, version, event) {
-        var patchInstruction = application.jsonBlueprintFactory.makeBlueprintForObjectType('PatchInstruction');
+        let patchInstruction = application.jsonBlueprintFactory.makeBlueprintForObjectType('PatchInstruction');
         patchInstruction.operation = 0; // = SET
         patchInstruction.document = event.newRowValue;
 
@@ -31,7 +31,7 @@ function DocumentDescriptionsActionHandler(contentBuilder, dataProvider, page) {
                 }
             }
         );
-    }
+    };
 
     this.observer = new Observer(function (event) {
         switch (event.command) {
@@ -99,8 +99,8 @@ function DocumentDescriptionsActionHandler(contentBuilder, dataProvider, page) {
                 }
                 break;
             case 'LimitChanged':
-                if (event.oldValue != event.value) {
-                    var query = $.url.parse(window.location.href);
+                if (event.oldValue !== event.value) {
+                    let query = $.url.parse(window.location.href);
 
                     if (typeof query.params === 'undefined') {
                         query.params = {};
@@ -116,8 +116,8 @@ function DocumentDescriptionsActionHandler(contentBuilder, dataProvider, page) {
                 }
                 break;
             case 'IndexChanged':
-                if (event.oldValue != event.value) {
-                    var query = $.url.parse(window.location.href);
+                if (event.oldValue !== event.value) {
+                    let query = $.url.parse(window.location.href);
 
                     if (typeof query.params === 'undefined') {
                         query.params = {};
@@ -133,7 +133,7 @@ function DocumentDescriptionsActionHandler(contentBuilder, dataProvider, page) {
                 break;
             case 'SearchSelected':
                 if (typeof event.value !== 'undefined' && event.value.length >= 0) {
-                    var query = $.url.parse(window.location.href);
+                    let query = $.url.parse(window.location.href);
 
                     if (typeof query.params === 'undefined') {
                         query.params = {};

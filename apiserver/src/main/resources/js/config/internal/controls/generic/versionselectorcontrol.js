@@ -1,57 +1,53 @@
 function VersionSelectorControl(model) {
-    var gotoCSSClassPostfix = '_goto';
-    var resourceUriPostfix = '_resourceuri';
-    var iconCSSClassPostfix = '_icon';
-    var textCSSClassPostfix = '_text';
-    var dropdownCSSClassPostfix = '_dropdown';
+    let gotoCSSClassPostfix = '_goto';
+    let resourceUriPostfix = '_resourceuri';
+    let iconCSSClassPostfix = '_icon';
+    let textCSSClassPostfix = '_text';
+    let dropdownCSSClassPostfix = '_dropdown';
 
-    var instance = this;
+    let instance = this;
 
     this.observable = new Observable();
 
-    var makeAnchorTags = function () {
-        var page = application.url.getCurrentPage();
+    let makeAnchorTags = function () {
+        let page = application.url.getCurrentPage();
 
-        var isParentPage = function () {
-            if (page == 'bots' || page == 'packages') {
-                return true;
-            }
-
-            return false;
+        let isParentPage = function () {
+            return page === 'bots' || page === 'packages';
         };
 
         if (isParentPage() && model.appendAnchorTags) {
-            var parentIdHashKey, parentVersionHashKey;
+            let parentIdHashKey, parentVersionHashKey;
 
-            if (page == 'bots') {
+            if (page === 'bots') {
                 parentIdHashKey = application.configuration.botParentIdHashKey;
                 parentVersionHashKey = application.configuration.botParentVersionHashKey;
-            } else if (page == 'packages') {
+            } else if (page === 'packages') {
                 parentIdHashKey = application.configuration.packageParentIdHashKey;
                 parentVersionHashKey = application.configuration.packageParentVersionHashKey;
             }
 
-            var anchors = '#'
+            let anchors = '#'
                 + parentIdHashKey + '=' + application.url.getCurrentId()
                 + '&' + parentVersionHashKey + '=' + application.url.getCurrentVersion();
 
-            if ($.param.fragment() != "") {
+            if ($.param.fragment() !== "") {
                 anchors += '&' + $.param.fragment();
             }
 
             return anchors;
         } else {
             /** Preserve old anchor tags. */
-            if ($.param.fragment() != "") {
+            if ($.param.fragment() !== "") {
                 return '#' + $.param.fragment();
             } else {
                 return "";
             }
         }
-    }
+    };
 
     this.createRepresentation = function () {
-        var representation = '<div id="' + model.idPrefix + model.id + '" class="' + model.CSSClassBase + '">';
+        let representation = '<div id="' + model.idPrefix + model.id + '" class="' + model.CSSClassBase + '">';
 
         if (model.showLink === true) {
             representation += '<a id="' + model.idPrefix + model.id + resourceUriPostfix + '" href="' + application.url.getEditorUriForResourceUri(model.resourceUri) + makeAnchorTags() + '">\
@@ -64,22 +60,22 @@ function VersionSelectorControl(model) {
         representation += '<div id="' + model.idPrefix + model.id + dropdownCSSClassPostfix + '" class="' + model.CSSClassBase + dropdownCSSClassPostfix + '"></div>';
         representation += '<div class="clear"></div></div>';
         return representation;
-    }
+    };
 
     this.getModel = function () {
         return model;
-    }
+    };
 
-    var onUpdateVersion = function () {
+    let onUpdateVersion = function () {
         $('#' + model.idPrefix + model.id + resourceUriPostfix).attr('href', application.url.getEditorUriForResourceUri(model.resourceUri));
-    }
+    };
 
     this.registerButtonEvents = function () {
         $('#' + model.idPrefix + model.id + gotoCSSClassPostfix).disableSelection();
 
         $('#' + model.idPrefix + model.id + gotoCSSClassPostfix).click(function () {
             model.anchors = makeAnchorTags();
-            instance.observable.notify(new Event(instance, 'GotoVersion'))
+            instance.observable.notify(new Event(instance, 'GotoVersion'));
             return false;
         });
 
@@ -87,7 +83,7 @@ function VersionSelectorControl(model) {
             value: model.currentVersion,
             possibleValues: model.versions.reverse(),
             valueChanged: function (value, oldValue) {
-                var editableEvent = new Event(instance, 'VersionChanged');
+                let editableEvent = new Event(instance, 'VersionChanged');
 
                 editableEvent.value = value;
                 editableEvent.oldValue = oldValue;

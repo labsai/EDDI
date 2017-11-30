@@ -1,13 +1,13 @@
 function BlockControl(model) {
-    var textCSSClassPostfix = '_text';
-    var editableIdPrefix = 'editable_';
-    var deleteableIdPrefix = 'deleteable_';
-    var editableCSSClassPostfix = '_editable';
-    var deleteableCSSClassPostfix = '_deleteable';
-    var rightSideCSSClassPostfix = '_right';
-    var secondRowPostfix = '_secondrow';
+    let textCSSClassPostfix = '_text';
+    let editableIdPrefix = 'editable_';
+    let deleteableIdPrefix = 'deleteable_';
+    let editableCSSClassPostfix = '_editable';
+    let deleteableCSSClassPostfix = '_deleteable';
+    let rightSideCSSClassPostfix = '_right';
+    let secondRowPostfix = '_secondrow';
 
-    var instance = this;
+    let instance = this;
 
     this.observable = new Observable();
     this.observer = new Observer(function (event) {
@@ -18,14 +18,14 @@ function BlockControl(model) {
         }
     });
 
-    var getOnlyPropertyKey = function (object) {
-        for (var property in object) {
+    let getOnlyPropertyKey = function (object) {
+        for (let property in object) {
             return property;
         }
-    }
+    };
 
-    var isResourceUriKey = function (configEntry) {
-        var kResourceIdentifier = 'eddi://';
+    let isResourceUriKey = function (configEntry) {
+        let kResourceIdentifier = 'eddi://';
 
         /** A configElement is a uri-selector if it starts with the __eddi://__ identifier. */
         if (configEntry.type.indexOf(kResourceIdentifier) === 0) {
@@ -33,11 +33,11 @@ function BlockControl(model) {
         } else {
             return false;
         }
-    }
+    };
 
-    var configDefinitionContainsOnlyOneUriElement = function (configDefinition) {
+    let configDefinitionContainsOnlyOneUriElement = function (configDefinition) {
         if (ObjectUtils.prototype.getNumberOfProperties(configDefinition) === 1) {
-            var property = getOnlyPropertyKey(configDefinition);
+            let property = getOnlyPropertyKey(configDefinition);
 
             return isResourceUriKey(configDefinition[property]);
         }
@@ -46,7 +46,7 @@ function BlockControl(model) {
     };
 
     this.createRepresentation = function () {
-        var representation = '<div id="' + model.idPrefix + model.id + '" class="' + model.CSSClassBase + '">' +
+        let representation = '<div id="' + model.idPrefix + model.id + '" class="' + model.CSSClassBase + '">' +
             '<div class="' + model.CSSClassBase + textCSSClassPostfix + '">' + model.text + '</div>';
 
         representation += '<div class="' + model.CSSClassBase + rightSideCSSClassPostfix + '">';
@@ -57,13 +57,13 @@ function BlockControl(model) {
         }
         representation += '<div class="clear"></div></div>';
 
-        representation += '<div class="clear"></div>'
+        representation += '<div class="clear"></div>';
 
-        for (var key in model.configDefinition) {
-            var elem = model.configDefinition[key];
+        for (let key in model.configDefinition) {
+            let elem = model.configDefinition[key];
 
             if (isResourceUriKey(elem)) {
-                var form = new ResourceURIFormElement('resourceuri_white', true, key, elem.type, elem.displayKey, model.task.getModel()[key], model.task.getModel());
+                let form = new ResourceURIFormElement('resourceuri_white', true, key, elem.type, elem.displayKey, model.task.getModel()[key], model.task.getModel());
                 form.observable.addObserver(application.actionHandler.observer);
                 form.observable.addObserver(instance.observer);
 
@@ -73,7 +73,7 @@ function BlockControl(model) {
 
                 model.children.push(form);
             } else {
-                var form = new GenericResourceElement('resourceconfig_white', key, elem.displayKey, model.task.getModel()[key], model.task.getModel());
+                let form = new GenericResourceElement('resourceconfig_white', key, elem.displayKey, model.task.getModel()[key], model.task.getModel());
                 form.observable.addObserver(application.actionHandler.observer);
                 form.observable.addObserver(instance.observer);
 
@@ -88,12 +88,12 @@ function BlockControl(model) {
         representation += '</div>';
 
         return representation;
-    }
+    };
 
     this.registerButtonEvents = function () {
         if (model.editable) {
             $('#' + model.idPrefix + editableIdPrefix + model.id).click(function () {
-                var event = new Event(instance, 'EditElement');
+                let event = new Event(instance, 'EditElement');
 
                 event.configDefinition = model.configDefinition;
 
@@ -109,15 +109,15 @@ function BlockControl(model) {
             });
         }
 
-        for (var i = 0; i < model.children.length; ++i) {
+        for (let i = 0; i < model.children.length; ++i) {
             model.children[i].registerButtonEvents();
         }
 
         /** Preserve additional state classes. */
-        for (var i = 0; i < model.additionalClasses.length; ++i) {
+        for (let i = 0; i < model.additionalClasses.length; ++i) {
             $('#' + model.idPrefix + model.id).addClass(model.additionalClasses[i]);
         }
-    }
+    };
 
     this.getModel = function () {
         return model;
@@ -139,10 +139,10 @@ function BlockControlModel(id, idPrefix, CSSClassBase, text, editable, deleteabl
     this.additionalClasses = [];
 
     this.addClass = function (className) {
-        if (this.additionalClasses.indexOf() == -1) {
+        if (this.additionalClasses.indexOf() === -1) {
             this.additionalClasses.push(className);
         }
-    }
+    };
 
     this.removeClass = function (className) {
         try {

@@ -1,38 +1,38 @@
 function ContentModelHelper() {
     this.createResourceVersionSelectorControl = function () {
-        var uri = application.dataProvider.readActiveDocumentDescription().resource;
+        let uri = application.dataProvider.readActiveDocumentDescription().resource;
 
-        var params = SLSUriParser(uri);
+        let params = SLSUriParser(uri);
 
-        var maxVersion = application.dataProvider.getCurrentVersionForResource(uri);
+        let maxVersion = application.dataProvider.getCurrentVersionForResource(uri);
 
-        var headerIdPrefix = params.id + 'header_';
-        var headerControlModel = new VersionSelectorControlModel(params.id, headerIdPrefix, 'headercontrol',
-            (new Array).arrayWithRange(1, maxVersion), params.version, uri, true, false);
-        var headerControl = new VersionSelectorControl(headerControlModel);
+        let headerIdPrefix = params.id + 'header_';
+        let headerControlModel = new VersionSelectorControlModel(params.id, headerIdPrefix, 'headercontrol',
+            ([]).arrayWithRange(1, maxVersion), params.version, uri, true, false);
+        let headerControl = new VersionSelectorControl(headerControlModel);
 
         headerControl.observable.addObserver(application.actionHandler.observer);
 
-        var resourceVersionControl = new ResourceVersionControl(headerControl);
+        let resourceVersionControl = new ResourceVersionControl(headerControl);
         $('.contextbutton:last').after(resourceVersionControl.createRepresentation());
 
         $('.resourceversion').hide().fadeIn('slow');
 
         resourceVersionControl.registerButtonEvents();
-    }
+    };
 
     this.createDocumentDescriptorDisplayControl = function () {
-        var docDisplayControl = new DocumentDescriptorDisplayControl(application.dataProvider.readActiveDocumentDescription());
+        let docDisplayControl = new DocumentDescriptorDisplayControl(application.dataProvider.readActiveDocumentDescription());
         $('.loginbox').before(docDisplayControl.createRepresentation());
         $('.documentdescriptorui').hide().fadeIn('slow');
 
         docDisplayControl.registerButtonEvents();
-    }
+    };
 
     this.createReturnToParentButton = function () {
-        var anchorParams = application.url.serializeAnchors();
+        let anchorParams = application.url.serializeAnchors();
 
-        var returnToParentCM = null;
+        let returnToParentCM = null;
 
         /**
          * Note: The order here matters.
@@ -56,18 +56,18 @@ function ContentModelHelper() {
             );
         }
 
-        if (returnToParentCM != null) {
-            var returnToParentControl = new ReturnToParentControl(returnToParentCM);
+        if (returnToParentCM !== null) {
+            let returnToParentControl = new ReturnToParentControl(returnToParentCM);
 
             $('.loginbox').before(returnToParentControl.createRepresentation());
             $('.' + returnToParentControl.getModel().cssClassBase).hide().show("slide", {direction: "left"}, 1000);
 
             returnToParentControl.registerButtonEvents();
         }
-    }
+    };
 
     this.createLanguageSelector = function () {
-        var languageSelector = new LanguageSelectorControl();
+        let languageSelector = new LanguageSelectorControl();
 
         if ($('.resourceversion').exists()) {
             $('.resourceversion').after(languageSelector.createRepresentation());

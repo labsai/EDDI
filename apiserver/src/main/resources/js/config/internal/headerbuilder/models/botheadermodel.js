@@ -2,7 +2,7 @@ function BotHeaderModel() {
     this.observable = new Observable();
 
     this.getHeaderModel = function () {
-        var model = [];
+        let model = [];
 
         model.push(new HeaderElement(window.lang.convert('CONTEXT_SAVE'), function () {
             this.observable.notify(new Event(this, 'Save'));
@@ -20,7 +20,7 @@ function BotHeaderModel() {
             this.observable.notify(new Event(this, 'Test'));
         }, this));
 
-        var tmp = new HeaderElement(window.lang.convert('CONTEXT_DEPLOY'), function () {
+        let tmp = new HeaderElement(window.lang.convert('CONTEXT_DEPLOY'), function () {
             this.observable.notify(new Event(this, 'Deploy'));
         }, this);
 
@@ -30,7 +30,7 @@ function BotHeaderModel() {
 
         model.push(tmp);
 
-        var tmp2 = new HeaderElement(window.lang.convert('CONTEXT_TEST_DEPLOY'), function () {
+        let tmp2 = new HeaderElement(window.lang.convert('CONTEXT_TEST_DEPLOY'), function () {
             this.observable.notify(new Event(this, 'TestDeploy'));
         }, this);
 

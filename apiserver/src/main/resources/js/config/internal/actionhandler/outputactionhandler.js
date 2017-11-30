@@ -1,27 +1,27 @@
 function OutputActionHandler(contentBuilder, dataProvider) {
-    var instance = this;
-    var synchronisationHelper = new DialogSynchronisationHelper(dataProvider);
-    var versionHelper = new VersionHelper();
-    var instructionCache = new PatchInstructionCache(dataProvider);
+    let instance = this;
+    let synchronisationHelper = new DialogSynchronisationHelper(dataProvider);
+    let versionHelper = new VersionHelper();
+    let instructionCache = new PatchInstructionCache(dataProvider);
 
     this.deleteRows = function (tableControl) {
         if (tableControl.getSelectedRows().length > 0) {
-            var patchInstructions = [];
+            let patchInstructions = [];
 
             tableControl.getSelectedRows().each(function () {
-                var rowId = $(this).attr("id");
-                var rowIndex;
+                let rowId = $(this).attr("id");
+                let rowIndex;
 
-                if (typeof rowId !== 'undefined' && rowId.indexOf(tableControl.getTableRowPrefix()) == 0) {
+                if (typeof rowId !== 'undefined' && rowId.indexOf(tableControl.getTableRowPrefix()) === 0) {
                     rowIndex = rowId.substring(tableControl.getTableRowPrefix().length, rowId.length);
                 }
 
                 if (typeof rowIndex !== 'undefined') {
-                    var patchInstruction = application.jsonBlueprintFactory.makeBlueprintForObjectType('PatchInstruction');
+                    let patchInstruction = application.jsonBlueprintFactory.makeBlueprintForObjectType('PatchInstruction');
                     patchInstruction.operation = 1; // = DELETE
                     patchInstruction.document = application.jsonBlueprintFactory.makeBlueprintForObjectType('OutputConfigurationSet');
-                    var data = application.jsonBlueprintFactory.makeBlueprintForObjectType(tableControl.getModel().data.context.dataType);
-                    for (var i = 0; i < tableControl.getModel().cols.length; i++) {
+                    let data = application.jsonBlueprintFactory.makeBlueprintForObjectType(tableControl.getModel().data.context.dataType);
+                    for (let i = 0; i < tableControl.getModel().cols.length; i++) {
                         if (tableControl.getModel().cols[i].isServerData) {
                             data[tableControl.getModel().cols[i].context.columnIdentifier] = tableControl.getModel().data.rows[rowIndex][i];
                         }
@@ -57,10 +57,10 @@ function OutputActionHandler(contentBuilder, dataProvider) {
                 }
             );
         }
-    }
+    };
 
     this.addRow = function (event) {
-        var patchInstruction = application.jsonBlueprintFactory.makeBlueprintForObjectType('PatchInstruction');
+        let patchInstruction = application.jsonBlueprintFactory.makeBlueprintForObjectType('PatchInstruction');
         patchInstruction.operation = 0; // = SET
         patchInstruction.document = application.jsonBlueprintFactory.makeBlueprintForObjectType('OutputConfigurationSet');
         patchInstruction.document[event.dataType].push(event.newRowValue);
@@ -70,7 +70,7 @@ function OutputActionHandler(contentBuilder, dataProvider) {
                 if (application.httpCodeManager.successfulRequest(httpCode)) {
                     synchronisationHelper.updateActiveVersion(value);
 
-                    if (event.dataType == 'outputs') {
+                    if (event.dataType === 'outputs') {
                         application.contentModelProvider.addChildControl(['<img class="dataTables_dotbutton" src="/binary/img/config/dotbutton.png"/>',
                             event.newRowValue.key,
                             event.newRowValue.occurrence,
@@ -93,11 +93,11 @@ function OutputActionHandler(contentBuilder, dataProvider) {
                 }
             }
         );
-    }
+    };
 
     this.valueChanged = function (event) {
         /* no encoding here, this is done in tablecontrol, so that this function do not need to know about datastructure. */
-        var patchInstruction = application.jsonBlueprintFactory.makeBlueprintForObjectType('PatchInstruction');
+        let patchInstruction = application.jsonBlueprintFactory.makeBlueprintForObjectType('PatchInstruction');
         patchInstruction.operation = 0; // = SET
         patchInstruction.document = application.jsonBlueprintFactory.makeBlueprintForObjectType('OutputConfigurationSet');
         patchInstruction.document[event.dataType].push(event.newRowValue);
@@ -127,7 +127,7 @@ function OutputActionHandler(contentBuilder, dataProvider) {
                 }
             }
         );
-    }
+    };
 
     this.observer = new Observer(function (event) {
         switch (event.command) {
@@ -162,27 +162,27 @@ function OutputActionHandler(contentBuilder, dataProvider) {
                 }
                 break;
             case 'AddSelected':
-                var tableControl = application.contentModelProvider.getTableControl();
+                let tableControl = application.contentModelProvider.getTableControl();
 
-                var text = window.lang.convert('ADD_DICTIONARY_ENTRY');
+                let text = window.lang.convert('ADD_DICTIONARY_ENTRY');
 
-                var formElements = [];
-                var col;
-                for (var i = 0; i < tableControl.getModel().cols.length; i++) {
+                let formElements = [];
+                let col;
+                for (let i = 0; i < tableControl.getModel().cols.length; i++) {
                     col = tableControl.getModel().cols[i];
                     if (col.isServerData) {
                         formElements.push(col.title + '<input class="plugintype_input" type="text" name="' + col.context.columnIdentifier + '" /><br/>');
                     }
                 }
 
-                var callback = function (success, callbackEvent) {
+                let callback = function (success, callbackEvent) {
                     if (success) {
-                        var addEntryEvent = new Event(tableControl, event.command);
+                        let addEntryEvent = new Event(tableControl, event.command);
                         addEntryEvent.dataType = tableControl.getModel().data.context.dataType;
-                        addEntryEvent.editableHtmlControl = $('#' + this.CSSClassBase)
+                        addEntryEvent.editableHtmlControl = $('#' + this.CSSClassBase);
 
                         addEntryEvent.newRowValue = application.jsonBlueprintFactory.makeBlueprintForObjectType(tableControl.getModel().data.context.dataType);
-                        for (var columnValue in callbackEvent.newRowData) {
+                        for (let columnValue in callbackEvent.newRowData) {
                             if (columnValue === 'outputValues') {
                                 addEntryEvent.newRowValue[columnValue].push(callbackEvent.newRowData[columnValue]);
                             } else {
@@ -193,9 +193,9 @@ function OutputActionHandler(contentBuilder, dataProvider) {
                     }
                 };
 
-                var model = new DialogControlModel(text, callback, window.lang.convert('OK_BUTTON'), window.lang.convert('CANCEL_BUTTON'), formElements, {dialogType: 'table'});
+                let model = new DialogControlModel(text, callback, window.lang.convert('OK_BUTTON'), window.lang.convert('CANCEL_BUTTON'), formElements, {dialogType: 'table'});
 
-                var dialog = new DialogControl(model);
+                let dialog = new DialogControl(model);
 
                 dialog.showDialog();
                 break;
@@ -203,8 +203,8 @@ function OutputActionHandler(contentBuilder, dataProvider) {
                 instance.deleteRows(application.contentModelProvider.getTableControl());
                 break;
             case 'LimitChanged':
-                if (event.oldValue != event.value) {
-                    var query = $.url.parse(window.location.href);
+                if (event.oldValue !== event.value) {
+                    let query = $.url.parse(window.location.href);
 
                     query.params.limit = event.value;
                     delete query.params.index;
@@ -217,8 +217,8 @@ function OutputActionHandler(contentBuilder, dataProvider) {
                 }
                 break;
             case 'IndexChanged':
-                if (event.oldValue != event.value) {
-                    var query = $.url.parse(window.location.href);
+                if (event.oldValue !== event.value) {
+                    let query = $.url.parse(window.location.href);
 
                     query.params.index = event.value;
                     delete query.query;
@@ -231,7 +231,7 @@ function OutputActionHandler(contentBuilder, dataProvider) {
                 break;
             case 'SearchSelected':
                 if (typeof event.value !== 'undefined' && event.value.length >= 0) {
-                    var query = $.url.parse(window.location.href);
+                    let query = $.url.parse(window.location.href);
 
                     if (event.value.length > 0) {
                         query.params.filter = event.value;
@@ -251,7 +251,7 @@ function OutputActionHandler(contentBuilder, dataProvider) {
                 instance.valueChanged(event);
                 break;
             case 'GotoVersion':
-                var targetUri = event.sender.getModel().resourceUri;
+                let targetUri = event.sender.getModel().resourceUri;
 
                 if (event.sender.getModel().anchors) {
                     targetUri += event.sender.getModel().anchors;

@@ -1,25 +1,25 @@
 function TableControl(model) {
-    var tableRowSelectedCSSClass = 'table_row_selected';
-    var tableRowErrorCSSClass = 'table_row_error';
-    var tableRowSuccessCSSClass = 'table_row_success';
-    var tableCellErrorCSSClass = 'table_cell_error';
-    var tableRowPrefix = model.idPrefix + model.id + '_row_';
-    var tableCellPrefix = model.idPrefix + model.id + '_cell_';
-    var tableControlLengthId = model.idPrefix + model.id + '_length';
-    var tableControlPrevId = model.idPrefix + model.id + '_prev';
-    var tableControlNextId = model.idPrefix + model.id + '_next';
-    var tableControlSearchTextId = model.idPrefix + model.id + '_searchtext';
-    var tableControlSearchButtonId = model.idPrefix + model.id + '_searchbutton';
+    let tableRowSelectedCSSClass = 'table_row_selected';
+    let tableRowErrorCSSClass = 'table_row_error';
+    let tableRowSuccessCSSClass = 'table_row_success';
+    let tableCellErrorCSSClass = 'table_cell_error';
+    let tableRowPrefix = model.idPrefix + model.id + '_row_';
+    let tableCellPrefix = model.idPrefix + model.id + '_cell_';
+    let tableControlLengthId = model.idPrefix + model.id + '_length';
+    let tableControlPrevId = model.idPrefix + model.id + '_prev';
+    let tableControlNextId = model.idPrefix + model.id + '_next';
+    let tableControlSearchTextId = model.idPrefix + model.id + '_searchtext';
+    let tableControlSearchButtonId = model.idPrefix + model.id + '_searchbutton';
     this.observable = new Observable();
 
     this.getModel = function () {
         return model;
-    }
+    };
 
     this.addRow = function (data) {
         console.log(data);
-        var index = model.data.rows.length;
-        var rowRepresentation = '<tr id="' + tableRowPrefix + index + '">'
+        let index = model.data.rows.length;
+        let rowRepresentation = '<tr id="' + tableRowPrefix + index + '">'
             + this.createRowContentRepresentation(false, data)
             + '</tr>';
 
@@ -34,18 +34,18 @@ function TableControl(model) {
         model.data.rows.push(data);
 
         this.registerButtonEvents();
-    }
+    };
 
     this.getTableRowPrefix = function () {
         return tableRowPrefix;
-    }
+    };
 
     this.arrayToHtmlList = function (array) {
-        var listRepresentation = '';
+        let listRepresentation = '';
         if (array.length > 0) {
             listRepresentation = '<ul>';
-            for (var j = 0; j < array.length; j++) {
-                var value = array[j];
+            for (let j = 0; j < array.length; j++) {
+                let value = array[j];
                 if (typeof value === 'string' || value instanceof String) {
                     value = value.replace(/\n/g, '<br/>');
                 } else {
@@ -56,18 +56,18 @@ function TableControl(model) {
             listRepresentation += '</ul>';
         }
         return listRepresentation;
-    }
+    };
 
     this.htmlListToArray = function (htmlString) {
         return this.editableTextToArray(this.htmlListToEditableText(htmlString));
-    }
+    };
 
     this.editableTextToArray = function (editableText) {
         return editableText.split('\n\n');
-    }
+    };
 
     this.htmlListToEditableText = function (htmlString) {
-        var editableText = htmlString;
+        let editableText = htmlString;
         editableText = editableText.replace(/<ul>/g, '');
         editableText = editableText.replace(/<li>/g, '');
         editableText = editableText.replace(/<\/li>/g, '\n\n');
@@ -78,31 +78,31 @@ function TableControl(model) {
         /* Unescape innerHtml before editing. */
         editableText = application.bindingManager.bindToString(editableText);
         return editableText;
-    }
+    };
 
     this.editableTextToHtmlList = function (editableText) {
-        var array = this.editableTextToArray(editableText);
-        var listRepresentation;
+        let array = this.editableTextToArray(editableText);
+        let listRepresentation;
         if (array.length > 0) {
             listRepresentation = '<ul>';
-            for (var j = 0; j < array.length; j++) {
+            for (let j = 0; j < array.length; j++) {
                 listRepresentation += '<li>' + array[j] + '</li>';
             }
             listRepresentation += '</ul>';
         }
         return listRepresentation;
-    }
+    };
 
     this.createRowContentRepresentation = function (isHeaderRow, rowData, rowColumnError) {
-        var cellTag = 'td';
+        let cellTag = 'td';
         if (isHeaderRow) {
             cellTag = 'th';
         }
 
-        var rowRepresentation = '';
+        let rowRepresentation = '';
 
-        var isColDataTypeArray;
-        for (var i = 0; i < model.cols.length; ++i) {
+        let isColDataTypeArray;
+        for (let i = 0; i < model.cols.length; ++i) {
             isColDataTypeArray = false;
             if (typeof rowData !== 'undefined' && typeof rowData[i] !== 'undefined') {
                 if ($.isArray(rowData[i])) {
@@ -113,7 +113,7 @@ function TableControl(model) {
             if (model.cols[i] !== null && typeof model.cols[i] !== 'undefined') {
                 rowRepresentation += '<' + cellTag + ' id="' + tableCellPrefix + i + '"';
 
-                var cssClass;
+                let cssClass;
 
                 if (model.cols[i].hasOwnProperty('cssClass')) {
                     cssClass = model.cols[i].cssClass;
@@ -152,7 +152,7 @@ function TableControl(model) {
                         rowRepresentation += model.cols[i].title;
                     }
                 } else {
-                    if (typeof rowData[i] !== 'undefined' && rowData[i] != null) {
+                    if (typeof rowData[i] !== 'undefined' && rowData[i] !== null) {
                         if (isColDataTypeArray) {
                             rowRepresentation += this.arrayToHtmlList(rowData[i]);
                         } else {
@@ -170,16 +170,16 @@ function TableControl(model) {
         }
 
         return rowRepresentation;
-    }
+    };
 
     this.createRepresentation = function () {
-        var representation = '';
+        let representation = '';
         if (model.showControlHeaders) {
             representation += '<div class="dataTables_wrapper">';
             representation += '<div class="dataTables_length"><label>' + window.lang.convert('TABLE_LENGTH_MENU_PRE') +
                 '<span id="' + tableControlLengthId + '" class="dataTables_length_selection"></span>' + window.lang.convert('TABLE_LENGTH_MENU_POST') + '</label></div>';
             representation += '<div class="dataTables_paginate"><a href="#" id="' + tableControlPrevId + '">&lt;</a>   <a href="#" id="' + tableControlNextId + '">&gt;</a></div>';
-            var filterValueString = '';
+            let filterValueString = '';
             if (typeof model.filter !== 'undefined') {
                 filterValueString = ' value="' + model.filter + '"';
             }
@@ -193,8 +193,8 @@ function TableControl(model) {
 
         representation += '<tbody>';
 
-        for (var i = 0; i < model.data.rows.length; i++) {
-            var errorClassHtml = '';
+        for (let i = 0; i < model.data.rows.length; i++) {
+            let errorClassHtml = '';
             if (typeof model.data.rowErrors !== 'undefined' && typeof model.data.rowErrors[i] !== 'undefined') {
                 errorClassHtml += '" class="';
                 if (model.data.rowErrors[i]) {
@@ -204,7 +204,7 @@ function TableControl(model) {
                 }
             }
 
-            var rowColumnError;
+            let rowColumnError;
             if (typeof model.data.rowColumnErrors !== 'undefined' && model.data.rowColumnErrors.length > i && typeof model.data.rowColumnErrors[i] !== 'undefined') {
                 rowColumnError = model.data.rowColumnErrors[i];
             }
@@ -221,23 +221,23 @@ function TableControl(model) {
         representation += '</table>';
 
         return representation;
-    }
+    };
 
     this.getSelectedRows = function () {
         return $('#' + model.idPrefix + model.id + ' .' + tableRowSelectedCSSClass);
-    }
+    };
 
     this.paginateClick = function (instance, tableControlIndex) {
-        if (model.index != tableControlIndex) {
-            var paginateEvent = new Event(instance, 'IndexChanged');
+        if (model.index !== tableControlIndex) {
+            let paginateEvent = new Event(instance, 'IndexChanged');
             paginateEvent.value = tableControlIndex;
 
             instance.observable.notify(paginateEvent);
         }
-    }
+    };
 
     this.registerButtonEvents = function () {
-        var instance = this;
+        let instance = this;
 
         function split(val) {
             return val.split(/,\s*/);
@@ -253,7 +253,7 @@ function TableControl(model) {
             possibleValues: application.configuration.tableControlDefaultLengthValues,
             displayInline: true,
             valueChanged: function (value, oldValue) {
-                var lengthChangedEvent = new Event(instance, 'LimitChanged');
+                let lengthChangedEvent = new Event(instance, 'LimitChanged');
 
                 lengthChangedEvent.value = value;
                 lengthChangedEvent.oldValue = oldValue;
@@ -277,10 +277,10 @@ function TableControl(model) {
             }
         });
 
-        var searchEvent = function () {
-            var searchText = $('#' + tableControlSearchTextId).val();
+        let searchEvent = function () {
+            let searchText = $('#' + tableControlSearchTextId).val();
             if (typeof searchText !== 'undefined' && searchText.length >= 0) {
-                var searchEvent = new Event(instance, 'SearchSelected');
+                let searchEvent = new Event(instance, 'SearchSelected');
                 searchEvent.value = application.bindingManager.bindFromString(searchText);
 
                 instance.observable.notify(searchEvent);
@@ -292,34 +292,34 @@ function TableControl(model) {
             if (e.keyCode == 13) /** ENTER */ {
                 searchEvent();
             }
-        })
+        });
 
         $('#' + tableControlSearchButtonId).off('click');
         /* Apply the click handler to the table search control */
         $('#' + tableControlSearchButtonId).on('click', searchEvent);
 
         /* Apply the jEditable handlers to the table */
-        var editableFunction = function (value, settings) {
+        let editableFunction = function (value, settings) {
             value = application.bindingManager.bindFromString(value);
-            if (settings.type == 'textarea') {
+            if (settings.type === 'textarea') {
                 value = instance.editableTextToArray(value);
             }
 
-            var parentId = $(this).parent().attr("id");
-            var editedDataRowIndex;
+            let parentId = $(this).parent().attr("id");
+            let editedDataRowIndex;
 
-            if (typeof parentId !== 'undefined' && parentId.indexOf(tableRowPrefix) == 0) {
+            if (typeof parentId !== 'undefined' && parentId.indexOf(tableRowPrefix) === 0) {
                 editedDataRowIndex = parentId.substring(tableRowPrefix.length, parentId.length);
             }
 
             /* Identify which dataModel-property is mapped to this cell */
-            var id = $(this).attr("id");
-            var editedDataColumnIndex;
-            if (typeof id !== 'undefined' && id.indexOf(tableCellPrefix) == 0) {
+            let id = $(this).attr("id");
+            let editedDataColumnIndex;
+            if (typeof id !== 'undefined' && id.indexOf(tableCellPrefix) === 0) {
                 editedDataColumnIndex = id.substring(tableCellPrefix.length, id.length);
             }
 
-            var editableEvent = new Event(instance, 'TableCellEdited');
+            let editableEvent = new Event(instance, 'TableCellEdited');
             editableEvent.editable = $(this);
             editableEvent.editableHtmlControl = $(this).parent();
             editableEvent.dataType = model.data.context.dataType;
@@ -329,9 +329,9 @@ function TableControl(model) {
                 editableEvent.editedDataColumnIndex = editedDataColumnIndex;
 
                 editableEvent.newRowValue = application.jsonBlueprintFactory.makeBlueprintForObjectType(model.data.context.dataType);
-                for (var i = 0; i < model.cols.length; i++) {
+                for (let i = 0; i < model.cols.length; i++) {
                     if (model.cols[i].isServerData) {
-                        if (i == editedDataColumnIndex) {
+                        if (i === editedDataColumnIndex) {
                             editableEvent.newRowValue[model.cols[editedDataColumnIndex].context.columnIdentifier] = value;
                         } else {
                             editableEvent.newRowValue[model.cols[i].context.columnIdentifier] = model.data.rows[editedDataRowIndex][i];
@@ -349,7 +349,7 @@ function TableControl(model) {
 
             instance.observable.notify(editableEvent);
 
-            if (settings.type == 'textarea') {
+            if (settings.type === 'textarea') {
                 value = instance.arrayToHtmlList(value);
             }
             return value;
@@ -385,7 +385,7 @@ function TableControl(model) {
             autocomplete: {
                 options: {
                     source: function (request, response) {
-                        var expressions = application.dataProvider.readExpressions(application.dataProvider.dataProviderState.getActiveId(),
+                        let expressions = application.dataProvider.readExpressions(application.dataProvider.dataProviderState.getActiveId(),
                             application.dataProvider.dataProviderState.getActiveVersion(),
                             extractLast(request.term)
                         );
@@ -394,7 +394,7 @@ function TableControl(model) {
                     },
                     search: function () {
                         // custom minLength
-                        var term = extractLast(this.value);
+                        let term = extractLast(this.value);
                         if (term.length < 1) {
                             return false;
                         }
@@ -404,7 +404,7 @@ function TableControl(model) {
                         return false;
                     },
                     select: function (event, ui) {
-                        var terms = split(this.value);
+                        let terms = split(this.value);
                         // remove the current input
                         terms.pop();
                         // add the selected item
@@ -437,7 +437,7 @@ function TableControl(model) {
 
         /* If detail rows are present hide them by default. */
         $('#' + model.idPrefix + model.id + ' tr').each(function (index) {
-            if (typeof $(this).attr("id") !== 'undefined' && $(this).attr("id").indexOf("_detail") != -1) {
+            if (typeof $(this).attr("id") !== 'undefined' && $(this).attr("id").indexOf("_detail") !== -1) {
                 $(this).hide();
             }
         });
@@ -456,14 +456,14 @@ function TableControl(model) {
 
             if ($(event.target).hasClass('tablecontrol_delete')) {
                 event.preventDefault();
-                var parentId = $(this).attr("id");
-                var editedDataRowIndex;
+                let parentId = $(this).attr("id");
+                let editedDataRowIndex;
 
-                if (typeof parentId !== 'undefined' && parentId.indexOf(tableRowPrefix) == 0) {
+                if (typeof parentId !== 'undefined' && parentId.indexOf(tableRowPrefix) === 0) {
                     editedDataRowIndex = parentId.substring(tableRowPrefix.length, parentId.length);
                 }
 
-                var deleteEvent = new Event(instance, 'Delete');
+                let deleteEvent = new Event(instance, 'Delete');
                 if (typeof model.data.resourceParams !== 'undefined' && typeof editedDataRowIndex !== 'undefined') {
                     deleteEvent.resourceId = model.data.resourceParams[editedDataRowIndex].id;
                     deleteEvent.resourceVersion = model.data.resourceParams[editedDataRowIndex].version;
@@ -473,14 +473,14 @@ function TableControl(model) {
 
             if ($(event.target).hasClass('tablecontrol_run')) {
                 event.preventDefault();
-                var rowId = $(this).attr("id");
-                var selectedDataRowIndex;
+                let rowId = $(this).attr("id");
+                let selectedDataRowIndex;
 
-                if (typeof rowId !== 'undefined' && rowId.indexOf(tableRowPrefix) == 0) {
+                if (typeof rowId !== 'undefined' && rowId.indexOf(tableRowPrefix) === 0) {
                     selectedDataRowIndex = rowId.substring(tableRowPrefix.length, rowId.length);
                 }
 
-                var runEvent = new Event(instance, 'Run');
+                let runEvent = new Event(instance, 'Run');
                 if (typeof model.data.resourceParams !== 'undefined' && typeof selectedDataRowIndex !== 'undefined') {
                     runEvent.resourceId = model.data.resourceParams[selectedDataRowIndex].id;
                     runEvent.resourceVersion = model.data.resourceParams[selectedDataRowIndex].version;

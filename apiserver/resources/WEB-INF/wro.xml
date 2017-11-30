@@ -231,7 +231,8 @@
         <css>classpath:css/config/ruleextensions/unknownextension.css</css>
     </group>
 
-    <group name="en_US">
+    <group name="i18n">
         <js>classpath:i18n/en_US.js</js>
+        <js>classpath:i18n/de_AT.js</js>
     </group>
 </groups>

@@ -1,17 +1,18 @@
 function DialogAdditionManager(dataProvider, animated) {
-    var synchronisationHelper = new DialogSynchronisationHelper(dataProvider);
-    var newStateClassName = application.configuration.newStateClassName;
+    let synchronisationHelper = new DialogSynchronisationHelper(dataProvider);
+    let newStateClassName = application.configuration.newStateClassName;
 
     this.controlAdded = function (event) {
+        let parentId;
         switch (event.controlType) {
             case 'BehaviorGroup':
-                var newGroup = application.jsonBlueprintFactory.makeBlueprintForObjectType('BehaviorGroup');
+                let newGroup = application.jsonBlueprintFactory.makeBlueprintForObjectType('BehaviorGroup');
 
                 newGroup.id = event.sender.getModel().id;
                 newGroup.selected = event.sender.getModel().selected;
                 newGroup.opened = event.sender.getModel().opened;
 
-                var groupId = '#' + event.sender.getModel().idPrefix + event.sender.getModel().id;
+                let groupId = '#' + event.sender.getModel().idPrefix + event.sender.getModel().id;
 
                 if (!animated) {
                     $(groupId).addClass(newStateClassName);
@@ -22,19 +23,19 @@ function DialogAdditionManager(dataProvider, animated) {
                 application.reloadManager.changesHappened();
                 break;
             case 'BehaviorRule':
-                var newRule = application.jsonBlueprintFactory.makeBlueprintForObjectType('BehaviorRule');
+                let newRule = application.jsonBlueprintFactory.makeBlueprintForObjectType('BehaviorRule');
 
                 newRule.id = event.sender.getModel().id;
                 newRule.selected = event.sender.getModel().selected;
                 newRule.opened = event.sender.getModel().opened;
 
-                var tmpRepresentation = application.jsonRepresentationManager.clone();
+                let tmpRepresentation = application.jsonRepresentationManager.clone();
 
-                var parentId = event.parent.getModel().id;
+                parentId = event.parent.getModel().id;
                 tmpRepresentation.addChildElementAtId(parentId, newRule);
-                var tmpSet = tmpRepresentation.getRuleSetView();
+                let tmpSet = tmpRepresentation.getRuleSetView();
 
-                var htmlId = '#' + event.sender.getModel().idPrefix + event.sender.getModel().id;
+                let htmlId = '#' + event.sender.getModel().idPrefix + event.sender.getModel().id;
 
                 if (animated) {
                     $(htmlId).showLoadingIndicator();
@@ -68,39 +69,39 @@ function DialogAdditionManager(dataProvider, animated) {
                     });
                 break;
             case 'BehaviorRuleExtension':
-                var parentId = event.parent.getModel().id;
+                parentId = event.parent.getModel().id;
 
-                var plugins = application.pluginManager.plugins.behaviorruleextensionhandlers;
-                var newExtensionJSON = null;
-                for (var key in plugins) {
+                let plugins = application.pluginManager.plugins.behaviorruleextensionhandlers;
+                let newExtensionJSON = null;
+                for (let key in plugins) {
                     if (event.sender instanceof plugins[key].control) {
                         newExtensionJSON = application.jsonBlueprintFactory.makeBlueprintForObjectType(key);
                         break;
                     }
                 }
 
-                if (newExtensionJSON != null) {
+                if (newExtensionJSON !== null) {
                     newExtensionJSON.id = event.sender.getModel().id;
 
-                    var idResolver = new HTMLIDResolver();
+                    let idResolver = new HTMLIDResolver();
 
-                    var parentRuleId = event.parent.getModel().id;
-                    var parentControl = event.parent;
+                    let parentRuleId = event.parent.getModel().id;
+                    let parentControl = event.parent;
 
                     /** Get the first parent that is a GroupControl (which is the representation of the behaviorRule) */
                     while (!(parentControl instanceof GroupControl)) {
-                        var parentModel = parentControl.getModel();
+                        let parentModel = parentControl.getModel();
                         parentRuleId = $('#' + parentModel.idPrefix + parentModel.id).parent().attr('id');
                         parentControl = idResolver.resolveId(parentRuleId);
                     }
 
-                    var tmpRepresentation = application.jsonRepresentationManager.clone();
+                    let tmpRepresentation = application.jsonRepresentationManager.clone();
 
                     tmpRepresentation.addChildElementAtId(parentId, newExtensionJSON);
 
-                    var tmpSet = tmpRepresentation.getRuleSetView();
+                    let tmpSet = tmpRepresentation.getRuleSetView();
 
-                    var parentHtmlId = '#' + event.sender.getModel().idPrefix + event.sender.getModel().id;
+                    let parentHtmlId = '#' + event.sender.getModel().idPrefix + event.sender.getModel().id;
 
                     if (animated) {
                         $(parentHtmlId).showLoadingIndicator();

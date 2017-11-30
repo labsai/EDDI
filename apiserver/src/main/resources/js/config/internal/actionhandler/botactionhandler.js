@@ -1,22 +1,22 @@
 function BotActionHandler(contentBuilder, dataProvider) {
-    var instance = this;
-    var synchronisationHelper = new DialogSynchronisationHelper(dataProvider);
-    var versionHelper = new VersionHelper();
-    var versionsChanged = false;
+    let instance = this;
+    let synchronisationHelper = new DialogSynchronisationHelper(dataProvider);
+    let versionHelper = new VersionHelper();
+    let versionsChanged = false;
 
-    var deployToEnvironment = function (event, providerInstance, deploy, getDeploymentStatus, environment) {
-        var intervalNumber;
+    let deployToEnvironment = function (event, providerInstance, deploy, getDeploymentStatus, environment) {
+        let intervalNumber;
 
-        var completion = function (httpCode, xmlHttpRequest, value) {
-            if (httpCode == 202) {
-                var timeoutFunc = function () {
-                    var returnValue = getDeploymentStatus.apply(providerInstance, [environment,
+        let completion = function (httpCode, xmlHttpRequest, value) {
+            if (httpCode === 202) {
+                let timeoutFunc = function () {
+                    let returnValue = getDeploymentStatus.apply(providerInstance, [environment,
                         providerInstance.dataProviderState.getActiveId(),
                         providerInstance.dataProviderState.getActiveVersion()]);
 
                     application.contentModelProvider.contextButtonChangeState(event.sender.id, environment, returnValue);
 
-                    if (returnValue != 'IN_PROGRESS') {
+                    if (returnValue !== 'IN_PROGRESS') {
                         clearInterval(intervalNumber);
                     }
                 };
@@ -35,24 +35,25 @@ function BotActionHandler(contentBuilder, dataProvider) {
                 providerInstance.dataProviderState.getActiveId(),
                 providerInstance.dataProviderState.getActiveVersion(),
                 completion]);
-    }
+    };
 
     this.observer = new Observer(function (event) {
+        let query;
         switch (event.command) {
             case 'Save':
-                var bot = dataProvider.readActiveBot();
-                var oldPackages = bot.packages;
+                let bot = dataProvider.readActiveBot();
+                let oldPackages = bot.packages;
                 bot.packages = [];
 
-                var package;
+                let package;
                 application.contentModelProvider.getBotDocumentDescriptionsSelector().each(function () {
                     package = application.contentModelProvider.getBotPackage($(this).attr("id"));
                     bot.packages.push(package.resource);
                 });
 
-                var changeDetected = oldPackages.length != bot.packages.length;
+                let changeDetected = oldPackages.length !== bot.packages.length;
                 if (!changeDetected) {
-                    for (var i = 0; i < oldPackages.length; i++) {
+                    for (let i = 0; i < oldPackages.length; i++) {
                         if (oldPackages[i] !== bot.packages[i]) {
                             changeDetected = true;
                             break;
@@ -94,40 +95,40 @@ function BotActionHandler(contentBuilder, dataProvider) {
                 instance.handleRemoveChild(event, application.contentModelProvider);
                 break;
             case "Deploy":
-                deployToEnvironment(event, dataProvider, dataProvider.deployBot, dataProvider.getDeploymentStatus, 'restricted');
+                deployToEnvironment(event, dataProvider, dataProvider.deployBot, dataProvider.getDeploymentStatus, 'unrestricted');
                 break;
             case "TestDeploy":
                 deployToEnvironment(event, dataProvider, dataProvider.deployBot, dataProvider.getDeploymentStatus, 'test');
                 break;
             case 'LinkBot':
                 window.open(
-                    REST.apiURL + '/ui/restricted/' + application.dataProvider.dataProviderState.getActiveId(),
+                    REST.apiURL + '/chat/unrestricted/' + application.dataProvider.dataProviderState.getActiveId(),
                     '_blank' // <- This is what makes it open in a new window.
                 );
                 break;
             case 'LinkBotTest':
                 window.open(
-                    REST.apiURL + '/ui/test/' + application.dataProvider.dataProviderState.getActiveId(),
+                    REST.apiURL + '/chat/test/' + application.dataProvider.dataProviderState.getActiveId(),
                     '_blank' // <- This is what makes it open in a new window.
                 );
                 break;
             case 'VersionChanged':
-                var uri = event.sender.getModel().resourceUri;
+                let uri = event.sender.getModel().resourceUri;
 
-                if (SLSUriParser(uri).host == "ai.labs.bot") {
+                if (SLSUriParser(uri).host === "ai.labs.bot") {
                     break;
                 }
 
-                var packages = application.contentModelProvider.getBotPackages();
+                let packages = application.contentModelProvider.getBotPackages();
 
-                for (var i = 0; i < packages.length; ++i) {
-                    if (packages[i].resource == event.sender.getModel().resourceUri) {
+                for (let i = 0; i < packages.length; ++i) {
+                    if (packages[i].resource === event.sender.getModel().resourceUri) {
                         packages[i].resource = application.url.updateVersion(packages[i].resource, event.value);
                         break;
                     }
                 }
 
-                var htmlId = '#' + event.sender.getModel().idPrefix + event.sender.getModel().id;
+                let htmlId = '#' + event.sender.getModel().idPrefix + event.sender.getModel().id;
 
                 $(htmlId).parent().parent().parent().removeClass(application.configuration.newStateClassName);
                 event.sender.getModel().parentPackageControl.getModel().removeClass(application.configuration.newStateClassName);
@@ -139,7 +140,7 @@ function BotActionHandler(contentBuilder, dataProvider) {
                 application.reloadManager.changesHappened();
                 break;
             case 'GotoVersion':
-                var targetUri = event.sender.getModel().resourceUri;
+                let targetUri = event.sender.getModel().resourceUri;
 
                 if (event.sender.getModel().anchors) {
                     targetUri += event.sender.getModel().anchors;
@@ -148,7 +149,7 @@ function BotActionHandler(contentBuilder, dataProvider) {
                 versionHelper.gotoResourceUri(targetUri);
                 break;
             case 'Monitor':
-                var query = $.url.parse(application.url.getUriForPage('monitor'));
+                query = $.url.parse(application.url.getUriForPage('monitor'));
 
                 if (typeof query.params === 'undefined') {
                     query.params = {};
@@ -165,7 +166,7 @@ function BotActionHandler(contentBuilder, dataProvider) {
                 window.location.assign($.url.build(query));
                 break;
             case 'Test':
-                var query = $.url.parse(application.url.getUriForPage('testcases'));
+                query = $.url.parse(application.url.getUriForPage('testcases'));
 
                 if (typeof query.params === 'undefined') {
                     query.params = {};

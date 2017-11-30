@@ -1,19 +1,19 @@
 function DocumentDescriptorDisplayControl(descriptor) {
-    var baseCSSClass = 'documentdescriptorui';
-    var rowCSSPostfix = '_row';
-    var keyCSSPostfix = '_key';
-    var valueCSSPostfix = '_value';
-    var headerCSSClassPostfix = '_header';
-    var descriptionCSSClassPostfix = '_description';
-    var descriptionTextPostfix = '_descriptiontext';
+    let baseCSSClass = 'documentdescriptorui';
+    let rowCSSPostfix = '_row';
+    let keyCSSPostfix = '_key';
+    let valueCSSPostfix = '_value';
+    let headerCSSClassPostfix = '_header';
+    let descriptionCSSClassPostfix = '_description';
+    let descriptionTextPostfix = '_descriptiontext';
 
-    var makeRow = function (key, value) {
+    let makeRow = function (key, value) {
         return '<div class="' + baseCSSClass + rowCSSPostfix + '"><span class="' + baseCSSClass + keyCSSPostfix + '">'
             + window.lang.convert(key) + '</span><span class"' + baseCSSClass + valueCSSPostfix + '">' + value + '</span></div>';
-    }
+    };
 
     this.createRepresentation = function () {
-        var representation = '<div class="' + baseCSSClass + '">\
+        let representation = '<div class="' + baseCSSClass + '">\
             <div class="' + baseCSSClass + headerCSSClassPostfix + '"><span>\
             ' + window.lang.convert('DESCRIPTORUI_HEADER') + '\
             </span></div>\
@@ -29,15 +29,15 @@ function DocumentDescriptorDisplayControl(descriptor) {
             </div>';
 
         return representation;
-    }
+    };
 
     this.registerButtonEvents = function () {
         $('#' + baseCSSClass + descriptionTextPostfix).editable(function (value, settings) {
-            if (value != descriptor.description) {
-                var patch = application.jsonBlueprintFactory.makeBlueprintForObjectType('PatchInstruction');
+            if (value !== descriptor.description) {
+                let patch = application.jsonBlueprintFactory.makeBlueprintForObjectType('PatchInstruction');
 
                 patch.document = descriptor;
-                var oldValue = patch.document.description;
+                let oldValue = patch.document.description;
                 patch.document.description = value;
 
                 $('#' + baseCSSClass + descriptionTextPostfix).showLoadingIndicator();

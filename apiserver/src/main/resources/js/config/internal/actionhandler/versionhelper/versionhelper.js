@@ -1,7 +1,7 @@
 function VersionHelper() {
     this.gotoResourceUri = function (uri) {
         /*
-        var callback = function (success) {
+        let callback = function (success) {
             if (success) {
                 window.location.assign(application.url.getEditorUriForResourceUri(uri));
             } else {
@@ -11,9 +11,9 @@ function VersionHelper() {
 
         $.modal.close();
 
-        var dialogModel = new DialogControlModel(window.lang.convert('CONFIRM_RELOAD'),
+        let dialogModel = new DialogControlModel(window.lang.convert('CONFIRM_RELOAD'),
             callback, window.lang.convert('RELOAD_BUTTON'), window.lang.convert('CANCEL_BUTTON'), false, false);
-        var dialogControl = new DialogControl(dialogModel);
+        let dialogControl = new DialogControl(dialogModel);
 
          //Ask for confirmation.
         dialogControl.showDialog(); */

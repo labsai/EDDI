@@ -1,18 +1,18 @@
 function DocumentDescriptionControl(model, baseCSSClass) {
-    var leftButtonIdPrefix = "lbut_";
-    var openCSSClassPostfix = "_opened";
-    var closeCSSClassPostfix = "_closed";
-    var leftButtonCSSClassBase = "_leftbutton";
-    var sequenceNumberCSSClass = "_sequencenumber";
-    var sequenceNumberTextCSSClass = "_sequencenumbertext";
-    var headerCSSClassPostfix = "_header";
-    var subheaderCSSClassPostfix = "_subheader";
-    var contentCSSClassPostfix = "_content";
-    var footerCSSClassPostfix = "_footer";
-    var titleCSSBaseClass = "_title";
-    var descriptionCSSBaseClass = "_description";
+    let leftButtonIdPrefix = "lbut_";
+    let openCSSClassPostfix = "_opened";
+    let closeCSSClassPostfix = "_closed";
+    let leftButtonCSSClassBase = "_leftbutton";
+    let sequenceNumberCSSClass = "_sequencenumber";
+    let sequenceNumberTextCSSClass = "_sequencenumbertext";
+    let headerCSSClassPostfix = "_header";
+    let subheaderCSSClassPostfix = "_subheader";
+    let contentCSSClassPostfix = "_content";
+    let footerCSSClassPostfix = "_footer";
+    let titleCSSBaseClass = "_title";
+    let descriptionCSSBaseClass = "_description";
 
-    var instance = this;
+    let instance = this;
 
     this.observable = new Observable();
     this.observer = new Observer(function (event) {
@@ -25,27 +25,27 @@ function DocumentDescriptionControl(model, baseCSSClass) {
 
     this.getModel = function () {
         return model;
-    }
+    };
 
     DocumentDescriptionControl.getRootElementSelector = function () {
         return $('.' + baseCSSClass + openCSSClassPostfix + ', .' + baseCSSClass + closeCSSClassPostfix);
-    }
+    };
 
-    for (var i = 0; i < model.footerControls.length; ++i) {
+    for (let i = 0; i < model.footerControls.length; ++i) {
         model.footerControls[i].observable.addObserver(this.observer);
     }
 
     this.createRepresentation = function () {
-        var classPostfix = model.open == true ? openCSSClassPostfix : closeCSSClassPostfix;
+        let classPostfix = model.open === true ? openCSSClassPostfix : closeCSSClassPostfix;
 
-        var representation =
+        let representation =
             '<div id="' + model.idPrefix + model.id + '" class="' + baseCSSClass + classPostfix + '">\
                 <div class="' + baseCSSClass + headerCSSClassPostfix + '">\
                 <a href="#"><div id="' + leftButtonIdPrefix + model.idPrefix + model.id + '" class="' + baseCSSClass + leftButtonCSSClassBase + classPostfix + '"></div></a> \
                 <span class="' + baseCSSClass + titleCSSBaseClass + classPostfix + '">' + model.title + '</span>';
 
 //        if (model.sequenceNumber !== false) {
-//            var sequenceNumberRepresentation = '<div class="' + baseCSSClass + sequenceNumberCSSClass + '">' +
+//            let sequenceNumberRepresentation = '<div class="' + baseCSSClass + sequenceNumberCSSClass + '">' +
 //                '<div class="' + baseCSSClass + sequenceNumberTextCSSClass + '">' + model.sequenceNumber + '</div></div>';
 //
 //            representation += sequenceNumberRepresentation;
@@ -55,7 +55,7 @@ function DocumentDescriptionControl(model, baseCSSClass) {
         if (model.headerControls && model.headerControls.length > 0) {
             representation += '<div class="' + baseCSSClass + subheaderCSSClassPostfix + '">';
 
-            for (var i = 0; i < model.headerControls.length; ++i) {
+            for (let i = 0; i < model.headerControls.length; ++i) {
                 representation += model.headerControls[i].createRepresentation();
             }
 
@@ -78,7 +78,7 @@ function DocumentDescriptionControl(model, baseCSSClass) {
         /** Show the footer controls. */
         if (model.footerControls && model.footerControls.length > 0) {
             representation += '<div class="' + baseCSSClass + footerCSSClassPostfix + '">';
-            for (var i = 0; i < model.footerControls.length; ++i) {
+            for (let i = 0; i < model.footerControls.length; ++i) {
                 if (model.footerControls[i].getModel().showOpenOnly && !model.open) {
                     break;
                 }
@@ -97,17 +97,17 @@ function DocumentDescriptionControl(model, baseCSSClass) {
         representation += '</div>';
 
         return representation;
-    }
+    };
 
     this.getWidth = function () {
         return $('#' + model.idPrefix + model.id).outerWidth(true);
-    }
+    };
 
     this.registerButtonEvents = function () {
-        var instance = this;
+        let instance = this;
 
         /** Preserve additional state classes. */
-        for (var i = 0; i < model.additionalClasses.length; ++i) {
+        for (let i = 0; i < model.additionalClasses.length; ++i) {
             $('#' + model.idPrefix + model.id).addClass(model.additionalClasses[i]);
         }
 
@@ -120,15 +120,15 @@ function DocumentDescriptionControl(model, baseCSSClass) {
         });
 
         if (model.editable) {
-            var selector = $('#' + model.idPrefix + model.id + ' div .' + baseCSSClass + titleCSSBaseClass + openCSSClassPostfix + ', '
+            let selector = $('#' + model.idPrefix + model.id + ' div .' + baseCSSClass + titleCSSBaseClass + openCSSClassPostfix + ', '
                 + '#' + model.idPrefix + model.id + ' div .' + baseCSSClass + titleCSSBaseClass + closeCSSClassPostfix);
 
             selector.editable(function (value, settings) {
-                var htmlIdResolver = new HTMLIDResolver();
-                var packageId = $(this).parent().parent().attr('id');
-                var sender = htmlIdResolver.resolveId(packageId);
+                let htmlIdResolver = new HTMLIDResolver();
+                let packageId = $(this).parent().parent().attr('id');
+                let sender = htmlIdResolver.resolveId(packageId);
 
-                var editableEvent = new Event(sender, 'DocumentDescriptionLabelEdited');
+                let editableEvent = new Event(sender, 'DocumentDescriptionLabelEdited');
                 editableEvent.value = value;
                 editableEvent.settings = settings;
                 editableEvent.oldValue = sender.getModel().text;
@@ -154,14 +154,14 @@ function DocumentDescriptionControl(model, baseCSSClass) {
             });
         }
 
-        for (var i = 0; i < model.headerControls.length; ++i) {
+        for (let i = 0; i < model.headerControls.length; ++i) {
             model.headerControls[i].registerButtonEvents();
         }
 
-        for (var i = 0; i < model.footerControls.length; ++i) {
+        for (let i = 0; i < model.footerControls.length; ++i) {
             model.footerControls[i].registerButtonEvents();
         }
-    }
+    };
 
     this.handleOpenCloseEvent = function () {
         model.open = !model.open;
@@ -194,10 +194,10 @@ function DocumentDescriptionControlModel(id, idPrefix, title, description, heade
     this.additionalClasses = [];
 
     this.addClass = function (className) {
-        if (this.additionalClasses.indexOf() == -1) {
+        if (this.additionalClasses.indexOf() === -1) {
             this.additionalClasses.push(className);
         }
-    }
+    };
 
     this.removeClass = function (className) {
         try {

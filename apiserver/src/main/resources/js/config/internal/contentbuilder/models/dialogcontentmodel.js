@@ -1,7 +1,7 @@
 function DialogContentModel(dataProvider, pluginManager, contentBuilder, actionHandler) {
-    var firstLevelGroupControlIdPrefix = 'behaviorgroup_';
-    var firstLevelCSSClass = 'groupcontrol';
-    var secondLevelCSSClass = 'packagecontrol';
+    let firstLevelGroupControlIdPrefix = 'behaviorgroup_';
+    let firstLevelCSSClass = 'groupcontrol';
+    let secondLevelCSSClass = 'packagecontrol';
 
     this.observable = new Observable();
 
@@ -13,19 +13,19 @@ function DialogContentModel(dataProvider, pluginManager, contentBuilder, actionH
 
     /** Resolves models recursively by setting the children property to the child controls before constructing the root node. */
     this.recursiveResolveModel = function (extension) {
-        var tmp = new Array();
-        for (var i = 0; i < extension.children.length; ++i) {
-            var res = this.recursiveResolveModel(extension.children[i]);
+        let tmp = [];
+        for (let i = 0; i < extension.children.length; ++i) {
+            let res = this.recursiveResolveModel(extension.children[i]);
 
             if (typeof res !== "undefined") {
                 tmp.push(res);
             }
         }
 
-        var extensionModel;
-        var extensionControl;
+        let extensionModel;
+        let extensionControl;
         try {
-            var extensionPlugin = this.getBehaviorRuleExtensionPlugin(extension);
+            let extensionPlugin = this.getBehaviorRuleExtensionPlugin(extension);
 
             if (extensionPlugin.model) {
                 extensionModel = new extensionPlugin.model(extension);
@@ -63,12 +63,12 @@ function DialogContentModel(dataProvider, pluginManager, contentBuilder, actionH
         }
 
         return extensionControl;
-    }
+    };
 
     this.makeContentModel = function (sizeCallbackInstance, selectionCallbackInstance) {
-        var models = [];
+        let models = [];
 
-        var groups = dataProvider.getBehaviorGroups();
+        let groups = dataProvider.getBehaviorGroups();
 
         application.contentModelHelper.createDocumentDescriptorDisplayControl();
         application.contentModelHelper.createResourceVersionSelectorControl();
@@ -77,23 +77,23 @@ function DialogContentModel(dataProvider, pluginManager, contentBuilder, actionH
 
         application.jsonRepresentationManager.setBackingData(groups);
 
-        for (var i = 0; i < groups.length; ++i) {
-            var behaviorGroup = groups[i];
-            var groupControlModel = this.createBehaviorGroupControlModel(behaviorGroup);
+        for (let i = 0; i < groups.length; ++i) {
+            let behaviorGroup = groups[i];
+            let groupControlModel = this.createBehaviorGroupControlModel(behaviorGroup);
 
-            var groupControl = this.createGroupControl(groupControlModel, firstLevelCSSClass, sizeCallbackInstance, selectionCallbackInstance);
+            let groupControl = this.createGroupControl(groupControlModel, firstLevelCSSClass, sizeCallbackInstance, selectionCallbackInstance);
 
-            var rules = behaviorGroup.children;
+            let rules = behaviorGroup.children;
 
-            for (var j = 0; j < rules.length; ++j) {
-                var rule = rules[j];
-                var ruleControlModel = this.createBehaviorRuleControlModel(rule, groupControlModel);
-                var ruleControl = this.createGroupControl(ruleControlModel, secondLevelCSSClass, sizeCallbackInstance, selectionCallbackInstance);
+            for (let j = 0; j < rules.length; ++j) {
+                let rule = rules[j];
+                let ruleControlModel = this.createBehaviorRuleControlModel(rule, groupControlModel);
+                let ruleControl = this.createGroupControl(ruleControlModel, secondLevelCSSClass, sizeCallbackInstance, selectionCallbackInstance);
 
-                for (var k = 0; k < rule.children.length; ++k) {
-                    var extension = rule.children[k];
+                for (let k = 0; k < rule.children.length; ++k) {
+                    let extension = rule.children[k];
 
-                    var extensionControl = this.recursiveResolveModel(extension);
+                    let extensionControl = this.recursiveResolveModel(extension);
 
                     /** Only add extensions that could be resolved. */
                     if (typeof extensionControl !== "undefined") {
@@ -108,7 +108,7 @@ function DialogContentModel(dataProvider, pluginManager, contentBuilder, actionH
         }
 
         return models;
-    }
+    };
 
     this.getBehaviorRuleExtensionPlugin = function (extension) {
         if (pluginManager.plugins.behaviorruleextensionhandlers.hasOwnProperty(extension.type)) {
@@ -116,64 +116,64 @@ function DialogContentModel(dataProvider, pluginManager, contentBuilder, actionH
         } else {
             throw new UnknownExtensionTypeException("Cannot display extension of type: " + extension.type + ".");
         }
-    }
+    };
 
     this.createBehaviorGroupControlModel = function (behaviorGroup) {
-        var footerControls = [];
+        let footerControls = [];
 
-        var footerModel = new FooterControlModel(behaviorGroup.id, firstLevelGroupControlIdPrefix + 'footer_', true);
-        var footerControl = new FooterControl(footerModel, 'footercontrol');
+        let footerModel = new FooterControlModel(behaviorGroup.id, firstLevelGroupControlIdPrefix + 'footer_', true);
+        let footerControl = new FooterControl(footerModel, 'footercontrol');
 
         footerControls.push(footerControl);
 
         return new GroupControlModel(behaviorGroup.id, firstLevelGroupControlIdPrefix, behaviorGroup.name,
             footerControls, false, behaviorGroup.opened, null, behaviorGroup.editable, behaviorGroup.editable);
-    }
+    };
 
     this.createBehaviorRuleControlModel = function (rule, parent) {
-        var footerControls = [];
+        let footerControls = [];
 
-        var footerModel = new FooterControlModel(rule.id, 'parent_' + parent.id + '_rule_footer_', false);
-        var footerControl = new FooterControl(footerModel, 'footercontrol');
+        let footerModel = new FooterControlModel(rule.id, 'parent_' + parent.id + '_rule_footer_', false);
+        let footerControl = new FooterControl(footerModel, 'footercontrol');
 
         footerControls.push(footerControl);
 
         return new GroupControlModel(rule.id, 'parent_' + parent.id + '_rule_', rule.name,
             footerControls, rule.sequenceNumber, rule.opened, null, rule.editable, rule.editable, true, rule.actions);
-    }
+    };
 
     this.createGroupControl = function (model, CSSClassBase, sizeCallbackInstance, selectionCallbackInstance) {
-        var gc = new GroupControl(model, CSSClassBase);
+        let gc = new GroupControl(model, CSSClassBase);
 
         gc.observable.addObserver(sizeCallbackInstance);
         //gc.observable.addObserver(selectionCallbackInstance);
         gc.observable.addObserver(actionHandler.observer);
 
         return gc;
-    }
+    };
 
     this.getDefaultBehaviorGroupControlData = function () {
-        var retVal = application.jsonBlueprintFactory.makeBlueprintForObjectType('BehaviorGroup');
+        let retVal = application.jsonBlueprintFactory.makeBlueprintForObjectType('BehaviorGroup');
         retVal.id = dataProvider.getNextIdForBehaviorGroup();
         retVal.opened = true;
 
         return retVal;
-    }
+    };
 
     this.getDefaultBehaviorRuleControlData = function () {
-        var retVal = application.jsonBlueprintFactory.makeBlueprintForObjectType('BehaviorRule');
+        let retVal = application.jsonBlueprintFactory.makeBlueprintForObjectType('BehaviorRule');
         retVal.id = dataProvider.getNextIdForBehaviorRule();
         retVal.opened = true;
 
         return retVal;
-    }
+    };
 
-    var instance = this;
+    let instance = this;
 
-    var addControl = function (parentControl, control, isRootLevel) {
-        var parentId;
+    let addControl = function (parentControl, control, isRootLevel) {
+        let parentId;
 
-        isFirstLevel = control.getModel().idPrefix.indexOf('parent_') == 0;
+        isFirstLevel = control.getModel().idPrefix.indexOf('parent_') === 0;
 
         if (isRootLevel) {
             parentId = '#toplevel';
@@ -181,7 +181,7 @@ function DialogContentModel(dataProvider, pluginManager, contentBuilder, actionH
             parentId = '#' + application.configuration.referencePrefix + parentControl.getModel().idPrefix + parentControl.getModel().id;
         }
 
-        var ownId = '#' + control.getModel().idPrefix + control.getModel().id;
+        let ownId = '#' + control.getModel().idPrefix + control.getModel().id;
 
         $(control.createRepresentation())
             .hide()
@@ -218,7 +218,7 @@ function DialogContentModel(dataProvider, pluginManager, contentBuilder, actionH
         control.registerButtonEvents();
 
         /** Notify the actionHandler. */
-        var event = new Event(control, 'ControlAdded');
+        let event = new Event(control, 'ControlAdded');
         event.parent = parentControl;
 
         if (isFirstLevel) {
@@ -230,46 +230,46 @@ function DialogContentModel(dataProvider, pluginManager, contentBuilder, actionH
         }
 
         instance.observable.notify(event);
-    }
+    };
 
     this.addChildControl = function (parentControl) {
-        var control;
-        var isFirstLevel, isSecondLevel, isRootLevel;
+        let control;
+        let isFirstLevel, isSecondLevel, isRootLevel;
 
         if (parentControl.hasOwnProperty('getModel')) {
-            isFirstLevel = parentControl.getModel().idPrefix.indexOf(firstLevelGroupControlIdPrefix) == 0;
-            isSecondLevel = parentControl.getModel().idPrefix.indexOf('parent_') == 0;
+            isFirstLevel = parentControl.getModel().idPrefix.indexOf(firstLevelGroupControlIdPrefix) === 0;
+            isSecondLevel = parentControl.getModel().idPrefix.indexOf('parent_') === 0;
             isRootLevel = false;
         } else {
             isRootLevel = true;
         }
 
         if (isRootLevel) {
-            var data = this.getDefaultBehaviorGroupControlData();
-            var model = this.createBehaviorGroupControlModel(data);
+            let data = this.getDefaultBehaviorGroupControlData();
+            let model = this.createBehaviorGroupControlModel(data);
 
             control = this.createGroupControl(model, firstLevelCSSClass, application.contentBuilder.observer);
         } else if (isFirstLevel) {
-            var data = this.getDefaultBehaviorRuleControlData();
-            var model = this.createBehaviorRuleControlModel(data, parentControl);
+            let data = this.getDefaultBehaviorRuleControlData();
+            let model = this.createBehaviorRuleControlModel(data, parentControl);
 
             control = this.createGroupControl(model, secondLevelCSSClass, application.contentBuilder.observer);
         } else if (isSecondLevel) {
-            var text = window.lang.convert('ASK_EXTENSION_TYPE');
+            let text = window.lang.convert('ASK_EXTENSION_TYPE');
 
-            var formElements = [];
-            var firstElementText = 'checked="checked"';
-            for (var key in pluginManager.plugins.behaviorruleextensionhandlers) {
+            let formElements = [];
+            let firstElementText = 'checked="checked"';
+            for (let key in pluginManager.plugins.behaviorruleextensionhandlers) {
                 formElements.push('<input class="plugintype_input" type="radio" name="plugintype" value="' + key + '"' + firstElementText + '/>' + key + '<br/>');
                 firstElementText = '';
             }
 
-            var callback = function (success, event) {
+            let callback = function (success, event) {
                 if (success) {
-                    var extensionPlugin = instance.getBehaviorRuleExtensionPlugin({type: event.command});
+                    let extensionPlugin = instance.getBehaviorRuleExtensionPlugin({type: event.command});
 
-                    var extensionModel;
-                    var extensionControl;
+                    let extensionModel;
+                    let extensionControl;
                     if (extensionPlugin.model) {
                         extensionModel = new extensionPlugin.model();
                         extensionModel.children = [];
@@ -296,9 +296,9 @@ function DialogContentModel(dataProvider, pluginManager, contentBuilder, actionH
                 }
             };
 
-            var model = new DialogControlModel(text, callback, window.lang.convert('OK_BUTTON'), window.lang.convert('CANCEL_BUTTON'), formElements);
+            let model = new DialogControlModel(text, callback, window.lang.convert('OK_BUTTON'), window.lang.convert('CANCEL_BUTTON'), formElements);
 
-            var dialog = new DialogControl(model);
+            let dialog = new DialogControl(model);
 
             dialog.showDialog();
 

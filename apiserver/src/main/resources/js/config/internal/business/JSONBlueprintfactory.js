@@ -1,10 +1,10 @@
 function JSONBlueprintFactory() {
     this.makeBlueprintForObjectType = function (objectType) {
+        let i = 1;
         switch (objectType) {
             case 'BehaviorGroup':
-                var behaviorGroupName = behaviorGroupNameDefault = window.lang.convert('BEHAVIORGROUP_DEFAULT_NAME');
+                let behaviorGroupName = behaviorGroupNameDefault = window.lang.convert('BEHAVIORGROUP_DEFAULT_NAME');
 
-                var i = 1;
                 while (application.jsonRepresentationManager.hasGroupWithName(behaviorGroupName)) {
                     behaviorGroupName = behaviorGroupNameDefault + ' ' + i++;
                 }
@@ -14,9 +14,8 @@ function JSONBlueprintFactory() {
                     children: []
                 };
             case 'BehaviorRule':
-                var behaviorRuleName = behaviorRuleNameDefault = window.lang.convert('BEHAVIORRULE_DEFAULT_NAME');
+                let behaviorRuleName = behaviorRuleNameDefault = window.lang.convert('BEHAVIORRULE_DEFAULT_NAME');
 
-                var i = 1;
                 while (application.jsonRepresentationManager.hasRuleWithName(behaviorRuleName)) {
                     behaviorRuleName = behaviorRuleNameDefault + ' ' + i++;
                 }
@@ -70,7 +69,7 @@ function JSONBlueprintFactory() {
             case 'Bot':
                 return {
                     packages: []
-                }
+                };
                 break;
             case 'Package':
                 return {
@@ -86,23 +85,21 @@ function JSONBlueprintFactory() {
                 return {
                     name: '',
                     description: ''
-                }
+                };
                 break;
             case 'TestCaseDescriptor':
                 return {
                     name: '',
                     description: ''
-                }
+                };
                 break;
         }
 
-        for (var key in application.pluginManager.plugins.behaviorruleextensionhandlers) {
-            if (objectType == key) {
-                var model = new application.pluginManager.plugins.behaviorruleextensionhandlers[key].model();
+        for (let key in application.pluginManager.plugins.behaviorruleextensionhandlers) {
+            if (objectType === key) {
+                let model = new application.pluginManager.plugins.behaviorruleextensionhandlers[key].model();
 
-                var defaultExtension = model.makeDefaultJSON();
-
-                return defaultExtension;
+                return model.makeDefaultJSON();
             }
         }
     }

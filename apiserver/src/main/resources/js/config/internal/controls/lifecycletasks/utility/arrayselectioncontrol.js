@@ -1,14 +1,12 @@
 function ArraySelectionControl(model) {
-    var instance = this;
-    var dropdownPostfix = '_dropdown';
+    let instance = this;
+    let dropdownPostfix = '_dropdown';
     this.createRepresentation = function () {
-        var representation = '<div id="' + model.idPrefix + model.id + '" class="' + model.CSSClassBase + '">'
+        return '<div id="' + model.idPrefix + model.id + '" class="' + model.CSSClassBase + '">'
             + '<div id="' + model.idPrefix + model.id + dropdownPostfix + '" class="' + model.CSSClassBase + dropdownPostfix + '"></div>'
             + '<div class="clear"></div>' +
             '</div>';
-
-        return representation;
-    }
+    };
 
     this.registerButtonEvents = function () {
         $('#' + model.idPrefix + model.id + dropdownPostfix).dropdown({
@@ -19,7 +17,7 @@ function ArraySelectionControl(model) {
                 model.selectedItemIndex = model.backingArray.indexOf(value);
             }
         });
-    }
+    };
 
     this.getModel = function () {
         return model;

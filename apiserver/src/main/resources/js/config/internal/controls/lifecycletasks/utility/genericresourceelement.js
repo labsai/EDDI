@@ -1,20 +1,18 @@
 function GenericResourceElement(cssClassBase, key, displayKey, currentValue, modelOrigin) {
-    var id = application.dataProvider.getNextIdGlobal();
-    var valuePostfix = '_value';
-    var keyPostfix = '_key';
-    var rowPostfix = '_row';
+    let id = application.dataProvider.getNextIdGlobal();
+    let valuePostfix = '_value';
+    let keyPostfix = '_key';
+    let rowPostfix = '_row';
 
-    var instance = this;
+    let instance = this;
     this.observable = new Observable();
 
     this.createRepresentation = function () {
-        var representation = '<div class="' + cssClassBase + rowPostfix + '"><div class="' + cssClassBase + keyPostfix + '">'
+        return '<div class="' + cssClassBase + rowPostfix + '"><div class="' + cssClassBase + keyPostfix + '">'
             + window.lang.convert(displayKey) + '</div>' +
             '<div id="' + cssClassBase + valuePostfix + id + '" class="' + cssClassBase + valuePostfix + '">' + currentValue + '</div>' +
             '<div class="clear"></div></div>';
-
-        return representation;
-    }
+    };
 
     this.registerButtonEvents = function () {
         $('#' + cssClassBase + valuePostfix + id).editable(function (value, settings) {
@@ -34,7 +32,7 @@ function GenericResourceElement(cssClassBase, key, displayKey, currentValue, mod
                 return application.bindingManager.bindToString(value);
             }
         });
-    }
+    };
 
     this.getModel = function () {
         return {

@@ -5,18 +5,18 @@ function NoSuchIdException(msg) {
 function HTMLIDResolver() {
     /** Returns the control associated to the given html id attribute. */
     this.resolveId = function (id) {
-        var refString = application.configuration.referencePrefix;
+        let refString = application.configuration.referencePrefix;
 
-        if (id.indexOf(refString) == 0) {
+        if (id.indexOf(refString) === 0) {
             id = id.substring(refString.length, id.length);
         }
 
-        var controlTree = application.contentBuilder.getControls();
+        let controlTree = application.contentBuilder.getControls();
 
-        var recursiveControlIdResolve = function (controls) {
+        let recursiveControlIdResolve = function (controls) {
 
-            for (var i = 0; i < controls.length; ++i) {
-                var model = controls[i].getModel();
+            for (let i = 0; i < controls.length; ++i) {
+                let model = controls[i].getModel();
 
                 if (model.hasOwnProperty('children')) {
                     try {

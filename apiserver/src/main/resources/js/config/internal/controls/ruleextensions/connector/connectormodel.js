@@ -9,7 +9,7 @@ function ConnectorModel(extension) {
             children: [],
             type: 'connector'
         };
-    }
+    };
 
     if (typeof extension === "undefined" || extension === null) {
         extension = this.makeDefaultJSON();
@@ -22,8 +22,8 @@ function ConnectorModel(extension) {
     this.operator = extension.values.operator;
     this.backingData = extension;
 
-    var footerControls = [];
-    var footerModel = new FooterControlModel(this.id, this.idPrefix + 'footer_', false);
+    let footerControls = [];
+    let footerModel = new FooterControlModel(this.id, this.idPrefix + 'footer_', false);
     footerControls.push(new FooterControl(footerModel, 'footercontrol_small'));
 
     this.footerControls = footerControls;
@@ -32,15 +32,15 @@ function ConnectorModel(extension) {
         if (this.hasOwnProperty('children')) {
             this.children.removeElement(child);
         }
-    }
+    };
 
     this.additionalClasses = [];
 
     this.addClass = function (className) {
-        if (this.additionalClasses.indexOf() == -1) {
+        if (this.additionalClasses.indexOf() === -1) {
             this.additionalClasses.push(className);
         }
-    }
+    };
 
     this.removeClass = function (className) {
         try {

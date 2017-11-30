@@ -11,5 +11,5 @@ function PluginManager() {
      *
      * @type {Object}
      */
-    this.plugins = new Object();
+    this.plugins = {};
 }

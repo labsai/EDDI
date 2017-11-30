@@ -1,26 +1,26 @@
 function DialogDeletionManager(dataProvider, animated) {
-    var synchronisationHelper = new DialogSynchronisationHelper(dataProvider);
-    var firstLevelGroupControlIdPrefix = 'behaviorgroup_';
+    let synchronisationHelper = new DialogSynchronisationHelper(dataProvider);
+    let firstLevelGroupControlIdPrefix = 'behaviorgroup_';
 
     this.controlDeleted = function (event) {
         switch (event.firstCommand) {
             case 'DeleteGroup':
                 /** This is the first event notification about the deletion - the 'ControlDeleted' event handles does the actual data access. */
-                var isFirstLevel = event.sender.getModel().idPrefix.indexOf(firstLevelGroupControlIdPrefix) == 0;
-                var isSecondLevel = event.sender.getModel().idPrefix.indexOf('parent_') == 0;
+                let isFirstLevel = event.sender.getModel().idPrefix.indexOf(firstLevelGroupControlIdPrefix) === 0;
+                let isSecondLevel = event.sender.getModel().idPrefix.indexOf('parent_') === 0;
 
                 if (isFirstLevel) {
-                    var htmlId = '#' + event.sender.getModel().idPrefix + event.sender.getModel().id;
+                    let htmlId = '#' + event.sender.getModel().idPrefix + event.sender.getModel().id;
 
                     if (animated) {
                         $(htmlId).showLoadingIndicator();
                     }
 
-                    var tmpRepresentation = application.jsonRepresentationManager.clone();
+                    let tmpRepresentation = application.jsonRepresentationManager.clone();
 
                     tmpRepresentation.deleteElementWithId(event.sender.getModel().id);
 
-                    var tmpSet = tmpRepresentation.getRuleSetView();
+                    let tmpSet = tmpRepresentation.getRuleSetView();
 
                     dataProvider.updateBehaviorRuleSet(tmpSet,
                         function (httpCode, xmlHttpRequest, value) {
@@ -50,27 +50,27 @@ function DialogDeletionManager(dataProvider, animated) {
                             }
                         });
                 } else if (isSecondLevel) {
-                    var groupId = '#' + event.sender.getModel().idPrefix + event.sender.getModel().id;
+                    let groupId = '#' + event.sender.getModel().idPrefix + event.sender.getModel().id;
 
                     if (animated) {
                         $(groupId).showLoadingIndicator();
                     }
 
-                    var tmpRepresentation = application.jsonRepresentationManager.clone();
+                    let tmpRepresentation = application.jsonRepresentationManager.clone();
 
                     tmpRepresentation.deleteElementWithId(event.sender.getModel().id);
 
-                    var tmpSet = tmpRepresentation.getRuleSetView();
+                    let tmpSet = tmpRepresentation.getRuleSetView();
 
                     dataProvider.updateBehaviorRuleSet(tmpSet,
                         function (httpCode, xmlHttpRequest, value) {
                             if (application.httpCodeManager.successfulRequest(httpCode)) {
                                 application.jsonRepresentationManager.deleteElementWithId(event.sender.getModel().id);
 
-                                var idResolver = new HTMLIDResolver();
+                                let idResolver = new HTMLIDResolver();
 
-                                var parentId = $('#' + event.sender.getModel().idPrefix + event.sender.getModel().id).parent().attr('id');
-                                var parentControl = idResolver.resolveId(parentId);
+                                let parentId = $('#' + event.sender.getModel().idPrefix + event.sender.getModel().id).parent().attr('id');
+                                let parentControl = idResolver.resolveId(parentId);
 
                                 parentControl.getModel().children.removeElement(event.sender);
 
@@ -97,28 +97,28 @@ function DialogDeletionManager(dataProvider, animated) {
                 }
                 break;
             case 'DeleteExtension':
-                var model = event.sender.getModel();
+                let model = event.sender.getModel();
 
-                var idResolver = new HTMLIDResolver();
+                let idResolver = new HTMLIDResolver();
 
-                var parentId = $('#' + model.idPrefix + model.id).parent().attr('id');
+                let parentId = $('#' + model.idPrefix + model.id).parent().attr('id');
 
-                var parentControl = idResolver.resolveId(parentId);
+                let parentControl = idResolver.resolveId(parentId);
 
                 /** Get the first parent that is a GroupControl (which is the representation of the behaviorRule) */
                 while (!(parentControl instanceof GroupControl)) {
-                    var parentModel = parentControl.getModel();
+                    let parentModel = parentControl.getModel();
                     parentId = $('#' + parentModel.idPrefix + parentModel.id).parent().attr('id');
                     parentControl = idResolver.resolveId(parentId);
                 }
 
-                var tmpRepresentation = application.jsonRepresentationManager.clone();
+                let tmpRepresentation = application.jsonRepresentationManager.clone();
 
                 tmpRepresentation.deleteElementWithId(model.id);
 
-                var tmpSet = tmpRepresentation.getRuleSetView();
+                let tmpSet = tmpRepresentation.getRuleSetView();
 
-                var htmlId = '#' + model.idPrefix + model.id;
+                let htmlId = '#' + model.idPrefix + model.id;
 
                 if (animated) {
                     $(htmlId).showLoadingIndicator();

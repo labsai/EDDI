@@ -1,20 +1,20 @@
 function SentenceparserLifecycleModel(lifecycle) {
     this.type = "core://ai.labs.parser?version=1";
-    var instance = this;
+    let instance = this;
 
     this.convertToJSON = function () {
-        var dictArray = [];
-        var corrArray = [];
+        let dictArray = [];
+        let corrArray = [];
 
         /** Corrections are added first */
-        for (var i = 0; i < this.backingGroupControl.getModel().children[0].getModel().children.length; ++i) {
-            var correction = this.backingGroupControl.getModel().children[0].getModel().children[i];
+        for (let i = 0; i < this.backingGroupControl.getModel().children[0].getModel().children.length; ++i) {
+            let correction = this.backingGroupControl.getModel().children[0].getModel().children[i];
             corrArray.push(correction.getModel().convertToJSON());
         }
 
         /** Dictionaries */
-        for (var i = 0; i < this.backingGroupControl.getModel().children[1].getModel().children.length; ++i) {
-            var dictionary = this.backingGroupControl.getModel().children[1].getModel().children[i];
+        for (let i = 0; i < this.backingGroupControl.getModel().children[1].getModel().children.length; ++i) {
+            let dictionary = this.backingGroupControl.getModel().children[1].getModel().children[i];
             dictArray.push(dictionary.getModel().convertToJSON());
         }
 

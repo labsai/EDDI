@@ -1,87 +1,87 @@
 function ResourceURIFormElement(cssClassBase, inPlaceEdited, key, type, displayKey, currentValue, modelOrigin) {
-    var id = application.dataProvider.getNextIdGlobal();
-    var displayNamePostfix = '_displayname';
-    var dropdownResourcePostfix = '_dropdown_resource';
-    var dropdownVersionPostfix = '_dropdown_version';
-    var editorPostfix = '_editoricon';
-    var addButtonPostfix = '_addbutton';
-    var containerPostfix = '_container';
-    var placeholderPostfix = '_placeholder';
-    var addContainerPostfix = '_addcontainer';
+    let id = application.dataProvider.getNextIdGlobal();
+    let displayNamePostfix = '_displayname';
+    let dropdownResourcePostfix = '_dropdown_resource';
+    let dropdownVersionPostfix = '_dropdown_version';
+    let editorPostfix = '_editoricon';
+    let addButtonPostfix = '_addbutton';
+    let containerPostfix = '_container';
+    let placeholderPostfix = '_placeholder';
+    let addContainerPostfix = '_addcontainer';
 
-    var instance = this;
+    let instance = this;
 
-    var typeHasEditor = function (type) {
+    let typeHasEditor = function (type) {
         return true;
-    }
+    };
 
     this.observable = new Observable();
 
-    var filter = type.split('//')[1];
+    let filter = type.split('//')[1];
 
-    var fetchDescriptions = function (pfilter) {
+    let fetchDescriptions = function (pfilter) {
         return application.dataProvider.readDocumentDescriptions(pfilter, 0, 0, '', 'asc');
-    }
+    };
 
-    var behaviorDescriptions = fetchDescriptions(filter);
+    let behaviorDescriptions = fetchDescriptions(filter);
 
-    if (currentValue == "") {
+    if (currentValue === "") {
         if (behaviorDescriptions.length > 0) {
             currentValue = behaviorDescriptions[0].resource;
         }
     }
 
-    var getNameForResource = function (resource) {
-        for (var i = 0; i < behaviorDescriptions.length; ++i) {
-            if (behaviorDescriptions[i].resource.split('?')[0] == resource) {
+    let getNameForResource = function (resource) {
+        for (let i = 0; i < behaviorDescriptions.length; ++i) {
+            if (behaviorDescriptions[i].resource.split('?')[0] === resource) {
                 return behaviorDescriptions[i].name;
             }
         }
-    }
+    };
 
-    var getResourceForName = function (name) {
-        for (var i = 0; i < behaviorDescriptions.length; ++i) {
-            if (behaviorDescriptions[i].name == name) {
+    let getResourceForName = function (name) {
+        for (let i = 0; i < behaviorDescriptions.length; ++i) {
+            if (behaviorDescriptions[i].name === name) {
                 return behaviorDescriptions[i].resource;
             }
         }
-    }
+    };
 
-    var getPossibleResources = function () {
-        var retVal = [];
+    let getPossibleResources = function () {
+        let retVal = [];
 
-        for (var i = 0; i < behaviorDescriptions.length; ++i) {
+        for (let i = 0; i < behaviorDescriptions.length; ++i) {
             retVal.push(behaviorDescriptions[i].name);
         }
 
         return retVal;
-    }
+    };
 
-    var getPossibleVersions = function (resource) {
-        var retVal = [];
+    let getPossibleVersions = function (resource) {
+        let retVal = [];
 
-        var maxVersion;
-        for (var i = 0; i < behaviorDescriptions.length; ++i) {
-            if (behaviorDescriptions[i].resource.split('?')[0] == resource) {
+        let maxVersion;
+        for (let i = 0; i < behaviorDescriptions.length; ++i) {
+            if (behaviorDescriptions[i].resource.split('?')[0] === resource) {
                 maxVersion = $.url.parse(behaviorDescriptions[i].resource).params.version;
             }
         }
 
-        for (var i = 0; i < maxVersion; ++i) {
+        for (let i = 0; i < maxVersion; ++i) {
             retVal.push(i + 1);
         }
 
         return retVal;
-    }
+    };
 
-    var iconCSSClassPostfix = '_icon';
-    var textCSSClassPostfix = '_text';
+    let iconCSSClassPostfix = '_icon';
+    let textCSSClassPostfix = '_text';
 
-    var makeAnchorTags = function () {
-        var page = application.url.getCurrentPage();
+    let makeAnchorTags = function () {
+        let page = application.url.getCurrentPage();
 
-        var isParentPage = function () {
-            if (page == 'bots' || page == 'packages') {
+        let isParentPage = function () {
+            if (page === 'bots' || page === 'packages') {
                 return true;
             }
 
@@ -89,17 +89,17 @@ function ResourceURIFormElement(cssClassBase, inPlaceEdited, key, type, displayK
         };
 
         if (isParentPage()) {
-            var parentIdHashKey, parentVersionHashKey;
+            let parentIdHashKey, parentVersionHashKey;
 
-            if (page == 'bots') {
+            if (page === 'bots') {
                 parentIdHashKey = application.configuration.botParentIdHashKey;
                 parentVersionHashKey = application.configuration.botParentVersionHashKey;
-            } else if (page == 'packages') {
+            } else if (page === 'packages') {
                 parentIdHashKey = application.configuration.packageParentIdHashKey;
                 parentVersionHashKey = application.configuration.packageParentVersionHashKey;
             }
 
-            var anchors = '#'
+            let anchors = '#'
                 + parentIdHashKey + '=' + application.url.getCurrentId()
                 + '&' + parentVersionHashKey + '=' + application.url.getCurrentVersion()
                 + '&' + $.param.fragment();
@@ -108,25 +108,25 @@ function ResourceURIFormElement(cssClassBase, inPlaceEdited, key, type, displayK
         } else {
             return "";
         }
-    }
+    };
 
-    var makeAnchorUrl = function (uri) {
+    let makeAnchorUrl = function (uri) {
         return application.url.getEditorUriForResourceUri(uri) + makeAnchorTags();
-    }
+    };
 
-    var getResourceUrl = function () {
-        var uri = instance.getModel().resourceUri;
+    let getResourceUrl = function () {
+        let uri = instance.getModel().resourceUri;
         try {
             return makeAnchorUrl(uri);
         } catch (ex) {
             /** Handle empty or malformed resource URI. */
             if (ex instanceof MalformedURLException) {
-                var possibleValues = getPossibleResources();
+                let possibleValues = getPossibleResources();
 
                 if (possibleValues.length > 0) {
                     /** Case malformed. */
-                    var resource = getResourceForName(possibleValues[0]);
-                    var possibleVersions = getPossibleVersions(resource.split('?')[0]);
+                    let resource = getResourceForName(possibleValues[0]);
+                    let possibleVersions = getPossibleVersions(resource.split('?')[0]);
 
                     currentValue = resource.split('?')[0] + '?version=' + possibleVersions[0];
 
@@ -140,10 +140,10 @@ function ResourceURIFormElement(cssClassBase, inPlaceEdited, key, type, displayK
                 throw ex;
             }
         }
-    }
+    };
 
-    var makeSelectionControlRepresentation = function () {
-        var representation = '<div id="' + cssClassBase + dropdownResourcePostfix + id + '" class="' + cssClassBase + dropdownResourcePostfix + '"></div>';
+    let makeSelectionControlRepresentation = function () {
+        let representation = '<div id="' + cssClassBase + dropdownResourcePostfix + id + '" class="' + cssClassBase + dropdownResourcePostfix + '"></div>';
 
         representation += '<div id="' + cssClassBase + dropdownVersionPostfix + id + '" class="' + cssClassBase + dropdownVersionPostfix + '"></div>';
 
@@ -155,13 +155,13 @@ function ResourceURIFormElement(cssClassBase, inPlaceEdited, key, type, displayK
         }
 
         return representation;
-    }
+    };
 
     this.createRepresentation = function () {
-        var representation = '<div id="' + cssClassBase + containerPostfix + id + '" class="' + cssClassBase + containerPostfix + '">';
+        let representation = '<div id="' + cssClassBase + containerPostfix + id + '" class="' + cssClassBase + containerPostfix + '">';
         representation += '<div class="' + cssClassBase + displayNamePostfix + '">' + window.lang.convert(displayKey) + '</div>';
 
-        var possibleValues = getPossibleResources();
+        let possibleValues = getPossibleResources();
 
         /** Only display the selection control if there is actually resources available. */
         if (possibleValues.length > 0) {
@@ -176,23 +176,23 @@ function ResourceURIFormElement(cssClassBase, inPlaceEdited, key, type, displayK
         representation += '<div class="clear"></div></div>';
 
         return representation;
-    }
+    };
 
-    var currentResource = currentValue.split('?')[0];
-    var currentVersion = $.url.parse(currentValue).params.version;
+    let currentResource = currentValue.split('?')[0];
+    let currentVersion = $.url.parse(currentValue).params.version;
 
-    var resourceCreationControl = null;
-    var showAddMenu = function () {
-        var resourceCreationModel = new ResourceCreationModel(id,
+    let resourceCreationControl = null;
+    let showAddMenu = function () {
+        let resourceCreationModel = new ResourceCreationModel(id,
             'resourcecreation_',
             'resourcecreation',
             type,
             function (success, autoUpdate) {
                 if (success) {
-                    if (resourceCreationControl.getModel().currentValue != "") {
-                        var last = type.split('.').last();
+                    if (resourceCreationControl.getModel().currentValue !== "") {
+                        let last = type.split('.').last();
 
-                        var newUri;
+                        let newUri;
                         /** Create a new resource. */
                         switch (last) {
                             case 'bot':
@@ -214,9 +214,9 @@ function ResourceURIFormElement(cssClassBase, inPlaceEdited, key, type, displayK
                                 break;
                         }
 
-                        var patch = application.jsonBlueprintFactory.makeBlueprintForObjectType('PatchInstruction');
+                        let patch = application.jsonBlueprintFactory.makeBlueprintForObjectType('PatchInstruction');
 
-                        var params = SLSUriParser(newUri);
+                        let params = SLSUriParser(newUri);
 
                         patch.document = application.dataProvider.readDocumentDescription(params.id, params.version);
                         patch.document.name = resourceCreationControl.getModel().currentValue;
@@ -227,10 +227,10 @@ function ResourceURIFormElement(cssClassBase, inPlaceEdited, key, type, displayK
                             patch,
                             function (httpCode) {
                                 if (!application.httpCodeManager.successfulRequest(httpCode)) {
-                                    var dcm = new DialogControlModel(window.lang.convert('ERROR_CREATE_RESOURCE'), function () {
+                                    let dcm = new DialogControlModel(window.lang.convert('ERROR_CREATE_RESOURCE'), function () {
                                         },
                                         window.lang.convert("OK_BUTTON"));
-                                    var dc = new DialogControl(dcm);
+                                    let dc = new DialogControl(dcm);
                                     dc.showDialog();
                                 } else {
                                     behaviorDescriptions = fetchDescriptions(filter);
@@ -250,10 +250,10 @@ function ResourceURIFormElement(cssClassBase, inPlaceEdited, key, type, displayK
                                 $('#' + cssClassBase + containerPostfix + id).hideLoadingIndicator();
                             });
                     } else {
-                        var dcm = new DialogControlModel(window.lang.convert('ERROR_NO_RESOURCE_NAME'), function () {
+                        let dcm = new DialogControlModel(window.lang.convert('ERROR_NO_RESOURCE_NAME'), function () {
                             },
                             window.lang.convert("OK_BUTTON"));
-                        var dc = new DialogControl(dcm);
+                        let dc = new DialogControl(dcm);
                         dc.showDialog();
                     }
                 }
@@ -277,9 +277,9 @@ function ResourceURIFormElement(cssClassBase, inPlaceEdited, key, type, displayK
         }, {
             duration: 500
         });
-    }
+    };
 
-    var hideAddMenu = function () {
+    let hideAddMenu = function () {
         $('#' + cssClassBase + addButtonPostfix + id).fadeIn();
 
         $('#' + resourceCreationControl.getModel().idPrefix + resourceCreationControl.getModel().id).animate({
@@ -287,20 +287,20 @@ function ResourceURIFormElement(cssClassBase, inPlaceEdited, key, type, displayK
         }, {
             duration: 500
         });
-    }
+    };
 
-    var updateUriInPlace = function () {
+    let updateUriInPlace = function () {
         modelOrigin[key] = instance.getModel().resourceUri;
 
         instance.observable.notify(new Event(this, 'UpdatedModel'));
-    }
+    };
 
     this.getModel = function () {
         return {
             resourceUri: currentResource + '?version=' + currentVersion,
             anchors: makeAnchorTags()
         };
-    }
+    };
 
     updateUriInPlace();
 
@@ -320,7 +320,7 @@ function ResourceURIFormElement(cssClassBase, inPlaceEdited, key, type, displayK
                 /** Keep model up-to-date. */
                 currentResource = getResourceForName(value).split('?')[0];
 
-                var versions = getPossibleVersions(currentResource);
+                let versions = getPossibleVersions(currentResource);
                 currentVersion = versions[versions.length - 1];
 
                 if (inPlaceEdited) {
@@ -361,11 +361,11 @@ function ResourceURIFormElement(cssClassBase, inPlaceEdited, key, type, displayK
                 return false;
             });
         }
-    }
+    };
 
     this.getKey = function () {
         return key;
-    }
+    };
 
     this.getValue = function () {
         return currentResource + '?version=' + currentVersion;

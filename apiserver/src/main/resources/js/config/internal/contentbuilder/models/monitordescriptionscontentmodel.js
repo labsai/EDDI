@@ -7,24 +7,24 @@ function MonitorDescriptionsContentModel(dataProvider, actionHandler) {
     this.defaultConversationStateDropDownValue = 'All';
     this.defaultViewStateDropDownValue = 'All';
 
-    var tableControl;
-    var tableControlLimit = this.defaultTableControlLimit;
-    var tableControlIndex = this.defaultTableControlIndex;
-    var tableControlFilter;
-    var tableControlOrder = this.defaultTableControlOrder;
-    var botDropDownValue = this.defaultBotDropDownValue;
-    var botVersionDropDownValue = this.defaultBotVersionDropDownValue;
-    var conversationStateDropDownValue = this.defaultConversationStateDropDownValue;
-    var viewStateDropDownValue = this.defaultViewStateDropDownValue;
+    let tableControl;
+    let tableControlLimit = this.defaultTableControlLimit;
+    let tableControlIndex = this.defaultTableControlIndex;
+    let tableControlFilter;
+    let tableControlOrder = this.defaultTableControlOrder;
+    let botDropDownValue = this.defaultBotDropDownValue;
+    let botVersionDropDownValue = this.defaultBotVersionDropDownValue;
+    let conversationStateDropDownValue = this.defaultConversationStateDropDownValue;
+    let viewStateDropDownValue = this.defaultViewStateDropDownValue;
 
     this.getTableControl = function () {
         return tableControl;
-    }
+    };
 
     this.makeContentModel = function (sizeCallbackInstance, selectionCallbackInstance) {
-        var models = [];
+        let models = [];
 
-        var urlParams = $.url.parse(window.location.href).params;
+        let urlParams = $.url.parse(window.location.href).params;
         if (typeof urlParams !== 'undefined') {
             if (typeof urlParams['limit'] !== 'undefined') {
                 tableControlLimit = parseInt(decodeURIComponent(urlParams['limit'])) || this.defaultTableControlLimit;
@@ -59,13 +59,13 @@ function MonitorDescriptionsContentModel(dataProvider, actionHandler) {
             }
         }
 
-        var botMaxVersion;
+        let botMaxVersion;
 
-        var botDocumentDescriptions = dataProvider.readDocumentDescriptions('ai.labs.bot', 0, 0, undefined, undefined);
-        var botDropDownValues = [];
+        let botDocumentDescriptions = dataProvider.readDocumentDescriptions('ai.labs.bot', 0, 0, undefined, undefined);
+        let botDropDownValues = [];
         botDropDownValues.push(this.defaultBotDropDownValue);
-        for (var i = 0; i < botDocumentDescriptions.length; ++i) {
-            var botDocumentDescriptionUriObject = SLSUriParser(botDocumentDescriptions[i].resource);
+        for (let i = 0; i < botDocumentDescriptions.length; ++i) {
+            let botDocumentDescriptionUriObject = SLSUriParser(botDocumentDescriptions[i].resource);
             //botDropDownValues.push({text:botDocumentDescriptions[i].name, value:botDocumentDescriptionUriObject.id});
             botDropDownValues.push(botDocumentDescriptionUriObject.id);
 
@@ -74,64 +74,64 @@ function MonitorDescriptionsContentModel(dataProvider, actionHandler) {
             }
         }
 
-        var botDropDownModel = new DropDownControlModel('dropdown_bots', 'dropdown_container', 'dropdown_dropdown', 'Bot', true, botDropDownValues, botDropDownValue, 'BotDropDownChanged');
-        var botDropDownControl = new DropDownControl(botDropDownModel);
+        let botDropDownModel = new DropDownControlModel('dropdown_bots', 'dropdown_container', 'dropdown_dropdown', 'Bot', true, botDropDownValues, botDropDownValue, 'BotDropDownChanged');
+        let botDropDownControl = new DropDownControl(botDropDownModel);
         botDropDownControl.observable.addObserver(actionHandler.observer);
         models.push(botDropDownControl);
 
         if (botDropDownValue !== this.defaultBotDropDownValue) {
-            var botVersionDropDownValues = [];
+            let botVersionDropDownValues = [];
             botVersionDropDownValues.push(this.defaultBotVersionDropDownValue);
-            botVersionDropDownValues = botVersionDropDownValues.concat((new Array).arrayWithRange(1, botMaxVersion));
+            botVersionDropDownValues = botVersionDropDownValues.concat(([]).arrayWithRange(1, botMaxVersion));
 
-            var botVersionDropDownModel = new DropDownControlModel('dropdown_botversions', 'dropdown_container', 'dropdown_dropdown', 'Bot-Version', true, botVersionDropDownValues, botVersionDropDownValue, 'BotVersionDropDownChanged');
-            var botVersionDropDownControl = new DropDownControl(botVersionDropDownModel);
+            let botVersionDropDownModel = new DropDownControlModel('dropdown_botversions', 'dropdown_container', 'dropdown_dropdown', 'Bot-Version', true, botVersionDropDownValues, botVersionDropDownValue, 'BotVersionDropDownChanged');
+            let botVersionDropDownControl = new DropDownControl(botVersionDropDownModel);
             botVersionDropDownControl.observable.addObserver(actionHandler.observer);
             models.push(botVersionDropDownControl);
         }
 
-        var conversationStateDropDownValues = [];
+        let conversationStateDropDownValues = [];
         conversationStateDropDownValues.push(this.defaultConversationStateDropDownValue);
         conversationStateDropDownValues.push('READY', 'IN_PROGRESS', 'ENDED');
 
-        var conversationStateDropDownModel = new DropDownControlModel('dropdown_conversationstates', 'dropdown_container', 'dropdown_dropdown', 'Conversation-State', true, conversationStateDropDownValues, conversationStateDropDownValue, 'ConversationStateDropDownChanged');
-        var conversationStateDropDownControl = new DropDownControl(conversationStateDropDownModel);
+        let conversationStateDropDownModel = new DropDownControlModel('dropdown_conversationstates', 'dropdown_container', 'dropdown_dropdown', 'Conversation-State', true, conversationStateDropDownValues, conversationStateDropDownValue, 'ConversationStateDropDownChanged');
+        let conversationStateDropDownControl = new DropDownControl(conversationStateDropDownModel);
         conversationStateDropDownControl.observable.addObserver(actionHandler.observer);
         models.push(conversationStateDropDownControl);
 
-        var viewStateDropDownValues = [];
+        let viewStateDropDownValues = [];
         viewStateDropDownValues.push(this.defaultViewStateDropDownValue);
         viewStateDropDownValues.push('SEEN', 'UNSEEN');
 
-        var viewStateDropDownModel = new DropDownControlModel('dropdown_viewstates', 'dropdown_container', 'dropdown_dropdown', 'View-State', true, viewStateDropDownValues, viewStateDropDownValue, 'ViewStateDropDownChanged');
-        var viewStateDropDownControl = new DropDownControl(viewStateDropDownModel);
+        let viewStateDropDownModel = new DropDownControlModel('dropdown_viewstates', 'dropdown_container', 'dropdown_dropdown', 'View-State', true, viewStateDropDownValues, viewStateDropDownValue, 'ViewStateDropDownChanged');
+        let viewStateDropDownControl = new DropDownControl(viewStateDropDownModel);
         viewStateDropDownControl.observable.addObserver(actionHandler.observer);
         models.push(viewStateDropDownControl);
 
-        var botId;
-        if (botDropDownValue != this.defaultBotDropDownValue) {
+        let botId;
+        if (botDropDownValue !== this.defaultBotDropDownValue) {
             botId = botDropDownValue;
         }
 
-        var botVersion;
-        if (botVersionDropDownValue != this.defaultBotVersionDropDownValue) {
+        let botVersion;
+        if (botVersionDropDownValue !== this.defaultBotVersionDropDownValue) {
             botVersion = botVersionDropDownValue;
         }
 
-        var conversationState;
-        if (conversationStateDropDownValue != this.defaultConversationStateDropDownValue) {
+        let conversationState;
+        if (conversationStateDropDownValue !== this.defaultConversationStateDropDownValue) {
             conversationState = conversationStateDropDownValue;
         }
 
-        var viewState;
-        if (viewStateDropDownValue != this.defaultViewStateDropDownValue) {
+        let viewState;
+        if (viewStateDropDownValue !== this.defaultViewStateDropDownValue) {
             viewState = viewStateDropDownValue;
         }
-        var monitorDescriptions = dataProvider.readConversationDescriptors(botId, botVersion, conversationState, viewState, tableControlLimit, tableControlIndex, tableControlFilter, tableControlOrder);
+        let monitorDescriptions = dataProvider.readConversationDescriptors(botId, botVersion, conversationState, viewState, tableControlLimit, tableControlIndex, tableControlFilter, tableControlOrder);
 
-        var tableModel;
+        let tableModel;
 
-        var monitorDescriptionsColumns = [
+        let monitorDescriptionsColumns = [
             new TableControlColumnModel({columnIdentifier: 'username'}, window.lang.convert('MONITOR_DESCRIPTOR_TABLE_COL_USERNAME'), 'table_col_username', false, false),
             new TableControlColumnModel({columnIdentifier: 'environment'}, window.lang.convert('MONITOR_DESCRIPTOR_TABLE_COL_ENVIRONMENT'), 'table_col_environment', false, false),
             new TableControlColumnModel({columnIdentifier: 'botname'}, window.lang.convert('MONITOR_DESCRIPTOR_TABLE_COL_BOTNAME'), 'table_col_botname', false, false),
@@ -142,12 +142,12 @@ function MonitorDescriptionsContentModel(dataProvider, actionHandler) {
             new TableControlColumnModel({columnIdentifier: 'feedback'}, window.lang.convert('MONITOR_DESCRIPTOR_TABLE_COL_FEEDBACK'), 'table_col_feedback', false, false)
         ];
 
-        var monitorDescriptionsData = [];
-        var monitorDescriptionResourceParams = [];
-        for (var i = 0; i < monitorDescriptions.length; ++i) {
-            var monitorDescriptionUriObject = SLSUriParser(monitorDescriptions[i].resource);
-            var lastModifiedDate = new Date(monitorDescriptions[i].lastModifiedOn);
-            var lastModifiedDateString = lastModifiedDate.toLocaleDateString() + ' - ' + lastModifiedDate.toLocaleTimeString();
+        let monitorDescriptionsData = [];
+        let monitorDescriptionResourceParams = [];
+        for (let i = 0; i < monitorDescriptions.length; ++i) {
+            let monitorDescriptionUriObject = SLSUriParser(monitorDescriptions[i].resource);
+            let lastModifiedDate = new Date(monitorDescriptions[i].lastModifiedOn);
+            let lastModifiedDateString = lastModifiedDate.toLocaleDateString() + ' - ' + lastModifiedDate.toLocaleTimeString();
             monitorDescriptionsData.push([monitorDescriptions[i].createdByUserName, monitorDescriptions[i].environment, monitorDescriptions[i].botName, lastModifiedDateString, monitorDescriptions[i].conversationStepSize, monitorDescriptions[i].conversationState, '<a href="' + application.url.getUriForResource(monitorDescriptionUriObject.id) + '">show</a>', monitorDescriptions[i].feedbacks.length]);
             monitorDescriptionResourceParams.push({id: monitorDescriptionUriObject.id});
         }

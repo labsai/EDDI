@@ -1,20 +1,20 @@
 function GenericLifecycleTaskControl(model) {
-    var groupControlIdPrefix = model.idPrefix + 'backinggroupcontrol_';
-    var groupControlBuilder = new GroupControlBuilder();
-    var blockControlPrefix = 'config_';
+    let groupControlIdPrefix = model.idPrefix + 'backinggroupcontrol_';
+    let groupControlBuilder = new GroupControlBuilder();
+    let blockControlPrefix = 'config_';
 
 
-    var getLifeCycleTaskPlugin = function (lifecycleTaskType) {
+    let getLifeCycleTaskPlugin = function (lifecycleTaskType) {
         if (application.pluginManager.plugins.lifecycletaskhandlers.hasOwnProperty(lifecycleTaskType)) {
             return application.pluginManager.plugins.lifecycletaskhandlers[lifecycleTaskType];
         } else {
             throw new UnknownLifecycleTaskException('No lifecycle task for type: ' + lifecycleTaskType);
         }
-    }
+    };
 
-    var getLifecycleTaskControl = function (extension) {
-        var lifeCycle;
-        var lifeCycleModel;
+    let getLifecycleTaskControl = function (extension) {
+        let lifeCycle;
+        let lifeCycleModel;
         try {
             lifeCycle = getLifeCycleTaskPlugin(extension.type);
             lifeCycleModel = new lifeCycle.model();
@@ -25,7 +25,7 @@ function GenericLifecycleTaskControl(model) {
             }
         }
 
-        var lifeCycleControl = new lifeCycle.control(lifeCycleModel);
+        let lifeCycleControl = new lifeCycle.control(lifeCycleModel);
 
         if (lifeCycleControl.hasOwnProperty('observable')) {
             lifeCycleControl.observable.addObserver(application.actionHandler.observer);
@@ -34,27 +34,27 @@ function GenericLifecycleTaskControl(model) {
         return lifeCycleControl;
     };
 
-    var displayName;
-    var definitionNamespace = model.type.split('//')[1].split('?')[0];
-    var definitionCacheId = 'CONTROL_DEFINITION_CACHE_' + definitionNamespace;
-    var definition = application.networkCacheManager.cachedNetworkCall(definitionCacheId, application.dataProvider,
+    let displayName;
+    let definitionNamespace = model.type.split('//')[1].split('?')[0];
+    let definitionCacheId = 'CONTROL_DEFINITION_CACHE_' + definitionNamespace;
+    let definition = application.networkCacheManager.cachedNetworkCall(definitionCacheId, application.dataProvider,
         application.dataProvider.readExtensionDefinitions,
         [definitionNamespace])[0];
 
-    if (definition.name == "") {
+    if (definition.name === "") {
         displayName = model.type;
     } else {
         displayName = definition.name;
     }
 
-    var groupControl = groupControlBuilder.createStandardUneditableGroupControl(model.id, groupControlIdPrefix,
+    let groupControl = groupControlBuilder.createStandardUneditableGroupControl(model.id, groupControlIdPrefix,
         displayName, true, true, false, 'packagecontrol', false);
 
-    var instance = this;
+    let instance = this;
     /** Configure the BehaviorLifecycleControl to act as a transparent proxy for its backing groupControl / blockControl. */
     this.observer = new Observer(function (event) {
-        if (event.command == 'UpdatedModel') {
-            var htmlId = '#' + model.backingGroupControl.getModel().idPrefix + model.backingGroupControl.getModel().id;
+        if (event.command === 'UpdatedModel') {
+            let htmlId = '#' + model.backingGroupControl.getModel().idPrefix + model.backingGroupControl.getModel().id;
 
             $(htmlId).removeClass(application.configuration.newStateClassName);
             model.backingGroupControl.getModel().removeClass(application.configuration.newStateClassName);
@@ -62,7 +62,7 @@ function GenericLifecycleTaskControl(model) {
             model.backingGroupControl.getModel().addClass(application.configuration.editedStateClassName);
             application.reloadManager.changesHappened();
         } else {
-            var newEvent = jQuery.extend(true, {}, event);
+            let newEvent = jQuery.extend(true, {}, event);
             newEvent.sender = instance;
             instance.observable.notify(newEvent);
         }
@@ -72,37 +72,37 @@ function GenericLifecycleTaskControl(model) {
     groupControl.observable.addObserver(this.observer);
 
     if (model.lifecycle.config && ObjectUtils.prototype.getNumberOfProperties(model.lifecycle.config) > 0) {
-        var blockModel = new BlockControlModel(model.id, model.idPrefix + blockControlPrefix, 'blockcontrol',
+        let blockModel = new BlockControlModel(model.id, model.idPrefix + blockControlPrefix, 'blockcontrol',
             window.lang.convert('LIFECYCLE_CONFIG'), true, false, model.type, this);
-        var blockControl = new BlockControl(blockModel);
+        let blockControl = new BlockControl(blockModel);
 
         blockControl.observable.addObserver(this.observer);
 
         groupControl.getModel().addChild(blockControl);
     }
 
-    var extensionPoints = application.jsonBuilderHelper.fetchExtension(model.lifecycle.type).extensionPoints;
+    let extensionPoints = application.jsonBuilderHelper.fetchExtension(model.lifecycle.type).extensionPoints;
 
     if (extensionPoints && ObjectUtils.prototype.getNumberOfProperties(extensionPoints) > 0) {
-        var groupControlBuilder = new GroupControlBuilder();
+        let groupControlBuilder = new GroupControlBuilder();
 
-        for (var i = 0; i < extensionPoints.length; ++i) {
-            var extensionPoint = extensionPoints[i];
+        for (let i = 0; i < extensionPoints.length; ++i) {
+            let extensionPoint = extensionPoints[i];
 
-            var extensionGC = groupControlBuilder.createStandardUneditableGroupControl(model.id, groupControlIdPrefix +
+            let extensionGC = groupControlBuilder.createStandardUneditableGroupControl(model.id, groupControlIdPrefix +
                 i + '_',
                 window.lang.convert(extensionPoint.displayKey), false, false, true, 'packagecontrol', true);
 
             extensionGC.getModel().context = {namespace: extensionPoint.namespace.split('//')[1]};
 
-            var extensions = model.lifecycle.extensions[extensionPoint.namespace.split(model.type + '.').last()];
+            let extensions = model.lifecycle.extensions[extensionPoint.namespace.split(model.type + '.').last()];
 
             console.log(window.lang.convert(extensionPoint.displayKey) + '::' + extensionGC.getModel().context.namespace)
             if (extensions) {
-                for (var j = 0; j < extensions.length; ++j) {
-                    var extension = extensions[j];
+                for (let j = 0; j < extensions.length; ++j) {
+                    let extension = extensions[j];
 
-                    var pluginControl = getLifecycleTaskControl(extension);
+                    let pluginControl = getLifecycleTaskControl(extension);
 
                     extensionGC.getModel().addChild(pluginControl);
                 }
@@ -116,18 +116,16 @@ function GenericLifecycleTaskControl(model) {
     model.children.push(groupControl);
 
     this.createRepresentation = function () {
-        var representation = '<div id="' + model.idPrefix + model.id + '">' + groupControl.createRepresentation() + '<div class="clear"></div></div>';
-
-        return representation;
-    }
+        return '<div id="' + model.idPrefix + model.id + '">' + groupControl.createRepresentation() + '<div class="clear"></div></div>';
+    };
 
     this.getModel = function () {
         return model;
-    }
+    };
 
     this.getHeight = function () {
         return $('#' + model.idPrefix + model.id).outerHeight(true);
-    }
+    };
 
     this.registerButtonEvents = function () {
         groupControl.registerButtonEvents();

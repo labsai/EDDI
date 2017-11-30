@@ -3,23 +3,23 @@ function DictionaryContentModel(dataProvider, actionHandler) {
     this.defaultTableControlIndex = 0;
     this.defaultTableControlOrder = 'asc';
 
-    var dictionary;
+    let dictionary;
 
-    var tableControl;
-    var tableControlLimit = this.defaultTableControlLimit;
-    var tableControlIndex = this.defaultTableControlIndex;
-    var tableControlFilter;
-    var tableControlOrder = this.defaultTableControlOrder;
+    let tableControl;
+    let tableControlLimit = this.defaultTableControlLimit;
+    let tableControlIndex = this.defaultTableControlIndex;
+    let tableControlFilter;
+    let tableControlOrder = this.defaultTableControlOrder;
 
     this.getTableControl = function () {
         return tableControl;
-    }
+    };
 
-    var firstRun = true;
+    let firstRun = true;
     this.makeContentModel = function (sizeCallbackInstance, selectionCallbackInstance) {
-        var models = [];
+        let models = [];
 
-        var urlParams = $.url.parse(window.location.href).params;
+        let urlParams = $.url.parse(window.location.href).params;
         if (typeof urlParams !== 'undefined') {
             if (typeof urlParams['limit'] !== 'undefined') {
                 tableControlLimit = parseInt(decodeURIComponent(urlParams['limit'])) || this.defaultTableControlLimit;
@@ -39,7 +39,7 @@ function DictionaryContentModel(dataProvider, actionHandler) {
         }
 
         //Hash's (Fragment's)
-        var hashString = $.param.fragment();
+        let hashString = $.param.fragment();
 
         if (typeof dictionary === 'undefined') {
             dictionary = dataProvider.readActiveRegularDictionary(tableControlLimit,
@@ -57,11 +57,11 @@ function DictionaryContentModel(dataProvider, actionHandler) {
             firstRun = false;
         }
 
-        var tableModel;
+        let tableModel;
 
-        if (hashString.indexOf("dataType=words") != -1) {
+        if (hashString.indexOf("dataType=words") !== -1) {
             //words
-            var wordsColumns = [
+            let wordsColumns = [
                 new TableControlColumnModel({columnIdentifier: 'selection'},
                     window.lang.convert('DICTIONARY_TABLE_COL_SELECTION'),
                     'table_col_selection', false, false),
@@ -76,8 +76,8 @@ function DictionaryContentModel(dataProvider, actionHandler) {
                     'table_col_frequency', true, true)
             ];
 
-            var wordsData = [];
-            for (var i = 0; i < dictionary.words.length; ++i) {
+            let wordsData = [];
+            for (let i = 0; i < dictionary.words.length; ++i) {
                 wordsData.push(['<img class="dataTables_dotbutton" src="/binary/img/config/dotbutton.png"/>',
                     dictionary.words[i].word,
                     dictionary.words[i].exp,
@@ -91,7 +91,7 @@ function DictionaryContentModel(dataProvider, actionHandler) {
                 tableControlLimit, tableControlIndex, tableControlFilter);
         } else {
             //phrases
-            var phrasesColumns = [
+            let phrasesColumns = [
                 new TableControlColumnModel({columnIdentifier: 'selection'},
                     window.lang.convert('DICTIONARY_TABLE_COL_SELECTION'),
                     'table_col_selection', false, false),
@@ -103,8 +103,8 @@ function DictionaryContentModel(dataProvider, actionHandler) {
                     'table_col_expression', true, true)
             ];
 
-            var phrasesData = [];
-            for (var i = 0; i < dictionary.phrases.length; ++i) {
+            let phrasesData = [];
+            for (let i = 0; i < dictionary.phrases.length; ++i) {
                 phrasesData.push(['<img class="dataTables_dotbutton" src="/binary/img/config/dotbutton.png"/>',
                     dictionary.phrases[i].phrase,
                     dictionary.phrases[i].exp]);
@@ -120,14 +120,14 @@ function DictionaryContentModel(dataProvider, actionHandler) {
         tableControl.observable.addObserver(actionHandler.observer);
         models.push(tableControl);
         return models;
-    }
+    };
 
     this.urlHashHasChanged = function (contentBuilder) {
-        var contentModel = this.makeContentModel();
+        let contentModel = this.makeContentModel();
 
         contentBuilder.buildContent(contentModel);
         contentBuilder.registerEvents();
-    }
+    };
 
     this.addChildControl = function (data) {
         tableControl.addRow(data);

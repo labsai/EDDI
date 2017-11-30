@@ -1,34 +1,34 @@
 function PatchInstructionCache(dataProvider) {
-    var instructionCache = [];
+    let instructionCache = [];
 
-    var addInstructionsToCache = function (patchInstructions, completion) {
-        for (var i = 0; i < patchInstructions.length; ++i) {
+    let addInstructionsToCache = function (patchInstructions, completion) {
+        for (let i = 0; i < patchInstructions.length; ++i) {
             instructionCache.push(patchInstructions[i]);
         }
 
-        var id = application.dataProvider.dataProviderState.getActiveId();
-        var version = application.dataProvider.dataProviderState.getActiveVersion();
+        let id = application.dataProvider.dataProviderState.getActiveId();
+        let version = application.dataProvider.dataProviderState.getActiveVersion();
 
-        var uri = application.url.getUriForResource(id, version);
+        let uri = application.url.getUriForResource(id, version);
 
         completion(200, {responseText: ""}, uri);
-    }
+    };
 
     this.patchActiveOutputSet = function (patchInstructions, completion) {
         addInstructionsToCache(patchInstructions, completion);
-    }
+    };
 
     this.patchActiveRegularDictionary = function (patchInstructions, completion) {
         addInstructionsToCache(patchInstructions, completion);
-    }
+    };
 
     this.flushCache = function (completion) {
-        if (application.url.getCurrentPage() == 'dictionaries') {
+        if (application.url.getCurrentPage() === 'dictionaries') {
             dataProvider.patchActiveRegularDictionary(instructionCache, completion);
-        } else if (application.url.getCurrentPage() == 'outputs') {
+        } else if (application.url.getCurrentPage() === 'outputs') {
             dataProvider.patchActiveOutputSet(instructionCache, completion);
         }
-    }
+    };
 
     this.updateActiveVersion = function () {
         /** NOP */

@@ -1,6 +1,6 @@
 function GroupControlBuilder() {
-    var createBackingUneditableGroupControl = function (groupControlModel, cssClass, isConnectedToActionHandler) {
-        var gc = new GroupControl(groupControlModel, cssClass);
+    let createBackingUneditableGroupControl = function (groupControlModel, cssClass, isConnectedToActionHandler) {
+        let gc = new GroupControl(groupControlModel, cssClass);
 
         gc.observable.addObserver(application.contentBuilder.observer);
 
@@ -9,26 +9,24 @@ function GroupControlBuilder() {
         }
 
         return gc;
-    }
+    };
 
-    var createBackingUneditableGroupControlModel = function (id, idPrefix, name, opened, isDeleteAble, hasAddButton) {
-        var footerControls = [];
+    let createBackingUneditableGroupControlModel = function (id, idPrefix, name, opened, isDeleteAble, hasAddButton) {
+        let footerControls = [];
 
         if (isDeleteAble) {
-            var footerModel = new FooterControlModel(id, idPrefix + 'footer_', true);
-            var footerControl = new FooterControl(footerModel, 'footercontrol');
+            let footerModel = new FooterControlModel(id, idPrefix + 'footer_', true);
+            let footerControl = new FooterControl(footerModel, 'footercontrol');
 
             footerControls.push(footerControl);
         }
 
         return new GroupControlModel(id, idPrefix, name,
             footerControls, false, opened, null, false, isDeleteAble, hasAddButton);
-    }
+    };
 
     this.createStandardUneditableGroupControl = function (id, idPrefix, name, opened, isDeleteAble, hasAddButton, cssClass, isConnectedToActionHandler) {
-        var model = createBackingUneditableGroupControlModel(id, idPrefix, name, opened, isDeleteAble, hasAddButton);
-        var control = createBackingUneditableGroupControl(model, cssClass, isConnectedToActionHandler);
-
-        return control;
+        let model = createBackingUneditableGroupControlModel(id, idPrefix, name, opened, isDeleteAble, hasAddButton);
+        return createBackingUneditableGroupControl(model, cssClass, isConnectedToActionHandler);
     }
 }

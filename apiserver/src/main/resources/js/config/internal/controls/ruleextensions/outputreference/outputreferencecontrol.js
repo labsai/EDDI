@@ -1,11 +1,11 @@
 function OutputReferenceControl(model) {
-    var filterRowPostfix = '_filterrow';
-    var filterDescriptorPostfix = '_filterdescriptor';
-    var filterPostfix = '_filter';
-    var inputValuePostfix = '_inputvalue';
-    var footerCSSClassPostfix = '_footer';
+    let filterRowPostfix = '_filterrow';
+    let filterDescriptorPostfix = '_filterdescriptor';
+    let filterPostfix = '_filter';
+    let inputValuePostfix = '_inputvalue';
+    let footerCSSClassPostfix = '_footer';
 
-    var instance = this;
+    let instance = this;
 
     this.observable = new Observable();
     this.observer = new Observer(function (event) {
@@ -16,12 +16,12 @@ function OutputReferenceControl(model) {
         }
     });
 
-    for (var i = 0; i < model.footerControls.length; ++i) {
+    for (let i = 0; i < model.footerControls.length; ++i) {
         model.footerControls[i].observable.addObserver(this.observer);
     }
 
     this.createRepresentation = function () {
-        var representation = '<div id="' + model.idPrefix + model.id + '" class="' + model.CSSClassBase + '">\
+        let representation = '<div id="' + model.idPrefix + model.id + '" class="' + model.CSSClassBase + '">\
             <div id="' + model.idPrefix + model.id + inputValuePostfix + '" class="' + model.CSSClassBase + inputValuePostfix + '"></div><div class="clear"></div>\
             <div class="' + model.CSSClassBase + filterRowPostfix + '">\
             <div class="' + model.CSSClassBase + filterDescriptorPostfix + '">' + window.lang.convert('OUTPUTREFERENCE_FILTER') + '</div>\
@@ -31,7 +31,7 @@ function OutputReferenceControl(model) {
 
         representation += '<div class="' + model.CSSClassBase + footerCSSClassPostfix + '">';
 
-        for (var i = 0; i < model.footerControls.length; ++i) {
+        for (let i = 0; i < model.footerControls.length; ++i) {
             representation += model.footerControls[i].createRepresentation();
         }
 
@@ -49,12 +49,12 @@ function OutputReferenceControl(model) {
     }
 
     this.registerButtonEvents = function () {
-        var that = this;
+        let that = this;
         $('#' + model.idPrefix + model.id + inputValuePostfix).dropdown({
             value: model.inputValue,
             possibleValues: application.dataProvider.getPossibleValuesForOutputReferenceInputValue(),
             valueChanged: function (value, oldValue) {
-                var editableEvent = new Event(that, 'ValueChanged');
+                let editableEvent = new Event(that, 'ValueChanged');
 
                 editableEvent.value = value;
                 editableEvent.oldValue = oldValue;
@@ -67,7 +67,7 @@ function OutputReferenceControl(model) {
         });
 
         $('#' + model.idPrefix + model.id + filterPostfix).editable(function (value, settings) {
-            var editableEvent = new Event(instance, 'ValueChanged');
+            let editableEvent = new Event(instance, 'ValueChanged');
             editableEvent.value = value;
             editableEvent.settings = settings;
             editableEvent.oldValue = instance.getModel().filter;
@@ -91,12 +91,12 @@ function OutputReferenceControl(model) {
             }
         });
 
-        for (var i = 0; i < model.footerControls.length; ++i) {
+        for (let i = 0; i < model.footerControls.length; ++i) {
             model.footerControls[i].registerButtonEvents();
         }
 
         /** Preserve additional state classes. */
-        for (var i = 0; i < model.additionalClasses.length; ++i) {
+        for (let i = 0; i < model.additionalClasses.length; ++i) {
             $('#' + model.idPrefix + model.id).addClass(model.additionalClasses[i]);
         }
     }

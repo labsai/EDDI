@@ -1,27 +1,27 @@
 function DialogActionHandler(contentBuilder, dataProvider) {
-    var instance = this;
-    var dataProviderProxy = new DialogSaveProxy();
-    var synchronisationHelper = new DialogSynchronisationHelper(dataProvider);
-    var additionManager = new DialogAdditionManager(dataProviderProxy, false);
-    var deletionManager = new DialogDeletionManager(dataProviderProxy, false);
-    var updateManager = new DialogUpdateManager(dataProviderProxy, false);
-    var versionHelper = new VersionHelper();
-    var ignoreNextUpdate = false;
+    let instance = this;
+    let dataProviderProxy = new DialogSaveProxy();
+    let synchronisationHelper = new DialogSynchronisationHelper(dataProvider);
+    let additionManager = new DialogAdditionManager(dataProviderProxy, false);
+    let deletionManager = new DialogDeletionManager(dataProviderProxy, false);
+    let updateManager = new DialogUpdateManager(dataProviderProxy, false);
+    let versionHelper = new VersionHelper();
+    let ignoreNextUpdate = false;
 
     function NoSuchBluePrintException(msg) {
         this.message = msg;
     }
 
-    var deleteCallback = function (event) {
+    let deleteCallback = function (event) {
         instance.observer.eventReceived(event);
-    }
+    };
 
     this.observer = new Observer(function (event) {
         switch (event.command) {
             case 'Save':
                 if (application.reloadManager.hasChanges()) {
-                    var tmpRepresentation = application.jsonRepresentationManager.clone();
-                    var tmpSet = tmpRepresentation.getRuleSetView();
+                    let tmpRepresentation = application.jsonRepresentationManager.clone();
+                    let tmpSet = tmpRepresentation.getRuleSetView();
 
                     $('#content').showLoadingIndicator();
 
@@ -112,7 +112,7 @@ function DialogActionHandler(contentBuilder, dataProvider) {
                 ignoreNextUpdate = true;
                 break;
             case 'GotoVersion':
-                var targetUri = event.sender.getModel().resourceUri;
+                let targetUri = event.sender.getModel().resourceUri;
 
                 if (event.sender.getModel().anchors) {
                     targetUri += event.sender.getModel().anchors;

@@ -1,17 +1,17 @@
 function ReferenceUpdateManager() {
-    var doUpdates = true;
-    var doUpdatesBot = true;
-    var synchronisationHelper = new DialogSynchronisationHelper(application.dataProvider);
+    let doUpdates = true;
+    let doUpdatesBot = true;
+    let synchronisationHelper = new DialogSynchronisationHelper(application.dataProvider);
 
     this.updateReferences = function (resourceURI, completion) {
-        if (doUpdates == false) {
+        if (doUpdates === false) {
             completion(true);
             return;
         }
 
-        var anchorParams = application.url.serializeAnchors();
+        let anchorParams = application.url.serializeAnchors();
 
-        if (application.url.getCurrentPage() == 'packages') {
+        if (application.url.getCurrentPage() === 'packages') {
             if (anchorParams.hasOwnProperty(application.configuration.botParentIdHashKey) &&
                 anchorParams.hasOwnProperty(application.configuration.botParentVersionHashKey)) {
                 application.dataProvider.updateResourceInBot(anchorParams[application.configuration.botParentIdHashKey],
@@ -19,8 +19,8 @@ function ReferenceUpdateManager() {
                     resourceURI,
                     function (httpCode, xmlHttpRequest, value) {
                         if (application.httpCodeManager.successfulRequest(httpCode)) {
-                            var newVersion = $.url.parse(xmlHttpRequest.responseText).params.version;
-                            var obj = {};
+                            let newVersion = $.url.parse(xmlHttpRequest.responseText).params.version;
+                            let obj = {};
 
                             obj[application.configuration.botParentVersionHashKey] = newVersion;
 
@@ -59,8 +59,8 @@ function ReferenceUpdateManager() {
                 function (httpCode, xmlHttpRequest, value) {
                     console.log(xmlHttpRequest.responseText);
                     if (application.httpCodeManager.successfulRequest(httpCode)) {
-                        var newVersion = $.url.parse(xmlHttpRequest.responseText).params.version;
-                        var obj = {};
+                        let newVersion = $.url.parse(xmlHttpRequest.responseText).params.version;
+                        let obj = {};
 
                         obj[application.configuration.packageParentVersionHashKey] = newVersion;
 
@@ -77,8 +77,8 @@ function ReferenceUpdateManager() {
                                     console.log('Updated bot ' + anchorParams[application.configuration.botParentIdHashKey]);
                                     console.log('With return value: ' + httpCode);
                                     if (application.httpCodeManager.successfulRequest(httpCode)) {
-                                        var newVersion = $.url.parse(xmlHttpRequest.responseText).params.version;
-                                        var obj = {};
+                                        let newVersion = $.url.parse(xmlHttpRequest.responseText).params.version;
+                                        let obj = {};
 
                                         obj[application.configuration.botParentVersionHashKey] = newVersion;
 
@@ -121,11 +121,11 @@ function ReferenceUpdateManager() {
         } else {
             completion(true);
         }
-    }
+    };
 
     this.toggleUpdateReferences = function () {
         doUpdates = !doUpdates;
-    }
+    };
 
     this.toggleUpdateReferencesBot = function () {
         doUpdatesBot = !doUpdatesBot;

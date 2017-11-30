@@ -2,11 +2,11 @@ function SortableEvent(command) {
     this.command = command;
 
     this.fromReceiveEvent = function (that, ui, levelIdentifier) {
-        var htmlIdResolver = new HTMLIDResolver();
+        let htmlIdResolver = new HTMLIDResolver();
 
-        var senderId = ui.sender.attr('id');
-        var receiverId = $(that).attr('id');
-        var itemId = ui.item.attr('id');
+        let senderId = ui.sender.attr('id');
+        let receiverId = $(that).attr('id');
+        let itemId = ui.item.attr('id');
 
         try {
             this.sender = htmlIdResolver.resolveId(senderId);
@@ -28,13 +28,13 @@ function SortableEvent(command) {
         this.sortable = ui.sender;
 
         return this;
-    }
+    };
 
     this.fromUpdateEvent = function (that, event, ui) {
         this.sender = that;
         this.originalEvent = event;
         this.ui = ui;
-        var idResolver = new HTMLIDResolver();
+        let idResolver = new HTMLIDResolver();
         try {
             this.receiver = idResolver.resolveId($(that).attr('id'));
         } catch (ex) {
@@ -45,7 +45,7 @@ function SortableEvent(command) {
             }
         }
 
-        var itemId = ui.item.attr('id');
+        let itemId = ui.item.attr('id');
         this.item = idResolver.resolveId(itemId);
 
         this.oldIndex = ui.item.data('old_index');

@@ -1,24 +1,24 @@
 function PackageActionHandler(contentBuilder, dataProvider) {
-    var synchronisationHelper = new DialogSynchronisationHelper(dataProvider);
-    var editHandler = new PackageEditHelper();
-    var idResolver = new HTMLIDResolver();
-    var versionHelper = new VersionHelper();
+    let synchronisationHelper = new DialogSynchronisationHelper(dataProvider);
+    let editHandler = new PackageEditHelper();
+    let idResolver = new HTMLIDResolver();
+    let versionHelper = new VersionHelper();
 
-    var deleteCallback = function (event) {
+    let deleteCallback = function (event) {
         instance.observer.eventReceived(event);
-    }
+    };
 
-    var instance = this;
+    let instance = this;
     this.observer = new Observer(function (event) {
         switch (event.command) {
             case 'Save':
                 if (application.reloadManager.hasChanges()) {
-                    var rootControls = application.contentBuilder.getControls();
+                    let rootControls = application.contentBuilder.getControls();
 
-                    var packageJSON = application.jsonBlueprintFactory.makeBlueprintForObjectType('Package');
-                    var rootNode = rootControls[0];
-                    for (var i = 0; i < rootNode.getModel().children.length; ++i) {
-                        var child = rootNode.getModel().children[i];
+                    let packageJSON = application.jsonBlueprintFactory.makeBlueprintForObjectType('Package');
+                    let rootNode = rootControls[0];
+                    for (let i = 0; i < rootNode.getModel().children.length; ++i) {
+                        let child = rootNode.getModel().children[i];
 
                         if (child.getModel().hasOwnProperty('convertToJSON')) {
                             packageJSON.packageExtensions.push(child.getModel().convertToJSON());
@@ -36,7 +36,7 @@ function PackageActionHandler(contentBuilder, dataProvider) {
                                     );
                                 });
                         } else {
-                            var callback = function (success) {
+                            let callback = function (success) {
                                 if (!success) {
                                     application.reloadManager.performWithoutConfirmation(
                                         synchronisationHelper.handlePageReload.curry(xmlHttpRequest.responseText)
@@ -72,11 +72,11 @@ function PackageActionHandler(contentBuilder, dataProvider) {
                 instance.handleDelete(event, deleteCallback);
                 break;
             case 'ControlDeleted':
-                var model = event.sender.getModel();
-                var modelId = '#' + model.idPrefix + model.id;
+                let model = event.sender.getModel();
+                let modelId = '#' + model.idPrefix + model.id;
 
-                var parentId = $(modelId).parent().attr('id');
-                var parentControl = idResolver.resolveId(parentId);
+                let parentId = $(modelId).parent().attr('id');
+                let parentControl = idResolver.resolveId(parentId);
                 parentControl.getModel().children.removeElement(event.sender);
 
                 synchronisationHelper.removeSenderFromDOM(event, true);
@@ -84,19 +84,19 @@ function PackageActionHandler(contentBuilder, dataProvider) {
                 break;
             case 'SortUpdateInner':
             case 'SortUpdatePackageInner':
-                var oldIndex = event.ui.item.data('old_index');
-                var newIndex = event.ui.item.data('new_index');
+                let oldIndex = event.ui.item.data('old_index');
+                let newIndex = event.ui.item.data('new_index');
 
-                var moveItemIndexArray = function (array, oldIndexParam, newIndexParam) {
-                    var tmp = array.splice(oldIndexParam, 1)[0];
+                let moveItemIndexArray = function (array, oldIndexParam, newIndexParam) {
+                    let tmp = array.splice(oldIndexParam, 1)[0];
                     array.splice(newIndexParam, 0, tmp);
                 };
 
-                var groupControl = idResolver.resolveId($(event.sender).attr('id'));
+                let groupControl = idResolver.resolveId($(event.sender).attr('id'));
 
                 moveItemIndexArray(groupControl.getModel().children, oldIndex, newIndex);
 
-                var htmlId = '#' + groupControl.getModel().children[newIndex].getModel().backingGroupControl.getModel().idPrefix +
+                let htmlId = '#' + groupControl.getModel().children[newIndex].getModel().backingGroupControl.getModel().idPrefix +
                     groupControl.getModel().children[newIndex].getModel().backingGroupControl.getModel().id;
 
                 $(htmlId).removeClass(application.configuration.newStateClassName);
@@ -107,7 +107,7 @@ function PackageActionHandler(contentBuilder, dataProvider) {
                 application.reloadManager.changesHappened();
                 break;
             case 'GotoVersion':
-                var targetUri = event.sender.getModel().resourceUri;
+                let targetUri = event.sender.getModel().resourceUri;
 
                 if (event.sender.getModel().anchors) {
                     targetUri += event.sender.getModel().anchors;

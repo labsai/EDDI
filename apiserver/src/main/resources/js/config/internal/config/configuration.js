@@ -10,9 +10,9 @@ function Configuration(url) {
      *  The current language is the default language,
      *  unless the query parameters('lang' and 'loc') explicitly call for a different languagepack.
      */
-    var lang = this.defaultLanguageKey;
-    var loc = this.defaultLocationKey;
-    var urlParams = $.url.parse(window.location.href).params;
+    let lang = this.defaultLanguageKey;
+    let loc = this.defaultLocationKey;
+    let urlParams = $.url.parse(window.location.href).params;
     if (typeof urlParams !== 'undefined') {
         lang = urlParams['lang'];
         if (typeof lang !== 'undefined') {
@@ -41,8 +41,8 @@ function Configuration(url) {
     this.packageParentIdHashKey = 'packageId';
     this.packageParentVersionHashKey = 'packageVersion';
 
-    if (url.getCurrentPage() == "dictionaries" ||
-        url.getCurrentPage() == "outputs") {
+    if (url.getCurrentPage() === "dictionaries" ||
+        url.getCurrentPage() === "outputs") {
         this.newStateClassName = 'isNewTableRow';
         this.editedStateClassName = 'hasChangesTableRow';
     } else {
@@ -157,7 +157,7 @@ function Configuration(url) {
              "core://ai.labs.parser.dictionaries.regular?version=1":{model:RegularModel, control:RegularControl},
              "core://ai.labs.parser.corrections.levenshtein?version=1":{model:LevenshteinModel, control:LevenshteinControl},
              "core://ai.labs.parser.corrections.phonetic?version=1":{model:PhoneticModel, control:PhoneticControl}*/
-        }
+        };
 
     /* Table Controls */
     this.tableControlDefaultLengthValues = ['10', '25', '50', '100'];

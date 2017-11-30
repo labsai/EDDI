@@ -3,12 +3,12 @@ function InconsistentStateDetectedException(msg) {
 }
 
 function DialogController() {
-    var updateManager = new DialogUpdateManager(application.dataProvider);
+    let updateManager = new DialogUpdateManager(application.dataProvider);
 
     this.observable = new Observable();
 
     this.registerEvents = function () {
-        var instance = this;
+        let instance = this;
 
         $('.packagecontrol_sortable_inner, .connector_control_right').sortable({
             cancel: 'a, form',
@@ -23,7 +23,7 @@ function DialogController() {
                 if (this === ui.item.parent()[0]) {
                     ui.item.data("new_index", ui.item.index());
 
-                    var sortableEvent = new SortableEvent('SortUpdatePackageInner');
+                    let sortableEvent = new SortableEvent('SortUpdatePackageInner');
                     sortableEvent.fromUpdateEvent(this, event, ui);
 
                     instance.observable.notify(sortableEvent);
@@ -32,7 +32,7 @@ function DialogController() {
             receive: function (eventIn, ui) {
                 ui.item.data("new_index", ui.item.index());
 
-                var event = new SortableEvent('SortableReceivedItem');
+                let event = new SortableEvent('SortableReceivedItem');
                 event.fromReceiveEvent(this, ui, application.configuration.packageInnerSortableLevel);
 
                 instance.observable.notify(event);
@@ -52,7 +52,7 @@ function DialogController() {
                 if (this === ui.item.parent()[0]) {
                     ui.item.data("new_index", ui.item.index());
 
-                    var sortableEvent = new SortableEvent('SortUpdatePackageInner');
+                    let sortableEvent = new SortableEvent('SortUpdatePackageInner');
                     sortableEvent.fromUpdateEvent(this, event, ui);
 
                     instance.observable.notify(sortableEvent);
@@ -61,17 +61,17 @@ function DialogController() {
             receive: function (eventIn, ui) {
                 ui.item.data("new_index", ui.item.index());
 
-                var event = new SortableEvent('SortableReceivedItem');
+                let event = new SortableEvent('SortableReceivedItem');
                 event.fromReceiveEvent(this, ui, application.configuration.packageInnerSortableLevel);
 
-                var sortableStr = '#' + $(this).attr('id') + ' > div';
-                var numChildren = $(sortableStr).length - 1; // -1 because the new element is already added in the DOM-representation.
+                let sortableStr = '#' + $(this).attr('id') + ' > div';
+                let numChildren = $(sortableStr).length - 1; // -1 because the new element is already added in the DOM-representation.
 
                 if (numChildren > 0) {
-                    var dialogModel = new DialogControlModel(window.lang.convert('ERROR_MAXIMUM_CHILD_COUNT'), function (success) {
+                    let dialogModel = new DialogControlModel(window.lang.convert('ERROR_MAXIMUM_CHILD_COUNT'), function (success) {
                         ;
                     }, window.lang.convert('OK_BUTTON'));
-                    var dialogControl = new DialogControl(dialogModel);
+                    let dialogControl = new DialogControl(dialogModel);
                     $(ui.sender).sortable('cancel');
 
                     dialogControl.showDialog();

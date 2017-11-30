@@ -1,15 +1,13 @@
 function DropDownControl(model) {
-    var dropDownControlId = '_dropdowncontrol';
+    let dropDownControlId = '_dropdowncontrol';
     this.observable = new Observable();
 
     this.createRepresentation = function () {
-        var representation = '<span id="' + model.id + '" class="' + model.containerCssClass + '"><label>' + model.title + ': <span id="' + model.id + dropDownControlId + '" class="' + model.dropDownCssClass + '"></span></label></span>';
-
-        return representation;
-    }
+        return '<span id="' + model.id + '" class="' + model.containerCssClass + '"><label>' + model.title + ': <span id="' + model.id + dropDownControlId + '" class="' + model.dropDownCssClass + '"></span></label></span>';
+    };
 
     this.registerButtonEvents = function () {
-        var instance = this;
+        let instance = this;
 
         /* Apply the dropdown handler to the table length control */
         $('#' + model.id + dropDownControlId).dropdown({
@@ -17,7 +15,7 @@ function DropDownControl(model) {
             possibleValues: model.values,
             displayInline: true,
             valueChanged: function (value, oldValue) {
-                var botDropDownChangedEvent = new Event(instance, model.observableEventName);
+                let botDropDownChangedEvent = new Event(instance, model.observableEventName);
 
                 botDropDownChangedEvent.value = value;
                 botDropDownChangedEvent.oldValue = oldValue;

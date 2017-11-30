@@ -4,12 +4,12 @@ function SLSConfiguratorApplication() {
 
     this.initializedNavigation = false;
 
-    var instance = this;
-    var continueStartup = function (httpCode, xmlHttpRequest, value) {
+    let instance = this;
+    let continueStartup = function (httpCode, xmlHttpRequest, value) {
         if (instance.httpCodeManager.successfulRequest(httpCode)) {
-            var language = application.configuration.languageKey;
-            var location = application.configuration.locationKey;
-            var languageIdentifier = language + '_' + location;
+            let language = application.configuration.languageKey;
+            let location = application.configuration.locationKey;
+            let languageIdentifier = language + '_' + location;
 
             //jquery_lang_js.prototype.lang[languageIdentifier] = jQuery.parseJSON(value);
 
@@ -39,12 +39,12 @@ function SLSConfiguratorApplication() {
 
             /** Setup the context menu. */
             instance.headerModelProvider.observable.addObserver(instance.actionHandler.observer);
-            var headerModel = instance.headerModelProvider.getHeaderModel();
+            let headerModel = instance.headerModelProvider.getHeaderModel();
 
             instance.headerBuilder.buildHeader(headerModel);
 
             /** Setup the content. */
-            var contentModel = instance.contentModelProvider.makeContentModel(instance.contentBuilder.observer,
+            let contentModel = instance.contentModelProvider.makeContentModel(instance.contentBuilder.observer,
                 instance.contentBuilder.observer);
 
             instance.contentBuilder.observable.addObserver(instance.actionHandler.observer);
@@ -58,7 +58,7 @@ function SLSConfiguratorApplication() {
         } else {
             /** TODO: Present an error. */
         }
-    }
+    };
 
     /**
      * The application entry point.
@@ -196,103 +196,101 @@ function SLSConfiguratorApplication() {
  * */
 function URLManipulator() {
     this.updatedURL = function (currUrl, param, paramVal) {
-        var url = currUrl
-        var newAdditionalURL = "";
-        var tempArray = url.split("?");
-        var baseURL = tempArray[0];
-        var additionalURL = tempArray[1];
-        var temp = "";
+        let url = currUrl;
+        let newAdditionalURL = "";
+        let tempArray = url.split("?");
+        let baseURL = tempArray[0];
+        let additionalURL = tempArray[1];
+        let temp = "";
 
         if (additionalURL) {
-            var tempArray = additionalURL.split("&");
-            for (var i = 0; i < tempArray.length; i++) {
-                if (tempArray[i].split('=')[0] != param) {
+            let tempArray = additionalURL.split("&");
+            for (let i = 0; i < tempArray.length; i++) {
+                if (tempArray[i].split('=')[0] !== param) {
                     newAdditionalURL += temp + tempArray[i];
                     temp = "&";
                 }
             }
         }
-        var rows_txt = temp + "" + param + "=" + paramVal;
-        var finalURL = baseURL + "?" + newAdditionalURL + rows_txt;
-
-        return finalURL;
-    }
+        let rows_txt = temp + "" + param + "=" + paramVal;
+        return baseURL + "?" + newAdditionalURL + rows_txt;
+    };
 
     this.getParam = function (variable) {
-        var query = window.location.search.substring(1);
-        var vars = query.split("&");
+        let query = window.location.search.substring(1);
+        let vars = query.split("&");
 
-        for (var i = 0; i < vars.length; i++) {
-            var pair = vars[i].split("=");
+        for (let i = 0; i < vars.length; i++) {
+            let pair = vars[i].split("=");
 
-            if (pair[0] == variable) {
+            if (pair[0] === variable) {
                 return pair[1];
             }
         }
 
         return false;
-    }
+    };
 
     this.serializeAnchors = function () {
-        var anchors = $.param.fragment();
+        let anchors = $.param.fragment();
 
-        var retVal = {};
+        let retVal = {};
 
-        if (anchors == "") {
+        if (anchors === "") {
             return retVal;
         }
 
-        var KVList = anchors.split('&');
+        let KVList = anchors.split('&');
 
-        for (var i = 0; i < KVList.length; ++i) {
-            var elem = KVList[i];
-            var kv = elem.split('=');
-            var key = kv[0];
-            var value = kv[1];
+        for (let i = 0; i < KVList.length; ++i) {
+            let elem = KVList[i];
+            let kv = elem.split('=');
+            let key = kv[0];
+            let value = kv[1];
 
             retVal[key] = decodeURIComponent(value);
         }
 
         return retVal;
-    }
+    };
 
-    var getQueryParts = function (href) {
-        var query = $.url.parse(href);
-        var path = query.path;
+    let getQueryParts = function (href) {
+        let query = $.url.parse(href);
+        let path = query.path;
 
-        var parts = path.split("/");
+        let parts = path.split("/");
 
-        var page;
-        var id;
-        var version;
+        let page;
+        let id;
+        let version;
 
         page = typeof parts[2] !== 'undefined' ? decodeURIComponent(parts[2]) : page;
         id = typeof parts[3] !== 'undefined' ? decodeURIComponent(parts[3]) : id;
         version = typeof query.params !== 'undefined' ? query.params['version'] : version;
 
         return {page: page, id: id, version: version};
-    }
+    };
 
-    var getCurrentQueryParts = function () {
+    let getCurrentQueryParts = function () {
         return getQueryParts(window.location.href);
-    }
+    };
 
     this.getCurrentPage = function () {
         return getCurrentQueryParts().page;
-    }
+    };
 
     this.getCurrentId = function () {
         return getCurrentQueryParts().id;
-    }
+    };
 
     this.getCurrentVersion = function () {
         return getCurrentQueryParts().version;
-    }
+    };
 
     this.deleteParamsExceptLanguage = function (parameters) {
         //remember location parameters if exists
-        var languageParam;
-        var locationParam;
+        let languageParam;
+        let locationParam;
         if (typeof parameters !== 'undefined') {
             languageParam = parameters["lang"];
             locationParam = parameters["loc"];
@@ -309,10 +307,10 @@ function URLManipulator() {
         }
 
         return parameters;
-    }
+    };
 
     this.getUriForPage = function (pagename) {
-        var uriObject = $.url.parse(window.location.href);
+        let uriObject = $.url.parse(window.location.href);
 
         delete uriObject.relative;
         delete uriObject.source;
@@ -322,14 +320,14 @@ function URLManipulator() {
 
         uriObject.params = this.deleteParamsExceptLanguage(uriObject.params);
 
-        var path = uriObject.path;
+        let path = uriObject.path;
 
-        var parts = path.split("/");
+        let parts = path.split("/");
         parts[2] = pagename;
 
-        var newPath = '';
-        for (var i = 0; i <= 2; i++) {
-            if (i != 0) {
+        let newPath = '';
+        for (let i = 0; i <= 2; i++) {
+            if (i !== 0) {
                 newPath += '/';
             }
             newPath += parts[i];
@@ -337,27 +335,27 @@ function URLManipulator() {
         uriObject.path = newPath;
 
         return $.url.build(uriObject);
-    }
+    };
 
     this.getResourceParams = function (href) {
-        var queryParts = getQueryParts(href);
+        let queryParts = getQueryParts(href);
 
         return {id: queryParts.id, version: queryParts.version};
-    }
+    };
 
     this.getUriForResource = function (id, version) {
-        var uriObject = $.url.parse(window.location.href);
+        let uriObject = $.url.parse(window.location.href);
 
         delete uriObject.relative;
         delete uriObject.source;
         delete uriObject.directory;
 
-        var path = uriObject.path;
+        let path = uriObject.path;
 
-        var parts = path.split("/");
+        let parts = path.split("/");
         parts[3] = id;
 
-        var newPath = parts.join("/");
+        let newPath = parts.join("/");
         uriObject.path = newPath;
 
         delete uriObject.query;
@@ -369,10 +367,10 @@ function URLManipulator() {
         }
 
         return $.url.build(uriObject);
-    }
+    };
 
     this.updateVersion = function (uri, value) {
-        var uriObject = $.url.parse(uri);
+        let uriObject = $.url.parse(uri);
 
         delete uriObject.relative;
         delete uriObject.source;
@@ -384,23 +382,23 @@ function URLManipulator() {
         uriObject.params.version = value;
 
         return $.url.build(uriObject);
-    }
+    };
 
     this.getEditorUriForResourceUri = function (resourceUri) {
-        var uriObject = $.url.parse(window.location.href);
-        var resourceObject = $.url.parse(resourceUri);
-        var resource = SLSUriParser(resourceUri);
+        let uriObject = $.url.parse(window.location.href);
+        let resourceObject = $.url.parse(resourceUri);
+        let resource = SLSUriParser(resourceUri);
 
         delete uriObject.relative;
         delete uriObject.source;
         delete uriObject.directory;
 
-        var path = uriObject.path;
+        let path = uriObject.path;
 
-        var parts = path.split("/");
+        let parts = path.split("/");
         parts[3] = resource.id;
 
-        var editorScreen;
+        let editorScreen;
         switch (resourceObject.host) {
             case 'ai.labs.package':
                 editorScreen = 'packages';
@@ -422,7 +420,7 @@ function URLManipulator() {
         }
         parts[2] = editorScreen;
 
-        var newPath = parts.join("/");
+        let newPath = parts.join("/");
         uriObject.path = newPath;
 
         delete uriObject.query;
@@ -432,12 +430,12 @@ function URLManipulator() {
         uriObject.anchor = resourceObject.anchor;
 
         return $.url.build(uriObject);
-    }
+    };
 
     this.getVersionAndIdForResource = function (resource) {
-        var query = $.url.parse(resource);
-        var id = query.path.split('/')[query.path.split('/').length - 1];
-        var version = query.params.version;
+        let query = $.url.parse(resource);
+        let id = query.path.split('/')[query.path.split('/').length - 1];
+        let version = query.params.version;
 
         return {id: id, version: version};
     }
@@ -449,19 +447,20 @@ function MalformedURLException(msg) {
 
 /** Bypass logging errors with browsers that don't have a console object. */
 if (typeof console === 'undefined') {
-    var console = {
+    let console = {
         log: function () {
         }
     };
 }
 
-var application;
+let application;
 
 function initApplication() {
     application = new SLSConfiguratorApplication();
 
+    let page;
     try {
-        var page = application.url.getCurrentPage();
+        page = application.url.getCurrentPage();
     } catch (ex) {
         if (ex instanceof MalformedURLException) {
             console.log(ex.message);

@@ -3,22 +3,22 @@ function DocumentDescriptionsContentModel(dataProvider, actionHandler, page) {
     this.defaultTableControlIndex = 0;
     this.defaultTableControlOrder = 'asc';
 
-    var documentDescriptions;
+    let documentDescriptions;
 
-    var tableControl;
-    var tableControlLimit = this.defaultTableControlLimit;
-    var tableControlIndex = this.defaultTableControlIndex;
-    var tableControlFilter;
-    var tableControlOrder = this.defaultTableControlOrder;
+    let tableControl;
+    let tableControlLimit = this.defaultTableControlLimit;
+    let tableControlIndex = this.defaultTableControlIndex;
+    let tableControlFilter;
+    let tableControlOrder = this.defaultTableControlOrder;
 
     this.getTableControl = function () {
         return tableControl;
-    }
+    };
 
     this.makeContentModel = function (sizeCallbackInstance, selectionCallbackInstance) {
-        var models = [];
+        let models = [];
 
-        var urlParams = $.url.parse(window.location.href).params;
+        let urlParams = $.url.parse(window.location.href).params;
         if (typeof urlParams !== 'undefined') {
             if (typeof urlParams['limit'] !== 'undefined') {
                 tableControlLimit = parseInt(decodeURIComponent(urlParams['limit'])) || this.defaultTableControlLimit;
@@ -37,7 +37,7 @@ function DocumentDescriptionsContentModel(dataProvider, actionHandler, page) {
             }
         }
 
-        var documentDescriptionType;
+        let documentDescriptionType;
         switch (page) {
             case 'bots':
                 documentDescriptionType = 'ai.labs.bot';
@@ -61,18 +61,18 @@ function DocumentDescriptionsContentModel(dataProvider, actionHandler, page) {
 
         documentDescriptions = dataProvider.readDocumentDescriptions(documentDescriptionType, tableControlLimit, tableControlIndex, tableControlFilter, tableControlOrder);
 
-        var tableModel;
+        let tableModel;
 
-        var documentDescriptionsColumns = [
+        let documentDescriptionsColumns = [
             new TableControlColumnModel({columnIdentifier: 'name'}, window.lang.convert('DICTIONARY_TABLE_COL_NAME'), 'table_col_name', true, true),
             new TableControlColumnModel({columnIdentifier: 'edit'}, window.lang.convert('DICTIONARY_TABLE_COL_EDIT'), 'table_col_edit', false, false),
             new TableControlColumnModel({columnIdentifier: 'delete'}, window.lang.convert('DICTIONARY_TABLE_COL_DELETE'), 'table_col_delete', false, false)
         ];
 
-        var documentDescriptionsData = [];
-        var documentDescriptionResourceParams = [];
-        for (var i = 0; i < documentDescriptions.length; ++i) {
-            var botDocumentDescriptionUriObject = SLSUriParser(documentDescriptions[i].resource);
+        let documentDescriptionsData = [];
+        let documentDescriptionResourceParams = [];
+        for (let i = 0; i < documentDescriptions.length; ++i) {
+            let botDocumentDescriptionUriObject = SLSUriParser(documentDescriptions[i].resource);
             documentDescriptionsData.push([documentDescriptions[i].name, '<a href="' + application.url.getUriForResource(botDocumentDescriptionUriObject.id, botDocumentDescriptionUriObject.version) + '">' + window.lang.convert('DICTIONARY_TABLE_COL_EDIT') + '</a>', '<a href="#" class="tablecontrol_delete" >' + window.lang.convert('DICTIONARY_TABLE_COL_DELETE') + '</a>']);
             documentDescriptionResourceParams.push({
                 id: botDocumentDescriptionUriObject.id,

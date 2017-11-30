@@ -1,7 +1,7 @@
 function IntegerModel(lifecycle) {
     this.type = "core://ai.labs.parser.dictionaries.integer?version=1";
 
-    var instance = this;
+    let instance = this;
     this.convertToJSON = function () {
         return {
             "type": instance.type

@@ -2,7 +2,7 @@ function PackageController() {
     this.observable = new Observable();
 
     this.registerEvents = function () {
-        var instance = this;
+        let instance = this;
 
         $('.lifecyclegroup_sortable_inner').sortable({
             cancel: 'a, form',
@@ -15,7 +15,7 @@ function PackageController() {
             update: function (event, ui) {
                 ui.item.data("new_index", ui.item.index());
 
-                var sortableEvent = new Event(this, 'SortUpdatePackageInner');
+                let sortableEvent = new Event(this, 'SortUpdatePackageInner');
                 sortableEvent.originalEvent = event;
                 sortableEvent.ui = ui;
                 sortableEvent.receiver = $(this);
@@ -25,7 +25,7 @@ function PackageController() {
             receive: function (eventIn, ui) {
                 ui.item.data("new_index", ui.item.index());
 
-                var event = new SortableEvent('SortableReceivedItem');
+                let event = new SortableEvent('SortableReceivedItem');
                 event.fromReceiveEvent(this, ui, application.configuration.packageInnerSortableLevel);
 
                 instance.observable.notify(event);

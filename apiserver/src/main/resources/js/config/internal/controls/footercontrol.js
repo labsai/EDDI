@@ -1,25 +1,25 @@
 function FooterControl(model, CSSClassBaseCtr) {
-    var footerControlModel = model;
-    var CSSClassBase = CSSClassBaseCtr;
+    let footerControlModel = model;
+    let CSSClassBase = CSSClassBaseCtr;
     this.observable = new Observable();
 
     this.createRepresentation = function () {
-        var representation = '';
+        let representation = '';
 
         representation += '<div class="' + CSSClassBase + '" id="' + footerControlModel.idPrefix + footerControlModel.id + '"></div>';
 
         return representation;
-    }
+    };
 
     this.registerButtonEvents = function () {
-        var that = this;
+        let that = this;
 
         $('#' + footerControlModel.idPrefix + footerControlModel.id).click(function () {
             that.observable.notify(new Event(footerControlModel, 'FooterClicked'));
 
             return false;
         });
-    }
+    };
 
     this.getModel = function () {
         return footerControlModel;

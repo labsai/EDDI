@@ -1,14 +1,12 @@
 function ResourceVersionControl(versionSelectorControl) {
-    var CSSClassBase = 'resourceversion'
+    let CSSClassBase = 'resourceversion'
 
     this.createRepresentation = function () {
-        var representation = '<div class="' + CSSClassBase + '">' + versionSelectorControl.createRepresentation() + '<div class="clear"></div></div>';
-
-        return representation;
-    }
+        return '<div class="' + CSSClassBase + '">' + versionSelectorControl.createRepresentation() + '<div class="clear"></div></div>';
+    };
 
     this.registerButtonEvents = function () {
-        if (versionSelectorControl.getModel().currentVersion == versionSelectorControl.getModel().versions.last()) {
+        if (versionSelectorControl.getModel().currentVersion === versionSelectorControl.getModel().versions.last()) {
             $('.' + CSSClassBase).css('background-color', '#90ee90');
         }
 

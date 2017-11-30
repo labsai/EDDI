@@ -23,25 +23,25 @@
  * @constructor
  */
 function GroupControl(groupControlModel, groupCSSClassBase) {
-    var leftButtonIdPrefix = "lbut_";
-    var rightButtonIdPrefix = "rbut_";
-    var openCSSClassPostfix = "_opened";
-    var closeCSSClassPostfix = "_closed";
-    var leftButtonCSSClassBase = "_leftbutton";
-    var rightButtonCSSClass = "_rightbutton";
-    var sequenceNumberCSSClass = "_sequencenumber";
-    var sequenceNumberTextCSSClass = "_sequencenumbertext";
-    var subheaderCSSClassPostfix = "_subheader";
-    var footerCSSClassPostfix = "_footer";
-    var textCSSBaseClass = "_text";
-    var actionBoxPostfix = '_actionbox';
-    var actionRowPostfix = '_actionrow';
-    var actionDescriptorPostfix = '_actiondescriptor';
-    var actionPostfix = '_action';
-    var isSelectable = groupControlModel.selected != null;
-    var isEditable = typeof groupControlModel.editable === 'undefined' ? true : groupControlModel.editable;
+    let leftButtonIdPrefix = "lbut_";
+    let rightButtonIdPrefix = "rbut_";
+    let openCSSClassPostfix = "_opened";
+    let closeCSSClassPostfix = "_closed";
+    let leftButtonCSSClassBase = "_leftbutton";
+    let rightButtonCSSClass = "_rightbutton";
+    let sequenceNumberCSSClass = "_sequencenumber";
+    let sequenceNumberTextCSSClass = "_sequencenumbertext";
+    let subheaderCSSClassPostfix = "_subheader";
+    let footerCSSClassPostfix = "_footer";
+    let textCSSBaseClass = "_text";
+    let actionBoxPostfix = '_actionbox';
+    let actionRowPostfix = '_actionrow';
+    let actionDescriptorPostfix = '_actiondescriptor';
+    let actionPostfix = '_action';
+    let isSelectable = groupControlModel.selected !== null;
+    let isEditable = typeof groupControlModel.editable === 'undefined' ? true : groupControlModel.editable;
 
-    var instance = this;
+    let instance = this;
 
     this.observable = new Observable();
     this.observer = new Observer(function (event) {
@@ -52,21 +52,21 @@ function GroupControl(groupControlModel, groupCSSClassBase) {
         }
     });
 
-    for (var i = 0; i < groupControlModel.footerControls.length; ++i) {
+    for (let i = 0; i < groupControlModel.footerControls.length; ++i) {
         groupControlModel.footerControls[i].observable.addObserver(this.observer);
     }
 
     this.createRepresentation = function () {
-        var classPostfix = groupControlModel.open == true ? openCSSClassPostfix : closeCSSClassPostfix;
+        let classPostfix = groupControlModel.open === true ? openCSSClassPostfix : closeCSSClassPostfix;
 
-        var representation =
+        let representation =
             '<div id="' + groupControlModel.idPrefix + groupControlModel.id + '" class="' + groupCSSClassBase + classPostfix + '">\
                 <div class="' + groupCSSClassBase + '_header' + '">\
                 <div id="' + leftButtonIdPrefix + groupControlModel.idPrefix + groupControlModel.id + '" class="' + groupCSSClassBase + leftButtonCSSClassBase + classPostfix + '"></div> \
                 <span class="' + groupCSSClassBase + textCSSBaseClass + classPostfix + '">' + groupControlModel.text + '</span>';
 
         if (groupControlModel.open && (typeof groupControlModel.rightButtonShown === 'undefined' || groupControlModel.rightButtonShown)) {
-            var rightButtonRepresentation = '<div id="' + rightButtonIdPrefix + groupControlModel.idPrefix + groupControlModel.id + '" class="' + groupCSSClassBase + rightButtonCSSClass + '"></div>';
+            let rightButtonRepresentation = '<div id="' + rightButtonIdPrefix + groupControlModel.idPrefix + groupControlModel.id + '" class="' + groupCSSClassBase + rightButtonCSSClass + '"></div>';
 
             representation += rightButtonRepresentation;
         }
@@ -74,7 +74,7 @@ function GroupControl(groupControlModel, groupCSSClassBase) {
         if (groupControlModel.open && groupControlModel.headerControls && groupControlModel.headerControls.length > 0) {
             representation += '<div class="' + groupCSSClassBase + subheaderCSSClassPostfix + '">';
 
-            for (var i = 0; i < groupControlModel.headerControls.length; ++i) {
+            for (let i = 0; i < groupControlModel.headerControls.length; ++i) {
                 representation += groupControlModel.headerControls[i].createRepresentation();
             }
 
@@ -83,7 +83,7 @@ function GroupControl(groupControlModel, groupCSSClassBase) {
         }
 
         if (groupControlModel.sequenceNumber) {
-            var sequenceNumberRepresentation = '<div class="' + groupCSSClassBase + sequenceNumberCSSClass + '">' +
+            let sequenceNumberRepresentation = '<div class="' + groupCSSClassBase + sequenceNumberCSSClass + '">' +
                 '<div class="' + groupCSSClassBase + sequenceNumberTextCSSClass + '">' + groupControlModel.sequenceNumber + '</div></div>';
 
             representation += sequenceNumberRepresentation;
@@ -105,10 +105,10 @@ function GroupControl(groupControlModel, groupCSSClassBase) {
 
         /** Show the children. */
         if (groupControlModel.open) {
-            var sortableId = application.configuration.referencePrefix + groupControlModel.idPrefix + groupControlModel.id;
+            let sortableId = application.configuration.referencePrefix + groupControlModel.idPrefix + groupControlModel.id;
             representation += '<div id="' + sortableId + '" class="' + groupCSSClassBase + '_sortable_inner">';
 
-            for (var i = 0; i < groupControlModel.children.length; ++i) {
+            for (let i = 0; i < groupControlModel.children.length; ++i) {
                 representation += groupControlModel.children[i].createRepresentation();
             }
 
@@ -118,7 +118,7 @@ function GroupControl(groupControlModel, groupCSSClassBase) {
         /** Show the footer controls. */
         if (groupControlModel.footerControls && groupControlModel.footerControls.length > 0) {
             representation += '<div class="' + groupCSSClassBase + footerCSSClassPostfix + '">';
-            for (var i = 0; i < groupControlModel.footerControls.length; ++i) {
+            for (let i = 0; i < groupControlModel.footerControls.length; ++i) {
                 if (groupControlModel.footerControls[i].getModel().showOpenOnly && !groupControlModel.open) {
                     break;
                 }
@@ -137,17 +137,17 @@ function GroupControl(groupControlModel, groupCSSClassBase) {
         representation += '</div>';
 
         return representation;
-    }
+    };
 
     this.getWidth = function () {
         return $('#' + groupControlModel.idPrefix + groupControlModel.id).outerWidth(true);
-    }
+    };
 
     this.registerButtonEvents = function () {
-        var instance = this;
+        let instance = this;
 
         /** Preserve additional state classes. */
-        for (var i = 0; i < groupControlModel.additionalClasses.length; ++i) {
+        for (let i = 0; i < groupControlModel.additionalClasses.length; ++i) {
             $('#' + groupControlModel.idPrefix + groupControlModel.id).addClass(groupControlModel.additionalClasses[i]);
         }
 
@@ -174,10 +174,10 @@ function GroupControl(groupControlModel, groupCSSClassBase) {
         }
 
         if (isEditable) {
-            var selector;
-            var commandString;
-            var widthString;
-            var mappingProperty;
+            let selector;
+            let commandString;
+            let widthString;
+            let mappingProperty;
             if (groupCSSClassBase === 'groupcontrol') {
                 selector = $('#' + groupControlModel.idPrefix + groupControlModel.id + ' .groupcontrol_text_opened');
                 commandString = 'GroupLabelEdited';
@@ -192,11 +192,11 @@ function GroupControl(groupControlModel, groupCSSClassBase) {
             }
 
             selector.editable(function (value, settings) {
-                var htmlIdResolver = new HTMLIDResolver();
-                var packageId = $(this).parent().parent().attr('id');
-                var sender = htmlIdResolver.resolveId(packageId);
+                let htmlIdResolver = new HTMLIDResolver();
+                let packageId = $(this).parent().parent().attr('id');
+                let sender = htmlIdResolver.resolveId(packageId);
 
-                var editableEvent = new Event(sender, commandString);
+                let editableEvent = new Event(sender, commandString);
                 editableEvent.value = value;
                 editableEvent.settings = settings;
                 editableEvent.oldValue = sender.getModel().text;
@@ -231,7 +231,7 @@ function GroupControl(groupControlModel, groupCSSClassBase) {
         }
 
         $('#' + groupControlModel.idPrefix + groupControlModel.id + actionPostfix).editable(function (value, settings) {
-            var editableEvent = new Event(instance, 'ValueChanged');
+            let editableEvent = new Event(instance, 'ValueChanged');
             editableEvent.value = value;
             editableEvent.settings = settings;
             editableEvent.oldValue = instance.getModel().actions;
@@ -255,9 +255,9 @@ function GroupControl(groupControlModel, groupCSSClassBase) {
             autocomplete: {
                 options: {
                     source: function (request, response) {
-                        var anchors = application.url.serializeAnchors();
+                        let anchors = application.url.serializeAnchors();
 
-                        var outputKeys;
+                        let outputKeys;
                         if (anchors.hasOwnProperty(application.configuration.packageParentIdHashKey) &&
                             anchors.hasOwnProperty(application.configuration.packageParentVersionHashKey)) {
                             outputKeys = application.dataProvider.readOutputKeysPackage(
@@ -271,7 +271,7 @@ function GroupControl(groupControlModel, groupCSSClassBase) {
                     },
                     search: function () {
                         // custom minLength
-                        var term = extractLast(this.value);
+                        let term = extractLast(this.value);
                         if (term.length < 1) {
                             return false;
                         }
@@ -281,7 +281,7 @@ function GroupControl(groupControlModel, groupCSSClassBase) {
                         return false;
                     },
                     select: function (event, ui) {
-                        var terms = split(this.value);
+                        let terms = split(this.value);
                         // remove the current input
                         terms.pop();
                         // add the selected item
@@ -300,18 +300,18 @@ function GroupControl(groupControlModel, groupCSSClassBase) {
         });
 
         /** Don't forget telling the children about it as well. */
-        for (var i = 0; i < groupControlModel.children.length; ++i) {
+        for (let i = 0; i < groupControlModel.children.length; ++i) {
             groupControlModel.children[i].registerButtonEvents();
         }
 
-        for (var i = 0; i < groupControlModel.headerControls.length; ++i) {
+        for (let i = 0; i < groupControlModel.headerControls.length; ++i) {
             groupControlModel.headerControls[i].registerButtonEvents();
         }
 
-        for (var i = 0; i < groupControlModel.footerControls.length; ++i) {
+        for (let i = 0; i < groupControlModel.footerControls.length; ++i) {
             groupControlModel.footerControls[i].registerButtonEvents();
         }
-    }
+    };
 
     this.handleOpenCloseEvent = function () {
         groupControlModel.open = !groupControlModel.open;
@@ -320,11 +320,11 @@ function GroupControl(groupControlModel, groupCSSClassBase) {
 
         /** Must re-register button events after replacing contents. */
         this.registerButtonEvents();
-    }
+    };
 
     this.unselectionEvent = function () {
         this.setSelected(false);
-    }
+    };
 
     this.setSelected = function (selectionState) {
         groupControlModel.selected = selectionState;
@@ -338,7 +338,7 @@ function GroupControl(groupControlModel, groupCSSClassBase) {
                 $('#' + groupControlModel.idPrefix + groupControlModel.id).css({'background-color': 'red'});
             }
         }
-    }
+    };
 
     this.getModel = function () {
         return groupControlModel;
@@ -371,10 +371,10 @@ function GroupControlModel(id, idPrefix, text, footerControls, sequenceNumber, o
     this.additionalClasses = [];
 
     this.addClass = function (className) {
-        if (this.additionalClasses.indexOf() == -1) {
+        if (this.additionalClasses.indexOf() === -1) {
             this.additionalClasses.push(className);
         }
-    }
+    };
 
     this.removeClass = function (className) {
         try {
@@ -386,14 +386,14 @@ function GroupControlModel(id, idPrefix, text, footerControls, sequenceNumber, o
                 throw ex;
             }
         }
-    }
+    };
 
     /**
      * @param child element to be added to the composition, must also implement __createRepresentation()__
      */
     this.addChild = function (child) {
         this.children.push(child);
-    }
+    };
 
     this.removeChild = function (child) {
         this.children.removeElement(child);

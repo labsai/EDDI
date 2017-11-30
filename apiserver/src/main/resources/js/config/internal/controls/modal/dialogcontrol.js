@@ -1,32 +1,32 @@
 function DialogControl(model) {
-    var contentPostfix = '_content';
-    var buttonBoxPostfix = '_buttons';
-    var okButtonPostfix = '_okbutton';
-    var cancelButtonPostfix = '_cancelbutton';
-    var formBoxPostfix = '_formBox';
-    var formPostfix = '_form';
-    var formIdPostfix = '_form_0';
-    var documentDescriptionPostfix = '_documentDescription';
-    var addButtonPostfix = '_addbutton';
-    var addContainerPostfix = '_addcontainer';
+    let contentPostfix = '_content';
+    let buttonBoxPostfix = '_buttons';
+    let okButtonPostfix = '_okbutton';
+    let cancelButtonPostfix = '_cancelbutton';
+    let formBoxPostfix = '_formBox';
+    let formPostfix = '_form';
+    let formIdPostfix = '_form_0';
+    let documentDescriptionPostfix = '_documentDescription';
+    let addButtonPostfix = '_addbutton';
+    let addContainerPostfix = '_addcontainer';
 
-    var selectedDocumentDescriptionValueIndex;
-    var resourceCreationControl = null;
+    let selectedDocumentDescriptionValueIndex;
+    let resourceCreationControl = null;
 
     this.observable = new Observable();
-    var instance = this;
+    let instance = this;
 
-    var showAddMenu = function () {
-        var type = 'ai.labs.package';
-        var resourceCreationModel = new ResourceCreationModel(application.dataProvider.getNextIdGlobal(), 'resourcecreation_',
+    let showAddMenu = function () {
+        let type = 'ai.labs.package';
+        let resourceCreationModel = new ResourceCreationModel(application.dataProvider.getNextIdGlobal(), 'resourcecreation_',
             'resourcecreation',
             type,
             function (success) {
                 if (success) {
-                    if (resourceCreationControl.getModel().currentValue != "") {
-                        var last = type.split('.').last();
+                    if (resourceCreationControl.getModel().currentValue !== "") {
+                        let last = type.split('.').last();
 
-                        var newUri;
+                        let newUri;
                         /** Create a new resource. */
                         switch (last) {
                             case 'bot':
@@ -48,9 +48,9 @@ function DialogControl(model) {
                                 break;
                         }
 
-                        var patch = application.jsonBlueprintFactory.makeBlueprintForObjectType('PatchInstruction');
+                        let patch = application.jsonBlueprintFactory.makeBlueprintForObjectType('PatchInstruction');
 
-                        var params = SLSUriParser(newUri);
+                        let params = SLSUriParser(newUri);
 
                         patch.document = application.dataProvider.readDocumentDescription(params.id, params.version);
                         patch.document.name = resourceCreationControl.getModel().currentValue;
@@ -61,10 +61,10 @@ function DialogControl(model) {
                             patch,
                             function (httpCode) {
                                 if (!application.httpCodeManager.successfulRequest(httpCode)) {
-                                    var dcm = new DialogControlModel(window.lang.convert('ERROR_CREATE_RESOURCE'), function () {
+                                    let dcm = new DialogControlModel(window.lang.convert('ERROR_CREATE_RESOURCE'), function () {
                                         },
                                         window.lang.convert("OK_BUTTON"));
-                                    var dc = new DialogControl(dcm);
+                                    let dc = new DialogControl(dcm);
                                     dc.showDialog();
                                 } else {
                                     model.formElements = application.dataProvider.readDocumentDescriptions('ai.labs.package', 0, 0, '', 'asc');
@@ -79,10 +79,10 @@ function DialogControl(model) {
                                 $('.' + model.CSSClassBase).hideLoadingIndicator();
                             });
                     } else {
-                        var dcm = new DialogControlModel(window.lang.convert('ERROR_NO_RESOURCE_NAME'), function () {
+                        let dcm = new DialogControlModel(window.lang.convert('ERROR_NO_RESOURCE_NAME'), function () {
                             },
                             window.lang.convert("OK_BUTTON"));
-                        var dc = new DialogControl(dcm);
+                        let dc = new DialogControl(dcm);
                         dc.showDialog();
                     }
                 } else {
@@ -103,14 +103,14 @@ function DialogControl(model) {
             duration: 500
         });
 
-        var totalHeight = $('.' + model.CSSClassBase + buttonBoxPostfix).outerHeight() + $('.' + model.CSSClassBase + formBoxPostfix).outerHeight()
+        let totalHeight = $('.' + model.CSSClassBase + buttonBoxPostfix).outerHeight() + $('.' + model.CSSClassBase + formBoxPostfix).outerHeight()
             + $('.' + model.CSSClassBase + contentPostfix).outerHeight()
             + 40;
 
         $('#simplemodal-container').animate({height: totalHeight * 1.15 + 'px'}, {duration: 500});
-    }
+    };
 
-    var hideAddMenu = function () {
+    let hideAddMenu = function () {
         $('#' + resourceCreationControl.getModel().idPrefix + resourceCreationControl.getModel().id).animate({
             height: 'toggle'
         }, {
@@ -121,17 +121,17 @@ function DialogControl(model) {
             }
         });
 
-        var totalHeight = $('.' + model.CSSClassBase + buttonBoxPostfix).outerHeight() + $('.' + model.CSSClassBase + formBoxPostfix).outerHeight()
+        let totalHeight = $('.' + model.CSSClassBase + buttonBoxPostfix).outerHeight() + $('.' + model.CSSClassBase + formBoxPostfix).outerHeight()
             + $('.' + model.CSSClassBase + contentPostfix).outerHeight() - 40;
         $('#simplemodal-container').animate({height: totalHeight * 1.15 + 'px'}, {duration: 500});
-    }
+    };
 
     this.createRepresentation = function () {
-        var representation = '<div class="' + model.CSSClassBase + '"><div class="' + model.CSSClassBase + contentPostfix + '">' + model.text + '</div>';
+        let representation = '<div class="' + model.CSSClassBase + '"><div class="' + model.CSSClassBase + contentPostfix + '">' + model.text + '</div>';
 
         representation += '<div class="' + model.CSSClassBase + formBoxPostfix + '">';
 
-        var renderingType = 'form';
+        let renderingType = 'form';
         if (typeof model.formElements !== 'undefined' && model.formElements !== false && model.formElements !== null) {
             if (typeof model.context === 'undefined' || typeof model.context.dialogType === 'undefined') {
                 renderingType = 'form';
@@ -145,7 +145,7 @@ function DialogControl(model) {
                         renderingType = 'documentDescription';
                         break;
                     case 'textFields':
-                        renderingType = 'textFields'
+                        renderingType = 'textFields';
                         break;
                 }
             }
@@ -155,7 +155,7 @@ function DialogControl(model) {
                 case 'textFields':
                     representation += '<form id="' + model.CSSClassBase + formIdPostfix + '" class="' + model.CSSClassBase + formPostfix + '" action="#">';
 
-                    for (var i = 0; i < model.formElements.length; ++i) {
+                    for (let i = 0; i < model.formElements.length; ++i) {
                         if (model.formElements[i].hasOwnProperty('createRepresentation')) {
                             representation += model.formElements[i].createRepresentation();
                         } else {
@@ -190,10 +190,10 @@ function DialogControl(model) {
         representation += '<div class="clear"></div></div></div>';
 
         return representation;
-    }
+    };
 
     this.registerButtonEvents = function () {
-        var instance = this;
+        let instance = this;
 
         function split(val) {
             return val.split(/,\s*/);
@@ -205,7 +205,7 @@ function DialogControl(model) {
 
         $('#' + model.CSSClassBase + formIdPostfix + ' input[name="exp"]').autocomplete({
             source: function (request, response) {
-                var expressions = application.dataProvider.readExpressions(
+                let expressions = application.dataProvider.readExpressions(
                     application.dataProvider.dataProviderState.getActiveId(),
                     application.dataProvider.dataProviderState.getActiveVersion(),
                     extractLast(request.term)
@@ -215,7 +215,7 @@ function DialogControl(model) {
             },
             search: function () {
                 // custom minLength
-                var term = extractLast(this.value);
+                let term = extractLast(this.value);
                 if (term.length < 1) {
                     return false;
                 }
@@ -225,7 +225,7 @@ function DialogControl(model) {
                 return false;
             },
             select: function (event, ui) {
-                var terms = split(this.value);
+                let terms = split(this.value);
                 // remove the current input
                 terms.pop();
                 // add the selected item
@@ -243,9 +243,9 @@ function DialogControl(model) {
 
         $('#' + model.CSSClassBase + formIdPostfix + ' input[name="key"]').autocomplete({
             source: function (request, response) {
-                var anchors = application.url.serializeAnchors();
+                let anchors = application.url.serializeAnchors();
 
-                var outputKeys;
+                let outputKeys;
                 if (anchors.hasOwnProperty(application.configuration.packageParentIdHashKey) &&
                     anchors.hasOwnProperty(application.configuration.packageParentVersionHashKey)) {
                     outputKeys = application.dataProvider.readOutputKeysPackage(
@@ -273,16 +273,16 @@ function DialogControl(model) {
             $('#' + model.CSSClassBase + formIdPostfix + ' input[type="text"]:eq(1)').focus(
                 function () {
                     if ($('#auto_generate_expression').attr('checked')) {
-                        var input = $('#' + model.CSSClassBase + formIdPostfix + ' input[type="text"]:eq(0)').val();
-                        var expr = application.expressionHelper.convertToExpression(input, "unused");
+                        let input = $('#' + model.CSSClassBase + formIdPostfix + ' input[type="text"]:eq(0)').val();
+                        let expr = application.expressionHelper.convertToExpression(input, "unused");
 
                         $('#' + model.CSSClassBase + formIdPostfix + ' input[type="text"]:eq(1)').val(expr);
                     }
 
                     if ($('#auto_to_lower').attr('checked')) {
-                        var input = $('#' + model.CSSClassBase + formIdPostfix + ' input[type="text"]:eq(0)').val();
+                        let input = $('#' + model.CSSClassBase + formIdPostfix + ' input[type="text"]:eq(0)').val();
 
-                        var output = input.toLowerCase();
+                        let output = input.toLowerCase();
 
                         console.log(output);
 
@@ -293,11 +293,11 @@ function DialogControl(model) {
         }
 
         $(window).bind('keypress', function (e) {
-            if (e.keyCode == 13) /** ENTER */ {
+            if (e.keyCode === 13) /** ENTER */ {
                 $(window).unbind('keypress');
                 $('.' + model.CSSClassBase + okButtonPostfix).trigger('click');
             }
-        })
+        });
 
         $('.' + model.CSSClassBase + addButtonPostfix).click(function () {
             showAddMenu();
@@ -308,9 +308,9 @@ function DialogControl(model) {
             if (typeof model.context !== 'undefined' && typeof model.context.dialogType !== 'undefined') {
                 switch (model.context.dialogType) {
                     case 'documentDescription':
-                        var documentSelectionValues = [];
-                        var preselectedDocument = null;
-                        for (var i = 0; i < model.formElements.length; ++i) {
+                        let documentSelectionValues = [];
+                        let preselectedDocument = null;
+                        for (let i = 0; i < model.formElements.length; ++i) {
                             documentSelectionValues.push(model.formElements[i].name);
 
                             /**
@@ -320,20 +320,20 @@ function DialogControl(model) {
                              * */
                             if (model.context &&
                                 model.context.preselectedUri &&
-                                model.formElements[i].resource == model.context.preselectedUri) {
+                                model.formElements[i].resource === model.context.preselectedUri) {
                                 preselectedDocument = model.formElements[i].name;
                             }
                         }
 
-                        var currentValue;
+                        let currentValue;
 
-                        if (preselectedDocument != null) {
+                        if (preselectedDocument !== null) {
                             currentValue = preselectedDocument;
                         } else {
                             currentValue = documentSelectionValues[0];
                         }
 
-                        var selector = $('.' + model.CSSClassBase + documentDescriptionPostfix);
+                        let selector = $('.' + model.CSSClassBase + documentDescriptionPostfix);
                         if (documentSelectionValues.length > 0) {
                             selectedDocumentDescriptionValueIndex = 0;
                             selector.dropdown({
@@ -355,7 +355,7 @@ function DialogControl(model) {
 
         // Events
         $('.' + model.CSSClassBase + okButtonPostfix).click(function () {
-            var event;
+            let event;
 
             if (typeof model.formElements !== 'undefined' && model.formElements !== false && model.formElements !== null) {
                 if (typeof model.context === 'undefined' || typeof model.context.dialogType === 'undefined') {
@@ -371,7 +371,7 @@ function DialogControl(model) {
                             break;
                         case 'documentDescription':
                             event = new Event(instance, 'Submit');
-                            if (selectedDocumentDescriptionValueIndex != -1) {
+                            if (selectedDocumentDescriptionValueIndex !== -1) {
                                 event.documentDescription = model.formElements[selectedDocumentDescriptionValueIndex];
                             }
                             break;
@@ -380,13 +380,13 @@ function DialogControl(model) {
 
                             event.map = {};
 
-                            var textSelector = $('#' + model.CSSClassBase + formIdPostfix + ' input[type="text"]');
-                            for (var i = 0; i < textSelector.length; ++i) {
-                                var item = $('#' + model.CSSClassBase + formIdPostfix + ' input[type="text"]:eq(' + i + ')');
+                            let textSelector = $('#' + model.CSSClassBase + formIdPostfix + ' input[type="text"]');
+                            for (let i = 0; i < textSelector.length; ++i) {
+                                let item = $('#' + model.CSSClassBase + formIdPostfix + ' input[type="text"]:eq(' + i + ')');
                                 event.map[item.attr('name')] = item.val();
                             }
 
-                            for (var i = 0; i < model.formElements.length; ++i) {
+                            for (let i = 0; i < model.formElements.length; ++i) {
                                 if (model.formElements[i].hasOwnProperty('getValue')) {
                                     event.map[model.formElements[i].getKey()] = model.formElements[i].getValue();
                                 }
@@ -408,9 +408,9 @@ function DialogControl(model) {
             model.callback(false);
         });
 
-        var hasResourceSelector = false
+        let hasResourceSelector = false
         if (model.formElements) {
-            for (var i = 0; i < model.formElements.length; ++i) {
+            for (let i = 0; i < model.formElements.length; ++i) {
                 if (model.formElements[i].hasOwnProperty('registerButtonEvents')) {
                     model.formElements[i].registerButtonEvents();
                     hasResourceSelector = true;
@@ -418,7 +418,7 @@ function DialogControl(model) {
             }
         }
 
-        var totalWidth = $('.' + model.CSSClassBase + okButtonPostfix).outerWidth() + $('.' + model.CSSClassBase + cancelButtonPostfix).outerWidth();
+        let totalWidth = $('.' + model.CSSClassBase + okButtonPostfix).outerWidth() + $('.' + model.CSSClassBase + cancelButtonPostfix).outerWidth();
 
         if (model.cancelButtonText !== false) {
             totalWidth += 15;
@@ -426,15 +426,15 @@ function DialogControl(model) {
 
         $('.' + model.CSSClassBase + buttonBoxPostfix).width(totalWidth);
 
-        var totalHeight = $('.' + model.CSSClassBase + buttonBoxPostfix).outerHeight() + $('.' + model.CSSClassBase + formBoxPostfix).outerHeight()
+        let totalHeight = $('.' + model.CSSClassBase + buttonBoxPostfix).outerHeight() + $('.' + model.CSSClassBase + formBoxPostfix).outerHeight()
             + $('.' + model.CSSClassBase + contentPostfix).outerHeight();
         $('#simplemodal-container').height(totalHeight * 1.15);
 
-        var sizes = [$('.' + model.CSSClassBase + contentPostfix).outerWidth(),
+        let sizes = [$('.' + model.CSSClassBase + contentPostfix).outerWidth(),
             $('.' + model.CSSClassBase + buttonBoxPostfix).outerWidth(),
             $('.' + model.CSSClassBase + formBoxPostfix).outerWidth()];
 
-        var maxWidth = 0;
+        let maxWidth = 0;
 
         $(sizes).each(function () {
             if (this > maxWidth) {
@@ -442,15 +442,15 @@ function DialogControl(model) {
             }
         });
 
-        if (resourceCreationControl != null) {
+        if (resourceCreationControl !== null) {
             resourceCreationControl.registerButtonEvents();
         }
 
         $('#simplemodal-container').width(maxWidth * 1.25);
-    }
+    };
 
     this.showDialog = function () {
-        var callback = function () {
+        let callback = function () {
             $.modal.close();
             model.callback(false);
         };
@@ -459,7 +459,7 @@ function DialogControl(model) {
         $.modal.close();
         $.modal(this.createRepresentation());
         this.registerButtonEvents();
-    }
+    };
 
     this.getModel = function () {
         return model;

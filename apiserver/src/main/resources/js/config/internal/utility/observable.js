@@ -1,30 +1,30 @@
 function Observable() {
-    var observers = [];
+    let observers = [];
 
     this.notify = function (event) {
-        for (var i = 0; i < observers.length; ++i) {
+        for (let i = 0; i < observers.length; ++i) {
             observers[i].eventReceived(event);
         }
-    }
+    };
 
     this.addObserver = function (listener) {
-        var index = observers.indexOf(listener);
+        let index = observers.indexOf(listener);
 
         /** Only register each listener once. */
-        if (index == -1) {
+        if (index === -1) {
             observers.push(listener);
         }
-    }
+    };
 
     this.removeObserver = function (listener) {
-        var index = observers.indexOf(listener);
+        let index = observers.indexOf(listener);
 
-        if (index != -1) {
+        if (index !== -1) {
             observers.splice(index, 1);
         } else {
             console.log('Tried to remove an observer that was not observing.');
         }
-    }
+    };
 
     this.getObservers = function () {
         return observers;

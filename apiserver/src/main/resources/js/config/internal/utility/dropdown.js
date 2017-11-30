@@ -1,16 +1,16 @@
 $.fn.dropdown = function (options) {
-    var callIfExists = function (method, param1, param2, param3) {
+    let callIfExists = function (method, param1, param2, param3) {
         if (typeof method !== 'undefined') {
             return method(param1, param2, param3);
         }
 
         return undefined;
-    }
+    };
 
-    var value;
-    var possibleValues;
-    var hoverCSSClass;
-    var displayInline;
+    let value;
+    let possibleValues;
+    let hoverCSSClass;
+    let displayInline;
 
     if (typeof options !== 'undefined') {
         if (typeof options.CSSClass !== 'undefined') {
@@ -31,7 +31,7 @@ $.fn.dropdown = function (options) {
         hoverCSSClass = 'dropdown_hover';
     }
 
-    var makeListItem = function (text, lastFlag) {
+    let makeListItem = function (text, lastFlag) {
         if (lastFlag) {
             return '<li><a class="dropdown_selection_last" href="#">' + text + '</a></li>';
         } else {
@@ -39,18 +39,18 @@ $.fn.dropdown = function (options) {
         }
     };
 
-    var buildDropdownList = function () {
-        var wrapperTag = '<div';
+    let buildDropdownList = function () {
+        let wrapperTag = '<div';
         if (displayInline) {
             wrapperTag = '<span';
         }
-        var representation = wrapperTag + ' class="dropdown_wrapper">';
+        let representation = wrapperTag + ' class="dropdown_wrapper">';
 
         representation += '<a class="dropdown_selected" href="#">' + value + '</a>';
         representation += '<ul class="dropdown_selection">';
 
-        for (var i = 0; i < possibleValues.length; ++i) {
-            if (i == possibleValues.length - 1) {
+        for (let i = 0; i < possibleValues.length; ++i) {
+            if (i === possibleValues.length - 1) {
                 representation += makeListItem(possibleValues[i], true);
             } else {
                 representation += makeListItem(possibleValues[i]);
@@ -73,7 +73,7 @@ $.fn.dropdown = function (options) {
 
         $(this).addClass(hoverCSSClass);
         $('ul:first', this).css('visibility', 'visible');
-        var leftPad = $(this).css('padding-left');
+        let leftPad = $(this).css('padding-left');
         $('ul:first', this).css('margin-left', '-' + leftPad);
 
         callIfExists(options.show);
@@ -84,15 +84,15 @@ $.fn.dropdown = function (options) {
     });
 
     /** Select next item, dispatch callback events. */
-    var that = this;
+    let that = this;
     $('ul li', this).click(function () {
-        var changeValue = $(this).text();
-        var oldValue = $('a:first', that).text();
-        var changeValueIndex = $(this).index();
+        let changeValue = $(this).text();
+        let oldValue = $('a:first', that).text();
+        let changeValueIndex = $(this).index();
 
         /** No events are dispatched when the value is not actually changed. */
         if (changeValue !== oldValue) {
-            var retVal = callIfExists(options.valueAboutToChange, changeValue, oldValue, changeValueIndex);
+            let retVal = callIfExists(options.valueAboutToChange, changeValue, oldValue, changeValueIndex);
 
             if (typeof retVal !== 'undefined') {
                 changeValue = retVal;

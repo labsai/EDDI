@@ -1,28 +1,28 @@
 function IntegerControl(model) {
     model.CSSClassBase = 'blockcontrol';
 
-    var cacheId = application.jsonBuilderHelper.getDefinitionCacheId(model.type);
-    var filterString = model.type.split('//')[1].split('?')[0];
-    var displayName = application.networkCacheManager.cachedNetworkCall(cacheId, application.dataProvider,
+    let cacheId = application.jsonBuilderHelper.getDefinitionCacheId(model.type);
+    let filterString = model.type.split('//')[1].split('?')[0];
+    let displayName = application.networkCacheManager.cachedNetworkCall(cacheId, application.dataProvider,
         application.dataProvider.readExtensionDefinitions, [filterString])[0].name;
 
     model.text = displayName;
     model.editable = false;
     model.deleteable = true;
 
-    var textCSSClassPostfix = '_text';
-    var editableIdPrefix = 'editable_';
-    var deleteableIdPrefix = 'deleteable_';
-    var editableCSSClassPostfix = '_editable';
-    var deleteableCSSClassPostfix = '_deleteable';
-    var rightSideCSSClassPostfix = '_right';
+    let textCSSClassPostfix = '_text';
+    let editableIdPrefix = 'editable_';
+    let deleteableIdPrefix = 'deleteable_';
+    let editableCSSClassPostfix = '_editable';
+    let deleteableCSSClassPostfix = '_deleteable';
+    let rightSideCSSClassPostfix = '_right';
 
     this.observable = new Observable();
 
-    var instance = this;
+    let instance = this;
 
     this.createRepresentation = function () {
-        var representation = '<div id="' + model.idPrefix + model.id + '" class="' + model.CSSClassBase + '">' +
+        let representation = '<div id="' + model.idPrefix + model.id + '" class="' + model.CSSClassBase + '">' +
             '<div class="' + model.CSSClassBase + textCSSClassPostfix + '">' + model.text + '</div>';
 
         representation += '<div class="' + model.CSSClassBase + rightSideCSSClassPostfix + '">';
@@ -40,7 +40,7 @@ function IntegerControl(model) {
         representation += '<div class="clear"></div></div>';
 
         return representation;
-    }
+    };
 
     this.registerButtonEvents = function () {
         if (model.editable) {
@@ -56,7 +56,7 @@ function IntegerControl(model) {
                 return false;
             });
         }
-    }
+    };
 
     this.getModel = function () {
         return model;

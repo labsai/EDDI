@@ -1,10 +1,10 @@
 function SentenceparserLifecycleControl(model) {
-    var groupControlIdPrefix = model.idPrefix + 'backinggroupcontrol_';
-    var correctionIdPrefix = groupControlIdPrefix + 'correction_';
-    var correctionBlockIdPrefix = correctionIdPrefix + 'block_';
-    var dictionaryIdPrefix = groupControlIdPrefix + 'dictionary_';
-    var dictionaryBlockIdPrefix = dictionaryIdPrefix + 'block_';
-    var lifecycleGroupControlCSSClass = 'lifecyclegroup';
+    let groupControlIdPrefix = model.idPrefix + 'backinggroupcontrol_';
+    let correctionIdPrefix = groupControlIdPrefix + 'correction_';
+    let correctionBlockIdPrefix = correctionIdPrefix + 'block_';
+    let dictionaryIdPrefix = groupControlIdPrefix + 'dictionary_';
+    let dictionaryBlockIdPrefix = dictionaryIdPrefix + 'block_';
+    let lifecycleGroupControlCSSClass = 'lifecyclegroup';
 
     this.observable = new Observable();
 
@@ -14,52 +14,52 @@ function SentenceparserLifecycleControl(model) {
         } else {
             throw new UnknownLifecycleTaskException("Cannot display lifecycle task of type: " + lifecycleTaskType + ".");
         }
-    }
+    };
 
-    var groupControlBuilder = new GroupControlBuilder();
-    var groupControl = groupControlBuilder.createStandardUneditableGroupControl(model.id, groupControlIdPrefix,
+    let groupControlBuilder = new GroupControlBuilder();
+    let groupControl = groupControlBuilder.createStandardUneditableGroupControl(model.id, groupControlIdPrefix,
         window.lang.convert('SENTENCEPARSERLIFECYCLE_NAME'), true, true, false, 'packagecontrol', false);
 
-    var instance = this;
+    let instance = this;
     /** Configure the SentenceparserLifecycleControl to act as a transparent proxy for its backing groupControl. */
     this.observer = new Observer(function (event) {
-        var newEvent = jQuery.extend(true, {}, event);
+        let newEvent = jQuery.extend(true, {}, event);
         newEvent.sender = instance;
         instance.observable.notify(newEvent);
     });
     this.observable = new Observable();
     groupControl.observable.addObserver(this.observer);
 
-    var correctionControl = groupControlBuilder.createStandardUneditableGroupControl(model.id, correctionIdPrefix,
+    let correctionControl = groupControlBuilder.createStandardUneditableGroupControl(model.id, correctionIdPrefix,
         window.lang.convert('SENTENCEPARSERLIFECYCLE_CORRECTION_NAME'), false, false, true, lifecycleGroupControlCSSClass, true);
 
     correctionControl.getModel().context = {namespace: 'ai.labs.parser.corrections'};
 
-    for (var i = 0; i < model.correction.length; ++i) {
-        var correction = model.correction[i];
+    for (let i = 0; i < model.correction.length; ++i) {
+        let correction = model.correction[i];
 
-        var plugin = this.getLifeCycleTaskPlugin(correction.type);
+        let plugin = this.getLifeCycleTaskPlugin(correction.type);
 
-        var blockControlModel = new plugin.model(correction);
-        var blockControl = new plugin.control(blockControlModel);
+        let blockControlModel = new plugin.model(correction);
+        let blockControl = new plugin.control(blockControlModel);
 
         blockControl.observable.addObserver(application.actionHandler.observer);
 
         correctionControl.getModel().addChild(blockControl);
     }
 
-    var dictionaryControl = groupControlBuilder.createStandardUneditableGroupControl(model.id, dictionaryIdPrefix,
+    let dictionaryControl = groupControlBuilder.createStandardUneditableGroupControl(model.id, dictionaryIdPrefix,
         window.lang.convert('SENTENCEPARSERLIFECYCLE_DICTIONARY_NAME'), false, false, true, lifecycleGroupControlCSSClass, true);
 
     dictionaryControl.getModel().context = {namespace: 'ai.labs.parser.dictionaries'};
 
-    for (var i = 0; i < model.dictionaries.length; ++i) {
-        var dictionary = model.dictionaries[i];
+    for (let i = 0; i < model.dictionaries.length; ++i) {
+        let dictionary = model.dictionaries[i];
 
-        var plugin = this.getLifeCycleTaskPlugin(dictionary.type);
+        let plugin = this.getLifeCycleTaskPlugin(dictionary.type);
 
-        var blockControlModel = new plugin.model(dictionary);
-        var blockControl = new plugin.control(blockControlModel);
+        let blockControlModel = new plugin.model(dictionary);
+        let blockControl = new plugin.control(blockControlModel);
 
         blockControl.observable.addObserver(application.actionHandler.observer);
 
@@ -73,18 +73,16 @@ function SentenceparserLifecycleControl(model) {
     model.children.push(groupControl);
 
     this.createRepresentation = function () {
-        var representation = '<div id="' + model.idPrefix + model.id + '">' + groupControl.createRepresentation() + '<div class="clear"></div></div>';
-
-        return representation;
-    }
+        return '<div id="' + model.idPrefix + model.id + '">' + groupControl.createRepresentation() + '<div class="clear"></div></div>';
+    };
 
     this.getModel = function () {
         return model;
-    }
+    };
 
     this.getHeight = function () {
         return $('#' + model.idPrefix + model.id).outerHeight(true);
-    }
+    };
 
     this.registerButtonEvents = function () {
         groupControl.registerButtonEvents();

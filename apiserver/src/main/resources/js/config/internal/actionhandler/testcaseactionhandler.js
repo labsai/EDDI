@@ -1,10 +1,10 @@
 function TestCaseActionHandler(contentBuilder, dataProvider) {
-    var instance = this;
+    let instance = this;
     this.observer = new Observer(function (event) {
         switch (event.command) {
 //            case 'BotDropDownChanged':
 //                if (event.oldValue != event.value) {
-//                    var query = $.url.parse(window.location.href);
+//                    let query = $.url.parse(window.location.href);
 //
 //                    if (typeof query.params === 'undefined') {
 //                        query.params = {};

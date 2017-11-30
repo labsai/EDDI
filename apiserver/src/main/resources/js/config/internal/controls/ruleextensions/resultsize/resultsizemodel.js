@@ -25,8 +25,8 @@ function ResultSizeModel(extension) {
     this.max = extension.values.max;
     this.backingData = extension;
 
-    var footerControls = [];
-    var footerModel = new FooterControlModel(this.id, this.idPrefix + 'footer_', false);
+    let footerControls = [];
+    let footerModel = new FooterControlModel(this.id, this.idPrefix + 'footer_', false);
     footerControls.push(new FooterControl(footerModel, 'footercontrol_small'));
 
     this.footerControls = footerControls;

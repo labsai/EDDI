@@ -1,11 +1,11 @@
 function BehaviorLifecycleModel(lifecycle) {
     this.type = "core://ai.labs.behavior?version=1";
-    var instance = this;
+    let instance = this;
 
     this.convertToJSON = function () {
-        var uri;
+        let uri;
 
-        if (instance.backingArray.length == 0) {
+        if (instance.backingArray.length === 0) {
             uri = "";
         } else {
             uri = instance.backingArray[instance.children[0].getModel().children[0].getModel().selectedItemIndex].resource;
@@ -27,9 +27,9 @@ function BehaviorLifecycleModel(lifecycle) {
         lifecycle = this.makeDefaultJSON();
     }
 
-    var behaviorDescriptionsCacheId = 'BEHAVIOR_DESCRIPTIONS';
+    let behaviorDescriptionsCacheId = 'BEHAVIOR_DESCRIPTIONS';
 
-    var behaviorDescriptions = application.networkCacheManager.cachedNetworkCall(behaviorDescriptionsCacheId,
+    let behaviorDescriptions = application.networkCacheManager.cachedNetworkCall(behaviorDescriptionsCacheId,
         application.dataProvider, application.dataProvider.readDocumentDescriptions,
         ['ai.labs.behavior', 0, 0, '', 'asc']
     );
@@ -42,9 +42,9 @@ function BehaviorLifecycleModel(lifecycle) {
 
     console.log('uri is: ' + lifecycle.config.uri);
 
-    var index = -1;
-    for (var i = 0; i < this.backingArray.length; ++i) {
-        if (this.backingArray[i].resource == lifecycle.config.uri) {
+    let index = -1;
+    for (let i = 0; i < this.backingArray.length; ++i) {
+        if (this.backingArray[i].resource === lifecycle.config.uri) {
 
             index = i;
         }

@@ -6,7 +6,7 @@ function NegationModel(extension) {
             children: [],
             type: 'negation'
         };
-    }
+    };
 
     if (typeof extension === "undefined" || extension === null) {
         extension = this.makeDefaultJSON();
@@ -19,8 +19,8 @@ function NegationModel(extension) {
     this.operator = 'NOT';
     this.backingData = extension;
 
-    var footerControls = [];
-    var footerModel = new FooterControlModel(this.id, this.idPrefix + 'footer_', false);
+    let footerControls = [];
+    let footerModel = new FooterControlModel(this.id, this.idPrefix + 'footer_', false);
     footerControls.push(new FooterControl(footerModel, 'footercontrol_small'));
 
     this.footerControls = footerControls;
@@ -29,15 +29,15 @@ function NegationModel(extension) {
         if (this.hasOwnProperty('children')) {
             this.children.removeElement(child);
         }
-    }
+    };
 
     this.additionalClasses = [];
 
     this.addClass = function (className) {
-        if (this.additionalClasses.indexOf() == -1) {
+        if (this.additionalClasses.indexOf() === -1) {
             this.additionalClasses.push(className);
         }
-    }
+    };
 
     this.removeClass = function (className) {
         try {

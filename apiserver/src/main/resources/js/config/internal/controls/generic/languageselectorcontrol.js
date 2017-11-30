@@ -1,21 +1,19 @@
 function LanguageSelectorControl() {
-    var cssClassBase = 'language_selector';
-    var dropdownPostfix = '_dropdown';
+    let cssClassBase = 'language_selector';
+    let dropdownPostfix = '_dropdown';
 
     this.createRepresentation = function () {
-        var representation = '<div class="' + cssClassBase + dropdownPostfix + '"></div>';
-
-        return representation;
-    }
+        return '<div class="' + cssClassBase + dropdownPostfix + '"></div>';
+    };
 
     this.registerButtonEvents = function () {
         $('.' + cssClassBase + dropdownPostfix).dropdown({
             value: application.configuration.languageKey + ' / ' + application.configuration.locationKey,
             possibleValues: application.configuration.languageSet,
             valueChanged: function (value, oldValue) {
-                var urlObj = $.url.parse(window.location.href);
+                let urlObj = $.url.parse(window.location.href);
 
-                var values = value.split(' / ');
+                let values = value.split(' / ');
 
                 delete urlObj.query;
                 delete urlObj.relative;
@@ -31,7 +29,7 @@ function LanguageSelectorControl() {
                 window.location.assign($.url.build(urlObj));
             }
         });
-    }
+    };
 
     this.getModel = function () {
         return {};

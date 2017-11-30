@@ -2,7 +2,7 @@ function OutputHeaderModel() {
     this.observable = new Observable();
 
     this.getHeaderModel = function () {
-        var model = [];
+        let model = [];
 
         model.push(new HeaderElement(window.lang.convert('CONTEXT_SAVE'), function () {
             this.observable.notify(new Event(this, 'Save'));

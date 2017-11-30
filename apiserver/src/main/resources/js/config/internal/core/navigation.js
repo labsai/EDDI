@@ -8,10 +8,10 @@ function NavigationManager() {
 
     this.initialize = function () {
         this.loadMainMenu();
-    }
+    };
 
     this.getMainMenu = function () {
-        var config = new Array();
+        let config = [];
 
         config.push(new MenuItem(window.lang.convert("NAVIGATION_BOTS"), application.url.getUriForPage('bots')));
         config.push(new MenuItem(window.lang.convert("NAVIGATION_PACKAGES"), application.url.getUriForPage('packages')));
@@ -24,16 +24,16 @@ function NavigationManager() {
 //        config.push(new MenuItem(window.lang.convert("NAVIGATION_SETTINGS"), application.url.getUriForPage('bots')));
 
         return config;
-    }
+    };
 
     this.loadMainMenu = function () {
-        var config = this.getMainMenu();
+        let config = this.getMainMenu();
 
-        var html = '';
+        let html = '';
 
-        for (var i = 0; i < config.length; i++) {
-            var name = config[i].name;
-            var link = config[i].link;
+        for (let i = 0; i < config.length; i++) {
+            let name = config[i].name;
+            let link = config[i].link;
 
             html += '<li><a href="' + link + '">' + name + '</a></li>';
         }

@@ -1,10 +1,10 @@
 function DependencyControl(model) {
-    var referenceCSSPostfix = '_reference';
-    var referenceTextPostfix = '_referencetext';
-    var referenceValuePostfix = '_referencevalue';
-    var footerCSSClassPostfix = '_footer';
+    let referenceCSSPostfix = '_reference';
+    let referenceTextPostfix = '_referencetext';
+    let referenceValuePostfix = '_referencevalue';
+    let footerCSSClassPostfix = '_footer';
 
-    var instance = this;
+    let instance = this;
 
     this.observable = new Observable();
     this.observer = new Observer(function (event) {
@@ -15,12 +15,12 @@ function DependencyControl(model) {
         }
     });
 
-    for (var i = 0; i < model.footerControls.length; ++i) {
+    for (let i = 0; i < model.footerControls.length; ++i) {
         model.footerControls[i].observable.addObserver(this.observer);
     }
 
     this.createRepresentation = function () {
-        var representation = '<div id="' + model.idPrefix + model.id + '" class="' + model.CSSClassBase + '">\
+        let representation = '<div id="' + model.idPrefix + model.id + '" class="' + model.CSSClassBase + '">\
             <div class="' + model.CSSClassBase + referenceCSSPostfix + '">'
             + '<div class="' + model.CSSClassBase + referenceTextPostfix + '">' + window.lang.convert('DEPENDENCY_REFERENCE') + '</div>'
             + '<div id="' + model.idPrefix + model.id + referenceValuePostfix + '" class="' + model.CSSClassBase + referenceValuePostfix + '"></div>'
@@ -28,30 +28,30 @@ function DependencyControl(model) {
 
         representation += '<div class="' + model.CSSClassBase + footerCSSClassPostfix + '">';
 
-        for (var i = 0; i < model.footerControls.length; ++i) {
+        for (let i = 0; i < model.footerControls.length; ++i) {
             representation += model.footerControls[i].createRepresentation();
         }
 
         representation += '<div class="clear"></div></div></div>';
 
         return representation;
-    }
+    };
 
     this.getModel = function () {
         return model;
-    }
+    };
 
     this.getHeight = function () {
         return $('#' + model.idPrefix + model.id).outerHeight(true);
-    }
+    };
 
     this.registerButtonEvents = function () {
-        var that = this;
+        let that = this;
         $('#' + model.idPrefix + model.id + referenceValuePostfix).dropdown({
             value: model.reference,
             possibleValues: application.jsonRepresentationManager.getRuleNames(),
             valueChanged: function (value, oldValue) {
-                var editableEvent = new Event(that, 'ValueChanged');
+                let editableEvent = new Event(that, 'ValueChanged');
 
                 editableEvent.value = value;
                 editableEvent.oldValue = oldValue;
@@ -63,12 +63,12 @@ function DependencyControl(model) {
             }
         });
 
-        for (var i = 0; i < model.footerControls.length; ++i) {
+        for (let i = 0; i < model.footerControls.length; ++i) {
             model.footerControls[i].registerButtonEvents();
         }
 
         /** Preserve additional state classes. */
-        for (var i = 0; i < model.additionalClasses.length; ++i) {
+        for (let i = 0; i < model.additionalClasses.length; ++i) {
             $('#' + model.idPrefix + model.id).addClass(model.additionalClasses[i]);
         }
     }

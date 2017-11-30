@@ -1,16 +1,16 @@
 function TabControl(model) {
-    var tabControlId = 'tabcontrol';
-    var tabIdPrefix = 'tabcontrol_tab_';
-    var tabListCSSClassPostfix = '_tablist';
-    var tabListItemCSSClassPostfix = '_tablist_item';
-    var tabSelectedCSSClassPostfix = '_tab_selected';
-    var tabAnchorIdPrefix = 'anchor_';
+    let tabControlId = 'tabcontrol';
+    let tabIdPrefix = 'tabcontrol_tab_';
+    let tabListCSSClassPostfix = '_tablist';
+    let tabListItemCSSClassPostfix = '_tablist_item';
+    let tabSelectedCSSClassPostfix = '_tab_selected';
+    let tabAnchorIdPrefix = 'anchor_';
 
     this.createRepresentation = function () {
-        var representation = '<div id="' + tabControlId + '"><ul class="' + model.CSSClassBase + tabListCSSClassPostfix + '">';
+        let representation = '<div id="' + tabControlId + '"><ul class="' + model.CSSClassBase + tabListCSSClassPostfix + '">';
 
-        for (var i = 0; i < model.tabControlTabs.length; ++i) {
-            if (i == 0) {
+        for (let i = 0; i < model.tabControlTabs.length; ++i) {
+            if (i === 0) {
                 representation += '<li class="' + model.CSSClassBase + tabListItemCSSClassPostfix + '">' +
                     '<a href="#' + tabIdPrefix + i + '" class="' + model.CSSClassBase + tabSelectedCSSClassPostfix + '" id="'
                     + tabAnchorIdPrefix + tabIdPrefix + i + '">'
@@ -22,10 +22,10 @@ function TabControl(model) {
         }
         representation += '<div class="clear"></div></ul>';
 
-        for (var i = 0; i < model.tabControlTabs.length; ++i) {
+        for (let i = 0; i < model.tabControlTabs.length; ++i) {
             representation += '<div id="' + tabIdPrefix + i + '">';
 
-            for (var j = 0; j < model.tabControlTabs[i].children.length; ++j) {
+            for (let j = 0; j < model.tabControlTabs[i].children.length; ++j) {
                 representation += model.tabControlTabs[i].children[j].createRepresentation();
             }
 
@@ -35,21 +35,21 @@ function TabControl(model) {
         representation += '</div>';
 
         return representation;
-    }
+    };
 
     this.registerButtonEvents = function () {
-        var tabs = $('#' + tabControlId).tabs({
+        let tabs = $('#' + tabControlId).tabs({
             selected: 0,
             select: function (event, ui) {
-                var index = tabs.tabs('option', 'selected');
+                let index = tabs.tabs('option', 'selected');
                 console.log('#' + tabAnchorIdPrefix + tabIdPrefix + index)
                 $('#' + tabAnchorIdPrefix + tabIdPrefix + index).toggleClass(model.CSSClassBase + tabSelectedCSSClassPostfix);
                 $(ui.tab).toggleClass(model.CSSClassBase + tabSelectedCSSClassPostfix);
             }
         });
 
-        for (var i = 0; i < model.tabControlTabs.length; ++i) {
-            for (var j = 0; j < model.tabControlTabs[i].children.length; ++j) {
+        for (let i = 0; i < model.tabControlTabs.length; ++i) {
+            for (let j = 0; j < model.tabControlTabs[i].children.length; ++j) {
                 model.tabControlTabs[i].children[j].registerButtonEvents();
             }
         }

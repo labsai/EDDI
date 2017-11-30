@@ -117,7 +117,7 @@ jquery_lang_js.prototype.lang['en_US'] = {
     "SUBJECT": "Subject",
     "LANGUAGE": "Language",
     "LOOKUPIFKNOWN": "Lookup If Known",
-    "RESOURCE_LINK": "",
+    "RESOURCE_LINK": "View",
     "DESCRIPTORUI_HEADER": "Descriptor",
     "DESCRIPTORUI_NAME": "Name:",
     "DESCRIPTORUI_AUTHOR": "Author:",

@@ -1,10 +1,10 @@
 function MonitorDescriptionsActionHandler(contentBuilder, dataProvider) {
-    var instance = this;
+    let instance = this;
     this.observer = new Observer(function (event) {
         switch (event.command) {
             case 'BotDropDownChanged':
-                if (event.oldValue != event.value) {
-                    var query = $.url.parse(window.location.href);
+                if (event.oldValue !== event.value) {
+                    let query = $.url.parse(window.location.href);
 
                     if (typeof query.params === 'undefined') {
                         query.params = {};
@@ -24,8 +24,8 @@ function MonitorDescriptionsActionHandler(contentBuilder, dataProvider) {
                 }
                 break;
             case 'BotVersionDropDownChanged':
-                if (event.oldValue != event.value) {
-                    var query = $.url.parse(window.location.href);
+                if (event.oldValue !== event.value) {
+                    let query = $.url.parse(window.location.href);
 
                     if (typeof query.params === 'undefined') {
                         query.params = {};
@@ -44,8 +44,8 @@ function MonitorDescriptionsActionHandler(contentBuilder, dataProvider) {
                 }
                 break;
             case 'ConversationStateDropDownChanged':
-                if (event.oldValue != event.value) {
-                    var query = $.url.parse(window.location.href);
+                if (event.oldValue !== event.value) {
+                    let query = $.url.parse(window.location.href);
 
                     if (typeof query.params === 'undefined') {
                         query.params = {};
@@ -64,8 +64,8 @@ function MonitorDescriptionsActionHandler(contentBuilder, dataProvider) {
                 }
                 break;
             case 'ViewStateDropDownChanged':
-                if (event.oldValue != event.value) {
-                    var query = $.url.parse(window.location.href);
+                if (event.oldValue !== event.value) {
+                    let query = $.url.parse(window.location.href);
 
                     if (typeof query.params === 'undefined') {
                         query.params = {};
@@ -84,8 +84,8 @@ function MonitorDescriptionsActionHandler(contentBuilder, dataProvider) {
                 }
                 break;
             case 'LimitChanged':
-                if (event.oldValue != event.value) {
-                    var query = $.url.parse(window.location.href);
+                if (event.oldValue !== event.value) {
+                    let query = $.url.parse(window.location.href);
 
                     if (typeof query.params === 'undefined') {
                         query.params = {};
@@ -101,8 +101,8 @@ function MonitorDescriptionsActionHandler(contentBuilder, dataProvider) {
                 }
                 break;
             case 'IndexChanged':
-                if (event.oldValue != event.value) {
-                    var query = $.url.parse(window.location.href);
+                if (event.oldValue !== event.value) {
+                    let query = $.url.parse(window.location.href);
 
                     if (typeof query.params === 'undefined') {
                         query.params = {};
@@ -118,7 +118,7 @@ function MonitorDescriptionsActionHandler(contentBuilder, dataProvider) {
                 break;
             case 'SearchSelected':
                 if (typeof event.value !== 'undefined' && event.value.length >= 0) {
-                    var query = $.url.parse(window.location.href);
+                    let query = $.url.parse(window.location.href);
 
                     if (typeof query.params === 'undefined') {
                         query.params = {};

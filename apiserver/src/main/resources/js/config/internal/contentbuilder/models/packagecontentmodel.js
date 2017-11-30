@@ -3,16 +3,16 @@ function UnknownLifecycleTaskException(msg) {
 }
 
 function PackageContentModel(dataProvider, actionHandler) {
-    var firstLevelGroupControlIdPrefix = 'package_';
-    var instance = this;
+    let firstLevelGroupControlIdPrefix = 'package_';
+    let instance = this;
 
     this.makeContentModel = function (sizeCallbackInstance, selectionCallbackInstance) {
-        var models = [];
+        let models = [];
 
-        var packageDescription = dataProvider.readActivePackage();
-        console.log(packageDescription)
+        let packageDescription = dataProvider.readActivePackage();
+        console.log(packageDescription);
 
-        var description = dataProvider.readActiveDocumentDescription();
+        let description = dataProvider.readActiveDocumentDescription();
         packageDescription.name = description.name;
 
         application.contentModelHelper.createResourceVersionSelectorControl();
@@ -20,13 +20,13 @@ function PackageContentModel(dataProvider, actionHandler) {
         application.contentModelHelper.createReturnToParentButton();
         application.contentModelHelper.createLanguageSelector();
 
-        var packageModel = this.createPackageGroupControlModel(packageDescription);
-        var packageControl = this.createGroupControl(packageModel, 'groupcontrol', sizeCallbackInstance, selectionCallbackInstance);
+        let packageModel = this.createPackageGroupControlModel(packageDescription);
+        let packageControl = this.createGroupControl(packageModel, 'groupcontrol', sizeCallbackInstance, selectionCallbackInstance);
 
-        for (var i = 0; i < packageDescription.packageExtensions.length; ++i) {
-            var lifeCycleJSON = packageDescription.packageExtensions[i];
+        for (let i = 0; i < packageDescription.packageExtensions.length; ++i) {
+            let lifeCycleJSON = packageDescription.packageExtensions[i];
 
-            var lifeCycle;
+            let lifeCycle;
             try {
                 lifeCycle = this.getLifeCycleTaskPlugin(lifeCycleJSON.type);
             } catch (ex) {
@@ -39,8 +39,8 @@ function PackageContentModel(dataProvider, actionHandler) {
                 }
             }
 
-            var lifeCycleModel = new lifeCycle.model(lifeCycleJSON);
-            var lifeCycleControl = new lifeCycle.control(lifeCycleModel);
+            let lifeCycleModel = new lifeCycle.model(lifeCycleJSON);
+            let lifeCycleControl = new lifeCycle.control(lifeCycleModel);
 
             if (lifeCycleControl.hasOwnProperty('observable')) {
                 lifeCycleControl.observable.addObserver(application.actionHandler.observer);
@@ -52,39 +52,38 @@ function PackageContentModel(dataProvider, actionHandler) {
         models.push(packageControl);
 
         return models;
-    }
-
+    };
 
     this.createPackageGroupControlModel = function (packageDescription) {
-        var footerControls = [];
+        let footerControls = [];
 
-        var packageId = dataProvider.getNextIdGlobal();
+        let packageId = dataProvider.getNextIdGlobal();
 
-        var footerModel = new FooterControlModel(packageId, firstLevelGroupControlIdPrefix + 'footer_', true);
-        var footerControl = new FooterControl(footerModel, 'footercontrol');
+        let footerModel = new FooterControlModel(packageId, firstLevelGroupControlIdPrefix + 'footer_', true);
+        let footerControl = new FooterControl(footerModel, 'footercontrol');
 
         footerControls.push(footerControl);
 
-        var headerControls = [];
+        let headerControls = [];
 
-        var retVal = new GroupControlModel(packageId, firstLevelGroupControlIdPrefix, packageDescription.name,
+        let retVal = new GroupControlModel(packageId, firstLevelGroupControlIdPrefix, packageDescription.name,
             footerControls, false, true, null, false, false);
 
         retVal.headerControls = headerControls;
         retVal.context = {namespace: 'ai.labs'};
 
         return retVal;
-    }
+    };
 
     this.createGroupControl = function (model, CSSClassBase, sizeCallbackInstance, selectionCallbackInstance) {
-        var gc = new GroupControl(model, CSSClassBase);
+        let gc = new GroupControl(model, CSSClassBase);
 
         gc.observable.addObserver(sizeCallbackInstance);
         //gc.observable.addObserver(selectionCallbackInstance);
         gc.observable.addObserver(actionHandler.observer);
 
         return gc;
-    }
+    };
 
     this.getLifeCycleTaskPlugin = function (lifecycleTaskType) {
         if (application.pluginManager.plugins.lifecycletaskhandlers.hasOwnProperty(lifecycleTaskType)) {
@@ -92,11 +91,11 @@ function PackageContentModel(dataProvider, actionHandler) {
         } else {
             throw new UnknownLifecycleTaskException('No lifecycle task for type: ' + lifecycleTaskType);
         }
-    }
+    };
 
-    var addControl = function (parentControl, control) {
-        var ownId = '#' + control.getModel().idPrefix + control.getModel().id;
-        var parentId = '#' + application.configuration.referencePrefix + parentControl.getModel().idPrefix + parentControl.getModel().id;
+    let addControl = function (parentControl, control) {
+        let ownId = '#' + control.getModel().idPrefix + control.getModel().id;
+        let parentId = '#' + application.configuration.referencePrefix + parentControl.getModel().idPrefix + parentControl.getModel().id;
 
         $(control.createRepresentation())
             .hide()
@@ -125,32 +124,32 @@ function PackageContentModel(dataProvider, actionHandler) {
                 $('#content').stop().unbind('scroll mousedown DOMMouseScroll mousewheel keyup'); // This identifies the scroll as a user action, stops the animation, then unbinds the event straight after (optional)
             }
         });
-    }
+    };
 
     this.addChildControl = function (sender) {
-        var callback = function (success, event) {
+        let callback = function (success, event) {
             if (success && event.documentDescription) {
-                var value = application.url.getVersionAndIdForResource(event.documentDescription.resource);
-                var id = value.id;
-                var version = value.version;
+                let value = application.url.getVersionAndIdForResource(event.documentDescription.resource);
+                let id = value.id;
+                let version = value.version;
 
-                var extensionIdVersionIdentifier = "CACHED_EXTENSION_IDV_" + version + '_' + id;
-                var extension = application.networkCacheManager.cachedNetworkCall(extensionIdVersionIdentifier,
+                let extensionIdVersionIdentifier = "CACHED_EXTENSION_IDV_" + version + '_' + id;
+                let extension = application.networkCacheManager.cachedNetworkCall(extensionIdVersionIdentifier,
                     application.dataProvider,
                     application.dataProvider.readExtension,
                     [id, version]
                 );
 
-                var lifeCycle;
-                var lifeCycleModel;
+                let lifeCycle;
+                let lifeCycleModel;
                 try {
                     lifeCycle = instance.getLifeCycleTaskPlugin(extension.type + '?version=' + version);
                     lifeCycleModel = new lifeCycle.model();
                 } catch (ex) {
                     if (ex instanceof UnknownLifecycleTaskException) {
-                        /**var errorModel = new DialogControlModel(window.lang.convert("PLUGIN_NOT_FOUND"), function() {},
+                        /**let errorModel = new DialogControlModel(window.lang.convert("PLUGIN_NOT_FOUND"), function() {},
                          window.lang.convert('OK_BUTTON'), false);
-                         var errorControl = new DialogControl(errorModel);
+                         let errorControl = new DialogControl(errorModel);
                          errorControl.showDialog();
                          return;*/
                         lifeCycle = {model: GenericLifecycleTaskModel, control: GenericLifecycleTaskControl};
@@ -158,7 +157,7 @@ function PackageContentModel(dataProvider, actionHandler) {
                     }
                 }
 
-                var lifeCycleControl = new lifeCycle.control(lifeCycleModel);
+                let lifeCycleControl = new lifeCycle.control(lifeCycleModel);
 
                 if (lifeCycleControl.hasOwnProperty('observable')) {
                     lifeCycleControl.observable.addObserver(application.actionHandler.observer);
@@ -168,21 +167,21 @@ function PackageContentModel(dataProvider, actionHandler) {
             }
         };
 
-        var namespaceId = 'CACHED_NAMESPACE_' + sender.getModel().context.namespace;
-        var selectionOptions = application.networkCacheManager.cachedNetworkCall(namespaceId, application.dataProvider,
+        let namespaceId = 'CACHED_NAMESPACE_' + sender.getModel().context.namespace;
+        let selectionOptions = application.networkCacheManager.cachedNetworkCall(namespaceId, application.dataProvider,
             application.dataProvider.readExtensionDefinitions,
             [sender.getModel().context.namespace]);
         console.log('Options in namespace ' + sender.getModel().context.namespace + ' are: ');
         console.log(selectionOptions);
 
-        var unnamedCounter = 0;
-        for (var i = 0; i < selectionOptions.length; ++i) {
-            if (selectionOptions[i].name == "") {
+        let unnamedCounter = 0;
+        for (let i = 0; i < selectionOptions.length; ++i) {
+            if (selectionOptions[i].name === "") {
                 selectionOptions[i].name = window.lang.convert('UNNAMED_ENTITY_LIFECYCLE') + '_' + unnamedCounter++;
             }
         }
 
-        var dialogModel = new DialogControlModel(
+        let dialogModel = new DialogControlModel(
             window.lang.convert('ASK_ADD_LIFECYCLETASK'),
             callback,
             window.lang.convert('OK_BUTTON'),
@@ -190,7 +189,7 @@ function PackageContentModel(dataProvider, actionHandler) {
             selectionOptions,
             {dialogType: 'documentDescription'}
         );
-        var dialog = new DialogControl(dialogModel);
+        let dialog = new DialogControl(dialogModel);
 
         dialog.showDialog();
     }

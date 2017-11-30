@@ -1,6 +1,6 @@
 function PhoneticModel(lifecycle) {
     this.type = "core://ai.labs.parser.corrections.phonetic?version=1";
-    var instance = this;
+    let instance = this;
 
     this.convertToJSON = function () {
         return {

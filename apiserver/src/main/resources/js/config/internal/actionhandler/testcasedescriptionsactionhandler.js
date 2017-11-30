@@ -1,9 +1,9 @@
 function TestCaseDescriptionsActionHandler(contentBuilder, dataProvider) {
-    var instance = this;
-    var synchronisationHelper = new DialogSynchronisationHelper(dataProvider);
+    let instance = this;
+    let synchronisationHelper = new DialogSynchronisationHelper(dataProvider);
 
     this.valueChanged = function (id, version, event) {
-        var patchInstruction = application.jsonBlueprintFactory.makeBlueprintForObjectType('PatchInstruction');
+        let patchInstruction = application.jsonBlueprintFactory.makeBlueprintForObjectType('PatchInstruction');
         patchInstruction.operation = 0; // = SET
         patchInstruction.document = event.newRowValue;
 
@@ -31,19 +31,19 @@ function TestCaseDescriptionsActionHandler(contentBuilder, dataProvider) {
                 }
             }
         );
-    }
+    };
 
-    var runTestCaseFunction = function (event, providerInstance, runTestCase, getRunTestCaseStatus) {
-        var intervalNumber;
+    let runTestCaseFunction = function (event, providerInstance, runTestCase, getRunTestCaseStatus) {
+        let intervalNumber;
 
-        var completion = function (httpCode, xmlHttpRequest, value) {
-            if (httpCode == 202) {
-                var timeoutFunc = function () {
-                    var returnValue = getRunTestCaseStatus.apply(providerInstance, [event.resourceId, event.resourceVersion]);
+        let completion = function (httpCode, xmlHttpRequest, value) {
+            if (httpCode === 202) {
+                let timeoutFunc = function () {
+                    let returnValue = getRunTestCaseStatus.apply(providerInstance, [event.resourceId, event.resourceVersion]);
 
                     application.contentModelProvider.setTestCaseResultState(event.rowId, returnValue);
 
-                    if (returnValue != 'IN_PROGRESS') {
+                    if (returnValue !== 'IN_PROGRESS') {
                         clearInterval(intervalNumber);
                     }
                 };
@@ -58,7 +58,7 @@ function TestCaseDescriptionsActionHandler(contentBuilder, dataProvider) {
         application.contentModelProvider.setTestCaseResultState(event.rowId, 'IN_PROGRESS');
 
         runTestCase.apply(providerInstance, [event.resourceId, event.resourceVersion, completion]);
-    }
+    };
 
     this.observer = new Observer(function (event) {
         switch (event.command) {
@@ -75,17 +75,17 @@ function TestCaseDescriptionsActionHandler(contentBuilder, dataProvider) {
                 runTestCaseFunction(event, dataProvider, dataProvider.runTestCase, dataProvider.getRunTestCaseStatus);
                 break;
             case 'RunAll':
-                var model = application.contentModelProvider.getTableControl().getModel();
-                var tableRowPrefix = application.contentModelProvider.getTableControl().getTableRowPrefix();
+                let model = application.contentModelProvider.getTableControl().getModel();
+                let tableRowPrefix = application.contentModelProvider.getTableControl().getTableRowPrefix();
                 $('#' + model.idPrefix + model.id + ' > tbody > tr').each(function () {
-                    var rowId = $(this).attr("id");
-                    var selectedDataRowIndex;
+                    let rowId = $(this).attr("id");
+                    let selectedDataRowIndex;
 
-                    if (typeof rowId !== 'undefined' && rowId.indexOf(tableRowPrefix) == 0) {
+                    if (typeof rowId !== 'undefined' && rowId.indexOf(tableRowPrefix) === 0) {
                         selectedDataRowIndex = rowId.substring(tableRowPrefix.length, rowId.length);
                     }
 
-                    var runEvent = new Event(instance, 'Run');
+                    let runEvent = new Event(instance, 'Run');
                     if (typeof model.data.resourceParams !== 'undefined' && typeof selectedDataRowIndex !== 'undefined') {
                         runEvent.resourceId = model.data.resourceParams[selectedDataRowIndex].id;
                         runEvent.resourceVersion = model.data.resourceParams[selectedDataRowIndex].version;
@@ -95,8 +95,8 @@ function TestCaseDescriptionsActionHandler(contentBuilder, dataProvider) {
                 });
                 break;
             case 'LimitChanged':
-                if (event.oldValue != event.value) {
-                    var query = $.url.parse(window.location.href);
+                if (event.oldValue !== event.value) {
+                    let query = $.url.parse(window.location.href);
 
                     if (typeof query.params === 'undefined') {
                         query.params = {};
@@ -112,8 +112,8 @@ function TestCaseDescriptionsActionHandler(contentBuilder, dataProvider) {
                 }
                 break;
             case 'IndexChanged':
-                if (event.oldValue != event.value) {
-                    var query = $.url.parse(window.location.href);
+                if (event.oldValue !== event.value) {
+                    let query = $.url.parse(window.location.href);
 
                     if (typeof query.params === 'undefined') {
                         query.params = {};
@@ -129,7 +129,7 @@ function TestCaseDescriptionsActionHandler(contentBuilder, dataProvider) {
                 break;
             case 'SearchSelected':
                 if (typeof event.value !== 'undefined' && event.value.length >= 0) {
-                    var query = $.url.parse(window.location.href);
+                    let query = $.url.parse(window.location.href);
 
                     if (typeof query.params === 'undefined') {
                         query.params = {};

@@ -1,11 +1,11 @@
 function ResultSizeControl(model) {
-    var sliderPostfix = '_slider';
-    var referencePostfix = '_reference';
-    var footerCSSClassPostfix = '_footer';
+    let sliderPostfix = '_slider';
+    let referencePostfix = '_reference';
+    let footerCSSClassPostfix = '_footer';
 
     this.resultSizeSynchronisationTimer = null;
 
-    var instance = this;
+    let instance = this;
 
     this.observable = new Observable();
     this.observer = new Observer(function (event) {
@@ -16,7 +16,7 @@ function ResultSizeControl(model) {
         }
     });
 
-    var getMinMaxFromData = function (min, max, equal) {
+    let getMinMaxFromData = function (min, max, equal) {
         if (equal != -1) {
             return {min: equal, max: equal};
         } else {
@@ -30,8 +30,8 @@ function ResultSizeControl(model) {
         }
     }
 
-    var makeRangeString = function (min, max) {
-        var prefix = window.lang.convert('RESULT_SIZE_RANGE_LABEL');
+    let makeRangeString = function (min, max) {
+        let prefix = window.lang.convert('RESULT_SIZE_RANGE_LABEL');
 
         if (min == -1) {
             return prefix + window.lang.convert('SLIDER_LESS_THAN') + ' ' + max;
@@ -45,23 +45,23 @@ function ResultSizeControl(model) {
         }
     }
 
-    for (var i = 0; i < model.footerControls.length; ++i) {
+    for (let i = 0; i < model.footerControls.length; ++i) {
         model.footerControls[i].observable.addObserver(this.observer);
     }
 
     this.createRepresentation = function () {
-        var tmp = getMinMaxFromData(model.min, model.max, model.equal);
-        var min = tmp.min;
-        var max = tmp.max;
+        let tmp = getMinMaxFromData(model.min, model.max, model.equal);
+        let min = tmp.min;
+        let max = tmp.max;
 
-        var representation = '<div id="' + model.idPrefix + model.id + '" class="' + model.CSSClassBase + '">\
+        let representation = '<div id="' + model.idPrefix + model.id + '" class="' + model.CSSClassBase + '">\
             <div id="' + model.idPrefix + model.id + referencePostfix + '" class="' + model.CSSClassBase + referencePostfix + '">'
             + makeRangeString(min, max) + '</div>'
             + '<div id="' + model.idPrefix + model.id + sliderPostfix + '"></div>';
 
         representation += '<div class="' + model.CSSClassBase + footerCSSClassPostfix + '">';
 
-        for (var i = 0; i < model.footerControls.length; ++i) {
+        for (let i = 0; i < model.footerControls.length; ++i) {
             representation += model.footerControls[i].createRepresentation();
         }
 
@@ -78,15 +78,15 @@ function ResultSizeControl(model) {
         return $('#' + model.idPrefix + model.id).outerHeight(true);
     }
 
-    var makeValuesFromUIEvent = function (ui) {
-        var min = ui.values[0];
-        var max = ui.values[1];
+    let makeValuesFromUIEvent = function (ui) {
+        let min = ui.values[0];
+        let max = ui.values[1];
 
         if (max == application.configuration.sliderMaxResultSize + 1) {
             max = -1;
         }
 
-        var equal;
+        let equal;
         if (min == max) {
             equal = min;
         } else {
@@ -97,7 +97,7 @@ function ResultSizeControl(model) {
     }
 
     this.registerButtonEvents = function () {
-        var tmp = getMinMaxFromData(model.min, model.max, model.equal);
+        let tmp = getMinMaxFromData(model.min, model.max, model.equal);
 
         $('#' + model.idPrefix + model.id + sliderPostfix).slider({
             range: true,
@@ -123,9 +123,9 @@ function ResultSizeControl(model) {
                 }
             },
             stop: function (event, ui) {
-                var valuesObj = makeValuesFromUIEvent(ui);
-                var dataSyncCallback = function () {
-                    var editableEvent = new Event(instance, 'ValueChanged');
+                let valuesObj = makeValuesFromUIEvent(ui);
+                let dataSyncCallback = function () {
+                    let editableEvent = new Event(instance, 'ValueChanged');
                     editableEvent.value = [valuesObj.min, valuesObj.max, valuesObj.equal];
                     editableEvent.oldValue = [instance.getModel().min, instance.getModel().max, instance.getModel().equal];
                     editableEvent.editable = $(this);
@@ -142,12 +142,12 @@ function ResultSizeControl(model) {
             }
         }).disableSelection();
 
-        for (var i = 0; i < model.footerControls.length; ++i) {
+        for (let i = 0; i < model.footerControls.length; ++i) {
             model.footerControls[i].registerButtonEvents();
         }
 
         /** Preserve additional state classes. */
-        for (var i = 0; i < model.additionalClasses.length; ++i) {
+        for (let i = 0; i < model.additionalClasses.length; ++i) {
             $('#' + model.idPrefix + model.id).addClass(model.additionalClasses[i]);
         }
     }

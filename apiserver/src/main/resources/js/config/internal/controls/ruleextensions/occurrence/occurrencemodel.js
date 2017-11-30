@@ -9,7 +9,7 @@ function OccurrenceModel(extension) {
             selected: false,
             type: 'occurrence'
         };
-    }
+    };
 
     if (typeof extension === "undefined" || extension === null) {
         extension = this.makeDefaultJSON();
@@ -23,8 +23,8 @@ function OccurrenceModel(extension) {
     this.maxOccurrence = extension.values.maxOccurrence;
     this.backingData = extension;
 
-    var footerControls = [];
-    var footerModel = new FooterControlModel(this.id, this.idPrefix + 'footer_', false);
+    let footerControls = [];
+    let footerModel = new FooterControlModel(this.id, this.idPrefix + 'footer_', false);
     footerControls.push(new FooterControl(footerModel, 'footercontrol_small'));
 
     this.footerControls = footerControls;
@@ -32,10 +32,10 @@ function OccurrenceModel(extension) {
     this.additionalClasses = [];
 
     this.addClass = function (className) {
-        if (this.additionalClasses.indexOf() == -1) {
+        if (this.additionalClasses.indexOf() === -1) {
             this.additionalClasses.push(className);
         }
-    }
+    };
 
     this.removeClass = function (className) {
         try {

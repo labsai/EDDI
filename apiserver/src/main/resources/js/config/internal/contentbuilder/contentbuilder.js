@@ -17,18 +17,18 @@ function ContentBuilder(viewController) {
      *
      * @type {Array}
      */
-    var groupControls = [];
+    let groupControls = [];
 
     this.getControls = function () {
         return groupControls;
-    }
+    };
 
     this.addGroupControl = function (control) {
         groupControls.push(control);
         this.readjustSize();
-    }
+    };
 
-    var instance = this;
+    let instance = this;
 
     this.observer = new Observer(function (event) {
         switch (event.command) {
@@ -43,21 +43,21 @@ function ContentBuilder(viewController) {
 
     this.rebuildContent = function () {
         this.buildContent(groupControls);
-    }
+    };
 
     this.buildContent = function (controls) {
         groupControls = controls;
 
-        var sortableOuter = '';
+        let sortableOuter = '';
         if (groupControls.length > 0) {
             if (groupControls[0] instanceof GroupControl) {
                 sortableOuter = ' class="sortable_outer"';
             }
         }
 
-        var fullHtml = '<div id="content"><div id="toplevel"' + sortableOuter + '>';
+        let fullHtml = '<div id="content"><div id="toplevel"' + sortableOuter + '>';
 
-        for (var i = 0; i < groupControls.length; ++i) {
+        for (let i = 0; i < groupControls.length; ++i) {
             fullHtml = fullHtml + groupControls[i].createRepresentation();
         }
 
@@ -65,31 +65,31 @@ function ContentBuilder(viewController) {
 
         $('#content').replaceWith('<body>' + fullHtml + '</body>');
 
-        var setDynamicWorkspaceLayout = function () {
+        let setDynamicWorkspaceLayout = function () {
             $('#content').height($('#right').height() - $('#header').height());
-        }
+        };
 
         setDynamicWorkspaceLayout();
 
         $(window).resize(function () {
             setDynamicWorkspaceLayout();
         });
-    }
+    };
 
     this.registerEvents = function () {
         this.readjustSize();
 
         /** Note: It's important to register button events just after the DOM-changes. */
-        for (var i = 0; i < groupControls.length; ++i) {
+        for (let i = 0; i < groupControls.length; ++i) {
             groupControls[i].registerButtonEvents();
         }
-    }
+    };
 
     this.readjustSize = function () {
-        var requiredWidth = function () {
-            var retVal = 0;
+        let requiredWidth = function () {
+            let retVal = 0;
 
-            for (var i = 0; i < groupControls.length; ++i) {
+            for (let i = 0; i < groupControls.length; ++i) {
                 if (groupControls[i].hasOwnProperty('getWidth')) {
                     retVal += groupControls[i].getWidth();
                 }
@@ -101,7 +101,7 @@ function ContentBuilder(viewController) {
             return retVal;
         }();
 
-        var contentWidth = $(window).outerWidth(true) - $('#mainmenu').outerWidth(true) - 1;
+        let contentWidth = $(window).outerWidth(true) - $('#mainmenu').outerWidth(true) - 1;
 
         /** Must specifically supply a width to make the div grow vertically instead of horizontally. */
         if (requiredWidth > contentWidth) {
@@ -110,7 +110,7 @@ function ContentBuilder(viewController) {
             $('.sortable_outer').width(contentWidth);
         }
 
-        var instance = this;
+        let instance = this;
 
         $('.sortable_outer').sortable({
             cancel: 'a, .groupcontrol_sortable_inner, form',
@@ -122,7 +122,7 @@ function ContentBuilder(viewController) {
             update: function (event, ui) {
                 ui.item.data("new_index", ui.item.index());
 
-                var sortableEvent = new SortableEvent('SortUpdatePackageInner');
+                let sortableEvent = new SortableEvent('SortUpdatePackageInner');
                 sortableEvent.fromUpdateEvent(this, event, ui);
 
                 instance.observable.notify(sortableEvent);
@@ -148,7 +148,7 @@ function ContentBuilder(viewController) {
             receive: function (eventIn, ui) {
                 ui.item.data("new_index", ui.item.index());
 
-                var event = new SortableEvent('SortableReceivedItem');
+                let event = new SortableEvent('SortableReceivedItem');
                 event.fromReceiveEvent(this, ui, application.configuration.packageOuterSortableLevel);
 
                 instance.observable.notify(event);
@@ -157,7 +157,7 @@ function ContentBuilder(viewController) {
                 if (this === ui.item.parent()[0]) {
                     ui.item.data("new_index", ui.item.index());
 
-                    var sortableEvent = new SortableEvent('SortUpdatePackageInner');
+                    let sortableEvent = new SortableEvent('SortUpdatePackageInner');
                     sortableEvent.fromUpdateEvent(this, event, ui);
 
                     instance.observable.notify(sortableEvent);
@@ -184,11 +184,11 @@ function ContentBuilder(viewController) {
         if (viewController !== null && typeof viewController !== 'undefined') {
             viewController.registerEvents();
         }
-    }
+    };
 
     this.getSelectedGroupControl = function () {
-        for (var i = 0; i < groupControls.length; ++i) {
-            for (var j = 0; j < groupControls[i].getModel().children.length; ++j) {
+        for (let i = 0; i < groupControls.length; ++i) {
+            for (let j = 0; j < groupControls[i].getModel().children.length; ++j) {
                 if (groupControls[i].getModel().children[j].getModel().selected) {
                     return groupControls[i].getModel().children[j];
                 }
@@ -197,7 +197,7 @@ function ContentBuilder(viewController) {
 
         /** No group control was selected, this should not happen unless group controls are not selectable to begin with. */
         throw "Unexpected state: No group control was selected.";
-    }
+    };
 
     this.handleSelection = function (groupControl) {
         /** Must select a new group control. */

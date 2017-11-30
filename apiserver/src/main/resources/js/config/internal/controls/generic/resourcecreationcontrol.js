@@ -1,15 +1,15 @@
 function ResourceCreationControl(model) {
-    var headerTextPostfix = '_headertext';
-    var footerPostfix = '_footer';
-    var acceptPostfix = '_accept';
-    var cancelPostfix = '_cancel';
-    var inputRowPostfix = '_inputrow';
-    var inputTextPostfix = '_inputtext';
-    var inputFieldPostfix = '_inputfield';
-    var autoUpdatePostfix = '_autoupdate';
+    let headerTextPostfix = '_headertext';
+    let footerPostfix = '_footer';
+    let acceptPostfix = '_accept';
+    let cancelPostfix = '_cancel';
+    let inputRowPostfix = '_inputrow';
+    let inputTextPostfix = '_inputtext';
+    let inputFieldPostfix = '_inputfield';
+    let autoUpdatePostfix = '_autoupdate';
 
     this.createRepresentation = function () {
-        var representation = '<div id="' + model.idPrefix + model.id + '" class="' + model.CSSClassBase + '">';
+        let representation = '<div id="' + model.idPrefix + model.id + '" class="' + model.CSSClassBase + '">';
 
         representation += '<div id="' + model.idPrefix + model.id + headerTextPostfix + '" class="' + model.CSSClassBase + headerTextPostfix + '">'
             + window.lang.convert('CREATE_RESOURCE') + '</div>';
@@ -40,7 +40,7 @@ function ResourceCreationControl(model) {
         representation += '</div>';
 
         return representation;
-    }
+    };
 
     this.registerButtonEvents = function () {
         $('#' + model.idPrefix + model.id + cancelPostfix).click(function () {
@@ -56,7 +56,7 @@ function ResourceCreationControl(model) {
 
         $(window).unbind('keypress');
         $(window).bind('keypress', function (e) {
-            if (e.keyCode == 13) /** ENTER */ {
+            if (e.keyCode === 13) /** ENTER */ {
                 $(window).unbind('keypress');
                 model.completion(true, $('#' + model.idPrefix + model.id + autoUpdatePostfix).attr('checked'));
             }
@@ -66,7 +66,7 @@ function ResourceCreationControl(model) {
             model.currentValue = value;
 
             $(window).bind('keypress', function (e) {
-                if (e.keyCode == 13) /** ENTER */ {
+                if (e.keyCode === 13) /** ENTER */ {
                     $(window).unbind('keypress');
                     model.completion(true, $('#' + model.idPrefix + model.id + autoUpdatePostfix).attr('checked'));
                 }
@@ -87,7 +87,7 @@ function ResourceCreationControl(model) {
         }).click(function () {
             $(window).unbind('keypress');
         });
-    }
+    };
 
     this.getModel = function () {
         return model;

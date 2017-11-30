@@ -1,23 +1,23 @@
 function PackageEditHelper() {
     this.showEditDialogWithDefinition = function (model, definition) {
-        var callback = function (success, event) {
+        let callback = function (success, event) {
             if (success) {
                 for (key in event.map) {
                     model[key] = event.map[key];
                 }
             }
-        }
+        };
 
-        var formRowCSS = 'editdialog_row';
-        var formLeftCSS = 'editdialog_left';
-        var formRightCSS = 'editdialog_right';
-        var formElements = [];
+        let formRowCSS = 'editdialog_row';
+        let formLeftCSS = 'editdialog_left';
+        let formRightCSS = 'editdialog_right';
+        let formElements = [];
 
-        for (var key in definition) {
-            var representation;
+        for (let key in definition) {
+            let representation;
 
             if (definition[key].type.indexOf('eddi://') === 0) {
-                var kBlockControlCSSClassBase = 'resourceuri';
+                let kBlockControlCSSClassBase = 'resourceuri';
                 representation = new ResourceURIFormElement(kBlockControlCSSClassBase, false, key, definition[key].type,
                     definition[key].displayKey, model[key]);
 
@@ -32,13 +32,13 @@ function PackageEditHelper() {
             formElements.push(representation);
         }
 
-        var dialogModel = new DialogControlModel(window.lang.convert("EDIT_LIFECYCLE_TEXT"), callback,
+        let dialogModel = new DialogControlModel(window.lang.convert("EDIT_LIFECYCLE_TEXT"), callback,
             window.lang.convert("OK_BUTTON"),
             window.lang.convert("CANCEL_BUTTON"),
             formElements,
             {dialogType: 'textFields'});
 
-        var dialog = new DialogControl(dialogModel);
+        let dialog = new DialogControl(dialogModel);
 
         dialog.showDialog();
     }

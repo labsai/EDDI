@@ -4,21 +4,21 @@ function TestCaseContentModel(dataProvider, actionHandler) {
     }
 
     this.makeContentModel = function (sizeCallbackInstance, selectionCallbackInstance) {
-        var models = [];
+        let models = [];
 
-        var testCase = dataProvider.readActiveTestCase();
-        var expectedResult = testCase.expected;
-        var actualResult = testCase.actual;
+        let testCase = dataProvider.readActiveTestCase();
+        let expectedResult = testCase.expected;
+        let actualResult = testCase.actual;
 
-        var conversationStepColumns = [
+        let conversationStepColumns = [
             new TableControlColumnModel({columnIdentifier: 'selection'}, window.lang.convert('MONITOR_CONVERSATION_TABLE_COL_SELECTION'), 'table_col_selection', false, false),
             new TableControlColumnModel({columnIdentifier: 'input'}, window.lang.convert('MONITOR_CONVERSATION_TABLE_COL_INPUT'), 'table_col_input', false, false),
             new TableControlColumnModel({columnIdentifier: 'output'}, window.lang.convert('TESTCASE_TABLE_COL_PREFIX_EXPECTED') + window.lang.convert('MONITOR_CONVERSATION_TABLE_COL_OUTPUT'), 'table_col_output', false, false),
             new TableControlColumnModel({columnIdentifier: 'actualValues'}, window.lang.convert('TESTCASE_TABLE_COL_ACTUALVALUES'), 'table_col_actualvalues', false, false)
         ];
 
-        var packageTableControls = [];
-        var packageColumns = [
+        let packageTableControls = [];
+        let packageColumns = [
             new TableControlColumnModel({columnIdentifier: 'selection'}, window.lang.convert('MONITOR_PACKAGE_TABLE_COL_SELECTION'), 'table_col_selection', false, false),
             new TableControlColumnModel({columnIdentifier: 'name'}, window.lang.convert('TESTCASE_TABLE_COL_PREFIX_EXPECTED') + window.lang.convert('MONITOR_PACKAGE_TABLE_COL_NAME'), 'table_col_name', false, false),
             new TableControlColumnModel({columnIdentifier: 'duration'}, window.lang.convert('MONITOR_PACKAGE_TABLE_COL_DURATION'), 'table_col_duration', false, false),
@@ -26,38 +26,38 @@ function TestCaseContentModel(dataProvider, actionHandler) {
             new TableControlColumnModel({columnIdentifier: 'actualValues'}, window.lang.convert('TESTCASE_TABLE_COL_ACTUALVALUES'), 'table_col_actualvalues', false, false)
         ];
 
-        var lifeCycleTaskTableControls = [];
-        var lifeCycleTaskColumns = [
+        let lifeCycleTaskTableControls = [];
+        let lifeCycleTaskColumns = [
             new TableControlColumnModel({columnIdentifier: 'key'}, window.lang.convert('TESTCASE_TABLE_COL_PREFIX_EXPECTED') + window.lang.convert('MONITOR_LIFECYCLETASK_TABLE_COL_KEY'), 'table_col_key', false, false),
             new TableControlColumnModel({columnIdentifier: 'result'}, window.lang.convert('TESTCASE_TABLE_COL_PREFIX_EXPECTED') + window.lang.convert('MONITOR_LIFECYCLETASK_TABLE_COL_RESULT'), 'table_col_result', false, false),
             new TableControlColumnModel({columnIdentifier: 'actualValues'}, window.lang.convert('TESTCASE_TABLE_COL_ACTUALVALUES'), 'table_col_actualvalues', false, false)
         ];
 
-        var conversationStepData = [];
-        var packageData = [];
-        var lifeCycleTaskData = [];
+        let conversationStepData = [];
+        let packageData = [];
+        let lifeCycleTaskData = [];
 
-        var conversationStepErrors = [];
-        var conversationStepColumnErrors = [];
+        let conversationStepErrors = [];
+        let conversationStepColumnErrors = [];
 
-        var packageErrors = [];
-        var packageColumnErrors = [];
+        let packageErrors = [];
+        let packageColumnErrors = [];
 
-        var lifeCycleTaskErrors = [];
-        var lifeCycleTaskColumnErrors = [];
+        let lifeCycleTaskErrors = [];
+        let lifeCycleTaskColumnErrors = [];
 
-        var expectedConversationStep;
-        var actualConversationStep;
-        var expectedConversationStepError;
-        var expectedConversationStepErrorString;
-        var input;
-        var inputError;
-        var output;
-        var outputError;
-        //var date;
-        //var dateError;
+        let expectedConversationStep;
+        let actualConversationStep;
+        let expectedConversationStepError;
+        let expectedConversationStepErrorString;
+        let input;
+        let inputError;
+        let output;
+        let outputError;
+        //let date;
+        //let dateError;
 
-        for (var i = 0; i < expectedResult.conversationSteps.length; i++) {
+        for (let i = 0; i < expectedResult.conversationSteps.length; i++) {
             lifeCycleTaskTableControls = [];
             packageData = [];
             packageErrors = [];
@@ -81,28 +81,28 @@ function TestCaseContentModel(dataProvider, actionHandler) {
                 expectedConversationStepErrorString += window.lang.convert('TESTCASE_FAILURE_CONVERSATION_STEP_LENGTH') + '<br/>';
             }
 
-            var expectedPackagesArray = expectedConversationStep.packages;
-            var actualPackagesArray;
-            if (actualConversationStep != null && typeof actualConversationStep.packages !== 'undefined') {
+            let expectedPackagesArray = expectedConversationStep.packages;
+            let actualPackagesArray;
+            if (actualConversationStep !== null && typeof actualConversationStep.packages !== 'undefined') {
                 actualPackagesArray = actualConversationStep.packages;
             } else {
                 actualPackagesArray = null;
                 expectedConversationStepError = true;
                 expectedConversationStepErrorString += window.lang.convert('TESTCASE_FAILURE_CONVERSATION_STEP_PACKAGES') + '<br/>';
             }
-            var expectedPackage;
-            var actualPackage;
-            var expectedLifeCycleTasksArray;
-            var actualLifeCycleTasksArray;
-            var expectedPackageError;
-            var expectedPackageErrorString;
-            var name;
-            var nameError;
-            var duration;
-            //var durationError;
-            var count;
-            var countError;
-            for (var j = 0; j < expectedPackagesArray.length; j++) {
+            let expectedPackage;
+            let actualPackage;
+            let expectedLifeCycleTasksArray;
+            let actualLifeCycleTasksArray;
+            let expectedPackageError;
+            let expectedPackageErrorString;
+            let name;
+            let nameError;
+            let duration;
+            //let durationError;
+            let count;
+            let countError;
+            for (let j = 0; j < expectedPackagesArray.length; j++) {
                 lifeCycleTaskData = [];
                 lifeCycleTaskErrors = [];
                 lifeCycleTaskColumnErrors = [];
@@ -113,7 +113,7 @@ function TestCaseContentModel(dataProvider, actionHandler) {
                 countError = false;
 
                 expectedPackage = expectedPackagesArray[j];
-                if (actualPackagesArray != null && actualPackagesArray.length > j) {
+                if (actualPackagesArray !== null && actualPackagesArray.length > j) {
                     actualPackage = actualPackagesArray[j];
                 } else {
                     actualPackage = null;
@@ -122,7 +122,7 @@ function TestCaseContentModel(dataProvider, actionHandler) {
                 }
 
                 expectedLifeCycleTasksArray = expectedPackage.lifecycleTasks;
-                if (actualPackage != null && typeof actualPackage.lifecycleTasks !== 'undefined') {
+                if (actualPackage !== null && typeof actualPackage.lifecycleTasks !== 'undefined') {
                     actualLifeCycleTasksArray = actualPackage.lifecycleTasks;
                 } else {
                     actualLifeCycleTasksArray = null;
@@ -131,35 +131,35 @@ function TestCaseContentModel(dataProvider, actionHandler) {
                 }
 
                 name = expectedPackage.context;
-                if (actualPackage != null && actualPackage.context != name) {
+                if (actualPackage !== null && actualPackage.context !== name) {
                     nameError = true;
                     expectedPackageErrorString += this.getErrorOutputHtmlString(name, actualPackage.context);//window.lang.convert('TESTCASE_FAILURE_PREFIX_ACTUAL') + window.lang.convert('MONITOR_PACKAGE_TABLE_COL_NAME') + ' = "' + actualPackage.context + '"<br/>';
                 }
                 count = expectedLifeCycleTasksArray.length;
-                if (actualLifeCycleTasksArray != null && actualLifeCycleTasksArray.length != count) {
+                if (actualLifeCycleTasksArray !== null && actualLifeCycleTasksArray.length !== count) {
                     countError = true;
                     expectedPackageErrorString += this.getErrorOutputHtmlString(count, actualLifeCycleTasksArray.length);//window.lang.convert('TESTCASE_FAILURE_PREFIX_ACTUAL') + window.lang.convert('MONITOR_PACKAGE_TABLE_COL_COUNT') + ' = "' + actualLifeCycleTasksArray.length + '"<br/>';
                 }
                 duration = expectedLifeCycleTasksArray.length > 0 ? expectedLifeCycleTasksArray[expectedLifeCycleTasksArray.length - 1].timestamp - expectedLifeCycleTasksArray[0].timestamp : 0;
 
-                var expectedLifeCycleTask;
-                var actualLifeCycleTask;
-                var expectedLifeCycleTaskError;
-                var expectedLifeCycleTaskErrorString;
-                var key;
-                var keyError;
-                var result;
-                var possibleResults;
-                var resultError;
-                var outputFoundInThisPackagesLifeCycleTaskArray = false;
-                for (var k = 0; k < expectedLifeCycleTasksArray.length; k++) {
+                let expectedLifeCycleTask;
+                let actualLifeCycleTask;
+                let expectedLifeCycleTaskError;
+                let expectedLifeCycleTaskErrorString;
+                let key;
+                let keyError;
+                let result;
+                let possibleResults;
+                let resultError;
+                let outputFoundInThisPackagesLifeCycleTaskArray = false;
+                for (let k = 0; k < expectedLifeCycleTasksArray.length; k++) {
                     expectedLifeCycleTaskError = false;
                     expectedLifeCycleTaskErrorString = '';
                     keyError = false;
                     resultError = false;
 
                     expectedLifeCycleTask = expectedLifeCycleTasksArray[k];
-                    if (actualLifeCycleTasksArray != null && actualLifeCycleTasksArray.length > k) {
+                    if (actualLifeCycleTasksArray !== null && actualLifeCycleTasksArray.length > k) {
                         actualLifeCycleTask = actualLifeCycleTasksArray[k];
                     } else {
                         actualLifeCycleTask = null;
@@ -168,14 +168,14 @@ function TestCaseContentModel(dataProvider, actionHandler) {
                     }
 
                     key = expectedLifeCycleTask.key;
-                    if (actualLifeCycleTask != null && actualLifeCycleTask.key != key) {
+                    if (actualLifeCycleTask !== null && actualLifeCycleTask.key !== key) {
                         keyError = true;
                         expectedLifeCycleTaskErrorString += this.getErrorOutputHtmlString(key, actualLifeCycleTask.key);//window.lang.convert('TESTCASE_FAILURE_PREFIX_ACTUAL') + window.lang.convert('MONITOR_LIFECYCLETASK_TABLE_COL_KEY') + ' = "' + actualLifeCycleTask.key + '"<br/>';
                     }
 
                     result = expectedLifeCycleTask.result;
                     possibleResults = expectedLifeCycleTask.possibleResults;
-                    if (actualLifeCycleTask != null && actualLifeCycleTask.possibleResults.toString() != possibleResults.toString()) {
+                    if (actualLifeCycleTask !== null && actualLifeCycleTask.possibleResults.toString() !== possibleResults.toString()) {
                         resultError = true;
                         expectedLifeCycleTaskErrorString += this.getErrorOutputHtmlString(possibleResults, actualLifeCycleTask.possibleResults);//window.lang.convert('TESTCASE_FAILURE_PREFIX_ACTUAL') + window.lang.convert('MONITOR_LIFECYCLETASK_TABLE_COL_RESULT') + ' = "' + actualLifeCycleTask.result + '"<br/>';
                     }
@@ -193,9 +193,9 @@ function TestCaseContentModel(dataProvider, actionHandler) {
                     expectedPackageError = expectedPackageError ? expectedPackageError : expectedLifeCycleTaskError;
                     lifeCycleTaskColumnErrors.push([keyError, resultError, false]);
 
-                    if (input == null && expectedLifeCycleTask.key.indexOf('input') == 0) {
+                    if (input === null && expectedLifeCycleTask.key.indexOf('input') === 0) {
                         input = expectedLifeCycleTask.result;
-                        if (actualLifeCycleTask != null && actualLifeCycleTask.result != input) {
+                        if (actualLifeCycleTask !== null && actualLifeCycleTask.result !== input) {
                             inputError = true;
                             expectedConversationStepErrorString += this.getErrorOutputHtmlString(input, actualLifeCycleTask.result);//window.lang.convert('TESTCASE_FAILURE_PREFIX_ACTUAL') + window.lang.convert('MONITOR_CONVERSATION_TABLE_COL_INPUT') + ' = "' + actualLifeCycleTask.result + '"<br/>';
                         }
@@ -203,20 +203,20 @@ function TestCaseContentModel(dataProvider, actionHandler) {
                     }
 
                     //output for conversationStep = the last lifeCycleElement which name begins with 'output' IN the first package which contains a lifecycle-element with a name beginning with 'output'
-                    if ((output == null || outputFoundInThisPackagesLifeCycleTaskArray) && expectedLifeCycleTask.key.indexOf('output') == 0) {
+                    if ((output === null || outputFoundInThisPackagesLifeCycleTaskArray) && expectedLifeCycleTask.key.indexOf('output') === 0) {
                         output = expectedLifeCycleTask.result;
                         outputFoundInThisPackagesLifeCycleTaskArray = true;
-                        if (actualLifeCycleTask != null && actualLifeCycleTask.result != output) {
+                        if (actualLifeCycleTask !== null && actualLifeCycleTask.result !== output) {
                             outputError = true;
                             expectedConversationStepErrorString += this.getErrorOutputHtmlString(output, actualLifeCycleTask.result);//window.lang.convert('TESTCASE_FAILURE_PREFIX_EXPECTED') + '<b>"' + output + '"</b>'+ '&nbsp;&nbsp;&nbsp;&nbsp;' + window.lang.convert('TESTCASE_FAILURE_PREFIX_ACTUAL') + '<b>"' + actualLifeCycleTask.result + '"</b>' + '<br/>';
                         }
                     }
                 }
 
-                var lifeCycleTaskTableDataModel = new TableControlDataModel({dataType: 'lifeCycleTask'}, lifeCycleTaskData);
+                let lifeCycleTaskTableDataModel = new TableControlDataModel({dataType: 'lifeCycleTask'}, lifeCycleTaskData);
                 lifeCycleTaskTableDataModel.rowErrors = lifeCycleTaskErrors;
                 lifeCycleTaskTableDataModel.rowColumnErrors = lifeCycleTaskColumnErrors;
-                var lifeCycleTaskTableModel = new TableControlModel(0, 'lifecycletask_table_', true, true, lifeCycleTaskColumns, lifeCycleTaskTableDataModel);
+                let lifeCycleTaskTableModel = new TableControlModel(0, 'lifecycletask_table_', true, true, lifeCycleTaskColumns, lifeCycleTaskTableDataModel);
                 lifeCycleTaskTableModel.setShowControlHeaders(false);
 
                 lifeCycleTaskTableControls.push(new TableControl(lifeCycleTaskTableModel));
@@ -229,11 +229,11 @@ function TestCaseContentModel(dataProvider, actionHandler) {
                 packageColumnErrors.push([false, nameError, false, countError, false]);
             }
 
-            var packageTableDataModel = new TableControlDataModel({dataType: 'package'}, packageData);
+            let packageTableDataModel = new TableControlDataModel({dataType: 'package'}, packageData);
             packageTableDataModel.rowErrors = packageErrors;
             packageTableDataModel.rowColumnErrors = packageColumnErrors;
             packageTableDataModel.setDetailRowsTableControls(lifeCycleTaskTableControls);
-            var packageTableModel = new TableControlModel(0, 'package_table_', true, true, packageColumns, packageTableDataModel);
+            let packageTableModel = new TableControlModel(0, 'package_table_', true, true, packageColumns, packageTableDataModel);
             packageTableModel.setShowControlHeaders(false);
 
             packageTableControls.push(new TableControl(packageTableModel));
@@ -244,15 +244,15 @@ function TestCaseContentModel(dataProvider, actionHandler) {
             conversationStepColumnErrors.push([false, false, inputError, outputError, false]);
         }
 
-        var tableDataModel = new TableControlDataModel({dataType: 'testcase'}, conversationStepData);
+        let tableDataModel = new TableControlDataModel({dataType: 'testcase'}, conversationStepData);
         tableDataModel.rowErrors = conversationStepErrors;
         tableDataModel.rowColumnErrors = conversationStepColumnErrors;
         tableDataModel.setDetailRowsTableControls(packageTableControls);
-        var tableModel = new TableControlModel(0, 'testcase_table_', true, true, conversationStepColumns, tableDataModel);
+        let tableModel = new TableControlModel(0, 'testcase_table_', true, true, conversationStepColumns, tableDataModel);
         tableModel.setShowControlHeaders(false);
 
 
-        var tableControl = new TableControl(tableModel);
+        let tableControl = new TableControl(tableModel);
         tableControl.observable.addObserver(actionHandler.observer);
         models.push(tableControl);
         return models;

@@ -3,7 +3,7 @@
  * @constructor
  */
 function UIDGenerator() {
-    var uid = 0;
+    let uid = 0;
 
     this.next = function () {
         return uid++;

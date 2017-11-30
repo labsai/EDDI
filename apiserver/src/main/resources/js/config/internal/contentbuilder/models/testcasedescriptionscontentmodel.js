@@ -3,26 +3,26 @@ function TestCaseDescriptionsContentModel(dataProvider, actionHandler) {
     this.defaultTableControlIndex = 0;
     this.defaultTableControlOrder = 'asc';
 
-    var tableControl;
-    var tableControlLimit = this.defaultTableControlLimit;
-    var tableControlIndex = this.defaultTableControlIndex;
-    var tableControlFilter;
-    var tableControlOrder = this.defaultTableControlOrder;
-    var botId;
-    var botVersion;
+    let tableControl;
+    let tableControlLimit = this.defaultTableControlLimit;
+    let tableControlIndex = this.defaultTableControlIndex;
+    let tableControlFilter;
+    let tableControlOrder = this.defaultTableControlOrder;
+    let botId;
+    let botVersion;
 
     this.getTableControl = function () {
         return tableControl;
-    }
+    };
 
     this.setTestCaseResultState = function (rowId, state) {
         $('.table_col_state', $('#' + rowId)).text(state);
-    }
+    };
 
     this.makeContentModel = function (sizeCallbackInstance, selectionCallbackInstance) {
-        var models = [];
+        let models = [];
 
-        var urlParams = $.url.parse(window.location.href).params;
+        let urlParams = $.url.parse(window.location.href).params;
         if (typeof urlParams !== 'undefined') {
             if (typeof urlParams['limit'] !== 'undefined') {
                 tableControlLimit = parseInt(decodeURIComponent(urlParams['limit'])) || this.defaultTableControlLimit;
@@ -49,11 +49,11 @@ function TestCaseDescriptionsContentModel(dataProvider, actionHandler) {
             }
         }
 
-        var testCaseDescriptors = dataProvider.readTestCaseDescriptors(botId, botVersion, tableControlLimit, tableControlIndex, tableControlFilter, tableControlOrder);
+        let testCaseDescriptors = dataProvider.readTestCaseDescriptors(botId, botVersion, tableControlLimit, tableControlIndex, tableControlFilter, tableControlOrder);
 
-        var tableModel;
+        let tableModel;
 
-        var testCaseDescriptorsColumns = [
+        let testCaseDescriptorsColumns = [
             new TableControlColumnModel({columnIdentifier: 'name'}, window.lang.convert('TESTCASEDESCRIPTION_TABLE_COL_NAME'), 'table_col_name', true, true),
             /*new TableControlColumnModel({columnIdentifier:'lastModifiedBy'}, window.lang.convert('TESTCASEDESCRIPTION_TABLE_COL_LAST_MODIFIED_BY'), 'table_col_last_modified_by', false, false),*/
             new TableControlColumnModel({columnIdentifier: 'created'}, window.lang.convert('TESTCASEDESCRIPTION_TABLE_COL_CREATED'), 'table_col_created', false, false),
@@ -65,12 +65,12 @@ function TestCaseDescriptionsContentModel(dataProvider, actionHandler) {
             new TableControlColumnModel({columnIdentifier: 'run'}, window.lang.convert('TESTCASEDESCRIPTION_TABLE_COL_RUN'), 'table_col_run', false, false)
         ];
 
-        var testCaseDescriptorsData = [];
-        var testCaseDescriptorsResourceParams = [];
-        for (var i = 0; i < testCaseDescriptors.length; ++i) {
-            var testCaseDescriptorUriObject = SLSUriParser(testCaseDescriptors[i].resource);
-            var createdOnDate = new Date(testCaseDescriptors[i].createdOn);
-            var createdOnDateString = createdOnDate.toLocaleDateString() + ' - ' + createdOnDate.toLocaleTimeString();
+        let testCaseDescriptorsData = [];
+        let testCaseDescriptorsResourceParams = [];
+        for (let i = 0; i < testCaseDescriptors.length; ++i) {
+            let testCaseDescriptorUriObject = SLSUriParser(testCaseDescriptors[i].resource);
+            let createdOnDate = new Date(testCaseDescriptors[i].createdOn);
+            let createdOnDateString = createdOnDate.toLocaleDateString() + ' - ' + createdOnDate.toLocaleTimeString();
             testCaseDescriptorsData.push([testCaseDescriptors[i].name, createdOnDateString, /*testCaseDescriptors[i].lastModifiedBy,*/ (new Date(testCaseDescriptors[i].lastModifiedOn)).toLocaleTimeString(), /*(new Date(testCaseDescriptors[i].lastRun)).toLocaleTimeString(),*/ testCaseDescriptors[i].testCaseState, '<a href="' + application.url.getUriForResource(testCaseDescriptorUriObject.id) + '">show</a>', '<a href="#" class="tablecontrol_delete" >delete</a>', '<a href="#" class="tablecontrol_run" >run</a>']);
             testCaseDescriptorsResourceParams.push({
                 id: testCaseDescriptorUriObject.id,

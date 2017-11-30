@@ -1,11 +1,11 @@
 function InputmatcherControl(model) {
-    var expressionRowPostfix = '_expressionrow';
-    var expressionDescriptorPostfix = '_expressiondescriptor';
-    var expressionPostfix = '_expression';
-    var occurrencePostfix = '_occurrence';
-    var footerCSSClassPostfix = '_footer';
+    let expressionRowPostfix = '_expressionrow';
+    let expressionDescriptorPostfix = '_expressiondescriptor';
+    let expressionPostfix = '_expression';
+    let occurrencePostfix = '_occurrence';
+    let footerCSSClassPostfix = '_footer';
 
-    var instance = this;
+    let instance = this;
 
     this.observable = new Observable();
     this.observer = new Observer(function (event) {
@@ -16,12 +16,12 @@ function InputmatcherControl(model) {
         }
     });
 
-    for (var i = 0; i < model.footerControls.length; ++i) {
+    for (let i = 0; i < model.footerControls.length; ++i) {
         model.footerControls[i].observable.addObserver(this.observer);
     }
 
     this.createRepresentation = function () {
-        var representation = '<div id="' + model.idPrefix + model.id + '" class="' + model.CSSClassBase + '">\
+        let representation = '<div id="' + model.idPrefix + model.id + '" class="' + model.CSSClassBase + '">\
             <div id=' + model.idPrefix + model.id + occurrencePostfix + ' class="' + model.CSSClassBase + occurrencePostfix + '"></div>\
             <div class="clear"></div>\
             <div class="' + model.CSSClassBase + expressionRowPostfix + '">\
@@ -32,25 +32,25 @@ function InputmatcherControl(model) {
 
         representation += '<div class="' + model.CSSClassBase + footerCSSClassPostfix + '">';
 
-        for (var i = 0; i < model.footerControls.length; ++i) {
+        for (let i = 0; i < model.footerControls.length; ++i) {
             representation += model.footerControls[i].createRepresentation();
         }
 
         representation += '<div class="clear"></div></div></div>';
 
         return representation;
-    }
+    };
 
     this.getModel = function () {
         return model;
-    }
+    };
 
     this.getHeight = function () {
         return $('#' + model.idPrefix + model.id).outerHeight(true);
-    }
+    };
 
     this.registerButtonEvents = function () {
-        var that = this;
+        let that = this;
 
         function split(val) {
             return val.split(/,\s*/);
@@ -66,7 +66,7 @@ function InputmatcherControl(model) {
             valueChanged: function (value, oldValue) {
                 console.log('New value is: ' + value);
 
-                var editableEvent = new Event(that, 'ValueChanged');
+                let editableEvent = new Event(that, 'ValueChanged');
 
                 editableEvent.value = value;
                 editableEvent.oldValue = oldValue;
@@ -79,7 +79,7 @@ function InputmatcherControl(model) {
         });
 
         $('#' + model.idPrefix + model.id + expressionPostfix).editable(function (value, settings) {
-            var editableEvent = new Event(instance, 'ValueChanged');
+            let editableEvent = new Event(instance, 'ValueChanged');
             editableEvent.value = value;
             editableEvent.settings = settings;
             editableEvent.oldValue = instance.getModel().expressions;
@@ -102,10 +102,10 @@ function InputmatcherControl(model) {
             autocomplete: {
                 options: {
                     source: function (request, response) {
-                        var anchors = application.url.serializeAnchors();
+                        let anchors = application.url.serializeAnchors();
                         if (anchors.hasOwnProperty(application.configuration.packageParentIdHashKey) &&
                             anchors.hasOwnProperty(application.configuration.packageParentVersionHashKey)) {
-                            var expressions = application.dataProvider.readPackageExpressions(
+                            let expressions = application.dataProvider.readPackageExpressions(
                                 anchors[application.configuration.packageParentIdHashKey],
                                 anchors[application.configuration.packageParentVersionHashKey],
                                 extractLast(request.term)
@@ -116,7 +116,7 @@ function InputmatcherControl(model) {
                     },
                     search: function () {
                         // custom minLength
-                        var term = extractLast(this.value);
+                        let term = extractLast(this.value);
                         if (term.length < 1) {
                             return false;
                         }
@@ -126,7 +126,7 @@ function InputmatcherControl(model) {
                         return false;
                     },
                     select: function (event, ui) {
-                        var terms = split(this.value);
+                        let terms = split(this.value);
                         // remove the current input
                         terms.pop();
                         // add the selected item
@@ -144,12 +144,12 @@ function InputmatcherControl(model) {
             }
         });
 
-        for (var i = 0; i < model.footerControls.length; ++i) {
+        for (let i = 0; i < model.footerControls.length; ++i) {
             model.footerControls[i].registerButtonEvents();
         }
 
         /** Preserve additional state classes. */
-        for (var i = 0; i < model.additionalClasses.length; ++i) {
+        for (let i = 0; i < model.additionalClasses.length; ++i) {
             $('#' + model.idPrefix + model.id).addClass(model.additionalClasses[i]);
         }
     }
