@@ -41,6 +41,7 @@ import static ai.labs.memory.ConversationMemoryUtilities.*;
 
 /**
  * @author ginccc
+ *
  */
 @Slf4j
 public class RestBotEngine implements IRestBotEngine {
@@ -158,7 +159,10 @@ public class RestBotEngine implements IRestBotEngine {
             final IConversationMemory conversationMemory = loadConversationMemory(conversationId);
             checkConversationMemoryNotNull(conversationMemory, conversationId);
             if (!botId.equals(conversationMemory.getBotId())) {
-                response.resume(new IllegalAccessException("Supplied botId is incompatible to conversationId"));
+                String message = "Supplied botId (%s) is incompatible with conversationId (%s)";
+                message = String.format(message, botId, conversationId);
+                response.resume(Response.status(Response.Status.CONFLICT).type(MediaType.TEXT_PLAIN).
+                        entity(message).build());
                 return;
             }
 
