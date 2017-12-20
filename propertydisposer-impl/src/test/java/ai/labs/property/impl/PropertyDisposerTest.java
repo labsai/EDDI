@@ -21,12 +21,12 @@ public class PropertyDisposerTest {
     private IExpressionProvider expressionProvider;
 
     @Before
-    public void setUp() throws Exception {
+    public void setUp() {
         expressionProvider = mock(IExpressionProvider.class);
     }
 
     @Test
-    public void extractProperties() throws Exception {
+    public void extractProperties() {
         //setup
         String testStringExpressions = "property(someMeaning(someValue)),noProperty(someMeaning(someValue))";
         when(expressionProvider.parseExpressions(eq(testStringExpressions))).thenAnswer(invocation ->
@@ -37,11 +37,11 @@ public class PropertyDisposerTest {
                                 new Expression("someMeaning",
                                         new Value("someValue")))
                 ));
-        PropertyDisposer propertyDisposer = new PropertyDisposer(expressionProvider);
+        PropertyDisposer propertyDisposer = new PropertyDisposer();
         PropertyEntry expectedPropertyEntry = new PropertyEntry(Collections.singletonList("someMeaning"), "someValue");
 
         //test
-        List<PropertyEntry> propertyEntries = propertyDisposer.extractProperties(testStringExpressions);
+        List<PropertyEntry> propertyEntries = propertyDisposer.extractProperties(expressionProvider.parseExpressions(testStringExpressions));
 
         //assert
         verify(expressionProvider, times(1)).parseExpressions(testStringExpressions);
@@ -49,7 +49,7 @@ public class PropertyDisposerTest {
     }
 
     @Test
-    public void extractMoreComplexProperties() throws Exception {
+    public void extractMoreComplexProperties() {
         //setup
         String testStringExpressions = "property(someMeaning(someSubMeaning(someValue)))," +
                 "property(someMeaning(someValue, someOtherValue))";
@@ -62,13 +62,13 @@ public class PropertyDisposerTest {
                                 new Expression("someMeaning",
                                         new Value("someValue"), new Value("someOtherValue")))
                 ));
-        PropertyDisposer propertyDisposer = new PropertyDisposer(expressionProvider);
+        PropertyDisposer propertyDisposer = new PropertyDisposer();
         List<PropertyEntry> expectedPropertyEntries = Arrays.asList(
                 new PropertyEntry(Arrays.asList("someMeaning", "someSubMeaning"), "someValue"),
                 new PropertyEntry(Collections.singletonList("someMeaning"), "someValue"));
 
         //test
-        List<PropertyEntry> propertyEntries = propertyDisposer.extractProperties(testStringExpressions);
+        List<PropertyEntry> propertyEntries = propertyDisposer.extractProperties(expressionProvider.parseExpressions(testStringExpressions));
 
         //assert
         verify(expressionProvider, times(1)).parseExpressions(testStringExpressions);
