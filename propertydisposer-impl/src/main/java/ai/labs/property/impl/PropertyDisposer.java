@@ -1,12 +1,10 @@
 package ai.labs.property.impl;
 
 import ai.labs.expressions.Expression;
-import ai.labs.expressions.utilities.IExpressionProvider;
 import ai.labs.expressions.value.Value;
 import ai.labs.property.IPropertyDisposer;
 import ai.labs.property.model.PropertyEntry;
 
-import javax.inject.Inject;
 import java.util.LinkedList;
 import java.util.List;
 import java.util.stream.Collectors;
@@ -16,16 +14,10 @@ import java.util.stream.Collectors;
  */
 public class PropertyDisposer implements IPropertyDisposer {
     private static final String PROPERTY_EXPRESSION = "property";
-    private final IExpressionProvider expressionProvider;
-
-    @Inject
-    public PropertyDisposer(IExpressionProvider expressionProvider) {
-        this.expressionProvider = expressionProvider;
-    }
 
     @Override
-    public List<PropertyEntry> extractProperties(String expressions) {
-        return expressionProvider.parseExpressions(expressions).stream().
+    public List<PropertyEntry> extractProperties(List<Expression> expressions) {
+        return expressions.stream().
                 filter(expression ->
                         PROPERTY_EXPRESSION.equals(expression.getExpressionName()) &&
                                 expression.getSubExpressions().length > 0).

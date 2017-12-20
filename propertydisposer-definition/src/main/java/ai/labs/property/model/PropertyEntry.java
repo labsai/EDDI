@@ -1,9 +1,6 @@
 package ai.labs.property.model;
 
-import lombok.AllArgsConstructor;
-import lombok.EqualsAndHashCode;
-import lombok.Getter;
-import lombok.Setter;
+import lombok.*;
 
 import java.util.List;
 
@@ -15,6 +12,7 @@ import java.util.List;
 @Getter
 @Setter
 @EqualsAndHashCode
+@ToString
 public class PropertyEntry {
     private List<String> meanings;
     private String value;
