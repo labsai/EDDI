@@ -46,7 +46,7 @@ public class TemporaryDictionaryParserTest {
                 Collections.singletonList(temporaryTestDictionary));
 
         //assert
-        List<Solution> actual = DictionaryUtilities.extractExpressions(rawSolutions, expressionProvider);
+        List<Solution> actual = DictionaryUtilities.extractExpressions(rawSolutions, true, true);
         Assert.assertEquals(expected, actual);
     }
 
@@ -63,7 +63,7 @@ public class TemporaryDictionaryParserTest {
                 Collections.singletonList(temporaryTestDictionary));
 
         //assert
-        List<Solution> actual = DictionaryUtilities.extractExpressions(rawSolutions, expressionProvider);
+        List<Solution> actual = DictionaryUtilities.extractExpressions(rawSolutions, true, true);
         Assert.assertEquals(expected, actual);
     }
 
@@ -80,7 +80,7 @@ public class TemporaryDictionaryParserTest {
                 Collections.singletonList(temporaryTestDictionary));
 
         //assert
-        List<Solution> actual = DictionaryUtilities.extractExpressions(rawSolutions, expressionProvider);
+        List<Solution> actual = DictionaryUtilities.extractExpressions(rawSolutions, true, true);
         Assert.assertEquals(expected, actual);
     }
 }

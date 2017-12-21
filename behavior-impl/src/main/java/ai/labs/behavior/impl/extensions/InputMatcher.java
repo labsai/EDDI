@@ -46,7 +46,7 @@ public class InputMatcher extends BaseMatcher implements IBehaviorExtension {
     @Override
     public Map<String, String> getValues() {
         Map<String, String> result = new HashMap<>();
-        result.put(expressionsQualifier, StringUtilities.joinStrings(",", expressions.toArray()));
+        result.put(expressionsQualifier, StringUtilities.joinStrings(",", expressions));
         result.putAll(super.getValues());
 
         return result;

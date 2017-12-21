@@ -2,7 +2,6 @@ package ai.labs.parser.rest.impl;
 
 import ai.labs.caching.ICache;
 import ai.labs.caching.ICacheFactory;
-import ai.labs.expressions.utilities.IExpressionProvider;
 import ai.labs.lifecycle.ILifecycleTask;
 import ai.labs.parser.IInputParser;
 import ai.labs.parser.InputParserTask;
@@ -22,6 +21,7 @@ import javax.ws.rs.BadRequestException;
 import javax.ws.rs.InternalServerErrorException;
 import javax.ws.rs.container.AsyncResponse;
 import java.net.URI;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.Callable;
@@ -36,7 +36,6 @@ import static ai.labs.parser.DictionaryUtilities.extractExpressions;
 public class RestSemanticParser implements IRestSemanticParser {
     private final SystemRuntime.IRuntime runtime;
     private final IResourceClientLibrary resourceClientLibrary;
-    private final IExpressionProvider expressionProvider;
     private final Provider<ILifecycleTask> parserProvider;
     private final ICache<URI, InputParserTask> cache;
 
@@ -44,12 +43,10 @@ public class RestSemanticParser implements IRestSemanticParser {
     public RestSemanticParser(SystemRuntime.IRuntime runtime,
                               IResourceClientLibrary resourceClientLibrary,
                               ICacheFactory cacheFactory,
-                              IExpressionProvider expressionProvider,
                               Map<String, Provider<ILifecycleTask>> lifecycleTasks) {
         this.runtime = runtime;
         this.resourceClientLibrary = resourceClientLibrary;
         cache = cacheFactory.getCache("ai.labs.parser");
-        this.expressionProvider = expressionProvider;
         parserProvider = lifecycleTasks.get("ai.labs.parser");
     }
 
@@ -64,7 +61,7 @@ public class RestSemanticParser implements IRestSemanticParser {
                 InputParserTask inputParserTask = getParser(resourceUri);
                 IInputParser inputParser = (IInputParser) inputParserTask.getComponent();
                 List<RawSolution> rawSolutions = inputParser.parse(sentence);
-                List<Solution> solutionExpressions = extractExpressions(rawSolutions, expressionProvider);
+                List<Solution> solutionExpressions = extractExpressions(rawSolutions, true, true);
                 asyncResponse.resume(solutionExpressions);
             } catch (IllegalArgumentException e) {
                 asyncResponse.resume(new BadRequestException(e.getLocalizedMessage()));
@@ -86,8 +83,10 @@ public class RestSemanticParser implements IRestSemanticParser {
         if (!cache.containsKey(resourceUri)) {
             ILifecycleTask parserTask = parserProvider.get();
             ParserConfiguration parserConfiguration = fetchParserConfiguration(resourceUri);
-            parserTask.configure(parserConfiguration.getConfig());
-            parserTask.setExtensions(parserConfiguration.getExtensions());
+            Map<String, Object> config = parserConfiguration.getConfig();
+            parserTask.configure(config != null ? config : new HashMap<>());
+            Map<String, Object> extensions = parserConfiguration.getExtensions();
+            parserTask.setExtensions(extensions != null ? extensions : new HashMap<>());
             parserTask.init();
             cache.put(resourceUri, (InputParserTask) parserTask);
         }

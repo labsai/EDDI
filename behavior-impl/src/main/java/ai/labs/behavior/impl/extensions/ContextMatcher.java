@@ -70,7 +70,7 @@ public class ContextMatcher implements IBehaviorExtension {
         result.put(contextKeyQualifier, contextKey);
         result.put(contextTypeQualifier, contextType);
         if (expressions != null) {
-            result.put(expressionsQualifier, StringUtilities.joinStrings(",", expressions.toArray()));
+            result.put(expressionsQualifier, StringUtilities.joinStrings(",", expressions));
         }
 
         if (object != null) {

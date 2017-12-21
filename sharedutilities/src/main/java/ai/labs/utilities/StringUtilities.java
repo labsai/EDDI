@@ -1,6 +1,7 @@
 package ai.labs.utilities;
 
 import java.util.Arrays;
+import java.util.Collection;
 import java.util.StringJoiner;
 
 /**
@@ -25,6 +26,10 @@ public final class StringUtilities {
         }
 
         return filter;
+    }
+
+    public static String joinStrings(String delimiter, Collection values) {
+        return joinStrings(delimiter, values.toArray());
     }
 
     public static String joinStrings(String delimiter, Object... values) {
