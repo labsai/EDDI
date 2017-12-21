@@ -37,7 +37,7 @@ public class ActionMatcher extends BaseMatcher implements IBehaviorExtension {
     @Override
     public Map<String, String> getValues() {
         Map<String, String> result = new HashMap<>();
-        result.put(actionsQualifier, StringUtilities.joinStrings(",", actions.toArray()));
+        result.put(actionsQualifier, StringUtilities.joinStrings(",", actions));
         result.putAll(super.getValues());
 
         return result;

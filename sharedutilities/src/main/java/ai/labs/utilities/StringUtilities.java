@@ -26,6 +26,10 @@ public final class StringUtilities {
         return filter;
     }
 
+    public static String joinStrings(String delimiter, Collection values) {
+        return joinStrings(delimiter, values.toArray());
+    }
+
     public static String joinStrings(String delimiter, Object... values) {
         StringJoiner stringJoiner = new StringJoiner(delimiter);
         Arrays.stream(values).map(Object::toString).forEach(stringJoiner::add);

@@ -2,10 +2,7 @@ package ai.labs.parser;
 
 import ai.labs.expressions.Expression;
 import ai.labs.expressions.utilities.IExpressionProvider;
-import ai.labs.lifecycle.ILifecycleTask;
-import ai.labs.lifecycle.IllegalExtensionConfigurationException;
-import ai.labs.lifecycle.LifecycleException;
-import ai.labs.lifecycle.UnrecognizedExtensionException;
+import ai.labs.lifecycle.*;
 import ai.labs.memory.Data;
 import ai.labs.memory.IConversationMemory;
 import ai.labs.memory.IData;
@@ -20,6 +17,7 @@ import ai.labs.resources.rest.regulardictionary.model.RegularDictionaryConfigura
 import ai.labs.runtime.client.configuration.IResourceClientLibrary;
 import ai.labs.runtime.service.ServiceException;
 import ai.labs.utilities.RuntimeUtilities;
+import ai.labs.utilities.StringUtilities;
 import lombok.extern.slf4j.Slf4j;
 
 import javax.inject.Inject;
@@ -39,25 +37,31 @@ public class InputParserTask implements ILifecycleTask {
     private List<IDictionary> dictionaries;
     private List<ICorrection> corrections;
     private IResourceClientLibrary resourceClientLibrary;
-    private final String regularDictionaryURI = "eddi://ai.labs.parser.dictionaries.regular";
-    private final String damerauLevenshteinURI = "eddi://ai.labs.parser.corrections.levenshtein";
-    private final String integerDictionaryURI = "eddi://ai.labs.parser.dictionaries.integer";
-    private final String decimalDictionaryURI = "eddi://ai.labs.parser.dictionaries.decimal";
-    private final String emailDictionaryURI = "eddi://ai.labs.parser.dictionaries.email";
-    private final String punctuationDictionaryURI = "eddi://ai.labs.parser.dictionaries.punctuation";
-    private final String timeExpressionDictionaryURI = "eddi://ai.labs.parser.dictionaries.time";
 
-    private final String ordinalNumberDictionaryURI = "eddi://ai.labs.parser.dictionaries.ordinalNumber";
-    private final String stemmingCorrectionURI = "eddi://ai.labs.parser.corrections.stemming";
-    private final String phoneticCorrectionURI = "eddi://ai.labs.parser.corrections.phonetic";
-    private final String mergedTermsCorrectionURI = "eddi://ai.labs.parser.corrections.mergedTerms";
-    private final String KEY_TYPE = "type";
-    private final String KEY_CONFIG = "config";
-    private final String KEY_URI = "uri";
-    private final String KEY_DISTANCE = "distance";
-    private final String KEY_LOOKUP_IF_KNOWN = "lookupIfKnown";
-    private final String KEY_LANGUAGE = "language";
+    private static final String regularDictionaryURI = "eddi://ai.labs.parser.dictionaries.regular";
+    private static final String damerauLevenshteinURI = "eddi://ai.labs.parser.corrections.levenshtein";
+    private static final String integerDictionaryURI = "eddi://ai.labs.parser.dictionaries.integer";
+    private static final String decimalDictionaryURI = "eddi://ai.labs.parser.dictionaries.decimal";
+    private static final String emailDictionaryURI = "eddi://ai.labs.parser.dictionaries.email";
+    private static final String punctuationDictionaryURI = "eddi://ai.labs.parser.dictionaries.punctuation";
+    private static final String timeExpressionDictionaryURI = "eddi://ai.labs.parser.dictionaries.time";
+
+    private static final String ordinalNumberDictionaryURI = "eddi://ai.labs.parser.dictionaries.ordinalNumber";
+    private static final String stemmingCorrectionURI = "eddi://ai.labs.parser.corrections.stemming";
+    private static final String phoneticCorrectionURI = "eddi://ai.labs.parser.corrections.phonetic";
+    private static final String mergedTermsCorrectionURI = "eddi://ai.labs.parser.corrections.mergedTerms";
+
+    private static final String KEY_EXPRESSIONS_PARSED = "expressions:parsed";
+    private static final String KEY_TYPE = "type";
+    private static final String KEY_CONFIG = "config";
+    private static final String KEY_URI = "uri";
+    private static final String KEY_DISTANCE = "distance";
+    private static final String KEY_LOOKUP_IF_KNOWN = "lookupIfKnown";
+    private static final String KEY_LANGUAGE = "language";
     private IExpressionProvider expressionProvider;
+    private boolean appendExpressions = true;
+    private boolean includeUnused = true;
+    private boolean includeUnknown = true;
 
     @Inject
     public InputParserTask(IResourceClientLibrary resourceClientLibrary,
@@ -132,9 +136,20 @@ public class InputParserTask implements ILifecycleTask {
 
     private void storeResultInMemory(IConversationMemory memory, List<RawSolution> parsedSolutions) {
         if (!parsedSolutions.isEmpty()) {
-            Solution solution = extractExpressions(parsedSolutions, expressionProvider).get(0);
-            IData expressionsData = new Data<>("expressions:parsed", solution.getExpressions());
-            memory.getCurrentStep().storeData(expressionsData);
+            Solution solution = extractExpressions(parsedSolutions, includeUnused, includeUnknown).get(0);
+
+            String expressions = solution.getExpressions();
+            if (appendExpressions) {
+                IData<String> latestExpressions = memory.getCurrentStep().getLatestData(KEY_EXPRESSIONS_PARSED);
+                if (latestExpressions != null) {
+                    expressions = StringUtilities.joinStrings(", ", latestExpressions.getResult(), expressions);
+                }
+            }
+
+            if (!expressions.isEmpty()) {
+                IData<String> expressionsData = new Data<>(KEY_EXPRESSIONS_PARSED, expressions);
+                memory.getCurrentStep().storeData(expressionsData);
+            }
         }
     }
 
@@ -154,7 +169,26 @@ public class InputParserTask implements ILifecycleTask {
         }
     }
 
-    private void convertDictionaries(List<Map<String, Object>> dictionariesList) throws IllegalExtensionConfigurationException, UnrecognizedDictionaryException {
+    @Override
+    public void configure(Map<String, Object> configuration) {
+        Object appendExpressions = configuration.get("appendExpressions");
+        if (!RuntimeUtilities.isNullOrEmpty(appendExpressions)) {
+            this.appendExpressions = Boolean.parseBoolean(appendExpressions.toString());
+        }
+
+        Object includeUnused = configuration.get("includeUnused");
+        if (!RuntimeUtilities.isNullOrEmpty(includeUnused)) {
+            this.includeUnused = Boolean.parseBoolean(includeUnused.toString());
+        }
+
+        Object includeUnknown = configuration.get("includeUnknown");
+        if (!RuntimeUtilities.isNullOrEmpty(includeUnknown)) {
+            this.includeUnknown = Boolean.parseBoolean(includeUnknown.toString());
+        }
+    }
+
+    private void convertDictionaries(List<Map<String, Object>> dictionariesList)
+            throws IllegalExtensionConfigurationException, UnrecognizedDictionaryException {
         IDictionary dictionary;
         for (Map<String, Object> dictionaryMap : dictionariesList) {
             dictionary = null;
