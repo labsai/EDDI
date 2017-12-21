@@ -16,8 +16,8 @@
     <dependencies>
         <dependency>
             <groupId>org.mongodb</groupId>
-            <artifactId>mongo-java-driver</artifactId>
-            <version>3.4.3</version>
+            <artifactId>mongodb-driver</artifactId>
+            <version>3.6.1</version>
         </dependency>
         <dependency>
             <groupId>org.codehaus.jackson</groupId>

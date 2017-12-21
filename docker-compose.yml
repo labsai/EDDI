@@ -15,13 +15,13 @@ services:
       EDDI_MEMORY_MAX: 1G
       #EDDI_JAVA_ENV_MONGODB_HOST: mongodb.hosts=mongodb
   mongodb:
-    image: mongo:3.4
+    image: mongo:3.6
     #ports:       #see override in your own repository with docker-compose.override.yml on each deployed machine for CRITICAL DATA
     volumes_from:
         - mongodata       #see override in your own repository with  docker-compose.override.yml on each deployed machine for CRITICAL DATA
     restart: always
   mongodata:
-    image: alpine:3.5
+    image: alpine:3.6
     volumes:
       - "./persistence:/data/db"
     command: echo Persistence for Mongo

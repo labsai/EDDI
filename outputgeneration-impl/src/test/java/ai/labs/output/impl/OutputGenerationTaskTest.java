@@ -4,7 +4,6 @@ import ai.labs.memory.Data;
 import ai.labs.memory.IConversationMemory;
 import ai.labs.memory.IData;
 import ai.labs.memory.IDataFactory;
-import ai.labs.output.IOutputFilter;
 import ai.labs.output.IOutputGeneration;
 import ai.labs.output.model.OutputEntry;
 import ai.labs.output.model.OutputValue;
@@ -18,7 +17,6 @@ import org.junit.Test;
 import java.net.URI;
 import java.util.*;
 
-import static org.mockito.Matchers.anyListOf;
 import static org.mockito.Mockito.*;
 
 /**
@@ -56,7 +54,7 @@ public class OutputGenerationTaskTest {
     @Test
     public void executeTask() throws Exception {
         //setup
-        when(outputGeneration.getOutputs(anyListOf(IOutputFilter.class))).thenAnswer(invocation -> {
+        when(outputGeneration.getOutputs(anyList())).thenAnswer(invocation -> {
             Map<String, List<OutputEntry>> ret = new LinkedHashMap<>();
             OutputEntry outputEntry = createOutputEntry();
             ret.put(ACTION_1, Collections.singletonList(outputEntry));
@@ -80,7 +78,7 @@ public class OutputGenerationTaskTest {
         List<QuickReply> quickReplies = Arrays.asList(new QuickReply(SOME_QUICK_REPLY, SOME_EXPRESSION, false),
                 new QuickReply(SOME_OTHER_QUICK_REPLY, SOME_OTHER_EXPRESSION, false));
         IData<List<QuickReply>> expectedQuickReplyData = new Data<>(QUICK_REPLIES + ACTION_1, quickReplies);
-        when(dataFactory.createData(eq(QUICK_REPLIES + ACTION_1), anyListOf(QuickReply.class))).
+        when(dataFactory.createData(eq(QUICK_REPLIES + ACTION_1), anyList())).
                 thenAnswer(invocation -> expectedQuickReplyData);
 
         //test
