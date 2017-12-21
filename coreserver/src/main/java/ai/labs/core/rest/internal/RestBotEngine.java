@@ -152,7 +152,7 @@ public class RestBotEngine implements IRestBotEngine {
         RuntimeUtilities.checkNotNull(inputData, "inputData");
         RuntimeUtilities.checkNotNull(inputData.getInput(), "inputData.input");
 
-        response.setTimeout(60, TimeUnit.SECONDS);
+        response.setTimeout(botTimeout, TimeUnit.SECONDS);
         response.setTimeoutHandler((asyncResp) ->
                 asyncResp.resume(Response.status(Response.Status.REQUEST_TIMEOUT).build()));
         try {
