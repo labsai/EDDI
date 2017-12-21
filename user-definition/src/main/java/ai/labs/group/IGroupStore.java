@@ -9,7 +9,7 @@ import ai.labs.persistence.IResourceStore;
 public interface IGroupStore {
     Group readGroup(String groupId) throws IResourceStore.ResourceStoreException, IResourceStore.ResourceNotFoundException;
 
-    void updateGroup(String groupId, Group group);
+    void updateGroup(String groupId, Group group) throws IResourceStore.ResourceStoreException;
 
     String createGroup(Group group) throws IResourceStore.ResourceStoreException;
 

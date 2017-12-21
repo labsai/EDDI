@@ -13,7 +13,7 @@ import org.junit.Test;
 
 import java.util.*;
 
-import static org.mockito.Matchers.eq;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.*;
 
 /**
