@@ -1,5 +1,6 @@
 package ai.labs.core.rest.internal;
 
+import ai.labs.memory.IConversationMemoryStore;
 import ai.labs.memory.model.Deployment;
 import ai.labs.memory.model.Deployment.Status;
 import ai.labs.resources.rest.deployment.IDeploymentStore;
@@ -16,6 +17,7 @@ import org.jboss.resteasy.spi.NoLogWebApplicationException;
 
 import javax.inject.Inject;
 import javax.ws.rs.InternalServerErrorException;
+import javax.ws.rs.core.MediaType;
 import javax.ws.rs.core.Response;
 import java.util.EnumSet;
 import java.util.concurrent.Callable;
@@ -30,11 +32,15 @@ import static ai.labs.resources.rest.deployment.model.DeploymentInfo.DeploymentS
 public class RestBotAdministration implements IRestBotAdministration {
     private final IBotFactory botFactory;
     private final IDeploymentStore deploymentStore;
+    private final IConversationMemoryStore conversationMemoryStore;
 
     @Inject
-    public RestBotAdministration(IBotFactory botFactory, IDeploymentStore deploymentStore) {
+    public RestBotAdministration(IBotFactory botFactory,
+                                 IDeploymentStore deploymentStore,
+                                 IConversationMemoryStore conversationMemoryStore) {
         this.botFactory = botFactory;
         this.deploymentStore = deploymentStore;
+        this.conversationMemoryStore = conversationMemoryStore;
     }
 
     @Override
@@ -58,7 +64,7 @@ public class RestBotAdministration implements IRestBotAdministration {
                         final String botId, final Integer version, final Boolean autoDeploy) {
         Callable<Void> deployBot = () -> {
             try {
-                if (EnumSet.of(Status.NOT_FOUND, Status.ERROR).contains(getStatus(environment, botId, version))) {
+                if (EnumSet.of(Status.NOT_FOUND, Status.ERROR).contains(checkDeploymentStatus(environment, botId, version))) {
                     botFactory.deployBot(environment, botId, version,
                             status -> {
                                 if (status == Status.READY && autoDeploy) {
@@ -94,7 +100,13 @@ public class RestBotAdministration implements IRestBotAdministration {
         RuntimeUtilities.checkNotNull(version, "version");
 
         try {
-            //todo check if there are still active (READY) conversation going on with this botId/botVersion
+            Long activeConversationCount = conversationMemoryStore.getActiveConversationCount(botId, version);
+            if (activeConversationCount > 0) {
+                String message = "%s active (thus not ENDED) conversation(s) going on with this bot!";
+                message = String.format(message, activeConversationCount);
+                return Response.status(Response.Status.CONFLICT).entity(message).type(MediaType.TEXT_PLAIN).build();
+            }
+
             undeploy(environment, botId, version);
             return Response.accepted().build();
         } catch (Exception e) {
@@ -135,10 +147,10 @@ public class RestBotAdministration implements IRestBotAdministration {
         RuntimeUtilities.checkNotNull(botId, "botId");
         RuntimeUtilities.checkNotNull(version, "version");
 
-        return getStatus(environment, botId, version).toString();
+        return checkDeploymentStatus(environment, botId, version).toString();
     }
 
-    private Status getStatus(Deployment.Environment environment, String botId, Integer version) {
+    private Status checkDeploymentStatus(Deployment.Environment environment, String botId, Integer version) {
         try {
             IBot bot = botFactory.getBot(environment, botId, version);
             if (bot != null) {

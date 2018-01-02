@@ -3,11 +3,14 @@ package ai.labs.memory.rest;
 import ai.labs.memory.descriptor.model.ConversationDescriptor;
 import ai.labs.memory.model.ConversationMemorySnapshot;
 import ai.labs.memory.model.ConversationState;
+import ai.labs.memory.model.ConversationStatus;
 import ai.labs.persistence.IResourceStore;
 import io.swagger.annotations.Api;
+import io.swagger.annotations.ApiParam;
 
 import javax.ws.rs.*;
 import javax.ws.rs.core.MediaType;
+import javax.ws.rs.core.Response;
 import java.util.List;
 
 /**
@@ -15,7 +18,7 @@ import java.util.List;
  */
 @Api(value = "configurations")
 @Path("/conversationstore/conversations")
-public interface IRestMonitorStore {
+public interface IRestConversationStore {
     @GET
     @Produces(MediaType.APPLICATION_JSON)
     List<ConversationDescriptor> readConversationDescriptors(@QueryParam("index") @DefaultValue("0") Integer index,
@@ -33,5 +36,20 @@ public interface IRestMonitorStore {
     @DELETE
     @Path("/{conversationId}")
     void deleteConversationLog(@PathParam("conversationId") String conversationId) throws IResourceStore.ResourceStoreException, IResourceStore.ResourceNotFoundException;
+
+    @GET
+    @Path("/active/{botId}")
+    @Produces(MediaType.APPLICATION_JSON)
+    List<ConversationStatus> getActiveConversations(@PathParam("botId") String botId,
+                                                    @ApiParam(name = "botVersion", required = true, format = "integer", example = "1")
+                                                    @QueryParam("botVersion") Integer botVersion,
+                                                    @ApiParam(name = "index", required = true, format = "integer", example = "0")
+                                                    @QueryParam("index") @DefaultValue("0") Integer index,
+                                                    @ApiParam(name = "limit", required = true, format = "integer", example = "20")
+                                                    @QueryParam("limit") @DefaultValue("20") Integer limit);
+
+    @POST
+    @Path("end")
+    Response endActiveConversations(List<ConversationStatus> conversationStatuses);
 }
 
