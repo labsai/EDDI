@@ -5,6 +5,7 @@ import ai.labs.group.model.Group;
 import ai.labs.group.rest.IRestGroupStore;
 import ai.labs.persistence.IResourceStore;
 import ai.labs.utilities.RestUtilities;
+import lombok.extern.slf4j.Slf4j;
 import org.jboss.resteasy.spi.NoLogWebApplicationException;
 
 import javax.inject.Inject;
@@ -15,8 +16,8 @@ import java.net.URI;
 /**
  * @author ginccc
  */
+@Slf4j
 public class RestGroupStore implements IRestGroupStore {
-    private final String resourceURI = "eddi://ai.labs.group/groupstore/groups/";
     private final IGroupStore groupStore;
 
     @Inject
@@ -29,7 +30,8 @@ public class RestGroupStore implements IRestGroupStore {
         try {
             return groupStore.readGroup(groupId);
         } catch (IResourceStore.ResourceStoreException e) {
-            throw new InternalServerErrorException(e.getLocalizedMessage(), e);
+            log.error(e.getLocalizedMessage(), e);
+            throw new InternalServerErrorException();
 
         } catch (IResourceStore.ResourceNotFoundException e) {
             throw new NoLogWebApplicationException(Response.Status.NOT_FOUND);
@@ -38,7 +40,12 @@ public class RestGroupStore implements IRestGroupStore {
 
     @Override
     public void updateGroup(String groupId, Group group) {
-        groupStore.updateGroup(groupId, group);
+        try {
+            groupStore.updateGroup(groupId, group);
+        } catch (IResourceStore.ResourceStoreException e) {
+            log.error(e.getLocalizedMessage(), e);
+            throw new InternalServerErrorException();
+        }
     }
 
     @Override
@@ -48,7 +55,8 @@ public class RestGroupStore implements IRestGroupStore {
             URI createdUri = RestUtilities.createURI(resourceURI, id);
             return Response.created(createdUri).build();
         } catch (IResourceStore.ResourceStoreException e) {
-            throw new InternalServerErrorException(e.getLocalizedMessage(), e);
+            log.error(e.getLocalizedMessage(), e);
+            throw new InternalServerErrorException();
         }
     }
 

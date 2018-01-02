@@ -1,7 +1,6 @@
 package ai.labs.utilities;
 
-import java.util.Arrays;
-import java.util.StringJoiner;
+import java.util.*;
 
 /**
  * @author ginccc
@@ -27,9 +26,23 @@ public final class StringUtilities {
         return filter;
     }
 
+    public static String joinStrings(String delimiter, Collection values) {
+        return joinStrings(delimiter, values.toArray());
+    }
+
     public static String joinStrings(String delimiter, Object... values) {
         StringJoiner stringJoiner = new StringJoiner(delimiter);
         Arrays.stream(values).map(Object::toString).forEach(stringJoiner::add);
         return stringJoiner.toString();
+    }
+
+    public static List<String> parseCommaSeparatedString(String commaSeparatedString) {
+        List<String> ret = new LinkedList<>();
+        StringTokenizer stringTokenizer = new StringTokenizer(commaSeparatedString, ",", false);
+        while (stringTokenizer.hasMoreTokens()) {
+            ret.add(stringTokenizer.nextToken().trim());
+        }
+
+        return ret;
     }
 }

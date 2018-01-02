@@ -7,7 +7,6 @@ import ai.labs.serialization.IJsonSerialization;
 import com.mongodb.BasicDBObject;
 import com.mongodb.client.MongoCollection;
 import com.mongodb.client.MongoDatabase;
-import com.mongodb.util.JSON;
 import lombok.extern.slf4j.Slf4j;
 import org.bson.Document;
 import org.bson.types.ObjectId;
@@ -51,13 +50,17 @@ public class GroupStore implements IGroupStore {
 
 
     @Override
-    public void updateGroup(String groupId, Group group) {
-        String jsonGroup = JSON.serialize(group);
-        Document document = Document.parse(jsonGroup);
+    public void updateGroup(String groupId, Group group) throws IResourceStore.ResourceStoreException {
+        try {
+            String jsonGroup = jsonSerialization.serialize(group);
+            Document document = Document.parse(jsonGroup);
 
-        document.put("_id", new ObjectId(groupId));
+            document.put("_id", new ObjectId(groupId));
 
-        collection.insertOne(document);
+            collection.insertOne(document);
+        } catch (IOException e) {
+            throw new IResourceStore.ResourceStoreException(e.getLocalizedMessage(), e);
+        }
     }
 
     @Override

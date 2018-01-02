@@ -77,12 +77,15 @@ public class PropertyDisposerTask implements ILifecycleTask {
         IConversationStepStack previousSteps = memory.getPreviousSteps();
         if (previousSteps.size() > 0) {
             IData<List<String>> actionsData = previousSteps.get(0).getLatestData(ACTIONS_IDENTIFIER);
-            List<String> actions = actionsData.getResult();
-            if (actions != null && actions.contains(CATCH_ANY_INPUT_AS_PROPERTY_ACTION)) {
-                IData<String> initialInputData = memory.getCurrentStep().getLatestData(INPUT_INITIAL_IDENTIFIER);
-                String initialInput = initialInputData.getResult();
-                if (!initialInput.isEmpty()) {
-                    properties.add(new PropertyEntry(Collections.singletonList(EXPRESSION_MEANING_USER_INPUT), initialInput));
+            if (actionsData != null) {
+                List<String> actions = actionsData.getResult();
+                if (actions != null && actions.contains(CATCH_ANY_INPUT_AS_PROPERTY_ACTION)) {
+                    IData<String> initialInputData = memory.getCurrentStep().getLatestData(INPUT_INITIAL_IDENTIFIER);
+                    String initialInput = initialInputData.getResult();
+                    if (!initialInput.isEmpty()) {
+                        properties.add(new PropertyEntry(
+                                Collections.singletonList(EXPRESSION_MEANING_USER_INPUT), initialInput));
+                    }
                 }
             }
         }

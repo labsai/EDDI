@@ -7,10 +7,12 @@ import ai.labs.parser.dictionaries.RegularDictionary;
 import ai.labs.parser.internal.matches.RawSolution;
 import ai.labs.parser.model.IDictionary;
 import ai.labs.parser.rest.model.Solution;
+import ai.labs.utilities.StringUtilities;
 
 import java.util.ArrayList;
 import java.util.LinkedList;
 import java.util.List;
+import java.util.stream.Collectors;
 
 /**
  * @author ginccc
@@ -27,12 +29,18 @@ public class DictionaryUtilities {
         return expressions;
     }
 
-    public static List<Solution> extractExpressions(List<RawSolution> rawSolutions, IExpressionProvider expressionProvider) {
+    public static List<Solution> extractExpressions(List<RawSolution> rawSolutions,
+                                                    boolean includeUnused,
+                                                    boolean includeUnknown) {
         List<Solution> solutionExpressions = new ArrayList<>();
 
         for (RawSolution rawSolution : rawSolutions) {
             List<Expression> expressions = convertDictionaryEntriesToExpressions(rawSolution.getDictionaryEntries());
-            solutionExpressions.add(new Solution(expressionProvider.toString(expressions)));
+            expressions = expressions.stream().
+                    filter(expression -> includeUnused || !expression.getExpressionName().equals("unused")).
+                    filter(expression -> includeUnknown || !expression.getExpressionName().equals("unknown")).
+                    collect(Collectors.toList());
+            solutionExpressions.add(new Solution(StringUtilities.joinStrings(", ", expressions)));
         }
 
         return solutionExpressions;

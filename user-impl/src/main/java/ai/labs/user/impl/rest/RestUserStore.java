@@ -6,6 +6,7 @@ import ai.labs.user.model.User;
 import ai.labs.user.rest.IRestUserStore;
 import ai.labs.utilities.RestUtilities;
 import ai.labs.utilities.SecurityUtilities;
+import lombok.extern.slf4j.Slf4j;
 import org.jboss.resteasy.spi.NoLogWebApplicationException;
 
 import javax.inject.Inject;
@@ -16,6 +17,7 @@ import java.net.URI;
 /**
  * @author ginccc
  */
+@Slf4j
 public class RestUserStore implements IRestUserStore {
     private final IUserStore userStore;
 
@@ -30,7 +32,8 @@ public class RestUserStore implements IRestUserStore {
             String id = userStore.searchUser(username);
             return RestUtilities.createURI(resourceURI, id);
         } catch (IResourceStore.ResourceStoreException e) {
-            throw new InternalServerErrorException(e.getLocalizedMessage(), e);
+            log.error(e.getLocalizedMessage(), e);
+            throw new InternalServerErrorException();
 
         } catch (IResourceStore.ResourceNotFoundException e) {
             throw new NoLogWebApplicationException(Response.Status.NOT_FOUND);
@@ -42,7 +45,8 @@ public class RestUserStore implements IRestUserStore {
         try {
             return userStore.readUser(userId);
         } catch (IResourceStore.ResourceStoreException e) {
-            throw new InternalServerErrorException(e.getLocalizedMessage(), e);
+            log.error(e.getLocalizedMessage(), e);
+            throw new InternalServerErrorException();
 
         } catch (IResourceStore.ResourceNotFoundException e) {
             throw new NoLogWebApplicationException(Response.Status.NOT_FOUND);
@@ -54,7 +58,8 @@ public class RestUserStore implements IRestUserStore {
         try {
             userStore.updateUser(userId, user);
         } catch (IResourceStore.ResourceStoreException e) {
-            throw new InternalServerErrorException(e.getLocalizedMessage(), e);
+            log.error(e.getLocalizedMessage(), e);
+            throw new InternalServerErrorException();
         }
     }
 
@@ -65,7 +70,8 @@ public class RestUserStore implements IRestUserStore {
             URI createdUri = RestUtilities.createURI(resourceURI, id);
             return Response.created(createdUri).build();
         } catch (IResourceStore.ResourceStoreException e) {
-            throw new InternalServerErrorException(e.getLocalizedMessage(), e);
+            log.error(e.getLocalizedMessage(), e);
+            throw new InternalServerErrorException();
         }
     }
 

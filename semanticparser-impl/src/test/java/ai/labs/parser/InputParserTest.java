@@ -1,5 +1,6 @@
 package ai.labs.parser;
 
+import ai.labs.expressions.Expression;
 import ai.labs.expressions.ExpressionFactory;
 import ai.labs.expressions.utilities.ExpressionProvider;
 import ai.labs.expressions.utilities.IExpressionProvider;
@@ -8,6 +9,7 @@ import ai.labs.parser.internal.matches.RawSolution;
 import ai.labs.parser.model.IDictionary;
 import ai.labs.parser.model.Phrase;
 import ai.labs.parser.model.Word;
+import ai.labs.utilities.StringUtilities;
 import lombok.extern.slf4j.Slf4j;
 import org.junit.Assert;
 import org.junit.Before;
@@ -59,7 +61,7 @@ public class InputParserTest {
 
         //assert
         Assert.assertEquals("day after tomorrow", suggestions.get(0).getDictionaryEntries().get(0).getValue());
-        Assert.assertEquals("phrase(day_after_tomorrow)", expressionProvider.toString(suggestions.get(0).getDictionaryEntries().get(0).getExpressions()));
+        Assert.assertEquals("phrase(day_after_tomorrow)", toString(suggestions.get(0).getDictionaryEntries().get(0).getExpressions()));
     }
 
     @Test
@@ -78,9 +80,9 @@ public class InputParserTest {
         Assert.assertEquals(1, suggestions.size());
         Assert.assertEquals(2, found.size());
         Assert.assertEquals("someword", found.get(0).getValue());
-        Assert.assertEquals("unknown(someword)", expressionProvider.toString(found.get(0).getExpressions()));
+        Assert.assertEquals("unknown(someword)", toString(found.get(0).getExpressions()));
         Assert.assertEquals("day after tomorrow", found.get(1).getValue());
-        Assert.assertEquals("phrase(day_after_tomorrow)", expressionProvider.toString(found.get(1).getExpressions()));
+        Assert.assertEquals("phrase(day_after_tomorrow)", toString(found.get(1).getExpressions()));
     }
 
     @Test
@@ -96,7 +98,7 @@ public class InputParserTest {
 
         //assert
         Assert.assertEquals("day after tomorrow", suggestions.get(0).getDictionaryEntries().get(0).getValue());
-        Assert.assertEquals("phrase(day_after_tomorrow)", expressionProvider.toString(suggestions.get(0).getDictionaryEntries().get(0).getExpressions()));
+        Assert.assertEquals("phrase(day_after_tomorrow)", toString(suggestions.get(0).getDictionaryEntries().get(0).getExpressions()));
     }
 
     @Test
@@ -112,7 +114,7 @@ public class InputParserTest {
 
         //assert
         Assert.assertEquals("day after tomorrow", suggestions.get(0).getDictionaryEntries().get(1).getValue());
-        Assert.assertEquals("phrase(day_after_tomorrow)", expressionProvider.toString(suggestions.get(0).getDictionaryEntries().get(1).getExpressions()));
+        Assert.assertEquals("phrase(day_after_tomorrow)", toString(suggestions.get(0).getDictionaryEntries().get(1).getExpressions()));
     }
 
     @Test
@@ -148,7 +150,7 @@ public class InputParserTest {
 
         //assert
         Assert.assertEquals("day after tomorrow", suggestions.get(0).getDictionaryEntries().get(0).getValue());
-        Assert.assertEquals("phrase(day_after_tomorrow)", expressionProvider.toString(suggestions.get(0).getDictionaryEntries().get(0).getExpressions()));
+        Assert.assertEquals("phrase(day_after_tomorrow)", toString(suggestions.get(0).getDictionaryEntries().get(0).getExpressions()));
     }
 
     @Test
@@ -193,8 +195,12 @@ public class InputParserTest {
         List<IDictionary.IFoundWord> foundWords = suggestions.get(0).getDictionaryEntries();
         Assert.assertEquals(2, foundWords.size());
         Assert.assertEquals("day after tomorrow", foundWords.get(0).getValue());
-        Assert.assertEquals("phrase(day_after_tomorrow)", expressionProvider.toString(foundWords.get(0).getExpressions()));
+        Assert.assertEquals("phrase(day_after_tomorrow)", toString(foundWords.get(0).getExpressions()));
         Assert.assertEquals("another phrase", foundWords.get(1).getValue());
-        Assert.assertEquals("phrase(another_phrase)", expressionProvider.toString(foundWords.get(1).getExpressions()));
+        Assert.assertEquals("phrase(another_phrase)", toString(foundWords.get(1).getExpressions()));
+    }
+
+    private static String toString(List<Expression> expressions) {
+        return StringUtilities.joinStrings(", ", expressions);
     }
 }

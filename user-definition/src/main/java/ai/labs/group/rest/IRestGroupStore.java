@@ -13,6 +13,8 @@ import javax.ws.rs.core.Response;
 @Api(value = "user management")
 @Path("/groupstore/groups")
 public interface IRestGroupStore {
+    String resourceURI = "eddi://ai.labs.group/groupstore/groups/";
+
     @GET
     @Path("/{groupId}")
     @Produces(MediaType.APPLICATION_JSON)

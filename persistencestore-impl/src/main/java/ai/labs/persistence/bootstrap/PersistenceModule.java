@@ -10,7 +10,6 @@ import javax.inject.Named;
 import javax.inject.Singleton;
 import java.io.InputStream;
 import java.net.UnknownHostException;
-import java.util.Collections;
 import java.util.LinkedList;
 import java.util.List;
 
@@ -50,7 +49,6 @@ public class PersistenceModule extends AbstractBaseModule {
                                         @Named("mongodb.minHeartbeatFrequency") Integer minHeartbeatFrequency,
                                         @Named("mongodb.requiredReplicaSetName") String requiredReplicaSetName,
                                         @Named("mongodb.serverSelectionTimeout") Integer serverSelectionTimeout,
-                                        @Named("mongodb.socketKeepAlive") Boolean socketKeepAlive,
                                         @Named("mongodb.socketTimeout") Integer socketTimeout,
                                         @Named("mongodb.sslEnabled") Boolean sslEnabled,
                                         @Named("mongodb.threadsAllowedToBlockForConnectionMultiplier") Integer threadsAllowedToBlockForConnectionMultiplier) {
@@ -65,13 +63,13 @@ public class PersistenceModule extends AbstractBaseModule {
                     heartbeatFrequency, heartbeatSocketTimeout, localThreshold,
                     maxConnectionIdleTime, maxConnectionLifeTime, maxWaitTime,
                     minConnectionsPerHost, minHeartbeatFrequency, requiredReplicaSetName,
-                    serverSelectionTimeout, socketKeepAlive, socketTimeout,
+                    serverSelectionTimeout, socketTimeout,
                     sslEnabled, threadsAllowedToBlockForConnectionMultiplier);
             if ("".equals(username) || "".equals(password)) {
                 mongoClient = new MongoClient(seeds, mongoClientOptions);
             } else {
                 MongoCredential credential = MongoCredential.createCredential(username, source, password.toCharArray());
-                mongoClient = new MongoClient(seeds, Collections.singletonList(credential), mongoClientOptions);
+                mongoClient = new MongoClient(seeds, credential, mongoClientOptions);
             }
 
             registerMongoClientShutdownHook(mongoClient);
@@ -89,8 +87,8 @@ public class PersistenceModule extends AbstractBaseModule {
                                                        Integer maxConnectionIdleTime, Integer maxConnectionLifeTime,
                                                        Integer maxWaitTime, Integer minConnectionsPerHost,
                                                        Integer minHeartbeatFrequency, String requiredReplicaSetName,
-                                                       Integer serverSelectionTimeout, Boolean socketKeepAlive,
-                                                       Integer socketTimeout, Boolean sslEnabled,
+                                                       Integer serverSelectionTimeout, Integer socketTimeout,
+                                                       Boolean sslEnabled,
                                                        Integer threadsAllowedToBlockForConnectionMultiplier) {
         MongoClientOptions.Builder builder = MongoClientOptions.builder();
         builder.writeConcern(writeConcern);
@@ -116,7 +114,6 @@ public class PersistenceModule extends AbstractBaseModule {
             builder.requiredReplicaSetName(requiredReplicaSetName);
         }
         builder.serverSelectionTimeout(serverSelectionTimeout);
-        builder.socketKeepAlive(socketKeepAlive);
         builder.socketTimeout(socketTimeout);
         builder.sslEnabled(sslEnabled);
         builder.threadsAllowedToBlockForConnectionMultiplier(threadsAllowedToBlockForConnectionMultiplier);

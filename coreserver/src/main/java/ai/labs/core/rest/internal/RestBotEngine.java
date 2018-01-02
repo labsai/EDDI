@@ -41,6 +41,7 @@ import static ai.labs.memory.ConversationMemoryUtilities.*;
 
 /**
  * @author ginccc
+ *
  */
 @Slf4j
 public class RestBotEngine implements IRestBotEngine {
@@ -151,14 +152,17 @@ public class RestBotEngine implements IRestBotEngine {
         RuntimeUtilities.checkNotNull(inputData, "inputData");
         RuntimeUtilities.checkNotNull(inputData.getInput(), "inputData.input");
 
-        response.setTimeout(60, TimeUnit.SECONDS);
+        response.setTimeout(botTimeout, TimeUnit.SECONDS);
         response.setTimeoutHandler((asyncResp) ->
                 asyncResp.resume(Response.status(Response.Status.REQUEST_TIMEOUT).build()));
         try {
             final IConversationMemory conversationMemory = loadConversationMemory(conversationId);
             checkConversationMemoryNotNull(conversationMemory, conversationId);
             if (!botId.equals(conversationMemory.getBotId())) {
-                response.resume(new IllegalAccessException("Supplied botId is incompatible to conversationId"));
+                String message = "Supplied botId (%s) is incompatible with conversationId (%s)";
+                message = String.format(message, botId, conversationId);
+                response.resume(Response.status(Response.Status.CONFLICT).type(MediaType.TEXT_PLAIN).
+                        entity(message).build());
                 return;
             }
 

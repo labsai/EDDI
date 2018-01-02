@@ -1,6 +1,5 @@
 package ai.labs.expressions.utilities;
 
-import ai.labs.expressions.Connector;
 import ai.labs.expressions.Expression;
 import ai.labs.expressions.IExpressionFactory;
 import ai.labs.expressions.value.Value;
@@ -25,60 +24,6 @@ public class ExpressionProvider implements IExpressionProvider {
     }
 
     @Override
-    public List<Expression> deepCopyExpressions(List<Expression> listReferencesToCopy) {
-        List<Expression> listCopy = new ArrayList<>();
-        listReferencesToCopy.forEach(expToCopy -> {
-            try {
-                listCopy.add((Expression) expToCopy.clone());
-            } catch (CloneNotSupportedException e) {
-                log.error("Clone failed!", e);
-            }
-        });
-        return listCopy;
-    }
-
-    @Override
-    public List<Expression> copyExpressionReferences(List<Expression> listReferencesToCopy) {
-        List<Expression> listCopy = new ArrayList<>();
-        listCopy.addAll(listReferencesToCopy);
-        return listCopy;
-    }
-
-    @Override
-    public Boolean doesListContainOnlyExpressions(List listToCheck) {
-        for (Object o : listToCheck) {
-            if (!(o instanceof Expression)) return false;
-        }
-        return true;
-    }
-
-    /**
-     * Inserts the given operator type between the expressions in the given list.
-     * Also considers connectors that might already exist in the list,
-     * so that there are no adjacent connectors.
-     */
-    @Override
-    public List<Expression> insertConnectorBetweenExpressions(List<Expression> exps, Value connectorType) {
-        List<Expression> result = new ArrayList<>();
-        if (exps.isEmpty()) return result;
-        result.add(exps.get(0));
-        boolean lastExpWasConnector = exps.get(0) instanceof Connector;
-        boolean nextExpIsConnector = (exps.size() > 1 && exps.get(1) instanceof Connector);
-        for (int i = 1; i < exps.size(); i++) {
-            if (!lastExpWasConnector && !nextExpIsConnector) {
-                Connector conn = new Connector();
-                conn.setConnector(connectorType);
-                result.add(conn);
-            }
-            result.add(exps.get(i));
-            lastExpWasConnector = exps.get(i) instanceof Connector;
-            nextExpIsConnector = (exps.size() > i && exps.get(i) instanceof Connector);
-        }
-        return result;
-    }
-
-
-    @Override
     public Expression createExpression(String predicate, Object... values) {
         StringBuilder sb = new StringBuilder(predicate);
         if (values != null && values.length > 0) {
@@ -99,7 +44,6 @@ public class ExpressionProvider implements IExpressionProvider {
             return new ArrayList<>();
         }
 
-        List<Expression> retExpression = new ArrayList<>();
         List<String> listStringExpressions = new ArrayList<>();
 
         expressions = expressions.trim();
@@ -144,10 +88,7 @@ public class ExpressionProvider implements IExpressionProvider {
             }
         }
 
-        retExpression.addAll(listStringExpressions.stream().map(this::parseExpression).collect(Collectors.toList()));
-
-
-        return retExpression;
+        return listStringExpressions.stream().map(this::parseExpression).collect(Collectors.toList());
 
     }
 
@@ -168,18 +109,6 @@ public class ExpressionProvider implements IExpressionProvider {
         }
 
         return expressionFactory.getExpression(exp);
-    }
-
-    @Override
-    public String toString(List<Expression> expressions) {
-        StringBuilder ret = new StringBuilder();
-        expressions.forEach(expression -> ret.append(expression.toString()).append(", "));
-
-        if (expressions.size() > 0) {
-            ret.delete(ret.length() - 2, ret.length());
-        }
-
-        return ret.toString();
     }
 
     @Override
