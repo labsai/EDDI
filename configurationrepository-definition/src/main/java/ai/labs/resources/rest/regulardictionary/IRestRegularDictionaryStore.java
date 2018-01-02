@@ -39,7 +39,7 @@ public interface IRestRegularDictionaryStore extends IRestVersionInfo {
     @ApiResponse(code = 200, response = RegularDictionaryConfiguration.class, message = "configuration of regular dictionary")
     RegularDictionaryConfiguration readRegularDictionary(@PathParam("id") String id,
                                                          @ApiParam(name = "version", required = true, format = "integer", example = "1")
-                                   @QueryParam("version") Integer version,
+                                                         @QueryParam("version") Integer version,
                                                          @QueryParam("filter") @DefaultValue("") String filter,
                                                          @QueryParam("order") @DefaultValue("") String order,
                                                          @QueryParam("index") @DefaultValue("0") Integer index,
@@ -61,7 +61,7 @@ public interface IRestRegularDictionaryStore extends IRestVersionInfo {
     @Consumes(MediaType.APPLICATION_JSON)
     Response updateRegularDictionary(@PathParam("id") String id,
                                      @ApiParam(name = "version", required = true, format = "integer", example = "1")
-                                @QueryParam("version") Integer version, RegularDictionaryConfiguration regularDictionaryConfiguration);
+                                     @QueryParam("version") Integer version, RegularDictionaryConfiguration regularDictionaryConfiguration);
 
 
     /**
@@ -96,12 +96,12 @@ public interface IRestRegularDictionaryStore extends IRestVersionInfo {
     @Path("/{id}")
     Response deleteRegularDictionary(@PathParam("id") String id,
                                      @ApiParam(name = "version", required = true, format = "integer", example = "1")
-                                 @QueryParam("version") Integer version);
+                                     @QueryParam("version") Integer version);
 
     @PATCH
     @Path("/{id}")
     @Consumes(MediaType.APPLICATION_JSON)
     Response patchRegularDictionary(@PathParam("id") String id,
                                     @ApiParam(name = "version", required = true, format = "integer", example = "1")
-                               @QueryParam("version") Integer version, PatchInstruction<RegularDictionaryConfiguration>[] patchInstructions);
+                                    @QueryParam("version") Integer version, PatchInstruction<RegularDictionaryConfiguration>[] patchInstructions);
 }

@@ -2,16 +2,15 @@ package ai.labs.memory.descriptor.model;
 
 import ai.labs.memory.model.ConversationState;
 import ai.labs.memory.model.Deployment;
-import ai.labs.memory.model.Feedback;
 import ai.labs.resources.rest.model.ResourceDescriptor;
-
-import java.net.URI;
-import java.util.LinkedList;
-import java.util.List;
+import lombok.Getter;
+import lombok.Setter;
 
 /**
  * @author ginccc
  */
+@Getter
+@Setter
 public class ConversationDescriptor extends ResourceDescriptor {
     public enum ViewState {
         UNSEEN,
@@ -24,104 +23,5 @@ public class ConversationDescriptor extends ResourceDescriptor {
     private String createdByUserName;
     private Deployment.Environment environment;
     private ConversationState conversationState;
-    private List<FeedbackPosition> feedbacks;
-
-    public ConversationDescriptor() {
-        this.feedbacks = new LinkedList<>();
-    }
-
-    public String getBotName() {
-        return botName;
-    }
-
-    public void setBotName(String botName) {
-        this.botName = botName;
-    }
-
-    public ViewState getViewState() {
-        return viewState;
-    }
-
-    public void setViewState(ViewState viewState) {
-        this.viewState = viewState;
-    }
-
-    public int getConversationStepSize() {
-        return conversationStepSize;
-    }
-
-    public void setConversationStepSize(int conversationStepSize) {
-        this.conversationStepSize = conversationStepSize;
-    }
-
-    public String getCreatedByUserName() {
-        return createdByUserName;
-    }
-
-    public void setCreatedByUserName(String createdByUserName) {
-        this.createdByUserName = createdByUserName;
-    }
-
-    public Deployment.Environment getEnvironment() {
-        return environment;
-    }
-
-    public void setEnvironment(Deployment.Environment environment) {
-        this.environment = environment;
-    }
-
-    public ConversationState getConversationState() {
-        return conversationState;
-    }
-
-    public void setConversationState(ConversationState conversationState) {
-        this.conversationState = conversationState;
-    }
-
-    public List<FeedbackPosition> getFeedbacks() {
-        return feedbacks;
-    }
-
-    public void setFeedbacks(List<FeedbackPosition> feedbacks) {
-        this.feedbacks = feedbacks;
-    }
-
-    public static class FeedbackPosition {
-        private URI feedback;
-        private Feedback.Type feedbackType;
-        private int conversationStep;
-
-        public FeedbackPosition() {
-        }
-
-        public FeedbackPosition(URI feedback, int conversationStep) {
-            this.feedback = feedback;
-            this.conversationStep = conversationStep;
-        }
-
-        public URI getFeedback() {
-            return feedback;
-        }
-
-        public void setFeedback(URI feedback) {
-            this.feedback = feedback;
-        }
-
-        public Feedback.Type getFeedbackType() {
-            return feedbackType;
-        }
-
-        public void setFeedbackType(Feedback.Type feedbackType) {
-            this.feedbackType = feedbackType;
-        }
-
-        public int getConversationStep() {
-            return conversationStep;
-        }
-
-        public void setConversationStep(int conversationStep) {
-            this.conversationStep = conversationStep;
-        }
-    }
 }
 

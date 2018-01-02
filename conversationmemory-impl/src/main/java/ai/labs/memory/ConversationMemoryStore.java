@@ -7,12 +7,16 @@ import ai.labs.serialization.IDocumentBuilder;
 import com.mongodb.BasicDBObject;
 import com.mongodb.client.MongoCollection;
 import com.mongodb.client.MongoDatabase;
+import com.mongodb.client.model.Filters;
 import com.mongodb.client.model.UpdateOptions;
 import org.bson.Document;
+import org.bson.conversions.Bson;
 import org.bson.types.ObjectId;
 
 import javax.inject.Inject;
 import java.io.IOException;
+
+import static ai.labs.memory.model.ConversationState.ENDED;
 
 /**
  * @author ginccc
@@ -66,7 +70,7 @@ public class ConversationMemoryStore implements IConversationMemoryStore, IResou
             document.remove("_id");
 
             ConversationMemorySnapshot snapshot = documentBuilder.build(document, ConversationMemorySnapshot.class);
-            
+
             snapshot.setId(conversationId);
 
             return snapshot;
@@ -94,6 +98,13 @@ public class ConversationMemoryStore implements IConversationMemoryStore, IResou
         }
 
         return null;
+    }
+
+    @Override
+    public Long getActiveConversationCount(String botId, Integer botVersion) {
+        Bson query = Filters.and(Filters.eq("botId", botId), Filters.eq("botVersion", botVersion),
+                Filters.not(new Document("conversationState", ENDED.toString())));
+        return conversationCollection.count(query);
     }
 
     @Override

@@ -2,7 +2,7 @@ package ai.labs.resources.bootstrap;
 
 import ai.labs.group.IGroupStore;
 import ai.labs.group.impl.mongo.GroupStore;
-import ai.labs.memory.rest.IRestMonitorStore;
+import ai.labs.memory.rest.IRestConversationStore;
 import ai.labs.permission.rest.IRestPermissionStore;
 import ai.labs.resources.impl.behavior.mongo.BehaviorStore;
 import ai.labs.resources.impl.behavior.rest.RestBehaviorStore;
@@ -15,7 +15,7 @@ import ai.labs.resources.impl.descriptor.rest.RestDocumentDescriptorStore;
 import ai.labs.resources.impl.expression.RestExpression;
 import ai.labs.resources.impl.extensions.mongo.ExtensionStore;
 import ai.labs.resources.impl.extensions.rest.RestExtensionStore;
-import ai.labs.resources.impl.monitor.rest.RestMonitorStore;
+import ai.labs.resources.impl.monitor.rest.RestConversationStore;
 import ai.labs.resources.impl.output.mongo.OutputStore;
 import ai.labs.resources.impl.output.rest.RestOutputStore;
 import ai.labs.resources.impl.output.rest.keys.RestOutputKeys;
@@ -83,7 +83,7 @@ public class RepositoryModule extends AbstractBaseModule {
         bind(IRestRegularDictionaryStore.class).to(RestRegularDictionaryStore.class);
         bind(IRestBehaviorStore.class).to(RestBehaviorStore.class);
         bind(IRestOutputStore.class).to(RestOutputStore.class);
-        bind(IRestMonitorStore.class).to(RestMonitorStore.class);
+        bind(IRestConversationStore.class).to(RestConversationStore.class);
 
         bind(IRestOutputKeys.class).to(RestOutputKeys.class);
     }

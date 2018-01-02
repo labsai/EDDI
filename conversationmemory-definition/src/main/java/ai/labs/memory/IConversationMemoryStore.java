@@ -17,4 +17,6 @@ public interface IConversationMemoryStore {
     void deleteConversationMemorySnapshot(String conversationId) throws IResourceStore.ResourceStoreException, IResourceStore.ResourceNotFoundException;
 
     ConversationState getConversationState(String conversationId);
+
+    Long getActiveConversationCount(String botId, Integer botVersion);
 }
