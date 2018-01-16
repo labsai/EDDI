@@ -297,6 +297,9 @@ public class ServerRuntime implements IServerRuntime {
 
     private Filter createCrossSiteScriptFilter() {
         return new Filter() {
+
+            private final String httpMethods = "GET, PUT, POST, DELETE, PATCH, OPTIONS";
+
             @Override
             public void init(FilterConfig filterConfig) {
                 // not implemented
@@ -307,8 +310,10 @@ public class ServerRuntime implements IServerRuntime {
                     throws IOException, ServletException {
                 HttpServletResponse httpResponse = (HttpServletResponse) response;
                 httpResponse.setHeader("Access-Control-Allow-Origin", "*");
-                httpResponse.setHeader("Access-Control-Request-Method", "GET, PUT, POST, DELETE, PATCH, OPTIONS");
                 httpResponse.setHeader("Access-Control-Allow-Headers", "authorization, Content-Type");
+
+                httpResponse.setHeader("Access-Control-Request-Method", httpMethods);
+                httpResponse.setHeader("Access-Control-Allow-Methods", httpMethods);
                 filterChain.doFilter(request, response);
             }
 
