@@ -139,14 +139,12 @@ public class InputParserTask implements ILifecycleTask {
             Solution solution = extractExpressions(parsedSolutions, includeUnused, includeUnknown).get(0);
 
             String expressions = solution.getExpressions();
-            if (appendExpressions) {
+            if (appendExpressions && !expressions.isEmpty()) {
                 IData<String> latestExpressions = memory.getCurrentStep().getLatestData(KEY_EXPRESSIONS_PARSED);
                 if (latestExpressions != null) {
                     expressions = StringUtilities.joinStrings(", ", latestExpressions.getResult(), expressions);
                 }
-            }
 
-            if (!expressions.isEmpty()) {
                 IData<String> expressionsData = new Data<>(KEY_EXPRESSIONS_PARSED, expressions);
                 memory.getCurrentStep().storeData(expressionsData);
             }
