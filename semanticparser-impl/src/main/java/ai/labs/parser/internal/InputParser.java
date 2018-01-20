@@ -1,14 +1,11 @@
 package ai.labs.parser.internal;
 
 import ai.labs.parser.IInputParser;
-import ai.labs.parser.correction.ICorrection;
+import ai.labs.parser.corrections.ICorrection;
 import ai.labs.parser.internal.matches.MatchingResult;
 import ai.labs.parser.internal.matches.RawSolution;
 import ai.labs.parser.internal.matches.Suggestion;
-import ai.labs.parser.model.FoundPhrase;
-import ai.labs.parser.model.FoundUnknown;
-import ai.labs.parser.model.IDictionary;
-import ai.labs.parser.model.Unknown;
+import ai.labs.parser.model.*;
 
 import java.util.*;
 import java.util.stream.Collectors;
@@ -17,6 +14,7 @@ import java.util.stream.Collectors;
  * @author ginccc
  */
 public class InputParser implements IInputParser {
+    private List<INormalizer> normalizers;
     private List<IDictionary> dictionaries;
     private List<ICorrection> corrections;
     private Map<IDictionary.IWord, List<IDictionary.IPhrase>> phrasesMap;
@@ -26,6 +24,11 @@ public class InputParser implements IInputParser {
     }
 
     public InputParser(List<IDictionary> dictionaries, List<ICorrection> corrections) {
+        this(Collections.emptyList(), dictionaries, corrections);
+    }
+
+    public InputParser(List<INormalizer> normalizers, List<IDictionary> dictionaries, List<ICorrection> corrections) {
+        this.normalizers = normalizers;
         this.dictionaries = dictionaries;
         this.corrections = corrections;
         phrasesMap = preparePhrases(dictionaries);
@@ -37,10 +40,13 @@ public class InputParser implements IInputParser {
     }
 
     @Override
-    public List<RawSolution> parse(String sentence, List<IDictionary> temporaryDictionaries)
+    public List<RawSolution> parse(final String sentence, final List<IDictionary> temporaryDictionaries)
             throws InterruptedException {
+
+        String normalizedSentence = iterateNormalizers(sentence);
+
         InputHolder holder = new InputHolder();
-        holder.input = sentence.split(" ");
+        holder.input = normalizedSentence.split(" ");
 
         for (; holder.index < holder.input.length; holder.index++) {
             final String currentInputPart = holder.input[holder.index];
@@ -57,6 +63,15 @@ public class InputParser implements IInputParser {
         }
 
         return lookupPhrases(holder, preparePhrases(temporaryDictionaries));
+    }
+
+    private String iterateNormalizers(String sentence) throws InterruptedException {
+        for (INormalizer normalizer : normalizers) {
+            throwExceptionIfInterrupted("normalizer");
+            sentence = normalizer.normalize(sentence);
+        }
+
+        return sentence;
     }
 
     private void iterateDictionaries(InputHolder holder, String currentInputPart, List<IDictionary> dictionaries)
@@ -77,7 +92,7 @@ public class InputParser implements IInputParser {
         for (ICorrection correction : corrections) {
             throwExceptionIfInterrupted("corrections");
             if (!correction.lookupIfKnown() && holder.getMatchingResultSize(holder.index) != 0) {
-                //skipped correction because input part is already known.
+                //skipped corrections because input part is already known.
                 continue;
             }
 
@@ -102,12 +117,10 @@ public class InputParser implements IInputParser {
 
     private void addDictionaryEntriesTo(InputHolder holder, String matchedInputValue,
                                         List<IDictionary.IFoundWord> foundWords) {
-        if (!holder.equalsMatchingTerm(matchedInputValue, foundWords)) {
-            for (IDictionary.IFoundWord foundWord : foundWords) {
-                MatchingResult matchingResult = new MatchingResult();
-                matchingResult.addResult(foundWord);
-                holder.addMatch(matchedInputValue, matchingResult);
-            }
+        for (IDictionary.IFoundWord foundWord : foundWords) {
+            MatchingResult matchingResult = new MatchingResult();
+            matchingResult.addResult(foundWord);
+            holder.addMatch(holder.index, matchedInputValue, matchingResult);
         }
     }
 

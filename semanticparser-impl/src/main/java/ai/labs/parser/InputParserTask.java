@@ -7,11 +7,12 @@ import ai.labs.memory.Data;
 import ai.labs.memory.IConversationMemory;
 import ai.labs.memory.IData;
 import ai.labs.output.model.QuickReply;
-import ai.labs.parser.correction.*;
+import ai.labs.parser.corrections.*;
 import ai.labs.parser.dictionaries.*;
 import ai.labs.parser.internal.InputParser;
 import ai.labs.parser.internal.matches.RawSolution;
 import ai.labs.parser.model.IDictionary;
+import ai.labs.parser.model.INormalizer;
 import ai.labs.parser.rest.model.Solution;
 import ai.labs.resources.rest.regulardictionary.model.RegularDictionaryConfiguration;
 import ai.labs.runtime.client.configuration.IResourceClientLibrary;
@@ -34,6 +35,7 @@ import static ai.labs.parser.DictionaryUtilities.extractExpressions;
 @Slf4j
 public class InputParserTask implements ILifecycleTask {
     private IInputParser sentenceParser;
+    private List<INormalizer> normalizers;
     private List<IDictionary> dictionaries;
     private List<ICorrection> corrections;
     private IResourceClientLibrary resourceClientLibrary;
@@ -82,11 +84,11 @@ public class InputParserTask implements ILifecycleTask {
 
     @Override
     public void init() {
-        this.sentenceParser = new InputParser(dictionaries, corrections);
+        this.sentenceParser = new InputParser(normalizers, dictionaries, corrections);
     }
 
     @Override
-    public void executeTask(IConversationMemory memory) throws LifecycleException {
+    public void executeTask(IConversationMemory memory) {
         //parse user input to meanings
         final IData<String> inputData = memory.getCurrentStep().getLatestData("input");
         if (inputData == null) {

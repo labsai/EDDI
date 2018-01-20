@@ -8,6 +8,7 @@ import org.junit.Assert;
 import org.junit.Test;
 
 import java.util.Arrays;
+import java.util.Collections;
 import java.util.Iterator;
 import java.util.List;
 
@@ -16,14 +17,14 @@ import java.util.List;
  */
 public class MatchMatrixTest {
     @Test
-    public void testCreatePossibleSolutions() throws Exception {
+    public void testCreatePossibleSolutions() {
         //setup
         MatchMatrix matchMatrix = new MatchMatrix();
         MatchingResult matchingResult = new MatchingResult();
-        List<Expression> expressions = Arrays.asList(new Expression("unused", new Expression("hello")));
+        List<Expression> expressions = Collections.singletonList(new Expression("unused", new Expression("hello")));
         IDictionary.IWord word = new Word("helo", expressions, null, 0, false);
         matchingResult.addResult(new FoundWord(word, false, 1.0));
-        matchMatrix.addMatchingResult("helo", matchingResult);
+        matchMatrix.addMatchingResult(0, "helo", matchingResult);
 
         //test
         Iterator<Suggestion> possibleSolutions = matchMatrix.iterator();

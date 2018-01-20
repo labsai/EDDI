@@ -1,4 +1,4 @@
-package ai.labs.parser.correction.similarities;
+package ai.labs.parser.corrections.similarities;
 
 /**
  * Damerau-Levenshtein Distance

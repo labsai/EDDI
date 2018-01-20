@@ -1,4 +1,4 @@
-package ai.labs.parser.correction;
+package ai.labs.parser.corrections;
 
 import ai.labs.expressions.Expression;
 import ai.labs.expressions.ExpressionFactory;

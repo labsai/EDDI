@@ -1,7 +1,7 @@
-package ai.labs.parser.correction;
+package ai.labs.parser.corrections;
 
-import ai.labs.parser.correction.similarities.DamerauLevenshteinDistance;
-import ai.labs.parser.correction.similarities.IDistanceCalculator;
+import ai.labs.parser.corrections.similarities.DamerauLevenshteinDistance;
+import ai.labs.parser.corrections.similarities.IDistanceCalculator;
 import ai.labs.parser.model.FoundWord;
 import ai.labs.parser.model.IDictionary;
 import ai.labs.parser.model.Word;
