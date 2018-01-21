@@ -30,6 +30,12 @@ public class CharacterUtilities {
     }
 
 
+    public static String deleteUndefinedChars(String sentence, String pattern) {
+        StringBuilder inputBuilder = new StringBuilder(sentence);
+        deleteUndefinedChars(inputBuilder, pattern);
+        return inputBuilder.toString();
+    }
+
     /**
      * Methode deletes all characters which are not defined in pattern
      * to make sure that there are no unexpected chars when processing input.
@@ -56,6 +62,12 @@ public class CharacterUtilities {
                 i++;
             }
         }
+    }
+
+    public static String convertSpecialCharacter(String input) {
+        StringBuilder inputBuilder = new StringBuilder(input);
+        convertSpecialCharacter(inputBuilder);
+        return inputBuilder.toString();
     }
 
     public static void convertSpecialCharacter(StringBuilder input) {

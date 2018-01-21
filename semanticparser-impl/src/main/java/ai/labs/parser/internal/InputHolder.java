@@ -3,7 +3,6 @@ package ai.labs.parser.internal;
 import ai.labs.parser.internal.matches.MatchMatrix;
 import ai.labs.parser.internal.matches.MatchingResult;
 import ai.labs.parser.internal.matches.Suggestion;
-import ai.labs.parser.model.IDictionary;
 
 import java.util.Iterator;
 import java.util.List;

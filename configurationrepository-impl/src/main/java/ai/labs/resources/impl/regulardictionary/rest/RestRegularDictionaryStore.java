@@ -88,9 +88,6 @@ public class RestRegularDictionaryStore extends RestVersionInfo<RegularDictionar
             RegularDictionaryConfiguration regularDictionaryConfigurationPatch = patchInstruction.getDocument();
             switch (patchInstruction.getOperation()) {
                 case SET:
-                    if (regularDictionaryConfigurationPatch.getLanguage() != null) {
-                        currentRegularDictionaryConfiguration.setLanguage(regularDictionaryConfigurationPatch.getLanguage());
-                    }
                     currentRegularDictionaryConfiguration.getWords().removeAll(regularDictionaryConfigurationPatch.getWords());
                     currentRegularDictionaryConfiguration.getWords().addAll(regularDictionaryConfigurationPatch.getWords());
                     currentRegularDictionaryConfiguration.getPhrases().removeAll(regularDictionaryConfigurationPatch.getPhrases());

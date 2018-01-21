@@ -1,6 +1,7 @@
 package ai.labs.parser.model;
 
 import ai.labs.expressions.Expression;
+import ai.labs.parser.extensions.dictionaries.IDictionary;
 
 import java.util.List;
 

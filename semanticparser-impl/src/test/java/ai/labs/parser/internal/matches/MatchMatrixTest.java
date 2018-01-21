@@ -2,12 +2,11 @@ package ai.labs.parser.internal.matches;
 
 import ai.labs.expressions.Expression;
 import ai.labs.parser.model.FoundWord;
-import ai.labs.parser.model.IDictionary;
+import ai.labs.parser.extensions.dictionaries.IDictionary;
 import ai.labs.parser.model.Word;
 import org.junit.Assert;
 import org.junit.Test;
 
-import java.util.Arrays;
 import java.util.Collections;
 import java.util.Iterator;
 import java.util.List;

@@ -1,7 +1,9 @@
 package ai.labs.parser.internal;
 
 import ai.labs.parser.IInputParser;
-import ai.labs.parser.corrections.ICorrection;
+import ai.labs.parser.extensions.corrections.ICorrection;
+import ai.labs.parser.extensions.dictionaries.IDictionary;
+import ai.labs.parser.extensions.normalizers.INormalizer;
 import ai.labs.parser.internal.matches.MatchingResult;
 import ai.labs.parser.internal.matches.RawSolution;
 import ai.labs.parser.internal.matches.Suggestion;

@@ -1,7 +1,7 @@
 package ai.labs.parser;
 
 import ai.labs.parser.internal.matches.RawSolution;
-import ai.labs.parser.model.IDictionary;
+import ai.labs.parser.extensions.dictionaries.IDictionary;
 
 import java.util.List;
 
