@@ -13,8 +13,18 @@ public class ContractedWordNormalizer implements INormalizer {
         contractedWords.put("can't", "cannot");
         contractedWords.put("couldn't", "could not");
         contractedWords.put("won't", "would not");
+        contractedWords.put("wasn't", "was not");
+        contractedWords.put("weren't", "were not");
         contractedWords.put("shouldn't", "should not");
+        contractedWords.put("haven't", "have not");
+        contractedWords.put("hasn't", "has not");
+        contractedWords.put("i'm", "i am");
+        contractedWords.put("you're", "you are");
+        contractedWords.put("he's", "he is");
+        contractedWords.put("she's", "she is");
         contractedWords.put("it's", "it is");
+        contractedWords.put("they're", "they are");
+        contractedWords.put("we're", "we are");
     }
 
     @Override

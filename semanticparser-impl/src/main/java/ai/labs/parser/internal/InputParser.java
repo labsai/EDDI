@@ -7,15 +7,21 @@ import ai.labs.parser.extensions.normalizers.INormalizer;
 import ai.labs.parser.internal.matches.MatchingResult;
 import ai.labs.parser.internal.matches.RawSolution;
 import ai.labs.parser.internal.matches.Suggestion;
-import ai.labs.parser.model.*;
+import ai.labs.parser.model.FoundPhrase;
+import ai.labs.parser.model.FoundUnknown;
+import ai.labs.parser.model.Unknown;
 
 import java.util.*;
+import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
 /**
  * @author ginccc
  */
 public class InputParser implements IInputParser {
+    private static final Pattern REGEX_MATCHER_MULTIPLE_SPACES = Pattern.compile(" +");
+    private static final String BLANK_CHAR = " ";
+
     private List<INormalizer> normalizers;
     private List<IDictionary> dictionaries;
     private List<ICorrection> corrections;
@@ -42,13 +48,22 @@ public class InputParser implements IInputParser {
     }
 
     @Override
+    public String normalize(final String sentence) throws InterruptedException {
+        String normalizedSentence = iterateNormalizers(sentence);
+        normalizedSentence = normalizeWhitespaces(normalizedSentence);
+        return normalizedSentence;
+    }
+
+    private String normalizeWhitespaces(String normalizedSentence) {
+        return REGEX_MATCHER_MULTIPLE_SPACES.matcher(normalizedSentence.trim()).replaceAll(BLANK_CHAR);
+    }
+
+    @Override
     public List<RawSolution> parse(final String sentence, final List<IDictionary> temporaryDictionaries)
             throws InterruptedException {
 
-        String normalizedSentence = iterateNormalizers(sentence);
-
         InputHolder holder = new InputHolder();
-        holder.input = normalizedSentence.split(" ");
+        holder.input = sentence.split(" ");
 
         for (; holder.index < holder.input.length; holder.index++) {
             final String currentInputPart = holder.input[holder.index];
@@ -69,7 +84,7 @@ public class InputParser implements IInputParser {
 
     private String iterateNormalizers(String sentence) throws InterruptedException {
         for (INormalizer normalizer : normalizers) {
-            throwExceptionIfInterrupted("normalizer");
+            throwExceptionIfInterrupted("normalizers");
             sentence = normalizer.normalize(sentence);
         }
 

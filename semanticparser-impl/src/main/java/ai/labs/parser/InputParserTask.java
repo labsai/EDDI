@@ -41,6 +41,7 @@ public class InputParserTask implements ILifecycleTask {
     private List<IDictionary> dictionaries;
     private List<ICorrection> corrections;
 
+    private static final String KEY_INPUT_NORMALIZED = "input:normalized";
     private static final String KEY_EXPRESSIONS_PARSED = "expressions:parsed";
     private static final String KEY_TYPE = "type";
     private static final String KEY_CONFIG = "config";
@@ -90,11 +91,15 @@ public class InputParserTask implements ILifecycleTask {
         List<IDictionary> temporaryDictionaries = prepareTemporaryDictionaries(memory);
         List<RawSolution> parsedSolutions;
         try {
-            parsedSolutions = sentenceParser.parse(inputData.getResult(), temporaryDictionaries);
+            String userInput = inputData.getResult();
+            String normalizedUserInput = sentenceParser.normalize(userInput);
+            storeNormalizedResultInMemory(memory, normalizedUserInput);
+            parsedSolutions = sentenceParser.parse(normalizedUserInput, temporaryDictionaries);
         } catch (InterruptedException e) {
             log.warn(e.getLocalizedMessage(), e);
             return;
         }
+
         storeResultInMemory(memory, parsedSolutions);
     }
 
@@ -126,6 +131,13 @@ public class InputParserTask implements ILifecycleTask {
                 });
 
         return ret;
+    }
+
+    private void storeNormalizedResultInMemory(IConversationMemory memory, String normalizedInput) {
+        if (!RuntimeUtilities.isNullOrEmpty(normalizedInput)) {
+            IData<String> expressionsData = new Data<>(KEY_INPUT_NORMALIZED, normalizedInput);
+            memory.getCurrentStep().storeData(expressionsData);
+        }
     }
 
     private void storeResultInMemory(IConversationMemory memory, List<RawSolution> parsedSolutions) {

@@ -9,6 +9,8 @@ import java.util.List;
  * @author ginccc
  */
 public interface IInputParser {
+    String normalize(String sentence) throws InterruptedException;
+
     List<RawSolution> parse(String sentence) throws InterruptedException;
 
     List<RawSolution> parse(String sentence, List<IDictionary> temporaryDictionaries) throws InterruptedException;
