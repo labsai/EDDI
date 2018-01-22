@@ -1,27 +1,35 @@
 package ai.labs.parser.internal.matches;
 
+import lombok.AllArgsConstructor;
+import lombok.EqualsAndHashCode;
+import lombok.Getter;
+import lombok.Setter;
+
 import java.util.*;
 
 /**
  * @author ginccc
  */
 public class MatchMatrix implements Iterable<Suggestion> {
-    private Map<String, List<MatchingResult>> mappedMatchMatrix = new LinkedHashMap<>();
-
-    public void addMatchingResult(String inputTerm, MatchingResult matchingResult) {
-        if (!mappedMatchMatrix.containsKey(inputTerm)) {
-            mappedMatchMatrix.put(inputTerm, new LinkedList<>());
-        }
-
-        mappedMatchMatrix.get(inputTerm).add(matchingResult);
+    @AllArgsConstructor
+    @Getter
+    @Setter
+    @EqualsAndHashCode
+    class Match {
+        int index;
+        String inputTerm;
     }
 
-    public List<MatchingResult> getMatchingResults(String inputTerm) {
-        if (mappedMatchMatrix.containsKey(inputTerm)) {
-            return mappedMatchMatrix.get(inputTerm);
+
+    private Map<Match, List<MatchingResult>> mappedMatchMatrix = new LinkedHashMap<>();
+
+    public void addMatchingResult(int index, String inputTerm, MatchingResult matchingResult) {
+        Match match = new Match(index, inputTerm);
+        if (!mappedMatchMatrix.containsKey(match)) {
+            mappedMatchMatrix.put(match, new LinkedList<>());
         }
 
-        return null;
+        mappedMatchMatrix.get(match).add(matchingResult);
     }
 
     public List<MatchingResult> getMatchingResults(int index) {

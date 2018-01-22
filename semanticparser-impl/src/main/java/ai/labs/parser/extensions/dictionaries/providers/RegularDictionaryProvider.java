@@ -1,0 +1,89 @@
+package ai.labs.parser.extensions.dictionaries.providers;
+
+import ai.labs.expressions.Expression;
+import ai.labs.expressions.utilities.IExpressionProvider;
+import ai.labs.lifecycle.IllegalExtensionConfigurationException;
+import ai.labs.parser.extensions.dictionaries.RegularDictionary;
+import ai.labs.parser.extensions.dictionaries.IDictionary;
+import ai.labs.resources.rest.regulardictionary.model.RegularDictionaryConfiguration;
+import ai.labs.runtime.client.configuration.IResourceClientLibrary;
+import ai.labs.runtime.service.ServiceException;
+import ai.labs.utilities.RuntimeUtilities;
+
+import javax.inject.Inject;
+import java.net.URI;
+import java.util.Collections;
+import java.util.List;
+import java.util.Map;
+
+/**
+ * @author ginccc
+ */
+public class RegularDictionaryProvider implements IDictionaryProvider {
+    public static final String ID = "ai.labs.parser.dictionaries.regular";
+
+    private static final String KEY_URI = "uri";
+
+    private final IResourceClientLibrary resourceClientLibrary;
+    private final IExpressionProvider expressionProvider;
+    private RegularDictionary regularDictionary;
+
+    @Inject
+    public RegularDictionaryProvider(IResourceClientLibrary resourceClientLibrary,
+                                     IExpressionProvider expressionProvider) {
+        this.resourceClientLibrary = resourceClientLibrary;
+        this.expressionProvider = expressionProvider;
+    }
+
+    @Override
+    public IDictionary provide() {
+        return regularDictionary != null ? regularDictionary : new RegularDictionary();
+    }
+
+    @Override
+    public void setConfig(Map<String, Object> config) throws IllegalExtensionConfigurationException {
+        try {
+            String uriString = config.get(KEY_URI).toString();
+            if (uriString.startsWith("eddi")) {
+                RegularDictionaryConfiguration regularDictionaryConfiguration =
+                        fetchRegularDictionaryConfiguration(URI.create(uriString));
+                addConfigsToDictionary(regularDictionaryConfiguration);
+            } else {
+                throw new ServiceException("No resource URI has been defined! [RegularDictionaryConfiguration]");
+            }
+        } catch (ServiceException e) {
+            String message = "Error while fetching RegularDictionaryConfiguration!\n" + e.getLocalizedMessage();
+            throw new IllegalExtensionConfigurationException(message, e);
+        }
+    }
+
+    private void addConfigsToDictionary(RegularDictionaryConfiguration regularDictionaryConfiguration) {
+        regularDictionary = new RegularDictionary();
+        regularDictionary.setLookupIfKnown(true);
+
+        regularDictionaryConfiguration.getWords().forEach(wordConfig -> {
+            String word = wordConfig.getWord();
+            regularDictionary.addWord(word,
+                    createDefaultExpressionIfNull(word, wordConfig.getExp()), wordConfig.getFrequency());
+        });
+
+        regularDictionaryConfiguration.getPhrases().forEach(phraseConfig -> {
+            String phrase = phraseConfig.getPhrase();
+            regularDictionary.addPhrase(phrase,
+                    createDefaultExpressionIfNull(phrase, phraseConfig.getExp()));
+        });
+    }
+
+    private List<Expression> createDefaultExpressionIfNull(String value, String exp) {
+        if (RuntimeUtilities.isNullOrEmpty(exp)) {
+            return Collections.singletonList(expressionProvider.createExpression("unused", value));
+        }
+
+        return expressionProvider.parseExpressions(exp);
+    }
+
+    private RegularDictionaryConfiguration fetchRegularDictionaryConfiguration(URI resourceURI)
+            throws ServiceException {
+        return resourceClientLibrary.getResource(resourceURI, RegularDictionaryConfiguration.class);
+    }
+}

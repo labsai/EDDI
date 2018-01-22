@@ -3,9 +3,9 @@ package ai.labs.parser;
 import ai.labs.expressions.Expression;
 import ai.labs.expressions.utilities.IExpressionProvider;
 import ai.labs.output.model.QuickReply;
-import ai.labs.parser.dictionaries.RegularDictionary;
+import ai.labs.parser.extensions.dictionaries.IDictionary;
+import ai.labs.parser.extensions.dictionaries.RegularDictionary;
 import ai.labs.parser.internal.matches.RawSolution;
-import ai.labs.parser.model.IDictionary;
 import ai.labs.parser.rest.model.Solution;
 import ai.labs.utilities.StringUtilities;
 
@@ -49,7 +49,7 @@ public class DictionaryUtilities {
     static List<IDictionary> convertQuickReplies(List<QuickReply> quickReplies, IExpressionProvider expressionProvider) {
         List<IDictionary> ret = new LinkedList<>();
 
-        RegularDictionary dictionary = new RegularDictionary(null, false);
+        RegularDictionary dictionary = new RegularDictionary();
         quickReplies.forEach(quickReply -> {
             String quickReplyValue = quickReply.getValue();
             List<Expression> expressions = expressionProvider.parseExpressions(quickReply.getExpressions());

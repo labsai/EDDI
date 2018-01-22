@@ -1,7 +1,7 @@
 package ai.labs.parser;
 
 import ai.labs.parser.model.FoundWord;
-import ai.labs.parser.model.IDictionary;
+import ai.labs.parser.extensions.dictionaries.IDictionary;
 import lombok.NoArgsConstructor;
 
 import java.util.LinkedList;
@@ -43,11 +43,6 @@ public class TestDictionary implements IDictionary {
         }
 
         return foundWords;
-    }
-
-    @Override
-    public String getLanguage() {
-        return "testDictionary";
     }
 
     @Override

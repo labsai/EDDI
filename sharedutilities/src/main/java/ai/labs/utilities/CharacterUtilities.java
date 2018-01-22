@@ -1,6 +1,20 @@
 package ai.labs.utilities;
 
+import java.util.HashMap;
+import java.util.Map;
+
 public class CharacterUtilities {
+    private static final Map<Character, Character> specialCharacters = new HashMap<>();
+
+    static {
+        specialCharacters.put('’', '\'');
+        specialCharacters.put('‘', '\'');
+        specialCharacters.put('´', '\'');
+        specialCharacters.put('`', '\'');
+        specialCharacters.put('“', '"');
+        specialCharacters.put('”', '"');
+    }
+
     public static boolean isStringInteger(String lookup) {
         for (int i = 0; i < lookup.length(); i++)
             if (!Character.isDigit(lookup.charAt(i))) {
@@ -30,6 +44,12 @@ public class CharacterUtilities {
     }
 
 
+    public static String deleteUndefinedChars(String sentence, String pattern) {
+        StringBuilder inputBuilder = new StringBuilder(sentence);
+        deleteUndefinedChars(inputBuilder, pattern);
+        return inputBuilder.toString();
+    }
+
     /**
      * Methode deletes all characters which are not defined in pattern
      * to make sure that there are no unexpected chars when processing input.
@@ -58,26 +78,37 @@ public class CharacterUtilities {
         }
     }
 
+    public static String convertSpecialCharacter(String input) {
+        StringBuilder inputBuilder = new StringBuilder(input);
+        convertSpecialCharacter(inputBuilder);
+        return inputBuilder.toString();
+    }
+
     public static void convertSpecialCharacter(StringBuilder input) {
         for (int i = 0; i < input.length(); i++) {
-            switch (Character.toLowerCase(input.charAt(i))) {
-                case 'ä':
-                    input.replace(i, i + 1, "ae");
-                    break;
-                case 'ö':
-                    input.replace(i, i + 1, "oe");
-                    break;
-                case 'ü':
-                    input.replace(i, i + 1, "ue");
-                    break;
-                case 'ß':
-                    input.replace(i, i + 1, "ss");
-                    break;
-                case 'é':
-                    input.replace(i, i + 1, "e");
-                    break;
-                case 'á':
-                    input.replace(i, i + 1, "a");
+            char lookup = input.charAt(i);
+            if (specialCharacters.containsKey(lookup)) {
+                input.replace(i, i + 1, specialCharacters.get(lookup).toString());
+            } else {
+                switch (Character.toLowerCase(lookup)) {
+                    case 'ä':
+                        input.replace(i, i + 1, "ae");
+                        break;
+                    case 'ö':
+                        input.replace(i, i + 1, "oe");
+                        break;
+                    case 'ü':
+                        input.replace(i, i + 1, "ue");
+                        break;
+                    case 'ß':
+                        input.replace(i, i + 1, "ss");
+                        break;
+                    case 'é':
+                        input.replace(i, i + 1, "e");
+                        break;
+                    case 'á':
+                        input.replace(i, i + 1, "a");
+                }
             }
         }
     }

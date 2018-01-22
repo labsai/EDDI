@@ -1,6 +1,6 @@
 package ai.labs.parser.internal.matches;
 
-import ai.labs.parser.model.IDictionary;
+import ai.labs.parser.extensions.dictionaries.IDictionary;
 
 import java.util.LinkedList;
 import java.util.List;

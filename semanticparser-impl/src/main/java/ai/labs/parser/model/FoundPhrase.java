@@ -1,5 +1,7 @@
 package ai.labs.parser.model;
 
+import ai.labs.parser.extensions.dictionaries.IDictionary;
+
 /**
  * @author ginccc
  */
