@@ -1,3 +1,5 @@
+REM used in docker container
+
 @echo off
 if [%1] == [] (
     echo "Usage: <environment> [rmi-server-hostname]"
