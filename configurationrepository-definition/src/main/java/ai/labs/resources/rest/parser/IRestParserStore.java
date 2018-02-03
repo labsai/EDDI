@@ -100,7 +100,7 @@ public interface IRestParserStore extends IRestVersionInfo {
      * ]}
      * }
      *
-     * @param parserConfiguration configuration of parser (which dictionaries and which correction algorithms in which order)
+     * @param parserConfiguration configuration of parser (which dictionaries and which corrections algorithms in which order)
      * @return an array of expressions representing the found solutions
      */
     @POST

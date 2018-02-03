@@ -34,6 +34,10 @@ import org.jboss.resteasy.plugins.guice.ext.RequestScopeModule;
 import java.io.FileInputStream;
 
 /**
+ * the central REST API server component
+ * run with params: -DEDDI_ENV=(development|production) -Xbootclasspath/p:[ABS_PATH_TO]\alpn-boot-8.1.11.v20170118.jar
+ * requires Mongo DB
+ *
  * @author ginccc
  */
 public class ApiServer {

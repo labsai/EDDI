@@ -5,6 +5,7 @@ import ai.labs.lifecycle.LifecycleException;
 import ai.labs.lifecycle.PackageConfigurationException;
 import ai.labs.memory.Data;
 import ai.labs.memory.IConversationMemory;
+import ai.labs.memory.IData;
 import ai.labs.resources.rest.behavior.model.BehaviorConfiguration;
 import ai.labs.runtime.client.configuration.IResourceClientLibrary;
 import ai.labs.runtime.service.ServiceException;
@@ -72,13 +73,22 @@ public class BehaviorRulesEvaluationTask implements ILifecycleTask {
     }
 
     private void addActionsToConversationMemory(IConversationMemory memory, List<BehaviorRule> successRules) {
-        List<String> allActions = new LinkedList<>();
+        List<String> allCurrentActions = new LinkedList<>();
         successRules.forEach(successRule -> successRule.getActions().stream().
-                filter(action -> !allActions.contains(action)).forEach(allActions::add));
+                filter(action -> !allCurrentActions.contains(action)).forEach(allCurrentActions::add));
 
-        Data actions = new Data<>("actions", allActions);
-        actions.setPublic(true);
-        memory.getCurrentStep().storeData(actions);
+        IData<List<String>> latestActions = memory.getCurrentStep().getLatestData("actions");
+        List<String> actions = new LinkedList<>();
+        if (latestActions != null && latestActions.getResult() != null) {
+            actions.addAll(latestActions.getResult());
+        }
+
+        actions.addAll(allCurrentActions.stream().
+                filter(action -> !actions.contains(action)).collect(Collectors.toList()));
+
+        Data actionsData = new Data<>("actions", actions);
+        actionsData.setPublic(true);
+        memory.getCurrentStep().storeData(actionsData);
     }
 
     private void storeResultIfNotEmpty(IConversationMemory memory, String key, List<BehaviorRule> result) {

@@ -297,17 +297,19 @@ public class ServerRuntime implements IServerRuntime {
 
     private Filter createCrossSiteScriptFilter() {
         return new Filter() {
+
             @Override
-            public void init(FilterConfig filterConfig) throws ServletException {
+            public void init(FilterConfig filterConfig) {
                 // not implemented
             }
 
             @Override
-            public void doFilter(ServletRequest request, ServletResponse response, FilterChain filterChain) throws IOException, ServletException {
+            public void doFilter(ServletRequest request, ServletResponse response, FilterChain filterChain)
+                    throws IOException, ServletException {
                 HttpServletResponse httpResponse = (HttpServletResponse) response;
                 httpResponse.setHeader("Access-Control-Allow-Origin", "*");
-                httpResponse.setHeader("Access-Control-Request-Method", "GET, PUT, POST, DELETE, PATCH, OPTIONS");
-                httpResponse.setHeader("Access-Control-Allow-Headers", "authorization");
+                httpResponse.setHeader("Access-Control-Allow-Headers", "authorization, Content-Type");
+                httpResponse.setHeader("Access-Control-Allow-Methods", "GET, PUT, POST, DELETE, PATCH, OPTIONS");
                 filterChain.doFilter(request, response);
             }
 

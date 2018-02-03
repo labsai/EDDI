@@ -6,7 +6,7 @@ import ai.labs.expressions.utilities.ExpressionProvider;
 import ai.labs.expressions.utilities.IExpressionProvider;
 import ai.labs.parser.internal.InputParser;
 import ai.labs.parser.internal.matches.RawSolution;
-import ai.labs.parser.model.IDictionary;
+import ai.labs.parser.extensions.dictionaries.IDictionary;
 import ai.labs.parser.model.Phrase;
 import ai.labs.parser.model.Word;
 import ai.labs.utilities.StringUtilities;
