@@ -17,7 +17,7 @@
         <dependency>
             <groupId>org.mongodb</groupId>
             <artifactId>mongodb-driver</artifactId>
-            <version>3.6.1</version>
+            <version>3.6.2</version>
         </dependency>
         <dependency>
             <groupId>org.codehaus.jackson</groupId>
@@ -43,6 +43,11 @@
             <groupId>ai.labs</groupId>
             <artifactId>runtime-definition</artifactId>
             <version>${project.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>org.keycloak</groupId>
+            <artifactId>keycloak-core</artifactId>
+            <version>3.4.3.Final</version>
         </dependency>
     </dependencies>
 
