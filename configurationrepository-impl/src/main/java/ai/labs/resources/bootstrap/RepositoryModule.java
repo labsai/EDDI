@@ -15,6 +15,8 @@ import ai.labs.resources.impl.descriptor.rest.RestDocumentDescriptorStore;
 import ai.labs.resources.impl.expression.RestExpression;
 import ai.labs.resources.impl.extensions.mongo.ExtensionStore;
 import ai.labs.resources.impl.extensions.rest.RestExtensionStore;
+import ai.labs.resources.impl.http.mongo.HttpCallsStore;
+import ai.labs.resources.impl.http.rest.RestHttpCallsStore;
 import ai.labs.resources.impl.monitor.rest.RestConversationStore;
 import ai.labs.resources.impl.output.mongo.OutputStore;
 import ai.labs.resources.impl.output.rest.RestOutputStore;
@@ -37,6 +39,8 @@ import ai.labs.resources.rest.documentdescriptor.IRestDocumentDescriptorStore;
 import ai.labs.resources.rest.expression.IRestExpression;
 import ai.labs.resources.rest.extensions.IExtensionStore;
 import ai.labs.resources.rest.extensions.IRestExtensionStore;
+import ai.labs.resources.rest.http.IHttpCallsStore;
+import ai.labs.resources.rest.http.IRestHttpCallsStore;
 import ai.labs.resources.rest.output.IOutputStore;
 import ai.labs.resources.rest.output.IRestOutputStore;
 import ai.labs.resources.rest.output.keys.IRestOutputKeys;
@@ -70,6 +74,7 @@ public class RepositoryModule extends AbstractBaseModule {
         bind(IBehaviorStore.class).to(BehaviorStore.class).in(Scopes.SINGLETON);
         bind(IOutputStore.class).to(OutputStore.class).in(Scopes.SINGLETON);
         bind(IDeploymentStore.class).to(DeploymentStore.class).in(Scopes.SINGLETON);
+        bind(IHttpCallsStore.class).to(HttpCallsStore.class).in(Scopes.SINGLETON);
 
         bind(IRestPermissionStore.class).to(RestPermissionStore.class);
         bind(IRestDocumentDescriptorStore.class).to(RestDocumentDescriptorStore.class);
@@ -84,6 +89,7 @@ public class RepositoryModule extends AbstractBaseModule {
         bind(IRestBehaviorStore.class).to(RestBehaviorStore.class);
         bind(IRestOutputStore.class).to(RestOutputStore.class);
         bind(IRestConversationStore.class).to(RestConversationStore.class);
+        bind(IRestHttpCallsStore.class).to(RestHttpCallsStore.class);
 
         bind(IRestOutputKeys.class).to(RestOutputKeys.class);
     }

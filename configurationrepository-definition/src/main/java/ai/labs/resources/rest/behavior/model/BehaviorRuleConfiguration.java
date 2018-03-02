@@ -1,5 +1,6 @@
 package ai.labs.resources.rest.behavior.model;
 
+import com.fasterxml.jackson.annotation.JsonProperty;
 import lombok.EqualsAndHashCode;
 import lombok.Getter;
 import lombok.Setter;
@@ -18,10 +19,11 @@ import java.util.List;
 public class BehaviorRuleConfiguration {
     private String name;
     private List<String> actions;
-    private List<BehaviorRuleElementConfiguration> children;
+  /*  @JsonProperty("children")*/
+    private List<BehaviorRuleElementConfiguration> conditions;
 
     public BehaviorRuleConfiguration() {
         actions = new LinkedList<>();
-        children = new ArrayList<>();
+        conditions = new ArrayList<>();
     }
 }

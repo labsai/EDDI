@@ -100,10 +100,14 @@ public class OutputTemplateTask implements ILifecycleTask {
             List<QuickReply> preTemplatedQuickReplies = copyQuickReplies(quickReplies);
 
             quickReplies.forEach(quickReply -> {
-                String preTemplatedValue = quickReply.getValue();
                 try {
+                    String preTemplatedValue = quickReply.getValue();
                     String postTemplatedValue = templatingEngine.processTemplate(preTemplatedValue, contextMap);
                     quickReply.setValue(postTemplatedValue);
+
+                    String preTemplatedExpressions = quickReply.getExpressions();
+                    String postTemplatedExpressions = templatingEngine.processTemplate(preTemplatedExpressions, contextMap);
+                    quickReply.setExpressions(postTemplatedExpressions);
                 } catch (ITemplatingEngine.TemplateEngineException e) {
                     log.error(e.getLocalizedMessage(), e);
                 }
