@@ -10,7 +10,9 @@ import ai.labs.resources.rest.bots.IBotStore;
 import ai.labs.resources.rest.bots.model.BotConfiguration;
 import ai.labs.rest.rest.IRestBotEngine;
 import ai.labs.rest.restinterfaces.IRestInterfaceFactory;
+import ai.labs.runtime.IBotFactory;
 import ai.labs.runtime.SystemRuntime;
+import ai.labs.runtime.service.ServiceException;
 import ai.labs.utilities.RestUtilities;
 import ai.labs.utilities.URIUtilities;
 import com.fasterxml.jackson.databind.JsonNode;
@@ -46,6 +48,7 @@ import java.util.Map;
 import java.util.concurrent.Callable;
 import java.util.concurrent.TimeUnit;
 
+import static ai.labs.memory.model.Deployment.Environment.unrestricted;
 import static ai.labs.persistence.IResourceStore.ResourceNotFoundException;
 import static ai.labs.persistence.IResourceStore.ResourceStoreException;
 import static ai.labs.rest.restinterfaces.RestInterfaceFactory.RestInterfaceFactoryException;
@@ -59,6 +62,7 @@ public class FacebookEndpoint implements IFacebookEndpoint {
     private static final int EDDI_TIMEOUT = 10000;
 
     private final IBotStore botStore;
+    private final IBotFactory botFactory;
     private final IHttpClient httpClient;
     private final IRestInterfaceFactory restInterfaceFactory;
     private final String apiServerURI;
@@ -67,11 +71,13 @@ public class FacebookEndpoint implements IFacebookEndpoint {
 
     @Inject
     public FacebookEndpoint(IBotStore botStore,
+                            IBotFactory botFactory,
                             IHttpClient httpClient,
                             IRestInterfaceFactory restInterfaceFactory,
                             @Named("system.apiServerURI") String apiServerURI,
                             ICacheFactory cacheFactory) {
         this.botStore = botStore;
+        this.botFactory = botFactory;
         this.httpClient = httpClient;
         this.restInterfaceFactory = restInterfaceFactory;
         this.apiServerURI = apiServerURI;
@@ -80,10 +86,10 @@ public class FacebookEndpoint implements IFacebookEndpoint {
     }
 
     private MessengerClient getMessageClient(String botId, Integer botVersion)
-            throws ResourceNotFoundException, ResourceStoreException {
+            throws ResourceNotFoundException, ResourceStoreException, ServiceException {
 
         if (botVersion == -1) {
-            botVersion = botStore.getCurrentResourceId(botId).getVersion();
+            botVersion = getLatestDeployedBotVersion(botId);
         }
 
         final BotResourceId botResourceId = new BotResourceId(botId, botVersion);
@@ -92,6 +98,10 @@ public class FacebookEndpoint implements IFacebookEndpoint {
         }
 
         return messengerClientCache.get(botResourceId);
+    }
+
+    private Integer getLatestDeployedBotVersion(String botId) throws ServiceException {
+        return botFactory.getLatestBot(unrestricted, botId).getVersion();
     }
 
     private MessengerClient createMessageClient(String botId, Integer botVersion)
@@ -118,12 +128,13 @@ public class FacebookEndpoint implements IFacebookEndpoint {
 
         return new MessengerClient(MessengerPlatform.newSendClientBuilder(pageAccessToken).build(),
                 MessengerPlatform.newReceiveClientBuilder(appSecret, verificationToken)
-                        .onTextMessageEvent(getTextMessageEventHandler(botId, botVersion, Deployment.Environment.unrestricted))
-                        .onQuickReplyMessageEvent(getQuickMessageEventHandler(botId, botVersion, Deployment.Environment.unrestricted))
+                        .onTextMessageEvent(createTextMessageEventHandler(botId, botVersion, unrestricted))
+                        .onQuickReplyMessageEvent(createQuickMessageEventHandler(botId, botVersion, unrestricted))
                         .build());
     }
 
-    private TextMessageEventHandler getTextMessageEventHandler(String botId, Integer botVersion, Deployment.Environment environment) {
+    private TextMessageEventHandler createTextMessageEventHandler(String botId, Integer botVersion,
+                                                                  Deployment.Environment environment) {
         return event -> {
             try {
                 String message = event.getText();
@@ -137,7 +148,8 @@ public class FacebookEndpoint implements IFacebookEndpoint {
         };
     }
 
-    private QuickReplyMessageEventHandler getQuickMessageEventHandler(String botId, Integer botVersion, Deployment.Environment environment) {
+    private QuickReplyMessageEventHandler createQuickMessageEventHandler(String botId, Integer botVersion,
+                                                                         Deployment.Environment environment) {
         return event -> {
             try {
                 String message = event.getQuickReply().getPayload();
@@ -157,7 +169,7 @@ public class FacebookEndpoint implements IFacebookEndpoint {
                      String conversationId,
                      String senderId,
                      String message)
-            throws IRequest.HttpRequestException, ResourceNotFoundException, ResourceStoreException {
+            throws IRequest.HttpRequestException, ResourceNotFoundException, ResourceStoreException, ServiceException {
 
         URI uri = RestUtilities.createURI(
                 apiServerURI, "/bots/",
@@ -347,7 +359,7 @@ public class FacebookEndpoint implements IFacebookEndpoint {
         } catch (MessengerVerificationException e) {
             log.error(e.getLocalizedMessage(), e);
             return Response.status(Response.Status.FORBIDDEN).build();
-        } catch (ResourceStoreException | ResourceNotFoundException e) {
+        } catch (ServiceException | ResourceStoreException | ResourceNotFoundException e) {
             log.error(e.getLocalizedMessage(), e);
             return Response.serverError().build();
         }
