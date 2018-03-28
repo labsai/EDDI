@@ -56,8 +56,8 @@
         <module>propertydisposer-impl</module>
         <module>backupservice-defintion</module>
         <module>backupservice-impl</module>
-        <module>graphQLConnector-definition</module>
-        <module>graphQLConnector-impl</module>
+        <module>httpCallsTask-definition</module>
+        <module>httpCallsTask-impl</module>
     </modules>
 
     <build>
