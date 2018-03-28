@@ -17,6 +17,7 @@ import ai.labs.persistence.bootstrap.PersistenceModule;
 import ai.labs.property.bootstrap.PropertyDisposerModule;
 import ai.labs.resources.bootstrap.RepositoryModule;
 import ai.labs.rest.bootstrap.RestInterfaceModule;
+import ai.labs.restapi.connector.bootstrap.HttpCallsModule;
 import ai.labs.runtime.DependencyInjector;
 import ai.labs.runtime.IAutoBotDeployment;
 import ai.labs.runtime.bootstrap.RuntimeModule;
@@ -83,6 +84,7 @@ public class ApiServer {
                 new ServerRuntimeModule(new FileInputStream(configDir + "webServer.properties")),
                 new FacebookMessengerModule(),
                 new BackupServiceModule(),
+                new HttpCallsModule(),
         };
 
         //init modules

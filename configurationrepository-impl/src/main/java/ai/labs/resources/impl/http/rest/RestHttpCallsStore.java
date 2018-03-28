@@ -1,7 +1,6 @@
 package ai.labs.resources.impl.http.rest;
 
 import ai.labs.persistence.IResourceStore;
-import ai.labs.resources.impl.http.rest.bots.mongo.HttpCallsStore;
 import ai.labs.resources.impl.resources.rest.RestVersionInfo;
 import ai.labs.resources.rest.documentdescriptor.IDocumentDescriptorStore;
 import ai.labs.resources.rest.documentdescriptor.model.DocumentDescriptor;

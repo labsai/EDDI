@@ -19,11 +19,10 @@ import java.util.List;
 public class BehaviorRuleConfiguration {
     private String name;
     private List<String> actions;
-  /*  @JsonProperty("children")*/
-    private List<BehaviorRuleElementConfiguration> conditions;
+    private List<BehaviorRuleElementConfiguration> children;
 
     public BehaviorRuleConfiguration() {
         actions = new LinkedList<>();
-        conditions = new ArrayList<>();
+        children = new ArrayList<>();
     }
 }

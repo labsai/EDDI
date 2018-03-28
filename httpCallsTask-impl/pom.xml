@@ -15,6 +15,11 @@
     <dependencies>
         <dependency>
             <groupId>ai.labs</groupId>
+            <artifactId>httpCallsTask-definition</artifactId>
+            <version>${project.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>ai.labs</groupId>
             <artifactId>conversationlifecycle-definition</artifactId>
             <version>${project.version}</version>
         </dependency>

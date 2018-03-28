@@ -31,7 +31,7 @@ import java.util.stream.IntStream;
  * @author ginccc
  */
 public class OutputGenerationTask implements ILifecycleTask {
-    private static final String ACTION_KEY = "action";
+    private static final String ACTION_KEY = "actions";
     private static final String MEMORY_OUTPUT_IDENTIFIER = "output";
     private static final String MEMORY_QUICK_REPLIES_IDENTIFIER = "quickReplies";
     private static final String CONTEXT_IDENTIFIER = "context";
