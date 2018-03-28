@@ -10,7 +10,9 @@ import ai.labs.resources.rest.bots.IBotStore;
 import ai.labs.resources.rest.bots.model.BotConfiguration;
 import ai.labs.rest.rest.IRestBotEngine;
 import ai.labs.rest.restinterfaces.IRestInterfaceFactory;
+import ai.labs.runtime.IBotFactory;
 import ai.labs.runtime.SystemRuntime;
+import ai.labs.runtime.service.ServiceException;
 import ai.labs.utilities.RestUtilities;
 import ai.labs.utilities.URIUtilities;
 import com.fasterxml.jackson.databind.JsonNode;
@@ -26,6 +28,7 @@ import com.github.messenger4j.send.MessengerSendClient;
 import com.github.messenger4j.send.QuickReply;
 import com.github.messenger4j.send.SenderAction;
 import lombok.AllArgsConstructor;
+import lombok.EqualsAndHashCode;
 import lombok.Getter;
 import lombok.Setter;
 import lombok.extern.slf4j.Slf4j;
@@ -34,7 +37,6 @@ import org.jboss.resteasy.plugins.guice.RequestScoped;
 import javax.inject.Inject;
 import javax.inject.Named;
 import javax.ws.rs.InternalServerErrorException;
-import javax.ws.rs.WebApplicationException;
 import javax.ws.rs.core.MediaType;
 import javax.ws.rs.core.Response;
 import java.io.IOException;
@@ -46,64 +48,72 @@ import java.util.Map;
 import java.util.concurrent.Callable;
 import java.util.concurrent.TimeUnit;
 
+import static ai.labs.memory.model.Deployment.Environment.unrestricted;
+import static ai.labs.persistence.IResourceStore.ResourceNotFoundException;
+import static ai.labs.persistence.IResourceStore.ResourceStoreException;
 import static ai.labs.rest.restinterfaces.RestInterfaceFactory.RestInterfaceFactoryException;
 
 @RequestScoped
 @Slf4j
 public class FacebookEndpoint implements IFacebookEndpoint {
-    private static final String RESOURCE_URI_CHANNELCONNECTOR = "eddi://ai.labs.channel.facebook";
+    private static final String RESOURCE_URI_CHANNEL_CONNECTOR = "eddi://ai.labs.channel.facebook";
     private static final String AI_LABS_USER_AGENT = "Jetty 9.4/HTTP CLIENT - AI.LABS.EDDI";
     private static final String ENCODING = "UTF-8";
+    private static final int EDDI_TIMEOUT = 10000;
 
     private final IBotStore botStore;
+    private final IBotFactory botFactory;
     private final IHttpClient httpClient;
     private final IRestInterfaceFactory restInterfaceFactory;
     private final String apiServerURI;
-    private final ICache<String, BotConfiguration> botConfigCache;
     private final ICache<String, String> conversationIdCache;
-    private final ICache<String, MessengerClient> messengerClientCache;
+    private final ICache<BotResourceId, MessengerClient> messengerClientCache;
 
     @Inject
     public FacebookEndpoint(IBotStore botStore,
+                            IBotFactory botFactory,
                             IHttpClient httpClient,
                             IRestInterfaceFactory restInterfaceFactory,
                             @Named("system.apiServerURI") String apiServerURI,
                             ICacheFactory cacheFactory) {
         this.botStore = botStore;
+        this.botFactory = botFactory;
         this.httpClient = httpClient;
         this.restInterfaceFactory = restInterfaceFactory;
         this.apiServerURI = apiServerURI;
-        this.botConfigCache = cacheFactory.getCache("facebook.botConfiguration");
         this.conversationIdCache = cacheFactory.getCache("facebook.conversationIds");
         this.messengerClientCache = cacheFactory.getCache("facebook.messengerReceiveClients");
     }
 
-    private MessengerClient getMessageClient(String botId) {
-        if (!messengerClientCache.containsKey(botId)) {
-            messengerClientCache.put(botId, createMessageClient(botId));
+    private MessengerClient getMessageClient(String botId, Integer botVersion)
+            throws ResourceNotFoundException, ResourceStoreException, ServiceException {
+
+        if (botVersion == -1) {
+            botVersion = getLatestDeployedBotVersion(botId);
         }
 
-        return messengerClientCache.get(botId);
+        final BotResourceId botResourceId = new BotResourceId(botId, botVersion);
+        if (!messengerClientCache.containsKey(botResourceId)) {
+            messengerClientCache.put(botResourceId, createMessageClient(botId, botVersion));
+        }
+
+        return messengerClientCache.get(botResourceId);
     }
 
-    private MessengerClient createMessageClient(String botId) {
-        BotConfiguration botConfiguration;
-        try {
-            Integer botVersion = botStore.getCurrentResourceId(botId).getVersion();
-            String cacheKey = botId + ":" + botVersion;
-            if ((botConfiguration = botConfigCache.get(cacheKey)) == null) {
-                botConfiguration = botStore.read(botId, botVersion);
-                botConfigCache.put(cacheKey, botConfiguration);
-            }
-        } catch (Exception e) {
-            throw new WebApplicationException("Could not read bot configuration", e);
-        }
+    private Integer getLatestDeployedBotVersion(String botId) throws ServiceException {
+        return botFactory.getLatestBot(unrestricted, botId).getVersion();
+    }
+
+    private MessengerClient createMessageClient(String botId, Integer botVersion)
+            throws ResourceNotFoundException, ResourceStoreException {
+
+        final BotConfiguration botConfiguration = botStore.read(botId, botVersion);
 
         String appSecret = null;
         String verificationToken = null;
         String pageAccessToken = null;
         for (BotConfiguration.ChannelConnector channelConnector : botConfiguration.getChannels()) {
-            if (channelConnector.getType().toString().equals(RESOURCE_URI_CHANNELCONNECTOR)) {
+            if (channelConnector.getType().toString().equals(RESOURCE_URI_CHANNEL_CONNECTOR)) {
                 Map<String, String> channelConnectorConfig = channelConnector.getConfig();
                 appSecret = channelConnectorConfig.get("appSecret");
                 verificationToken = channelConnectorConfig.get("verificationToken");
@@ -118,34 +128,36 @@ public class FacebookEndpoint implements IFacebookEndpoint {
 
         return new MessengerClient(MessengerPlatform.newSendClientBuilder(pageAccessToken).build(),
                 MessengerPlatform.newReceiveClientBuilder(appSecret, verificationToken)
-                        .onTextMessageEvent(getTextMessageEventHandler(botId, Deployment.Environment.unrestricted))
-                        .onQuickReplyMessageEvent(getQuickMessageEventHandler(botId, Deployment.Environment.unrestricted))
+                        .onTextMessageEvent(createTextMessageEventHandler(botId, botVersion, unrestricted))
+                        .onQuickReplyMessageEvent(createQuickMessageEventHandler(botId, botVersion, unrestricted))
                         .build());
     }
 
-    private TextMessageEventHandler getTextMessageEventHandler(String botId, Deployment.Environment environment) {
+    private TextMessageEventHandler createTextMessageEventHandler(String botId, Integer botVersion,
+                                                                  Deployment.Environment environment) {
         return event -> {
             try {
                 String message = event.getText();
                 String senderId = event.getSender().getId();
                 final String conversationId = getConversationId(environment, botId, senderId);
-                say(environment, botId, conversationId, senderId, message);
+                say(environment, botId, botVersion, conversationId, senderId, message);
 
-            } catch (RestInterfaceFactoryException | IRequest.HttpRequestException e) {
+            } catch (Exception e) {
                 log.error(e.getLocalizedMessage(), e);
             }
         };
     }
 
-    private QuickReplyMessageEventHandler getQuickMessageEventHandler(String botId, Deployment.Environment environment) {
+    private QuickReplyMessageEventHandler createQuickMessageEventHandler(String botId, Integer botVersion,
+                                                                         Deployment.Environment environment) {
         return event -> {
             try {
                 String message = event.getQuickReply().getPayload();
                 String senderId = event.getSender().getId();
                 final String conversationId = getConversationId(environment, botId, senderId);
-                say(environment, botId, conversationId, senderId, message);
+                say(environment, botId, botVersion, conversationId, senderId, message);
 
-            } catch (RestInterfaceFactoryException | IRequest.HttpRequestException e) {
+            } catch (Exception e) {
                 log.error(e.getLocalizedMessage(), e);
             }
         };
@@ -153,9 +165,11 @@ public class FacebookEndpoint implements IFacebookEndpoint {
 
     private void say(Deployment.Environment environment,
                      String botId,
+                     Integer botVersion,
                      String conversationId,
                      String senderId,
-                     String message) throws IRequest.HttpRequestException {
+                     String message)
+            throws IRequest.HttpRequestException, ResourceNotFoundException, ResourceStoreException, ServiceException {
 
         URI uri = RestUtilities.createURI(
                 apiServerURI, "/bots/",
@@ -163,8 +177,9 @@ public class FacebookEndpoint implements IFacebookEndpoint {
                 botId, "/",
                 conversationId);
 
+        final MessengerSendClient sendClient = getMessageClient(botId, botVersion).getSendClient();
         try {
-            messengerClientCache.get(botId).getSendClient().sendSenderAction(senderId, SenderAction.TYPING_ON);
+            sendClient.sendSenderAction(senderId, SenderAction.TYPING_ON);
         } catch (MessengerApiException | MessengerIOException e) {
             log.error(e.getLocalizedMessage(), e);
         }
@@ -173,7 +188,7 @@ public class FacebookEndpoint implements IFacebookEndpoint {
         try {
             IResponse httpResponse = httpClient.newRequest(uri, IHttpClient.Method.POST)
                     .setUserAgent(AI_LABS_USER_AGENT)
-                    .setTimeout(10000, TimeUnit.MILLISECONDS)
+                    .setTimeout(EDDI_TIMEOUT, TimeUnit.MILLISECONDS)
                     .setBodyEntity(jsonRequestBody, ENCODING, MediaType.APPLICATION_JSON)
                     .send();
             log.debug("response: {}", httpResponse.getContentAsString());
@@ -181,7 +196,7 @@ public class FacebookEndpoint implements IFacebookEndpoint {
             final List<Map<String, String>> quickReplies = getQuickReplies(httpResponse.getContentAsString());
 
             try {
-                messengerClientCache.get(botId).getSendClient().sendSenderAction(senderId, SenderAction.TYPING_OFF);
+                sendClient.sendSenderAction(senderId, SenderAction.TYPING_OFF);
             } catch (MessengerApiException | MessengerIOException e) {
                 log.error(e.getLocalizedMessage(), e);
             }
@@ -192,16 +207,14 @@ public class FacebookEndpoint implements IFacebookEndpoint {
                 for (Map<String, String> quickReply : quickReplies) {
                     listBuilder.addTextQuickReply(quickReply.get("value"), quickReply.get("expressions")).toList();
                 }
-               fbQuickReplies = listBuilder.build();
+                fbQuickReplies = listBuilder.build();
             }
 
             for (String outputText : output) {
                 if (!fbQuickReplies.isEmpty()) {
-                    messengerClientCache.get(botId).getSendClient().
-                            sendTextMessage(senderId, outputText, fbQuickReplies);
+                    sendClient.sendTextMessage(senderId, outputText, fbQuickReplies);
                 } else {
-                    messengerClientCache.get(botId).getSendClient().
-                            sendTextMessage(senderId, outputText);
+                    sendClient.sendTextMessage(senderId, outputText);
                 }
             }
 
@@ -214,8 +227,8 @@ public class FacebookEndpoint implements IFacebookEndpoint {
         }
     }
 
-    private List<Map<String,String>> getQuickReplies(String json) {
-        List<Map<String,String>> output = new ArrayList<>();
+    private List<Map<String, String>> getQuickReplies(String json) {
+        List<Map<String, String>> output = new ArrayList<>();
 
         ObjectMapper mapper = new ObjectMapper();
         try {
@@ -265,7 +278,6 @@ public class FacebookEndpoint implements IFacebookEndpoint {
     }
 
     private String getConversationState(String json) {
-
         String state = null;
 
         ObjectMapper mapper = new ObjectMapper();
@@ -317,11 +329,12 @@ public class FacebookEndpoint implements IFacebookEndpoint {
     }
 
     @Override
-    public Response webHook(final String botId, final String callbackPayload, final String sha1PayloadSignature) {
+    public Response webHook(final String botId, final Integer botVersion,
+                            final String callbackPayload, final String sha1PayloadSignature) {
         SystemRuntime.getRuntime().submitCallable((Callable<Void>) () -> {
             try {
-                log.info("webhook called");
-                getMessageClient(botId).getReceiveClient().
+                log.info("web hook called");
+                getMessageClient(botId, botVersion).getReceiveClient().
                         processCallbackPayload(callbackPayload, sha1PayloadSignature);
             } catch (MessengerVerificationException e) {
                 log.error(e.getLocalizedMessage(), e);
@@ -334,15 +347,21 @@ public class FacebookEndpoint implements IFacebookEndpoint {
     }
 
     @Override
-    public Response webHookSetup(final String botId, final String mode,
+    public Response webHookSetup(final String botId, final Integer botVersion, final String mode,
                                  final String verificationToken, final String challenge) {
         try {
-            log.info("webhook setup called");
-            return Response.ok(getMessageClient(botId).getReceiveClient().
-                    verifyWebhook(mode, verificationToken, challenge)).build();
+            log.info("web hook setup called");
+            return Response.ok(
+                    getMessageClient(botId, botVersion).
+                            getReceiveClient().
+                            verifyWebhook(mode, verificationToken, challenge)
+            ).build();
         } catch (MessengerVerificationException e) {
             log.error(e.getLocalizedMessage(), e);
             return Response.status(Response.Status.FORBIDDEN).build();
+        } catch (ServiceException | ResourceStoreException | ResourceNotFoundException e) {
+            log.error(e.getLocalizedMessage(), e);
+            return Response.serverError().build();
         }
     }
 
@@ -352,5 +371,13 @@ public class FacebookEndpoint implements IFacebookEndpoint {
     private static class MessengerClient {
         MessengerSendClient sendClient;
         MessengerReceiveClient receiveClient;
+    }
+
+    @Getter
+    @AllArgsConstructor
+    @EqualsAndHashCode
+    private class BotResourceId {
+        private final String id;
+        private final Integer version;
     }
 }
