@@ -310,6 +310,7 @@ public class ServerRuntime implements IServerRuntime {
                 httpResponse.setHeader("Access-Control-Allow-Origin", "*");
                 httpResponse.setHeader("Access-Control-Allow-Headers", "authorization, Content-Type");
                 httpResponse.setHeader("Access-Control-Allow-Methods", "GET, PUT, POST, DELETE, PATCH, OPTIONS");
+                httpResponse.setHeader("Access-Control-Expose-Headers", "location");
                 filterChain.doFilter(request, response);
             }
 
