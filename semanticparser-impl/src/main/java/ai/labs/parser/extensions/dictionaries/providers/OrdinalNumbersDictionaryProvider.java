@@ -20,6 +20,16 @@ public class OrdinalNumbersDictionaryProvider implements IDictionaryProvider {
     }
 
     @Override
+    public String getId() {
+        return ID;
+    }
+
+    @Override
+    public String getDisplayName() {
+        return "Ordinal Numbers Dictionary";
+    }
+
+    @Override
     public IDictionary provide() {
         return new OrdinalNumbersDictionary(expressionProvider);
     }

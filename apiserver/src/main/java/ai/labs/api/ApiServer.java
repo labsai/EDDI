@@ -10,6 +10,7 @@ import ai.labs.expressions.bootstrap.ExpressionModule;
 import ai.labs.facebookmessenger.bootstrap.FacebookMessengerModule;
 import ai.labs.httpclient.guice.HttpClientModule;
 import ai.labs.memory.bootstrap.ConversationMemoryModule;
+import ai.labs.normalizer.bootstrap.NormalizerModule;
 import ai.labs.output.bootstrap.OutputGenerationModule;
 import ai.labs.parser.bootstrap.SemanticParserModule;
 import ai.labs.permission.bootstrap.PermissionModule;
@@ -69,6 +70,7 @@ public class ApiServer {
                 new RepositoryModule(),
                 new UserModule(),
                 new CachingModule(new FileInputStream(configDir + "infinispan.xml")),
+                new NormalizerModule(),
                 new SemanticParserModule(),
                 new BehaviorModule(),
                 new OutputGenerationModule(),

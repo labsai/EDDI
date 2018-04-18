@@ -23,6 +23,16 @@ public class StemmingCorrectionProvider implements ICorrectionProvider {
     }
 
     @Override
+    public String getId() {
+        return ID;
+    }
+
+    @Override
+    public String getDisplayName() {
+        return "Grammar Stemming Correction";
+    }
+
+    @Override
     public void setConfig(Map<String, Object> config) throws IllegalExtensionConfigurationException {
         Object languageObj = config.get(KEY_LANGUAGE);
         String language;

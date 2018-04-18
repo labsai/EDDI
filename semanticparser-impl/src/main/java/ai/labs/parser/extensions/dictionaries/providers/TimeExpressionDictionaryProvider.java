@@ -20,6 +20,16 @@ public class TimeExpressionDictionaryProvider implements IDictionaryProvider {
     }
 
     @Override
+    public String getId() {
+        return ID;
+    }
+
+    @Override
+    public String getDisplayName() {
+        return "Time Expression Dictionary";
+    }
+
+    @Override
     public IDictionary provide() {
         return new TimeExpressionDictionary(expressionProvider);
     }

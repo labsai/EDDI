@@ -21,6 +21,16 @@ public class PunctuationDictionaryProvider implements IDictionaryProvider {
     }
 
     @Override
+    public String getId() {
+        return ID;
+    }
+
+    @Override
+    public String getDisplayName() {
+        return "Punctuation Dictionary";
+    }
+
+    @Override
     public IDictionary provide() {
         return new PunctuationDictionary(expressionProvider);
     }
