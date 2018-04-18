@@ -29,6 +29,7 @@ public class HttpCallsTask implements ILifecycleTask {
     private static final String UTF_8 = "utf-8";
     private static final String CONTENT_TYPE_APPLICATION_JSON = "application/json";
     private static final String ACTION_KEY = "actions";
+    private static final String CONTENT_TYPE = "Content-Type";
     private final IHttpClient httpClient;
     private IJsonSerialization jsonSerialization;
     private final IResourceClientLibrary resourceClientLibrary;
@@ -65,8 +66,8 @@ public class HttpCallsTask implements ILifecycleTask {
             return;
         }
 
-        IConversationMemory.IConversationStepStack allSteps = memory.getAllSteps();
-        Map<String, Object> templateDataObjects = convertMemory(memory);
+        Map<String, Object> templateDataObjects = new HashMap<>();
+        templateDataObjects.put("memory", convertMemory(memory));
 
         List<String> actions = latestData.getResult();
 
@@ -79,9 +80,10 @@ public class HttpCallsTask implements ILifecycleTask {
                 try {
                     Request requestConfig = call.getRequest();
                     String targetUri = targetServerUri + requestConfig.getPath();
+                    String requestBody = templateValues(requestConfig.getBody(), templateDataObjects);
                     IRequest request = httpClient.newRequest(URI.create(targetUri),
                             IHttpClient.Method.valueOf(requestConfig.getMethod().toUpperCase())).
-                            setBodyEntity(templateValues(requestConfig.getBody(), templateDataObjects),
+                            setBodyEntity(requestBody,
                                     UTF_8, requestConfig.getContentType());
 
                     Map<String, String> headers = requestConfig.getHeaders();
@@ -90,11 +92,18 @@ public class HttpCallsTask implements ILifecycleTask {
                     }
 
                     IResponse response = request.send();
+                    if (response.getHttpCode() != 200) {
+                        String message = "HttpCall (%s) didn't return http code 200, instead %s.";
+                        log.warn(String.format(message, call.getName(), response.getHttpCode()));
+                        log.warn("Error Msg:" + response.getHttpCodeMessage());
+                        continue;
+                    }
                     String responseBody = response.getContentAsString();
-                    String actualContentType = response.getHttpHeader().get("Content-Type");
+                    log.info("http call response:" + responseBody);
+                    String actualContentType = response.getHttpHeader().get(CONTENT_TYPE);
                     if (!CONTENT_TYPE_APPLICATION_JSON.equals(actualContentType)) {
                         String message = "HttpCall (%s) didn't return application/json as content-type, instead was (%s)";
-                        log.warn(message, call.getName(), actualContentType);
+                        log.warn(String.format(message, call.getName(), actualContentType));
                         continue;
                     }
 
@@ -120,10 +129,10 @@ public class HttpCallsTask implements ILifecycleTask {
         Map<String, Object> props = new HashMap<>();
 
         IConversationMemory.IWritableConversationStep currentStep = memory.getCurrentStep();
-        HashMap<Object, Object> current = convertConversationStep(currentStep);
+        Map<Object, Object> current = convertConversationStep(currentStep);
         props.put("current", current);
 
-        HashMap<Object, Object> last = new HashMap<>();
+        Map<Object, Object> last = new HashMap<>();
         if (memory.getPreviousSteps().size() > 0) {
             IConversationMemory.IConversationStep lastStep = memory.getPreviousSteps().get(0);
             last = convertConversationStep(lastStep);
@@ -137,15 +146,28 @@ public class HttpCallsTask implements ILifecycleTask {
     private HashMap<Object, Object> convertConversationStep(IConversationMemory.IConversationStep conversationStep) {
         HashMap<Object, Object> ret = new HashMap<>();
 
-        Set<String> allKeys = conversationStep.getAllKeys();
-        for (String key : allKeys) {
-            IData data = conversationStep.getData(key);
-            key = key.replaceAll(":", ".");
+        List<String> prefixKeys = getAllPrefixKeys(conversationStep.getAllKeys());
+        for (String prefixKey : prefixKeys) {
+            IData data = conversationStep.getLatestData(prefixKey);
             if (data.getResult() != null) {
-                ret.put(key, data.getResult());
+                ret.put(prefixKey, data.getResult());
             }
         }
 
+        return ret;
+    }
+
+    private List<String> getAllPrefixKeys(Set<String> allKeys) {
+        List<String> ret = new LinkedList<>();
+        for (String key : allKeys) {
+            if (key.contains(":")) {
+                key = key.substring(0, key.indexOf(":"));
+            }
+
+            if (!ret.contains(key)) {
+                ret.add(key);
+            }
+        }
         return ret;
     }
 
