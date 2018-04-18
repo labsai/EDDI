@@ -126,6 +126,11 @@
         </dependency>
         <dependency>
             <groupId>ai.labs</groupId>
+            <artifactId>xmpp-impl</artifactId>
+            <version>${project.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>ai.labs</groupId>
             <artifactId>behavior-impl</artifactId>
             <version>${project.version}</version>
         </dependency>
