@@ -1,7 +1,6 @@
 package ai.labs.templateengine;
 
 import ai.labs.lifecycle.ILifecycleTask;
-import ai.labs.lifecycle.LifecycleException;
 import ai.labs.lifecycle.model.Context;
 import ai.labs.lifecycle.model.Context.ContextType;
 import ai.labs.memory.IConversationMemory;
@@ -47,7 +46,7 @@ public class OutputTemplateTask implements ILifecycleTask {
     }
 
     @Override
-    public void executeTask(IConversationMemory memory) throws LifecycleException {
+    public void executeTask(IConversationMemory memory) {
         IConversationMemory.IWritableConversationStep currentStep = memory.getCurrentStep();
         List<IData<String>> outputDataList = currentStep.getAllData("output");
         List<IData<List<QuickReply>>> quickReplyDataList = currentStep.getAllData("quickReplies");
@@ -75,14 +74,14 @@ public class OutputTemplateTask implements ILifecycleTask {
 
     private void templateOutputTexts(IConversationMemory memory,
                                      List<IData<String>> outputDataList,
-                                     Map<String, Object> ContextMap) {
+                                     Map<String, Object> contextMap) {
         outputDataList.forEach(output -> {
             String outputKey = output.getKey();
             if (outputKey.startsWith(OUTPUT_TEXT)) {
                 String preTemplated = output.getResult();
 
                 try {
-                    String postTemplated = templatingEngine.processTemplate(preTemplated, ContextMap);
+                    String postTemplated = templatingEngine.processTemplate(preTemplated, contextMap);
                     output.setResult(postTemplated);
                     templateData(memory, output, outputKey, preTemplated, postTemplated);
                 } catch (ITemplatingEngine.TemplateEngineException e) {
