@@ -1,4 +1,4 @@
-package ai.labs.facebookmessenger.endpoint;
+package ai.labs.facebookmessenger;
 
 import io.swagger.annotations.Api;
 
