@@ -9,6 +9,8 @@ import java.util.List;
 @Setter
 public class HttpCall {
     private String name;
+    private boolean saveResponse;
+    private String responseObjectName;
     private List<String> actions;
     private Request request;
 }

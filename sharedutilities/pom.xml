@@ -44,6 +44,12 @@
             <artifactId>persistencestore-definition</artifactId>
             <version>${project.version}</version>
         </dependency>
+        <dependency>
+            <groupId>ai.labs</groupId>
+            <artifactId>conversationmemory-definition</artifactId>
+            <version>4.3</version>
+            <scope>compile</scope>
+        </dependency>
     </dependencies>
 
     <build>

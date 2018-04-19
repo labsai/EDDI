@@ -7,6 +7,7 @@ import ai.labs.memory.IConversationMemory;
 import ai.labs.memory.IData;
 import ai.labs.memory.IDataFactory;
 import ai.labs.output.model.QuickReply;
+import ai.labs.utilities.TemplatingUtilities;
 import lombok.extern.slf4j.Slf4j;
 
 import javax.inject.Inject;
@@ -53,6 +54,9 @@ public class OutputTemplateTask implements ILifecycleTask {
         List<IData<Context>> contextDataList = currentStep.getAllData("context");
 
         Map<String, Object> contextMap = prepareContext(contextDataList);
+
+        Map<String, Object> memoryForTemplate = TemplatingUtilities.convertMemoryForTemplating(memory);
+        contextMap.put("memory", memoryForTemplate);
 
         templateOutputTexts(memory, outputDataList, contextMap);
 

@@ -16,6 +16,7 @@ import ai.labs.runtime.client.configuration.IResourceClientLibrary;
 import ai.labs.runtime.service.ServiceException;
 import ai.labs.serialization.IJsonSerialization;
 import ai.labs.templateengine.ITemplatingEngine;
+import ai.labs.utilities.TemplatingUtilities;
 import lombok.extern.slf4j.Slf4j;
 
 import javax.inject.Inject;
@@ -30,6 +31,8 @@ public class HttpCallsTask implements ILifecycleTask {
     private static final String CONTENT_TYPE_APPLICATION_JSON = "application/json";
     private static final String ACTION_KEY = "actions";
     private static final String CONTENT_TYPE = "Content-Type";
+    private static final String KEY_HTTP_CALLS = "httpCalls";
+    private static final String COLON = ":";
     private final IHttpClient httpClient;
     private IJsonSerialization jsonSerialization;
     private final IResourceClientLibrary resourceClientLibrary;
@@ -67,7 +70,9 @@ public class HttpCallsTask implements ILifecycleTask {
         }
 
         Map<String, Object> templateDataObjects = new HashMap<>();
-        templateDataObjects.put("memory", convertMemory(memory));
+        Map<String, Object> memoryForTemplate = TemplatingUtilities.convertMemoryForTemplating(memory);
+        Map<String, Object> currentMemory = (Map<String, Object>) memoryForTemplate.get("current");
+        templateDataObjects.put("memory", memoryForTemplate);
 
         List<String> actions = latestData.getResult();
 
@@ -98,19 +103,29 @@ public class HttpCallsTask implements ILifecycleTask {
                         log.warn("Error Msg:" + response.getHttpCodeMessage());
                         continue;
                     }
-                    String responseBody = response.getContentAsString();
-                    log.info("http call response:" + responseBody);
-                    String actualContentType = response.getHttpHeader().get(CONTENT_TYPE);
-                    if (!CONTENT_TYPE_APPLICATION_JSON.equals(actualContentType)) {
-                        String message = "HttpCall (%s) didn't return application/json as content-type, instead was (%s)";
-                        log.warn(String.format(message, call.getName(), actualContentType));
-                        continue;
-                    }
+                    if (call.isSaveResponse()) {
+                        String responseBody = response.getContentAsString();
+                        log.debug("http call response:" + responseBody);
+                        String actualContentType = response.getHttpHeader().get(CONTENT_TYPE);
+                        if (!CONTENT_TYPE_APPLICATION_JSON.equals(actualContentType)) {
+                            String message = "HttpCall (%s) didn't return application/json as content-type, instead was (%s)";
+                            log.warn(String.format(message, call.getName(), actualContentType));
+                            continue;
+                        }
 
-                    Object responseObject = jsonSerialization.deserialize(responseBody, Object.class);
-                    String memoryDataName = "httpCalls:" + call.getName();
-                    IData<Object> httpResponseData = dataFactory.createData(memoryDataName, responseObject);
-                    memory.getCurrentStep().storeData(httpResponseData);
+                        Object responseObject = jsonSerialization.deserialize(responseBody, Object.class);
+                        String responseObjectName = call.getResponseObjectName();
+                        Map<String, Object> templateHttpCalls = (Map<String, Object>) currentMemory.get(KEY_HTTP_CALLS);
+                        if (templateHttpCalls == null) {
+                            templateHttpCalls = new HashMap<>();
+                            currentMemory.put(KEY_HTTP_CALLS, templateHttpCalls);
+                        }
+
+                        templateHttpCalls.put(responseObjectName, responseObject);
+                        String memoryDataName = "httpCalls:" + responseObjectName;
+                        IData<Object> httpResponseData = dataFactory.createData(memoryDataName, responseObject);
+                        memory.getCurrentStep().storeData(httpResponseData);
+                    }
 
                 } catch (IRequest.HttpRequestException | IOException | ITemplatingEngine.TemplateEngineException e) {
                     log.error(e.getLocalizedMessage(), e);
@@ -123,52 +138,6 @@ public class HttpCallsTask implements ILifecycleTask {
                     "context:quickReplies",
                     buildQuickReplies(response.getContentAsString()))
             );*/
-    }
-
-    private Map<String, Object> convertMemory(IConversationMemory memory) {
-        Map<String, Object> props = new HashMap<>();
-
-        IConversationMemory.IWritableConversationStep currentStep = memory.getCurrentStep();
-        Map<Object, Object> current = convertConversationStep(currentStep);
-        props.put("current", current);
-
-        Map<Object, Object> last = new HashMap<>();
-        if (memory.getPreviousSteps().size() > 0) {
-            IConversationMemory.IConversationStep lastStep = memory.getPreviousSteps().get(0);
-            last = convertConversationStep(lastStep);
-        }
-        props.put("last", last);
-
-
-        return props;
-    }
-
-    private HashMap<Object, Object> convertConversationStep(IConversationMemory.IConversationStep conversationStep) {
-        HashMap<Object, Object> ret = new HashMap<>();
-
-        List<String> prefixKeys = getAllPrefixKeys(conversationStep.getAllKeys());
-        for (String prefixKey : prefixKeys) {
-            IData data = conversationStep.getLatestData(prefixKey);
-            if (data.getResult() != null) {
-                ret.put(prefixKey, data.getResult());
-            }
-        }
-
-        return ret;
-    }
-
-    private List<String> getAllPrefixKeys(Set<String> allKeys) {
-        List<String> ret = new LinkedList<>();
-        for (String key : allKeys) {
-            if (key.contains(":")) {
-                key = key.substring(0, key.indexOf(":"));
-            }
-
-            if (!ret.contains(key)) {
-                ret.add(key);
-            }
-        }
-        return ret;
     }
 
     private String templateValues(String toBeTemplated, Map<String, Object> properties)
