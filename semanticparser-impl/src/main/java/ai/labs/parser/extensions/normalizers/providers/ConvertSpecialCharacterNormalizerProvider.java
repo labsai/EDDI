@@ -7,6 +7,16 @@ public class ConvertSpecialCharacterNormalizerProvider implements INormalizerPro
     public static final String ID = "ai.labs.parser.normalizers.specialCharacter";
 
     @Override
+    public String getId() {
+        return ID;
+    }
+
+    @Override
+    public String getDisplayName() {
+        return "Convert Special Character Normalizer";
+    }
+
+    @Override
     public INormalizer provide() {
         return new ConvertSpecialCharacterNormalizer();
     }
