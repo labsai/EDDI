@@ -9,6 +9,7 @@ import ai.labs.memory.IData;
 import ai.labs.memory.IDataFactory;
 import ai.labs.property.IPropertyDisposer;
 import ai.labs.property.model.PropertyEntry;
+import ai.labs.resources.rest.extensions.model.ExtensionDescriptor;
 
 import javax.inject.Inject;
 import java.util.Collections;
@@ -21,6 +22,7 @@ import static ai.labs.memory.IConversationMemory.IConversationStepStack;
  * @author ginccc
  */
 public class PropertyDisposerTask implements ILifecycleTask {
+    private static final String ID = "ai.labs.property";
     private static final String EXPRESSIONS_PARSED_IDENTIFIER = "expressions:parsed";
     private static final String ACTIONS_IDENTIFIER = "actions";
     private static final String CATCH_ANY_INPUT_AS_PROPERTY_ACTION = "CATCH_ANY_INPUT_AS_PROPERTY";
@@ -44,7 +46,7 @@ public class PropertyDisposerTask implements ILifecycleTask {
 
     @Override
     public String getId() {
-        return PropertyDisposerTask.class.getSimpleName();
+        return ID;
     }
 
     @Override
@@ -107,5 +109,12 @@ public class PropertyDisposerTask implements ILifecycleTask {
         });
 
         return ret;
+    }
+
+    @Override
+    public ExtensionDescriptor getExtensionDescriptor() {
+        ExtensionDescriptor extensionDescriptor = new ExtensionDescriptor(ID);
+        extensionDescriptor.setDisplayName("Property Extraction");
+        return extensionDescriptor;
     }
 }

@@ -1,4 +1,4 @@
-package ai.labs.core.normalizing;
+package ai.labs.normalizer.impl;
 
 /**
  * @author ginccc

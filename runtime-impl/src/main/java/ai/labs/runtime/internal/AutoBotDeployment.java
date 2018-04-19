@@ -38,7 +38,7 @@ public class AutoBotDeployment implements IAutoBotDeployment {
                         try {
                             botFactory.deployBot(environment, botId, botVersion, null);
                         } catch (ServiceException | IllegalAccessException | IllegalArgumentException e) {
-                            String message = "Error while auto deploying bot (environment=%s, id=%s, version=&s)!\n";
+                            String message = "Error while auto deploying bot (environment=%s, id=%s, version=%s)!\n";
                             log.error(String.format(message, environment, botId, botVersion));
                             log.error(e.getLocalizedMessage(), e);
                         }

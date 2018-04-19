@@ -3,8 +3,10 @@ package ai.labs.parser.extensions.dictionaries.providers;
 import ai.labs.expressions.Expression;
 import ai.labs.expressions.utilities.IExpressionProvider;
 import ai.labs.lifecycle.IllegalExtensionConfigurationException;
-import ai.labs.parser.extensions.dictionaries.RegularDictionary;
+import ai.labs.resources.rest.extensions.model.ExtensionDescriptor.ConfigValue;
+import ai.labs.resources.rest.extensions.model.ExtensionDescriptor.FieldType;
 import ai.labs.parser.extensions.dictionaries.IDictionary;
+import ai.labs.parser.extensions.dictionaries.RegularDictionary;
 import ai.labs.resources.rest.regulardictionary.model.RegularDictionaryConfiguration;
 import ai.labs.runtime.client.configuration.IResourceClientLibrary;
 import ai.labs.runtime.service.ServiceException;
@@ -13,6 +15,7 @@ import ai.labs.utilities.RuntimeUtilities;
 import javax.inject.Inject;
 import java.net.URI;
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
@@ -38,6 +41,25 @@ public class RegularDictionaryProvider implements IDictionaryProvider {
     @Override
     public IDictionary provide() {
         return regularDictionary != null ? regularDictionary : new RegularDictionary();
+    }
+
+    @Override
+    public Map<String, ConfigValue> getConfigs() {
+        Map<String, ConfigValue> ret = new HashMap<>();
+
+        ret.put(KEY_URI, new ConfigValue("Resource URI", FieldType.URI, false, null));
+
+        return ret;
+    }
+
+    @Override
+    public String getId() {
+        return ID;
+    }
+
+    @Override
+    public String getDisplayName() {
+        return "Regular Dictionary";
     }
 
     @Override
