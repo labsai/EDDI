@@ -12,6 +12,8 @@ import ai.labs.output.IOutputGeneration;
 import ai.labs.output.model.OutputEntry;
 import ai.labs.output.model.OutputValue;
 import ai.labs.output.model.QuickReply;
+import ai.labs.resources.rest.extensions.model.ExtensionDescriptor;
+import ai.labs.resources.rest.extensions.model.ExtensionDescriptor.ConfigValue;
 import ai.labs.resources.rest.output.model.OutputConfiguration;
 import ai.labs.resources.rest.output.model.OutputConfigurationSet;
 import ai.labs.runtime.client.configuration.IResourceClientLibrary;
@@ -31,11 +33,13 @@ import java.util.stream.IntStream;
  * @author ginccc
  */
 public class OutputGenerationTask implements ILifecycleTask {
+    private static final String ID = "ai.labs.output";
     private static final String ACTION_KEY = "action";
     private static final String MEMORY_OUTPUT_IDENTIFIER = "output";
     private static final String MEMORY_QUICK_REPLIES_IDENTIFIER = "quickReplies";
     private static final String CONTEXT_IDENTIFIER = "context";
     private static final String QUICK_REPLIES_IDENTIFIER = "quickReplies";
+    public static final String OUTPUTSET_CONFIG_URI = "uri";
     private final IResourceClientLibrary resourceClientLibrary;
     private final IDataFactory dataFactory;
     private final IOutputGeneration outputGeneration;
@@ -51,7 +55,7 @@ public class OutputGenerationTask implements ILifecycleTask {
 
     @Override
     public String getId() {
-        return "ai.labs.output";
+        return ID;
     }
 
     @Override
@@ -136,7 +140,7 @@ public class OutputGenerationTask implements ILifecycleTask {
 
     @Override
     public void configure(Map<String, Object> configuration) throws PackageConfigurationException {
-        Object uriObj = configuration.get("uri");
+        Object uriObj = configuration.get(OUTPUTSET_CONFIG_URI);
         URI uri = URI.create(uriObj.toString());
 
         try {
@@ -212,5 +216,15 @@ public class OutputGenerationTask implements ILifecycleTask {
             quickReply.setExpressions(configQuickReply.getExpressions());
             return quickReply;
         }).collect(Collectors.toCollection(LinkedList::new));
+    }
+
+    @Override
+    public ExtensionDescriptor getExtensionDescriptor() {
+        ExtensionDescriptor extensionDescriptor = new ExtensionDescriptor(ID);
+        extensionDescriptor.setDisplayName("Output Generation");
+
+        ConfigValue configValue = new ConfigValue("Resource URI", ExtensionDescriptor.FieldType.URI, false, null);
+        extensionDescriptor.getConfigs().put(OUTPUTSET_CONFIG_URI, configValue);
+        return extensionDescriptor;
     }
 }

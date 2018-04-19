@@ -20,6 +20,16 @@ public class PhoneticCorrectionProvider implements ICorrectionProvider {
     }
 
     @Override
+    public String getId() {
+        return ID;
+    }
+
+    @Override
+    public String getDisplayName() {
+        return "Phonetic Matching Correction";
+    }
+
+    @Override
     public void setConfig(Map<String, Object> config) {
         boolean lookupIfKnownParam = extractLookupIfKnownParam(config);
         phoneticCorrection = new PhoneticCorrection(lookupIfKnownParam);

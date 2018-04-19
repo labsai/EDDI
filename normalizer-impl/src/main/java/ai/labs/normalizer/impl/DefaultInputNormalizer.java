@@ -1,4 +1,4 @@
-package ai.labs.core.normalizing;
+package ai.labs.normalizer.impl;
 
 import ai.labs.utilities.CharacterUtilities;
 import ai.labs.utilities.WordSplitter;
