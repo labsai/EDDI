@@ -95,21 +95,16 @@ public class XmppEndpoint implements IXmppEndpoint {
 
     public void init() {
         URI uri = RestUtilities.createURI(apiServerURI, "/botstore/bots/descriptors");
-        log.info("xmpp uri: {}", uri.toString());
         try {
             IResponse httpResponse = httpClient.newRequest(uri, IHttpClient.Method.GET)
                     .setUserAgent(AI_LABS_USER_AGENT)
                     .setTimeout(EDDI_TIMEOUT, TimeUnit.MILLISECONDS)
                     .send();
-            log.info("xmpp found bots: {}", httpResponse.getContentAsString());
             List<String> botids = extractBotIdsFromResponse(httpResponse.getContentAsString());
             for (String botId : botids) {
-                log.info("xmpp botid: {}", botId);
                 Integer version = getLatestDeployedBotVersion(botId);
                 BotConfiguration botConfiguration = botStore.read(botId, version);
-                log.info("xmpp found bots: {}", botId);
                 for (BotConfiguration.ChannelConnector channelConnector : botConfiguration.getChannels()) {
-                    log.info("xmpp type: {}", channelConnector.getType().toString());
                     if (channelConnector.getType().toString().equals(RESOURCE_URI_CHANNEL_CONNECTOR)) {
                         Map<String, String> channelConnectorConfig = channelConnector.getConfig();
                         String username = channelConnectorConfig.get("username");
