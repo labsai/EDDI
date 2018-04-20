@@ -5,6 +5,7 @@ import ai.labs.runtime.bootstrap.AbstractBaseModule;
 import ai.labs.xmpp.endpoint.XmppEndpoint;
 import com.google.inject.Scopes;
 import com.google.inject.Singleton;
+import lombok.extern.slf4j.Slf4j;
 import org.jivesoftware.smack.ConnectionConfiguration;
 import org.jivesoftware.smack.tcp.XMPPTCPConnection;
 import org.jivesoftware.smack.tcp.XMPPTCPConnectionConfiguration;
@@ -12,12 +13,14 @@ import org.jivesoftware.smack.tcp.XMPPTCPConnectionConfiguration;
 /**
  * @author rpi
  */
+@Slf4j
 public class XmppModule extends AbstractBaseModule {
 
 
 
     @Override
     protected void configure() {
+        log.info("XMPP configure");
         bind(IXmppEndpoint.class).to(XmppEndpoint.class).in(Scopes.SINGLETON);
 
     }
