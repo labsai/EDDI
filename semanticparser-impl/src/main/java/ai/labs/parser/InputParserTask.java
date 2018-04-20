@@ -4,6 +4,7 @@ import ai.labs.expressions.utilities.IExpressionProvider;
 import ai.labs.lifecycle.ILifecycleTask;
 import ai.labs.lifecycle.IllegalExtensionConfigurationException;
 import ai.labs.lifecycle.UnrecognizedExtensionException;
+import ai.labs.resources.rest.extensions.model.ExtensionDescriptor;
 import ai.labs.memory.Data;
 import ai.labs.memory.IConversationMemory;
 import ai.labs.memory.IData;
@@ -27,6 +28,8 @@ import java.net.URI;
 import java.util.*;
 import java.util.stream.Collectors;
 
+import static ai.labs.resources.rest.extensions.model.ExtensionDescriptor.ConfigValue;
+import static ai.labs.resources.rest.extensions.model.ExtensionDescriptor.FieldType.BOOLEAN;
 import static ai.labs.parser.DictionaryUtilities.convertQuickReplies;
 import static ai.labs.parser.DictionaryUtilities.extractExpressions;
 
@@ -36,6 +39,12 @@ import static ai.labs.parser.DictionaryUtilities.extractExpressions;
 @Slf4j
 public class InputParserTask implements ILifecycleTask {
     public static final String ID = "ai.labs.parser";
+    private static final String CONFIG_APPEND_EXPRESSIONS = "appendExpressions";
+    private static final String CONFIG_INCLUDE_UNUSED = "includeUnused";
+    private static final String CONFIG_INCLUDE_UNKNOWN = "includeUnknown";
+    private static final String EXTENSION_NAME_NORMALIZER = "normalizer";
+    private static final String EXTENSION_NAME_DICTIONARIES = "dictionaries";
+    private static final String EXTENSION_NAME_CORRECTIONS = "corrections";
     private IInputParser sentenceParser;
     private List<INormalizer> normalizers;
     private List<IDictionary> dictionaries;
@@ -159,17 +168,17 @@ public class InputParserTask implements ILifecycleTask {
 
     @Override
     public void configure(Map<String, Object> configuration) {
-        Object appendExpressions = configuration.get("appendExpressions");
+        Object appendExpressions = configuration.get(CONFIG_APPEND_EXPRESSIONS);
         if (!RuntimeUtilities.isNullOrEmpty(appendExpressions)) {
             this.appendExpressions = Boolean.parseBoolean(appendExpressions.toString());
         }
 
-        Object includeUnused = configuration.get("includeUnused");
+        Object includeUnused = configuration.get(CONFIG_INCLUDE_UNUSED);
         if (!RuntimeUtilities.isNullOrEmpty(includeUnused)) {
             this.includeUnused = Boolean.parseBoolean(includeUnused.toString());
         }
 
-        Object includeUnknown = configuration.get("includeUnknown");
+        Object includeUnknown = configuration.get(CONFIG_INCLUDE_UNKNOWN);
         if (!RuntimeUtilities.isNullOrEmpty(includeUnknown)) {
             this.includeUnknown = Boolean.parseBoolean(includeUnknown.toString());
         }
@@ -179,23 +188,64 @@ public class InputParserTask implements ILifecycleTask {
     public void setExtensions(Map<String, Object> extensions) throws
             UnrecognizedExtensionException, IllegalExtensionConfigurationException {
 
-        List<Map<String, Object>> normalizerList = castToListofMaps(extensions, "normalizers");
+        List<Map<String, Object>> normalizerList = castToListofMaps(extensions, EXTENSION_NAME_NORMALIZER);
         normalizers = new LinkedList<>();
         if (normalizerList != null) {
             convertNormalizers(normalizerList);
         }
 
-        List<Map<String, Object>> dictionariesList = castToListofMaps(extensions, "dictionaries");
+        List<Map<String, Object>> dictionariesList = castToListofMaps(extensions, EXTENSION_NAME_DICTIONARIES);
         dictionaries = new LinkedList<>();
         if (dictionariesList != null) {
             convertDictionaries(dictionariesList);
         }
 
         corrections = new LinkedList<>();
-        List<Map<String, Object>> correctionsList = castToListofMaps(extensions, "corrections");
+        List<Map<String, Object>> correctionsList = castToListofMaps(extensions, EXTENSION_NAME_CORRECTIONS);
         if (correctionsList != null) {
             convertCorrections(correctionsList);
         }
+    }
+
+    @Override
+    public ExtensionDescriptor getExtensionDescriptor() {
+        ExtensionDescriptor extensionDescriptor = new ExtensionDescriptor(ID);
+        extensionDescriptor.setDisplayName("Input Parser");
+
+        normalizerProviders.keySet().forEach(type -> {
+            ExtensionDescriptor normalizerDescriptor = new ExtensionDescriptor(type);
+            Provider<INormalizerProvider> normalizerProvider = normalizerProviders.get(type);
+            INormalizerProvider provider = normalizerProvider.get();
+            normalizerDescriptor.setDisplayName(provider.getDisplayName());
+            normalizerDescriptor.setConfigs(provider.getConfigs());
+            extensionDescriptor.addExtension(EXTENSION_NAME_NORMALIZER, normalizerDescriptor);
+        });
+
+        dictionaryProviders.keySet().forEach(type -> {
+            ExtensionDescriptor dictionaryDescriptor = new ExtensionDescriptor(type);
+            Provider<IDictionaryProvider> dictionaryProvider = dictionaryProviders.get(type);
+            IDictionaryProvider provider = dictionaryProvider.get();
+            dictionaryDescriptor.setDisplayName(provider.getDisplayName());
+            dictionaryDescriptor.setConfigs(provider.getConfigs());
+            extensionDescriptor.addExtension(EXTENSION_NAME_DICTIONARIES, dictionaryDescriptor);
+        });
+
+        correctionProviders.keySet().forEach(type -> {
+            ExtensionDescriptor correctionsDescriptor = new ExtensionDescriptor(type);
+            Provider<ICorrectionProvider> correctionProvider = correctionProviders.get(type);
+            ICorrectionProvider provider = correctionProvider.get();
+            correctionsDescriptor.setDisplayName(provider.getDisplayName());
+            correctionsDescriptor.setConfigs(provider.getConfigs());
+            extensionDescriptor.addExtension(EXTENSION_NAME_CORRECTIONS, correctionsDescriptor);
+        });
+
+        Map<String, ConfigValue> extensionConfigs = new HashMap<>();
+        extensionConfigs.put(CONFIG_APPEND_EXPRESSIONS, new ConfigValue("Append Expressions", BOOLEAN, true, true));
+        extensionConfigs.put(CONFIG_INCLUDE_UNUSED, new ConfigValue("Include Unused Expressions", BOOLEAN, true, true));
+        extensionConfigs.put(CONFIG_INCLUDE_UNKNOWN, new ConfigValue("Include Unknown Expressions", BOOLEAN, true, true));
+        extensionDescriptor.setConfigs(extensionConfigs);
+
+        return extensionDescriptor;
     }
 
     private void convertNormalizers(List<Map<String, Object>> normalizerList)
@@ -206,7 +256,7 @@ public class InputParserTask implements ILifecycleTask {
             if (normalizerProvider != null) {
                 INormalizerProvider normalizer = normalizerProvider.get();
                 Object configObject = normalizerMap.get(KEY_CONFIG);
-                if (configObject != null && configObject instanceof Map) {
+                if (configObject instanceof Map) {
                     Map<String, Object> config = castToMap(configObject);
                     normalizer.setConfig(config);
                 }
@@ -227,7 +277,7 @@ public class InputParserTask implements ILifecycleTask {
             if (dictionaryProvider != null) {
                 IDictionaryProvider dictionary = dictionaryProvider.get();
                 Object configObject = dictionaryMap.get(KEY_CONFIG);
-                if (configObject != null && configObject instanceof Map) {
+                if (configObject instanceof Map) {
                     Map<String, Object> config = castToMap(configObject);
                     dictionary.setConfig(config);
                 }
@@ -248,7 +298,7 @@ public class InputParserTask implements ILifecycleTask {
             if (correctionProviderCreator != null) {
                 ICorrectionProvider correctionProvider = correctionProviderCreator.get();
                 Object configObject = correctionMap.get(KEY_CONFIG);
-                if (configObject != null && configObject instanceof Map) {
+                if (configObject instanceof Map) {
                     Map<String, Object> config = castToMap(configObject);
                     correctionProvider.setConfig(config);
                 }

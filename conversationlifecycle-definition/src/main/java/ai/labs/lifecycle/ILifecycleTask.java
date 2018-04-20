@@ -1,5 +1,6 @@
 package ai.labs.lifecycle;
 
+import ai.labs.resources.rest.extensions.model.ExtensionDescriptor;
 import ai.labs.memory.IConversationMemory;
 
 import java.util.Collections;
@@ -57,5 +58,9 @@ public interface ILifecycleTask {
 
     default void setExtensions(Map<String, Object> extensions) throws UnrecognizedExtensionException, IllegalExtensionConfigurationException {
         //to be overridden if needed
+    }
+
+    default ExtensionDescriptor getExtensionDescriptor() {
+        return new ExtensionDescriptor(getId());
     }
 }

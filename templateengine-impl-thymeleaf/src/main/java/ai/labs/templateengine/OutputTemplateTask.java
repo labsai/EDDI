@@ -23,6 +23,7 @@ import static ai.labs.utilities.StringUtilities.joinStrings;
  */
 @Slf4j
 public class OutputTemplateTask implements ILifecycleTask {
+    private static final String ID = "ai.labs.templating";
     private static final String OUTPUT_TEXT = "output:text";
     private static final String PRE_TEMPLATED = "preTemplated";
     private static final String POST_TEMPLATED = "postTemplated";
@@ -150,5 +151,12 @@ public class OutputTemplateTask implements ILifecycleTask {
         String newOutputKey = joinStrings(":", originalKey, templateAppendix);
         IData processedData = dataFactory.createData(newOutputKey, dataValue);
         memory.getCurrentStep().storeData(processedData);
+    }
+
+    @Override
+    public ExtensionDescriptor getExtensionDescriptor() {
+        ExtensionDescriptor extensionDescriptor = new ExtensionDescriptor(ID);
+        extensionDescriptor.setDisplayName("Templating");
+        return extensionDescriptor;
     }
 }

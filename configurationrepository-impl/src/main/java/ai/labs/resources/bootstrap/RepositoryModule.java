@@ -13,8 +13,8 @@ import ai.labs.resources.impl.deployment.rest.RestDeploymentStore;
 import ai.labs.resources.impl.descriptor.mongo.DocumentDescriptorStore;
 import ai.labs.resources.impl.descriptor.rest.RestDocumentDescriptorStore;
 import ai.labs.resources.impl.expression.RestExpression;
-import ai.labs.resources.impl.extensions.mongo.ExtensionStore;
-import ai.labs.resources.impl.extensions.rest.RestExtensionStore;
+
+import ai.labs.resources.impl.extensions.RestExtensionStore;
 import ai.labs.resources.impl.http.mongo.HttpCallsStore;
 import ai.labs.resources.impl.http.rest.RestHttpCallsStore;
 import ai.labs.resources.impl.monitor.rest.RestConversationStore;
@@ -37,7 +37,6 @@ import ai.labs.resources.rest.deployment.IRestDeploymentStore;
 import ai.labs.resources.rest.documentdescriptor.IDocumentDescriptorStore;
 import ai.labs.resources.rest.documentdescriptor.IRestDocumentDescriptorStore;
 import ai.labs.resources.rest.expression.IRestExpression;
-import ai.labs.resources.rest.extensions.IExtensionStore;
 import ai.labs.resources.rest.extensions.IRestExtensionStore;
 import ai.labs.resources.rest.http.IHttpCallsStore;
 import ai.labs.resources.rest.http.IRestHttpCallsStore;
@@ -66,7 +65,6 @@ public class RepositoryModule extends AbstractBaseModule {
         bind(IGroupStore.class).to(GroupStore.class).in(Scopes.SINGLETON);
         bind(IDocumentDescriptorStore.class).to(DocumentDescriptorStore.class).in(Scopes.SINGLETON);
 
-        bind(IExtensionStore.class).to(ExtensionStore.class).in(Scopes.SINGLETON);
         bind(IBotStore.class).to(BotStore.class).in(Scopes.SINGLETON);
         bind(IPackageStore.class).to(PackageStore.class).in(Scopes.SINGLETON);
         bind(IParserStore.class).to(ParserStore.class).in(Scopes.SINGLETON);
