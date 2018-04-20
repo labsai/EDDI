@@ -56,7 +56,6 @@ import static ai.labs.persistence.IResourceStore.ResourceNotFoundException;
 import static ai.labs.persistence.IResourceStore.ResourceStoreException;
 import static ai.labs.rest.restinterfaces.RestInterfaceFactory.RestInterfaceFactoryException;
 
-@Singleton
 @Slf4j
 public class XmppEndpoint implements IXmppEndpoint {
     private static final String RESOURCE_URI_CHANNEL_CONNECTOR = "eddi://ai.labs.channel.xmpp";
