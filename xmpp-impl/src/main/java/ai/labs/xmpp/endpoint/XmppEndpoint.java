@@ -102,18 +102,21 @@ public class XmppEndpoint implements IXmppEndpoint {
                     .setUserAgent(AI_LABS_USER_AGENT)
                     .setTimeout(EDDI_TIMEOUT, TimeUnit.MILLISECONDS)
                     .send();
-            log.debug("found bots: {}", httpResponse.getContentAsString());
+            log.info("xmpp found bots: {}", httpResponse.getContentAsString());
             List<String> botids = extractBotIdsFromResponse(httpResponse.getContentAsString());
             for (String botId : botids) {
                 Integer version = getLatestDeployedBotVersion(botId);
                 BotConfiguration botConfiguration = botStore.read(botId, version);
+                log.info("xmpp found bots: {}", botId);
                 for (BotConfiguration.ChannelConnector channelConnector : botConfiguration.getChannels()) {
+                    log.info("xmpp type: {}", channelConnector.getType().toString());
                     if (channelConnector.getType().toString().equals(RESOURCE_URI_CHANNEL_CONNECTOR)) {
                         Map<String, String> channelConnectorConfig = channelConnector.getConfig();
                         String username = channelConnectorConfig.get("username");
                         String password = channelConnectorConfig.get("password");
                         String hostname = channelConnectorConfig.get("hostname");
 
+                        log.info("opening connection to: {}", hostname );
                         XMPPTCPConnectionConfiguration config = XMPPTCPConnectionConfiguration.builder()
                                 .setUsernameAndPassword(username, password)
                                 .setHost(hostname)
@@ -294,6 +297,7 @@ public class XmppEndpoint implements IXmppEndpoint {
     @Override
     public void newIncomingMessage(EntityBareJid entityBareJid, Message message, Chat chat) {
         try {
+            log.info("xmpp incoming: {}", message.getBody());
             String conversationId = getConversationId(unrestricted, configuredBotId, entityBareJid.asEntityBareJidString());
             if (conversationId == null) {
                 conversationId = createConversation(unrestricted,configuredBotId, entityBareJid.asEntityBareJidString());
