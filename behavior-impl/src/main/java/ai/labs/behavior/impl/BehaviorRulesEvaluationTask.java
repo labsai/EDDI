@@ -7,6 +7,9 @@ import ai.labs.memory.Data;
 import ai.labs.memory.IConversationMemory;
 import ai.labs.memory.IData;
 import ai.labs.resources.rest.behavior.model.BehaviorConfiguration;
+import ai.labs.resources.rest.extensions.model.ExtensionDescriptor;
+import ai.labs.resources.rest.extensions.model.ExtensionDescriptor.ConfigValue;
+import ai.labs.resources.rest.extensions.model.ExtensionDescriptor.FieldType;
 import ai.labs.runtime.client.configuration.IResourceClientLibrary;
 import ai.labs.runtime.service.ServiceException;
 import ai.labs.serialization.DeserializationException;
@@ -26,8 +29,9 @@ import java.util.stream.Collectors;
  */
 @Slf4j
 public class BehaviorRulesEvaluationTask implements ILifecycleTask {
+    public static final String ID = "ai.labs.behavior";
     private BehaviorRulesEvaluator evaluator;
-    private static final String BEHAVIOR_CONFIG = "uri";
+    private static final String BEHAVIOR_CONFIG_URI = "uri";
     private final IResourceClientLibrary resourceClientLibrary;
     private final IJsonSerialization jsonSerialization;
     private final IBehaviorDeserialization behaviorSerialization;
@@ -43,7 +47,7 @@ public class BehaviorRulesEvaluationTask implements ILifecycleTask {
 
     @Override
     public String getId() {
-        return evaluator.getClass().toString();
+        return ID;
     }
 
     @Override
@@ -103,7 +107,7 @@ public class BehaviorRulesEvaluationTask implements ILifecycleTask {
 
     @Override
     public void configure(Map<String, Object> configuration) throws PackageConfigurationException {
-        Object uriObj = configuration.get(BEHAVIOR_CONFIG);
+        Object uriObj = configuration.get(BEHAVIOR_CONFIG_URI);
         URI uri = URI.create(uriObj.toString());
 
 
@@ -123,5 +127,15 @@ public class BehaviorRulesEvaluationTask implements ILifecycleTask {
             log.debug(message, e);
             throw new PackageConfigurationException(message, e);
         }
+    }
+
+    @Override
+    public ExtensionDescriptor getExtensionDescriptor() {
+        ExtensionDescriptor extensionDescriptor = new ExtensionDescriptor(ID);
+        extensionDescriptor.setDisplayName("Behavior Rules");
+
+        ConfigValue configValue = new ConfigValue("Resource URI", FieldType.URI, false, null);
+        extensionDescriptor.getConfigs().put(BEHAVIOR_CONFIG_URI, configValue);
+        return extensionDescriptor;
     }
 }

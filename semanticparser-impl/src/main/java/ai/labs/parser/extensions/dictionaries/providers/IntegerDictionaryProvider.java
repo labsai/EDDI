@@ -20,6 +20,16 @@ public class IntegerDictionaryProvider implements IDictionaryProvider {
     }
 
     @Override
+    public String getId() {
+        return ID;
+    }
+
+    @Override
+    public String getDisplayName() {
+        return "Integer Dictionary";
+    }
+
+    @Override
     public IDictionary provide() {
         return new IntegerDictionary(expressionProvider);
     }

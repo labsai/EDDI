@@ -20,6 +20,16 @@ public class EmailDictionaryProvider implements IDictionaryProvider {
     }
 
     @Override
+    public String getId() {
+        return ID;
+    }
+
+    @Override
+    public String getDisplayName() {
+        return "Email Dictionary";
+    }
+
+    @Override
     public IDictionary provide() {
         return new EmailDictionary(expressionProvider);
     }
