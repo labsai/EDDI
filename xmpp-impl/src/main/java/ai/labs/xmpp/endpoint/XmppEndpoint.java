@@ -173,7 +173,7 @@ public class XmppEndpoint implements IXmppEndpoint {
     }
 
     private Integer getLatestDeployedBotVersion(String botId) throws ServiceException {
-        return botFactory.getLatestBot(unrestricted, botId).getVersion();
+        return botFactory.getLatestBot(unrestricted, botId) != null ?  botFactory.getLatestBot(unrestricted, botId).getVersion() : new Integer(1);
     }
 
     private void say(Deployment.Environment environment,
