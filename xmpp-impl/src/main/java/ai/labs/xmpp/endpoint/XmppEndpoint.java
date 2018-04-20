@@ -90,6 +90,7 @@ public class XmppEndpoint implements IXmppEndpoint {
         this.apiServerURI = apiServerURI;
 
         this.conversationIdCache = cacheFactory.getCache("xmpp.conversationIds");
+        log.info("XMPP STARTING");
 
         init();
     }
