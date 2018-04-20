@@ -117,6 +117,8 @@ public class OutputTemplateTaskTest {
                 expectedOutputString);
         when(templatingEngine.processTemplate(eq(expectedPreQuickReplies.get(0).getValue()), anyMap())).
                 then(invocation -> expectedPostQuickReplies.get(0).getValue());
+        when(templatingEngine.processTemplate(eq(expectedPreQuickReplies.get(0).getExpressions()), anyMap())).
+                then(invocation -> expectedPostQuickReplies.get(0).getExpressions());
         return expectedPostQuickReplies;
     }
 
