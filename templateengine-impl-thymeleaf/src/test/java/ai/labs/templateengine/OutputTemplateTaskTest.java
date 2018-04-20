@@ -12,10 +12,10 @@ import lombok.Getter;
 import lombok.Setter;
 import org.junit.Before;
 import org.junit.Test;
+import org.mockito.invocation.InvocationOnMock;
+import org.mockito.stubbing.Answer;
 
-import java.util.Date;
-import java.util.LinkedList;
-import java.util.List;
+import java.util.*;
 
 import static org.mockito.Mockito.*;
 
@@ -30,6 +30,7 @@ public class OutputTemplateTaskTest {
     private OutputTemplateTask outputTemplateTask;
     private final String expectedOutputString = "This is some output with context such as someContextValue";
     private ITemplatingEngine templatingEngine;
+    private IMemoryTemplateConverter memoryTemplateConverter;
 
     @Before
     public void setUp() throws Exception {
@@ -38,7 +39,10 @@ public class OutputTemplateTaskTest {
         conversationMemory = mock(IConversationMemory.class);
         currentStep = mock(IConversationMemory.IWritableConversationStep.class);
         when(conversationMemory.getCurrentStep()).then(invocation -> currentStep);
-        outputTemplateTask = new OutputTemplateTask(templatingEngine, dataFactory);
+        memoryTemplateConverter = mock(IMemoryTemplateConverter.class);
+        when(memoryTemplateConverter.convertMemoryForTemplating(any(IConversationMemory.class))).
+                then(invocation -> new HashMap<>());
+        outputTemplateTask = new OutputTemplateTask(templatingEngine, memoryTemplateConverter, dataFactory);
     }
 
     @Test

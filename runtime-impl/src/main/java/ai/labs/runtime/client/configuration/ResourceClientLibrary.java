@@ -1,6 +1,7 @@
 package ai.labs.runtime.client.configuration;
 
 import ai.labs.resources.rest.behavior.IRestBehaviorStore;
+import ai.labs.resources.rest.http.IRestHttpCallsStore;
 import ai.labs.resources.rest.output.IRestOutputStore;
 import ai.labs.resources.rest.parser.IRestParserStore;
 import ai.labs.resources.rest.regulardictionary.IRestRegularDictionaryStore;
@@ -58,6 +59,16 @@ public class ResourceClientLibrary implements IResourceClientLibrary {
                 IRestBehaviorStore behaviorStore = restInterfaceFactory.get(IRestBehaviorStore.class,
                         apiServerURI);
                 return behaviorStore.readBehaviorRuleSet(id, version);
+            } catch (Exception e) {
+                throw new ServiceException(e.getLocalizedMessage(), e);
+            }
+        });
+
+        restInterfaces.put("ai.labs.httpcalls", (id, version) -> {
+            try {
+                IRestHttpCallsStore httpCallsStore = restInterfaceFactory.get(IRestHttpCallsStore.class,
+                        apiServerURI);
+                return httpCallsStore.readHttpCalls(id, version);
             } catch (Exception e) {
                 throw new ServiceException(e.getLocalizedMessage(), e);
             }
