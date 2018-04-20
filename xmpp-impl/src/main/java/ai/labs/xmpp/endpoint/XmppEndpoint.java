@@ -91,8 +91,6 @@ public class XmppEndpoint implements IXmppEndpoint {
 
         this.conversationIdCache = cacheFactory.getCache("xmpp.conversationIds");
         log.info("XMPP STARTING");
-
-        init();
     }
 
     public void init() {
