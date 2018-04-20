@@ -42,6 +42,7 @@ import javax.ws.rs.InternalServerErrorException;
 import javax.ws.rs.core.MediaType;
 import javax.ws.rs.core.Response;
 import java.io.IOException;
+import java.net.InetAddress;
 import java.net.URI;
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -120,6 +121,7 @@ public class XmppEndpoint implements IXmppEndpoint {
                         XMPPTCPConnectionConfiguration config = XMPPTCPConnectionConfiguration.builder()
                                 .setUsernameAndPassword(username, password)
                                 .setHost(hostname)
+                                .setHostAddress(InetAddress.getByName(hostname))
                                 .setXmppDomain(hostname)
                                 .setPort(5222)
                                 .setSecurityMode(ConnectionConfiguration.SecurityMode.ifpossible)
