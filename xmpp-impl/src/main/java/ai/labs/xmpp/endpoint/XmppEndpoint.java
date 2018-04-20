@@ -120,6 +120,7 @@ public class XmppEndpoint implements IXmppEndpoint {
                         XMPPTCPConnectionConfiguration config = XMPPTCPConnectionConfiguration.builder()
                                 .setUsernameAndPassword(username, password)
                                 .setHost(hostname)
+                                .setXmppDomain(hostname)
                                 .setPort(5222)
                                 .setSecurityMode(ConnectionConfiguration.SecurityMode.ifpossible)
                                 .setDebuggerEnabled(true)
