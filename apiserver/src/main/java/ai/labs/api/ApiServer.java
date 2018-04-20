@@ -31,6 +31,7 @@ import ai.labs.templateengine.bootstrap.TemplateEngineModule;
 import ai.labs.testing.bootstrap.AutomatedtestingModule;
 import ai.labs.utilities.FileUtilities;
 import ai.labs.xmpp.bootstrap.XmppModule;
+import ai.labs.xmpp.endpoint.IXmppEndpoint;
 import com.google.inject.Module;
 import org.jboss.resteasy.plugins.guice.ext.RequestScopeModule;
 
@@ -98,6 +99,7 @@ public class ApiServer {
         injector.getInstance(IServerRuntime.class).startup(() -> {
             //auto re-deploy bots
             injector.getInstance(IAutoBotDeployment.class).autoDeployBots();
+            injector.getInstance(IXmppEndpoint.class).init();
         });
     }
 }

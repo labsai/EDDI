@@ -95,7 +95,7 @@ public class XmppEndpoint implements IXmppEndpoint {
         init();
     }
 
-    private void init() {
+    public void init() {
         URI uri = RestUtilities.createURI(apiServerURI, "/botstore/bots/descriptiors");
 
         try {
