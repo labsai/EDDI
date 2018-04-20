@@ -1,7 +1,6 @@
 package ai.labs.templateengine;
 
 import ai.labs.lifecycle.ILifecycleTask;
-import ai.labs.lifecycle.LifecycleException;
 import ai.labs.lifecycle.model.Context;
 import ai.labs.lifecycle.model.Context.ContextType;
 import ai.labs.memory.IConversationMemory;
@@ -30,17 +29,21 @@ public class OutputTemplateTask implements ILifecycleTask {
     private static final String PRE_TEMPLATED = "preTemplated";
     private static final String POST_TEMPLATED = "postTemplated";
     private final ITemplatingEngine templatingEngine;
+    private final IMemoryTemplateConverter memoryTemplateConverter;
     private final IDataFactory dataFactory;
 
     @Inject
-    public OutputTemplateTask(ITemplatingEngine templatingEngine, IDataFactory dataFactory) {
+    public OutputTemplateTask(ITemplatingEngine templatingEngine,
+                              IMemoryTemplateConverter memoryTemplateConverter,
+                              IDataFactory dataFactory) {
         this.templatingEngine = templatingEngine;
+        this.memoryTemplateConverter = memoryTemplateConverter;
         this.dataFactory = dataFactory;
     }
 
     @Override
     public String getId() {
-        return ID;
+        return "ai.labs.templating";
     }
 
     @Override
@@ -49,13 +52,18 @@ public class OutputTemplateTask implements ILifecycleTask {
     }
 
     @Override
-    public void executeTask(IConversationMemory memory) throws LifecycleException {
+    public void executeTask(IConversationMemory memory) {
         IConversationMemory.IWritableConversationStep currentStep = memory.getCurrentStep();
         List<IData<String>> outputDataList = currentStep.getAllData("output");
         List<IData<List<QuickReply>>> quickReplyDataList = currentStep.getAllData("quickReplies");
         List<IData<Context>> contextDataList = currentStep.getAllData("context");
 
         Map<String, Object> contextMap = prepareContext(contextDataList);
+
+        Map<String, Object> memoryForTemplate = memoryTemplateConverter.convertMemoryForTemplating(memory);
+        if (!memoryForTemplate.isEmpty()) {
+            contextMap.put("memory", memoryForTemplate);
+        }
 
         templateOutputTexts(memory, outputDataList, contextMap);
 
@@ -77,14 +85,14 @@ public class OutputTemplateTask implements ILifecycleTask {
 
     private void templateOutputTexts(IConversationMemory memory,
                                      List<IData<String>> outputDataList,
-                                     Map<String, Object> ContextMap) {
+                                     Map<String, Object> contextMap) {
         outputDataList.forEach(output -> {
             String outputKey = output.getKey();
             if (outputKey.startsWith(OUTPUT_TEXT)) {
                 String preTemplated = output.getResult();
 
                 try {
-                    String postTemplated = templatingEngine.processTemplate(preTemplated, ContextMap);
+                    String postTemplated = templatingEngine.processTemplate(preTemplated, contextMap);
                     output.setResult(postTemplated);
                     templateData(memory, output, outputKey, preTemplated, postTemplated);
                 } catch (ITemplatingEngine.TemplateEngineException e) {
@@ -102,10 +110,14 @@ public class OutputTemplateTask implements ILifecycleTask {
             List<QuickReply> preTemplatedQuickReplies = copyQuickReplies(quickReplies);
 
             quickReplies.forEach(quickReply -> {
-                String preTemplatedValue = quickReply.getValue();
                 try {
+                    String preTemplatedValue = quickReply.getValue();
                     String postTemplatedValue = templatingEngine.processTemplate(preTemplatedValue, contextMap);
                     quickReply.setValue(postTemplatedValue);
+
+                    String preTemplatedExpressions = quickReply.getExpressions();
+                    String postTemplatedExpressions = templatingEngine.processTemplate(preTemplatedExpressions, contextMap);
+                    quickReply.setExpressions(postTemplatedExpressions);
                 } catch (ITemplatingEngine.TemplateEngineException e) {
                     log.error(e.getLocalizedMessage(), e);
                 }
