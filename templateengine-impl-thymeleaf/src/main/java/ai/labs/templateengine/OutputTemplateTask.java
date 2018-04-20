@@ -7,7 +7,6 @@ import ai.labs.memory.IConversationMemory;
 import ai.labs.memory.IData;
 import ai.labs.memory.IDataFactory;
 import ai.labs.output.model.QuickReply;
-import ai.labs.utilities.TemplatingUtilities;
 import lombok.extern.slf4j.Slf4j;
 
 import javax.inject.Inject;
@@ -28,11 +27,15 @@ public class OutputTemplateTask implements ILifecycleTask {
     private static final String PRE_TEMPLATED = "preTemplated";
     private static final String POST_TEMPLATED = "postTemplated";
     private final ITemplatingEngine templatingEngine;
+    private final IMemoryTemplateConverter memoryTemplateConverter;
     private final IDataFactory dataFactory;
 
     @Inject
-    public OutputTemplateTask(ITemplatingEngine templatingEngine, IDataFactory dataFactory) {
+    public OutputTemplateTask(ITemplatingEngine templatingEngine,
+                              IMemoryTemplateConverter memoryTemplateConverter,
+                              IDataFactory dataFactory) {
         this.templatingEngine = templatingEngine;
+        this.memoryTemplateConverter = memoryTemplateConverter;
         this.dataFactory = dataFactory;
     }
 
@@ -55,8 +58,10 @@ public class OutputTemplateTask implements ILifecycleTask {
 
         Map<String, Object> contextMap = prepareContext(contextDataList);
 
-        Map<String, Object> memoryForTemplate = TemplatingUtilities.convertMemoryForTemplating(memory);
-        contextMap.put("memory", memoryForTemplate);
+        Map<String, Object> memoryForTemplate = memoryTemplateConverter.convertMemoryForTemplating(memory);
+        if (!memoryForTemplate.isEmpty()) {
+            contextMap.put("memory", memoryForTemplate);
+        }
 
         templateOutputTexts(memory, outputDataList, contextMap);
 

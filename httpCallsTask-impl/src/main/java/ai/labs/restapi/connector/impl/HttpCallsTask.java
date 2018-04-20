@@ -15,8 +15,8 @@ import ai.labs.resources.rest.http.model.Request;
 import ai.labs.runtime.client.configuration.IResourceClientLibrary;
 import ai.labs.runtime.service.ServiceException;
 import ai.labs.serialization.IJsonSerialization;
+import ai.labs.templateengine.IMemoryTemplateConverter;
 import ai.labs.templateengine.ITemplatingEngine;
-import ai.labs.utilities.TemplatingUtilities;
 import lombok.extern.slf4j.Slf4j;
 
 import javax.inject.Inject;
@@ -38,18 +38,20 @@ public class HttpCallsTask implements ILifecycleTask {
     private final IResourceClientLibrary resourceClientLibrary;
     private IDataFactory dataFactory;
     private final ITemplatingEngine templatingEngine;
+    private final IMemoryTemplateConverter memoryTemplateConverter;
     private String targetServerUri;
     private List<HttpCall> httpCalls;
 
     @Inject
     public HttpCallsTask(IHttpClient httpClient, IJsonSerialization jsonSerialization,
                          IResourceClientLibrary resourceClientLibrary, IDataFactory dataFactory,
-                         ITemplatingEngine templatingEngine) {
+                         ITemplatingEngine templatingEngine, IMemoryTemplateConverter memoryTemplateConverter) {
         this.httpClient = httpClient;
         this.jsonSerialization = jsonSerialization;
         this.resourceClientLibrary = resourceClientLibrary;
         this.dataFactory = dataFactory;
         this.templatingEngine = templatingEngine;
+        this.memoryTemplateConverter = memoryTemplateConverter;
     }
 
     @Override
@@ -70,7 +72,7 @@ public class HttpCallsTask implements ILifecycleTask {
         }
 
         Map<String, Object> templateDataObjects = new HashMap<>();
-        Map<String, Object> memoryForTemplate = TemplatingUtilities.convertMemoryForTemplating(memory);
+        Map<String, Object> memoryForTemplate = memoryTemplateConverter.convertMemoryForTemplating(memory);
         Map<String, Object> currentMemory = (Map<String, Object>) memoryForTemplate.get("current");
         templateDataObjects.put("memory", memoryForTemplate);
 
@@ -105,7 +107,7 @@ public class HttpCallsTask implements ILifecycleTask {
                     }
                     if (call.isSaveResponse()) {
                         String responseBody = response.getContentAsString();
-                        log.debug("http call response:" + responseBody);
+                        log.info("http call response:" + responseBody);
                         String actualContentType = response.getHttpHeader().get(CONTENT_TYPE);
                         if (!CONTENT_TYPE_APPLICATION_JSON.equals(actualContentType)) {
                             String message = "HttpCall (%s) didn't return application/json as content-type, instead was (%s)";

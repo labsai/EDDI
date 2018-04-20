@@ -12,6 +12,14 @@
 
     <artifactId>templateengine-definition</artifactId>
 
+    <dependencies>
+        <dependency>
+            <groupId>ai.labs</groupId>
+            <artifactId>conversationmemory-definition</artifactId>
+            <version>${project.version}</version>
+        </dependency>
+    </dependencies>
+
     <properties>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
     </properties>

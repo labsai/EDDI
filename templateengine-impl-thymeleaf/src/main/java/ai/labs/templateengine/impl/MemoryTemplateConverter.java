@@ -1,15 +1,16 @@
-package ai.labs.utilities;
+package ai.labs.templateengine.impl;
 
 import ai.labs.memory.IConversationMemory;
 import ai.labs.memory.IData;
+import ai.labs.templateengine.IMemoryTemplateConverter;
 
 import java.util.*;
 
-public class TemplatingUtilities {
+public class MemoryTemplateConverter implements IMemoryTemplateConverter {
+    private static final String KEY_HTTP_CALLS = "httpCalls";
 
-    public static final String KEY_HTTP_CALLS = "httpCalls";
-
-    public static Map<String, Object> convertMemoryForTemplating(IConversationMemory memory) {
+    @Override
+    public Map<String, Object> convertMemoryForTemplating(IConversationMemory memory) {
         Map<String, Object> props = new HashMap<>();
 
         IConversationMemory.IWritableConversationStep currentStep = memory.getCurrentStep();
