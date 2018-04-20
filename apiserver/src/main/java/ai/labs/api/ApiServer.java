@@ -100,7 +100,6 @@ public class ApiServer {
         injector.getInstance(IServerRuntime.class).startup(() -> {
             //auto re-deploy bots
             injector.getInstance(IAutoBotDeployment.class).autoDeployBots();
-            injector.getInstance(IXmppEndpoint.class).init();
         });
     }
 }

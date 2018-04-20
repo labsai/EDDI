@@ -106,6 +106,7 @@ public class XmppEndpoint implements IXmppEndpoint {
             log.info("xmpp found bots: {}", httpResponse.getContentAsString());
             List<String> botids = extractBotIdsFromResponse(httpResponse.getContentAsString());
             for (String botId : botids) {
+                log.info("xmpp botid: {}", botId);
                 Integer version = getLatestDeployedBotVersion(botId);
                 BotConfiguration botConfiguration = botStore.read(botId, version);
                 log.info("xmpp found bots: {}", botId);
@@ -125,7 +126,7 @@ public class XmppEndpoint implements IXmppEndpoint {
                                 .setXmppDomain(hostname)
                                 .setPort(5222)
                                 .setSecurityMode(ConnectionConfiguration.SecurityMode.ifpossible)
-                                .setDebuggerEnabled(true)
+                                .setDebuggerEnabled(false)
                                 .build();
 
                         connection = new XMPPTCPConnection(config);
