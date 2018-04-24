@@ -17,7 +17,8 @@ public class OutputValue {
         text,
         image,
         video,
-        audio
+        audio,
+        delay
     }
 
     private Type type;

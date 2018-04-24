@@ -1,9 +1,7 @@
 package ai.labs.runtime;
 
 import java.util.Map;
-import java.util.concurrent.Callable;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Future;
+import java.util.concurrent.*;
 
 /**
  * @author ginccc
@@ -31,6 +29,10 @@ public final class SystemRuntime {
         ExecutorService getExecutorService();
 
         void logVersion();
+
+        <T> ScheduledFuture<?> submitScheduledCallable(Callable<T> callable,
+                                                       long delay, TimeUnit timeUnit,
+                                                       Map<Object, Object> threadBindings);
 
         <T> Future<T> submitCallable(Callable<T> callable, Map<Object, Object> threadBindings);
 

@@ -9,10 +9,7 @@ import javax.inject.Inject;
 import javax.inject.Named;
 import java.io.File;
 import java.util.Map;
-import java.util.concurrent.Callable;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Future;
-import java.util.concurrent.TimeUnit;
+import java.util.concurrent.*;
 
 /**
  * @author ginccc
@@ -22,7 +19,7 @@ public class BaseRuntime implements SystemRuntime.IRuntime {
     private final String CONFIG_DIR;
     private final String LOG_DIR = FileUtilities.buildPath(System.getProperty("user.dir"), "logs");
 
-    private final ExecutorService executorService;
+    private final ScheduledExecutorService executorService;
     private final String projectName;
 
     private boolean isInit = false;
@@ -30,7 +27,7 @@ public class BaseRuntime implements SystemRuntime.IRuntime {
     private Logger log;
 
     @Inject
-    public BaseRuntime(ExecutorService executorService,
+    public BaseRuntime(ScheduledExecutorService executorService,
                        @Named("systemRuntime.projectName") String projectName,
                        @Named("systemRuntime.projectVersion") String projectVersion,
                        @Named("systemRuntime.configDir") String configDir) {
@@ -94,8 +91,17 @@ public class BaseRuntime implements SystemRuntime.IRuntime {
         return new String(chars);
     }
 
-    public ExecutorService getExecutorService() {
+    public ScheduledExecutorService getExecutorService() {
         return executorService;
+    }
+
+    @Override
+    public <T> ScheduledFuture<?> submitScheduledCallable(final Callable<T> callable,
+                                                          long delay, TimeUnit timeUnit,
+                                                          final Map<Object, Object> threadBindings) {
+        return getExecutorService().schedule(() -> {
+            submitCallable(callable, threadBindings);
+        }, delay, timeUnit);
     }
 
     @Override
