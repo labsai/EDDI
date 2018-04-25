@@ -3,9 +3,11 @@ package ai.labs.templateengine.impl;
 import ai.labs.memory.IConversationMemory;
 import ai.labs.memory.IData;
 import ai.labs.templateengine.IMemoryTemplateConverter;
+import lombok.extern.slf4j.Slf4j;
 
 import java.util.*;
 
+@Slf4j
 public class MemoryTemplateConverter implements IMemoryTemplateConverter {
     private static final String KEY_HTTP_CALLS = "httpCalls";
 
@@ -57,6 +59,7 @@ public class MemoryTemplateConverter implements IMemoryTemplateConverter {
                     httpCalls = new HashMap<>();
                     ret.put(KEY_HTTP_CALLS, httpCalls);
                 }
+                log.info("key: " + prefixKey.substring(prefixKey.indexOf(":") + 1, prefixKey.length()) + " result " + data.getResult());
                 httpCalls.put(prefixKey.substring(prefixKey.indexOf(":") + 1, prefixKey.length()), data.getResult());
             }
         });
