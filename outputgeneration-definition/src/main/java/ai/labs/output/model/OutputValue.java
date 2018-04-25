@@ -17,10 +17,10 @@ public class OutputValue {
         text,
         image,
         video,
-        audio,
-        delay
+        audio
     }
 
     private Type type;
+    private long delayInMillis;
     private List<String> valueAlternatives;
 }
