@@ -9,6 +9,9 @@ import ai.labs.lifecycle.PackageConfigurationException;
 import ai.labs.memory.IConversationMemory;
 import ai.labs.memory.IData;
 import ai.labs.memory.IDataFactory;
+import ai.labs.resources.rest.extensions.model.ExtensionDescriptor;
+import ai.labs.resources.rest.extensions.model.ExtensionDescriptor.ConfigValue;
+import ai.labs.resources.rest.extensions.model.ExtensionDescriptor.FieldType;
 import ai.labs.resources.rest.http.model.HttpCall;
 import ai.labs.resources.rest.http.model.HttpCallsConfiguration;
 import ai.labs.resources.rest.http.model.Request;
@@ -27,12 +30,12 @@ import java.util.stream.Collectors;
 
 @Slf4j
 public class HttpCallsTask implements ILifecycleTask {
+    private static final String ID = "ai.labs.httpcalls";
     private static final String UTF_8 = "utf-8";
     private static final String CONTENT_TYPE_APPLICATION_JSON = "application/json";
     private static final String ACTION_KEY = "actions";
     private static final String CONTENT_TYPE = "Content-Type";
     private static final String KEY_HTTP_CALLS = "httpCalls";
-    private static final String COLON = ":";
     private final IHttpClient httpClient;
     private IJsonSerialization jsonSerialization;
     private final IResourceClientLibrary resourceClientLibrary;
@@ -56,7 +59,7 @@ public class HttpCallsTask implements ILifecycleTask {
 
     @Override
     public String getId() {
-        return HttpCallsTask.class.getSimpleName();
+        return ID;
     }
 
     @Override
@@ -173,5 +176,14 @@ public class HttpCallsTask implements ILifecycleTask {
             log.error(e.getLocalizedMessage(), e);
             throw new PackageConfigurationException(e.getMessage(), e);
         }
+    }
+
+    @Override
+    public ExtensionDescriptor getExtensionDescriptor() {
+        ExtensionDescriptor extensionDescriptor = new ExtensionDescriptor(ID);
+        extensionDescriptor.setDisplayName("Http Calls");
+        ConfigValue configValue = new ConfigValue("Resource URI", FieldType.URI, false, null);
+        extensionDescriptor.getConfigs().put("uri", configValue);
+        return extensionDescriptor;
     }
 }
