@@ -70,9 +70,11 @@ public class OutputGenerationTask implements ILifecycleTask {
 
         IData<List<String>> latestData = memory.getCurrentStep().getLatestData(ACTION_KEY);
         if (latestData == null) {
+            System.out.println("latestData is null");
             return;
         }
         List<String> actions = latestData.getResult();
+        System.out.println("latest actions: " + actions);
         List<IOutputFilter> outputFilters = createOutputFilters(memory, actions);
 
         Map<String, List<OutputEntry>> outputs = outputGeneration.getOutputs(outputFilters);
