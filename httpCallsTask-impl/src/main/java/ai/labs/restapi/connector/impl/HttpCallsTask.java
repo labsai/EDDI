@@ -110,9 +110,11 @@ public class HttpCallsTask implements ILifecycleTask {
                     }
                     if (call.isSaveResponse()) {
                         String responseBody = response.getContentAsString();
-                        log.info("http call response:" + responseBody);
                         String actualContentType = response.getHttpHeader().get(CONTENT_TYPE);
-                        if (!CONTENT_TYPE_APPLICATION_JSON.equals(actualContentType)) {
+                        if (actualContentType != null) {
+                            actualContentType = actualContentType.split("\\;")[0];
+                        }
+                        if (!CONTENT_TYPE_APPLICATION_JSON.startsWith(actualContentType)) {
                             String message = "HttpCall (%s) didn't return application/json as content-type, instead was (%s)";
                             log.warn(String.format(message, call.getName(), actualContentType));
                             continue;

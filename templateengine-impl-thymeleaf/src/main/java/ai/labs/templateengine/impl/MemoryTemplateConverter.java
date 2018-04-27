@@ -3,9 +3,11 @@ package ai.labs.templateengine.impl;
 import ai.labs.memory.IConversationMemory;
 import ai.labs.memory.IData;
 import ai.labs.templateengine.IMemoryTemplateConverter;
+import lombok.extern.slf4j.Slf4j;
 
 import java.util.*;
 
+@Slf4j
 public class MemoryTemplateConverter implements IMemoryTemplateConverter {
     private static final String KEY_HTTP_CALLS = "httpCalls";
 
