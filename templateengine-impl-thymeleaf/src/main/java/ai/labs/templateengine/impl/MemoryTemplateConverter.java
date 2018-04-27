@@ -50,20 +50,15 @@ public class MemoryTemplateConverter implements IMemoryTemplateConverter {
     private static HashMap<Object, Object> convertHttpCalls(IConversationMemory.IConversationStep conversationStep) {
         HashMap<Object, Object> ret = new HashMap<>();
 
-        System.out.println("converting httpcalls");
         Set<String> prefixKeys = conversationStep.getAllKeys();
         prefixKeys.stream().filter(key -> key.startsWith(KEY_HTTP_CALLS)).forEach(prefixKey -> {
-            System.out.println("key: " + prefixKey);
             IData data = conversationStep.getLatestData(prefixKey);
-            System.out.println("data: " + data);
             if (data.getResult() != null) {
-                System.out.println("data result: " + data.getResult());
                 HashMap<Object, Object> httpCalls = (HashMap<Object, Object>) ret.get(KEY_HTTP_CALLS);
                 if (ret.get(KEY_HTTP_CALLS) == null) {
                     httpCalls = new HashMap<>();
                     ret.put(KEY_HTTP_CALLS, httpCalls);
                 }
-                System.out.println("key: " + prefixKey.substring(prefixKey.indexOf(":") + 1, prefixKey.length()) + " result " + data.getResult());
                 httpCalls.put(prefixKey.substring(prefixKey.indexOf(":") + 1, prefixKey.length()), data.getResult());
             }
         });
