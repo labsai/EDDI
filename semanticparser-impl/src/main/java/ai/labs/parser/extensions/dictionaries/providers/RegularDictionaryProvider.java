@@ -3,14 +3,15 @@ package ai.labs.parser.extensions.dictionaries.providers;
 import ai.labs.expressions.Expression;
 import ai.labs.expressions.utilities.IExpressionProvider;
 import ai.labs.lifecycle.IllegalExtensionConfigurationException;
-import ai.labs.resources.rest.extensions.model.ExtensionDescriptor.ConfigValue;
-import ai.labs.resources.rest.extensions.model.ExtensionDescriptor.FieldType;
 import ai.labs.parser.extensions.dictionaries.IDictionary;
 import ai.labs.parser.extensions.dictionaries.RegularDictionary;
+import ai.labs.resources.rest.extensions.model.ExtensionDescriptor.ConfigValue;
+import ai.labs.resources.rest.extensions.model.ExtensionDescriptor.FieldType;
 import ai.labs.resources.rest.regulardictionary.model.RegularDictionaryConfiguration;
 import ai.labs.runtime.client.configuration.IResourceClientLibrary;
 import ai.labs.runtime.service.ServiceException;
 import ai.labs.utilities.RuntimeUtilities;
+import lombok.extern.slf4j.Slf4j;
 
 import javax.inject.Inject;
 import java.net.URI;
@@ -22,6 +23,7 @@ import java.util.Map;
 /**
  * @author ginccc
  */
+@Slf4j
 public class RegularDictionaryProvider implements IDictionaryProvider {
     public static final String ID = "ai.labs.parser.dictionaries.regular";
 
@@ -85,14 +87,22 @@ public class RegularDictionaryProvider implements IDictionaryProvider {
 
         regularDictionaryConfiguration.getWords().forEach(wordConfig -> {
             String word = wordConfig.getWord();
-            regularDictionary.addWord(word,
-                    createDefaultExpressionIfNull(word, wordConfig.getExp()), wordConfig.getFrequency());
+            if (word != null) {
+                regularDictionary.addWord(word.trim(),
+                        createDefaultExpressionIfNull(word, wordConfig.getExp()), wordConfig.getFrequency());
+            } else {
+                log.warn("Value of 'word' in dictionary was null. Skipped it.");
+            }
         });
 
         regularDictionaryConfiguration.getPhrases().forEach(phraseConfig -> {
             String phrase = phraseConfig.getPhrase();
-            regularDictionary.addPhrase(phrase,
-                    createDefaultExpressionIfNull(phrase, phraseConfig.getExp()));
+            if (phrase != null) {
+                regularDictionary.addPhrase(phrase.trim(),
+                        createDefaultExpressionIfNull(phrase, phraseConfig.getExp()));
+            } else {
+                log.warn("Value of 'phrase' in dictionary was null. Skipped it.");
+            }
         });
     }
 
