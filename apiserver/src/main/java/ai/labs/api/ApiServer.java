@@ -30,6 +30,9 @@ import ai.labs.staticresources.bootstrap.StaticResourcesModule;
 import ai.labs.templateengine.bootstrap.TemplateEngineModule;
 import ai.labs.testing.bootstrap.AutomatedtestingModule;
 import ai.labs.utilities.FileUtilities;
+import ai.labs.xmpp.bootstrap.XmppModule;
+import ai.labs.xmpp.endpoint.IXmppEndpoint;
+import ai.labs.xmpp.endpoint.XmppEndpoint;
 import com.google.inject.Module;
 import org.jboss.resteasy.plugins.guice.ext.RequestScopeModule;
 
@@ -87,6 +90,7 @@ public class ApiServer {
                 new FacebookMessengerModule(),
                 new BackupServiceModule(),
                 new HttpCallsModule(),
+                new XmppModule()
         };
 
         //init modules
@@ -96,6 +100,7 @@ public class ApiServer {
         injector.getInstance(IServerRuntime.class).startup(() -> {
             //auto re-deploy bots
             injector.getInstance(IAutoBotDeployment.class).autoDeployBots();
+            injector.getInstance(IXmppEndpoint.class).init();
         });
     }
 }

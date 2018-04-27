@@ -2,6 +2,7 @@ package ai.labs.facebookmessenger.endpoint;
 
 import ai.labs.caching.ICache;
 import ai.labs.caching.ICacheFactory;
+import ai.labs.facebookmessenger.IFacebookEndpoint;
 import ai.labs.httpclient.IHttpClient;
 import ai.labs.httpclient.IRequest;
 import ai.labs.httpclient.IResponse;
