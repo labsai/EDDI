@@ -30,6 +30,8 @@ import org.jivesoftware.smack.XMPPException;
 import org.jivesoftware.smack.chat2.Chat;
 import org.jivesoftware.smack.chat2.ChatManager;
 import org.jivesoftware.smack.packet.Message;
+import org.jivesoftware.smack.roster.Roster;
+import org.jivesoftware.smack.roster.RosterGroup;
 import org.jivesoftware.smack.tcp.XMPPTCPConnection;
 import org.jivesoftware.smack.tcp.XMPPTCPConnectionConfiguration;
 import org.jxmpp.jid.EntityBareJid;
@@ -44,10 +46,7 @@ import javax.ws.rs.core.Response;
 import java.io.IOException;
 import java.net.InetAddress;
 import java.net.URI;
-import java.util.ArrayList;
-import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
+import java.util.*;
 import java.util.concurrent.Callable;
 import java.util.concurrent.TimeUnit;
 import java.util.regex.Pattern;
@@ -119,7 +118,7 @@ public class XmppEndpoint implements IXmppEndpoint {
                                 .setXmppDomain(hostname)
                                 .setPort(5222)
                                 .setSecurityMode(ConnectionConfiguration.SecurityMode.ifpossible)
-                                .setDebuggerEnabled(false)
+                                .setDebuggerEnabled(true)
                                 .build();
 
                         connection = new XMPPTCPConnection(config);
