@@ -118,7 +118,7 @@ public class XmppEndpoint implements IXmppEndpoint {
                                 .setXmppDomain(hostname)
                                 .setPort(5222)
                                 .setSecurityMode(ConnectionConfiguration.SecurityMode.ifpossible)
-                                .setDebuggerEnabled(true)
+                                .setDebuggerEnabled(false)
                                 .build();
 
                         connection = new XMPPTCPConnection(config);
