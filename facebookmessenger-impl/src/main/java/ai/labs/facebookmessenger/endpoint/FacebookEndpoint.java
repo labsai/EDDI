@@ -46,12 +46,14 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.Callable;
-import java.util.concurrent.TimeUnit;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.TimeoutException;
 
 import static ai.labs.memory.model.Deployment.Environment.unrestricted;
 import static ai.labs.persistence.IResourceStore.ResourceNotFoundException;
 import static ai.labs.persistence.IResourceStore.ResourceStoreException;
 import static ai.labs.rest.restinterfaces.RestInterfaceFactory.RestInterfaceFactoryException;
+import static java.util.concurrent.TimeUnit.MILLISECONDS;
 
 @RequestScoped
 @Slf4j
@@ -173,7 +175,7 @@ public class FacebookEndpoint implements IFacebookEndpoint {
                      String conversationId,
                      String senderId,
                      String message)
-            throws IRequest.HttpRequestException, ResourceNotFoundException, ResourceStoreException, ServiceException {
+            throws IRequest.HttpRequestException, ResourceNotFoundException, ResourceStoreException, ServiceException, InterruptedException, ExecutionException, TimeoutException {
 
         URI uri = RestUtilities.createURI(
                 apiServerURI, "/bots/",
@@ -191,7 +193,7 @@ public class FacebookEndpoint implements IFacebookEndpoint {
         final String jsonRequestBody = "{ \"input\": \"" + message + "\", \"context\": {} }";
         IResponse httpResponse = httpClient.newRequest(uri, IHttpClient.Method.POST)
                 .setUserAgent(AI_LABS_USER_AGENT)
-                .setTimeout(EDDI_TIMEOUT, TimeUnit.MILLISECONDS)
+                .setTimeout(EDDI_TIMEOUT, MILLISECONDS)
                 .setBodyEntity(jsonRequestBody, ENCODING, MediaType.APPLICATION_JSON)
                 .send();
         log.debug("response: {}", httpResponse.getContentAsString());
@@ -224,7 +226,7 @@ public class FacebookEndpoint implements IFacebookEndpoint {
                     log.error(e.getLocalizedMessage(), e);
                 }
                 return null;
-            }, delay, TimeUnit.MILLISECONDS, null);
+            }, delay, MILLISECONDS, null).get(EDDI_TIMEOUT, MILLISECONDS);
             delay = 0;
         }
 
