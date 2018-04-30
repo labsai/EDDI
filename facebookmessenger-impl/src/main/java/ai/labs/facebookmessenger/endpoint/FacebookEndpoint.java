@@ -210,7 +210,7 @@ public class FacebookEndpoint implements IFacebookEndpoint {
         long delay = 0;
         for (Output output : outputs) {
             if (DELAY.equals(output.getType())) {
-                delay = Long.parseLong(output.getValue());
+                delay += Long.parseLong(output.getValue());
                 continue;
             }
             runtime.submitScheduledCallable(() -> {
