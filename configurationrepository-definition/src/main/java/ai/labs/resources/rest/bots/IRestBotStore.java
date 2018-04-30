@@ -25,9 +25,18 @@ public interface IRestBotStore extends IRestVersionInfo {
     @Produces(MediaType.APPLICATION_JSON)
     List<DocumentDescriptor> readBotDescriptors(@QueryParam("filter") @DefaultValue("") String filter,
                                                 @QueryParam("index") @DefaultValue("0") Integer index,
-                                                @QueryParam("limit") @DefaultValue("20") Integer limit,
-                                                @QueryParam("packageId") String packageId,
-                                                @QueryParam("packageVersion") Integer packageVersion);
+                                                @QueryParam("limit") @DefaultValue("20") Integer limit);
+
+    @POST
+    @Path("descriptors")
+    @Consumes(MediaType.TEXT_PLAIN)
+    @Produces(MediaType.APPLICATION_JSON)
+    List<DocumentDescriptor> readBotDescriptors(
+            @QueryParam("filter") @DefaultValue("") String filter,
+            @QueryParam("index") @DefaultValue("0") Integer index,
+            @QueryParam("limit") @DefaultValue("20") Integer limit,
+            @ApiParam(name = "body", value = "eddi://ai.labs.package/packagestore/packages/ID?version=VERSION")
+            @DefaultValue("") String containingPackageUri);
 
     @GET
     @Path("/{id}")

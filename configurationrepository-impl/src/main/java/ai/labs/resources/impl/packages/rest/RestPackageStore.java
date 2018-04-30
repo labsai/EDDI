@@ -2,6 +2,7 @@ package ai.labs.resources.impl.packages.rest;
 
 import ai.labs.persistence.IResourceStore;
 import ai.labs.resources.impl.resources.rest.RestVersionInfo;
+import ai.labs.resources.impl.utilities.ResourceUtilities;
 import ai.labs.resources.rest.documentdescriptor.IDocumentDescriptorStore;
 import ai.labs.resources.rest.documentdescriptor.model.DocumentDescriptor;
 import ai.labs.resources.rest.packages.IPackageStore;
@@ -11,7 +12,6 @@ import ai.labs.utilities.RestUtilities;
 import lombok.extern.slf4j.Slf4j;
 
 import javax.inject.Inject;
-import javax.ws.rs.BadRequestException;
 import javax.ws.rs.InternalServerErrorException;
 import javax.ws.rs.core.MediaType;
 import javax.ws.rs.core.Response;
@@ -49,16 +49,10 @@ public class RestPackageStore extends RestVersionInfo<PackageConfiguration> impl
                 throw new InternalServerErrorException();
             }
         } else {
-            return createMaleFormattedResourceUriException(containingResourceUri);
+            return ResourceUtilities.createMaleFormattedResourceUriException(containingResourceUri);
         }
     }
 
-    private static List<DocumentDescriptor> createMaleFormattedResourceUriException(String containingResourceUri) {
-        String message = String.format("Bad resource uri. Needs to be of this format: " +
-                "eddi://ai.labs.<type>/<path>/<ID>?version=<VERSION>" +
-                "\n actual: '%s'", containingResourceUri);
-        throw new BadRequestException(Response.status(BAD_REQUEST).entity(message).type(MediaType.TEXT_PLAIN).build());
-    }
 
     @Override
     public PackageConfiguration readPackage(String id, Integer version) {

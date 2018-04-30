@@ -8,7 +8,9 @@ import ai.labs.resources.rest.bots.IRestBotStore;
 import ai.labs.resources.rest.bots.model.BotConfiguration;
 import ai.labs.resources.rest.documentdescriptor.IDocumentDescriptorStore;
 import ai.labs.resources.rest.documentdescriptor.model.DocumentDescriptor;
+import ai.labs.resources.rest.packages.IRestPackageStore;
 import ai.labs.utilities.RestUtilities;
+import ai.labs.utilities.URIUtilities;
 import lombok.extern.slf4j.Slf4j;
 
 import javax.inject.Inject;
@@ -19,6 +21,7 @@ import javax.ws.rs.core.Response;
 import java.net.URI;
 import java.util.List;
 
+import static ai.labs.resources.impl.utilities.ResourceUtilities.createMaleFormattedResourceUriException;
 import static javax.ws.rs.core.Response.Status.BAD_REQUEST;
 
 /**
@@ -26,6 +29,7 @@ import static javax.ws.rs.core.Response.Status.BAD_REQUEST;
  */
 @Slf4j
 public class RestBotStore extends RestVersionInfo<BotConfiguration> implements IRestBotStore {
+    private static final String PACKAGE_URI = IRestPackageStore.resourceURI;
     private final IBotStore botStore;
 
     @Inject
@@ -36,25 +40,27 @@ public class RestBotStore extends RestVersionInfo<BotConfiguration> implements I
     }
 
     @Override
-    public List<DocumentDescriptor> readBotDescriptors(String filter, Integer index, Integer limit,
-                                                       String packageId, Integer packageVersion) {
-        if (packageId != null && packageVersion != null) {
+    public List<DocumentDescriptor> readBotDescriptors(String filter, Integer index, Integer limit) {
+        return readDescriptors("ai.labs.bot", filter, index, limit);
+    }
+
+    @Override
+    public List<DocumentDescriptor> readBotDescriptors(String filter, Integer index, Integer limit, String containingPackageUri) {
+        if (containingPackageUri.startsWith(PACKAGE_URI)) {
             try {
+                URIUtilities.ResourceId resourceId = URIUtilities.extractResourceId(URI.create(containingPackageUri));
+                String packageId = resourceId.getId();
+                Integer packageVersion = resourceId.getVersion();
+                if (packageId == null || packageVersion == null || packageVersion == 0) {
+                    return createMaleFormattedResourceUriException(containingPackageUri);
+                }
                 return botStore.getBotDescriptorsContainingPackage(packageId, packageVersion);
             } catch (IResourceStore.ResourceNotFoundException | IResourceStore.ResourceStoreException e) {
                 log.error(e.getLocalizedMessage(), e);
                 throw new InternalServerErrorException();
             }
         } else {
-            if (packageId != null) {
-                return createBadRequestException("packageVersion");
-            }
-
-            if (packageVersion != null) {
-                return createBadRequestException("packageId");
-            }
-
-            return readDescriptors("ai.labs.bot", filter, index, limit);
+            return createMaleFormattedResourceUriException(containingPackageUri);
         }
     }
 

@@ -54,7 +54,7 @@ public class PackageStore implements IPackageStore {
     }
 
     @Override
-    public void delete(String id, Integer version) throws ResourceStoreException, ResourceModifiedException, ResourceNotFoundException {
+    public void delete(String id, Integer version) throws ResourceModifiedException, ResourceNotFoundException {
         packageResourceStore.delete(id, version);
     }
 
