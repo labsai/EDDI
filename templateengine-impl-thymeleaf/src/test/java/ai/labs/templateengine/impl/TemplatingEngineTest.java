@@ -20,7 +20,8 @@ public class TemplatingEngineTest {
     @Before
     public void setup() {
         TemplateEngineModule engineModule = new TemplateEngineModule();
-        templatingEngine = new TemplatingEngine(engineModule.provideTemplateEngine());
+        templatingEngine = new TemplatingEngine(
+                engineModule.provideTextTemplateEngine(), engineModule.provideHtmlTemplateEngine());
     }
 
     @Test

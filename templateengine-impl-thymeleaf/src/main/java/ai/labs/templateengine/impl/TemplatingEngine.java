@@ -16,21 +16,32 @@ import java.util.Map;
  */
 public class TemplatingEngine implements ITemplatingEngine {
     private static final List<String> templatingControlChars = Arrays.asList("${", "*{", "#{", "@{", "~{", "th:");
-    private final TemplateEngine templateEngine;
+    private final TextTemplateEngine textTemplateEngine;
+    private final HtmlTemplateEngine htmlTemplateEngine;
 
     @Inject
-    public TemplatingEngine(TemplateEngine templateEngine) {
-        this.templateEngine = templateEngine;
+    public TemplatingEngine(TextTemplateEngine textTemplateEngine,
+                            HtmlTemplateEngine htmlTemplateEngine) {
+
+        this.textTemplateEngine = textTemplateEngine;
+        this.htmlTemplateEngine = htmlTemplateEngine;
     }
 
     @Override
-    public String processTemplate(String template, Map<String, Object> dynamicAttributesMap)
-            throws TemplateEngineException {
+    public String processTemplate(String template,
+                                  Map<String, Object> dynamicAttributesMap) throws TemplateEngineException {
+        return processTemplate(template, dynamicAttributesMap, TemplateMode.TEXT);
+    }
+
+    @Override
+    public String processTemplate(String template,
+                                  Map<String, Object> dynamicAttributesMap,
+                                  TemplateMode templateMode) throws TemplateEngineException {
         final Context ctx = new Context(Locale.ENGLISH);
         dynamicAttributesMap.forEach(ctx::setVariable);
         try {
             if (containsTemplatingControlCharacters(template)) {
-                return templateEngine.process(template, ctx);
+                return getTemplateEngine(templateMode).process(template, ctx);
             } else {
                 return template;
             }
@@ -43,5 +54,13 @@ public class TemplatingEngine implements ITemplatingEngine {
 
     private boolean containsTemplatingControlCharacters(String template) {
         return templatingControlChars.parallelStream().anyMatch(template::contains);
+    }
+
+    private TemplateEngine getTemplateEngine(TemplateMode templateMode) {
+        if (templateMode.equals(TemplateMode.HTML)) {
+            return htmlTemplateEngine.getTemplateEngine();
+        } else {
+            return textTemplateEngine.getTemplateEngine();
+        }
     }
 }
