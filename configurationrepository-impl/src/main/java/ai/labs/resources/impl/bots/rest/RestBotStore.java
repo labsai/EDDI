@@ -12,10 +12,14 @@ import ai.labs.utilities.RestUtilities;
 import lombok.extern.slf4j.Slf4j;
 
 import javax.inject.Inject;
+import javax.ws.rs.BadRequestException;
+import javax.ws.rs.InternalServerErrorException;
 import javax.ws.rs.core.MediaType;
 import javax.ws.rs.core.Response;
 import java.net.URI;
 import java.util.List;
+
+import static javax.ws.rs.core.Response.Status.BAD_REQUEST;
 
 /**
  * @author ginccc
@@ -32,8 +36,31 @@ public class RestBotStore extends RestVersionInfo<BotConfiguration> implements I
     }
 
     @Override
-    public List<DocumentDescriptor> readBotDescriptors(String filter, Integer index, Integer limit) {
-        return readDescriptors("ai.labs.bot", filter, index, limit);
+    public List<DocumentDescriptor> readBotDescriptors(String filter, Integer index, Integer limit,
+                                                       String packageId, Integer packageVersion) {
+        if (packageId != null && packageVersion != null) {
+            try {
+                return botStore.getBotDescriptorsContainingPackage(packageId, packageVersion);
+            } catch (IResourceStore.ResourceNotFoundException | IResourceStore.ResourceStoreException e) {
+                log.error(e.getLocalizedMessage(), e);
+                throw new InternalServerErrorException();
+            }
+        } else {
+            if (packageId != null) {
+                return createBadRequestException("packageVersion");
+            }
+
+            if (packageVersion != null) {
+                return createBadRequestException("packageId");
+            }
+
+            return readDescriptors("ai.labs.bot", filter, index, limit);
+        }
+    }
+
+    private List<DocumentDescriptor> createBadRequestException(String paramName) {
+        String message = String.format("query param '%s' is missing", paramName);
+        throw new BadRequestException(Response.status(BAD_REQUEST).entity(message).type(MediaType.TEXT_PLAIN).build());
     }
 
     @Override
@@ -66,7 +93,7 @@ public class RestBotStore extends RestVersionInfo<BotConfiguration> implements I
             return updateBot(id, version, botConfiguration);
         } else {
             URI uri = RestUtilities.createURI(RestPackageStore.resourceURI, id, versionQueryParam, version);
-            return Response.status(Response.Status.BAD_REQUEST).entity(uri).type(MediaType.TEXT_PLAIN).build();
+            return Response.status(BAD_REQUEST).entity(uri).type(MediaType.TEXT_PLAIN).build();
         }
     }
 
