@@ -15,9 +15,11 @@ import java.util.List;
 public class OutputValue {
     public enum Type {
         text,
+        html,
         image,
         video,
-        audio
+        audio,
+        delay
     }
 
     private Type type;

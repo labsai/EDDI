@@ -27,9 +27,8 @@ import javax.inject.Singleton;
 import java.io.InputStream;
 import java.util.Arrays;
 import java.util.concurrent.ExecutorService;
-import java.util.concurrent.LinkedBlockingQueue;
-import java.util.concurrent.ThreadPoolExecutor;
-import java.util.concurrent.TimeUnit;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.ScheduledThreadPoolExecutor;
 
 /**
  * @author ginccc
@@ -69,19 +68,18 @@ public class RuntimeModule extends AbstractBaseModule {
 
     @Provides
     @Singleton
-    private ExecutorService provideExecutorService(@Named("threads.corePoolSize") int corePoolSize,
-                                                   @Named("threads.maximumPoolSize") int maximumPoolSize,
-                                                   @Named("threads.keepAliveTimeInSeconds") int keepAliveTimeInSeconds,
-                                                   @Named("threads.queueSize") int queueSize) {
+    private ScheduledExecutorService provideScheduledExecutorService(@Named("threads.corePoolSize") int corePoolSize) {
         try {
-            return new ThreadPoolExecutor(corePoolSize, // core size
-                    maximumPoolSize, // max size
-                    keepAliveTimeInSeconds, // idle timeout
-                    TimeUnit.SECONDS,
-                    new LinkedBlockingQueue<>(queueSize <= -1 ? Integer.MAX_VALUE : queueSize)); // queue with a size
+            return new ScheduledThreadPoolExecutor(corePoolSize);
         } catch (Exception e) {
             throw new RuntimeException(e.getLocalizedMessage(), e);
         }
+    }
+
+    @Provides
+    @Singleton
+    private ExecutorService provideExecutorService(@Named("threads.corePoolSize") int corePoolSize) {
+        return provideScheduledExecutorService(corePoolSize);
     }
 
     static class HasInitMethod extends AbstractMatcher<TypeLiteral<?>> {
