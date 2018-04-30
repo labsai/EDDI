@@ -11,11 +11,15 @@ import ai.labs.utilities.RestUtilities;
 import lombok.extern.slf4j.Slf4j;
 
 import javax.inject.Inject;
+import javax.ws.rs.BadRequestException;
+import javax.ws.rs.InternalServerErrorException;
 import javax.ws.rs.core.MediaType;
 import javax.ws.rs.core.Response;
 import java.net.URI;
 import java.util.List;
 import java.util.Map;
+
+import static javax.ws.rs.core.Response.Status.BAD_REQUEST;
 
 @Slf4j
 public class RestPackageStore extends RestVersionInfo<PackageConfiguration> implements IRestPackageStore {
@@ -33,6 +37,27 @@ public class RestPackageStore extends RestVersionInfo<PackageConfiguration> impl
     @Override
     public List<DocumentDescriptor> readPackageDescriptors(String filter, Integer index, Integer limit) {
         return readDescriptors("ai.labs.package", filter, index, limit);
+    }
+
+    @Override
+    public List<DocumentDescriptor> readPackageDescriptors(String filter, Integer index, Integer limit, String containingResourceUri) {
+        if (containingResourceUri.startsWith("eddi://")) {
+            try {
+                return packageStore.getPackageDescriptorsContainingResource(URI.create(containingResourceUri));
+            } catch (IResourceStore.ResourceNotFoundException | IResourceStore.ResourceStoreException e) {
+                log.error(e.getLocalizedMessage(), e);
+                throw new InternalServerErrorException();
+            }
+        } else {
+            return createMaleFormattedResourceUriException(containingResourceUri);
+        }
+    }
+
+    private static List<DocumentDescriptor> createMaleFormattedResourceUriException(String containingResourceUri) {
+        String message = String.format("Bad resource uri. Needs to be of this format: " +
+                "eddi://ai.labs.<type>/<path>/<ID>?version=<VERSION>" +
+                "\n actual: '%s'", containingResourceUri);
+        throw new BadRequestException(Response.status(BAD_REQUEST).entity(message).type(MediaType.TEXT_PLAIN).build());
     }
 
     @Override
@@ -76,7 +101,7 @@ public class RestPackageStore extends RestVersionInfo<PackageConfiguration> impl
             return updatePackage(id, version, packageConfiguration);
         } else {
             URI uri = RestUtilities.createURI(RestPackageStore.resourceURI, id, versionQueryParam, version);
-            return Response.status(Response.Status.BAD_REQUEST).entity(uri).type(MediaType.TEXT_PLAIN).build();
+            return Response.status(BAD_REQUEST).entity(uri).type(MediaType.TEXT_PLAIN).build();
         }
     }
 

@@ -27,6 +27,17 @@ public interface IRestPackageStore extends IRestVersionInfo {
                                                     @QueryParam("index") @DefaultValue("0") Integer index,
                                                     @QueryParam("limit") @DefaultValue("20") Integer limit);
 
+    @POST
+    @Path("descriptors")
+    @Consumes(MediaType.TEXT_PLAIN)
+    @Produces(MediaType.APPLICATION_JSON)
+    List<DocumentDescriptor> readPackageDescriptors(
+            @QueryParam("filter") @DefaultValue("") String filter,
+            @QueryParam("index") @DefaultValue("0") Integer index,
+            @QueryParam("limit") @DefaultValue("20") Integer limit,
+            @ApiParam(name = "body", value = "eddi://ai.labs.<type>/<path>/<ID>?version=<VERSION>")
+            @DefaultValue("") String containingResourceUri);
+
     @GET
     @Path("/{id}")
     @Produces(MediaType.APPLICATION_JSON)
@@ -39,7 +50,7 @@ public interface IRestPackageStore extends IRestVersionInfo {
     @Consumes(MediaType.APPLICATION_JSON)
     Response updatePackage(@PathParam("id") String id,
                            @ApiParam(name = "version", required = true, format = "integer", example = "1")
-                      @QueryParam("version") Integer version, PackageConfiguration packageConfiguration);
+                           @QueryParam("version") Integer version, PackageConfiguration packageConfiguration);
 
     @PUT
     @Path("/{id}/updateResourceUri")
@@ -56,5 +67,5 @@ public interface IRestPackageStore extends IRestVersionInfo {
     @Path("/{id}")
     Response deletePackage(@PathParam("id") String id,
                            @ApiParam(name = "version", required = true, format = "integer", example = "1")
-                       @QueryParam("version") Integer version);
+                           @QueryParam("version") Integer version);
 }

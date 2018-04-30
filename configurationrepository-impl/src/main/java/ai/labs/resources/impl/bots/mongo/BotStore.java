@@ -4,6 +4,7 @@ import ai.labs.persistence.IResourceStore;
 import ai.labs.persistence.mongo.HistorizedResourceStore;
 import ai.labs.persistence.mongo.MongoResourceStorage;
 import ai.labs.resources.impl.descriptor.mongo.DocumentDescriptorStore;
+import ai.labs.resources.impl.utilities.ResourceUtilities;
 import ai.labs.resources.rest.bots.IBotStore;
 import ai.labs.resources.rest.bots.model.BotConfiguration;
 import ai.labs.resources.rest.documentdescriptor.model.DocumentDescriptor;
@@ -18,7 +19,6 @@ import javax.inject.Inject;
 import java.util.Collections;
 import java.util.LinkedList;
 import java.util.List;
-import java.util.Objects;
 
 /**
  * @author ginccc
@@ -103,39 +103,20 @@ public class BotStore implements IBotStore {
             FindIterable<Document> documentIterable;
 
             documentIterable = currentCollection.find(filter);
-            extractBotIds(botIds, documentIterable);
+            ResourceUtilities.extractIds(botIds, documentIterable);
 
             documentIterable = historyCollection.find(filter);
-            extractBotIds(botIds, documentIterable);
+            ResourceUtilities.extractIds(botIds, documentIterable);
 
             List<IResourceId> latestBots = new LinkedList<>();
 
             IResourceId currentResourceId;
             for (String botId : botIds) {
                 currentResourceId = documentDescriptorStore.getCurrentResourceId(botId);
-                addIfNewerVersion(currentResourceId, latestBots);
+                ResourceUtilities.addIfNewerVersion(currentResourceId, latestBots);
             }
 
             return latestBots;
-        }
-
-        private void addIfNewerVersion(IResourceId resourceId, List<IResourceId> bots) {
-            if (bots.isEmpty()) {
-                bots.add(resourceId);
-            } else {
-                boolean addToList = bots.stream().noneMatch(bot ->
-                        Objects.equals(resourceId.getId(), bot.getId()) && resourceId.getVersion() < bot.getVersion());
-
-                if (addToList) {
-                    bots.add(resourceId);
-                }
-            }
-        }
-
-        private void extractBotIds(List<String> botIds, FindIterable<Document> documentIterable) {
-            for (Document document : documentIterable) {
-                botIds.add(document.getObjectId("_id").toString());
-            }
         }
     }
 
