@@ -1,7 +1,7 @@
 package ai.labs.facebookmessenger.bootstrap;
 
+import ai.labs.facebookmessenger.IFacebookEndpoint;
 import ai.labs.facebookmessenger.endpoint.FacebookEndpoint;
-import ai.labs.facebookmessenger.endpoint.IFacebookEndpoint;
 import ai.labs.runtime.bootstrap.AbstractBaseModule;
 
 /**

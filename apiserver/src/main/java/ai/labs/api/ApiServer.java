@@ -18,6 +18,7 @@ import ai.labs.persistence.bootstrap.PersistenceModule;
 import ai.labs.property.bootstrap.PropertyDisposerModule;
 import ai.labs.resources.bootstrap.RepositoryModule;
 import ai.labs.rest.bootstrap.RestInterfaceModule;
+import ai.labs.restapi.connector.bootstrap.HttpCallsModule;
 import ai.labs.runtime.DependencyInjector;
 import ai.labs.runtime.IAutoBotDeployment;
 import ai.labs.runtime.bootstrap.RuntimeModule;
@@ -29,6 +30,9 @@ import ai.labs.staticresources.bootstrap.StaticResourcesModule;
 import ai.labs.templateengine.bootstrap.TemplateEngineModule;
 import ai.labs.testing.bootstrap.AutomatedtestingModule;
 import ai.labs.utilities.FileUtilities;
+import ai.labs.xmpp.bootstrap.XmppModule;
+import ai.labs.xmpp.endpoint.IXmppEndpoint;
+import ai.labs.xmpp.endpoint.XmppEndpoint;
 import com.google.inject.Module;
 import org.jboss.resteasy.plugins.guice.ext.RequestScopeModule;
 
@@ -85,6 +89,8 @@ public class ApiServer {
                 new ServerRuntimeModule(new FileInputStream(configDir + "webServer.properties")),
                 new FacebookMessengerModule(),
                 new BackupServiceModule(),
+                new HttpCallsModule(),
+                new XmppModule()
         };
 
         //init modules
@@ -94,6 +100,7 @@ public class ApiServer {
         injector.getInstance(IServerRuntime.class).startup(() -> {
             //auto re-deploy bots
             injector.getInstance(IAutoBotDeployment.class).autoDeployBots();
+            injector.getInstance(IXmppEndpoint.class).init();
         });
     }
 }

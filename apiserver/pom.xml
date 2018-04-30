@@ -126,6 +126,11 @@
         </dependency>
         <dependency>
             <groupId>ai.labs</groupId>
+            <artifactId>xmpp-impl</artifactId>
+            <version>${project.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>ai.labs</groupId>
             <artifactId>behavior-impl</artifactId>
             <version>${project.version}</version>
         </dependency>
@@ -144,7 +149,12 @@
             <artifactId>backupservice-impl</artifactId>
             <version>${project.version}</version>
         </dependency>
-        <dependency>
+      <dependency>
+            <groupId>ai.labs</groupId>
+            <artifactId>httpCallsTask-impl</artifactId>
+            <version>${project.version}</version>
+        </dependency>
+      <dependency>
             <groupId>ai.labs</groupId>
             <artifactId>normalizer-impl</artifactId>
             <version>${project.version}</version>
