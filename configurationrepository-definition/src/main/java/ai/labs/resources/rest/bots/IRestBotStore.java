@@ -27,19 +27,30 @@ public interface IRestBotStore extends IRestVersionInfo {
                                                 @QueryParam("index") @DefaultValue("0") Integer index,
                                                 @QueryParam("limit") @DefaultValue("20") Integer limit);
 
+    @POST
+    @Path("descriptors")
+    @Consumes(MediaType.TEXT_PLAIN)
+    @Produces(MediaType.APPLICATION_JSON)
+    List<DocumentDescriptor> readBotDescriptors(
+            @QueryParam("filter") @DefaultValue("") String filter,
+            @QueryParam("index") @DefaultValue("0") Integer index,
+            @QueryParam("limit") @DefaultValue("20") Integer limit,
+            @ApiParam(name = "body", value = "eddi://ai.labs.package/packagestore/packages/ID?version=VERSION")
+            @DefaultValue("") String containingPackageUri);
+
     @GET
     @Path("/{id}")
     @Produces(MediaType.APPLICATION_JSON)
     BotConfiguration readBot(@PathParam("id") String id,
                              @ApiParam(name = "version", required = true, format = "integer", example = "1")
-                     @QueryParam("version") Integer version);
+                             @QueryParam("version") Integer version);
 
     @PUT
     @Path("/{id}")
     @Consumes(MediaType.APPLICATION_JSON)
     Response updateBot(@PathParam("id") String id,
                        @ApiParam(name = "version", required = true, format = "integer", example = "1")
-                  @QueryParam("version") Integer version, BotConfiguration botConfiguration);
+                       @QueryParam("version") Integer version, BotConfiguration botConfiguration);
 
     @PUT
     @Path("/{id}/updateResourceUri")
@@ -56,5 +67,5 @@ public interface IRestBotStore extends IRestVersionInfo {
     @Path("/{id}")
     Response deleteBot(@PathParam("id") String id,
                        @ApiParam(name = "version", required = true, format = "integer", example = "1")
-                   @QueryParam("version") Integer version);
+                       @QueryParam("version") Integer version);
 }
