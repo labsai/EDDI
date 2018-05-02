@@ -10,7 +10,7 @@ import java.io.IOException;
  * @author ginccc
  */
 public class HistorizedResourceStore<T> implements IResourceStore<T> {
-    protected static IResourceStore.ResourceNotFoundException createResourceNotFoundException(String id, Integer version) {
+    static IResourceStore.ResourceNotFoundException createResourceNotFoundException(String id, Integer version) {
         String message = "Resource not found. (id=%s, version=%s)";
         message = String.format(message, id, version);
         return new IResourceStore.ResourceNotFoundException(message);
@@ -28,7 +28,7 @@ public class HistorizedResourceStore<T> implements IResourceStore<T> {
 
     private static final String HISTORY_POSTFIX = ".history";
 
-    protected IResourceStorage<T> resourceStorage;
+    IResourceStorage<T> resourceStorage;
 
     public HistorizedResourceStore(IResourceStorage<T> resourceStore) {
         this.resourceStorage = resourceStore;
@@ -72,7 +72,7 @@ public class HistorizedResourceStore<T> implements IResourceStore<T> {
     }
 
     @Override
-    public synchronized void delete(String id, Integer version) throws IResourceStore.ResourceStoreException, IResourceStore.ResourceModifiedException, IResourceStore.ResourceNotFoundException {
+    public synchronized void delete(String id, Integer version) throws IResourceStore.ResourceModifiedException, IResourceStore.ResourceNotFoundException {
         RuntimeUtilities.checkNotNull(id, "id");
         RuntimeUtilities.checkNotNull(version, "version");
 

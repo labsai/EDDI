@@ -24,9 +24,9 @@ public class MongoResourceStorage<T> implements IResourceStorage<T> {
     private static final String HISTORY_POSTFIX = ".history";
     private final Class<T> documentType;
 
-    private MongoCollection<Document> currentCollection;
-    private MongoCollection<Document> historyCollection;
-    private IDocumentBuilder documentBuilder;
+    protected MongoCollection<Document> currentCollection;
+    protected MongoCollection<Document> historyCollection;
+    protected IDocumentBuilder documentBuilder;
 
     public MongoResourceStorage(MongoDatabase database, String collectionName,
                                 IDocumentBuilder documentBuilder,

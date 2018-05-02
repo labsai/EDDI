@@ -8,6 +8,7 @@ import ai.labs.memory.IData;
 import ai.labs.memory.IDataFactory;
 import ai.labs.output.model.QuickReply;
 import ai.labs.resources.rest.extensions.model.ExtensionDescriptor;
+import ai.labs.templateengine.ITemplatingEngine.TemplateMode;
 import lombok.extern.slf4j.Slf4j;
 
 import javax.inject.Inject;
@@ -26,6 +27,7 @@ import static ai.labs.utilities.StringUtilities.joinStrings;
 public class OutputTemplateTask implements ILifecycleTask {
     private static final String ID = "ai.labs.templating";
     private static final String OUTPUT_TEXT = "output:text";
+    private static final String OUTPUT_HTML = "output:html";
     private static final String PRE_TEMPLATED = "preTemplated";
     private static final String POST_TEMPLATED = "postTemplated";
     private final ITemplatingEngine templatingEngine;
@@ -88,11 +90,16 @@ public class OutputTemplateTask implements ILifecycleTask {
                                      Map<String, Object> contextMap) {
         outputDataList.forEach(output -> {
             String outputKey = output.getKey();
-            if (outputKey.startsWith(OUTPUT_TEXT)) {
+            TemplateMode templateMode = outputKey.startsWith(OUTPUT_TEXT) ? TemplateMode.TEXT : null;
+            if (templateMode == null) {
+                templateMode = outputKey.startsWith(OUTPUT_HTML) ? TemplateMode.HTML : null;
+            }
+
+            if (templateMode != null) {
                 String preTemplated = output.getResult();
 
                 try {
-                    String postTemplated = templatingEngine.processTemplate(preTemplated, contextMap);
+                    String postTemplated = templatingEngine.processTemplate(preTemplated, contextMap, templateMode);
                     output.setResult(postTemplated);
                     templateData(memory, output, outputKey, preTemplated, postTemplated);
                 } catch (ITemplatingEngine.TemplateEngineException e) {

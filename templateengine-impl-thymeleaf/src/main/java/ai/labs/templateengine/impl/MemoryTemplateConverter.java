@@ -10,21 +10,23 @@ import java.util.*;
 @Slf4j
 public class MemoryTemplateConverter implements IMemoryTemplateConverter {
     private static final String KEY_HTTP_CALLS = "httpCalls";
+    private static final String KEY_CONTEXT = "context";
 
     @Override
     public Map<String, Object> convertMemoryForTemplating(IConversationMemory memory) {
         Map<String, Object> props = new HashMap<>();
+        IConversationMemory.IWritableConversationStep currentStep;
+        IConversationMemory.IConversationStep lastStep;
 
-        IConversationMemory.IWritableConversationStep currentStep = memory.getCurrentStep();
-        Map<Object, Object> current = convertConversationStep(currentStep);
-        current.putAll(convertHttpCalls(currentStep));
+
+        currentStep = memory.getCurrentStep();
+        Map<Object, Object> current = collectMemoryEntries(currentStep);
         props.put("current", current);
 
         Map<Object, Object> last = new HashMap<>();
         if (memory.getPreviousSteps().size() > 0) {
-            IConversationMemory.IConversationStep lastStep = memory.getPreviousSteps().get(0);
-            last = convertConversationStep(lastStep);
-            last.putAll(convertHttpCalls(lastStep));
+            lastStep = memory.getPreviousSteps().get(0);
+            last = collectMemoryEntries(lastStep);
         }
         props.put("last", last);
 
@@ -32,12 +34,24 @@ public class MemoryTemplateConverter implements IMemoryTemplateConverter {
         return props;
     }
 
-    private static HashMap<Object, Object> convertConversationStep(IConversationMemory.IConversationStep conversationStep) {
+    private Map<Object, Object> collectMemoryEntries(IConversationMemory.IConversationStep conversationStep) {
+        Map<Object, Object> step;
+        step = convertConversationStep(conversationStep, KEY_HTTP_CALLS, KEY_CONTEXT);
+        step.putAll(convertExplicitMemoryEntries(KEY_HTTP_CALLS, conversationStep));
+        step.putAll(convertExplicitMemoryEntries(KEY_CONTEXT, conversationStep));
+        return step;
+    }
+
+    private static HashMap<Object, Object> convertConversationStep(IConversationMemory.IConversationStep conversationStep, String... ignoredRootKeys) {
         HashMap<Object, Object> ret = new HashMap<>();
 
         List<String> prefixKeys = getAllPrefixKeys(conversationStep.getAllKeys());
         for (String prefixKey : prefixKeys) {
-            if(prefixKey.startsWith(KEY_HTTP_CALLS)) continue;
+
+            if (Arrays.stream(ignoredRootKeys).anyMatch(prefixKey::startsWith)) {
+                continue;
+            }
+
             IData data = conversationStep.getLatestData(prefixKey);
             if (data.getResult() != null) {
                 ret.put(prefixKey, data.getResult());
@@ -47,17 +61,17 @@ public class MemoryTemplateConverter implements IMemoryTemplateConverter {
         return ret;
     }
 
-    private static HashMap<Object, Object> convertHttpCalls(IConversationMemory.IConversationStep conversationStep) {
+    private static HashMap<Object, Object> convertExplicitMemoryEntries(String rootKey, IConversationMemory.IConversationStep conversationStep) {
         HashMap<Object, Object> ret = new HashMap<>();
 
         Set<String> prefixKeys = conversationStep.getAllKeys();
-        prefixKeys.stream().filter(key -> key.startsWith(KEY_HTTP_CALLS)).forEach(prefixKey -> {
+        prefixKeys.stream().filter(key -> key.startsWith(rootKey)).forEach(prefixKey -> {
             IData data = conversationStep.getLatestData(prefixKey);
             if (data.getResult() != null) {
-                HashMap<Object, Object> httpCalls = (HashMap<Object, Object>) ret.get(KEY_HTTP_CALLS);
-                if (ret.get(KEY_HTTP_CALLS) == null) {
+                HashMap<Object, Object> httpCalls = (HashMap<Object, Object>) ret.get(rootKey);
+                if (ret.get(rootKey) == null) {
                     httpCalls = new HashMap<>();
-                    ret.put(KEY_HTTP_CALLS, httpCalls);
+                    ret.put(rootKey, httpCalls);
                 }
                 httpCalls.put(prefixKey.substring(prefixKey.indexOf(":") + 1, prefixKey.length()), data.getResult());
             }

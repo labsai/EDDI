@@ -47,12 +47,14 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.Callable;
-import java.util.concurrent.TimeUnit;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.TimeoutException;
 
 import static ai.labs.memory.model.Deployment.Environment.unrestricted;
 import static ai.labs.persistence.IResourceStore.ResourceNotFoundException;
 import static ai.labs.persistence.IResourceStore.ResourceStoreException;
 import static ai.labs.rest.restinterfaces.RestInterfaceFactory.RestInterfaceFactoryException;
+import static java.util.concurrent.TimeUnit.MILLISECONDS;
 
 @RequestScoped
 @Slf4j
@@ -61,7 +63,9 @@ public class FacebookEndpoint implements IFacebookEndpoint {
     private static final String AI_LABS_USER_AGENT = "Jetty 9.4/HTTP CLIENT - AI.LABS.EDDI";
     private static final String ENCODING = "UTF-8";
     private static final int EDDI_TIMEOUT = 10000;
+    private static final String DELAY = "delay";
 
+    private final SystemRuntime.IRuntime runtime;
     private final IBotStore botStore;
     private final IBotFactory botFactory;
     private final IHttpClient httpClient;
@@ -71,12 +75,14 @@ public class FacebookEndpoint implements IFacebookEndpoint {
     private final ICache<BotResourceId, MessengerClient> messengerClientCache;
 
     @Inject
-    public FacebookEndpoint(IBotStore botStore,
+    public FacebookEndpoint(SystemRuntime.IRuntime runtime,
+                            IBotStore botStore,
                             IBotFactory botFactory,
                             IHttpClient httpClient,
                             IRestInterfaceFactory restInterfaceFactory,
                             @Named("system.apiServerURI") String apiServerURI,
                             ICacheFactory cacheFactory) {
+        this.runtime = runtime;
         this.botStore = botStore;
         this.botFactory = botFactory;
         this.httpClient = httpClient;
@@ -170,7 +176,7 @@ public class FacebookEndpoint implements IFacebookEndpoint {
                      String conversationId,
                      String senderId,
                      String message)
-            throws IRequest.HttpRequestException, ResourceNotFoundException, ResourceStoreException, ServiceException {
+            throws IRequest.HttpRequestException, ResourceNotFoundException, ResourceStoreException, ServiceException, InterruptedException, ExecutionException, TimeoutException {
 
         URI uri = RestUtilities.createURI(
                 apiServerURI, "/bots/",
@@ -186,45 +192,54 @@ public class FacebookEndpoint implements IFacebookEndpoint {
         }
 
         final String jsonRequestBody = "{ \"input\": \"" + message + "\", \"context\": {} }";
+        IResponse httpResponse = httpClient.newRequest(uri, IHttpClient.Method.POST)
+                .setUserAgent(AI_LABS_USER_AGENT)
+                .setTimeout(EDDI_TIMEOUT, MILLISECONDS)
+                .setBodyEntity(jsonRequestBody, ENCODING, MediaType.APPLICATION_JSON)
+                .send();
+        log.debug("response: {}", httpResponse.getContentAsString());
+        final List<Output> outputs = getOutputText(httpResponse.getContentAsString());
+        final List<Map<String, String>> quickReplies = getQuickReplies(httpResponse.getContentAsString());
+
+        final List<QuickReply> fbQuickReplies = new ArrayList<>();
+        if (quickReplies != null && quickReplies.size() > 0) {
+            QuickReply.ListBuilder listBuilder = QuickReply.newListBuilder();
+            for (Map<String, String> quickReply : quickReplies) {
+                listBuilder.addTextQuickReply(quickReply.get("value"), quickReply.get("expressions")).toList();
+            }
+            fbQuickReplies.addAll(listBuilder.build());
+        }
+
+        long delay = 0;
+        for (Output output : outputs) {
+            if (DELAY.equals(output.getType())) {
+                delay += Long.parseLong(output.getValue());
+                continue;
+            }
+            runtime.submitScheduledCallable(() -> {
+                try {
+                    if (!fbQuickReplies.isEmpty()) {
+                        sendClient.sendTextMessage(senderId, output.getValue(), fbQuickReplies);
+                    } else {
+                        sendClient.sendTextMessage(senderId, output.getValue());
+                    }
+                } catch (MessengerIOException | MessengerApiException e) {
+                    log.error(e.getLocalizedMessage(), e);
+                }
+                return null;
+            }, delay, MILLISECONDS, null).get(EDDI_TIMEOUT, MILLISECONDS);
+            delay = 0;
+        }
+
         try {
-            IResponse httpResponse = httpClient.newRequest(uri, IHttpClient.Method.POST)
-                    .setUserAgent(AI_LABS_USER_AGENT)
-                    .setTimeout(EDDI_TIMEOUT, TimeUnit.MILLISECONDS)
-                    .setBodyEntity(jsonRequestBody, ENCODING, MediaType.APPLICATION_JSON)
-                    .send();
-            log.debug("response: {}", httpResponse.getContentAsString());
-            final List<String> output = getOutputText(httpResponse.getContentAsString());
-            final List<Map<String, String>> quickReplies = getQuickReplies(httpResponse.getContentAsString());
-
-            try {
-                sendClient.sendSenderAction(senderId, SenderAction.TYPING_OFF);
-            } catch (MessengerApiException | MessengerIOException e) {
-                log.error(e.getLocalizedMessage(), e);
-            }
-
-            List<QuickReply> fbQuickReplies = new ArrayList<>();
-            if (quickReplies != null && quickReplies.size() > 0) {
-                QuickReply.ListBuilder listBuilder = QuickReply.newListBuilder();
-                for (Map<String, String> quickReply : quickReplies) {
-                    listBuilder.addTextQuickReply(quickReply.get("value"), quickReply.get("expressions")).toList();
-                }
-                fbQuickReplies = listBuilder.build();
-            }
-
-            for (String outputText : output) {
-                if (!fbQuickReplies.isEmpty()) {
-                    sendClient.sendTextMessage(senderId, outputText, fbQuickReplies);
-                } else {
-                    sendClient.sendTextMessage(senderId, outputText);
-                }
-            }
-
-            final String state = getConversationState(httpResponse.getContentAsString());
-            if (state != null && !state.equals("READY")) {
-                conversationIdCache.remove(senderId);
-            }
-        } catch (MessengerIOException | MessengerApiException e) {
+            sendClient.sendSenderAction(senderId, SenderAction.TYPING_OFF);
+        } catch (MessengerApiException | MessengerIOException e) {
             log.error(e.getLocalizedMessage(), e);
+        }
+
+        final String state = getConversationState(httpResponse.getContentAsString());
+        if (state != null && !state.equals("READY")) {
+            conversationIdCache.remove(senderId);
         }
     }
 
@@ -256,9 +271,9 @@ public class FacebookEndpoint implements IFacebookEndpoint {
         return output;
     }
 
-    private List<String> getOutputText(String json) {
+    private List<Output> getOutputText(String json) {
 
-        List<String> output = new ArrayList<>();
+        List<Output> output = new ArrayList<>();
 
         ObjectMapper mapper = new ObjectMapper();
         try {
@@ -266,8 +281,12 @@ public class FacebookEndpoint implements IFacebookEndpoint {
             JsonNode conversationStepsArray = rootNode.path("conversationSteps");
             for (JsonNode conversationStep : conversationStepsArray) {
                 for (JsonNode conversationStepValues : conversationStep.get("conversationStep")) {
-                    if (conversationStepValues.get("key") != null && conversationStepValues.get("key").asText().startsWith("output:text")) {
-                        output.add(conversationStepValues.get("value").asText());
+                    if (conversationStepValues.get("key") != null) {
+                        if (conversationStepValues.get("key").asText().startsWith("output:text")) {
+                            output.add(new Output("text", conversationStepValues.get("value").asText()));
+                        } else if (conversationStepValues.get("key").asText().startsWith("output:" + DELAY)) {
+                            output.add(new Output(DELAY, conversationStepValues.get("value").asText()));
+                        }
                     }
                 }
             }
@@ -380,5 +399,13 @@ public class FacebookEndpoint implements IFacebookEndpoint {
     private class BotResourceId {
         private final String id;
         private final Integer version;
+    }
+
+    @AllArgsConstructor
+    @Getter
+    @Setter
+    private class Output {
+        String type;
+        String value;
     }
 }
