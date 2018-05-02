@@ -3,6 +3,7 @@ package ai.labs.resources.impl.bots.rest;
 import ai.labs.persistence.IResourceStore;
 import ai.labs.resources.impl.packages.rest.RestPackageStore;
 import ai.labs.resources.impl.resources.rest.RestVersionInfo;
+import ai.labs.resources.impl.utilities.ResourceUtilities;
 import ai.labs.resources.rest.bots.IBotStore;
 import ai.labs.resources.rest.bots.IRestBotStore;
 import ai.labs.resources.rest.bots.model.BotConfiguration;
@@ -10,7 +11,6 @@ import ai.labs.resources.rest.documentdescriptor.IDocumentDescriptorStore;
 import ai.labs.resources.rest.documentdescriptor.model.DocumentDescriptor;
 import ai.labs.resources.rest.packages.IRestPackageStore;
 import ai.labs.utilities.RestUtilities;
-import ai.labs.utilities.URIUtilities;
 import lombok.extern.slf4j.Slf4j;
 
 import javax.inject.Inject;
@@ -21,7 +21,7 @@ import javax.ws.rs.core.Response;
 import java.net.URI;
 import java.util.List;
 
-import static ai.labs.resources.impl.utilities.ResourceUtilities.createMaleFormattedResourceUriException;
+import static ai.labs.resources.impl.utilities.ResourceUtilities.createMalFormattedResourceUriException;
 import static javax.ws.rs.core.Response.Status.BAD_REQUEST;
 
 /**
@@ -46,21 +46,17 @@ public class RestBotStore extends RestVersionInfo<BotConfiguration> implements I
 
     @Override
     public List<DocumentDescriptor> readBotDescriptors(String filter, Integer index, Integer limit, String containingPackageUri) {
-        if (containingPackageUri.startsWith(PACKAGE_URI)) {
-            try {
-                URIUtilities.ResourceId resourceId = URIUtilities.extractResourceId(URI.create(containingPackageUri));
-                String packageId = resourceId.getId();
-                Integer packageVersion = resourceId.getVersion();
-                if (packageId == null || packageVersion == null || packageVersion == 0) {
-                    return createMaleFormattedResourceUriException(containingPackageUri);
-                }
-                return botStore.getBotDescriptorsContainingPackage(packageId, packageVersion);
-            } catch (IResourceStore.ResourceNotFoundException | IResourceStore.ResourceStoreException e) {
-                log.error(e.getLocalizedMessage(), e);
-                throw new InternalServerErrorException();
-            }
-        } else {
-            return createMaleFormattedResourceUriException(containingPackageUri);
+        IResourceStore.IResourceId validatedResourceId = ResourceUtilities.validateUri(containingPackageUri);
+        if (validatedResourceId == null || !containingPackageUri.startsWith(PACKAGE_URI)) {
+            return createMalFormattedResourceUriException(containingPackageUri);
+        }
+
+        try {
+            return botStore.getBotDescriptorsContainingPackage(
+                    validatedResourceId.getId(), validatedResourceId.getVersion());
+        } catch (IResourceStore.ResourceNotFoundException | IResourceStore.ResourceStoreException e) {
+            log.error(e.getLocalizedMessage(), e);
+            throw new InternalServerErrorException();
         }
     }
 

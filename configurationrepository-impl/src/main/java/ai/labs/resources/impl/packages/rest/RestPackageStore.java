@@ -41,15 +41,15 @@ public class RestPackageStore extends RestVersionInfo<PackageConfiguration> impl
 
     @Override
     public List<DocumentDescriptor> readPackageDescriptors(String filter, Integer index, Integer limit, String containingResourceUri) {
-        if (containingResourceUri.startsWith("eddi://")) {
-            try {
-                return packageStore.getPackageDescriptorsContainingResource(URI.create(containingResourceUri));
-            } catch (IResourceStore.ResourceNotFoundException | IResourceStore.ResourceStoreException e) {
-                log.error(e.getLocalizedMessage(), e);
-                throw new InternalServerErrorException();
-            }
-        } else {
-            return ResourceUtilities.createMaleFormattedResourceUriException(containingResourceUri);
+        if (ResourceUtilities.validateUri(containingResourceUri) == null) {
+            return ResourceUtilities.createMalFormattedResourceUriException(containingResourceUri);
+        }
+
+        try {
+            return packageStore.getPackageDescriptorsContainingResource(URI.create(containingResourceUri));
+        } catch (IResourceStore.ResourceNotFoundException | IResourceStore.ResourceStoreException e) {
+            log.error(e.getLocalizedMessage(), e);
+            throw new InternalServerErrorException();
         }
     }
 
