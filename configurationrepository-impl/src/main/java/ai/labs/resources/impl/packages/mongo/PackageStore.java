@@ -9,7 +9,6 @@ import ai.labs.resources.rest.packages.IPackageStore;
 import ai.labs.resources.rest.packages.model.PackageConfiguration;
 import ai.labs.serialization.IDocumentBuilder;
 import ai.labs.utilities.RuntimeUtilities;
-import com.mongodb.client.FindIterable;
 import com.mongodb.client.MongoDatabase;
 import org.bson.Document;
 
@@ -93,26 +92,9 @@ public class PackageStore implements IPackageStore {
         List<IResourceId> getPackageDescriptorsContainingResource(URI resourceURI) throws ResourceNotFoundException {
             String searchQuery = String.format("JSON.stringify(this).indexOf('%s')!=-1", resourceURI);
             Document filter = new Document("$where", searchQuery);
-            List<String> packageIds = new LinkedList<>();
 
-
-            FindIterable<Document> documentIterable;
-
-            documentIterable = currentCollection.find(filter);
-            ResourceUtilities.extractIds(packageIds, documentIterable);
-
-            documentIterable = historyCollection.find(filter);
-            ResourceUtilities.extractIds(packageIds, documentIterable);
-
-            List<IResourceId> latestPackages = new LinkedList<>();
-
-            IResourceId currentResourceId;
-            for (String packageId : packageIds) {
-                currentResourceId = documentDescriptorStore.getCurrentResourceId(packageId);
-                ResourceUtilities.addIfNewerVersion(currentResourceId, latestPackages);
-            }
-
-            return latestPackages;
+            return ResourceUtilities.getAllConfigsContainingResources(filter,
+                    currentCollection, historyCollection, documentDescriptorStore);
         }
     }
 
