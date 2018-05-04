@@ -13,11 +13,14 @@ abstract class AbstractBackupService {
     static final String PACKAGE_EXT = "package";
     static final String DICTIONARY_EXT = "regulardictionary";
     static final String BEHAVIOR_EXT = "behavior";
+    static final String HTTPCALLS_EXT = "httpcalls";
     static final String OUTPUT_EXT = "output";
     static final Pattern DICTIONARY_URI_PATTERN =
             Pattern.compile("\"eddi://ai.labs.regulardictionary/regulardictionarystore/regulardictionaries/.*?\"");
     static final Pattern BEHAVIOR_URI_PATTERN =
             Pattern.compile("\"eddi://ai.labs.behavior/behaviorstore/behaviorsets/.*?\"");
+    static final Pattern HTTPCALLS_URI_PATTERN =
+            Pattern.compile("\"eddi://ai.labs.httpcalls/httpcallsstore/httpcalls/.*?\"");
     static final Pattern OUTPUT_URI_PATTERN =
             Pattern.compile("\"eddi://ai.labs.output/outputstore/outputsets/.*?\"");
 
