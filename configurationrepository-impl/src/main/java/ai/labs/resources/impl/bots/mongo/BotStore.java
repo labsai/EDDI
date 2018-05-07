@@ -7,10 +7,10 @@ import ai.labs.resources.impl.descriptor.mongo.DocumentDescriptorStore;
 import ai.labs.resources.impl.utilities.ResourceUtilities;
 import ai.labs.resources.rest.bots.IBotStore;
 import ai.labs.resources.rest.bots.model.BotConfiguration;
+import ai.labs.resources.rest.documentdescriptor.IDocumentDescriptorStore;
 import ai.labs.resources.rest.documentdescriptor.model.DocumentDescriptor;
 import ai.labs.serialization.IDocumentBuilder;
 import ai.labs.utilities.RuntimeUtilities;
-import com.mongodb.client.FindIterable;
 import com.mongodb.client.MongoDatabase;
 import lombok.extern.slf4j.Slf4j;
 import org.bson.Document;
@@ -25,7 +25,7 @@ import java.util.List;
  */
 @Slf4j
 public class BotStore implements IBotStore {
-    private final DocumentDescriptorStore documentDescriptorStore;
+    private final IDocumentDescriptorStore documentDescriptorStore;
     private final BotHistorizedResourceStore botResourceStore;
 
     @Inject
@@ -93,30 +93,14 @@ public class BotStore implements IBotStore {
 
         List<IResourceStore.IResourceId> getBotIdsContainingPackageUri(String packageId, Integer packageVersion)
                 throws ResourceNotFoundException {
+
             String searchedForPackageUri = String.join("",
                     packageResourceURI, packageId, versionQueryParam, String.valueOf(packageVersion));
             Document filter = new Document("packages",
                     new Document("$in", Collections.singletonList(searchedForPackageUri)));
-            List<String> botIds = new LinkedList<>();
 
-
-            FindIterable<Document> documentIterable;
-
-            documentIterable = currentCollection.find(filter);
-            ResourceUtilities.extractIds(botIds, documentIterable);
-
-            documentIterable = historyCollection.find(filter);
-            ResourceUtilities.extractIds(botIds, documentIterable);
-
-            List<IResourceId> latestBots = new LinkedList<>();
-
-            IResourceId currentResourceId;
-            for (String botId : botIds) {
-                currentResourceId = documentDescriptorStore.getCurrentResourceId(botId);
-                ResourceUtilities.addIfNewerVersion(currentResourceId, latestBots);
-            }
-
-            return latestBots;
+            return ResourceUtilities.getAllConfigsContainingResources(filter,
+                    currentCollection, historyCollection, documentDescriptorStore);
         }
     }
 
