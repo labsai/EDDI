@@ -141,9 +141,9 @@ public class RestConversationStore implements IRestConversationStore {
             conversationMemoryStore.deleteConversationMemorySnapshot(conversationId);
             log.info(String.format("Conversation has been permanently deleted (id=%s)", conversationId));
         }
-        //else {
-        //no real deletion here, DocumentDescriptorInterceptor will mark it as deleted
-        //}
+
+        // DocumentDescriptorInterceptor will mark the DocumentDescriptor of this resource as deleted,
+        // regardless of whether it has been permanently deleted or not
     }
 
     @Override
