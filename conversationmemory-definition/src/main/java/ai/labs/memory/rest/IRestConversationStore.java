@@ -35,7 +35,9 @@ public interface IRestConversationStore {
 
     @DELETE
     @Path("/{conversationId}")
-    void deleteConversationLog(@PathParam("conversationId") String conversationId) throws IResourceStore.ResourceStoreException, IResourceStore.ResourceNotFoundException;
+    void deleteConversationLog(@PathParam("conversationId") String conversationId,
+                               @QueryParam("deletePermanently") @DefaultValue("false") Boolean deletePermanently)
+            throws IResourceStore.ResourceStoreException, IResourceStore.ResourceNotFoundException;
 
     @GET
     @Path("/active/{botId}")

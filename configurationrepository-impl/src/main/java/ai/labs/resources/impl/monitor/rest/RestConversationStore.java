@@ -133,10 +133,17 @@ public class RestConversationStore implements IRestConversationStore {
     }
 
     @Override
-    public void deleteConversationLog(String conversationId) {
+    public void deleteConversationLog(String conversationId, Boolean deletePermanently)
+            throws IResourceStore.ResourceStoreException, IResourceStore.ResourceNotFoundException {
         RuntimeUtilities.checkNotNull(conversationId, "conversationId");
 
-        //no real deletion here, DocumentDescriptorInterceptor will mark it as deleted
+        if (deletePermanently) {
+            conversationMemoryStore.deleteConversationMemorySnapshot(conversationId);
+            log.info(String.format("Conversation has been permanently deleted (id=%s)", conversationId));
+        }
+
+        // DocumentDescriptorInterceptor will mark the DocumentDescriptor of this resource as deleted,
+        // regardless of whether it has been permanently deleted or not
     }
 
     @Override
