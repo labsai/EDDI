@@ -25,7 +25,9 @@ import lombok.extern.slf4j.Slf4j;
 import javax.inject.Inject;
 import java.io.IOException;
 import java.net.URI;
-import java.util.*;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
 import java.util.stream.Collectors;
 
 @Slf4j
@@ -101,6 +103,11 @@ public class HttpCallsTask implements ILifecycleTask {
                         request.setHttpHeader(headerName, templateValues(headers.get(headerName), templateDataObjects));
                     }
 
+                    Map<String, String> queryParams = requestConfig.getQueryParams();
+                    for (String queryParam : queryParams.keySet()) {
+                        request.setQueryParam(queryParam, templateValues(queryParams.get(queryParam), templateDataObjects));
+                    }
+
                     IResponse response = request.send();
                     if (response.getHttpCode() != 200) {
                         String message = "HttpCall (%s) didn't return http code 200, instead %s.";
@@ -112,8 +119,11 @@ public class HttpCallsTask implements ILifecycleTask {
                         String responseBody = response.getContentAsString();
                         String actualContentType = response.getHttpHeader().get(CONTENT_TYPE);
                         if (actualContentType != null) {
-                            actualContentType = actualContentType.split("\\;")[0];
+                            actualContentType = actualContentType.split(";")[0];
+                        } else {
+                            actualContentType = "<not-present>";
                         }
+
                         if (!CONTENT_TYPE_APPLICATION_JSON.startsWith(actualContentType)) {
                             String message = "HttpCall (%s) didn't return application/json as content-type, instead was (%s)";
                             log.warn(String.format(message, call.getName(), actualContentType));
