@@ -6,15 +6,14 @@ import ai.labs.httpclient.IResponse;
 import ai.labs.lifecycle.ILifecycleTask;
 import ai.labs.lifecycle.LifecycleException;
 import ai.labs.lifecycle.PackageConfigurationException;
+import ai.labs.lifecycle.model.Context;
 import ai.labs.memory.IConversationMemory;
 import ai.labs.memory.IData;
 import ai.labs.memory.IDataFactory;
 import ai.labs.resources.rest.extensions.model.ExtensionDescriptor;
 import ai.labs.resources.rest.extensions.model.ExtensionDescriptor.ConfigValue;
 import ai.labs.resources.rest.extensions.model.ExtensionDescriptor.FieldType;
-import ai.labs.resources.rest.http.model.HttpCall;
-import ai.labs.resources.rest.http.model.HttpCallsConfiguration;
-import ai.labs.resources.rest.http.model.Request;
+import ai.labs.resources.rest.http.model.*;
 import ai.labs.runtime.client.configuration.IResourceClientLibrary;
 import ai.labs.runtime.service.ServiceException;
 import ai.labs.serialization.IJsonSerialization;
@@ -93,21 +92,7 @@ public class HttpCallsTask implements ILifecycleTask {
                     Request requestConfig = call.getRequest();
                     String targetUri = targetServerUri + requestConfig.getPath();
                     String requestBody = templateValues(requestConfig.getBody(), templateDataObjects);
-                    IRequest request = httpClient.newRequest(URI.create(targetUri),
-                            IHttpClient.Method.valueOf(requestConfig.getMethod().toUpperCase())).
-                            setBodyEntity(requestBody,
-                                    UTF_8, requestConfig.getContentType());
-
-                    Map<String, String> headers = requestConfig.getHeaders();
-                    for (String headerName : headers.keySet()) {
-                        request.setHttpHeader(headerName, templateValues(headers.get(headerName), templateDataObjects));
-                    }
-
-                    Map<String, String> queryParams = requestConfig.getQueryParams();
-                    for (String queryParam : queryParams.keySet()) {
-                        request.setQueryParam(queryParam, templateValues(queryParams.get(queryParam), templateDataObjects));
-                    }
-
+                    IRequest request = buildRequest(targetUri, requestBody, requestConfig, templateDataObjects);
                     IResponse response = request.send();
                     if (response.getHttpCode() != 200) {
                         String message = "HttpCall (%s) didn't return http code 200, instead %s.";
@@ -116,7 +101,7 @@ public class HttpCallsTask implements ILifecycleTask {
                         continue;
                     }
                     if (call.isSaveResponse()) {
-                        String responseBody = response.getContentAsString();
+                        final String responseBody = response.getContentAsString();
                         String actualContentType = response.getHttpHeader().get(CONTENT_TYPE);
                         if (actualContentType != null) {
                             actualContentType = actualContentType.split(";")[0];
@@ -139,22 +124,60 @@ public class HttpCallsTask implements ILifecycleTask {
                         }
 
                         templateHttpCalls.put(responseObjectName, responseObject);
+                        templateDataObjects.put(responseObjectName, responseObject);
+
                         String memoryDataName = "httpCalls:" + responseObjectName;
                         IData<Object> httpResponseData = dataFactory.createData(memoryDataName, responseObject);
                         memory.getCurrentStep().storeData(httpResponseData);
-                    }
 
+                        runPostResponse(memory, call, templateDataObjects);
+                    }
                 } catch (IRequest.HttpRequestException | IOException | ITemplatingEngine.TemplateEngineException e) {
                     log.error(e.getLocalizedMessage(), e);
                     throw new LifecycleException(e.getLocalizedMessage(), e);
                 }
             }
         }
+    }
 
-           /* memory.getCurrentStep().storeData(dataFactory.createData(
-                    "context:quickReplies",
-                    buildQuickReplies(response.getContentAsString()))
-            );*/
+    private void runPostResponse(IConversationMemory memory, HttpCall call, Map<String, Object> templateDataObjects)
+            throws ITemplatingEngine.TemplateEngineException, IOException {
+
+        PostResponse postResponse = call.getPostResponse();
+        QuickRepliesBuildingInstruction qrBuildInstruction = null;
+        if (postResponse != null) {
+            qrBuildInstruction = postResponse.getQrBuildInstruction();
+        }
+
+        if (qrBuildInstruction != null) {
+            List<Map<String, String>> quickReplies = buildQuickReplies(qrBuildInstruction.getIterationObjectName(),
+                    qrBuildInstruction.getPathToTargetArray(),
+                    qrBuildInstruction.getQuickReplyValue(),
+                    qrBuildInstruction.getQuickReplyExpressions(),
+                    templateDataObjects);
+
+            Context context = new Context(Context.ContextType.object, quickReplies);
+            IData<Context> contextData = dataFactory.createData("context:quickReplies", context);
+            memory.getCurrentStep().storeData(contextData);
+        }
+    }
+
+    private IRequest buildRequest(String targetUri, String requestBody, Request requestConfig, Map<String, Object> templateDataObjects) throws ITemplatingEngine.TemplateEngineException {
+        IRequest request = httpClient.newRequest(URI.create(targetUri),
+                IHttpClient.Method.valueOf(requestConfig.getMethod().toUpperCase())).
+                setBodyEntity(requestBody,
+                        UTF_8, requestConfig.getContentType());
+
+        Map<String, String> headers = requestConfig.getHeaders();
+        for (String headerName : headers.keySet()) {
+            request.setHttpHeader(headerName, templateValues(headers.get(headerName), templateDataObjects));
+        }
+
+        Map<String, String> queryParams = requestConfig.getQueryParams();
+        for (String queryParam : queryParams.keySet()) {
+            request.setQueryParam(queryParam, templateValues(queryParams.get(queryParam), templateDataObjects));
+        }
+        return request;
     }
 
     private String templateValues(String toBeTemplated, Map<String, Object> properties)
@@ -163,15 +186,26 @@ public class HttpCallsTask implements ILifecycleTask {
         return templatingEngine.processTemplate(toBeTemplated, properties);
     }
 
-/*    private String buildQuickReplies(String contentAsString) throws ITemplatingEngine.TemplateEngineException {
-        HashMap<String, Object> dynamicAttributesMap = new HashMap<>();
-        return templatingEngine.processTemplate("[# th:each=\"community : ${graphQL.communities}\"]" +
+    private List<Map<String, String>> buildQuickReplies(String iterationObjectName,
+                                                        String pathToTargetArray,
+                                                        String quickReplyValue,
+                                                        String quickReplyExpressions,
+                                                        Map<String, Object> templateDataObjects)
+            throws ITemplatingEngine.TemplateEngineException, IOException {
+
+        String jsonQuickReplies = templatingEngine.processTemplate("[" +
+                "[# th:each=\"" + iterationObjectName + ", iterationStatus : ${" + pathToTargetArray + "}\"]" +
                 "    {" +
-                "        \"value\":\"[(${community.name})]\"," +
-                "        \"expressions\":\"property(community([(${community.id})])\"" +
+                "        \"value\":\"" + quickReplyValue + "\"," +
+                "        \"expressions\":\"" + quickReplyExpressions + "\"" +
                 "    }" +
-                "[/]", dynamicAttributesMap);
-    }*/
+                "    [# th:text=\"!${iterationStatus.last} ? ',':''\"/]" +
+                "[/]" +
+                "]", templateDataObjects);
+
+
+        return jsonSerialization.deserialize(jsonQuickReplies, List.class);
+    }
 
     @Override
     public void configure(Map<String, Object> configuration) throws PackageConfigurationException {
