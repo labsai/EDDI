@@ -1,4 +1,4 @@
-FROM openjdk:8-jre-alpine
+FROM openjdk:8u151-jre-alpine3.7
 
 ARG EDDI_VERSION
 ARG EDDI_ENV

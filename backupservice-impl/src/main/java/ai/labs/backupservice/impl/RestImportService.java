@@ -8,6 +8,8 @@ import ai.labs.resources.rest.bots.IRestBotStore;
 import ai.labs.resources.rest.bots.model.BotConfiguration;
 import ai.labs.resources.rest.documentdescriptor.IRestDocumentDescriptorStore;
 import ai.labs.resources.rest.documentdescriptor.model.DocumentDescriptor;
+import ai.labs.resources.rest.http.IRestHttpCallsStore;
+import ai.labs.resources.rest.http.model.HttpCallsConfiguration;
 import ai.labs.resources.rest.output.IRestOutputStore;
 import ai.labs.resources.rest.output.model.OutputConfigurationSet;
 import ai.labs.resources.rest.packages.IRestPackageStore;
@@ -141,6 +143,15 @@ public class RestImportService extends AbstractBackupService implements IRestImp
                             updateDocumentDescriptor(packagePath, behaviorUris, newBehaviorUris);
                             packageFileString = replaceURIs(packageFileString, behaviorUris, newBehaviorUris);
 
+                            // ... for http calls
+                            List<URI> httpCallsUris = extractResourcesUris(packageFileString, HTTPCALLS_URI_PATTERN);
+                            List<URI> newHttpCallsUris = createNewHttpCalls(
+                                    readResources(httpCallsUris, packagePath,
+                                            HTTPCALLS_EXT, HttpCallsConfiguration.class));
+
+                            updateDocumentDescriptor(packagePath, httpCallsUris, newHttpCallsUris);
+                            packageFileString = replaceURIs(packageFileString, httpCallsUris, newHttpCallsUris);
+
                             // ... for output
                             List<URI> outputUris = extractResourcesUris(packageFileString, OUTPUT_URI_PATTERN);
                             List<URI> newOutputUris = createNewOutputs(
@@ -200,6 +211,15 @@ public class RestImportService extends AbstractBackupService implements IRestImp
         return behaviorConfigurations.stream().map(behaviorConfiguration -> {
             Response behaviorResponse = restBehaviorStore.createBehaviorRuleSet(behaviorConfiguration);
             return behaviorResponse.getLocation();
+        }).collect(Collectors.toList());
+    }
+
+    private List<URI> createNewHttpCalls(List<HttpCallsConfiguration> httpCallsConfigurations)
+            throws RestInterfaceFactory.RestInterfaceFactoryException {
+        IRestHttpCallsStore restHttpCallsStore = getRestResourceStore(IRestHttpCallsStore.class);
+        return httpCallsConfigurations.stream().map(httpCallsConfiguration -> {
+            Response httpCallsResponse = restHttpCallsStore.createHttpCalls(httpCallsConfiguration);
+            return httpCallsResponse.getLocation();
         }).collect(Collectors.toList());
     }
 
