@@ -13,4 +13,5 @@ public class HttpCall {
     private String responseObjectName;
     private List<String> actions;
     private Request request;
+    private PostResponse postResponse;
 }
