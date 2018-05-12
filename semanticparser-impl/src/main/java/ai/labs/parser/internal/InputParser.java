@@ -222,7 +222,7 @@ public class InputParser implements IInputParser {
             }
 
             if (possibleSolutions.isEmpty()) {
-                foundWords.removeIf(foundWord -> !foundWord.isWord());
+                foundWords.removeIf(foundWord -> foundWord.getFoundWord().isPartOfPhrase());
                 if (!foundWords.isEmpty()) {
                     rawSolution = new RawSolution(RawSolution.Match.NOTHING);
                     rawSolution.setDictionaryEntries(foundWords);
