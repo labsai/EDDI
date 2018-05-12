@@ -236,11 +236,9 @@ public class InputParser implements IInputParser {
                         for (int i = maxIndex; i >= 0; i--) {
                             RawSolution tmpSolution = possibleSolutions.get(i);
                             if (tmpSolution.getMatch().equals(RawSolution.Match.NOTHING)) {
-                                continue;
-                            }
-
-                            if (i + 1 > maxIndex) {
-                                addIfAbsent(possibleSolutions, rawSolution);
+                                if (i == 0) {
+                                    addIfAbsent(possibleSolutions, rawSolution, 0);
+                                }
                             } else {
                                 addIfAbsent(possibleSolutions, rawSolution, i + 1);
                             }
@@ -263,7 +261,7 @@ public class InputParser implements IInputParser {
 
     private void addIfAbsent(List<RawSolution> possibleSolutions, RawSolution rawSolution, int insertAtIndex) {
         if (possibleSolutions.stream().noneMatch(rawSolution::equals)) {
-            if (insertAtIndex > -1) {
+            if (insertAtIndex > -1 && insertAtIndex < possibleSolutions.size()) {
                 possibleSolutions.add(insertAtIndex, rawSolution);
             } else {
                 possibleSolutions.add(rawSolution);
