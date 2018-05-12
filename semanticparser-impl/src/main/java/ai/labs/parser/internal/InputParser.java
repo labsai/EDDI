@@ -222,9 +222,12 @@ public class InputParser implements IInputParser {
             }
 
             if (possibleSolutions.isEmpty()) {
-                rawSolution = new RawSolution(RawSolution.Match.NOTHING);
-                rawSolution.setDictionaryEntries(foundWords);
-                possibleSolutions.add(rawSolution);
+                foundWords.removeIf(foundWord -> !foundWord.isWord());
+                if (!foundWords.isEmpty()) {
+                    rawSolution = new RawSolution(RawSolution.Match.NOTHING);
+                    rawSolution.setDictionaryEntries(foundWords);
+                    possibleSolutions.add(rawSolution);
+                }
             }
 
             if (currentIteration > maxIterations) {

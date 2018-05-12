@@ -14,11 +14,13 @@ public class FoundWord extends FoundDictionaryEntry implements IDictionary.IFoun
     public FoundWord(IDictionary.IWord word, boolean corrected, double matchingAccuracy) {
         super(word, corrected, matchingAccuracy);
         this.word = word;
+        isWord = true;
     }
 
     public FoundWord(String unknownValue, List<Expression> unknownExp) {
         super(unknownValue, unknownExp, false, 0.0);
         word = null;
+        isWord = true;
     }
 
     @Override
@@ -41,5 +43,15 @@ public class FoundWord extends FoundDictionaryEntry implements IDictionary.IFoun
     @Override
     public int hashCode() {
         return value.hashCode();
+    }
+
+    @Override
+    public boolean isWord() {
+        return word.isWord();
+    }
+
+    @Override
+    public boolean isPhrase() {
+        return word.isPhrase();
     }
 }

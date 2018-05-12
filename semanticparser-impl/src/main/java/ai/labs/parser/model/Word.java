@@ -19,8 +19,7 @@ public class Word extends DictionaryEntry implements IDictionary.IWord {
         super(value, expression, identifier, frequency);
         isPartOfPhrase = partOfPhrase;
 
-        isWord = true;
-        isPhrase = false;
+        isWord = !isPartOfPhrase;
     }
 
     @Override
