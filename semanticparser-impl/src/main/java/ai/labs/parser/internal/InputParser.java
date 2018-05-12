@@ -219,14 +219,14 @@ public class InputParser implements IInputParser {
                 if (matchingCompleted) {
                     return possibleSolutions;
                 }
-            }
-
-            if (!foundWords.isEmpty()) {
+            } else if (!foundWords.isEmpty()) {
+                //if we are here, we know it is not a phrase in this iteration, neither fully nor partly
                 if (foundWords.stream().anyMatch(word -> word.getFoundWord().isPartOfPhrase())) {
                     rawSolution = new RawSolution(RawSolution.Match.NOTHING);
                     rawSolution.setDictionaryEntries(foundWords);
                     addIfAbsent(possibleSolutions, rawSolution);
                 } else {
+                    //found no words from phrase, but actual dictionary word(s), so we treat in more prominent
                     rawSolution = new RawSolution(RawSolution.Match.PARTLY);
                     rawSolution.setDictionaryEntries(foundWords);
                     if (possibleSolutions.isEmpty()) {
