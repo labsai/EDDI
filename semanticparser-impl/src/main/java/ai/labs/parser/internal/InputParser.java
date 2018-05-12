@@ -221,12 +221,31 @@ public class InputParser implements IInputParser {
                 }
             }
 
-            if (possibleSolutions.isEmpty()) {
-                foundWords.removeIf(foundWord -> foundWord.getFoundWord().isPartOfPhrase());
-                if (!foundWords.isEmpty()) {
+            if (!foundWords.isEmpty()) {
+                if (foundWords.stream().anyMatch(word -> word.getFoundWord().isPartOfPhrase())) {
                     rawSolution = new RawSolution(RawSolution.Match.NOTHING);
                     rawSolution.setDictionaryEntries(foundWords);
-                    possibleSolutions.add(rawSolution);
+                    addIfAbsent(possibleSolutions, rawSolution);
+                } else {
+                    rawSolution = new RawSolution(RawSolution.Match.PARTLY);
+                    rawSolution.setDictionaryEntries(foundWords);
+                    if (possibleSolutions.isEmpty()) {
+                        possibleSolutions.add(rawSolution);
+                    } else {
+                        int maxIndex = possibleSolutions.size() - 1;
+                        for (int i = maxIndex; i >= 0; i--) {
+                            RawSolution tmpSolution = possibleSolutions.get(i);
+                            if (tmpSolution.getMatch().equals(RawSolution.Match.NOTHING)) {
+                                continue;
+                            }
+
+                            if (i + 1 > maxIndex) {
+                                addIfAbsent(possibleSolutions, rawSolution);
+                            } else {
+                                addIfAbsent(possibleSolutions, rawSolution, i + 1);
+                            }
+                        }
+                    }
                 }
             }
 
@@ -236,6 +255,20 @@ public class InputParser implements IInputParser {
         }
 
         return possibleSolutions;
+    }
+
+    private void addIfAbsent(List<RawSolution> possibleSolutions, RawSolution rawSolution) {
+        addIfAbsent(possibleSolutions, rawSolution, -1);
+    }
+
+    private void addIfAbsent(List<RawSolution> possibleSolutions, RawSolution rawSolution, int insertAtIndex) {
+        if (possibleSolutions.stream().noneMatch(rawSolution::equals)) {
+            if (insertAtIndex > -1) {
+                possibleSolutions.add(insertAtIndex, rawSolution);
+            } else {
+                possibleSolutions.add(rawSolution);
+            }
+        }
     }
 
     private boolean isInterrupted() {

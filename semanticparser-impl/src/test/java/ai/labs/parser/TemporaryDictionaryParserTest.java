@@ -81,6 +81,7 @@ public class TemporaryDictionaryParserTest {
 
         //assert
         List<Solution> actual = DictionaryUtilities.extractExpressions(rawSolutions, true, true);
-        Assert.assertEquals(expected, actual);
+        Assert.assertEquals(2, actual.size());
+        Assert.assertEquals(expected.get(0), actual.get(0));
     }
 }
