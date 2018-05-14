@@ -104,9 +104,9 @@ public class OutputGenerationTask implements ILifecycleTask {
         });
     }
 
-    private List<QuickReply> convertMapToObjects(List<Map<String, String>> quickRepliesListMap) {
-        return quickRepliesListMap.stream().map(map ->
-                new QuickReply(map.get("value"), map.get("expressions"), Boolean.parseBoolean(map.get("isDefault")))).
+    private List<QuickReply> convertMapToObjects(List<Map<String, String>> quickRepliesMapList) {
+        return quickRepliesMapList.stream().map(map ->
+                new QuickReply(map.get("value"), map.get("expressions"), Boolean.parseBoolean(map.getOrDefault("isDefault", "false")))).
                 collect(Collectors.toCollection(LinkedList::new));
     }
 
@@ -206,6 +206,7 @@ public class OutputGenerationTask implements ILifecycleTask {
 
     /**
      * helper method to convert from OutputConfiguration to internal QuickReply
+     *
      * @param configQuickReplies List<OutputConfiguration.QuickReply> as it comes from the configuration repository
      * @return List<QuickReply> as it is used in the internal system
      */
