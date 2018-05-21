@@ -36,7 +36,7 @@ jobs:
       - deploy:
           name: Build and push Docker image
           command: |
-            if [ "${CIRCLE_BRANCH}" == "master" ]; then
+            if [ "${CIRCLE_BRANCH}" == "release/4.3.0" ]; then
             docker login -u $DOCKER_USER -p $DOCKER_PASS
 
             docker build --build-arg EDDI_VERSION=4.3 --build-arg EDDI_ENV=production -t labsai/eddi:4.3.0-b$CIRCLE_BUILD_NUM .
