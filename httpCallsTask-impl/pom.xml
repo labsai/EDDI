@@ -5,7 +5,7 @@
     <parent>
         <artifactId>eddi</artifactId>
         <groupId>ai.labs</groupId>
-        <version>4.3</version>
+        <version>4.4</version>
         <relativePath>../pom.xml</relativePath>
     </parent>
     <modelVersion>4.0.0</modelVersion>
@@ -36,17 +36,17 @@
         <dependency>
             <groupId>ai.labs</groupId>
             <artifactId>httpclient-definition</artifactId>
-            <version>4.3</version>
+            <version>${project.version}</version>
         </dependency>
         <dependency>
             <groupId>ai.labs</groupId>
             <artifactId>sharedutilities</artifactId>
-            <version>4.3</version>
+            <version>${project.version}</version>
         </dependency>
         <dependency>
             <groupId>ai.labs</groupId>
             <artifactId>templateengine-definition</artifactId>
-            <version>4.3</version>
+            <version>${project.version}</version>
         </dependency>
     </dependencies>
 

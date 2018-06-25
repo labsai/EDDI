@@ -4,9 +4,9 @@ import ai.labs.expressions.Expression;
 import ai.labs.expressions.ExpressionFactory;
 import ai.labs.expressions.utilities.ExpressionProvider;
 import ai.labs.expressions.utilities.IExpressionProvider;
+import ai.labs.parser.extensions.dictionaries.IDictionary;
 import ai.labs.parser.internal.InputParser;
 import ai.labs.parser.internal.matches.RawSolution;
-import ai.labs.parser.extensions.dictionaries.IDictionary;
 import ai.labs.parser.model.Phrase;
 import ai.labs.parser.model.Word;
 import ai.labs.utilities.StringUtilities;
@@ -170,7 +170,7 @@ public class InputParserTest {
         List<RawSolution> suggestions = inputParser.parse(lookupString);
 
         //assert
-        Assert.assertEquals(1, suggestions.size());
+        Assert.assertEquals(3, suggestions.size());
         List<IDictionary.IFoundWord> foundWords = suggestions.get(0).getDictionaryEntries();
         Assert.assertEquals(3, foundWords.size());
         Assert.assertEquals("day", foundWords.get(0).getValue());

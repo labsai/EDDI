@@ -11,6 +11,7 @@ import java.util.Map;
 public class Request {
     private String path;
     private Map<String, String> headers;
+    private Map<String, String> queryParams;
     private String method;
     private String contentType;
     private String body;
@@ -18,6 +19,7 @@ public class Request {
     public Request() {
         path = "";
         headers = new HashMap<>();
+        queryParams = new HashMap<>();
         method = "GET";
         contentType = "";
         body = "";

@@ -219,12 +219,32 @@ public class InputParser implements IInputParser {
                 if (matchingCompleted) {
                     return possibleSolutions;
                 }
-            }
-
-            if (possibleSolutions.isEmpty()) {
-                rawSolution = new RawSolution(RawSolution.Match.NOTHING);
-                rawSolution.setDictionaryEntries(foundWords);
-                possibleSolutions.add(rawSolution);
+            } else if (!foundWords.isEmpty()) {
+                //if we are here, we know it is not a phrase in this iteration, neither fully nor partly
+                if (foundWords.stream().anyMatch(word -> word.getFoundWord().isPartOfPhrase())) {
+                    rawSolution = new RawSolution(RawSolution.Match.NOTHING);
+                    rawSolution.setDictionaryEntries(foundWords);
+                    addIfAbsent(possibleSolutions, rawSolution);
+                } else {
+                    //found no words from phrase, but actual dictionary word(s), so we treat in more prominent
+                    rawSolution = new RawSolution(RawSolution.Match.PARTLY);
+                    rawSolution.setDictionaryEntries(foundWords);
+                    if (possibleSolutions.isEmpty()) {
+                        possibleSolutions.add(rawSolution);
+                    } else {
+                        int maxIndex = possibleSolutions.size() - 1;
+                        for (int i = maxIndex; i >= 0; i--) {
+                            RawSolution tmpSolution = possibleSolutions.get(i);
+                            if (tmpSolution.getMatch().equals(RawSolution.Match.NOTHING)) {
+                                if (i == 0) {
+                                    addIfAbsent(possibleSolutions, rawSolution, 0);
+                                }
+                            } else {
+                                addIfAbsent(possibleSolutions, rawSolution, i + 1);
+                            }
+                        }
+                    }
+                }
             }
 
             if (currentIteration > maxIterations) {
@@ -233,6 +253,20 @@ public class InputParser implements IInputParser {
         }
 
         return possibleSolutions;
+    }
+
+    private void addIfAbsent(List<RawSolution> possibleSolutions, RawSolution rawSolution) {
+        addIfAbsent(possibleSolutions, rawSolution, -1);
+    }
+
+    private void addIfAbsent(List<RawSolution> possibleSolutions, RawSolution rawSolution, int insertAtIndex) {
+        if (possibleSolutions.stream().noneMatch(rawSolution::equals)) {
+            if (insertAtIndex > -1 && insertAtIndex < possibleSolutions.size()) {
+                possibleSolutions.add(insertAtIndex, rawSolution);
+            } else {
+                possibleSolutions.add(rawSolution);
+            }
+        }
     }
 
     private boolean isInterrupted() {

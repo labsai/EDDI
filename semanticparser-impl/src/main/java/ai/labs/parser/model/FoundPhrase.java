@@ -11,6 +11,7 @@ public class FoundPhrase extends FoundDictionaryEntry implements IDictionary.IFo
     public FoundPhrase(IDictionary.IPhrase phrase, boolean corrected, double matchingAccuracy) {
         super(phrase, corrected, matchingAccuracy);
         this.phrase = phrase;
+        isPhrase = true;
     }
 
     @Override
