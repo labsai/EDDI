@@ -89,17 +89,16 @@ public class HttpCallsTask implements ILifecycleTask {
                     collect(Collectors.toList());
             for (HttpCall call : httpCalls) {
                 try {
-                    Request requestConfig = call.getRequest();
-                    String targetUri = targetServerUri + requestConfig.getPath();
-                    String requestBody = templateValues(requestConfig.getBody(), templateDataObjects);
-                    IRequest request = buildRequest(targetUri, requestBody, requestConfig, templateDataObjects);
+                    IRequest request = buildRequest(call.getRequest(), templateDataObjects);
                     IResponse response = request.send();
+
                     if (response.getHttpCode() != 200) {
                         String message = "HttpCall (%s) didn't return http code 200, instead %s.";
                         log.warn(String.format(message, call.getName(), response.getHttpCode()));
                         log.warn("Error Msg:" + response.getHttpCodeMessage());
                         continue;
                     }
+
                     if (call.isSaveResponse()) {
                         final String responseBody = response.getContentAsString();
                         String actualContentType = response.getHttpHeader().get(CONTENT_TYPE);
@@ -162,8 +161,11 @@ public class HttpCallsTask implements ILifecycleTask {
         }
     }
 
-    private IRequest buildRequest(String targetUri, String requestBody, Request requestConfig, Map<String, Object> templateDataObjects) throws ITemplatingEngine.TemplateEngineException {
-        IRequest request = httpClient.newRequest(URI.create(targetUri),
+    private IRequest buildRequest(Request requestConfig, Map<String, Object> templateDataObjects) throws ITemplatingEngine.TemplateEngineException {
+        URI targetUri = URI.create(targetServerUri + templateValues(requestConfig.getPath(), templateDataObjects));
+        String requestBody = templateValues(requestConfig.getBody(), templateDataObjects);
+
+        IRequest request = httpClient.newRequest(targetUri,
                 IHttpClient.Method.valueOf(requestConfig.getMethod().toUpperCase())).
                 setBodyEntity(requestBody,
                         UTF_8, requestConfig.getContentType());
