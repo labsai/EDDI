@@ -45,7 +45,38 @@ class QuickReply {
     }
 }
 
+var keycloak;
+
+var logout = function () {
+    $.post('/logout', function () {
+        console.log('Logged out server-side');
+        keycloak.logout();
+        console.log('Logged out client-side');
+    });
+};
+
 $(function () {
+    keycloak = Keycloak(
+        {
+            url: 'https://dev-auth.differ.chat/auth',
+            realm: 'EDDI',
+            clientId: 'eddi-engine'
+        });
+
+    var initOptions = {
+        responseMode: 'fragment',
+        flow: 'standard'
+    };
+
+    keycloak.init(initOptions).success(function (authenticated) {
+        console.log('Init Success (' + (authenticated ? 'Authenticated' : 'Not Authenticated') + ')');
+        if (!authenticated) {
+            keycloak.login();
+        }
+    }).error(function () {
+        console.log('Init Error');
+    });
+
     let message_side = 'right';
 
     function getMessageText() {
