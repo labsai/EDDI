@@ -237,3 +237,13 @@ body {
 .message_template {
     display: none;
 }
+
+.positionRight {
+    position: absolute;
+    right: 10px;
+}
+
+#contextValue {
+    position: absolute;
+    z-index: 99;
+}
