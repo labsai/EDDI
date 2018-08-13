@@ -148,10 +148,6 @@
                         <artifactId>jcip-annotations</artifactId>
                         <groupId>net.jcip</groupId>
                     </exclusion>
-                    <exclusion>
-                        <groupId>org.apache.httpcomponents</groupId>
-                        <artifactId>httpclient</artifactId>
-                    </exclusion>
             </exclusions>
         </dependency>
         <dependency>
