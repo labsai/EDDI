@@ -95,19 +95,11 @@ $(function () {
 
     eddi.submitUserMessage = function (userMessage) {
         let requestBody = null;
-        let contextType = $('#contextType option:selected').text();
-        let contextName = $('#contextName').val();
         let contextValue = $('#contextValue').val().trim();
         if (contextValue !== null && contextValue !== '') {
-            let context = {};
-            let value = contextType === 'object' ? JSON.parse(contextValue) : contextValue;
-            context[contextName] = {
-                type: contextType,
-                value: value
-            };
             requestBody = {
                 input: userMessage,
-                context: context
+                context: JSON.parse(contextValue)
             }
         } else {
             requestBody = {
@@ -205,7 +197,7 @@ $(function () {
 
         if (conversationState === 'ENDED') {
             $('<div style="padding-bottom: 1rem; color:darkgray;"><hr>Conversation Ended</div>').appendTo($('.messages'));
-            createConversation(eddi.environment, eddi.botId);
+            eddi.createConversation(eddi.environment, eddi.botId);
         }
     };
 
@@ -231,10 +223,15 @@ $(function () {
         });
     };
 
-    const createConversation = function (environment, botId) {
+    eddi.createConversation = function (environment, botId, empty) {
+        if (empty) {
+            $('.messages').empty();
+        }
         $.post('/bots/' + environment + '/' + botId).done(function (data, status, xhr) {
             const conversationUriArray = xhr.getResponseHeader('Location').split('/');
             eddi.conversationId = conversationUriArray[conversationUriArray.length - 1];
+            $('#currentConversationId').text(eddi.conversationId);
+            $('#currentConversationLink').attr('href', '/conversationstore/conversations/' + eddi.conversationId);
             proceedConversation();
         });
     };
@@ -277,7 +274,7 @@ $(function () {
 
     const proceedConversation = function () {
         if (!eddi.conversationId) {
-            createConversation(eddi.environment, eddi.botId);
+            eddi.createConversation(eddi.environment, eddi.botId);
         } else {
             checkConversationStatus(eddi.environment, eddi.botId, eddi.conversationId);
         }

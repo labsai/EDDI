@@ -9,18 +9,15 @@
 <body>
 
 <div style="position: absolute">
-    <label for="contextType">Context Type:</label>
-    <select id="contextType">
-        <option value="string">string</option>
-        <option value="expressions">expressions</option>
-        <option value="json">object</option>
-    </select>
     <label for="contextValue">Context Name:</label>
-    <input id="contextName" name="contextName" placeholder="context name...">
-    <label for="contextValue">Context Value:</label>
-    <textarea id="contextValue" name="contextValue" placeholder="context value to be send..."></textarea>
+    <textarea id="contextValue" name="contextValue" placeholder="context to be send..."></textarea>
 </div>
 
+<div class="positionRight">
+    <a id="currentConversationLink" href="#" target="_blank">View Current Conversation</a>
+    <div id="currentConversationId"></div>
+    <input type="button" onclick="eddi.createConversation(eddi.environment, eddi.botId, true)" value="New Conversation">
+</div>
 <div class="chat_window">
     <div class="top_menu">
         <div class="buttons">
