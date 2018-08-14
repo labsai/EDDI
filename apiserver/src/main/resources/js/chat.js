@@ -232,14 +232,14 @@ $(function () {
 
             if (eddi.conversationId) {
                 $('#previousConversationId').text(eddi.conversationId);
-                $('#previousConversationLink').attr('href', '/conversationstore/conversations/' + eddi.conversationId);
+                $('#previousConversationLink').attr('href', '/bots/' + eddi.environment + '/' + eddi.botId + '/' + eddi.conversationId);
                 $('#previousConversationLink').show();
             }
 
             eddi.conversationId = conversationUriArray[conversationUriArray.length - 1];
 
             $('#currentConversationId').text(eddi.conversationId);
-            $('#currentConversationLink').attr('href', '/conversationstore/conversations/' + eddi.conversationId);
+            $('#currentConversationLink').attr('href', '/bots/' + eddi.environment + '/' + eddi.botId + '/' + eddi.conversationId);
             proceedConversation();
         });
     };
