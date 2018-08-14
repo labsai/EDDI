@@ -11,6 +11,7 @@ import java.util.*;
 public class MemoryTemplateConverter implements IMemoryTemplateConverter {
     private static final String KEY_HTTP_CALLS = "httpCalls";
     private static final String KEY_CONTEXT = "context";
+    private static final String KEY_PROPERTIES = "properties";
 
     @Override
     public Map<String, Object> convertMemoryForTemplating(IConversationMemory memory) {
@@ -36,9 +37,10 @@ public class MemoryTemplateConverter implements IMemoryTemplateConverter {
 
     private Map<Object, Object> collectMemoryEntries(IConversationMemory.IConversationStep conversationStep) {
         Map<Object, Object> step;
-        step = convertConversationStep(conversationStep, KEY_HTTP_CALLS, KEY_CONTEXT);
+        step = convertConversationStep(conversationStep, KEY_HTTP_CALLS, KEY_CONTEXT, KEY_PROPERTIES);
         step.putAll(convertExplicitMemoryEntries(KEY_HTTP_CALLS, conversationStep));
         step.putAll(convertExplicitMemoryEntries(KEY_CONTEXT, conversationStep));
+        step.putAll(convertExplicitMemoryEntries(KEY_PROPERTIES, conversationStep));
         return step;
     }
 
@@ -68,12 +70,12 @@ public class MemoryTemplateConverter implements IMemoryTemplateConverter {
         prefixKeys.stream().filter(key -> key.startsWith(rootKey)).forEach(prefixKey -> {
             IData data = conversationStep.getLatestData(prefixKey);
             if (data.getResult() != null) {
-                HashMap<Object, Object> httpCalls = (HashMap<Object, Object>) ret.get(rootKey);
+                HashMap<Object, Object> valueEntity = (HashMap<Object, Object>) ret.get(rootKey);
                 if (ret.get(rootKey) == null) {
-                    httpCalls = new HashMap<>();
-                    ret.put(rootKey, httpCalls);
+                    valueEntity = new HashMap<>();
+                    ret.put(rootKey, valueEntity);
                 }
-                httpCalls.put(prefixKey.substring(prefixKey.indexOf(":") + 1, prefixKey.length()), data.getResult());
+                valueEntity.put(prefixKey.substring(prefixKey.indexOf(":") + 1), data.getResult());
             }
         });
 

@@ -229,7 +229,15 @@ $(function () {
         }
         $.post('/bots/' + environment + '/' + botId).done(function (data, status, xhr) {
             const conversationUriArray = xhr.getResponseHeader('Location').split('/');
+
+            if (eddi.conversationId) {
+                $('#previousConversationId').text(eddi.conversationId);
+                $('#previousConversationLink').attr('href', '/conversationstore/conversations/' + eddi.conversationId);
+                $('#previousConversationLink').show();
+            }
+
             eddi.conversationId = conversationUriArray[conversationUriArray.length - 1];
+
             $('#currentConversationId').text(eddi.conversationId);
             $('#currentConversationLink').attr('href', '/conversationstore/conversations/' + eddi.conversationId);
             proceedConversation();

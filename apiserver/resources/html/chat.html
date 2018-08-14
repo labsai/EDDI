@@ -9,11 +9,14 @@
 <body>
 
 <div style="position: absolute">
-    <label for="contextValue">Context Name:</label>
+    <label for="contextValue">Context JSON:</label>
     <textarea id="contextValue" name="contextValue" placeholder="context to be send..."></textarea>
 </div>
 
 <div class="positionRight">
+    <a id="previousConversationLink" href="#" target="_blank" style="display: none;">View Previous Conversation</a>
+    <div id="previousConversationId"></div>
+    <br/>
     <a id="currentConversationLink" href="#" target="_blank">View Current Conversation</a>
     <div id="currentConversationId"></div>
     <input type="button" onclick="eddi.createConversation(eddi.environment, eddi.botId, true)" value="New Conversation">
