@@ -312,6 +312,30 @@ $(function () {
             });
     };
 
+    eddi.insertContextExample = function () {
+        if ($('#contextValue').val() !== '') {
+            alert('context textarea is not empty!');
+            return;
+        }
+
+        $('#contextValue').val('{\n' +
+            '  "userId": {\n' +
+            '    "type": "string",\n' +
+            '    "value": "cdec53d4-9826-4a81-2w2w2-7d184bd6063f"\n' +
+            '  },\n' +
+            '  "userInfo": {\n' +
+            '    "type": "object",\n' +
+            '    "value": {\n' +
+            '      "username": "Tom"\n' +
+            '    }\n' +
+            '  },\n' +
+            '  "properties": {\n' +
+            '    "type": "expressions",\n' +
+            '    "value": "property(category_1(value)), property(category_2(value))"\n' +
+            '  }\n' +
+            '}');
+    };
+
     $(document).ready(function () {
         const extractedParams = getQueryParts(window.location.href);
         //extract environment from URL
