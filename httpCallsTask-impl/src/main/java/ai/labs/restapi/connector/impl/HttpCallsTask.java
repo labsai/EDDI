@@ -19,6 +19,7 @@ import ai.labs.runtime.service.ServiceException;
 import ai.labs.serialization.IJsonSerialization;
 import ai.labs.templateengine.IMemoryTemplateConverter;
 import ai.labs.templateengine.ITemplatingEngine;
+import ai.labs.utilities.RuntimeUtilities;
 import lombok.extern.slf4j.Slf4j;
 
 import javax.inject.Inject;
@@ -151,6 +152,7 @@ public class HttpCallsTask implements ILifecycleTask {
         if (qrBuildInstruction != null) {
             List<Map<String, String>> quickReplies = buildQuickReplies(qrBuildInstruction.getIterationObjectName(),
                     qrBuildInstruction.getPathToTargetArray(),
+                    qrBuildInstruction.getTemplateFilterExpression(),
                     qrBuildInstruction.getQuickReplyValue(),
                     qrBuildInstruction.getQuickReplyExpressions(),
                     templateDataObjects);
@@ -190,21 +192,33 @@ public class HttpCallsTask implements ILifecycleTask {
 
     private List<Map<String, String>> buildQuickReplies(String iterationObjectName,
                                                         String pathToTargetArray,
+                                                        String templateFilterExpression,
                                                         String quickReplyValue,
                                                         String quickReplyExpressions,
                                                         Map<String, Object> templateDataObjects)
             throws ITemplatingEngine.TemplateEngineException, IOException {
 
-        String jsonQuickReplies = templatingEngine.processTemplate("[" +
-                "[# th:each=\"" + iterationObjectName + ", iterationStatus : ${" + pathToTargetArray + "}\"]" +
+        String templateCode = "[" +
+                "[# th:each=\"" + iterationObjectName + " : ${" + pathToTargetArray + "}\"";
+
+        if (!RuntimeUtilities.isNullOrEmpty(templateFilterExpression)) {
+            templateCode += "   th:object=\"${" + iterationObjectName + "}\"";
+            templateCode += "   th:if=\"" + templateFilterExpression + "\"";
+        }
+
+        templateCode += "]" +
                 "    {" +
                 "        \"value\":\"" + quickReplyValue + "\"," +
                 "        \"expressions\":\"" + quickReplyExpressions + "\"" +
-                "    }" +
-                "    [# th:text=\"!${iterationStatus.last} ? ',':''\"/]" +
+                "    }," +
                 "[/]" +
-                "]", templateDataObjects);
+                "]";
 
+        String jsonQuickReplies = templatingEngine.processTemplate(templateCode, templateDataObjects);
+
+        //remove last comma of iterated array
+        jsonQuickReplies = new StringBuilder(jsonQuickReplies).
+                deleteCharAt(jsonQuickReplies.lastIndexOf(",")).toString();
 
         return jsonSerialization.deserialize(jsonQuickReplies, List.class);
     }
