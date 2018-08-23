@@ -217,8 +217,10 @@ public class HttpCallsTask implements ILifecycleTask {
         String jsonQuickReplies = templatingEngine.processTemplate(templateCode, templateDataObjects);
 
         //remove last comma of iterated array
-        jsonQuickReplies = new StringBuilder(jsonQuickReplies).
-                deleteCharAt(jsonQuickReplies.lastIndexOf(",")).toString();
+        if (jsonQuickReplies.contains(",")) {
+            jsonQuickReplies = new StringBuilder(jsonQuickReplies).
+                    deleteCharAt(jsonQuickReplies.lastIndexOf(",")).toString();
+        }
 
         return jsonSerialization.deserialize(jsonQuickReplies, List.class);
     }
