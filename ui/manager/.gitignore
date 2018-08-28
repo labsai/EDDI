@@ -1,0 +1,14 @@
+node_modules
+dist
+compiled
+.idea
+*.js
+*.js.map
+*.log
+.nyc_output
+coverage
+.awcache
+!wallaby.js
+!webpack.config.babel.js
+!webpack/*.js
+!server.js

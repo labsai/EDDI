@@ -1,0 +1,19 @@
+{
+  "pinVersions": true,
+  "semanticCommits": true,
+  "depTypes": [
+    {
+      "depType": "dependencies",
+      "pinVersions": false
+    }
+  ],
+  "timezone": "Europe/Oslo",
+  "schedule": ["after 10pm and before 5am on every weekday", "every weekend"],
+  "rebaseStalePrs": true,
+  "prHourlyLimit": 5,
+  "prConcurrentLimit": 3,
+  "automerge": "minor",
+  "labels": ["tooling", "dependencies"],
+  "assignees": ["@kennethlynne"],
+  "reviewers": ["@kennethlynne"]
+}

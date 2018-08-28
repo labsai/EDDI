@@ -1,0 +1,69 @@
+const webpack = require('webpack');
+const CopyWebpackPlugin = require('copy-webpack-plugin');
+const ExtractTextPlugin = require('extract-text-webpack-plugin');
+const HtmlWebpackPlugin = require('html-webpack-plugin');
+const UglifyJSPlugin = require('uglifyjs-webpack-plugin');
+const GenerateJsonPlugin = require('generate-json-webpack-plugin');
+const _ = require('lodash');
+
+const isBuild = process.env.npm_lifecycle_event === 'build';
+
+const isVendorModule = (module) => {
+  // returns true for everything in node_modules
+  return module.context && module.context.indexOf('node_modules') !== -1;
+};
+
+const ENV = process.env.NODE_ENV || 'local';
+
+const defaultEnvironment = require(`../environments/${ENV}.json`);
+
+const appVersion = require('../package.json').version;
+
+export function getPlugins() {
+  let plugins = [
+
+    new webpack.ProgressPlugin(),
+
+    new HtmlWebpackPlugin({
+      template: 'public/index.html',
+      chunksSortMode: 'dependency',
+    }),
+
+    new ExtractTextPlugin({
+      filename: 'css/[name].[hash].css',
+      disable: !isBuild,
+    }),
+
+    new webpack.optimize.CommonsChunkPlugin({
+      name: 'vendor',
+      filename: 'vendor.bundle.[hash].js',
+      minChunks: isVendorModule,
+    }),
+
+    new CopyWebpackPlugin([{from: 'public'}]),
+
+    new webpack.EnvironmentPlugin(_.defaults({appVersion: appVersion}, {eddiApiUrl: process.env.EDDI_API_URL}, defaultEnvironment)),
+
+    new webpack.DefinePlugin({
+      '__DEV__': JSON.stringify(ENV !== 'production' && ENV !== 'staging'),
+      'process.env.NODE_ENV': JSON.stringify(ENV),
+    }),
+
+    new webpack.HotModuleReplacementPlugin(),
+  ];
+  if (ENV === 'default') {
+    // Add module names so they appear in browser profiler
+    plugins.push(new webpack.NamedModulesPlugin());
+  }
+
+  if (isBuild) {
+    plugins.push(new UglifyJSPlugin({sourceMap: true}));
+    plugins.push(new GenerateJsonPlugin('version.json', {
+      buildNumber: process.env.CIRCLE_BUILD_NUM,
+      environment: ENV,
+      version: appVersion,
+    }));
+  }
+
+  return plugins;
+}

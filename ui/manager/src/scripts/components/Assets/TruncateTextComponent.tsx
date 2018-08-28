@@ -1,0 +1,90 @@
+import * as React from 'react';
+import { Component, compose, pure, setDisplayName } from 'recompose';
+import { CSSProperties } from 'react';
+import * as renderIf from 'render-if';
+
+const styles: CSSProperties = {
+  truncate: {
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+  },
+  textContainer: {
+    display: 'flex',
+    color: '#7A849E',
+    fontSize: '13px',
+  },
+  textButton: {
+    fontSize: '13px',
+    color: '#16325C',
+    whiteSpace: 'nowrap',
+  },
+};
+
+interface IState {
+  isExpanded: boolean;
+}
+
+interface IProps {
+  text: string;
+  length: number;
+}
+
+class TruncateTextComponent extends React.Component<IProps, IState> {
+  constructor(props) {
+    super(props);
+    this.state = {
+      isExpanded: false,
+    };
+  }
+
+  toggleText = () => {
+    this.setState({ isExpanded: !this.state.isExpanded });
+  };
+
+  getTextStyling() {
+    if (this.state.isExpanded) {
+      return {};
+    } else {
+      return {
+        ...styles.truncate,
+        maxWidth: `${this.props.length}ch`,
+      };
+    }
+  }
+  render() {
+    return (
+      <div>
+        {renderIf(this.props.text)(() => (
+          <div>
+            <div style={styles.textContainer}>
+              <div style={this.getTextStyling()}>{this.props.text}</div>
+              {renderIf(
+                !this.state.isExpanded &&
+                  this.props.text.length > this.props.length,
+              )(() => (
+                <a style={styles.textButton} onClick={this.toggleText}>
+                  {'See more'}
+                </a>
+              ))}
+            </div>
+            {renderIf(this.state.isExpanded)(() => (
+              <div>
+                <a style={styles.textButton} onClick={this.toggleText}>
+                  {'See less'}
+                </a>
+              </div>
+            ))}
+          </div>
+        ))}
+      </div>
+    );
+  }
+}
+
+const ComposedTruncateTextComponent: Component<IProps> = compose<IProps>(
+  pure,
+  setDisplayName('TruncateTextComponent'),
+)(TruncateTextComponent);
+
+export default ComposedTruncateTextComponent;

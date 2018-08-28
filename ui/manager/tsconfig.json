@@ -1,0 +1,21 @@
+{
+  "compilerOptions": {
+    "module": "commonjs",
+    "target": "es6",
+    "lib": ["es2015", "es2017", "dom"],
+    "importHelpers": true,
+    "noImplicitAny": false,
+    "noEmitHelpers": true,
+    "jsx": "react",
+    "sourceMap": true,
+    "allowJs": false,
+    "skipLibCheck": true,
+    "experimentalDecorators": true,
+    "baseUrl": ".",
+    "paths": {
+      "images": ["src/public/images"]
+    }
+  },
+  "compileOnSave": true,
+  "include": ["*.ts", "src/**/*", "tests/**/*"]
+}
