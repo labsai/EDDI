@@ -1,4 +1,4 @@
-# bottyboys-knowledge-app [![CircleCI](https://circleci.com/gh/EdtechFoundry/bottyboys-knowledge-app/tree/master.svg?style=svg&circle-token=c566e6f2cbf02040c02088213c6911eca6d6593d)](https://circleci.com/gh/EdtechFoundry/bottyboys-knowledge-app/tree/master)
+# EDDI-CONFIG-UI
 
 ## Setup
 ```
