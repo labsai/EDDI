@@ -9,6 +9,7 @@ import { run as runSagaMiddleware } from '../sagas';
 import * as renderIf from 'render-if';
 import { connect } from 'react-redux';
 import PackageViewPage from './pages/PackageViewPage';
+import RegularDictionaryPage from './pages/RegularDictionaryPage';
 
 interface IPublicProps {}
 
@@ -30,6 +31,11 @@ class App extends React.Component<IPrivateProps> {
             <Route path="/" exact component={Dashboard} />
             <Route path="/botview/:id" exact component={BotViewPage} />
             <Route path="/packageview/:id" exact component={PackageViewPage} />
+            <Route
+              path="/resources/:type"
+              exact
+              component={RegularDictionaryPage}
+            />
             <ModalComponentFrame />
           </div>
         ))}

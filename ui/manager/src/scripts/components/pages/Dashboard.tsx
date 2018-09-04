@@ -1,11 +1,7 @@
 import * as React from 'react';
 import Botlist from '../Bots/Botlist';
 import TopBarComponent from '../TopBar/TopBarComponent';
-import { IPackage } from '../utils/AxiosFunctions';
 import styles from '../App.style';
-import { connect } from 'react-redux';
-import { botsSelector } from '../../selectors/BotSelectors';
-import * as Radium from 'radium';
 import { Component, compose, pure, setDisplayName } from 'recompose';
 
 interface IProps {}
