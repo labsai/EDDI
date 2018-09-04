@@ -37,10 +37,17 @@ class BotView extends React.Component<IPrivateProps, IState> {
   };
 
   openEditJsonModal = () => {
-    ModalActionDispatchers.showEditJsonModal(this.props.bot.resource, {
-      packages: this.props.bot.packages,
-      channels: this.props.bot.channels,
-    });
+    ModalActionDispatchers.showEditJsonModal(
+      this.props.bot.resource,
+      JSON.stringify(
+        {
+          packages: this.props.bot.packages,
+          channels: this.props.bot.channels,
+        },
+        null,
+        '\t',
+      ),
+    );
   };
 
   selectVersion = (newVersion: number) => {
