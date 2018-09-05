@@ -13,6 +13,7 @@ import styles from '../AddPackagesModal/AddPackagesModal.styles';
 import ModalActionDispatchers from '../../../actions/ModalActionDispatchers';
 import * as renderIf from 'render-if';
 import BlueButton from '../../Assets/Buttons/BlueButton';
+import WhiteButton from '../../Assets/Buttons/WhiteButton';
 import { ClimbingBoxLoader } from 'react-spinners';
 import { REGULAR_DICTIONARY } from '../../utils/EddiTypes';
 
@@ -148,6 +149,12 @@ class AddPluginModal extends React.Component<IPrivateProps, IState> {
     this.closeModal();
   };
 
+  createNewPlugin = () => {
+    ModalActionDispatchers.showCreateNewModal(
+      Parser.getPluginName(this.props.pluginType, false),
+    );
+  };
+
   render() {
     return (
       <div>
@@ -158,6 +165,14 @@ class AddPluginModal extends React.Component<IPrivateProps, IState> {
               true,
             )}`}</div>
             <div style={styles.centerFlex} />
+            <WhiteButton
+              customStyles={styles.createButton}
+              onClick={this.createNewPlugin}
+              text={`Create new ${Parser.getPluginName(
+                this.props.pluginType,
+                false,
+              )}`}
+            />
             <BlueButton
               customStyles={styles.button}
               disabled={!this.unsavedChanges()}

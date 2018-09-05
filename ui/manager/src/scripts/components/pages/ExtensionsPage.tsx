@@ -5,6 +5,6 @@ interface IRouteProps {
 }
 interface IProps extends IRouteProps {}
 
-const RegularDictionaryPage = (props: IProps) => <div />;
+const ExtensionsPage = (props: IProps) => <div />;
 
-export default RegularDictionaryPage;
+export default ExtensionsPage;

@@ -23,6 +23,7 @@ import UpdatePackageModal from './UpdatePackageModal';
 import { ModalEnum } from '../utils/ModalEnum';
 import EditJsonModal from './EditJsonModal';
 import ViewJsonModal from './ViewJsonModal/ViewJsonModal';
+import CreateNewModal from './CreateNewModal';
 
 const customStyles = {
   content: {
@@ -125,6 +126,8 @@ class ModalComponentFrame extends React.Component<IPrivateProps, IState> {
             addPlugins={this.props.addPlugin}
           />
         );
+      case ModalEnum.createNew:
+        return <CreateNewModal type={this.props.pluginType} />;
       default:
         return null;
     }

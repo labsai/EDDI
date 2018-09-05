@@ -14,6 +14,7 @@ import {
   SHOW_ADD_PLUGINS_MODAL,
   SHOW_EDIT_BOT_MODAL,
   SHOW_EDIT_PACKAGE_MODAL,
+  SHOW_CREATE_NEW_MODAL,
 } from './ModalActionTypes';
 
 export interface IShowModalAction extends Action {
@@ -136,5 +137,16 @@ export function showEditPackageModal(
   return {
     packagePayload,
     type: SHOW_EDIT_PACKAGE_MODAL,
+  };
+}
+
+export interface IShowCreateNewModal extends Action {
+  pluginType: string;
+}
+
+export function showCreateNewModal(pluginType: string): IShowCreateNewModal {
+  return {
+    pluginType,
+    type: SHOW_CREATE_NEW_MODAL,
   };
 }

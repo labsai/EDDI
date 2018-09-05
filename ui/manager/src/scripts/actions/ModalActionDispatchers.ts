@@ -25,6 +25,8 @@ import {
   showEditBotModal,
   IShowEditPackageModalAction,
   showEditPackageModal,
+  IShowCreateNewModal,
+  showCreateNewModal,
 } from './ModalActions';
 
 export interface IModalActionDispatchers extends ActionCreatorsMapObject {
@@ -51,6 +53,7 @@ export interface IModalActionDispatchers extends ActionCreatorsMapObject {
   showEditPackageModal: (
     packagePayload: IPackage,
   ) => IShowEditPackageModalAction;
+  showCreateNewModal: (pluginType: string) => IShowCreateNewModal;
 }
 
 const actions: IModalActionDispatchers = {
@@ -62,6 +65,7 @@ const actions: IModalActionDispatchers = {
   showAddPluginsModal,
   showEditBotModal,
   showEditPackageModal,
+  showCreateNewModal,
 };
 
 const modalActionDispatchers: IModalActionDispatchers = bindActionCreators<

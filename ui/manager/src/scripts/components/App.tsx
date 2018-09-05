@@ -9,7 +9,7 @@ import { run as runSagaMiddleware } from '../sagas';
 import * as renderIf from 'render-if';
 import { connect } from 'react-redux';
 import PackageViewPage from './pages/PackageViewPage';
-import RegularDictionaryPage from './pages/RegularDictionaryPage';
+import RegularDictionaryPage from './pages/ExtensionsPage';
 
 interface IPublicProps {}
 

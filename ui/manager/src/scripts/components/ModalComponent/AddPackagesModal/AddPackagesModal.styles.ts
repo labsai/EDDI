@@ -22,6 +22,10 @@ const styles: CSSProperties = {
     width: '165px',
     marginRight: '50px',
   },
+  createButton: {
+    width: '165px',
+    marginRight: '10px',
+  },
   bottomHeader: {
     marginTop: '42px',
     display: 'flex',
