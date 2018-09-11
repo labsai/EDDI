@@ -11,20 +11,20 @@ services:
     environment:
       EDDI_VERSION: 4.4
       EDDI_ENV: production
-      EDDI_MEMORY_MIN: 1G
-      EDDI_MEMORY_MAX: 1G
+      EDDI_MEMORY_MIN: 128m
+      EDDI_MEMORY_MAX: 128m
       #EDDI_JAVA_ENV_MONGODB_HOST: mongodb.hosts=mongodb
   eddi-config-ui:
-    image: ginc/eddi-config-ui:latest
+    image: labsai/eddi-config-ui:latest
     ports:
-    - "7070:7070"
+    - "3000:3000"
     links:
-    - mongodb
+    - eddi
     depends_on:
-    - mongodb
+    - eddi
     environment:
-      EDDI_VERSION: 4.4
-      EDDI_ENV: production
+      EDDI_API_URL: "http://eddi:7070"
+      PORT: 3000
   mongodb:
     image: mongo:3.6
     restart: always
