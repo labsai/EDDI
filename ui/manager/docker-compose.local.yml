@@ -1,16 +1,12 @@
 version: '3'
 services:
-  eddi:
+  eddi-config-ui:
     build:
       context: .
       args:
-        EDDI_VERSION: 4.4
-        EDDI_ENV: production
-        EDDI_MEMORY_MIN: 128m
-        EDDI_MEMORY_MAX: 128m
-    image: labsai/eddi:local
+        EDDI_API_URL: "http://localhost:7070"
+        PORT: 7071
+    image: labsai/eddi-config-ui:local
     environment:
-      EDDI_VERSION: 4.4
-      EDDI_ENV: production
-      EDDI_MEMORY_MIN: 128m
-      EDDI_MEMORY_MAX: 128m
+      EDDI_API_URL: "http://localhost:7070"
+      PORT: 7071
