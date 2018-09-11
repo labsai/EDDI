@@ -100,6 +100,8 @@ import {
   IUpdateJsonDataAction,
   updateJsonDataFailedAction,
   updatePluginSuccessAction,
+  ICreateNewConfigAction,
+  createNewConfigFailedAction,
 } from '../actions/EddiApiActions';
 import * as Edditypes from '../components/utils/EddiTypes';
 import Parser from '../components/utils/Parser';
@@ -402,6 +404,13 @@ export function* watchFetchPackagesUsingPlugin(): Iterator<{}> {
   yield takeEvery(FETCH_PACKAGES_USING_PLUGIN, fetchPackagesUsingPlugin);
 }
 
+export function* createNewConfig(action: ICreateNewConfigAction): Iterator<{}> {
+  try {
+    // todo: create specific config depending on parameter type, and call dedicated success action.
+  } catch (err) {
+    yield put(createNewConfigFailedAction(err));
+  }
+}
 export function* updateJsonData(action: IUpdateJsonDataAction): Iterator<{}> {
   try {
     yield call(axiosUpdateJsonData, action.resource, action.data);
