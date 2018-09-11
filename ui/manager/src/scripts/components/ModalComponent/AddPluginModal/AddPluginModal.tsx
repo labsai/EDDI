@@ -150,9 +150,7 @@ class AddPluginModal extends React.Component<IPrivateProps, IState> {
   };
 
   createNewPlugin = () => {
-    ModalActionDispatchers.showCreateNewModal(
-      Parser.getPluginName(this.props.pluginType, false),
-    );
+    ModalActionDispatchers.showCreateNewConfigModal(this.props.pluginType);
   };
 
   render() {

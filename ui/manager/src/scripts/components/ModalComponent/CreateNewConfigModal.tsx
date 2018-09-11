@@ -5,6 +5,7 @@ import './ModalComponent.styles.scss';
 import { Component, compose, pure, setDisplayName } from 'recompose';
 import { ModalEnum } from '../utils/ModalEnum';
 import ModalActionDispatchers from '../../actions/ModalActionDispatchers';
+import Parser from '../utils/Parser';
 
 const customStyles = {
   createNewBotButton: {
@@ -33,7 +34,7 @@ interface IProps {
   type: string;
 }
 
-class CreateNewModal extends React.Component<IProps, IState> {
+class CreateNewConfigModal extends React.Component<IProps, IState> {
   constructor(props) {
     super(props);
     this.state = {
@@ -61,12 +62,14 @@ class CreateNewModal extends React.Component<IProps, IState> {
   };
 
   render() {
+    console.log(this.props);
+    const typeName = Parser.getPluginName(this.props.type, false);
     return (
       <div>
         <div style={styles.tallModalHeader}>
           <div style={styles.modalTopHeader}>
             <h2 style={styles.createPackageHeaderText}>
-              {`Create new ${this.props.type}`}
+              {`Create new ${typeName}`}
             </h2>
             <div style={styles.modalTopHeaderCenter} />
             <button
@@ -75,19 +78,19 @@ class CreateNewModal extends React.Component<IProps, IState> {
                 this.openModal();
               }}
               style={this.getButtonStyle()}>
-              {`Create ${this.props.type}`}
+              {`Create ${typeName}`}
             </button>
           </div>
         </div>
         <div style={styles.content}>
           <div style={styles.botText}>
-            {`Give the ${this.props.type} a name`}
+            {`Give the ${typeName} a name`}
             <div style={styles.inputBoxContent}>
               <textarea
                 defaultValue={''}
                 name={'name'}
                 style={styles.inputBoxName}
-                placeholder={`Give the ${this.props.type} a name..`}
+                placeholder={`Give the ${typeName} a name..`}
                 onChange={e =>
                   this.setState({
                     name: e.target.value,
@@ -97,15 +100,13 @@ class CreateNewModal extends React.Component<IProps, IState> {
             </div>
           </div>
           <div style={styles.botText}>
-            {`Give the ${this.props.type} a short description`}
+            {`Give the ${typeName} a short description`}
             <div style={styles.inputBoxContent}>
               <textarea
                 defaultValue={''}
                 name={'description'}
                 style={styles.inputBox}
-                placeholder={`Give the ${
-                  this.props.type
-                } a short description..`}
+                placeholder={`Give the ${typeName} a short description..`}
                 onChange={e =>
                   this.setState({
                     description: e.target.value,
@@ -120,9 +121,9 @@ class CreateNewModal extends React.Component<IProps, IState> {
   }
 }
 
-const ComposedCreateNewModal: Component<IProps> = compose<IProps>(
+const ComposedCreateNewConfigModal: Component<IProps> = compose<IProps>(
   pure,
-  setDisplayName('CreateNewModal'),
-)(CreateNewModal);
+  setDisplayName('CreateNewConfigModal'),
+)(CreateNewConfigModal);
 
-export default ComposedCreateNewModal;
+export default ComposedCreateNewConfigModal;

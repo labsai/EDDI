@@ -14,7 +14,8 @@ import {
   SHOW_ADD_PLUGINS_MODAL,
   SHOW_EDIT_BOT_MODAL,
   SHOW_EDIT_PACKAGE_MODAL,
-  SHOW_CREATE_NEW_MODAL,
+  SHOW_CREATE_NEW_CONFIG_MODAL,
+  SHOW_CREATE_NEW_CONFIG_2_MODAL,
 } from './ModalActionTypes';
 
 export interface IShowModalAction extends Action {
@@ -140,13 +141,34 @@ export function showEditPackageModal(
   };
 }
 
-export interface IShowCreateNewModal extends Action {
+export interface IShowCreateNewConfigModal extends Action {
   pluginType: string;
 }
 
-export function showCreateNewModal(pluginType: string): IShowCreateNewModal {
+export function showCreateNewConfigModal(
+  pluginType: string,
+): IShowCreateNewConfigModal {
   return {
     pluginType,
-    type: SHOW_CREATE_NEW_MODAL,
+    type: SHOW_CREATE_NEW_CONFIG_MODAL,
+  };
+}
+
+export interface IShowCreateNewConfig2Modal extends Action {
+  pluginType: string;
+  name: string;
+  description: string;
+}
+
+export function showCreateNewConfig2Modal(
+  pluginType: string,
+  name: string,
+  description: string,
+): IShowCreateNewConfig2Modal {
+  return {
+    pluginType,
+    name,
+    description,
+    type: SHOW_CREATE_NEW_CONFIG_2_MODAL,
   };
 }

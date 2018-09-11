@@ -3,7 +3,7 @@ import { Action, Reducer } from 'redux';
 import {
   IShowAddPackagesModalAction,
   IShowAddPluginsModalAction,
-  IShowCreateNewModal,
+  IShowCreateNewConfigModal,
   IShowEditBotModalAction,
   IShowEditJsonModalAction,
   IShowEditPackageModalAction,
@@ -14,7 +14,7 @@ import {
   CLOSE_MODAL,
   SHOW_ADD_PACKAGES_MODAL,
   SHOW_ADD_PLUGINS_MODAL,
-  SHOW_CREATE_NEW_MODAL,
+  SHOW_CREATE_NEW_CONFIG_MODAL,
   SHOW_EDIT_BOT_MODAL,
   SHOW_EDIT_JSON_MODAL,
   SHOW_EDIT_PACKAGE_MODAL,
@@ -190,11 +190,11 @@ const ModalReducer: IModalReducer = (
         },
       });
 
-    case SHOW_CREATE_NEW_MODAL:
-      modalAction = action as IShowCreateNewModal;
+    case SHOW_CREATE_NEW_CONFIG_MODAL:
+      modalAction = action as IShowCreateNewConfigModal;
       return update(state, {
         mode: {
-          $set: ModalEnum.createNew,
+          $set: ModalEnum.createNewConfig,
         },
         isModalOpen: {
           $set: true,
