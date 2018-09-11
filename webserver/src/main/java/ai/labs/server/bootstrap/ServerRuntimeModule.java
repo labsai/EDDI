@@ -57,7 +57,7 @@ public class ServerRuntimeModule extends AbstractBaseModule {
                                                @Named("webServer.idleTime") Long idleTime,
                                                @Named("webServer.outputBufferSize") Integer outputBufferSize,
                                                @Named("webServer.securityHandlerType") String securityHandlerType,
-                                               /*@Named("webServer.securityPaths") String securityPaths,*/
+            /*@Named("webServer.securityPaths") String securityPaths,*/
                                                Provider<SecurityHandler> securityHandlerProvider,
                                                GuiceResteasyBootstrapServletContextListener contextListener,
                                                SwaggerServletContextListener swaggerContextListener,
@@ -97,7 +97,7 @@ public class ServerRuntimeModule extends AbstractBaseModule {
     @Singleton
     private SecurityHandler provideAuthenticationService(@Named("webserver.keycloak.admin") String admin,
                                                          @Named("webserver.keycloak.user") String user,
-                                                         @Named("webserver.keycloak.path") String path,
+                                                         @Named("webserver.keycloak.publicAccessPaths") String publicAccessPaths,
                                                          @Named("webserver.keycloak.realm") String realm,
                                                          @Named("webserver.keycloak.realmKey") String realmKey,
                                                          @Named("webserver.keycloak.authServerUrl") String authServerUrl,
@@ -109,14 +109,26 @@ public class ServerRuntimeModule extends AbstractBaseModule {
         securityHandler.addRole(admin);
         securityHandler.addRole(user);
 
-        ConstraintMapping mapping = new ConstraintMapping();
-        mapping.setPathSpec(path);
         Constraint constraint = new Constraint();
         constraint.setAuthenticate(true);
         constraint.setRoles(new String[]{admin, user});
 
+        // require auth on all paths
+        ConstraintMapping mapping = new ConstraintMapping();
         mapping.setConstraint(constraint);
+        mapping.setPathSpec("/*");
         securityHandler.addConstraintMapping(mapping);
+
+        // expect those paths given in webserver.keycloak.publicAccessPaths , separated by ";"
+        constraint = new Constraint();
+        constraint.setAuthenticate(false);
+
+        for (String path : publicAccessPaths.split(";")) {
+            mapping = new ConstraintMapping();
+            mapping.setConstraint(constraint);
+            mapping.setPathSpec(path);
+            securityHandler.addConstraintMapping(mapping);
+        }
 
         // Keycloak
         KeycloakJettyAuthenticator keycloakAuthenticator = new KeycloakJettyAuthenticator();
