@@ -748,3 +748,23 @@ export async function updateJsonData(resource: string, data: string) {
     throw err;
   }
 }
+
+export async function createNewConfig(
+  type: string,
+  data: string,
+  name: string,
+  description: string,
+) {
+  try {
+    const response: IResponse = await postJsonHelper(
+      '/regulardictionarystore/regulardictionaries',
+      { data },
+    );
+    const resource = response.headers.location;
+    await patchDescriptor(resource, name, description);
+    return resource;
+  } catch (err) {
+    console.error(`Failed to create new config. Error: ${err.message}`);
+    throw err;
+  }
+}
