@@ -43,7 +43,7 @@ docker run -p "7071:7071" name_of_container
 You can change the environments by using this command. 
 Change `EDDI_API_URL=localhost7070` to whatever path you like.
 ```
-docker run -e  "EDDI_API_URL=localhost7070" -p "3000:3000" name_of_container
+docker run -e  "EDDI_API_URL=localhost7070" -p "7071:7071" name_of_container
 ```
 
 This image is suppose to work with [**EDDI**](https://github.com/labsai/EDDI).
