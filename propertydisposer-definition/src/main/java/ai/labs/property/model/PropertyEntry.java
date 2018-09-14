@@ -1,19 +1,21 @@
 package ai.labs.property.model;
 
-import lombok.*;
+import lombok.Getter;
+import lombok.Setter;
+import lombok.ToString;
 
+import java.util.HashMap;
 import java.util.List;
 
 /**
  * @author ginccc
  */
 
-@AllArgsConstructor
 @Getter
 @Setter
-@EqualsAndHashCode
 @ToString
-public class PropertyEntry {
-    private List<String> meanings;
-    private String value;
+public class PropertyEntry extends HashMap<String, String> {
+    public PropertyEntry(List<String> meanings, String value) {
+        put(String.join(".", meanings), value);
+    }
 }

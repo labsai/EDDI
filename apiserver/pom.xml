@@ -16,7 +16,7 @@
         <dependency>
             <groupId>org.jboss.resteasy</groupId>
             <artifactId>resteasy-cache-core</artifactId>
-            <version>3.1.4.Final</version>
+            <version>3.6.1.Final</version>
         </dependency>
 
         <dependency>

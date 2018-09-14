@@ -104,8 +104,9 @@ public class RestBotEngine implements IRestBotEngine {
             ConversationMemorySnapshot conversationMemorySnapshot =
                     conversationMemoryStore.loadConversationMemorySnapshot(conversationId);
             if (!botId.equals(conversationMemorySnapshot.getBotId())) {
-                String message = "conversationId: %s does not belong to bot with id: %s";
-                message = String.format(message, conversationId, botId);
+                String message = "conversationId: '%s' does not belong to bot with id: '%s'. " +
+                        "(provided botId='%s', botId in ConversationMemory='%s')";
+                message = String.format(message, conversationId, botId, botId, conversationMemorySnapshot.getBotId());
                 throw new IllegalAccessException(message);
             }
             return convertSimpleConversationMemory(conversationMemorySnapshot, returnDetailed);

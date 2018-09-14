@@ -19,6 +19,7 @@ import ai.labs.runtime.service.ServiceException;
 import ai.labs.serialization.IJsonSerialization;
 import ai.labs.templateengine.IMemoryTemplateConverter;
 import ai.labs.templateengine.ITemplatingEngine;
+import ai.labs.utilities.RuntimeUtilities;
 import lombok.extern.slf4j.Slf4j;
 
 import javax.inject.Inject;
@@ -89,17 +90,16 @@ public class HttpCallsTask implements ILifecycleTask {
                     collect(Collectors.toList());
             for (HttpCall call : httpCalls) {
                 try {
-                    Request requestConfig = call.getRequest();
-                    String targetUri = targetServerUri + requestConfig.getPath();
-                    String requestBody = templateValues(requestConfig.getBody(), templateDataObjects);
-                    IRequest request = buildRequest(targetUri, requestBody, requestConfig, templateDataObjects);
+                    IRequest request = buildRequest(call.getRequest(), templateDataObjects);
                     IResponse response = request.send();
+
                     if (response.getHttpCode() != 200) {
                         String message = "HttpCall (%s) didn't return http code 200, instead %s.";
                         log.warn(String.format(message, call.getName(), response.getHttpCode()));
                         log.warn("Error Msg:" + response.getHttpCodeMessage());
                         continue;
                     }
+
                     if (call.isSaveResponse()) {
                         final String responseBody = response.getContentAsString();
                         String actualContentType = response.getHttpHeader().get(CONTENT_TYPE);
@@ -152,6 +152,7 @@ public class HttpCallsTask implements ILifecycleTask {
         if (qrBuildInstruction != null) {
             List<Map<String, String>> quickReplies = buildQuickReplies(qrBuildInstruction.getIterationObjectName(),
                     qrBuildInstruction.getPathToTargetArray(),
+                    qrBuildInstruction.getTemplateFilterExpression(),
                     qrBuildInstruction.getQuickReplyValue(),
                     qrBuildInstruction.getQuickReplyExpressions(),
                     templateDataObjects);
@@ -162,8 +163,11 @@ public class HttpCallsTask implements ILifecycleTask {
         }
     }
 
-    private IRequest buildRequest(String targetUri, String requestBody, Request requestConfig, Map<String, Object> templateDataObjects) throws ITemplatingEngine.TemplateEngineException {
-        IRequest request = httpClient.newRequest(URI.create(targetUri),
+    private IRequest buildRequest(Request requestConfig, Map<String, Object> templateDataObjects) throws ITemplatingEngine.TemplateEngineException {
+        URI targetUri = URI.create(targetServerUri + templateValues(requestConfig.getPath(), templateDataObjects));
+        String requestBody = templateValues(requestConfig.getBody(), templateDataObjects);
+
+        IRequest request = httpClient.newRequest(targetUri,
                 IHttpClient.Method.valueOf(requestConfig.getMethod().toUpperCase())).
                 setBodyEntity(requestBody,
                         UTF_8, requestConfig.getContentType());
@@ -188,21 +192,35 @@ public class HttpCallsTask implements ILifecycleTask {
 
     private List<Map<String, String>> buildQuickReplies(String iterationObjectName,
                                                         String pathToTargetArray,
+                                                        String templateFilterExpression,
                                                         String quickReplyValue,
                                                         String quickReplyExpressions,
                                                         Map<String, Object> templateDataObjects)
             throws ITemplatingEngine.TemplateEngineException, IOException {
 
-        String jsonQuickReplies = templatingEngine.processTemplate("[" +
-                "[# th:each=\"" + iterationObjectName + ", iterationStatus : ${" + pathToTargetArray + "}\"]" +
+        String templateCode = "[" +
+                "[# th:each=\"" + iterationObjectName + " : ${" + pathToTargetArray + "}\"";
+
+        if (!RuntimeUtilities.isNullOrEmpty(templateFilterExpression)) {
+            templateCode += "   th:object=\"${" + iterationObjectName + "}\"";
+            templateCode += "   th:if=\"" + templateFilterExpression + "\"";
+        }
+
+        templateCode += "]" +
                 "    {" +
                 "        \"value\":\"" + quickReplyValue + "\"," +
                 "        \"expressions\":\"" + quickReplyExpressions + "\"" +
-                "    }" +
-                "    [# th:text=\"!${iterationStatus.last} ? ',':''\"/]" +
+                "    }," +
                 "[/]" +
-                "]", templateDataObjects);
+                "]";
 
+        String jsonQuickReplies = templatingEngine.processTemplate(templateCode, templateDataObjects);
+
+        //remove last comma of iterated array
+        if (jsonQuickReplies.contains(",")) {
+            jsonQuickReplies = new StringBuilder(jsonQuickReplies).
+                    deleteCharAt(jsonQuickReplies.lastIndexOf(",")).toString();
+        }
 
         return jsonSerialization.deserialize(jsonQuickReplies, List.class);
     }

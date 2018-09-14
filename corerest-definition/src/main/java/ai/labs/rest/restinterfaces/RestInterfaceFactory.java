@@ -1,11 +1,11 @@
 package ai.labs.rest.restinterfaces;
 
 import ai.labs.runtime.ThreadContext;
-import org.apache.http.client.HttpClient;
+import org.eclipse.jetty.client.HttpClient;
 import org.jboss.resteasy.client.jaxrs.ResteasyClient;
 import org.jboss.resteasy.client.jaxrs.ResteasyClientBuilder;
 import org.jboss.resteasy.client.jaxrs.ResteasyWebTarget;
-import org.jboss.resteasy.client.jaxrs.engines.ApacheHttpClient4Engine;
+import org.jboss.resteasy.client.jaxrs.engines.jetty.JettyClientEngine;
 
 import javax.inject.Inject;
 import javax.inject.Singleton;
@@ -50,7 +50,7 @@ public class RestInterfaceFactory implements IRestInterfaceFactory {
         ResteasyClient client = clients.get(targetServerUri);
         if(client == null) {
 
-            ApacheHttpClient4Engine engine = new ApacheHttpClient4Engine(httpClient);
+            JettyClientEngine engine = new JettyClientEngine(httpClient);
             ResteasyClientBuilder clientBuilder = new ResteasyClientBuilder();
             clientBuilder.httpEngine(engine);
 
