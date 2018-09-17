@@ -1,20 +1,43 @@
-package ai.labs.templateengine.impl;
+package ai.labs.memory;
 
-import ai.labs.memory.IConversationMemory;
-import ai.labs.memory.IData;
-import ai.labs.templateengine.IMemoryTemplateConverter;
+import ai.labs.lifecycle.model.Context;
 import lombok.extern.slf4j.Slf4j;
 
 import java.util.*;
 
 @Slf4j
-public class MemoryTemplateConverter implements IMemoryTemplateConverter {
+public class MemoryItemConverter implements IMemoryItemConverter {
     private static final String KEY_HTTP_CALLS = "httpCalls";
     private static final String KEY_CONTEXT = "context";
     private static final String KEY_PROPERTIES = "properties";
 
+    public Map<String, Object> convert(IConversationMemory memory) {
+        List<IData<Context>> contextDataList = memory.getCurrentStep().getAllData("context");
+        Map<String, Object> contextMap = prepareContext(contextDataList);
+
+        Map<String, Object> memoryForTemplate = convertMemoryItems(memory);
+        if (!memoryForTemplate.isEmpty()) {
+            contextMap.put("memory", memoryForTemplate);
+        }
+
+        return contextMap;
+    }
+
+    private HashMap<String, Object> prepareContext(List<IData<Context>> contextDataList) {
+        HashMap<String, Object> dynamicAttributesMap = new HashMap<>();
+        contextDataList.forEach(contextData -> {
+            Context context = contextData.getResult();
+            Context.ContextType contextType = context.getType();
+            if (contextType.equals(Context.ContextType.object) || contextType.equals(Context.ContextType.string)) {
+                String dataKey = contextData.getKey();
+                dynamicAttributesMap.put(dataKey.substring(dataKey.indexOf(":") + 1), context.getValue());
+            }
+        });
+        return dynamicAttributesMap;
+    }
+
     @Override
-    public Map<String, Object> convertMemoryForTemplating(IConversationMemory memory) {
+    public Map<String, Object> convertMemoryItems(IConversationMemory memory) {
         Map<String, Object> props = new HashMap<>();
         IConversationMemory.IWritableConversationStep currentStep;
         IConversationMemory.IConversationStep lastStep;

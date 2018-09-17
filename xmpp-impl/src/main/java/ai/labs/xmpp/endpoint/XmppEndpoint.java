@@ -11,45 +11,33 @@ import ai.labs.resources.rest.bots.model.BotConfiguration;
 import ai.labs.rest.rest.IRestBotEngine;
 import ai.labs.rest.restinterfaces.IRestInterfaceFactory;
 import ai.labs.runtime.IBotFactory;
-import ai.labs.runtime.SystemRuntime;
 import ai.labs.runtime.service.ServiceException;
 import ai.labs.utilities.RestUtilities;
 import ai.labs.utilities.URIUtilities;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import lombok.AllArgsConstructor;
-import lombok.EqualsAndHashCode;
-import lombok.Getter;
-import lombok.Setter;
 import lombok.extern.slf4j.Slf4j;
-import org.jboss.resteasy.plugins.guice.RequestScoped;
 import org.jivesoftware.smack.ConnectionConfiguration;
 import org.jivesoftware.smack.SmackException;
-import org.jivesoftware.smack.XMPPConnection;
 import org.jivesoftware.smack.XMPPException;
 import org.jivesoftware.smack.chat2.Chat;
 import org.jivesoftware.smack.chat2.ChatManager;
 import org.jivesoftware.smack.packet.Message;
-import org.jivesoftware.smack.roster.Roster;
-import org.jivesoftware.smack.roster.RosterGroup;
 import org.jivesoftware.smack.tcp.XMPPTCPConnection;
 import org.jivesoftware.smack.tcp.XMPPTCPConnectionConfiguration;
 import org.jxmpp.jid.EntityBareJid;
 
-import javax.annotation.PostConstruct;
 import javax.inject.Inject;
 import javax.inject.Named;
-import javax.inject.Singleton;
-import javax.ws.rs.InternalServerErrorException;
 import javax.ws.rs.core.MediaType;
 import javax.ws.rs.core.Response;
 import java.io.IOException;
 import java.net.InetAddress;
 import java.net.URI;
-import java.util.*;
-import java.util.concurrent.Callable;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Map;
 import java.util.concurrent.TimeUnit;
-import java.util.regex.Pattern;
 
 import static ai.labs.memory.model.Deployment.Environment.unrestricted;
 import static ai.labs.persistence.IResourceStore.ResourceNotFoundException;
@@ -172,7 +160,7 @@ public class XmppEndpoint implements IXmppEndpoint {
     }
 
     private Integer getLatestDeployedBotVersion(String botId) throws ServiceException {
-        return botFactory.getLatestBot(unrestricted, botId) != null ?  botFactory.getLatestBot(unrestricted, botId).getVersion() : new Integer(1);
+        return botFactory.getLatestBot(unrestricted, botId) != null ? botFactory.getLatestBot(unrestricted, botId).getBotVersion() : new Integer(1);
     }
 
     private void say(Deployment.Environment environment,
@@ -273,7 +261,7 @@ public class XmppEndpoint implements IXmppEndpoint {
         String conversationId;
         try {
             Response response = restInterfaceFactory.get(IRestBotEngine.class, apiServerURI).
-                    startConversation(environment, botId);
+                    startConversation(environment, botId, senderId);
             if (response.getStatus() == 201) {
                 URIUtilities.ResourceId resourceIdConversation =
                         URIUtilities.extractResourceId(response.getLocation());

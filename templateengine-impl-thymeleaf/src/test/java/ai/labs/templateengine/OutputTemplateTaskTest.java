@@ -1,10 +1,7 @@
 package ai.labs.templateengine;
 
 import ai.labs.lifecycle.model.Context;
-import ai.labs.memory.Data;
-import ai.labs.memory.IConversationMemory;
-import ai.labs.memory.IData;
-import ai.labs.memory.IDataFactory;
+import ai.labs.memory.*;
 import ai.labs.output.model.QuickReply;
 import lombok.AllArgsConstructor;
 import lombok.EqualsAndHashCode;
@@ -37,7 +34,7 @@ public class OutputTemplateTaskTest {
     private OutputTemplateTask outputTemplateTask;
     private final String expectedOutputString = "This is some output with context such as someContextValue";
     private ITemplatingEngine templatingEngine;
-    private IMemoryTemplateConverter memoryTemplateConverter;
+    private IMemoryItemConverter memoryTemplateConverter;
 
     @Before
     public void setUp() {
@@ -46,8 +43,8 @@ public class OutputTemplateTaskTest {
         conversationMemory = mock(IConversationMemory.class);
         currentStep = mock(IConversationMemory.IWritableConversationStep.class);
         when(conversationMemory.getCurrentStep()).then(invocation -> currentStep);
-        memoryTemplateConverter = mock(IMemoryTemplateConverter.class);
-        when(memoryTemplateConverter.convertMemoryForTemplating(any(IConversationMemory.class))).
+        memoryTemplateConverter = mock(IMemoryItemConverter.class);
+        when(memoryTemplateConverter.convertMemoryItems(any(IConversationMemory.class))).
                 then(invocation -> new HashMap<>());
         outputTemplateTask = new OutputTemplateTask(templatingEngine, memoryTemplateConverter, dataFactory);
     }

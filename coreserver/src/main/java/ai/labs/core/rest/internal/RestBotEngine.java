@@ -66,7 +66,7 @@ public class RestBotEngine implements IRestBotEngine {
     }
 
     @Override
-    public Response startConversation(Deployment.Environment environment, String botId) {
+    public Response startConversation(Deployment.Environment environment, String botId, String userId) {
         RuntimeUtilities.checkNotNull(environment, "environment");
         RuntimeUtilities.checkNotNull(botId, "botId");
 

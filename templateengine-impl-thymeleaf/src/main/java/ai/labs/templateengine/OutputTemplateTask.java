@@ -6,6 +6,7 @@ import ai.labs.lifecycle.model.Context.ContextType;
 import ai.labs.memory.IConversationMemory;
 import ai.labs.memory.IData;
 import ai.labs.memory.IDataFactory;
+import ai.labs.memory.IMemoryItemConverter;
 import ai.labs.output.model.QuickReply;
 import ai.labs.resources.rest.extensions.model.ExtensionDescriptor;
 import ai.labs.templateengine.ITemplatingEngine.TemplateMode;
@@ -31,12 +32,12 @@ public class OutputTemplateTask implements ILifecycleTask {
     private static final String PRE_TEMPLATED = "preTemplated";
     private static final String POST_TEMPLATED = "postTemplated";
     private final ITemplatingEngine templatingEngine;
-    private final IMemoryTemplateConverter memoryTemplateConverter;
+    private final IMemoryItemConverter memoryTemplateConverter;
     private final IDataFactory dataFactory;
 
     @Inject
     public OutputTemplateTask(ITemplatingEngine templatingEngine,
-                              IMemoryTemplateConverter memoryTemplateConverter,
+                              IMemoryItemConverter memoryTemplateConverter,
                               IDataFactory dataFactory) {
         this.templatingEngine = templatingEngine;
         this.memoryTemplateConverter = memoryTemplateConverter;
@@ -62,7 +63,7 @@ public class OutputTemplateTask implements ILifecycleTask {
 
         Map<String, Object> contextMap = prepareContext(contextDataList);
 
-        Map<String, Object> memoryForTemplate = memoryTemplateConverter.convertMemoryForTemplating(memory);
+        Map<String, Object> memoryForTemplate = memoryTemplateConverter.convertMemoryItems(memory);
         if (!memoryForTemplate.isEmpty()) {
             contextMap.put("memory", memoryForTemplate);
         }

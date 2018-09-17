@@ -108,7 +108,7 @@ public class FacebookEndpoint implements IFacebookEndpoint {
     }
 
     private Integer getLatestDeployedBotVersion(String botId) throws ServiceException {
-        return botFactory.getLatestBot(unrestricted, botId).getVersion();
+        return botFactory.getLatestBot(unrestricted, botId).getBotVersion();
     }
 
     private MessengerClient createMessageClient(String botId, Integer botVersion)
@@ -332,7 +332,7 @@ public class FacebookEndpoint implements IFacebookEndpoint {
         String conversationId;
         try {
             Response response = restInterfaceFactory.get(IRestBotEngine.class, apiServerURI).
-                    startConversation(environment, botId);
+                    startConversation(environment, botId, senderId);
             if (response.getStatus() == 201) {
                 URIUtilities.ResourceId resourceIdConversation =
                         URIUtilities.extractResourceId(response.getLocation());

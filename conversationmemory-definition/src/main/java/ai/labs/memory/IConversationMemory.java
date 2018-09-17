@@ -3,6 +3,7 @@ package ai.labs.memory;
 import ai.labs.memory.model.ConversationState;
 
 import java.io.Serializable;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Set;
 import java.util.Stack;
@@ -11,11 +12,13 @@ import java.util.Stack;
  * @author ginccc
  */
 public interface IConversationMemory extends Serializable {
-    String getId();
+    String getConversationId();
 
     String getBotId();
 
     Integer getBotVersion();
+
+    String getUserId();
 
     IWritableConversationStep getCurrentStep();
 
@@ -86,6 +89,12 @@ public interface IConversationMemory extends Serializable {
         String getContext();
 
         void setContext(String context);
+    }
+
+    interface IConversationProperties {
+        HashMap<String, Object> getProperties();
+
+        void setProperties(HashMap<String, Object> context);
     }
 
 }

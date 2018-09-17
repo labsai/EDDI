@@ -3,6 +3,7 @@ package ai.labs.property.impl;
 import ai.labs.expressions.Expression;
 import ai.labs.expressions.utilities.IExpressionProvider;
 import ai.labs.lifecycle.ILifecycleTask;
+import ai.labs.lifecycle.PackageConfigurationException;
 import ai.labs.lifecycle.model.Context;
 import ai.labs.memory.IConversationMemory;
 import ai.labs.memory.IData;
@@ -15,6 +16,7 @@ import javax.inject.Inject;
 import java.util.Collections;
 import java.util.LinkedList;
 import java.util.List;
+import java.util.Map;
 
 import static ai.labs.memory.IConversationMemory.IConversationStepStack;
 
@@ -102,7 +104,7 @@ public class PropertyDisposerTask implements ILifecycleTask {
         contextDataList.forEach(contextData -> {
             String contextKey = contextData.getKey();
             Context context = contextData.getResult();
-            String key = contextKey.substring((CONTEXT_IDENTIFIER + ":").length(), contextKey.length());
+            String key = contextKey.substring((CONTEXT_IDENTIFIER + ":").length());
             if (key.startsWith(PROPERTIES_IDENTIFIER) && context.getType().equals(Context.ContextType.expressions)) {
                 ret.addAll(expressionProvider.parseExpressions(context.getValue().toString()));
             }
@@ -116,5 +118,14 @@ public class PropertyDisposerTask implements ILifecycleTask {
         ExtensionDescriptor extensionDescriptor = new ExtensionDescriptor(ID);
         extensionDescriptor.setDisplayName("Property Extraction");
         return extensionDescriptor;
+    }
+
+    @Override
+    public void configure(Map<String, Object> configuration) throws PackageConfigurationException {
+        List<ActionProperties> setOnActions = (List<ActionProperties>) configuration.get("setOnActions");
+
+        setOnActions.forEach(actions -> {
+
+        });
     }
 }

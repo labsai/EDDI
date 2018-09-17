@@ -2,19 +2,17 @@ package ai.labs.memory;
 
 import ai.labs.memory.model.ConversationState;
 
-import java.util.ArrayList;
-import java.util.LinkedList;
-import java.util.List;
-import java.util.Stack;
+import java.util.*;
 import java.util.stream.Collectors;
 
 /**
  * @author ginccc
  */
 public class ConversationMemory implements IConversationMemory {
-    private String id;
+    private String conversationId;
     private String botId;
     private Integer botVersion;
+    private String userId;
 
     private IWritableConversationStep currentStep;
     private Stack<IConversationStep> previousSteps;
@@ -22,9 +20,14 @@ public class ConversationMemory implements IConversationMemory {
     private IConversationMemory.IConversationContext context;
     private ConversationState conversationState;
 
-    ConversationMemory(String id, String botId, Integer botVersion) {
+    ConversationMemory(String conversationId, String botId, Integer botVersion) {
         this(botId, botVersion);
-        this.id = id;
+        this.conversationId = conversationId;
+    }
+
+    public ConversationMemory(String botId, Integer botVersion, String userId) {
+        this(botId, botVersion);
+        this.userId = userId;
     }
 
     public ConversationMemory(String botId, Integer botVersion) {
@@ -110,8 +113,8 @@ public class ConversationMemory implements IConversationMemory {
     }
 
     @Override
-    public String getId() {
-        return id;
+    public String getConversationId() {
+        return conversationId;
     }
 
     @Override
@@ -122,6 +125,11 @@ public class ConversationMemory implements IConversationMemory {
     @Override
     public Integer getBotVersion() {
         return botVersion;
+    }
+
+    @Override
+    public String getUserId() {
+        return userId;
     }
 
     @Override
@@ -229,6 +237,24 @@ public class ConversationMemory implements IConversationMemory {
         @Override
         public int hashCode() {
             return context != null ? context.hashCode() : 0;
+        }
+    }
+
+    public static class ConversationProperties implements IConversationProperties {
+        private HashMap<String, Object> properties;
+
+        public ConversationProperties() {
+            properties = new HashMap<>();
+        }
+
+        @Override
+        public HashMap<String, Object> getProperties() {
+            return properties;
+        }
+
+        @Override
+        public void setProperties(HashMap<String, Object> properties) {
+            this.properties = properties;
         }
     }
 }

@@ -10,6 +10,7 @@ import ai.labs.lifecycle.model.Context;
 import ai.labs.memory.IConversationMemory;
 import ai.labs.memory.IData;
 import ai.labs.memory.IDataFactory;
+import ai.labs.memory.IMemoryItemConverter;
 import ai.labs.resources.rest.extensions.model.ExtensionDescriptor;
 import ai.labs.resources.rest.extensions.model.ExtensionDescriptor.ConfigValue;
 import ai.labs.resources.rest.extensions.model.ExtensionDescriptor.FieldType;
@@ -17,7 +18,6 @@ import ai.labs.resources.rest.http.model.*;
 import ai.labs.runtime.client.configuration.IResourceClientLibrary;
 import ai.labs.runtime.service.ServiceException;
 import ai.labs.serialization.IJsonSerialization;
-import ai.labs.templateengine.IMemoryTemplateConverter;
 import ai.labs.templateengine.ITemplatingEngine;
 import ai.labs.utilities.RuntimeUtilities;
 import lombok.extern.slf4j.Slf4j;
@@ -43,14 +43,14 @@ public class HttpCallsTask implements ILifecycleTask {
     private final IResourceClientLibrary resourceClientLibrary;
     private IDataFactory dataFactory;
     private final ITemplatingEngine templatingEngine;
-    private final IMemoryTemplateConverter memoryTemplateConverter;
+    private final IMemoryItemConverter memoryTemplateConverter;
     private String targetServerUri;
     private List<HttpCall> httpCalls;
 
     @Inject
     public HttpCallsTask(IHttpClient httpClient, IJsonSerialization jsonSerialization,
                          IResourceClientLibrary resourceClientLibrary, IDataFactory dataFactory,
-                         ITemplatingEngine templatingEngine, IMemoryTemplateConverter memoryTemplateConverter) {
+                         ITemplatingEngine templatingEngine, IMemoryItemConverter memoryTemplateConverter) {
         this.httpClient = httpClient;
         this.jsonSerialization = jsonSerialization;
         this.resourceClientLibrary = resourceClientLibrary;
@@ -77,7 +77,7 @@ public class HttpCallsTask implements ILifecycleTask {
         }
 
         Map<String, Object> templateDataObjects = new HashMap<>();
-        Map<String, Object> memoryForTemplate = memoryTemplateConverter.convertMemoryForTemplating(memory);
+        Map<String, Object> memoryForTemplate = memoryTemplateConverter.convertMemoryItems(memory);
         Map<String, Object> currentMemory = (Map<String, Object>) memoryForTemplate.get("current");
         templateDataObjects.put("memory", memoryForTemplate);
 

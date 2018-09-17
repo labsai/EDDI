@@ -9,15 +9,15 @@ import ai.labs.memory.model.Deployment;
  * @author ginccc
  */
 public interface IBot {
-    String getId();
+    String getBotId();
 
-    Integer getVersion();
+    Integer getBotVersion();
 
     Deployment.Status getDeploymentStatus();
 
     void addPackage(IExecutablePackage executablePackage) throws IllegalAccessException;
 
-    IConversation startConversation(IConversation.IConversationOutputRenderer outputProvider) throws InstantiationException, IllegalAccessException, LifecycleException;
+    IConversation startConversation(String userId, IConversation.IConversationOutputRenderer outputProvider) throws InstantiationException, IllegalAccessException, LifecycleException;
 
     IConversation continueConversation(IConversationMemory conversationMemory, IConversation.IConversationOutputRenderer outputProvider) throws InstantiationException, IllegalAccessException;
 }

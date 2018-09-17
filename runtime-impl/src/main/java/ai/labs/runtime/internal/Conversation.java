@@ -52,6 +52,13 @@ public class Conversation implements IConversation {
     public void init() throws LifecycleException {
         setConversationState(ConversationState.READY);
         executePackages(new LinkedList<>());
+        if (conversationMemory.getUserId() != null) {
+            initProperties();
+        }
+    }
+
+    private void initProperties() {
+        //TODO
     }
 
     private void setConversationState(ConversationState conversationState) {

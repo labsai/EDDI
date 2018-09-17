@@ -40,14 +40,14 @@ public class BotFactory implements IBotFactory {
     }
 
     @Override
-    public IBot getLatestBot(Deployment.Environment environment, String botId) throws ServiceException {
-        List<BotId> botVersions = new LinkedList<>();
+    public IBot getLatestBot(Deployment.Environment environment, String botId) {
 
         Map<BotId, IBot> bots = getBotEnvironment(environment);
-        botVersions.addAll(bots.keySet().stream().filter(id -> id.getId().equals(botId)).collect(Collectors.toList()));
-        botVersions.sort(Collections.reverseOrder((botId1, botId2) ->
+        List<BotId> botVersions = bots.keySet().stream().
+                filter(id -> id.getId().equals(botId)).sorted(Collections.reverseOrder((botId1, botId2) ->
                 botId1.getVersion() < botId2.getVersion() ?
-                        -1 : botId1.getVersion().equals(botId2.getVersion()) ? 0 : 1));
+                        -1 : botId1.getVersion().equals(botId2.getVersion()) ? 0 : 1)).
+                collect(Collectors.toCollection(LinkedList::new));
 
         IBot latestBot = null;
 
@@ -111,20 +111,18 @@ public class BotFactory implements IBotFactory {
     }
 
     @Override
-    public void undeployBot(Deployment.Environment environment, String botId, Integer version) throws ServiceException, IllegalAccessException {
+    public void undeployBot(Deployment.Environment environment, String botId, Integer version) {
         Map<BotId, IBot> botEnvironment = getBotEnvironment(environment);
 
         BotId id = new BotId(botId, version);
-        if (botEnvironment.containsKey(id)) {
-            botEnvironment.remove(id);
-        }
+        botEnvironment.remove(id);
     }
 
     private ConcurrentHashMap<BotId, IBot> getBotEnvironment(Deployment.Environment environment) {
         return environments.get(environment);
     }
 
-    private Bot createInProgressDummyBot(String botId, Integer version) throws IllegalAccessException {
+    private Bot createInProgressDummyBot(String botId, Integer version) {
         Bot bot = new Bot(botId, version) {
             @Override
             public void addPackage(IExecutablePackage executablePackage) throws IllegalAccessException {
@@ -132,15 +130,15 @@ public class BotFactory implements IBotFactory {
             }
 
             @Override
-            public IConversation startConversation(IConversation.IConversationOutputRenderer outputProvider)
-                    throws InstantiationException, IllegalAccessException {
+            public IConversation startConversation(String userId, IConversation.IConversationOutputRenderer outputProvider)
+                    throws IllegalAccessException {
                 throw createBotInProgressException();
             }
 
             @Override
             public IConversation continueConversation(IConversationMemory conversationMemory,
                                                       IConversation.IConversationOutputRenderer outputProvider)
-                    throws InstantiationException, IllegalAccessException {
+                    throws IllegalAccessException {
                 throw createBotInProgressException();
             }
         };
