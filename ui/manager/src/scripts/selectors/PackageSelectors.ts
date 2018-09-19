@@ -22,6 +22,18 @@ export function packagesSelector(state: IAppState) {
   };
 }
 
+export interface IPackagesWithPluginSelectorProps {
+  pluginid: string;
+}
+export function packagesWithPluginSelector(
+  state: IAppState,
+  props: IPackagesWithPluginSelectorProps,
+) {
+  const packages = state.packageState.packages.filter(
+    pkg => pkg.version === pkg.currentVersion,
+  );
+}
+
 export function packageSelector(
   state: IAppState,
   props: IPackageSelectorProps,
