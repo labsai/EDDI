@@ -29,17 +29,18 @@ interface IState {
 }
 
 interface IProps {
-  setName: (name: string) => void;
-  setDescription: (description: string) => void;
+  name: string;
+  description: string;
   type: string;
+  data: string;
 }
 
 class CreateNewConfigModal extends React.Component<IProps, IState> {
   constructor(props) {
     super(props);
     this.state = {
-      name: '',
-      description: '',
+      name: props.name || '',
+      description: props.description || '',
     };
   }
 
@@ -55,14 +56,16 @@ class CreateNewConfigModal extends React.Component<IProps, IState> {
     }
   }
 
-  openModal = () => {
-    this.props.setName(this.state.name);
-    this.props.setDescription(this.state.description);
-    // todo: ModalActionDispatchers.showModal(ModalEnum.updatePackage, null, null);
+  nextButton = () => {
+    ModalActionDispatchers.showCreateNewConfig2Modal(
+      this.props.type,
+      this.state.name,
+      this.state.description,
+      this.props.data,
+    );
   };
 
   render() {
-    console.log(this.props);
     const typeName = Parser.getPluginName(this.props.type, false);
     return (
       <div>
@@ -75,10 +78,10 @@ class CreateNewConfigModal extends React.Component<IProps, IState> {
             <button
               disabled={!this.state.name}
               onClick={() => {
-                this.openModal();
+                this.nextButton();
               }}
               style={this.getButtonStyle()}>
-              {`Create ${typeName}`}
+              {`Next`}
             </button>
           </div>
         </div>
@@ -87,7 +90,7 @@ class CreateNewConfigModal extends React.Component<IProps, IState> {
             {`Give the ${typeName} a name`}
             <div style={styles.inputBoxContent}>
               <textarea
-                defaultValue={''}
+                defaultValue={this.state.name}
                 name={'name'}
                 style={styles.inputBoxName}
                 placeholder={`Give the ${typeName} a name..`}
@@ -103,7 +106,7 @@ class CreateNewConfigModal extends React.Component<IProps, IState> {
             {`Give the ${typeName} a short description`}
             <div style={styles.inputBoxContent}>
               <textarea
-                defaultValue={''}
+                defaultValue={this.state.description}
                 name={'description'}
                 style={styles.inputBox}
                 placeholder={`Give the ${typeName} a short description..`}

@@ -5,8 +5,10 @@ import { Component, compose, pure, setDisplayName } from 'recompose';
 import AceEditor from 'react-ace';
 import eddiApiActionDispatchers from '../../actions/EddiApiActionDispatchers';
 import BlueButton from '../Assets/Buttons/BlueButton';
+import WhiteButton from '../Assets/Buttons/WhiteButton';
 import modalActionDispatchers from '../../actions/ModalActionDispatchers';
 import * as renderIf from 'render-if';
+import Parser from '../utils/Parser';
 
 require('brace/mode/json');
 require('brace/theme/monokai');
@@ -15,14 +17,14 @@ interface IState {
   editorText: string;
 }
 
-interface IPrivateProps extends IPublicProps {}
-
-interface IPublicProps {
-  resource: string;
+interface IProps {
+  type: string;
+  name: string;
+  description: string;
   data: string;
 }
 
-class CreateNewConfig2Modal extends React.Component<IPrivateProps, IState> {
+class CreateNewConfig2Modal extends React.Component<IProps, IState> {
   constructor(props) {
     super(props);
     this.state = {
@@ -54,20 +56,35 @@ class CreateNewConfig2Modal extends React.Component<IPrivateProps, IState> {
     return this.state.editorText !== this.props.data;
   }
 
-  onClick = () => {
-    eddiApiActionDispatchers.updateJsonDataAction(
-      this.props.resource,
-      JSON.parse(this.state.editorText),
+  createNew = () => {
+    eddiApiActionDispatchers.createNewConfigAction(
+      this.props.type,
+      this.props.name,
+      this.props.description,
+      this.state.editorText,
     );
     modalActionDispatchers.closeModal();
   };
 
+  back = () => {
+    modalActionDispatchers.showCreateNewConfigModal(
+      this.props.type,
+      this.props.name,
+      this.props.description,
+      this.state.editorText,
+    );
+  };
+
   render() {
+    const typeName = Parser.getPluginName(this.props.type, false);
     return (
       <div>
         <div style={styles.modalHeader}>
           <div style={styles.modalTopHeader}>
-            <div style={styles.botHeaderText}>{'Edit existing data'}</div>
+            <div
+              style={
+                styles.botHeaderText
+              }>{`Edit new ${typeName} JSON data`}</div>
             <div style={styles.modalTopHeaderCenter} />
             {renderIf(this.unsavedChanges())(() => (
               <button
@@ -76,10 +93,15 @@ class CreateNewConfig2Modal extends React.Component<IPrivateProps, IState> {
                 {'Discard changes'}
               </button>
             ))}
+            <WhiteButton
+              onClick={() => this.back()}
+              text={'Back'}
+              customStyles={styles.backButton}
+            />
             <BlueButton
-              onClick={this.onClick}
+              onClick={this.createNew}
               disabled={!this.unsavedChanges()}
-              text={'Save changes'}
+              text={`Create new ${typeName}`}
             />
           </div>
         </div>
@@ -102,9 +124,9 @@ class CreateNewConfig2Modal extends React.Component<IPrivateProps, IState> {
   }
 }
 
-const ComposedCreateNewConfig2Modal: Component<IPublicProps> = compose<
-  IPrivateProps,
-  IPublicProps
->(pure, setDisplayName('CreateNewConfig2Modal'))(CreateNewConfig2Modal);
+const ComposedCreateNewConfig2Modal: Component<IProps> = compose<IProps>(
+  pure,
+  setDisplayName('CreateNewConfig2Modal'),
+)(CreateNewConfig2Modal);
 
 export default ComposedCreateNewConfig2Modal;

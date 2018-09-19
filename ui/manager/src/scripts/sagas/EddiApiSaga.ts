@@ -19,6 +19,7 @@ import {
   FETCH_BOTS_USING_PACKAGE,
   FETCH_PACKAGES_USING_PLUGIN,
   UPDATE_JSON_DATA,
+  CREATE_NEW_CONFIG,
 } from '../actions/EddiApiActionTypes';
 import {
   getPackage,
@@ -48,6 +49,7 @@ import {
   getPackagesUsingPlugin,
   getCurrentBot,
   getCurrentPlugin,
+  postNewConfig,
 } from '../components/utils/AxiosFunctions';
 import {
   fetchBotFailedAction,
@@ -404,9 +406,20 @@ export function* watchFetchPackagesUsingPlugin(): Iterator<{}> {
   yield takeEvery(FETCH_PACKAGES_USING_PLUGIN, fetchPackagesUsingPlugin);
 }
 
+export function* watchCreateNewConfig(): Iterator<{}> {
+  yield takeEvery(CREATE_NEW_CONFIG, createNewConfig);
+}
+
 export function* createNewConfig(action: ICreateNewConfigAction): Iterator<{}> {
   try {
-    // todo: create specific config depending on parameter type, and call dedicated success action.
+    const id = yield call(
+      postNewConfig,
+      action.eddiType,
+      action.name,
+      action.description,
+      action.data,
+    );
+    // todo: yield success action.
   } catch (err) {
     yield put(createNewConfigFailedAction(err));
   }

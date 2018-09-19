@@ -143,13 +143,22 @@ export function showEditPackageModal(
 
 export interface IShowCreateNewConfigModal extends Action {
   pluginType: string;
+  name: string;
+  description: string;
+  data: string;
 }
 
 export function showCreateNewConfigModal(
   pluginType: string,
+  name: string,
+  description: string,
+  data: string,
 ): IShowCreateNewConfigModal {
   return {
     pluginType,
+    name,
+    description,
+    data,
     type: SHOW_CREATE_NEW_CONFIG_MODAL,
   };
 }
@@ -158,17 +167,20 @@ export interface IShowCreateNewConfig2Modal extends Action {
   pluginType: string;
   name: string;
   description: string;
+  data: string;
 }
 
 export function showCreateNewConfig2Modal(
   pluginType: string,
   name: string,
   description: string,
+  data = '',
 ): IShowCreateNewConfig2Modal {
   return {
     pluginType,
     name,
     description,
+    data,
     type: SHOW_CREATE_NEW_CONFIG_2_MODAL,
   };
 }
