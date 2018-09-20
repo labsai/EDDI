@@ -801,3 +801,23 @@ export async function postNewConfig(
     throw err;
   }
 }
+
+export async function updatePackages(
+  pluginResource: string,
+  packages: IPackage[],
+) {
+  try {
+    const updatedPackages: IPackage[] = [];
+    for (let i = 0; i < _.size(packages); i++) {
+      const updatedPackage: IPackage = await updatePackage(
+        packages[i],
+        pluginResource,
+      );
+      updatedPackages.push(updatedPackage);
+    }
+    return updatedPackages;
+  } catch (err) {
+    console.error(`Failed to update packages. Error: ${err.message}`);
+    throw err;
+  }
+}
