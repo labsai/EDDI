@@ -312,7 +312,7 @@ export const getPackageDescriptors: () => Promise<IPackage[]> = async () => {
     const res: IDescriptorResponse = await axios.get(
       `${await getAPIUrl()}/packagestore/packages/descriptors?limit=${DEFAULT_LIMIT}`,
     );
-    return res.data.map(pkg => {
+    const packages: IPackage[] = res.data.map(pkg => {
       const version = Parser.getVersion(pkg.resource);
       return {
         createdOn: pkg.createdOn,
@@ -325,6 +325,11 @@ export const getPackageDescriptors: () => Promise<IPackage[]> = async () => {
         currentVersion: version,
       };
     });
+    for (let i = 0; i < _.size(packages); i++) {
+      const data = await getPackageData(packages[i].resource);
+      packages[i].packageData = data;
+    }
+    return packages;
   } catch (err) {
     console.error(`Failed to get package descriptors. Error: ${err.message}`);
     throw err;
@@ -767,30 +772,24 @@ export async function postNewConfig(
   data: string,
 ) {
   let configPath: string;
-  console.log('Type: ', type);
   switch (type) {
     case REGULAR_DICTIONARY:
       configPath = REGULAR_DICTIONARY_PATH;
       break;
-
     case BEHAVIOUR:
       configPath = BEHAVIOUR_PATH;
-
     case OUTPUT:
       configPath = OUTPUT_PATH;
       break;
-
     case BOT:
       configPath = BOT_PATH;
       break;
-
     case PACKAGE:
       configPath = PACKAGE_PATH;
       break;
 
     default:
-      console.log(`Could not create new config of type: ${type}`);
-      console.log(configPath);
+      console.error(`Could not create new config of type: ${type}`);
   }
   try {
     const response: IResponse = await postJsonHelper(configPath, { data });

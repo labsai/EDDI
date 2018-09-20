@@ -72,5 +72,16 @@ const styles: CSSProperties = {
     marginTop: '-1px',
     marginRight: '10px',
   },
+  versionName: {
+    backgroundColor: '#E0E5EE',
+    borderRadius: '100px',
+    color: '#16325C',
+    fontSize: '16px',
+    height: '20px',
+    marginTop: '5px',
+    padding: '2px 10px',
+    textAlign: 'center',
+    width: '40px',
+  },
 };
 export default styles;

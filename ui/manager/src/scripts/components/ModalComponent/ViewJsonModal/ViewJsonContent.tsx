@@ -57,7 +57,9 @@ class ViewJsonContent extends React.Component<IPrivateProps, IState> {
   render() {
     const isCurrentVersion =
       this.props.descriptor.currentVersion === this.props.descriptor.version;
-    const isPackage = this.props.descriptor.resource.includes(PACKAGE);
+    const isPackage =
+      _.isEmpty(this.props.descriptor) &&
+      this.props.descriptor.resource.includes(PACKAGE);
     return (
       <div>
         <div style={styles.header}>

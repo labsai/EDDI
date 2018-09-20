@@ -16,6 +16,8 @@ import {
   SHOW_EDIT_PACKAGE_MODAL,
   SHOW_CREATE_NEW_CONFIG_MODAL,
   SHOW_CREATE_NEW_CONFIG_2_MODAL,
+  SHOW_UPDATE_PACKAGES_MODAL,
+  SHOW_UPDATE_BOTS_MODAL,
 } from './ModalActionTypes';
 
 export interface IShowModalAction extends Action {
@@ -182,5 +184,31 @@ export function showCreateNewConfig2Modal(
     description,
     data,
     type: SHOW_CREATE_NEW_CONFIG_2_MODAL,
+  };
+}
+
+export interface IShowUpdatePackagesModal extends Action {
+  resource: string;
+}
+
+export function showUpdatePackagesModal(
+  resource: string,
+): IShowUpdatePackagesModal {
+  return {
+    resource,
+    type: SHOW_UPDATE_PACKAGES_MODAL,
+  };
+}
+
+export interface IShowUpdateBotsModal extends Action {
+  packageResources: string[];
+}
+
+export function showUpdateBotsModal(
+  packageResources: string[],
+): IShowUpdateBotsModal {
+  return {
+    packageResources,
+    type: SHOW_UPDATE_BOTS_MODAL,
   };
 }

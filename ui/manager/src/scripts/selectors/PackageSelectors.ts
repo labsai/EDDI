@@ -1,6 +1,7 @@
 import { IAppState } from '../reducers';
 import { IBot, IPackage } from '../components/utils/AxiosFunctions';
 import * as _ from 'lodash';
+import Parser from '../components/utils/Parser';
 
 export interface IPackageSelectorProps {
   packageResource: string;
@@ -23,15 +24,27 @@ export function packagesSelector(state: IAppState) {
 }
 
 export interface IPackagesWithPluginSelectorProps {
-  pluginid: string;
+  pluginResource: string;
 }
 export function packagesWithPluginSelector(
   state: IAppState,
   props: IPackagesWithPluginSelectorProps,
 ) {
   const packages = state.packageState.packages.filter(
-    pkg => pkg.version === pkg.currentVersion,
+    pkg =>
+      pkg.version === pkg.currentVersion &&
+      JSON.stringify(pkg.packageData).includes(
+        Parser.getId(props.pluginResource),
+      ),
   );
+  const sortedPackages = packages.sort(function(a, b) {
+    return b.lastModifiedOn - a.lastModifiedOn;
+  });
+  return {
+    packages: sortedPackages,
+    isLoading: state.packageState.isLoadingAllPackages,
+    error: state.packageState.error,
+  };
 }
 
 export function packageSelector(

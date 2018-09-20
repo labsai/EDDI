@@ -10,4 +10,6 @@ export enum ModalEnum {
   'viewJson',
   'createNewConfig',
   'createNewConfig2',
+  'updatePackages',
+  'updateBots',
 }

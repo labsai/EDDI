@@ -21,6 +21,7 @@ import {
   SHOW_EDIT_JSON_MODAL,
   SHOW_EDIT_PACKAGE_MODAL,
   SHOW_MODAL,
+  SHOW_UPDATE_PACKAGES_MODAL,
   SHOW_VIEW_JSON_MODAL,
 } from '../actions/ModalActionTypes';
 import {
@@ -29,6 +30,8 @@ import {
   IPackage,
 } from '../components/utils/AxiosFunctions';
 import { ModalEnum } from '../components/utils/ModalEnum';
+import { UPDATE_PLUGIN_SUCCESS } from '../actions/EddiApiActionTypes';
+import { IUpdatePluginSuccessAction } from '../actions/EddiApiActions';
 
 export type IModalReducer = Reducer<IModalState>;
 
@@ -235,6 +238,36 @@ const ModalReducer: IModalReducer = (
         },
         data: {
           $set: modalAction.data,
+        },
+      });
+
+    case SHOW_UPDATE_PACKAGES_MODAL:
+      return update(state, {
+        mode: {
+          $set: ModalEnum.updatePackages,
+        },
+        isModalOpen: {
+          $set: true,
+        },
+        resource: {
+          $set: modalAction.resource,
+        },
+      });
+
+    case UPDATE_PLUGIN_SUCCESS:
+      console.log(
+        'Resource:',
+        (action as IUpdatePluginSuccessAction).plugin.resource,
+      );
+      return update(state, {
+        mode: {
+          $set: ModalEnum.updatePackages,
+        },
+        isModalOpen: {
+          $set: true,
+        },
+        resource: {
+          $set: (action as IUpdatePluginSuccessAction).plugin.resource,
         },
       });
 

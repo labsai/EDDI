@@ -2,18 +2,22 @@ import * as React from 'react';
 import '../ModalComponent.styles.scss';
 import { Link, browserHistory } from 'react-router-dom';
 import { Component, compose, pure, setDisplayName } from 'recompose';
-import Package from './Package';
+import Package from '../AddPackagesModal/Package';
 import { IBot, IPackage } from '../../utils/AxiosFunctions';
-import { packagesSelector } from '../../../selectors/PackageSelectors';
+import {
+  packagesSelector,
+  packagesWithPluginSelector,
+} from '../../../selectors/PackageSelectors';
 import { connect } from 'react-redux';
 import * as _ from 'lodash';
 import eddiApiActionDispatchers from '../../../actions/EddiApiActionDispatchers';
 import Parser from '../../utils/Parser';
-import styles from './AddPackagesModal.styles';
+import styles from '../AddPackagesModal/AddPackagesModal.styles';
 import ModalActionDispatchers from '../../../actions/ModalActionDispatchers';
 import * as renderIf from 'render-if';
 import BlueButton from '../../Assets/Buttons/BlueButton';
 import { ClimbingBoxLoader } from 'react-spinners';
+import SelectableConfig from './SelectableConfig';
 
 interface IState {
   selectedPackages: string[];
@@ -38,6 +42,7 @@ class UpdatePackagesModal extends React.Component<IPrivateProps, IState> {
   }
 
   componentDidMount() {
+    console.log('FETCHING PACKAGES!');
     eddiApiActionDispatchers.fetchPackagesAction();
   }
 
@@ -67,6 +72,8 @@ class UpdatePackagesModal extends React.Component<IPrivateProps, IState> {
   }
 
   render() {
+    console.log(this.props.pluginResource);
+    console.log(this.props.packages);
     return (
       <div>
         <div style={styles.header}>
@@ -74,12 +81,12 @@ class UpdatePackagesModal extends React.Component<IPrivateProps, IState> {
             <div
               style={
                 styles.title
-              }>{`Select packages to update from any old versions of the extension to latest`}</div>
+              }>{`Select packages to update any old versions of the extension to latest`}</div>
             <div style={styles.centerFlex} />
             <BlueButton
               customStyles={styles.button}
               onClick={this.closeModal}
-              text={'Update selected packages'}
+              text={'Update selected'}
             />
           </div>
           <div style={styles.bottomHeader}>
@@ -88,18 +95,20 @@ class UpdatePackagesModal extends React.Component<IPrivateProps, IState> {
           </div>
         </div>
         <div>
-          {renderIf(!this.props.isLoading)(() => (
-            <div style={styles.packageList}>
-              {this.props.packages.map((pack, i) => (
-                <Package
-                  key={i}
-                  selected={this.isPackageSelected(pack)}
-                  packageResource={pack}
-                  handleClick={this.selectPackage}
-                />
-              ))}
-            </div>
-          ))}
+          {renderIf(!this.props.isLoading && !_.isEmpty(this.props.packages))(
+            () => (
+              <div style={styles.packageList}>
+                {this.props.packages.map((pack, i) => (
+                  <SelectableConfig
+                    key={i}
+                    selected={this.isPackageSelected(pack.resource)}
+                    descriptor={pack}
+                    handleClick={this.selectPackage}
+                  />
+                ))}
+              </div>
+            ),
+          )}
           {renderIf(this.props.isLoading)(() => (
             <div style={styles.loadingWrapper}>
               <ClimbingBoxLoader loading />
@@ -111,9 +120,12 @@ class UpdatePackagesModal extends React.Component<IPrivateProps, IState> {
   }
 }
 const ComposedUpdatePackagesModal: Component<IPrivateProps> = compose<
-  IPrivateProps
->(pure, setDisplayName('UpdatePackagesModal'), connect(packagesSelector))(
-  UpdatePackagesModal,
-);
+  IPrivateProps,
+  IPublicProps
+>(
+  pure,
+  setDisplayName('UpdatePackagesModal'),
+  connect(packagesWithPluginSelector),
+)(UpdatePackagesModal);
 
 export default ComposedUpdatePackagesModal;
