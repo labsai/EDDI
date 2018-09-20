@@ -43,6 +43,12 @@ import {
   IUpdateJsonDataAction,
   ICreateNewConfigAction,
   createNewConfigAction,
+  IUpdatePackagesAction,
+  IUpdatePackagesSuccessAction,
+  IUpdatePackagesFailedAction,
+  updatePackagesAction,
+  updatePackagesSuccessAction,
+  updatePackagesFailedAction,
 } from './EddiApiActions';
 
 export interface IEddiApiActionDispatchers extends ActionCreatorsMapObject {
@@ -86,6 +92,9 @@ export interface IEddiApiActionDispatchers extends ActionCreatorsMapObject {
     description,
     data,
   ) => ICreateNewConfigAction;
+  updatePackagesAction: (pluginResource, packages) => IUpdatePackagesAction;
+  updatePackagesSuccessAction: (packages) => IUpdatePackagesSuccessAction;
+  updatePackagesFailedAction: (error) => IUpdatePackagesFailedAction;
 }
 
 const actions: IEddiApiActionDispatchers = {
@@ -110,6 +119,9 @@ const actions: IEddiApiActionDispatchers = {
   fetchPackagesUsingPluginAction,
   updateJsonDataAction,
   createNewConfigAction,
+  updatePackagesAction,
+  updatePackagesSuccessAction,
+  updatePackagesFailedAction,
 };
 
 const eddiApiActionDispatchers: IEddiApiActionDispatchers = bindActionCreators<

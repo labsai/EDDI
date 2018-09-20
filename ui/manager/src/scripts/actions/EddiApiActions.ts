@@ -61,6 +61,8 @@ import {
   CREATE_NEW_BOT_SUCCESS,
   CREATE_NEW_PACKAGE_SUCCESS,
   CREATE_NEW_PLUGIN_SUCCESS,
+  UPDATE_PACKAGES,
+  UPDATE_PACKAGES_FAILED,
 } from './EddiApiActionTypes';
 import {
   IBot,
@@ -874,5 +876,47 @@ export function createNewPluginSuccessAction(
   return {
     plugin,
     type: CREATE_NEW_PLUGIN_SUCCESS,
+  };
+}
+
+export interface IUpdatePackagesAction extends Action {
+  pluginResource: string;
+  packages: IPackage[];
+}
+
+export function updatePackagesAction(
+  pluginResource: string,
+  packages: IPackage[],
+): IUpdatePackagesAction {
+  return {
+    pluginResource,
+    packages,
+    type: UPDATE_PACKAGES,
+  };
+}
+
+export interface IUpdatePackagesSuccessAction extends Action {
+  packages: IPackage[];
+}
+
+export function updatePackagesSuccessAction(
+  packages: IPackage[],
+): IUpdatePackagesSuccessAction {
+  return {
+    packages,
+    type: UPDATE_PACKAGE_SUCCESS,
+  };
+}
+
+export interface IUpdatePackagesFailedAction extends Action {
+  error: Error;
+}
+
+export function updatePackagesFailedAction(
+  error: Error,
+): IUpdatePackagesFailedAction {
+  return {
+    error,
+    type: UPDATE_PACKAGES_FAILED,
   };
 }

@@ -18,6 +18,7 @@ import {
   UPDATE_PLUGIN_TYPE_IN_PACKAGE_SUCCESS,
   FETCH_BOTS_USING_PACKAGE_SUCCESS,
   FETCH_PACKAGES_USING_PLUGIN_SUCCESS,
+  UPDATE_PACKAGES,
 } from '../actions/EddiApiActionTypes';
 import * as update from 'immutability-helper';
 import {
@@ -34,6 +35,7 @@ import {
   IFetchPluginTypesSuccessAction,
   IFetchBotsUsingPackageSuccessAction,
   IFetchPackagesUsingPluginSuccessAction,
+  IUpdatePackagesSuccessAction,
 } from '../actions/EddiApiActions';
 import * as _ from 'lodash';
 import { parsePluginExtensions } from '../components/utils/helpers/PluginParser';
@@ -366,6 +368,28 @@ const PackageReducer: IPackageReducer = (
             } else {
               return packages;
             }
+          },
+        },
+      });
+
+    case UPDATE_PACKAGES:
+      return update(state, {
+        packages: {
+          $apply: (packages: IPackage[]) => {
+            const updatedPackages: IPackage[] = (action as IUpdatePackagesSuccessAction)
+              .packages;
+            const newPackageList = packages.map(pack => {
+              for (let i = 0; i < _.size(updatedPackages); i++) {
+                if (pack.id === updatedPackages[i].id) {
+                  return update(pack, {
+                    currentVersion: { $set: updatedPackages[i].version },
+                    updatablePlugins: { $set: [] },
+                  });
+                }
+              }
+              return pack;
+            });
+            return newPackageList.concat(updatedPackages);
           },
         },
       });
