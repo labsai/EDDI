@@ -63,6 +63,7 @@ import {
   CREATE_NEW_PLUGIN_SUCCESS,
   UPDATE_PACKAGES,
   UPDATE_PACKAGES_FAILED,
+  UPDATE_PACKAGES_SUCCESS,
 } from './EddiApiActionTypes';
 import {
   IBot,
@@ -904,7 +905,7 @@ export function updatePackagesSuccessAction(
 ): IUpdatePackagesSuccessAction {
   return {
     packages,
-    type: UPDATE_PACKAGE_SUCCESS,
+    type: UPDATE_PACKAGES_SUCCESS,
   };
 }
 

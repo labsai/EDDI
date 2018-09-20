@@ -33,9 +33,10 @@ export function packagesWithPluginSelector(
   const packages = state.packageState.packages.filter(
     pkg =>
       pkg.version === pkg.currentVersion &&
-      JSON.stringify(pkg.packageData).includes(
-        Parser.getId(props.pluginResource),
-      ),
+      (!_.isEmpty(pkg.packageData) &&
+        JSON.stringify(pkg.packageData).includes(
+          Parser.getId(props.pluginResource),
+        )),
   );
   const sortedPackages = packages.sort(function(a, b) {
     return b.lastModifiedOn - a.lastModifiedOn;

@@ -42,12 +42,22 @@ class UpdatePackagesModal extends React.Component<IPrivateProps, IState> {
   }
 
   componentDidMount() {
-    console.log('FETCHING PACKAGES!');
     eddiApiActionDispatchers.fetchPackagesAction();
   }
 
   closeModal = () => {
     ModalActionDispatchers.closeModal();
+  };
+
+  updateSelectedPackages = () => {
+    const selectedPackagesForUpdate = this.props.packages.filter(pkg =>
+      this.state.selectedPackages.includes(pkg.resource),
+    );
+    eddiApiActionDispatchers.updatePackagesAction(
+      this.props.pluginResource,
+      selectedPackagesForUpdate,
+    );
+    this.closeModal();
   };
 
   selectPackage = (packageResource: string) => {
@@ -72,8 +82,6 @@ class UpdatePackagesModal extends React.Component<IPrivateProps, IState> {
   }
 
   render() {
-    console.log(this.props.pluginResource);
-    console.log(this.props.packages);
     return (
       <div>
         <div style={styles.header}>
@@ -85,7 +93,7 @@ class UpdatePackagesModal extends React.Component<IPrivateProps, IState> {
             <div style={styles.centerFlex} />
             <BlueButton
               customStyles={styles.button}
-              onClick={this.closeModal}
+              onClick={this.updateSelectedPackages}
               text={'Update selected'}
             />
           </div>
@@ -114,6 +122,9 @@ class UpdatePackagesModal extends React.Component<IPrivateProps, IState> {
               <ClimbingBoxLoader loading />
             </div>
           ))}
+          {renderIf(!this.props.isLoading && !_.isEmpty(this.props.packages))(
+            () => <div>{'Found no packages that can be updated'}</div>,
+          )}
         </div>
       </div>
     );

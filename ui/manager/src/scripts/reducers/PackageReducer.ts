@@ -19,6 +19,8 @@ import {
   FETCH_BOTS_USING_PACKAGE_SUCCESS,
   FETCH_PACKAGES_USING_PLUGIN_SUCCESS,
   UPDATE_PACKAGES,
+  UPDATE_PACKAGES_SUCCESS,
+  UPDATE_PACKAGES_FAILED,
 } from '../actions/EddiApiActionTypes';
 import * as update from 'immutability-helper';
 import {
@@ -36,6 +38,7 @@ import {
   IFetchBotsUsingPackageSuccessAction,
   IFetchPackagesUsingPluginSuccessAction,
   IUpdatePackagesSuccessAction,
+  IUpdatePackagesFailedAction,
 } from '../actions/EddiApiActions';
 import * as _ from 'lodash';
 import { parsePluginExtensions } from '../components/utils/helpers/PluginParser';
@@ -374,6 +377,23 @@ const PackageReducer: IPackageReducer = (
 
     case UPDATE_PACKAGES:
       return update(state, {
+        isLoadingAllPackages: {
+          $set: false,
+        },
+      });
+
+    case UPDATE_PACKAGES_FAILED:
+      return update(state, {
+        error: {
+          $set: (action as IUpdatePackagesFailedAction).error,
+        },
+        isLoadingAllPackages: {
+          $set: false,
+        },
+      });
+
+    case UPDATE_PACKAGES_SUCCESS:
+      return update(state, {
         packages: {
           $apply: (packages: IPackage[]) => {
             const updatedPackages: IPackage[] = (action as IUpdatePackagesSuccessAction)
@@ -390,6 +410,9 @@ const PackageReducer: IPackageReducer = (
               return pack;
             });
             return newPackageList.concat(updatedPackages);
+          },
+          isLoadingAllPackages: {
+            $set: false,
           },
         },
       });

@@ -481,15 +481,22 @@ export function updatePackageExtension(
   externalPackages: IPluginExtensions[],
   newExtensionResource: string,
 ) {
+  const newExtensionId = Parser.getId(newExtensionResource);
   const updatedExternalPackages = externalPackages.map(externalPackage => {
-    if (externalPackage.extensions) {
+    if (
+      externalPackage.config &&
+      externalPackage.config.uri &&
+      Parser.getId(externalPackage.config.uri) === newExtensionId
+    ) {
+      externalPackage.config.uri = newExtensionResource;
+    }
+    if (!_.isEmpty(externalPackage.extensions)) {
       for (let extensions of Object.values(externalPackage.extensions)) {
         for (let extension of extensions) {
           if (
             extension.config &&
             extension.config.uri &&
-            Parser.getId(extension.config.uri) ===
-              Parser.getId(newExtensionResource)
+            Parser.getId(extension.config.uri) === newExtensionId
           ) {
             extension.config.uri = newExtensionResource;
           }
@@ -511,7 +518,7 @@ export async function updatePackage(
     }?version=${currentPackage.version}`;
     const packageData: IPlugins = (await axios.get(currentPackageUri)).data;
     const newPlugin = await getCurrentPlugin(updatablePluginResource);
-    const newPackageData = updatePackageExtension(
+    const newPackageData = await updatePackageExtension(
       packageData.packageExtensions,
       newPlugin.resource,
     );
