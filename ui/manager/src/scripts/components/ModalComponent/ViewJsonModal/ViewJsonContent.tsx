@@ -58,7 +58,7 @@ class ViewJsonContent extends React.Component<IPrivateProps, IState> {
     const isCurrentVersion =
       this.props.descriptor.currentVersion === this.props.descriptor.version;
     const isPackage =
-      _.isEmpty(this.props.descriptor) &&
+      !_.isEmpty(this.props.descriptor) &&
       this.props.descriptor.resource.includes(PACKAGE);
     return (
       <div>
@@ -100,13 +100,13 @@ class ViewJsonContent extends React.Component<IPrivateProps, IState> {
               </div>
             </div>
           </div>
-          {renderIf(isPackage)(() => (
+          {renderIf(isPackage && !_.isEmpty(this.props.descriptor))(() => (
             <div style={styles.usedInContainer}>
               {'Used in:'}
               <BotsUsingPackage packagePayload={this.props.descriptor} />
             </div>
           ))}
-          {renderIf(!isPackage)(() => (
+          {renderIf(!isPackage && !_.isEmpty(this.props.descriptor))(() => (
             <div style={styles.usedInContainer}>
               {'Used in:'}
               <PackagesUsingPlugin plugin={this.props.descriptor} />

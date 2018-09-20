@@ -57,7 +57,9 @@ export function packageSelector(
   );
   return {
     packagePayload: pkg,
-    isLoading: state.packageState.isLoadingPackage,
+    isLoading:
+      state.packageState.isLoadingPackage &&
+      state.packageState.isLoadingAllPackages,
     error: state.packageState.error,
   };
 }

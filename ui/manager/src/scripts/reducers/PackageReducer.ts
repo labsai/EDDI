@@ -78,18 +78,12 @@ const PackageReducer: IPackageReducer = (
       });
 
     case FETCH_PACKAGES_SUCCESS:
-      const newPackageList = (action as IFetchPackagesSuccessAction).packages.map(
-        newPackage => {
-          const oldPackage = state.packages.find(
-            pkg => pkg.resource === newPackage.resource,
-          );
-          if (_.isEmpty(oldPackage)) {
-            return newPackage;
-          } else {
-            return oldPackage;
-          }
-        },
+      const newPackages: IPackage[] = (action as IFetchPackagesSuccessAction)
+        .packages;
+      const oldPackages = state.packages.filter(pkg =>
+        _.isEmpty(newPackages.find(newPkg => newPkg.resource === pkg.resource)),
       );
+      const newPackageList = newPackages.concat(oldPackages);
       return update(state, {
         packages: {
           $set: newPackageList,
@@ -378,7 +372,7 @@ const PackageReducer: IPackageReducer = (
     case UPDATE_PACKAGES:
       return update(state, {
         isLoadingAllPackages: {
-          $set: false,
+          $set: true,
         },
       });
 

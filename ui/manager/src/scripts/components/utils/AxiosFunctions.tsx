@@ -326,8 +326,9 @@ export const getPackageDescriptors: () => Promise<IPackage[]> = async () => {
       };
     });
     for (let i = 0; i < _.size(packages); i++) {
-      const data = await getPackageData(packages[i].resource);
-      packages[i].packageData = data;
+      // todo: Refactor this
+      packages[i].packageData = await getPackageData(packages[i].resource);
+      packages[i].pluginTypes = await getPluginTypes(packages[i].resource);
     }
     return packages;
   } catch (err) {

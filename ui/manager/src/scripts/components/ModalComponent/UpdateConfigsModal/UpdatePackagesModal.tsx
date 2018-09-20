@@ -122,7 +122,7 @@ class UpdatePackagesModal extends React.Component<IPrivateProps, IState> {
               <ClimbingBoxLoader loading />
             </div>
           ))}
-          {renderIf(!this.props.isLoading && !_.isEmpty(this.props.packages))(
+          {renderIf(!this.props.isLoading && _.isEmpty(this.props.packages))(
             () => <div>{'Found no packages that can be updated'}</div>,
           )}
         </div>
