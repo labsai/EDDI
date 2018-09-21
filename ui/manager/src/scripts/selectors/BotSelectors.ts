@@ -59,3 +59,24 @@ export function latestBotSelector(
     isLoading: state.botState.isLoadingAllBots || state.botState.isLoadingBot,
   };
 }
+
+export interface IBotsWithPackageSelectorProps {
+  packageResources: string[];
+}
+
+export function botsWithPackageSelector(
+  state: IAppState,
+  props: IBotsWithPackageSelectorProps,
+) {
+  const botLists = [];
+  for (let i = 0; i < _.size(props.packageResources); i++) {
+    const botlist = state.botState.bots.filter(bot =>
+      JSON.stringify(bot.packages).includes(props.packageResources[i]),
+    );
+    botLists.push(botlist);
+  }
+  return {
+    botLists,
+    isLoading: state.botState.isLoadingAllBots,
+  };
+}

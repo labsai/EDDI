@@ -18,6 +18,7 @@ import * as renderIf from 'render-if';
 import BlueButton from '../../Assets/Buttons/BlueButton';
 import { ClimbingBoxLoader } from 'react-spinners';
 import SelectableConfig from './SelectableConfig';
+import { botsWithPackageSelector } from '../../../selectors/BotSelectors';
 
 interface IBotToUpdate {
   botResource: string;
@@ -119,6 +120,7 @@ class UpdateBotsModal extends React.Component<IPrivateProps, IState> {
   }
 
   render() {
+    console.log('BOTS', this.props.bots);
     return (
       <div>
         <div style={styles.header}>
@@ -172,7 +174,7 @@ class UpdateBotsModal extends React.Component<IPrivateProps, IState> {
 const ComposedUpdateBotsModal: Component<IPrivateProps> = compose<
   IPrivateProps,
   IPublicProps
->(pure, setDisplayName('UpdateBotsModal'), connect(packagesWithPluginSelector))(
+>(pure, setDisplayName('UpdateBotsModal'), connect(botsWithPackageSelector))(
   UpdateBotsModal,
 );
 
