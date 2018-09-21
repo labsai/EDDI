@@ -9,7 +9,7 @@ export const BOT: string = 'eddi://ai.labs.bot';
 
 export const REGULAR_DICTIONARY_PATH: string =
   '/regulardictionarystore/regulardictionaries';
-export const BEHAVIOUR_PATH: string = '/behaviourstore/behavioursets';
+export const BEHAVIOR_PATH: string = '/behaviorstore/behaviorsets';
 export const OUTPUT_PATH: string = '/outputstore/outputsets';
 export const PACKAGE_PATH: string = '/packagestore/packages';
 export const BOT_PATH: string = '/botstore/bots';

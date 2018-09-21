@@ -86,7 +86,7 @@ class PackageView extends React.Component<IPrivateProps, IState> {
   openEditJsonModal = () => {
     ModalActionDispatchers.showEditJsonModal(
       this.props.packagePayload.resource,
-      this.props.packagePayload.packageData,
+      JSON.stringify(this.props.packagePayload.packageData, null, '\t'),
     );
   };
 
