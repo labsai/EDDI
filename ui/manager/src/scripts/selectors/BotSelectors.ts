@@ -81,8 +81,6 @@ export function botsWithPackageSelector(
     );
     botLists.push(botlist);
   }
-  console.log('Bots:', state.botState.bots);
-  console.log('Botlists:', botLists);
   return {
     botLists,
     isLoading: state.botState.isLoadingAllBots,
