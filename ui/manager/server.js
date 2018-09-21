@@ -8,21 +8,6 @@ const envUrl = '/_/env.json';
 
 const app = express();
 
-const session = require('express-session');
-const Keycloak = require('keycloak-connect');
-
-const memoryStore = new session.MemoryStore();
-let keycloakConfig = {
-  clientId: 'eddiui',
-  bearerOnly: true,
-  serverUrl: 'https://dev-auth.differ.chat/auth',
-  realm: 'eddiui',
-  realmPublicKey: 'MIIBIjANB...'
-};
-
-const keycloak = new Keycloak({ store: memoryStore }, keycloakConfig);
-
-app.use(keycloak.middleware({}));
 app.use(serveStatic(hostPath));
 
 if (env) {

@@ -4,7 +4,7 @@ const styles: CSSProperties = {
   body: {
     overflow: 'scroll',
   },
-  differLogo: {
+  eddiLogo: {
     display: 'block',
     marginLeft: 'auto',
     marginRight: 'auto',
