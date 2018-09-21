@@ -49,6 +49,12 @@ import {
   updatePackagesAction,
   updatePackagesSuccessAction,
   updatePackagesFailedAction,
+  IUpdateBotsAction,
+  IUpdateBotsSuccessAction,
+  IUpdateBotsFailedAction,
+  updateBotsSuccessAction,
+  updateBotsAction,
+  updateBotsFailedAction,
 } from './EddiApiActions';
 
 export interface IEddiApiActionDispatchers extends ActionCreatorsMapObject {
@@ -95,6 +101,9 @@ export interface IEddiApiActionDispatchers extends ActionCreatorsMapObject {
   updatePackagesAction: (pluginResource, packages) => IUpdatePackagesAction;
   updatePackagesSuccessAction: (packages) => IUpdatePackagesSuccessAction;
   updatePackagesFailedAction: (error) => IUpdatePackagesFailedAction;
+  updateBotsAction: (bots) => IUpdateBotsAction;
+  updateBotsSuccessAction: (bots) => IUpdateBotsSuccessAction;
+  updateBotsFailedAction: (error) => IUpdateBotsFailedAction;
 }
 
 const actions: IEddiApiActionDispatchers = {
@@ -122,6 +131,9 @@ const actions: IEddiApiActionDispatchers = {
   updatePackagesAction,
   updatePackagesSuccessAction,
   updatePackagesFailedAction,
+  updateBotsAction,
+  updateBotsFailedAction,
+  updateBotsSuccessAction,
 };
 
 const eddiApiActionDispatchers: IEddiApiActionDispatchers = bindActionCreators<

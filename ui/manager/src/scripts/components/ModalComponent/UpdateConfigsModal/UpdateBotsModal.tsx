@@ -59,7 +59,7 @@ class UpdateBotsModal extends React.Component<IPrivateProps, IState> {
   };
 
   updateSelectedBots = () => {
-    // todo: update bots
+    eddiApiActionDispatchers.updateBotsAction(this.state.selectedBots);
     this.closeModal();
   };
 

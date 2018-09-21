@@ -495,7 +495,9 @@ export async function updateResourcesInBot(
     const oldBot: IBot = await getCurrentBot(Parser.getId(botResource));
     const newBotPackageList = oldBot.packages.map(pkg => {
       return (
-        packageResources.find(resource => Parser.getId(resource) === pkg) || pkg
+        packageResources.find(
+          resource => Parser.getId(resource) === Parser.getId(pkg),
+        ) || pkg
       );
     });
     await axios.put(currentBotUri, {
