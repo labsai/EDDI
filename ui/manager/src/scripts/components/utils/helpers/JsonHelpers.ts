@@ -11,6 +11,7 @@ export async function postJsonHelper(
   url: string,
   payload: object,
 ): Promise<IResponse> {
+  console.log(`${await getAPIUrl()}${url}`);
   const res = await axios.post(
     `${await getAPIUrl()}${url}`,
     JSON.stringify(payload),

@@ -189,7 +189,10 @@ const styles: CSSProperties = {
     fontSize: '13px',
     whiteSpace: 'nowrap',
     textAlign: 'right',
-    backgroundColor: '#FFF',
+    backgroundColor: 'transparent',
+    marginRight: '5px',
+  },
+  backButton: {
     marginRight: '5px',
   },
 };

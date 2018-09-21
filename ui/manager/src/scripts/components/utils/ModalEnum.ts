@@ -8,4 +8,6 @@ export enum ModalEnum {
   'editJson',
   'addPlugins',
   'viewJson',
+  'createNewConfig',
+  'createNewConfig2',
 }

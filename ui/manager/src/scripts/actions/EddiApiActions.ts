@@ -56,6 +56,11 @@ import {
   UPDATE_JSON_DATA,
   UPDATE_JSON_DATA_FAILED,
   UPDATE_PLUGIN_SUCCESS,
+  CREATE_NEW_CONFIG,
+  CREATE_NEW_CONFIG_FAILED,
+  CREATE_NEW_BOT_SUCCESS,
+  CREATE_NEW_PACKAGE_SUCCESS,
+  CREATE_NEW_PLUGIN_SUCCESS,
 } from './EddiApiActionTypes';
 import {
   IBot,
@@ -795,5 +800,79 @@ export function updatePluginSuccessAction(
   return {
     plugin,
     type: UPDATE_PLUGIN_SUCCESS,
+  };
+}
+
+export interface ICreateNewConfigAction extends Action {
+  eddiType: string;
+  name: string;
+  description: string;
+  data: string;
+}
+
+export function createNewConfigAction(
+  eddiType: string,
+  name: string,
+  description: string,
+  data: string,
+): ICreateNewConfigAction {
+  return {
+    eddiType,
+    name,
+    description,
+    data,
+    type: CREATE_NEW_CONFIG,
+  };
+}
+
+export interface ICreateNewConfigFailedAction extends Action {
+  error: Error;
+}
+
+export function createNewConfigFailedAction(
+  error: Error,
+): ICreateNewConfigFailedAction {
+  return {
+    error,
+    type: CREATE_NEW_CONFIG_FAILED,
+  };
+}
+
+export interface ICreateNewBotSuccessAction extends Action {
+  bot: IBot;
+}
+
+export function createNewBotSuccessAction(
+  bot: IBot,
+): ICreateNewBotSuccessAction {
+  return {
+    bot,
+    type: CREATE_NEW_BOT_SUCCESS,
+  };
+}
+
+export interface ICreateNewPackageSuccessAction extends Action {
+  pkg: IPackage;
+}
+
+export function createNewPackageSuccessAction(
+  pkg: IPackage,
+): ICreateNewPackageSuccessAction {
+  return {
+    pkg,
+    type: CREATE_NEW_PACKAGE_SUCCESS,
+  };
+}
+
+export interface ICreateNewPluginSuccessAction extends Action {
+  plugin: IPlugin;
+}
+
+export function createNewPluginSuccessAction(
+  plugin: IPlugin,
+): ICreateNewPluginSuccessAction {
+  return {
+    plugin,
+    type: CREATE_NEW_PLUGIN_SUCCESS,
   };
 }

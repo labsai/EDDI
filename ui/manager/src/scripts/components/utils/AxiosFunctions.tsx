@@ -3,13 +3,24 @@ import * as React from 'react';
 import { parsePluginExtensions } from './helpers/PluginParser';
 import { DEFAULT_LIMIT, getAPIUrl } from './ApiFunctions';
 import Parser from './Parser';
-import * as PluginType from './EddiTypes';
 import * as _ from 'lodash';
 import {
   mapDataToDetailedDescriptors,
   postJsonHelper,
   putHelper,
 } from './helpers/JsonHelpers';
+import {
+  BEHAVIOUR,
+  BEHAVIOR_PATH,
+  BOT,
+  BOT_PATH,
+  OUTPUT,
+  OUTPUT_PATH,
+  PACKAGE,
+  PACKAGE_PATH,
+  REGULAR_DICTIONARY,
+  REGULAR_DICTIONARY_PATH,
+} from './EddiTypes';
 
 export interface IDescriptor {
   createdBy?: string;
@@ -651,19 +662,19 @@ export async function getPluginDescriptors(
   try {
     let res: IDescriptorResponse;
     switch (pluginType) {
-      case PluginType.BEHAVIOUR:
+      case BEHAVIOUR:
         res = await axios.get(
           `${await getAPIUrl()}/behaviorstore/behaviorsets/descriptors?limit=${DEFAULT_LIMIT}`,
         );
         break;
 
-      case PluginType.OUTPUT:
+      case OUTPUT:
         res = await axios.get(
           `${await getAPIUrl()}/outputstore/outputsets/descriptors?limit=${DEFAULT_LIMIT}`,
         );
         break;
 
-      case PluginType.REGULAR_DICTIONARY:
+      case REGULAR_DICTIONARY:
         res = await axios.get(
           `${await getAPIUrl()}/regulardictionarystore/regulardictionaries/descriptors?limit=${DEFAULT_LIMIT}`,
         );
@@ -745,6 +756,50 @@ export async function updateJsonData(resource: string, data: string) {
     );
   } catch (err) {
     console.error(`Failed to update JSON data. Error: ${err.message}`);
+    throw err;
+  }
+}
+
+export async function postNewConfig(
+  type: string,
+  name: string,
+  description: string,
+  data: string,
+) {
+  let configPath: string;
+  console.log('Type: ', type);
+  switch (type) {
+    case REGULAR_DICTIONARY:
+      configPath = REGULAR_DICTIONARY_PATH;
+      break;
+
+    case BEHAVIOUR:
+      configPath = BEHAVIOR_PATH;
+      break;
+
+    case OUTPUT:
+      configPath = OUTPUT_PATH;
+      break;
+
+    case BOT:
+      configPath = BOT_PATH;
+      break;
+
+    case PACKAGE:
+      configPath = PACKAGE_PATH;
+      break;
+
+    default:
+      console.log(`Could not create new config of type: ${type}`);
+      console.log(configPath);
+  }
+  try {
+    const response: IResponse = await postJsonHelper(configPath, { data });
+    const resource = response.headers.location;
+    await patchDescriptor(resource, name, description);
+    return resource;
+  } catch (err) {
+    console.error(`Failed to create new config. Error: ${err.message}`);
     throw err;
   }
 }

@@ -19,6 +19,7 @@ import {
   FETCH_BOTS_USING_PACKAGE,
   FETCH_PACKAGES_USING_PLUGIN,
   UPDATE_JSON_DATA,
+  CREATE_NEW_CONFIG,
 } from '../actions/EddiApiActionTypes';
 import {
   getPackage,
@@ -48,6 +49,7 @@ import {
   getPackagesUsingPlugin,
   getCurrentBot,
   getCurrentPlugin,
+  postNewConfig,
 } from '../components/utils/AxiosFunctions';
 import {
   fetchBotFailedAction,
@@ -100,6 +102,8 @@ import {
   IUpdateJsonDataAction,
   updateJsonDataFailedAction,
   updatePluginSuccessAction,
+  ICreateNewConfigAction,
+  createNewConfigFailedAction,
 } from '../actions/EddiApiActions';
 import * as Edditypes from '../components/utils/EddiTypes';
 import Parser from '../components/utils/Parser';
@@ -402,6 +406,24 @@ export function* watchFetchPackagesUsingPlugin(): Iterator<{}> {
   yield takeEvery(FETCH_PACKAGES_USING_PLUGIN, fetchPackagesUsingPlugin);
 }
 
+export function* watchCreateNewConfig(): Iterator<{}> {
+  yield takeEvery(CREATE_NEW_CONFIG, createNewConfig);
+}
+
+export function* createNewConfig(action: ICreateNewConfigAction): Iterator<{}> {
+  try {
+    const id = yield call(
+      postNewConfig,
+      action.eddiType,
+      action.name,
+      action.description,
+      action.data,
+    );
+    // todo: yield success action.
+  } catch (err) {
+    yield put(createNewConfigFailedAction(err));
+  }
+}
 export function* updateJsonData(action: IUpdateJsonDataAction): Iterator<{}> {
   try {
     yield call(axiosUpdateJsonData, action.resource, action.data);

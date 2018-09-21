@@ -23,6 +23,8 @@ import UpdatePackageModal from './UpdatePackageModal';
 import { ModalEnum } from '../utils/ModalEnum';
 import EditJsonModal from './EditJsonModal';
 import ViewJsonModal from './ViewJsonModal/ViewJsonModal';
+import CreateNewConfigModal from './CreateNewConfigModal';
+import CreateNewConfig2Modal from './CreateNewConfig2Modal';
 
 const customStyles = {
   content: {
@@ -63,6 +65,8 @@ interface IPrivateProps {
   descriptor?: IDetailedDescriptor;
   resource?: string;
   data?: {};
+  name?: string;
+  description?: string;
   addPlugin?(plugins: string[]): void;
 }
 
@@ -123,6 +127,24 @@ class ModalComponentFrame extends React.Component<IPrivateProps, IState> {
             oldPlugins={this.props.selectedResources}
             pluginType={this.props.pluginType}
             addPlugins={this.props.addPlugin}
+          />
+        );
+      case ModalEnum.createNewConfig:
+        return (
+          <CreateNewConfigModal
+            type={this.props.pluginType}
+            name={this.props.name}
+            description={this.props.description}
+            data={this.props.data}
+          />
+        );
+      case ModalEnum.createNewConfig2:
+        return (
+          <CreateNewConfig2Modal
+            type={this.props.pluginType}
+            name={this.props.name}
+            description={this.props.description}
+            data={this.props.data}
           />
         );
       default:
