@@ -312,7 +312,7 @@ export const getPackageDescriptors: () => Promise<IPackage[]> = async () => {
     const res: IDescriptorResponse = await axios.get(
       `${await getAPIUrl()}/packagestore/packages/descriptors?limit=${DEFAULT_LIMIT}`,
     );
-    return res.data.map(pkg => {
+    const packages: IPackage[] = res.data.map(pkg => {
       const version = Parser.getVersion(pkg.resource);
       return {
         createdOn: pkg.createdOn,
@@ -325,6 +325,12 @@ export const getPackageDescriptors: () => Promise<IPackage[]> = async () => {
         currentVersion: version,
       };
     });
+    for (let i = 0; i < _.size(packages); i++) {
+      // todo: Refactor this
+      packages[i].packageData = await getPackageData(packages[i].resource);
+      packages[i].pluginTypes = await getPluginTypes(packages[i].resource);
+    }
+    return packages;
   } catch (err) {
     console.error(`Failed to get package descriptors. Error: ${err.message}`);
     throw err;
@@ -476,15 +482,22 @@ export function updatePackageExtension(
   externalPackages: IPluginExtensions[],
   newExtensionResource: string,
 ) {
+  const newExtensionId = Parser.getId(newExtensionResource);
   const updatedExternalPackages = externalPackages.map(externalPackage => {
-    if (externalPackage.extensions) {
+    if (
+      externalPackage.config &&
+      externalPackage.config.uri &&
+      Parser.getId(externalPackage.config.uri) === newExtensionId
+    ) {
+      externalPackage.config.uri = newExtensionResource;
+    }
+    if (!_.isEmpty(externalPackage.extensions)) {
       for (let extensions of Object.values(externalPackage.extensions)) {
         for (let extension of extensions) {
           if (
             extension.config &&
             extension.config.uri &&
-            Parser.getId(extension.config.uri) ===
-              Parser.getId(newExtensionResource)
+            Parser.getId(extension.config.uri) === newExtensionId
           ) {
             extension.config.uri = newExtensionResource;
           }
@@ -506,7 +519,7 @@ export async function updatePackage(
     }?version=${currentPackage.version}`;
     const packageData: IPlugins = (await axios.get(currentPackageUri)).data;
     const newPlugin = await getCurrentPlugin(updatablePluginResource);
-    const newPackageData = updatePackageExtension(
+    const newPackageData = await updatePackageExtension(
       packageData.packageExtensions,
       newPlugin.resource,
     );
@@ -767,31 +780,25 @@ export async function postNewConfig(
   data: string,
 ) {
   let configPath: string;
-  console.log('Type: ', type);
   switch (type) {
     case REGULAR_DICTIONARY:
       configPath = REGULAR_DICTIONARY_PATH;
       break;
-
     case BEHAVIOUR:
       configPath = BEHAVIOR_PATH;
       break;
-
     case OUTPUT:
       configPath = OUTPUT_PATH;
       break;
-
     case BOT:
       configPath = BOT_PATH;
       break;
-
     case PACKAGE:
       configPath = PACKAGE_PATH;
       break;
 
     default:
-      console.log(`Could not create new config of type: ${type}`);
-      console.log(configPath);
+      console.error(`Could not create new config of type: ${type}`);
   }
   try {
     const response: IResponse = await postJsonHelper(configPath, { data });
@@ -800,6 +807,26 @@ export async function postNewConfig(
     return resource;
   } catch (err) {
     console.error(`Failed to create new config. Error: ${err.message}`);
+    throw err;
+  }
+}
+
+export async function updatePackages(
+  pluginResource: string,
+  packages: IPackage[],
+) {
+  try {
+    const updatedPackages: IPackage[] = [];
+    for (let i = 0; i < _.size(packages); i++) {
+      const updatedPackage: IPackage = await updatePackage(
+        packages[i],
+        pluginResource,
+      );
+      updatedPackages.push(updatedPackage);
+    }
+    return updatedPackages;
+  } catch (err) {
+    console.error(`Failed to update packages. Error: ${err.message}`);
     throw err;
   }
 }

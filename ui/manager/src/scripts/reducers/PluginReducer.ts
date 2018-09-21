@@ -36,6 +36,9 @@ import {
   IPlugin,
 } from '../components/utils/AxiosFunctions';
 import * as _ from 'lodash';
+import ModalActionDispatchers, {
+  default as modalActionDispatchers,
+} from '../actions/ModalActionDispatchers';
 
 export type IPluginReducer = Reducer<IPluginState>;
 

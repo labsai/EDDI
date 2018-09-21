@@ -18,6 +18,9 @@ import {
   UPDATE_PLUGIN_TYPE_IN_PACKAGE_SUCCESS,
   FETCH_BOTS_USING_PACKAGE_SUCCESS,
   FETCH_PACKAGES_USING_PLUGIN_SUCCESS,
+  UPDATE_PACKAGES,
+  UPDATE_PACKAGES_SUCCESS,
+  UPDATE_PACKAGES_FAILED,
 } from '../actions/EddiApiActionTypes';
 import * as update from 'immutability-helper';
 import {
@@ -34,6 +37,8 @@ import {
   IFetchPluginTypesSuccessAction,
   IFetchBotsUsingPackageSuccessAction,
   IFetchPackagesUsingPluginSuccessAction,
+  IUpdatePackagesSuccessAction,
+  IUpdatePackagesFailedAction,
 } from '../actions/EddiApiActions';
 import * as _ from 'lodash';
 import { parsePluginExtensions } from '../components/utils/helpers/PluginParser';
@@ -73,18 +78,12 @@ const PackageReducer: IPackageReducer = (
       });
 
     case FETCH_PACKAGES_SUCCESS:
-      const newPackageList = (action as IFetchPackagesSuccessAction).packages.map(
-        newPackage => {
-          const oldPackage = state.packages.find(
-            pkg => pkg.resource === newPackage.resource,
-          );
-          if (_.isEmpty(oldPackage)) {
-            return newPackage;
-          } else {
-            return oldPackage;
-          }
-        },
+      const newPackages: IPackage[] = (action as IFetchPackagesSuccessAction)
+        .packages;
+      const oldPackages = state.packages.filter(pkg =>
+        _.isEmpty(newPackages.find(newPkg => newPkg.resource === pkg.resource)),
       );
+      const newPackageList = newPackages.concat(oldPackages);
       return update(state, {
         packages: {
           $set: newPackageList,
@@ -366,6 +365,48 @@ const PackageReducer: IPackageReducer = (
             } else {
               return packages;
             }
+          },
+        },
+      });
+
+    case UPDATE_PACKAGES:
+      return update(state, {
+        isLoadingAllPackages: {
+          $set: true,
+        },
+      });
+
+    case UPDATE_PACKAGES_FAILED:
+      return update(state, {
+        error: {
+          $set: (action as IUpdatePackagesFailedAction).error,
+        },
+        isLoadingAllPackages: {
+          $set: false,
+        },
+      });
+
+    case UPDATE_PACKAGES_SUCCESS:
+      return update(state, {
+        packages: {
+          $apply: (packages: IPackage[]) => {
+            const updatedPackages: IPackage[] = (action as IUpdatePackagesSuccessAction)
+              .packages;
+            const newPackageList = packages.map(pack => {
+              for (let i = 0; i < _.size(updatedPackages); i++) {
+                if (pack.id === updatedPackages[i].id) {
+                  return update(pack, {
+                    currentVersion: { $set: updatedPackages[i].version },
+                    updatablePlugins: { $set: [] },
+                  });
+                }
+              }
+              return pack;
+            });
+            return newPackageList.concat(updatedPackages);
+          },
+          isLoadingAllPackages: {
+            $set: false,
           },
         },
       });

@@ -29,6 +29,10 @@ import {
   showCreateNewConfigModal,
   IShowCreateNewConfig2Modal,
   showCreateNewConfig2Modal,
+  IShowUpdatePackagesModal,
+  IShowUpdateBotsModal,
+  showUpdatePackagesModal,
+  showUpdateBotsModal,
 } from './ModalActions';
 
 export interface IModalActionDispatchers extends ActionCreatorsMapObject {
@@ -67,6 +71,8 @@ export interface IModalActionDispatchers extends ActionCreatorsMapObject {
     description: string,
     data?: string,
   ) => IShowCreateNewConfig2Modal;
+  showUpdatePackagesModal: (resource: string) => IShowUpdatePackagesModal;
+  showUpdateBotsModal: (packageResources: string[]) => IShowUpdateBotsModal;
 }
 
 const actions: IModalActionDispatchers = {
@@ -80,6 +86,8 @@ const actions: IModalActionDispatchers = {
   showEditPackageModal,
   showCreateNewConfigModal,
   showCreateNewConfig2Modal,
+  showUpdatePackagesModal,
+  showUpdateBotsModal,
 };
 
 const modalActionDispatchers: IModalActionDispatchers = bindActionCreators<
