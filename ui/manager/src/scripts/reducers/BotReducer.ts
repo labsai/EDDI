@@ -1,5 +1,10 @@
 import { Reducer, Action } from 'redux';
-import { IBot, IDescriptor, IPlugin } from '../components/utils/AxiosFunctions';
+import {
+  IBot,
+  IDescriptor,
+  IPackage,
+  IPlugin,
+} from '../components/utils/AxiosFunctions';
 import {
   FETCH_BOT,
   FETCH_BOT_FAILED,
@@ -12,6 +17,7 @@ import {
   UPDATE_DESCRIPTOR_SUCCESS,
   UPDATE_BOT_PACKAGES_SUCCESS,
   FETCH_BOTS_USING_PACKAGE_SUCCESS,
+  UPDATE_BOTS_SUCCESS,
 } from '../actions/EddiApiActionTypes';
 import * as update from 'immutability-helper';
 import {
@@ -24,6 +30,8 @@ import {
   IUpdateBotPackagesSuccessAction,
   IFetchPluginsSuccessAction,
   IFetchBotsUsingPackageSuccessAction,
+  IUpdatePackagesSuccessAction,
+  IUpdateBotsSuccessAction,
 } from '../actions/EddiApiActions';
 import * as _ from 'lodash';
 
@@ -225,6 +233,31 @@ const BotReducer: IBotReducer = (
           },
         },
       });
+
+    case UPDATE_BOTS_SUCCESS:
+      return update(state, {
+        bots: {
+          $apply: (bots: IBot[]) => {
+            const updatedBots: IBot[] = (action as IUpdateBotsSuccessAction)
+              .bots;
+            const newBotList: IBot[] = bots.map(bot => {
+              for (let i = 0; i < _.size(updatedBots); i++) {
+                if (bot.id === updatedBots[i].id) {
+                  return update(bot, {
+                    currentVersion: { $set: updatedBots[i].version },
+                  });
+                }
+              }
+              return bot;
+            });
+            return newBotList.concat(updatedBots);
+          },
+          isLoadingAllBots: {
+            $set: false,
+          },
+        },
+      });
+
     default:
       return state;
   }

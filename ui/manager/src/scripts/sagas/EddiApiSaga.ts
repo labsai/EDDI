@@ -21,6 +21,7 @@ import {
   UPDATE_JSON_DATA,
   CREATE_NEW_CONFIG,
   UPDATE_PACKAGES,
+  UPDATE_BOTS,
 } from '../actions/EddiApiActionTypes';
 import {
   getPackage,
@@ -52,6 +53,8 @@ import {
   getCurrentPlugin,
   postNewConfig,
   updatePackages as axiosUpdatePackages,
+  updateResourcesInBot,
+  updateBots as axiosUpdateBots,
 } from '../components/utils/AxiosFunctions';
 import {
   fetchBotFailedAction,
@@ -109,6 +112,9 @@ import {
   IUpdatePackagesAction,
   updatePackagesFailedAction,
   updatePackagesSuccessAction,
+  IUpdateBotsAction,
+  updateBotsFailedAction,
+  updateBotsSuccessAction,
 } from '../actions/EddiApiActions';
 import * as Edditypes from '../components/utils/EddiTypes';
 import Parser from '../components/utils/Parser';
@@ -475,4 +481,17 @@ export function* updatePackages(action: IUpdatePackagesAction): Iterator<{}> {
 
 export function* watchUpdatePackages(): Iterator<{}> {
   yield takeEvery(UPDATE_PACKAGES, updatePackages);
+}
+
+export function* updateBots(action: IUpdateBotsAction): Iterator<{}> {
+  try {
+    const updatedBots: IBot[] = yield call(axiosUpdateBots, action.bots);
+    yield put(updateBotsSuccessAction(updatedBots));
+  } catch (err) {
+    yield put(updateBotsFailedAction(err));
+  }
+}
+
+export function* watchUpdateBots(): Iterator<{}> {
+  yield takeEvery(UPDATE_BOTS, updateBots);
 }

@@ -26,6 +26,7 @@ import ViewJsonModal from './ViewJsonModal/ViewJsonModal';
 import CreateNewConfigModal from './CreateNewConfigModal';
 import CreateNewConfig2Modal from './CreateNewConfig2Modal';
 import UpdatePackagesModal from './UpdateConfigsModal/UpdatePackagesModal';
+import UpdateBotsModal from './UpdateConfigsModal/UpdateBotsModal';
 
 const customStyles = {
   content: {
@@ -149,8 +150,12 @@ class ModalComponentFrame extends React.Component<IPrivateProps, IState> {
           />
         );
       case ModalEnum.updatePackages:
-        console.log('HELLO', this.props.resource);
         return <UpdatePackagesModal pluginResource={this.props.resource} />;
+      case ModalEnum.updateBots:
+        console.log('SelectedResources:', this.props.selectedResources);
+        return (
+          <UpdateBotsModal packageResources={this.props.selectedResources} />
+        );
       default:
         return null;
     }

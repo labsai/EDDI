@@ -135,7 +135,13 @@ export async function getAllBots(): Promise<IBot[]> {
         resource: bot.resource,
       };
     });
-    return bots;
+    const temporaryBotList = [];
+    for (let i = 0; i < _.size(bots); i++) {
+      const bot = await getSpecificBot(bots[i].resource);
+      temporaryBotList.push(bot);
+    }
+    // todo: Refactor this function
+    return temporaryBotList;
   } catch (err) {
     console.error(`Failed to get all bots. Error: ${err.message}`);
     throw err;
@@ -474,6 +480,56 @@ export async function updateBotPackages(
     return newBot;
   } catch (err) {
     console.error(`Failed to update bot packages. Error: ${err.message}`);
+    throw err;
+  }
+}
+
+export async function updateResourcesInBot(
+  botResource: string,
+  packageResources: string[],
+): Promise<IBot> {
+  try {
+    const currentBotUri = `${await getAPIUrl()}/botstore/bots/${Parser.getIdAndVersion(
+      botResource,
+    )}`;
+    const oldBot: IBot = await getCurrentBot(Parser.getId(botResource));
+    const newBotPackageList = oldBot.packages.map(pkg => {
+      return (
+        packageResources.find(
+          resource => Parser.getId(resource) === Parser.getId(pkg),
+        ) || pkg
+      );
+    });
+    await axios.put(currentBotUri, {
+      packages: newBotPackageList,
+      channels: oldBot.channels,
+    });
+    const newBot: IBot = await getCurrentBot(Parser.getId(botResource));
+    return newBot;
+  } catch (err) {
+    console.error(`Failed to update resources in bot. Error: ${err.message}`);
+    throw err;
+  }
+}
+
+interface IBotToUpdate {
+  botResource: string;
+  packageResources: string[];
+}
+
+export async function updateBots(bots: IBotToUpdate[]) {
+  try {
+    const newBots: IBot[] = [];
+    for (let i = 0; i < _.size(bots); i++) {
+      const newBot: IBot = await updateResourcesInBot(
+        bots[i].botResource,
+        bots[i].packageResources,
+      );
+      newBots.push(newBot);
+    }
+    return newBots;
+  } catch (err) {
+    console.error(`Failed to update bots. Error: ${err.message}`);
     throw err;
   }
 }

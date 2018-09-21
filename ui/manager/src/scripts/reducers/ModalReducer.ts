@@ -30,8 +30,18 @@ import {
   IPackage,
 } from '../components/utils/AxiosFunctions';
 import { ModalEnum } from '../components/utils/ModalEnum';
-import { UPDATE_PLUGIN_SUCCESS } from '../actions/EddiApiActionTypes';
-import { IUpdatePluginSuccessAction } from '../actions/EddiApiActions';
+import {
+  UPDATE_PACKAGE_SUCCESS,
+  UPDATE_PACKAGES_SUCCESS,
+  UPDATE_PLUGIN_SUCCESS,
+  UPDATE_PLUGIN_TYPE_IN_PACKAGE_SUCCESS,
+} from '../actions/EddiApiActionTypes';
+import {
+  IUpdatePackagesSuccessAction,
+  IUpdatePackageSuccessAction,
+  IUpdatePluginSuccessAction,
+  IUpdatePluginTypeSuccessAction,
+} from '../actions/EddiApiActions';
 
 export type IModalReducer = Reducer<IModalState>;
 
@@ -255,10 +265,6 @@ const ModalReducer: IModalReducer = (
       });
 
     case UPDATE_PLUGIN_SUCCESS:
-      console.log(
-        'Resource:',
-        (action as IUpdatePluginSuccessAction).plugin.resource,
-      );
       return update(state, {
         mode: {
           $set: ModalEnum.updatePackages,
@@ -268,6 +274,49 @@ const ModalReducer: IModalReducer = (
         },
         resource: {
           $set: (action as IUpdatePluginSuccessAction).plugin.resource,
+        },
+      });
+
+    case UPDATE_PACKAGE_SUCCESS:
+      return update(state, {
+        mode: {
+          $set: ModalEnum.updateBots,
+        },
+        isModalOpen: {
+          $set: true,
+        },
+        selectedResources: {
+          $set: [(action as IUpdatePackageSuccessAction).package.resource],
+        },
+      });
+
+    case UPDATE_PLUGIN_TYPE_IN_PACKAGE_SUCCESS:
+      return update(state, {
+        mode: {
+          $set: ModalEnum.updateBots,
+        },
+        isModalOpen: {
+          $set: true,
+        },
+        selectedResources: {
+          $set: [
+            (action as IUpdatePluginTypeSuccessAction).packagePayload.resource,
+          ],
+        },
+      });
+
+    case UPDATE_PACKAGES_SUCCESS:
+      return update(state, {
+        mode: {
+          $set: ModalEnum.updateBots,
+        },
+        isModalOpen: {
+          $set: true,
+        },
+        selectedResources: {
+          $set: (action as IUpdatePackagesSuccessAction).packages.map(
+            pkg => pkg.resource,
+          ),
         },
       });
 
