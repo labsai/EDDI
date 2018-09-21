@@ -11,7 +11,7 @@ import {
 } from './helpers/JsonHelpers';
 import {
   BEHAVIOUR,
-  BEHAVIOUR_PATH,
+  BEHAVIOR_PATH,
   BOT,
   BOT_PATH,
   OUTPUT,
@@ -785,7 +785,8 @@ export async function postNewConfig(
       configPath = REGULAR_DICTIONARY_PATH;
       break;
     case BEHAVIOUR:
-      configPath = BEHAVIOUR_PATH;
+      configPath = BEHAVIOR_PATH;
+      break;
     case OUTPUT:
       configPath = OUTPUT_PATH;
       break;

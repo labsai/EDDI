@@ -9,7 +9,7 @@ interface IState {
   filterText: string;
 }
 
-const differLogo = require('../../../public/images/DifferSymbolSmall.png');
+const eddiLogo = require('../../../public/images/eddi-logo.png');
 
 class Dashboard extends React.Component<IProps, IState> {
   constructor(props) {
@@ -26,7 +26,7 @@ class Dashboard extends React.Component<IProps, IState> {
   render() {
     return (
       <div>
-        <img src={differLogo} style={styles.differLogo} />
+        <img src={eddiLogo} style={styles.eddiLogo} />
         <div className="content">
           <TopBarComponent filter={this.filter} />
           <Botlist filterText={this.state.filterText} />
