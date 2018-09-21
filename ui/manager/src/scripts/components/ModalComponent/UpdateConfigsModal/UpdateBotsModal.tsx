@@ -16,6 +16,7 @@ import styles from '../AddPackagesModal/AddPackagesModal.styles';
 import ModalActionDispatchers from '../../../actions/ModalActionDispatchers';
 import * as renderIf from 'render-if';
 import BlueButton from '../../Assets/Buttons/BlueButton';
+import WhiteButton from '../../Assets/Buttons/WhiteButton';
 import { ClimbingBoxLoader } from 'react-spinners';
 import SelectableConfig from './SelectableConfig';
 import { botsWithPackageSelector } from '../../../selectors/BotSelectors';
@@ -24,6 +25,7 @@ interface IBotToUpdate {
   botResource: string;
   packageResources: string[];
 }
+
 interface IState {
   selectedBots: IBotToUpdate[];
   page: number;
@@ -36,7 +38,7 @@ interface IPublicProps {
 interface IPrivateProps extends IPublicProps {
   error: Error;
   isLoading: boolean;
-  bots: [IBot[]];
+  botLists: [IBot[]];
 }
 
 class UpdateBotsModal extends React.Component<IPrivateProps, IState> {
@@ -67,45 +69,45 @@ class UpdateBotsModal extends React.Component<IPrivateProps, IState> {
     });
   };
 
+  previousPage = () => {
+    this.setState({
+      page: this.state.page - 1,
+    });
+  };
+
   selectBot = (botResource: string) => {
+    const currentPakageResource = this.props.packageResources[this.state.page];
     const selectedBot = this.state.selectedBots.find(
       bot => bot.botResource === botResource,
     );
-    if (
-      !_.isEmpty(
-        this.state.selectedBots.find(bot => bot.botResource === botResource),
-      )
-    ) {
-      const newBotList = this.state.selectedBots.filter(
+    if (_.isEmpty(selectedBot)) {
+      const newList = this.state.selectedBots.map(bot => bot);
+      newList.push({
+        botResource: botResource,
+        packageResources: [currentPakageResource],
+      });
+      this.setState({ selectedBots: newList });
+    } else {
+      const newList = this.state.selectedBots.filter(
         bot => bot.botResource !== botResource,
       );
-      if (
-        selectedBot.packageResources.includes(
-          this.props.packageResources[this.state.page],
-        )
-      ) {
-        const selectedBotUpdated: IBotToUpdate = {
-          botResource: botResource,
+      if (selectedBot.packageResources.includes(currentPakageResource)) {
+        newList.push({
+          botResource: selectedBot.botResource,
           packageResources: selectedBot.packageResources.filter(
-            resource =>
-              resource !== this.props.packageResources[this.state.page],
+            resource => resource !== currentPakageResource,
           ),
-        };
-        newBotList.push(selectedBotUpdated);
+        });
+        this.setState({ selectedBots: newList });
       } else {
-        const selectedBot: IBotToUpdate = {
-          botResource,
-          packageResources: [this.props.packageResources[this.state.page]],
-        };
-        newBotList.push(selectedBot);
+        selectedBot.packageResources.push(currentPakageResource);
+        newList.push(selectedBot);
+        this.setState({ selectedBots: newList });
       }
-      this.setState({
-        selectedBots: newBotList,
-      });
     }
   };
 
-  isPackageSelected(botResource: string): boolean {
+  isBotSelected(botResource: string): boolean {
     return !!this.state.selectedBots.find(
       selectedBot =>
         selectedBot.botResource === botResource &&
@@ -116,11 +118,10 @@ class UpdateBotsModal extends React.Component<IPrivateProps, IState> {
   }
 
   isLastPage(): boolean {
-    return this.state.page === _.size(this.props.packageResources);
+    return this.state.page === _.size(this.props.packageResources) - 1;
   }
 
   render() {
-    console.log('BOTS', this.props.bots);
     return (
       <div>
         <div style={styles.header}>
@@ -130,12 +131,19 @@ class UpdateBotsModal extends React.Component<IPrivateProps, IState> {
                 styles.title
               }>{`Select bots to update any old versions of the package to latest`}</div>
             <div style={styles.centerFlex} />
+            {renderIf(this.state.page > 0)(() => (
+              <WhiteButton
+                customStyles={styles.backButton}
+                onClick={this.previousPage}
+                text={'Back'}
+              />
+            ))}
             <BlueButton
               customStyles={styles.button}
               onClick={
                 this.isLastPage() ? this.updateSelectedBots : this.nextPage
               }
-              text={this.isLastPage() ? 'Next' : 'Update selected'}
+              text={this.isLastPage() ? 'Update selected' : 'Next'}
             />
           </div>
           <div style={styles.bottomHeader}>
@@ -144,13 +152,13 @@ class UpdateBotsModal extends React.Component<IPrivateProps, IState> {
           </div>
         </div>
         <div>
-          {renderIf(!this.props.isLoading && !_.isEmpty(this.props.bots))(
+          {renderIf(!this.props.isLoading && !_.isEmpty(this.props.botLists))(
             () => (
               <div style={styles.packageList}>
-                {this.props.bots[this.state.page].map((bot, i) => (
+                {this.props.botLists[this.state.page].map((bot, i) => (
                   <SelectableConfig
                     key={i}
-                    selected={this.isPackageSelected(bot.resource)}
+                    selected={this.isBotSelected(bot.resource)}
                     descriptor={bot}
                     handleClick={this.selectBot}
                   />
@@ -163,9 +171,9 @@ class UpdateBotsModal extends React.Component<IPrivateProps, IState> {
               <ClimbingBoxLoader loading />
             </div>
           ))}
-          {renderIf(!this.props.isLoading && _.isEmpty(this.props.bots))(() => (
-            <div>{'Found no packages that can be updated'}</div>
-          ))}
+          {renderIf(!this.props.isLoading && _.isEmpty(this.props.botLists))(
+            () => <div>{'Found no bots that can be updated'}</div>,
+          )}
         </div>
       </div>
     );

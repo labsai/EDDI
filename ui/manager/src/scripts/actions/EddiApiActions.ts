@@ -64,6 +64,9 @@ import {
   UPDATE_PACKAGES,
   UPDATE_PACKAGES_FAILED,
   UPDATE_PACKAGES_SUCCESS,
+  UPDATE_BOTS,
+  UPDATE_BOTS_SUCCESS,
+  UPDATE_BOTS_FAILED,
 } from './EddiApiActionTypes';
 import {
   IBot,
@@ -919,5 +922,45 @@ export function updatePackagesFailedAction(
   return {
     error,
     type: UPDATE_PACKAGES_FAILED,
+  };
+}
+
+interface IBotToUpdate {
+  botResource: string;
+  packageResources: string[];
+}
+
+export interface IUpdateBotsAction extends Action {
+  bots: IBotToUpdate[];
+}
+
+export function updateBotsAction(bots: IBotToUpdate[]): IUpdateBotsAction {
+  return {
+    bots,
+    type: UPDATE_BOTS,
+  };
+}
+
+export interface IUpdateBotsSuccessAction extends Action {
+  bots: IBot[];
+}
+
+export function updateBotsSuccessAction(
+  bots: IBot[],
+): IUpdateBotsSuccessAction {
+  return {
+    bots,
+    type: UPDATE_BOTS_SUCCESS,
+  };
+}
+
+export interface IUpdateBotsFailedAction extends Action {
+  error: Error;
+}
+
+export function updateBotsFailedAction(error: Error): IUpdateBotsFailedAction {
+  return {
+    error,
+    type: UPDATE_BOTS_FAILED,
   };
 }

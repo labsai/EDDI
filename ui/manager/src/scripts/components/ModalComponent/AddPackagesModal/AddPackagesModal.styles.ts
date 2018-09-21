@@ -22,6 +22,10 @@ const styles: CSSProperties = {
     width: '165px',
     marginRight: '50px',
   },
+  backButton: {
+    width: '165px',
+    marginRight: '5px',
+  },
   createButton: {
     width: '165px',
     marginRight: '10px',

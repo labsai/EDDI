@@ -3,6 +3,7 @@ import { IAppState } from '../reducers';
 import { IBotState } from '../reducers/BotReducer';
 import { IBot } from '../components/utils/AxiosFunctions';
 import * as _ from 'lodash';
+import Parser from '../components/utils/Parser';
 
 export const BotStateSelector: (state: IAppState) => IBotState = state =>
   state.botState;
@@ -70,11 +71,18 @@ export function botsWithPackageSelector(
 ) {
   const botLists = [];
   for (let i = 0; i < _.size(props.packageResources); i++) {
-    const botlist = state.botState.bots.filter(bot =>
-      JSON.stringify(bot.packages).includes(props.packageResources[i]),
+    const botlist = state.botState.bots.filter(
+      bot =>
+        bot.version === bot.currentVersion &&
+        !_.isEmpty(bot.packages) &&
+        JSON.stringify(bot.packages).includes(
+          Parser.getId(props.packageResources[i]),
+        ),
     );
     botLists.push(botlist);
   }
+  console.log('Bots:', state.botState.bots);
+  console.log('Botlists:', botLists);
   return {
     botLists,
     isLoading: state.botState.isLoadingAllBots,
