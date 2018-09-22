@@ -4,6 +4,7 @@ import ai.labs.serialization.DocumentBuilder;
 import ai.labs.serialization.IDocumentBuilder;
 import ai.labs.serialization.IJsonSerialization;
 import ai.labs.serialization.JsonSerialization;
+import com.fasterxml.jackson.annotation.JsonInclude;
 import com.fasterxml.jackson.databind.DeserializationFeature;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.SerializationFeature;
@@ -26,6 +27,8 @@ public class SerializationModule extends AbstractModule {
     @Singleton
     public ObjectMapper provideObjectMapper() {
         ObjectMapper objectMapper = new ObjectMapper();
+        objectMapper.setSerializationInclusion(JsonInclude.Include.NON_NULL);
+        objectMapper.setSerializationInclusion(JsonInclude.Include.NON_DEFAULT);
         objectMapper.configure(SerializationFeature.INDENT_OUTPUT, true);
         objectMapper.configure(SerializationFeature.FAIL_ON_EMPTY_BEANS, false);
         objectMapper.configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false);

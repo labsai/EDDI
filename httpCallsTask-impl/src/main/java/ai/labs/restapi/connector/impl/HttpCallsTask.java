@@ -25,9 +25,7 @@ import lombok.extern.slf4j.Slf4j;
 import javax.inject.Inject;
 import java.io.IOException;
 import java.net.URI;
-import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
+import java.util.*;
 import java.util.stream.Collectors;
 
 @Slf4j
@@ -84,53 +82,63 @@ public class HttpCallsTask implements ILifecycleTask {
         List<String> actions = latestData.getResult();
 
         for (String action : actions) {
-            List<HttpCall> httpCalls;
-            httpCalls = this.httpCalls.stream().
-                    filter(httpCall -> httpCall.getActions().contains(action)).
-                    collect(Collectors.toList());
+            List<HttpCall> httpCalls = this.httpCalls.stream().
+                    filter(httpCall -> {
+                        List<String> httpCallActions = httpCall.getActions();
+                        return httpCallActions.contains(action) || httpCallActions.contains("*");
+                    }).collect(Collectors.toList());
+
+            httpCalls = removeDuplicates(httpCalls);
+
             for (HttpCall call : httpCalls) {
                 try {
                     IRequest request = buildRequest(call.getRequest(), templateDataObjects);
-                    IResponse response = request.send();
+                    if (call.isFireAndForget()) {
+                        request.send(r -> {
+                            //ignore response
+                        });
+                    } else {
+                        IResponse response = request.send();
 
-                    if (response.getHttpCode() != 200) {
-                        String message = "HttpCall (%s) didn't return http code 200, instead %s.";
-                        log.warn(String.format(message, call.getName(), response.getHttpCode()));
-                        log.warn("Error Msg:" + response.getHttpCodeMessage());
-                        continue;
-                    }
-
-                    if (call.isSaveResponse()) {
-                        final String responseBody = response.getContentAsString();
-                        String actualContentType = response.getHttpHeader().get(CONTENT_TYPE);
-                        if (actualContentType != null) {
-                            actualContentType = actualContentType.split(";")[0];
-                        } else {
-                            actualContentType = "<not-present>";
-                        }
-
-                        if (!CONTENT_TYPE_APPLICATION_JSON.startsWith(actualContentType)) {
-                            String message = "HttpCall (%s) didn't return application/json as content-type, instead was (%s)";
-                            log.warn(String.format(message, call.getName(), actualContentType));
+                        if (response.getHttpCode() != 200) {
+                            String message = "HttpCall (%s) didn't return http code 200, instead %s.";
+                            log.warn(String.format(message, call.getName(), response.getHttpCode()));
+                            log.warn("Error Msg:" + response.getHttpCodeMessage());
                             continue;
                         }
 
-                        Object responseObject = jsonSerialization.deserialize(responseBody, Object.class);
-                        String responseObjectName = call.getResponseObjectName();
-                        Map<String, Object> templateHttpCalls = (Map<String, Object>) currentMemory.get(KEY_HTTP_CALLS);
-                        if (templateHttpCalls == null) {
-                            templateHttpCalls = new HashMap<>();
-                            currentMemory.put(KEY_HTTP_CALLS, templateHttpCalls);
+                        if (call.isSaveResponse()) {
+                            final String responseBody = response.getContentAsString();
+                            String actualContentType = response.getHttpHeader().get(CONTENT_TYPE);
+                            if (actualContentType != null) {
+                                actualContentType = actualContentType.split(";")[0];
+                            } else {
+                                actualContentType = "<not-present>";
+                            }
+
+                            if (!CONTENT_TYPE_APPLICATION_JSON.startsWith(actualContentType)) {
+                                String message = "HttpCall (%s) didn't return application/json as content-type, instead was (%s)";
+                                log.warn(String.format(message, call.getName(), actualContentType));
+                                continue;
+                            }
+
+                            Object responseObject = jsonSerialization.deserialize(responseBody, Object.class);
+                            String responseObjectName = call.getResponseObjectName();
+                            Map<String, Object> templateHttpCalls = (Map<String, Object>) currentMemory.get(KEY_HTTP_CALLS);
+                            if (templateHttpCalls == null) {
+                                templateHttpCalls = new HashMap<>();
+                                currentMemory.put(KEY_HTTP_CALLS, templateHttpCalls);
+                            }
+
+                            templateHttpCalls.put(responseObjectName, responseObject);
+                            templateDataObjects.put(responseObjectName, responseObject);
+
+                            String memoryDataName = "httpCalls:" + responseObjectName;
+                            IData<Object> httpResponseData = dataFactory.createData(memoryDataName, responseObject);
+                            memory.getCurrentStep().storeData(httpResponseData);
+
+                            runPostResponse(memory, call, templateDataObjects);
                         }
-
-                        templateHttpCalls.put(responseObjectName, responseObject);
-                        templateDataObjects.put(responseObjectName, responseObject);
-
-                        String memoryDataName = "httpCalls:" + responseObjectName;
-                        IData<Object> httpResponseData = dataFactory.createData(memoryDataName, responseObject);
-                        memory.getCurrentStep().storeData(httpResponseData);
-
-                        runPostResponse(memory, call, templateDataObjects);
                     }
                 } catch (IRequest.HttpRequestException | IOException | ITemplatingEngine.TemplateEngineException e) {
                     log.error(e.getLocalizedMessage(), e);
@@ -138,6 +146,10 @@ public class HttpCallsTask implements ILifecycleTask {
                 }
             }
         }
+    }
+
+    private LinkedList<HttpCall> removeDuplicates(List<HttpCall> httpCalls) {
+        return new LinkedList<>(new HashSet<>(httpCalls));
     }
 
     private void runPostResponse(IConversationMemory memory, HttpCall call, Map<String, Object> templateDataObjects)
