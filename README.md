@@ -8,7 +8,9 @@ v4.3.0 - STABLE
 
 License: Apache License 2.0
 
-Visit http://eddi.labs.ai for further references.
+Visit https://eddi.labs.ai for further references.
+
+For professional support, check out: https://www.labs.ai
 
 Check out the full documentation [here](https://labsai.atlassian.net/wiki/display/EDDI/).
 
