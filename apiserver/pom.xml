@@ -17,6 +17,12 @@
             <groupId>org.jboss.resteasy</groupId>
             <artifactId>resteasy-cache-core</artifactId>
             <version>3.6.1.Final</version>
+            <exclusions>
+                <exclusion>
+                    <groupId>org.infinispan</groupId>
+                    <artifactId>infinispan-core</artifactId>
+                </exclusion>
+            </exclusions>
         </dependency>
 
         <dependency>
@@ -149,12 +155,12 @@
             <artifactId>backupservice-impl</artifactId>
             <version>${project.version}</version>
         </dependency>
-      <dependency>
+        <dependency>
             <groupId>ai.labs</groupId>
             <artifactId>httpCallsTask-impl</artifactId>
             <version>${project.version}</version>
         </dependency>
-      <dependency>
+        <dependency>
             <groupId>ai.labs</groupId>
             <artifactId>normalizer-impl</artifactId>
             <version>${project.version}</version>
