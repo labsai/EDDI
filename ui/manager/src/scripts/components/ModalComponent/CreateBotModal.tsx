@@ -4,6 +4,8 @@ import styles from './ModalComponent.styles';
 import './ModalComponent.styles.scss';
 import { Component, compose, pure, setDisplayName } from 'recompose';
 import { createNewBot } from '../utils/AxiosFunctions';
+import { history } from '../../index';
+import modalActionDispatchers from '../../actions/ModalActionDispatchers';
 
 const customStyles = {
   createNewBotButton: {
@@ -60,7 +62,8 @@ class CreateBotModal extends React.Component<IProps, IState> {
                   this.state.name,
                   this.state.description,
                 );
-                location.href = `/botview/${botID}`;
+                history.push(`/botview/${botID}`);
+                modalActionDispatchers.closeModal();
               }}>
               {'Create bot'}
             </button>

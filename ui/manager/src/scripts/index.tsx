@@ -3,14 +3,17 @@ import '../styles/base.scss';
 import { render } from 'react-dom';
 import App from './components/App';
 import { Provider } from 'react-redux';
-import { BrowserRouter, Route } from 'react-router-dom';
+import { Router, Route } from 'react-router-dom';
+import createBrowserHistory from 'history/createBrowserHistory';
 import { store } from './store/store';
+
+export const history = createBrowserHistory();
 
 render(
   <Provider store={store}>
-    <BrowserRouter>
+    <Router history={history}>
       <Route component={App} />
-    </BrowserRouter>
+    </Router>
   </Provider>,
   document.getElementById('root'),
 );

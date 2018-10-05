@@ -16,6 +16,8 @@ import * as _ from 'lodash';
 import eddiApiActionDispatchers from '../../actions/EddiApiActionDispatchers';
 import { connect } from 'react-redux';
 import { defaultPluginTypesSelector } from '../../selectors/PluginSelectors';
+import { history } from '../../index';
+import modalActionDispatchers from '../../actions/ModalActionDispatchers';
 
 const customStyles = {
   createNewBotButton: {
@@ -117,7 +119,8 @@ class UpdatePackageModal extends React.Component<IPrivateProps, IState> {
               style={this.getButtonStyle()}
               onClick={async () => {
                 const packageID = await this.createNewPackage();
-                location.href = `/packageview/${packageID}`;
+                history.push(`/packageview/${packageID}`);
+                modalActionDispatchers.closeModal();
               }}>
               {'Save'}
             </button>

@@ -11,6 +11,7 @@ import * as _ from 'lodash';
 import VersionSelectComponent from '../Assets/VersionSelectComponent';
 import { Link, browserHistory } from 'react-router-dom';
 import { defaultPluginTypesSelector } from '../../selectors/PluginSelectors';
+import { history } from '../../index';
 
 interface IPublicProps {
   isPackageInBot: boolean;
@@ -94,7 +95,7 @@ class Package extends React.Component<IPrivateProps> {
                   disabled={!isCurrentVersion}
                   style={this.getEditPackageStyle()}
                   onClick={() =>
-                    (location.href = `/packageview/${packagePayload.id}`)
+                    history.push(`/packageview/${packagePayload.id}`)
                   }>
                   {'Edit package'}
                 </button>
