@@ -6,16 +6,14 @@ import ai.labs.runtime.bootstrap.AbstractBaseModule;
 import com.google.inject.Provides;
 import org.eclipse.jetty.client.HttpClient;
 import org.eclipse.jetty.util.ssl.SslContextFactory;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 
 import javax.inject.Named;
 import javax.inject.Singleton;
 import java.io.InputStream;
+import java.util.Arrays;
 import java.util.concurrent.ExecutorService;
 
 public class HttpClientModule extends AbstractBaseModule {
-    private Logger logger = LoggerFactory.getLogger(this.getClass());
 
     public HttpClientModule(InputStream... configFiles) {
         super(configFiles);
@@ -54,7 +52,7 @@ public class HttpClientModule extends AbstractBaseModule {
 
             return httpClient;
         } catch (Exception e) {
-            logger.error(e.getLocalizedMessage(), e);
+            System.out.println(Arrays.toString(e.getStackTrace()));
             throw new RuntimeException(e.getLocalizedMessage(), e);
         }
     }
@@ -69,7 +67,8 @@ public class HttpClientModule extends AbstractBaseModule {
                     }
                 } catch (Throwable e) {
                     String message = "HttpClient did not stop as expected.";
-                    logger.error(message, e);
+                    System.out.println(message);
+                    System.out.println(Arrays.toString(e.getStackTrace()));
                 }
             }
         });

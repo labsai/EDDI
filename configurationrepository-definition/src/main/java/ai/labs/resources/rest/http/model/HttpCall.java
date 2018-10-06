@@ -9,6 +9,7 @@ import java.util.List;
 @Setter
 public class HttpCall {
     private String name;
+    private boolean fireAndForget;
     private boolean saveResponse;
     private String responseObjectName;
     private List<String> actions;

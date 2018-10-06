@@ -2,16 +2,16 @@ package ai.labs.runtime.bootstrap;
 
 import com.google.inject.AbstractModule;
 import com.google.inject.name.Names;
-import lombok.extern.slf4j.Slf4j;
 
 import java.io.IOException;
 import java.io.InputStream;
+import java.util.Arrays;
 import java.util.Properties;
 
 /**
  * @author ginccc
  */
-@Slf4j
+
 public abstract class AbstractBaseModule extends AbstractModule {
     protected final InputStream[] configFiles;
 
@@ -40,7 +40,7 @@ public abstract class AbstractBaseModule extends AbstractModule {
                 Names.bindProperties(binder(), properties);
             }
         } catch (IOException e) {
-            log.error(e.getLocalizedMessage(), e);
+            System.out.println(Arrays.toString(e.getStackTrace()));
         }
     }
 }

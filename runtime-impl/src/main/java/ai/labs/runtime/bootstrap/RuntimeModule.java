@@ -27,8 +27,8 @@ import javax.inject.Singleton;
 import java.io.InputStream;
 import java.util.Arrays;
 import java.util.concurrent.ExecutorService;
-import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ScheduledThreadPoolExecutor;
+import java.util.concurrent.ThreadPoolExecutor;
 
 /**
  * @author ginccc
@@ -68,7 +68,7 @@ public class RuntimeModule extends AbstractBaseModule {
 
     @Provides
     @Singleton
-    private ScheduledExecutorService provideScheduledExecutorService(@Named("threads.corePoolSize") int corePoolSize) {
+    private ScheduledThreadPoolExecutor provideScheduledThreadPoolExecutor(@Named("threads.corePoolSize") int corePoolSize) {
         try {
             return new ScheduledThreadPoolExecutor(corePoolSize);
         } catch (Exception e) {
@@ -78,8 +78,14 @@ public class RuntimeModule extends AbstractBaseModule {
 
     @Provides
     @Singleton
-    private ExecutorService provideExecutorService(@Named("threads.corePoolSize") int corePoolSize) {
-        return provideScheduledExecutorService(corePoolSize);
+    private ThreadPoolExecutor provideThreadPoolExecutor(ScheduledThreadPoolExecutor threadPoolExecutor) {
+        return threadPoolExecutor;
+    }
+
+    @Provides
+    @Singleton
+    private ExecutorService provideExecutorService(ScheduledThreadPoolExecutor threadPoolExecutor) {
+        return threadPoolExecutor;
     }
 
     static class HasInitMethod extends AbstractMatcher<TypeLiteral<?>> {

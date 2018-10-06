@@ -4,6 +4,7 @@ services:
     image: labsai/eddi:latest
     ports:
       - "7070:7070"
+      - "7443:7443"
     links:
       - mongodb
     depends_on:

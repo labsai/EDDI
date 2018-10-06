@@ -1,7 +1,6 @@
 package ai.labs.server;
 
 import ai.labs.runtime.SwaggerServletContextListener;
-import ai.labs.runtime.SystemRuntime;
 import ai.labs.runtime.ThreadContext;
 import ai.labs.utilities.FileUtilities;
 import lombok.AllArgsConstructor;
@@ -38,6 +37,7 @@ import java.net.MalformedURLException;
 import java.net.URI;
 import java.net.URL;
 import java.util.*;
+import java.util.concurrent.ThreadPoolExecutor;
 
 /**
  * @author ginccc
@@ -69,6 +69,7 @@ public class ServerRuntime implements IServerRuntime {
     private final SwaggerServletContextListener swaggerContextListener;
     private final HttpServletDispatcher httpServletDispatcher;
     private final SecurityHandler securityHandler;
+    private final ThreadPoolExecutor threadPoolExecutor;
     private final String environment;
     private final String resourceDir;
 
@@ -77,6 +78,7 @@ public class ServerRuntime implements IServerRuntime {
                          SwaggerServletContextListener swaggerContextListener,
                          HttpServletDispatcher httpServletDispatcher,
                          SecurityHandler securityHandler,
+                         ThreadPoolExecutor threadPoolExecutor,
                          @Named("system.environment") String environment,
                          @Named("systemRuntime.resourceDir") String resourceDir) {
         this.options = options;
@@ -84,6 +86,7 @@ public class ServerRuntime implements IServerRuntime {
         this.swaggerContextListener = swaggerContextListener;
         this.httpServletDispatcher = httpServletDispatcher;
         this.securityHandler = securityHandler;
+        this.threadPoolExecutor = threadPoolExecutor;
         this.environment = environment;
         this.resourceDir = resourceDir;
         RegisterBuiltin.register(ResteasyProviderFactory.getInstance());
@@ -133,7 +136,6 @@ public class ServerRuntime implements IServerRuntime {
 
         HTTP2ServerConnectionFactory http2 = new HTTP2ServerConnectionFactory(config);
 
-        NegotiatingServerConnectionFactory.checkProtocolNegotiationAvailable();
         ALPNServerConnectionFactory alpn = new ALPNServerConnectionFactory();
         alpn.setDefaultProtocol("h2");
 
@@ -215,7 +217,7 @@ public class ServerRuntime implements IServerRuntime {
         return new Filter() {
 
             @Override
-            public void init(FilterConfig filterConfig) throws ServletException {
+            public void init(FilterConfig filterConfig) {
                 //not implemented
             }
 
@@ -269,7 +271,7 @@ public class ServerRuntime implements IServerRuntime {
     private Filter createInitThreadBoundValuesFilter() {
         return new Filter() {
             @Override
-            public void init(FilterConfig filterConfig) throws ServletException {
+            public void init(FilterConfig filterConfig) {
                 //not implemented
             }
 
@@ -326,7 +328,7 @@ public class ServerRuntime implements IServerRuntime {
     }
 
     private ThreadPool createThreadPool() {
-        return new ExecutorThreadPool(SystemRuntime.getRuntime().getExecutorService());
+        return new ExecutorThreadPool(threadPoolExecutor);
     }
 
     @AllArgsConstructor

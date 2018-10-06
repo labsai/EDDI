@@ -1,4 +1,4 @@
-FROM openjdk:8u151-jre-alpine3.7
+FROM labsai/base-image
 
 ARG EDDI_VERSION
 ARG EDDI_ENV
@@ -6,9 +6,6 @@ ARG EDDI_MEMORY_MIN
 ARG EDDI_MEMORY_MAX
 
 EXPOSE 7070
-
-RUN apk update
-RUN apk add --no-cache bash
 
 RUN mkdir -p /apiserver/
 WORKDIR /apiserver/
