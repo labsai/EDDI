@@ -4,13 +4,13 @@ import * as renderIf from 'render-if';
 import PluginList from './PluginList';
 import styles from './Package.styles';
 import { Component, compose, pure, setDisplayName } from 'recompose';
-import { IDefaultPluginTypes, IPackage } from '../utils/AxiosFunctions';
+import { IPackage } from '../utils/AxiosFunctions';
 import { connect } from 'react-redux';
 import { packageSelector } from '../../selectors/PackageSelectors';
 import * as _ from 'lodash';
 import VersionSelectComponent from '../Assets/VersionSelectComponent';
 import { Link, browserHistory } from 'react-router-dom';
-import { defaultPluginTypesSelector } from '../../selectors/PluginSelectors';
+import { history } from '../../history';
 
 interface IPublicProps {
   isPackageInBot: boolean;
@@ -94,7 +94,7 @@ class Package extends React.Component<IPrivateProps> {
                   disabled={!isCurrentVersion}
                   style={this.getEditPackageStyle()}
                   onClick={() =>
-                    (location.href = `/packageview/${packagePayload.id}`)
+                    history.push(`/packageview/${packagePayload.id}`)
                   }>
                   {'Edit package'}
                 </button>
