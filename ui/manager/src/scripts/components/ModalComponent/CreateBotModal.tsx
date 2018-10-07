@@ -4,7 +4,7 @@ import styles from './ModalComponent.styles';
 import './ModalComponent.styles.scss';
 import { Component, compose, pure, setDisplayName } from 'recompose';
 import { createNewBot } from '../utils/AxiosFunctions';
-import { history } from '../../index';
+import { history } from '../../history';
 import modalActionDispatchers from '../../actions/ModalActionDispatchers';
 
 const customStyles = {

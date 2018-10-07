@@ -4,14 +4,13 @@ import * as renderIf from 'render-if';
 import PluginList from './PluginList';
 import styles from './Package.styles';
 import { Component, compose, pure, setDisplayName } from 'recompose';
-import { IDefaultPluginTypes, IPackage } from '../utils/AxiosFunctions';
+import { IPackage } from '../utils/AxiosFunctions';
 import { connect } from 'react-redux';
 import { packageSelector } from '../../selectors/PackageSelectors';
 import * as _ from 'lodash';
 import VersionSelectComponent from '../Assets/VersionSelectComponent';
 import { Link, browserHistory } from 'react-router-dom';
-import { defaultPluginTypesSelector } from '../../selectors/PluginSelectors';
-import { history } from '../../index';
+import { history } from '../../history';
 
 interface IPublicProps {
   isPackageInBot: boolean;

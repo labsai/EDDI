@@ -16,7 +16,7 @@ import * as _ from 'lodash';
 import eddiApiActionDispatchers from '../../actions/EddiApiActionDispatchers';
 import { connect } from 'react-redux';
 import { defaultPluginTypesSelector } from '../../selectors/PluginSelectors';
-import { history } from '../../index';
+import { history } from '../../history';
 import modalActionDispatchers from '../../actions/ModalActionDispatchers';
 
 const customStyles = {
