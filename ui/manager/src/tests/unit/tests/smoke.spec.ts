@@ -1,4 +1,4 @@
-import {assert} from 'chai';
+import { assert } from 'chai';
 
 describe('Smoke test', function() {
   it('should support async functions', async function() {
