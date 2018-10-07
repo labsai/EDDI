@@ -104,7 +104,7 @@ public class ConversationMemoryStore implements IConversationMemoryStore, IResou
     public Long getActiveConversationCount(String botId, Integer botVersion) {
         Bson query = Filters.and(Filters.eq("botId", botId), Filters.eq("botVersion", botVersion),
                 Filters.not(new Document("conversationState", ENDED.toString())));
-        return conversationCollection.count(query);
+        return conversationCollection.countDocuments(query);
     }
 
     @Override
