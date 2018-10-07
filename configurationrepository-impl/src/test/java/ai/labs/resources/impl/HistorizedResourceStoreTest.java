@@ -160,7 +160,7 @@ public class HistorizedResourceStoreTest {
 
         // assert
         Assert.assertNotNull(id.getId());
-        Assert.assertEquals(new Integer(1), id.getVersion());
+        Assert.assertEquals(Integer.valueOf(1), id.getVersion());
         Assert.assertEquals(1, mockResourceStorage.getResources().size());
     }
 
@@ -174,12 +174,12 @@ public class HistorizedResourceStoreTest {
         Integer newVersion = testResourceStore.update(id.getId(), id.getVersion(), dataClass);
 
         // assert
-        Assert.assertEquals(new Integer(2), newVersion);
+        Assert.assertEquals(Integer.valueOf(2), newVersion);
         Assert.assertEquals(1, mockResourceStorage.getResources().size());
 
         IResourceStorage.IResource resource = mockResourceStorage.getResources().get(id.getId());
         Assert.assertEquals(id.getId(), resource.getId());
-        Assert.assertEquals(new Integer(2), resource.getVersion());
+        Assert.assertEquals(Integer.valueOf(2), resource.getVersion());
 
         Map<Integer, IResourceStorage.IHistoryResource> history = mockResourceStorage.getHistory().get(id.getId());
         Assert.assertEquals(1, history.size());

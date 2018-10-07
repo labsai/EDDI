@@ -24,9 +24,9 @@ public interface IRestRegularDictionaryStore extends IRestVersionInfo {
     @Path("/descriptors")
     @Produces(MediaType.APPLICATION_JSON)
     @ApiImplicitParams({
-            @ApiImplicitParam(name = "filter", format = "string", example = "<name_of_regular_dictionary>"),
-            @ApiImplicitParam(name = "index", format = "integer", example = "<at what position should the paging start>"),
-            @ApiImplicitParam(name = "limit", format = "integer", example = "<how many results should be returned>")})
+            @ApiImplicitParam(name = "filter", paramType = "query", dataType = "string", format = "string", example = "<name_of_regular_dictionary>"),
+            @ApiImplicitParam(name = "index", paramType = "query", dataType = "integer", format = "integer", example = "0"),
+            @ApiImplicitParam(name = "limit", paramType = "query", dataType = "integer", format = "integer", example = "20")})
     @ApiResponse(code = 200, response = DocumentDescriptor.class, responseContainer = "List",
             message = "Array of DocumentDescriptors")
     List<DocumentDescriptor> readRegularDictionaryDescriptors(@QueryParam("filter") @DefaultValue("") String filter,
