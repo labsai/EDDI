@@ -121,6 +121,6 @@ class CompareNumeralStrings implements Comparable<CompareNumeralStrings> {
 
     @Override
     public int compareTo(CompareNumeralStrings o) {
-        return new Integer(number).compareTo(o.number);
+        return Integer.valueOf(number).compareTo(o.number);
     }
 }
