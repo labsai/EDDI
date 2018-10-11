@@ -24,6 +24,8 @@ import {
   watchCreateNewConfig,
   watchUpdatePackages,
   watchUpdateBots,
+  watchDeployBot,
+  watchUndeployBot,
 } from './EddiApiSaga';
 
 function* root() {
@@ -49,6 +51,8 @@ function* root() {
   yield fork(watchCreateNewConfig);
   yield fork(watchUpdatePackages);
   yield fork(watchUpdateBots);
+  yield fork(watchDeployBot);
+  yield fork(watchUndeployBot);
 }
 
 export const run: () => Task = () => sagaMiddleware.run(root);

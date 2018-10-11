@@ -3,6 +3,7 @@ import { Action, Reducer } from 'redux';
 import {
   IShowAddPackagesModalAction,
   IShowAddPluginsModalAction,
+  IShowConfirmationModal,
   IShowCreateNewConfig2Modal,
   IShowCreateNewConfigModal,
   IShowEditBotModalAction,
@@ -15,6 +16,7 @@ import {
   CLOSE_MODAL,
   SHOW_ADD_PACKAGES_MODAL,
   SHOW_ADD_PLUGINS_MODAL,
+  SHOW_CONFIRMATION_MODAL,
   SHOW_CREATE_NEW_CONFIG_2_MODAL,
   SHOW_CREATE_NEW_CONFIG_MODAL,
   SHOW_EDIT_BOT_MODAL,
@@ -55,7 +57,9 @@ export interface IModalState {
   descriptor: IDetailedDescriptor;
   resource: string;
   data: {};
+  message: string;
   addPlugin?: (plugins: string[]) => void;
+  onConfirm?: () => void;
 }
 
 export const initialState: IModalState = {
@@ -69,6 +73,8 @@ export const initialState: IModalState = {
   resource: null,
   addPlugin: null,
   data: null,
+  message: null,
+  onConfirm: null,
 };
 
 const ModalReducer: IModalReducer = (
@@ -317,6 +323,22 @@ const ModalReducer: IModalReducer = (
           $set: (action as IUpdatePackagesSuccessAction).packages.map(
             pkg => pkg.resource,
           ),
+        },
+      });
+
+    case SHOW_CONFIRMATION_MODAL:
+      return update(state, {
+        mode: {
+          $set: ModalEnum.confirmation,
+        },
+        isModalOpen: {
+          $set: true,
+        },
+        onConfirm: {
+          $set: (action as IShowConfirmationModal).onConfirm,
+        },
+        message: {
+          $set: (action as IShowConfirmationModal).message,
         },
       });
 

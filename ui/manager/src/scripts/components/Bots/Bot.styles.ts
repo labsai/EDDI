@@ -60,9 +60,41 @@ const styles: CSSProperties = {
   },
   publishButton: {
     height: '35px',
+    width: '108px',
+    borderRadius: '4px',
+    cursor: 'pointer',
+    fontSize: '12px',
+    textAlign: 'center',
     marginLeft: '25px',
     marginRight: '25px',
     marginTop: '17px',
+  },
+  undeployButton: {
+    color: 'white',
+    backgroundColor: '#FF5976',
+    border: '1px solid #FF5976',
+    ':hover': {
+      backgroundColor: 'red',
+    },
+  },
+  deployButton: {
+    color: 'white',
+    backgroundColor: '#4BCA81',
+    border: '1px solid #4BCA81',
+    ':hover': {
+      backgroundColor: 'green',
+    },
+  },
+  inProgressButton: {
+    color: 'white',
+    backgroundColor: '#FADA5E',
+    border: '1px solid #FADA5E',
+  },
+  errorButton: {
+    color: 'red',
+    backgroundColor: 'white',
+    border: '1px solid #D8DDE6',
+    cursor: 'default',
   },
   updateAvailable: {
     color: '#FF5976',

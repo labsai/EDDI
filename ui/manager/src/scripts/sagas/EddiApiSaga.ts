@@ -22,6 +22,8 @@ import {
   CREATE_NEW_CONFIG,
   UPDATE_PACKAGES,
   UPDATE_BOTS,
+  DEPLOY_BOT,
+  UNDEPLOY_BOT,
 } from '../actions/EddiApiActionTypes';
 import {
   getPackage,
@@ -55,6 +57,8 @@ import {
   updatePackages as axiosUpdatePackages,
   updateResourcesInBot,
   updateBots as axiosUpdateBots,
+  deployBot as axiosDeployBot,
+  undeployBot as axiosUndeployBot,
 } from '../components/utils/AxiosFunctions';
 import {
   fetchBotFailedAction,
@@ -115,6 +119,12 @@ import {
   IUpdateBotsAction,
   updateBotsFailedAction,
   updateBotsSuccessAction,
+  IDeployBotAction,
+  deployBotSuccessAction,
+  deployBotFailedAction,
+  IUndeployBotAction,
+  undeployBotSuccessAction,
+  undeployBotFailedAction,
 } from '../actions/EddiApiActions';
 import * as Edditypes from '../components/utils/EddiTypes';
 import Parser from '../components/utils/Parser';
@@ -494,4 +504,30 @@ export function* updateBots(action: IUpdateBotsAction): Iterator<{}> {
 
 export function* watchUpdateBots(): Iterator<{}> {
   yield takeEvery(UPDATE_BOTS, updateBots);
+}
+
+export function* deployBot(action: IDeployBotAction): Iterator<{}> {
+  try {
+    yield call(axiosDeployBot, action.botResource);
+    yield put(deployBotSuccessAction(action.botResource));
+  } catch (err) {
+    yield put(deployBotFailedAction(err));
+  }
+}
+
+export function* watchDeployBot(): Iterator<{}> {
+  yield takeEvery(DEPLOY_BOT, deployBot);
+}
+
+export function* undeployBot(action: IUndeployBotAction): Iterator<{}> {
+  try {
+    yield call(axiosUndeployBot, action.botResource);
+    yield put(undeployBotSuccessAction(action.botResource));
+  } catch (err) {
+    yield put(undeployBotFailedAction(err));
+  }
+}
+
+export function* watchUndeployBot(): Iterator<{}> {
+  yield takeEvery(UNDEPLOY_BOT, undeployBot);
 }

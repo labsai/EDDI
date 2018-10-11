@@ -18,6 +18,7 @@ import {
   SHOW_CREATE_NEW_CONFIG_2_MODAL,
   SHOW_UPDATE_PACKAGES_MODAL,
   SHOW_UPDATE_BOTS_MODAL,
+  SHOW_CONFIRMATION_MODAL,
 } from './ModalActionTypes';
 
 export interface IShowModalAction extends Action {
@@ -28,7 +29,9 @@ export interface IShowModalAction extends Action {
   selectedResources?: string[];
   descriptor?: IDetailedDescriptor;
   data?: string;
+  message?: string;
   addPlugin?: (plugins: string[]) => void;
+  onConfirm?: () => void;
 }
 
 export function showModal(
@@ -39,7 +42,9 @@ export function showModal(
   selectedResources?: string[],
   descriptor?: IDetailedDescriptor,
   data?: string,
+  message?: string,
   addPlugin?: (plugins: string[]) => void,
+  onConfirm?: () => void,
 ): IShowModalAction {
   return {
     mode,
@@ -49,7 +54,9 @@ export function showModal(
     selectedResources,
     descriptor,
     data,
+    message,
     addPlugin,
+    onConfirm,
     type: SHOW_MODAL,
   };
 }
@@ -210,5 +217,21 @@ export function showUpdateBotsModal(
   return {
     packageResources,
     type: SHOW_UPDATE_BOTS_MODAL,
+  };
+}
+
+export interface IShowConfirmationModal extends Action {
+  message: string;
+  onConfirm: () => void;
+}
+
+export function showConfirmationModal(
+  message: string,
+  onConfirm: () => void,
+): IShowConfirmationModal {
+  return {
+    message,
+    onConfirm,
+    type: SHOW_CONFIRMATION_MODAL,
   };
 }

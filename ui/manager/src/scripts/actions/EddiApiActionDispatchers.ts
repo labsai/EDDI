@@ -55,6 +55,15 @@ import {
   updateBotsSuccessAction,
   updateBotsAction,
   updateBotsFailedAction,
+  IDeployBotAction,
+  IDeployBotSuccessAction,
+  IDeployBotFailedAction,
+  deployBotAction,
+  deployBotSuccessAction,
+  deployBotFailedAction,
+  undeployBotFailedAction,
+  undeployBotSuccessAction,
+  undeployBotAction,
 } from './EddiApiActions';
 
 export interface IEddiApiActionDispatchers extends ActionCreatorsMapObject {
@@ -104,6 +113,9 @@ export interface IEddiApiActionDispatchers extends ActionCreatorsMapObject {
   updateBotsAction: (bots) => IUpdateBotsAction;
   updateBotsSuccessAction: (bots) => IUpdateBotsSuccessAction;
   updateBotsFailedAction: (error) => IUpdateBotsFailedAction;
+  deployBotAction: (botResource) => IDeployBotAction;
+  deployBotSuccessAction: (botResource) => IDeployBotSuccessAction;
+  deployBotFailedAction: (error) => IDeployBotFailedAction;
 }
 
 const actions: IEddiApiActionDispatchers = {
@@ -134,6 +146,12 @@ const actions: IEddiApiActionDispatchers = {
   updateBotsAction,
   updateBotsFailedAction,
   updateBotsSuccessAction,
+  deployBotAction,
+  deployBotSuccessAction,
+  deployBotFailedAction,
+  undeployBotAction,
+  undeployBotSuccessAction,
+  undeployBotFailedAction,
 };
 
 const eddiApiActionDispatchers: IEddiApiActionDispatchers = bindActionCreators<

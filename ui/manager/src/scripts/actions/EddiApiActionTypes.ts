@@ -104,3 +104,11 @@ export const UPDATE_PACKAGES_FAILED: string = 'UPDATE_PACKAGES_FAILED';
 export const UPDATE_BOTS: string = 'UPDATE_BOTS';
 export const UPDATE_BOTS_SUCCESS: string = 'UPDATE_BOTS_SUCCESS';
 export const UPDATE_BOTS_FAILED: string = 'UPDATE_BOTS_FAILED';
+
+export const DEPLOY_BOT: string = 'DEPLOY_BOT';
+export const DEPLOY_BOT_SUCCESS = 'DEPLOY_BOT_SUCCESS';
+export const DEPLOY_BOT_FAILED = 'DEPLOY_BOT_FAILED';
+
+export const UNDEPLOY_BOT: string = 'UNDEPLOY_BOT';
+export const UNDEPLOY_BOT_SUCCESS: string = 'UNDEPLOY_BOT_SUCCESS';
+export const UNDEPLOY_BOT_FAILED: string = 'UNDEPLOY_BOT_FAILED';

@@ -67,6 +67,12 @@ import {
   UPDATE_BOTS,
   UPDATE_BOTS_SUCCESS,
   UPDATE_BOTS_FAILED,
+  DEPLOY_BOT,
+  DEPLOY_BOT_SUCCESS,
+  DEPLOY_BOT_FAILED,
+  UNDEPLOY_BOT,
+  UNDEPLOY_BOT_SUCCESS,
+  UNDEPLOY_BOT_FAILED,
 } from './EddiApiActionTypes';
 import {
   IBot,
@@ -76,6 +82,7 @@ import {
   IPlugin,
   IPluginsResponse,
   IPluginTypes,
+  undeployBot,
 } from '../components/utils/AxiosFunctions';
 
 export interface IFetchBotsAction extends Action {}
@@ -962,5 +969,77 @@ export function updateBotsFailedAction(error: Error): IUpdateBotsFailedAction {
   return {
     error,
     type: UPDATE_BOTS_FAILED,
+  };
+}
+
+export interface IDeployBotAction extends Action {
+  botResource: string;
+}
+
+export function deployBotAction(botResource: string): IDeployBotAction {
+  return {
+    botResource,
+    type: DEPLOY_BOT,
+  };
+}
+
+export interface IDeployBotSuccessAction extends Action {
+  botResource: string;
+}
+
+export function deployBotSuccessAction(
+  botResource: string,
+): IDeployBotSuccessAction {
+  return {
+    botResource,
+    type: DEPLOY_BOT_SUCCESS,
+  };
+}
+
+export interface IDeployBotFailedAction extends Action {
+  error: Error;
+}
+
+export function deployBotFailedAction(error: Error): IDeployBotFailedAction {
+  return {
+    error,
+    type: DEPLOY_BOT_FAILED,
+  };
+}
+
+export interface IUndeployBotAction extends Action {
+  botResource: string;
+}
+
+export function undeployBotAction(botResource: string): IUndeployBotAction {
+  return {
+    botResource,
+    type: UNDEPLOY_BOT,
+  };
+}
+
+export interface IUndeployBotSuccessAction extends Action {
+  botResource: string;
+}
+
+export function undeployBotSuccessAction(
+  botResource: string,
+): IUndeployBotSuccessAction {
+  return {
+    botResource,
+    type: UNDEPLOY_BOT_SUCCESS,
+  };
+}
+
+export interface IUndeployBotFailedAction extends Action {
+  error: Error;
+}
+
+export function undeployBotFailedAction(
+  error: Error,
+): IUndeployBotFailedAction {
+  return {
+    error,
+    type: UNDEPLOY_BOT_FAILED,
   };
 }

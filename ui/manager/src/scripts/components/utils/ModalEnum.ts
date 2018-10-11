@@ -12,4 +12,5 @@ export enum ModalEnum {
   'createNewConfig2',
   'updatePackages',
   'updateBots',
+  'confirmation',
 }
