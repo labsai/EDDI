@@ -14,7 +14,7 @@ import { Component, compose, pure, setDisplayName } from 'recompose';
 import eddiApiActionDispatchers from '../../actions/EddiApiActionDispatchers';
 import * as _ from 'lodash';
 import * as moment from 'moment';
-import WhiteButton from '../Assets/Buttons/WhiteButton';
+import DeployButton from '../Assets/Buttons/DeployButton';
 import {
   READY,
   ERROR,
@@ -35,84 +35,11 @@ interface IPrivateProps extends IPublicProps {
 const warningIcon = require('../../../public/images/WarningIcon.png');
 
 class Bot extends React.Component<IPrivateProps> {
-  constructor(props) {
-    super(props);
-    this.state = {};
-  }
-
   async componentDidMount() {
     eddiApiActionDispatchers.fetchBotDataAction(this.props.bot.resource);
-    getDeploymentStatus(this.props.bot.resource);
-    console.log(await getDeploymentStatus(this.props.bot.resource));
-  }
-
-  getDeployButton() {
-    let buttonText;
-    let style = styles.publishButton;
-    let disabled = false;
-    switch (this.props.bot.deploymentStatus) {
-      case READY:
-        buttonText = 'Undeploy';
-        style = { ...styles.publishButton, ...styles.undeployButton };
-        return (
-          <button
-            disabled={disabled}
-            style={style}
-            onClick={() =>
-              modalActionDispatchers.showConfirmationModal(
-                `Are you sure you want to undeploy ${this.props.bot.name}?`,
-                () =>
-                  eddiApiActionDispatchers.undeployBotAction(
-                    this.props.bot.resource,
-                  ),
-              )
-            }>
-            {buttonText}
-          </button>
-        );
-      case ERROR:
-        buttonText = 'ERROR';
-        style = { ...styles.publishButton, ...styles.errorButton };
-        disabled = true;
-        break;
-      case IN_PROGRESS:
-        buttonText = 'In Progress';
-        style = { ...styles.publishButton, ...styles.inProgressButton };
-        disabled = true;
-        break;
-      case NOT_FOUND:
-        buttonText = 'Deploy';
-        style = { ...styles.publishButton, ...styles.deployButton };
-        return (
-          <button
-            disabled={disabled}
-            style={style}
-            onClick={() =>
-              eddiApiActionDispatchers.deployBotAction(this.props.bot.resource)
-            }>
-            {buttonText}
-          </button>
-        );
-      default:
-        buttonText = 'STATUS ERROR';
-        style = { ...styles.publishButton, ...styles.errorButton };
-        disabled = true;
-        break;
-    }
-    return (
-      <button disabled={disabled} style={style}>
-        {buttonText}
-      </button>
-    );
   }
 
   render() {
-    console.log(
-      'Deploymentstatus: ' +
-        this.props.bot.deploymentStatus +
-        '  ' +
-        DeploymentStatus.READY,
-    );
     return (
       <div>
         <div style={styles.botBox}>
@@ -149,7 +76,12 @@ class Bot extends React.Component<IPrivateProps> {
                 </span>
               </div>
             </Link>
-            {this.getDeployButton()}
+            <DeployButton
+              name={this.props.bot.name}
+              botResource={this.props.bot.resource}
+              deploymentStatus={this.props.bot.deploymentStatus}
+              customStyles={styles.deployButton}
+            />
           </div>
           <div style={styles.botContent}>
             {renderIf(_.isEmpty(this.props.bot.packages))(() => (
