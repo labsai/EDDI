@@ -11,26 +11,7 @@ import {
 } from '../../utils/helpers/BotHelper';
 import modalActionDispatchers from '../../../actions/ModalActionDispatchers';
 import eddiApiActionDispatchers from '../../../actions/EddiApiActionDispatchers';
-
-const styles: CSSProperties = {
-  button: {
-    border: '0px',
-    color: '#FFFFFF',
-    backgroundColor: '#0070D2',
-  },
-  disabled: {
-    backgroundColor: '#c4c9d2',
-    cursor: 'default',
-  },
-  active: {
-    ':hover': {
-      backgroundColor: '#4A90E2',
-    },
-    ':active': {
-      backgroundColor: '#0070D2',
-    },
-  },
-};
+import { getDeploymentStatus } from '../../utils/AxiosFunctions';
 
 const undeployStyle: CSSProperties = {
   button: {
@@ -76,7 +57,25 @@ interface IProps {
   customStyles: {};
 }
 
+const sleep = milliseconds => {
+  return new Promise(resolve => setTimeout(resolve, milliseconds));
+};
+
 class DeployButton extends React.Component<IProps> {
+  checkStatus() {
+    return getDeploymentStatus(this.props.botResource);
+  }
+  async waitForUpdatedStatus() {
+    const status = await this.checkStatus();
+    if (status === IN_PROGRESS) {
+      return await sleep(500).then(() => this.waitForUpdatedStatus());
+    } else {
+      eddiApiActionDispatchers.updateBotDeploymentStatusAction(
+        this.props.botResource,
+      );
+      return status;
+    }
+  }
   getButton() {
     switch (this.props.deploymentStatus) {
       case READY:
@@ -92,7 +91,7 @@ class DeployButton extends React.Component<IProps> {
                   ),
               )
             }
-            styles={{ ...styles, ...undeployStyle }}
+            styles={undeployStyle}
             customStyles={this.props.customStyles}
           />
         );
@@ -100,7 +99,7 @@ class DeployButton extends React.Component<IProps> {
         return (
           <Button
             text={'ERROR'}
-            styles={{ ...styles, ...errorStyle }}
+            styles={errorStyle}
             customStyles={this.props.customStyles}
             disabled={true}
           />
@@ -109,7 +108,7 @@ class DeployButton extends React.Component<IProps> {
         return (
           <Button
             text={'In Progress'}
-            styles={{ ...styles, ...inProgressStyle }}
+            styles={inProgressStyle}
             customStyles={this.props.customStyles}
             disabled={true}
           />
@@ -121,7 +120,7 @@ class DeployButton extends React.Component<IProps> {
             onClick={() =>
               eddiApiActionDispatchers.deployBotAction(this.props.botResource)
             }
-            styles={{ ...styles, ...deployStyle }}
+            styles={deployStyle}
             customStyles={this.props.customStyles}
           />
         );
@@ -129,7 +128,7 @@ class DeployButton extends React.Component<IProps> {
         return (
           <Button
             text={'STATUS ERROR'}
-            styles={{ ...styles, ...errorStyle }}
+            styles={errorStyle}
             customStyles={this.props.customStyles}
             disabled={true}
           />
@@ -138,6 +137,7 @@ class DeployButton extends React.Component<IProps> {
   }
 
   render() {
+    this.waitForUpdatedStatus();
     return this.getButton();
   }
 }

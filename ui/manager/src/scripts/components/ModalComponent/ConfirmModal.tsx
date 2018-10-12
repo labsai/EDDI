@@ -28,7 +28,6 @@ interface IProps {
 }
 class ConfirmModal extends React.Component<IProps> {
   onClick = () => {
-    console.log('BUTTON CLICKED');
     this.props.onConfirm();
     modalActionDispatchers.closeModal();
   };
@@ -43,7 +42,7 @@ class ConfirmModal extends React.Component<IProps> {
             <WhiteButton
               customStyles={styles.buttonMargin}
               text={'Cancel'}
-              onClick={() => modalActionDispatchers.closeModal}
+              onClick={modalActionDispatchers.closeModal}
             />
             <BlueButton text={'Confirm'} onClick={this.onClick} />
           </div>

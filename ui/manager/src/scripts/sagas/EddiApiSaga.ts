@@ -24,6 +24,7 @@ import {
   UPDATE_BOTS,
   DEPLOY_BOT,
   UNDEPLOY_BOT,
+  UPDATE_BOT_DEPLOYMENT_STATUS,
 } from '../actions/EddiApiActionTypes';
 import {
   getPackage,
@@ -59,6 +60,7 @@ import {
   updateBots as axiosUpdateBots,
   deployBot as axiosDeployBot,
   undeployBot as axiosUndeployBot,
+  getDeploymentStatus,
 } from '../components/utils/AxiosFunctions';
 import {
   fetchBotFailedAction,
@@ -125,6 +127,9 @@ import {
   IUndeployBotAction,
   undeployBotSuccessAction,
   undeployBotFailedAction,
+  IUpdateBotDeploymentStatusAction,
+  updateBotDeploymentStatusSuccessAction,
+  updateBotDeploymentStatusFailedAction,
 } from '../actions/EddiApiActions';
 import * as Edditypes from '../components/utils/EddiTypes';
 import Parser from '../components/utils/Parser';
@@ -530,4 +535,21 @@ export function* undeployBot(action: IUndeployBotAction): Iterator<{}> {
 
 export function* watchUndeployBot(): Iterator<{}> {
   yield takeEvery(UNDEPLOY_BOT, undeployBot);
+}
+
+export function* updateBotDeploymentStatus(
+  action: IUpdateBotDeploymentStatusAction,
+): Iterator<{}> {
+  try {
+    const status = yield call(getDeploymentStatus, action.botResource);
+    yield put(
+      updateBotDeploymentStatusSuccessAction(action.botResource, status),
+    );
+  } catch (err) {
+    yield put(updateBotDeploymentStatusFailedAction(err));
+  }
+}
+
+export function* watchUpdateBotDeploymentStatus(): Iterator<{}> {
+  yield takeEvery(UPDATE_BOT_DEPLOYMENT_STATUS, updateBotDeploymentStatus);
 }

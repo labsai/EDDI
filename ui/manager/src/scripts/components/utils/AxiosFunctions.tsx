@@ -199,6 +199,7 @@ export async function getCurrentBot(id: string): Promise<IBot> {
     )).data;
     const descriptor = await getDescriptor(id, version);
     const data: IBotData = await getBotData(descriptor.resource);
+    const deploymentStatus = await getDeploymentStatus(descriptor.resource);
     return {
       id,
       lastModifiedOn: descriptor.lastModifiedOn,
@@ -210,6 +211,7 @@ export async function getCurrentBot(id: string): Promise<IBot> {
       createdOn: descriptor.createdOn,
       packages: data.packages,
       channels: data.channels,
+      deploymentStatus,
     };
   } catch (err) {
     console.error(`Failed to get current bot. Error: ${err.message}`);
@@ -890,22 +892,13 @@ export async function updatePackages(
   }
 }
 
-export enum DeploymentStatus {
-  'NOT_FOUND',
-  'IN_PROGRESS',
-  'ERROR',
-  'READY',
-}
-
 export async function getDeploymentStatus(resource: string) {
   try {
-    // todo: getdeploymentstatus
     const res = await axios.get(
       `${await getAPIUrl()}/administration/unrestricted/deploymentstatus/${Parser.getIdAndVersion(
         resource,
       )}`,
     );
-    console.log(res);
     return res.data;
   } catch (err) {
     console.error(`Failed to get deployment status. Error: ${err.message}`);
@@ -915,7 +908,6 @@ export async function getDeploymentStatus(resource: string) {
 
 export async function deployBot(resource: string) {
   try {
-    // todo: deploy bot
     await axios.post(
       `${await getAPIUrl()}/administration/unrestricted/deploy/${Parser.getIdAndVersion(
         resource,
@@ -929,7 +921,6 @@ export async function deployBot(resource: string) {
 
 export async function undeployBot(resource: string) {
   try {
-    // todo: undeploy bot
     await axios.post(
       `${await getAPIUrl()}/administration/unrestricted/undeploy/${Parser.getIdAndVersion(
         resource,

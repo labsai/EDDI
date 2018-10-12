@@ -73,6 +73,9 @@ import {
   UNDEPLOY_BOT,
   UNDEPLOY_BOT_SUCCESS,
   UNDEPLOY_BOT_FAILED,
+  UPDATE_BOT_DEPLOYMENT_STATUS,
+  UPDATE_BOT_DEPLOYMENT_STATUS_SUCCESS,
+  UPDATE_BOT_DEPLOYMENT_STATUS_FAILED,
 } from './EddiApiActionTypes';
 import {
   IBot,
@@ -1041,5 +1044,47 @@ export function undeployBotFailedAction(
   return {
     error,
     type: UNDEPLOY_BOT_FAILED,
+  };
+}
+
+export interface IUpdateBotDeploymentStatusAction extends Action {
+  botResource: string;
+}
+
+export function updateBotDeploymentStatusAction(
+  botResource: string,
+): IUpdateBotDeploymentStatusAction {
+  return {
+    botResource,
+    type: UPDATE_BOT_DEPLOYMENT_STATUS,
+  };
+}
+
+export interface IUpdateBotDeploymentStatusSuccessAction extends Action {
+  botResource: string;
+  status: string;
+}
+
+export function updateBotDeploymentStatusSuccessAction(
+  botResource: string,
+  status: string,
+): IUpdateBotDeploymentStatusSuccessAction {
+  return {
+    botResource,
+    status,
+    type: UPDATE_BOT_DEPLOYMENT_STATUS_SUCCESS,
+  };
+}
+
+export interface IUpdateBotDeploymentStatusFailedAction extends Action {
+  error: Error;
+}
+
+export function updateBotDeploymentStatusFailedAction(
+  error: Error,
+): IUpdateBotDeploymentStatusFailedAction {
+  return {
+    error,
+    type: UPDATE_BOT_DEPLOYMENT_STATUS_FAILED,
   };
 }

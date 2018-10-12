@@ -21,6 +21,7 @@ import {
   DEPLOY_BOT,
   DEPLOY_BOT_SUCCESS,
   UNDEPLOY_BOT_SUCCESS,
+  UPDATE_BOT_DEPLOYMENT_STATUS_SUCCESS,
 } from '../actions/EddiApiActionTypes';
 import * as update from 'immutability-helper';
 import {
@@ -37,6 +38,7 @@ import {
   IUpdateBotsSuccessAction,
   IDeployBotSuccessAction,
   IUndeployBotSuccessAction,
+  IUpdateBotDeploymentStatusSuccessAction,
 } from '../actions/EddiApiActions';
 import * as _ from 'lodash';
 
@@ -295,6 +297,28 @@ const BotReducer: IBotReducer = (
                 return update(bot, {
                   deploymentStatus: {
                     $set: 'NOT_FOUND',
+                  },
+                });
+              }
+              return bot;
+            });
+          },
+        },
+      });
+
+    case UPDATE_BOT_DEPLOYMENT_STATUS_SUCCESS:
+      return update(state, {
+        bots: {
+          $apply: (bots: IBot[]) => {
+            return bots.map(bot => {
+              if (
+                bot.resource ===
+                (action as IUpdateBotDeploymentStatusSuccessAction).botResource
+              ) {
+                return update(bot, {
+                  deploymentStatus: {
+                    $set: (action as IUpdateBotDeploymentStatusSuccessAction)
+                      .status,
                   },
                 });
               }

@@ -3,25 +3,13 @@ import * as renderIf from 'render-if';
 import styles from './Bot.styles';
 import * as Radium from 'radium';
 import { Link, browserHistory } from 'react-router-dom';
-import {
-  IBot,
-  IPackage,
-  getDeploymentStatus,
-  DeploymentStatus,
-} from '../utils/AxiosFunctions';
+import { IBot } from '../utils/AxiosFunctions';
 import Packages from './Packages';
 import { Component, compose, pure, setDisplayName } from 'recompose';
 import eddiApiActionDispatchers from '../../actions/EddiApiActionDispatchers';
 import * as _ from 'lodash';
 import * as moment from 'moment';
 import DeployButton from '../Assets/Buttons/DeployButton';
-import {
-  READY,
-  ERROR,
-  IN_PROGRESS,
-  NOT_FOUND,
-} from '../utils/helpers/BotHelper';
-import modalActionDispatchers from '../../actions/ModalActionDispatchers';
 
 interface IPublicProps {
   bot: IBot;

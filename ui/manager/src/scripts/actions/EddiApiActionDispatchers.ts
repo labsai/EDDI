@@ -64,6 +64,12 @@ import {
   undeployBotFailedAction,
   undeployBotSuccessAction,
   undeployBotAction,
+  IUpdateBotDeploymentStatusAction,
+  IUpdateBotDeploymentStatusSuccessAction,
+  IUpdateBotDeploymentStatusFailedAction,
+  updateBotDeploymentStatusAction,
+  updateBotDeploymentStatusFailedAction,
+  updateBotDeploymentStatusSuccessAction,
 } from './EddiApiActions';
 
 export interface IEddiApiActionDispatchers extends ActionCreatorsMapObject {
@@ -116,6 +122,16 @@ export interface IEddiApiActionDispatchers extends ActionCreatorsMapObject {
   deployBotAction: (botResource) => IDeployBotAction;
   deployBotSuccessAction: (botResource) => IDeployBotSuccessAction;
   deployBotFailedAction: (error) => IDeployBotFailedAction;
+  updateBotDeploymentStatusAction: (
+    botResource,
+  ) => IUpdateBotDeploymentStatusAction;
+  updateBotDeploymentStatusSuccessAction: (
+    botResource,
+    status,
+  ) => IUpdateBotDeploymentStatusSuccessAction;
+  updateBotDeploymentStatusFailedAction: (
+    error,
+  ) => IUpdateBotDeploymentStatusFailedAction;
 }
 
 const actions: IEddiApiActionDispatchers = {
@@ -152,6 +168,9 @@ const actions: IEddiApiActionDispatchers = {
   undeployBotAction,
   undeployBotSuccessAction,
   undeployBotFailedAction,
+  updateBotDeploymentStatusAction,
+  updateBotDeploymentStatusSuccessAction,
+  updateBotDeploymentStatusFailedAction,
 };
 
 const eddiApiActionDispatchers: IEddiApiActionDispatchers = bindActionCreators<
