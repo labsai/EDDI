@@ -2,9 +2,9 @@ package ai.labs.behavior.impl.extensions;
 
 import ai.labs.expressions.Expression;
 import ai.labs.expressions.utilities.IExpressionProvider;
-import ai.labs.lifecycle.model.Context;
 import ai.labs.memory.IConversationMemory;
 import ai.labs.memory.IData;
+import ai.labs.models.Context;
 import ai.labs.serialization.IJsonSerialization;
 import lombok.EqualsAndHashCode;
 import org.junit.Assert;
@@ -27,7 +27,7 @@ public class ContextMatcherTest {
     private IConversationMemory.IWritableConversationStep currentStep;
 
     @Before
-    public void setUp() throws Exception {
+    public void setUp() {
         expressionProvider = mock(IExpressionProvider.class);
         jsonSerialization = mock(IJsonSerialization.class);
         contextMatcher = new ContextMatcher(expressionProvider, jsonSerialization);
@@ -37,7 +37,7 @@ public class ContextMatcherTest {
     }
 
     @Test
-    public void getValuesWithExpressions() throws Exception {
+    public void getValuesWithExpressions() {
         //setup
         final HashMap<String, String> expected = setupValuesWithExpressions();
 
@@ -65,7 +65,7 @@ public class ContextMatcherTest {
     }
 
     @Test
-    public void getValuesWithObject() throws Exception {
+    public void getValuesWithObject() {
         //setup
         final HashMap<String, String> expected = setupValuesWithObject(true);
 
@@ -91,7 +91,7 @@ public class ContextMatcherTest {
     }
 
     @Test
-    public void getValuesWithString() throws Exception {
+    public void getValuesWithString() {
         //setup
         final HashMap<String, String> expected = setupValuesWithString();
 
@@ -112,7 +112,7 @@ public class ContextMatcherTest {
     }
 
     @Test
-    public void executeWithExpressionForSuccess() throws Exception {
+    public void executeWithExpressionForSuccess() {
         //setup
         final HashMap<String, String> values = setupValuesWithExpressions();
         when(currentStep.getAllData(eq("context"))).then(invocation -> {
@@ -134,7 +134,7 @@ public class ContextMatcherTest {
     }
 
     @Test
-    public void executeWithExpressionForFail() throws Exception {
+    public void executeWithExpressionForFail() {
         //setup
         final HashMap<String, String> values = setupValuesWithExpressions();
         final String otherExpressions = "someOtherExpressions(than_expected)";
@@ -271,7 +271,7 @@ public class ContextMatcherTest {
     }
 
     @Test
-    public void executeWithStringForSuccess() throws Exception {
+    public void executeWithStringForSuccess() {
         //setup
         setupValuesWithString();
         when(currentStep.getAllData(eq("context"))).then(invocation -> {
@@ -289,7 +289,7 @@ public class ContextMatcherTest {
     }
 
     @Test
-    public void executeWithStringForFail() throws Exception {
+    public void executeWithStringForFail() {
         //setup
         setupValuesWithString();
         when(currentStep.getAllData(eq("context"))).then(invocation -> {

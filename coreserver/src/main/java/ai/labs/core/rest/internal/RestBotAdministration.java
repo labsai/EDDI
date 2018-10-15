@@ -1,8 +1,8 @@
 package ai.labs.core.rest.internal;
 
 import ai.labs.memory.IConversationMemoryStore;
-import ai.labs.memory.model.Deployment;
-import ai.labs.memory.model.Deployment.Status;
+import ai.labs.models.Deployment;
+import ai.labs.models.Deployment.Status;
 import ai.labs.resources.rest.deployment.IDeploymentStore;
 import ai.labs.rest.rest.IRestBotAdministration;
 import ai.labs.runtime.IBot;

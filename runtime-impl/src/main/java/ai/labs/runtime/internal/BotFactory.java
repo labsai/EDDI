@@ -2,7 +2,7 @@ package ai.labs.runtime.internal;
 
 import ai.labs.lifecycle.IConversation;
 import ai.labs.memory.IConversationMemory;
-import ai.labs.memory.model.Deployment;
+import ai.labs.models.Deployment;
 import ai.labs.runtime.IBot;
 import ai.labs.runtime.IBotFactory;
 import ai.labs.runtime.IExecutablePackage;
@@ -40,7 +40,7 @@ public class BotFactory implements IBotFactory {
     }
 
     @Override
-    public IBot getLatestBot(Deployment.Environment environment, String botId) throws ServiceException {
+    public IBot getLatestBot(Deployment.Environment environment, String botId) {
         List<BotId> botVersions = new LinkedList<>();
 
         Map<BotId, IBot> bots = getBotEnvironment(environment);
@@ -111,20 +111,18 @@ public class BotFactory implements IBotFactory {
     }
 
     @Override
-    public void undeployBot(Deployment.Environment environment, String botId, Integer version) throws ServiceException, IllegalAccessException {
+    public void undeployBot(Deployment.Environment environment, String botId, Integer version) {
         Map<BotId, IBot> botEnvironment = getBotEnvironment(environment);
 
         BotId id = new BotId(botId, version);
-        if (botEnvironment.containsKey(id)) {
-            botEnvironment.remove(id);
-        }
+        botEnvironment.remove(id);
     }
 
     private ConcurrentHashMap<BotId, IBot> getBotEnvironment(Deployment.Environment environment) {
         return environments.get(environment);
     }
 
-    private Bot createInProgressDummyBot(String botId, Integer version) throws IllegalAccessException {
+    private Bot createInProgressDummyBot(String botId, Integer version) {
         Bot bot = new Bot(botId, version) {
             @Override
             public void addPackage(IExecutablePackage executablePackage) throws IllegalAccessException {
@@ -133,14 +131,14 @@ public class BotFactory implements IBotFactory {
 
             @Override
             public IConversation startConversation(IConversation.IConversationOutputRenderer outputProvider)
-                    throws InstantiationException, IllegalAccessException {
+                    throws IllegalAccessException {
                 throw createBotInProgressException();
             }
 
             @Override
             public IConversation continueConversation(IConversationMemory conversationMemory,
                                                       IConversation.IConversationOutputRenderer outputProvider)
-                    throws InstantiationException, IllegalAccessException {
+                    throws IllegalAccessException {
                 throw createBotInProgressException();
             }
         };

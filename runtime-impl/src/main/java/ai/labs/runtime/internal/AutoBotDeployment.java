@@ -1,6 +1,6 @@
 package ai.labs.runtime.internal;
 
-import ai.labs.memory.model.Deployment.Environment;
+import ai.labs.models.Deployment.Environment;
 import ai.labs.persistence.IResourceStore;
 import ai.labs.resources.rest.deployment.IDeploymentStore;
 import ai.labs.resources.rest.deployment.model.DeploymentInfo;

@@ -32,7 +32,6 @@ import ai.labs.testing.bootstrap.AutomatedtestingModule;
 import ai.labs.utilities.FileUtilities;
 import ai.labs.xmpp.bootstrap.XmppModule;
 import ai.labs.xmpp.endpoint.IXmppEndpoint;
-import ai.labs.xmpp.endpoint.XmppEndpoint;
 import com.google.inject.Module;
 import org.jboss.resteasy.plugins.guice.ext.RequestScopeModule;
 

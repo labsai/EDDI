@@ -2,15 +2,15 @@ package ai.labs.core.rest.internal;
 
 import ai.labs.lifecycle.IConversation;
 import ai.labs.lifecycle.LifecycleException;
-import ai.labs.lifecycle.model.Context;
 import ai.labs.memory.IConversationMemory;
 import ai.labs.memory.IConversationMemoryStore;
 import ai.labs.memory.model.ConversationMemorySnapshot;
-import ai.labs.memory.model.ConversationState;
-import ai.labs.memory.model.Deployment;
 import ai.labs.memory.model.SimpleConversationMemorySnapshot;
+import ai.labs.models.Context;
+import ai.labs.models.ConversationState;
+import ai.labs.models.Deployment;
+import ai.labs.models.InputData;
 import ai.labs.persistence.IResourceStore;
-import ai.labs.rest.model.InputData;
 import ai.labs.rest.rest.IRestBotEngine;
 import ai.labs.runtime.IBot;
 import ai.labs.runtime.IBotFactory;
@@ -216,7 +216,7 @@ public class RestBotEngine implements IRestBotEngine {
 
     private Callable<Void> processUserInput(Deployment.Environment environment,
                                             String conversationId, String message,
-                                            Map<String, InputData.Context> inputDataContext,
+                                            Map<String, Context> inputDataContext,
                                             IConversationMemory conversationMemory,
                                             IConversation conversation) {
         return () -> {
@@ -224,7 +224,7 @@ public class RestBotEngine implements IRestBotEngine {
                         conversation.say(message, convertContext(inputDataContext));
                         return null;
                     },
-                    new IFinishedExecution<Void>() {
+                    new IFinishedExecution<>() {
                         @Override
                         public void onComplete(Void result) {
                             try {
@@ -273,7 +273,7 @@ public class RestBotEngine implements IRestBotEngine {
         log.error(msg, t);
     }
 
-    private Map<String, Context> convertContext(Map<String, InputData.Context> inputDataContext) {
+    private Map<String, Context> convertContext(Map<String, Context> inputDataContext) {
         if (inputDataContext == null) {
             return new HashMap<>();
         } else {
@@ -281,7 +281,7 @@ public class RestBotEngine implements IRestBotEngine {
                     .stream()
                     .collect(Collectors.toMap(Map.Entry::getKey,
                             e -> {
-                                InputData.Context context = e.getValue();
+                                Context context = e.getValue();
                                 return new Context(
                                         Context.ContextType.valueOf(context.getType().toString()),
                                         context.getValue());

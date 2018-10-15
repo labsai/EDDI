@@ -1,6 +1,22 @@
 <infinispan>
     <cache-container default-cache="local">
-        <local-cache name="local"/>
+        <!-- template configurations -->
+        <local-cache-configuration name="base-template-config">
+            <memory>
+                <object size="1000"/>
+            </memory>
+        </local-cache-configuration>
+
+        <local-cache-configuration name="user-conversations-config">
+            <memory>
+                <object size="10000"/>
+            </memory>
+            <expiration interval="10000" max-idle="3600000"/>
+        </local-cache-configuration>
+
+        <!-- cache definitions -->
+        <local-cache name="local" configuration="base-template-config"/>
+        <local-cache name="userConversations" configuration="user-conversations-config"/>
     </cache-container>
 </infinispan>
 

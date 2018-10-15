@@ -3,10 +3,10 @@ package ai.labs.property.impl;
 import ai.labs.expressions.Expression;
 import ai.labs.expressions.utilities.IExpressionProvider;
 import ai.labs.lifecycle.ILifecycleTask;
-import ai.labs.lifecycle.model.Context;
 import ai.labs.memory.IConversationMemory;
 import ai.labs.memory.IData;
 import ai.labs.memory.IDataFactory;
+import ai.labs.models.Context;
 import ai.labs.property.IPropertyDisposer;
 import ai.labs.property.model.PropertyEntry;
 import ai.labs.resources.rest.extensions.model.ExtensionDescriptor;
@@ -102,7 +102,7 @@ public class PropertyDisposerTask implements ILifecycleTask {
         contextDataList.forEach(contextData -> {
             String contextKey = contextData.getKey();
             Context context = contextData.getResult();
-            String key = contextKey.substring((CONTEXT_IDENTIFIER + ":").length(), contextKey.length());
+            String key = contextKey.substring((CONTEXT_IDENTIFIER + ":").length());
             if (key.startsWith(PROPERTIES_IDENTIFIER) && context.getType().equals(Context.ContextType.expressions)) {
                 ret.addAll(expressionProvider.parseExpressions(context.getValue().toString()));
             }

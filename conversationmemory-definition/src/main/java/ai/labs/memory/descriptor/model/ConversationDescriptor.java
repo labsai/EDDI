@@ -1,7 +1,7 @@
 package ai.labs.memory.descriptor.model;
 
-import ai.labs.memory.model.ConversationState;
-import ai.labs.memory.model.Deployment;
+import ai.labs.models.ConversationState;
+import ai.labs.models.Deployment;
 import ai.labs.resources.rest.model.ResourceDescriptor;
 import lombok.Getter;
 import lombok.Setter;

@@ -1,10 +1,10 @@
 package ai.labs.rest.rest;
 
 
-import ai.labs.memory.model.ConversationState;
-import ai.labs.memory.model.Deployment;
 import ai.labs.memory.model.SimpleConversationMemorySnapshot;
-import ai.labs.rest.model.InputData;
+import ai.labs.models.ConversationState;
+import ai.labs.models.Deployment;
+import ai.labs.models.InputData;
 import io.swagger.annotations.Api;
 import org.jboss.resteasy.annotations.cache.NoCache;
 
@@ -74,7 +74,7 @@ public interface IRestBotEngine {
      * @param environment
      * @param botId
      * @param conversationId
-     * @param inputData      of type ai.labs.rest.model.InputData
+     * @param inputData      of type ai.labs.models.InputData
      * @return
      * @throws Exception
      */

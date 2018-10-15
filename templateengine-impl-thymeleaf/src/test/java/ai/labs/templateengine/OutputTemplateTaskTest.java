@@ -1,10 +1,10 @@
 package ai.labs.templateengine;
 
-import ai.labs.lifecycle.model.Context;
 import ai.labs.memory.Data;
 import ai.labs.memory.IConversationMemory;
 import ai.labs.memory.IData;
 import ai.labs.memory.IDataFactory;
+import ai.labs.models.Context;
 import ai.labs.output.model.QuickReply;
 import lombok.AllArgsConstructor;
 import lombok.EqualsAndHashCode;

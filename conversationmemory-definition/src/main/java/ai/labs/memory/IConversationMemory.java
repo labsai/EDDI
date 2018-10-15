@@ -1,6 +1,6 @@
 package ai.labs.memory;
 
-import ai.labs.memory.model.ConversationState;
+import ai.labs.models.ConversationState;
 
 import java.io.Serializable;
 import java.util.List;

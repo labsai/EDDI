@@ -1,11 +1,11 @@
 package ai.labs.templateengine;
 
 import ai.labs.lifecycle.ILifecycleTask;
-import ai.labs.lifecycle.model.Context;
-import ai.labs.lifecycle.model.Context.ContextType;
 import ai.labs.memory.IConversationMemory;
 import ai.labs.memory.IData;
 import ai.labs.memory.IDataFactory;
+import ai.labs.models.Context;
+import ai.labs.models.Context.ContextType;
 import ai.labs.output.model.QuickReply;
 import ai.labs.resources.rest.extensions.model.ExtensionDescriptor;
 import ai.labs.templateengine.ITemplatingEngine.TemplateMode;
