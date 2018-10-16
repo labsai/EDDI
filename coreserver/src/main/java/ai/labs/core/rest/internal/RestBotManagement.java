@@ -1,10 +1,8 @@
 package ai.labs.core.rest.internal;
 
-import ai.labs.caching.ICache;
-import ai.labs.caching.ICacheFactory;
 import ai.labs.models.*;
 import ai.labs.resources.rest.botmanagement.IRestBotTriggerStore;
-import ai.labs.resources.rest.botmanagement.IUserConversationStore;
+import ai.labs.resources.rest.botmanagement.IRestUserConversationStore;
 import ai.labs.rest.rest.IRestBotEngine;
 import ai.labs.rest.rest.IRestBotManagement;
 import ai.labs.utilities.RestUtilities;
@@ -18,24 +16,21 @@ import java.net.URI;
 import java.util.List;
 import java.util.Random;
 
-import static ai.labs.persistence.IResourceStore.*;
+import static ai.labs.persistence.IResourceStore.IResourceId;
 
 @Slf4j
 public class RestBotManagement implements IRestBotManagement {
     private final IRestBotEngine restBotEngine;
-    private final IUserConversationStore userConversationStore;
+    private final IRestUserConversationStore restUserConversationStore;
     private final IRestBotTriggerStore restBotManagementStore;
-    private final ICache<String, UserConversation> userConversationCache;
 
     @Inject
     public RestBotManagement(IRestBotEngine restBotEngine,
-                             IUserConversationStore userConversationStore,
-                             IRestBotTriggerStore restBotManagementStore,
-                             ICacheFactory cacheFactory) {
+                             IRestUserConversationStore restUserConversationStore,
+                             IRestBotTriggerStore restBotManagementStore) {
         this.restBotEngine = restBotEngine;
-        this.userConversationStore = userConversationStore;
+        this.restUserConversationStore = restUserConversationStore;
         this.restBotManagementStore = restBotManagementStore;
-        userConversationCache = cacheFactory.getCache("userConversations");
     }
 
     @Override
@@ -69,11 +64,8 @@ public class RestBotManagement implements IRestBotManagement {
         }
     }
 
-    private void deleteUserConversation(String intent, String userId)
-            throws ResourceStoreException {
-
-        userConversationStore.deleteUserConversation(intent, userId);
-        userConversationCache.remove(calculateCacheKey(intent, userId));
+    private void deleteUserConversation(String intent, String userId) {
+        restUserConversationStore.deleteUserConversation(intent, userId);
     }
 
     private boolean isConversationEnded(UserConversation userConversation) {
@@ -83,9 +75,9 @@ public class RestBotManagement implements IRestBotManagement {
     }
 
     private UserConversation createNewConversation(String intent, String userId)
-            throws CannotCreateConversationException, ResourceStoreException, ResourceAlreadyExistsException {
+            throws CannotCreateConversationException {
 
-        BotTriggerConfiguration botTriggerConfiguration = fetchBotTrigger(intent);
+        BotTriggerConfiguration botTriggerConfiguration = getBotTrigger(intent);
         BotDeployment botDeployment = getRandom(botTriggerConfiguration.getBotDeployments());
         Response botResponse = restBotEngine.startConversation(botDeployment.getEnvironment(), botDeployment.getBotId());
         if (botResponse.getStatus() == 201) {
@@ -100,8 +92,7 @@ public class RestBotManagement implements IRestBotManagement {
     }
 
     private UserConversation createUserConversation(String intent, String userId,
-                                                    BotDeployment botDeployment, String conversationId)
-            throws ResourceStoreException, ResourceAlreadyExistsException {
+                                                    BotDeployment botDeployment, String conversationId) {
 
         UserConversation userConversation = new UserConversation(
                 intent,
@@ -119,36 +110,16 @@ public class RestBotManagement implements IRestBotManagement {
         return botDeployments.get(new Random().nextInt(botDeployments.size()));
     }
 
-    private BotTriggerConfiguration fetchBotTrigger(String intent) {
+    private BotTriggerConfiguration getBotTrigger(String intent) {
         return restBotManagementStore.readBotTrigger(intent);
     }
 
-    private UserConversation getUserConversation(String intent, String userId)
-            throws ResourceNotFoundException, ResourceStoreException {
-
-        UserConversation userConversation = userConversationCache.get(calculateCacheKey(intent, userId));
-        if (userConversation == null) {
-            userConversation = fetchUserConversation(intent, userId);
-        }
-
-        return userConversation;
+    private UserConversation getUserConversation(String intent, String userId) {
+        return restUserConversationStore.readUserConversation(intent, userId);
     }
 
-    private UserConversation fetchUserConversation(String intent, String userId)
-            throws ResourceNotFoundException, ResourceStoreException {
-
-        return userConversationStore.readUserConversation(intent, userId);
-    }
-
-    private void storeUserConversation(String intent, String userId, UserConversation userConversation)
-            throws ResourceStoreException, ResourceAlreadyExistsException {
-
-        userConversationCache.put(calculateCacheKey(intent, userId), userConversation);
-        userConversationStore.createUserConversation(userConversation);
-    }
-
-    private static String calculateCacheKey(String intent, String userId) {
-        return intent + "::" + userId;
+    private void storeUserConversation(String intent, String userId, UserConversation userConversation) {
+        restUserConversationStore.createUserConversation(intent, userId, userConversation);
     }
 
     private class CannotCreateConversationException extends Exception {

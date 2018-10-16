@@ -1,5 +1,7 @@
 package ai.labs.resources.impl.botmanagement.rest;
 
+import ai.labs.caching.ICache;
+import ai.labs.caching.ICacheFactory;
 import ai.labs.models.UserConversation;
 import ai.labs.persistence.IResourceStore;
 import ai.labs.resources.rest.botmanagement.IRestUserConversationStore;
@@ -15,17 +17,28 @@ import javax.ws.rs.InternalServerErrorException;
  */
 @Slf4j
 public class RestUserConversationStore implements IRestUserConversationStore {
+    private static final String CACHE_NAME = "userConversations";
     private final IUserConversationStore userConversationStore;
+    private final ICache<String, UserConversation> userConversationCache;
 
     @Inject
-    public RestUserConversationStore(IUserConversationStore userConversationStore) {
+    public RestUserConversationStore(IUserConversationStore userConversationStore,
+                                     ICacheFactory cacheFactory) {
         this.userConversationStore = userConversationStore;
+        userConversationCache = cacheFactory.getCache(CACHE_NAME);
     }
 
     @Override
     public UserConversation readUserConversation(String intent, String userId) {
         try {
-            return userConversationStore.readUserConversation(intent, userId);
+            String cacheKey = calculateCacheKey(intent, userId);
+            UserConversation userConversation = userConversationCache.get(cacheKey);
+            if (userConversation == null) {
+                userConversation = userConversationStore.readUserConversation(intent, userId);
+                userConversationCache.put(cacheKey, userConversation);
+            }
+
+            return userConversation;
         } catch (IResourceStore.ResourceNotFoundException e) {
             throw new NoLogWebApplicationException(404);
         } catch (IResourceStore.ResourceStoreException e) {
@@ -35,12 +48,28 @@ public class RestUserConversationStore implements IRestUserConversationStore {
     }
 
     @Override
+    public void createUserConversation(String intent, String userId, UserConversation userConversation) {
+        try {
+            userConversationCache.put(calculateCacheKey(intent, userId), userConversation);
+            userConversationStore.createUserConversation(userConversation);
+        } catch (IResourceStore.ResourceAlreadyExistsException | IResourceStore.ResourceStoreException e) {
+            log.error(e.getLocalizedMessage(), e);
+            throw new InternalServerErrorException();
+        }
+    }
+
+    @Override
     public void deleteUserConversation(String intent, String userId) {
         try {
             userConversationStore.deleteUserConversation(intent, userId);
+            userConversationCache.remove(calculateCacheKey(intent, userId));
         } catch (IResourceStore.ResourceStoreException e) {
             log.error(e.getLocalizedMessage(), e);
             throw new InternalServerErrorException();
         }
+    }
+
+    private static String calculateCacheKey(String intent, String userId) {
+        return intent + "::" + userId;
     }
 }

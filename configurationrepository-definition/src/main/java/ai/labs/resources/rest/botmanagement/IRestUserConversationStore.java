@@ -16,6 +16,12 @@ public interface IRestUserConversationStore {
     @Produces(MediaType.APPLICATION_JSON)
     UserConversation readUserConversation(@PathParam("intent") String intent, @PathParam("userId") String userId);
 
+    @POST
+    @Path("/{intent}/{userId}")
+    @Produces(MediaType.APPLICATION_JSON)
+    void createUserConversation(@PathParam("intent") String intent, @PathParam("userId") String userId,
+                                UserConversation userConversation);
+
     @DELETE
     @Path("/{intent}/{userId}")
     void deleteUserConversation(@PathParam("intent") String intent, @PathParam("userId") String userId);
