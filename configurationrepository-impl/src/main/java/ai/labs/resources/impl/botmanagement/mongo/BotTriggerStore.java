@@ -27,7 +27,7 @@ public class BotTriggerStore implements IBotTriggerStore {
     private final MongoCollection<Document> collection;
     private final IDocumentBuilder documentBuilder;
     private final IJsonSerialization jsonSerialization;
-    private BotManagementResourceStore botManagementStore;
+    private BotTriggerResourceStore botTriggerStore;
 
     @Inject
     public BotTriggerStore(MongoDatabase database,
@@ -37,7 +37,7 @@ public class BotTriggerStore implements IBotTriggerStore {
         RuntimeUtilities.checkNotNull(database, "database");
         this.collection = database.getCollection(COLLECTION_BOT_TRIGGERS);
         this.documentBuilder = documentBuilder;
-        this.botManagementStore = new BotManagementResourceStore();
+        this.botTriggerStore = new BotTriggerResourceStore();
         collection.createIndex(Indexes.ascending(INTENT_FIELD), new IndexOptions().unique(true));
     }
 
@@ -46,7 +46,7 @@ public class BotTriggerStore implements IBotTriggerStore {
             throws ResourceNotFoundException, ResourceStoreException {
         RuntimeUtilities.checkNotNull(intent, "intent");
 
-        return botManagementStore.readBotTrigger(intent);
+        return botTriggerStore.readBotTrigger(intent);
     }
 
     @Override
@@ -55,7 +55,7 @@ public class BotTriggerStore implements IBotTriggerStore {
         RuntimeUtilities.checkNotNull(intent, "intent");
         RuntimeUtilities.checkNotNull(botTriggerConfiguration, "botTriggerConfiguration");
 
-        botManagementStore.updateBotTrigger(intent, botTriggerConfiguration);
+        botTriggerStore.updateBotTrigger(intent, botTriggerConfiguration);
     }
 
     @Override
@@ -63,17 +63,17 @@ public class BotTriggerStore implements IBotTriggerStore {
             throws ResourceAlreadyExistsException, ResourceStoreException {
         RuntimeUtilities.checkNotNull(botTriggerConfiguration, "botTriggerConfiguration");
 
-        botManagementStore.createBotTrigger(botTriggerConfiguration);
+        botTriggerStore.createBotTrigger(botTriggerConfiguration);
     }
 
     @Override
     public void deleteBotTrigger(String intent) {
         RuntimeUtilities.checkNotNull(intent, "intent");
 
-        botManagementStore.deleteBotTrigger(intent);
+        botTriggerStore.deleteBotTrigger(intent);
     }
 
-    private class BotManagementResourceStore {
+    private class BotTriggerResourceStore {
         BotTriggerConfiguration readBotTrigger(String intent)
                 throws ResourceStoreException, ResourceNotFoundException {
 
