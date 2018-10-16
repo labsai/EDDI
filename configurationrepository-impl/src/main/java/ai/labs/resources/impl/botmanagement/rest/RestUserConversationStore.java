@@ -50,8 +50,8 @@ public class RestUserConversationStore implements IRestUserConversationStore {
     @Override
     public void createUserConversation(String intent, String userId, UserConversation userConversation) {
         try {
-            userConversationCache.put(calculateCacheKey(intent, userId), userConversation);
             userConversationStore.createUserConversation(userConversation);
+            userConversationCache.put(calculateCacheKey(intent, userId), userConversation);
         } catch (IResourceStore.ResourceAlreadyExistsException | IResourceStore.ResourceStoreException e) {
             log.error(e.getLocalizedMessage(), e);
             throw new InternalServerErrorException();
