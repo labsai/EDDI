@@ -11,7 +11,7 @@
     </parent>
     <packaging>jar</packaging>
 
-    <artifactId>basemodules</artifactId>
+    <artifactId>basemodels</artifactId>
 
     <properties>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>

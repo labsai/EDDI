@@ -64,7 +64,7 @@
         </dependency>
         <dependency>
             <groupId>ai.labs</groupId>
-            <artifactId>basemodules</artifactId>
+            <artifactId>basemodels</artifactId>
             <version>${project.version}</version>
         </dependency>
     </dependencies>
