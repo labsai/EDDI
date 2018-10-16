@@ -32,6 +32,11 @@ public interface IRestBotEngine {
     Response startConversation(@PathParam("environment") Deployment.Environment environment,
                                @PathParam("botId") String botId);
 
+    @POST
+    @Path("/{conversationId}/endConversation")
+    Response endConversation(@PathParam("conversationId") String conversationId);
+
+
     @GET
     @NoCache
     @Path("/{environment}/{botId}/{conversationId}")

@@ -7,10 +7,12 @@ import ai.labs.persistence.IResourceStore;
 import ai.labs.resources.rest.botmanagement.IBotTriggerStore;
 import ai.labs.resources.rest.botmanagement.IRestBotTriggerStore;
 import lombok.extern.slf4j.Slf4j;
-import org.jboss.resteasy.spi.NoLogWebApplicationException;
 
 import javax.inject.Inject;
 import javax.ws.rs.InternalServerErrorException;
+import javax.ws.rs.NotFoundException;
+import javax.ws.rs.WebApplicationException;
+import javax.ws.rs.core.Response;
 
 /**
  * @author ginccc
@@ -39,47 +41,50 @@ public class RestBotTriggerStore implements IRestBotTriggerStore {
 
             return botTriggerConfiguration;
         } catch (IResourceStore.ResourceNotFoundException e) {
-            throw new NoLogWebApplicationException(404);
+            throw new NotFoundException(e.getLocalizedMessage());
         } catch (IResourceStore.ResourceStoreException e) {
             log.error(e.getLocalizedMessage(), e);
-            throw new InternalServerErrorException();
+            throw new InternalServerErrorException(e.getLocalizedMessage());
         }
     }
 
     @Override
-    public void updateBotTrigger(String intent, BotTriggerConfiguration botTriggerConfiguration) {
+    public Response updateBotTrigger(String intent, BotTriggerConfiguration botTriggerConfiguration) {
         try {
             botTriggerStore.updateBotTrigger(intent, botTriggerConfiguration);
             botTriggersCache.put(intent, botTriggerConfiguration);
+            return Response.ok().build();
         } catch (IResourceStore.ResourceNotFoundException e) {
-            throw new NoLogWebApplicationException(404);
+            throw new NotFoundException(e.getLocalizedMessage());
         } catch (IResourceStore.ResourceStoreException e) {
             log.error(e.getLocalizedMessage(), e);
-            throw new InternalServerErrorException();
+            throw new InternalServerErrorException(e.getLocalizedMessage());
         }
     }
 
     @Override
-    public void createBotTrigger(BotTriggerConfiguration botTriggerConfiguration) {
+    public Response createBotTrigger(BotTriggerConfiguration botTriggerConfiguration) {
         try {
             botTriggerStore.createBotTrigger(botTriggerConfiguration);
             botTriggersCache.put(botTriggerConfiguration.getIntent(), botTriggerConfiguration);
+            return Response.ok().build();
+        } catch (IResourceStore.ResourceAlreadyExistsException e) {
+            throw new WebApplicationException(e.getLocalizedMessage(), Response.Status.CONFLICT);
         } catch (IResourceStore.ResourceStoreException e) {
             log.error(e.getLocalizedMessage(), e);
-            throw new InternalServerErrorException();
-        } catch (IResourceStore.ResourceAlreadyExistsException e) {
-            throw new NoLogWebApplicationException(409);
+            throw new InternalServerErrorException(e.getLocalizedMessage());
         }
     }
 
     @Override
-    public void deleteBotTrigger(String intent) {
+    public Response deleteBotTrigger(String intent) {
         try {
             botTriggerStore.deleteBotTrigger(intent);
             botTriggersCache.remove(intent);
+            return Response.ok().build();
         } catch (IResourceStore.ResourceStoreException e) {
             log.error(e.getLocalizedMessage(), e);
-            throw new InternalServerErrorException();
+            throw new InternalServerErrorException(e.getLocalizedMessage());
         }
     }
 }

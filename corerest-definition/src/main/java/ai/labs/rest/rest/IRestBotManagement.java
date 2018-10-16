@@ -7,9 +7,10 @@ import javax.ws.rs.*;
 import javax.ws.rs.container.AsyncResponse;
 import javax.ws.rs.container.Suspended;
 import javax.ws.rs.core.MediaType;
+import javax.ws.rs.core.Response;
 
-@Api(value = "bot management")
-@Path("/bot-management")
+@Api(value = "bot engine")
+@Path("/botcrowd")
 public interface IRestBotManagement {
     @POST
     @Path("/{intent}/{userId}")
@@ -21,4 +22,8 @@ public interface IRestBotManagement {
                           @QueryParam("returnCurrentStepOnly") @DefaultValue("true") Boolean returnCurrentStepOnly,
                           InputData inputData,
                           @Suspended final AsyncResponse response);
+
+    @POST
+    @Path("/{intent}/{userId}/endConversation")
+    Response endCurrentConversation(@PathParam("intent") String intent, @PathParam("userId") String userId);
 }

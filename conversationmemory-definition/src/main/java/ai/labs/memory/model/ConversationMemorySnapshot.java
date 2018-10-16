@@ -64,7 +64,6 @@ public class ConversationMemorySnapshot {
     @Getter
     @Setter
     public static class PackageRunSnapshot {
-        private String context;
         private List<ResultSnapshot> lifecycleTasks = new LinkedList<>();
 
         @Override
@@ -74,17 +73,12 @@ public class ConversationMemorySnapshot {
 
             PackageRunSnapshot that = (PackageRunSnapshot) o;
 
-            if (context != null ? context.equals(that.context) : that.context == null) {
-                return lifecycleTasks != null ? lifecycleTasks.equals(that.lifecycleTasks) : that.lifecycleTasks == null;
-            }
-            return false;
+            return lifecycleTasks != null ? lifecycleTasks.equals(that.lifecycleTasks) : that.lifecycleTasks == null;
         }
 
         @Override
         public int hashCode() {
-            int result = context != null ? context.hashCode() : 0;
-            result = 31 * result + (lifecycleTasks != null ? lifecycleTasks.hashCode() : 0);
-            return result;
+            return 31 * (lifecycleTasks != null ? lifecycleTasks.hashCode() : 0);
         }
     }
 

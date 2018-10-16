@@ -5,9 +5,10 @@ import io.swagger.annotations.Api;
 
 import javax.ws.rs.*;
 import javax.ws.rs.core.MediaType;
+import javax.ws.rs.core.Response;
 
 @Api(value = "configurations")
-@Path("/bottriggerstore/bottriggers")
+@Path("/userconversationstore/userconversations")
 public interface IRestUserConversationStore {
     String resourceURI = "eddi://ai.labs.userconversation/userconversationstore/userconversations/";
 
@@ -19,10 +20,10 @@ public interface IRestUserConversationStore {
     @POST
     @Path("/{intent}/{userId}")
     @Produces(MediaType.APPLICATION_JSON)
-    void createUserConversation(@PathParam("intent") String intent, @PathParam("userId") String userId,
-                                UserConversation userConversation);
+    Response createUserConversation(@PathParam("intent") String intent, @PathParam("userId") String userId,
+                                    UserConversation userConversation);
 
     @DELETE
     @Path("/{intent}/{userId}")
-    void deleteUserConversation(@PathParam("intent") String intent, @PathParam("userId") String userId);
+    Response deleteUserConversation(@PathParam("intent") String intent, @PathParam("userId") String userId);
 }

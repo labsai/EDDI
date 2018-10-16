@@ -89,7 +89,7 @@ public class ConversationMemoryStore implements IConversationMemoryStore, IResou
     @Override
     public void setConversationState(String conversationId, ConversationState conversationState) {
         Document updateConversationStateField = new Document("$set", new BasicDBObject(CONVERSATION_STATE_FIELD, conversationState.name()));
-        conversationCollection.updateMany(new Document(OBJECT_ID, new ObjectId(conversationId)), updateConversationStateField);
+        conversationCollection.updateOne(new Document(OBJECT_ID, new ObjectId(conversationId)), updateConversationStateField);
     }
 
     @Override

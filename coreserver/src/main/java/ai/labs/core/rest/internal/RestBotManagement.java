@@ -9,6 +9,7 @@ import ai.labs.utilities.RestUtilities;
 import lombok.extern.slf4j.Slf4j;
 
 import javax.inject.Inject;
+import javax.ws.rs.WebApplicationException;
 import javax.ws.rs.container.AsyncResponse;
 import javax.ws.rs.core.MediaType;
 import javax.ws.rs.core.Response;
@@ -58,10 +59,22 @@ public class RestBotManagement implements IRestBotManagement {
 
         } catch (Exception e) {
             log.error(e.getLocalizedMessage(), e);
-            response.resume(Response.status(Response.Status.INTERNAL_SERVER_ERROR).type(MediaType.TEXT_PLAIN).
-                    entity(e.getLocalizedMessage()).
-                    build());
+            Response.ResponseBuilder responseStatus;
+            if (e instanceof WebApplicationException) {
+                Response exResponse = ((WebApplicationException) e).getResponse();
+                responseStatus = Response.status(exResponse.getStatus());
+            } else {
+                responseStatus = Response.status(Response.Status.INTERNAL_SERVER_ERROR);
+            }
+            response.resume(responseStatus.type(MediaType.TEXT_PLAIN).entity(e.getLocalizedMessage()).build());
         }
+    }
+
+    @Override
+    public Response endCurrentConversation(String intent, String userId) {
+        UserConversation userConversation = restUserConversationStore.readUserConversation(intent, userId);
+        restBotEngine.endConversation(userConversation.getConversationId());
+        return Response.ok().build();
     }
 
     private void deleteUserConversation(String intent, String userId) {
@@ -88,7 +101,7 @@ public class RestBotManagement implements IRestBotManagement {
         } else {
             throw new CannotCreateConversationException(
                     String.format("Cannot create conversation for botId=%s in environment=%s (httpCode=%s)",
-                    botDeployment.getBotId(),
+                            botDeployment.getBotId(),
                             botDeployment.getEnvironment(),
                             responseHttpCode));
         }

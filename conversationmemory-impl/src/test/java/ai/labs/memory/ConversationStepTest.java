@@ -1,6 +1,5 @@
 package ai.labs.memory;
 
-import org.junit.After;
 import org.junit.Assert;
 import org.junit.Before;
 import org.junit.Test;
@@ -16,31 +15,27 @@ public class ConversationStepTest {
     private IConversationMemory.IWritableConversationStep conversationStep;
 
     @Before
-    public void setUp() throws Exception {
-        conversationStep = new ConversationStep(new ConversationMemory.ConversationContext());
-    }
-
-    @After
-    public void tearDown() throws Exception {
+    public void setUp() {
+        conversationStep = new ConversationStep();
     }
 
     @Test
-    public void testPlain() throws Exception {
+    public void testPlain() {
         //assert
         Assert.assertNull(conversationStep.getData("whatever"));
         final List<IData<Void>> allData = conversationStep.getAllData("void");
         Assert.assertNotNull(allData);
-        Assert.assertTrue(allData.size() == 0);
-        Assert.assertNotNull(conversationStep.getAllElements(conversationStep.getCurrentConversationContext()));
-        Assert.assertTrue(conversationStep.getAllElements(conversationStep.getCurrentConversationContext()).size() == 0);
+        Assert.assertEquals(0, allData.size());
+        Assert.assertNotNull(conversationStep.getAllElements());
+        Assert.assertEquals(0, conversationStep.getAllElements().size());
         Assert.assertNotNull(conversationStep.getAllKeys());
-        Assert.assertTrue(conversationStep.getAllKeys().size() == 0);
+        Assert.assertEquals(0, conversationStep.getAllKeys().size());
         Assert.assertTrue(conversationStep.isEmpty());
-        Assert.assertTrue(conversationStep.size() == 0);
+        Assert.assertEquals(0, conversationStep.size());
     }
 
     @Test
-    public void testGetData() throws Exception {
+    public void testGetData() {
         //setup
         final Data data = new Data<List>("testKey", new LinkedList());
         conversationStep.storeData(data);
@@ -51,7 +46,7 @@ public class ConversationStepTest {
     }
 
     @Test
-    public void testGetAllData() throws Exception {
+    public void testGetAllData() {
         //setup
         final Data data1 = new Data<List>("testKey1", new LinkedList());
         final Data data2 = new Data<List>("testKey2", new LinkedList());
@@ -69,7 +64,7 @@ public class ConversationStepTest {
     }
 
     @Test
-    public void testGetAllKeys() throws Exception {
+    public void testGetAllKeys() {
         //setup
         final Data data1 = new Data<List>("testKey1", new LinkedList());
         final Data data2 = new Data<List>("testKey2", new LinkedList());
@@ -87,7 +82,7 @@ public class ConversationStepTest {
     }
 
     @Test
-    public void testGetAllElements() throws Exception {
+    public void testGetAllElements() {
         //setup
         final Data data1 = new Data<>("testKey1", "testData1");
         final Data data2 = new Data<>("testKey2", "testData2");
@@ -95,7 +90,7 @@ public class ConversationStepTest {
         conversationStep.storeData(data2);
 
         //test
-        final List<IData> allData = conversationStep.getAllElements(conversationStep.getCurrentConversationContext());
+        final List<IData> allData = conversationStep.getAllElements();
 
         //assert
         Assert.assertNotNull(allData);
@@ -104,17 +99,17 @@ public class ConversationStepTest {
     }
 
     @Test
-    public void testSize() throws Exception {
+    public void testSize() {
         //setup
         final Data data1 = new Data<List>("testKey1", new LinkedList());
         conversationStep.storeData(data1);
 
         //assert
-        Assert.assertTrue(conversationStep.size() == 1);
+        Assert.assertEquals(1, conversationStep.size());
     }
 
     @Test
-    public void testIsEmpty() throws Exception {
+    public void testIsEmpty() {
         //setup
         final Data data1 = new Data<List>("testKey1", new LinkedList());
         conversationStep.storeData(data1);
@@ -124,11 +119,11 @@ public class ConversationStepTest {
     }
 
     @Test
-    public void testEquals() throws Exception {
+    public void testEquals() {
         //setup
         final Data data = new Data<List>("testKey", new LinkedList());
         this.conversationStep.storeData(data);
-        ConversationStep conversationStep = new ConversationStep(new ConversationMemory.ConversationContext());
+        ConversationStep conversationStep = new ConversationStep();
         conversationStep.storeData(data);
 
         //assert

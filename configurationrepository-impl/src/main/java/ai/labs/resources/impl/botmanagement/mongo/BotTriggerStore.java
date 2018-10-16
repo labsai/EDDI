@@ -44,7 +44,7 @@ public class BotTriggerStore implements IBotTriggerStore {
     @Override
     public BotTriggerConfiguration readBotTrigger(String intent)
             throws ResourceNotFoundException, ResourceStoreException {
-        RuntimeUtilities.checkNotNull(intent, "intent");
+        RuntimeUtilities.checkNotNull(intent, INTENT_FIELD);
 
         return botTriggerStore.readBotTrigger(intent);
     }
@@ -52,7 +52,7 @@ public class BotTriggerStore implements IBotTriggerStore {
     @Override
     public void updateBotTrigger(String intent, BotTriggerConfiguration botTriggerConfiguration)
             throws ResourceStoreException {
-        RuntimeUtilities.checkNotNull(intent, "intent");
+        RuntimeUtilities.checkNotNull(intent, INTENT_FIELD);
         RuntimeUtilities.checkNotNull(botTriggerConfiguration, "botTriggerConfiguration");
 
         botTriggerStore.updateBotTrigger(intent, botTriggerConfiguration);
@@ -68,7 +68,7 @@ public class BotTriggerStore implements IBotTriggerStore {
 
     @Override
     public void deleteBotTrigger(String intent) {
-        RuntimeUtilities.checkNotNull(intent, "intent");
+        RuntimeUtilities.checkNotNull(intent, INTENT_FIELD);
 
         botTriggerStore.deleteBotTrigger(intent);
     }
@@ -78,7 +78,7 @@ public class BotTriggerStore implements IBotTriggerStore {
                 throws ResourceStoreException, ResourceNotFoundException {
 
             Document filter = new Document();
-            filter.put("intent", intent);
+            filter.put(INTENT_FIELD, intent);
 
             try {
                 Document document = collection.find(filter).first();
@@ -98,13 +98,13 @@ public class BotTriggerStore implements IBotTriggerStore {
                 throws ResourceStoreException {
 
             Document document = createDocument(botTriggerConfiguration);
-            collection.updateOne(new Document("intent", intent), document);
+            collection.replaceOne(new Document(INTENT_FIELD, intent), document);
         }
 
         void createBotTrigger(BotTriggerConfiguration botTriggerConfiguration)
                 throws ResourceStoreException, ResourceAlreadyExistsException {
 
-            if (collection.find(new Document("intent", botTriggerConfiguration.getIntent())).first() != null) {
+            if (collection.find(new Document(INTENT_FIELD, botTriggerConfiguration.getIntent())).first() != null) {
                 String message = "BotTriggerConfiguration with intent=%s does already exist";
                 message = String.format(message, botTriggerConfiguration.getIntent());
                 throw new ResourceAlreadyExistsException(message);
@@ -114,7 +114,7 @@ public class BotTriggerStore implements IBotTriggerStore {
         }
 
         void deleteBotTrigger(String intent) {
-            collection.deleteOne(new Document("intent", intent));
+            collection.deleteOne(new Document(INTENT_FIELD, intent));
         }
 
         private Document createDocument(BotTriggerConfiguration botTriggerConfiguration)

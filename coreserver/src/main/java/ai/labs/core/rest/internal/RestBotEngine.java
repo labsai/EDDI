@@ -99,6 +99,12 @@ public class RestBotEngine implements IRestBotEngine {
     }
 
     @Override
+    public Response endConversation(String conversationId) {
+        setConversationState(conversationId, ConversationState.ENDED);
+        return Response.ok().build();
+    }
+
+    @Override
     public SimpleConversationMemorySnapshot readConversation(Deployment.Environment environment,
                                                              String botId,
                                                              String conversationId,

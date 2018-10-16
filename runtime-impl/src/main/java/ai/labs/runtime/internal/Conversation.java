@@ -125,7 +125,6 @@ public class Conversation implements IConversation {
 
     private void executePackages(List<IData> data) throws LifecycleException {
         for (IExecutablePackage executablePackage : executablePackages) {
-            conversationMemory.setCurrentContext(executablePackage.getName());
             data.stream().filter(Objects::nonNull).
                     forEach(datum -> conversationMemory.getCurrentStep().storeData(datum));
             ILifecycleManager lifecycleManager = executablePackage.getLifecycleManager();

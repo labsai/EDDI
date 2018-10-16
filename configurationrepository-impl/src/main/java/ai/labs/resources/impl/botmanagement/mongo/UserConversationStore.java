@@ -15,7 +15,8 @@ import org.bson.Document;
 import javax.inject.Inject;
 import java.io.IOException;
 
-import static ai.labs.persistence.IResourceStore.*;
+import static ai.labs.persistence.IResourceStore.ResourceAlreadyExistsException;
+import static ai.labs.persistence.IResourceStore.ResourceStoreException;
 
 /**
  * @author ginccc
@@ -47,8 +48,7 @@ public class UserConversationStore implements IUserConversationStore {
     }
 
     @Override
-    public UserConversation readUserConversation(String intent, String userId)
-            throws ResourceNotFoundException, ResourceStoreException {
+    public UserConversation readUserConversation(String intent, String userId) throws ResourceStoreException {
         RuntimeUtilities.checkNotNull(intent, INTENT_FIELD);
         RuntimeUtilities.checkNotNull(userId, USER_ID_FIELD);
 
@@ -78,7 +78,7 @@ public class UserConversationStore implements IUserConversationStore {
 
     private class UserConversationResourceStore {
         UserConversation readUserConversation(String intent, String userId)
-                throws ResourceStoreException, ResourceNotFoundException {
+                throws ResourceStoreException {
 
             Document filter = new Document();
             filter.put(INTENT_FIELD, intent);
@@ -86,13 +86,7 @@ public class UserConversationStore implements IUserConversationStore {
 
             try {
                 Document document = collection.find(filter).first();
-                if (document != null) {
-                    return documentBuilder.build(document, UserConversation.class);
-                } else {
-                    String message = "UserConversation with intent=%s and userId=%s does not exist";
-                    message = String.format(message, intent, userId);
-                    throw new ResourceNotFoundException(message);
-                }
+                return document != null ? documentBuilder.build(document, UserConversation.class) : null;
             } catch (IOException e) {
                 throw new ResourceStoreException(e.getLocalizedMessage(), e);
             }

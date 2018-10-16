@@ -5,6 +5,7 @@ import io.swagger.annotations.Api;
 
 import javax.ws.rs.*;
 import javax.ws.rs.core.MediaType;
+import javax.ws.rs.core.Response;
 
 @Api(value = "configurations")
 @Path("/bottriggerstore/bottriggers")
@@ -19,13 +20,13 @@ public interface IRestBotTriggerStore {
     @PUT
     @Path("/{intent}")
     @Consumes(MediaType.APPLICATION_JSON)
-    void updateBotTrigger(@PathParam("intent") String intent, BotTriggerConfiguration botTriggerConfiguration);
+    Response updateBotTrigger(@PathParam("intent") String intent, BotTriggerConfiguration botTriggerConfiguration);
 
     @POST
     @Consumes(MediaType.APPLICATION_JSON)
-    void createBotTrigger(BotTriggerConfiguration botTriggerConfiguration);
+    Response createBotTrigger(BotTriggerConfiguration botTriggerConfiguration);
 
     @DELETE
     @Path("/{intent}")
-    void deleteBotTrigger(@PathParam("intent") String id);
+    Response deleteBotTrigger(@PathParam("intent") String id);
 }

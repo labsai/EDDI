@@ -7,10 +7,11 @@ import ai.labs.persistence.IResourceStore;
 import ai.labs.resources.rest.botmanagement.IRestUserConversationStore;
 import ai.labs.resources.rest.botmanagement.IUserConversationStore;
 import lombok.extern.slf4j.Slf4j;
-import org.jboss.resteasy.spi.NoLogWebApplicationException;
 
 import javax.inject.Inject;
 import javax.ws.rs.InternalServerErrorException;
+import javax.ws.rs.WebApplicationException;
+import javax.ws.rs.core.Response;
 
 /**
  * @author ginccc
@@ -35,37 +36,42 @@ public class RestUserConversationStore implements IRestUserConversationStore {
             UserConversation userConversation = userConversationCache.get(cacheKey);
             if (userConversation == null) {
                 userConversation = userConversationStore.readUserConversation(intent, userId);
-                userConversationCache.put(cacheKey, userConversation);
+                if (userConversation != null) {
+                    userConversationCache.put(cacheKey, userConversation);
+                }
             }
 
             return userConversation;
-        } catch (IResourceStore.ResourceNotFoundException e) {
-            throw new NoLogWebApplicationException(404);
+
         } catch (IResourceStore.ResourceStoreException e) {
             log.error(e.getLocalizedMessage(), e);
-            throw new InternalServerErrorException();
+            throw new InternalServerErrorException(e.getLocalizedMessage());
         }
     }
 
     @Override
-    public void createUserConversation(String intent, String userId, UserConversation userConversation) {
+    public Response createUserConversation(String intent, String userId, UserConversation userConversation) {
         try {
             userConversationStore.createUserConversation(userConversation);
             userConversationCache.put(calculateCacheKey(intent, userId), userConversation);
-        } catch (IResourceStore.ResourceAlreadyExistsException | IResourceStore.ResourceStoreException e) {
+            return Response.ok().build();
+        } catch (IResourceStore.ResourceAlreadyExistsException e) {
+            throw new WebApplicationException(e.getLocalizedMessage(), Response.Status.CONFLICT);
+        } catch (IResourceStore.ResourceStoreException e) {
             log.error(e.getLocalizedMessage(), e);
-            throw new InternalServerErrorException();
+            throw new InternalServerErrorException(e.getLocalizedMessage());
         }
     }
 
     @Override
-    public void deleteUserConversation(String intent, String userId) {
+    public Response deleteUserConversation(String intent, String userId) {
         try {
             userConversationStore.deleteUserConversation(intent, userId);
             userConversationCache.remove(calculateCacheKey(intent, userId));
+            return Response.ok().build();
         } catch (IResourceStore.ResourceStoreException e) {
             log.error(e.getLocalizedMessage(), e);
-            throw new InternalServerErrorException();
+            throw new InternalServerErrorException(e.getLocalizedMessage());
         }
     }
 
