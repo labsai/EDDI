@@ -18,6 +18,7 @@
         <local-cache name="local" configuration="base-template-config"/>
         <local-cache name="userConversations" configuration="user-conversations-config"/>
         <local-cache name="botTriggers" configuration="base-template-config"/>
+        <local-cache name="conversationState" configuration="base-template-config"/>
     </cache-container>
 </infinispan>
 

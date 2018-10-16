@@ -80,14 +80,17 @@ public class RestBotManagement implements IRestBotManagement {
         BotTriggerConfiguration botTriggerConfiguration = getBotTrigger(intent);
         BotDeployment botDeployment = getRandom(botTriggerConfiguration.getBotDeployments());
         Response botResponse = restBotEngine.startConversation(botDeployment.getEnvironment(), botDeployment.getBotId());
-        if (botResponse.getStatus() == 201) {
+        int responseHttpCode = botResponse.getStatus();
+        if (responseHttpCode == 201) {
             URI locationUri = URI.create(botResponse.getHeaders().get("location").get(0).toString());
             IResourceId resourceId = RestUtilities.extractResourceId(locationUri);
             return createUserConversation(intent, userId, botDeployment, resourceId.getId());
         } else {
-            throw new CannotCreateConversationException(String.format("Cannot create conversation for %s in %s",
+            throw new CannotCreateConversationException(
+                    String.format("Cannot create conversation for botId=%s in environment=%s (httpCode=%s)",
                     botDeployment.getBotId(),
-                    botDeployment.getEnvironment()));
+                            botDeployment.getEnvironment(),
+                            responseHttpCode));
         }
     }
 
