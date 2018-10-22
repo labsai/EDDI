@@ -1,5 +1,6 @@
 package ai.labs.staticresources.rest.impl;
 
+import ai.labs.runtime.SystemRuntime;
 import ai.labs.staticresources.rest.IResourceFileManager;
 import ai.labs.staticresources.rest.IRestHtmlApiResource;
 import org.jboss.resteasy.spi.NoLogWebApplicationException;
@@ -12,10 +13,12 @@ import javax.ws.rs.core.Response;
  */
 public class RestHtmlApiResource implements IRestHtmlApiResource {
     private final IResourceFileManager resourceFileManager;
+    private final SystemRuntime.IRuntime runtime;
 
     @Inject
-    public RestHtmlApiResource(IResourceFileManager resourceFileManager) {
+    public RestHtmlApiResource(IResourceFileManager resourceFileManager, SystemRuntime.IRuntime runtime) {
         this.resourceFileManager = resourceFileManager;
+        this.runtime = runtime;
     }
 
     @Override
@@ -27,7 +30,9 @@ public class RestHtmlApiResource implements IRestHtmlApiResource {
     public String viewHtml(String path) {
         try {
             path = preparePath(path);
-            return resourceFileManager.getResourceAsString("html", path);
+            String htmlString = resourceFileManager.getResourceAsString("html", path);
+            htmlString = htmlString.replace("<EDDI-VERSION/>", runtime.getVersion());
+            return htmlString;
         } catch (IResourceFileManager.NotFoundException e) {
             throw new NoLogWebApplicationException(Response.Status.NOT_FOUND);
         }

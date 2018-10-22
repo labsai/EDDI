@@ -1,1 +1,6 @@
-<infinispan/>
+<infinispan>
+    <cache-container default-cache="local">
+        <local-cache name="local"/>
+    </cache-container>
+</infinispan>
+

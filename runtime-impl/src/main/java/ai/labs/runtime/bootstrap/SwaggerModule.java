@@ -4,7 +4,6 @@ import ai.labs.runtime.SwaggerServletContextListener;
 import com.google.inject.multibindings.Multibinder;
 import io.swagger.jaxrs.listing.ApiListingResource;
 import io.swagger.jaxrs.listing.SwaggerSerializers;
-import lombok.extern.slf4j.Slf4j;
 
 import javax.servlet.ServletContextListener;
 import java.io.InputStream;
@@ -12,7 +11,7 @@ import java.io.InputStream;
 /**
  * @author ginccc
  */
-@Slf4j
+
 public final class SwaggerModule extends AbstractBaseModule {
     private final InputStream[] configFiles;
 

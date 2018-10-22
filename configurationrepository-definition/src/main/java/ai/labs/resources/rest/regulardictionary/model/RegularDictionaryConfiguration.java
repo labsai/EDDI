@@ -23,7 +23,7 @@ public class RegularDictionaryConfiguration {
 
     @Getter
     @Setter
-    public static class WordConfiguration {
+    public static class WordConfiguration implements Comparable<WordConfiguration> {
         private String word;
         private String exp;
         private int frequency;
@@ -41,6 +41,11 @@ public class RegularDictionaryConfiguration {
         @Override
         public int hashCode() {
             return word.hashCode();
+        }
+
+        @Override
+        public int compareTo(WordConfiguration o) {
+            return word.compareTo(o.getWord());
         }
     }
 

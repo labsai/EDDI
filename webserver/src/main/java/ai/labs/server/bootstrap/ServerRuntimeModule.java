@@ -15,6 +15,7 @@ import javax.inject.Named;
 import javax.inject.Singleton;
 import java.io.File;
 import java.io.InputStream;
+import java.util.concurrent.ThreadPoolExecutor;
 
 /**
  * @author ginccc
@@ -48,6 +49,7 @@ public class ServerRuntimeModule extends AbstractBaseModule {
                                                @Named("webServer.outputBufferSize") Integer outputBufferSize,
                                                GuiceResteasyBootstrapServletContextListener contextListener,
                                                SwaggerServletContextListener swaggerContextListener,
+                                               ThreadPoolExecutor threadPoolExecutor,
                                                HttpServletDispatcher httpServletDispatcher,
                                                LoginService mongoLoginService) throws ClassNotFoundException {
 
@@ -69,6 +71,6 @@ public class ServerRuntimeModule extends AbstractBaseModule {
         options.outputBufferSize = outputBufferSize;
 
         return new ServerRuntime(options, contextListener, swaggerContextListener, httpServletDispatcher,
-                null, environment, resourceDir);
+                null, threadPoolExecutor, environment, resourceDir);
     }
 }

@@ -101,9 +101,14 @@ public class ExpressionProvider implements IExpressionProvider {
         if (indexOfOpening > -1 && indexOfClosing > -1) {
             String tmp = expression.substring(0, indexOfOpening);
             exp = new Expression(tmp.trim());
-            String subExpressions = expression.substring(indexOfOpening + 1, indexOfClosing);
-            List<Expression> expressions = parseExpressions(subExpressions);
-            exp.setSubExpressions(expressions);
+            try {
+                String subExpressions = expression.substring(indexOfOpening + 1, indexOfClosing);
+                List<Expression> expressions = parseExpressions(subExpressions);
+                exp.setSubExpressions(expressions);
+            } catch (Exception e) {
+                log.error("Error while parsing Expression: %s, indexOfOpening: %s, indexOfClosing: %s, message: %s",
+                        expression, indexOfOpening, indexOfClosing, e.getLocalizedMessage());
+            }
         } else {
             exp = new Expression(expression);
         }

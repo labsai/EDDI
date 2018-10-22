@@ -21,7 +21,7 @@ import java.net.URI;
 public interface IRestImportService {
     @POST
     @Consumes("application/zip")
-    @ApiImplicitParam(paramType = "body", required = true)
+    @ApiImplicitParam(type = "body", paramType = "body", required = true)
     @ApiResponse(code = 200, responseHeaders = {
             @ResponseHeader(name = "location", response = URI.class)
     }, message = "returns reference to the newly created (imported) bot")

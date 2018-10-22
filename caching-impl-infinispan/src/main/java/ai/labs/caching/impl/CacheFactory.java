@@ -30,7 +30,7 @@ public class CacheFactory implements ICacheFactory {
     public <K, V> ICache<K, V> getCache(String cacheName) {
         Cache<K, V> cache;
         if (cacheName != null) {
-            cache = this.cacheManager.getCache(cacheName);
+            cache = this.cacheManager.getCache(cacheName, true);
         } else {
             cache = this.cacheManager.getCache();
         }

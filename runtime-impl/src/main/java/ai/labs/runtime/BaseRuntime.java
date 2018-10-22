@@ -19,7 +19,7 @@ public class BaseRuntime implements SystemRuntime.IRuntime {
     private final String CONFIG_DIR;
     private final String LOG_DIR = FileUtilities.buildPath(System.getProperty("user.dir"), "logs");
 
-    private final ScheduledExecutorService executorService;
+    private final ScheduledThreadPoolExecutor executorService;
     private final String projectName;
 
     private boolean isInit = false;
@@ -27,7 +27,7 @@ public class BaseRuntime implements SystemRuntime.IRuntime {
     private Logger log;
 
     @Inject
-    public BaseRuntime(ScheduledExecutorService executorService,
+    public BaseRuntime(ScheduledThreadPoolExecutor executorService,
                        @Named("systemRuntime.projectName") String projectName,
                        @Named("systemRuntime.projectVersion") String projectVersion,
                        @Named("systemRuntime.configDir") String configDir) {
@@ -91,7 +91,7 @@ public class BaseRuntime implements SystemRuntime.IRuntime {
         return new String(chars);
     }
 
-    public ScheduledExecutorService getExecutorService() {
+    public ExecutorService getExecutorService() {
         return executorService;
     }
 
@@ -99,7 +99,7 @@ public class BaseRuntime implements SystemRuntime.IRuntime {
     public <T> ScheduledFuture<?> submitScheduledCallable(final Callable<T> callable,
                                                           long delay, TimeUnit timeUnit,
                                                           final Map<Object, Object> threadBindings) {
-        return getExecutorService().schedule(() -> {
+        return executorService.schedule(() -> {
             submitCallable(callable, threadBindings);
         }, delay, timeUnit);
     }

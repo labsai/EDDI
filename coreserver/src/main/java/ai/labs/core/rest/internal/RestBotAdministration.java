@@ -102,8 +102,12 @@ public class RestBotAdministration implements IRestBotAdministration {
         try {
             Long activeConversationCount = conversationMemoryStore.getActiveConversationCount(botId, version);
             if (activeConversationCount > 0) {
-                String message = "%s active (thus not ENDED) conversation(s) going on with this bot!";
-                message = String.format(message, activeConversationCount);
+                String message = "%s active (thus not ENDED) conversation(s) going on with this bot!" +
+                        "\nCheck GET /conversationstore/conversations/active/%s?botVersion=%s " +
+                        "to see active conversations and end conversations with " +
+                        "POST /conversationstore/conversations/end , " +
+                        "providing the list you receive with GET";
+                message = String.format(message, activeConversationCount, botId, version);
                 return Response.status(Response.Status.CONFLICT).entity(message).type(MediaType.TEXT_PLAIN).build();
             }
 

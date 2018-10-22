@@ -22,9 +22,9 @@ public interface IRestBehaviorStore extends IRestVersionInfo {
     @GET
     @Path("descriptors")
     @ApiImplicitParams({
-            @ApiImplicitParam(name = "filter", format = "string", example = "<name_of_behavior>"),
-            @ApiImplicitParam(name = "index", format = "integer", example = "<at what position should the paging start>"),
-            @ApiImplicitParam(name = "limit", format = "integer", example = "<how many results should be returned>")})
+            @ApiImplicitParam(name = "filter", paramType = "query", dataType = "string", format = "string", example = "<name_of_behavior>"),
+            @ApiImplicitParam(name = "index", paramType = "query", dataType = "integer", format = "integer", example = "0"),
+            @ApiImplicitParam(name = "limit", paramType = "query", dataType = "integer", format = "integer", example = "20")})
     @ApiResponse(code = 200, response = DocumentDescriptor.class, responseContainer = "List",
             message = "Array of DocumentDescriptors")
     @Produces(MediaType.APPLICATION_JSON)
@@ -37,14 +37,14 @@ public interface IRestBehaviorStore extends IRestVersionInfo {
     @Produces(MediaType.APPLICATION_JSON)
     BehaviorConfiguration readBehaviorRuleSet(@PathParam("id") String id,
                                               @ApiParam(name = "version", required = true, format = "integer", example = "1")
-                                 @QueryParam("version") Integer version);
+                                              @QueryParam("version") Integer version);
 
     @PUT
     @Path("/{id}")
     @Consumes(MediaType.APPLICATION_JSON)
     Response updateBehaviorRuleSet(@PathParam("id") String id,
                                    @ApiParam(name = "version", required = true, format = "integer", example = "1")
-                              @QueryParam("version") Integer version, BehaviorConfiguration behaviorConfiguration);
+                                   @QueryParam("version") Integer version, BehaviorConfiguration behaviorConfiguration);
 
     @POST
     @Consumes(MediaType.APPLICATION_JSON)
@@ -54,5 +54,5 @@ public interface IRestBehaviorStore extends IRestVersionInfo {
     @Path("/{id}")
     Response deleteBehaviorRuleSet(@PathParam("id") String id,
                                    @ApiParam(name = "version", required = true, format = "integer", example = "1")
-                               @QueryParam("version") Integer version);
+                                   @QueryParam("version") Integer version);
 }

@@ -1,7 +1,7 @@
 package ai.labs.parser.extensions.corrections;
 
-import ai.labs.parser.model.FoundWord;
 import ai.labs.parser.extensions.dictionaries.IDictionary;
+import ai.labs.parser.model.FoundWord;
 import org.tartarus.snowball.SnowballStemmer;
 
 import java.util.*;
@@ -38,9 +38,9 @@ public class StemmingCorrection implements ICorrection {
 
     private SnowballStemmer createNewStemmer() {
         try {
-            Class stemClass = Class.forName("org.tartarus.snowball.ext." + language + "Stemmer");
-            return (SnowballStemmer) stemClass.newInstance();
-        } catch (InstantiationException | IllegalAccessException | ClassNotFoundException e) {
+            Class<?> stemClass = Class.forName("org.tartarus.snowball.ext." + language + "Stemmer");
+            return (SnowballStemmer) stemClass.getDeclaredConstructor().newInstance();
+        } catch (Exception e) {
             throw new RuntimeException(e.getMessage(), e);
         }
     }
