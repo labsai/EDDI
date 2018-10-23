@@ -37,7 +37,6 @@ public class OutputTemplateTaskTest {
     private OutputTemplateTask outputTemplateTask;
     private final String expectedOutputString = "This is some output with context such as someContextValue";
     private ITemplatingEngine templatingEngine;
-    private IMemoryTemplateConverter memoryTemplateConverter;
 
     @Before
     public void setUp() {
@@ -46,7 +45,7 @@ public class OutputTemplateTaskTest {
         conversationMemory = mock(IConversationMemory.class);
         currentStep = mock(IConversationMemory.IWritableConversationStep.class);
         when(conversationMemory.getCurrentStep()).then(invocation -> currentStep);
-        memoryTemplateConverter = mock(IMemoryTemplateConverter.class);
+        IMemoryTemplateConverter memoryTemplateConverter = mock(IMemoryTemplateConverter.class);
         when(memoryTemplateConverter.convertMemoryForTemplating(any(IConversationMemory.class))).
                 then(invocation -> new HashMap<>());
         outputTemplateTask = new OutputTemplateTask(templatingEngine, memoryTemplateConverter, dataFactory);
@@ -138,7 +137,7 @@ public class OutputTemplateTaskTest {
         verify(dataFactory).createData(eq(KEY_OUTPUT_TEXT_SOME_ACTION_POST_TEMPLATED), eq(expectedOutputString));
         verify(dataFactory, times(2)).createData(eq(KEY_QUICK_REPLY_SOME_ACTION_PRE_TEMPLATED), any());
         verify(dataFactory, times(2)).createData(eq(KEY_QUICK_REPLY_SOME_ACTION_POST_TEMPLATED), eq(expectedPostQuickReplies));
-        verify(currentStep, times(9)).storeData(any(IData.class));
+        verify(currentStep, times(9)).storeData(any(IData.class), anyBoolean());
     }
 
 
