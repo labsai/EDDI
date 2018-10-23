@@ -6,6 +6,7 @@ ARG EDDI_MEMORY_MIN
 ARG EDDI_MEMORY_MAX
 
 EXPOSE 7070
+EXPOSE 7443
 
 RUN mkdir -p /apiserver/ && \
     mkdir /apiserver/logs && \
