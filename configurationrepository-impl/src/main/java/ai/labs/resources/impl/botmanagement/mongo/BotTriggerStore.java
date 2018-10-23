@@ -105,7 +105,7 @@ public class BotTriggerStore implements IBotTriggerStore {
                 throws ResourceStoreException, ResourceAlreadyExistsException {
 
             if (collection.find(new Document(INTENT_FIELD, botTriggerConfiguration.getIntent())).first() != null) {
-                String message = "BotTriggerConfiguration with intent=%s does already exist";
+                String message = "BotTriggerConfiguration with intent=%s already exists";
                 message = String.format(message, botTriggerConfiguration.getIntent());
                 throw new ResourceAlreadyExistsException(message);
             }
