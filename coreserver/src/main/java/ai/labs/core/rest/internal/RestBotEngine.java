@@ -7,6 +7,7 @@ import ai.labs.lifecycle.LifecycleException;
 import ai.labs.memory.IConversationMemory;
 import ai.labs.memory.IConversationMemoryStore;
 import ai.labs.memory.model.ConversationMemorySnapshot;
+import ai.labs.memory.model.ConversationOutput;
 import ai.labs.memory.model.SimpleConversationMemorySnapshot;
 import ai.labs.models.Context;
 import ai.labs.models.ConversationState;
@@ -116,7 +117,7 @@ public class RestBotEngine implements IRestBotEngine {
             ConversationMemorySnapshot conversationMemorySnapshot =
                     conversationMemoryStore.loadConversationMemorySnapshot(conversationId);
             if (!botId.equals(conversationMemorySnapshot.getBotId())) {
-                String message = "conversationId: '%s' does not belong to bot with id: '%s'. " +
+                String message = "conversationId: '%s' does not belong to bot with conversationId: '%s'. " +
                         "(provided botId='%s', botId in ConversationMemory='%s')";
                 message = String.format(message, conversationId, botId, botId, conversationMemorySnapshot.getBotId());
                 throw new IllegalAccessException(message);
@@ -187,7 +188,7 @@ public class RestBotEngine implements IRestBotEngine {
             IBot bot = botFactory.getBot(environment,
                     conversationMemory.getBotId(), conversationMemory.getBotVersion());
             if (bot == null) {
-                String msg = "Bot not deployed (environment=%s, id=%s, version=%s)";
+                String msg = "Bot not deployed (environment=%s, conversationId=%s, version=%s)";
                 msg = String.format(msg, environment, conversationMemory.getBotId(), conversationMemory.getBotVersion());
                 response.resume(new NotFoundException(msg));
                 return;
@@ -470,6 +471,11 @@ public class RestBotEngine implements IRestBotEngine {
                     conversationSteps.get(conversationSteps.size() - 1);
             conversationSteps.clear();
             conversationSteps.add(currentConversationStep);
+
+            List<ConversationOutput> conversationOutputs = memorySnapshot.getConversationOutputs();
+            ConversationOutput conversationOutput = conversationOutputs.get(0);
+            conversationOutputs.clear();
+            conversationOutputs.add(conversationOutput);
         }
         return memorySnapshot;
     }
@@ -477,7 +483,7 @@ public class RestBotEngine implements IRestBotEngine {
     private static void checkConversationMemoryNotNull(IConversationMemory conversationMemory, String conversationId)
             throws IllegalAccessException {
         if (conversationMemory == null) {
-            String message = "No conversation found with id: %s";
+            String message = "No conversation found with conversationId: %s";
             message = String.format(message, conversationId);
             throw new IllegalAccessException(message);
         }

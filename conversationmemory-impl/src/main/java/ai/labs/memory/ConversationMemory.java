@@ -1,5 +1,6 @@
 package ai.labs.memory;
 
+import ai.labs.memory.model.ConversationOutput;
 import ai.labs.models.ConversationState;
 
 import java.util.ArrayList;
@@ -12,24 +13,32 @@ import java.util.stream.Collectors;
  * @author ginccc
  */
 public class ConversationMemory implements IConversationMemory {
-    private String id;
+    private String conversationId;
     private String botId;
     private Integer botVersion;
+    private String userId;
 
     private IWritableConversationStep currentStep;
     private Stack<IConversationStep> previousSteps;
     private Stack<IConversationStep> redoCache = new Stack<>();
     private ConversationState conversationState;
 
-    ConversationMemory(String id, String botId, Integer botVersion) {
+    ConversationMemory(String conversationId, String botId, Integer botVersion) {
         this(botId, botVersion);
-        this.id = id;
+        this.conversationId = conversationId;
+    }
+
+    public ConversationMemory(String botId, Integer botVersion, String userId) {
+        this(botId, botVersion);
+        this.userId = userId;
     }
 
     public ConversationMemory(String botId, Integer botVersion) {
         this.botId = botId;
         this.botVersion = botVersion;
-        this.currentStep = new ConversationStep();
+        ConversationOutput conversationOutput = new ConversationOutput();
+        this.conversationOutputs.add(conversationOutput);
+        this.currentStep = new ConversationStep(conversationOutput);
         this.previousSteps = new Stack<>();
     }
 
@@ -54,7 +63,9 @@ public class ConversationMemory implements IConversationMemory {
     public IConversationStep startNextStep() {
         ((ConversationStep) currentStep).conversationStepNumber = previousSteps.size();
         previousSteps.push(currentStep);
-        currentStep = new ConversationStep();
+        ConversationOutput conversationOutput = new ConversationOutput();
+        conversationOutputs.add(0, conversationOutput);
+        currentStep = new ConversationStep(conversationOutput);
         return currentStep;
     }
 
@@ -103,8 +114,8 @@ public class ConversationMemory implements IConversationMemory {
     }
 
     @Override
-    public String getId() {
-        return id;
+    public String getConversationId() {
+        return conversationId;
     }
 
     @Override
@@ -113,8 +124,17 @@ public class ConversationMemory implements IConversationMemory {
     }
 
     @Override
+    public String getUserId() {
+        return this.userId;
+    }
+
+    @Override
     public Integer getBotVersion() {
         return botVersion;
+    }
+
+    public List<ConversationOutput> getConversationOutputs() {
+        return conversationOutputs;
     }
 
     @Override

@@ -16,7 +16,7 @@ import java.util.Stack;
 @Getter
 @Setter
 public class ConversationMemorySnapshot {
-    private String id;
+    private String conversationId;
     private String botId;
     private Integer botVersion;
     private Deployment.Environment environment;

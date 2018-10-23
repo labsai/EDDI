@@ -1,5 +1,7 @@
 package ai.labs.memory;
 
+import ai.labs.memory.model.ConversationOutput;
+
 import java.util.*;
 
 /**
@@ -7,10 +9,12 @@ import java.util.*;
  */
 public class ConversationStep implements IConversationMemory.IWritableConversationStep {
     private Map<String, IData> store;
+    private final ConversationOutput conversationOutput;
     int conversationStepNumber;
 
-    ConversationStep() {
+    ConversationStep(ConversationOutput conversationOutput) {
         store = new LinkedHashMap<>();
+        this.conversationOutput = conversationOutput;
     }
 
     @Override
@@ -35,7 +39,24 @@ public class ConversationStep implements IConversationMemory.IWritableConversati
 
     @Override
     public void storeData(IData data) {
+        storeData(data, true);
+    }
+
+    @Override
+    public void storeData(IData data, boolean publish) {
         store.put(data.getKey(), data);
+        if (publish) {
+            List<Object> outputList = conversationOutput.computeIfAbsent(getRootKey(data.getKey()), k -> new ArrayList<>());
+            outputList.add(data.getResult());
+        }
+    }
+
+    private static String getRootKey(String key) {
+        return key.contains(":") ? key.substring(0, key.indexOf(":")) : key;
+    }
+
+    public void resetConversationOutput(String rootKey) {
+        conversationOutput.put(rootKey, new ArrayList<>());
     }
 
     @Override

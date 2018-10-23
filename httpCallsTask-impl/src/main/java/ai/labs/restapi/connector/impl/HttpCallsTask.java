@@ -135,7 +135,7 @@ public class HttpCallsTask implements ILifecycleTask {
 
                             String memoryDataName = "httpCalls:" + responseObjectName;
                             IData<Object> httpResponseData = dataFactory.createData(memoryDataName, responseObject);
-                            memory.getCurrentStep().storeData(httpResponseData);
+                            memory.getCurrentStep().storeData(httpResponseData, false);
 
                             runPostResponse(memory, call, templateDataObjects);
                         }

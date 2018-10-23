@@ -1,5 +1,6 @@
 package ai.labs.memory;
 
+import ai.labs.memory.model.ConversationOutput;
 import ai.labs.models.ConversationState;
 
 import java.io.Serializable;
@@ -11,11 +12,15 @@ import java.util.Stack;
  * @author ginccc
  */
 public interface IConversationMemory extends Serializable {
-    String getId();
+    String getConversationId();
 
     String getBotId();
 
     Integer getBotVersion();
+
+    String getUserId();
+
+    List<ConversationOutput> getConversationOutputs();
 
     IWritableConversationStep getCurrentStep();
 
@@ -72,5 +77,9 @@ public interface IConversationMemory extends Serializable {
 
     interface IWritableConversationStep extends IConversationStep {
         void storeData(IData element);
+
+        void storeData(IData element, boolean publish);
+
+        void resetConversationOutput(String rootKey);
     }
 }

@@ -27,23 +27,23 @@ public interface IRestDocumentDescriptorStore {
                                              @QueryParam("limit") @DefaultValue("20") Integer limit);
 
     @GET
-    @Path("/{id}")
+    @Path("/{conversationId}")
     @Produces(MediaType.APPLICATION_JSON)
-    DocumentDescriptor readDescriptor(@PathParam("id") String id,
+    DocumentDescriptor readDescriptor(@PathParam("conversationId") String id,
                                       @ApiParam(name = "version", required = true, format = "integer", example = "1")
                                       @QueryParam("version") Integer version);
 
     @GET
-    @Path("/{id}/simple")
+    @Path("/{conversationId}/simple")
     @Produces(MediaType.APPLICATION_JSON)
-    SimpleDocumentDescriptor readSimpleDescriptor(@PathParam("id") String id,
+    SimpleDocumentDescriptor readSimpleDescriptor(@PathParam("conversationId") String id,
                                                   @ApiParam(name = "version", required = true, format = "integer", example = "1")
                                                   @QueryParam("version") Integer version);
 
     @PATCH
-    @Path("/{id}")
+    @Path("/{conversationId}")
     @Consumes(MediaType.APPLICATION_JSON)
-    void patchDescriptor(@PathParam("id") String id,
+    void patchDescriptor(@PathParam("conversationId") String id,
                          @ApiParam(name = "version", required = true, format = "integer", example = "1")
                          @QueryParam("version") Integer version, PatchInstruction<DocumentDescriptor> patchInstruction);
 }

@@ -97,7 +97,7 @@ public class BehaviorRulesEvaluationTask implements ILifecycleTask {
 
     private void storeResultIfNotEmpty(IConversationMemory memory, String key, List<BehaviorRule> result) {
         if (!result.isEmpty()) {
-            memory.getCurrentStep().storeData(new Data<>(key, convert(result)));
+            memory.getCurrentStep().storeData(new Data<>(key, convert(result)), false);
         }
     }
 

@@ -1,10 +1,10 @@
 package ai.labs.parser;
 
+import ai.labs.expressions.Expression;
 import ai.labs.expressions.utilities.IExpressionProvider;
 import ai.labs.lifecycle.ILifecycleTask;
 import ai.labs.lifecycle.IllegalExtensionConfigurationException;
 import ai.labs.lifecycle.UnrecognizedExtensionException;
-import ai.labs.resources.rest.extensions.model.ExtensionDescriptor;
 import ai.labs.memory.Data;
 import ai.labs.memory.IConversationMemory;
 import ai.labs.memory.IData;
@@ -18,6 +18,7 @@ import ai.labs.parser.extensions.normalizers.providers.INormalizerProvider;
 import ai.labs.parser.internal.InputParser;
 import ai.labs.parser.internal.matches.RawSolution;
 import ai.labs.parser.rest.model.Solution;
+import ai.labs.resources.rest.extensions.model.ExtensionDescriptor;
 import ai.labs.utilities.RuntimeUtilities;
 import ai.labs.utilities.StringUtilities;
 import lombok.extern.slf4j.Slf4j;
@@ -28,10 +29,10 @@ import java.net.URI;
 import java.util.*;
 import java.util.stream.Collectors;
 
-import static ai.labs.resources.rest.extensions.model.ExtensionDescriptor.ConfigValue;
-import static ai.labs.resources.rest.extensions.model.ExtensionDescriptor.FieldType.BOOLEAN;
 import static ai.labs.parser.DictionaryUtilities.convertQuickReplies;
 import static ai.labs.parser.DictionaryUtilities.extractExpressions;
+import static ai.labs.resources.rest.extensions.model.ExtensionDescriptor.ConfigValue;
+import static ai.labs.resources.rest.extensions.model.ExtensionDescriptor.FieldType.BOOLEAN;
 
 /**
  * @author ginccc
@@ -45,13 +46,16 @@ public class InputParserTask implements ILifecycleTask {
     private static final String EXTENSION_NAME_NORMALIZER = "normalizer";
     private static final String EXTENSION_NAME_DICTIONARIES = "dictionaries";
     private static final String EXTENSION_NAME_CORRECTIONS = "corrections";
+
     private IInputParser sentenceParser;
     private List<INormalizer> normalizers;
     private List<IDictionary> dictionaries;
     private List<ICorrection> corrections;
 
-    private static final String KEY_INPUT_NORMALIZED = "input:normalized";
+    private static final String KEY_INPUT = "input";
+    private static final String KEY_INPUT_NORMALIZED = KEY_INPUT + ":normalized";
     private static final String KEY_EXPRESSIONS_PARSED = "expressions:parsed";
+    private static final String KEY_INTENT = "intent";
     private static final String KEY_TYPE = "type";
     private static final String KEY_CONFIG = "config";
 
@@ -92,7 +96,7 @@ public class InputParserTask implements ILifecycleTask {
     @Override
     public void executeTask(IConversationMemory memory) {
         //parse user input to meanings
-        final IData<String> inputData = memory.getCurrentStep().getLatestData("input");
+        final IData<String> inputData = memory.getCurrentStep().getLatestData(KEY_INPUT);
         if (inputData == null) {
             return;
         }
@@ -145,6 +149,7 @@ public class InputParserTask implements ILifecycleTask {
     private void storeNormalizedResultInMemory(IConversationMemory memory, String normalizedInput) {
         if (!RuntimeUtilities.isNullOrEmpty(normalizedInput)) {
             IData<String> expressionsData = new Data<>(KEY_INPUT_NORMALIZED, normalizedInput);
+            memory.getCurrentStep().resetConversationOutput(KEY_INPUT);
             memory.getCurrentStep().storeData(expressionsData);
         }
     }
@@ -162,6 +167,12 @@ public class InputParserTask implements ILifecycleTask {
 
                 IData<String> expressionsData = new Data<>(KEY_EXPRESSIONS_PARSED, expressions);
                 memory.getCurrentStep().storeData(expressionsData);
+
+                List<String> intents = expressionProvider.parseExpressions(expressions).stream().
+                        map(Expression::getExpressionName).
+                        collect(Collectors.toList());
+                Data<List<String>> intentData = new Data<>(KEY_INTENT, intents);
+                memory.getCurrentStep().storeData(intentData);
             }
         }
     }

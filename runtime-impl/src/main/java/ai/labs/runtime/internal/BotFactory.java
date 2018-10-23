@@ -153,10 +153,10 @@ public class BotFactory implements IBotFactory {
 
     private void logBotDeployment(String environment, String botId, Integer botVersion, Deployment.Status status) {
         if (status == Deployment.Status.IN_PROGRESS) {
-            log.info(String.format("Deploying Bot... (environment=%s, id=%s , version=%s)",
+            log.info(String.format("Deploying Bot... (environment=%s, botId=%s , version=%s)",
                     environment, botId, botVersion));
         } else {
-            log.info(String.format("Bot deployed with status: %s (environment=%s, id=%s , version=%s)", status,
+            log.info(String.format("Bot deployed with status: %s (environment=%s, botId=%s , version=%s)", status,
                     environment, botId, botVersion));
         }
     }

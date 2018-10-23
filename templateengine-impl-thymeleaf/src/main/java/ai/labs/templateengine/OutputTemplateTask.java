@@ -30,6 +30,10 @@ public class OutputTemplateTask implements ILifecycleTask {
     private static final String OUTPUT_HTML = "output:html";
     private static final String PRE_TEMPLATED = "preTemplated";
     private static final String POST_TEMPLATED = "postTemplated";
+    private static final String KEY_OUTPUT = "output";
+    private static final String KEY_QUICK_REPLIES = "quickReplies";
+    private static final String KEY_CONTEXT = "context";
+    private static final String KEY_MEMORY = "memory";
     private final ITemplatingEngine templatingEngine;
     private final IMemoryTemplateConverter memoryTemplateConverter;
     private final IDataFactory dataFactory;
@@ -56,19 +60,26 @@ public class OutputTemplateTask implements ILifecycleTask {
     @Override
     public void executeTask(IConversationMemory memory) {
         IConversationMemory.IWritableConversationStep currentStep = memory.getCurrentStep();
-        List<IData<String>> outputDataList = currentStep.getAllData("output");
-        List<IData<List<QuickReply>>> quickReplyDataList = currentStep.getAllData("quickReplies");
-        List<IData<Context>> contextDataList = currentStep.getAllData("context");
+        List<IData<Object>> outputDataList = currentStep.getAllData(KEY_OUTPUT);
+        List<IData<List<QuickReply>>> quickReplyDataList = currentStep.getAllData(KEY_QUICK_REPLIES);
+        List<IData<Context>> contextDataList = currentStep.getAllData(KEY_CONTEXT);
 
         Map<String, Object> contextMap = prepareContext(contextDataList);
 
         Map<String, Object> memoryForTemplate = memoryTemplateConverter.convertMemoryForTemplating(memory);
         if (!memoryForTemplate.isEmpty()) {
-            contextMap.put("memory", memoryForTemplate);
+            contextMap.put(KEY_MEMORY, memoryForTemplate);
+        }
+
+        if (!outputDataList.isEmpty()) {
+            currentStep.resetConversationOutput(KEY_OUTPUT);
         }
 
         templateOutputTexts(memory, outputDataList, contextMap);
 
+        if (!quickReplyDataList.isEmpty()) {
+            currentStep.resetConversationOutput(KEY_QUICK_REPLIES);
+        }
         templatingQuickReplies(memory, quickReplyDataList, contextMap);
     }
 
@@ -86,7 +97,7 @@ public class OutputTemplateTask implements ILifecycleTask {
     }
 
     private void templateOutputTexts(IConversationMemory memory,
-                                     List<IData<String>> outputDataList,
+                                     List<IData<Object>> outputDataList,
                                      Map<String, Object> contextMap) {
         outputDataList.forEach(output -> {
             String outputKey = output.getKey();
@@ -96,18 +107,55 @@ public class OutputTemplateTask implements ILifecycleTask {
             }
 
             if (templateMode != null) {
-                String preTemplated = output.getResult();
+                Object result = output.getResult();
+                String preTemplated = null;
+                boolean isObj = false;
+                if (result instanceof String) { // keep supporting string for backwards compatibility
+                    preTemplated = (String) result;
+                } else if (result instanceof Map) {
+                    preTemplated = getFieldToTemplate((Map<String, Object>) result,
+                            "text", "label", "value");
+                    isObj = true;
+                }
 
-                try {
-                    String postTemplated = templatingEngine.processTemplate(preTemplated, contextMap, templateMode);
-                    output.setResult(postTemplated);
-                    templateData(memory, output, outputKey, preTemplated, postTemplated);
-                } catch (ITemplatingEngine.TemplateEngineException e) {
-                    log.error(e.getLocalizedMessage(), e);
+                if (preTemplated != null) {
+                    try {
+                        String postTemplated = templatingEngine.processTemplate(preTemplated, contextMap, templateMode);
+                        if (isObj) {
+                            putFieldToTemplate((Map<String, Object>) result, postTemplated,
+                                    "text", "label", "value");
+                        } else {
+                            output.setResult(postTemplated);
+                        }
+                        templateData(memory, output, outputKey, preTemplated, postTemplated);
+                    } catch (ITemplatingEngine.TemplateEngineException e) {
+                        log.error(e.getLocalizedMessage(), e);
+                    }
                 }
             }
         });
     }
+
+    private static String getFieldToTemplate(Map<String, Object> result, String... keys) {
+        for (String key : keys) {
+            Object field = result.get(key);
+            if (field instanceof String) {
+                return field.toString();
+            }
+        }
+
+        return null;
+    }
+
+    private static void putFieldToTemplate(Map<String, Object> result, String value, String... keys) {
+        for (String key : result.keySet()) {
+            if (result.containsKey(key)) {
+                result.put(key, value);
+                break;
+            }
+        }
+    }
+
 
     private void templatingQuickReplies(IConversationMemory memory,
                                         List<IData<List<QuickReply>>> quickReplyDataList,
@@ -148,7 +196,7 @@ public class OutputTemplateTask implements ILifecycleTask {
 
         storeTemplatedData(memory, dataKey, PRE_TEMPLATED, preTemplated);
         storeTemplatedData(memory, dataKey, POST_TEMPLATED, postTemplated);
-        memory.getCurrentStep().storeData(dataText);
+        memory.getCurrentStep().storeData(dataText, true);
     }
 
     private void storeTemplatedData(IConversationMemory memory,
@@ -158,7 +206,7 @@ public class OutputTemplateTask implements ILifecycleTask {
 
         String newOutputKey = joinStrings(":", originalKey, templateAppendix);
         IData processedData = dataFactory.createData(newOutputKey, dataValue);
-        memory.getCurrentStep().storeData(processedData);
+        memory.getCurrentStep().storeData(processedData, false);
     }
 
     @Override

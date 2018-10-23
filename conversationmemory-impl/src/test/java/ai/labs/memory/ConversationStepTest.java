@@ -1,5 +1,6 @@
 package ai.labs.memory;
 
+import ai.labs.memory.model.ConversationOutput;
 import org.junit.Assert;
 import org.junit.Before;
 import org.junit.Test;
@@ -16,7 +17,7 @@ public class ConversationStepTest {
 
     @Before
     public void setUp() {
-        conversationStep = new ConversationStep();
+        conversationStep = new ConversationStep(new ConversationOutput());
     }
 
     @Test
@@ -123,7 +124,7 @@ public class ConversationStepTest {
         //setup
         final Data data = new Data<List>("testKey", new LinkedList());
         this.conversationStep.storeData(data);
-        ConversationStep conversationStep = new ConversationStep();
+        ConversationStep conversationStep = new ConversationStep(new ConversationOutput());
         conversationStep.storeData(data);
 
         //assert

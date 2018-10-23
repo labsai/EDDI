@@ -30,24 +30,24 @@ public interface IRestTestCaseStore {
                                                      @QueryParam("limit") @DefaultValue("20") Integer limit);
 
     @PATCH
-    @Path("/{id}")
+    @Path("/{conversationId}")
     @Consumes(MediaType.APPLICATION_JSON)
-    void patchDescriptor(@PathParam("id") String id, @QueryParam("version") Integer version, PatchInstruction<SimpleTestCaseDescriptor> patchInstruction);
+    void patchDescriptor(@PathParam("conversationId") String id, @QueryParam("version") Integer version, PatchInstruction<SimpleTestCaseDescriptor> patchInstruction);
 
 
     @GET
-    @Path("/{id}")
+    @Path("/{conversationId}")
     @Produces(MediaType.APPLICATION_JSON)
-    TestCase readTestCase(@PathParam("id") String id);
+    TestCase readTestCase(@PathParam("conversationId") String id);
 
     @POST
     Response createTestCase(String conversationId);
 
     @PUT
-    @Path("/{id}")
-    URI updateTestCase(@PathParam("id") String id, TestCase testCase);
+    @Path("/{conversationId}")
+    URI updateTestCase(@PathParam("conversationId") String id, TestCase testCase);
 
     @DELETE
-    @Path("/{id}")
-    void deleteTestCase(@PathParam("id") String id);
+    @Path("/{conversationId}")
+    void deleteTestCase(@PathParam("conversationId") String id);
 }

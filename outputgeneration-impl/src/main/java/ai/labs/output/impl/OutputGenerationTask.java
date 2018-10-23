@@ -112,10 +112,13 @@ public class OutputGenerationTask implements ILifecycleTask {
     private void selectAndStoreOutput(IConversationMemory memory, String action, List<OutputValue> outputValues) {
         IntStream.range(0, outputValues.size()).forEach(index -> {
             OutputValue outputValue = outputValues.get(index);
-            List<String> possibleValueAlternatives = outputValue.getValueAlternatives();
-            String randomValue = chooseRandomly(possibleValueAlternatives);
+            List<Object> possibleValueAlternatives = outputValue.getValueAlternatives();
+            Object randomValue = chooseRandomly(possibleValueAlternatives);
+            if (randomValue instanceof Map) {
+                ((Map) randomValue).put("type", outputValue.getType());
+            }
             String outputKey = createOutputKey(action, outputValues, outputValue, index);
-            IData<String> outputData = dataFactory.createData(outputKey, randomValue, possibleValueAlternatives);
+            IData<Object> outputData = dataFactory.createData(outputKey, randomValue, possibleValueAlternatives);
             outputData.setPublic(true);
             memory.getCurrentStep().storeData(outputData);
         });
@@ -167,7 +170,7 @@ public class OutputGenerationTask implements ILifecycleTask {
         }
     }
 
-    private String chooseRandomly(List<String> possibleValues) {
+    private Object chooseRandomly(List<Object> possibleValues) {
         return possibleValues.get(new Random().nextInt(possibleValues.size()));
     }
 

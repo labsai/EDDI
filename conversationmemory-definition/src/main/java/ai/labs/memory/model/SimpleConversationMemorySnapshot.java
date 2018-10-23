@@ -22,6 +22,7 @@ public class SimpleConversationMemorySnapshot {
     private Deployment.Environment environment;
     private ConversationState conversationState;
     private int redoCacheSize;
+    private List<ConversationOutput> conversationOutputs = new LinkedList<>();
     private List<SimpleConversationStep> conversationSteps = new LinkedList<>();
 
     @Getter

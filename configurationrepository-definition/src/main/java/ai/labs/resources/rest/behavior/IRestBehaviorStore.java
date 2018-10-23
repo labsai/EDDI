@@ -33,16 +33,16 @@ public interface IRestBehaviorStore extends IRestVersionInfo {
                                                      @QueryParam("limit") @DefaultValue("20") Integer limit);
 
     @GET
-    @Path("/{id}")
+    @Path("/{conversationId}")
     @Produces(MediaType.APPLICATION_JSON)
-    BehaviorConfiguration readBehaviorRuleSet(@PathParam("id") String id,
+    BehaviorConfiguration readBehaviorRuleSet(@PathParam("conversationId") String id,
                                               @ApiParam(name = "version", required = true, format = "integer", example = "1")
                                               @QueryParam("version") Integer version);
 
     @PUT
-    @Path("/{id}")
+    @Path("/{conversationId}")
     @Consumes(MediaType.APPLICATION_JSON)
-    Response updateBehaviorRuleSet(@PathParam("id") String id,
+    Response updateBehaviorRuleSet(@PathParam("conversationId") String id,
                                    @ApiParam(name = "version", required = true, format = "integer", example = "1")
                                    @QueryParam("version") Integer version, BehaviorConfiguration behaviorConfiguration);
 
@@ -51,8 +51,8 @@ public interface IRestBehaviorStore extends IRestVersionInfo {
     Response createBehaviorRuleSet(BehaviorConfiguration behaviorConfiguration);
 
     @DELETE
-    @Path("/{id}")
-    Response deleteBehaviorRuleSet(@PathParam("id") String id,
+    @Path("/{conversationId}")
+    Response deleteBehaviorRuleSet(@PathParam("conversationId") String id,
                                    @ApiParam(name = "version", required = true, format = "integer", example = "1")
                                    @QueryParam("version") Integer version);
 }
