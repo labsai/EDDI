@@ -152,17 +152,17 @@
         </dependency>
         <dependency>
             <groupId>ai.labs</groupId>
-            <artifactId>backupservice-impl</artifactId>
-            <version>${project.version}</version>
-        </dependency>
-        <dependency>
-            <groupId>ai.labs</groupId>
             <artifactId>httpCallsTask-impl</artifactId>
             <version>${project.version}</version>
         </dependency>
         <dependency>
             <groupId>ai.labs</groupId>
             <artifactId>normalizer-impl</artifactId>
+            <version>${project.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>ai.labs</groupId>
+            <artifactId>backupservice-impl</artifactId>
             <version>${project.version}</version>
         </dependency>
     </dependencies>

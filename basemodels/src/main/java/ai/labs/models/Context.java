@@ -1,4 +1,4 @@
-package ai.labs.lifecycle.model;
+package ai.labs.models;
 
 import lombok.AllArgsConstructor;
 import lombok.Getter;

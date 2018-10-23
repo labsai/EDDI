@@ -40,6 +40,13 @@ public interface IResourceStore<T> {
         }
     }
 
+    class ResourceAlreadyExistsException extends Exception {
+
+        public ResourceAlreadyExistsException(String message) {
+            super(message);
+        }
+    }
+
     IResourceId create(T content) throws ResourceStoreException;
 
     T read(String id, Integer version) throws ResourceNotFoundException, ResourceStoreException;

@@ -1,7 +1,7 @@
 package ai.labs.lifecycle;
 
-import ai.labs.lifecycle.model.Context;
 import ai.labs.memory.IConversationMemory;
+import ai.labs.models.Context;
 
 import java.util.Map;
 

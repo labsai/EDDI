@@ -1,16 +1,18 @@
 package ai.labs.core.rest.internal;
 
+import ai.labs.caching.ICache;
+import ai.labs.caching.ICacheFactory;
 import ai.labs.lifecycle.IConversation;
 import ai.labs.lifecycle.LifecycleException;
-import ai.labs.lifecycle.model.Context;
 import ai.labs.memory.IConversationMemory;
 import ai.labs.memory.IConversationMemoryStore;
 import ai.labs.memory.model.ConversationMemorySnapshot;
-import ai.labs.memory.model.ConversationState;
-import ai.labs.memory.model.Deployment;
 import ai.labs.memory.model.SimpleConversationMemorySnapshot;
+import ai.labs.models.Context;
+import ai.labs.models.ConversationState;
+import ai.labs.models.Deployment;
+import ai.labs.models.InputData;
 import ai.labs.persistence.IResourceStore;
-import ai.labs.rest.model.InputData;
 import ai.labs.rest.rest.IRestBotEngine;
 import ai.labs.runtime.IBot;
 import ai.labs.runtime.IBotFactory;
@@ -41,26 +43,29 @@ import static ai.labs.memory.ConversationMemoryUtilities.*;
 
 /**
  * @author ginccc
- *
  */
 @Slf4j
 public class RestBotEngine implements IRestBotEngine {
     private static final String resourceURI = "eddi://ai.labs.conversation/conversationstore/conversations/";
+    private static final String CACHE_NAME_CONVERSATION_STATE = "conversationState";
     private final IBotFactory botFactory;
     private final IConversationMemoryStore conversationMemoryStore;
     private final IConversationCoordinator conversationCoordinator;
     private final SystemRuntime.IRuntime runtime;
     private final int botTimeout;
+    private final ICache<String, ConversationState> conversationStateCache;
 
     @Inject
     public RestBotEngine(IBotFactory botFactory,
                          IConversationMemoryStore conversationMemoryStore,
                          IConversationCoordinator conversationCoordinator,
+                         ICacheFactory cacheFactory,
                          SystemRuntime.IRuntime runtime,
                          @Named("system.botTimeoutInSeconds") int botTimeout) {
         this.botFactory = botFactory;
         this.conversationMemoryStore = conversationMemoryStore;
         this.conversationCoordinator = conversationCoordinator;
+        this.conversationStateCache = cacheFactory.getCache(CACHE_NAME_CONVERSATION_STATE);
         this.runtime = runtime;
         this.botTimeout = botTimeout;
     }
@@ -80,6 +85,7 @@ public class RestBotEngine implements IRestBotEngine {
 
             IConversation conversation = latestBot.startConversation(null);
             String conversationId = storeConversationMemory(conversation.getConversationMemory(), environment);
+            cacheConversationState(conversationId, ConversationState.READY);
             URI createdUri = RestUtilities.createURI(resourceURI, conversationId);
             return Response.created(createdUri).build();
         } catch (ServiceException |
@@ -90,6 +96,12 @@ public class RestBotEngine implements IRestBotEngine {
             log.error(e.getLocalizedMessage(), e);
             throw new InternalServerErrorException(e.getLocalizedMessage(), e);
         }
+    }
+
+    @Override
+    public Response endConversation(String conversationId) {
+        setConversationState(conversationId, ConversationState.ENDED);
+        return Response.ok().build();
     }
 
     @Override
@@ -123,7 +135,12 @@ public class RestBotEngine implements IRestBotEngine {
         RuntimeUtilities.checkNotNull(environment, "environment");
         RuntimeUtilities.checkNotNull(conversationId, "conversationId");
 
-        ConversationState conversationState = conversationMemoryStore.getConversationState(conversationId);
+        ConversationState conversationState = conversationStateCache.get(conversationId);
+        if (conversationState == null) {
+            conversationState = conversationMemoryStore.getConversationState(conversationId);
+            cacheConversationState(conversationId, conversationState);
+        }
+
         if (conversationState == null) {
             String message = "No conversation found! (conversationId=%s)";
             message = String.format(message, conversationId);
@@ -182,6 +199,7 @@ public class RestBotEngine implements IRestBotEngine {
                                         returnDetailed,
                                         returnCurrentStepOnly);
                         memorySnapshot.setEnvironment(environment);
+                        cacheConversationState(conversationId, memorySnapshot.getConversationState());
                         response.resume(memorySnapshot);
                     });
 
@@ -216,7 +234,7 @@ public class RestBotEngine implements IRestBotEngine {
 
     private Callable<Void> processUserInput(Deployment.Environment environment,
                                             String conversationId, String message,
-                                            Map<String, InputData.Context> inputDataContext,
+                                            Map<String, Context> inputDataContext,
                                             IConversationMemory conversationMemory,
                                             IConversation conversation) {
         return () -> {
@@ -224,7 +242,7 @@ public class RestBotEngine implements IRestBotEngine {
                         conversation.say(message, convertContext(inputDataContext));
                         return null;
                     },
-                    new IFinishedExecution<Void>() {
+                    new IFinishedExecution<>() {
                         @Override
                         public void onComplete(Void result) {
                             try {
@@ -273,7 +291,7 @@ public class RestBotEngine implements IRestBotEngine {
         log.error(msg, t);
     }
 
-    private Map<String, Context> convertContext(Map<String, InputData.Context> inputDataContext) {
+    private Map<String, Context> convertContext(Map<String, Context> inputDataContext) {
         if (inputDataContext == null) {
             return new HashMap<>();
         } else {
@@ -281,7 +299,7 @@ public class RestBotEngine implements IRestBotEngine {
                     .stream()
                     .collect(Collectors.toMap(Map.Entry::getKey,
                             e -> {
-                                InputData.Context context = e.getValue();
+                                Context context = e.getValue();
                                 return new Context(
                                         Context.ContextType.valueOf(context.getType().toString()),
                                         context.getValue());
@@ -425,6 +443,11 @@ public class RestBotEngine implements IRestBotEngine {
 
     private void setConversationState(String conversationId, ConversationState conversationState) {
         conversationMemoryStore.setConversationState(conversationId, conversationState);
+        cacheConversationState(conversationId, conversationState);
+    }
+
+    private void cacheConversationState(String conversationId, ConversationState conversationState) {
+        conversationStateCache.put(conversationId, conversationState);
     }
 
     private String storeConversationMemory(IConversationMemory conversationMemory, Deployment.Environment environment)

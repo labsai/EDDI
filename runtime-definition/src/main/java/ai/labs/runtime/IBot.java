@@ -3,7 +3,7 @@ package ai.labs.runtime;
 import ai.labs.lifecycle.IConversation;
 import ai.labs.lifecycle.LifecycleException;
 import ai.labs.memory.IConversationMemory;
-import ai.labs.memory.model.Deployment;
+import ai.labs.models.Deployment;
 
 /**
  * @author ginccc

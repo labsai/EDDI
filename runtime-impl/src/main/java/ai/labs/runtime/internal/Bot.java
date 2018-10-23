@@ -4,7 +4,7 @@ import ai.labs.lifecycle.IConversation;
 import ai.labs.lifecycle.LifecycleException;
 import ai.labs.memory.ConversationMemory;
 import ai.labs.memory.IConversationMemory;
-import ai.labs.memory.model.Deployment;
+import ai.labs.models.Deployment;
 import ai.labs.runtime.IBot;
 import ai.labs.runtime.IExecutablePackage;
 import lombok.Getter;

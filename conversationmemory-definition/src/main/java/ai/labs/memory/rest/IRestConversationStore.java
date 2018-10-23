@@ -2,8 +2,8 @@ package ai.labs.memory.rest;
 
 import ai.labs.memory.descriptor.model.ConversationDescriptor;
 import ai.labs.memory.model.ConversationMemorySnapshot;
-import ai.labs.memory.model.ConversationState;
-import ai.labs.memory.model.ConversationStatus;
+import ai.labs.models.ConversationState;
+import ai.labs.models.ConversationStatus;
 import ai.labs.persistence.IResourceStore;
 import io.swagger.annotations.Api;
 import io.swagger.annotations.ApiParam;
