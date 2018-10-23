@@ -2,7 +2,6 @@ package ai.labs.memory;
 
 import ai.labs.memory.model.ConversationMemorySnapshot;
 import ai.labs.memory.model.SimpleConversationMemorySnapshot;
-import ai.labs.persistence.IResourceStore;
 
 import java.util.LinkedList;
 import java.util.List;
@@ -37,14 +36,11 @@ public class ConversationMemoryUtilities {
 
     private static ConversationMemorySnapshot.ConversationStepSnapshot iterateConversationStep(IConversationMemory.IConversationStep conversationStep) {
         ConversationMemorySnapshot.ConversationStepSnapshot conversationStepSnapshot = new ConversationMemorySnapshot.ConversationStepSnapshot();
-        for (IConversationMemory.IConversationContext context : conversationStep.getAllConversationContexts()) {
-            if (conversationStep.isEmpty()) {
-                continue;
-            }
+
+        if (!conversationStep.isEmpty()) {
             ConversationMemorySnapshot.PackageRunSnapshot packageRunSnapshot = new ConversationMemorySnapshot.PackageRunSnapshot();
-            packageRunSnapshot.setContext(context.getContext());
             conversationStepSnapshot.getPackages().add(packageRunSnapshot);
-            for (IData data : conversationStep.getAllElements(context)) {
+            for (IData data : conversationStep.getAllElements()) {
                 ConversationMemorySnapshot.ResultSnapshot resultSnapshot = new ConversationMemorySnapshot.ResultSnapshot(data.getKey(), data.getResult(), data.getPossibleResults(), data.getTimestamp(), data.isPublic());
                 packageRunSnapshot.getLifecycleTasks().add(resultSnapshot);
             }
@@ -56,10 +52,9 @@ public class ConversationMemoryUtilities {
     private static List<IConversationMemory.IConversationStep> iterateRedoCache(List<ConversationMemorySnapshot.ConversationStepSnapshot> redoSteps) {
         List<IConversationMemory.IConversationStep> conversationSteps = new LinkedList<>();
         for (ConversationMemorySnapshot.ConversationStepSnapshot redoStep : redoSteps) {
-            IConversationMemory.IWritableConversationStep conversationStep = new ConversationStep(new ConversationMemory.ConversationContext());
+            IConversationMemory.IWritableConversationStep conversationStep = new ConversationStep();
             conversationSteps.add(conversationStep);
             for (ConversationMemorySnapshot.PackageRunSnapshot packageRunSnapshot : redoStep.getPackages()) {
-                conversationStep.setCurrentConversationContext(new ConversationMemory.ConversationContext(packageRunSnapshot.getContext()));
                 for (ConversationMemorySnapshot.ResultSnapshot resultSnapshot : packageRunSnapshot.getLifecycleTasks()) {
                     Data data = new Data(resultSnapshot.getKey(), resultSnapshot.getResult(), resultSnapshot.getPossibleResults(), resultSnapshot.getTimestamp(), resultSnapshot.isPublic());
                     conversationStep.storeData(data);
@@ -70,7 +65,7 @@ public class ConversationMemoryUtilities {
         return conversationSteps;
     }
 
-    public static IConversationMemory convertConversationMemorySnapshot(ConversationMemorySnapshot snapshot) throws IResourceStore.ResourceStoreException, IResourceStore.ResourceNotFoundException {
+    public static IConversationMemory convertConversationMemorySnapshot(ConversationMemorySnapshot snapshot) {
         IConversationMemory conversationMemory = new ConversationMemory(snapshot.getId(), snapshot.getBotId(), snapshot.getBotVersion());
         conversationMemory.setConversationState(snapshot.getConversationState());
 
@@ -88,7 +83,6 @@ public class ConversationMemoryUtilities {
             }
 
             for (ConversationMemorySnapshot.PackageRunSnapshot packageRunSnapshot : conversationStepSnapshot.getPackages()) {
-                conversationMemory.setCurrentContext(packageRunSnapshot.getContext());
                 for (ConversationMemorySnapshot.ResultSnapshot resultSnapshot : packageRunSnapshot.getLifecycleTasks()) {
                     Data data = new Data(resultSnapshot.getKey(), resultSnapshot.getResult(), resultSnapshot.getPossibleResults(), resultSnapshot.getTimestamp(), resultSnapshot.isPublic());
                     conversationMemory.getCurrentStep().storeData(data);

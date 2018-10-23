@@ -1,6 +1,8 @@
 package ai.labs.memory.model;
 
 
+import ai.labs.models.ConversationState;
+import ai.labs.models.Deployment;
 import lombok.*;
 
 import java.util.Date;
@@ -62,7 +64,6 @@ public class ConversationMemorySnapshot {
     @Getter
     @Setter
     public static class PackageRunSnapshot {
-        private String context;
         private List<ResultSnapshot> lifecycleTasks = new LinkedList<>();
 
         @Override
@@ -72,17 +73,12 @@ public class ConversationMemorySnapshot {
 
             PackageRunSnapshot that = (PackageRunSnapshot) o;
 
-            if (context != null ? context.equals(that.context) : that.context == null)
-                if (lifecycleTasks != null ? lifecycleTasks.equals(that.lifecycleTasks) : that.lifecycleTasks == null)
-                    return true;
-            return false;
+            return lifecycleTasks != null ? lifecycleTasks.equals(that.lifecycleTasks) : that.lifecycleTasks == null;
         }
 
         @Override
         public int hashCode() {
-            int result = context != null ? context.hashCode() : 0;
-            result = 31 * result + (lifecycleTasks != null ? lifecycleTasks.hashCode() : 0);
-            return result;
+            return 31 * (lifecycleTasks != null ? lifecycleTasks.hashCode() : 0);
         }
     }
 
@@ -105,9 +101,9 @@ public class ConversationMemorySnapshot {
 
             ResultSnapshot that = (ResultSnapshot) o;
 
-            if (key != null ? key.equals(that.key) : that.key == null)
-                if (possibleResults != null ? possibleResults.equals(that.possibleResults) : that.possibleResults == null)
-                    return true;
+            if (key != null ? key.equals(that.key) : that.key == null) {
+                return possibleResults != null ? possibleResults.equals(that.possibleResults) : that.possibleResults == null;
+            }
             return false;
         }
 

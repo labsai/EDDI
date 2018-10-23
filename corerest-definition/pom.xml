@@ -62,6 +62,11 @@
             <artifactId>runtime-definition</artifactId>
             <version>${project.version}</version>
         </dependency>
+        <dependency>
+            <groupId>ai.labs</groupId>
+            <artifactId>basemodels</artifactId>
+            <version>${project.version}</version>
+        </dependency>
     </dependencies>
 
     <properties>

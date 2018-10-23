@@ -22,12 +22,6 @@ public class HistorizedResourceStore<T> implements IResourceStore<T> {
         return new IResourceStore.ResourceModifiedException(message);
     }
 
-    public static final String DELETED_FIELD = "_deleted";
-    public static final String ID_FIELD = "_id";
-    public static final String VERSION_FIELD = "_version";
-
-    private static final String HISTORY_POSTFIX = ".history";
-
     IResourceStorage<T> resourceStorage;
 
     public HistorizedResourceStore(IResourceStorage<T> resourceStore) {

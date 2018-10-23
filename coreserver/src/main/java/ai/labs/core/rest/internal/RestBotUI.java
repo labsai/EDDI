@@ -1,6 +1,6 @@
 package ai.labs.core.rest.internal;
 
-import ai.labs.memory.model.Deployment;
+import ai.labs.models.Deployment;
 import ai.labs.rest.rest.IRestBotUI;
 import lombok.extern.slf4j.Slf4j;
 import org.jboss.resteasy.plugins.guice.RequestScoped;

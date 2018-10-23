@@ -1,7 +1,7 @@
 package ai.labs.memory;
 
 import ai.labs.memory.model.ConversationMemorySnapshot;
-import ai.labs.memory.model.ConversationState;
+import ai.labs.models.ConversationState;
 import ai.labs.persistence.IResourceStore;
 
 /**

@@ -1,6 +1,6 @@
 package ai.labs.runtime;
 
-import ai.labs.memory.model.Deployment;
+import ai.labs.models.Deployment;
 import ai.labs.runtime.service.ServiceException;
 
 /**

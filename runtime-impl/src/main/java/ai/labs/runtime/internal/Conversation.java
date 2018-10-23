@@ -3,12 +3,12 @@ package ai.labs.runtime.internal;
 import ai.labs.lifecycle.IConversation;
 import ai.labs.lifecycle.ILifecycleManager;
 import ai.labs.lifecycle.LifecycleException;
-import ai.labs.lifecycle.model.Context;
 import ai.labs.memory.ConversationMemory;
 import ai.labs.memory.Data;
 import ai.labs.memory.IConversationMemory;
 import ai.labs.memory.IData;
-import ai.labs.memory.model.ConversationState;
+import ai.labs.models.Context;
+import ai.labs.models.ConversationState;
 import ai.labs.runtime.IExecutablePackage;
 
 import java.util.LinkedList;
@@ -125,7 +125,6 @@ public class Conversation implements IConversation {
 
     private void executePackages(List<IData> data) throws LifecycleException {
         for (IExecutablePackage executablePackage : executablePackages) {
-            conversationMemory.setCurrentContext(executablePackage.getName());
             data.stream().filter(Objects::nonNull).
                     forEach(datum -> conversationMemory.getCurrentStep().storeData(datum));
             ILifecycleManager lifecycleManager = executablePackage.getLifecycleManager();

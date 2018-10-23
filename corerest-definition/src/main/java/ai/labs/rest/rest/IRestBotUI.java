@@ -1,6 +1,6 @@
 package ai.labs.rest.rest;
 
-import ai.labs.memory.model.Deployment;
+import ai.labs.models.Deployment;
 import org.jboss.resteasy.annotations.cache.NoCache;
 
 import javax.ws.rs.*;

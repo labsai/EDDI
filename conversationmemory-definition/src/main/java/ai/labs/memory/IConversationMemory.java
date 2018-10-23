@@ -1,6 +1,6 @@
 package ai.labs.memory;
 
-import ai.labs.memory.model.ConversationState;
+import ai.labs.models.ConversationState;
 
 import java.io.Serializable;
 import java.util.List;
@@ -33,8 +33,6 @@ public interface IConversationMemory extends Serializable {
 
     void redoLastStep();
 
-    void setCurrentContext(String context);
-
     ConversationState getConversationState();
 
     void setConversationState(ConversationState conversationState);
@@ -63,13 +61,7 @@ public interface IConversationMemory extends Serializable {
 
         Set<String> getAllKeys();
 
-        List<IData> getAllElements(IConversationMemory.IConversationContext context);
-
-        IConversationContext getCurrentConversationContext();
-
-        void setCurrentConversationContext(IConversationContext conversationContext);
-
-        Set<IConversationContext> getAllConversationContexts();
+        List<IData> getAllElements();
 
         int size();
 
@@ -81,11 +73,4 @@ public interface IConversationMemory extends Serializable {
     interface IWritableConversationStep extends IConversationStep {
         void storeData(IData element);
     }
-
-    interface IConversationContext {
-        String getContext();
-
-        void setContext(String context);
-    }
-
 }

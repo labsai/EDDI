@@ -1,5 +1,7 @@
 package ai.labs.memory.model;
 
+import ai.labs.models.ConversationState;
+import ai.labs.models.Deployment;
 import lombok.AllArgsConstructor;
 import lombok.Getter;
 import lombok.Setter;

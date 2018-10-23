@@ -2,8 +2,8 @@ package ai.labs.testing.impl;
 
 import ai.labs.memory.IConversationMemoryStore;
 import ai.labs.memory.model.ConversationMemorySnapshot;
-import ai.labs.memory.model.ConversationState;
-import ai.labs.memory.model.Deployment;
+import ai.labs.models.ConversationState;
+import ai.labs.models.Deployment;
 import ai.labs.rest.rest.IRestBotAdministration;
 import ai.labs.rest.rest.IRestBotEngine;
 import ai.labs.rest.restinterfaces.IRestInterfaceFactory;

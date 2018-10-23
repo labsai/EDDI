@@ -6,33 +6,23 @@ import java.util.*;
  * @author ginccc
  */
 public class ConversationStep implements IConversationMemory.IWritableConversationStep {
-    private Map<IConversationMemory.IConversationContext, Map<String, IData>> store;
-    private IConversationMemory.IConversationContext conversationContext;
+    private Map<String, IData> store;
     int conversationStepNumber;
 
-    ConversationStep(IConversationMemory.IConversationContext conversationContext) {
-        this.conversationContext = conversationContext;
+    ConversationStep() {
         store = new LinkedHashMap<>();
     }
 
     @Override
     public <T> IData<T> getData(String key) {
-        return getCurrentContext().get(key);
-    }
-
-    private Map<String, IData> getCurrentContext() {
-        if (!store.containsKey(conversationContext)) {
-            store.put(new ConversationMemory.ConversationContext(conversationContext), new LinkedHashMap<>());
-        }
-
-        return store.get(conversationContext);
+        return store.get(key);
     }
 
     @Override
     public <T> List<IData<T>> getAllData(String prefix) {
         List<IData<T>> dataList = new ArrayList<>();
 
-        for (String key : getCurrentContext().keySet()) {
+        for (String key : store.keySet()) {
             IData<T> data = getData(key);
             if (data != null) {
                 if (key.startsWith(prefix))
@@ -45,38 +35,23 @@ public class ConversationStep implements IConversationMemory.IWritableConversati
 
     @Override
     public void storeData(IData data) {
-        getCurrentContext().put(data.getKey(), data);
+        store.put(data.getKey(), data);
     }
 
     @Override
     public Set<String> getAllKeys() {
-        return getCurrentContext().keySet();
-    }
-
-    @Override
-    public List<IData> getAllElements(IConversationMemory.IConversationContext context) {
-        Map<String, IData> contextMap = store.get(context);
-        return contextMap != null ? new ArrayList<>(contextMap.values()) : new ArrayList<>();
-    }
-
-    @Override
-    public IConversationMemory.IConversationContext getCurrentConversationContext() {
-        return conversationContext;
-    }
-
-    @Override
-    public void setCurrentConversationContext(IConversationMemory.IConversationContext conversationContext) {
-        this.conversationContext = conversationContext;
-    }
-
-    @Override
-    public Set<IConversationMemory.IConversationContext> getAllConversationContexts() {
         return store.keySet();
     }
 
     @Override
+    public List<IData> getAllElements() {
+        return new ArrayList<>(store.values());
+    }
+
+
+    @Override
     public <T> IData<T> getLatestData(String prefix) {
-        List<IData> elements = getAllElements(conversationContext);
+        List<IData> elements = getAllElements();
         Collections.reverse(elements);
         for (IData element : elements) {
             if (element.getKey().startsWith(prefix)) {
@@ -89,12 +64,12 @@ public class ConversationStep implements IConversationMemory.IWritableConversati
 
     @Override
     public int size() {
-        return getCurrentContext().size();
+        return store.size();
     }
 
     @Override
     public boolean isEmpty() {
-        return getCurrentContext().isEmpty();
+        return store.isEmpty();
     }
 
     @Override

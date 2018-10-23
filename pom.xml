@@ -61,6 +61,7 @@
         <module>httpCallsTask-impl</module>
         <module>normalizer-definition</module>
         <module>normalizer-impl</module>
+        <module>basemodels</module>
     </modules>
 
     <build>

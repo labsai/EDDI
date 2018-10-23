@@ -6,6 +6,10 @@ import ai.labs.memory.rest.IRestConversationStore;
 import ai.labs.permission.rest.IRestPermissionStore;
 import ai.labs.resources.impl.behavior.mongo.BehaviorStore;
 import ai.labs.resources.impl.behavior.rest.RestBehaviorStore;
+import ai.labs.resources.impl.botmanagement.mongo.BotTriggerStore;
+import ai.labs.resources.impl.botmanagement.mongo.UserConversationStore;
+import ai.labs.resources.impl.botmanagement.rest.RestBotTriggerStore;
+import ai.labs.resources.impl.botmanagement.rest.RestUserConversationStore;
 import ai.labs.resources.impl.bots.mongo.BotStore;
 import ai.labs.resources.impl.bots.rest.RestBotStore;
 import ai.labs.resources.impl.deployment.mongo.DeploymentStore;
@@ -13,7 +17,6 @@ import ai.labs.resources.impl.deployment.rest.RestDeploymentStore;
 import ai.labs.resources.impl.descriptor.mongo.DocumentDescriptorStore;
 import ai.labs.resources.impl.descriptor.rest.RestDocumentDescriptorStore;
 import ai.labs.resources.impl.expression.RestExpression;
-
 import ai.labs.resources.impl.extensions.RestExtensionStore;
 import ai.labs.resources.impl.http.mongo.HttpCallsStore;
 import ai.labs.resources.impl.http.rest.RestHttpCallsStore;
@@ -30,6 +33,10 @@ import ai.labs.resources.impl.regulardictionary.mongo.RegularDictionaryStore;
 import ai.labs.resources.impl.regulardictionary.rest.RestRegularDictionaryStore;
 import ai.labs.resources.rest.behavior.IBehaviorStore;
 import ai.labs.resources.rest.behavior.IRestBehaviorStore;
+import ai.labs.resources.rest.botmanagement.IBotTriggerStore;
+import ai.labs.resources.rest.botmanagement.IRestBotTriggerStore;
+import ai.labs.resources.rest.botmanagement.IRestUserConversationStore;
+import ai.labs.resources.rest.botmanagement.IUserConversationStore;
 import ai.labs.resources.rest.bots.IBotStore;
 import ai.labs.resources.rest.bots.IRestBotStore;
 import ai.labs.resources.rest.deployment.IDeploymentStore;
@@ -66,6 +73,8 @@ public class RepositoryModule extends AbstractBaseModule {
         bind(IDocumentDescriptorStore.class).to(DocumentDescriptorStore.class).in(Scopes.SINGLETON);
 
         bind(IBotStore.class).to(BotStore.class).in(Scopes.SINGLETON);
+        bind(IBotTriggerStore.class).to(BotTriggerStore.class).in(Scopes.SINGLETON);
+        bind(IUserConversationStore.class).to(UserConversationStore.class).in(Scopes.SINGLETON);
         bind(IPackageStore.class).to(PackageStore.class).in(Scopes.SINGLETON);
         bind(IParserStore.class).to(ParserStore.class).in(Scopes.SINGLETON);
         bind(IRegularDictionaryStore.class).to(RegularDictionaryStore.class).in(Scopes.SINGLETON);
@@ -81,6 +90,8 @@ public class RepositoryModule extends AbstractBaseModule {
         bind(IRestDeploymentStore.class).to(RestDeploymentStore.class);
 
         bind(IRestBotStore.class).to(RestBotStore.class);
+        bind(IRestBotTriggerStore.class).to(RestBotTriggerStore.class);
+        bind(IRestUserConversationStore.class).to(RestUserConversationStore.class);
         bind(IRestPackageStore.class).to(RestPackageStore.class);
         bind(IRestParserStore.class).to(RestParserStore.class);
         bind(IRestRegularDictionaryStore.class).to(RestRegularDictionaryStore.class);

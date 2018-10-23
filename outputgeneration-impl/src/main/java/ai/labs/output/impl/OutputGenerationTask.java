@@ -1,12 +1,11 @@
 package ai.labs.output.impl;
 
 import ai.labs.lifecycle.ILifecycleTask;
-import ai.labs.lifecycle.LifecycleException;
 import ai.labs.lifecycle.PackageConfigurationException;
-import ai.labs.lifecycle.model.Context;
 import ai.labs.memory.IConversationMemory;
 import ai.labs.memory.IData;
 import ai.labs.memory.IDataFactory;
+import ai.labs.models.Context;
 import ai.labs.output.IOutputFilter;
 import ai.labs.output.IOutputGeneration;
 import ai.labs.output.model.OutputEntry;
@@ -39,7 +38,7 @@ public class OutputGenerationTask implements ILifecycleTask {
     private static final String MEMORY_QUICK_REPLIES_IDENTIFIER = "quickReplies";
     private static final String CONTEXT_IDENTIFIER = "context";
     private static final String QUICK_REPLIES_IDENTIFIER = "quickReplies";
-    public static final String OUTPUTSET_CONFIG_URI = "uri";
+    private static final String OUTPUTSET_CONFIG_URI = "uri";
     private final IResourceClientLibrary resourceClientLibrary;
     private final IDataFactory dataFactory;
     private final IOutputGeneration outputGeneration;
@@ -64,7 +63,7 @@ public class OutputGenerationTask implements ILifecycleTask {
     }
 
     @Override
-    public void executeTask(IConversationMemory memory) throws LifecycleException {
+    public void executeTask(IConversationMemory memory) {
         List<IData<Context>> contextDataList = memory.getCurrentStep().getAllData("context");
         storeContextQuickReplies(memory, contextDataList);
 
@@ -88,12 +87,12 @@ public class OutputGenerationTask implements ILifecycleTask {
         contextDataList.forEach(contextData -> {
             String contextKey = contextData.getKey();
             Context context = contextData.getResult();
-            String key = contextKey.substring((CONTEXT_IDENTIFIER + ":").length(), contextKey.length());
+            String key = contextKey.substring((CONTEXT_IDENTIFIER + ":").length());
             if (key.startsWith(QUICK_REPLIES_IDENTIFIER) && context.getType().equals(Context.ContextType.object)) {
                 String contextQuickReplyKey = CONTEXT_IDENTIFIER + ":" + QUICK_REPLIES_IDENTIFIER + ":";
                 String quickRepliesKey = "context";
                 if (contextKey.contains(contextQuickReplyKey)) {
-                    quickRepliesKey = contextKey.substring(contextQuickReplyKey.length(), contextKey.length());
+                    quickRepliesKey = contextKey.substring(contextQuickReplyKey.length());
                 }
 
                 if (context.getType().equals(Context.ContextType.object)) {
