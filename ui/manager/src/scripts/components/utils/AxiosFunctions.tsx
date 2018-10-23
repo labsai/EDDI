@@ -65,6 +65,7 @@ export interface IBot extends IDetailedDescriptor {
   packages?: string[];
   channels?: string[];
   hasAvailableUpdates?: boolean;
+  deploymentStatus?: string;
 }
 
 export interface IDescriptorResponse {
@@ -87,6 +88,7 @@ export async function getSpecificBot(botResource: string): Promise<IBot> {
     const botDescriptor = await getDescriptor(id, version);
     const data: IBotData = await getBotData(botResource);
     const currentVersion = await getCurrentVersion(botResource);
+    const deploymentStatus = await getDeploymentStatus(botResource);
     return {
       id,
       version,
@@ -98,6 +100,7 @@ export async function getSpecificBot(botResource: string): Promise<IBot> {
       resource: botDescriptor.resource,
       packages: data.packages,
       channels: data.channels,
+      deploymentStatus,
     };
   } catch (err) {
     console.error(`Failed to get bot. Error: ${err.message}`);
@@ -196,6 +199,7 @@ export async function getCurrentBot(id: string): Promise<IBot> {
     )).data;
     const descriptor = await getDescriptor(id, version);
     const data: IBotData = await getBotData(descriptor.resource);
+    const deploymentStatus = await getDeploymentStatus(descriptor.resource);
     return {
       id,
       lastModifiedOn: descriptor.lastModifiedOn,
@@ -207,6 +211,7 @@ export async function getCurrentBot(id: string): Promise<IBot> {
       createdOn: descriptor.createdOn,
       packages: data.packages,
       channels: data.channels,
+      deploymentStatus,
     };
   } catch (err) {
     console.error(`Failed to get current bot. Error: ${err.message}`);
@@ -884,5 +889,44 @@ export async function updatePackages(
   } catch (err) {
     console.error(`Failed to update packages. Error: ${err.message}`);
     throw err;
+  }
+}
+
+export async function getDeploymentStatus(resource: string) {
+  try {
+    const res = await axios.get(
+      `${await getAPIUrl()}/administration/unrestricted/deploymentstatus/${Parser.getIdAndVersion(
+        resource,
+      )}`,
+    );
+    return res.data;
+  } catch (err) {
+    console.error(`Failed to get deployment status. Error: ${err.message}`);
+    throw err;
+  }
+}
+
+export async function deployBot(resource: string) {
+  try {
+    await axios.post(
+      `${await getAPIUrl()}/administration/unrestricted/deploy/${Parser.getIdAndVersion(
+        resource,
+      )}`,
+    );
+  } catch (err) {
+    console.error(`Failed to deploy bot. Error: ${err.message}`);
+    throw err;
+  }
+}
+
+export async function undeployBot(resource: string) {
+  try {
+    await axios.post(
+      `${await getAPIUrl()}/administration/unrestricted/undeploy/${Parser.getIdAndVersion(
+        resource,
+      )}`,
+    );
+  } catch (err) {
+    console.error(`Failed to undeploy bot. Error: ${err.message}`);
   }
 }

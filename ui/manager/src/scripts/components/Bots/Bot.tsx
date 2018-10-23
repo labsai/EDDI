@@ -3,13 +3,13 @@ import * as renderIf from 'render-if';
 import styles from './Bot.styles';
 import * as Radium from 'radium';
 import { Link, browserHistory } from 'react-router-dom';
-import { IBot, IPackage } from '../utils/AxiosFunctions';
+import { IBot } from '../utils/AxiosFunctions';
 import Packages from './Packages';
 import { Component, compose, pure, setDisplayName } from 'recompose';
 import eddiApiActionDispatchers from '../../actions/EddiApiActionDispatchers';
 import * as _ from 'lodash';
 import * as moment from 'moment';
-import WhiteButton from '../Assets/Buttons/WhiteButton';
+import DeployButton from '../Assets/Buttons/DeployButton';
 
 interface IPublicProps {
   bot: IBot;
@@ -23,11 +23,6 @@ interface IPrivateProps extends IPublicProps {
 const warningIcon = require('../../../public/images/WarningIcon.png');
 
 class Bot extends React.Component<IPrivateProps> {
-  constructor(props) {
-    super(props);
-    this.state = {};
-  }
-
   async componentDidMount() {
     eddiApiActionDispatchers.fetchBotDataAction(this.props.bot.resource);
   }
@@ -69,10 +64,11 @@ class Bot extends React.Component<IPrivateProps> {
                 </span>
               </div>
             </Link>
-            <WhiteButton
-              text={'Publish'}
-              disabled={true}
-              customStyles={styles.publishButton}
+            <DeployButton
+              name={this.props.bot.name}
+              botResource={this.props.bot.resource}
+              deploymentStatus={this.props.bot.deploymentStatus}
+              customStyles={styles.deployButton}
             />
           </div>
           <div style={styles.botContent}>

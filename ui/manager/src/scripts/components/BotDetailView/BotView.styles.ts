@@ -39,5 +39,9 @@ const styles: CSSProperties = {
     fontSize: '12px',
     textAlign: 'center',
   },
+  deployButton: {
+    height: '39px',
+    marginLeft: '10px',
+  },
 };
 export default styles;

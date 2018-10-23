@@ -5,12 +5,13 @@ import PackageList from './PackageList';
 import * as renderIf from 'render-if';
 import styles from './BotView.styles';
 import { Component, compose, pure, setDisplayName } from 'recompose';
-import { IBot } from '../utils/AxiosFunctions';
+import { IBot, getDeploymentStatus } from '../utils/AxiosFunctions';
 import { botSelector } from '../../selectors/BotSelectors';
-import { ModalEnum } from '../utils/ModalEnum';
 import { connect } from 'react-redux';
 import VersionSelectComponent from '../Assets/VersionSelectComponent';
 import WhiteButton from '../Assets/Buttons/WhiteButton';
+import DeployButton from '../Assets/Buttons/DeployButton';
+import { IN_PROGRESS } from '../utils/helpers/BotHelper';
 
 interface IPublicProps {
   botResource: string;
@@ -93,10 +94,11 @@ class BotView extends React.Component<IPrivateProps, IState> {
                 </div>
               ))}
               <div style={styles.botHeaderSpacing} />
-              <WhiteButton
-                text={'Publish'}
-                disabled={true}
-                customStyles={styles.button}
+              <DeployButton
+                name={this.props.bot.name}
+                botResource={this.props.bot.resource}
+                deploymentStatus={this.props.bot.deploymentStatus}
+                customStyles={styles.deployButton}
               />
             </div>
             <BotDescriptor

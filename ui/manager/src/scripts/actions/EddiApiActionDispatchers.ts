@@ -55,6 +55,21 @@ import {
   updateBotsSuccessAction,
   updateBotsAction,
   updateBotsFailedAction,
+  IDeployBotAction,
+  IDeployBotSuccessAction,
+  IDeployBotFailedAction,
+  deployBotAction,
+  deployBotSuccessAction,
+  deployBotFailedAction,
+  undeployBotFailedAction,
+  undeployBotSuccessAction,
+  undeployBotAction,
+  IUpdateBotDeploymentStatusAction,
+  IUpdateBotDeploymentStatusSuccessAction,
+  IUpdateBotDeploymentStatusFailedAction,
+  updateBotDeploymentStatusAction,
+  updateBotDeploymentStatusFailedAction,
+  updateBotDeploymentStatusSuccessAction,
 } from './EddiApiActions';
 
 export interface IEddiApiActionDispatchers extends ActionCreatorsMapObject {
@@ -104,6 +119,19 @@ export interface IEddiApiActionDispatchers extends ActionCreatorsMapObject {
   updateBotsAction: (bots) => IUpdateBotsAction;
   updateBotsSuccessAction: (bots) => IUpdateBotsSuccessAction;
   updateBotsFailedAction: (error) => IUpdateBotsFailedAction;
+  deployBotAction: (botResource) => IDeployBotAction;
+  deployBotSuccessAction: (botResource) => IDeployBotSuccessAction;
+  deployBotFailedAction: (error) => IDeployBotFailedAction;
+  updateBotDeploymentStatusAction: (
+    botResource,
+  ) => IUpdateBotDeploymentStatusAction;
+  updateBotDeploymentStatusSuccessAction: (
+    botResource,
+    status,
+  ) => IUpdateBotDeploymentStatusSuccessAction;
+  updateBotDeploymentStatusFailedAction: (
+    error,
+  ) => IUpdateBotDeploymentStatusFailedAction;
 }
 
 const actions: IEddiApiActionDispatchers = {
@@ -134,6 +162,15 @@ const actions: IEddiApiActionDispatchers = {
   updateBotsAction,
   updateBotsFailedAction,
   updateBotsSuccessAction,
+  deployBotAction,
+  deployBotSuccessAction,
+  deployBotFailedAction,
+  undeployBotAction,
+  undeployBotSuccessAction,
+  undeployBotFailedAction,
+  updateBotDeploymentStatusAction,
+  updateBotDeploymentStatusSuccessAction,
+  updateBotDeploymentStatusFailedAction,
 };
 
 const eddiApiActionDispatchers: IEddiApiActionDispatchers = bindActionCreators<

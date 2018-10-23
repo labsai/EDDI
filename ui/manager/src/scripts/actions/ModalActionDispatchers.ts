@@ -33,6 +33,8 @@ import {
   IShowUpdateBotsModal,
   showUpdatePackagesModal,
   showUpdateBotsModal,
+  showConfirmationModal,
+  IShowConfirmationModal,
 } from './ModalActions';
 
 export interface IModalActionDispatchers extends ActionCreatorsMapObject {
@@ -44,7 +46,9 @@ export interface IModalActionDispatchers extends ActionCreatorsMapObject {
     selectedResources?: string[],
     descriptor?: IDetailedDescriptor,
     data?: string,
+    message?: string,
     addPlugin?: (plugins: string[]) => void,
+    onConfirm?: () => void,
   ) => IShowModalAction;
   closeModal: () => ICloseModalAction;
   showViewJsonModal: (resource: string) => IShowViewJsonModalAction;
@@ -73,6 +77,10 @@ export interface IModalActionDispatchers extends ActionCreatorsMapObject {
   ) => IShowCreateNewConfig2Modal;
   showUpdatePackagesModal: (resource: string) => IShowUpdatePackagesModal;
   showUpdateBotsModal: (packageResources: string[]) => IShowUpdateBotsModal;
+  showConfirmationModal: (
+    message: string,
+    onConfirm: () => void,
+  ) => IShowConfirmationModal;
 }
 
 const actions: IModalActionDispatchers = {
@@ -88,6 +96,7 @@ const actions: IModalActionDispatchers = {
   showCreateNewConfig2Modal,
   showUpdatePackagesModal,
   showUpdateBotsModal,
+  showConfirmationModal,
 };
 
 const modalActionDispatchers: IModalActionDispatchers = bindActionCreators<

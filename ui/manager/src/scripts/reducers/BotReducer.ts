@@ -18,6 +18,10 @@ import {
   UPDATE_BOT_PACKAGES_SUCCESS,
   FETCH_BOTS_USING_PACKAGE_SUCCESS,
   UPDATE_BOTS_SUCCESS,
+  DEPLOY_BOT,
+  DEPLOY_BOT_SUCCESS,
+  UNDEPLOY_BOT_SUCCESS,
+  UPDATE_BOT_DEPLOYMENT_STATUS_SUCCESS,
 } from '../actions/EddiApiActionTypes';
 import * as update from 'immutability-helper';
 import {
@@ -32,6 +36,9 @@ import {
   IFetchBotsUsingPackageSuccessAction,
   IUpdatePackagesSuccessAction,
   IUpdateBotsSuccessAction,
+  IDeployBotSuccessAction,
+  IUndeployBotSuccessAction,
+  IUpdateBotDeploymentStatusSuccessAction,
 } from '../actions/EddiApiActions';
 import * as _ from 'lodash';
 
@@ -254,6 +261,69 @@ const BotReducer: IBotReducer = (
           },
           isLoadingAllBots: {
             $set: false,
+          },
+        },
+      });
+
+    case DEPLOY_BOT_SUCCESS:
+      return update(state, {
+        bots: {
+          $apply: (bots: IBot[]) => {
+            return bots.map(bot => {
+              if (
+                bot.resource === (action as IDeployBotSuccessAction).botResource
+              ) {
+                return update(bot, {
+                  deploymentStatus: {
+                    $set: 'IN_PROGRESS',
+                  },
+                });
+              }
+              return bot;
+            });
+          },
+        },
+      });
+
+    case UNDEPLOY_BOT_SUCCESS:
+      return update(state, {
+        bots: {
+          $apply: (bots: IBot[]) => {
+            return bots.map(bot => {
+              if (
+                bot.resource ===
+                (action as IUndeployBotSuccessAction).botResource
+              ) {
+                return update(bot, {
+                  deploymentStatus: {
+                    $set: 'NOT_FOUND',
+                  },
+                });
+              }
+              return bot;
+            });
+          },
+        },
+      });
+
+    case UPDATE_BOT_DEPLOYMENT_STATUS_SUCCESS:
+      return update(state, {
+        bots: {
+          $apply: (bots: IBot[]) => {
+            return bots.map(bot => {
+              if (
+                bot.resource ===
+                (action as IUpdateBotDeploymentStatusSuccessAction).botResource
+              ) {
+                return update(bot, {
+                  deploymentStatus: {
+                    $set: (action as IUpdateBotDeploymentStatusSuccessAction)
+                      .status,
+                  },
+                });
+              }
+              return bot;
+            });
           },
         },
       });

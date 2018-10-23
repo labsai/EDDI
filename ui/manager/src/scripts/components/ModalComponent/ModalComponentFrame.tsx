@@ -27,6 +27,7 @@ import CreateNewConfigModal from './CreateNewConfigModal';
 import CreateNewConfig2Modal from './CreateNewConfig2Modal';
 import UpdatePackagesModal from './UpdateConfigsModal/UpdatePackagesModal';
 import UpdateBotsModal from './UpdateConfigsModal/UpdateBotsModal';
+import ConfirmModal from './ConfirmModal';
 
 const customStyles = {
   content: {
@@ -41,7 +42,7 @@ const customStyles = {
     outline: '0px',
     padding: '0px',
     position: 'relative',
-    minHeight: '600px',
+    minHeight: '300px',
     maxHeight: 'auto',
     overflow: 'visible',
   },
@@ -69,6 +70,8 @@ interface IPrivateProps {
   data?: {};
   name?: string;
   description?: string;
+  message?: string;
+  onConfirm?(): void;
   addPlugin?(plugins: string[]): void;
 }
 
@@ -152,9 +155,15 @@ class ModalComponentFrame extends React.Component<IPrivateProps, IState> {
       case ModalEnum.updatePackages:
         return <UpdatePackagesModal pluginResource={this.props.resource} />;
       case ModalEnum.updateBots:
-        console.log('SelectedResources:', this.props.selectedResources);
         return (
           <UpdateBotsModal packageResources={this.props.selectedResources} />
+        );
+      case ModalEnum.confirmation:
+        return (
+          <ConfirmModal
+            message={this.props.message}
+            onConfirm={this.props.onConfirm}
+          />
         );
       default:
         return null;

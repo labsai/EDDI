@@ -58,8 +58,9 @@ const styles: CSSProperties = {
     flex: '1',
     textDecoration: 'none',
   },
-  publishButton: {
+  deployButton: {
     height: '35px',
+    width: '108px',
     marginLeft: '25px',
     marginRight: '25px',
     marginTop: '17px',
