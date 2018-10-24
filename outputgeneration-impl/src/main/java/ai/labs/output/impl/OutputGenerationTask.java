@@ -82,7 +82,8 @@ public class OutputGenerationTask implements ILifecycleTask {
                 outputEntries.forEach(outputEntry -> {
                     List<OutputValue> outputValues = outputEntry.getOutputs();
                     selectAndStoreOutput(memory, action, outputValues);
-                    storeQuickReplies(memory, outputEntry.getQuickReplies(), outputEntry.getAction());
+
+                    storeQuickReplies(memory, outputEntry.getQuickReplies(), outputEntry.getAction(), true);
                 }));
     }
 
@@ -191,18 +192,18 @@ public class OutputGenerationTask implements ILifecycleTask {
 
     private int countActionOccurrences(IConversationMemory.IConversationStepStack conversationStepStack,
                                        String action) {
+
         int count = 0;
         for (int i = 0; i < conversationStepStack.size(); i++) {
             IConversationMemory.IConversationStep conversationStep = conversationStepStack.get(i);
-            IData<List<String>> actionsData = conversationStep.getLatestData(ACTION_KEY);
-            if (actionsData != null) {
-                List<String> actions = actionsData.getResult();
+            IData<List<String>> latestData = conversationStep.getLatestData(ACTION_KEY);
+            if (latestData != null) {
+                List<String> actions = latestData.getResult();
                 if (actions.contains(action)) {
                     count++;
                 }
             }
         }
-
         return count;
     }
 

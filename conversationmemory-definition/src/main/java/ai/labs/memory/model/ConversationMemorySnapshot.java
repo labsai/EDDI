@@ -21,6 +21,7 @@ public class ConversationMemorySnapshot {
     private Integer botVersion;
     private Deployment.Environment environment;
     private ConversationState conversationState;
+    private List<ConversationOutput> conversationOutputs = new LinkedList<>();
     private List<ConversationStepSnapshot> conversationSteps = new LinkedList<>();
     private Stack<ConversationStepSnapshot> redoCache = new Stack<>();
 

@@ -77,6 +77,18 @@ public class Conversation implements IConversation {
             ((ConversationMemory) conversationMemory).startNextStep();
             List<IData> data = new LinkedList<>();
 
+            //add userInfo
+            IData userData;
+            String userId;
+            if ((userId = conversationMemory.getUserId()) != null) {
+                userData = new Data<>("userInfo:userId", userId);
+                userData.setPublic(true);
+                data.add(userData);
+            }
+
+            //store context data
+            data.addAll(createContextData(contexts));
+
             //store user input in memory
             IData initialData;
             if (!"".equals(message.trim())) {

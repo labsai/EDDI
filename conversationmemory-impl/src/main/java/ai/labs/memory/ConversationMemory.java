@@ -21,6 +21,7 @@ public class ConversationMemory implements IConversationMemory {
     private IWritableConversationStep currentStep;
     private Stack<IConversationStep> previousSteps;
     private Stack<IConversationStep> redoCache = new Stack<>();
+    private List<ConversationOutput> conversationOutputs = new LinkedList<>();
     private ConversationState conversationState;
 
     ConversationMemory(String conversationId, String botId, Integer botVersion) {
