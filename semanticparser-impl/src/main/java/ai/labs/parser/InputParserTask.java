@@ -55,7 +55,7 @@ public class InputParserTask implements ILifecycleTask {
     private static final String KEY_INPUT = "input";
     private static final String KEY_INPUT_NORMALIZED = KEY_INPUT + ":normalized";
     private static final String KEY_EXPRESSIONS_PARSED = "expressions:parsed";
-    private static final String KEY_INTENT = "intent";
+    private static final String KEY_INTENT = "intents";
     private static final String KEY_TYPE = "type";
     private static final String KEY_CONFIG = "config";
 

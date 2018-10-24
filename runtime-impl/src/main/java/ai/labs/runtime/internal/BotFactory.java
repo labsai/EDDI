@@ -2,6 +2,7 @@ package ai.labs.runtime.internal;
 
 import ai.labs.lifecycle.IConversation;
 import ai.labs.memory.IConversationMemory;
+import ai.labs.models.Context;
 import ai.labs.models.Deployment;
 import ai.labs.runtime.IBot;
 import ai.labs.runtime.IBotFactory;
@@ -130,8 +131,7 @@ public class BotFactory implements IBotFactory {
             }
 
             @Override
-            public IConversation startConversation(IConversation.IConversationOutputRenderer outputProvider)
-                    throws IllegalAccessException {
+            public IConversation startConversation(Map<String, Context> context, IConversation.IConversationOutputRenderer outputProvider) throws IllegalAccessException {
                 throw createBotInProgressException();
             }
 

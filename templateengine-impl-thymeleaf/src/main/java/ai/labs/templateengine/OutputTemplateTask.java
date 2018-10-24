@@ -26,7 +26,7 @@ import static ai.labs.utilities.StringUtilities.joinStrings;
 @Slf4j
 public class OutputTemplateTask implements ILifecycleTask {
     private static final String ID = "ai.labs.templating";
-    private static final String OUTPUT_TEXT = "output:text";
+    private static final String OUTPUT = "output";
     private static final String OUTPUT_HTML = "output:html";
     private static final String PRE_TEMPLATED = "preTemplated";
     private static final String POST_TEMPLATED = "postTemplated";
@@ -101,7 +101,7 @@ public class OutputTemplateTask implements ILifecycleTask {
                                      Map<String, Object> contextMap) {
         outputDataList.forEach(output -> {
             String outputKey = output.getKey();
-            TemplateMode templateMode = outputKey.startsWith(OUTPUT_TEXT) ? TemplateMode.TEXT : null;
+            TemplateMode templateMode = outputKey.startsWith(OUTPUT) ? TemplateMode.TEXT : null;
             if (templateMode == null) {
                 templateMode = outputKey.startsWith(OUTPUT_HTML) ? TemplateMode.HTML : null;
             }
@@ -148,14 +148,13 @@ public class OutputTemplateTask implements ILifecycleTask {
     }
 
     private static void putFieldToTemplate(Map<String, Object> result, String value, String... keys) {
-        for (String key : result.keySet()) {
+        for (String key : keys) {
             if (result.containsKey(key)) {
                 result.put(key, value);
                 break;
             }
         }
     }
-
 
     private void templatingQuickReplies(IConversationMemory memory,
                                         List<IData<List<QuickReply>>> quickReplyDataList,
@@ -196,7 +195,7 @@ public class OutputTemplateTask implements ILifecycleTask {
 
         storeTemplatedData(memory, dataKey, PRE_TEMPLATED, preTemplated);
         storeTemplatedData(memory, dataKey, POST_TEMPLATED, postTemplated);
-        memory.getCurrentStep().storeData(dataText, true);
+        memory.getCurrentStep().storeData(dataText);
     }
 
     private void storeTemplatedData(IConversationMemory memory,

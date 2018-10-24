@@ -172,6 +172,8 @@ $(function () {
                     images.push(obj.value);
                 } else if (obj.key.indexOf('quickReplies') === 0) {
                     pushArray(quickReplies, obj.value);
+                } else if (obj.key.indexOf('output:quickReply') === 0) {
+                    pushArray(quickReplies, obj.value);
                 }
             }
 

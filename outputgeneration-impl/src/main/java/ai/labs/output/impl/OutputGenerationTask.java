@@ -39,6 +39,9 @@ public class OutputGenerationTask implements ILifecycleTask {
     private static final String CONTEXT_IDENTIFIER = "context";
     private static final String QUICK_REPLIES_IDENTIFIER = "quickReplies";
     private static final String OUTPUTSET_CONFIG_URI = "uri";
+    public static final String KEY_VALUE = "value";
+    public static final String KEY_EXPRESSIONS = "expressions";
+    public static final String KEY_IS_DEFAULT = "isDefault";
     private final IResourceClientLibrary resourceClientLibrary;
     private final IDataFactory dataFactory;
     private final IOutputGeneration outputGeneration;
@@ -97,7 +100,7 @@ public class OutputGenerationTask implements ILifecycleTask {
 
                 if (context.getType().equals(Context.ContextType.object)) {
                     List<QuickReply> quickReplies = convertMapToObjects((List<Map<String, String>>) context.getValue());
-                    storeQuickReplies(memory, quickReplies, quickRepliesKey);
+                    storeQuickReplies(memory, quickReplies, quickRepliesKey, true);
                 }
             }
         });
@@ -105,11 +108,13 @@ public class OutputGenerationTask implements ILifecycleTask {
 
     private List<QuickReply> convertMapToObjects(List<Map<String, String>> quickRepliesMapList) {
         return quickRepliesMapList.stream().map(map ->
-                new QuickReply(map.get("value"), map.get("expressions"), Boolean.parseBoolean(map.getOrDefault("isDefault", "false")))).
+                new QuickReply(map.get(KEY_VALUE), map.get(KEY_EXPRESSIONS),
+                        Boolean.parseBoolean(map.getOrDefault(KEY_IS_DEFAULT, "false")))).
                 collect(Collectors.toCollection(LinkedList::new));
     }
 
     private void selectAndStoreOutput(IConversationMemory memory, String action, List<OutputValue> outputValues) {
+        List<QuickReply> quickReplies = new LinkedList<>();
         IntStream.range(0, outputValues.size()).forEach(index -> {
             OutputValue outputValue = outputValues.get(index);
             List<Object> possibleValueAlternatives = outputValue.getValueAlternatives();
@@ -117,20 +122,30 @@ public class OutputGenerationTask implements ILifecycleTask {
             if (randomValue instanceof Map) {
                 ((Map) randomValue).put("type", outputValue.getType());
             }
+            if (outputValue.getType().equals(OutputValue.Type.quickReply)) {
+                Map<String, String> randomValueMap = (Map) randomValue;
+                quickReplies.add(new QuickReply(randomValueMap.get(KEY_VALUE), randomValueMap.get(KEY_EXPRESSIONS),
+                        Boolean.parseBoolean(randomValueMap.getOrDefault(KEY_IS_DEFAULT, "false"))));
+            }
+
             String outputKey = createOutputKey(action, outputValues, outputValue, index);
             IData<Object> outputData = dataFactory.createData(outputKey, randomValue, possibleValueAlternatives);
             outputData.setPublic(true);
             memory.getCurrentStep().storeData(outputData);
         });
+
+        if (!quickReplies.isEmpty()) {
+            storeQuickReplies(memory, quickReplies, action, false);
+        }
     }
 
-    private void storeQuickReplies(IConversationMemory memory, List<QuickReply> quickReplies, String action) {
+    private void storeQuickReplies(IConversationMemory memory, List<QuickReply> quickReplies, String action, boolean publish) {
         if (!quickReplies.isEmpty()) {
             String outputQuickReplyKey = StringUtilities.
                     joinStrings(":", MEMORY_QUICK_REPLIES_IDENTIFIER, action);
             IData outputQuickReplies = dataFactory.createData(outputQuickReplyKey, quickReplies);
             outputQuickReplies.setPublic(true);
-            memory.getCurrentStep().storeData(outputQuickReplies);
+            memory.getCurrentStep().storeData(outputQuickReplies, publish);
         }
     }
 
