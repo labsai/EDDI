@@ -16,10 +16,10 @@ import javax.ws.rs.core.Response;
 @Path("/testcases/run")
 public interface IRestTestCaseRuntime {
     @GET
-    @Path("/{conversationId}")
-    TestCaseState getTestCaseState(@PathParam("conversationId") String id);
+    @Path("/{id}")
+    TestCaseState getTestCaseState(@PathParam("id") String id);
 
     @POST
-    @Path("/{conversationId}")
-    Response runTestCase(@PathParam("conversationId") String id);
+    @Path("/{id}")
+    Response runTestCase(@PathParam("id") String id);
 }

@@ -27,16 +27,16 @@ public interface IRestHttpCallsStore extends IRestVersionInfo {
                                                       @QueryParam("limit") @DefaultValue("20") Integer limit);
 
     @GET
-    @Path("/{conversationId}")
+    @Path("/{id}")
     @Produces(MediaType.APPLICATION_JSON)
-    HttpCallsConfiguration readHttpCalls(@PathParam("conversationId") String id,
+    HttpCallsConfiguration readHttpCalls(@PathParam("id") String id,
                                          @ApiParam(name = "version", required = true, format = "integer", example = "1")
                                          @QueryParam("version") Integer version);
 
     @PUT
-    @Path("/{conversationId}")
+    @Path("/{id}")
     @Consumes(MediaType.APPLICATION_JSON)
-    Response updateHttpCalls(@PathParam("conversationId") String id,
+    Response updateHttpCalls(@PathParam("id") String id,
                              @ApiParam(name = "version", required = true, format = "integer", example = "1")
                              @QueryParam("version") Integer version, HttpCallsConfiguration httpCallsConfiguration);
 
@@ -45,8 +45,8 @@ public interface IRestHttpCallsStore extends IRestVersionInfo {
     Response createHttpCalls(HttpCallsConfiguration httpCallsConfiguration);
 
     @DELETE
-    @Path("/{conversationId}")
-    Response deleteHttpCalls(@PathParam("conversationId") String id,
+    @Path("/{id}")
+    Response deleteHttpCalls(@PathParam("id") String id,
                              @ApiParam(name = "version", required = true, format = "integer", example = "1")
                              @QueryParam("version") Integer version);
 }
