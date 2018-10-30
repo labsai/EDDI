@@ -68,6 +68,15 @@ class CreateNewConfig2Modal extends React.Component<IProps, IState> {
     );
   }
 
+  isJsonString() {
+    try {
+      JSON.parse(this.state.editorText);
+    } catch (e) {
+      return false;
+    }
+    return true;
+  }
+
   createNew = () => {
     eddiApiActionDispatchers.createNewConfigAction(
       this.props.type,
@@ -113,6 +122,7 @@ class CreateNewConfig2Modal extends React.Component<IProps, IState> {
             <BlueButton
               onClick={this.createNew}
               text={`Create new ${typeName}`}
+              disabled={!this.isJsonString()}
             />
           </div>
         </div>
