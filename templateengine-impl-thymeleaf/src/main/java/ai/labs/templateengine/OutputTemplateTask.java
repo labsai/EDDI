@@ -12,12 +12,10 @@ import ai.labs.templateengine.ITemplatingEngine.TemplateMode;
 import lombok.extern.slf4j.Slf4j;
 
 import javax.inject.Inject;
-import java.util.HashMap;
-import java.util.LinkedList;
-import java.util.List;
-import java.util.Map;
+import java.util.*;
 import java.util.stream.Collectors;
 
+import static ai.labs.memory.IConversationMemory.IWritableConversationStep;
 import static ai.labs.utilities.StringUtilities.joinStrings;
 
 /**
@@ -26,7 +24,6 @@ import static ai.labs.utilities.StringUtilities.joinStrings;
 @Slf4j
 public class OutputTemplateTask implements ILifecycleTask {
     private static final String ID = "ai.labs.templating";
-    private static final String OUTPUT = "output";
     private static final String OUTPUT_HTML = "output:html";
     private static final String PRE_TEMPLATED = "preTemplated";
     private static final String POST_TEMPLATED = "postTemplated";
@@ -59,7 +56,7 @@ public class OutputTemplateTask implements ILifecycleTask {
 
     @Override
     public void executeTask(IConversationMemory memory) {
-        IConversationMemory.IWritableConversationStep currentStep = memory.getCurrentStep();
+        IWritableConversationStep currentStep = memory.getCurrentStep();
         List<IData<Object>> outputDataList = currentStep.getAllData(KEY_OUTPUT);
         List<IData<List<QuickReply>>> quickReplyDataList = currentStep.getAllData(KEY_QUICK_REPLIES);
         List<IData<Context>> contextDataList = currentStep.getAllData(KEY_CONTEXT);
@@ -101,7 +98,7 @@ public class OutputTemplateTask implements ILifecycleTask {
                                      Map<String, Object> contextMap) {
         outputDataList.forEach(output -> {
             String outputKey = output.getKey();
-            TemplateMode templateMode = outputKey.startsWith(OUTPUT) ? TemplateMode.TEXT : null;
+            TemplateMode templateMode = outputKey.startsWith(KEY_OUTPUT) ? TemplateMode.TEXT : null;
             if (templateMode == null) {
                 templateMode = outputKey.startsWith(OUTPUT_HTML) ? TemplateMode.HTML : null;
             }
@@ -128,6 +125,8 @@ public class OutputTemplateTask implements ILifecycleTask {
                             output.setResult(postTemplated);
                         }
                         templateData(memory, output, outputKey, preTemplated, postTemplated);
+                        IWritableConversationStep currentStep = memory.getCurrentStep();
+                        currentStep.addConversationOutputList(KEY_OUTPUT, Collections.singletonList(postTemplated));
                     } catch (ITemplatingEngine.TemplateEngineException e) {
                         log.error(e.getLocalizedMessage(), e);
                     }
@@ -178,6 +177,7 @@ public class OutputTemplateTask implements ILifecycleTask {
             });
 
             templateData(memory, quickReplyData, quickReplyData.getKey(), preTemplatedQuickReplies, quickReplies);
+            memory.getCurrentStep().addConversationOutputList(KEY_QUICK_REPLIES, quickReplies);
         });
     }
 
@@ -205,7 +205,7 @@ public class OutputTemplateTask implements ILifecycleTask {
 
         String newOutputKey = joinStrings(":", originalKey, templateAppendix);
         IData processedData = dataFactory.createData(newOutputKey, dataValue);
-        memory.getCurrentStep().storeData(processedData, false);
+        memory.getCurrentStep().storeData(processedData);
     }
 
     @Override

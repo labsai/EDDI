@@ -20,6 +20,7 @@ public class NormalizeInputTask implements ILifecycleTask {
     private static final String ID = "ai.labs.normalizer";
     private static final String ALLOWED_CHARS_IDENTIFIER = "allowedChars";
     private static final String CONVERT_SPECIAL_CHARACTER_IDENTIFIER = "convertSpecialCharacter";
+    private static final String KEY_INPUT = "input";
     private InputNormalizer normalizer;
     private String allowedChars = InputNormalizer.DEFAULT_DEFINED_CHARS;
     private boolean convertSpecialCharacter = true;
@@ -43,14 +44,16 @@ public class NormalizeInputTask implements ILifecycleTask {
 
     @Override
     public void executeTask(IConversationMemory memory) {
-        IData<String> latestInput = memory.getCurrentStep().getLatestData("input");
+        IConversationMemory.IWritableConversationStep currentStep = memory.getCurrentStep();
+        IData<String> latestInput = currentStep.getLatestData(KEY_INPUT);
         if (latestInput == null) {
             return;
         }
 
         String input = latestInput.getResult();
         String formattedInput = normalizer.normalizeInput(input, allowedChars, true, convertSpecialCharacter);
-        memory.getCurrentStep().storeData(new Data<>("input:formatted", formattedInput));
+        currentStep.storeData(new Data<>("input:formatted", formattedInput));
+        currentStep.addConversationOutputString(KEY_INPUT, formattedInput);
     }
 
     @Override

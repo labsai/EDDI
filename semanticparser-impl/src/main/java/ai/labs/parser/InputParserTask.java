@@ -54,7 +54,8 @@ public class InputParserTask implements ILifecycleTask {
 
     private static final String KEY_INPUT = "input";
     private static final String KEY_INPUT_NORMALIZED = KEY_INPUT + ":normalized";
-    private static final String KEY_EXPRESSIONS_PARSED = "expressions:parsed";
+    private static final String KEY_EXPRESSIONS = "expressions";
+    private static final String KEY_EXPRESSIONS_PARSED = KEY_EXPRESSIONS + ":parsed";
     private static final String KEY_INTENT = "intents";
     private static final String KEY_TYPE = "type";
     private static final String KEY_CONFIG = "config";
@@ -106,14 +107,14 @@ public class InputParserTask implements ILifecycleTask {
         try {
             String userInput = inputData.getResult();
             String normalizedUserInput = sentenceParser.normalize(userInput);
-            storeNormalizedResultInMemory(memory, normalizedUserInput);
+            storeNormalizedResultInMemory(memory.getCurrentStep(), normalizedUserInput);
             parsedSolutions = sentenceParser.parse(normalizedUserInput, temporaryDictionaries);
         } catch (InterruptedException e) {
             log.warn(e.getLocalizedMessage(), e);
             return;
         }
 
-        storeResultInMemory(memory, parsedSolutions);
+        storeResultInMemory(memory.getCurrentStep(), parsedSolutions);
     }
 
     private List<IDictionary> prepareTemporaryDictionaries(IConversationMemory memory) {
@@ -146,33 +147,35 @@ public class InputParserTask implements ILifecycleTask {
         return ret;
     }
 
-    private void storeNormalizedResultInMemory(IConversationMemory memory, String normalizedInput) {
+    private void storeNormalizedResultInMemory(IConversationMemory.IWritableConversationStep currentStep, String normalizedInput) {
         if (!RuntimeUtilities.isNullOrEmpty(normalizedInput)) {
             IData<String> expressionsData = new Data<>(KEY_INPUT_NORMALIZED, normalizedInput);
-            memory.getCurrentStep().resetConversationOutput(KEY_INPUT);
-            memory.getCurrentStep().storeData(expressionsData);
+            currentStep.storeData(expressionsData);
+            currentStep.addConversationOutputString(KEY_INPUT, normalizedInput);
         }
     }
 
-    private void storeResultInMemory(IConversationMemory memory, List<RawSolution> parsedSolutions) {
+    private void storeResultInMemory(IConversationMemory.IWritableConversationStep currentStep, List<RawSolution> parsedSolutions) {
         if (!parsedSolutions.isEmpty()) {
             Solution solution = extractExpressions(parsedSolutions, includeUnused, includeUnknown).get(0);
 
             String expressions = solution.getExpressions();
             if (appendExpressions && !expressions.isEmpty()) {
-                IData<String> latestExpressions = memory.getCurrentStep().getLatestData(KEY_EXPRESSIONS_PARSED);
+                IData<String> latestExpressions = currentStep.getLatestData(KEY_EXPRESSIONS_PARSED);
                 if (latestExpressions != null) {
                     expressions = StringUtilities.joinStrings(", ", latestExpressions.getResult(), expressions);
                 }
 
                 IData<String> expressionsData = new Data<>(KEY_EXPRESSIONS_PARSED, expressions);
-                memory.getCurrentStep().storeData(expressionsData);
+                currentStep.storeData(expressionsData);
+                currentStep.addConversationOutputString(KEY_EXPRESSIONS, expressions);
 
                 List<String> intents = expressionProvider.parseExpressions(expressions).stream().
                         map(Expression::getExpressionName).
                         collect(Collectors.toList());
                 Data<List<String>> intentData = new Data<>(KEY_INTENT, intents);
-                memory.getCurrentStep().storeData(intentData);
+                currentStep.storeData(intentData);
+                currentStep.addConversationOutputList(KEY_INTENT, intents);
             }
         }
     }
@@ -199,20 +202,20 @@ public class InputParserTask implements ILifecycleTask {
     public void setExtensions(Map<String, Object> extensions) throws
             UnrecognizedExtensionException, IllegalExtensionConfigurationException {
 
-        List<Map<String, Object>> normalizerList = castToListofMaps(extensions, EXTENSION_NAME_NORMALIZER);
+        List<Map<String, Object>> normalizerList = castToListOfMaps(extensions, EXTENSION_NAME_NORMALIZER);
         normalizers = new LinkedList<>();
         if (normalizerList != null) {
             convertNormalizers(normalizerList);
         }
 
-        List<Map<String, Object>> dictionariesList = castToListofMaps(extensions, EXTENSION_NAME_DICTIONARIES);
+        List<Map<String, Object>> dictionariesList = castToListOfMaps(extensions, EXTENSION_NAME_DICTIONARIES);
         dictionaries = new LinkedList<>();
         if (dictionariesList != null) {
             convertDictionaries(dictionariesList);
         }
 
         corrections = new LinkedList<>();
-        List<Map<String, Object>> correctionsList = castToListofMaps(extensions, EXTENSION_NAME_CORRECTIONS);
+        List<Map<String, Object>> correctionsList = castToListOfMaps(extensions, EXTENSION_NAME_CORRECTIONS);
         if (correctionsList != null) {
             convertCorrections(correctionsList);
         }
@@ -329,7 +332,7 @@ public class InputParserTask implements ILifecycleTask {
         return normalizerUri.getHost();
     }
 
-    private static List<Map<String, Object>> castToListofMaps(Map<String, Object> extensions, String key) {
+    private static List<Map<String, Object>> castToListOfMaps(Map<String, Object> extensions, String key) {
         return (List<Map<String, Object>>) extensions.get(key);
     }
 

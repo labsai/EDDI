@@ -5,6 +5,7 @@ import ai.labs.models.ConversationState;
 
 import java.io.Serializable;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import java.util.Stack;
 
@@ -73,13 +74,19 @@ public interface IConversationMemory extends Serializable {
         boolean isEmpty();
 
         <T> IData<T> getLatestData(String prefix);
+
+        ConversationOutput getConversationOutput();
     }
 
     interface IWritableConversationStep extends IConversationStep {
         void storeData(IData element);
 
-        void storeData(IData element, boolean publish);
-
         void resetConversationOutput(String rootKey);
+
+        void addConversationOutputString(String key, String value);
+
+        void addConversationOutputList(String key, List list);
+
+        void addConversationOutputMap(String key, Map<String, Object> map);
     }
 }

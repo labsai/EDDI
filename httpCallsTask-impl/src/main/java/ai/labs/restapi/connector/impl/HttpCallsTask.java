@@ -36,6 +36,8 @@ public class HttpCallsTask implements ILifecycleTask {
     private static final String ACTION_KEY = "actions";
     private static final String CONTENT_TYPE = "Content-Type";
     private static final String KEY_HTTP_CALLS = "httpCalls";
+    private static final String KEY_CURRENT_MEMORY = "current";
+    private static final String KEY_MEMORY = "memory";
     private final IHttpClient httpClient;
     private IJsonSerialization jsonSerialization;
     private final IResourceClientLibrary resourceClientLibrary;
@@ -69,15 +71,16 @@ public class HttpCallsTask implements ILifecycleTask {
 
     @Override
     public void executeTask(IConversationMemory memory) throws LifecycleException {
-        IData<List<String>> latestData = memory.getCurrentStep().getLatestData(ACTION_KEY);
+        IConversationMemory.IWritableConversationStep currentStep = memory.getCurrentStep();
+        IData<List<String>> latestData = currentStep.getLatestData(ACTION_KEY);
         if (latestData == null) {
             return;
         }
 
         Map<String, Object> templateDataObjects = new HashMap<>();
         Map<String, Object> memoryForTemplate = memoryTemplateConverter.convertMemoryForTemplating(memory);
-        Map<String, Object> currentMemory = (Map<String, Object>) memoryForTemplate.get("current");
-        templateDataObjects.put("memory", memoryForTemplate);
+        Map<String, Object> currentMemory = (Map<String, Object>) memoryForTemplate.get(KEY_CURRENT_MEMORY);
+        templateDataObjects.put(KEY_MEMORY, memoryForTemplate);
 
         List<String> actions = latestData.getResult();
 
@@ -135,7 +138,8 @@ public class HttpCallsTask implements ILifecycleTask {
 
                             String memoryDataName = "httpCalls:" + responseObjectName;
                             IData<Object> httpResponseData = dataFactory.createData(memoryDataName, responseObject);
-                            memory.getCurrentStep().storeData(httpResponseData, false);
+                            currentStep.storeData(httpResponseData);
+                            currentStep.addConversationOutputMap(KEY_HTTP_CALLS, Map.of(responseObjectName, responseObject));
 
                             runPostResponse(memory, call, templateDataObjects);
                         }

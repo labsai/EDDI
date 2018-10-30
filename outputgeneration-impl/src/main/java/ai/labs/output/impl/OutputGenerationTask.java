@@ -21,12 +21,11 @@ import ai.labs.utilities.StringUtilities;
 
 import javax.inject.Inject;
 import java.net.URI;
-import java.util.LinkedList;
-import java.util.List;
-import java.util.Map;
-import java.util.Random;
+import java.util.*;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
+
+import static ai.labs.memory.IConversationMemory.*;
 
 /**
  * @author ginccc
@@ -39,9 +38,9 @@ public class OutputGenerationTask implements ILifecycleTask {
     private static final String CONTEXT_IDENTIFIER = "context";
     private static final String QUICK_REPLIES_IDENTIFIER = "quickReplies";
     private static final String OUTPUTSET_CONFIG_URI = "uri";
-    public static final String KEY_VALUE = "value";
-    public static final String KEY_EXPRESSIONS = "expressions";
-    public static final String KEY_IS_DEFAULT = "isDefault";
+    private static final String KEY_VALUE = "value";
+    private static final String KEY_EXPRESSIONS = "expressions";
+    private static final String KEY_IS_DEFAULT = "isDefault";
     private final IResourceClientLibrary resourceClientLibrary;
     private final IDataFactory dataFactory;
     private final IOutputGeneration outputGeneration;
@@ -83,7 +82,7 @@ public class OutputGenerationTask implements ILifecycleTask {
                     List<OutputValue> outputValues = outputEntry.getOutputs();
                     selectAndStoreOutput(memory, action, outputValues);
 
-                    storeQuickReplies(memory, outputEntry.getQuickReplies(), outputEntry.getAction(), true);
+                    storeQuickReplies(memory, outputEntry.getQuickReplies(), outputEntry.getAction());
                 }));
     }
 
@@ -101,7 +100,7 @@ public class OutputGenerationTask implements ILifecycleTask {
 
                 if (context.getType().equals(Context.ContextType.object)) {
                     List<QuickReply> quickReplies = convertMapToObjects((List<Map<String, String>>) context.getValue());
-                    storeQuickReplies(memory, quickReplies, quickRepliesKey, true);
+                    storeQuickReplies(memory, quickReplies, quickRepliesKey);
                 }
             }
         });
@@ -132,21 +131,25 @@ public class OutputGenerationTask implements ILifecycleTask {
             String outputKey = createOutputKey(action, outputValues, outputValue, index);
             IData<Object> outputData = dataFactory.createData(outputKey, randomValue, possibleValueAlternatives);
             outputData.setPublic(true);
-            memory.getCurrentStep().storeData(outputData);
+            IWritableConversationStep currentStep = memory.getCurrentStep();
+            currentStep.storeData(outputData);
+            currentStep.addConversationOutputList(MEMORY_OUTPUT_IDENTIFIER, Collections.singletonList(randomValue));
         });
 
         if (!quickReplies.isEmpty()) {
-            storeQuickReplies(memory, quickReplies, action, false);
+            storeQuickReplies(memory, quickReplies, action);
         }
     }
 
-    private void storeQuickReplies(IConversationMemory memory, List<QuickReply> quickReplies, String action, boolean publish) {
+    private void storeQuickReplies(IConversationMemory memory, List<QuickReply> quickReplies, String action) {
         if (!quickReplies.isEmpty()) {
             String outputQuickReplyKey = StringUtilities.
                     joinStrings(":", MEMORY_QUICK_REPLIES_IDENTIFIER, action);
             IData outputQuickReplies = dataFactory.createData(outputQuickReplyKey, quickReplies);
             outputQuickReplies.setPublic(true);
-            memory.getCurrentStep().storeData(outputQuickReplies, publish);
+            IWritableConversationStep currentStep = memory.getCurrentStep();
+            currentStep.storeData(outputQuickReplies);
+            currentStep.addConversationOutputList(MEMORY_QUICK_REPLIES_IDENTIFIER, quickReplies);
         }
     }
 
@@ -190,12 +193,12 @@ public class OutputGenerationTask implements ILifecycleTask {
         return possibleValues.get(new Random().nextInt(possibleValues.size()));
     }
 
-    private int countActionOccurrences(IConversationMemory.IConversationStepStack conversationStepStack,
+    private int countActionOccurrences(IConversationStepStack conversationStepStack,
                                        String action) {
 
         int count = 0;
         for (int i = 0; i < conversationStepStack.size(); i++) {
-            IConversationMemory.IConversationStep conversationStep = conversationStepStack.get(i);
+            IConversationStep conversationStep = conversationStepStack.get(i);
             IData<List<String>> latestData = conversationStep.getLatestData(ACTION_KEY);
             if (latestData != null) {
                 List<String> actions = latestData.getResult();

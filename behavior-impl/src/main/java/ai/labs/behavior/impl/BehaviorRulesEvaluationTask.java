@@ -30,11 +30,13 @@ import java.util.stream.Collectors;
 @Slf4j
 public class BehaviorRulesEvaluationTask implements ILifecycleTask {
     public static final String ID = "ai.labs.behavior";
-    private BehaviorRulesEvaluator evaluator;
+    private static final String KEY_ACTIONS = "actions";
     private static final String BEHAVIOR_CONFIG_URI = "uri";
     private final IResourceClientLibrary resourceClientLibrary;
     private final IJsonSerialization jsonSerialization;
     private final IBehaviorDeserialization behaviorSerialization;
+
+    private BehaviorRulesEvaluator evaluator;
 
     @Inject
     public BehaviorRulesEvaluationTask(IResourceClientLibrary resourceClientLibrary,
@@ -81,7 +83,8 @@ public class BehaviorRulesEvaluationTask implements ILifecycleTask {
         successRules.forEach(successRule -> successRule.getActions().stream().
                 filter(action -> !allCurrentActions.contains(action)).forEach(allCurrentActions::add));
 
-        IData<List<String>> latestActions = memory.getCurrentStep().getLatestData("actions");
+        IConversationMemory.IWritableConversationStep currentStep = memory.getCurrentStep();
+        IData<List<String>> latestActions = currentStep.getLatestData(KEY_ACTIONS);
         List<String> actions = new LinkedList<>();
         if (latestActions != null && latestActions.getResult() != null) {
             actions.addAll(latestActions.getResult());
@@ -90,14 +93,16 @@ public class BehaviorRulesEvaluationTask implements ILifecycleTask {
         actions.addAll(allCurrentActions.stream().
                 filter(action -> !actions.contains(action)).collect(Collectors.toList()));
 
-        Data actionsData = new Data<>("actions", actions);
+        Data actionsData = new Data<>(KEY_ACTIONS, actions);
         actionsData.setPublic(true);
-        memory.getCurrentStep().storeData(actionsData);
+        currentStep.storeData(actionsData);
+        currentStep.resetConversationOutput(KEY_ACTIONS);
+        currentStep.addConversationOutputList(KEY_ACTIONS, actions);
     }
 
     private void storeResultIfNotEmpty(IConversationMemory memory, String key, List<BehaviorRule> result) {
         if (!result.isEmpty()) {
-            memory.getCurrentStep().storeData(new Data<>(key, convert(result)), false);
+            memory.getCurrentStep().storeData(new Data<>(key, convert(result)));
         }
     }
 
