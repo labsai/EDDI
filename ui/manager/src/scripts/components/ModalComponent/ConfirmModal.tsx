@@ -7,21 +7,6 @@ import WhiteButton from '../Assets/Buttons/WhiteButton';
 import BlueButton from '../Assets/Buttons/BlueButton';
 import modalActionDispatchers from '../../actions/ModalActionDispatchers';
 
-const customStyles = {
-  createNewBotButton: {
-    backgroundColor: '#0070D2',
-    border: '0px',
-    borderRadius: '4px',
-    color: '#FFFFFF',
-    fontSize: '12px',
-    height: '36px',
-    marginLeft: '60%',
-    marginTop: '8px',
-    textAlign: 'center',
-    minWidth: '100px',
-  },
-};
-
 interface IProps {
   message: string;
   onConfirm(): void;

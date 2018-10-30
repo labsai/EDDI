@@ -22,6 +22,8 @@ import {
   DEPLOY_BOT_SUCCESS,
   UNDEPLOY_BOT_SUCCESS,
   UPDATE_BOT_DEPLOYMENT_STATUS_SUCCESS,
+  DEPLOY_BOT_FAILED,
+  UNDEPLOY_BOT_FAILED,
 } from '../actions/EddiApiActionTypes';
 import * as update from 'immutability-helper';
 import {
@@ -39,8 +41,10 @@ import {
   IDeployBotSuccessAction,
   IUndeployBotSuccessAction,
   IUpdateBotDeploymentStatusSuccessAction,
+  IUndeployBotFailedAction,
 } from '../actions/EddiApiActions';
 import * as _ from 'lodash';
+import modalActionDispatchers from '../actions/ModalActionDispatchers';
 
 export type IBotReducer = Reducer<IBotState>;
 

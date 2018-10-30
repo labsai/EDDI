@@ -33,17 +33,20 @@ import {
 } from '../components/utils/AxiosFunctions';
 import { ModalEnum } from '../components/utils/ModalEnum';
 import {
+  UNDEPLOY_BOT_FAILED,
   UPDATE_PACKAGE_SUCCESS,
   UPDATE_PACKAGES_SUCCESS,
   UPDATE_PLUGIN_SUCCESS,
   UPDATE_PLUGIN_TYPE_IN_PACKAGE_SUCCESS,
 } from '../actions/EddiApiActionTypes';
 import {
+  IUndeployBotFailedAction,
   IUpdatePackagesSuccessAction,
   IUpdatePackageSuccessAction,
   IUpdatePluginSuccessAction,
   IUpdatePluginTypeSuccessAction,
 } from '../actions/EddiApiActions';
+import modalActionDispatchers from '../actions/ModalActionDispatchers';
 
 export type IModalReducer = Reducer<IModalState>;
 
@@ -58,6 +61,7 @@ export interface IModalState {
   resource: string;
   data: {};
   message: string;
+  title: string;
   addPlugin?: (plugins: string[]) => void;
   onConfirm?: () => void;
 }
@@ -74,6 +78,7 @@ export const initialState: IModalState = {
   addPlugin: null,
   data: null,
   message: null,
+  title: null,
   onConfirm: null,
 };
 
@@ -342,6 +347,22 @@ const ModalReducer: IModalReducer = (
         },
       });
 
+    case UNDEPLOY_BOT_FAILED:
+      return update(state, {
+        mode: {
+          $set: ModalEnum.error,
+        },
+        isModalOpen: {
+          $set: true,
+        },
+        title: {
+          $set: 'Failed to undeploy bot',
+        },
+        message: {
+          $set: (action as IUndeployBotFailedAction).error.message,
+        },
+      });
+
     case CLOSE_MODAL:
       return update(state, {
         isModalOpen: {
@@ -368,7 +389,16 @@ const ModalReducer: IModalReducer = (
         data: {
           $set: null,
         },
+        message: {
+          $set: null,
+        },
+        title: {
+          $set: null,
+        },
         addPlugin: {
+          $set: null,
+        },
+        onConfirm: {
           $set: null,
         },
       });

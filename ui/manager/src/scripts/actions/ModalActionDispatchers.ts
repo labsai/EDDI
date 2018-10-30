@@ -35,6 +35,8 @@ import {
   showUpdateBotsModal,
   showConfirmationModal,
   IShowConfirmationModal,
+  IShowErrorMessageModal,
+  showErrorMessageModal,
 } from './ModalActions';
 
 export interface IModalActionDispatchers extends ActionCreatorsMapObject {
@@ -81,6 +83,10 @@ export interface IModalActionDispatchers extends ActionCreatorsMapObject {
     message: string,
     onConfirm: () => void,
   ) => IShowConfirmationModal;
+  showErrorMessageModal: (
+    title: string,
+    message: string,
+  ) => IShowErrorMessageModal;
 }
 
 const actions: IModalActionDispatchers = {
@@ -97,6 +103,7 @@ const actions: IModalActionDispatchers = {
   showUpdatePackagesModal,
   showUpdateBotsModal,
   showConfirmationModal,
+  showErrorMessageModal,
 };
 
 const modalActionDispatchers: IModalActionDispatchers = bindActionCreators<
