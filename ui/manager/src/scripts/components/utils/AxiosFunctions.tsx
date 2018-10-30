@@ -862,7 +862,10 @@ export async function postNewConfig(
       console.error(`Could not create new config of type: ${type}`);
   }
   try {
-    const response: IResponse = await postJsonHelper(configPath, { data });
+    const response: IResponse = await postJsonHelper(
+      configPath,
+      JSON.parse(data),
+    );
     const resource = response.headers.location;
     await patchDescriptor(resource, name, description);
     return resource;

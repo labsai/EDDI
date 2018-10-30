@@ -9,12 +9,15 @@ import WhiteButton from '../Assets/Buttons/WhiteButton';
 import modalActionDispatchers from '../../actions/ModalActionDispatchers';
 import * as renderIf from 'render-if';
 import Parser from '../utils/Parser';
+import { getPostExample } from '../utils/EddiConfigExampleData';
+import * as _ from 'lodash';
 
 require('brace/mode/json');
 require('brace/theme/monokai');
 
 interface IState {
   editorText: string;
+  initialEditorText: string;
 }
 
 interface IProps {
@@ -29,6 +32,7 @@ class CreateNewConfig2Modal extends React.Component<IProps, IState> {
     super(props);
     this.state = {
       editorText: '',
+      initialEditorText: '',
     };
   }
 
@@ -47,13 +51,21 @@ class CreateNewConfig2Modal extends React.Component<IProps, IState> {
   };
 
   discardChanges(props = this.props) {
+    const editorText = _.isEmpty(props.data)
+      ? getPostExample(props.type)
+      : props.data;
     this.setState({
-      editorText: props.data,
+      editorText: editorText,
     });
   }
 
   unsavedChanges() {
-    return this.state.editorText !== this.props.data;
+    return (
+      this.state.editorText !==
+      (_.isEmpty(this.props.data)
+        ? getPostExample(this.props.type)
+        : this.props.data)
+    );
   }
 
   createNew = () => {
@@ -100,7 +112,6 @@ class CreateNewConfig2Modal extends React.Component<IProps, IState> {
             />
             <BlueButton
               onClick={this.createNew}
-              disabled={!this.unsavedChanges()}
               text={`Create new ${typeName}`}
             />
           </div>

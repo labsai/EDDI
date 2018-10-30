@@ -437,6 +437,7 @@ export function* watchCreateNewConfig(): Iterator<{}> {
 }
 
 export function* createNewConfig(action: ICreateNewConfigAction): Iterator<{}> {
+  console.log('Data:' + action.data);
   try {
     const id = yield call(
       postNewConfig,
