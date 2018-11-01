@@ -35,7 +35,7 @@ export function pluginsSelector(
       ) && plug.version === plug.currentVersion,
   );
   const sortedPlugins = plugins.sort(function(a, b) {
-    return a.lastModifiedOn - b.lastModifiedOn;
+    return b.lastModifiedOn - a.lastModifiedOn;
   });
   return {
     plugins: sortedPlugins || [],
