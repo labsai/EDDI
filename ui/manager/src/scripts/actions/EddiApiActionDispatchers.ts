@@ -70,6 +70,8 @@ import {
   updateBotDeploymentStatusAction,
   updateBotDeploymentStatusFailedAction,
   updateBotDeploymentStatusSuccessAction,
+  ICreateNewPluginSuccessAction,
+  createNewPluginSuccessAction,
 } from './EddiApiActions';
 
 export interface IEddiApiActionDispatchers extends ActionCreatorsMapObject {
@@ -113,6 +115,7 @@ export interface IEddiApiActionDispatchers extends ActionCreatorsMapObject {
     description,
     data,
   ) => ICreateNewConfigAction;
+  createNewPluginSuccessAction: (plugin) => ICreateNewPluginSuccessAction;
   updatePackagesAction: (pluginResource, packages) => IUpdatePackagesAction;
   updatePackagesSuccessAction: (packages) => IUpdatePackagesSuccessAction;
   updatePackagesFailedAction: (error) => IUpdatePackagesFailedAction;
@@ -156,6 +159,7 @@ const actions: IEddiApiActionDispatchers = {
   fetchPackagesUsingPluginAction,
   updateJsonDataAction,
   createNewConfigAction,
+  createNewPluginSuccessAction,
   updatePackagesAction,
   updatePackagesSuccessAction,
   updatePackagesFailedAction,

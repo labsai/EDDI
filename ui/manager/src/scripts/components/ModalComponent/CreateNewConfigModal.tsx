@@ -33,6 +33,7 @@ interface IProps {
   description: string;
   type: string;
   data: string;
+  onConfirm(): void;
 }
 
 class CreateNewConfigModal extends React.Component<IProps, IState> {
@@ -62,6 +63,7 @@ class CreateNewConfigModal extends React.Component<IProps, IState> {
       this.state.name,
       this.state.description,
       this.props.data,
+      this.props.onConfirm,
     );
   };
 

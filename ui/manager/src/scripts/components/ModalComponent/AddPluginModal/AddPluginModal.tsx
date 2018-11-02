@@ -56,6 +56,7 @@ class AddPluginModal extends React.Component<IPrivateProps, IState> {
   }
 
   componentWillReceiveProps(nextProps) {
+    console.log('Received new props!');
     if (
       !_.isEmpty(
         _.differenceBy(nextProps.plugins, this.props.plugins, 'resource'),
@@ -150,7 +151,18 @@ class AddPluginModal extends React.Component<IPrivateProps, IState> {
   };
 
   createNewPlugin = () => {
-    ModalActionDispatchers.showCreateNewConfigModal(this.props.pluginType);
+    ModalActionDispatchers.showCreateNewConfigModal(
+      this.props.pluginType,
+      null,
+      null,
+      null,
+      () =>
+        ModalActionDispatchers.showAddPluginsModal(
+          this.props.pluginType,
+          this.props.oldPlugins,
+          this.props.addPlugins,
+        ),
+    );
   };
 
   render() {

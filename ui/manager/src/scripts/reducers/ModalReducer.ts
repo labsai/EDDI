@@ -232,6 +232,9 @@ const ModalReducer: IModalReducer = (
         data: {
           $set: modalAction.data,
         },
+        onConfirm: {
+          $set: modalAction.onConfirm,
+        },
       });
 
     case SHOW_CREATE_NEW_CONFIG_2_MODAL:
@@ -254,6 +257,9 @@ const ModalReducer: IModalReducer = (
         },
         data: {
           $set: modalAction.data,
+        },
+        onConfirm: {
+          $set: modalAction.onConfirm,
         },
       });
 
@@ -369,6 +375,9 @@ const ModalReducer: IModalReducer = (
           $set: null,
         },
         addPlugin: {
+          $set: null,
+        },
+        onConfirm: {
           $set: null,
         },
       });
