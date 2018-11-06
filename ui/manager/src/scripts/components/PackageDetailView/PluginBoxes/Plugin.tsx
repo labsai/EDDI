@@ -148,13 +148,15 @@ class Plugin extends React.Component<IPrivateProps> {
     }
     return (
       <div style={styles.pluginContainer}>
-        <div
-          onClick={() => {
-            this.deletePlugin(this.props.pluginType.extensionKey);
-          }}
-          style={styles.closeButton}>
-          &times;
-        </div>
+        {renderIf(!this.props.editDisabled)(() => (
+          <div
+            onClick={() => {
+              this.deletePlugin(this.props.pluginType.extensionKey);
+            }}
+            style={styles.closeButton}>
+            &times;
+          </div>
+        ))}
         <button style={this.getBoxStyling()} onClick={this.openViewJsonModal}>
           <div style={styles.pluginHeader}>
             <div style={this.getNameStyling()}>

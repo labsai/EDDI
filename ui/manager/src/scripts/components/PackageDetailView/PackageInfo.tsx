@@ -3,17 +3,21 @@ import PackageView from './PackageView';
 import { IPackage } from '../utils/AxiosFunctions';
 import { Component, compose, pure, setDisplayName } from 'recompose';
 import HomeButtonComponent from '../HomeButton/HomeButtonComponent';
-import * as Radium from 'radium';
 import { connect } from 'react-redux';
 import eddiApiActionDispatchers from '../../actions/EddiApiActionDispatchers';
 import styles from '../Bots/Botlist.styles';
 import * as _ from 'lodash';
 import { ClimbingBoxLoader } from 'react-spinners';
 import * as renderIf from 'render-if';
-import { latestPackageSelector } from '../../selectors/PackageSelectors';
+import {
+  latestPackageSelector,
+  specificPackageSelector,
+} from '../../selectors/PackageSelectors';
+import { PACKAGE, PACKAGE_PATH } from '../utils/EddiTypes';
 
 interface IProps {
   packageId: string;
+  version: string;
   packagePayload: IPackage;
   isLoading: boolean;
   error: Error;
@@ -21,7 +25,20 @@ interface IProps {
 
 class PackageInfo extends React.Component<IProps> {
   async componentDidMount() {
-    eddiApiActionDispatchers.fetchCurrentPackageAction(this.props.packageId);
+    if (_.isEmpty(this.props.version)) {
+      eddiApiActionDispatchers.fetchCurrentPackageAction(this.props.packageId);
+    } else {
+      console.log(
+        `${PACKAGE}${PACKAGE_PATH}${this.props.packageId}?version=${
+          this.props.version
+        }`,
+      );
+      eddiApiActionDispatchers.fetchPackageAction(
+        `${PACKAGE}${PACKAGE_PATH}/${this.props.packageId}?version=${
+          this.props.version
+        }`,
+      );
+    }
   }
 
   render() {
@@ -53,7 +70,7 @@ class PackageInfo extends React.Component<IProps> {
 
 const ComposedPackageInfo: Component<IProps> = compose<IProps>(
   pure,
-  connect(latestPackageSelector),
+  connect(specificPackageSelector),
   setDisplayName('PackageInfo'),
 )(PackageInfo);
 

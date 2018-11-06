@@ -56,7 +56,6 @@ class AddPluginModal extends React.Component<IPrivateProps, IState> {
   }
 
   componentWillReceiveProps(nextProps) {
-    console.log('Received new props!');
     if (
       !_.isEmpty(
         _.differenceBy(nextProps.plugins, this.props.plugins, 'resource'),

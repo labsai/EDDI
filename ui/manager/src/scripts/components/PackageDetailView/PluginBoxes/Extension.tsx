@@ -56,6 +56,7 @@ interface IPublicProps {
   pluginType: IOptions;
   index: number;
   pluginResource: string;
+  editDisabled: boolean;
   deleteExtension(extensionKey: number): void;
   updateExtension(extensionResource: string): void;
 }
@@ -139,9 +140,11 @@ class Extension extends React.Component<IPrivateProps> {
     }
     return (
       <div style={styles.extensionContainer}>
-        <div style={customStyles.closeButton} onClick={this.deleteExtension}>
-          &times;
-        </div>
+        {renderIf(!this.props.editDisabled)(() => (
+          <div style={customStyles.closeButton} onClick={this.deleteExtension}>
+            &times;
+          </div>
+        ))}
         <button style={this.getBoxStyling()} onClick={this.openViewJsonModal}>
           <div style={styles.pluginHeader}>
             <div style={this.getNameStyling()}>{this.getPluginName()}</div>

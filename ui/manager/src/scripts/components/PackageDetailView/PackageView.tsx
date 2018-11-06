@@ -3,7 +3,6 @@ import ModalActionDispatchers from '../../actions/ModalActionDispatchers';
 import PackageDescriptor from './PackageDescriptor';
 import Plugin from './PluginBoxes/Plugin';
 import PluginWithExtension from './PluginBoxes/PluginWithExtensions';
-import VersionDropDownComponent from '../BotDetailView/VersionDropDown/VersionDropDownComponent';
 import * as renderIf from 'render-if';
 import styles from './PackageView.styles';
 import { Component, compose, pure, setDisplayName } from 'recompose';
@@ -22,6 +21,9 @@ import { defaultPluginTypesSelector } from '../../selectors/PluginSelectors';
 import BlueButton from '../Assets/Buttons/BlueButton';
 import WhiteButton from '../Assets/Buttons/WhiteButton';
 import BotsUsingPackage from './UsedByComponent/BotsUsingPackage';
+import VersionSelectComponent from '../Assets/VersionSelectComponent';
+import { history } from '../../history';
+import Parser from '../utils/Parser';
 
 export interface IOptions {
   type: string;
@@ -274,25 +276,42 @@ class PackageView extends React.Component<IPrivateProps, IState> {
     return !this.unsavedChanges();
   }
 
+  selectVersion = (newVersion: number) => {
+    eddiApiActionDispatchers.fetchPackageAction(
+      Parser.replaceResourceVersion(
+        this.props.packagePayload.resource,
+        newVersion,
+      ),
+    );
+    history.push(`/packageview/${this.props.packagePayload.id}/${newVersion}`);
+  };
+
   render() {
+    const isCurrentVersion =
+      this.props.packagePayload.version ===
+      this.props.packagePayload.currentVersion;
     return (
       <div>
         <div style={styles.packageHeader}>
           <div style={styles.packageName}>
             {this.props.packagePayload.name || this.props.packagePayload.id}
           </div>
-          <VersionDropDownComponent
-            version={this.props.packagePayload.version}
+          <VersionSelectComponent
+            selectedVersion={this.props.packagePayload.version}
+            currentVersion={this.props.packagePayload.currentVersion}
+            selectVersion={this.selectVersion}
           />
           <WhiteButton
             onClick={this.openEditPackageModal}
             text={'Edit Package'}
             customStyles={styles.editPackageButton}
+            disabled={!isCurrentVersion}
           />
           <WhiteButton
             onClick={this.openEditJsonModal}
             text={'Edit JSON'}
             customStyles={styles.editPackageButton}
+            disabled={!isCurrentVersion}
           />
           {renderIf(foundUnpublishedChanges)(() => (
             <div style={styles.unpublishedChanges}>
@@ -332,6 +351,7 @@ class PackageView extends React.Component<IPrivateProps, IState> {
                   pluginResource={ext.resource}
                   deletePlugin={this.deletePlugin}
                   updateExtensionsInPlugin={this.updateExtensionsInPlugin}
+                  editDisabled={!isCurrentVersion}
                 />
               ))}
             <div style={styles.pluginList}>
@@ -345,20 +365,27 @@ class PackageView extends React.Component<IPrivateProps, IState> {
                     pluginResource={ext.resource}
                     updateResourceInPlugin={this.updateResourceInPlugin}
                     updateExtensionsInPlugin={this.updateExtensionsInPlugin}
+                    editDisabled={!isCurrentVersion}
                   />
                 ))}
             </div>
           </div>
         ))}
-        <div style={styles.pluginAddTitle}>{'Add plugins'}</div>
-        <div style={styles.pluginDropdown}>
-          <PluginSelect
-            packageExtensions={this.state.defaultPluginTypes.map(extension => {
-              return extension;
-            })}
-            addExtension={this.addPlugin}
-          />
-        </div>
+        {renderIf(isCurrentVersion)(() => (
+          <div>
+            <div style={styles.pluginAddTitle}>{'Add plugins'}</div>
+            <div style={styles.pluginDropdown}>
+              <PluginSelect
+                packageExtensions={this.state.defaultPluginTypes.map(
+                  extension => {
+                    return extension;
+                  },
+                )}
+                addExtension={this.addPlugin}
+              />
+            </div>
+          </div>
+        ))}
       </div>
     );
   }

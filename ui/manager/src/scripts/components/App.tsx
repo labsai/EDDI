@@ -30,7 +30,11 @@ class App extends React.Component<IPrivateProps> {
           <div>
             <Route path="/" exact component={Dashboard} />
             <Route path="/botview/:id" exact component={BotViewPage} />
-            <Route path="/packageview/:id" exact component={PackageViewPage} />
+            <Route
+              path="/packageview/:id/:version?"
+              exact
+              component={PackageViewPage}
+            />
             <Route
               path="/resources/:type"
               exact

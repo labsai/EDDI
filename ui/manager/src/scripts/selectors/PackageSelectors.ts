@@ -83,6 +83,35 @@ export function latestPackageSelector(
   };
 }
 
+export interface ISpecificPackageSelectorProps {
+  packageId: string;
+  version: string;
+}
+
+export function specificPackageSelector(
+  state: IAppState,
+  props: ISpecificPackageSelectorProps,
+) {
+  let packagePayload: IPackage;
+  if (!_.isEmpty(props.version)) {
+    packagePayload = state.packageState.packages.find(
+      pack =>
+        pack.id === props.packageId &&
+        pack.version.toString() === props.version,
+    );
+  } else {
+    packagePayload = state.packageState.packages.find(
+      pack =>
+        pack.id === props.packageId && pack.version === pack.currentVersion,
+    );
+  }
+  return {
+    packagePayload,
+    error: state.packageState.error,
+    isLoading: state.packageState.isLoadingPackage,
+  };
+}
+
 export function pluginTypesSelector(
   state: IAppState,
   props: IPackageSelectorProps,
