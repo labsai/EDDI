@@ -137,7 +137,7 @@ public class OutputTemplateTaskTest {
         verify(dataFactory).createData(eq(KEY_OUTPUT_TEXT_SOME_ACTION_POST_TEMPLATED), eq(expectedOutputString));
         verify(dataFactory, times(2)).createData(eq(KEY_QUICK_REPLY_SOME_ACTION_PRE_TEMPLATED), any());
         verify(dataFactory, times(2)).createData(eq(KEY_QUICK_REPLY_SOME_ACTION_POST_TEMPLATED), eq(expectedPostQuickReplies));
-        verify(currentStep, times(6)).storeData(any(IData.class));
+        verify(currentStep, times(9)).storeData(any(IData.class));
     }
 
 
