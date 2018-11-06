@@ -34,6 +34,8 @@ import {
 import { ModalEnum } from '../components/utils/ModalEnum';
 import {
   UNDEPLOY_BOT_FAILED,
+  UPDATE_DESCRIPTOR_FAILED,
+  UPDATE_JSON_DATA_FAILED,
   UPDATE_PACKAGE_SUCCESS,
   UPDATE_PACKAGES_SUCCESS,
   UPDATE_PLUGIN_SUCCESS,
@@ -41,6 +43,8 @@ import {
 } from '../actions/EddiApiActionTypes';
 import {
   IUndeployBotFailedAction,
+  IUpdateDescriptorFailedAction,
+  IUpdateJsonDataFailedAction,
   IUpdatePackagesSuccessAction,
   IUpdatePackageSuccessAction,
   IUpdatePluginSuccessAction,
@@ -360,6 +364,38 @@ const ModalReducer: IModalReducer = (
         },
         message: {
           $set: (action as IUndeployBotFailedAction).error.message,
+        },
+      });
+
+    case UPDATE_DESCRIPTOR_FAILED:
+      return update(state, {
+        mode: {
+          $set: ModalEnum.error,
+        },
+        isModalOpen: {
+          $set: true,
+        },
+        title: {
+          $set: 'Failed to update descriptor',
+        },
+        message: {
+          $set: (action as IUpdateDescriptorFailedAction).error.message,
+        },
+      });
+
+    case UPDATE_JSON_DATA_FAILED:
+      return update(state, {
+        mode: {
+          $set: ModalEnum.error,
+        },
+        isModalOpen: {
+          $set: true,
+        },
+        title: {
+          $set: 'Failed to update JSON data',
+        },
+        message: {
+          $set: (action as IUpdateJsonDataFailedAction).error.message,
         },
       });
 

@@ -62,6 +62,15 @@ class EditJsonModal extends React.Component<IPrivateProps, IState> {
     modalActionDispatchers.closeModal();
   };
 
+  isJsonString() {
+    try {
+      JSON.parse(this.state.editorText);
+    } catch (e) {
+      return false;
+    }
+    return true;
+  }
+
   render() {
     return (
       <div>
@@ -78,7 +87,7 @@ class EditJsonModal extends React.Component<IPrivateProps, IState> {
             ))}
             <BlueButton
               onClick={this.onClick}
-              disabled={!this.unsavedChanges()}
+              disabled={!this.unsavedChanges || !this.isJsonString()}
               text={'Save changes'}
             />
           </div>
