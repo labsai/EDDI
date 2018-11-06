@@ -28,5 +28,5 @@ public interface IRestBotTriggerStore {
 
     @DELETE
     @Path("/{intent}")
-    Response deleteBotTrigger(@PathParam("intent") String id);
+    Response deleteBotTrigger(@PathParam("intent") String intent);
 }

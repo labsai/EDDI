@@ -75,7 +75,7 @@ public class RestUserConversationStore implements IRestUserConversationStore {
         }
     }
 
-    private static String calculateCacheKey(String intent, String userId) {
+    static String calculateCacheKey(String intent, String userId) {
         return intent + "::" + userId;
     }
 }
