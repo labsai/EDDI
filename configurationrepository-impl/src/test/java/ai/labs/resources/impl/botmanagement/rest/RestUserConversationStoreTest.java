@@ -12,6 +12,7 @@ import org.junit.Before;
 import org.junit.Test;
 import org.mockito.Mockito;
 
+import javax.ws.rs.NotFoundException;
 import javax.ws.rs.core.Response;
 
 import static ai.labs.resources.impl.botmanagement.rest.RestUserConversationStore.calculateCacheKey;
@@ -88,7 +89,14 @@ public class RestUserConversationStoreTest {
                 then(invocation -> null);
 
         //test
-        UserConversation actual = restUserConversationStore.readUserConversation(intent, userId);
+        UserConversation actual = null;
+        try {
+            actual = restUserConversationStore.readUserConversation(intent, userId);
+        } catch (Exception e) {
+            if (!(e instanceof NotFoundException)) {
+                Assert.fail();
+            }
+        }
 
         //assert
         Assert.assertNull(actual);
