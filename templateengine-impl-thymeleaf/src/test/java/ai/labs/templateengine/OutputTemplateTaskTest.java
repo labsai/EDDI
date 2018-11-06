@@ -37,7 +37,6 @@ public class OutputTemplateTaskTest {
     private OutputTemplateTask outputTemplateTask;
     private final String expectedOutputString = "This is some output with context such as someContextValue";
     private ITemplatingEngine templatingEngine;
-    private IMemoryTemplateConverter memoryTemplateConverter;
 
     @Before
     public void setUp() {
@@ -46,7 +45,7 @@ public class OutputTemplateTaskTest {
         conversationMemory = mock(IConversationMemory.class);
         currentStep = mock(IConversationMemory.IWritableConversationStep.class);
         when(conversationMemory.getCurrentStep()).then(invocation -> currentStep);
-        memoryTemplateConverter = mock(IMemoryTemplateConverter.class);
+        IMemoryTemplateConverter memoryTemplateConverter = mock(IMemoryTemplateConverter.class);
         when(memoryTemplateConverter.convertMemoryForTemplating(any(IConversationMemory.class))).
                 then(invocation -> new HashMap<>());
         outputTemplateTask = new OutputTemplateTask(templatingEngine, memoryTemplateConverter, dataFactory);

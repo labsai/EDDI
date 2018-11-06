@@ -16,11 +16,12 @@ import java.util.Stack;
 @Getter
 @Setter
 public class ConversationMemorySnapshot {
-    private String id;
+    private String conversationId;
     private String botId;
     private Integer botVersion;
     private Deployment.Environment environment;
     private ConversationState conversationState;
+    private List<ConversationOutput> conversationOutputs = new LinkedList<>();
     private List<ConversationStepSnapshot> conversationSteps = new LinkedList<>();
     private Stack<ConversationStepSnapshot> redoCache = new Stack<>();
 

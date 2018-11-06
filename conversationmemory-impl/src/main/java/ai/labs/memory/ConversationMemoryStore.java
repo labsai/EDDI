@@ -46,11 +46,11 @@ public class ConversationMemoryStore implements IConversationMemoryStore, IResou
             String json = documentBuilder.toString(snapshot);
             Document document = Document.parse(json);
 
-            document.remove("id");
+            document.remove("conversationId");
 
-            if (snapshot.getId() != null) {
-                document.put(OBJECT_ID, new ObjectId(snapshot.getId()));
-                conversationCollection.updateOne(new Document(OBJECT_ID, new ObjectId(snapshot.getId())),
+            if (snapshot.getConversationId() != null) {
+                document.put(OBJECT_ID, new ObjectId(snapshot.getConversationId()));
+                conversationCollection.updateOne(new Document(OBJECT_ID, new ObjectId(snapshot.getConversationId())),
                         new Document("$set", document),
                         new UpdateOptions().upsert(true));
             } else {
@@ -69,7 +69,7 @@ public class ConversationMemoryStore implements IConversationMemoryStore, IResou
 
         try {
             if (document == null) {
-                String message = "Could not find ConversationMemorySnapshot (id=%s)";
+                String message = "Could not find ConversationMemorySnapshot (conversationId=%s)";
                 message = String.format(message, conversationId);
                 throw new IResourceStore.ResourceNotFoundException(message);
             }
@@ -78,7 +78,7 @@ public class ConversationMemoryStore implements IConversationMemoryStore, IResou
 
             ConversationMemorySnapshot snapshot = documentBuilder.build(document, ConversationMemorySnapshot.class);
 
-            snapshot.setId(conversationId);
+            snapshot.setConversationId(conversationId);
 
             return snapshot;
         } catch (IOException e) {

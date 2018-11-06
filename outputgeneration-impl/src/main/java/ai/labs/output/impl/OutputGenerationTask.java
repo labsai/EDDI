@@ -21,12 +21,11 @@ import ai.labs.utilities.StringUtilities;
 
 import javax.inject.Inject;
 import java.net.URI;
-import java.util.LinkedList;
-import java.util.List;
-import java.util.Map;
-import java.util.Random;
+import java.util.*;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
+
+import static ai.labs.memory.IConversationMemory.*;
 
 /**
  * @author ginccc
@@ -39,6 +38,9 @@ public class OutputGenerationTask implements ILifecycleTask {
     private static final String CONTEXT_IDENTIFIER = "context";
     private static final String QUICK_REPLIES_IDENTIFIER = "quickReplies";
     private static final String OUTPUTSET_CONFIG_URI = "uri";
+    private static final String KEY_VALUE = "value";
+    private static final String KEY_EXPRESSIONS = "expressions";
+    private static final String KEY_IS_DEFAULT = "isDefault";
     private final IResourceClientLibrary resourceClientLibrary;
     private final IDataFactory dataFactory;
     private final IOutputGeneration outputGeneration;
@@ -79,6 +81,7 @@ public class OutputGenerationTask implements ILifecycleTask {
                 outputEntries.forEach(outputEntry -> {
                     List<OutputValue> outputValues = outputEntry.getOutputs();
                     selectAndStoreOutput(memory, action, outputValues);
+
                     storeQuickReplies(memory, outputEntry.getQuickReplies(), outputEntry.getAction());
                 }));
     }
@@ -105,20 +108,37 @@ public class OutputGenerationTask implements ILifecycleTask {
 
     private List<QuickReply> convertMapToObjects(List<Map<String, String>> quickRepliesMapList) {
         return quickRepliesMapList.stream().map(map ->
-                new QuickReply(map.get("value"), map.get("expressions"), Boolean.parseBoolean(map.getOrDefault("isDefault", "false")))).
+                new QuickReply(map.get(KEY_VALUE), map.get(KEY_EXPRESSIONS),
+                        Boolean.parseBoolean(map.getOrDefault(KEY_IS_DEFAULT, "false")))).
                 collect(Collectors.toCollection(LinkedList::new));
     }
 
     private void selectAndStoreOutput(IConversationMemory memory, String action, List<OutputValue> outputValues) {
+        List<QuickReply> quickReplies = new LinkedList<>();
         IntStream.range(0, outputValues.size()).forEach(index -> {
             OutputValue outputValue = outputValues.get(index);
-            List<String> possibleValueAlternatives = outputValue.getValueAlternatives();
-            String randomValue = chooseRandomly(possibleValueAlternatives);
+            List<Object> possibleValueAlternatives = outputValue.getValueAlternatives();
+            Object randomValue = chooseRandomly(possibleValueAlternatives);
+            if (randomValue instanceof Map) {
+                ((Map) randomValue).put("type", outputValue.getType());
+            }
+            if (outputValue.getType().equals(OutputValue.Type.quickReply)) {
+                Map<String, String> randomValueMap = (Map) randomValue;
+                quickReplies.add(new QuickReply(randomValueMap.get(KEY_VALUE), randomValueMap.get(KEY_EXPRESSIONS),
+                        Boolean.parseBoolean(randomValueMap.getOrDefault(KEY_IS_DEFAULT, "false"))));
+            }
+
             String outputKey = createOutputKey(action, outputValues, outputValue, index);
-            IData<String> outputData = dataFactory.createData(outputKey, randomValue, possibleValueAlternatives);
+            IData<Object> outputData = dataFactory.createData(outputKey, randomValue, possibleValueAlternatives);
             outputData.setPublic(true);
-            memory.getCurrentStep().storeData(outputData);
+            IWritableConversationStep currentStep = memory.getCurrentStep();
+            currentStep.storeData(outputData);
+            currentStep.addConversationOutputList(MEMORY_OUTPUT_IDENTIFIER, Collections.singletonList(randomValue));
         });
+
+        if (!quickReplies.isEmpty()) {
+            storeQuickReplies(memory, quickReplies, action);
+        }
     }
 
     private void storeQuickReplies(IConversationMemory memory, List<QuickReply> quickReplies, String action) {
@@ -127,7 +147,9 @@ public class OutputGenerationTask implements ILifecycleTask {
                     joinStrings(":", MEMORY_QUICK_REPLIES_IDENTIFIER, action);
             IData outputQuickReplies = dataFactory.createData(outputQuickReplyKey, quickReplies);
             outputQuickReplies.setPublic(true);
-            memory.getCurrentStep().storeData(outputQuickReplies);
+            IWritableConversationStep currentStep = memory.getCurrentStep();
+            currentStep.storeData(outputQuickReplies);
+            currentStep.addConversationOutputList(MEMORY_QUICK_REPLIES_IDENTIFIER, quickReplies);
         }
     }
 
@@ -167,24 +189,24 @@ public class OutputGenerationTask implements ILifecycleTask {
         }
     }
 
-    private String chooseRandomly(List<String> possibleValues) {
+    private Object chooseRandomly(List<Object> possibleValues) {
         return possibleValues.get(new Random().nextInt(possibleValues.size()));
     }
 
-    private int countActionOccurrences(IConversationMemory.IConversationStepStack conversationStepStack,
+    private int countActionOccurrences(IConversationStepStack conversationStepStack,
                                        String action) {
+
         int count = 0;
         for (int i = 0; i < conversationStepStack.size(); i++) {
-            IConversationMemory.IConversationStep conversationStep = conversationStepStack.get(i);
-            IData<List<String>> actionsData = conversationStep.getLatestData(ACTION_KEY);
-            if (actionsData != null) {
-                List<String> actions = actionsData.getResult();
+            IConversationStep conversationStep = conversationStepStack.get(i);
+            IData<List<String>> latestData = conversationStep.getLatestData(ACTION_KEY);
+            if (latestData != null) {
+                List<String> actions = latestData.getResult();
                 if (actions.contains(action)) {
                     count++;
                 }
             }
         }
-
         return count;
     }
 

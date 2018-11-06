@@ -1,16 +1,21 @@
 package ai.labs.memory;
 
+import ai.labs.memory.model.ConversationOutput;
+
 import java.util.*;
+import java.util.function.Function;
 
 /**
  * @author ginccc
  */
 public class ConversationStep implements IConversationMemory.IWritableConversationStep {
     private Map<String, IData> store;
+    private final ConversationOutput conversationOutput;
     int conversationStepNumber;
 
-    ConversationStep() {
+    ConversationStep(ConversationOutput conversationOutput) {
         store = new LinkedHashMap<>();
+        this.conversationOutput = conversationOutput;
     }
 
     @Override
@@ -36,6 +41,36 @@ public class ConversationStep implements IConversationMemory.IWritableConversati
     @Override
     public void storeData(IData data) {
         store.put(data.getKey(), data);
+    }
+
+    public void resetConversationOutput(String rootKey) {
+        conversationOutput.put(rootKey, new ArrayList<>());
+    }
+
+    @Override
+    public void addConversationOutputString(String key, String value) {
+        conversationOutput.put(key, value);
+    }
+
+    @Override
+    public void addConversationOutputList(String key, List list) {
+        List<Object> currentList = (List<Object>) conversationOutput.
+                computeIfAbsent(key, (Function<String, List>) k -> new ArrayList());
+
+        currentList.addAll(list);
+    }
+
+    @Override
+    public void addConversationOutputMap(String key, Map<String, Object> map) {
+        Map<String, Object> currentMap = (Map<String, Object>) conversationOutput.
+                computeIfAbsent(key, (Function<String, Map>) k -> new LinkedHashMap<String, Object>());
+
+        currentMap.putAll(map);
+    }
+
+    @Override
+    public ConversationOutput getConversationOutput() {
+        return conversationOutput;
     }
 
     @Override

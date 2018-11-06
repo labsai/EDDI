@@ -79,7 +79,7 @@ public class DocumentDescriptorInterceptor implements ContainerResponseFilter {
                                     testCaseDescriptorStore.createDescriptor(resourceId.getId(), resourceId.getVersion(), createTestCaseDescriptor(createdResourceURI, userURI));
                                 } else if (resourceLocationUri.startsWith("eddi://ai.labs.conversation")) {
                                     conversationDescriptorStore.createDescriptor(resourceId.getId(), resourceId.getVersion(), createConversationDescriptor(createdResourceURI, userURI));
-                                } else {
+                                } else if (isResourceIdValid(resourceId)) {
                                     documentDescriptorStore.createDescriptor(resourceId.getId(), resourceId.getVersion(), createDocumentDescriptor(createdResourceURI, userURI));
                                 }
                             }
@@ -102,9 +102,11 @@ public class DocumentDescriptorInterceptor implements ContainerResponseFilter {
                     String currentResourceURI = (String) ThreadContext.get("currentResourceURI");
                     IDescriptorStore descriptorStore = getDescriptorStore(currentResourceURI);
                     IResourceStore.IResourceId resourceId = RestUtilities.extractResourceId(URI.create(currentResourceURI));
-                    ResourceDescriptor resourceDescriptor = (ResourceDescriptor) descriptorStore.readDescriptor(resourceId.getId(), resourceId.getVersion());
-                    resourceDescriptor.setDeleted(true);
-                    descriptorStore.setDescriptor(resourceId.getId(), resourceId.getVersion(), resourceDescriptor);
+                    if (isResourceIdValid(resourceId)) {
+                        ResourceDescriptor resourceDescriptor = (ResourceDescriptor) descriptorStore.readDescriptor(resourceId.getId(), resourceId.getVersion());
+                        resourceDescriptor.setDeleted(true);
+                        descriptorStore.setDescriptor(resourceId.getId(), resourceId.getVersion(), resourceDescriptor);
+                    }
                 }
             }
         } catch (IResourceStore.ResourceStoreException e) {
@@ -131,7 +133,7 @@ public class DocumentDescriptorInterceptor implements ContainerResponseFilter {
         return descriptorStore;
     }
 
-    private TestCaseDescriptor createTestCaseDescriptor(URI resource, URI author) {
+    private static TestCaseDescriptor createTestCaseDescriptor(URI resource, URI author) {
         Date current = new Date(System.currentTimeMillis());
 
         TestCaseDescriptor descriptor = new TestCaseDescriptor();
@@ -146,7 +148,7 @@ public class DocumentDescriptorInterceptor implements ContainerResponseFilter {
         return descriptor;
     }
 
-    private DocumentDescriptor createDocumentDescriptor(URI resource, URI author) {
+    private static DocumentDescriptor createDocumentDescriptor(URI resource, URI author) {
         Date current = new Date(System.currentTimeMillis());
 
         DocumentDescriptor descriptor = new DocumentDescriptor();
@@ -161,7 +163,7 @@ public class DocumentDescriptorInterceptor implements ContainerResponseFilter {
         return descriptor;
     }
 
-    private ConversationDescriptor createConversationDescriptor(URI resource, URI user) throws IResourceStore.ResourceStoreException, IResourceStore.ResourceNotFoundException {
+    private static ConversationDescriptor createConversationDescriptor(URI resource, URI user) {
         ConversationDescriptor conversationDescriptor = new ConversationDescriptor();
         conversationDescriptor.setResource(resource);
         Date createdOn = new Date(System.currentTimeMillis());
@@ -173,7 +175,7 @@ public class DocumentDescriptorInterceptor implements ContainerResponseFilter {
         return conversationDescriptor;
     }
 
-    private URI createNewVersionOfResource(final URI resource, Integer version) {
+    private static URI createNewVersionOfResource(final URI resource, Integer version) {
         String resourceURIString = resource.toString();
         if (resourceURIString.contains("version")) {
             resourceURIString = resourceURIString.substring(0, resourceURIString.lastIndexOf("=") + 1);
@@ -185,27 +187,31 @@ public class DocumentDescriptorInterceptor implements ContainerResponseFilter {
         return URI.create(resourceURIString);
     }
 
-    private boolean isUpdatePermissions(Method resourceMethod) {
+    private static boolean isUpdatePermissions(Method resourceMethod) {
         return resourceMethod.getName().equals(METHOD_NAME_UPDATE_PERMISSIONS);
     }
 
-    private boolean isUpdateDescriptor(Method resourceMethod) {
+    private static boolean isUpdateDescriptor(Method resourceMethod) {
         return resourceMethod.getName().equals(METHOD_NAME_UPDATE_DESCRIPTOR);
     }
 
-    private boolean isPUT(Method resourceMethod) {
+    private static boolean isPUT(Method resourceMethod) {
         return resourceMethod.isAnnotationPresent(PUT.class);
     }
 
-    private boolean isPATCH(Method resourceMethod) {
+    private static boolean isPATCH(Method resourceMethod) {
         return resourceMethod.isAnnotationPresent(PATCH.class);
     }
 
-    private boolean isPOST(Method resourceMethod) {
+    private static boolean isPOST(Method resourceMethod) {
         return resourceMethod.isAnnotationPresent(POST.class);
     }
 
-    private boolean isDELETE(Method resourceMethod) {
+    private static boolean isDELETE(Method resourceMethod) {
         return resourceMethod.isAnnotationPresent(DELETE.class);
+    }
+
+    private static boolean isResourceIdValid(IResourceStore.IResourceId resourceId) {
+        return resourceId.getId() != null && resourceId.getVersion() > 0;
     }
 }

@@ -23,12 +23,12 @@ public class OutputGenerationTest {
     private OutputGeneration outputGeneration;
 
     @Before
-    public void setUp() throws Exception {
+    public void setUp() {
         outputGeneration = new OutputGeneration();
     }
 
     @Test
-    public void addOutputEntry() throws Exception {
+    public void addOutputEntry() {
         //setup
         List<OutputEntry> outputEntries = setupOutputEntries();
 
@@ -42,7 +42,7 @@ public class OutputGenerationTest {
     }
 
     @Test
-    public void getOutputs() throws Exception {
+    public void getOutputs() {
         //setup
         List<OutputEntry> outputEntries = setupOutputEntries();
         outputEntries.forEach(outputEntry -> outputGeneration.addOutputEntry(outputEntry));
@@ -58,7 +58,7 @@ public class OutputGenerationTest {
     }
 
     @Test
-    public void extractOutputEntryOfSameOccurrence_Occured_0() throws Exception {
+    public void extractOutputEntryOfSameOccurrence_Occurred_0() {
         //setup
         List<OutputEntry> outputEntries = setupOutputEntries();
 
@@ -70,7 +70,7 @@ public class OutputGenerationTest {
     }
 
     @Test
-    public void extractOutputEntryOfSameOccurrence_Occured_1() throws Exception {
+    public void extractOutputEntryOfSameOccurrence_Occurred_1() {
         //setup
         List<OutputEntry> outputEntries = setupOutputEntries();
 
@@ -82,7 +82,7 @@ public class OutputGenerationTest {
     }
 
     @Test
-    public void extractOutputEntryOfSameOccurrence_Occured_2() throws Exception {
+    public void extractOutputEntryOfSameOccurrence_Occurred_2() {
         //setup
         List<OutputEntry> outputEntries = setupOutputEntries();
 
@@ -94,7 +94,7 @@ public class OutputGenerationTest {
     }
 
     @Test
-    public void extractOutputEntryOfSameOccurrence_Occured_3() throws Exception {
+    public void extractOutputEntryOfSameOccurrence_Occurred_3() {
         //setup
         List<OutputEntry> outputEntries = setupOutputEntries();
 
@@ -107,8 +107,8 @@ public class OutputGenerationTest {
 
     private List<OutputEntry> setupOutputEntries() {
         List<OutputEntry> outputEntries = new LinkedList<>();
-        List<String> valueAlternatives1 = Arrays.asList("Text1 Alternative 1", "Text1 Alternative 2");
-        List<String> valueAlternatives2 = Arrays.asList("Text2 Alternative 1", "Text2 Alternative 2");
+        List<Object> valueAlternatives1 = Arrays.asList("Text1 Alternative 1", "Text1 Alternative 2");
+        List<Object> valueAlternatives2 = Arrays.asList("Text2 Alternative 1", "Text2 Alternative 2");
         List<OutputValue> outputValues = Arrays.asList(new OutputValue(OutputValue.Type.text, valueAlternatives1),
                 new OutputValue(OutputValue.Type.text, valueAlternatives2));
         List<QuickReply> quickReply = Arrays.asList(new QuickReply("Some QuickReply", "some(Expression)", false),

@@ -19,9 +19,10 @@ public class OutputValue {
         image,
         video,
         audio,
-        delay
+        delay,
+        quickReply
     }
 
     private Type type;
-    private List<String> valueAlternatives;
+    private List<Object> valueAlternatives;
 }
