@@ -14,6 +14,7 @@ import javax.ws.rs.container.AsyncResponse;
 import javax.ws.rs.container.Suspended;
 import javax.ws.rs.core.MediaType;
 import javax.ws.rs.core.Response;
+import java.util.List;
 import java.util.Map;
 
 /**
@@ -62,7 +63,8 @@ public interface IRestBotEngine {
                                                       @PathParam("botId") String botId,
                                                       @PathParam("conversationId") String conversationId,
                                                       @QueryParam("returnDetailed") @DefaultValue("false") Boolean returnDetailed,
-                                                      @QueryParam("returnCurrentStepOnly") @DefaultValue("true") Boolean returnCurrentStepOnly);
+                                                      @QueryParam("returnCurrentStepOnly") @DefaultValue("true") Boolean returnCurrentStepOnly,
+                                                      @QueryParam("returningFields") List<String> returningFields);
 
     @GET
     @Path("/{environment}/conversationstatus/{conversationId}")
@@ -88,6 +90,7 @@ public interface IRestBotEngine {
              @PathParam("conversationId") String conversationId,
              @QueryParam("returnDetailed") @DefaultValue("false") Boolean returnDetailed,
              @QueryParam("returnCurrentStepOnly") @DefaultValue("true") Boolean returnCurrentStepOnly,
+             @QueryParam("returningFields") List<String> returningFields,
              @DefaultValue("") String message,
              @Suspended final AsyncResponse response);
 
@@ -97,7 +100,8 @@ public interface IRestBotEngine {
      * @param environment
      * @param botId
      * @param conversationId
-     * @param inputData      of type ai.labs.models.InputData
+     * @param returningFields
+     * @param inputData       of type ai.labs.models.InputData
      * @return
      * @throws Exception
      */
@@ -110,6 +114,7 @@ public interface IRestBotEngine {
                           @PathParam("conversationId") String conversationId,
                           @QueryParam("returnDetailed") @DefaultValue("false") Boolean returnDetailed,
                           @QueryParam("returnCurrentStepOnly") @DefaultValue("true") Boolean returnCurrentStepOnly,
+                          @QueryParam("returningFields") List<String> returningFields,
                           InputData inputData,
                           @Suspended final AsyncResponse response);
 

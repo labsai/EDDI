@@ -38,14 +38,14 @@ public class RestBotManagement implements IRestBotManagement {
     }
 
     @Override
-    public SimpleConversationMemorySnapshot loadConversationMemory(String intent, String userId, Boolean returnDetailed, Boolean returnCurrentStepOnly) {
+    public SimpleConversationMemorySnapshot loadConversationMemory(String intent, String userId, Boolean returnDetailed, Boolean returnCurrentStepOnly, List<String> returningFields) {
         try {
             UserConversation userConversation = initUserConversation(intent, userId);
             return restBotEngine.readConversation(userConversation.getEnvironment(),
                     userConversation.getBotId(),
                     userConversation.getConversationId(),
                     returnDetailed,
-                    returnCurrentStepOnly);
+                    returnCurrentStepOnly, returningFields);
         } catch (CannotCreateConversationException e) {
             log.error(e.getLocalizedMessage(), e);
             throw new InternalServerErrorException(e.getLocalizedMessage());
@@ -57,6 +57,7 @@ public class RestBotManagement implements IRestBotManagement {
                                  String userId,
                                  Boolean returnDetailed,
                                  Boolean returnCurrentStepOnly,
+                                 List<String> returningFields,
                                  InputData inputData,
                                  AsyncResponse response) {
         try {
@@ -64,7 +65,7 @@ public class RestBotManagement implements IRestBotManagement {
             UserConversation userConversation = initUserConversation(intent, userId);
 
             restBotEngine.sayWithinContext(userConversation.getEnvironment(), userConversation.getBotId(),
-                    userConversation.getConversationId(), returnDetailed, returnCurrentStepOnly, inputData, response);
+                    userConversation.getConversationId(), returnDetailed, returnCurrentStepOnly, returningFields, inputData, response);
 
         } catch (Exception e) {
             log.error(e.getLocalizedMessage(), e);

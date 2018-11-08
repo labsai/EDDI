@@ -117,7 +117,8 @@ public class RestBotEngine implements IRestBotEngine {
                                                              String botId,
                                                              String conversationId,
                                                              Boolean returnDetailed,
-                                                             Boolean returnCurrentStepOnly) {
+                                                             Boolean returnCurrentStepOnly,
+                                                             List<String> returningFields) {
 
         RuntimeUtilities.checkNotNull(environment, "environment");
         RuntimeUtilities.checkNotNull(botId, "botId");
@@ -131,7 +132,10 @@ public class RestBotEngine implements IRestBotEngine {
                 message = String.format(message, conversationId, botId, botId, conversationMemorySnapshot.getBotId());
                 throw new IllegalAccessException(message);
             }
-            return getSimpleConversationMemorySnapshot(conversationMemorySnapshot, returnDetailed, returnCurrentStepOnly);
+            return getSimpleConversationMemorySnapshot(conversationMemorySnapshot,
+                    returnDetailed,
+                    returnCurrentStepOnly,
+                    returningFields);
         } catch (IResourceStore.ResourceStoreException | IllegalAccessException e) {
             log.error(e.getLocalizedMessage(), e);
             throw new InternalServerErrorException(e.getLocalizedMessage(), e);
@@ -164,16 +168,19 @@ public class RestBotEngine implements IRestBotEngine {
     public void say(final Deployment.Environment environment,
                     final String botId, final String conversationId,
                     final Boolean returnDetailed, final Boolean returnCurrentStepOnly,
-                    final String message, final AsyncResponse response) {
+                    final List<String> returningFields, final String message, final AsyncResponse response) {
+
         sayWithinContext(environment, botId, conversationId, returnDetailed, returnCurrentStepOnly,
-                new InputData(message, new HashMap<>()), response);
+                returningFields, new InputData(message, new HashMap<>()), response);
     }
 
     @Override
     public void sayWithinContext(final Deployment.Environment environment,
                                  final String botId, final String conversationId,
                                  final Boolean returnDetailed, final Boolean returnCurrentStepOnly,
-                                 final InputData inputData, final AsyncResponse response) {
+                                 final List<String> returningFields, final InputData inputData,
+                                 final AsyncResponse response) {
+
         RuntimeUtilities.checkNotNull(environment, "environment");
         RuntimeUtilities.checkNotNull(botId, "botId");
         RuntimeUtilities.checkNotNull(conversationId, "conversationId");
@@ -207,7 +214,8 @@ public class RestBotEngine implements IRestBotEngine {
                         SimpleConversationMemorySnapshot memorySnapshot =
                                 getSimpleConversationMemorySnapshot(returnConversationMemory,
                                         returnDetailed,
-                                        returnCurrentStepOnly);
+                                        returnCurrentStepOnly,
+                                        returningFields);
                         memorySnapshot.setEnvironment(environment);
                         cacheConversationState(conversationId, memorySnapshot.getConversationState());
                         response.resume(memorySnapshot);
@@ -470,32 +478,45 @@ public class RestBotEngine implements IRestBotEngine {
     private SimpleConversationMemorySnapshot getSimpleConversationMemorySnapshot(
             IConversationMemory returnConversationMemory,
             Boolean returnDetailed,
-            Boolean returnCurrentStepOnly) {
+            Boolean returnCurrentStepOnly,
+            List<String> returningFields) {
 
         return getSimpleConversationMemorySnapshot(
                 convertConversationMemory(returnConversationMemory),
                 returnDetailed,
-                returnCurrentStepOnly);
+                returnCurrentStepOnly, returningFields);
     }
 
     private SimpleConversationMemorySnapshot getSimpleConversationMemorySnapshot(
             ConversationMemorySnapshot conversationMemorySnapshot,
             Boolean returnDetailed,
-            Boolean returnCurrentStepOnly) {
+            Boolean returnCurrentStepOnly,
+            List<String> returningFields) {
+
         SimpleConversationMemorySnapshot memorySnapshot = convertSimpleConversationMemory(
                 conversationMemorySnapshot, returnDetailed);
         if (returnCurrentStepOnly) {
-            List<SimpleConversationMemorySnapshot.SimpleConversationStep> conversationSteps =
-                    memorySnapshot.getConversationSteps();
-            SimpleConversationMemorySnapshot.SimpleConversationStep currentConversationStep =
-                    conversationSteps.get(conversationSteps.size() - 1);
-            conversationSteps.clear();
-            conversationSteps.add(currentConversationStep);
+            if (returningFields.isEmpty() || returningFields.contains("conversationSteps")) {
+                List<SimpleConversationMemorySnapshot.SimpleConversationStep> conversationSteps =
+                        memorySnapshot.getConversationSteps();
+                SimpleConversationMemorySnapshot.SimpleConversationStep currentConversationStep =
+                        conversationSteps.get(conversationSteps.size() - 1);
+                conversationSteps.clear();
+                conversationSteps.add(currentConversationStep);
+            } else {
+                memorySnapshot.setConversationSteps(null);
+            }
 
-            List<ConversationOutput> conversationOutputs = memorySnapshot.getConversationOutputs();
-            ConversationOutput conversationOutput = conversationOutputs.get(0);
-            conversationOutputs.clear();
-            conversationOutputs.add(conversationOutput);
+
+            if (returningFields.isEmpty() || returningFields.contains("conversationOutputs")) {
+                List<ConversationOutput> conversationOutputs = memorySnapshot.getConversationOutputs();
+
+                ConversationOutput conversationOutput = conversationOutputs.get(0);
+                conversationOutputs.clear();
+                conversationOutputs.add(conversationOutput);
+            } else {
+                memorySnapshot.setConversationOutputs(null);
+            }
         }
         return memorySnapshot;
     }
