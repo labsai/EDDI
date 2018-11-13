@@ -20,7 +20,12 @@ public class OutputValue {
         video,
         audio,
         delay,
-        quickReply
+        quickReply,
+        button,
+        title,
+        progress,
+        textInput,
+        profileImageUpload
     }
 
     private Type type;

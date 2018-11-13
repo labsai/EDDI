@@ -198,7 +198,11 @@ $(function () {
                 }
             }
             for (let image of latestInteraction.images) {
-                displayImage('/binary/img/' + image);
+                if (typeof image === 'object') {
+                    displayImage(image.uri);
+                } else {
+                    displayImage('/binary/img/' + image);
+                }
             }
             displayQuickReplies(latestInteraction.quickReplies);
 

@@ -244,17 +244,21 @@ public class HttpCallsTask implements ILifecycleTask {
     @Override
     public void configure(Map<String, Object> configuration) throws PackageConfigurationException {
         Object uriObj = configuration.get("uri");
-        URI uri = URI.create(uriObj.toString());
+        if (!RuntimeUtilities.isNullOrEmpty(uriObj)) {
+            URI uri = URI.create(uriObj.toString());
 
-        try {
-            HttpCallsConfiguration httpCallsConfig = resourceClientLibrary.getResource(uri, HttpCallsConfiguration.class);
+            try {
+                HttpCallsConfiguration httpCallsConfig = resourceClientLibrary.getResource(uri, HttpCallsConfiguration.class);
 
-            this.targetServerUri = httpCallsConfig.getTargetServer().toString();
-            this.httpCalls = httpCallsConfig.getHttpCalls();
+                this.targetServerUri = httpCallsConfig.getTargetServer().toString();
+                this.httpCalls = httpCallsConfig.getHttpCalls();
 
-        } catch (ServiceException e) {
-            log.error(e.getLocalizedMessage(), e);
-            throw new PackageConfigurationException(e.getMessage(), e);
+            } catch (ServiceException e) {
+                log.error(e.getLocalizedMessage(), e);
+                throw new PackageConfigurationException(e.getMessage(), e);
+            }
+        } else {
+            this.httpCalls = new LinkedList<>();
         }
     }
 

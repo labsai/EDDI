@@ -125,12 +125,13 @@ public class OutputTemplateTask implements ILifecycleTask {
                             output.setResult(postTemplated);
                         }
                         templateData(memory, output, outputKey, preTemplated, postTemplated);
-                        IWritableConversationStep currentStep = memory.getCurrentStep();
-                        currentStep.addConversationOutputList(KEY_OUTPUT, Collections.singletonList(postTemplated));
                     } catch (ITemplatingEngine.TemplateEngineException e) {
                         log.error(e.getLocalizedMessage(), e);
                     }
                 }
+
+                IWritableConversationStep currentStep = memory.getCurrentStep();
+                currentStep.addConversationOutputList(KEY_OUTPUT, Collections.singletonList(output.getResult()));
             }
         });
     }
