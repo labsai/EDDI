@@ -11,6 +11,7 @@ import * as renderIf from 'render-if';
 import Parser from '../utils/Parser';
 import { getPostExample } from '../utils/EddiConfigExampleData';
 import * as _ from 'lodash';
+import Radium = require('radium');
 
 require('brace/mode/json');
 require('brace/theme/monokai');
@@ -18,6 +19,7 @@ require('brace/theme/monokai');
 interface IState {
   editorText: string;
   initialEditorText: string;
+  showExample: boolean;
 }
 
 interface IProps {
@@ -25,6 +27,7 @@ interface IProps {
   name: string;
   description: string;
   data: string;
+  onConfirm(): void;
 }
 
 class CreateNewConfig2Modal extends React.Component<IProps, IState> {
@@ -33,6 +36,7 @@ class CreateNewConfig2Modal extends React.Component<IProps, IState> {
     this.state = {
       editorText: '',
       initialEditorText: '',
+      showExample: false,
     };
   }
 
@@ -51,9 +55,7 @@ class CreateNewConfig2Modal extends React.Component<IProps, IState> {
   };
 
   discardChanges(props = this.props) {
-    const editorText = _.isEmpty(props.data)
-      ? getPostExample(props.type)
-      : props.data;
+    const editorText = _.isEmpty(props.data) ? '{\n\t\n}' : props.data;
     this.setState({
       editorText: editorText,
     });
@@ -62,9 +64,7 @@ class CreateNewConfig2Modal extends React.Component<IProps, IState> {
   unsavedChanges() {
     return (
       this.state.editorText !==
-      (_.isEmpty(this.props.data)
-        ? getPostExample(this.props.type)
-        : this.props.data)
+      (_.isEmpty(this.props.data) ? '{\n\t\n}' : this.props.data)
     );
   }
 
@@ -84,7 +84,8 @@ class CreateNewConfig2Modal extends React.Component<IProps, IState> {
       this.props.description,
       this.state.editorText,
     );
-    modalActionDispatchers.closeModal();
+    // modalActionDispatchers.closeModal();
+    this.props.onConfirm();
   };
 
   back = () => {
@@ -94,6 +95,12 @@ class CreateNewConfig2Modal extends React.Component<IProps, IState> {
       this.props.description,
       this.state.editorText,
     );
+  };
+
+  exampleClick = () => {
+    this.setState({
+      showExample: !this.state.showExample,
+    });
   };
 
   render() {
@@ -126,6 +133,19 @@ class CreateNewConfig2Modal extends React.Component<IProps, IState> {
             />
           </div>
         </div>
+        <button onClick={this.exampleClick} style={styles.collapsibleButton}>
+          <div>{`${
+            this.state.showExample ? 'Hide' : 'Show'
+          } ${typeName.toLowerCase()} example data`}</div>
+          <div style={styles.collapsibleRightSign}>
+            {this.state.showExample ? '-' : '+'}
+          </div>
+        </button>
+        {renderIf(this.state.showExample)(() => (
+          <div style={styles.exampleData}>
+            {getPostExample(this.props.type)}
+          </div>
+        ))}
         <AceEditor
           mode={'json'}
           height={'800px'}

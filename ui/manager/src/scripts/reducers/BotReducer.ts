@@ -137,7 +137,7 @@ const BotReducer: IBotReducer = (
           $apply: (bots: IBot[]) => {
             const alreadyExists: boolean = !!bots.find(bot => {
               return (
-                bot.resource === (action as IFetchBotSuccessAction).botResource
+                bot.resource === (action as IFetchBotSuccessAction).bot.resource
               );
             });
             if (alreadyExists) {

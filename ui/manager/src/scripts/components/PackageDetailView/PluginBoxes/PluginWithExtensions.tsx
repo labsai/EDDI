@@ -33,6 +33,7 @@ const customStyles: CSSProperties = {
 interface IPublicProps {
   pluginType: IOptions;
   pluginResource: string;
+  editDisabled: boolean;
   deletePlugin(extensionKey: number): void;
   updateExtensionsInPlugin(extensionKey: number, extensions: IOptions[]): void;
 }
@@ -131,9 +132,11 @@ class PluginWithExtensions extends React.Component<IPrivateProps> {
   render() {
     return (
       <div style={styles.pluginWithExtensionsContainer}>
-        <div style={styles.closeButton} onClick={this.deletePlugin}>
-          &times;
-        </div>
+        {renderIf(!this.props.editDisabled)(() => (
+          <div style={styles.closeButton} onClick={this.deletePlugin}>
+            &times;
+          </div>
+        ))}
         <div style={styles.pluginBoxWithExtensions}>
           <div style={styles.bigPluginName}>
             <div style={styles.pluginName}>
@@ -151,11 +154,13 @@ class PluginWithExtensions extends React.Component<IPrivateProps> {
               )}
             </div>
             <div style={styles.centerFlex} />
-            <a
-              onClick={this.openAddPluginsModal}
-              style={styles.addExtensionButton}>
-              {'Add dictionary'}
-            </a>
+            {renderIf(!this.props.editDisabled)(() => (
+              <a
+                onClick={this.openAddPluginsModal}
+                style={styles.addExtensionButton}>
+                {'Add dictionary'}
+              </a>
+            ))}
           </div>
           <div style={styles.pluginDate}>
             {PluginHelper.getLastModified(
@@ -177,6 +182,7 @@ class PluginWithExtensions extends React.Component<IPrivateProps> {
                     deleteExtension={this.deleteExtension}
                     pluginResource={ext.resource}
                     updateExtension={this.updateExtension}
+                    editDisabled={this.props.editDisabled}
                   />
                 ))}
               </div>

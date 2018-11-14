@@ -13,6 +13,7 @@ import * as _ from 'lodash';
 import WhiteButton from '../Assets/Buttons/WhiteButton';
 import ModalActionDispatchers from '../../actions/ModalActionDispatchers';
 import { ModalEnum } from '../utils/ModalEnum';
+import { history } from '../../history';
 
 interface IPrivateProps extends IPublicProps {
   packagePayload: IPackage;
@@ -66,7 +67,13 @@ class Package extends React.Component<IPrivateProps, IState> {
             )(() => (
               <div>
                 <button
-                  onClick={this.openViewJsonModal}
+                  onClick={() =>
+                    history.push(
+                      `/packageview/${this.props.packagePayload.id}?version=${
+                        this.props.packagePayload.version
+                      }`,
+                    )
+                  }
                   style={styles.botPackageButton}>
                   <div
                     className={

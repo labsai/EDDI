@@ -76,6 +76,7 @@ import {
   UPDATE_BOT_DEPLOYMENT_STATUS,
   UPDATE_BOT_DEPLOYMENT_STATUS_SUCCESS,
   UPDATE_BOT_DEPLOYMENT_STATUS_FAILED,
+  FETCH_CURRENT_BOT,
 } from './EddiApiActionTypes';
 import {
   IBot,
@@ -124,23 +125,29 @@ export interface IFetchBotAction extends Action {
 
 export function fetchBotAction(botId: string): IFetchBotAction {
   return {
-    type: FETCH_BOT,
     botId,
+    type: FETCH_BOT,
+  };
+}
+
+export interface IFetchCurrentBotAction extends Action {
+  botId: string;
+}
+
+export function fetchCurrentBotAction(botId: string): IFetchCurrentBotAction {
+  return {
+    botId,
+    type: FETCH_CURRENT_BOT,
   };
 }
 
 export interface IFetchBotSuccessAction extends Action {
   bot: IBot;
-  botResource: string;
 }
 
-export function fetchBotSuccessAction(
-  bot: IBot,
-  botResource: string,
-): IFetchBotSuccessAction {
+export function fetchBotSuccessAction(bot: IBot): IFetchBotSuccessAction {
   return {
     bot,
-    botResource,
     type: FETCH_BOT_SUCCESS,
   };
 }

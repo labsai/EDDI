@@ -34,6 +34,7 @@ const customStyles = {
     color: '#16325C',
     fontSize: '12px',
     overflow: 'hidden',
+    marginLeft: '1px',
   }),
   option: (base, state) => ({
     ...base,

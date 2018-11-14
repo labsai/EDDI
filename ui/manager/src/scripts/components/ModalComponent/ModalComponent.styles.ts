@@ -195,5 +195,35 @@ const styles: CSSProperties = {
   backButton: {
     marginRight: '5px',
   },
+  collapsibleButton: {
+    ':focus': {
+      backgroundColor: '#f9d648',
+      outline: 'none',
+    },
+    ':hover': {
+      backgroundColor: '#f9d648',
+    },
+    display: 'flex',
+    width: '100%',
+    fontSize: '18px',
+    textAlign: 'left',
+    padding: '8px 20px 8px 20px',
+    backgroundColor: '#FADA5E',
+    border: 'none',
+    cursor: 'pointer',
+  },
+  collapsibleRightSign: {
+    textAlign: 'right',
+    flex: '1',
+  },
+  exampleData: {
+    color: '#7A849E',
+    fontSize: '14px',
+    backgroundColor: '#fdf1bf',
+    flex: '1',
+    overflow: 'hidden',
+    whiteSpace: 'pre-wrap',
+    padding: '5px 20px 5px 20px',
+  },
 };
 export default styles;

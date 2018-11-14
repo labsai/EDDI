@@ -4,7 +4,10 @@ import { IBot } from '../utils/AxiosFunctions';
 import { Component, compose, pure, setDisplayName } from 'recompose';
 import HomeButtonComponent from '../HomeButton/HomeButtonComponent';
 import * as Radium from 'radium';
-import { latestBotSelector } from '../../selectors/BotSelectors';
+import {
+  latestBotSelector,
+  specificBotSelector,
+} from '../../selectors/BotSelectors';
 import { connect } from 'react-redux';
 import eddiApiActionDispatchers from '../../actions/EddiApiActionDispatchers';
 import styles from '../Bots/Botlist.styles';
@@ -12,9 +15,11 @@ import * as _ from 'lodash';
 import { ClimbingBoxLoader } from 'react-spinners';
 import * as renderIf from 'render-if';
 import Parser from '../utils/Parser';
+import { BOT, BOT_PATH } from '../utils/EddiTypes';
 
 interface IPublicProps {
   botId: string;
+  botVersion: string;
 }
 
 interface IPrivateProps extends IPublicProps {
@@ -23,52 +28,22 @@ interface IPrivateProps extends IPublicProps {
   isLoading: boolean;
 }
 
-interface IState {
-  selectedBotResource: string;
-}
-
-class BotInfo extends React.Component<IPrivateProps, IState> {
+class BotInfo extends React.Component<IPrivateProps> {
   constructor(props) {
     super(props);
-    this.state = {
-      selectedBotResource: '',
-    };
   }
 
   componentDidMount() {
-    if (!this.props.isLoading && !this.props.bot) {
-      eddiApiActionDispatchers.fetchBotAction(this.props.botId);
-    }
-    if (this.props.bot) {
-      this.setState({
-        selectedBotResource: this.props.bot.resource,
-      });
-    }
-  }
-  componentWillReceiveProps(nextProps) {
-    if (!_.isEmpty(this.props.bot) && !_.isEmpty(nextProps.bot)) {
-      if (nextProps.bot.currentVersion > this.props.bot.currentVersion) {
-        this.setState({
-          selectedBotResource: nextProps.bot.resource,
-        });
-      }
-    } else if (!_.isEmpty(nextProps.bot)) {
-      this.setState({
-        selectedBotResource: nextProps.bot.resource,
-      });
+    if (_.isEmpty(this.props.botVersion)) {
+      eddiApiActionDispatchers.fetchCurrentBotAction(this.props.botId);
+    } else {
+      eddiApiActionDispatchers.fetchBotAction(
+        `${BOT}${BOT_PATH}/${this.props.botId}?version=${
+          this.props.botVersion
+        }`,
+      );
     }
   }
-
-  selectVersion = (resource: string, newVersion: number) => {
-    const selectedBotResource = Parser.replaceResourceVersion(
-      resource,
-      newVersion,
-    );
-    this.setState({
-      selectedBotResource,
-    });
-    eddiApiActionDispatchers.fetchBotAction(selectedBotResource);
-  };
 
   render() {
     return (
@@ -88,10 +63,7 @@ class BotInfo extends React.Component<IPrivateProps, IState> {
               <p>{'Bot not found'}</p>
             ))}
             {renderIf(!this.props.error && !_.isEmpty(this.props.bot))(() => (
-              <BotView
-                botResource={this.state.selectedBotResource}
-                selectVersion={this.selectVersion}
-              />
+              <BotView bot={this.props.bot} />
             ))}
           </div>
         ))}
@@ -103,7 +75,7 @@ class BotInfo extends React.Component<IPrivateProps, IState> {
 const ComposedBotInfo: Component<IProps> = compose<IProps>(
   pure,
   Radium,
-  connect(latestBotSelector),
+  connect(specificBotSelector),
   setDisplayName('BotInfo'),
 )(BotInfo);
 

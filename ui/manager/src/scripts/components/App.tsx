@@ -29,8 +29,8 @@ class App extends React.Component<IPrivateProps> {
         {renderIf(this.props.isAppReady)(() => (
           <div>
             <Route path="/" exact component={Dashboard} />
-            <Route path="/botview/:id" exact component={BotViewPage} />
-            <Route path="/packageview/:id" exact component={PackageViewPage} />
+            <Route path="/botview/:id" component={BotViewPage} />
+            <Route path="/packageview/:id" component={PackageViewPage} />
             <Route
               path="/resources/:type"
               exact
