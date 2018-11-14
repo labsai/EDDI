@@ -22,6 +22,7 @@ const styles: CSSProperties = {
     fontSize: '18px',
     width: '100%',
     textAlign: 'left',
+    paddingBottom: '10px',
   },
   message: {
     marginTop: '10px',
