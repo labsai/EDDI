@@ -1036,13 +1036,16 @@ export function undeployBotSuccessAction(
 
 export interface IUndeployBotFailedAction extends Action {
   error: Error;
+  response: string;
 }
 
 export function undeployBotFailedAction(
   error: Error,
+  response: string,
 ): IUndeployBotFailedAction {
   return {
     error,
+    response,
     type: UNDEPLOY_BOT_FAILED,
   };
 }

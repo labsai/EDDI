@@ -529,7 +529,7 @@ export function* undeployBot(action: IUndeployBotAction): Iterator<{}> {
     yield call(axiosUndeployBot, action.botResource);
     yield put(undeployBotSuccessAction(action.botResource));
   } catch (err) {
-    yield put(undeployBotFailedAction(err));
+    yield put(undeployBotFailedAction(err, err.response.data));
   }
 }
 

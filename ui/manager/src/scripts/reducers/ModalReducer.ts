@@ -363,7 +363,9 @@ const ModalReducer: IModalReducer = (
           $set: 'Failed to undeploy bot',
         },
         message: {
-          $set: (action as IUndeployBotFailedAction).error.message,
+          $set: `${(action as IUndeployBotFailedAction).error.message}\n\n${
+            (action as IUndeployBotFailedAction).response
+          }`,
         },
       });
 
