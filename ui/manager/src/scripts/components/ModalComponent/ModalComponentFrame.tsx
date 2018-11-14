@@ -141,6 +141,7 @@ class ModalComponentFrame extends React.Component<IPrivateProps, IState> {
             name={this.props.name}
             description={this.props.description}
             data={this.props.data}
+            onConfirm={this.props.onConfirm}
           />
         );
       case ModalEnum.createNewConfig2:
@@ -150,6 +151,7 @@ class ModalComponentFrame extends React.Component<IPrivateProps, IState> {
             name={this.props.name}
             description={this.props.description}
             data={this.props.data}
+            onConfirm={this.props.onConfirm}
           />
         );
       case ModalEnum.updatePackages:

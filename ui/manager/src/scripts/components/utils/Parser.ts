@@ -19,6 +19,10 @@ export interface IUsedResource {
   usedByOlderVersion: boolean;
 }
 
+export interface IQueryStringProperties {
+  version?: string;
+}
+
 export default class Parser {
   static getId(uri: string): string {
     return pattern.match(uri).id;
@@ -109,5 +113,15 @@ export default class Parser {
       );
     }
     return shorterList;
+  }
+
+  static getQueryStrings(search = ''): IQueryStringProperties {
+    const hashes = search.slice(search.indexOf(`?`) + 1).split(`&`);
+    const queryStringObject = {};
+    for (let i = 0; i < hashes.length; i++) {
+      const query = hashes[i].split('=');
+      queryStringObject[query[0]] = query[1];
+    }
+    return queryStringObject;
   }
 }

@@ -68,12 +68,14 @@ export interface IModalActionDispatchers extends ActionCreatorsMapObject {
     name?: string,
     description?: string,
     data?: string,
+    onConfirm?: () => void,
   ) => IShowCreateNewConfigModal;
   showCreateNewConfig2Modal: (
     pluginType: string,
     name: string,
     description: string,
     data?: string,
+    onConfirm?: () => void,
   ) => IShowCreateNewConfig2Modal;
   showUpdatePackagesModal: (resource: string) => IShowUpdatePackagesModal;
   showUpdateBotsModal: (packageResources: string[]) => IShowUpdateBotsModal;

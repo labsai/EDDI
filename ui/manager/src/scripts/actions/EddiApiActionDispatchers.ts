@@ -70,10 +70,15 @@ import {
   updateBotDeploymentStatusAction,
   updateBotDeploymentStatusFailedAction,
   updateBotDeploymentStatusSuccessAction,
+  ICreateNewPluginSuccessAction,
+  createNewPluginSuccessAction,
+  IFetchCurrentBotAction,
+  fetchCurrentBotAction,
 } from './EddiApiActions';
 
 export interface IEddiApiActionDispatchers extends ActionCreatorsMapObject {
   fetchBotAction: (botId) => IFetchBotAction;
+  fetchCurrentBotAction: (botId) => IFetchCurrentBotAction;
   fetchBotsAction: () => IFetchBotsAction;
   fetchBotDataAction: (botResource) => IFetchBotDataAction;
   fetchPackagesAction: () => IFetchPackagesAction;
@@ -113,6 +118,7 @@ export interface IEddiApiActionDispatchers extends ActionCreatorsMapObject {
     description,
     data,
   ) => ICreateNewConfigAction;
+  createNewPluginSuccessAction: (plugin) => ICreateNewPluginSuccessAction;
   updatePackagesAction: (pluginResource, packages) => IUpdatePackagesAction;
   updatePackagesSuccessAction: (packages) => IUpdatePackagesSuccessAction;
   updatePackagesFailedAction: (error) => IUpdatePackagesFailedAction;
@@ -136,6 +142,7 @@ export interface IEddiApiActionDispatchers extends ActionCreatorsMapObject {
 
 const actions: IEddiApiActionDispatchers = {
   fetchBotAction,
+  fetchCurrentBotAction,
   fetchBotsAction,
   fetchBotDataAction,
   fetchPackagesAction,
@@ -156,6 +163,7 @@ const actions: IEddiApiActionDispatchers = {
   fetchPackagesUsingPluginAction,
   updateJsonDataAction,
   createNewConfigAction,
+  createNewPluginSuccessAction,
   updatePackagesAction,
   updatePackagesSuccessAction,
   updatePackagesFailedAction,

@@ -13,6 +13,7 @@ import {
   FETCH_PACKAGES_USING_PLUGIN_SUCCESS,
   UPDATE_PACKAGE_SUCCESS,
   UPDATE_PLUGIN_SUCCESS,
+  CREATE_NEW_PLUGIN_SUCCESS,
 } from '../actions/EddiApiActionTypes';
 import * as update from 'immutability-helper';
 import {
@@ -29,6 +30,7 @@ import {
   IFetchPackagesUsingPluginSuccessAction,
   IUpdatePackageSuccessAction,
   IUpdatePluginSuccessAction,
+  ICreateNewPluginSuccessAction,
 } from '../actions/EddiApiActions';
 import {
   IDefaultPluginTypes,
@@ -210,6 +212,17 @@ const PluginReducer: IPluginReducer = (
             });
             newPluginList.push(updatedPlugin);
             return newPluginList;
+          },
+        },
+      });
+
+    case CREATE_NEW_PLUGIN_SUCCESS:
+      return update(state, {
+        plugins: {
+          $apply: (plugins: IPlugin[]) => {
+            return plugins.concat(
+              (action as ICreateNewPluginSuccessAction).plugin,
+            );
           },
         },
       });

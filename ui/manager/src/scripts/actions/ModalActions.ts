@@ -155,6 +155,7 @@ export interface IShowCreateNewConfigModal extends Action {
   name: string;
   description: string;
   data: string;
+  onConfirm: () => void;
 }
 
 export function showCreateNewConfigModal(
@@ -162,12 +163,14 @@ export function showCreateNewConfigModal(
   name: string,
   description: string,
   data: string,
+  onConfirm: () => void,
 ): IShowCreateNewConfigModal {
   return {
     pluginType,
     name,
     description,
     data,
+    onConfirm,
     type: SHOW_CREATE_NEW_CONFIG_MODAL,
   };
 }
@@ -177,6 +180,7 @@ export interface IShowCreateNewConfig2Modal extends Action {
   name: string;
   description: string;
   data: string;
+  onConfirm: () => void;
 }
 
 export function showCreateNewConfig2Modal(
@@ -184,12 +188,14 @@ export function showCreateNewConfig2Modal(
   name: string,
   description: string,
   data = '',
+  onConfirm: () => void,
 ): IShowCreateNewConfig2Modal {
   return {
     pluginType,
     name,
     description,
     data,
+    onConfirm,
     type: SHOW_CREATE_NEW_CONFIG_2_MODAL,
   };
 }

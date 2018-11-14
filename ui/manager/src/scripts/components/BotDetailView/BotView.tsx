@@ -12,23 +12,17 @@ import VersionSelectComponent from '../Assets/VersionSelectComponent';
 import WhiteButton from '../Assets/Buttons/WhiteButton';
 import DeployButton from '../Assets/Buttons/DeployButton';
 import { IN_PROGRESS } from '../utils/helpers/BotHelper';
+import eddiApiActionDispatchers from '../../actions/EddiApiActionDispatchers';
+import Parser from '../utils/Parser';
+import { history } from '../../history';
 
-interface IPublicProps {
-  botResource: string;
-  selectVersion(resource: string, newVersion): void;
-}
-
-interface IPrivateProps extends IPublicProps {
+interface IProps {
   bot: IBot;
-  error: Error;
-  isLoading: boolean;
 }
-
-interface IState {}
 
 const warningIcon = require('../../../public/images/WarningIcon.png');
 const foundUnpublishedChanges = false; // todo : add function to check if there are unpublished changes.
-class BotView extends React.Component<IPrivateProps, IState> {
+class BotView extends React.Component<IProps> {
   constructor(props) {
     super(props);
   }
@@ -52,7 +46,10 @@ class BotView extends React.Component<IPrivateProps, IState> {
   };
 
   selectVersion = (newVersion: number) => {
-    this.props.selectVersion(this.props.bot.resource, newVersion);
+    eddiApiActionDispatchers.fetchBotAction(
+      Parser.replaceResourceVersion(this.props.bot.resource, newVersion),
+    );
+    history.push(`${this.props.bot.id}?version=${newVersion}`);
   };
 
   render() {
@@ -119,7 +116,6 @@ class BotView extends React.Component<IPrivateProps, IState> {
 
 const ComposedBotView: Component<IProps> = compose<IProps>(
   pure,
-  connect(botSelector),
   setDisplayName('BotView'),
 )(BotView);
 

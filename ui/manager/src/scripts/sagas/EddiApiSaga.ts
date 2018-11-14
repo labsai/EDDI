@@ -25,6 +25,7 @@ import {
   DEPLOY_BOT,
   UNDEPLOY_BOT,
   UPDATE_BOT_DEPLOYMENT_STATUS,
+  FETCH_CURRENT_BOT,
 } from '../actions/EddiApiActionTypes';
 import {
   getPackage,
@@ -130,9 +131,23 @@ import {
   IUpdateBotDeploymentStatusAction,
   updateBotDeploymentStatusSuccessAction,
   updateBotDeploymentStatusFailedAction,
+  createNewBotSuccessAction,
+  createNewPackageSuccessAction,
+  createNewPluginSuccessAction,
+  IFetchCurrentBotAction,
 } from '../actions/EddiApiActions';
 import * as Edditypes from '../components/utils/EddiTypes';
 import Parser from '../components/utils/Parser';
+import { PACKAGE_PATH } from '../components/utils/EddiTypes';
+import { BEHAVIOR_PATH } from '../components/utils/EddiTypes';
+import { OUTPUT } from '../components/utils/EddiTypes';
+import { BOT } from '../components/utils/EddiTypes';
+import { BEHAVIOUR } from '../components/utils/EddiTypes';
+import { OUTPUT_PATH } from '../components/utils/EddiTypes';
+import { REGULAR_DICTIONARY_PATH } from '../components/utils/EddiTypes';
+import { REGULAR_DICTIONARY } from '../components/utils/EddiTypes';
+import { BOT_PATH } from '../components/utils/EddiTypes';
+import { PACKAGE } from '../components/utils/EddiTypes';
 
 export function* FetchBots() {
   try {
@@ -163,7 +178,7 @@ export function* watchFetchPackages(): Iterator<{}> {
 export function* FetchBot(action: IFetchBotAction) {
   try {
     const bot: IBot = yield call(getBot, action.botId);
-    yield put(fetchBotSuccessAction(bot, bot.resource));
+    yield put(fetchBotSuccessAction(bot));
   } catch (err) {
     yield put(fetchBotFailedAction(err));
   }
@@ -171,6 +186,19 @@ export function* FetchBot(action: IFetchBotAction) {
 
 export function* watchFetchBot(): Iterator<{}> {
   yield takeEvery(FETCH_BOT, FetchBot);
+}
+
+export function* FetchCurrentBot(action: IFetchCurrentBotAction) {
+  try {
+    const bot: IBot = yield call(getCurrentBot, action.botId);
+    yield put(fetchBotSuccessAction(bot));
+  } catch (err) {
+    yield put(fetchBotFailedAction(err));
+  }
+}
+
+export function* watchFetchCurrentBot(): Iterator<{}> {
+  yield takeEvery(FETCH_CURRENT_BOT, FetchCurrentBot);
 }
 
 export function* FetchBotData(action: IFetchBotDataAction) {
@@ -438,14 +466,29 @@ export function* watchCreateNewConfig(): Iterator<{}> {
 
 export function* createNewConfig(action: ICreateNewConfigAction): Iterator<{}> {
   try {
-    const id = yield call(
+    const newResource = yield call(
       postNewConfig,
       action.eddiType,
       action.name,
       action.description,
       action.data,
     );
-    // todo: yield success action.
+    switch (action.eddiType) {
+      case BOT:
+        const bot: IBot = yield call(getCurrentBot, Parser.getId(newResource));
+        yield put(createNewBotSuccessAction(bot));
+        break;
+      case PACKAGE:
+        const pkg: IPackage = yield call(
+          getCurrentPackage,
+          Parser.getId(newResource),
+        );
+        yield put(createNewPackageSuccessAction(pkg));
+        break;
+      default:
+        const plugin = yield call(getCurrentPlugin, newResource);
+        yield put(createNewPluginSuccessAction(plugin));
+    }
   } catch (err) {
     yield put(createNewConfigFailedAction(err));
   }
