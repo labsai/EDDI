@@ -86,3 +86,30 @@ export function botsWithPackageSelector(
     isLoading: state.botState.isLoadingAllBots,
   };
 }
+
+export interface ISpecificBotSelectorProps {
+  botId: string;
+  botVersion: string;
+}
+
+export function specificBotSelector(
+  state: IAppState,
+  props: ISpecificBotSelectorProps,
+) {
+  let bot: IBot;
+  if (!_.isEmpty(props.botVersion)) {
+    bot = state.botState.bots.find(
+      bot =>
+        bot.id === props.botId && bot.version.toString() === props.botVersion,
+    );
+  } else {
+    bot = state.botState.bots.find(
+      bot => bot.id === props.botId && bot.version === bot.currentVersion,
+    );
+  }
+  return {
+    bot,
+    isLoading: state.botState.isLoadingBot,
+    error: state.botState.error,
+  };
+}

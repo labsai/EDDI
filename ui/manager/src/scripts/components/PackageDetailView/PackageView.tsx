@@ -283,7 +283,9 @@ class PackageView extends React.Component<IPrivateProps, IState> {
         newVersion,
       ),
     );
-    history.push(`/packageview/${this.props.packagePayload.id}/${newVersion}`);
+    history.push(
+      `/packageview/${this.props.packagePayload.id}?version=${newVersion}`,
+    );
   };
 
   render() {

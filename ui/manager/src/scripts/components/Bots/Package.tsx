@@ -69,7 +69,7 @@ class Package extends React.Component<IPrivateProps, IState> {
                 <button
                   onClick={() =>
                     history.push(
-                      `/packageview/${this.props.packagePayload.id}/${
+                      `/packageview/${this.props.packagePayload.id}?version=${
                         this.props.packagePayload.version
                       }`,
                     )

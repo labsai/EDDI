@@ -25,6 +25,7 @@ import {
   DEPLOY_BOT,
   UNDEPLOY_BOT,
   UPDATE_BOT_DEPLOYMENT_STATUS,
+  FETCH_CURRENT_BOT,
 } from '../actions/EddiApiActionTypes';
 import {
   getPackage,
@@ -133,6 +134,7 @@ import {
   createNewBotSuccessAction,
   createNewPackageSuccessAction,
   createNewPluginSuccessAction,
+  IFetchCurrentBotAction,
 } from '../actions/EddiApiActions';
 import * as Edditypes from '../components/utils/EddiTypes';
 import Parser from '../components/utils/Parser';
@@ -176,7 +178,7 @@ export function* watchFetchPackages(): Iterator<{}> {
 export function* FetchBot(action: IFetchBotAction) {
   try {
     const bot: IBot = yield call(getBot, action.botId);
-    yield put(fetchBotSuccessAction(bot, bot.resource));
+    yield put(fetchBotSuccessAction(bot));
   } catch (err) {
     yield put(fetchBotFailedAction(err));
   }
@@ -184,6 +186,19 @@ export function* FetchBot(action: IFetchBotAction) {
 
 export function* watchFetchBot(): Iterator<{}> {
   yield takeEvery(FETCH_BOT, FetchBot);
+}
+
+export function* FetchCurrentBot(action: IFetchCurrentBotAction) {
+  try {
+    const bot: IBot = yield call(getCurrentBot, action.botId);
+    yield put(fetchBotSuccessAction(bot));
+  } catch (err) {
+    yield put(fetchBotFailedAction(err));
+  }
+}
+
+export function* watchFetchCurrentBot(): Iterator<{}> {
+  yield takeEvery(FETCH_CURRENT_BOT, FetchCurrentBot);
 }
 
 export function* FetchBotData(action: IFetchBotDataAction) {

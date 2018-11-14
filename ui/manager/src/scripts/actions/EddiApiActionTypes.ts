@@ -6,6 +6,8 @@ export const FETCH_BOT: string = 'FETCH_BOT';
 export const FETCH_BOT_SUCCESS: string = 'FETCH_BOT_SUCCESS';
 export const FETCH_BOT_FAILED: string = 'FETCH_BOT_FAILED';
 
+export const FETCH_CURRENT_BOT: string = 'FETCH_CURRENT_BOT';
+
 export const FETCH_BOTDATA: string = 'FETCH_BOTDATA';
 export const FETCH_BOTDATA_SUCCESS: string = 'FETCH_BOTDATA_SUCCESS';
 export const FETCH_BOTDATA_FAILED: string = 'FETCH_BOTDATA_FAILED';

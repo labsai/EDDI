@@ -27,10 +27,12 @@ import {
   watchDeployBot,
   watchUndeployBot,
   watchUpdateBotDeploymentStatus,
+  watchFetchCurrentBot,
 } from './EddiApiSaga';
 
 function* root() {
   yield fork(watchFetchBot);
+  yield fork(watchFetchCurrentBot);
   yield fork(watchFetchBots);
   yield fork(watchFetchPackages);
   yield fork(watchFetchBotData);

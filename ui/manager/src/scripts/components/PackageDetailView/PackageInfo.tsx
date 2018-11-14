@@ -15,24 +15,22 @@ import {
 } from '../../selectors/PackageSelectors';
 import { PACKAGE, PACKAGE_PATH } from '../utils/EddiTypes';
 
-interface IProps {
+interface IPublicProps {
   packageId: string;
   version: string;
+}
+
+interface IPrivateProps extends IPublicProps {
   packagePayload: IPackage;
   isLoading: boolean;
   error: Error;
 }
 
-class PackageInfo extends React.Component<IProps> {
+class PackageInfo extends React.Component<IPrivateProps> {
   async componentDidMount() {
     if (_.isEmpty(this.props.version)) {
       eddiApiActionDispatchers.fetchCurrentPackageAction(this.props.packageId);
     } else {
-      console.log(
-        `${PACKAGE}${PACKAGE_PATH}${this.props.packageId}?version=${
-          this.props.version
-        }`,
-      );
       eddiApiActionDispatchers.fetchPackageAction(
         `${PACKAGE}${PACKAGE_PATH}/${this.props.packageId}?version=${
           this.props.version
@@ -68,7 +66,7 @@ class PackageInfo extends React.Component<IProps> {
   }
 }
 
-const ComposedPackageInfo: Component<IProps> = compose<IProps>(
+const ComposedPackageInfo: Component<IPrivateProps> = compose<IPrivateProps>(
   pure,
   connect(specificPackageSelector),
   setDisplayName('PackageInfo'),
