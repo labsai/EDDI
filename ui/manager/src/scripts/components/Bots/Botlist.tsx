@@ -10,6 +10,7 @@ import { connect } from 'react-redux';
 import { botsSelector } from '../../selectors/BotSelectors';
 import styles from './Botlist.styles';
 import { ClimbingBoxLoader } from 'react-spinners';
+import { getAPIUrl } from '../utils/ApiFunctions';
 
 interface IPublicProps {
   filterText: string;
@@ -21,9 +22,21 @@ interface IPrivateProps extends IPublicProps {
   error: Error;
 }
 
-class BotList extends React.Component<IPrivateProps> {
-  componentDidMount() {
+interface IState {
+  apiUrl: string;
+}
+
+class BotList extends React.Component<IPrivateProps, IState> {
+  constructor(props) {
+    super(props);
+    this.state = {
+      apiUrl: '',
+    };
+  }
+
+  async componentDidMount() {
     eddiApiActionDispatchers.fetchBotsAction();
+    this.setState({ apiUrl: await getAPIUrl() });
   }
 
   filterBots() {
@@ -61,7 +74,13 @@ class BotList extends React.Component<IPrivateProps> {
                 {renderIf(_.isEmpty(botList))(() => (
                   <p>{`Found no bots matching: "${this.props.filterText}"`}</p>
                 ))}
-                {botList.map(bot => <Bot key={bot.resource} bot={bot} />)}
+                {botList.map(bot => (
+                  <Bot
+                    key={bot.resource}
+                    bot={bot}
+                    apiUrl={this.state.apiUrl}
+                  />
+                ))}
               </div>
             ))}
           </div>
