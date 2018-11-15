@@ -82,8 +82,9 @@ export interface IModalActionDispatchers extends ActionCreatorsMapObject {
   showUpdatePackagesModal: (resource: string) => IShowUpdatePackagesModal;
   showUpdateBotsModal: (packageResources: string[]) => IShowUpdateBotsModal;
   showConfirmationModal: (
-    message: string,
-    onConfirm: () => void,
+    title: string,
+    message?: string,
+    onConfirm?: () => void,
   ) => IShowConfirmationModal;
   showErrorMessageModal: (
     title: string,

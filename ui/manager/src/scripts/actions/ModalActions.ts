@@ -228,15 +228,18 @@ export function showUpdateBotsModal(
 }
 
 export interface IShowConfirmationModal extends Action {
+  title: string;
   message: string;
   onConfirm: () => void;
 }
 
 export function showConfirmationModal(
+  title: string,
   message: string,
   onConfirm: () => void,
 ): IShowConfirmationModal {
   return {
+    title,
     message,
     onConfirm,
     type: SHOW_CONFIRMATION_MODAL,

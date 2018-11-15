@@ -148,6 +148,7 @@ import { REGULAR_DICTIONARY_PATH } from '../components/utils/EddiTypes';
 import { REGULAR_DICTIONARY } from '../components/utils/EddiTypes';
 import { BOT_PATH } from '../components/utils/EddiTypes';
 import { PACKAGE } from '../components/utils/EddiTypes';
+import { getAPIUrl } from '../components/utils/ApiFunctions';
 
 export function* FetchBots() {
   try {
@@ -557,7 +558,10 @@ export function* watchUpdateBots(): Iterator<{}> {
 export function* deployBot(action: IDeployBotAction): Iterator<{}> {
   try {
     yield call(axiosDeployBot, action.botResource);
-    yield put(deployBotSuccessAction(action.botResource));
+    const conversationUrl = `${yield call(
+      getAPIUrl,
+    )}/chat/unrestricted/${Parser.getId(action.botResource)}`;
+    yield put(deployBotSuccessAction(action.botResource, conversationUrl));
   } catch (err) {
     yield put(deployBotFailedAction(err));
   }

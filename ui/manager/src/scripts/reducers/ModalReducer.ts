@@ -33,6 +33,7 @@ import {
 } from '../components/utils/AxiosFunctions';
 import { ModalEnum } from '../components/utils/ModalEnum';
 import {
+  DEPLOY_BOT_SUCCESS,
   UNDEPLOY_BOT_FAILED,
   UPDATE_DESCRIPTOR_FAILED,
   UPDATE_JSON_DATA_FAILED,
@@ -42,6 +43,7 @@ import {
   UPDATE_PLUGIN_TYPE_IN_PACKAGE_SUCCESS,
 } from '../actions/EddiApiActionTypes';
 import {
+  IDeployBotSuccessAction,
   IUndeployBotFailedAction,
   IUpdateDescriptorFailedAction,
   IUpdateJsonDataFailedAction,
@@ -51,6 +53,8 @@ import {
   IUpdatePluginTypeSuccessAction,
 } from '../actions/EddiApiActions';
 import modalActionDispatchers from '../actions/ModalActionDispatchers';
+import { getAPIUrl } from '../components/utils/ApiFunctions';
+import Parser from '../components/utils/Parser';
 
 export type IModalReducer = Reducer<IModalState>;
 
@@ -352,8 +356,38 @@ const ModalReducer: IModalReducer = (
         onConfirm: {
           $set: (action as IShowConfirmationModal).onConfirm,
         },
+        title: {
+          $set: (action as IShowConfirmationModal).title,
+        },
         message: {
           $set: (action as IShowConfirmationModal).message,
+        },
+      });
+
+    case DEPLOY_BOT_SUCCESS:
+      return update(state, {
+        mode: {
+          $set: ModalEnum.confirmation,
+        },
+        isModalOpen: {
+          $set: true,
+        },
+        onConfirm: {
+          $set: () =>
+            window
+              .open(
+                (action as IDeployBotSuccessAction).conversationUrl,
+                '_blank',
+              )
+              .focus(),
+        },
+        title: {
+          $set: 'Bot successfully deployed!',
+        },
+        message: {
+          $set: `${
+            (action as IDeployBotSuccessAction).botResource
+          } has been deployed. \n\n Do you wish to start a conversation?`,
         },
       });
 

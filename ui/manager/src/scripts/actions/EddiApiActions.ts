@@ -995,13 +995,16 @@ export function deployBotAction(botResource: string): IDeployBotAction {
 
 export interface IDeployBotSuccessAction extends Action {
   botResource: string;
+  conversationUrl: string;
 }
 
 export function deployBotSuccessAction(
   botResource: string,
+  conversationUrl: string,
 ): IDeployBotSuccessAction {
   return {
     botResource,
+    conversationUrl,
     type: DEPLOY_BOT_SUCCESS,
   };
 }

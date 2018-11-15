@@ -85,6 +85,7 @@ class DeployButton extends React.Component<IProps> {
             onClick={() =>
               modalActionDispatchers.showConfirmationModal(
                 `Are you sure you want to undeploy ${this.props.botName}?`,
+                null,
                 () =>
                   eddiApiActionDispatchers.undeployBotAction(
                     this.props.botResource,

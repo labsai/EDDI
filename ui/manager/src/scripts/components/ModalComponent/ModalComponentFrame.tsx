@@ -165,6 +165,7 @@ class ModalComponentFrame extends React.Component<IPrivateProps, IState> {
       case ModalEnum.confirmation:
         return (
           <ConfirmModal
+            title={this.props.title}
             message={this.props.message}
             onConfirm={this.props.onConfirm}
           />

@@ -22,10 +22,18 @@ const styles: CSSProperties = {
     fontSize: '12px',
     width: '100%',
     textAlign: 'left',
+    paddingBottom: '25px',
+  },
+  message: {
+    color: '#54698D',
+    fontSize: '18px',
+    margin: '30px 20px 10px 20px',
+    whiteSpace: 'pre-line',
+    textAlign: 'center',
   },
   buttons: {
     width: 'fit-content',
-    margin: '60px auto auto auto',
+    margin: '80px auto auto auto',
   },
   modalHeader: {
     backgroundColor: '#F7F9FB',
@@ -35,7 +43,7 @@ const styles: CSSProperties = {
     marginRight: '30px',
   },
   modalTopHeader: {
-    fontSize: '18px',
+    fontSize: '20px',
     height: '32px',
     width: 'fit-content',
     paddingTop: '30px',
