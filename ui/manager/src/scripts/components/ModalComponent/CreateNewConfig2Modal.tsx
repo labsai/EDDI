@@ -11,7 +11,6 @@ import * as renderIf from 'render-if';
 import Parser from '../utils/Parser';
 import { getPostExample } from '../utils/EddiConfigExampleData';
 import * as _ from 'lodash';
-import Radium = require('radium');
 
 require('brace/mode/json');
 require('brace/theme/monokai');

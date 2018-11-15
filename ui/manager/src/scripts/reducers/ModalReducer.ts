@@ -33,17 +33,28 @@ import {
 } from '../components/utils/AxiosFunctions';
 import { ModalEnum } from '../components/utils/ModalEnum';
 import {
+  DEPLOY_BOT_SUCCESS,
+  UNDEPLOY_BOT_FAILED,
+  UPDATE_DESCRIPTOR_FAILED,
+  UPDATE_JSON_DATA_FAILED,
   UPDATE_PACKAGE_SUCCESS,
   UPDATE_PACKAGES_SUCCESS,
   UPDATE_PLUGIN_SUCCESS,
   UPDATE_PLUGIN_TYPE_IN_PACKAGE_SUCCESS,
 } from '../actions/EddiApiActionTypes';
 import {
+  IDeployBotSuccessAction,
+  IUndeployBotFailedAction,
+  IUpdateDescriptorFailedAction,
+  IUpdateJsonDataFailedAction,
   IUpdatePackagesSuccessAction,
   IUpdatePackageSuccessAction,
   IUpdatePluginSuccessAction,
   IUpdatePluginTypeSuccessAction,
 } from '../actions/EddiApiActions';
+import modalActionDispatchers from '../actions/ModalActionDispatchers';
+import { getAPIUrl } from '../components/utils/ApiFunctions';
+import Parser from '../components/utils/Parser';
 
 export type IModalReducer = Reducer<IModalState>;
 
@@ -58,6 +69,7 @@ export interface IModalState {
   resource: string;
   data: {};
   message: string;
+  title: string;
   addPlugin?: (plugins: string[]) => void;
   onConfirm?: () => void;
 }
@@ -74,6 +86,7 @@ export const initialState: IModalState = {
   addPlugin: null,
   data: null,
   message: null,
+  title: null,
   onConfirm: null,
 };
 
@@ -343,8 +356,88 @@ const ModalReducer: IModalReducer = (
         onConfirm: {
           $set: (action as IShowConfirmationModal).onConfirm,
         },
+        title: {
+          $set: (action as IShowConfirmationModal).title,
+        },
         message: {
           $set: (action as IShowConfirmationModal).message,
+        },
+      });
+
+    case DEPLOY_BOT_SUCCESS:
+      return update(state, {
+        mode: {
+          $set: ModalEnum.confirmation,
+        },
+        isModalOpen: {
+          $set: true,
+        },
+        onConfirm: {
+          $set: () =>
+            window
+              .open(
+                (action as IDeployBotSuccessAction).conversationUrl,
+                '_blank',
+              )
+              .focus(),
+        },
+        title: {
+          $set: 'Bot successfully deployed!',
+        },
+        message: {
+          $set: `${
+            (action as IDeployBotSuccessAction).botResource
+          } has been deployed. \n\n Do you wish to start a conversation?`,
+        },
+      });
+
+    case UNDEPLOY_BOT_FAILED:
+      return update(state, {
+        mode: {
+          $set: ModalEnum.error,
+        },
+        isModalOpen: {
+          $set: true,
+        },
+        title: {
+          $set: 'Failed to undeploy bot',
+        },
+        message: {
+          $set: `${(action as IUndeployBotFailedAction).error.message}\n\n${
+            (action as IUndeployBotFailedAction).response
+          }`,
+        },
+      });
+
+    case UPDATE_DESCRIPTOR_FAILED:
+      return update(state, {
+        mode: {
+          $set: ModalEnum.error,
+        },
+        isModalOpen: {
+          $set: true,
+        },
+        title: {
+          $set: 'Failed to update descriptor',
+        },
+        message: {
+          $set: (action as IUpdateDescriptorFailedAction).error.message,
+        },
+      });
+
+    case UPDATE_JSON_DATA_FAILED:
+      return update(state, {
+        mode: {
+          $set: ModalEnum.error,
+        },
+        isModalOpen: {
+          $set: true,
+        },
+        title: {
+          $set: 'Failed to update JSON data',
+        },
+        message: {
+          $set: (action as IUpdateJsonDataFailedAction).error.message,
         },
       });
 
@@ -372,6 +465,12 @@ const ModalReducer: IModalReducer = (
           $set: null,
         },
         data: {
+          $set: null,
+        },
+        message: {
+          $set: null,
+        },
+        title: {
           $set: null,
         },
         addPlugin: {

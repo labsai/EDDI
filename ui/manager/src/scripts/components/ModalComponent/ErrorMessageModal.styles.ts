@@ -19,37 +19,46 @@ const styles: CSSProperties = {
   },
   content: {
     color: '#54698D',
-    fontSize: '12px',
+    fontSize: '18px',
     width: '100%',
     textAlign: 'left',
-    paddingBottom: '25px',
+    paddingBottom: '10px',
   },
   message: {
-    color: '#54698D',
-    fontSize: '18px',
-    margin: '30px 20px 10px 20px',
+    marginTop: '10px',
     whiteSpace: 'pre-line',
-    textAlign: 'center',
   },
-  buttons: {
+  topContent: {
+    marginLeft: '50px',
+    marginRight: '50px',
+    marginTop: '40px',
+    display: 'flex',
+  },
+  button: {
     width: 'fit-content',
-    margin: '80px auto auto auto',
+    margin: '60px auto auto auto',
   },
   modalHeader: {
     backgroundColor: '#F7F9FB',
     width: '100%',
   },
-  buttonMargin: {
-    marginRight: '30px',
-  },
   modalTopHeader: {
-    fontSize: '20px',
+    display: 'flex',
+    fontSize: '18px',
     height: '32px',
     width: 'fit-content',
     paddingTop: '30px',
     paddingBottom: '20px',
     marginLeft: 'auto',
     marginRight: 'auto',
+  },
+  errorTitle: {
+    fontSize: '22px',
+    color: '#FF5976',
+  },
+  warningIcon: {
+    height: '50px',
+    marginRight: '15px',
   },
 };
 export default styles;

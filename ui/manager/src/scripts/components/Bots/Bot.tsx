@@ -10,9 +10,12 @@ import eddiApiActionDispatchers from '../../actions/EddiApiActionDispatchers';
 import * as _ from 'lodash';
 import * as moment from 'moment';
 import DeployButton from '../Assets/Buttons/DeployButton';
+import WhiteButton from '../Assets/Buttons/WhiteButton';
+import { READY } from '../utils/helpers/BotHelper';
 
 interface IPublicProps {
   bot: IBot;
+  apiUrl: string;
 }
 
 interface IPrivateProps extends IPublicProps {
@@ -64,6 +67,21 @@ class Bot extends React.Component<IPrivateProps> {
                 </span>
               </div>
             </Link>
+            <WhiteButton
+              text={'Open Chat'}
+              customStyles={styles.chatButton}
+              disabled={this.props.bot.deploymentStatus !== READY}
+              onClick={() =>
+                window
+                  .open(
+                    `${this.props.apiUrl}/chat/unrestricted/${
+                      this.props.bot.id
+                    }`,
+                    '_blank',
+                  )
+                  .focus()
+              }
+            />
             <DeployButton
               name={this.props.bot.name}
               botResource={this.props.bot.resource}

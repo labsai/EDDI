@@ -11,20 +11,32 @@ import { connect } from 'react-redux';
 import VersionSelectComponent from '../Assets/VersionSelectComponent';
 import WhiteButton from '../Assets/Buttons/WhiteButton';
 import DeployButton from '../Assets/Buttons/DeployButton';
-import { IN_PROGRESS } from '../utils/helpers/BotHelper';
+import { IN_PROGRESS, READY } from '../utils/helpers/BotHelper';
 import eddiApiActionDispatchers from '../../actions/EddiApiActionDispatchers';
 import Parser from '../utils/Parser';
 import { history } from '../../history';
+import { getAPIUrl } from '../utils/ApiFunctions';
 
 interface IProps {
   bot: IBot;
 }
 
+interface IState {
+  apiUrl: string;
+}
+
 const warningIcon = require('../../../public/images/WarningIcon.png');
 const foundUnpublishedChanges = false; // todo : add function to check if there are unpublished changes.
-class BotView extends React.Component<IProps> {
+class BotView extends React.Component<IProps, IState> {
   constructor(props) {
     super(props);
+    this.state = {
+      apiUrl: '',
+    };
+  }
+
+  async componentDidMount() {
+    this.setState({ apiUrl: await getAPIUrl() });
   }
 
   openEditBotModal = () => {
@@ -91,6 +103,21 @@ class BotView extends React.Component<IProps> {
                 </div>
               ))}
               <div style={styles.botHeaderSpacing} />
+              <WhiteButton
+                text={'Open Chat'}
+                customStyles={styles.chatButton}
+                disabled={this.props.bot.deploymentStatus !== READY}
+                onClick={() =>
+                  window
+                    .open(
+                      `${this.state.apiUrl}/chat/unrestricted/${
+                        this.props.bot.id
+                      }`,
+                      '_blank',
+                    )
+                    .focus()
+                }
+              />
               <DeployButton
                 name={this.props.bot.name}
                 botResource={this.props.bot.resource}

@@ -19,6 +19,7 @@ import {
   SHOW_UPDATE_PACKAGES_MODAL,
   SHOW_UPDATE_BOTS_MODAL,
   SHOW_CONFIRMATION_MODAL,
+  SHOW_ERROR_MESSAGE_MODAL,
 } from './ModalActionTypes';
 
 export interface IShowModalAction extends Action {
@@ -227,17 +228,36 @@ export function showUpdateBotsModal(
 }
 
 export interface IShowConfirmationModal extends Action {
+  title: string;
   message: string;
   onConfirm: () => void;
 }
 
 export function showConfirmationModal(
+  title: string,
   message: string,
   onConfirm: () => void,
 ): IShowConfirmationModal {
   return {
+    title,
     message,
     onConfirm,
     type: SHOW_CONFIRMATION_MODAL,
+  };
+}
+
+export interface IShowErrorMessageModal extends Action {
+  title: string;
+  message: string;
+}
+
+export function showErrorMessageModal(
+  title: string,
+  message: string,
+): IShowErrorMessageModal {
+  return {
+    title,
+    message,
+    type: SHOW_ERROR_MESSAGE_MODAL,
   };
 }

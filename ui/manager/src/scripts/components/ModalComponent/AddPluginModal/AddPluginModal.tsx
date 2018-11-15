@@ -184,7 +184,9 @@ class AddPluginModal extends React.Component<IPrivateProps, IState> {
             />
             <BlueButton
               customStyles={styles.button}
-              disabled={!this.unsavedChanges()}
+              disabled={
+                !this.unsavedChanges() || _.isEmpty(this.state.selectedPlugins)
+              }
               onClick={this.selectPlugins}
               text={`Add ${Parser.getPluginName(this.props.pluginType, false)}`}
             />

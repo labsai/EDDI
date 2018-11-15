@@ -126,7 +126,10 @@ export interface IEddiApiActionDispatchers extends ActionCreatorsMapObject {
   updateBotsSuccessAction: (bots) => IUpdateBotsSuccessAction;
   updateBotsFailedAction: (error) => IUpdateBotsFailedAction;
   deployBotAction: (botResource) => IDeployBotAction;
-  deployBotSuccessAction: (botResource) => IDeployBotSuccessAction;
+  deployBotSuccessAction: (
+    botResource,
+    conversationUrl,
+  ) => IDeployBotSuccessAction;
   deployBotFailedAction: (error) => IDeployBotFailedAction;
   updateBotDeploymentStatusAction: (
     botResource,

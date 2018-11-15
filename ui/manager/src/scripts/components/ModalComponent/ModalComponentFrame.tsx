@@ -28,6 +28,7 @@ import CreateNewConfig2Modal from './CreateNewConfig2Modal';
 import UpdatePackagesModal from './UpdateConfigsModal/UpdatePackagesModal';
 import UpdateBotsModal from './UpdateConfigsModal/UpdateBotsModal';
 import ConfirmModal from './ConfirmModal';
+import ErrorMessageModal from './ErrorMessageModal';
 
 const customStyles = {
   content: {
@@ -71,6 +72,7 @@ interface IPrivateProps {
   name?: string;
   description?: string;
   message?: string;
+  title?: string;
   onConfirm?(): void;
   addPlugin?(plugins: string[]): void;
 }
@@ -163,8 +165,16 @@ class ModalComponentFrame extends React.Component<IPrivateProps, IState> {
       case ModalEnum.confirmation:
         return (
           <ConfirmModal
+            title={this.props.title}
             message={this.props.message}
             onConfirm={this.props.onConfirm}
+          />
+        );
+      case ModalEnum.error:
+        return (
+          <ErrorMessageModal
+            title={this.props.title}
+            message={this.props.message}
           />
         );
       default:

@@ -923,13 +923,10 @@ export async function deployBot(resource: string) {
 }
 
 export async function undeployBot(resource: string) {
-  try {
-    await axios.post(
-      `${await getAPIUrl()}/administration/unrestricted/undeploy/${Parser.getIdAndVersion(
-        resource,
-      )}`,
-    );
-  } catch (err) {
-    console.error(`Failed to undeploy bot. Error: ${err.message}`);
-  }
+  const res = await axios.post(
+    `${await getAPIUrl()}/administration/unrestricted/undeploy/${Parser.getIdAndVersion(
+      resource,
+    )}`,
+  );
+  return res;
 }
