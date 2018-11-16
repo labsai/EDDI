@@ -49,9 +49,9 @@ public class Conversation implements IConversation {
     }
 
     @Override
-    public void init() throws LifecycleException {
+    public void init(Map<String, Context> context) throws LifecycleException {
         setConversationState(ConversationState.READY);
-        executePackages(new LinkedList<>());
+        executePackages(createContextData(context));
     }
 
     private void setConversationState(ConversationState conversationState) {
@@ -77,6 +77,18 @@ public class Conversation implements IConversation {
             ((ConversationMemory) conversationMemory).startNextStep();
             List<IData> data = new LinkedList<>();
 
+            //add userInfo
+            IData userData;
+            String userId;
+            if ((userId = conversationMemory.getUserId()) != null) {
+                userData = new Data<>("userInfo:userId", userId);
+                userData.setPublic(true);
+                data.add(userData);
+            }
+
+            //store context data
+            data.addAll(createContextData(contexts));
+
             //store user input in memory
             IData initialData;
             if (!"".equals(message.trim())) {
@@ -84,15 +96,6 @@ public class Conversation implements IConversation {
                 initialData.setPublic(true);
                 data.add(initialData);
             }
-
-            //store context data
-            List<IData<Context>> contextData = new LinkedList<>();
-            for (String key : contexts.keySet()) {
-                Context context = contexts.get(key);
-                contextData.add(new Data<>("context:" + key, context));
-
-            }
-            data.addAll(contextData);
 
             //execute input processing
             executePackages(data);
@@ -121,6 +124,17 @@ public class Conversation implements IConversation {
                 outputProvider.renderOutput(conversationMemory);
             }
         }
+    }
+
+    private List<IData> createContextData(Map<String, Context> context) {
+        List<IData> contextData = new LinkedList<>();
+        if (context != null) {
+            for (String key : context.keySet()) {
+                contextData.add(new Data<>("context:" + key, context.get(key)));
+
+            }
+        }
+        return contextData;
     }
 
     private void executePackages(List<IData> data) throws LifecycleException {

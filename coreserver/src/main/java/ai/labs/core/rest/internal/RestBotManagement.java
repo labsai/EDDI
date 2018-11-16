@@ -1,5 +1,6 @@
 package ai.labs.core.rest.internal;
 
+import ai.labs.memory.model.SimpleConversationMemorySnapshot;
 import ai.labs.models.*;
 import ai.labs.resources.rest.botmanagement.IRestBotTriggerStore;
 import ai.labs.resources.rest.botmanagement.IRestUserConversationStore;
@@ -9,6 +10,8 @@ import ai.labs.utilities.RestUtilities;
 import lombok.extern.slf4j.Slf4j;
 
 import javax.inject.Inject;
+import javax.ws.rs.InternalServerErrorException;
+import javax.ws.rs.NotFoundException;
 import javax.ws.rs.WebApplicationException;
 import javax.ws.rs.container.AsyncResponse;
 import javax.ws.rs.core.MediaType;
@@ -35,27 +38,34 @@ public class RestBotManagement implements IRestBotManagement {
     }
 
     @Override
+    public SimpleConversationMemorySnapshot loadConversationMemory(String intent, String userId, Boolean returnDetailed, Boolean returnCurrentStepOnly, List<String> returningFields) {
+        try {
+            UserConversation userConversation = initUserConversation(intent, userId);
+            return restBotEngine.readConversation(userConversation.getEnvironment(),
+                    userConversation.getBotId(),
+                    userConversation.getConversationId(),
+                    returnDetailed,
+                    returnCurrentStepOnly, returningFields);
+        } catch (CannotCreateConversationException e) {
+            log.error(e.getLocalizedMessage(), e);
+            throw new InternalServerErrorException(e.getLocalizedMessage());
+        }
+    }
+
+    @Override
     public void sayWithinContext(String intent,
                                  String userId,
                                  Boolean returnDetailed,
                                  Boolean returnCurrentStepOnly,
+                                 List<String> returningFields,
                                  InputData inputData,
                                  AsyncResponse response) {
         try {
 
-            UserConversation userConversation = getUserConversation(intent, userId);
-
-            if (userConversation != null && isConversationEnded(userConversation)) {
-                deleteUserConversation(intent, userId);
-                userConversation = null;
-            }
-
-            if (userConversation == null) {
-                userConversation = createNewConversation(intent, userId);
-            }
+            UserConversation userConversation = initUserConversation(intent, userId);
 
             restBotEngine.sayWithinContext(userConversation.getEnvironment(), userConversation.getBotId(),
-                    userConversation.getConversationId(), returnDetailed, returnCurrentStepOnly, inputData, response);
+                    userConversation.getConversationId(), returnDetailed, returnCurrentStepOnly, returningFields, inputData, response);
 
         } catch (Exception e) {
             log.error(e.getLocalizedMessage(), e);
@@ -68,6 +78,21 @@ public class RestBotManagement implements IRestBotManagement {
             }
             response.resume(responseStatus.type(MediaType.TEXT_PLAIN).entity(e.getLocalizedMessage()).build());
         }
+    }
+
+    private UserConversation initUserConversation(String intent, String userId) throws CannotCreateConversationException {
+        UserConversation userConversation;
+        try {
+            userConversation = getUserConversation(intent, userId);
+        } catch (NotFoundException e) {
+            userConversation = createNewConversation(intent, userId);
+        }
+
+        if (isConversationEnded(userConversation)) {
+            deleteUserConversation(intent, userId);
+            userConversation = createNewConversation(intent, userId);
+        }
+        return userConversation;
     }
 
     @Override
@@ -92,7 +117,9 @@ public class RestBotManagement implements IRestBotManagement {
 
         BotTriggerConfiguration botTriggerConfiguration = getBotTrigger(intent);
         BotDeployment botDeployment = getRandom(botTriggerConfiguration.getBotDeployments());
-        Response botResponse = restBotEngine.startConversation(botDeployment.getEnvironment(), botDeployment.getBotId());
+        Response botResponse = restBotEngine.startConversationWithContext(botDeployment.getEnvironment(),
+                botDeployment.getBotId(),
+                botDeployment.getInitialContext());
         int responseHttpCode = botResponse.getStatus();
         if (responseHttpCode == 201) {
             URI locationUri = URI.create(botResponse.getHeaders().get("location").get(0).toString());

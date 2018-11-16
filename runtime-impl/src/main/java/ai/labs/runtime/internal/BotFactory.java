@@ -2,6 +2,7 @@ package ai.labs.runtime.internal;
 
 import ai.labs.lifecycle.IConversation;
 import ai.labs.memory.IConversationMemory;
+import ai.labs.models.Context;
 import ai.labs.models.Deployment;
 import ai.labs.runtime.IBot;
 import ai.labs.runtime.IBotFactory;
@@ -130,8 +131,7 @@ public class BotFactory implements IBotFactory {
             }
 
             @Override
-            public IConversation startConversation(IConversation.IConversationOutputRenderer outputProvider)
-                    throws IllegalAccessException {
+            public IConversation startConversation(Map<String, Context> context, IConversation.IConversationOutputRenderer outputProvider) throws IllegalAccessException {
                 throw createBotInProgressException();
             }
 
@@ -153,10 +153,10 @@ public class BotFactory implements IBotFactory {
 
     private void logBotDeployment(String environment, String botId, Integer botVersion, Deployment.Status status) {
         if (status == Deployment.Status.IN_PROGRESS) {
-            log.info(String.format("Deploying Bot... (environment=%s, id=%s , version=%s)",
+            log.info(String.format("Deploying Bot... (environment=%s, botId=%s , version=%s)",
                     environment, botId, botVersion));
         } else {
-            log.info(String.format("Bot deployed with status: %s (environment=%s, id=%s , version=%s)", status,
+            log.info(String.format("Bot deployed with status: %s (environment=%s, botId=%s , version=%s)", status,
                     environment, botId, botVersion));
         }
     }

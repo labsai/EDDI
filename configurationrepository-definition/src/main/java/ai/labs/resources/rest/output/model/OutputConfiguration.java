@@ -39,7 +39,7 @@ public class OutputConfiguration {
     @Setter
     public static class OutputType {
         private String type;
-        private List<String> valueAlternatives = new LinkedList<>();
+        private List<Object> valueAlternatives = new LinkedList<>();
     }
 
     @Getter

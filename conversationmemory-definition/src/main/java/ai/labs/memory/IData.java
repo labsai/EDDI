@@ -1,13 +1,12 @@
 package ai.labs.memory;
 
-import java.io.Serializable;
 import java.util.Date;
 import java.util.List;
 
 /**
  * @author ginccc
  */
-public interface IData<T> extends Serializable {
+public interface IData<T> {
     String getKey();
 
     List<T> getPossibleResults();

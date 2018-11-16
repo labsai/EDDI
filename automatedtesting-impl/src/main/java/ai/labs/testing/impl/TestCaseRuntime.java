@@ -43,7 +43,7 @@ public class TestCaseRuntime {
         this.conversationMemoryStore = conversationMemoryStore;
     }
 
-    public void executeTestCase(final String id, final TestCase testCase) throws Exception {
+    public void executeTestCase(final String id, final TestCase testCase) {
         SystemRuntime.getRuntime().submitCallable((Callable<Void>) () -> {
             try {
                 testCaseStore.setTestCaseState(id, TestCaseState.IN_PROGRESS);
@@ -109,7 +109,9 @@ public class TestCaseRuntime {
             if (RuntimeUtilities.isNullOrEmpty(input)) {
                 input = " ";
             }
-            botEngine.say(Deployment.Environment.test, botId, conversationId, true, false, input, new MockAsyncResponse());
+            botEngine.say(Deployment.Environment.test, botId, conversationId,
+                    true, false,
+                    Collections.emptyList(), input, new MockAsyncResponse());
             while (botEngine.getConversationState(Deployment.Environment.test, conversationId) == ConversationState.IN_PROGRESS) {
                 Thread.sleep(1000);
             }

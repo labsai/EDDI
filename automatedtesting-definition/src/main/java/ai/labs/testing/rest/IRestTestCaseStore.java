@@ -41,7 +41,7 @@ public interface IRestTestCaseStore {
     TestCase readTestCase(@PathParam("id") String id);
 
     @POST
-    Response createTestCase(String conversationId);
+    Response createTestCase(String id);
 
     @PUT
     @Path("/{id}")

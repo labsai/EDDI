@@ -10,6 +10,7 @@ import lombok.extern.slf4j.Slf4j;
 
 import javax.inject.Inject;
 import javax.ws.rs.InternalServerErrorException;
+import javax.ws.rs.NotFoundException;
 import javax.ws.rs.WebApplicationException;
 import javax.ws.rs.core.Response;
 
@@ -39,6 +40,12 @@ public class RestUserConversationStore implements IRestUserConversationStore {
                 if (userConversation != null) {
                     userConversationCache.put(cacheKey, userConversation);
                 }
+            }
+
+            if (userConversation == null) {
+                String message = "UserConversation with intent=%s and userId=%s does not exist.";
+                message = String.format(message, intent, userId);
+                throw new NotFoundException(message);
             }
 
             return userConversation;
@@ -75,7 +82,7 @@ public class RestUserConversationStore implements IRestUserConversationStore {
         }
     }
 
-    private static String calculateCacheKey(String intent, String userId) {
+    static String calculateCacheKey(String intent, String userId) {
         return intent + "::" + userId;
     }
 }

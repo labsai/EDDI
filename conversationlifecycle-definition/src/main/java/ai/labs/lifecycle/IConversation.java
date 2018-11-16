@@ -11,7 +11,7 @@ import java.util.Map;
 public interface IConversation {
     IConversationMemory getConversationMemory();
 
-    void init() throws LifecycleException;
+    void init(Map<String, Context> context) throws LifecycleException;
 
     boolean isEnded();
 
