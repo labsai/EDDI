@@ -5,7 +5,7 @@ import ai.labs.caching.ICacheFactory;
 import ai.labs.httpclient.IHttpClient;
 import ai.labs.httpclient.IRequest;
 import ai.labs.httpclient.IResponse;
-import ai.labs.memory.model.Deployment;
+import ai.labs.models.Deployment;
 import ai.labs.resources.rest.bots.IBotStore;
 import ai.labs.resources.rest.bots.model.BotConfiguration;
 import ai.labs.rest.rest.IRestBotEngine;
@@ -39,7 +39,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.concurrent.TimeUnit;
 
-import static ai.labs.memory.model.Deployment.Environment.unrestricted;
+import static ai.labs.models.Deployment.Environment.unrestricted;
 import static ai.labs.persistence.IResourceStore.ResourceNotFoundException;
 import static ai.labs.persistence.IResourceStore.ResourceStoreException;
 import static ai.labs.rest.restinterfaces.RestInterfaceFactory.RestInterfaceFactoryException;
@@ -144,7 +144,7 @@ public class XmppEndpoint implements IXmppEndpoint {
             JsonNode rootNode = mapper.readValue(json, JsonNode.class);
             for (JsonNode bot : rootNode) {
                 if (bot.get("resource") != null) {
-                    String[] urlParts = bot.get("resource").asText().split("\\/");
+                    String[] urlParts = bot.get("resource").asText().split("/");
                     if (urlParts.length > 0) {
                         String[] requestParts = urlParts[urlParts.length-1].split("\\?");
                         botIds.add(requestParts[0]);
@@ -160,17 +160,16 @@ public class XmppEndpoint implements IXmppEndpoint {
     }
 
     private Integer getLatestDeployedBotVersion(String botId) throws ServiceException {
-        return botFactory.getLatestBot(unrestricted, botId) != null ? botFactory.getLatestBot(unrestricted, botId).getBotVersion() : new Integer(1);
+        return botFactory.getLatestBot(unrestricted, botId) != null ? botFactory.getLatestBot(unrestricted, botId).getBotVersion() : Integer.valueOf(1);
     }
 
     private void say(Deployment.Environment environment,
                      String botId,
-                     Integer botVersion,
                      String conversationId,
                      String senderId,
                      String message,
                      Chat chat)
-            throws IRequest.HttpRequestException, ResourceNotFoundException, ResourceStoreException, ServiceException {
+            throws IRequest.HttpRequestException {
 
         URI uri = RestUtilities.createURI(
                 apiServerURI, "/bots/",
@@ -286,18 +285,11 @@ public class XmppEndpoint implements IXmppEndpoint {
             if (conversationId == null) {
                 conversationId = createConversation(unrestricted,configuredBotId, entityBareJid.asEntityBareJidString());
             }
-            say(unrestricted, configuredBotId, getLatestDeployedBotVersion(configuredBotId), conversationId, entityBareJid.asEntityBareJidString(), message.getBody(), chat);
+            say(unrestricted, configuredBotId, conversationId, entityBareJid.asEntityBareJidString(), message.getBody(), chat);
         } catch (RestInterfaceFactoryException e) {
             log.error("rest interface exception", e);
-        } catch (ResourceNotFoundException e) {
-            log.error("resource not found", e);
-        } catch (ServiceException e) {
-            log.error("service excption", e);
         } catch (IRequest.HttpRequestException e) {
             log.error("http exception", e);
-        } catch (ResourceStoreException e) {
-            log.error("resource store exception", e);
         }
     }
-
 }

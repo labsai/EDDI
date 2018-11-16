@@ -8,6 +8,7 @@ import ai.labs.lifecycle.model.Context;
 import ai.labs.memory.IConversationMemory;
 import ai.labs.memory.IData;
 import ai.labs.memory.IDataFactory;
+import ai.labs.models.Context;
 import ai.labs.property.IPropertyDisposer;
 import ai.labs.property.model.PropertyEntry;
 import ai.labs.resources.rest.extensions.model.ExtensionDescriptor;

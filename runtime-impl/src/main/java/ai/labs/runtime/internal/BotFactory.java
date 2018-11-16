@@ -2,7 +2,8 @@ package ai.labs.runtime.internal;
 
 import ai.labs.lifecycle.IConversation;
 import ai.labs.memory.IConversationMemory;
-import ai.labs.memory.model.Deployment;
+import ai.labs.models.Context;
+import ai.labs.models.Deployment;
 import ai.labs.runtime.IBot;
 import ai.labs.runtime.IBotFactory;
 import ai.labs.runtime.IExecutablePackage;
@@ -41,13 +42,13 @@ public class BotFactory implements IBotFactory {
 
     @Override
     public IBot getLatestBot(Deployment.Environment environment, String botId) {
+        List<BotId> botVersions = new LinkedList<>();
 
         Map<BotId, IBot> bots = getBotEnvironment(environment);
-        List<BotId> botVersions = bots.keySet().stream().
-                filter(id -> id.getId().equals(botId)).sorted(Collections.reverseOrder((botId1, botId2) ->
+        botVersions.addAll(bots.keySet().stream().filter(id -> id.getId().equals(botId)).collect(Collectors.toList()));
+        botVersions.sort(Collections.reverseOrder((botId1, botId2) ->
                 botId1.getVersion() < botId2.getVersion() ?
-                        -1 : botId1.getVersion().equals(botId2.getVersion()) ? 0 : 1)).
-                collect(Collectors.toCollection(LinkedList::new));
+                        -1 : botId1.getVersion().equals(botId2.getVersion()) ? 0 : 1));
 
         IBot latestBot = null;
 
@@ -130,8 +131,10 @@ public class BotFactory implements IBotFactory {
             }
 
             @Override
-            public IConversation startConversation(String userId, IConversation.IConversationOutputRenderer outputProvider)
-                    throws IllegalAccessException {
+            public IConversation startConversation(String userId,
+                                                   Map<String, Context> context,
+                                                   IConversation.IConversationOutputRenderer outputProvider)
+                    throws InstantiationException, IllegalAccessException {
                 throw createBotInProgressException();
             }
 
@@ -153,10 +156,10 @@ public class BotFactory implements IBotFactory {
 
     private void logBotDeployment(String environment, String botId, Integer botVersion, Deployment.Status status) {
         if (status == Deployment.Status.IN_PROGRESS) {
-            log.info(String.format("Deploying Bot... (environment=%s, id=%s , version=%s)",
+            log.info(String.format("Deploying Bot... (environment=%s, botId=%s , version=%s)",
                     environment, botId, botVersion));
         } else {
-            log.info(String.format("Bot deployed with status: %s (environment=%s, id=%s , version=%s)", status,
+            log.info(String.format("Bot deployed with status: %s (environment=%s, botId=%s , version=%s)", status,
                     environment, botId, botVersion));
         }
     }

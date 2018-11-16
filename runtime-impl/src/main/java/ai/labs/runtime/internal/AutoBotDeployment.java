@@ -1,6 +1,6 @@
 package ai.labs.runtime.internal;
 
-import ai.labs.memory.model.Deployment.Environment;
+import ai.labs.models.Deployment.Environment;
 import ai.labs.persistence.IResourceStore;
 import ai.labs.resources.rest.deployment.IDeploymentStore;
 import ai.labs.resources.rest.deployment.model.DeploymentInfo;
@@ -38,7 +38,7 @@ public class AutoBotDeployment implements IAutoBotDeployment {
                         try {
                             botFactory.deployBot(environment, botId, botVersion, null);
                         } catch (ServiceException | IllegalAccessException | IllegalArgumentException e) {
-                            String message = "Error while auto deploying bot (environment=%s, id=%s, version=%s)!\n";
+                            String message = "Error while auto deploying bot (environment=%s, botId=%s, version=%s)!\n";
                             log.error(String.format(message, environment, botId, botVersion));
                             log.error(e.getLocalizedMessage(), e);
                         }

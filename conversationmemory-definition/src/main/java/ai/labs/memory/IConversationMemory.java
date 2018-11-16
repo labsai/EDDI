@@ -1,10 +1,11 @@
 package ai.labs.memory;
 
-import ai.labs.memory.model.ConversationState;
+import ai.labs.memory.model.ConversationOutput;
+import ai.labs.models.ConversationState;
 
 import java.io.Serializable;
-import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import java.util.Stack;
 
@@ -19,6 +20,8 @@ public interface IConversationMemory extends Serializable {
     Integer getBotVersion();
 
     String getUserId();
+
+    List<ConversationOutput> getConversationOutputs();
 
     IWritableConversationStep getCurrentStep();
 
@@ -35,8 +38,6 @@ public interface IConversationMemory extends Serializable {
     boolean isRedoAvailable();
 
     void redoLastStep();
-
-    void setCurrentContext(String context);
 
     ConversationState getConversationState();
 
@@ -66,35 +67,32 @@ public interface IConversationMemory extends Serializable {
 
         Set<String> getAllKeys();
 
-        List<IData> getAllElements(IConversationMemory.IConversationContext context);
-
-        IConversationContext getCurrentConversationContext();
-
-        void setCurrentConversationContext(IConversationContext conversationContext);
-
-        Set<IConversationContext> getAllConversationContexts();
+        List<IData> getAllElements();
 
         int size();
 
         boolean isEmpty();
 
         <T> IData<T> getLatestData(String prefix);
+
+        ConversationOutput getConversationOutput();
     }
 
     interface IWritableConversationStep extends IConversationStep {
         void storeData(IData element);
-    }
 
-    interface IConversationContext {
-        String getContext();
+        void resetConversationOutput(String rootKey);
 
-        void setContext(String context);
+        void addConversationOutputString(String key, String value);
+
+        void addConversationOutputList(String key, List list);
+
+        void addConversationOutputMap(String key, Map<String, Object> map);
     }
 
     interface IConversationProperties {
-        HashMap<String, Object> getProperties();
+        Map<String, Object> getProperties();
 
-        void setProperties(HashMap<String, Object> context);
+        void setProperties(Map<String, Object> context);
     }
-
 }

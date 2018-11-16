@@ -8,7 +8,9 @@ v4.3.0 - STABLE
 
 License: Apache License 2.0
 
-Visit http://eddi.labs.ai for further references.
+Visit https://eddi.labs.ai for further references.
+
+For professional support, check out: https://www.labs.ai
 
 Check out the full documentation [here](https://labsai.atlassian.net/wiki/display/EDDI/).
 
@@ -40,7 +42,7 @@ technical spec:
 
 ## Prerequirements
 
-- Java 8
+- Java 11
 - Maven 3
 
 
@@ -54,7 +56,7 @@ Go to the root directory and execute
 1. Setup a local mongodb (> v3.0)
 2. launch with VM options 
     ```
-    -Xbootclasspath/p:'.:lib/alpn-boot-8.1.11.v20170118.jar' -DEDDI_ENV=[development/production] -Duser.dir=[LOCAL_PATH_TO_EDDI]\apiserver ai.labs.api.ApiServer
+    -DEDDI_ENV=[development/production] -Duser.dir=[LOCAL_PATH_TO_EDDI]\apiserver ai.labs.api.ApiServer
     ```
 3. Go to Browser --> http://localhost:7070
 

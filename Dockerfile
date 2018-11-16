@@ -1,4 +1,4 @@
-FROM openjdk:8u151-jre-alpine3.7
+FROM labsai/base-image
 
 ARG EDDI_VERSION
 ARG EDDI_ENV
@@ -6,23 +6,19 @@ ARG EDDI_MEMORY_MIN
 ARG EDDI_MEMORY_MAX
 
 EXPOSE 7070
+EXPOSE 7443
 
-RUN apk update
-RUN apk add --no-cache bash
-
-RUN mkdir -p /apiserver/
-WORKDIR /apiserver/
+RUN mkdir -p /apiserver/ && \
+    mkdir /apiserver/logs && \
+    mkdir /apiserver/install
 
 COPY /licenses/ /apiserver/licences
-
-RUN mkdir /apiserver/logs
-
-RUN mkdir /apiserver/install
-
 COPY /apiserver/target/apiserver-$EDDI_VERSION-package.zip /apiserver/install
 COPY /start_eddi.sh /apiserver
 
-RUN unzip /apiserver/install/apiserver-$EDDI_VERSION-package.zip -d /apiserver
+RUN unzip /apiserver/install/apiserver-$EDDI_VERSION-package.zip -d /apiserver  && \
+    chmod -R 777 /apiserver/ && \
+    rm /apiserver/install/apiserver-$EDDI_VERSION-package.zip
 
-RUN chmod -R 777 /apiserver/
+WORKDIR /apiserver/
 ENTRYPOINT /apiserver/start_eddi.sh

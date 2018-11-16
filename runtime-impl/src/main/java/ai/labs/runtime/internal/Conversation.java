@@ -3,12 +3,12 @@ package ai.labs.runtime.internal;
 import ai.labs.lifecycle.IConversation;
 import ai.labs.lifecycle.ILifecycleManager;
 import ai.labs.lifecycle.LifecycleException;
-import ai.labs.lifecycle.model.Context;
 import ai.labs.memory.ConversationMemory;
 import ai.labs.memory.Data;
 import ai.labs.memory.IConversationMemory;
 import ai.labs.memory.IData;
-import ai.labs.memory.model.ConversationState;
+import ai.labs.models.Context;
+import ai.labs.models.ConversationState;
 import ai.labs.runtime.IExecutablePackage;
 
 import java.util.LinkedList;
@@ -49,9 +49,9 @@ public class Conversation implements IConversation {
     }
 
     @Override
-    public void init() throws LifecycleException {
+    public void init(Map<String, Context> context) throws LifecycleException {
         setConversationState(ConversationState.READY);
-        executePackages(new LinkedList<>());
+        executePackages(createContextData(context));
         if (conversationMemory.getUserId() != null) {
             initProperties();
         }
@@ -84,6 +84,18 @@ public class Conversation implements IConversation {
             ((ConversationMemory) conversationMemory).startNextStep();
             List<IData> data = new LinkedList<>();
 
+            //add userInfo
+            IData userData;
+            String userId;
+            if ((userId = conversationMemory.getUserId()) != null) {
+                userData = new Data<>("userInfo:userId", userId);
+                userData.setPublic(true);
+                data.add(userData);
+            }
+
+            //store context data
+            data.addAll(createContextData(contexts));
+
             //store user input in memory
             IData initialData;
             if (!"".equals(message.trim())) {
@@ -91,15 +103,6 @@ public class Conversation implements IConversation {
                 initialData.setPublic(true);
                 data.add(initialData);
             }
-
-            //store context data
-            List<IData<Context>> contextData = new LinkedList<>();
-            for (String key : contexts.keySet()) {
-                Context context = contexts.get(key);
-                contextData.add(new Data<>("context:" + key, context));
-
-            }
-            data.addAll(contextData);
 
             //execute input processing
             executePackages(data);
@@ -130,9 +133,19 @@ public class Conversation implements IConversation {
         }
     }
 
+    private List<IData> createContextData(Map<String, Context> context) {
+        List<IData> contextData = new LinkedList<>();
+        if (context != null) {
+            for (String key : context.keySet()) {
+                contextData.add(new Data<>("context:" + key, context.get(key)));
+
+            }
+        }
+        return contextData;
+    }
+
     private void executePackages(List<IData> data) throws LifecycleException {
         for (IExecutablePackage executablePackage : executablePackages) {
-            conversationMemory.setCurrentContext(executablePackage.getName());
             data.stream().filter(Objects::nonNull).
                     forEach(datum -> conversationMemory.getCurrentStep().storeData(datum));
             ILifecycleManager lifecycleManager = executablePackage.getLifecycleManager();

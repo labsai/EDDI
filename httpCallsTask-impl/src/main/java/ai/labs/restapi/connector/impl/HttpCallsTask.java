@@ -6,11 +6,10 @@ import ai.labs.httpclient.IResponse;
 import ai.labs.lifecycle.ILifecycleTask;
 import ai.labs.lifecycle.LifecycleException;
 import ai.labs.lifecycle.PackageConfigurationException;
-import ai.labs.lifecycle.model.Context;
 import ai.labs.memory.IConversationMemory;
 import ai.labs.memory.IData;
 import ai.labs.memory.IDataFactory;
-import ai.labs.memory.IMemoryItemConverter;
+import ai.labs.models.Context;
 import ai.labs.resources.rest.extensions.model.ExtensionDescriptor;
 import ai.labs.resources.rest.extensions.model.ExtensionDescriptor.ConfigValue;
 import ai.labs.resources.rest.extensions.model.ExtensionDescriptor.FieldType;
@@ -18,6 +17,7 @@ import ai.labs.resources.rest.http.model.*;
 import ai.labs.runtime.client.configuration.IResourceClientLibrary;
 import ai.labs.runtime.service.ServiceException;
 import ai.labs.serialization.IJsonSerialization;
+import ai.labs.templateengine.IMemoryTemplateConverter;
 import ai.labs.templateengine.ITemplatingEngine;
 import ai.labs.utilities.RuntimeUtilities;
 import lombok.extern.slf4j.Slf4j;
@@ -25,9 +25,7 @@ import lombok.extern.slf4j.Slf4j;
 import javax.inject.Inject;
 import java.io.IOException;
 import java.net.URI;
-import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
+import java.util.*;
 import java.util.stream.Collectors;
 
 @Slf4j
@@ -38,19 +36,21 @@ public class HttpCallsTask implements ILifecycleTask {
     private static final String ACTION_KEY = "actions";
     private static final String CONTENT_TYPE = "Content-Type";
     private static final String KEY_HTTP_CALLS = "httpCalls";
+    private static final String KEY_CURRENT_MEMORY = "current";
+    private static final String KEY_MEMORY = "memory";
     private final IHttpClient httpClient;
     private IJsonSerialization jsonSerialization;
     private final IResourceClientLibrary resourceClientLibrary;
     private IDataFactory dataFactory;
     private final ITemplatingEngine templatingEngine;
-    private final IMemoryItemConverter memoryTemplateConverter;
+    private final IMemoryTemplateConverter memoryTemplateConverter;
     private String targetServerUri;
     private List<HttpCall> httpCalls;
 
     @Inject
     public HttpCallsTask(IHttpClient httpClient, IJsonSerialization jsonSerialization,
                          IResourceClientLibrary resourceClientLibrary, IDataFactory dataFactory,
-                         ITemplatingEngine templatingEngine, IMemoryItemConverter memoryTemplateConverter) {
+                         ITemplatingEngine templatingEngine, IMemoryTemplateConverter memoryTemplateConverter) {
         this.httpClient = httpClient;
         this.jsonSerialization = jsonSerialization;
         this.resourceClientLibrary = resourceClientLibrary;
@@ -71,66 +71,78 @@ public class HttpCallsTask implements ILifecycleTask {
 
     @Override
     public void executeTask(IConversationMemory memory) throws LifecycleException {
-        IData<List<String>> latestData = memory.getCurrentStep().getLatestData(ACTION_KEY);
+        IConversationMemory.IWritableConversationStep currentStep = memory.getCurrentStep();
+        IData<List<String>> latestData = currentStep.getLatestData(ACTION_KEY);
         if (latestData == null) {
             return;
         }
 
         Map<String, Object> templateDataObjects = new HashMap<>();
         Map<String, Object> memoryForTemplate = memoryTemplateConverter.convertMemoryItems(memory);
-        Map<String, Object> currentMemory = (Map<String, Object>) memoryForTemplate.get("current");
-        templateDataObjects.put("memory", memoryForTemplate);
+        Map<String, Object> currentMemory = (Map<String, Object>) memoryForTemplate.get(KEY_CURRENT_MEMORY);
+        templateDataObjects.put(KEY_MEMORY, memoryForTemplate);
 
         List<String> actions = latestData.getResult();
 
         for (String action : actions) {
-            List<HttpCall> httpCalls;
-            httpCalls = this.httpCalls.stream().
-                    filter(httpCall -> httpCall.getActions().contains(action)).
-                    collect(Collectors.toList());
+            List<HttpCall> httpCalls = this.httpCalls.stream().
+                    filter(httpCall -> {
+                        List<String> httpCallActions = httpCall.getActions();
+                        return httpCallActions.contains(action) || httpCallActions.contains("*");
+                    }).collect(Collectors.toList());
+
+            httpCalls = removeDuplicates(httpCalls);
+
             for (HttpCall call : httpCalls) {
                 try {
                     IRequest request = buildRequest(call.getRequest(), templateDataObjects);
-                    IResponse response = request.send();
+                    if (call.isFireAndForget()) {
+                        request.send(r -> {
+                            //ignore response
+                        });
+                    } else {
+                        IResponse response = request.send();
 
-                    if (response.getHttpCode() != 200) {
-                        String message = "HttpCall (%s) didn't return http code 200, instead %s.";
-                        log.warn(String.format(message, call.getName(), response.getHttpCode()));
-                        log.warn("Error Msg:" + response.getHttpCodeMessage());
-                        continue;
-                    }
-
-                    if (call.isSaveResponse()) {
-                        final String responseBody = response.getContentAsString();
-                        String actualContentType = response.getHttpHeader().get(CONTENT_TYPE);
-                        if (actualContentType != null) {
-                            actualContentType = actualContentType.split(";")[0];
-                        } else {
-                            actualContentType = "<not-present>";
-                        }
-
-                        if (!CONTENT_TYPE_APPLICATION_JSON.startsWith(actualContentType)) {
-                            String message = "HttpCall (%s) didn't return application/json as content-type, instead was (%s)";
-                            log.warn(String.format(message, call.getName(), actualContentType));
+                        if (response.getHttpCode() != 200) {
+                            String message = "HttpCall (%s) didn't return http code 200, instead %s.";
+                            log.warn(String.format(message, call.getName(), response.getHttpCode()));
+                            log.warn("Error Msg:" + response.getHttpCodeMessage());
                             continue;
                         }
 
-                        Object responseObject = jsonSerialization.deserialize(responseBody, Object.class);
-                        String responseObjectName = call.getResponseObjectName();
-                        Map<String, Object> templateHttpCalls = (Map<String, Object>) currentMemory.get(KEY_HTTP_CALLS);
-                        if (templateHttpCalls == null) {
-                            templateHttpCalls = new HashMap<>();
-                            currentMemory.put(KEY_HTTP_CALLS, templateHttpCalls);
+                        if (call.isSaveResponse()) {
+                            final String responseBody = response.getContentAsString();
+                            String actualContentType = response.getHttpHeader().get(CONTENT_TYPE);
+                            if (actualContentType != null) {
+                                actualContentType = actualContentType.split(";")[0];
+                            } else {
+                                actualContentType = "<not-present>";
+                            }
+
+                            if (!CONTENT_TYPE_APPLICATION_JSON.startsWith(actualContentType)) {
+                                String message = "HttpCall (%s) didn't return application/json as content-type, instead was (%s)";
+                                log.warn(String.format(message, call.getName(), actualContentType));
+                                continue;
+                            }
+
+                            Object responseObject = jsonSerialization.deserialize(responseBody, Object.class);
+                            String responseObjectName = call.getResponseObjectName();
+                            Map<String, Object> templateHttpCalls = (Map<String, Object>) currentMemory.get(KEY_HTTP_CALLS);
+                            if (templateHttpCalls == null) {
+                                templateHttpCalls = new HashMap<>();
+                                currentMemory.put(KEY_HTTP_CALLS, templateHttpCalls);
+                            }
+
+                            templateHttpCalls.put(responseObjectName, responseObject);
+                            templateDataObjects.put(responseObjectName, responseObject);
+
+                            String memoryDataName = "httpCalls:" + responseObjectName;
+                            IData<Object> httpResponseData = dataFactory.createData(memoryDataName, responseObject);
+                            currentStep.storeData(httpResponseData);
+                            currentStep.addConversationOutputMap(KEY_HTTP_CALLS, Map.of(responseObjectName, responseObject));
+
+                            runPostResponse(memory, call, templateDataObjects);
                         }
-
-                        templateHttpCalls.put(responseObjectName, responseObject);
-                        templateDataObjects.put(responseObjectName, responseObject);
-
-                        String memoryDataName = "httpCalls:" + responseObjectName;
-                        IData<Object> httpResponseData = dataFactory.createData(memoryDataName, responseObject);
-                        memory.getCurrentStep().storeData(httpResponseData);
-
-                        runPostResponse(memory, call, templateDataObjects);
                     }
                 } catch (IRequest.HttpRequestException | IOException | ITemplatingEngine.TemplateEngineException e) {
                     log.error(e.getLocalizedMessage(), e);
@@ -138,6 +150,10 @@ public class HttpCallsTask implements ILifecycleTask {
                 }
             }
         }
+    }
+
+    private LinkedList<HttpCall> removeDuplicates(List<HttpCall> httpCalls) {
+        return new LinkedList<>(new HashSet<>(httpCalls));
     }
 
     private void runPostResponse(IConversationMemory memory, HttpCall call, Map<String, Object> templateDataObjects)
@@ -228,17 +244,21 @@ public class HttpCallsTask implements ILifecycleTask {
     @Override
     public void configure(Map<String, Object> configuration) throws PackageConfigurationException {
         Object uriObj = configuration.get("uri");
-        URI uri = URI.create(uriObj.toString());
+        if (!RuntimeUtilities.isNullOrEmpty(uriObj)) {
+            URI uri = URI.create(uriObj.toString());
 
-        try {
-            HttpCallsConfiguration httpCallsConfig = resourceClientLibrary.getResource(uri, HttpCallsConfiguration.class);
+            try {
+                HttpCallsConfiguration httpCallsConfig = resourceClientLibrary.getResource(uri, HttpCallsConfiguration.class);
 
-            this.targetServerUri = httpCallsConfig.getTargetServer().toString();
-            this.httpCalls = httpCallsConfig.getHttpCalls();
+                this.targetServerUri = httpCallsConfig.getTargetServer().toString();
+                this.httpCalls = httpCallsConfig.getHttpCalls();
 
-        } catch (ServiceException e) {
-            log.error(e.getLocalizedMessage(), e);
-            throw new PackageConfigurationException(e.getMessage(), e);
+            } catch (ServiceException e) {
+                log.error(e.getLocalizedMessage(), e);
+                throw new PackageConfigurationException(e.getMessage(), e);
+            }
+        } else {
+            this.httpCalls = new LinkedList<>();
         }
     }
 

@@ -72,17 +72,17 @@ public class TestCaseStore implements ITestCaseStore, IResourceStore<TestCase> {
         }
     }
 
-    public void setTestCaseState(String conversationId, TestCaseState testCaseState) {
+    public void setTestCaseState(String id, TestCaseState testCaseState) {
         BasicDBObject updateTestCaseField = new BasicDBObject("$set", new BasicDBObject(TESTCASE_STATE_FIELD, testCaseState.name()));
-        testcaseCollection.updateOne(new BasicDBObject("_id", new ObjectId(conversationId)), updateTestCaseField);
+        testcaseCollection.updateOne(new BasicDBObject("_id", new ObjectId(id)), updateTestCaseField);
     }
 
-    public void deleteTestCase(String conversationId) throws ResourceStoreException, ResourceNotFoundException {
-        testcaseCollection.deleteOne(new BasicDBObject("_id", new ObjectId(conversationId)));
+    public void deleteTestCase(String id) {
+        testcaseCollection.deleteOne(new BasicDBObject("_id", new ObjectId(id)));
     }
 
-    public TestCaseState getTestCaseState(String conversationId) {
-        Document conversationMemoryDocument = testcaseCollection.find(new Document("_id", new ObjectId(conversationId))).first();
+    public TestCaseState getTestCaseState(String id) {
+        Document conversationMemoryDocument = testcaseCollection.find(new Document("_id", new ObjectId(id))).first();
         if (conversationMemoryDocument != null) {
             return TestCaseState.valueOf(conversationMemoryDocument.get(TESTCASE_STATE_FIELD).toString());
         }
@@ -92,12 +92,12 @@ public class TestCaseStore implements ITestCaseStore, IResourceStore<TestCase> {
 
     @Override
     public IResourceId create(TestCase content) throws ResourceStoreException {
-        final String conversationId = storeTestCase(null, content);
+        final String id = storeTestCase(null, content);
 
         return new IResourceId() {
             @Override
             public String getId() {
-                return conversationId;
+                return id;
             }
 
             @Override
@@ -113,13 +113,13 @@ public class TestCaseStore implements ITestCaseStore, IResourceStore<TestCase> {
     }
 
     @Override
-    public Integer update(String id, Integer version, TestCase testCase) throws ResourceStoreException, ResourceModifiedException, ResourceNotFoundException {
+    public Integer update(String id, Integer version, TestCase testCase) throws ResourceStoreException {
         storeTestCase(id, testCase);
         return 0;
     }
 
     @Override
-    public void delete(String id, Integer version) throws ResourceStoreException, ResourceModifiedException, ResourceNotFoundException {
+    public void delete(String id, Integer version) {
         //todo implement
     }
 
@@ -129,7 +129,7 @@ public class TestCaseStore implements ITestCaseStore, IResourceStore<TestCase> {
     }
 
     @Override
-    public IResourceId getCurrentResourceId(final String id) throws ResourceNotFoundException {
+    public IResourceId getCurrentResourceId(final String id) {
         return new IResourceId() {
             @Override
             public String getId() {

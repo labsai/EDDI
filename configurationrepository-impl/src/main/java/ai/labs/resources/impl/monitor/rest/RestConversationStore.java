@@ -4,9 +4,9 @@ import ai.labs.memory.IConversationMemoryStore;
 import ai.labs.memory.descriptor.IConversationDescriptorStore;
 import ai.labs.memory.descriptor.model.ConversationDescriptor;
 import ai.labs.memory.model.ConversationMemorySnapshot;
-import ai.labs.memory.model.ConversationState;
-import ai.labs.memory.model.ConversationStatus;
 import ai.labs.memory.rest.IRestConversationStore;
+import ai.labs.models.ConversationState;
+import ai.labs.models.ConversationStatus;
 import ai.labs.persistence.IResourceStore;
 import ai.labs.resources.rest.documentdescriptor.IDocumentDescriptorStore;
 import ai.labs.user.IUserStore;
@@ -139,7 +139,7 @@ public class RestConversationStore implements IRestConversationStore {
 
         if (deletePermanently) {
             conversationMemoryStore.deleteConversationMemorySnapshot(conversationId);
-            log.info(String.format("Conversation has been permanently deleted (id=%s)", conversationId));
+            log.info(String.format("Conversation has been permanently deleted (conversationId=%s)", conversationId));
         }
 
         // DocumentDescriptorInterceptor will mark the DocumentDescriptor of this resource as deleted,

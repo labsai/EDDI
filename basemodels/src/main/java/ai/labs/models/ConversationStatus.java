@@ -1,4 +1,4 @@
-package ai.labs.memory.model;
+package ai.labs.models;
 
 import lombok.Getter;
 import lombok.Setter;

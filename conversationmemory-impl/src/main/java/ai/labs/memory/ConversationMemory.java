@@ -1,6 +1,7 @@
 package ai.labs.memory;
 
-import ai.labs.memory.model.ConversationState;
+import ai.labs.memory.model.ConversationOutput;
+import ai.labs.models.ConversationState;
 
 import java.util.*;
 import java.util.stream.Collectors;
@@ -17,7 +18,7 @@ public class ConversationMemory implements IConversationMemory {
     private IWritableConversationStep currentStep;
     private Stack<IConversationStep> previousSteps;
     private Stack<IConversationStep> redoCache = new Stack<>();
-    private IConversationMemory.IConversationContext context;
+    private List<ConversationOutput> conversationOutputs = new LinkedList<>();
     private ConversationState conversationState;
 
     ConversationMemory(String conversationId, String botId, Integer botVersion) {
@@ -33,8 +34,9 @@ public class ConversationMemory implements IConversationMemory {
     public ConversationMemory(String botId, Integer botVersion) {
         this.botId = botId;
         this.botVersion = botVersion;
-        this.context = new ConversationContext();
-        this.currentStep = new ConversationStep(context);
+        ConversationOutput conversationOutput = new ConversationOutput();
+        this.conversationOutputs.add(conversationOutput);
+        this.currentStep = new ConversationStep(conversationOutput);
         this.previousSteps = new Stack<>();
     }
 
@@ -59,7 +61,9 @@ public class ConversationMemory implements IConversationMemory {
     public IConversationStep startNextStep() {
         ((ConversationStep) currentStep).conversationStepNumber = previousSteps.size();
         previousSteps.push(currentStep);
-        currentStep = new ConversationStep(context);
+        ConversationOutput conversationOutput = new ConversationOutput();
+        conversationOutputs.add(0, conversationOutput);
+        currentStep = new ConversationStep(conversationOutput);
         return currentStep;
     }
 
@@ -99,11 +103,6 @@ public class ConversationMemory implements IConversationMemory {
     }
 
     @Override
-    public void setCurrentContext(String context) {
-        this.context.setContext(context);
-    }
-
-    @Override
     public ConversationState getConversationState() {
         return conversationState;
     }
@@ -123,6 +122,11 @@ public class ConversationMemory implements IConversationMemory {
     }
 
     @Override
+    public String getUserId() {
+        return this.userId;
+    }
+
+    @Override
     public Integer getBotVersion() {
         return botVersion;
     }
@@ -130,6 +134,10 @@ public class ConversationMemory implements IConversationMemory {
     @Override
     public String getUserId() {
         return userId;
+    }
+
+    public List<ConversationOutput> getConversationOutputs() {
+        return conversationOutputs;
     }
 
     @Override
@@ -197,64 +205,6 @@ public class ConversationMemory implements IConversationMemory {
 
         public void add(IConversationStep step) {
             this.conversationSteps.add(step);
-        }
-    }
-
-    public static class ConversationContext implements IConversationContext {
-        private String context;
-
-        ConversationContext() {
-            this.context = "";
-        }
-
-        ConversationContext(String context) {
-            this.context = context;
-        }
-
-        ConversationContext(IConversationContext context) {
-            this.context = context.getContext();
-        }
-
-        public String getContext() {
-            return context;
-        }
-
-        public void setContext(String context) {
-            this.context = context;
-        }
-
-        @Override
-        public boolean equals(Object o) {
-            if (this == o) return true;
-            if (o == null || getClass() != o.getClass()) return false;
-
-            ConversationContext that = (ConversationContext) o;
-
-            return context != null ? context.equals(that.context) : that.context == null;
-
-        }
-
-        @Override
-        public int hashCode() {
-            return context != null ? context.hashCode() : 0;
-        }
-    }
-
-    public static class ConversationProperties implements IConversationProperties {
-        private HashMap<String, Object> properties;
-
-        public ConversationProperties() {
-            properties = new HashMap<>();
-        }
-
-        @Override
-        public HashMap<String, Object> getProperties() {
-            return properties;
-        }
-
-        @Override
-        public void setProperties(HashMap<String, Object> properties) {
-            this.properties = properties;
         }
     }
 }

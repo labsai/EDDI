@@ -44,7 +44,7 @@ public class OutputGenerationTaskTest {
     private IDataFactory dataFactory;
 
     @Before
-    public void setUp() throws Exception {
+    public void setUp() {
         resourceClientLibrary = mock(IResourceClientLibrary.class);
         dataFactory = mock(IDataFactory.class);
         outputGeneration = mock(IOutputGeneration.class);
@@ -52,7 +52,7 @@ public class OutputGenerationTaskTest {
     }
 
     @Test
-    public void executeTask() throws Exception {
+    public void executeTask() {
         //setup
         when(outputGeneration.getOutputs(anyList())).thenAnswer(invocation -> {
             Map<String, List<OutputEntry>> ret = new LinkedHashMap<>();
@@ -130,7 +130,7 @@ public class OutputGenerationTaskTest {
         LinkedList<OutputConfiguration.OutputType> outputs = new LinkedList<>();
         OutputConfiguration.OutputType outputType = new OutputConfiguration.OutputType();
         outputType.setType(OutputValue.Type.text.toString());
-        LinkedList<String> valueAlternatives = new LinkedList<>();
+        LinkedList<Object> valueAlternatives = new LinkedList<>();
         valueAlternatives.add(ANSWER_ALTERNATIVE_1);
         valueAlternatives.add(ANSWER_ALTERNATIVE_2);
         outputType.setValueAlternatives(valueAlternatives);

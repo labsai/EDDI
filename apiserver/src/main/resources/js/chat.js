@@ -159,10 +159,20 @@ $(function () {
                 } else if (obj.key.indexOf('actions') === 0) {
                     action = obj.value;
                 } else if (obj.key.indexOf('output:text') === 0) {
-                    outputs.push(obj.value);
+                    let item = obj.value;
+                    if (item != null && typeof item === 'object') {
+                        if (item.value != null) {
+                            item = item.value;
+                        } else if (item.text != null) {
+                            item = item.text;
+                        }
+                    }
+                    outputs.push(item);
                 } else if (obj.key.indexOf('output:image') === 0) {
                     images.push(obj.value);
                 } else if (obj.key.indexOf('quickReplies') === 0) {
+                    pushArray(quickReplies, obj.value);
+                } else if (obj.key.indexOf('output:quickReply') === 0) {
                     pushArray(quickReplies, obj.value);
                 }
             }
@@ -188,7 +198,11 @@ $(function () {
                 }
             }
             for (let image of latestInteraction.images) {
-                displayImage('/binary/img/' + image);
+                if (typeof image === 'object') {
+                    displayImage(image.uri);
+                } else {
+                    displayImage('/binary/img/' + image);
+                }
             }
             displayQuickReplies(latestInteraction.quickReplies);
 
