@@ -80,7 +80,7 @@ class PluginWithExtensions extends React.Component<IPrivateProps> {
           newExtensionList,
         );
         return;
-      case PluginType.BEHAVIOUR:
+      case PluginType.BEHAVIOR:
         break;
       case PluginType.OUTPUT:
         break;

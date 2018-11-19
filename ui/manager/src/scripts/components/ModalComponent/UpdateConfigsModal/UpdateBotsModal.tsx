@@ -2,16 +2,10 @@ import * as React from 'react';
 import '../ModalComponent.styles.scss';
 import { Link, browserHistory } from 'react-router-dom';
 import { Component, compose, pure, setDisplayName } from 'recompose';
-import Package from '../AddPackagesModal/Package';
-import { IBot, IPackage } from '../../utils/AxiosFunctions';
-import {
-  packagesSelector,
-  packagesWithPluginSelector,
-} from '../../../selectors/PackageSelectors';
+import { IBot } from '../../utils/AxiosFunctions';
 import { connect } from 'react-redux';
 import * as _ from 'lodash';
 import eddiApiActionDispatchers from '../../../actions/EddiApiActionDispatchers';
-import Parser from '../../utils/Parser';
 import styles from '../AddPackagesModal/AddPackagesModal.styles';
 import ModalActionDispatchers from '../../../actions/ModalActionDispatchers';
 import * as renderIf from 'render-if';
@@ -20,6 +14,7 @@ import WhiteButton from '../../Assets/Buttons/WhiteButton';
 import { ClimbingBoxLoader } from 'react-spinners';
 import SelectableConfig from './SelectableConfig';
 import { botsWithPackageSelector } from '../../../selectors/BotSelectors';
+import { DEFAULT_LIMIT } from '../../utils/ApiFunctions';
 
 interface IBotToUpdate {
   botResource: string;
@@ -51,7 +46,7 @@ class UpdateBotsModal extends React.Component<IPrivateProps, IState> {
   }
 
   componentDidMount() {
-    eddiApiActionDispatchers.fetchBotsAction(10, 0);
+    eddiApiActionDispatchers.fetchBotsAction(DEFAULT_LIMIT, 0);
   }
 
   closeModal = () => {
@@ -76,7 +71,7 @@ class UpdateBotsModal extends React.Component<IPrivateProps, IState> {
   };
 
   selectBot = (botResource: string) => {
-    const currentPakageResource = this.props.packageResources[this.state.page];
+    const currentPackageResource = this.props.packageResources[this.state.page];
     const selectedBot = this.state.selectedBots.find(
       bot => bot.botResource === botResource,
     );
@@ -84,23 +79,23 @@ class UpdateBotsModal extends React.Component<IPrivateProps, IState> {
       const newList = this.state.selectedBots.map(bot => bot);
       newList.push({
         botResource: botResource,
-        packageResources: [currentPakageResource],
+        packageResources: [currentPackageResource],
       });
       this.setState({ selectedBots: newList });
     } else {
       const newList = this.state.selectedBots.filter(
         bot => bot.botResource !== botResource,
       );
-      if (selectedBot.packageResources.includes(currentPakageResource)) {
+      if (selectedBot.packageResources.includes(currentPackageResource)) {
         newList.push({
           botResource: selectedBot.botResource,
           packageResources: selectedBot.packageResources.filter(
-            resource => resource !== currentPakageResource,
+            resource => resource !== currentPackageResource,
           ),
         });
         this.setState({ selectedBots: newList });
       } else {
-        selectedBot.packageResources.push(currentPakageResource);
+        selectedBot.packageResources.push(currentPackageResource);
         newList.push(selectedBot);
         this.setState({ selectedBots: newList });
       }

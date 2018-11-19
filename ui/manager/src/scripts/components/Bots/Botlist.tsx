@@ -10,7 +10,7 @@ import { connect } from 'react-redux';
 import { botsSelector } from '../../selectors/BotSelectors';
 import styles from './Botlist.styles';
 import { ClimbingBoxLoader } from 'react-spinners';
-import { getAPIUrl } from '../utils/ApiFunctions';
+import { DEFAULT_LIMIT, getAPIUrl } from '../utils/ApiFunctions';
 import * as InfiniteScrollTypes from 'react-infinite-scroller';
 const InfiniteScroll = require('react-infinite-scroller') as InfiniteScrollTypes;
 
@@ -28,7 +28,7 @@ interface IPrivateProps extends IPublicProps {
 interface IState {
   apiUrl: string;
   loading: boolean;
-  page: number;
+  fetchIndex: number;
 }
 
 class BotList extends React.Component<IPrivateProps, IState> {
@@ -37,12 +37,12 @@ class BotList extends React.Component<IPrivateProps, IState> {
     this.state = {
       apiUrl: '',
       loading: false,
-      page: 0,
+      fetchIndex: 0,
     };
   }
 
   async componentDidMount() {
-    eddiApiActionDispatchers.fetchBotsAction(12, 0);
+    eddiApiActionDispatchers.fetchBotsAction(DEFAULT_LIMIT, 0);
     this.setState({ apiUrl: await getAPIUrl() });
   }
 
@@ -70,8 +70,11 @@ class BotList extends React.Component<IPrivateProps, IState> {
     if (this.state.loading) {
       return;
     }
-    this.setState({ loading: true, page: this.state.page + 1 });
-    eddiApiActionDispatchers.fetchBotsAction(12, this.state.page);
+    this.setState({ loading: true, fetchIndex: this.state.fetchIndex + 1 });
+    eddiApiActionDispatchers.fetchBotsAction(
+      DEFAULT_LIMIT,
+      this.state.fetchIndex,
+    );
   };
 
   render() {

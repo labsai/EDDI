@@ -86,6 +86,7 @@ export function botsWithPackageSelector(
   }
   return {
     botLists,
+    allBotsLoaded: state.botState.allBotsLoaded,
     isLoading: state.botState.isLoadingAllBots,
   };
 }

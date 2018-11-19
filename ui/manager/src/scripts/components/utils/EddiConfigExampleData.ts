@@ -1,5 +1,5 @@
 import {
-  BEHAVIOUR,
+  BEHAVIOR,
   BOT,
   HTTPCALLS,
   OUTPUT,
@@ -123,7 +123,7 @@ export function getPostExample(eddiType: string) {
   switch (eddiType) {
     case REGULAR_DICTIONARY:
       return REGULAR_DICTIONARY_POST_EXAMPLE;
-    case BEHAVIOUR:
+    case BEHAVIOR:
       return BEHAVIOUR_POST_EXAMPLE;
     case OUTPUT:
       return OUTPUT_POST_EXAMPLE;

@@ -10,7 +10,7 @@ import {
   putHelper,
 } from './helpers/JsonHelpers';
 import {
-  BEHAVIOUR,
+  BEHAVIOR,
   BEHAVIOR_PATH,
   BOT,
   BOT_PATH,
@@ -20,6 +20,8 @@ import {
   PACKAGE_PATH,
   REGULAR_DICTIONARY,
   REGULAR_DICTIONARY_PATH,
+  HTTPCALLS,
+  HTTPCALLS_PATH,
 } from './EddiTypes';
 
 export interface IDescriptor {
@@ -740,21 +742,27 @@ export async function getPluginDescriptors(
   try {
     let res: IDescriptorResponse;
     switch (pluginType) {
-      case BEHAVIOUR:
+      case BEHAVIOR:
         res = await axios.get(
-          `${await getAPIUrl()}/behaviorstore/behaviorsets/descriptors?limit=${DEFAULT_LIMIT}`,
+          `${await getAPIUrl()}${BEHAVIOR_PATH}/descriptors?limit=${DEFAULT_LIMIT}`,
         );
         break;
 
       case OUTPUT:
         res = await axios.get(
-          `${await getAPIUrl()}/outputstore/outputsets/descriptors?limit=${DEFAULT_LIMIT}`,
+          `${await getAPIUrl()}${OUTPUT_PATH}/descriptors?limit=${DEFAULT_LIMIT}`,
         );
         break;
 
       case REGULAR_DICTIONARY:
         res = await axios.get(
-          `${await getAPIUrl()}/regulardictionarystore/regulardictionaries/descriptors?limit=${DEFAULT_LIMIT}`,
+          `${await getAPIUrl()}${REGULAR_DICTIONARY_PATH}/descriptors?limit=${DEFAULT_LIMIT}`,
+        );
+        break;
+
+      case HTTPCALLS:
+        res = await axios.get(
+          `${await getAPIUrl()}${HTTPCALLS_PATH}/descriptors?limit=${DEFAULT_LIMIT}`,
         );
         break;
 
@@ -849,7 +857,7 @@ export async function postNewConfig(
     case REGULAR_DICTIONARY:
       configPath = REGULAR_DICTIONARY_PATH;
       break;
-    case BEHAVIOUR:
+    case BEHAVIOR:
       configPath = BEHAVIOR_PATH;
       break;
     case OUTPUT:
@@ -860,6 +868,9 @@ export async function postNewConfig(
       break;
     case PACKAGE:
       configPath = PACKAGE_PATH;
+      break;
+    case HTTPCALLS:
+      configPath = HTTPCALLS_PATH;
       break;
 
     default:
