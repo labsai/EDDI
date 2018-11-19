@@ -24,7 +24,7 @@ import {
   UPDATE_BOTS,
   DEPLOY_BOT,
   UNDEPLOY_BOT,
-  UPDATE_BOT_DEPLOYMENT_STATUS,
+  FETCH_BOT_DEPLOYMENT_STATUS,
   FETCH_CURRENT_BOT,
 } from '../actions/EddiApiActionTypes';
 import {
@@ -62,6 +62,7 @@ import {
   deployBot as axiosDeployBot,
   undeployBot as axiosUndeployBot,
   getDeploymentStatus,
+  getBotDescriptors,
 } from '../components/utils/AxiosFunctions';
 import {
   fetchBotFailedAction,
@@ -128,13 +129,14 @@ import {
   IUndeployBotAction,
   undeployBotSuccessAction,
   undeployBotFailedAction,
-  IUpdateBotDeploymentStatusAction,
-  updateBotDeploymentStatusSuccessAction,
-  updateBotDeploymentStatusFailedAction,
+  IFetchBotDeploymentStatusAction,
+  fetchBotDeploymentStatusSuccessAction,
+  fetchBotDeploymentStatusFailedAction,
   createNewBotSuccessAction,
   createNewPackageSuccessAction,
   createNewPluginSuccessAction,
   IFetchCurrentBotAction,
+  IFetchBotsAction,
 } from '../actions/EddiApiActions';
 import * as Edditypes from '../components/utils/EddiTypes';
 import Parser from '../components/utils/Parser';
@@ -150,10 +152,14 @@ import { BOT_PATH } from '../components/utils/EddiTypes';
 import { PACKAGE } from '../components/utils/EddiTypes';
 import { getAPIUrl } from '../components/utils/ApiFunctions';
 
-export function* FetchBots() {
+export function* FetchBots(action: IFetchBotsAction) {
   try {
-    const bots: IBot[] = yield call(getAllBots);
-    yield put(fetchBotsSuccessAction(bots));
+    const bots: IBot[] = yield call(
+      getBotDescriptors,
+      action.limit,
+      action.index,
+    );
+    yield put(fetchBotsSuccessAction(bots, action.limit, action.index));
   } catch (err) {
     yield put(fetchBotsFailedAction(err));
   }
@@ -584,19 +590,19 @@ export function* watchUndeployBot(): Iterator<{}> {
   yield takeEvery(UNDEPLOY_BOT, undeployBot);
 }
 
-export function* updateBotDeploymentStatus(
-  action: IUpdateBotDeploymentStatusAction,
+export function* fetchBotDeploymentStatus(
+  action: IFetchBotDeploymentStatusAction,
 ): Iterator<{}> {
   try {
     const status = yield call(getDeploymentStatus, action.botResource);
     yield put(
-      updateBotDeploymentStatusSuccessAction(action.botResource, status),
+      fetchBotDeploymentStatusSuccessAction(action.botResource, status),
     );
   } catch (err) {
-    yield put(updateBotDeploymentStatusFailedAction(err));
+    yield put(fetchBotDeploymentStatusFailedAction(err));
   }
 }
 
-export function* watchUpdateBotDeploymentStatus(): Iterator<{}> {
-  yield takeEvery(UPDATE_BOT_DEPLOYMENT_STATUS, updateBotDeploymentStatus);
+export function* watchFetchBotDeploymentStatus(): Iterator<{}> {
+  yield takeEvery(FETCH_BOT_DEPLOYMENT_STATUS, fetchBotDeploymentStatus);
 }

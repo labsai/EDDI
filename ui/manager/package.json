@@ -135,6 +135,7 @@
     "react": "15.5.4",
     "react-ace": "^6.1.0",
     "react-dom": "15.5.4",
+    "react-infinite-scroller": "^1.2.2",
     "react-modal": "^3.3.1",
     "react-native-web-image-loader": "0.0.5",
     "react-redux": "5.0.4",

@@ -13,12 +13,14 @@ export const botsSelector: (
 ) => {
   bots: IBot[];
   isLoading: boolean;
+  allBotsLoaded: boolean;
   error: Error;
 } = createSelector(BotStateSelector, function(
   botState: IBotState,
 ): {
   bots: IBot[];
   isLoading: boolean;
+  allBotsLoaded: boolean;
   error: Error;
 } {
   const bots = botState.bots.filter(bot => bot.version === bot.currentVersion);
@@ -28,6 +30,7 @@ export const botsSelector: (
   return {
     bots: sortedBots,
     isLoading: botState.isLoadingAllBots,
+    allBotsLoaded: botState.allBotsLoaded,
     error: botState.error,
   };
 });

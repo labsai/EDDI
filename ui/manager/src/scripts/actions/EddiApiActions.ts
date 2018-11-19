@@ -73,10 +73,11 @@ import {
   UNDEPLOY_BOT,
   UNDEPLOY_BOT_SUCCESS,
   UNDEPLOY_BOT_FAILED,
-  UPDATE_BOT_DEPLOYMENT_STATUS,
-  UPDATE_BOT_DEPLOYMENT_STATUS_SUCCESS,
-  UPDATE_BOT_DEPLOYMENT_STATUS_FAILED,
+  FETCH_BOT_DEPLOYMENT_STATUS,
+  FETCH_BOT_DEPLOYMENT_STATUS_SUCCESS,
+  FETCH_BOT_DEPLOYMENT_STATUS_FAILED,
   FETCH_CURRENT_BOT,
+  FETCH_BOT_DETAILS,
 } from './EddiApiActionTypes';
 import {
   IBot,
@@ -89,21 +90,37 @@ import {
   undeployBot,
 } from '../components/utils/AxiosFunctions';
 
-export interface IFetchBotsAction extends Action {}
+export interface IFetchBotsAction extends Action {
+  limit: string;
+  index: string;
+}
 
-export function fetchBotsAction(): IFetchBotsAction {
+export function fetchBotsAction(
+  limit: string,
+  index: string,
+): IFetchBotsAction {
   return {
+    limit,
+    index,
     type: FETCH_BOTS,
   };
 }
 
 export interface IFetchBotsSuccessAction extends Action {
   bots: IBot[];
+  limit: string;
+  index: string;
 }
 
-export function fetchBotsSuccessAction(bots: IBot[]): IFetchBotsSuccessAction {
+export function fetchBotsSuccessAction(
+  bots: IBot[],
+  limit: string,
+  index: string,
+): IFetchBotsSuccessAction {
   return {
+    limit,
     bots,
+    index,
     type: FETCH_BOTS_SUCCESS,
   };
 }
@@ -1060,44 +1077,44 @@ export function undeployBotFailedAction(
   };
 }
 
-export interface IUpdateBotDeploymentStatusAction extends Action {
+export interface IFetchBotDeploymentStatusAction extends Action {
   botResource: string;
 }
 
-export function updateBotDeploymentStatusAction(
+export function fetchBotDeploymentStatusAction(
   botResource: string,
-): IUpdateBotDeploymentStatusAction {
+): IFetchBotDeploymentStatusAction {
   return {
     botResource,
-    type: UPDATE_BOT_DEPLOYMENT_STATUS,
+    type: FETCH_BOT_DEPLOYMENT_STATUS,
   };
 }
 
-export interface IUpdateBotDeploymentStatusSuccessAction extends Action {
+export interface IFetchBotDeploymentStatusSuccessAction extends Action {
   botResource: string;
   status: string;
 }
 
-export function updateBotDeploymentStatusSuccessAction(
+export function fetchBotDeploymentStatusSuccessAction(
   botResource: string,
   status: string,
-): IUpdateBotDeploymentStatusSuccessAction {
+): IFetchBotDeploymentStatusSuccessAction {
   return {
     botResource,
     status,
-    type: UPDATE_BOT_DEPLOYMENT_STATUS_SUCCESS,
+    type: FETCH_BOT_DEPLOYMENT_STATUS_SUCCESS,
   };
 }
 
-export interface IUpdateBotDeploymentStatusFailedAction extends Action {
+export interface IFetchBotDeploymentStatusFailedAction extends Action {
   error: Error;
 }
 
-export function updateBotDeploymentStatusFailedAction(
+export function fetchBotDeploymentStatusFailedAction(
   error: Error,
-): IUpdateBotDeploymentStatusFailedAction {
+): IFetchBotDeploymentStatusFailedAction {
   return {
     error,
-    type: UPDATE_BOT_DEPLOYMENT_STATUS_FAILED,
+    type: FETCH_BOT_DEPLOYMENT_STATUS_FAILED,
   };
 }

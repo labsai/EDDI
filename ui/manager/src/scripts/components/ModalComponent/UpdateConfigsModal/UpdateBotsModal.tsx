@@ -51,7 +51,7 @@ class UpdateBotsModal extends React.Component<IPrivateProps, IState> {
   }
 
   componentDidMount() {
-    eddiApiActionDispatchers.fetchBotsAction();
+    eddiApiActionDispatchers.fetchBotsAction(10, 0);
   }
 
   closeModal = () => {

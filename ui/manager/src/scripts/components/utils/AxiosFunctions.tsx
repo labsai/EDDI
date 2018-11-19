@@ -163,10 +163,13 @@ export async function getBotPackages(resource: string): Promise<string[]> {
   }
 }
 
-export const getBotDescriptors: () => Promise<IBot[]> = async () => {
+export async function getBotDescriptors(
+  limit: string,
+  index: string,
+): Promise<IBot[]> {
   try {
     const res: IDescriptorResponse = await axios.get(
-      `${await getAPIUrl()}/botstore/bots/descriptors?limit=${DEFAULT_LIMIT}`,
+      `${await getAPIUrl()}/botstore/bots/descriptors?index=${index}&limit=${limit}`,
     );
     return res.data.map(bot => {
       const createdOn = bot.createdOn;
@@ -184,13 +187,14 @@ export const getBotDescriptors: () => Promise<IBot[]> = async () => {
         name,
         resource,
         version,
+        currentVersion: version,
       };
     });
-  } catch (e) {
-    console.error(e);
-    return Promise.resolve([]);
+  } catch (err) {
+    console.error(err);
+    throw err;
   }
-};
+}
 
 export async function getCurrentBot(id: string): Promise<IBot> {
   try {

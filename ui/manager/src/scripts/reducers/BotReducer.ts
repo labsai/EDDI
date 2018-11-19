@@ -21,7 +21,7 @@ import {
   DEPLOY_BOT,
   DEPLOY_BOT_SUCCESS,
   UNDEPLOY_BOT_SUCCESS,
-  UPDATE_BOT_DEPLOYMENT_STATUS_SUCCESS,
+  FETCH_BOT_DEPLOYMENT_STATUS_SUCCESS,
   DEPLOY_BOT_FAILED,
   UNDEPLOY_BOT_FAILED,
 } from '../actions/EddiApiActionTypes';
@@ -40,11 +40,12 @@ import {
   IUpdateBotsSuccessAction,
   IDeployBotSuccessAction,
   IUndeployBotSuccessAction,
-  IUpdateBotDeploymentStatusSuccessAction,
+  IFetchBotDeploymentStatusSuccessAction,
   IUndeployBotFailedAction,
 } from '../actions/EddiApiActions';
 import * as _ from 'lodash';
 import modalActionDispatchers from '../actions/ModalActionDispatchers';
+import eddiApiActionDispatchers from '../actions/EddiApiActionDispatchers';
 
 export type IBotReducer = Reducer<IBotState>;
 
@@ -53,6 +54,7 @@ export interface IBotState {
   error: Error;
   isLoadingAllBots: boolean;
   isLoadingBot: boolean;
+  allBotsLoaded: boolean;
 }
 
 export const initialState: IBotState = {
@@ -60,6 +62,7 @@ export const initialState: IBotState = {
   error: null,
   isLoadingAllBots: false,
   isLoadingBot: false,
+  allBotsLoaded: false,
 };
 
 const BotReducer: IBotReducer = (
@@ -79,14 +82,48 @@ const BotReducer: IBotReducer = (
       });
 
     case FETCH_BOTS_SUCCESS:
-      return update(state, {
-        bots: {
-          $set: (action as IFetchBotsSuccessAction).bots,
-        },
-        isLoadingAllBots: {
-          $set: false,
-        },
-      });
+      const lastIndex =
+        parseInt((action as IFetchBotsSuccessAction).limit, 10) >
+        (action as IFetchBotsSuccessAction).bots.length;
+      console.log(
+        'fetching bots!',
+        'index: ' + (action as IFetchBotsSuccessAction).index,
+        'last: ' + lastIndex,
+      );
+      if ((action as IFetchBotsSuccessAction).index === '0') {
+        return update(state, {
+          bots: {
+            $set: (action as IFetchBotsSuccessAction).bots,
+          },
+          isLoadingAllBots: {
+            $set: false,
+          },
+          allBotsLoaded: {
+            $set: lastIndex,
+          },
+        });
+      } else {
+        return update(state, {
+          bots: {
+            $apply: (bots: IBot[]) => {
+              if (!_.isEmpty((action as IFetchBotsSuccessAction).bots)) {
+                return _.uniqBy(
+                  bots.concat((action as IFetchBotsSuccessAction).bots),
+                  bot => bot.resource,
+                );
+              } else {
+                return bots;
+              }
+            },
+          },
+          isLoadingAllBots: {
+            $set: false,
+          },
+          allBotsLoaded: {
+            $set: lastIndex,
+          },
+        });
+      }
 
     case FETCH_BOTS_FAILED:
       return update(state, {
@@ -310,18 +347,18 @@ const BotReducer: IBotReducer = (
         },
       });
 
-    case UPDATE_BOT_DEPLOYMENT_STATUS_SUCCESS:
+    case FETCH_BOT_DEPLOYMENT_STATUS_SUCCESS:
       return update(state, {
         bots: {
           $apply: (bots: IBot[]) => {
             return bots.map(bot => {
               if (
                 bot.resource ===
-                (action as IUpdateBotDeploymentStatusSuccessAction).botResource
+                (action as IFetchBotDeploymentStatusSuccessAction).botResource
               ) {
                 return update(bot, {
                   deploymentStatus: {
-                    $set: (action as IUpdateBotDeploymentStatusSuccessAction)
+                    $set: (action as IFetchBotDeploymentStatusSuccessAction)
                       .status,
                   },
                 });

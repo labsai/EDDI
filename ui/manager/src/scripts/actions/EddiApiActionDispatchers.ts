@@ -64,12 +64,12 @@ import {
   undeployBotFailedAction,
   undeployBotSuccessAction,
   undeployBotAction,
-  IUpdateBotDeploymentStatusAction,
-  IUpdateBotDeploymentStatusSuccessAction,
-  IUpdateBotDeploymentStatusFailedAction,
-  updateBotDeploymentStatusAction,
-  updateBotDeploymentStatusFailedAction,
-  updateBotDeploymentStatusSuccessAction,
+  IFetchBotDeploymentStatusAction,
+  IFetchBotDeploymentStatusSuccessAction,
+  IFetchBotDeploymentStatusFailedAction,
+  fetchBotDeploymentStatusAction,
+  fetchBotDeploymentStatusFailedAction,
+  fetchBotDeploymentStatusSuccessAction,
   ICreateNewPluginSuccessAction,
   createNewPluginSuccessAction,
   IFetchCurrentBotAction,
@@ -79,7 +79,7 @@ import {
 export interface IEddiApiActionDispatchers extends ActionCreatorsMapObject {
   fetchBotAction: (botId) => IFetchBotAction;
   fetchCurrentBotAction: (botId) => IFetchCurrentBotAction;
-  fetchBotsAction: () => IFetchBotsAction;
+  fetchBotsAction: (limit, index) => IFetchBotsAction;
   fetchBotDataAction: (botResource) => IFetchBotDataAction;
   fetchPackagesAction: () => IFetchPackagesAction;
   fetchPackageAction: (packageResource) => IFetchPackageAction;
@@ -131,16 +131,16 @@ export interface IEddiApiActionDispatchers extends ActionCreatorsMapObject {
     conversationUrl,
   ) => IDeployBotSuccessAction;
   deployBotFailedAction: (error) => IDeployBotFailedAction;
-  updateBotDeploymentStatusAction: (
+  fetchBotDeploymentStatusAction: (
     botResource,
-  ) => IUpdateBotDeploymentStatusAction;
-  updateBotDeploymentStatusSuccessAction: (
+  ) => IFetchBotDeploymentStatusAction;
+  fetchBotDeploymentStatusSuccessAction: (
     botResource,
     status,
-  ) => IUpdateBotDeploymentStatusSuccessAction;
-  updateBotDeploymentStatusFailedAction: (
+  ) => IFetchBotDeploymentStatusSuccessAction;
+  fetchBotDeploymentStatusFailedAction: (
     error,
-  ) => IUpdateBotDeploymentStatusFailedAction;
+  ) => IFetchBotDeploymentStatusFailedAction;
 }
 
 const actions: IEddiApiActionDispatchers = {
@@ -179,9 +179,9 @@ const actions: IEddiApiActionDispatchers = {
   undeployBotAction,
   undeployBotSuccessAction,
   undeployBotFailedAction,
-  updateBotDeploymentStatusAction,
-  updateBotDeploymentStatusSuccessAction,
-  updateBotDeploymentStatusFailedAction,
+  fetchBotDeploymentStatusAction,
+  fetchBotDeploymentStatusSuccessAction,
+  fetchBotDeploymentStatusFailedAction,
 };
 
 const eddiApiActionDispatchers: IEddiApiActionDispatchers = bindActionCreators<

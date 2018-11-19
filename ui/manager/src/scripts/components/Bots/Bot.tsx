@@ -13,21 +13,24 @@ import DeployButton from '../Assets/Buttons/DeployButton';
 import WhiteButton from '../Assets/Buttons/WhiteButton';
 import { READY } from '../utils/helpers/BotHelper';
 
-interface IPublicProps {
+interface IProps {
   bot: IBot;
   apiUrl: string;
 }
 
-interface IPrivateProps extends IPublicProps {
-  error: Error;
-  isLoading: boolean;
-}
-
 const warningIcon = require('../../../public/images/WarningIcon.png');
 
-class Bot extends React.Component<IPrivateProps> {
+class Bot extends React.Component<IProps> {
   async componentDidMount() {
     eddiApiActionDispatchers.fetchBotDataAction(this.props.bot.resource);
+  }
+
+  componentWillReceiveProps(nextProps) {
+    if (nextProps.bot.deploymentStatus === null) {
+      eddiApiActionDispatchers.fetchBotDeploymentStatusAction(
+        nextProps.bot.resource,
+      );
+    }
   }
 
   render() {
@@ -106,9 +109,10 @@ class Bot extends React.Component<IPrivateProps> {
   }
 }
 
-const ComposedBot: Component<IPublicProps> = compose<
-  IPublicProps,
-  IPrivateProps
->(pure, Radium, setDisplayName('Bot'))(Bot);
+const ComposedBot: Component<IProps> = compose<IProps>(
+  pure,
+  Radium,
+  setDisplayName('Bot'),
+)(Bot);
 
 export default ComposedBot;

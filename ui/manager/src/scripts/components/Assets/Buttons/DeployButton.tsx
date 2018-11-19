@@ -62,20 +62,30 @@ const sleep = milliseconds => {
 };
 
 class DeployButton extends React.Component<IProps> {
+  componentDidMount() {
+    this.waitForUpdatedStatus();
+  }
+
+  componentWillReceiveProps(nextProps) {
+    this.waitForUpdatedStatus();
+  }
+
   checkStatus() {
     return getDeploymentStatus(this.props.botResource);
   }
+
   async waitForUpdatedStatus() {
     const status = await this.checkStatus();
     if (status === IN_PROGRESS) {
       return await sleep(500).then(() => this.waitForUpdatedStatus());
     } else {
-      eddiApiActionDispatchers.updateBotDeploymentStatusAction(
+      eddiApiActionDispatchers.fetchBotDeploymentStatusAction(
         this.props.botResource,
       );
       return status;
     }
   }
+
   getButton() {
     switch (this.props.deploymentStatus) {
       case READY:
@@ -125,6 +135,15 @@ class DeployButton extends React.Component<IProps> {
             customStyles={this.props.customStyles}
           />
         );
+      case undefined:
+        return (
+          <Button
+            text={'Loading...'}
+            styles={errorStyle}
+            customStyles={this.props.customStyles}
+            disabled={true}
+          />
+        );
       default:
         return (
           <Button
@@ -138,7 +157,6 @@ class DeployButton extends React.Component<IProps> {
   }
 
   render() {
-    this.waitForUpdatedStatus();
     return this.getButton();
   }
 }
