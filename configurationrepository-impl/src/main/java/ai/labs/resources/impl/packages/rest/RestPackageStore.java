@@ -40,13 +40,20 @@ public class RestPackageStore extends RestVersionInfo<PackageConfiguration> impl
     }
 
     @Override
-    public List<DocumentDescriptor> readPackageDescriptors(String filter, Integer index, Integer limit, String containingResourceUri) {
+    public List<DocumentDescriptor> readPackageDescriptors(String filter,
+                                                           Integer index,
+                                                           Integer limit,
+                                                           String containingResourceUri,
+                                                           Boolean includePreviousVersions) {
+
         if (ResourceUtilities.validateUri(containingResourceUri) == null) {
             return ResourceUtilities.createMalFormattedResourceUriException(containingResourceUri);
         }
 
         try {
-            return packageStore.getPackageDescriptorsContainingResource(URI.create(containingResourceUri));
+            return packageStore.getPackageDescriptorsContainingResource(
+                    containingResourceUri,
+                    includePreviousVersions);
         } catch (IResourceStore.ResourceNotFoundException | IResourceStore.ResourceStoreException e) {
             log.error(e.getLocalizedMessage(), e);
             throw new InternalServerErrorException();

@@ -11,6 +11,7 @@ import ai.labs.resources.rest.documentdescriptor.IDocumentDescriptorStore;
 import ai.labs.resources.rest.documentdescriptor.model.DocumentDescriptor;
 import ai.labs.serialization.IDocumentBuilder;
 import ai.labs.utilities.RuntimeUtilities;
+import ai.labs.utilities.URIUtilities;
 import com.mongodb.client.MongoDatabase;
 import lombok.extern.slf4j.Slf4j;
 import org.bson.Document;
@@ -70,15 +71,29 @@ public class BotStore implements IBotStore {
         return botResourceStore.getCurrentResourceId(id);
     }
 
-    public List<DocumentDescriptor> getBotDescriptorsContainingPackage(String packageId, Integer packageVersion)
+    public List<DocumentDescriptor> getBotDescriptorsContainingPackage(String packageId, Integer packageVersion, boolean includePreviousVersions)
             throws ResourceNotFoundException, ResourceStoreException {
 
         List<DocumentDescriptor> ret = new LinkedList<>();
-        List<IResourceId> botIdsContainingPackageUri = botResourceStore.getBotIdsContainingPackage(packageId, packageVersion);
-        for (IResourceId botIds : botIdsContainingPackageUri) {
-            DocumentDescriptor documentDescriptor = documentDescriptorStore.readDescriptor(botIds.getId(), botIds.getVersion());
-            ret.add(documentDescriptor);
-        }
+        do {
+            List<IResourceId> botIdsContainingPackageUri =
+                    botResourceStore.getBotIdsContainingPackage(packageId, packageVersion);
+
+            for (IResourceId botId : botIdsContainingPackageUri) {
+                boolean alreadyContainsResource = !ret.stream().filter(
+                        descriptor ->
+                                URIUtilities.extractResourceId(descriptor.getResource()).getId().equals(botId.getId())).
+                        findFirst().isEmpty();
+
+                if (alreadyContainsResource) {
+                    continue;
+                }
+
+                ret.add(documentDescriptorStore.readDescriptor(botId.getId(), botId.getVersion()));
+            }
+
+            packageVersion--;
+        } while (includePreviousVersions && packageVersion >= 1);
 
         return ret;
     }
