@@ -80,6 +80,11 @@ public class BotStore implements IBotStore {
                     botResourceStore.getBotIdsContainingPackage(packageId, packageVersion);
 
             for (IResourceId botId : botIdsContainingPackageUri) {
+
+                if (botId.getVersion() < getCurrentResourceId(botId.getId()).getVersion()) {
+                    continue;
+                }
+
                 boolean alreadyContainsResource = !ret.stream().filter(
                         descriptor ->
                                 URIUtilities.extractResourceId(descriptor.getResource()).getId().equals(botId.getId())).

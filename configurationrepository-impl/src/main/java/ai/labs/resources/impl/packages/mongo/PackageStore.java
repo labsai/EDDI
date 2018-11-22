@@ -83,6 +83,11 @@ public class PackageStore implements IPackageStore {
             List<IResourceId> packagesContainingResource =
                     packageResourceStore.getPackageDescriptorsContainingResource(resourceURI);
             for (IResourceId packageId : packagesContainingResource) {
+
+                if (packageId.getVersion() < getCurrentResourceId(packageId.getId()).getVersion()) {
+                    continue;
+                }
+
                 boolean alreadyContainsResource = !ret.stream().filter(
                         resource ->
                         {
