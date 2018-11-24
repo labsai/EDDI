@@ -324,35 +324,20 @@ export interface IPackage extends IDetailedDescriptor {
   usedByBots?: string[];
 }
 
-export const getPackageDescriptors: () => Promise<IPackage[]> = async () => {
+export async function getPackageDescriptors(
+  limit = DEFAULT_LIMIT,
+  index = 0,
+): Promise<IPackage[]> {
   try {
     const res: IDescriptorResponse = await axios.get(
-      `${await getAPIUrl()}/packagestore/packages/descriptors?limit=${DEFAULT_LIMIT}`,
+      `${await getAPIUrl()}/packagestore/packages/descriptors?limit=${limit}&index=${index}`,
     );
-    const packages: IPackage[] = res.data.map(pkg => {
-      const version = Parser.getVersion(pkg.resource);
-      return {
-        createdOn: pkg.createdOn,
-        description: pkg.description,
-        id: Parser.getId(pkg.resource),
-        lastModifiedOn: pkg.lastModifiedOn,
-        name: pkg.name,
-        resource: pkg.resource,
-        version,
-        currentVersion: version,
-      };
-    });
-    for (let i = 0; i < _.size(packages); i++) {
-      // todo: Refactor this
-      packages[i].packageData = await getPackageData(packages[i].resource);
-      packages[i].pluginTypes = await getPluginTypes(packages[i].resource);
-    }
-    return packages;
+    return Parser.getDetailedDescriptors(res, true);
   } catch (err) {
     console.error(`Failed to get package descriptors. Error: ${err.message}`);
     throw err;
   }
-};
+}
 
 export async function getPackage(resource: string): Promise<IPackage> {
   try {
@@ -794,17 +779,18 @@ export async function getPluginDescriptors(
 
 export async function getBotsUsingPackage(
   packageResource: string,
+  usingOldVersions = false,
 ): Promise<IBot[]> {
   try {
     const config = {
       headers: { Accept: 'application/json', 'Content-Type': 'text/plain' },
     };
     const res: IDescriptorResponse = await axios.post(
-      `${await getAPIUrl()}/botstore/bots/descriptors?limit=${DEFAULT_LIMIT}`,
+      `${await getAPIUrl()}/botstore/bots/descriptors?limit=500&includePreviousVersions=${usingOldVersions}`,
       packageResource,
       config,
     );
-    return Parser.getDetailedDescriptors(res);
+    return Parser.getDetailedDescriptors(res, true);
   } catch (err) {
     console.error(
       `Failed to get bots using this package. Error: ${err.message}`,
@@ -815,17 +801,18 @@ export async function getBotsUsingPackage(
 
 export async function getPackagesUsingPlugin(
   pluginResource: string,
+  usingOldVersions = false,
 ): Promise<IPackage[]> {
   try {
     const config = {
       headers: { Accept: 'application/json', 'Content-Type': 'text/plain' },
     };
     const res = await axios.post(
-      `${await getAPIUrl()}/packagestore/packages/descriptors?limit=${DEFAULT_LIMIT}`,
+      `${await getAPIUrl()}/packagestore/packages/descriptors?limit=500&includePreviousVersions=${usingOldVersions}`,
       pluginResource,
       config,
     );
-    return Parser.getDetailedDescriptors(res);
+    return Parser.getDetailedDescriptors(res, true);
   } catch (err) {
     console.error(
       `Failed to get packages using this plugin. Error: ${err.message}`,

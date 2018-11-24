@@ -2,7 +2,7 @@ import * as React from 'react';
 import '../ModalComponent.styles.scss';
 import { Link, browserHistory } from 'react-router-dom';
 import { Component, compose, pure, setDisplayName } from 'recompose';
-import { IBot } from '../../utils/AxiosFunctions';
+import { getBotsUsingPackage, IBot } from '../../utils/AxiosFunctions';
 import { connect } from 'react-redux';
 import * as _ from 'lodash';
 import eddiApiActionDispatchers from '../../../actions/EddiApiActionDispatchers';
@@ -13,7 +13,10 @@ import BlueButton from '../../Assets/Buttons/BlueButton';
 import WhiteButton from '../../Assets/Buttons/WhiteButton';
 import { ClimbingBoxLoader } from 'react-spinners';
 import SelectableConfig from './SelectableConfig';
-import { botsWithPackageSelector } from '../../../selectors/BotSelectors';
+import {
+  botsWithPackageSelector,
+  loadingBotSelector,
+} from '../../../selectors/BotSelectors';
 import { DEFAULT_LIMIT } from '../../utils/ApiFunctions';
 
 interface IBotToUpdate {
@@ -24,6 +27,7 @@ interface IBotToUpdate {
 interface IState {
   selectedBots: IBotToUpdate[];
   page: number;
+  bots: [IBot[]];
 }
 
 interface IPublicProps {
@@ -33,7 +37,6 @@ interface IPublicProps {
 interface IPrivateProps extends IPublicProps {
   error: Error;
   isLoading: boolean;
-  botLists: [IBot[]];
 }
 
 class UpdateBotsModal extends React.Component<IPrivateProps, IState> {
@@ -42,11 +45,12 @@ class UpdateBotsModal extends React.Component<IPrivateProps, IState> {
     this.state = {
       selectedBots: [],
       page: 0,
+      bots: null,
     };
   }
 
   componentDidMount() {
-    eddiApiActionDispatchers.fetchBotsAction(DEFAULT_LIMIT, 0);
+    this.loadBotsUsingPackage(0);
   }
 
   closeModal = () => {
@@ -58,10 +62,32 @@ class UpdateBotsModal extends React.Component<IPrivateProps, IState> {
     this.closeModal();
   };
 
+  async loadBotsUsingPackage(page: number) {
+    eddiApiActionDispatchers.fetchBotsUsingPackageAction(
+      this.props.packageResources[page],
+      true,
+    );
+    let bots: [IBot[]];
+    if (page === 0) {
+      bots = [
+        await getBotsUsingPackage(this.props.packageResources[page], true),
+      ];
+    } else {
+      bots = { ...this.state.bots };
+      bots.push(
+        await getBotsUsingPackage(this.props.packageResources[page], true),
+      );
+    }
+    this.setState({ bots });
+  }
+
   nextPage = () => {
     this.setState({
       page: this.state.page + 1,
     });
+    if (_.isEmpty(this.state.bots[this.state.page])) {
+      this.loadBotsUsingPackage(this.state.page);
+    }
   };
 
   previousPage = () => {
@@ -147,28 +173,30 @@ class UpdateBotsModal extends React.Component<IPrivateProps, IState> {
           </div>
         </div>
         <div>
-          {renderIf(!this.props.isLoading && !_.isEmpty(this.props.botLists))(
-            () => (
-              <div style={styles.packageList}>
-                {this.props.botLists[this.state.page].map((bot, i) => (
-                  <SelectableConfig
-                    key={i}
-                    selected={this.isBotSelected(bot.resource)}
-                    descriptor={bot}
-                    handleClick={this.selectBot}
-                  />
-                ))}
-              </div>
-            ),
-          )}
+          {renderIf(
+            !this.props.isLoading &&
+              !_.isEmpty(this.state.bots) &&
+              !_.isEmpty(this.state.bots[this.state.page]),
+          )(() => (
+            <div style={styles.packageList}>
+              {this.state.bots[this.state.page].map((bot, i) => (
+                <SelectableConfig
+                  key={i}
+                  selected={this.isBotSelected(bot.resource)}
+                  descriptor={bot}
+                  handleClick={this.selectBot}
+                />
+              ))}
+            </div>
+          ))}
           {renderIf(this.props.isLoading)(() => (
             <div style={styles.loadingWrapper}>
               <ClimbingBoxLoader loading />
             </div>
           ))}
-          {renderIf(!this.props.isLoading && _.isEmpty(this.props.botLists))(
-            () => <div>{'Found no bots that can be updated'}</div>,
-          )}
+          {renderIf(!this.props.isLoading && _.isEmpty(this.state.bots))(() => (
+            <div>{'Found no bots that can be updated'}</div>
+          ))}
         </div>
       </div>
     );
@@ -177,7 +205,7 @@ class UpdateBotsModal extends React.Component<IPrivateProps, IState> {
 const ComposedUpdateBotsModal: Component<IPrivateProps> = compose<
   IPrivateProps,
   IPublicProps
->(pure, setDisplayName('UpdateBotsModal'), connect(botsWithPackageSelector))(
+>(pure, setDisplayName('UpdateBotsModal'), connect(loadingBotSelector))(
   UpdateBotsModal,
 );
 

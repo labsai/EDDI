@@ -48,6 +48,7 @@ class BotsUsingPackage extends React.Component<IProps, IState> {
     if (!_.isEmpty(this.props.packagePayload)) {
       eddiApiActionDispatchers.fetchBotsUsingPackageAction(
         this.props.packagePayload.resource,
+        false,
       );
     }
   }
@@ -56,6 +57,7 @@ class BotsUsingPackage extends React.Component<IProps, IState> {
     if (!nextProps.packagePayload.usedByBots) {
       eddiApiActionDispatchers.fetchBotsUsingPackageAction(
         nextProps.packagePayload.resource,
+        false,
       );
     }
   }

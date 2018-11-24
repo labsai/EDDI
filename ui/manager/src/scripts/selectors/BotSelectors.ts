@@ -91,6 +91,13 @@ export function botsWithPackageSelector(
   };
 }
 
+export function loadingBotSelector(state: IAppState) {
+  return {
+    isLoading: state.botState.isLoadingAllBots,
+    error: state.botState.error,
+  };
+}
+
 export interface ISpecificBotSelectorProps {
   botId: string;
   botVersion: string;

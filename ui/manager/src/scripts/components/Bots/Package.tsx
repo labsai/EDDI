@@ -14,6 +14,7 @@ import WhiteButton from '../Assets/Buttons/WhiteButton';
 import ModalActionDispatchers from '../../actions/ModalActionDispatchers';
 import { ModalEnum } from '../utils/ModalEnum';
 import { history } from '../../history';
+import { ClipLoader } from 'react-spinners';
 
 interface IPrivateProps extends IPublicProps {
   packagePayload: IPackage;
@@ -61,7 +62,7 @@ class Package extends React.Component<IPrivateProps, IState> {
             ))}
             {renderIf(
               !this.props.error && _.isEmpty(this.props.packagePayload),
-            )(() => <p>{'This package does not exist'}</p>)}
+            )(() => <ClipLoader color={'#0070D2'} />)}
             {renderIf(
               !this.props.error && !_.isEmpty(this.props.packagePayload),
             )(() => (

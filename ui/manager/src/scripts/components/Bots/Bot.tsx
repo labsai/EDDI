@@ -93,8 +93,12 @@ class Bot extends React.Component<IProps> {
             />
           </div>
           <div style={styles.botContent}>
-            {renderIf(_.isEmpty(this.props.bot.packages))(() => (
-              <p>{`There are no packages yet`}</p>
+            {renderIf(
+              _.isEmpty(this.props.bot.packages) &&
+                !_.isUndefined(this.props.bot.packages),
+            )(() => <p>{`This bot has no packages yet`}</p>)}
+            {renderIf(_.isUndefined(this.props.bot.packages))(() => (
+              <p>{`Loading`}</p>
             ))}
             {renderIf(!_.isEmpty(this.props.bot.packages))(() => (
               <Packages

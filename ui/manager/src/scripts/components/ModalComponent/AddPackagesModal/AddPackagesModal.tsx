@@ -2,7 +2,7 @@ import * as React from 'react';
 import '../ModalComponent.styles.scss';
 import { Link, browserHistory } from 'react-router-dom';
 import { Component, compose, pure, setDisplayName } from 'recompose';
-import Package from './Package';
+import PackageContainer from './PackageContainer';
 import { IBot, IPackage } from '../../utils/AxiosFunctions';
 import { packagesSelector } from '../../../selectors/PackageSelectors';
 import { connect } from 'react-redux';
@@ -14,10 +14,12 @@ import ModalActionDispatchers from '../../../actions/ModalActionDispatchers';
 import * as renderIf from 'render-if';
 import BlueButton from '../../Assets/Buttons/BlueButton';
 import { ClimbingBoxLoader } from 'react-spinners';
+import { DEFAULT_LIMIT } from '../../utils/ApiFunctions';
 
 interface IState {
   selectedPackages: string[];
-  availablePackages: string[];
+  loading: boolean;
+  fetchIndex: number;
 }
 
 interface IPublicProps {
@@ -27,6 +29,7 @@ interface IPublicProps {
 interface IPrivateProps extends IPublicProps {
   error: Error;
   isLoading: boolean;
+  allPackagesLoaded: boolean;
   packages: IPackage[];
 }
 
@@ -35,45 +38,25 @@ class AddPackagesModal extends React.Component<IPrivateProps, IState> {
     super(props);
     this.state = {
       selectedPackages: [],
-      availablePackages: [],
+      loading: false,
+      fetchIndex: 0,
     };
   }
 
   componentDidMount() {
-    eddiApiActionDispatchers.fetchPackagesAction();
+    eddiApiActionDispatchers.fetchPackagesAction(DEFAULT_LIMIT, 0);
     this.discardChanges();
   }
 
   componentWillReceiveProps(nextProps) {
-    if (
-      !_.isEmpty(
-        _.differenceBy(nextProps.packages, this.props.packages, 'resource'),
-      )
-    ) {
-      this.discardChanges(nextProps);
+    if (this.props.isLoading && !nextProps.isLoading) {
+      this.setState({ loading: false });
     }
   }
 
   closeModal = () => {
     this.discardChanges();
     ModalActionDispatchers.closeModal();
-  };
-
-  selectVersion = (resource: string, version: number) => {
-    const id = Parser.getId(resource);
-    const availablePackages = this.state.availablePackages.map(pkg => {
-      if (Parser.getId(pkg) === id) {
-        return Parser.replaceResourceVersion(pkg, version);
-      }
-      return pkg;
-    });
-    const selectedPackages = this.state.selectedPackages.filter(
-      selectedPackage => Parser.getId(selectedPackage) !== id,
-    );
-    this.setState({
-      availablePackages,
-      selectedPackages,
-    });
   };
 
   selectPackage = (packageResource: string) => {
@@ -95,12 +78,8 @@ class AddPackagesModal extends React.Component<IPrivateProps, IState> {
   }
 
   discardChanges(props = this.props): void {
-    const availablePackages = props.packages.map(pkg => {
-      return this.getBotPackageIfUsed(pkg.resource);
-    });
     this.setState({
       selectedPackages: props.bot.packages,
-      availablePackages,
     });
   }
 
@@ -150,13 +129,12 @@ class AddPackagesModal extends React.Component<IPrivateProps, IState> {
         <div>
           {renderIf(!this.props.isLoading)(() => (
             <div style={styles.packageList}>
-              {this.state.availablePackages.map((pack, i) => (
-                <Package
+              {this.props.packages.map((pack, i) => (
+                <PackageContainer
                   key={i}
-                  selected={this.isPackageSelected(pack)}
-                  packageResource={pack}
+                  packageResource={this.getBotPackageIfUsed(pack.resource)}
+                  selected={this.isPackageSelected(pack.resource)}
                   handleClick={this.selectPackage}
-                  selectVersion={this.selectVersion}
                 />
               ))}
             </div>

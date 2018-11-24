@@ -220,23 +220,37 @@ export function fetchBotDataFailedAction(
   };
 }
 
-export interface IFetchPackagesAction extends Action {}
+export interface IFetchPackagesAction extends Action {
+  limit: number;
+  index: number;
+}
 
-export function fetchPackagesAction(): IFetchPackagesAction {
+export function fetchPackagesAction(
+  limit: number,
+  index: number,
+): IFetchPackagesAction {
   return {
+    limit,
+    index,
     type: FETCH_PACKAGES,
   };
 }
 
 export interface IFetchPackagesSuccessAction extends Action {
   packages: IPackage[];
+  limit: number;
+  index: number;
 }
 
 export function fetchPackagesSuccessAction(
   packages: IPackage[],
+  limit: number,
+  index: number,
 ): IFetchPackagesSuccessAction {
   return {
     packages,
+    limit,
+    index,
     type: FETCH_PACKAGES_SUCCESS,
   };
 }
@@ -714,28 +728,34 @@ export function updatePluginTypeFailedAction(
 
 export interface IFetchBotsUsingPackageAction extends Action {
   packageResource: string;
+  anyVersion: boolean;
 }
 
 export function fetchBotsUsingPackageAction(
   packageResource: string,
+  anyVersion: boolean,
 ): IFetchBotsUsingPackageAction {
   return {
     packageResource,
+    anyVersion,
     type: FETCH_BOTS_USING_PACKAGE,
   };
 }
 
 export interface IFetchBotsUsingPackageSuccessAction extends Action {
   packageResource: string;
+  anyVersion: boolean;
   bots: IBot[];
 }
 
 export function fetchBotsUsingPackageSuccessAction(
   packageResource: string,
+  anyVersion: boolean,
   bots: IBot[],
 ): IFetchBotsUsingPackageSuccessAction {
   return {
     packageResource,
+    anyVersion,
     bots,
     type: FETCH_BOTS_USING_PACKAGE_SUCCESS,
   };

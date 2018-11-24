@@ -85,11 +85,6 @@ const BotReducer: IBotReducer = (
       const lastIndex =
         parseInt((action as IFetchBotsSuccessAction).limit, 10) >
         (action as IFetchBotsSuccessAction).bots.length;
-      console.log(
-        'fetching bots!',
-        'index: ' + (action as IFetchBotsSuccessAction).index,
-        'last: ' + lastIndex,
-      );
       if ((action as IFetchBotsSuccessAction).index === '0') {
         return update(state, {
           bots: {

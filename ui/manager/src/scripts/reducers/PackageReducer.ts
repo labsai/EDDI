@@ -39,6 +39,7 @@ import {
   IFetchPackagesUsingPluginSuccessAction,
   IUpdatePackagesSuccessAction,
   IUpdatePackagesFailedAction,
+  IFetchBotsSuccessAction,
 } from '../actions/EddiApiActions';
 import * as _ from 'lodash';
 import { parsePluginExtensions } from '../components/utils/helpers/PluginParser';
@@ -51,6 +52,7 @@ export interface IPackageState {
   isLoadingPackageData: boolean;
   isLoadingPackage: boolean;
   packages: IPackage[];
+  allPackagesLoaded: boolean;
 }
 
 export const initialState: IPackageState = {
@@ -59,6 +61,7 @@ export const initialState: IPackageState = {
   isLoadingPackageData: false,
   isLoadingPackage: false,
   packages: [],
+  allPackagesLoaded: false,
 };
 
 const PackageReducer: IPackageReducer = (
@@ -75,9 +78,15 @@ const PackageReducer: IPackageReducer = (
         isLoadingAllPackages: {
           $set: true,
         },
+        allPackagesLoaded: {
+          $set: false,
+        },
       });
 
     case FETCH_PACKAGES_SUCCESS:
+      const lastIndex =
+        (action as IFetchPackagesSuccessAction).limit >
+        (action as IFetchPackagesSuccessAction).packages.length;
       const newPackages: IPackage[] = (action as IFetchPackagesSuccessAction)
         .packages;
       const oldPackages = state.packages.filter(pkg =>
@@ -90,6 +99,9 @@ const PackageReducer: IPackageReducer = (
         },
         isLoadingAllPackages: {
           $set: false,
+        },
+        allPackagesLoaded: {
+          $set: lastIndex,
         },
       });
 
@@ -324,28 +336,33 @@ const PackageReducer: IPackageReducer = (
       });
 
     case FETCH_BOTS_USING_PACKAGE_SUCCESS:
-      return update(state, {
-        packages: {
-          $apply: (packages: IPackage[]) => {
-            return packages.map(pack => {
-              if (
-                pack.resource ===
-                (action as IFetchBotsUsingPackageSuccessAction).packageResource
-              ) {
-                return update(pack, {
-                  usedByBots: {
-                    $set: (action as IFetchBotsUsingPackageSuccessAction).bots.map(
-                      bot => bot.resource,
-                    ),
-                  },
-                });
-              } else {
-                return pack;
-              }
-            });
+      if ((action as IFetchBotsUsingPackageSuccessAction).anyVersion) {
+        return state;
+      } else {
+        return update(state, {
+          packages: {
+            $apply: (packages: IPackage[]) => {
+              return packages.map(pack => {
+                if (
+                  pack.resource ===
+                  (action as IFetchBotsUsingPackageSuccessAction)
+                    .packageResource
+                ) {
+                  return update(pack, {
+                    usedByBots: {
+                      $set: (action as IFetchBotsUsingPackageSuccessAction).bots.map(
+                        bot => bot.resource,
+                      ),
+                    },
+                  });
+                } else {
+                  return pack;
+                }
+              });
+            },
           },
-        },
-      });
+        });
+      }
 
     case FETCH_PACKAGES_USING_PLUGIN_SUCCESS:
       return update(state, {

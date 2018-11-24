@@ -137,6 +137,7 @@ import {
   createNewPluginSuccessAction,
   IFetchCurrentBotAction,
   IFetchBotsAction,
+  IFetchPackagesAction,
 } from '../actions/EddiApiActions';
 import * as Edditypes from '../components/utils/EddiTypes';
 import Parser from '../components/utils/Parser';
@@ -169,10 +170,14 @@ export function* watchFetchBots(): Iterator<{}> {
   yield takeEvery(FETCH_BOTS, FetchBots);
 }
 
-export function* FetchPackages() {
+export function* FetchPackages(action: IFetchPackagesAction) {
   try {
-    const packages: IPackage[] = yield call(getPackageDescriptors);
-    yield put(fetchPackagesSuccessAction(packages));
+    const packages: IPackage[] = yield call(
+      getPackageDescriptors,
+      action.limit,
+      action.index,
+    );
+    yield put(fetchPackagesSuccessAction(packages, action.limit, action.index));
   } catch (err) {
     yield put(fetchPackagesFailedAction(err));
   }
@@ -428,10 +433,12 @@ export function* fetchBotsUsingPackage(
     const botsUsingPackage: IBot[] = yield call(
       getBotsUsingPackage,
       action.packageResource,
+      action.anyVersion,
     );
     yield put(
       fetchBotsUsingPackageSuccessAction(
         action.packageResource,
+        action.anyVersion,
         botsUsingPackage,
       ),
     );

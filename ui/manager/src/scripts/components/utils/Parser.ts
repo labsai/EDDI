@@ -78,7 +78,23 @@ export default class Parser {
 
   static getDetailedDescriptors(
     data: IDescriptorResponse,
+    currentVersion = false,
   ): IDetailedDescriptor[] {
+    if (currentVersion) {
+      return data.data.map(pkg => {
+        const version = Parser.getVersion(pkg.resource);
+        return {
+          id: Parser.getId(pkg.resource),
+          version,
+          currentVersion: version,
+          createdOn: pkg.createdOn,
+          description: pkg.description,
+          lastModifiedOn: pkg.lastModifiedOn,
+          name: pkg.name,
+          resource: pkg.resource,
+        };
+      });
+    }
     return data.data.map(pkg => {
       return {
         id: Parser.getId(pkg.resource),

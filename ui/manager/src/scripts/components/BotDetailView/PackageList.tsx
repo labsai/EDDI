@@ -51,7 +51,6 @@ class PackageList extends React.Component<IPrivateProps, IState> {
   };
 
   openAddPackagesModal = () => {
-    eddiApiActionDispatchers.fetchPackagesAction();
     ModalActionDispatchers.showAddPackagesModal(this.props.bot);
   };
 

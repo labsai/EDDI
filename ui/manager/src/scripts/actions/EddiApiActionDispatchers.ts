@@ -81,7 +81,7 @@ export interface IEddiApiActionDispatchers extends ActionCreatorsMapObject {
   fetchCurrentBotAction: (botId) => IFetchCurrentBotAction;
   fetchBotsAction: (limit, index) => IFetchBotsAction;
   fetchBotDataAction: (botResource) => IFetchBotDataAction;
-  fetchPackagesAction: () => IFetchPackagesAction;
+  fetchPackagesAction: (limit, index) => IFetchPackagesAction;
   fetchPackageAction: (packageResource) => IFetchPackageAction;
   fetchCurrentPackageAction: (packageId) => IFetchCurrentPackageAction;
   fetchPackageDataAction: (packageResource) => IFetchPackageDataAction;
@@ -107,6 +107,7 @@ export interface IEddiApiActionDispatchers extends ActionCreatorsMapObject {
   ) => IUpdatePluginTypeAction;
   fetchBotsUsingPackageAction: (
     packageResource,
+    anyVersion,
   ) => IFetchBotsUsingPackageAction;
   fetchPackagesUsingPluginAction: (
     pluginResource,
