@@ -1,5 +1,5 @@
 import { Reducer, Action } from 'redux';
-import { IPackage } from '../components/utils/AxiosFunctions';
+import { IBot, IPackage } from '../components/utils/AxiosFunctions';
 import {
   FETCH_PACKAGEDATA,
   FETCH_PACKAGEDATA_FAILED,
@@ -87,15 +87,20 @@ const PackageReducer: IPackageReducer = (
       const lastIndex =
         (action as IFetchPackagesSuccessAction).limit >
         (action as IFetchPackagesSuccessAction).packages.length;
-      const newPackages: IPackage[] = (action as IFetchPackagesSuccessAction)
-        .packages;
-      const oldPackages = state.packages.filter(pkg =>
-        _.isEmpty(newPackages.find(newPkg => newPkg.resource === pkg.resource)),
-      );
-      const newPackageList = newPackages.concat(oldPackages);
       return update(state, {
         packages: {
-          $set: newPackageList,
+          $apply: (packages: IPackage[]) => {
+            if (!_.isEmpty((action as IFetchPackagesSuccessAction).packages)) {
+              return _.uniqBy(
+                packages.concat(
+                  (action as IFetchPackagesSuccessAction).packages,
+                ),
+                pkg => pkg.resource,
+              );
+            } else {
+              return packages;
+            }
+          },
         },
         isLoadingAllPackages: {
           $set: false,
@@ -123,12 +128,29 @@ const PackageReducer: IPackageReducer = (
       });
 
     case FETCH_PACKAGE_SUCCESS:
-      const packageList = state.packages.filter(
-        pkg =>
-          pkg.resource !==
-          (action as IFetchPackageSuccessAction).package.resource,
-      );
-      packageList.push((action as IFetchPackageSuccessAction).package);
+      const newPackage = (action as IFetchPackageSuccessAction).package;
+      const packageList = state.packages.map(pkg => {
+        if (pkg.resource === newPackage.resource) {
+          return {
+            id: pkg.id,
+            resource: pkg.resource,
+            version: pkg.version,
+            currentVersion: pkg.currentVersion,
+            pluginTypes: pkg.pluginTypes,
+            name: newPackage.name,
+            description: newPackage.description,
+            lastModifiedOn: newPackage.lastModifiedOn,
+            createdOn: newPackage.createdOn,
+          };
+        } else {
+          return pkg;
+        }
+      });
+      if (
+        _.isEmpty(packageList.find(pkg => pkg.resource === newPackage.resource))
+      ) {
+        packageList.push((action as IFetchPackageSuccessAction).package);
+      }
       return update(state, {
         isLoadingPackage: {
           $set: false,
