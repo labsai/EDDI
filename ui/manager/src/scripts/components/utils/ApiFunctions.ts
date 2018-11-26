@@ -10,7 +10,11 @@ export async function getAPIUrl(): Promise<string> {
       .get('/_/env.json')
       .then(overrides => {
         if (overrides.data.EDDI_API_URL) {
-          return overrides.data.EDDI_API_URL;
+          let apiUrl = overrides.data.EDDI_API_URL;
+          if (apiUrl[apiUrl.length] === '/') {
+            apiUrl = apiUrl.substring(0, apiUrl.length - 1);
+          }
+          return apiUrl;
         } else {
           if (process.env.eddiApiUrl) {
             return process.env.eddiApiUrl;
