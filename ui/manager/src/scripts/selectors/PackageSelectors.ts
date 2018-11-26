@@ -18,6 +18,7 @@ export function packagesSelector(state: IAppState) {
   });
   return {
     packages: sortedPackages,
+    allPackagesLoaded: state.packageState.allPackagesLoaded,
     isLoading: state.packageState.isLoadingAllPackages,
     error: state.packageState.error,
   };

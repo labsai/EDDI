@@ -137,6 +137,7 @@ const PackageReducer: IPackageReducer = (
             version: pkg.version,
             currentVersion: pkg.currentVersion,
             pluginTypes: pkg.pluginTypes,
+            usedByBots: pkg.usedByBots,
             name: newPackage.name,
             description: newPackage.description,
             lastModifiedOn: newPackage.lastModifiedOn,

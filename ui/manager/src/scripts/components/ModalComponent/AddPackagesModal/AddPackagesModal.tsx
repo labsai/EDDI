@@ -15,6 +15,8 @@ import * as renderIf from 'render-if';
 import BlueButton from '../../Assets/Buttons/BlueButton';
 import { ClimbingBoxLoader } from 'react-spinners';
 import { DEFAULT_LIMIT } from '../../utils/ApiFunctions';
+import * as InfiniteScrollTypes from 'react-infinite-scroller';
+const InfiniteScroll = require('react-infinite-scroller') as InfiniteScrollTypes;
 
 interface IState {
   selectedPackages: string[];
@@ -105,9 +107,21 @@ class AddPackagesModal extends React.Component<IPrivateProps, IState> {
     this.closeModal();
   };
 
+  loadMore = () => {
+    if (this.state.loading || _.isEmpty(this.props.packages)) {
+      return;
+    }
+    console.log('loading' + this.state.fetchIndex);
+    this.setState({ loading: true, fetchIndex: this.state.fetchIndex + 1 });
+    eddiApiActionDispatchers.fetchPackagesAction(
+      DEFAULT_LIMIT,
+      this.state.fetchIndex,
+    );
+  };
+
   render() {
     return (
-      <div>
+      <div style={styles.testDerp}>
         <div style={styles.header}>
           <div style={styles.topHeader}>
             <div style={styles.title}>{`Select packages for <${
@@ -126,9 +140,17 @@ class AddPackagesModal extends React.Component<IPrivateProps, IState> {
             <div style={styles.lastModified}>{'Last modified'}</div>
           </div>
         </div>
-        <div>
-          {renderIf(!this.props.isLoading)(() => (
-            <div style={styles.packageList}>
+        <div style={styles.packageList}>
+          <InfiniteScroll
+            pageStart={0}
+            loadMore={this.loadMore}
+            hasMore={
+              !this.props.allPackagesLoaded &&
+              !this.props.isLoading &&
+              !this.state.loading
+            }
+            useWindow={false}>
+            <div>
               {this.props.packages.map((pack, i) => (
                 <PackageContainer
                   key={i}
@@ -138,7 +160,7 @@ class AddPackagesModal extends React.Component<IPrivateProps, IState> {
                 />
               ))}
             </div>
-          ))}
+          </InfiniteScroll>
           {renderIf(this.props.isLoading)(() => (
             <div style={styles.loadingWrapper}>
               <ClimbingBoxLoader loading />

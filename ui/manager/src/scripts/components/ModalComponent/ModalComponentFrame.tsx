@@ -29,6 +29,7 @@ import UpdatePackagesModal from './UpdateConfigsModal/UpdatePackagesModal';
 import UpdateBotsModal from './UpdateConfigsModal/UpdateBotsModal';
 import ConfirmModal from './ConfirmModal';
 import ErrorMessageModal from './ErrorMessageModal';
+import { CSSProperties } from 'react';
 
 const customStyles = {
   content: {
@@ -51,6 +52,35 @@ const customStyles = {
     backgroundColor: 'rgba(159, 170, 181, 0.90)',
     overflow: 'auto',
     paddingBottom: '300px',
+  },
+};
+
+const randomStyles: CSSProperties = {
+  content: {
+    background: '#fff',
+    border: '1px solid #ccc',
+    borderRadius: '4px',
+    left: '0px',
+    top: '0px',
+    margin: '100px auto 100px',
+    maxWidth: '960px',
+    minWidth: '600px',
+    outline: '0px',
+    padding: '0px',
+    position: 'relative',
+    minHeight: '300px',
+    maxHeight: 'auto',
+    overflow: 'visible',
+  },
+  overlay: {
+    backgroundColor: 'rgba(159, 170, 181, 0.90)',
+    overflow: 'auto',
+    paddingBottom: '300px',
+    position: 'fixed',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
   },
 };
 
@@ -186,7 +216,7 @@ class ModalComponentFrame extends React.Component<IPrivateProps, IState> {
     ModalActionDispatchers.closeModal();
   };
 
-  render() {
+  render2() {
     return (
       <Modal
         isOpen={this.props.isModalOpen}
@@ -200,6 +230,14 @@ class ModalComponentFrame extends React.Component<IPrivateProps, IState> {
         </span>
         {this.renderContent(this.props.mode)}
       </Modal>
+    );
+  }
+
+  render() {
+    return (
+      <div style={randomStyles.overlay}>
+        <div style={randomStyles.content} />
+      </div>
     );
   }
 }
