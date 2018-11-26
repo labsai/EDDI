@@ -142,7 +142,7 @@ import { PACKAGE_PATH } from '../components/utils/EddiTypes';
 import { BEHAVIOR_PATH } from '../components/utils/EddiTypes';
 import { OUTPUT } from '../components/utils/EddiTypes';
 import { BOT } from '../components/utils/EddiTypes';
-import { BEHAVIOUR } from '../components/utils/EddiTypes';
+import { BEHAVIOR } from '../components/utils/EddiTypes';
 import { OUTPUT_PATH } from '../components/utils/EddiTypes';
 import { REGULAR_DICTIONARY_PATH } from '../components/utils/EddiTypes';
 import { REGULAR_DICTIONARY } from '../components/utils/EddiTypes';
