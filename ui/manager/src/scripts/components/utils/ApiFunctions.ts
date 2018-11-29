@@ -11,7 +11,7 @@ export async function getAPIUrl(): Promise<string> {
       .then(overrides => {
         if (overrides.data.EDDI_API_URL) {
           let apiUrl = overrides.data.EDDI_API_URL;
-          if (apiUrl[apiUrl.length] === '/') {
+          if (apiUrl[apiUrl.length - 1] === '/') {
             apiUrl = apiUrl.substring(0, apiUrl.length - 1);
           }
           return apiUrl;
@@ -34,7 +34,11 @@ export async function getAPIUrl(): Promise<string> {
         }
       }));
   } else {
-    return apiUrlPromise;
+    let apiUrl = await apiUrlPromise;
+    if (apiUrl[apiUrl.length - 1] === '/') {
+      apiUrl = apiUrl.substring(0, apiUrl.length - 1);
+    }
+    return apiUrl;
   }
 }
 
