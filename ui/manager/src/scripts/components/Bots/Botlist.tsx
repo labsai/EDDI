@@ -53,6 +53,7 @@ class BotList extends React.Component<IPrivateProps, IState> {
     }
   }
   render() {
+    console.log(getAPIUrl());
     const botList = this.filterBots();
     return (
       <div>
