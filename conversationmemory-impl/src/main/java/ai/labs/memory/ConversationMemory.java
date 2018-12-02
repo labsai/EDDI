@@ -62,10 +62,16 @@ public class ConversationMemory implements IConversationMemory {
     }
 
     public IConversationStep startNextStep() {
+        return startNextStep(null);
+    }
+
+    IConversationStep startNextStep(ConversationOutput conversationOutput) {
         ((ConversationStep) currentStep).conversationStepNumber = previousSteps.size();
         previousSteps.push(currentStep);
-        ConversationOutput conversationOutput = new ConversationOutput();
-        conversationOutputs.add(0, conversationOutput);
+        if (conversationOutput == null) {
+            conversationOutput = new ConversationOutput();
+        }
+        conversationOutputs.add(conversationOutput);
         currentStep = new ConversationStep(conversationOutput);
         return currentStep;
     }

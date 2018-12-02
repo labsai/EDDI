@@ -69,10 +69,8 @@ public class ConversationMemoryUtilities {
     }
 
     public static IConversationMemory convertConversationMemorySnapshot(ConversationMemorySnapshot snapshot) {
-        IConversationMemory conversationMemory = new ConversationMemory(snapshot.getConversationId(), snapshot.getBotId(), snapshot.getBotVersion());
+        ConversationMemory conversationMemory = new ConversationMemory(snapshot.getConversationId(), snapshot.getBotId(), snapshot.getBotVersion());
         conversationMemory.setConversationState(snapshot.getConversationState());
-
-        conversationMemory.getConversationOutputs().addAll(snapshot.getConversationOutputs());
 
         List<IConversationMemory.IConversationStep> redoSteps = iterateRedoCache(snapshot.getRedoCache());
         for (IConversationMemory.IConversationStep redoStep : redoSteps) {
@@ -81,10 +79,11 @@ public class ConversationMemoryUtilities {
 
         List<ConversationMemorySnapshot.ConversationStepSnapshot> conversationSteps = snapshot.getConversationSteps();
         for (int i = 0; i < conversationSteps.size(); i++) {
+            ConversationOutput conversationOutput = snapshot.getConversationOutputs().get(i);
             ConversationMemorySnapshot.ConversationStepSnapshot conversationStepSnapshot = conversationSteps.get(i);
 
             if (i > 0) {
-                ((ConversationMemory) conversationMemory).startNextStep();
+                conversationMemory.startNextStep(conversationOutput);
             }
 
             for (ConversationMemorySnapshot.PackageRunSnapshot packageRunSnapshot : conversationStepSnapshot.getPackages()) {
