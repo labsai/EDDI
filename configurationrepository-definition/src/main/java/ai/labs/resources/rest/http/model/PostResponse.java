@@ -6,5 +6,6 @@ import lombok.Setter;
 @Getter
 @Setter
 public class PostResponse {
+    private PropertySavingInstruction propertySavingInstruction;
     private QuickRepliesBuildingInstruction qrBuildInstruction;
 }

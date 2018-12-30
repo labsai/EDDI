@@ -49,7 +49,8 @@ public interface IRestBotEngine {
     @Path("/{environment}/{botId}")
     @Consumes(MediaType.APPLICATION_JSON)
     Response startConversationWithContext(@PathParam("environment") Deployment.Environment environment,
-                                          @PathParam("botId") String botId, Map<String, Context> context);
+                                          @PathParam("botId") String botId,
+                                          @QueryParam("userId") String userId, Map<String, Context> context);
 
     @POST
     @Path("/{conversationId}/endConversation")

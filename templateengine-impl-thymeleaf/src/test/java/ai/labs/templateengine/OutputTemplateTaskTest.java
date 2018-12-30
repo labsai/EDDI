@@ -1,9 +1,10 @@
 package ai.labs.templateengine;
 
-import ai.labs.memory.Data;
 import ai.labs.memory.IConversationMemory;
 import ai.labs.memory.IData;
 import ai.labs.memory.IDataFactory;
+import ai.labs.memory.IMemoryItemConverter;
+import ai.labs.memory.model.Data;
 import ai.labs.models.Context;
 import ai.labs.output.model.QuickReply;
 import lombok.AllArgsConstructor;
@@ -45,8 +46,8 @@ public class OutputTemplateTaskTest {
         conversationMemory = mock(IConversationMemory.class);
         currentStep = mock(IConversationMemory.IWritableConversationStep.class);
         when(conversationMemory.getCurrentStep()).then(invocation -> currentStep);
-        IMemoryTemplateConverter memoryTemplateConverter = mock(IMemoryTemplateConverter.class);
-        when(memoryTemplateConverter.convertMemoryForTemplating(any(IConversationMemory.class))).
+        IMemoryItemConverter memoryTemplateConverter = mock(IMemoryItemConverter.class);
+        when(memoryTemplateConverter.convert(any(IConversationMemory.class))).
                 then(invocation -> new HashMap<>());
         outputTemplateTask = new OutputTemplateTask(templatingEngine, memoryTemplateConverter, dataFactory);
     }

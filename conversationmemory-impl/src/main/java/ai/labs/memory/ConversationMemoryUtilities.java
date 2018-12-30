@@ -2,6 +2,7 @@ package ai.labs.memory;
 
 import ai.labs.memory.model.ConversationMemorySnapshot;
 import ai.labs.memory.model.ConversationOutput;
+import ai.labs.memory.model.Data;
 import ai.labs.memory.model.SimpleConversationMemorySnapshot;
 
 import java.util.LinkedList;
@@ -33,6 +34,7 @@ public class ConversationMemoryUtilities {
         }
 
         snapshot.getConversationOutputs().addAll(conversationMemory.getConversationOutputs());
+        snapshot.getConversationProperties().putAll(conversationMemory.getConversationProperties());
 
         return snapshot;
     }
@@ -73,6 +75,7 @@ public class ConversationMemoryUtilities {
         conversationMemory.setConversationState(snapshot.getConversationState());
 
         conversationMemory.getConversationOutputs().addAll(snapshot.getConversationOutputs());
+        conversationMemory.getConversationProperties().putAll(snapshot.getConversationProperties());
 
         List<IConversationMemory.IConversationStep> redoSteps = iterateRedoCache(snapshot.getRedoCache());
         for (IConversationMemory.IConversationStep redoStep : redoSteps) {
@@ -108,6 +111,7 @@ public class ConversationMemoryUtilities {
         simpleSnapshot.setRedoCacheSize(conversationMemorySnapshot.getRedoCache().size());
 
         simpleSnapshot.getConversationOutputs().addAll(conversationMemorySnapshot.getConversationOutputs());
+        simpleSnapshot.getConversationProperties().putAll(conversationMemorySnapshot.getConversationProperties());
 
         for (ConversationMemorySnapshot.ConversationStepSnapshot conversationStepSnapshot : conversationMemorySnapshot.getConversationSteps()) {
             SimpleConversationMemorySnapshot.SimpleConversationStep simpleConversationStep = new SimpleConversationMemorySnapshot.SimpleConversationStep();

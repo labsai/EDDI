@@ -4,7 +4,6 @@ import ai.labs.httpclient.ICompleteListener;
 import ai.labs.httpclient.IHttpClient;
 import ai.labs.httpclient.IRequest;
 import ai.labs.httpclient.IResponse;
-import com.sun.org.apache.xml.internal.security.utils.Base64;
 import lombok.extern.slf4j.Slf4j;
 import org.eclipse.jetty.client.HttpClient;
 import org.eclipse.jetty.client.api.*;
@@ -18,6 +17,7 @@ import org.eclipse.jetty.http.HttpFields;
 import javax.inject.Inject;
 import java.net.CookieStore;
 import java.net.URI;
+import java.util.Base64;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.concurrent.ExecutionException;
@@ -53,7 +53,7 @@ public class HttpClientWrapper implements IHttpClient {
         private Request request;
         private int maxLength = 2 * 1024 * 1024;
 
-        public RequestWrapper(URI uri, Request request) {
+        RequestWrapper(URI uri, Request request) {
             this.uri = uri;
             this.request = request;
         }
@@ -61,7 +61,8 @@ public class HttpClientWrapper implements IHttpClient {
         @Override
         public IRequest setBasicAuthentication(String username, String password, String realm, boolean preemptive) {
             if (preemptive) {
-                request.getHeaders().add("Authorization", "Basic " + Base64.encode(String.valueOf(username + ":" + password).getBytes()));
+                request.getHeaders().add("Authorization", "Basic " + Base64.getEncoder().
+                        encodeToString((username + ":" + password).getBytes()));
             } else {
                 AuthenticationStore auth = httpClient.getAuthenticationStore();
                 auth.addAuthentication(new BasicAuthentication(uri, realm, username, password));
@@ -141,7 +142,7 @@ public class HttpClientWrapper implements IHttpClient {
         }
 
         @Override
-        public void send(final ICompleteListener completeListener) throws HttpRequestException {
+        public void send(final ICompleteListener completeListener) {
             final BufferingResponseListener responseListener = new BufferingResponseListener(maxLength) {
                 @Override
                 public void onComplete(final Result result) {
@@ -177,6 +178,15 @@ public class HttpClientWrapper implements IHttpClient {
             };
 
             request.send(responseListener);
+        }
+
+        @Override
+        public String toString() {
+            return "RequestWrapper{" +
+                    "uri=" + uri +
+                    ", request=" + request.toString() +
+                    ", maxLength=" + maxLength +
+                    '}';
         }
     }
 

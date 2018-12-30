@@ -1,9 +1,9 @@
 package ai.labs.output.impl;
 
-import ai.labs.memory.Data;
 import ai.labs.memory.IConversationMemory;
 import ai.labs.memory.IData;
 import ai.labs.memory.IDataFactory;
+import ai.labs.memory.model.Data;
 import ai.labs.output.IOutputGeneration;
 import ai.labs.output.model.OutputEntry;
 import ai.labs.output.model.OutputValue;

@@ -1,9 +1,13 @@
 package ai.labs.memory;
 
 import ai.labs.memory.model.ConversationOutput;
+import ai.labs.memory.model.ConversationProperties;
 import ai.labs.models.ConversationState;
 
-import java.util.*;
+import java.util.ArrayList;
+import java.util.LinkedList;
+import java.util.List;
+import java.util.Stack;
 import java.util.stream.Collectors;
 
 /**
@@ -19,6 +23,7 @@ public class ConversationMemory implements IConversationMemory {
     private Stack<IConversationStep> previousSteps;
     private Stack<IConversationStep> redoCache = new Stack<>();
     private List<ConversationOutput> conversationOutputs = new LinkedList<>();
+    private IConversationProperties conversationProperties = new ConversationProperties(this);
     private ConversationState conversationState;
 
     ConversationMemory(String conversationId, String botId, Integer botVersion) {
@@ -131,13 +136,13 @@ public class ConversationMemory implements IConversationMemory {
         return botVersion;
     }
 
-    @Override
-    public String getUserId() {
-        return userId;
-    }
-
     public List<ConversationOutput> getConversationOutputs() {
         return conversationOutputs;
+    }
+
+    @Override
+    public IConversationProperties getConversationProperties() {
+        return conversationProperties;
     }
 
     @Override

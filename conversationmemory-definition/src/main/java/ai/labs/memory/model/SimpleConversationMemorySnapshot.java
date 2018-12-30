@@ -1,5 +1,6 @@
 package ai.labs.memory.model;
 
+import ai.labs.memory.IConversationMemory;
 import ai.labs.models.ConversationState;
 import ai.labs.models.Deployment;
 import lombok.AllArgsConstructor;
@@ -23,6 +24,7 @@ public class SimpleConversationMemorySnapshot {
     private ConversationState conversationState;
     private int redoCacheSize;
     private List<ConversationOutput> conversationOutputs = new LinkedList<>();
+    private IConversationMemory.IConversationProperties conversationProperties = new ConversationProperties(null);
     private List<SimpleConversationStep> conversationSteps = new LinkedList<>();
 
     @Getter

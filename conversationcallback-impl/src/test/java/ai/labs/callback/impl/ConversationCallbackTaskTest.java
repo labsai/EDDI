@@ -6,8 +6,8 @@ import ai.labs.callback.model.ConversationDataResponse;
 import ai.labs.lifecycle.LifecycleException;
 import ai.labs.lifecycle.PackageConfigurationException;
 import ai.labs.memory.ConversationMemory;
-import ai.labs.memory.Data;
 import ai.labs.memory.IConversationMemory;
+import ai.labs.memory.model.Data;
 import org.junit.Before;
 import org.junit.Test;
 

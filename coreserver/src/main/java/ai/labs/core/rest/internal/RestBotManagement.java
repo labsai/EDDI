@@ -119,6 +119,7 @@ public class RestBotManagement implements IRestBotManagement {
         BotDeployment botDeployment = getRandom(botTriggerConfiguration.getBotDeployments());
         Response botResponse = restBotEngine.startConversationWithContext(botDeployment.getEnvironment(),
                 botDeployment.getBotId(),
+                userId,
                 botDeployment.getInitialContext());
         int responseHttpCode = botResponse.getStatus();
         if (responseHttpCode == 201) {

@@ -251,7 +251,7 @@ public class FacebookEndpoint implements IFacebookEndpoint {
             JsonNode rootNode = mapper.readValue(json, JsonNode.class);
             JsonNode conversationStepsArray = rootNode.path("conversationSteps");
             for (JsonNode conversationStep : conversationStepsArray) {
-                for (JsonNode conversationStepValues : conversationStep.get("conversationStep")) {
+                for (JsonNode conversationStepValues : conversationStep.get("step")) {
                     if (conversationStepValues.get("key") != null && conversationStepValues.get("key").asText().startsWith("quickReplies")) {
                         if (conversationStepValues.get("value").isArray()) {
                             for (JsonNode node : conversationStepValues.get("value")) {
@@ -280,7 +280,7 @@ public class FacebookEndpoint implements IFacebookEndpoint {
             JsonNode rootNode = mapper.readValue(json, JsonNode.class);
             JsonNode conversationStepsArray = rootNode.path("conversationSteps");
             for (JsonNode conversationStep : conversationStepsArray) {
-                for (JsonNode conversationStepValues : conversationStep.get("conversationStep")) {
+                for (JsonNode conversationStepValues : conversationStep.get("step")) {
                     if (conversationStepValues.get("key") != null) {
                         if (conversationStepValues.get("key").asText().startsWith("output:text")) {
                             output.add(new Output("text", conversationStepValues.get("value").asText()));

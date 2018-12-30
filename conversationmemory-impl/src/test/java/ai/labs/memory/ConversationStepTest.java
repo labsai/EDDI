@@ -1,6 +1,7 @@
 package ai.labs.memory;
 
 import ai.labs.memory.model.ConversationOutput;
+import ai.labs.memory.model.Data;
 import org.junit.Assert;
 import org.junit.Before;
 import org.junit.Test;

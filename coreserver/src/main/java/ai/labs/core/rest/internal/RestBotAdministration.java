@@ -74,15 +74,9 @@ public class RestBotAdministration implements IRestBotAdministration {
                             });
                 }
             } catch (ServiceException e) {
-                String message = "Error while deploying bot! (botId=%s , version=%s)";
-                message = String.format(message, botId, version);
-                log.error(message, e);
-                throw new InternalServerErrorException(message, e);
+                throwError(botId, version, e, "Error while deploying bot! (botId=%s , version=%s)");
             } catch (IllegalAccessException e) {
-                String message = "Bot deployment is currently in progress! (botId=%s , version=%s)";
-                message = String.format(message, botId, version);
-                log.error(message, e);
-                throw new NoLogWebApplicationException(new Throwable(message), Response.Status.FORBIDDEN);
+                throwErrorForbidden(botId, version, e);
             } catch (Exception e) {
                 log.error(e.getLocalizedMessage(), e);
                 throw new InternalServerErrorException(e.getLocalizedMessage(), e);
@@ -126,15 +120,9 @@ public class RestBotAdministration implements IRestBotAdministration {
                 deploymentStore.setDeploymentInfo(environment.toString(),
                         botId, version, DeploymentStatus.undeployed);
             } catch (ServiceException e) {
-                String message = "Error while undeploying bot! (botId=%s , version=%s)";
-                message = String.format(message, botId, version);
-                log.error(message, e);
-                throw new InternalServerErrorException(message, e);
+                throwError(botId, version, e, "Error while undeploying bot! (botId=%s , version=%s)");
             } catch (IllegalAccessException e) {
-                String message = "Bot deployment is currently in progress! (botId=%s , version=%s)";
-                message = String.format(message, botId, version);
-                log.error(message, e);
-                throw new NoLogWebApplicationException(new Throwable(message), Response.Status.FORBIDDEN);
+                return throwErrorForbidden(botId, version, e);
             } catch (Exception e) {
                 log.error(e.getLocalizedMessage(), e);
                 throw new InternalServerErrorException(e.getLocalizedMessage(), e);
@@ -143,6 +131,13 @@ public class RestBotAdministration implements IRestBotAdministration {
             return null;
         };
         SystemRuntime.getRuntime().submitCallable(undeployBot, ThreadContext.getResources());
+    }
+
+    private static Void throwErrorForbidden(String botId, Integer version, IllegalAccessException e) {
+        String message = "Bot deployment is currently in progress! (botId=%s , version=%s)";
+        message = String.format(message, botId, version);
+        log.error(message, e);
+        throw new NoLogWebApplicationException(new Throwable(message), Response.Status.FORBIDDEN);
     }
 
     @Override
@@ -163,10 +158,13 @@ public class RestBotAdministration implements IRestBotAdministration {
                 return Status.NOT_FOUND;
             }
         } catch (ServiceException e) {
-            String message = "Error while deploying bot! (botId=%s , version=%s)";
-            message = String.format(message, botId, version);
-            log.error(message, e);
-            throw new InternalServerErrorException(message, e);
+            return throwError(botId, version, e, "Error while deploying bot! (botId=%s , version=%s)");
         }
+    }
+
+    private Status throwError(String botId, Integer version, ServiceException e, String message) {
+        message = String.format(message, botId, version);
+        log.error(message, e);
+        throw new InternalServerErrorException(message, e);
     }
 }

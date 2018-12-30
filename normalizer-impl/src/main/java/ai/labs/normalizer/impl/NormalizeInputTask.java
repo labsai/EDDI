@@ -1,9 +1,9 @@
 package ai.labs.normalizer.impl;
 
 import ai.labs.lifecycle.ILifecycleTask;
-import ai.labs.memory.Data;
 import ai.labs.memory.IConversationMemory;
 import ai.labs.memory.IData;
+import ai.labs.memory.model.Data;
 import ai.labs.resources.rest.extensions.model.ExtensionDescriptor;
 import ai.labs.resources.rest.extensions.model.ExtensionDescriptor.ConfigValue;
 
@@ -15,7 +15,7 @@ import static ai.labs.resources.rest.extensions.model.ExtensionDescriptor.FieldT
 /**
  * @author ginccc
  */
-
+@Deprecated
 public class NormalizeInputTask implements ILifecycleTask {
     private static final String ID = "ai.labs.normalizer";
     private static final String ALLOWED_CHARS_IDENTIFIER = "allowedChars";

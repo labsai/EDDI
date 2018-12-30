@@ -5,16 +5,12 @@ import lombok.Setter;
 
 @Getter
 @Setter
-public class QuickRepliesBuildingInstruction {
-    private String pathToTargetArray;
-    private String iterationObjectName;
-    private String templateFilterExpression;
+public class QuickRepliesBuildingInstruction extends BuildingInstruction {
     private String quickReplyValue;
     private String quickReplyExpressions;
 
     public QuickRepliesBuildingInstruction() {
-        iterationObjectName = "obj";
-        templateFilterExpression = "";
+        super();
         quickReplyValue = "";
         quickReplyExpressions = "";
     }
