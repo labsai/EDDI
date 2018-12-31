@@ -133,7 +133,6 @@ public class OutputTemplateTaskTest {
     private void verifyTask(List<QuickReply> expectedPostQuickReplies) {
         verify(currentStep).getAllData("output");
         verify(currentStep).getAllData("quickReplies");
-        verify(currentStep).getAllData("context");
         verify(dataFactory).createData(eq(KEY_OUTPUT_TEXT_SOME_ACTION_PRE_TEMPLATED), eq(templateString));
         verify(dataFactory).createData(eq(KEY_OUTPUT_TEXT_SOME_ACTION_POST_TEMPLATED), eq(expectedOutputString));
         verify(dataFactory, times(2)).createData(eq(KEY_QUICK_REPLY_SOME_ACTION_PRE_TEMPLATED), any());

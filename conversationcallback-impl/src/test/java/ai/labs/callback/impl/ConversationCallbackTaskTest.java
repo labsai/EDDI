@@ -7,6 +7,7 @@ import ai.labs.lifecycle.LifecycleException;
 import ai.labs.lifecycle.PackageConfigurationException;
 import ai.labs.memory.ConversationMemory;
 import ai.labs.memory.IConversationMemory;
+import ai.labs.memory.model.ConversationProperties;
 import ai.labs.memory.model.Data;
 import org.junit.Before;
 import org.junit.Test;
@@ -45,6 +46,7 @@ public class ConversationCallbackTaskTest {
                 new ConversationMemory.ConversationStepStack(new LinkedList<>()));
         when(currentStep.getLatestData(eq("action"))).thenAnswer(invocation ->
                 new Data<>("action", Collections.singletonList("action_1")));
+        when(memory.getConversationProperties()).thenAnswer(invocation -> new ConversationProperties(memory));
     }
 
     @Test
