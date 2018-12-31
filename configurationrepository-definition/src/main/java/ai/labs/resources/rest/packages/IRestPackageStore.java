@@ -36,7 +36,8 @@ public interface IRestPackageStore extends IRestVersionInfo {
             @QueryParam("index") @DefaultValue("0") Integer index,
             @QueryParam("limit") @DefaultValue("20") Integer limit,
             @ApiParam(name = "body", value = "eddi://ai.labs.TYPE/PATH/ID?version=VERSION")
-            @DefaultValue("") String containingResourceUri);
+            @DefaultValue("") String containingResourceUri,
+            @QueryParam("includePreviousVersions") @DefaultValue("false") Boolean includePreviousVersions);
 
     @GET
     @Path("/{id}")

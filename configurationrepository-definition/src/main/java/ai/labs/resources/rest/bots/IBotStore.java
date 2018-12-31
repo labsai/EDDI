@@ -11,5 +11,5 @@ import java.util.List;
  * @author ginccc
  */
 public interface IBotStore extends IResourceStore<BotConfiguration> {
-    List<DocumentDescriptor> getBotDescriptorsContainingPackage(String packageId, Integer packageVersion) throws ResourceNotFoundException, ResourceStoreException;
+    List<DocumentDescriptor> getBotDescriptorsContainingPackage(String packageId, Integer packageVersion, boolean includePreviousVersions) throws ResourceNotFoundException, ResourceStoreException;
 }

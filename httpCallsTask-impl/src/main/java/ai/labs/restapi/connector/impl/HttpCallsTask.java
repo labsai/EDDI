@@ -44,10 +44,11 @@ public class HttpCallsTask implements ILifecycleTask {
     private static final String KEY_HTTP_CALLS = "httpCalls";
     private static final String KEY_CURRENT_MEMORY = "current";
     private static final String KEY_MEMORY = "memory";
+    private static final String SLASH_CHAR = "/";
     private final IHttpClient httpClient;
-    private IJsonSerialization jsonSerialization;
+    private final IJsonSerialization jsonSerialization;
     private final IResourceClientLibrary resourceClientLibrary;
-    private IDataFactory dataFactory;
+    private final IDataFactory dataFactory;
     private final ITemplatingEngine templatingEngine;
     private final IMemoryItemConverter memoryItemConverter;
     private String targetServerUri;
@@ -152,13 +153,10 @@ public class HttpCallsTask implements ILifecycleTask {
                                 continue;
                             }
 
-                            Object responseObject = jsonSerialization.deserialize(responseBody, Object.class);
                             String responseObjectName = call.getResponseObjectName();
-                            Map<String, Object> templateHttpCalls = (Map<String, Object>) currentMemory.get(KEY_HTTP_CALLS);
-                            if (templateHttpCalls == null) {
-                                templateHttpCalls = new HashMap<>();
-                                currentMemory.put(KEY_HTTP_CALLS, templateHttpCalls);
-                            }
+                            templateHttpCalls.put(responseObjectName + "Response", response);
+
+                            Object responseObject = jsonSerialization.deserialize(responseBody, Object.class);
 
                             templateHttpCalls.put(responseObjectName, responseObject);
                             templateDataObjects.put(responseObjectName, responseObject);
@@ -223,10 +221,13 @@ public class HttpCallsTask implements ILifecycleTask {
         }
     }
 
-    private IRequest buildRequest(Request requestConfig, Map<String, Object> templateDataObjects)
-            throws ITemplatingEngine.TemplateEngineException {
+    private IRequest buildRequest(Request requestConfig, Map<String, Object> templateDataObjects) throws ITemplatingEngine.TemplateEngineException {
+        String path = requestConfig.getPath().trim();
+        if (!path.startsWith(SLASH_CHAR)) {
+            path = SLASH_CHAR + path;
+        }
+        URI targetUri = URI.create(targetServerUri + templateValues(path, templateDataObjects));
 
-        URI targetUri = URI.create(targetServerUri + templateValues(requestConfig.getPath(), templateDataObjects));
         String requestBody = templateValues(requestConfig.getBody(), templateDataObjects);
 
         IRequest request = httpClient.newRequest(targetUri,
@@ -310,7 +311,11 @@ public class HttpCallsTask implements ILifecycleTask {
             try {
                 HttpCallsConfiguration httpCallsConfig = resourceClientLibrary.getResource(uri, HttpCallsConfiguration.class);
 
-                this.targetServerUri = httpCallsConfig.getTargetServer().toString();
+                String targetServerUri = httpCallsConfig.getTargetServer().toString();
+                if (targetServerUri.endsWith(SLASH_CHAR)) {
+                    targetServerUri = targetServerUri.substring(0, targetServerUri.length() - 2);
+                }
+                this.targetServerUri = targetServerUri;
                 this.httpCalls = httpCallsConfig.getHttpCalls();
 
             } catch (ServiceException e) {
