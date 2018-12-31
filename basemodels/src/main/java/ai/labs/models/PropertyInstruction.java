@@ -10,5 +10,5 @@ import lombok.Setter;
 @NoArgsConstructor
 @AllArgsConstructor
 public class PropertyInstruction extends Property {
-    private String path = "";
+    private String fromObjectPath = "";
 }

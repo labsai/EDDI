@@ -99,7 +99,7 @@ public class PropertyDisposerTask implements ILifecycleTask {
                     for (PropertyInstruction property : propertyInstructions) {
                         try {
                             String name = property.getName();
-                            String path = property.getPath();
+                            String path = property.getFromObjectPath();
                             Property.Scope scope = property.getScope();
                             RuntimeUtilities.checkNotNull(name, "property.name");
 
@@ -202,7 +202,7 @@ public class PropertyDisposerTask implements ILifecycleTask {
                 propertyInstruction.setValue(property.get(VALUE));
             }
             if (property.containsKey(PATH)) {
-                propertyInstruction.setPath(property.get(PATH).toString());
+                propertyInstruction.setFromObjectPath(property.get(PATH).toString());
             }
             if (property.containsKey(SCOPE)) {
                 propertyInstruction.setScope(Property.Scope.valueOf(property.get(SCOPE).toString()));
