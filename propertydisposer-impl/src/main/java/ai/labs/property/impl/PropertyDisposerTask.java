@@ -39,7 +39,7 @@ public class PropertyDisposerTask implements ILifecycleTask {
     private static final String KEY_SET_ON_ACTIONS = "setOnActions";
     private static final String NAME = "name";
     private static final String VALUE = "value";
-    private static final String PATH = "path";
+    private static final String FROM_OBJECT_PATH = "fromObjectPath";
     private static final String SCOPE = "scope";
     private final Map<String, List<PropertyInstruction>> actionPropertyMapper = new HashMap<>();
     private final IPropertyDisposer propertyDisposer;
@@ -99,13 +99,13 @@ public class PropertyDisposerTask implements ILifecycleTask {
                     for (PropertyInstruction property : propertyInstructions) {
                         try {
                             String name = property.getName();
-                            String path = property.getFromObjectPath();
+                            String fromObjectPath = property.getFromObjectPath();
                             Property.Scope scope = property.getScope();
                             RuntimeUtilities.checkNotNull(name, "property.name");
 
                             Object templatedObj;
-                            if (!RuntimeUtilities.isNullOrEmpty(path)) {
-                                templatedObj = Ognl.getValue(path, templateDataObjects);
+                            if (!RuntimeUtilities.isNullOrEmpty(fromObjectPath)) {
+                                templatedObj = Ognl.getValue(fromObjectPath, templateDataObjects);
                             } else {
                                 templatedObj = property.getValue();
                             }
@@ -201,8 +201,8 @@ public class PropertyDisposerTask implements ILifecycleTask {
             if (property.containsKey(VALUE)) {
                 propertyInstruction.setValue(property.get(VALUE));
             }
-            if (property.containsKey(PATH)) {
-                propertyInstruction.setFromObjectPath(property.get(PATH).toString());
+            if (property.containsKey(FROM_OBJECT_PATH)) {
+                propertyInstruction.setFromObjectPath(property.get(FROM_OBJECT_PATH).toString());
             }
             if (property.containsKey(SCOPE)) {
                 propertyInstruction.setScope(Property.Scope.valueOf(property.get(SCOPE).toString()));

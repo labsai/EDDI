@@ -12,6 +12,7 @@ import ai.labs.memory.IDataFactory;
 import ai.labs.memory.IMemoryItemConverter;
 import ai.labs.models.Context;
 import ai.labs.models.Property;
+import ai.labs.models.PropertyInstruction;
 import ai.labs.resources.rest.extensions.model.ExtensionDescriptor;
 import ai.labs.resources.rest.extensions.model.ExtensionDescriptor.ConfigValue;
 import ai.labs.resources.rest.extensions.model.ExtensionDescriptor.FieldType;
@@ -189,21 +190,21 @@ public class HttpCallsTask implements ILifecycleTask {
             throws IOException, ITemplatingEngine.TemplateEngineException, OgnlException {
 
         PostResponse postResponse = call.getPostResponse();
-        PropertySavingInstruction propertySavingInstruction = null;
+        PropertyInstruction propertyInstruction = null;
         QuickRepliesBuildingInstruction qrBuildInstruction = null;
         if (postResponse != null) {
-            propertySavingInstruction = postResponse.getPropertySavingInstruction();
+            propertyInstruction = postResponse.getPropertyInstruction();
             qrBuildInstruction = postResponse.getQrBuildInstruction();
         }
 
-        if (propertySavingInstruction != null) {
-            String propertyName = propertySavingInstruction.getPropertyName();
-            RuntimeUtilities.checkNotNull(propertyName, "propertyName");
+        if (propertyInstruction != null) {
+            String propertyName = propertyInstruction.getName();
+            RuntimeUtilities.checkNotNull(propertyName, "name");
 
-            String path = propertySavingInstruction.getPath();
-            RuntimeUtilities.checkNotNull(path, "path");
+            String path = propertyInstruction.getFromObjectPath();
+            RuntimeUtilities.checkNotNull(path, "fromObjectPath");
 
-            Property.Scope scope = Property.Scope.valueOf(propertySavingInstruction.getScope());
+            Property.Scope scope = propertyInstruction.getScope();
             memory.getConversationProperties().put(propertyName, new Property(propertyName,
                     Ognl.getValue(path, templateDataObjects), scope));
         }
