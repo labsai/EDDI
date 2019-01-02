@@ -29,7 +29,10 @@ import ognl.OgnlException;
 import javax.inject.Inject;
 import java.io.IOException;
 import java.net.URI;
-import java.util.*;
+import java.util.HashSet;
+import java.util.LinkedList;
+import java.util.List;
+import java.util.Map;
 import java.util.stream.Collectors;
 
 import static ai.labs.utilities.RuntimeUtilities.isNullOrEmpty;
@@ -153,12 +156,8 @@ public class HttpCallsTask implements ILifecycleTask {
                                 continue;
                             }
 
-                            String responseObjectName = call.getResponseObjectName();
-                            templateHttpCalls.put(responseObjectName + "Response", response);
-
                             Object responseObject = jsonSerialization.deserialize(responseBody, Object.class);
-
-                            templateHttpCalls.put(responseObjectName, responseObject);
+                            String responseObjectName = call.getResponseObjectName();
                             templateDataObjects.put(responseObjectName, responseObject);
 
                             String memoryDataName = "httpCalls:" + responseObjectName;
