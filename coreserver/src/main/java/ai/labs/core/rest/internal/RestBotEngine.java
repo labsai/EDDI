@@ -34,10 +34,7 @@ import javax.ws.rs.container.AsyncResponse;
 import javax.ws.rs.core.MediaType;
 import javax.ws.rs.core.Response;
 import java.net.URI;
-import java.util.Collections;
-import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
+import java.util.*;
 import java.util.concurrent.*;
 import java.util.stream.Collectors;
 
@@ -82,13 +79,17 @@ public class RestBotEngine implements IRestBotEngine {
     public Response startConversationWithContext(Deployment.Environment environment, String botId, Map<String, Context> context) {
         RuntimeUtilities.checkNotNull(environment, "environment");
         RuntimeUtilities.checkNotNull(botId, "botId");
-        RuntimeUtilities.checkNotNull(context, "context");
+
         try {
             IBot latestBot = botFactory.getLatestBot(environment, botId);
             if (latestBot == null) {
                 String message = "No instance of bot (botId=%s) deployed in environment (environment=%s)!";
                 message = String.format(message, botId, environment);
                 return Response.status(Response.Status.NOT_FOUND).type(MediaType.TEXT_PLAIN).entity(message).build();
+            }
+
+            if (context == null) {
+                context = new LinkedHashMap<>();
             }
 
             IConversation conversation = latestBot.startConversation(context, null);
@@ -239,9 +240,6 @@ public class RestBotEngine implements IRestBotEngine {
             String errorMsg = "Error while processing message!";
             log.error(errorMsg, e);
             throw new InternalServerErrorException(errorMsg, e);
-        } catch (IResourceStore.ResourceStoreException e) {
-            log.error(e.getLocalizedMessage(), e);
-            throw new InternalServerErrorException(e.getLocalizedMessage(), e);
         } catch (IResourceStore.ResourceNotFoundException e) {
             throw new NoLogWebApplicationException(Response.Status.NOT_FOUND);
         } catch (Exception e) {
@@ -379,9 +377,6 @@ public class RestBotEngine implements IRestBotEngine {
             String errorMsg = "Error while processing message!";
             log.error(errorMsg, e);
             throw new InternalServerErrorException(errorMsg, e);
-        } catch (IResourceStore.ResourceStoreException e) {
-            log.error(e.getLocalizedMessage(), e);
-            throw new InternalServerErrorException(e.getLocalizedMessage(), e);
         } catch (IResourceStore.ResourceNotFoundException e) {
             throw new NoLogWebApplicationException(Response.Status.NOT_FOUND);
         } catch (Exception e) {
@@ -441,9 +436,6 @@ public class RestBotEngine implements IRestBotEngine {
             String errorMsg = "Error while processing message!";
             log.error(errorMsg, e);
             throw new InternalServerErrorException(errorMsg, e);
-        } catch (IResourceStore.ResourceStoreException e) {
-            log.error(e.getLocalizedMessage(), e);
-            throw new InternalServerErrorException(e.getLocalizedMessage(), e);
         } catch (IResourceStore.ResourceNotFoundException e) {
             throw new NoLogWebApplicationException(Response.Status.NOT_FOUND);
         } catch (Exception e) {
