@@ -7,34 +7,43 @@ import ai.labs.memory.ConversationMemory;
 import ai.labs.memory.IConversationMemory;
 import ai.labs.memory.IConversationMemory.IConversationProperties;
 import ai.labs.memory.IData;
+import ai.labs.memory.IPropertiesHandler;
 import ai.labs.memory.model.Data;
 import ai.labs.models.Context;
 import ai.labs.models.ConversationState;
 import ai.labs.models.Property;
 import ai.labs.models.Property.Scope;
+import ai.labs.persistence.IResourceStore;
+import ai.labs.resources.rest.properties.model.Properties;
 import ai.labs.runtime.IExecutablePackage;
-import org.apache.commons.lang3.RandomStringUtils;
 
-import java.util.LinkedList;
-import java.util.List;
-import java.util.Map;
-import java.util.Objects;
+import java.util.*;
 import java.util.stream.Collectors;
+
+import static ai.labs.memory.IConversationMemory.IWritableConversationStep;
 
 /**
  * @author ginccc
  */
 public class Conversation implements IConversation {
     private static final String CONVERSATION_END = "CONVERSATION_END";
+    private static final String KEY_USER_INFO = "userInfo";
+    private static final String KEY_INPUT = "input";
+    private static final String KEY_CONTEXT = "context";
+    private static final String KEY_ACTIONS = "actions";
+    private static final String CONVERSATION_START = "CONVERSATION_START";
     private final List<IExecutablePackage> executablePackages;
     private final IConversationMemory conversationMemory;
+    private final IPropertiesHandler propertiesHandler;
     private final IConversation.IConversationOutputRenderer outputProvider;
 
     Conversation(List<IExecutablePackage> executablePackages,
                  IConversationMemory conversationMemory,
+                 IPropertiesHandler propertiesHandler,
                  IConversationOutputRenderer outputProvider) {
         this.executablePackages = executablePackages;
         this.conversationMemory = conversationMemory;
+        this.propertiesHandler = propertiesHandler;
         this.outputProvider = outputProvider;
     }
 
@@ -56,18 +65,41 @@ public class Conversation implements IConversation {
     @Override
     public void init(Map<String, Context> context) throws LifecycleException {
         setConversationState(ConversationState.READY);
-        executePackages(createContextData(context));
-        if (conversationMemory.getUserId() != null) {
-            initProperties();
-        }
-    }
 
-    private void initProperties() {
-        //TODO
+        addConversationStartAction(conversationMemory.getCurrentStep());
+        loadLongTermProperties(conversationMemory);
+
+        executePackages(createContextData(context));
     }
 
     private void setConversationState(ConversationState conversationState) {
         this.conversationMemory.setConversationState(conversationState);
+    }
+
+    private static void addConversationStartAction(IWritableConversationStep currentStep) {
+        List<String> conversationEndArray = Collections.singletonList(CONVERSATION_START);
+        currentStep.storeData(new Data<>(KEY_ACTIONS, conversationEndArray));
+        currentStep.addConversationOutputList(KEY_ACTIONS, conversationEndArray);
+    }
+
+    private void loadLongTermProperties(IConversationMemory conversationMemory) throws LifecycleException {
+        try {
+            Properties properties = propertiesHandler.loadProperties();
+
+            if (properties.containsKey(KEY_USER_INFO)) {
+                Object userInfo = properties.get(KEY_USER_INFO);
+                if (userInfo instanceof Map) {
+                    conversationMemory.getConversationProperties().
+                            put(KEY_USER_INFO, new Property(KEY_USER_INFO, userInfo, Scope.conversation));
+                }
+            }
+
+            conversationMemory.getConversationProperties().putAll(convertProperties(properties));
+
+        } catch (IResourceStore.ResourceStoreException | IResourceStore.ResourceNotFoundException e) {
+            throw new LifecycleException(e.getLocalizedMessage(), e);
+        }
+
     }
 
     private ConversationState getConversationState() {
@@ -87,45 +119,32 @@ public class Conversation implements IConversation {
             setConversationState(ConversationState.IN_PROGRESS);
 
             ((ConversationMemory) conversationMemory).startNextStep();
-            List<IData> data = new LinkedList<>();
-
-            //add userInfo
-            IData userData;
-            String userId = conversationMemory.getUserId();
-            if (userId == null) {
-                userId = "anonymous-" + RandomStringUtils.randomAlphanumeric(10);
-            }
-
-            userData = new Data<>("userInfo:userId", userId);
-            userData.setPublic(true);
-            data.add(userData);
-
-            //store context data
-            data.addAll(createContextData(contexts));
-
-            IConversationMemory.IWritableConversationStep currentStep = conversationMemory.getCurrentStep();
-            //todo load userInfo from db
-            currentStep.addConversationOutputMap("userInfo", Map.of("userId", userId));
+            List<IData> data = createContextData(contexts);
 
             //store user input in memory
             IData initialData;
+            IWritableConversationStep currentStep = conversationMemory.getCurrentStep();
             if (!"".equals(message.trim())) {
-                initialData = new Data<>("input:initial", message);
+                initialData = new Data<>(KEY_INPUT + ":initial", message);
                 initialData.setPublic(true);
                 data.add(initialData);
-                currentStep.addConversationOutputString("input", message);
+                currentStep.addConversationOutputString(KEY_INPUT, message);
             }
 
             //execute input processing
             executePackages(data);
 
-            IData<List<String>> actionData = currentStep.getLatestData("action");
+            IData<List<String>> actionData = currentStep.getLatestData(KEY_ACTIONS);
             if (actionData != null) {
                 List<String> result = actionData.getResult();
                 if (result != null && result.contains(CONVERSATION_END)) {
                     endConversation();
                 }
             }
+
+            removeOldInvalidProperties();
+            storePropertiesPermanently();
+
         } catch (LifecycleException.LifecycleInterruptedException e) {
             setConversationState(ConversationState.EXECUTION_INTERRUPTED);
             throw e;
@@ -137,32 +156,22 @@ public class Conversation implements IConversation {
                 setConversationState(ConversationState.READY);
             }
 
-            removeOldInvalidProperties();
-            storePropertiesPermanently();
-
             if (outputProvider != null) {
                 outputProvider.renderOutput(conversationMemory);
             }
         }
     }
 
-    private void storePropertiesPermanently() {
-/*
-        List<IData<List<Property>>> propertiesData = conversationMemory.getCurrentStep().getAllData("properties");
-        List<List<Property>> collect = propertiesData.stream().
-                reduce(data -> data.getResult()).collect(Collectors.toList());
-        List<Map<String, Object>> properties = collect.stream().
-                filter(data -> data.getResult().getScope() == Scope.longTerm).map(data -> {
-            String key = data.getKey();
-            return Map.of(key.substring(key.indexOf(":") + 1), data.getResult().getValue());
-        }).collect(Collectors.toList());
-*/
+    private Map<String, Property> convertProperties(Properties properties) {
+        return properties.keySet().stream().collect(
+                Collectors.toMap(name -> name,
+                        name -> new Property(name, properties.get(name), Scope.longTerm),
+                        (a, b) -> b, LinkedHashMap::new));
 
-        //todo store in userinfo db
     }
 
     private void removeOldInvalidProperties() {
-        IConversationProperties conversationProperties = this.conversationMemory.getConversationProperties();
+        IConversationProperties conversationProperties = conversationMemory.getConversationProperties();
         Map<String, Property> filteredConversationProperties =
                 conversationProperties.entrySet().stream()
                         .filter(property -> property.getValue().getScope() != Scope.step)
@@ -172,11 +181,21 @@ public class Conversation implements IConversation {
         conversationProperties.putAll(filteredConversationProperties);
     }
 
+    private void storePropertiesPermanently()
+            throws IResourceStore.ResourceStoreException {
+
+        Properties longTermConversationProperties = conversationMemory.getConversationProperties().values().stream()
+                .filter(property -> property.getScope() == Scope.longTerm)
+                .collect(Collectors.toMap(Property::getName, Property::getValue, (a, b) -> b, Properties::new));
+
+        propertiesHandler.mergeProperties(longTermConversationProperties);
+    }
+
     private List<IData> createContextData(Map<String, Context> context) {
         List<IData> contextData = new LinkedList<>();
         if (context != null) {
             for (String key : context.keySet()) {
-                contextData.add(new Data<>("context:" + key, context.get(key)));
+                contextData.add(new Data<>(KEY_CONTEXT + ":" + key, context.get(key)));
 
             }
         }

@@ -20,6 +20,7 @@ import java.util.List;
 public class SimpleConversationMemorySnapshot {
     private String botId;
     private Integer botVersion;
+    private String userId;
     private Deployment.Environment environment;
     private ConversationState conversationState;
     private int redoCacheSize;

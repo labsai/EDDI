@@ -26,8 +26,8 @@ public class ConversationMemory implements IConversationMemory {
     private IConversationProperties conversationProperties = new ConversationProperties(this);
     private ConversationState conversationState;
 
-    ConversationMemory(String conversationId, String botId, Integer botVersion) {
-        this(botId, botVersion);
+    public ConversationMemory(String conversationId, String botId, Integer botVersion, String userId) {
+        this(botId, botVersion, userId);
         this.conversationId = conversationId;
     }
 

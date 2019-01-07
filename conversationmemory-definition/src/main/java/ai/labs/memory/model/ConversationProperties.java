@@ -38,6 +38,11 @@ public class ConversationProperties
     }
 
     @Override
+    public void putAll(Map<? extends String, ? extends Property> map) {
+        map.keySet().forEach(key -> put(key, map.get(key)));
+    }
+
+    @Override
     public Map<String, Object> toMap() {
         return propertiesMap;
     }

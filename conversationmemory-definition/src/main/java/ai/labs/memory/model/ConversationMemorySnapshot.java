@@ -17,6 +17,7 @@ public class ConversationMemorySnapshot {
     private String conversationId;
     private String botId;
     private Integer botVersion;
+    private String userId;
     private Deployment.Environment environment;
     private ConversationState conversationState;
     private List<ConversationOutput> conversationOutputs = new LinkedList<>();

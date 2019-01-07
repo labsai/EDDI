@@ -42,14 +42,14 @@ public class RestUtilities {
 
         String relativeUriString;
         if (uriString.contains("://")) {
-            uriString = uriString.substring(uriString.indexOf("://") + 3, uriString.length());
-            relativeUriString = uriString.substring(uriString.indexOf("/"), uriString.length());
+            uriString = uriString.substring(uriString.indexOf("://") + 3);
+            relativeUriString = uriString.substring(uriString.indexOf("/"));
         } else {
             relativeUriString = uriString;
         }
 
         if (relativeUriString.startsWith("/")) {
-            relativeUriString = relativeUriString.substring(1, relativeUriString.length());
+            relativeUriString = relativeUriString.substring(1);
         }
 
         if (relativeUriString.endsWith("/")) {
@@ -61,7 +61,7 @@ public class RestUtilities {
         String lastPartOfUri = split.length > 2 ? split[split.length - 1].split("\\?")[0] : null;
         final String id = isValidId(lastPartOfUri) ? lastPartOfUri : null;
 
-        Integer queryParamVersion = 0;
+        int queryParamVersion = 0;
         if (relativeUriString.contains(versionQueryParam)) {
             String queryParamsString = relativeUriString.split("\\?")[1];
             Map<String, String> queryMap = getQueryMap(queryParamsString);

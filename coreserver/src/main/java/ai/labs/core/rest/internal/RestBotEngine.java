@@ -6,14 +6,15 @@ import ai.labs.lifecycle.IConversation;
 import ai.labs.lifecycle.LifecycleException;
 import ai.labs.memory.IConversationMemory;
 import ai.labs.memory.IConversationMemoryStore;
+import ai.labs.memory.IPropertiesHandler;
 import ai.labs.memory.model.ConversationMemorySnapshot;
-import ai.labs.memory.model.ConversationOutput;
 import ai.labs.memory.model.SimpleConversationMemorySnapshot;
 import ai.labs.models.Context;
 import ai.labs.models.ConversationState;
 import ai.labs.models.Deployment;
 import ai.labs.models.InputData;
-import ai.labs.persistence.IResourceStore;
+import ai.labs.resources.rest.properties.IPropertiesStore;
+import ai.labs.resources.rest.properties.model.Properties;
 import ai.labs.rest.rest.IRestBotEngine;
 import ai.labs.runtime.IBot;
 import ai.labs.runtime.IBotFactory;
@@ -24,6 +25,7 @@ import ai.labs.runtime.service.ServiceException;
 import ai.labs.utilities.RestUtilities;
 import ai.labs.utilities.RuntimeUtilities;
 import lombok.extern.slf4j.Slf4j;
+import org.apache.commons.lang3.RandomStringUtils;
 import org.jboss.resteasy.spi.NoLogWebApplicationException;
 
 import javax.inject.Inject;
@@ -42,6 +44,8 @@ import java.util.concurrent.*;
 import java.util.stream.Collectors;
 
 import static ai.labs.memory.ConversationMemoryUtilities.*;
+import static ai.labs.persistence.IResourceStore.ResourceNotFoundException;
+import static ai.labs.persistence.IResourceStore.ResourceStoreException;
 
 /**
  * @author ginccc
@@ -52,6 +56,7 @@ public class RestBotEngine implements IRestBotEngine {
     private static final String CACHE_NAME_CONVERSATION_STATE = "conversationState";
     private final IBotFactory botFactory;
     private final IConversationMemoryStore conversationMemoryStore;
+    private final IPropertiesStore propertiesStore;
     private final IConversationCoordinator conversationCoordinator;
     private final SystemRuntime.IRuntime runtime;
     private final int botTimeout;
@@ -60,12 +65,14 @@ public class RestBotEngine implements IRestBotEngine {
     @Inject
     public RestBotEngine(IBotFactory botFactory,
                          IConversationMemoryStore conversationMemoryStore,
+                         IPropertiesStore propertiesStore,
                          IConversationCoordinator conversationCoordinator,
                          ICacheFactory cacheFactory,
                          SystemRuntime.IRuntime runtime,
                          @Named("system.botTimeoutInSeconds") int botTimeout) {
         this.botFactory = botFactory;
         this.conversationMemoryStore = conversationMemoryStore;
+        this.propertiesStore = propertiesStore;
         this.conversationCoordinator = conversationCoordinator;
         this.conversationStateCache = cacheFactory.getCache(CACHE_NAME_CONVERSATION_STATE);
         this.runtime = runtime;
@@ -75,7 +82,7 @@ public class RestBotEngine implements IRestBotEngine {
 
     @Override
     public Response startConversation(Deployment.Environment environment, String botId, String userId) {
-        return startConversationWithContext(environment, botId, null, Collections.emptyMap());
+        return startConversationWithContext(environment, botId, userId, Collections.emptyMap());
     }
 
     @Override
@@ -95,19 +102,51 @@ public class RestBotEngine implements IRestBotEngine {
                 return Response.status(Response.Status.NOT_FOUND).type(MediaType.TEXT_PLAIN).entity(message).build();
             }
 
-            IConversation conversation = latestBot.startConversation(userId, context, null);
+            userId = computeAnonymousUserIdIfEmpty(userId);
+            IConversation conversation = latestBot.startConversation(userId, context,
+                    createPropertiesHandler(userId), null);
             String conversationId = storeConversationMemory(conversation.getConversationMemory(), environment);
             cacheConversationState(conversationId, ConversationState.READY);
             URI createdUri = RestUtilities.createURI(resourceURI, conversationId);
             return Response.created(createdUri).build();
         } catch (ServiceException |
-                IResourceStore.ResourceStoreException |
+                ResourceStoreException |
                 InstantiationException |
                 LifecycleException |
                 IllegalAccessException e) {
             log.error(e.getLocalizedMessage(), e);
             throw new InternalServerErrorException(e.getLocalizedMessage(), e);
         }
+    }
+
+    private String computeAnonymousUserIdIfEmpty(String userId) {
+        return RuntimeUtilities.isNullOrEmpty(userId) ?
+                "anonymous-" + RandomStringUtils.randomAlphanumeric(10) : userId;
+    }
+
+    private IPropertiesHandler createPropertiesHandler(final String userId) {
+        return new IPropertiesHandler() {
+            @Override
+            public Properties loadProperties() throws ResourceStoreException {
+                Properties properties = null;
+                if (!RuntimeUtilities.isNullOrEmpty(userId)) {
+                    properties = propertiesStore.readProperties(userId);
+                }
+
+                if (properties == null) {
+                    properties = new Properties();
+                } else {
+                    properties.remove("_id");
+                }
+
+                return properties;
+            }
+
+            @Override
+            public void mergeProperties(Properties properties) throws ResourceStoreException {
+                propertiesStore.mergeProperties(userId, properties);
+            }
+        };
     }
 
     @Override
@@ -128,8 +167,7 @@ public class RestBotEngine implements IRestBotEngine {
         RuntimeUtilities.checkNotNull(botId, "botId");
         RuntimeUtilities.checkNotNull(conversationId, "conversationId");
         try {
-            ConversationMemorySnapshot conversationMemorySnapshot =
-                    conversationMemoryStore.loadConversationMemorySnapshot(conversationId);
+            var conversationMemorySnapshot = conversationMemoryStore.loadConversationMemorySnapshot(conversationId);
             if (!botId.equals(conversationMemorySnapshot.getBotId())) {
                 String message = "conversationId: '%s' does not belong to bot with conversationId: '%s'. " +
                         "(provided botId='%s', botId in ConversationMemory='%s')";
@@ -140,10 +178,10 @@ public class RestBotEngine implements IRestBotEngine {
                     returnDetailed,
                     returnCurrentStepOnly,
                     returningFields);
-        } catch (IResourceStore.ResourceStoreException | IllegalAccessException e) {
+        } catch (ResourceStoreException | IllegalAccessException e) {
             log.error(e.getLocalizedMessage(), e);
             throw new InternalServerErrorException(e.getLocalizedMessage(), e);
-        } catch (IResourceStore.ResourceNotFoundException e) {
+        } catch (ResourceNotFoundException e) {
             throw new NoLogWebApplicationException(Response.Status.NOT_FOUND);
         }
     }
@@ -205,15 +243,16 @@ public class RestBotEngine implements IRestBotEngine {
                 return;
             }
 
-            IBot bot = botFactory.getBot(environment,
-                    conversationMemory.getBotId(), conversationMemory.getBotVersion());
+            IBot bot = botFactory.getBot(environment, conversationMemory.getBotId(), conversationMemory.getBotVersion());
             if (bot == null) {
                 String msg = "Bot not deployed (environment=%s, conversationId=%s, version=%s)";
                 msg = String.format(msg, environment, conversationMemory.getBotId(), conversationMemory.getBotVersion());
                 response.resume(new NotFoundException(msg));
                 return;
             }
+
             final IConversation conversation = bot.continueConversation(conversationMemory,
+                    createPropertiesHandler(conversationMemory.getUserId()),
                     returnConversationMemory -> {
                         SimpleConversationMemorySnapshot memorySnapshot =
                                 getSimpleConversationMemorySnapshot(returnConversationMemory,
@@ -243,7 +282,7 @@ public class RestBotEngine implements IRestBotEngine {
             String errorMsg = "Error while processing message!";
             log.error(errorMsg, e);
             throw new InternalServerErrorException(errorMsg, e);
-        } catch (IResourceStore.ResourceNotFoundException e) {
+        } catch (ResourceNotFoundException e) {
             throw new NoLogWebApplicationException(Response.Status.NOT_FOUND);
         } catch (Exception e) {
             log.error(e.getLocalizedMessage(), e);
@@ -266,7 +305,7 @@ public class RestBotEngine implements IRestBotEngine {
                         public void onComplete(Void result) {
                             try {
                                 storeConversationMemory(conversationMemory, environment);
-                            } catch (IResourceStore.ResourceStoreException e) {
+                            } catch (ResourceStoreException e) {
                                 logConversationError(conversationId, e);
                             }
                         }
@@ -336,10 +375,10 @@ public class RestBotEngine implements IRestBotEngine {
         try {
             conversationMemory = loadConversationMemory(conversationId);
             return conversationMemory.isUndoAvailable();
-        } catch (IResourceStore.ResourceStoreException e) {
+        } catch (ResourceStoreException e) {
             log.error(e.getLocalizedMessage(), e);
             throw new InternalServerErrorException();
-        } catch (IResourceStore.ResourceNotFoundException e) {
+        } catch (ResourceNotFoundException e) {
             throw new NoLogWebApplicationException(Response.Status.NOT_FOUND);
         }
     }
@@ -374,7 +413,7 @@ public class RestBotEngine implements IRestBotEngine {
             String errorMsg = "Error while processing message!";
             log.error(errorMsg, e);
             throw new InternalServerErrorException(errorMsg, e);
-        } catch (IResourceStore.ResourceNotFoundException e) {
+        } catch (ResourceNotFoundException e) {
             throw new NoLogWebApplicationException(Response.Status.NOT_FOUND);
         } catch (Exception e) {
             log.error(e.getLocalizedMessage(), e);
@@ -382,8 +421,8 @@ public class RestBotEngine implements IRestBotEngine {
         }
     }
 
-    private IConversationMemory loadAndValidateConversationMemory(String botId, String conversationId) throws IResourceStore.ResourceStoreException, IResourceStore.ResourceNotFoundException, IllegalAccessException {
-        final IConversationMemory conversationMemory = loadConversationMemory(conversationId);
+    private IConversationMemory loadAndValidateConversationMemory(String botId, String conversationId) throws ResourceStoreException, ResourceNotFoundException, IllegalAccessException {
+        var conversationMemory = loadConversationMemory(conversationId);
         checkConversationMemoryNotNull(conversationMemory, conversationId);
 
         if (!botId.equals(conversationMemory.getBotId())) {
@@ -398,13 +437,12 @@ public class RestBotEngine implements IRestBotEngine {
         RuntimeUtilities.checkNotNull(environment, "environment");
         RuntimeUtilities.checkNotNull(botId, "botId");
         RuntimeUtilities.checkNotNull(conversationId, "conversationId");
-        final IConversationMemory conversationMemory;
         try {
-            conversationMemory = loadConversationMemory(conversationId);
+            var conversationMemory = loadConversationMemory(conversationId);
             return conversationMemory.isRedoAvailable();
-        } catch (IResourceStore.ResourceStoreException e) {
+        } catch (ResourceStoreException e) {
             throw new NoLogWebApplicationException(Response.Status.NOT_FOUND);
-        } catch (IResourceStore.ResourceNotFoundException e) {
+        } catch (ResourceNotFoundException e) {
             log.error(e.getLocalizedMessage(), e);
             throw new InternalServerErrorException();
         }
@@ -438,7 +476,7 @@ public class RestBotEngine implements IRestBotEngine {
             String errorMsg = "Error while processing message!";
             log.error(errorMsg, e);
             throw new InternalServerErrorException(errorMsg, e);
-        } catch (IResourceStore.ResourceNotFoundException e) {
+        } catch (ResourceNotFoundException e) {
             throw new NoLogWebApplicationException(Response.Status.NOT_FOUND);
         } catch (Exception e) {
             log.error(e.getLocalizedMessage(), e);
@@ -447,9 +485,8 @@ public class RestBotEngine implements IRestBotEngine {
     }
 
     private IConversationMemory loadConversationMemory(String conversationId)
-            throws IResourceStore.ResourceStoreException, IResourceStore.ResourceNotFoundException {
-        ConversationMemorySnapshot conversationMemorySnapshot =
-                conversationMemoryStore.loadConversationMemorySnapshot(conversationId);
+            throws ResourceStoreException, ResourceNotFoundException {
+        var conversationMemorySnapshot = conversationMemoryStore.loadConversationMemorySnapshot(conversationId);
         return convertConversationMemorySnapshot(conversationMemorySnapshot);
     }
 
@@ -463,8 +500,8 @@ public class RestBotEngine implements IRestBotEngine {
     }
 
     private String storeConversationMemory(IConversationMemory conversationMemory, Deployment.Environment environment)
-            throws IResourceStore.ResourceStoreException {
-        ConversationMemorySnapshot memorySnapshot = convertConversationMemory(conversationMemory);
+            throws ResourceStoreException {
+        var memorySnapshot = convertConversationMemory(conversationMemory);
         memorySnapshot.setEnvironment(environment);
         return conversationMemoryStore.storeConversationMemorySnapshot(memorySnapshot);
     }
@@ -487,25 +524,20 @@ public class RestBotEngine implements IRestBotEngine {
             Boolean returnCurrentStepOnly,
             List<String> returningFields) {
 
-        SimpleConversationMemorySnapshot memorySnapshot = convertSimpleConversationMemory(
-                conversationMemorySnapshot, returnDetailed);
+        var memorySnapshot = convertSimpleConversationMemory(conversationMemorySnapshot, returnDetailed);
         if (returnCurrentStepOnly) {
             if (returningFields.isEmpty() || returningFields.contains("conversationSteps")) {
-                List<SimpleConversationMemorySnapshot.SimpleConversationStep> conversationSteps =
-                        memorySnapshot.getConversationSteps();
-                SimpleConversationMemorySnapshot.SimpleConversationStep currentConversationStep =
-                        conversationSteps.get(conversationSteps.size() - 1);
+                var conversationSteps = memorySnapshot.getConversationSteps();
+                var conversationStep = conversationSteps.get(conversationSteps.size() - 1);
                 conversationSteps.clear();
-                conversationSteps.add(currentConversationStep);
+                conversationSteps.add(conversationStep);
             } else {
                 memorySnapshot.setConversationSteps(null);
             }
 
-
             if (returningFields.isEmpty() || returningFields.contains("conversationOutputs")) {
-                List<ConversationOutput> conversationOutputs = memorySnapshot.getConversationOutputs();
-
-                ConversationOutput conversationOutput = conversationOutputs.get(0);
+                var conversationOutputs = memorySnapshot.getConversationOutputs();
+                var conversationOutput = conversationOutputs.get(conversationOutputs.size() - 1);
                 conversationOutputs.clear();
                 conversationOutputs.add(conversationOutput);
             } else {

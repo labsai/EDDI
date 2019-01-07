@@ -4,10 +4,10 @@ import ai.labs.memory.model.ConversationOutput;
 import ai.labs.models.Context;
 import lombok.extern.slf4j.Slf4j;
 
-import java.util.HashMap;
-import java.util.LinkedList;
-import java.util.List;
-import java.util.Map;
+import java.util.*;
+
+import static ai.labs.memory.IConversationMemory.IConversationStep;
+import static ai.labs.memory.IConversationMemory.IWritableConversationStep;
 
 @Slf4j
 public class MemoryItemConverter implements IMemoryItemConverter {
@@ -20,19 +20,26 @@ public class MemoryItemConverter implements IMemoryItemConverter {
 
     @Override
     public Map<String, Object> convert(IConversationMemory memory) {
+        Map<String, Object> ret = new LinkedHashMap<>();
         List<IData<Context>> contextDataList = memory.getCurrentStep().getAllData(KEY_CONTEXT);
-        Map<String, Object> contextMap = prepareContext(contextDataList);
+        var contextMap = prepareContext(contextDataList);
+        var memoryMap = convertMemoryItems(memory);
+        var conversationProperties = memory.getConversationProperties();
 
-        Map<String, Object> memoryForTemplate = convertMemoryItems(memory);
-        if (!memoryForTemplate.isEmpty()) {
-            contextMap.put(KEY_MEMORY, memoryForTemplate);
+        if (!contextMap.isEmpty()) {
+            ret.put(KEY_CONTEXT, contextMap);
+            ret.putAll(contextMap);
         }
 
-        if (!memory.getConversationProperties().isEmpty()) {
-            contextMap.put(KEY_PROPERTIES, memory.getConversationProperties().toMap());
+        if (!conversationProperties.isEmpty()) {
+            ret.put(KEY_PROPERTIES, conversationProperties.toMap());
         }
 
-        return contextMap;
+        if (!memoryMap.isEmpty()) {
+            ret.put(KEY_MEMORY, convertMemoryItems(memory));
+        }
+
+        return ret;
     }
 
     private static Map<String, Object> prepareContext(List<IData<Context>> contextDataList) {
@@ -50,21 +57,21 @@ public class MemoryItemConverter implements IMemoryItemConverter {
 
     private static Map<String, Object> convertMemoryItems(IConversationMemory memory) {
         Map<String, Object> props = new HashMap<>();
-        IConversationMemory.IWritableConversationStep currentStep;
-        IConversationMemory.IConversationStep lastStep;
+        IWritableConversationStep currentStep;
+        IConversationStep lastStep;
 
         currentStep = memory.getCurrentStep();
-        ConversationOutput current = currentStep.getConversationOutput();
+        var current = currentStep.getConversationOutput();
         props.put(KEY_CURRENT, current);
 
-        ConversationOutput last = new ConversationOutput();
+        var last = new ConversationOutput();
         if (memory.getPreviousSteps().size() > 0) {
             lastStep = memory.getPreviousSteps().get(0);
             last = lastStep.getConversationOutput();
         }
         props.put(KEY_LAST, last);
 
-        List<ConversationOutput> past = memory.getConversationOutputs();
+        var past = memory.getConversationOutputs();
         if (past.size() > 1) {
             past = past.subList(1, past.size());
         } else {

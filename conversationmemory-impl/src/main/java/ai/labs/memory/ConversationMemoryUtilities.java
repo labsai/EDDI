@@ -15,6 +15,10 @@ public class ConversationMemoryUtilities {
     public static ConversationMemorySnapshot convertConversationMemory(IConversationMemory conversationMemory) {
         ConversationMemorySnapshot snapshot = new ConversationMemorySnapshot();
 
+        if (conversationMemory.getUserId() != null) {
+            snapshot.setUserId(conversationMemory.getUserId());
+        }
+
         if (conversationMemory.getConversationId() != null) {
             snapshot.setConversationId(conversationMemory.getConversationId());
         }
@@ -71,10 +75,10 @@ public class ConversationMemoryUtilities {
     }
 
     public static IConversationMemory convertConversationMemorySnapshot(ConversationMemorySnapshot snapshot) {
-        ConversationMemory conversationMemory = new ConversationMemory(snapshot.getConversationId(), snapshot.getBotId(), snapshot.getBotVersion());
-        conversationMemory.setConversationState(snapshot.getConversationState());
+        ConversationMemory conversationMemory = new ConversationMemory(snapshot.getConversationId(),
+                snapshot.getBotId(), snapshot.getBotVersion(), snapshot.getUserId());
 
-        conversationMemory.getConversationOutputs().addAll(snapshot.getConversationOutputs());
+        conversationMemory.setConversationState(snapshot.getConversationState());
         conversationMemory.getConversationProperties().putAll(snapshot.getConversationProperties());
 
         List<IConversationMemory.IConversationStep> redoSteps = iterateRedoCache(snapshot.getRedoCache());
@@ -104,6 +108,10 @@ public class ConversationMemoryUtilities {
 
     public static SimpleConversationMemorySnapshot convertSimpleConversationMemory(ConversationMemorySnapshot conversationMemorySnapshot, boolean returnDetailed) {
         SimpleConversationMemorySnapshot simpleSnapshot = new SimpleConversationMemorySnapshot();
+
+        if (conversationMemorySnapshot.getUserId() != null) {
+            simpleSnapshot.setUserId(conversationMemorySnapshot.getUserId());
+        }
 
         simpleSnapshot.setBotId(conversationMemorySnapshot.getBotId());
         simpleSnapshot.setBotVersion(conversationMemorySnapshot.getBotVersion());

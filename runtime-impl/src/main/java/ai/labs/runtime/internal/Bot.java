@@ -4,6 +4,7 @@ import ai.labs.lifecycle.IConversation;
 import ai.labs.lifecycle.LifecycleException;
 import ai.labs.memory.ConversationMemory;
 import ai.labs.memory.IConversationMemory;
+import ai.labs.memory.IPropertiesHandler;
 import ai.labs.models.Context;
 import ai.labs.models.Deployment;
 import ai.labs.runtime.IBot;
@@ -43,17 +44,19 @@ public class Bot implements IBot {
     @Override
     public IConversation startConversation(final String userId,
                                            final Map<String, Context> context,
-                                           final IConversation.IConversationOutputRenderer outputProvider) throws InstantiationException, IllegalAccessException, LifecycleException {
+                                           IPropertiesHandler propertiesHandler,
+                                           final IConversation.IConversationOutputRenderer outputProvider)
+            throws LifecycleException, IllegalAccessException {
         Conversation conversation = new Conversation(executablePackages,
-                new ConversationMemory(botId, botVersion, userId), outputProvider);
+                new ConversationMemory(botId, botVersion, userId), propertiesHandler, outputProvider);
         conversation.init(context);
         return conversation;
     }
 
     @Override
     public IConversation continueConversation(final IConversationMemory conversationMemory,
-                                              final IConversation.IConversationOutputRenderer outputProvider)
-            throws IllegalAccessException {
-        return new Conversation(executablePackages, conversationMemory, outputProvider);
+                                              final IPropertiesHandler propertiesHandler,
+                                              final IConversation.IConversationOutputRenderer outputProvider) throws IllegalAccessException {
+        return new Conversation(executablePackages, conversationMemory, propertiesHandler, outputProvider);
     }
 }

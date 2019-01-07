@@ -85,9 +85,9 @@ public class OutputGenerationTaskTest {
         outputGenerationTask.executeTask(conversationMemory);
 
         //assert
-        verify(conversationMemory, times(2)).getCurrentStep();
-        //verify(currentStep).storeData(expectedOutputData);
-        //verify(currentStep).storeData(expectedQuickReplyData);
+        verify(conversationMemory, times(1)).getCurrentStep();
+        verify(currentStep, times(2)).storeData(any());
+        verify(currentStep, times(2)).addConversationOutputList(anyString(), anyList());
     }
 
     @Test

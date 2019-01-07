@@ -10,6 +10,7 @@ import ai.labs.memory.IDataFactory;
 import ai.labs.memory.IMemoryItemConverter;
 import ai.labs.models.Context;
 import ai.labs.models.Property;
+import ai.labs.models.Property.Scope;
 import ai.labs.models.PropertyInstruction;
 import ai.labs.property.IPropertyDisposer;
 import ai.labs.property.model.PropertyEntry;
@@ -18,10 +19,15 @@ import ai.labs.utilities.RuntimeUtilities;
 import ognl.Ognl;
 
 import javax.inject.Inject;
-import java.util.*;
+import java.util.Collections;
+import java.util.LinkedList;
+import java.util.List;
+import java.util.Map;
 import java.util.stream.Collectors;
 
 import static ai.labs.memory.IConversationMemory.IConversationStepStack;
+import static ai.labs.models.Property.Scope.conversation;
+import static java.lang.Boolean.parseBoolean;
 
 /**
  * @author ginccc
@@ -41,7 +47,8 @@ public class PropertyDisposerTask implements ILifecycleTask {
     private static final String VALUE = "value";
     private static final String FROM_OBJECT_PATH = "fromObjectPath";
     private static final String SCOPE = "scope";
-    private final Map<String, List<PropertyInstruction>> actionPropertyMapper = new HashMap<>();
+    private static final String OVERRIDE = "override";
+    private final List<SetOnActions> setOnActionsList = new LinkedList<>();
     private final IPropertyDisposer propertyDisposer;
     private final IExpressionProvider expressionProvider;
     private final IMemoryItemConverter memoryItemConverter;
@@ -94,13 +101,23 @@ public class PropertyDisposerTask implements ILifecycleTask {
         Map<String, Object> templateDataObjects = memoryItemConverter.convert(memory);
         if (actionsData != null && !RuntimeUtilities.isNullOrEmpty(actionsData.getResult())) {
             for (String action : actionsData.getResult()) {
-                List<PropertyInstruction> propertyInstructions = actionPropertyMapper.get(action);
+                List<PropertyInstruction> propertyInstructions = new LinkedList<>();
+                setOnActionsList.forEach(setOnAction -> {
+                    List<String> actions = setOnAction.getActions();
+                    if (actions.contains(action) || actions.contains("*")) {
+                        setOnAction.getPropertyInstruction().stream().
+                                filter(propertyInstruction -> !propertyInstructions.contains(propertyInstruction)).
+                                forEach(propertyInstructions::add);
+                    }
+                });
+
                 if (!RuntimeUtilities.isNullOrEmpty(propertyInstructions)) {
-                    for (PropertyInstruction property : propertyInstructions) {
-                        try {
+                    try {
+                        for (PropertyInstruction property : propertyInstructions) {
                             String name = property.getName();
                             String fromObjectPath = property.getFromObjectPath();
-                            Property.Scope scope = property.getScope();
+                            Scope scope = property.getScope();
+                            boolean override = property.isOverride();
                             RuntimeUtilities.checkNotNull(name, "property.name");
 
                             Object templatedObj;
@@ -110,10 +127,15 @@ public class PropertyDisposerTask implements ILifecycleTask {
                                 templatedObj = property.getValue();
                             }
 
+                            if (!override && memory.getConversationProperties().containsKey(name)) {
+                                continue;
+                            }
+
                             memory.getConversationProperties().put(name, new Property(name, templatedObj, scope));
-                        } catch (Exception e) {
-                            throw new LifecycleException(e.getLocalizedMessage(), e);
+                            templateDataObjects.put(PROPERTIES_IDENTIFIER, memory.getConversationProperties().toMap());
                         }
+                    } catch (Exception e) {
+                        throw new LifecycleException(e.getLocalizedMessage(), e);
                     }
                 }
             }
@@ -165,26 +187,25 @@ public class PropertyDisposerTask implements ILifecycleTask {
     @Override
     public void configure(Map<String, Object> configuration) {
         if (configuration.containsKey(KEY_SET_ON_ACTIONS)) {
-            List<Map<String, Object>> setOnActions = (List<Map<String, Object>>) configuration.get(KEY_SET_ON_ACTIONS);
+            List<Map<String, Object>> setOnActionsRaw = (List<Map<String, Object>>) configuration.get(KEY_SET_ON_ACTIONS);
 
-            if (!RuntimeUtilities.isNullOrEmpty(setOnActions)) {
-                for (Map<String, Object> setOnAction : setOnActions) {
+            if (!RuntimeUtilities.isNullOrEmpty(setOnActionsRaw)) {
+                for (Map<String, Object> setOnAction : setOnActionsRaw) {
                     Object actionsObj = setOnAction.get("actions");
+                    SetOnActions setOnActions = new SetOnActions();
+                    this.setOnActionsList.add(setOnActions);
                     if (actionsObj instanceof String) {
                         actionsObj = Collections.singletonList(actionsObj);
                     }
                     if (actionsObj instanceof List) {
                         List<String> actions = (List<String>) actionsObj;
-                        for (String action : actions) {
-                            if (!actionPropertyMapper.containsKey(action)) {
-                                actionPropertyMapper.put(action, new LinkedList<>());
-                            }
 
-                            Object setPropertiesObj = setOnAction.get("setProperties");
-                            if (setPropertiesObj instanceof List) {
-                                actionPropertyMapper.get(action).addAll(
-                                        convertToProperties((List<Map<String, Object>>) setPropertiesObj));
-                            }
+                        setOnActions.setActions(actions);
+
+                        Object setPropertiesObj = setOnAction.get("setProperties");
+                        if (setPropertiesObj instanceof List) {
+                            setOnActions.setPropertyInstruction(
+                                    convertToProperties((List<Map<String, Object>>) setPropertiesObj));
                         }
                     }
                 }
@@ -205,10 +226,12 @@ public class PropertyDisposerTask implements ILifecycleTask {
                 propertyInstruction.setFromObjectPath(property.get(FROM_OBJECT_PATH).toString());
             }
             if (property.containsKey(SCOPE)) {
-                propertyInstruction.setScope(Property.Scope.valueOf(property.get(SCOPE).toString()));
+                propertyInstruction.setScope(Scope.valueOf(property.getOrDefault(SCOPE, conversation).toString()));
             }
+
+            propertyInstruction.setOverride(parseBoolean(property.getOrDefault(OVERRIDE, true).toString()));
+
             return propertyInstruction;
         }).collect(Collectors.toList());
     }
 }
-
