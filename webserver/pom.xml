@@ -43,7 +43,7 @@
         <dependency>
             <groupId>org.jboss.resteasy</groupId>
             <artifactId>resteasy-jsapi</artifactId>
-            <version>3.6.1.Final</version>
+            <version>3.6.2.Final</version>
         </dependency>
         <!-- Jetty -->
         <dependency>

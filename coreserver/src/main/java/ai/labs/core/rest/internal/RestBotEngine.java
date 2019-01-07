@@ -36,10 +36,7 @@ import javax.ws.rs.container.AsyncResponse;
 import javax.ws.rs.core.MediaType;
 import javax.ws.rs.core.Response;
 import java.net.URI;
-import java.util.Collections;
-import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
+import java.util.*;
 import java.util.concurrent.*;
 import java.util.stream.Collectors;
 
@@ -93,7 +90,10 @@ public class RestBotEngine implements IRestBotEngine {
 
         RuntimeUtilities.checkNotNull(environment, "environment");
         RuntimeUtilities.checkNotNull(botId, "botId");
-        RuntimeUtilities.checkNotNull(context, "context");
+        if (context == null) {
+            context = new LinkedHashMap<>();
+        } 
+
         try {
             IBot latestBot = botFactory.getLatestBot(environment, botId);
             if (latestBot == null) {
@@ -102,9 +102,10 @@ public class RestBotEngine implements IRestBotEngine {
                 return Response.status(Response.Status.NOT_FOUND).type(MediaType.TEXT_PLAIN).entity(message).build();
             }
 
-            userId = computeAnonymousUserIdIfEmpty(userId);
+            userId = computeAnonymousUserIdIfEmpty(userId); 
             IConversation conversation = latestBot.startConversation(userId, context,
-                    createPropertiesHandler(userId), null);
+                   createPropertiesHandler(userId), null);
+
             String conversationId = storeConversationMemory(conversation.getConversationMemory(), environment);
             cacheConversationState(conversationId, ConversationState.READY);
             URI createdUri = RestUtilities.createURI(resourceURI, conversationId);
