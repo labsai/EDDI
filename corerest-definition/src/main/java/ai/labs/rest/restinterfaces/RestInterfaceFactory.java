@@ -27,14 +27,14 @@ public class RestInterfaceFactory implements IRestInterfaceFactory {
     }
 
     @Override
-    public <T> T get(Class<T> clazz, String targetServerUri) throws RestInterfaceFactoryException {
+    public <T> T get(Class<T> clazz, String targetServerUri) {
         Object context = ThreadContext.get("security.token");
         String securityToken = context != null ? context.toString(): null;
         return get(clazz, targetServerUri, securityToken);
     }
 
     @Override
-    public <T> T get(Class<T> clazz, String targetServerUri, String securityToken) throws RestInterfaceFactoryException {
+    public <T> T get(Class<T> clazz, String targetServerUri, String securityToken) {
         ResteasyClient client = getResteasyClient(targetServerUri);
         ResteasyWebTarget target = client.target(targetServerUri);
 
@@ -46,7 +46,7 @@ public class RestInterfaceFactory implements IRestInterfaceFactory {
         return target.proxy(clazz);
     }
 
-    private ResteasyClient getResteasyClient(String targetServerUri) throws RestInterfaceFactoryException {
+    private ResteasyClient getResteasyClient(String targetServerUri) {
         ResteasyClient client = clients.get(targetServerUri);
         if(client == null) {
 
