@@ -130,6 +130,30 @@ $(function () {
         eddi.displayMessage('<img src="' + imageUrl + '" alt="" style="max-width: 100%" />', 'left');
     };
 
+    const refreshConversationLog2 = function (conversationMemory) {
+        const conversationState = conversationMemory.conversationState;
+
+        if (conversationState === 'ERROR') {
+            log('ERROR', 'An Error has occurred. Please contact the administrator!');
+            return;
+        }
+
+        if (conversationState === 'IN_PROGRESS') {
+            setTimeout(loadConversationLog, 1000);
+            return;
+        }
+
+        for(let conversationOutput in conversationMemory.conversationOutputs) {
+            let outputArray = conversationOutput.output;
+            createMessage(outputArray);
+        }
+
+        if (conversationState === 'ENDED') {
+            $('<div style="padding-bottom: 1rem; color:darkgray;"><hr>Conversation Ended</div>').appendTo($('.messages'));
+            eddi.createConversation(eddi.environment, eddi.botId);
+        }
+    };
+
     const refreshConversationLog = function (conversationMemory) {
         const conversationState = conversationMemory.conversationState;
 

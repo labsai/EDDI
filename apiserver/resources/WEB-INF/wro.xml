@@ -37,8 +37,19 @@
         <css>classpath:css/chat.css</css>
     </group>
 
+    <group name="chat2">
+        <group-ref>jquery3</group-ref>
+        <js>classpath:js/chat2.js</js>
+        <js>classpath:js/chat.js</js>
+        <css>classpath:css/chat2.css</css>
+    </group>
+
     <group name="jquery">
         <js>classpath:js/jquery-1.8.0.min.js</js>
         <js>classpath:js/jquery.urldecoder.edited.js</js>
+    </group>
+
+    <group name="jquery3">
+        <js>classpath:js/jquery-3.3.1.min.js</js>
     </group>
 </groups>
