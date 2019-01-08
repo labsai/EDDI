@@ -46,7 +46,6 @@ public class HttpCallsTask implements ILifecycleTask {
     private static final String ACTION_KEY = "actions";
     private static final String CONTENT_TYPE = "Content-Type";
     private static final String KEY_HTTP_CALLS = "httpCalls";
-    private static final String KEY_MEMORY = "memory";
     private static final String SLASH_CHAR = "/";
     private final IHttpClient httpClient;
     private final IJsonSerialization jsonSerialization;
@@ -183,38 +182,41 @@ public class HttpCallsTask implements ILifecycleTask {
     private void runPostResponse(IConversationMemory memory, HttpCall call, Map<String, Object> templateDataObjects)
             throws IOException, ITemplatingEngine.TemplateEngineException, OgnlException {
 
-        PostResponse postResponse = call.getPostResponse();
-        PropertyInstruction propertyInstruction = null;
-        QuickRepliesBuildingInstruction qrBuildInstruction = null;
+        var postResponse = call.getPostResponse();
         if (postResponse != null) {
-            propertyInstruction = postResponse.getPropertyInstruction();
-            qrBuildInstruction = postResponse.getQrBuildInstruction();
+            var propertyInstructions = postResponse.getPropertyInstructions();
+            if (propertyInstructions != null) {
+                for (PropertyInstruction propertyInstruction : propertyInstructions) {
+                    String propertyName = propertyInstruction.getName();
+                    RuntimeUtilities.checkNotNull(propertyName, "name");
+
+                    String path = propertyInstruction.getFromObjectPath();
+                    RuntimeUtilities.checkNotNull(path, "fromObjectPath");
+
+                    Property.Scope scope = propertyInstruction.getScope();
+                    memory.getConversationProperties().put(propertyName, new Property(propertyName,
+                            Ognl.getValue(path, templateDataObjects), scope));
+                }
+            }
+
+            var qrBuildInstructions = postResponse.getQrBuildInstructions();
+            if (qrBuildInstructions != null) {
+                for (QuickRepliesBuildingInstruction qrBuildInstruction : qrBuildInstructions) {
+                    List<Object> quickReplies = buildQuickReplies(qrBuildInstruction.getIterationObjectName(),
+                            qrBuildInstruction.getPathToTargetArray(),
+                            qrBuildInstruction.getTemplateFilterExpression(),
+                            qrBuildInstruction.getQuickReplyValue(),
+                            qrBuildInstruction.getQuickReplyExpressions(),
+                            templateDataObjects);
+
+                    var context = new Context(Context.ContextType.object, quickReplies);
+                    IData<Context> contextData = dataFactory.createData("context:quickReplies", context);
+                    memory.getCurrentStep().storeData(contextData);
+                }
+            }
         }
 
-        if (propertyInstruction != null) {
-            String propertyName = propertyInstruction.getName();
-            RuntimeUtilities.checkNotNull(propertyName, "name");
 
-            String path = propertyInstruction.getFromObjectPath();
-            RuntimeUtilities.checkNotNull(path, "fromObjectPath");
-
-            Property.Scope scope = propertyInstruction.getScope();
-            memory.getConversationProperties().put(propertyName, new Property(propertyName,
-                    Ognl.getValue(path, templateDataObjects), scope));
-        }
-
-        if (qrBuildInstruction != null) {
-            List<Object> quickReplies = buildQuickReplies(qrBuildInstruction.getIterationObjectName(),
-                    qrBuildInstruction.getPathToTargetArray(),
-                    qrBuildInstruction.getTemplateFilterExpression(),
-                    qrBuildInstruction.getQuickReplyValue(),
-                    qrBuildInstruction.getQuickReplyExpressions(),
-                    templateDataObjects);
-
-            Context context = new Context(Context.ContextType.object, quickReplies);
-            IData<Context> contextData = dataFactory.createData("context:quickReplies", context);
-            memory.getCurrentStep().storeData(contextData);
-        }
     }
 
     private IRequest buildRequest(Request requestConfig, Map<String, Object> templateDataObjects) throws ITemplatingEngine.TemplateEngineException {
