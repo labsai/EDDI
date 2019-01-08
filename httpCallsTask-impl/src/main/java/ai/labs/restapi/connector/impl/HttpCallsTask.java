@@ -46,7 +46,6 @@ public class HttpCallsTask implements ILifecycleTask {
     private static final String ACTION_KEY = "actions";
     private static final String CONTENT_TYPE = "Content-Type";
     private static final String KEY_HTTP_CALLS = "httpCalls";
-    private static final String KEY_CURRENT_MEMORY = "current";
     private static final String KEY_MEMORY = "memory";
     private static final String SLASH_CHAR = "/";
     private final IHttpClient httpClient;
@@ -89,9 +88,6 @@ public class HttpCallsTask implements ILifecycleTask {
         }
 
         Map<String, Object> templateDataObjects = memoryItemConverter.convert(memory);
-
-        Map<String, Object> memoryDataObject = (Map<String, Object>) templateDataObjects.get(KEY_MEMORY);
-        Map<String, Object> currentMemory = (Map<String, Object>) memoryDataObject.get(KEY_CURRENT_MEMORY);
         List<String> actions = latestData.getResult();
 
         for (String action : actions) {
@@ -107,7 +103,7 @@ public class HttpCallsTask implements ILifecycleTask {
                 try {
                     IRequest request;
                     if (call.isFireAndForget()) {
-                        PreRequest preRequest = call.getPreRequest();
+                        var preRequest = call.getPreRequest();
                         if (preRequest != null && preRequest.getBatchRequests() != null) {
                             BuildingInstruction batchRequest = preRequest.getBatchRequests();
 
