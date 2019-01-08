@@ -4,6 +4,7 @@ import ai.labs.lifecycle.IConversation;
 import ai.labs.lifecycle.LifecycleException;
 import ai.labs.memory.ConversationMemory;
 import ai.labs.memory.IConversationMemory;
+import ai.labs.memory.IPropertiesHandler;
 import ai.labs.models.Context;
 import ai.labs.models.Deployment;
 import ai.labs.runtime.IBot;
@@ -20,18 +21,18 @@ import java.util.Map;
  */
 public class Bot implements IBot {
     @Getter
-    private String id;
+    private String botId;
     @Getter
-    private Integer version;
+    private Integer botVersion;
     private List<IExecutablePackage> executablePackages;
 
     @Getter
     @Setter
     private Deployment.Status deploymentStatus;
 
-    public Bot(String id, Integer version) {
-        this.id = id;
-        this.version = version;
+    public Bot(String botId, Integer botVersion) {
+        this.botId = botId;
+        this.botVersion = botVersion;
         executablePackages = new LinkedList<>();
     }
 
@@ -41,15 +42,21 @@ public class Bot implements IBot {
     }
 
     @Override
-    public IConversation startConversation(final Map<String, Context> context,
-                                           final IConversation.IConversationOutputRenderer outputProvider) throws LifecycleException, IllegalAccessException {
-        Conversation conversation = new Conversation(executablePackages, new ConversationMemory(id, version), outputProvider);
+    public IConversation startConversation(final String userId,
+                                           final Map<String, Context> context,
+                                           IPropertiesHandler propertiesHandler,
+                                           final IConversation.IConversationOutputRenderer outputProvider)
+            throws LifecycleException, IllegalAccessException {
+        Conversation conversation = new Conversation(executablePackages,
+                new ConversationMemory(botId, botVersion, userId), propertiesHandler, outputProvider);
         conversation.init(context);
         return conversation;
     }
 
     @Override
-    public IConversation continueConversation(final IConversationMemory conversationMemory, final IConversation.IConversationOutputRenderer outputProvider) throws IllegalAccessException {
-        return new Conversation(executablePackages, conversationMemory, outputProvider);
+    public IConversation continueConversation(final IConversationMemory conversationMemory,
+                                              final IPropertiesHandler propertiesHandler,
+                                              final IConversation.IConversationOutputRenderer outputProvider) throws IllegalAccessException {
+        return new Conversation(executablePackages, conversationMemory, propertiesHandler, outputProvider);
     }
 }

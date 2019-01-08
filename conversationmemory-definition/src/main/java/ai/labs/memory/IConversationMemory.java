@@ -2,6 +2,7 @@ package ai.labs.memory;
 
 import ai.labs.memory.model.ConversationOutput;
 import ai.labs.models.ConversationState;
+import ai.labs.models.Property;
 
 import java.io.Serializable;
 import java.util.List;
@@ -22,6 +23,8 @@ public interface IConversationMemory extends Serializable {
     String getUserId();
 
     List<ConversationOutput> getConversationOutputs();
+
+    IConversationProperties getConversationProperties();
 
     IWritableConversationStep getCurrentStep();
 
@@ -83,10 +86,16 @@ public interface IConversationMemory extends Serializable {
 
         void resetConversationOutput(String rootKey);
 
+        void addConversationOutputObject(String key, Object value);
+
         void addConversationOutputString(String key, String value);
 
         void addConversationOutputList(String key, List list);
 
         void addConversationOutputMap(String key, Map<String, Object> map);
+    }
+
+    interface IConversationProperties extends Map<String, Property> {
+        Map<String, Object> toMap();
     }
 }

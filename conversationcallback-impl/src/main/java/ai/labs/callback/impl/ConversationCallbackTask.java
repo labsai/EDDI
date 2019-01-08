@@ -2,15 +2,11 @@ package ai.labs.callback.impl;
 
 import ai.labs.callback.IConversationCallback;
 import ai.labs.callback.model.ConversationDataRequest;
-import ai.labs.callback.model.ConversationDataResponse;
 import ai.labs.lifecycle.ILifecycleTask;
-import ai.labs.lifecycle.LifecycleException;
 import ai.labs.lifecycle.PackageConfigurationException;
-import ai.labs.memory.ConversationMemoryUtilities;
 import ai.labs.memory.IConversationMemory;
 import ai.labs.memory.IData;
 import ai.labs.memory.model.ConversationMemorySnapshot;
-import ai.labs.persistence.IResourceStore;
 import ai.labs.resources.rest.extensions.model.ExtensionDescriptor;
 import ai.labs.resources.rest.extensions.model.ExtensionDescriptor.ConfigValue;
 import ai.labs.resources.rest.extensions.model.ExtensionDescriptor.FieldType;
@@ -24,13 +20,16 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
+import static ai.labs.memory.ConversationMemoryUtilities.convertConversationMemory;
+import static ai.labs.memory.ConversationMemoryUtilities.convertConversationMemorySnapshot;
+
 /**
  * Created by rpi on 08.02.2017.
  */
 @Slf4j
 public class ConversationCallbackTask implements ILifecycleTask {
     private static final String ID = "ai.labs.callback";
-    private static final String KEY_ACTION = "action";
+    private static final String KEY_ACTIONS = "actions";
     private static final String KEY_CALLBACK_URI = "callbackUri";
     private static final String KEY_TIMEOUT_IN_MILLIS = "timeoutInMillis";
     private static final String KEY_CALL_ON_ACTIONS = "callOnActions";
@@ -57,27 +56,22 @@ public class ConversationCallbackTask implements ILifecycleTask {
     }
 
     @Override
-    public void executeTask(IConversationMemory memory) throws LifecycleException {
-        try {
-            IData<List<String>> actionData = memory.getCurrentStep().getLatestData(KEY_ACTION);
-            if (!executeCallback(actionData)) {
-                return;
-            }
+    public void executeTask(IConversationMemory memory) {
+        IData<List<String>> actionData = memory.getCurrentStep().getLatestData(KEY_ACTIONS);
+        if (!executeCallback(actionData)) {
+            return;
+        }
 
-            ConversationDataRequest request = new ConversationDataRequest();
-            request.setConversationMemorySnapshot(ConversationMemoryUtilities.convertConversationMemory(memory));
-            ConversationDataResponse response =
-                    conversationCallback.doExternalCall(callback, request, timeoutInMillis);
+        var request = new ConversationDataRequest();
+        request.setConversationMemorySnapshot(convertConversationMemory(memory));
+        var response = conversationCallback.doExternalCall(callback, request, timeoutInMillis);
 
-            if (String.valueOf(response.getHttpCode()).startsWith("2")) { //check for success, http code 2xx
-                mergeConversationMemory(memory, response.getConversationMemorySnapshot());
-            } else {
-                String msg = "ConversationCallback was (%s) but should have been 2xx. Return value as been ignored";
-                msg = String.format(msg, response.getHttpCode());
-                log.warn(msg);
-            }
-        } catch (IResourceStore.ResourceStoreException | IResourceStore.ResourceNotFoundException e) {
-            throw new LifecycleException(e.getLocalizedMessage(), e);
+        if (String.valueOf(response.getHttpCode()).startsWith("2")) { //check for success, http code 2xx
+            mergeConversationMemory(memory, response.getConversationMemorySnapshot());
+        } else {
+            String msg = "ConversationCallback was (%s) but should have been 2xx. Return value as been ignored";
+            msg = String.format(msg, response.getHttpCode());
+            log.warn(msg);
         }
     }
 
@@ -95,15 +89,13 @@ public class ConversationCallbackTask implements ILifecycleTask {
     }
 
     private void mergeConversationMemory(IConversationMemory currentConversationMemory,
-                                         ConversationMemorySnapshot callbackMemorySnapshot)
-            throws IResourceStore.ResourceStoreException, IResourceStore.ResourceNotFoundException {
+                                         ConversationMemorySnapshot callbackMemorySnapshot) {
         if (callbackMemorySnapshot != null && !callbackMemorySnapshot.getConversationSteps().isEmpty()) {
-            IConversationMemory.IWritableConversationStep currentStep = currentConversationMemory.getCurrentStep();
+            var currentStep = currentConversationMemory.getCurrentStep();
 
-            IConversationMemory callbackConversationMemory = ConversationMemoryUtilities.
-                    convertConversationMemorySnapshot(callbackMemorySnapshot);
+            var callbackConversationMemory = convertConversationMemorySnapshot(callbackMemorySnapshot);
 
-            IConversationMemory.IWritableConversationStep currentCallbackStep = callbackConversationMemory.getCurrentStep();
+            var currentCallbackStep = callbackConversationMemory.getCurrentStep();
             Set<String> callbackKeys = currentCallbackStep.getAllKeys();
             for (String callbackKey : callbackKeys) {
                 currentStep.storeData(currentCallbackStep.getData(callbackKey));

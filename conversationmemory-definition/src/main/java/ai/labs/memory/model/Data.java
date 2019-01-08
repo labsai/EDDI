@@ -1,5 +1,6 @@
-package ai.labs.memory;
+package ai.labs.memory.model;
 
+import ai.labs.memory.IData;
 import lombok.Getter;
 import lombok.Setter;
 

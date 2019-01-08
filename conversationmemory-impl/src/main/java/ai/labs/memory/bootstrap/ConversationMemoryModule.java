@@ -14,6 +14,7 @@ public class ConversationMemoryModule extends AbstractBaseModule {
     protected void configure() {
         bind(IConversationDescriptorStore.class).to(ConversationDescriptorStore.class).in(Scopes.SINGLETON);
         bind(IConversationMemoryStore.class).to(ConversationMemoryStore.class).in(Scopes.SINGLETON);
+        bind(IMemoryItemConverter.class).to(MemoryItemConverter.class).in(Scopes.SINGLETON);
         bind(IDataFactory.class).to(DataFactory.class).in(Scopes.SINGLETON);
     }
 }

@@ -29,6 +29,8 @@ import ai.labs.resources.impl.packages.rest.RestPackageStore;
 import ai.labs.resources.impl.parser.mongo.ParserStore;
 import ai.labs.resources.impl.parser.rest.RestParserStore;
 import ai.labs.resources.impl.permission.rest.RestPermissionStore;
+import ai.labs.resources.impl.properties.mongo.PropertiesStore;
+import ai.labs.resources.impl.properties.rest.RestPropertiesStore;
 import ai.labs.resources.impl.regulardictionary.mongo.RegularDictionaryStore;
 import ai.labs.resources.impl.regulardictionary.rest.RestRegularDictionaryStore;
 import ai.labs.resources.rest.behavior.IBehaviorStore;
@@ -54,6 +56,8 @@ import ai.labs.resources.rest.packages.IPackageStore;
 import ai.labs.resources.rest.packages.IRestPackageStore;
 import ai.labs.resources.rest.parser.IParserStore;
 import ai.labs.resources.rest.parser.IRestParserStore;
+import ai.labs.resources.rest.properties.IPropertiesStore;
+import ai.labs.resources.rest.properties.IRestPropertiesStore;
 import ai.labs.resources.rest.regulardictionary.IRegularDictionaryStore;
 import ai.labs.resources.rest.regulardictionary.IRestRegularDictionaryStore;
 import ai.labs.runtime.bootstrap.AbstractBaseModule;
@@ -82,6 +86,7 @@ public class RepositoryModule extends AbstractBaseModule {
         bind(IOutputStore.class).to(OutputStore.class).in(Scopes.SINGLETON);
         bind(IDeploymentStore.class).to(DeploymentStore.class).in(Scopes.SINGLETON);
         bind(IHttpCallsStore.class).to(HttpCallsStore.class).in(Scopes.SINGLETON);
+        bind(IPropertiesStore.class).to(PropertiesStore.class).in(Scopes.SINGLETON);
 
         bind(IRestPermissionStore.class).to(RestPermissionStore.class);
         bind(IRestDocumentDescriptorStore.class).to(RestDocumentDescriptorStore.class);
@@ -99,6 +104,7 @@ public class RepositoryModule extends AbstractBaseModule {
         bind(IRestOutputStore.class).to(RestOutputStore.class);
         bind(IRestConversationStore.class).to(RestConversationStore.class);
         bind(IRestHttpCallsStore.class).to(RestHttpCallsStore.class);
+        bind(IRestPropertiesStore.class).to(RestPropertiesStore.class);
 
         bind(IRestOutputKeys.class).to(RestOutputKeys.class);
     }

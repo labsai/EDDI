@@ -14,5 +14,8 @@ public class HttpCall {
     private String responseObjectName;
     private List<String> actions;
     private Request request;
+    private PreRequest preRequest;
+    private boolean isBatchCalls;
+    private String iterationObjectName;
     private PostResponse postResponse;
 }

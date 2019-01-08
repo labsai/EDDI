@@ -12,7 +12,7 @@ import java.util.*;
  */
 public class OutputGeneration implements IOutputGeneration {
     @Getter
-    private Map<String, List<OutputEntry>> outputMapper = new HashMap<>();
+    private Map<String, List<OutputEntry>> outputMapper = new LinkedHashMap<>();
 
     @Override
     public void addOutputEntry(OutputEntry outputEntry) {
