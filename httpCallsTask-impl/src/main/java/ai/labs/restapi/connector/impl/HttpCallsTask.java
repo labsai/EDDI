@@ -1,6 +1,7 @@
 package ai.labs.restapi.connector.impl;
 
 import ai.labs.httpclient.IHttpClient;
+import ai.labs.httpclient.IHttpClient.Method;
 import ai.labs.httpclient.IRequest;
 import ai.labs.httpclient.IResponse;
 import ai.labs.lifecycle.ILifecycleTask;
@@ -226,13 +227,14 @@ public class HttpCallsTask implements ILifecycleTask {
             path = SLASH_CHAR + path;
         }
         URI targetUri = URI.create(targetServerUri + templateValues(path, templateDataObjects));
-
         String requestBody = templateValues(requestConfig.getBody(), templateDataObjects);
 
-        IRequest request = httpClient.newRequest(targetUri,
-                IHttpClient.Method.valueOf(requestConfig.getMethod().toUpperCase())).
-                setBodyEntity(requestBody,
-                        UTF_8, requestConfig.getContentType());
+        var method = Method.valueOf(requestConfig.getMethod().toUpperCase());
+        log.info("targetUri: {}", targetUri);
+        log.info("method: {}", method);
+        log.info("body: {}", requestBody);
+        IRequest request = httpClient.newRequest(targetUri, method).
+                setBodyEntity(requestBody, UTF_8, requestConfig.getContentType());
 
         Map<String, String> headers = requestConfig.getHeaders();
         for (String headerName : headers.keySet()) {
