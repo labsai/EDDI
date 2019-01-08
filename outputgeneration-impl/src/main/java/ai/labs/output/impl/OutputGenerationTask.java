@@ -32,12 +32,12 @@ import static ai.labs.memory.IConversationMemory.*;
  */
 public class OutputGenerationTask implements ILifecycleTask {
     private static final String ID = "ai.labs.output";
-    private static final String ACTION_KEY = "action";
+    private static final String KEY_ACTIONS = "actions";
     private static final String MEMORY_OUTPUT_IDENTIFIER = "output";
     private static final String MEMORY_QUICK_REPLIES_IDENTIFIER = "quickReplies";
     private static final String CONTEXT_IDENTIFIER = "context";
     private static final String QUICK_REPLIES_IDENTIFIER = "quickReplies";
-    private static final String OUTPUTSET_CONFIG_URI = "uri";
+    private static final String OUTPUT_SET_CONFIG_URI = "uri";
     private static final String KEY_VALUE = "value";
     private static final String KEY_EXPRESSIONS = "expressions";
     private static final String KEY_IS_DEFAULT = "isDefault";
@@ -66,10 +66,11 @@ public class OutputGenerationTask implements ILifecycleTask {
 
     @Override
     public void executeTask(IConversationMemory memory) {
-        List<IData<Context>> contextDataList = memory.getCurrentStep().getAllData("context");
-        storeContextQuickReplies(memory, contextDataList);
+        IWritableConversationStep currentStep = memory.getCurrentStep();
+        List<IData<Context>> contextDataList = currentStep.getAllData("context");
+        storeContextQuickReplies(currentStep, contextDataList);
 
-        IData<List<String>> latestData = memory.getCurrentStep().getLatestData(ACTION_KEY);
+        IData<List<String>> latestData = currentStep.getLatestData(KEY_ACTIONS);
         if (latestData == null) {
             return;
         }
@@ -80,13 +81,12 @@ public class OutputGenerationTask implements ILifecycleTask {
         outputs.forEach((action, outputEntries) ->
                 outputEntries.forEach(outputEntry -> {
                     List<OutputValue> outputValues = outputEntry.getOutputs();
-                    selectAndStoreOutput(memory, action, outputValues);
-
-                    storeQuickReplies(memory, outputEntry.getQuickReplies(), outputEntry.getAction());
+                    selectAndStoreOutput(currentStep, action, outputValues);
+                    storeQuickReplies(currentStep, outputEntry.getQuickReplies(), outputEntry.getAction());
                 }));
     }
 
-    private void storeContextQuickReplies(IConversationMemory memory, List<IData<Context>> contextDataList) {
+    private void storeContextQuickReplies(IWritableConversationStep currentStep, List<IData<Context>> contextDataList) {
         contextDataList.forEach(contextData -> {
             String contextKey = contextData.getKey();
             Context context = contextData.getResult();
@@ -100,7 +100,7 @@ public class OutputGenerationTask implements ILifecycleTask {
 
                 if (context.getType().equals(Context.ContextType.object)) {
                     List<QuickReply> quickReplies = convertMapToObjects((List<Map<String, String>>) context.getValue());
-                    storeQuickReplies(memory, quickReplies, quickRepliesKey);
+                    storeQuickReplies(currentStep, quickReplies, quickRepliesKey);
                 }
             }
         });
@@ -113,7 +113,7 @@ public class OutputGenerationTask implements ILifecycleTask {
                 collect(Collectors.toCollection(LinkedList::new));
     }
 
-    private void selectAndStoreOutput(IConversationMemory memory, String action, List<OutputValue> outputValues) {
+    private void selectAndStoreOutput(IWritableConversationStep currentStep, String action, List<OutputValue> outputValues) {
         List<QuickReply> quickReplies = new LinkedList<>();
         IntStream.range(0, outputValues.size()).forEach(index -> {
             OutputValue outputValue = outputValues.get(index);
@@ -131,23 +131,21 @@ public class OutputGenerationTask implements ILifecycleTask {
             String outputKey = createOutputKey(action, outputValues, outputValue, index);
             IData<Object> outputData = dataFactory.createData(outputKey, randomValue, possibleValueAlternatives);
             outputData.setPublic(true);
-            IWritableConversationStep currentStep = memory.getCurrentStep();
             currentStep.storeData(outputData);
             currentStep.addConversationOutputList(MEMORY_OUTPUT_IDENTIFIER, Collections.singletonList(randomValue));
         });
 
         if (!quickReplies.isEmpty()) {
-            storeQuickReplies(memory, quickReplies, action);
+            storeQuickReplies(currentStep, quickReplies, action);
         }
     }
 
-    private void storeQuickReplies(IConversationMemory memory, List<QuickReply> quickReplies, String action) {
+    private void storeQuickReplies(IWritableConversationStep currentStep, List<QuickReply> quickReplies, String action) {
         if (!quickReplies.isEmpty()) {
             String outputQuickReplyKey = StringUtilities.
                     joinStrings(":", MEMORY_QUICK_REPLIES_IDENTIFIER, action);
             IData outputQuickReplies = dataFactory.createData(outputQuickReplyKey, quickReplies);
             outputQuickReplies.setPublic(true);
-            IWritableConversationStep currentStep = memory.getCurrentStep();
             currentStep.storeData(outputQuickReplies);
             currentStep.addConversationOutputList(MEMORY_QUICK_REPLIES_IDENTIFIER, quickReplies);
         }
@@ -161,7 +159,7 @@ public class OutputGenerationTask implements ILifecycleTask {
 
     @Override
     public void configure(Map<String, Object> configuration) throws PackageConfigurationException {
-        Object uriObj = configuration.get(OUTPUTSET_CONFIG_URI);
+        Object uriObj = configuration.get(OUTPUT_SET_CONFIG_URI);
         URI uri = URI.create(uriObj.toString());
 
         try {
@@ -199,7 +197,7 @@ public class OutputGenerationTask implements ILifecycleTask {
         int count = 0;
         for (int i = 0; i < conversationStepStack.size(); i++) {
             IConversationStep conversationStep = conversationStepStack.get(i);
-            IData<List<String>> latestData = conversationStep.getLatestData(ACTION_KEY);
+            IData<List<String>> latestData = conversationStep.getLatestData(KEY_ACTIONS);
             if (latestData != null) {
                 List<String> actions = latestData.getResult();
                 if (actions.contains(action)) {
@@ -246,7 +244,7 @@ public class OutputGenerationTask implements ILifecycleTask {
         extensionDescriptor.setDisplayName("Output Generation");
 
         ConfigValue configValue = new ConfigValue("Resource URI", ExtensionDescriptor.FieldType.URI, false, null);
-        extensionDescriptor.getConfigs().put(OUTPUTSET_CONFIG_URI, configValue);
+        extensionDescriptor.getConfigs().put(OUTPUT_SET_CONFIG_URI, configValue);
         return extensionDescriptor;
     }
 }

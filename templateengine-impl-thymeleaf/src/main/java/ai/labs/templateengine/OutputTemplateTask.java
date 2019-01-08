@@ -4,15 +4,17 @@ import ai.labs.lifecycle.ILifecycleTask;
 import ai.labs.memory.IConversationMemory;
 import ai.labs.memory.IData;
 import ai.labs.memory.IDataFactory;
-import ai.labs.models.Context;
-import ai.labs.models.Context.ContextType;
+import ai.labs.memory.IMemoryItemConverter;
 import ai.labs.output.model.QuickReply;
 import ai.labs.resources.rest.extensions.model.ExtensionDescriptor;
 import ai.labs.templateengine.ITemplatingEngine.TemplateMode;
 import lombok.extern.slf4j.Slf4j;
 
 import javax.inject.Inject;
-import java.util.*;
+import java.util.Collections;
+import java.util.LinkedList;
+import java.util.List;
+import java.util.Map;
 import java.util.stream.Collectors;
 
 import static ai.labs.memory.IConversationMemory.IWritableConversationStep;
@@ -29,18 +31,16 @@ public class OutputTemplateTask implements ILifecycleTask {
     private static final String POST_TEMPLATED = "postTemplated";
     private static final String KEY_OUTPUT = "output";
     private static final String KEY_QUICK_REPLIES = "quickReplies";
-    private static final String KEY_CONTEXT = "context";
-    private static final String KEY_MEMORY = "memory";
     private final ITemplatingEngine templatingEngine;
-    private final IMemoryTemplateConverter memoryTemplateConverter;
+    private final IMemoryItemConverter memoryItemConverter;
     private final IDataFactory dataFactory;
 
     @Inject
     public OutputTemplateTask(ITemplatingEngine templatingEngine,
-                              IMemoryTemplateConverter memoryTemplateConverter,
+                              IMemoryItemConverter memoryItemConverter,
                               IDataFactory dataFactory) {
         this.templatingEngine = templatingEngine;
-        this.memoryTemplateConverter = memoryTemplateConverter;
+        this.memoryItemConverter = memoryItemConverter;
         this.dataFactory = dataFactory;
     }
 
@@ -59,14 +59,8 @@ public class OutputTemplateTask implements ILifecycleTask {
         IWritableConversationStep currentStep = memory.getCurrentStep();
         List<IData<Object>> outputDataList = currentStep.getAllData(KEY_OUTPUT);
         List<IData<List<QuickReply>>> quickReplyDataList = currentStep.getAllData(KEY_QUICK_REPLIES);
-        List<IData<Context>> contextDataList = currentStep.getAllData(KEY_CONTEXT);
 
-        Map<String, Object> contextMap = prepareContext(contextDataList);
-
-        Map<String, Object> memoryForTemplate = memoryTemplateConverter.convertMemoryForTemplating(memory);
-        if (!memoryForTemplate.isEmpty()) {
-            contextMap.put(KEY_MEMORY, memoryForTemplate);
-        }
+        final Map<String, Object> contextMap = memoryItemConverter.convert(memory);
 
         if (!outputDataList.isEmpty()) {
             currentStep.resetConversationOutput(KEY_OUTPUT);
@@ -78,19 +72,6 @@ public class OutputTemplateTask implements ILifecycleTask {
             currentStep.resetConversationOutput(KEY_QUICK_REPLIES);
         }
         templatingQuickReplies(memory, quickReplyDataList, contextMap);
-    }
-
-    private HashMap<String, Object> prepareContext(List<IData<Context>> contextDataList) {
-        HashMap<String, Object> dynamicAttributesMap = new HashMap<>();
-        contextDataList.forEach(contextData -> {
-            Context context = contextData.getResult();
-            ContextType contextType = context.getType();
-            if (contextType.equals(ContextType.object) || contextType.equals(ContextType.string)) {
-                String dataKey = contextData.getKey();
-                dynamicAttributesMap.put(dataKey.substring(dataKey.indexOf(":") + 1), context.getValue());
-            }
-        });
-        return dynamicAttributesMap;
     }
 
     private void templateOutputTexts(IConversationMemory memory,

@@ -3,12 +3,10 @@ package ai.labs.memory.model;
 
 import ai.labs.models.ConversationState;
 import ai.labs.models.Deployment;
+import ai.labs.models.Property;
 import lombok.*;
 
-import java.util.Date;
-import java.util.LinkedList;
-import java.util.List;
-import java.util.Stack;
+import java.util.*;
 
 /**
  * @author ginccc
@@ -19,9 +17,11 @@ public class ConversationMemorySnapshot {
     private String conversationId;
     private String botId;
     private Integer botVersion;
+    private String userId;
     private Deployment.Environment environment;
     private ConversationState conversationState;
     private List<ConversationOutput> conversationOutputs = new LinkedList<>();
+    private Map<String, Property> conversationProperties = new LinkedHashMap<>();
     private List<ConversationStepSnapshot> conversationSteps = new LinkedList<>();
     private Stack<ConversationStepSnapshot> redoCache = new Stack<>();
 
@@ -32,13 +32,17 @@ public class ConversationMemorySnapshot {
 
         ConversationMemorySnapshot that = (ConversationMemorySnapshot) o;
 
-        return conversationSteps != null ? conversationSteps.equals(that.conversationSteps) : that.conversationSteps == null;
+        return Objects.equals(conversationSteps, that.conversationSteps);
 
     }
 
     @Override
     public int hashCode() {
         return conversationSteps != null ? conversationSteps.hashCode() : 0;
+    }
+
+    public Map<String, Property> getConversationProperties() {
+        return conversationProperties;
     }
 
     @Getter
@@ -53,7 +57,7 @@ public class ConversationMemorySnapshot {
 
             ConversationStepSnapshot that = (ConversationStepSnapshot) o;
 
-            return packages != null ? packages.equals(that.packages) : that.packages == null;
+            return Objects.equals(packages, that.packages);
         }
 
         @Override
@@ -74,7 +78,7 @@ public class ConversationMemorySnapshot {
 
             PackageRunSnapshot that = (PackageRunSnapshot) o;
 
-            return lifecycleTasks != null ? lifecycleTasks.equals(that.lifecycleTasks) : that.lifecycleTasks == null;
+            return Objects.equals(lifecycleTasks, that.lifecycleTasks);
         }
 
         @Override
@@ -102,8 +106,8 @@ public class ConversationMemorySnapshot {
 
             ResultSnapshot that = (ResultSnapshot) o;
 
-            if (key != null ? key.equals(that.key) : that.key == null) {
-                return possibleResults != null ? possibleResults.equals(that.possibleResults) : that.possibleResults == null;
+            if (Objects.equals(key, that.key)) {
+                return Objects.equals(possibleResults, that.possibleResults);
             }
             return false;
         }

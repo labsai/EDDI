@@ -1,9 +1,9 @@
 package ai.labs.output.impl;
 
-import ai.labs.memory.Data;
 import ai.labs.memory.IConversationMemory;
 import ai.labs.memory.IData;
 import ai.labs.memory.IDataFactory;
+import ai.labs.memory.model.Data;
 import ai.labs.output.IOutputGeneration;
 import ai.labs.output.model.OutputEntry;
 import ai.labs.output.model.OutputValue;
@@ -85,9 +85,9 @@ public class OutputGenerationTaskTest {
         outputGenerationTask.executeTask(conversationMemory);
 
         //assert
-        verify(conversationMemory, times(2)).getCurrentStep();
-        //verify(currentStep).storeData(expectedOutputData);
-        //verify(currentStep).storeData(expectedQuickReplyData);
+        verify(conversationMemory, times(1)).getCurrentStep();
+        verify(currentStep, times(2)).storeData(any());
+        verify(currentStep, times(2)).addConversationOutputList(anyString(), anyList());
     }
 
     @Test

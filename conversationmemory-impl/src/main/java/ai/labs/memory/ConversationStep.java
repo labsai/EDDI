@@ -48,6 +48,11 @@ public class ConversationStep implements IConversationMemory.IWritableConversati
     }
 
     @Override
+    public void addConversationOutputObject(String key, Object value) {
+        conversationOutput.put(key, value);
+    }
+
+    @Override
     public void addConversationOutputString(String key, String value) {
         conversationOutput.put(key, value);
     }

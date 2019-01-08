@@ -14,7 +14,6 @@ import ai.labs.utilities.RestUtilities;
 import lombok.extern.slf4j.Slf4j;
 
 import javax.inject.Inject;
-import javax.ws.rs.BadRequestException;
 import javax.ws.rs.InternalServerErrorException;
 import javax.ws.rs.core.MediaType;
 import javax.ws.rs.core.Response;
@@ -45,7 +44,7 @@ public class RestBotStore extends RestVersionInfo<BotConfiguration> implements I
     }
 
     @Override
-    public List<DocumentDescriptor> readBotDescriptors(String filter, Integer index, Integer limit, String containingPackageUri) {
+    public List<DocumentDescriptor> readBotDescriptors(String filter, Integer index, Integer limit, String containingPackageUri, Boolean includePreviousVersions) {
         IResourceStore.IResourceId validatedResourceId = ResourceUtilities.validateUri(containingPackageUri);
         if (validatedResourceId == null || !containingPackageUri.startsWith(PACKAGE_URI)) {
             return createMalFormattedResourceUriException(containingPackageUri);
@@ -53,16 +52,11 @@ public class RestBotStore extends RestVersionInfo<BotConfiguration> implements I
 
         try {
             return botStore.getBotDescriptorsContainingPackage(
-                    validatedResourceId.getId(), validatedResourceId.getVersion());
+                    validatedResourceId.getId(), validatedResourceId.getVersion(), includePreviousVersions);
         } catch (IResourceStore.ResourceNotFoundException | IResourceStore.ResourceStoreException e) {
             log.error(e.getLocalizedMessage(), e);
             throw new InternalServerErrorException();
         }
-    }
-
-    private List<DocumentDescriptor> createBadRequestException(String paramName) {
-        String message = String.format("query param '%s' is missing", paramName);
-        throw new BadRequestException(Response.status(BAD_REQUEST).entity(message).type(MediaType.TEXT_PLAIN).build());
     }
 
     @Override

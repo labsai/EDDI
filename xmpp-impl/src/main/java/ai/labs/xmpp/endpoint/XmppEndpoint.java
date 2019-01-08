@@ -160,7 +160,7 @@ public class XmppEndpoint implements IXmppEndpoint {
     }
 
     private Integer getLatestDeployedBotVersion(String botId) throws ServiceException {
-        return botFactory.getLatestBot(unrestricted, botId) != null ? botFactory.getLatestBot(unrestricted, botId).getVersion() : Integer.valueOf(1);
+        return botFactory.getLatestBot(unrestricted, botId) != null ? botFactory.getLatestBot(unrestricted, botId).getBotVersion() : Integer.valueOf(1);
     }
 
     private void say(Deployment.Environment environment,
@@ -260,7 +260,7 @@ public class XmppEndpoint implements IXmppEndpoint {
         String conversationId;
         try {
             Response response = restInterfaceFactory.get(IRestBotEngine.class, apiServerURI).
-                    startConversation(environment, botId);
+                    startConversation(environment, botId, senderId);
             if (response.getStatus() == 201) {
                 URIUtilities.ResourceId resourceIdConversation =
                         URIUtilities.extractResourceId(response.getLocation());

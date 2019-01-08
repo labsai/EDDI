@@ -1,9 +1,10 @@
 package ai.labs.templateengine;
 
-import ai.labs.memory.Data;
 import ai.labs.memory.IConversationMemory;
 import ai.labs.memory.IData;
 import ai.labs.memory.IDataFactory;
+import ai.labs.memory.IMemoryItemConverter;
+import ai.labs.memory.model.Data;
 import ai.labs.models.Context;
 import ai.labs.output.model.QuickReply;
 import lombok.AllArgsConstructor;
@@ -45,8 +46,8 @@ public class OutputTemplateTaskTest {
         conversationMemory = mock(IConversationMemory.class);
         currentStep = mock(IConversationMemory.IWritableConversationStep.class);
         when(conversationMemory.getCurrentStep()).then(invocation -> currentStep);
-        IMemoryTemplateConverter memoryTemplateConverter = mock(IMemoryTemplateConverter.class);
-        when(memoryTemplateConverter.convertMemoryForTemplating(any(IConversationMemory.class))).
+        IMemoryItemConverter memoryTemplateConverter = mock(IMemoryItemConverter.class);
+        when(memoryTemplateConverter.convert(any(IConversationMemory.class))).
                 then(invocation -> new HashMap<>());
         outputTemplateTask = new OutputTemplateTask(templatingEngine, memoryTemplateConverter, dataFactory);
     }
@@ -132,7 +133,6 @@ public class OutputTemplateTaskTest {
     private void verifyTask(List<QuickReply> expectedPostQuickReplies) {
         verify(currentStep).getAllData("output");
         verify(currentStep).getAllData("quickReplies");
-        verify(currentStep).getAllData("context");
         verify(dataFactory).createData(eq(KEY_OUTPUT_TEXT_SOME_ACTION_PRE_TEMPLATED), eq(templateString));
         verify(dataFactory).createData(eq(KEY_OUTPUT_TEXT_SOME_ACTION_POST_TEMPLATED), eq(expectedOutputString));
         verify(dataFactory, times(2)).createData(eq(KEY_QUICK_REPLY_SOME_ACTION_PRE_TEMPLATED), any());

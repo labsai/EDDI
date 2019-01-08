@@ -96,7 +96,7 @@ public class TestCaseRuntime {
     private ConversationMemorySnapshot runTestCase(String botId, TestCase testCase) throws Exception {
         IRestBotEngine botEngine = restInterfaceFactory.get(IRestBotEngine.class, apiServerURI);
 
-        Response ConversationResponse = botEngine.startConversation(Deployment.Environment.test, botId);
+        Response ConversationResponse = botEngine.startConversation(Deployment.Environment.test, botId, "testCaseRunner");
         URI conversationURI = ConversationResponse.getLocation();
         String conversationURIPath = conversationURI.getPath();
         String conversationId = conversationURIPath.substring(conversationURIPath.lastIndexOf("/") + 1);
