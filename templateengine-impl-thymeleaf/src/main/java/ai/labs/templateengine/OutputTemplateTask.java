@@ -11,7 +11,10 @@ import ai.labs.templateengine.ITemplatingEngine.TemplateMode;
 import lombok.extern.slf4j.Slf4j;
 
 import javax.inject.Inject;
-import java.util.*;
+import java.util.Collections;
+import java.util.LinkedList;
+import java.util.List;
+import java.util.Map;
 import java.util.stream.Collectors;
 
 import static ai.labs.memory.IConversationMemory.IWritableConversationStep;
@@ -85,12 +88,11 @@ public class OutputTemplateTask implements ILifecycleTask {
                 Object result = output.getResult();
                 String preTemplated = null;
                 boolean isObj = false;
-                Map<String, Object> resultMap = Collections.emptyMap();
                 if (result instanceof String) { // keep supporting string for backwards compatibility
                     preTemplated = (String) result;
                 } else if (result instanceof Map) {
-                    resultMap = new LinkedHashMap<>((Map<String, Object>) result);
-                    preTemplated = getFieldToTemplate(resultMap, "text", "label", "value");
+                    preTemplated = getFieldToTemplate((Map<String, Object>) result,
+                            "text", "label", "value");
                     isObj = true;
                 }
 
@@ -98,14 +100,12 @@ public class OutputTemplateTask implements ILifecycleTask {
                     try {
                         String postTemplated = templatingEngine.processTemplate(preTemplated, contextMap, templateMode);
                         if (isObj) {
-                            putFieldToTemplate(resultMap, postTemplated, "text", "label", "value");
-                            result = resultMap;
+                            putFieldToTemplate((Map<String, Object>) result, postTemplated,
+                                    "text", "label", "value");
                         } else {
-                            result = postTemplated;
+                            output.setResult(postTemplated);
                         }
-
-                        IData postData = dataFactory.createData(output.getKey(), result);
-                        templateData(memory, postData, outputKey, preTemplated, postTemplated);
+                        templateData(memory, output, outputKey, preTemplated, postTemplated);
                     } catch (ITemplatingEngine.TemplateEngineException e) {
                         log.error(e.getLocalizedMessage(), e);
                     }

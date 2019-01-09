@@ -201,18 +201,22 @@ public class HttpCallsTask implements ILifecycleTask {
 
             var qrBuildInstructions = postResponse.getQrBuildInstructions();
             if (qrBuildInstructions != null) {
+                List<Object> quickReplies = new LinkedList<>();
                 for (QuickRepliesBuildingInstruction qrBuildInstruction : qrBuildInstructions) {
-                    List<Object> quickReplies = buildQuickReplies(qrBuildInstruction.getIterationObjectName(),
-                            qrBuildInstruction.getPathToTargetArray(),
-                            qrBuildInstruction.getTemplateFilterExpression(),
-                            qrBuildInstruction.getQuickReplyValue(),
-                            qrBuildInstruction.getQuickReplyExpressions(),
-                            templateDataObjects);
+                    quickReplies.addAll(
+                            buildQuickReplies(
+                                    qrBuildInstruction.getIterationObjectName(),
+                                    qrBuildInstruction.getPathToTargetArray(),
+                                    qrBuildInstruction.getTemplateFilterExpression(),
+                                    qrBuildInstruction.getQuickReplyValue(),
+                                    qrBuildInstruction.getQuickReplyExpressions(),
+                                    templateDataObjects));
 
-                    var context = new Context(Context.ContextType.object, quickReplies);
-                    IData<Context> contextData = dataFactory.createData("context:quickReplies", context);
-                    memory.getCurrentStep().storeData(contextData);
                 }
+
+                var context = new Context(Context.ContextType.object, quickReplies);
+                IData<Context> contextData = dataFactory.createData("context:quickReplies", context);
+                memory.getCurrentStep().storeData(contextData);
             }
         }
 
