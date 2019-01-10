@@ -92,7 +92,7 @@ public class OutputTemplateTask implements ILifecycleTask {
                     preTemplated = (String) result;
                 } else if (result instanceof Map) {
                     preTemplated = getFieldToTemplate((Map<String, Object>) result,
-                            "text", "label", "value");
+                            "text", "label", "value", "uri");
                     isObj = true;
                 }
 
@@ -101,7 +101,7 @@ public class OutputTemplateTask implements ILifecycleTask {
                         String postTemplated = templatingEngine.processTemplate(preTemplated, contextMap, templateMode);
                         if (isObj) {
                             putFieldToTemplate((Map<String, Object>) result, postTemplated,
-                                    "text", "label", "value");
+                                    "text", "label", "value", "uri");
                         } else {
                             output.setResult(postTemplated);
                         }
