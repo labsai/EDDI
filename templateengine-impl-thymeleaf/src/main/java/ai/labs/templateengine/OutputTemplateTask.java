@@ -11,10 +11,7 @@ import ai.labs.templateengine.ITemplatingEngine.TemplateMode;
 import lombok.extern.slf4j.Slf4j;
 
 import javax.inject.Inject;
-import java.util.Collections;
-import java.util.LinkedList;
-import java.util.List;
-import java.util.Map;
+import java.util.*;
 import java.util.stream.Collectors;
 
 import static ai.labs.memory.IConversationMemory.IWritableConversationStep;
@@ -85,56 +82,39 @@ public class OutputTemplateTask implements ILifecycleTask {
             }
 
             if (templateMode != null) {
-                Object result = output.getResult();
-                String preTemplated = null;
-                boolean isObj = false;
-                if (result instanceof String) { // keep supporting string for backwards compatibility
-                    preTemplated = (String) result;
-                } else if (result instanceof Map) {
-                    preTemplated = getFieldToTemplate((Map<String, Object>) result,
-                            "text", "label", "value", "uri");
-                    isObj = true;
-                }
+                try {
+                    Object preTemplated = output.getResult();
+                    Object postTemplated = null;
 
-                if (preTemplated != null) {
-                    try {
-                        String postTemplated = templatingEngine.processTemplate(preTemplated, contextMap, templateMode);
-                        if (isObj) {
-                            putFieldToTemplate((Map<String, Object>) result, postTemplated,
-                                    "text", "label", "value", "uri");
-                        } else {
-                            output.setResult(postTemplated);
+                    if (preTemplated instanceof String) { // keep supporting string for backwards compatibility
+
+                        postTemplated = templatingEngine.processTemplate(preTemplated.toString(), contextMap, templateMode);
+
+                    } else if (preTemplated instanceof Map) {
+                        var tmpMap = new LinkedHashMap<>((Map<String, Object>) preTemplated);
+
+                        for (String key : tmpMap.keySet()) {
+                            Object valueObj = tmpMap.get(key);
+                            if (valueObj instanceof String) {
+                                String post = templatingEngine.processTemplate(valueObj.toString(), contextMap, templateMode);
+                                tmpMap.put(key, post);
+                            }
                         }
-                        templateData(memory, output, outputKey, preTemplated, postTemplated);
-                    } catch (ITemplatingEngine.TemplateEngineException e) {
-                        log.error(e.getLocalizedMessage(), e);
-                    }
-                }
 
-                IWritableConversationStep currentStep = memory.getCurrentStep();
-                currentStep.addConversationOutputList(KEY_OUTPUT, Collections.singletonList(output.getResult()));
+                        postTemplated = tmpMap;
+                    }
+
+                    output.setResult(postTemplated);
+                    templateData(memory, output, outputKey, preTemplated, postTemplated);
+
+                    IWritableConversationStep currentStep = memory.getCurrentStep();
+                    currentStep.addConversationOutputList(KEY_OUTPUT, Collections.singletonList(output.getResult()));
+
+                } catch (ITemplatingEngine.TemplateEngineException e) {
+                    log.error(e.getLocalizedMessage(), e);
+                }
             }
         });
-    }
-
-    private static String getFieldToTemplate(Map<String, Object> result, String... keys) {
-        for (String key : keys) {
-            Object field = result.get(key);
-            if (field instanceof String) {
-                return field.toString();
-            }
-        }
-
-        return null;
-    }
-
-    private static void putFieldToTemplate(Map<String, Object> result, String value, String... keys) {
-        for (String key : keys) {
-            if (result.containsKey(key)) {
-                result.put(key, value);
-                break;
-            }
-        }
     }
 
     private void templatingQuickReplies(IConversationMemory memory,
