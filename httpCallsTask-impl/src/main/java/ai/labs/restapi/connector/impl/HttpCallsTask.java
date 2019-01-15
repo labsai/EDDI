@@ -12,6 +12,7 @@ import ai.labs.memory.IData;
 import ai.labs.memory.IDataFactory;
 import ai.labs.memory.IMemoryItemConverter;
 import ai.labs.models.Context;
+import ai.labs.models.HttpCodeValidator;
 import ai.labs.models.Property;
 import ai.labs.models.PropertyInstruction;
 import ai.labs.resources.rest.extensions.model.ExtensionDescriptor;
@@ -161,7 +162,7 @@ public class HttpCallsTask implements ILifecycleTask {
                             currentStep.storeData(httpResponseData);
                             currentStep.addConversationOutputMap(KEY_HTTP_CALLS, Map.of(responseObjectName, responseObject));
 
-                            runPostResponse(memory, call, templateDataObjects);
+                            runPostResponse(memory, call, templateDataObjects, response.getHttpCode());
                         }
                     }
                 } catch (IRequest.HttpRequestException |
@@ -179,7 +180,7 @@ public class HttpCallsTask implements ILifecycleTask {
         return new LinkedList<>(new HashSet<>(httpCalls));
     }
 
-    private void runPostResponse(IConversationMemory memory, HttpCall call, Map<String, Object> templateDataObjects)
+    private void runPostResponse(IConversationMemory memory, HttpCall call, Map<String, Object> templateDataObjects, int httpCode)
             throws IOException, ITemplatingEngine.TemplateEngineException, OgnlException {
 
         var postResponse = call.getPostResponse();
@@ -187,15 +188,18 @@ public class HttpCallsTask implements ILifecycleTask {
             var propertyInstructions = postResponse.getPropertyInstructions();
             if (propertyInstructions != null) {
                 for (PropertyInstruction propertyInstruction : propertyInstructions) {
-                    String propertyName = propertyInstruction.getName();
-                    RuntimeUtilities.checkNotNull(propertyName, "name");
+                    if (verifyHttpCode(propertyInstruction.getHttpCodeValidator(), httpCode)) {
 
-                    String path = propertyInstruction.getFromObjectPath();
-                    RuntimeUtilities.checkNotNull(path, "fromObjectPath");
+                        String propertyName = propertyInstruction.getName();
+                        RuntimeUtilities.checkNotNull(propertyName, "name");
 
-                    Property.Scope scope = propertyInstruction.getScope();
-                    memory.getConversationProperties().put(propertyName, new Property(propertyName,
-                            Ognl.getValue(path, templateDataObjects), scope));
+                        String path = propertyInstruction.getFromObjectPath();
+                        RuntimeUtilities.checkNotNull(path, "fromObjectPath");
+
+                        Property.Scope scope = propertyInstruction.getScope();
+                        memory.getConversationProperties().put(propertyName, new Property(propertyName,
+                                Ognl.getValue(path, templateDataObjects), scope));
+                    }
                 }
             }
 
@@ -203,15 +207,17 @@ public class HttpCallsTask implements ILifecycleTask {
             if (qrBuildInstructions != null) {
                 List<Object> quickReplies = new LinkedList<>();
                 for (QuickRepliesBuildingInstruction qrBuildInstruction : qrBuildInstructions) {
-                    quickReplies.addAll(
-                            buildQuickReplies(
-                                    qrBuildInstruction.getIterationObjectName(),
-                                    qrBuildInstruction.getPathToTargetArray(),
-                                    qrBuildInstruction.getTemplateFilterExpression(),
-                                    qrBuildInstruction.getQuickReplyValue(),
-                                    qrBuildInstruction.getQuickReplyExpressions(),
-                                    templateDataObjects));
+                    if (verifyHttpCode(qrBuildInstruction.getHttpCodeValidator(), httpCode)) {
 
+                        quickReplies.addAll(
+                                buildQuickReplies(
+                                        qrBuildInstruction.getIterationObjectName(),
+                                        qrBuildInstruction.getPathToTargetArray(),
+                                        qrBuildInstruction.getTemplateFilterExpression(),
+                                        qrBuildInstruction.getQuickReplyValue(),
+                                        qrBuildInstruction.getQuickReplyExpressions(),
+                                        templateDataObjects));
+                    }
                 }
 
                 var context = new Context(Context.ContextType.object, quickReplies);
@@ -221,6 +227,11 @@ public class HttpCallsTask implements ILifecycleTask {
         }
 
 
+    }
+
+    private boolean verifyHttpCode(HttpCodeValidator httpCodeValidator, int httpCode) {
+        return httpCodeValidator.getRunOnHttpCode().contains(httpCode) &&
+                !httpCodeValidator.getSkipOnHttpCode().contains(httpCode);
     }
 
     private IRequest buildRequest(Request requestConfig, Map<String, Object> templateDataObjects) throws ITemplatingEngine.TemplateEngineException {
