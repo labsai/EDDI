@@ -29,7 +29,9 @@ public class ConversationProperties
             String propertiesKey = KEY_PROPERTIES + ":" + key;
             IConversationMemory.IWritableConversationStep currentStep = conversationMemory.getCurrentStep();
             currentStep.storeData(new Data<>(propertiesKey, Collections.singletonList(property)));
-            Map<String, Object> propertyMap = Map.of(property.getName(), property.getValue());
+            Map<String, Object> propertyMap = new LinkedHashMap<>();
+            propertyMap.put(property.getName(), property.getValue());
+
             propertiesMap.putAll(propertyMap);
             currentStep.addConversationOutputMap(KEY_PROPERTIES, propertyMap);
         }
