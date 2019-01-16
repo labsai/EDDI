@@ -28,6 +28,8 @@ public class BehaviorModule extends AbstractBaseModule {
                 to(ActionMatcher.class);
         behaviorExtensionPlugins.addBinding("ai.labs.behavior.extension.contextmatcher").
                 to(ContextMatcher.class);
+        behaviorExtensionPlugins.addBinding("ai.labs.behavior.extension.dynamicvaluematcher").
+                to(DynamicValueMatcher.class);
         behaviorExtensionPlugins.addBinding("ai.labs.behavior.extension.connector").
                 to(Connector.class);
         behaviorExtensionPlugins.addBinding("ai.labs.behavior.extension.dependency").

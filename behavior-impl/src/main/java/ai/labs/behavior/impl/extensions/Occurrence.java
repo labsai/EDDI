@@ -78,12 +78,12 @@ public class Occurrence implements IBehaviorExtension {
             }
 
             if (values.containsKey(maxTimesOccurredQualifier)) {
-                Integer timesOccurred = Integer.parseInt(values.get(maxTimesOccurredQualifier));
+                int timesOccurred = Integer.parseInt(values.get(maxTimesOccurredQualifier));
                 setMaxTimesOccurred(timesOccurred);
             }
 
             if (values.containsKey(minTimesOccurredQualifier)) {
-                Integer timesOccurred = Integer.parseInt(values.get(minTimesOccurredQualifier));
+                int timesOccurred = Integer.parseInt(values.get(minTimesOccurredQualifier));
                 setMinTimesOccurred(timesOccurred);
             }
 
@@ -127,7 +127,7 @@ public class Occurrence implements IBehaviorExtension {
     }
 
     @Override
-    public IBehaviorExtension clone() throws CloneNotSupportedException {
+    public IBehaviorExtension clone() {
         IBehaviorExtension occurrence = new Occurrence();
         occurrence.setValues(getValues());
 

@@ -110,7 +110,7 @@ public class ResultSize implements IBehaviorExtension {
         return state;
     }
 
-    public IBehaviorExtension clone() throws CloneNotSupportedException {
+    public IBehaviorExtension clone() {
         IBehaviorExtension clone = new ResultSize();
         clone.setValues(getValues());
         return clone;
