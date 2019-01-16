@@ -53,7 +53,7 @@ public class TemplatingEngine implements ITemplatingEngine {
     }
 
     private boolean containsTemplatingControlCharacters(String template) {
-        return templatingControlChars.parallelStream().anyMatch(template::contains);
+        return templatingControlChars.stream().anyMatch(template::contains);
     }
 
     private TemplateEngine getTemplateEngine(TemplateMode templateMode) {

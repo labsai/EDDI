@@ -3,11 +3,8 @@ package ai.labs.runtime.internal;
 import ai.labs.lifecycle.IConversation;
 import ai.labs.lifecycle.ILifecycleManager;
 import ai.labs.lifecycle.LifecycleException;
-import ai.labs.memory.ConversationMemory;
-import ai.labs.memory.IConversationMemory;
+import ai.labs.memory.*;
 import ai.labs.memory.IConversationMemory.IConversationProperties;
-import ai.labs.memory.IData;
-import ai.labs.memory.IPropertiesHandler;
 import ai.labs.memory.model.Data;
 import ai.labs.models.Context;
 import ai.labs.models.ConversationState;
@@ -69,7 +66,7 @@ public class Conversation implements IConversation {
         addConversationStartAction(conversationMemory.getCurrentStep());
         loadLongTermProperties(conversationMemory);
 
-        executePackages(createContextData(context));
+        executePackages(new LinkedList<>(createContextData(context)));
     }
 
     private void setConversationState(ConversationState conversationState) {
@@ -119,7 +116,9 @@ public class Conversation implements IConversation {
             setConversationState(ConversationState.IN_PROGRESS);
 
             ((ConversationMemory) conversationMemory).startNextStep();
-            List<IData> data = createContextData(contexts);
+            var contextData = createContextData(contexts);
+            addContextToConversationOutput(conversationMemory.getCurrentStep(), contextData);
+            var lifecycleData = new LinkedList<IData>(contextData);
 
             //store user input in memory
             IData initialData;
@@ -127,12 +126,12 @@ public class Conversation implements IConversation {
             if (!"".equals(message.trim())) {
                 initialData = new Data<>(KEY_INPUT + ":initial", message);
                 initialData.setPublic(true);
-                data.add(initialData);
+                lifecycleData.add(initialData);
                 currentStep.addConversationOutputString(KEY_INPUT, message);
             }
 
             //execute input processing
-            executePackages(data);
+            executePackages(lifecycleData);
 
             IData<List<String>> actionData = currentStep.getLatestData(KEY_ACTIONS);
             if (actionData != null) {
@@ -159,6 +158,15 @@ public class Conversation implements IConversation {
             if (outputProvider != null) {
                 outputProvider.renderOutput(conversationMemory);
             }
+        }
+    }
+
+    private void addContextToConversationOutput(IWritableConversationStep currentStep,
+                                                List<IData<Context>> contextData) {
+
+        if (!contextData.isEmpty()) {
+            var context = ConversationMemoryUtilities.prepareContext(contextData);
+            currentStep.addConversationOutputMap(KEY_CONTEXT, context);
         }
     }
 
@@ -191,8 +199,8 @@ public class Conversation implements IConversation {
         propertiesHandler.mergeProperties(longTermConversationProperties);
     }
 
-    private List<IData> createContextData(Map<String, Context> context) {
-        List<IData> contextData = new LinkedList<>();
+    private List<IData<Context>> createContextData(Map<String, Context> context) {
+        List<IData<Context>> contextData = new LinkedList<>();
         if (context != null) {
             for (String key : context.keySet()) {
                 contextData.add(new Data<>(KEY_CONTEXT + ":" + key, context.get(key)));
