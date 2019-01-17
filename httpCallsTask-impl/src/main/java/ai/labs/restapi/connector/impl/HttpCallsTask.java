@@ -23,7 +23,6 @@ import ai.labs.runtime.client.configuration.IResourceClientLibrary;
 import ai.labs.runtime.service.ServiceException;
 import ai.labs.serialization.IJsonSerialization;
 import ai.labs.templateengine.ITemplatingEngine;
-import ai.labs.utilities.RuntimeUtilities;
 import lombok.extern.slf4j.Slf4j;
 import ognl.Ognl;
 import ognl.OgnlException;
@@ -37,6 +36,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.stream.Collectors;
 
+import static ai.labs.utilities.RuntimeUtilities.checkNotNull;
 import static ai.labs.utilities.RuntimeUtilities.isNullOrEmpty;
 
 @Slf4j
@@ -191,10 +191,10 @@ public class HttpCallsTask implements ILifecycleTask {
                     if (verifyHttpCode(propertyInstruction.getHttpCodeValidator(), httpCode)) {
 
                         String propertyName = propertyInstruction.getName();
-                        RuntimeUtilities.checkNotNull(propertyName, "name");
+                        checkNotNull(propertyName, "name");
 
                         String path = propertyInstruction.getFromObjectPath();
-                        RuntimeUtilities.checkNotNull(path, "fromObjectPath");
+                        checkNotNull(path, "fromObjectPath");
 
                         Property.Scope scope = propertyInstruction.getScope();
                         memory.getConversationProperties().put(propertyName, new Property(propertyName,
@@ -230,6 +230,17 @@ public class HttpCallsTask implements ILifecycleTask {
     }
 
     private boolean verifyHttpCode(HttpCodeValidator httpCodeValidator, int httpCode) {
+        if (httpCodeValidator == null) {
+            httpCodeValidator = HttpCodeValidator.DEFAULT;
+        } else {
+            if (isNullOrEmpty(httpCodeValidator.getRunOnHttpCode())) {
+                httpCodeValidator.setRunOnHttpCode(HttpCodeValidator.DEFAULT.getRunOnHttpCode());
+            }
+            if (isNullOrEmpty(httpCodeValidator.getSkipOnHttpCode())) {
+                httpCodeValidator.setSkipOnHttpCode(HttpCodeValidator.DEFAULT.getSkipOnHttpCode());
+            }
+        }
+
         return httpCodeValidator.getRunOnHttpCode().contains(httpCode) &&
                 !httpCodeValidator.getSkipOnHttpCode().contains(httpCode);
     }

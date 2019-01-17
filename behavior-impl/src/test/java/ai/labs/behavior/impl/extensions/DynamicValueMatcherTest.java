@@ -28,17 +28,27 @@ public class DynamicValueMatcherTest {
     @Before
     public void setUp() {
         memoryItemConverter = mock(IMemoryItemConverter.class);
-        when(memoryItemConverter.convert(any())).thenAnswer(invocation -> new LinkedHashMap<>(createConversationOutput()));
         conversationMemory = mock(IConversationMemory.class);
         currentStep = mock(IConversationMemory.IWritableConversationStep.class);
-        when(currentStep.getConversationOutput()).then(invocation -> createConversationOutput());
         when(conversationMemory.getCurrentStep()).then(invocation -> currentStep);
     }
 
+    private void initOutput() {
+        initOutput("username", "John");
+    }
+
+    private void initOutput(String nameKey, String name) {
+        when(memoryItemConverter.convert(any())).thenAnswer(invocation ->
+                new LinkedHashMap<>(createConversationOutput(nameKey, name)));
+        when(currentStep.getConversationOutput()).then(invocation -> createConversationOutput(nameKey, name));
+    }
+
     @Test
-    public void dynamicValueNothingDefined() {
+    public void dynamicValue_NothingDefined() {
         //setup
+        initOutput();
         DynamicValueMatcher dynamicValueMatcher = new DynamicValueMatcher(memoryItemConverter);
+        dynamicValueMatcher.setValues(createValues(false, false, false));
 
         //test
         dynamicValueMatcher.execute(conversationMemory, new LinkedList<>());
@@ -48,10 +58,11 @@ public class DynamicValueMatcherTest {
     }
 
     @Test
-    public void dynamicValueNothingEquals() {
+    public void dynamicValue_ValuePathOnly() {
         //setup
+        initOutput();
         DynamicValueMatcher dynamicValueMatcher = new DynamicValueMatcher(memoryItemConverter);
-        dynamicValueMatcher.setValues(createValues(true, false));
+        dynamicValueMatcher.setValues(createValues(true, false, false));
 
         //test
         dynamicValueMatcher.execute(conversationMemory, new LinkedList<>());
@@ -61,10 +72,11 @@ public class DynamicValueMatcherTest {
     }
 
     @Test
-    public void dynamicValueNothingContains() {
+    public void dynamicValue_NothingEquals() {
         //setup
+        initOutput();
         DynamicValueMatcher dynamicValueMatcher = new DynamicValueMatcher(memoryItemConverter);
-        dynamicValueMatcher.setValues(createValues(false, true));
+        dynamicValueMatcher.setValues(createValues(true, true, false));
 
         //test
         dynamicValueMatcher.execute(conversationMemory, new LinkedList<>());
@@ -73,9 +85,39 @@ public class DynamicValueMatcherTest {
         Assert.assertEquals(ExecutionState.SUCCESS, dynamicValueMatcher.getExecutionState());
     }
 
-    private Map<String, String> createValues(boolean isEquals, boolean isContains) {
+    @Test
+    public void dynamicValue_NothingContains() {
+        //setup
+        initOutput();
+        DynamicValueMatcher dynamicValueMatcher = new DynamicValueMatcher(memoryItemConverter);
+        dynamicValueMatcher.setValues(createValues(true, false, true));
+
+        //test
+        dynamicValueMatcher.execute(conversationMemory, new LinkedList<>());
+
+        //assert
+        Assert.assertEquals(ExecutionState.SUCCESS, dynamicValueMatcher.getExecutionState());
+    }
+
+    @Test
+    public void dynamicValue_propertyIsNull() {
+        //setup
+        initOutput("name", "Tom");
+        DynamicValueMatcher dynamicValueMatcher = new DynamicValueMatcher(memoryItemConverter);
+        dynamicValueMatcher.setValues(createValues(true, false, false));
+
+        //test
+        dynamicValueMatcher.execute(conversationMemory, new LinkedList<>());
+
+        //assert
+        Assert.assertEquals(ExecutionState.FAIL, dynamicValueMatcher.getExecutionState());
+    }
+
+    private Map<String, String> createValues(boolean isValuePath, boolean isEquals, boolean isContains) {
         Map<String, String> ret = new HashMap<>();
-        ret.put("valuePath", "properties.username");
+        if (isValuePath) {
+            ret.put("valuePath", "properties.username");
+        }
         if (isEquals) {
             ret.put("equals", "John");
         }
@@ -85,10 +127,10 @@ public class DynamicValueMatcherTest {
         return ret;
     }
 
-    private ConversationOutput createConversationOutput() {
+    private ConversationOutput createConversationOutput(String nameKey, String name) {
         ConversationOutput conversationOutput = new ConversationOutput();
-        var usernameMap = new HashMap();
-        usernameMap.put("username", "John");
+        var usernameMap = new HashMap<>();
+        usernameMap.put(nameKey, name);
         conversationOutput.put("properties", usernameMap);
         return conversationOutput;
     }

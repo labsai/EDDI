@@ -61,10 +61,18 @@ public class DynamicValueMatcher implements IBehaviorExtension {
         try {
             if (!isNullOrEmpty(valuePath)) {
                 Object value = Ognl.getValue(valuePath, memoryItemConverter.convert(memory));
-                if (!isNullOrEmpty(equals) && equals.equals(value)) {
-                    success = true;
-                } else if (!isNullOrEmpty(contains) && value instanceof String && ((String) value).contains(contains)) {
-                    success = true;
+                if (value != null) {
+                    if (!isNullOrEmpty(equals) && equals.equals(value)) {
+                        success = true;
+                    } else if (!isNullOrEmpty(contains)) {
+                        if (value instanceof String && ((String) value).contains(contains)) {
+                            success = true;
+                        } else if (value instanceof List && ((List) value).contains(contains)) {
+                            success = true;
+                        }
+                    } else if (isNullOrEmpty(equals) && isNullOrEmpty(contains)) {
+                        success = true;
+                    }
                 }
             }
         } catch (NoSuchPropertyException e) {
