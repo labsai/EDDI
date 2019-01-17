@@ -197,8 +197,14 @@ public class HttpCallsTask implements ILifecycleTask {
                         checkNotNull(path, "fromObjectPath");
 
                         Property.Scope scope = propertyInstruction.getScope();
-                        memory.getConversationProperties().put(propertyName, new Property(propertyName,
-                                Ognl.getValue(path, templateDataObjects), scope));
+                        Object propertyValue;
+                        if (!isNullOrEmpty(path)) {
+                            propertyValue = Ognl.getValue(path, templateDataObjects);
+                        } else {
+                            propertyValue = propertyInstruction.getValue();
+                        }
+                        memory.getConversationProperties().put(propertyName,
+                                new Property(propertyName, propertyValue, scope));
                     }
                 }
             }
