@@ -6,6 +6,7 @@ import lombok.extern.slf4j.Slf4j;
 
 import java.util.*;
 
+import static ai.labs.memory.ConversationMemoryUtilities.prepareContext;
 import static ai.labs.memory.IConversationMemory.IConversationStep;
 import static ai.labs.memory.IConversationMemory.IWritableConversationStep;
 
@@ -40,19 +41,6 @@ public class MemoryItemConverter implements IMemoryItemConverter {
         }
 
         return ret;
-    }
-
-    private static Map<String, Object> prepareContext(List<IData<Context>> contextDataList) {
-        Map<String, Object> dynamicAttributesMap = new HashMap<>();
-        contextDataList.forEach(contextData -> {
-            Context context = contextData.getResult();
-            Context.ContextType contextType = context.getType();
-            if (contextType.equals(Context.ContextType.object) || contextType.equals(Context.ContextType.string)) {
-                String dataKey = contextData.getKey();
-                dynamicAttributesMap.put(dataKey.substring(dataKey.indexOf(":") + 1), context.getValue());
-            }
-        });
-        return dynamicAttributesMap;
     }
 
     private static Map<String, Object> convertMemoryItems(IConversationMemory memory) {

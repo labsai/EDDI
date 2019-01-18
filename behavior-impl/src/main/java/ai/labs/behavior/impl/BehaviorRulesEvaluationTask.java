@@ -32,11 +32,13 @@ public class BehaviorRulesEvaluationTask implements ILifecycleTask {
     public static final String ID = "ai.labs.behavior";
     private static final String KEY_ACTIONS = "actions";
     private static final String BEHAVIOR_CONFIG_URI = "uri";
+    private static final String BEHAVIOR_CONFIG_APPEND_ACTIONS = "appendActions";
     private final IResourceClientLibrary resourceClientLibrary;
     private final IJsonSerialization jsonSerialization;
     private final IBehaviorDeserialization behaviorSerialization;
 
     private BehaviorRulesEvaluator evaluator;
+    private boolean appendActions = true;
 
     @Inject
     public BehaviorRulesEvaluationTask(IResourceClientLibrary resourceClientLibrary,
@@ -83,11 +85,14 @@ public class BehaviorRulesEvaluationTask implements ILifecycleTask {
         successRules.forEach(successRule -> successRule.getActions().stream().
                 filter(action -> !allCurrentActions.contains(action)).forEach(allCurrentActions::add));
 
-        IConversationMemory.IWritableConversationStep currentStep = memory.getCurrentStep();
-        IData<List<String>> latestActions = currentStep.getLatestData(KEY_ACTIONS);
+        var currentStep = memory.getCurrentStep();
+
         List<String> actions = new LinkedList<>();
-        if (latestActions != null && latestActions.getResult() != null) {
-            actions.addAll(latestActions.getResult());
+        if (appendActions || allCurrentActions.isEmpty()) {
+            IData<List<String>> latestActions = currentStep.getLatestData(KEY_ACTIONS);
+            if (latestActions != null && latestActions.getResult() != null) {
+                actions.addAll(latestActions.getResult());
+            }
         }
 
         actions.addAll(allCurrentActions.stream().
@@ -122,6 +127,10 @@ public class BehaviorRulesEvaluationTask implements ILifecycleTask {
             BehaviorSet behaviorSet = behaviorSerialization.deserialize(behaviorConfigJson);
 
             evaluator = new BehaviorRulesEvaluator(behaviorSet);
+            Object appendActionsObj = configuration.get(BEHAVIOR_CONFIG_APPEND_ACTIONS);
+            if (appendActionsObj != null) {
+                appendActions = Boolean.parseBoolean(appendActionsObj.toString());
+            }
 
         } catch (IOException | DeserializationException e) {
             String message = "Error while configuring BehaviorRuleLifecycleTask!";
@@ -139,8 +148,14 @@ public class BehaviorRulesEvaluationTask implements ILifecycleTask {
         ExtensionDescriptor extensionDescriptor = new ExtensionDescriptor(ID);
         extensionDescriptor.setDisplayName("Behavior Rules");
 
-        ConfigValue configValue = new ConfigValue("Resource URI", FieldType.URI, false, null);
+        ConfigValue configValue =
+                new ConfigValue("Resource URI", FieldType.URI, false, null);
         extensionDescriptor.getConfigs().put(BEHAVIOR_CONFIG_URI, configValue);
+
+        ConfigValue appendActionsConfig =
+                new ConfigValue("Append Actions", FieldType.BOOLEAN, false, true);
+        extensionDescriptor.getConfigs().put(BEHAVIOR_CONFIG_APPEND_ACTIONS, appendActionsConfig);
+
         return extensionDescriptor;
     }
 }

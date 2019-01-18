@@ -360,6 +360,7 @@ public class RestBotEngine implements IRestBotEngine {
                             e -> {
                                 Context context = e.getValue();
                                 return new Context(
+                                        //TODO proper error handling if null or unknown
                                         Context.ContextType.valueOf(context.getType().toString()),
                                         context.getValue());
                             }));

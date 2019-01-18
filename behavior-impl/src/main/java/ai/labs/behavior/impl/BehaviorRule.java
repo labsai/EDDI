@@ -57,8 +57,7 @@ public class BehaviorRule implements Cloneable {
         }
     }
 
-    private InfiniteLoopException throwInfiniteLoopError(List<BehaviorRule> trace)
-            throws InfiniteLoopException {
+    private InfiniteLoopException throwInfiniteLoopError(List<BehaviorRule> trace) {
         StringBuilder errorMessage = new StringBuilder();
 
         errorMessage.append("reached infinite  loop:\n");

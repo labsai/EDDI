@@ -1,5 +1,6 @@
 package ai.labs.resources.rest.http.model;
 
+import ai.labs.models.HttpCodeValidator;
 import lombok.Getter;
 import lombok.Setter;
 
@@ -8,10 +9,12 @@ import lombok.Setter;
 public class QuickRepliesBuildingInstruction extends BuildingInstruction {
     private String quickReplyValue;
     private String quickReplyExpressions;
+    private HttpCodeValidator httpCodeValidator;
 
     public QuickRepliesBuildingInstruction() {
         super();
         quickReplyValue = "";
         quickReplyExpressions = "";
+        httpCodeValidator = new HttpCodeValidator();
     }
 }

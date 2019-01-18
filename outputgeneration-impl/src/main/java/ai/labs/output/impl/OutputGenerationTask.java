@@ -120,12 +120,15 @@ public class OutputGenerationTask implements ILifecycleTask {
             List<Object> possibleValueAlternatives = outputValue.getValueAlternatives();
             Object randomValue = chooseRandomly(possibleValueAlternatives);
             if (randomValue instanceof Map) {
-                ((Map) randomValue).put("type", outputValue.getType());
-            }
-            if (outputValue.getType().equals(OutputValue.Type.quickReply)) {
-                Map<String, String> randomValueMap = (Map) randomValue;
-                quickReplies.add(new QuickReply(randomValueMap.get(KEY_VALUE), randomValueMap.get(KEY_EXPRESSIONS),
-                        Boolean.parseBoolean(randomValueMap.getOrDefault(KEY_IS_DEFAULT, "false"))));
+                Map<String, String> randomValueMap = new LinkedHashMap<>((Map) randomValue);
+                randomValueMap.put("type", outputValue.getType().toString());
+
+                if (outputValue.getType().equals(OutputValue.Type.quickReply)) {
+                    quickReplies.add(new QuickReply(randomValueMap.get(KEY_VALUE), randomValueMap.get(KEY_EXPRESSIONS),
+                            Boolean.parseBoolean(randomValueMap.getOrDefault(KEY_IS_DEFAULT, "false"))));
+                }
+
+                randomValue = randomValueMap;
             }
 
             String outputKey = createOutputKey(action, outputValues, outputValue, index);

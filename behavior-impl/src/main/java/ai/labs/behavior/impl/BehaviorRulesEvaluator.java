@@ -77,9 +77,5 @@ class BehaviorRulesEvaluator {
         BehaviorRuleExecutionException(String message, Exception e) {
             super(message, e);
         }
-
-        BehaviorRuleExecutionException(Exception e) {
-            super(e);
-        }
     }
 }

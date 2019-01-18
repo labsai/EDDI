@@ -4,9 +4,12 @@ import ai.labs.memory.model.ConversationMemorySnapshot;
 import ai.labs.memory.model.ConversationOutput;
 import ai.labs.memory.model.Data;
 import ai.labs.memory.model.SimpleConversationMemorySnapshot;
+import ai.labs.models.Context;
 
+import java.util.HashMap;
 import java.util.LinkedList;
 import java.util.List;
+import java.util.Map;
 
 /**
  * @author ginccc
@@ -141,5 +144,18 @@ public class ConversationMemoryUtilities {
         }
 
         return simpleSnapshot;
+    }
+
+    public static Map<String, Object> prepareContext(List<IData<Context>> contextDataList) {
+        Map<String, Object> dynamicAttributesMap = new HashMap<>();
+        contextDataList.forEach(contextData -> {
+            Context context = contextData.getResult();
+            Context.ContextType contextType = context.getType();
+            if (contextType.equals(Context.ContextType.object) || contextType.equals(Context.ContextType.string)) {
+                String dataKey = contextData.getKey();
+                dynamicAttributesMap.put(dataKey.substring(dataKey.indexOf(":") + 1), context.getValue());
+            }
+        });
+        return dynamicAttributesMap;
     }
 }

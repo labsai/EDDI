@@ -60,14 +60,14 @@ public class OutputGenerationTaskTest {
             ret.put(ACTION_1, Collections.singletonList(outputEntry));
             return ret;
         });
-        IConversationMemory conversationMemory = mock(IConversationMemory.class);
-        IConversationMemory.IWritableConversationStep currentStep = mock(IConversationMemory.IWritableConversationStep.class);
+        var conversationMemory = mock(IConversationMemory.class);
+        var currentStep = mock(IConversationMemory.IWritableConversationStep.class);
         when(conversationMemory.getCurrentStep()).thenAnswer(invocation -> currentStep);
         when(currentStep.getLatestData(eq(ACTION))).thenAnswer(invocation ->
                 new Data<>(ACTION_1, Arrays.asList(SOME_ACTION_1, SOME_OTHER_ACTION_1)));
-        IConversationMemory.IConversationStepStack conversationStepStack = mock(IConversationMemory.IConversationStepStack.class);
+        var conversationStepStack = mock(IConversationMemory.IConversationStepStack.class);
         when(conversationMemory.getPreviousSteps()).then(invocation -> conversationStepStack);
-        IConversationMemory.IConversationStep conversationStep = mock(IConversationMemory.IConversationStep.class);
+        var conversationStep = mock(IConversationMemory.IConversationStep.class);
         when(conversationStepStack.get(anyInt())).then(invocation -> conversationStep);
         when(conversationStep.getLatestData(eq(ACTION))).then(invocation ->
                 new Data<>(ACTION_2, Arrays.asList(SOME_ACTION_2, SOME_OTHER_ACTION_2)));

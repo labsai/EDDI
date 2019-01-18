@@ -4,9 +4,11 @@ import ai.labs.models.PropertyInstruction;
 import lombok.Getter;
 import lombok.Setter;
 
+import java.util.List;
+
 @Getter
 @Setter
 public class PostResponse {
-    private PropertyInstruction propertyInstruction;
-    private QuickRepliesBuildingInstruction qrBuildInstruction;
+    private List<PropertyInstruction> propertyInstructions;
+    private List<QuickRepliesBuildingInstruction> qrBuildInstructions;
 }

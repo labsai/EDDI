@@ -1,6 +1,7 @@
 package ai.labs.restapi.connector.impl;
 
 import ai.labs.httpclient.IHttpClient;
+import ai.labs.httpclient.IHttpClient.Method;
 import ai.labs.httpclient.IRequest;
 import ai.labs.httpclient.IResponse;
 import ai.labs.lifecycle.ILifecycleTask;
@@ -11,6 +12,7 @@ import ai.labs.memory.IData;
 import ai.labs.memory.IDataFactory;
 import ai.labs.memory.IMemoryItemConverter;
 import ai.labs.models.Context;
+import ai.labs.models.HttpCodeValidator;
 import ai.labs.models.Property;
 import ai.labs.models.PropertyInstruction;
 import ai.labs.resources.rest.extensions.model.ExtensionDescriptor;
@@ -21,7 +23,6 @@ import ai.labs.runtime.client.configuration.IResourceClientLibrary;
 import ai.labs.runtime.service.ServiceException;
 import ai.labs.serialization.IJsonSerialization;
 import ai.labs.templateengine.ITemplatingEngine;
-import ai.labs.utilities.RuntimeUtilities;
 import lombok.extern.slf4j.Slf4j;
 import ognl.Ognl;
 import ognl.OgnlException;
@@ -35,6 +36,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.stream.Collectors;
 
+import static ai.labs.utilities.RuntimeUtilities.checkNotNull;
 import static ai.labs.utilities.RuntimeUtilities.isNullOrEmpty;
 
 @Slf4j
@@ -45,8 +47,6 @@ public class HttpCallsTask implements ILifecycleTask {
     private static final String ACTION_KEY = "actions";
     private static final String CONTENT_TYPE = "Content-Type";
     private static final String KEY_HTTP_CALLS = "httpCalls";
-    private static final String KEY_CURRENT_MEMORY = "current";
-    private static final String KEY_MEMORY = "memory";
     private static final String SLASH_CHAR = "/";
     private final IHttpClient httpClient;
     private final IJsonSerialization jsonSerialization;
@@ -88,9 +88,6 @@ public class HttpCallsTask implements ILifecycleTask {
         }
 
         Map<String, Object> templateDataObjects = memoryItemConverter.convert(memory);
-
-        Map<String, Object> memoryDataObject = (Map<String, Object>) templateDataObjects.get(KEY_MEMORY);
-        Map<String, Object> currentMemory = (Map<String, Object>) memoryDataObject.get(KEY_CURRENT_MEMORY);
         List<String> actions = latestData.getResult();
 
         for (String action : actions) {
@@ -106,7 +103,7 @@ public class HttpCallsTask implements ILifecycleTask {
                 try {
                     IRequest request;
                     if (call.isFireAndForget()) {
-                        PreRequest preRequest = call.getPreRequest();
+                        var preRequest = call.getPreRequest();
                         if (preRequest != null && preRequest.getBatchRequests() != null) {
                             BuildingInstruction batchRequest = preRequest.getBatchRequests();
 
@@ -165,7 +162,7 @@ public class HttpCallsTask implements ILifecycleTask {
                             currentStep.storeData(httpResponseData);
                             currentStep.addConversationOutputMap(KEY_HTTP_CALLS, Map.of(responseObjectName, responseObject));
 
-                            runPostResponse(memory, call, templateDataObjects);
+                            runPostResponse(memory, call, templateDataObjects, response.getHttpCode());
                         }
                     }
                 } catch (IRequest.HttpRequestException |
@@ -183,41 +180,75 @@ public class HttpCallsTask implements ILifecycleTask {
         return new LinkedList<>(new HashSet<>(httpCalls));
     }
 
-    private void runPostResponse(IConversationMemory memory, HttpCall call, Map<String, Object> templateDataObjects)
+    private void runPostResponse(IConversationMemory memory, HttpCall call, Map<String, Object> templateDataObjects, int httpCode)
             throws IOException, ITemplatingEngine.TemplateEngineException, OgnlException {
 
-        PostResponse postResponse = call.getPostResponse();
-        PropertyInstruction propertyInstruction = null;
-        QuickRepliesBuildingInstruction qrBuildInstruction = null;
+        var postResponse = call.getPostResponse();
         if (postResponse != null) {
-            propertyInstruction = postResponse.getPropertyInstruction();
-            qrBuildInstruction = postResponse.getQrBuildInstruction();
+            var propertyInstructions = postResponse.getPropertyInstructions();
+            if (propertyInstructions != null) {
+                for (PropertyInstruction propertyInstruction : propertyInstructions) {
+                    if (verifyHttpCode(propertyInstruction.getHttpCodeValidator(), httpCode)) {
+
+                        String propertyName = propertyInstruction.getName();
+                        checkNotNull(propertyName, "name");
+
+                        String path = propertyInstruction.getFromObjectPath();
+                        checkNotNull(path, "fromObjectPath");
+
+                        Property.Scope scope = propertyInstruction.getScope();
+                        Object propertyValue;
+                        if (!isNullOrEmpty(path)) {
+                            propertyValue = Ognl.getValue(path, templateDataObjects);
+                        } else {
+                            propertyValue = propertyInstruction.getValue();
+                        }
+                        memory.getConversationProperties().put(propertyName,
+                                new Property(propertyName, propertyValue, scope));
+                    }
+                }
+            }
+
+            var qrBuildInstructions = postResponse.getQrBuildInstructions();
+            if (qrBuildInstructions != null) {
+                List<Object> quickReplies = new LinkedList<>();
+                for (QuickRepliesBuildingInstruction qrBuildInstruction : qrBuildInstructions) {
+                    if (verifyHttpCode(qrBuildInstruction.getHttpCodeValidator(), httpCode)) {
+
+                        quickReplies.addAll(
+                                buildQuickReplies(
+                                        qrBuildInstruction.getIterationObjectName(),
+                                        qrBuildInstruction.getPathToTargetArray(),
+                                        qrBuildInstruction.getTemplateFilterExpression(),
+                                        qrBuildInstruction.getQuickReplyValue(),
+                                        qrBuildInstruction.getQuickReplyExpressions(),
+                                        templateDataObjects));
+                    }
+                }
+
+                var context = new Context(Context.ContextType.object, quickReplies);
+                IData<Context> contextData = dataFactory.createData("context:quickReplies", context);
+                memory.getCurrentStep().storeData(contextData);
+            }
         }
 
-        if (propertyInstruction != null) {
-            String propertyName = propertyInstruction.getName();
-            RuntimeUtilities.checkNotNull(propertyName, "name");
 
-            String path = propertyInstruction.getFromObjectPath();
-            RuntimeUtilities.checkNotNull(path, "fromObjectPath");
+    }
 
-            Property.Scope scope = propertyInstruction.getScope();
-            memory.getConversationProperties().put(propertyName, new Property(propertyName,
-                    Ognl.getValue(path, templateDataObjects), scope));
+    private boolean verifyHttpCode(HttpCodeValidator httpCodeValidator, int httpCode) {
+        if (httpCodeValidator == null) {
+            httpCodeValidator = HttpCodeValidator.DEFAULT;
+        } else {
+            if (isNullOrEmpty(httpCodeValidator.getRunOnHttpCode())) {
+                httpCodeValidator.setRunOnHttpCode(HttpCodeValidator.DEFAULT.getRunOnHttpCode());
+            }
+            if (isNullOrEmpty(httpCodeValidator.getSkipOnHttpCode())) {
+                httpCodeValidator.setSkipOnHttpCode(HttpCodeValidator.DEFAULT.getSkipOnHttpCode());
+            }
         }
 
-        if (qrBuildInstruction != null) {
-            List<Object> quickReplies = buildQuickReplies(qrBuildInstruction.getIterationObjectName(),
-                    qrBuildInstruction.getPathToTargetArray(),
-                    qrBuildInstruction.getTemplateFilterExpression(),
-                    qrBuildInstruction.getQuickReplyValue(),
-                    qrBuildInstruction.getQuickReplyExpressions(),
-                    templateDataObjects);
-
-            Context context = new Context(Context.ContextType.object, quickReplies);
-            IData<Context> contextData = dataFactory.createData("context:quickReplies", context);
-            memory.getCurrentStep().storeData(contextData);
-        }
+        return httpCodeValidator.getRunOnHttpCode().contains(httpCode) &&
+                !httpCodeValidator.getSkipOnHttpCode().contains(httpCode);
     }
 
     private IRequest buildRequest(Request requestConfig, Map<String, Object> templateDataObjects) throws ITemplatingEngine.TemplateEngineException {
@@ -226,13 +257,14 @@ public class HttpCallsTask implements ILifecycleTask {
             path = SLASH_CHAR + path;
         }
         URI targetUri = URI.create(targetServerUri + templateValues(path, templateDataObjects));
-
         String requestBody = templateValues(requestConfig.getBody(), templateDataObjects);
 
-        IRequest request = httpClient.newRequest(targetUri,
-                IHttpClient.Method.valueOf(requestConfig.getMethod().toUpperCase())).
-                setBodyEntity(requestBody,
-                        UTF_8, requestConfig.getContentType());
+        var method = Method.valueOf(requestConfig.getMethod().toUpperCase());
+        log.info("targetUri: {}", targetUri);
+        log.info("method: {}", method);
+        log.info("body: {}", requestBody);
+        IRequest request = httpClient.newRequest(targetUri, method).
+                setBodyEntity(requestBody, UTF_8, requestConfig.getContentType());
 
         Map<String, String> headers = requestConfig.getHeaders();
         for (String headerName : headers.keySet()) {
