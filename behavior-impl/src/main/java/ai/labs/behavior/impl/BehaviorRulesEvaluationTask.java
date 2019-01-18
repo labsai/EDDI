@@ -88,7 +88,7 @@ public class BehaviorRulesEvaluationTask implements ILifecycleTask {
         var currentStep = memory.getCurrentStep();
 
         List<String> actions = new LinkedList<>();
-        if (appendActions) {
+        if (appendActions || allCurrentActions.isEmpty()) {
             IData<List<String>> latestActions = currentStep.getLatestData(KEY_ACTIONS);
             if (latestActions != null && latestActions.getResult() != null) {
                 actions.addAll(latestActions.getResult());
