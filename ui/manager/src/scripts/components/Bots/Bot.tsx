@@ -12,6 +12,7 @@ import * as moment from 'moment';
 import DeployButton from '../Assets/Buttons/DeployButton';
 import WhiteButton from '../Assets/Buttons/WhiteButton';
 import { READY } from '../utils/helpers/BotHelper';
+import { ClipLoader } from 'react-spinners';
 
 interface IProps {
   bot: IBot;
@@ -98,7 +99,7 @@ class Bot extends React.Component<IProps> {
                 !_.isUndefined(this.props.bot.packages),
             )(() => <p>{`This bot has no packages yet`}</p>)}
             {renderIf(_.isUndefined(this.props.bot.packages))(() => (
-              <p>{`Loading`}</p>
+              <ClipLoader color={'#0070D2'} />
             ))}
             {renderIf(!_.isEmpty(this.props.bot.packages))(() => (
               <Packages

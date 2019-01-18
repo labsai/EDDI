@@ -54,7 +54,6 @@ class Package extends React.Component<IPrivateProps, IState> {
       : false;
     return (
       <div>
-        {renderIf(this.props.isLoading)(() => <p>{'Loading Package'}</p>)}
         {renderIf(!this.props.isLoading)(() => (
           <div>
             {renderIf(this.props.error)(() => (

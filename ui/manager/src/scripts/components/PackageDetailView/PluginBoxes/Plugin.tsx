@@ -1,5 +1,4 @@
 import * as React from 'react';
-import * as Radium from 'radium';
 import { Component, compose, pure, setDisplayName } from 'recompose';
 import { IOptions } from '../PackageView';
 import Parser from '../../utils/Parser';
@@ -10,7 +9,6 @@ import eddiApiActionDispatchers from '../../../actions/EddiApiActionDispatchers'
 import styles from './Plugin.styles';
 import { connect } from 'react-redux';
 import { pluginSelector } from '../../../selectors/PluginSelectors';
-import { ModalEnum } from '../../utils/ModalEnum';
 import ModalActionDispatchers from '../../../actions/ModalActionDispatchers';
 import WhiteButton from '../../Assets/Buttons/WhiteButton';
 import * as PluginType from '../../utils/EddiTypes';

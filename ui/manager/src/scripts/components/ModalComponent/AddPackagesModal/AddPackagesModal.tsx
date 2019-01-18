@@ -13,15 +13,13 @@ import styles from './AddPackagesModal.styles';
 import ModalActionDispatchers from '../../../actions/ModalActionDispatchers';
 import * as renderIf from 'render-if';
 import BlueButton from '../../Assets/Buttons/BlueButton';
+import WhiteButton from '../../Assets/Buttons/WhiteButton';
 import { ClimbingBoxLoader } from 'react-spinners';
 import { DEFAULT_LIMIT } from '../../utils/ApiFunctions';
-import * as InfiniteScrollTypes from 'react-infinite-scroller';
-const InfiniteScroll = require('react-infinite-scroller') as InfiniteScrollTypes;
 
 interface IState {
   selectedPackages: string[];
   loading: boolean;
-  fetchIndex: number;
 }
 
 interface IPublicProps {
@@ -33,6 +31,7 @@ interface IPrivateProps extends IPublicProps {
   isLoading: boolean;
   allPackagesLoaded: boolean;
   packages: IPackage[];
+  packagesLoaded: number;
 }
 
 class AddPackagesModal extends React.Component<IPrivateProps, IState> {
@@ -41,12 +40,16 @@ class AddPackagesModal extends React.Component<IPrivateProps, IState> {
     this.state = {
       selectedPackages: [],
       loading: false,
-      fetchIndex: 0,
     };
   }
 
   componentDidMount() {
-    eddiApiActionDispatchers.fetchPackagesAction(DEFAULT_LIMIT, 0);
+    if (
+      this.props.packagesLoaded < DEFAULT_LIMIT &&
+      !this.props.allPackagesLoaded
+    ) {
+      eddiApiActionDispatchers.fetchPackagesAction(DEFAULT_LIMIT, 0);
+    }
     this.discardChanges();
   }
 
@@ -108,20 +111,17 @@ class AddPackagesModal extends React.Component<IPrivateProps, IState> {
   };
 
   loadMore = () => {
+    const fetchIndex = Math.floor(this.props.packagesLoaded / DEFAULT_LIMIT);
     if (this.state.loading || _.isEmpty(this.props.packages)) {
       return;
     }
-    console.log('loading' + this.state.fetchIndex);
-    this.setState({ loading: true, fetchIndex: this.state.fetchIndex + 1 });
-    eddiApiActionDispatchers.fetchPackagesAction(
-      DEFAULT_LIMIT,
-      this.state.fetchIndex,
-    );
+    this.setState({ loading: true });
+    eddiApiActionDispatchers.fetchPackagesAction(DEFAULT_LIMIT, fetchIndex);
   };
 
   render() {
     return (
-      <div style={styles.testDerp}>
+      <div>
         <div style={styles.header}>
           <div style={styles.topHeader}>
             <div style={styles.title}>{`Select packages for <${
@@ -141,30 +141,31 @@ class AddPackagesModal extends React.Component<IPrivateProps, IState> {
           </div>
         </div>
         <div style={styles.packageList}>
-          <InfiniteScroll
-            pageStart={0}
-            loadMore={this.loadMore}
-            hasMore={
-              !this.props.allPackagesLoaded &&
-              !this.props.isLoading &&
-              !this.state.loading
-            }
-            useWindow={false}>
-            <div>
-              {this.props.packages.map((pack, i) => (
-                <PackageContainer
-                  key={i}
-                  packageResource={this.getBotPackageIfUsed(pack.resource)}
-                  selected={this.isPackageSelected(pack.resource)}
-                  handleClick={this.selectPackage}
-                />
-              ))}
-            </div>
-          </InfiniteScroll>
+          <div>
+            {this.props.packages.map((pack, i) => (
+              <PackageContainer
+                key={i}
+                packageResource={this.getBotPackageIfUsed(pack.resource)}
+                selected={this.isPackageSelected(pack.resource)}
+                handleClick={this.selectPackage}
+              />
+            ))}
+          </div>
           {renderIf(this.props.isLoading)(() => (
             <div style={styles.loadingWrapper}>
               <ClimbingBoxLoader loading />
             </div>
+          ))}
+          {renderIf(
+            !this.props.allPackagesLoaded &&
+              !this.props.isLoading &&
+              !this.state.loading,
+          )(() => (
+            <BlueButton
+              customStyles={styles.loadMoreButton}
+              onClick={this.loadMore}
+              text={'Load More'}
+            />
           ))}
         </div>
       </div>

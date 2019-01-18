@@ -78,6 +78,10 @@ import {
   FETCH_BOT_DEPLOYMENT_STATUS_FAILED,
   FETCH_CURRENT_BOT,
   FETCH_BOT_DETAILS,
+  CREATE_NEW_BOT,
+  CREATE_NEW_BOT_FAILED,
+  CREATE_NEW_PACKAGE,
+  CREATE_NEW_PACKAGE_FAILED,
 } from './EddiApiActionTypes';
 import {
   IBot,
@@ -91,13 +95,13 @@ import {
 } from '../components/utils/AxiosFunctions';
 
 export interface IFetchBotsAction extends Action {
-  limit: string;
-  index: string;
+  limit: number;
+  index: number;
 }
 
 export function fetchBotsAction(
-  limit: string,
-  index: string,
+  limit: number,
+  index: number,
 ): IFetchBotsAction {
   return {
     limit,
@@ -108,14 +112,14 @@ export function fetchBotsAction(
 
 export interface IFetchBotsSuccessAction extends Action {
   bots: IBot[];
-  limit: string;
-  index: string;
+  limit: number;
+  index: number;
 }
 
 export function fetchBotsSuccessAction(
   bots: IBot[],
-  limit: string,
-  index: string,
+  limit: number,
+  index: number,
 ): IFetchBotsSuccessAction {
   return {
     limit,
@@ -356,24 +360,41 @@ export function fetchDefaultPluginTypesFailedAction(
 
 export interface IFetchPluginsAction extends Action {
   pluginType: string;
+  limit: number;
+  index: number;
 }
 
-export function fetchPluginsAction(pluginType: string): IFetchPluginsAction {
+export function fetchPluginsAction(
+  pluginType: string,
+  limit: number,
+  index: number,
+): IFetchPluginsAction {
   return {
     pluginType,
+    limit,
+    index,
     type: FETCH_PLUGINS,
   };
 }
 
 export interface IFetchPluginsSuccessAction extends Action {
   plugins: IPlugin[];
+  pluginType: string;
+  limit: number;
+  index: number;
 }
 
 export function fetchPluginsSuccessAction(
   plugins: IPlugin[],
+  pluginType: string,
+  limit: number,
+  index: number,
 ): IFetchPluginsSuccessAction {
   return {
     plugins,
+    pluginType,
+    limit,
+    index,
     type: FETCH_PLUGINS_SUCCESS,
   };
 }
@@ -898,6 +919,18 @@ export function createNewConfigFailedAction(
   };
 }
 
+export interface ICreateNewBotAction extends Action {
+  // todo : Remake this action so no api calls have to be called before this is action runs.
+  botId: string;
+}
+
+export function createNewBotAction(botId: string): ICreateNewBotAction {
+  return {
+    botId,
+    type: CREATE_NEW_BOT,
+  };
+}
+
 export interface ICreateNewBotSuccessAction extends Action {
   bot: IBot;
 }
@@ -911,6 +944,33 @@ export function createNewBotSuccessAction(
   };
 }
 
+export interface ICreateNewBotFailedAction extends Action {
+  error: Error;
+}
+
+export function createNewBotFailedAction(
+  error: Error,
+): ICreateNewBotFailedAction {
+  return {
+    error,
+    type: CREATE_NEW_BOT_FAILED,
+  };
+}
+
+export interface ICreateNewPackageAction extends Action {
+  // todo : Remake this action so no api calls have to be called before this is action runs.
+  packageId: string;
+}
+
+export function createNewPackageAction(
+  packageId: string,
+): ICreateNewPackageAction {
+  return {
+    packageId,
+    type: CREATE_NEW_PACKAGE,
+  };
+}
+
 export interface ICreateNewPackageSuccessAction extends Action {
   pkg: IPackage;
 }
@@ -921,6 +981,19 @@ export function createNewPackageSuccessAction(
   return {
     pkg,
     type: CREATE_NEW_PACKAGE_SUCCESS,
+  };
+}
+
+export interface ICreateNewPackageFailedAction extends Action {
+  error: Error;
+}
+
+export function createNewPackageFailedAction(
+  error: Error,
+): ICreateNewPackageFailedAction {
+  return {
+    error,
+    type: CREATE_NEW_PACKAGE_FAILED,
   };
 }
 

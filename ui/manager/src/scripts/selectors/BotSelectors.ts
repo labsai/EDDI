@@ -22,6 +22,7 @@ export const botsSelector: (
   isLoading: boolean;
   allBotsLoaded: boolean;
   error: Error;
+  botsLoaded: number;
 } {
   const bots = botState.bots.filter(bot => bot.version === bot.currentVersion);
   const sortedBots = bots.sort(function(a, b) {
@@ -32,6 +33,7 @@ export const botsSelector: (
     isLoading: botState.isLoadingAllBots,
     allBotsLoaded: botState.allBotsLoaded,
     error: botState.error,
+    botsLoaded: botState.botsLoaded,
   };
 });
 

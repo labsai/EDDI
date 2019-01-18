@@ -43,7 +43,6 @@ const styles: CSSProperties = {
     marginLeft: '50px',
     marginRight: '50px',
     paddingBottom: '100px',
-    maxHeight: '500px',
   },
   closeContainer: {
     display: 'flex',
@@ -65,8 +64,13 @@ const styles: CSSProperties = {
     height: '500px',
     justifyContent: 'center',
   },
-  testDerp: {
-    overflow: 'auto',
+  loadMoreButton: {
+    width: '150px',
+    height: '40px',
+    display: 'block',
+    marginTop: '20px',
+    marginLeft: 'auto',
+    marginRight: 'auto',
   },
 };
 export default styles;

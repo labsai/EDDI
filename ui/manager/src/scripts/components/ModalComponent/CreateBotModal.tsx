@@ -6,6 +6,7 @@ import { Component, compose, pure, setDisplayName } from 'recompose';
 import { createNewBot } from '../utils/AxiosFunctions';
 import { history } from '../../history';
 import modalActionDispatchers from '../../actions/ModalActionDispatchers';
+import eddiApiActionDispatchers from '../../actions/EddiApiActionDispatchers';
 
 const customStyles = {
   createNewBotButton: {
@@ -48,6 +49,14 @@ class CreateBotModal extends React.Component<IProps, IState> {
       };
     }
   }
+
+  async createBot() {
+    const botID = await createNewBot(this.state.name, this.state.description);
+    eddiApiActionDispatchers.createNewBotAction(botID);
+    history.push(`/botview/${botID}`);
+    modalActionDispatchers.closeModal();
+  }
+
   render() {
     return (
       <div>
@@ -57,14 +66,7 @@ class CreateBotModal extends React.Component<IProps, IState> {
             <button
               disabled={!this.state.name}
               style={this.getButtonStyle()}
-              onClick={async () => {
-                const botID = await createNewBot(
-                  this.state.name,
-                  this.state.description,
-                );
-                history.push(`/botview/${botID}`);
-                modalActionDispatchers.closeModal();
-              }}>
+              onClick={() => this.createBot()}>
               {'Create bot'}
             </button>
           </div>

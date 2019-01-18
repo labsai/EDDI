@@ -83,11 +83,13 @@ class UpdatePackageModal extends React.Component<IPrivateProps, IState> {
     const list: object = this.state.addedPlugins.map(a => ({
       type: a.type,
     }));
-    return createNewPackage(
+    const pkg = await createNewPackage(
       this.props.packageName,
       this.props.packageDescription,
       list,
     );
+    eddiApiActionDispatchers.createNewPackageAction(pkg);
+    return pkg;
   };
 
   addPluginsInModal = (addedPlugin: IOptions) => {

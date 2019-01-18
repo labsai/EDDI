@@ -26,6 +26,8 @@ import {
   UNDEPLOY_BOT,
   FETCH_BOT_DEPLOYMENT_STATUS,
   FETCH_CURRENT_BOT,
+  CREATE_NEW_BOT,
+  CREATE_NEW_PACKAGE,
 } from '../actions/EddiApiActionTypes';
 import {
   getPackage,
@@ -138,6 +140,10 @@ import {
   IFetchCurrentBotAction,
   IFetchBotsAction,
   IFetchPackagesAction,
+  ICreateNewBotAction,
+  createNewBotFailedAction,
+  ICreateNewPackageAction,
+  createNewPackageAction,
 } from '../actions/EddiApiActions';
 import * as Edditypes from '../components/utils/EddiTypes';
 import Parser from '../components/utils/Parser';
@@ -272,8 +278,17 @@ export function* FetchPlugins(action: IFetchPluginsAction) {
     const plugins: IPlugin[] = yield call(
       getPluginDescriptors,
       action.pluginType,
+      action.limit,
+      action.index,
     );
-    yield put(fetchPluginsSuccessAction(plugins));
+    yield put(
+      fetchPluginsSuccessAction(
+        plugins,
+        action.pluginType,
+        action.limit,
+        action.index,
+      ),
+    );
   } catch (err) {
     yield put(fetchPluginsFailedAction(err));
   }
@@ -472,6 +487,34 @@ export function* fetchPackagesUsingPlugin(
 
 export function* watchFetchPackagesUsingPlugin(): Iterator<{}> {
   yield takeEvery(FETCH_PACKAGES_USING_PLUGIN, fetchPackagesUsingPlugin);
+}
+
+export function* watchCreateNewBot(): Iterator<{}> {
+  yield takeEvery(CREATE_NEW_BOT, createNewBot);
+}
+
+export function* createNewBot(action: ICreateNewBotAction): Iterator<{}> {
+  try {
+    const bot: IBot = yield call(getCurrentBot, action.botId);
+    yield put(createNewBotSuccessAction(bot));
+  } catch (err) {
+    yield put(createNewBotFailedAction(err));
+  }
+}
+
+export function* watchCreateNewPackage(): Iterator<{}> {
+  yield takeEvery(CREATE_NEW_PACKAGE, createNewPackage);
+}
+
+export function* createNewPackage(
+  action: ICreateNewPackageAction,
+): Iterator<{}> {
+  try {
+    const pkg: IPackage = yield call(getCurrentPackage, action.packageId);
+    yield put(createNewPackageSuccessAction(pkg));
+  } catch (err) {
+    yield put(createNewPackageAction(err));
+  }
 }
 
 export function* watchCreateNewConfig(): Iterator<{}> {

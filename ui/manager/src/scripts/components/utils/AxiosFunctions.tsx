@@ -166,8 +166,8 @@ export async function getBotPackages(resource: string): Promise<string[]> {
 }
 
 export async function getBotDescriptors(
-  limit: string,
-  index: string,
+  limit: number,
+  index: number,
 ): Promise<IBot[]> {
   try {
     const res: IDescriptorResponse = await axios.get(
@@ -723,31 +723,33 @@ export interface IPluginExtension {
 
 export async function getPluginDescriptors(
   pluginType: string,
+  limit: number,
+  index: number,
 ): Promise<IPlugin[]> {
   try {
     let res: IDescriptorResponse;
     switch (pluginType) {
       case BEHAVIOR:
         res = await axios.get(
-          `${await getAPIUrl()}${BEHAVIOR_PATH}/descriptors?limit=${DEFAULT_LIMIT}`,
+          `${await getAPIUrl()}${BEHAVIOR_PATH}/descriptors?index=${index}&limit=${limit}`,
         );
         break;
 
       case OUTPUT:
         res = await axios.get(
-          `${await getAPIUrl()}${OUTPUT_PATH}/descriptors?limit=${DEFAULT_LIMIT}`,
+          `${await getAPIUrl()}${OUTPUT_PATH}/descriptors?index=${index}&limit=${limit}`,
         );
         break;
 
       case REGULAR_DICTIONARY:
         res = await axios.get(
-          `${await getAPIUrl()}${REGULAR_DICTIONARY_PATH}/descriptors?limit=${DEFAULT_LIMIT}`,
+          `${await getAPIUrl()}${REGULAR_DICTIONARY_PATH}/descriptors?index=${index}&limit=${limit}`,
         );
         break;
 
       case HTTPCALLS:
         res = await axios.get(
-          `${await getAPIUrl()}${HTTPCALLS_PATH}/descriptors?limit=${DEFAULT_LIMIT}`,
+          `${await getAPIUrl()}${HTTPCALLS_PATH}/descriptors?index=${index}&limit=${limit}`,
         );
         break;
 

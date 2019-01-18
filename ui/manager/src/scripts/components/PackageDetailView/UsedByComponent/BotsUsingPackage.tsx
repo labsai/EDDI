@@ -45,10 +45,7 @@ class BotsUsingPackage extends React.Component<IProps, IState> {
   }
 
   componentDidMount() {
-    if (
-      !_.isEmpty(this.props.packagePayload) &&
-      _.isUndefined(this.props.packagePayload.usedByBots)
-    ) {
+    if (!_.isEmpty(this.props.packagePayload)) {
       eddiApiActionDispatchers.fetchBotsUsingPackageAction(
         this.props.packagePayload.resource,
         false,

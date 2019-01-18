@@ -17,8 +17,11 @@ export function packagesSelector(state: IAppState) {
     return b.lastModifiedOn - a.lastModifiedOn;
   });
   return {
-    packages: sortedPackages,
+    packages: state.packageState.allPackagesLoaded
+      ? sortedPackages
+      : sortedPackages.slice(0, state.packageState.packagesLoaded),
     allPackagesLoaded: state.packageState.allPackagesLoaded,
+    packagesLoaded: state.packageState.packagesLoaded,
     isLoading: state.packageState.isLoadingAllPackages,
     error: state.packageState.error,
   };

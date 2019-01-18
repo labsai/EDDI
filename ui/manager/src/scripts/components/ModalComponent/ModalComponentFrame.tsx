@@ -62,9 +62,6 @@ const randomStyles: CSSProperties = {
     borderRadius: '4px',
     left: '0px',
     top: '0px',
-    margin: '100px auto 100px',
-    maxWidth: '960px',
-    minWidth: '600px',
     outline: '0px',
     padding: '0px',
     position: 'relative',
@@ -81,6 +78,30 @@ const randomStyles: CSSProperties = {
     left: 0,
     right: 0,
     bottom: 0,
+  },
+  close: {
+    ':focus': {
+      color: '#000',
+      cursor: 'pointer',
+    },
+    ':hover': {
+      color: '#000',
+      cursor: 'pointer',
+    },
+    marginLeft: 'auto',
+    color: '#FFF',
+    cursor: 'pointer',
+    fontSize: '40px',
+    position: 'relative',
+    width: '22px',
+    height: '22px',
+    lineHeight: '20px',
+  },
+  box: {
+    maxWidth: '960px',
+    minWidth: '600px',
+    position: 'relative',
+    margin: '100px auto 100px',
   },
 };
 
@@ -234,11 +255,23 @@ class ModalComponentFrame extends React.Component<IPrivateProps, IState> {
   }
 
   render() {
-    return (
-      <div style={randomStyles.overlay}>
-        <div style={randomStyles.content} />
-      </div>
-    );
+    if (this.props.isModalOpen) {
+      document.body.className = 'modal-body-open';
+      return (
+        <div style={randomStyles.overlay}>
+          <div style={randomStyles.box}>
+            <div onClick={this.closeModal} style={randomStyles.close}>
+              &times;
+            </div>
+            <div style={randomStyles.content}>
+              {this.renderContent(this.props.mode)}
+            </div>
+          </div>
+        </div>
+      );
+    }
+    document.body.className = 'modal-body-closed';
+    return <div />;
   }
 }
 

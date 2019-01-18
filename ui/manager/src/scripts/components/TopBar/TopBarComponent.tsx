@@ -6,6 +6,8 @@ import { CSSProperties } from 'react';
 import { Link } from 'react-router-dom';
 import { ModalEnum } from '../utils/ModalEnum';
 import BlueButton from '../Assets/Buttons/BlueButton';
+import { history } from '../../history';
+import * as EddiTypes from '../utils/EddiTypes';
 
 const styles: CSSProperties = {
   createNewBotButton: {
@@ -46,9 +48,7 @@ class TopBarComponent extends React.Component<IProps> {
         <BlueButton
           text={'Create new bot'}
           customStyles={styles.createNewBotButton}
-          onClick={() => {
-            this.openModal();
-          }}
+          onClick={this.openModal}
           style={styles.createNewBot}>
           {'Create new bot'}
         </BlueButton>

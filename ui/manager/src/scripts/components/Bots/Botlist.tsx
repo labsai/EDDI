@@ -23,12 +23,12 @@ interface IPrivateProps extends IPublicProps {
   isLoading: boolean;
   allBotsLoaded: boolean;
   error: Error;
+  botsLoaded: number;
 }
 
 interface IState {
   apiUrl: string;
   loading: boolean;
-  fetchIndex: number;
 }
 
 class BotList extends React.Component<IPrivateProps, IState> {
@@ -37,12 +37,13 @@ class BotList extends React.Component<IPrivateProps, IState> {
     this.state = {
       apiUrl: '',
       loading: false,
-      fetchIndex: 0,
     };
   }
 
   async componentDidMount() {
-    eddiApiActionDispatchers.fetchBotsAction(DEFAULT_LIMIT, 0);
+    if (this.props.bots.length < DEFAULT_LIMIT && !this.props.allBotsLoaded) {
+      eddiApiActionDispatchers.fetchBotsAction(DEFAULT_LIMIT, 0);
+    }
     this.setState({ apiUrl: await getAPIUrl() });
   }
 
@@ -70,10 +71,10 @@ class BotList extends React.Component<IPrivateProps, IState> {
     if (this.state.loading) {
       return;
     }
-    this.setState({ loading: true, fetchIndex: this.state.fetchIndex + 1 });
+    this.setState({ loading: true });
     eddiApiActionDispatchers.fetchBotsAction(
       DEFAULT_LIMIT,
-      this.state.fetchIndex,
+      Math.floor(this.props.botsLoaded / DEFAULT_LIMIT),
     );
   };
 

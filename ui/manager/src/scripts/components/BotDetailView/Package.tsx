@@ -11,6 +11,7 @@ import * as _ from 'lodash';
 import VersionSelectComponent from '../Assets/VersionSelectComponent';
 import { Link, browserHistory } from 'react-router-dom';
 import { history } from '../../history';
+import eddiApiActionDispatchers from '../../actions/EddiApiActionDispatchers';
 
 interface IPublicProps {
   isPackageInBot: boolean;
@@ -27,6 +28,22 @@ interface IPrivateProps extends IPublicProps {
 const warningIcon = require('../../../public/images/WarningIcon.png');
 
 class Package extends React.Component<IPrivateProps> {
+  componentDidMount() {
+    this.fetchPlugins();
+  }
+  componentWillReceiveProps(nextProps) {
+    this.fetchPlugins(nextProps);
+  }
+
+  fetchPlugins(props = this.props) {
+    if (
+      !_.isUndefined(props.packagePayload) &&
+      _.isUndefined(props.packagePayload.pluginTypes)
+    ) {
+      eddiApiActionDispatchers.fetchPluginTypesAction(props.packageResource);
+    }
+  }
+
   selectVersion = (newVersion: number) => {
     this.props.selectVersion(this.props.packagePayload.resource, newVersion);
   };

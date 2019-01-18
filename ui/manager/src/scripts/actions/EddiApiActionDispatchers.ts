@@ -74,6 +74,14 @@ import {
   createNewPluginSuccessAction,
   IFetchCurrentBotAction,
   fetchCurrentBotAction,
+  ICreateNewBotAction,
+  createNewBotAction,
+  createNewBotSuccessAction,
+  createNewBotFailedAction,
+  createNewPackageAction,
+  createNewPackageSuccessAction,
+  createNewPackageFailedAction,
+  ICreateNewPackageAction,
 } from './EddiApiActions';
 
 export interface IEddiApiActionDispatchers extends ActionCreatorsMapObject {
@@ -86,7 +94,7 @@ export interface IEddiApiActionDispatchers extends ActionCreatorsMapObject {
   fetchCurrentPackageAction: (packageId) => IFetchCurrentPackageAction;
   fetchPackageDataAction: (packageResource) => IFetchPackageDataAction;
   fetchDefaultPluginTypesAction: () => IFetchDefaultPluginTypesAction;
-  fetchPluginsAction: (pluginType) => IFetchPluginsAction;
+  fetchPluginsAction: (pluginType, limit, index) => IFetchPluginsAction;
   fetchPluginAction: (pluginResource) => IFetchPluginAction;
   updateBotAction: (bot, packageIndex) => IUpdateBotAction;
   updateBotPackagesAction: (bot, packages) => IUpdateBotPackagesAction;
@@ -120,6 +128,8 @@ export interface IEddiApiActionDispatchers extends ActionCreatorsMapObject {
     data,
   ) => ICreateNewConfigAction;
   createNewPluginSuccessAction: (plugin) => ICreateNewPluginSuccessAction;
+  createNewBotAction: (botId) => ICreateNewBotAction;
+  createNewPackageAction: (pkg) => ICreateNewPackageAction;
   updatePackagesAction: (pluginResource, packages) => IUpdatePackagesAction;
   updatePackagesSuccessAction: (packages) => IUpdatePackagesSuccessAction;
   updatePackagesFailedAction: (error) => IUpdatePackagesFailedAction;
@@ -168,6 +178,12 @@ const actions: IEddiApiActionDispatchers = {
   updateJsonDataAction,
   createNewConfigAction,
   createNewPluginSuccessAction,
+  createNewPackageAction,
+  createNewPackageFailedAction,
+  createNewPackageSuccessAction,
+  createNewBotAction,
+  createNewBotFailedAction,
+  createNewBotSuccessAction,
   updatePackagesAction,
   updatePackagesSuccessAction,
   updatePackagesFailedAction,

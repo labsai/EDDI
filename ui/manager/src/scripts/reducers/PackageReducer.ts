@@ -1,5 +1,5 @@
 import { Reducer, Action } from 'redux';
-import { IBot, IPackage } from '../components/utils/AxiosFunctions';
+import { IBot, IPackage, IPlugin } from '../components/utils/AxiosFunctions';
 import {
   FETCH_PACKAGEDATA,
   FETCH_PACKAGEDATA_FAILED,
@@ -21,6 +21,7 @@ import {
   UPDATE_PACKAGES,
   UPDATE_PACKAGES_SUCCESS,
   UPDATE_PACKAGES_FAILED,
+  CREATE_NEW_PACKAGE_SUCCESS,
 } from '../actions/EddiApiActionTypes';
 import * as update from 'immutability-helper';
 import {
@@ -40,6 +41,8 @@ import {
   IUpdatePackagesSuccessAction,
   IUpdatePackagesFailedAction,
   IFetchBotsSuccessAction,
+  ICreateNewPluginSuccessAction,
+  ICreateNewPackageSuccessAction,
 } from '../actions/EddiApiActions';
 import * as _ from 'lodash';
 import { parsePluginExtensions } from '../components/utils/helpers/PluginParser';
@@ -53,6 +56,7 @@ export interface IPackageState {
   isLoadingPackage: boolean;
   packages: IPackage[];
   allPackagesLoaded: boolean;
+  packagesLoaded: number;
 }
 
 export const initialState: IPackageState = {
@@ -62,6 +66,7 @@ export const initialState: IPackageState = {
   isLoadingPackage: false,
   packages: [],
   allPackagesLoaded: false,
+  packagesLoaded: 0,
 };
 
 const PackageReducer: IPackageReducer = (
@@ -84,9 +89,19 @@ const PackageReducer: IPackageReducer = (
       });
 
     case FETCH_PACKAGES_SUCCESS:
-      const lastIndex =
+      const lastPage =
         (action as IFetchPackagesSuccessAction).limit >
         (action as IFetchPackagesSuccessAction).packages.length;
+      let newPackagesLoaded;
+      if (
+        (action as IFetchPackagesSuccessAction).index === 0 &&
+        state.packagesLoaded !== 0
+      ) {
+        newPackagesLoaded = 0;
+      } else {
+        newPackagesLoaded = (action as IFetchPackagesSuccessAction).packages
+          .length;
+      }
       return update(state, {
         packages: {
           $apply: (packages: IPackage[]) => {
@@ -106,7 +121,10 @@ const PackageReducer: IPackageReducer = (
           $set: false,
         },
         allPackagesLoaded: {
-          $set: lastIndex,
+          $set: lastPage,
+        },
+        packagesLoaded: {
+          $set: state.packagesLoaded + newPackagesLoaded,
         },
       });
 
@@ -448,6 +466,20 @@ const PackageReducer: IPackageReducer = (
           isLoadingAllPackages: {
             $set: false,
           },
+        },
+      });
+
+    case CREATE_NEW_PACKAGE_SUCCESS:
+      return update(state, {
+        packages: {
+          $apply: (packages: IPackage[]) => {
+            return packages.concat(
+              (action as ICreateNewPackageSuccessAction).pkg,
+            );
+          },
+        },
+        packagesLoaded: {
+          $set: state.packagesLoaded + 1,
         },
       });
 
