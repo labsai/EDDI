@@ -1,4 +1,5 @@
 const eddi = {};
+eddi.isFirstConversation = true;
 
 class Message {
     constructor(text) {
@@ -13,7 +14,7 @@ class Message {
             const $message = $('<div>');
             this.element.append($message);
             $message.addClass('message message-left animated fadeInUp bubbleLeft');
-            $message.html(this.text);
+            $message.html(this.text.replace('\n', '<br>'));
             $('#chat-container').append(this.element);
             return setTimeout(function () {
                 return $message.addClass('appeared');
@@ -43,15 +44,38 @@ class QuickReply {
                 }
             });
 
+            $quickReply.hide();
             $quickReply.addClass('message message-left animated fadeInUp bubbleLeft');
             $quickReply.addClass('quick_reply');
             $('#chat-container').append($quickReply);
+            $quickReply.fadeIn({queue: false, duration: 1500});
             return setTimeout(function () {
                 return $quickReply.addClass('appeared');
             }, 0);
         };
     }
 }
+
+class ConversationEnd {
+    constructor(infoMessage) {
+        this.infoMessage = infoMessage;
+    }
+
+    get draw() {
+        return function () {
+            this.element = $('<div style="margin: 1em;">');
+            this.element.addClass('line');
+            const $message = $('<div style="color:darkgray;">*** ' + this.infoMessage + ' ***</div>');
+            this.element.append($message);
+            $message.html(this.text);
+            $('#chat-container').append(this.element);
+            return setTimeout(function () {
+                return $message.addClass('appeared');
+            }, 0);
+        };
+    }
+}
+
 
 $(function () {
     eddi.submitUserMessage = function (userMessage) {
@@ -91,7 +115,7 @@ $(function () {
         const conversationState = conversationMemory.conversationState;
 
         if (conversationState === 'ERROR') {
-            log('ERROR', 'An Error has occurred. Please contact the administrator!');
+            console.log('ERROR', 'An Error has occurred. Please contact the administrator!');
             return;
         }
 
@@ -100,17 +124,12 @@ $(function () {
             return;
         }
 
-        for (let i = 0; i < conversationMemory.conversationOutputs.length; i++) {
-            let conversationOutput = conversationMemory.conversationOutputs[i];
-            let outputArray = conversationOutput.output ? conversationOutput.output : [];
-            let quickReplyArray = conversationOutput.quickReplies ? conversationOutput.quickReplies : [];
-            createMessage(outputArray, quickReplyArray);
-        }
-
-        if (conversationState === 'ENDED') {
-            $('<div style="padding-bottom: 1rem; color:darkgray;"><hr>Conversation Ended</div>').appendTo($('#chat-container'));
-            eddi.createConversation(eddi.environment, eddi.botId);
-        }
+        /** @namespace conversationMemory.conversationOutputs */
+        /** @namespace conversationOutput.quickReplies */
+        let conversationOutput = conversationMemory.conversationOutputs[0];
+        let outputArray = conversationOutput.output ? conversationOutput.output : [];
+        let quickReplyArray = conversationOutput.quickReplies ? conversationOutput.quickReplies : [];
+        createMessage(outputArray, quickReplyArray, conversationState === 'ENDED');
     };
 
     const deployBot = function (environment, botId, botVersion) {
@@ -137,6 +156,12 @@ $(function () {
         }
         $.post('/bots/' + environment + '/' + botId).done(function (data, status, xhr) {
             const conversationUriArray = xhr.getResponseHeader('Location').split('/');
+
+            if (!isFirstMessage) {
+                new ConversationEnd('NEW CONVERSATION STARTED').draw();
+                smoothScrolling();
+                isFirstMessage = false;
+            }
 
             if (eddi.conversationId) {
                 $('#previousConversationId').text(eddi.conversationId);

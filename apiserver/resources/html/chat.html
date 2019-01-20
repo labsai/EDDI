@@ -6,45 +6,46 @@
     <meta http-equiv="X-UA-Compatible" content="IE=edge,chrome=1"/>
 
 
-    <title>Differ Bot | Conversational bot</title>
+    <title>E.D.D.I | Conversational Interface</title>
     <meta name="description" content="">
     <meta name="keywords" content="">
     <meta http-equiv="Content-Type" content="text/html; charset=UTF-8">
     <meta name="theme-color" content="#9966ff">
     <meta name="apple-touch-fullscreen" content="yes">
     <meta name="apple-mobile-web-app-capable" content="yes">
-    <meta name="apple-mobile-web-app-status-bar-style" content="purple">
+    <meta name="apple-mobile-web-app-status-bar-style" content="white">
     <meta name="twitter:card" content="summary_large_image">
     <meta name="twitter:site" content="@">
     <meta name="twitter:creator" content="@">
     <meta name="twitter:title" content="">
     <meta name="twitter:description" content="">
-    <meta name="twitter:image" content="/binary/img/Differ_bot_friendly_face.png">
-    <link rel="icon" href="/binary/img/Differ_bot_friendly_face.png" class="js-favicon">
+    <meta name="twitter:image" content="/binary/img/logo_high.png">
+    <link rel="icon" href="/binary/img/logo_high.png" class="js-favicon">
     <link rel="apple-touch-icon" sizes="152x152" href="">
-    <link rel="apple-touch-icon" sizes="120x120" href="/binary/img/Differ_bot_friendly_face.png">
-    <link rel="apple-touch-icon" sizes="76x76" href="/binary/img/Differ_bot_friendly_face.png">
-    <link rel="apple-touch-icon" sizes="60x60" href="/binary/img/Differ_bot_friendly_face.png">
-    <link rel="mask-icon" href="/binary/img/Differ_bot_friendly_face.png" color="#9966ff">
+    <link rel="apple-touch-icon" sizes="120x120" href="/binary/img/logo_high.png">
+    <link rel="apple-touch-icon" sizes="76x76" href="/binary/img/logo_high.png">
+    <link rel="apple-touch-icon" sizes="60x60" href="/binary/img/logo_high.png">
+    <link rel="mask-icon" href="/binary/img/logo_high.png" color="#9966ff">
 
     <!-- Open Graph data -->
-    <meta property="og:title" content="E.D.D.I | Conversational bot">
+    <meta property="og:title" content="E.D.D.I | Conversational Interface">
     <meta property="og:url" content="https://eddi.labs.ai">
     <meta property="og:description" content="">
-    <meta property="og:site_name" content="E.D.D.I | Conversational bot">
-    <meta property="og:image" content="/binary/img/Differ_bot_friendly_face.png">
+    <meta property="og:site_name" content="E.D.D.I | Conversational Interface">
+    <meta property="og:image" content="/binary/img/logo_high.png">
     <meta name="og:locale" content="de_AT">
     <meta name="fb:admins" content="">
     <meta name="og:type" content="website">
 
     <!-- Site Verifications -->
-    <link rel="shortcut icon" href="/binary/img/Differ_bot_friendly_face.png" type="image/x-icon">
-    <link rel="icon" href="/binary/img/Differ_bot_friendly_face.png" type="image/x-icon">
-    <link rel="shortcut icon" href="/binary/img/Differ_bot_friendly_face.png">
+    <link rel="shortcut icon" href="/binary/img/logo_high.png" type="image/x-icon">
+    <link rel="icon" href="/binary/img/logo_high.png" type="image/x-icon">
+    <link rel="shortcut icon" href="/binary/img/logo_high.png">
 
     <!--  Stylesheets -->
     <link rel="stylesheet" type="text/css" media="all" href="/text/css/chat2.css">
-    <link rel="stylesheet" href="https://maxcdn.bootstrapcdn.com/font-awesome/4.4.0/css/font-awesome.min.css">
+    <link rel="stylesheet" href="https://use.fontawesome.com/releases/v5.6.3/css/all.css"
+          integrity="sha384-UHRtZLI+pbxtHCWp1t77Bi1L4ZtiqrqD80Kn4Z8NTSRyMA2Fd33n5dQ8lWUE00s/" crossorigin="anonymous">
 
     <!-- Custom fonts for this template -->
     <link href="https://fonts.googleapis.com/css?family=Lato" rel="stylesheet">
@@ -59,16 +60,29 @@
 <div id="chat-container" class="container spacer animated fadeIn">
     <div id="debug-container">
         <div>
+            <h1>Debug Options</h1>
             <div class="container spacer" style="display: block;">
-                <input type="button" value="Insert Example" onclick="eddi.insertContextExample()">
                 <label for="contextValue">Context JSON:</label>
-                <textarea id="contextValue" name="contextValue" placeholder="context to be send..."></textarea>
+                <br>
+                <textarea id="contextValue"
+                          name="contextValue"
+                          placeholder="context to be send..."
+                          rows="6" cols="50"></textarea>
+                <br>
+                <br>
+                <br>
+                <br>
+                <button class="btn" type="button" onclick="eddi.insertContextExample()">
+                    <span>Insert Example</span>
+                </button>
             </div>
             <div class="container spacer" style="display: block;">
                 <div>
-                    <a id="previousConversationLink" href="#" target="_blank" style="display: none;">
-                        Previous Conversation
-                    </a>
+                    <p>
+                        <a id="previousConversationLink" href="#" target="_blank" style="display: none;">
+                            Previous Conversation
+                        </a>
+                    </p>
                     <div id="previousConversationId">
 
                     </div>
@@ -82,12 +96,13 @@
 
                     </div>
                 </div>
-                <input type="button" onclick="eddi.createConversation(eddi.environment, eddi.botId, true)"
-                       value="New Conversation">
+                <button class="btn" type="button" onclick="eddi.createConversation(eddi.environment, eddi.botId, true)">
+                    <span>New Conversation</span>
+                </button>
             </div>
         </div>
     </div>
-    <img class="chatImg" src="/binary/img/Differ_bot_friendly_face.png" alt="Differ Bot image"/>
+    <img class="chatImg" src="/binary/img/logo_high.png" alt="Differ Bot image"/>
     <span id="welcomeMsg"></span>
 </div>
 
@@ -95,46 +110,70 @@
     <div id="about-container" class="container spacer animated fadeIn displayOff">
         <div class="container spacer animated ">
             <div class="section">
-                <img src="/binary/img/Differ_bot_friendly_face.png" alt="Differ Bot image">
+                <img src="/binary/img/logo_high.png" alt="E.D.D.I Logo">
+                <p>
+                    <a target="_blank" title="E.D.D.I Website" href="https://eddi.labs.ai">
+                        E.D.D.I
+                    </a>
 
-                <h1>E.D.D.I</h1>
+                    is maintained by
 
-                <p>E.D.D.I was developed by <a target="_blank" title="LABS.AI on Github"
-                                               href="https://github.com/labsai/EDDI">LABS.AI</a>
+                    <a target="_blank" title="LABS.AI Website" href="https://www.labs.ai">
+                        LABS.AI
+                    </a>
                 </p>
+                <p>
+                <div>
+                    <script type="text/javascript" language="javascript">
+                        <!--
+                        // Email obfuscator script 2.1 by Tim Williams, University of Arizona
+                        // Random encryption key feature coded by Andrew Moulden
+                        // This code is freeware provided these four comment lines remain intact
+                        // A wizard to generate this code is at http://www.jottings.com/obfuscator/
+                        {
+                            const coded = 'OeKQXOQ@zXkT.XR';
+                            const key = 'kin7e1uTGVcyMSXwRKY4tfZUhOl3Aq96ELgQDFx5JzIN0WjbpdvomPsC2H8Bra';
+                            const shift = coded.length;
+                            let link = '';
+                            let ltr;
+                            for (let i = 0; i < coded.length; i++) {
+                                if (key.indexOf(coded.charAt(i)) === -1) {
+                                    ltr = coded.charAt(i);
+                                    link += (ltr)
+                                } else {
+                                    ltr = (key.indexOf(coded.charAt(i)) - shift + key.length) % key.length;
+                                    link += (key.charAt(ltr))
+                                }
+                            }
+                            document.write('<a href="mailto:' + link + '">Get in Touch</a>');
+                        }
+                        //-->
+                    </script>
+                    <noscript>Sorry, you need Javascript on to email me.</noscript>
 
+                </div>
             </div>
         </div>
-        <div class="section">
-            <h1>Get in touch with Differ Bot</h1>
-            <div>
-                <a title="Mail Differ Bot bot" target="_blank" href="mailto:contact@labs.ai" class="big-link">Differ
-                    Botbot@gmail.com</a>
-            </div>
-        </div>
+
     </div>
     <div class="displayNone" id="menu">
         <ul>
-            <li id="debug">
-                <a href="#debug-container">
-                    <i class="fas fa-toolbox"></i> Debug
-                </a>
-            </li>
             <li id="chat" class="active">
-                <a href="#chat-container" onclick="chat()">
-                    <i class="fa fa-comments-o fa-2x"></i>
-                    Chat
+                <a href="#chat-container">
+                    <i class="far fa-comments fa-3x" style="margin-top: 5px"></i>
+                    <div style="padding-top: 3px">Chat</div>
                 </a>
             </li>
             <li id="about">
-                <a href="#about-container" onclick="about()">
-                    <i class="fa fa-info-circle fa-2x"></i>
-                    About
+                <a href="#about-container">
+                    <i class="fas fa-info-circle fa-3x" style="margin-top: 5px"></i>
+                    <div style="margin-top: 3px">About</div>
                 </a>
             </li>
-            <li id="mail">
-                <a href="#" onclick="mail()">
-                    <i class="fa fa-envelope-o fa-2x"></i> Mail
+            <li id="debug">
+                <a href="#debug-container">
+                    <i class="fas fa-toolbox fa-3x" style="margin-top: 5px"></i>
+                    <div style="margin-top: 3px">Debug</div>
                 </a>
             </li>
         </ul>
@@ -142,9 +181,9 @@
     <noscript>
         <div class="noJS noJSText">
             <i class="fa fa-exclamation-triangle fa-3x"></i>
-            Differ Bot can't run without JavaScript. Click <a href="https://enable-javascript.com/"
-                                                              title="Learn how to enable JavaScript on your browser"
-                                                              target="_blank">here</a> to learn more.
+            E.D.D.I can't run without JavaScript. Click <a href="https://enable-javascript.com/"
+                                                           title="Learn how to enable JavaScript on your browser"
+                                                           target="_blank">here</a> to learn more.
         </div>
     </noscript>
 </div>

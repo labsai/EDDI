@@ -59,11 +59,17 @@ function displayQuickReplies(quickReplies) {
     return true;
 }
 
+function smoothScrolling() {
+    //Special case for chat
+    if ($(".active").attr('id') === "chat") {
+        smoothScrollBottom();
+    }
+}
 
 // Recursive function that goes through the set of messages it is given
 let isFirstMessage = true;
 
-function createMessage(outputArray, quickRepliesArray, i) {
+function createMessage(outputArray, quickRepliesArray, hasConversationEnded, i) {
 
     // i is optional - i is the current message in the array the system is displaying
     i = typeof i !== 'undefined' ? i : 0;
@@ -99,16 +105,11 @@ function createMessage(outputArray, quickRepliesArray, i) {
         isFirstMessage = false;
     }
 
-    let typingIndicator = new Message('<img src="/binary/img/typing-indicator.svg" style="width: 50px" />');
+    let typingIndicator = new Message('<img src="/binary/img/typing-indicator.svg" />');
     typingIndicator.draw();
+    smoothScrolling();
 
     setTimeout(function () {
-        function smoothScrolling() {
-            //Special case for chat
-            if ($(".active").attr('id') === "chat") {
-                smoothScrollBottom();
-            }
-        }
 
         typingIndicator.remove();
 
@@ -119,11 +120,16 @@ function createMessage(outputArray, quickRepliesArray, i) {
 
         smoothScrolling();
         if (i + 1 < outputArray.length) {
-            createMessage(outputArray, quickRepliesArray, ++i);
+            createMessage(outputArray, quickRepliesArray, hasConversationEnded, ++i);
         } else {
-            if (!displayQuickReplies(quickRepliesArray)) {
+            if (!hasConversationEnded && !displayQuickReplies(quickRepliesArray)) {
                 createAnswerField();
                 smoothScrolling();
+            }
+
+            if (hasConversationEnded) {
+                new ConversationEnd('CONVERSATION ENDED').draw();
+                eddi.createConversation(eddi.environment, eddi.botId);
             }
         }
     }, delay);
