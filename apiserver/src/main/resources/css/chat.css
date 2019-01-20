@@ -1,12 +1,3 @@
-* {
-    box-sizing: border-box;
-}
-
-body {
-    background-color: #edeff2;
-    font-family: "Calibri", "Roboto", sans-serif;
-}
-
 .chat_window {
     position: absolute;
     width: calc(100% - 20px);
@@ -236,11 +227,6 @@ body {
 
 .message_template {
     display: none;
-}
-
-.positionRight {
-    position: absolute;
-    right: 10px;
 }
 
 #contextValue {

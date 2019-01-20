@@ -1,72 +1,137 @@
-// --------------------------------------- //
+// <![CDATA[
+$(document).ready(function () {
+    $("#welcomeMsg").ready(function () {
+        $("#chat-container").show();
+
+    });
+});
+
+// ]]>
+
+/**
+ Display Menu when JS is enabled in browser
+ **/
+// <![CDATA[
+$(document).ready(function () {
+    $("#menu").show();
+    $("div").removeClass("displayNone");
+
+});
+
+// ]]>
+
+// <![CDATA[
+$(document).ready(function () {
+    $("#debug-container").hide();
+
+    $("#chat").click(function () {
+        $("#about-container").hide();
+        $("#chat-container").show();
+    });
+    $("#about").click(function () {
+        $("#chat-container").hide();
+        $("#about-container").show();
+    });
+    $("#debug").click(function () {
+        if ($("#debug-container").is(":visible")) {
+            $("#debug-container").hide();
+        } else {
+            $("#debug-container").show();
+        }
+    });
+});
+
+// ]]>
+
+//Greetings End
+
+function displayQuickReplies(quickReplies) {
+    if (typeof quickReplies === 'undefined' || quickReplies.length === 0) {
+        return false;
+    }
+
+    let quickReply;
+    for (let i = 0; i < quickReplies.length; i++) {
+        quickReply = new QuickReply(quickReplies[i].value);
+        quickReply.draw();
+    }
+
+    return true;
+}
+
 
 // Recursive function that goes through the set of messages it is given
-function createMessage(messagesArray, i, response) {
+let isFirstMessage = true;
+
+function createMessage(outputArray, quickRepliesArray, i) {
 
     // i is optional - i is the current message in the array the system is displaying
     i = typeof i !== 'undefined' ? i : 0;
 
-    // response is optional - response is a boolean that refers to whether the set of messages is a response to a question or the question itself
-    response = typeof response !== 'undefined' ? response : 0;
-
-    // add this HTML to the front and back of the message for #style
-    const htmlWrapperBeginning = "<div class=\"line\"><div class=\"message message-left animated fadeInUp bubbleLeft\">",
-        htmlWrapperEnding = "</div></div>";
-
     // If this message is not the first, use the previous to calculate a delay, otherwise use a number
-    const delay = (i > 0) ? calculateDelay(messagesArray[i - 1]) : 1000;
+    let messageObject = outputArray[i];
+    let message = null;
+    if (typeof messageObject === 'string') {
+        message = messageObject;
+    } else if (typeof messageObject === 'object') {
+        switch (messageObject.type) {
+            case 'text':
+            case 'title':
+                message = messageObject.text;
+                break;
+            case 'image':
+                message = '<img src="' + messageObject.uri + '" width="100%" alt="image send by the bot" />';
+                preLoadImage(messageObject.uri);
+                break;
+            case 'quickReplies':
+                quickRepliesArray.push({value: messageObject.value, expressions: messageObject.expressions});
+                break;
+            default:
+                console.log('output type is not recognized ' + messageObject.type);
+        }
+    }
 
+    let delay = (i > 0 && i < outputArray.length) ? calculateDelay(message) : 1000;
 
     // delay override - Make first responses quick
-    /*if (!response && questions[currentQuestion].intro && i === 0) {
+    if (isFirstMessage && i === 0) {
         delay = 50;
-    }*/
+        isFirstMessage = false;
+    }
+
+    let typingIndicator = new Message('<img src="/binary/img/typing-indicator.svg" style="width: 50px" />');
+    typingIndicator.draw();
 
     setTimeout(function () {
-        // if it's the last message in the series
-        if (i < messagesArray.length) {
-            let message = '';
-
-            let messageElement = messagesArray[i];
-            if (typeof messageElement === 'string') {
-                message = messageElement;
-            } else if (typeof messageElement === 'object') {
-                let type = messageElement.type;
-                switch (type) {
-                    case 'html':
-                    case 'text':
-                        message = messageElement.text;
-                        break;
-                    case 'image':
-                }
-            }
-
-            $('#chat-container').append(htmlWrapperBeginning + message + htmlWrapperEnding);
+        function smoothScrolling() {
             //Special case for chat
-            if ($('.active').attr('id') === "chat") {
+            if ($(".active").attr('id') === "chat") {
                 smoothScrollBottom();
             }
-            i++;
-            createMessage(messagesArray, i, response);
         }
-        // if it's not the last message, display the next one
-        else {
-            createAnswerField(delay);
-            return 1;
+
+        typingIndicator.remove();
+
+        if (message != null) {
+            const msg = new Message(message);
+            msg.draw();
+        }
+
+        smoothScrolling();
+        if (i + 1 < outputArray.length) {
+            createMessage(outputArray, quickRepliesArray, ++i);
+        } else {
+            if (!displayQuickReplies(quickRepliesArray)) {
+                createAnswerField();
+                smoothScrolling();
+            }
         }
     }, delay);
 }
 
 // Creates an answer input bubble
 function createAnswerField() {
-    const htmlAnswerField = "<div id=\"answer-container\" class=\"line\">" +
-        "<form action=\"#\" onsubmit=\"return false;\">" +
-        "<input type=\"text\" name=\"answer\" id=\"answer\" class=\"message message-right animated fadeInUp\" value=\"\" placeholder=\"Type a message…\">" +
-        "</form><div class=\"clear\"></div></div>";
-
-    /*if (questions[currentQuestion].ending) {
-        return 1;
-    }*/
+    let htmlAnswerField = "<div id=\"answer-container\" class=\"line\"><form action=\"#\" onsubmit=\"return false;\"><input required=\"required\" novalidate=\"novalidate\" autocomplete=\"on\" min=\"2\" max=\"40\" formnovalidate=\"formnovalidate\" autofocus=\"autofocus\" type=\"text\" name=\"answer\" id=\"answer\" class=\"message message-right animated fadeInUp\" value=\"\" placeholder=\"Type your response…\"></form><div class=\"clear\"></div></div>";
 
     $('#chat-container').append(htmlAnswerField);
 
@@ -76,12 +141,14 @@ function createAnswerField() {
             if (answer !== "") {
                 $('#answer-container').remove();
                 createAnswerMessage(answer);
+                eddi.submitUserMessage(answer);
             } else {
                 $('#answer').removeClass('shake').removeClass('fadeInUp');
                 $('#answer').addClass('shake');
-                $('#answer').one('webkitAnimationEnd mozAnimationEnd MSAnimationEnd oanimationend animationend', function () {
-                    $(this).removeClass('shake').removeClass('fadeInUp');
-                });
+                $('#answer').one('webkitAnimationEnd mozAnimationEnd MSAnimationEnd oanimationend animationend',
+                    function () {
+                        $(this).removeClass('shake').removeClass('fadeInUp');
+                    });
             }
         }
     });
@@ -89,25 +156,24 @@ function createAnswerField() {
     $('#answer').focus();
 
     //Special case for chat
-    if ($('.active').attr('id') === "chat") {
+    if ($(".active").attr('id') === "chat") {
         smoothScrollBottom();
     }
 }
 
 function createAnswerMessage(answer) {
-    const htmlWrapperBeginning = "<div class=\"line\">" +
-        "<div class=\"message message-right animated fadeInUp bubbleRight\">",
+    let htmlWrapperBeginning = "<div class=\"line\"><div class=\"message message-right animated fadeInUp bubbleRight\">",
         htmlWrapperEnding = "</div></div><div class=\"clear\"></div>";
 
+    $('.quickReply').remove();
     $('#chat-container').append(htmlWrapperBeginning + answer + htmlWrapperEnding);
 }
 
 // Calculates the delay based on whatever string you give it
-function calculateDelay(string) {
-    // 275 words per minute in milliseconds plus a constant
-    const delayPerWord = 218;
-    let delay = string.split(" ").length * delayPerWord;
-    delay = (delay < delayPerWord * 3) ? delay + 400 : delay;
+function calculateDelay(text) {
+    let delayPerWord = 120;
+    let delay = text.trim().split(" ").length * delayPerWord;
+    delay = (delay < delayPerWord * 3) ? delay + 250 : delay;
     return delay;
 }
 
@@ -115,12 +181,27 @@ function smoothScrollBottom() {
     $('html,body').animate({scrollTop: $(document).height()}, 1000);
 }
 
+function preLoadImage(photoUrl) {
+    //create image to preload:
+    let imgPreload = new Image();
+    $(imgPreload).attr({
+        src: photoUrl
+    });
+
+    if (!imgPreload.complete && imgPreload.readyState === 2) {
+        $(imgPreload).load(function (response, status, xhr) {
+            // don't do anything
+        });
+    }
+}
+
 // Tabs
+
 function tabHandler() {
     $tab = $('#menu ul li');
     $content = $('.content');
     $defaultTab = $('#chat');
-    var animationOver = true;
+    let animationOver = true;
 
     $defaultTab.addClass('active');
     $("#" + $defaultTab.attr('data-content')).addClass('activeContent');
@@ -129,7 +210,7 @@ function tabHandler() {
         // If Active when you click
         if (!$(this).hasClass('active')) {
             animationOver = false;
-            var tabContent = "#" + $(this).attr('data-content');
+            let tabContent = "#" + $(this).attr('data-content');
 
             // Make tab active
             $tab.removeClass('active');
@@ -144,7 +225,7 @@ function tabHandler() {
             $(tabContent).show().addClass('activeContent');
 
             //Special case for chat
-            if ($('.active').attr('id') === "chat") {
+            if ($(".active").attr('id') === "chat") {
                 smoothScrollBottom();
                 $(".message").each(function () {
                     $(this).removeClass('tada').removeClass('fadeInUp').addClass('fadeIn');
@@ -152,14 +233,16 @@ function tabHandler() {
             }
 
             //Special case for about
-            if ($('.active').attr('id') === "about") {
+            if ($(".active").attr('id') === "about") {
                 $('html,body').animate({scrollTop: 0}, 0);
             }
         }
     });
 }
 
+
 // })(); END GLOBAL
+
 $(document).ready(function () {
-    new tabHandler();
+    tabHandler();
 });

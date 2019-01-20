@@ -1,27 +1,34 @@
 const eddi = {};
 
 class Message {
-    constructor(text, message_side) {
+    constructor(text) {
         this.text = text;
-        this.message_side = message_side;
+        this.element = $('<div>');
     }
 
     get draw() {
         return function () {
-            const $message = $($('.message_template').clone().html());
-            $message.addClass(this.message_side).find('.text').html(this.text);
-            $('.messages').append($message);
+            this.element = $('<div>');
+            this.element.addClass('line');
+            const $message = $('<div>');
+            this.element.append($message);
+            $message.addClass('message message-left animated fadeInUp bubbleLeft');
+            $message.html(this.text);
+            $('#chat-container').append(this.element);
             return setTimeout(function () {
                 return $message.addClass('appeared');
             }, 0);
         };
     }
+
+    remove() {
+        this.element.remove();
+    }
 }
 
 class QuickReply {
-    constructor(text, message_side) {
+    constructor(text) {
         this.text = text;
-        this.message_side = message_side;
     }
 
     get draw() {
@@ -30,14 +37,15 @@ class QuickReply {
             const $quickReply = $('<button/>', {
                 text: this.text,
                 click: function () {
+                    createAnswerMessage(_this.text);
                     eddi.submitUserMessage(_this.text);
-                    eddi.displayMessage(_this.text, 'right');
                     $('.quick_reply').remove();
                 }
             });
-            $quickReply.addClass(this.message_side);
+
+            $quickReply.addClass('message message-left animated fadeInUp bubbleLeft');
             $quickReply.addClass('quick_reply');
-            $('.messages').append($quickReply);
+            $('#chat-container').append($quickReply);
             return setTimeout(function () {
                 return $quickReply.addClass('appeared');
             }, 0);
@@ -46,53 +54,6 @@ class QuickReply {
 }
 
 $(function () {
-    let message_side = 'right';
-
-    function getMessageText() {
-        const $message_input = $('.message_input');
-        return $message_input.val();
-    }
-
-    eddi.displayMessage = function (text, side) {
-        let $messages, message;
-        if (text.trim() === '') {
-            return;
-        }
-        $('.message_input').val('');
-        $messages = $('.messages');
-        message_side = side ? 'right' : 'left';
-        message = new Message(text, side);
-        message.draw();
-        return $messages.animate({scrollTop: $messages.prop('scrollHeight')}, 300);
-    };
-
-    function displayQuickReplies(quickReplies) {
-        let $messages, quickReply;
-        if (quickReplies.length === 0) {
-            return;
-        }
-
-        $messages = $('.messages');
-        for (let i = 0; i < quickReplies.length; i++) {
-            quickReply = new QuickReply(quickReplies[i].value, 'left');
-            quickReply.draw();
-        }
-        return $messages.animate({scrollTop: $messages.prop('scrollHeight')}, 300);
-    }
-
-    $('.send_message').click(function () {
-        const userMessage = getMessageText();
-        eddi.submitUserMessage(userMessage);
-        return eddi.displayMessage(userMessage, 'right');
-    });
-    $('.message_input').keyup(function (e) {
-        if (e.which === 13) {
-            const userMessage = getMessageText();
-            eddi.submitUserMessage(userMessage);
-            return eddi.displayMessage(userMessage, 'right');
-        }
-    });
-
     eddi.submitUserMessage = function (userMessage) {
         let requestBody = null;
         let contextValue = $('#contextValue').val().trim();
@@ -126,34 +87,6 @@ $(function () {
             });
     };
 
-    const displayImage = function (imageUrl) {
-        eddi.displayMessage('<img src="' + imageUrl + '" alt="" style="max-width: 100%" />', 'left');
-    };
-
-    const refreshConversationLog2 = function (conversationMemory) {
-        const conversationState = conversationMemory.conversationState;
-
-        if (conversationState === 'ERROR') {
-            log('ERROR', 'An Error has occurred. Please contact the administrator!');
-            return;
-        }
-
-        if (conversationState === 'IN_PROGRESS') {
-            setTimeout(loadConversationLog, 1000);
-            return;
-        }
-
-        for(let conversationOutput in conversationMemory.conversationOutputs) {
-            let outputArray = conversationOutput.output;
-            createMessage(outputArray);
-        }
-
-        if (conversationState === 'ENDED') {
-            $('<div style="padding-bottom: 1rem; color:darkgray;"><hr>Conversation Ended</div>').appendTo($('.messages'));
-            eddi.createConversation(eddi.environment, eddi.botId);
-        }
-    };
-
     const refreshConversationLog = function (conversationMemory) {
         const conversationState = conversationMemory.conversationState;
 
@@ -167,80 +100,17 @@ $(function () {
             return;
         }
 
-        let ioList = [];
-        for (let i = 0; i < conversationMemory.conversationSteps.length; i++) {
-            let step = conversationMemory.conversationSteps[i];
-
-            let input = null;
-            let action = null;
-            let outputs = [];
-            let images = [];
-            let quickReplies = [];
-            for (let x = 0; x < step.conversationStep.length; x++) {
-                let obj = step.conversationStep[x];
-                if (obj.key.indexOf('input') === 0) {
-                    input = obj.value;
-                } else if (obj.key.indexOf('actions') === 0) {
-                    action = obj.value;
-                } else if (obj.key.indexOf('output:text') === 0) {
-                    let item = obj.value;
-                    if (item != null && typeof item === 'object') {
-                        if (item.value != null) {
-                            item = item.value;
-                        } else if (item.text != null) {
-                            item = item.text;
-                        }
-                    }
-                    outputs.push(item);
-                } else if (obj.key.indexOf('output:image') === 0) {
-                    images.push(obj.value);
-                } else if (obj.key.indexOf('quickReplies') === 0) {
-                    pushArray(quickReplies, obj.value);
-                } else if (obj.key.indexOf('output:quickReply') === 0) {
-                    pushArray(quickReplies, obj.value);
-                }
-            }
-
-            ioList.push({input: input, outputs: outputs, images: images, quickReplies: quickReplies});
-        }
-
-        if (ioList.length > 0) {
-            let latestInteraction = ioList[ioList.length - 1];
-            if (latestInteraction === 'undefined') {
-                latestInteraction = {};
-            }
-
-            for (let output of latestInteraction.outputs) {
-                if (output.indexOf("http://") === 0 || output.indexOf("https://") === 0) {
-                    let indexEnd = output.indexOf(" ");
-                    if (indexEnd === -1) {
-                        indexEnd = output.length;
-                    }
-                    displayImage(output.substr(0, indexEnd));
-                } else {
-                    eddi.displayMessage(output, 'left');
-                }
-            }
-            for (let image of latestInteraction.images) {
-                if (typeof image === 'object') {
-                    displayImage(image.uri);
-                } else {
-                    displayImage('/binary/img/' + image);
-                }
-            }
-            displayQuickReplies(latestInteraction.quickReplies);
-
-            $('.message_input').focus();
+        for (let i = 0; i < conversationMemory.conversationOutputs.length; i++) {
+            let conversationOutput = conversationMemory.conversationOutputs[i];
+            let outputArray = conversationOutput.output ? conversationOutput.output : [];
+            let quickReplyArray = conversationOutput.quickReplies ? conversationOutput.quickReplies : [];
+            createMessage(outputArray, quickReplyArray);
         }
 
         if (conversationState === 'ENDED') {
-            $('<div style="padding-bottom: 1rem; color:darkgray;"><hr>Conversation Ended</div>').appendTo($('.messages'));
+            $('<div style="padding-bottom: 1rem; color:darkgray;"><hr>Conversation Ended</div>').appendTo($('#chat-container'));
             eddi.createConversation(eddi.environment, eddi.botId);
         }
-    };
-
-    const pushArray = function (arr, arr2) {
-        arr.push.apply(arr, arr2);
     };
 
     const deployBot = function (environment, botId, botVersion) {
