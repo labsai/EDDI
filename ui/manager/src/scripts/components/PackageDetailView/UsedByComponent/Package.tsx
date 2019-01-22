@@ -5,6 +5,7 @@ import { IPackage } from '../../utils/AxiosFunctions';
 import { connect } from 'react-redux';
 import NameAndVersion from './NameAndVersion';
 import { packageSelector } from '../../../selectors/PackageSelectors';
+import { history } from '../../../history';
 
 interface IPublicProps {
   packageResource: string;
@@ -25,6 +26,9 @@ class Package extends React.Component<IPrivateProps> {
         descriptor={this.props.packagePayload}
         usedByOlderVersion={this.props.usedByOlderVersion}
         isSmallName={this.props.isSmallName}
+        onClick={() =>
+          history.push(`/packageview/${this.props.packagePayload.id}`)
+        }
       />
     );
   }

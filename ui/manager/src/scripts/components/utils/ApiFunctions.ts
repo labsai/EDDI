@@ -40,4 +40,4 @@ export async function getAPIUrl(): Promise<string> {
   }
 }
 
-export const DEFAULT_LIMIT: number = 20;
+export const DEFAULT_LIMIT: number = 10;

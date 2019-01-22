@@ -23,7 +23,9 @@ const warningIcon = require('../../../public/images/WarningIcon.png');
 
 class Bot extends React.Component<IProps> {
   async componentDidMount() {
-    eddiApiActionDispatchers.fetchBotDataAction(this.props.bot.resource);
+    if (_.isUndefined(this.props.bot.packages)) {
+      eddiApiActionDispatchers.fetchBotDataAction(this.props.bot.resource);
+    }
   }
 
   componentWillReceiveProps(nextProps) {

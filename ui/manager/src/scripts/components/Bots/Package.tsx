@@ -39,8 +39,11 @@ class Package extends React.Component<IPrivateProps, IState> {
       showModal: false,
     };
   }
+
   async componentDidMount() {
-    eddiApiActionDispatchers.fetchPackageAction(this.props.packageResource);
+    if (_.isEmpty(this.props.packagePayload)) {
+      eddiApiActionDispatchers.fetchPackageAction(this.props.packageResource);
+    }
   }
 
   openViewJsonModal = () => {

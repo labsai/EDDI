@@ -14,6 +14,7 @@ import {
   specificPackageSelector,
 } from '../../selectors/PackageSelectors';
 import { PACKAGE, PACKAGE_PATH } from '../utils/EddiTypes';
+import { history } from '../../history';
 
 interface IPublicProps {
   packageId: string;

@@ -41,9 +41,7 @@ class BotList extends React.Component<IPrivateProps, IState> {
   }
 
   async componentDidMount() {
-    if (this.props.bots.length < DEFAULT_LIMIT && !this.props.allBotsLoaded) {
-      eddiApiActionDispatchers.fetchBotsAction(DEFAULT_LIMIT, 0);
-    }
+    this.loadMore();
     this.setState({ apiUrl: await getAPIUrl() });
   }
 
@@ -71,17 +69,22 @@ class BotList extends React.Component<IPrivateProps, IState> {
     if (this.state.loading) {
       return;
     }
+    console.log('Loading more!!');
     this.setState({ loading: true });
-    eddiApiActionDispatchers.fetchBotsAction(
-      DEFAULT_LIMIT,
-      Math.floor(this.props.botsLoaded / DEFAULT_LIMIT),
-    );
+    if (this.props.bots.length < 5 && !this.props.allBotsLoaded) {
+      eddiApiActionDispatchers.fetchBotsAction(5, 0);
+    } else {
+      eddiApiActionDispatchers.fetchBotsAction(
+        5,
+        Math.floor(this.props.botsLoaded / 5),
+      );
+    }
   };
 
   render() {
     const botList = this.filterBots();
     return (
-      <div>
+      <div style={styles.botList}>
         {renderIf(false)(() => (
           <div style={styles.loadingWrapper}>
             <ClimbingBoxLoader loading />
