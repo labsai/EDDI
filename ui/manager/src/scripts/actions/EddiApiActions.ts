@@ -73,10 +73,15 @@ import {
   UNDEPLOY_BOT,
   UNDEPLOY_BOT_SUCCESS,
   UNDEPLOY_BOT_FAILED,
-  UPDATE_BOT_DEPLOYMENT_STATUS,
-  UPDATE_BOT_DEPLOYMENT_STATUS_SUCCESS,
-  UPDATE_BOT_DEPLOYMENT_STATUS_FAILED,
+  FETCH_BOT_DEPLOYMENT_STATUS,
+  FETCH_BOT_DEPLOYMENT_STATUS_SUCCESS,
+  FETCH_BOT_DEPLOYMENT_STATUS_FAILED,
   FETCH_CURRENT_BOT,
+  FETCH_BOT_DETAILS,
+  CREATE_NEW_BOT,
+  CREATE_NEW_BOT_FAILED,
+  CREATE_NEW_PACKAGE,
+  CREATE_NEW_PACKAGE_FAILED,
 } from './EddiApiActionTypes';
 import {
   IBot,
@@ -89,21 +94,37 @@ import {
   undeployBot,
 } from '../components/utils/AxiosFunctions';
 
-export interface IFetchBotsAction extends Action {}
+export interface IFetchBotsAction extends Action {
+  limit: number;
+  index: number;
+}
 
-export function fetchBotsAction(): IFetchBotsAction {
+export function fetchBotsAction(
+  limit: number,
+  index: number,
+): IFetchBotsAction {
   return {
+    limit,
+    index,
     type: FETCH_BOTS,
   };
 }
 
 export interface IFetchBotsSuccessAction extends Action {
   bots: IBot[];
+  limit: number;
+  index: number;
 }
 
-export function fetchBotsSuccessAction(bots: IBot[]): IFetchBotsSuccessAction {
+export function fetchBotsSuccessAction(
+  bots: IBot[],
+  limit: number,
+  index: number,
+): IFetchBotsSuccessAction {
   return {
+    limit,
     bots,
+    index,
     type: FETCH_BOTS_SUCCESS,
   };
 }
@@ -203,23 +224,37 @@ export function fetchBotDataFailedAction(
   };
 }
 
-export interface IFetchPackagesAction extends Action {}
+export interface IFetchPackagesAction extends Action {
+  limit: number;
+  index: number;
+}
 
-export function fetchPackagesAction(): IFetchPackagesAction {
+export function fetchPackagesAction(
+  limit: number,
+  index: number,
+): IFetchPackagesAction {
   return {
+    limit,
+    index,
     type: FETCH_PACKAGES,
   };
 }
 
 export interface IFetchPackagesSuccessAction extends Action {
   packages: IPackage[];
+  limit: number;
+  index: number;
 }
 
 export function fetchPackagesSuccessAction(
   packages: IPackage[],
+  limit: number,
+  index: number,
 ): IFetchPackagesSuccessAction {
   return {
     packages,
+    limit,
+    index,
     type: FETCH_PACKAGES_SUCCESS,
   };
 }
@@ -325,24 +360,41 @@ export function fetchDefaultPluginTypesFailedAction(
 
 export interface IFetchPluginsAction extends Action {
   pluginType: string;
+  limit: number;
+  index: number;
 }
 
-export function fetchPluginsAction(pluginType: string): IFetchPluginsAction {
+export function fetchPluginsAction(
+  pluginType: string,
+  limit: number,
+  index: number,
+): IFetchPluginsAction {
   return {
     pluginType,
+    limit,
+    index,
     type: FETCH_PLUGINS,
   };
 }
 
 export interface IFetchPluginsSuccessAction extends Action {
   plugins: IPlugin[];
+  pluginType: string;
+  limit: number;
+  index: number;
 }
 
 export function fetchPluginsSuccessAction(
   plugins: IPlugin[],
+  pluginType: string,
+  limit: number,
+  index: number,
 ): IFetchPluginsSuccessAction {
   return {
     plugins,
+    pluginType,
+    limit,
+    index,
     type: FETCH_PLUGINS_SUCCESS,
   };
 }
@@ -697,28 +749,34 @@ export function updatePluginTypeFailedAction(
 
 export interface IFetchBotsUsingPackageAction extends Action {
   packageResource: string;
+  anyVersion: boolean;
 }
 
 export function fetchBotsUsingPackageAction(
   packageResource: string,
+  anyVersion: boolean,
 ): IFetchBotsUsingPackageAction {
   return {
     packageResource,
+    anyVersion,
     type: FETCH_BOTS_USING_PACKAGE,
   };
 }
 
 export interface IFetchBotsUsingPackageSuccessAction extends Action {
   packageResource: string;
+  anyVersion: boolean;
   bots: IBot[];
 }
 
 export function fetchBotsUsingPackageSuccessAction(
   packageResource: string,
+  anyVersion: boolean,
   bots: IBot[],
 ): IFetchBotsUsingPackageSuccessAction {
   return {
     packageResource,
+    anyVersion,
     bots,
     type: FETCH_BOTS_USING_PACKAGE_SUCCESS,
   };
@@ -861,6 +919,18 @@ export function createNewConfigFailedAction(
   };
 }
 
+export interface ICreateNewBotAction extends Action {
+  // todo : Remake this action so no api calls have to be called before this is action runs.
+  botId: string;
+}
+
+export function createNewBotAction(botId: string): ICreateNewBotAction {
+  return {
+    botId,
+    type: CREATE_NEW_BOT,
+  };
+}
+
 export interface ICreateNewBotSuccessAction extends Action {
   bot: IBot;
 }
@@ -874,6 +944,33 @@ export function createNewBotSuccessAction(
   };
 }
 
+export interface ICreateNewBotFailedAction extends Action {
+  error: Error;
+}
+
+export function createNewBotFailedAction(
+  error: Error,
+): ICreateNewBotFailedAction {
+  return {
+    error,
+    type: CREATE_NEW_BOT_FAILED,
+  };
+}
+
+export interface ICreateNewPackageAction extends Action {
+  // todo : Remake this action so no api calls have to be called before this is action runs.
+  packageId: string;
+}
+
+export function createNewPackageAction(
+  packageId: string,
+): ICreateNewPackageAction {
+  return {
+    packageId,
+    type: CREATE_NEW_PACKAGE,
+  };
+}
+
 export interface ICreateNewPackageSuccessAction extends Action {
   pkg: IPackage;
 }
@@ -884,6 +981,19 @@ export function createNewPackageSuccessAction(
   return {
     pkg,
     type: CREATE_NEW_PACKAGE_SUCCESS,
+  };
+}
+
+export interface ICreateNewPackageFailedAction extends Action {
+  error: Error;
+}
+
+export function createNewPackageFailedAction(
+  error: Error,
+): ICreateNewPackageFailedAction {
+  return {
+    error,
+    type: CREATE_NEW_PACKAGE_FAILED,
   };
 }
 
@@ -1060,44 +1170,44 @@ export function undeployBotFailedAction(
   };
 }
 
-export interface IUpdateBotDeploymentStatusAction extends Action {
+export interface IFetchBotDeploymentStatusAction extends Action {
   botResource: string;
 }
 
-export function updateBotDeploymentStatusAction(
+export function fetchBotDeploymentStatusAction(
   botResource: string,
-): IUpdateBotDeploymentStatusAction {
+): IFetchBotDeploymentStatusAction {
   return {
     botResource,
-    type: UPDATE_BOT_DEPLOYMENT_STATUS,
+    type: FETCH_BOT_DEPLOYMENT_STATUS,
   };
 }
 
-export interface IUpdateBotDeploymentStatusSuccessAction extends Action {
+export interface IFetchBotDeploymentStatusSuccessAction extends Action {
   botResource: string;
   status: string;
 }
 
-export function updateBotDeploymentStatusSuccessAction(
+export function fetchBotDeploymentStatusSuccessAction(
   botResource: string,
   status: string,
-): IUpdateBotDeploymentStatusSuccessAction {
+): IFetchBotDeploymentStatusSuccessAction {
   return {
     botResource,
     status,
-    type: UPDATE_BOT_DEPLOYMENT_STATUS_SUCCESS,
+    type: FETCH_BOT_DEPLOYMENT_STATUS_SUCCESS,
   };
 }
 
-export interface IUpdateBotDeploymentStatusFailedAction extends Action {
+export interface IFetchBotDeploymentStatusFailedAction extends Action {
   error: Error;
 }
 
-export function updateBotDeploymentStatusFailedAction(
+export function fetchBotDeploymentStatusFailedAction(
   error: Error,
-): IUpdateBotDeploymentStatusFailedAction {
+): IFetchBotDeploymentStatusFailedAction {
   return {
     error,
-    type: UPDATE_BOT_DEPLOYMENT_STATUS_FAILED,
+    type: FETCH_BOT_DEPLOYMENT_STATUS_FAILED,
   };
 }

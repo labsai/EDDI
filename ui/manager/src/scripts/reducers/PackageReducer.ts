@@ -1,5 +1,5 @@
 import { Reducer, Action } from 'redux';
-import { IPackage } from '../components/utils/AxiosFunctions';
+import { IBot, IPackage, IPlugin } from '../components/utils/AxiosFunctions';
 import {
   FETCH_PACKAGEDATA,
   FETCH_PACKAGEDATA_FAILED,
@@ -21,6 +21,7 @@ import {
   UPDATE_PACKAGES,
   UPDATE_PACKAGES_SUCCESS,
   UPDATE_PACKAGES_FAILED,
+  CREATE_NEW_PACKAGE_SUCCESS,
 } from '../actions/EddiApiActionTypes';
 import * as update from 'immutability-helper';
 import {
@@ -39,6 +40,9 @@ import {
   IFetchPackagesUsingPluginSuccessAction,
   IUpdatePackagesSuccessAction,
   IUpdatePackagesFailedAction,
+  IFetchBotsSuccessAction,
+  ICreateNewPluginSuccessAction,
+  ICreateNewPackageSuccessAction,
 } from '../actions/EddiApiActions';
 import * as _ from 'lodash';
 import { parsePluginExtensions } from '../components/utils/helpers/PluginParser';
@@ -51,6 +55,8 @@ export interface IPackageState {
   isLoadingPackageData: boolean;
   isLoadingPackage: boolean;
   packages: IPackage[];
+  allPackagesLoaded: boolean;
+  packagesLoaded: number;
 }
 
 export const initialState: IPackageState = {
@@ -59,6 +65,8 @@ export const initialState: IPackageState = {
   isLoadingPackageData: false,
   isLoadingPackage: false,
   packages: [],
+  allPackagesLoaded: false,
+  packagesLoaded: 0,
 };
 
 const PackageReducer: IPackageReducer = (
@@ -75,21 +83,48 @@ const PackageReducer: IPackageReducer = (
         isLoadingAllPackages: {
           $set: true,
         },
+        allPackagesLoaded: {
+          $set: false,
+        },
       });
 
     case FETCH_PACKAGES_SUCCESS:
-      const newPackages: IPackage[] = (action as IFetchPackagesSuccessAction)
-        .packages;
-      const oldPackages = state.packages.filter(pkg =>
-        _.isEmpty(newPackages.find(newPkg => newPkg.resource === pkg.resource)),
-      );
-      const newPackageList = newPackages.concat(oldPackages);
+      const lastPage =
+        (action as IFetchPackagesSuccessAction).limit >
+        (action as IFetchPackagesSuccessAction).packages.length;
+      let newPackagesLoaded;
+      if (
+        (action as IFetchPackagesSuccessAction).index === 0 &&
+        state.packagesLoaded !== 0
+      ) {
+        newPackagesLoaded = 0;
+      } else {
+        newPackagesLoaded = (action as IFetchPackagesSuccessAction).packages
+          .length;
+      }
       return update(state, {
         packages: {
-          $set: newPackageList,
+          $apply: (packages: IPackage[]) => {
+            if (!_.isEmpty((action as IFetchPackagesSuccessAction).packages)) {
+              return _.uniqBy(
+                packages.concat(
+                  (action as IFetchPackagesSuccessAction).packages,
+                ),
+                pkg => pkg.resource,
+              );
+            } else {
+              return packages;
+            }
+          },
         },
         isLoadingAllPackages: {
           $set: false,
+        },
+        allPackagesLoaded: {
+          $set: lastPage,
+        },
+        packagesLoaded: {
+          $set: state.packagesLoaded + newPackagesLoaded,
         },
       });
 
@@ -111,12 +146,30 @@ const PackageReducer: IPackageReducer = (
       });
 
     case FETCH_PACKAGE_SUCCESS:
-      const packageList = state.packages.filter(
-        pkg =>
-          pkg.resource !==
-          (action as IFetchPackageSuccessAction).package.resource,
-      );
-      packageList.push((action as IFetchPackageSuccessAction).package);
+      const newPackage = (action as IFetchPackageSuccessAction).package;
+      const packageList = state.packages.map(pkg => {
+        if (pkg.resource === newPackage.resource) {
+          return {
+            id: pkg.id,
+            resource: pkg.resource,
+            version: pkg.version,
+            currentVersion: pkg.currentVersion,
+            pluginTypes: pkg.pluginTypes,
+            usedByBots: pkg.usedByBots,
+            name: newPackage.name,
+            description: newPackage.description,
+            lastModifiedOn: newPackage.lastModifiedOn,
+            createdOn: newPackage.createdOn,
+          };
+        } else {
+          return pkg;
+        }
+      });
+      if (
+        _.isEmpty(packageList.find(pkg => pkg.resource === newPackage.resource))
+      ) {
+        packageList.push((action as IFetchPackageSuccessAction).package);
+      }
       return update(state, {
         isLoadingPackage: {
           $set: false,
@@ -324,28 +377,33 @@ const PackageReducer: IPackageReducer = (
       });
 
     case FETCH_BOTS_USING_PACKAGE_SUCCESS:
-      return update(state, {
-        packages: {
-          $apply: (packages: IPackage[]) => {
-            return packages.map(pack => {
-              if (
-                pack.resource ===
-                (action as IFetchBotsUsingPackageSuccessAction).packageResource
-              ) {
-                return update(pack, {
-                  usedByBots: {
-                    $set: (action as IFetchBotsUsingPackageSuccessAction).bots.map(
-                      bot => bot.resource,
-                    ),
-                  },
-                });
-              } else {
-                return pack;
-              }
-            });
+      if ((action as IFetchBotsUsingPackageSuccessAction).anyVersion) {
+        return state;
+      } else {
+        return update(state, {
+          packages: {
+            $apply: (packages: IPackage[]) => {
+              return packages.map(pack => {
+                if (
+                  pack.resource ===
+                  (action as IFetchBotsUsingPackageSuccessAction)
+                    .packageResource
+                ) {
+                  return update(pack, {
+                    usedByBots: {
+                      $set: (action as IFetchBotsUsingPackageSuccessAction).bots.map(
+                        bot => bot.resource,
+                      ),
+                    },
+                  });
+                } else {
+                  return pack;
+                }
+              });
+            },
           },
-        },
-      });
+        });
+      }
 
     case FETCH_PACKAGES_USING_PLUGIN_SUCCESS:
       return update(state, {
@@ -408,6 +466,20 @@ const PackageReducer: IPackageReducer = (
           isLoadingAllPackages: {
             $set: false,
           },
+        },
+      });
+
+    case CREATE_NEW_PACKAGE_SUCCESS:
+      return update(state, {
+        packages: {
+          $apply: (packages: IPackage[]) => {
+            return packages.concat(
+              (action as ICreateNewPackageSuccessAction).pkg,
+            );
+          },
+        },
+        packagesLoaded: {
+          $set: state.packagesLoaded + 1,
         },
       });
 

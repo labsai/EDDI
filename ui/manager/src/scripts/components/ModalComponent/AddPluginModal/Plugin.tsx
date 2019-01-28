@@ -27,7 +27,7 @@ interface IPrivateProps extends IPublicProps {
 
 class Plugin extends React.Component<IPrivateProps> {
   async componentDidMount() {
-    if (this.props.pluginResource) {
+    if (this.props.pluginResource && _.isUndefined(this.props.plugin)) {
       eddiApiActionDispatchers.fetchPluginAction(this.props.pluginResource);
     }
   }

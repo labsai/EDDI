@@ -26,18 +26,6 @@ interface IPrivateProps extends IPublicProps {
 }
 
 class Package extends React.Component<IPrivateProps> {
-  async componentDidMount() {
-    if (!this.props.packagePayload) {
-      eddiApiActionDispatchers.fetchPackageAction(this.props.packageResource);
-    }
-  }
-
-  async componentWillReceiveProps(nextProps) {
-    if (!nextProps.packagePayload) {
-      eddiApiActionDispatchers.fetchPackageAction(nextProps.packageResource);
-    }
-  }
-
   getButtonStyle() {
     if (this.props.selected) {
       return { ...styles.button, backgroundColor: '#4BCA81' };

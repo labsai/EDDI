@@ -14,14 +14,14 @@ import {
   BEHAVIOR_PATH,
   BOT,
   BOT_PATH,
-  HTTPCALLS,
-  HTTPCALLS_PATH,
   OUTPUT,
   OUTPUT_PATH,
   PACKAGE,
   PACKAGE_PATH,
   REGULAR_DICTIONARY,
   REGULAR_DICTIONARY_PATH,
+  HTTPCALLS,
+  HTTPCALLS_PATH,
 } from './EddiTypes';
 
 export interface IDescriptor {
@@ -165,10 +165,13 @@ export async function getBotPackages(resource: string): Promise<string[]> {
   }
 }
 
-export const getBotDescriptors: () => Promise<IBot[]> = async () => {
+export async function getBotDescriptors(
+  limit: number,
+  index: number,
+): Promise<IBot[]> {
   try {
     const res: IDescriptorResponse = await axios.get(
-      `${await getAPIUrl()}/botstore/bots/descriptors?limit=${DEFAULT_LIMIT}`,
+      `${await getAPIUrl()}/botstore/bots/descriptors?index=${index}&limit=${limit}`,
     );
     return res.data.map(bot => {
       const createdOn = bot.createdOn;
@@ -186,13 +189,14 @@ export const getBotDescriptors: () => Promise<IBot[]> = async () => {
         name,
         resource,
         version,
+        currentVersion: version,
       };
     });
-  } catch (e) {
-    console.error(e);
-    return Promise.resolve([]);
+  } catch (err) {
+    console.error(err);
+    throw err;
   }
-};
+}
 
 export async function getCurrentBot(id: string): Promise<IBot> {
   try {
@@ -320,35 +324,20 @@ export interface IPackage extends IDetailedDescriptor {
   usedByBots?: string[];
 }
 
-export const getPackageDescriptors: () => Promise<IPackage[]> = async () => {
+export async function getPackageDescriptors(
+  limit = DEFAULT_LIMIT,
+  index = 0,
+): Promise<IPackage[]> {
   try {
     const res: IDescriptorResponse = await axios.get(
-      `${await getAPIUrl()}/packagestore/packages/descriptors?limit=${DEFAULT_LIMIT}`,
+      `${await getAPIUrl()}/packagestore/packages/descriptors?limit=${limit}&index=${index}`,
     );
-    const packages: IPackage[] = res.data.map(pkg => {
-      const version = Parser.getVersion(pkg.resource);
-      return {
-        createdOn: pkg.createdOn,
-        description: pkg.description,
-        id: Parser.getId(pkg.resource),
-        lastModifiedOn: pkg.lastModifiedOn,
-        name: pkg.name,
-        resource: pkg.resource,
-        version,
-        currentVersion: version,
-      };
-    });
-    for (let i = 0; i < _.size(packages); i++) {
-      // todo: Refactor this
-      packages[i].packageData = await getPackageData(packages[i].resource);
-      packages[i].pluginTypes = await getPluginTypes(packages[i].resource);
-    }
-    return packages;
+    return Parser.getDetailedDescriptors(res, true);
   } catch (err) {
     console.error(`Failed to get package descriptors. Error: ${err.message}`);
     throw err;
   }
-};
+}
 
 export async function getPackage(resource: string): Promise<IPackage> {
   try {
@@ -734,31 +723,33 @@ export interface IPluginExtension {
 
 export async function getPluginDescriptors(
   pluginType: string,
+  limit: number,
+  index: number,
 ): Promise<IPlugin[]> {
   try {
     let res: IDescriptorResponse;
     switch (pluginType) {
       case BEHAVIOR:
         res = await axios.get(
-          `${await getAPIUrl()}${BEHAVIOR_PATH}/descriptors?limit=${DEFAULT_LIMIT}`,
+          `${await getAPIUrl()}${BEHAVIOR_PATH}/descriptors?index=${index}&limit=${limit}`,
         );
         break;
 
       case OUTPUT:
         res = await axios.get(
-          `${await getAPIUrl()}${OUTPUT_PATH}/descriptors?limit=${DEFAULT_LIMIT}`,
+          `${await getAPIUrl()}${OUTPUT_PATH}/descriptors?index=${index}&limit=${limit}`,
         );
         break;
 
       case REGULAR_DICTIONARY:
         res = await axios.get(
-          `${await getAPIUrl()}${REGULAR_DICTIONARY_PATH}/descriptors?limit=${DEFAULT_LIMIT}`,
+          `${await getAPIUrl()}${REGULAR_DICTIONARY_PATH}/descriptors?index=${index}&limit=${limit}`,
         );
         break;
 
       case HTTPCALLS:
         res = await axios.get(
-          `${await getAPIUrl()}${HTTPCALLS_PATH}/descriptors?limit=${DEFAULT_LIMIT}`,
+          `${await getAPIUrl()}${HTTPCALLS_PATH}/descriptors?index=${index}&limit=${limit}`,
         );
         break;
 
@@ -790,17 +781,18 @@ export async function getPluginDescriptors(
 
 export async function getBotsUsingPackage(
   packageResource: string,
+  usingOldVersions = false,
 ): Promise<IBot[]> {
   try {
     const config = {
       headers: { Accept: 'application/json', 'Content-Type': 'text/plain' },
     };
     const res: IDescriptorResponse = await axios.post(
-      `${await getAPIUrl()}/botstore/bots/descriptors?limit=${DEFAULT_LIMIT}`,
+      `${await getAPIUrl()}/botstore/bots/descriptors?limit=500&includePreviousVersions=${usingOldVersions}`,
       packageResource,
       config,
     );
-    return Parser.getDetailedDescriptors(res);
+    return Parser.getDetailedDescriptors(res, true);
   } catch (err) {
     console.error(
       `Failed to get bots using this package. Error: ${err.message}`,
@@ -811,17 +803,18 @@ export async function getBotsUsingPackage(
 
 export async function getPackagesUsingPlugin(
   pluginResource: string,
+  usingOldVersions = false,
 ): Promise<IPackage[]> {
   try {
     const config = {
       headers: { Accept: 'application/json', 'Content-Type': 'text/plain' },
     };
     const res = await axios.post(
-      `${await getAPIUrl()}/packagestore/packages/descriptors?limit=${DEFAULT_LIMIT}`,
+      `${await getAPIUrl()}/packagestore/packages/descriptors?limit=500&includePreviousVersions=${usingOldVersions}`,
       pluginResource,
       config,
     );
-    return Parser.getDetailedDescriptors(res);
+    return Parser.getDetailedDescriptors(res, true);
   } catch (err) {
     console.error(
       `Failed to get packages using this plugin. Error: ${err.message}`,
@@ -859,14 +852,14 @@ export async function postNewConfig(
     case OUTPUT:
       configPath = OUTPUT_PATH;
       break;
-    case HTTPCALLS:
-      configPath = HTTPCALLS_PATH;
-      break;
     case BOT:
       configPath = BOT_PATH;
       break;
     case PACKAGE:
       configPath = PACKAGE_PATH;
+      break;
+    case HTTPCALLS:
+      configPath = HTTPCALLS_PATH;
       break;
 
     default:

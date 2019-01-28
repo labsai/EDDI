@@ -2,7 +2,7 @@ import * as React from 'react';
 import '../ModalComponent.styles.scss';
 import { Link, browserHistory } from 'react-router-dom';
 import { Component, compose, pure, setDisplayName } from 'recompose';
-import Package from './Package';
+import PackageContainer from './PackageContainer';
 import { IBot, IPackage } from '../../utils/AxiosFunctions';
 import { packagesSelector } from '../../../selectors/PackageSelectors';
 import { connect } from 'react-redux';
@@ -13,11 +13,13 @@ import styles from './AddPackagesModal.styles';
 import ModalActionDispatchers from '../../../actions/ModalActionDispatchers';
 import * as renderIf from 'render-if';
 import BlueButton from '../../Assets/Buttons/BlueButton';
+import WhiteButton from '../../Assets/Buttons/WhiteButton';
 import { ClimbingBoxLoader } from 'react-spinners';
+import { DEFAULT_LIMIT } from '../../utils/ApiFunctions';
 
 interface IState {
   selectedPackages: string[];
-  availablePackages: string[];
+  loading: boolean;
 }
 
 interface IPublicProps {
@@ -27,7 +29,9 @@ interface IPublicProps {
 interface IPrivateProps extends IPublicProps {
   error: Error;
   isLoading: boolean;
+  allPackagesLoaded: boolean;
   packages: IPackage[];
+  packagesLoaded: number;
 }
 
 class AddPackagesModal extends React.Component<IPrivateProps, IState> {
@@ -35,45 +39,29 @@ class AddPackagesModal extends React.Component<IPrivateProps, IState> {
     super(props);
     this.state = {
       selectedPackages: [],
-      availablePackages: [],
+      loading: false,
     };
   }
 
   componentDidMount() {
-    eddiApiActionDispatchers.fetchPackagesAction();
+    if (
+      this.props.packagesLoaded < DEFAULT_LIMIT &&
+      !this.props.allPackagesLoaded
+    ) {
+      eddiApiActionDispatchers.fetchPackagesAction(DEFAULT_LIMIT, 0);
+    }
     this.discardChanges();
   }
 
   componentWillReceiveProps(nextProps) {
-    if (
-      !_.isEmpty(
-        _.differenceBy(nextProps.packages, this.props.packages, 'resource'),
-      )
-    ) {
-      this.discardChanges(nextProps);
+    if (this.props.isLoading && !nextProps.isLoading) {
+      this.setState({ loading: false });
     }
   }
 
   closeModal = () => {
     this.discardChanges();
     ModalActionDispatchers.closeModal();
-  };
-
-  selectVersion = (resource: string, version: number) => {
-    const id = Parser.getId(resource);
-    const availablePackages = this.state.availablePackages.map(pkg => {
-      if (Parser.getId(pkg) === id) {
-        return Parser.replaceResourceVersion(pkg, version);
-      }
-      return pkg;
-    });
-    const selectedPackages = this.state.selectedPackages.filter(
-      selectedPackage => Parser.getId(selectedPackage) !== id,
-    );
-    this.setState({
-      availablePackages,
-      selectedPackages,
-    });
   };
 
   selectPackage = (packageResource: string) => {
@@ -95,12 +83,8 @@ class AddPackagesModal extends React.Component<IPrivateProps, IState> {
   }
 
   discardChanges(props = this.props): void {
-    const availablePackages = props.packages.map(pkg => {
-      return this.getBotPackageIfUsed(pkg.resource);
-    });
     this.setState({
       selectedPackages: props.bot.packages,
-      availablePackages,
     });
   }
 
@@ -126,6 +110,15 @@ class AddPackagesModal extends React.Component<IPrivateProps, IState> {
     this.closeModal();
   };
 
+  loadMore = () => {
+    const fetchIndex = Math.floor(this.props.packagesLoaded / DEFAULT_LIMIT);
+    if (this.state.loading || _.isEmpty(this.props.packages)) {
+      return;
+    }
+    this.setState({ loading: true });
+    eddiApiActionDispatchers.fetchPackagesAction(DEFAULT_LIMIT, fetchIndex);
+  };
+
   render() {
     return (
       <div>
@@ -147,24 +140,32 @@ class AddPackagesModal extends React.Component<IPrivateProps, IState> {
             <div style={styles.lastModified}>{'Last modified'}</div>
           </div>
         </div>
-        <div>
-          {renderIf(!this.props.isLoading)(() => (
-            <div style={styles.packageList}>
-              {this.state.availablePackages.map((pack, i) => (
-                <Package
-                  key={i}
-                  selected={this.isPackageSelected(pack)}
-                  packageResource={pack}
-                  handleClick={this.selectPackage}
-                  selectVersion={this.selectVersion}
-                />
-              ))}
-            </div>
-          ))}
+        <div style={styles.packageList}>
+          <div>
+            {this.props.packages.map((pack, i) => (
+              <PackageContainer
+                key={i}
+                packageResource={this.getBotPackageIfUsed(pack.resource)}
+                selected={this.isPackageSelected(pack.resource)}
+                handleClick={this.selectPackage}
+              />
+            ))}
+          </div>
           {renderIf(this.props.isLoading)(() => (
             <div style={styles.loadingWrapper}>
               <ClimbingBoxLoader loading />
             </div>
+          ))}
+          {renderIf(
+            !this.props.allPackagesLoaded &&
+              !this.props.isLoading &&
+              !this.state.loading,
+          )(() => (
+            <BlueButton
+              customStyles={styles.loadMoreButton}
+              onClick={this.loadMore}
+              text={'Load More'}
+            />
           ))}
         </div>
       </div>

@@ -64,29 +64,37 @@ import {
   undeployBotFailedAction,
   undeployBotSuccessAction,
   undeployBotAction,
-  IUpdateBotDeploymentStatusAction,
-  IUpdateBotDeploymentStatusSuccessAction,
-  IUpdateBotDeploymentStatusFailedAction,
-  updateBotDeploymentStatusAction,
-  updateBotDeploymentStatusFailedAction,
-  updateBotDeploymentStatusSuccessAction,
+  IFetchBotDeploymentStatusAction,
+  IFetchBotDeploymentStatusSuccessAction,
+  IFetchBotDeploymentStatusFailedAction,
+  fetchBotDeploymentStatusAction,
+  fetchBotDeploymentStatusFailedAction,
+  fetchBotDeploymentStatusSuccessAction,
   ICreateNewPluginSuccessAction,
   createNewPluginSuccessAction,
   IFetchCurrentBotAction,
   fetchCurrentBotAction,
+  ICreateNewBotAction,
+  createNewBotAction,
+  createNewBotSuccessAction,
+  createNewBotFailedAction,
+  createNewPackageAction,
+  createNewPackageSuccessAction,
+  createNewPackageFailedAction,
+  ICreateNewPackageAction,
 } from './EddiApiActions';
 
 export interface IEddiApiActionDispatchers extends ActionCreatorsMapObject {
   fetchBotAction: (botId) => IFetchBotAction;
   fetchCurrentBotAction: (botId) => IFetchCurrentBotAction;
-  fetchBotsAction: () => IFetchBotsAction;
+  fetchBotsAction: (limit, index) => IFetchBotsAction;
   fetchBotDataAction: (botResource) => IFetchBotDataAction;
-  fetchPackagesAction: () => IFetchPackagesAction;
+  fetchPackagesAction: (limit, index) => IFetchPackagesAction;
   fetchPackageAction: (packageResource) => IFetchPackageAction;
   fetchCurrentPackageAction: (packageId) => IFetchCurrentPackageAction;
   fetchPackageDataAction: (packageResource) => IFetchPackageDataAction;
   fetchDefaultPluginTypesAction: () => IFetchDefaultPluginTypesAction;
-  fetchPluginsAction: (pluginType) => IFetchPluginsAction;
+  fetchPluginsAction: (pluginType, limit, index) => IFetchPluginsAction;
   fetchPluginAction: (pluginResource) => IFetchPluginAction;
   updateBotAction: (bot, packageIndex) => IUpdateBotAction;
   updateBotPackagesAction: (bot, packages) => IUpdateBotPackagesAction;
@@ -107,6 +115,7 @@ export interface IEddiApiActionDispatchers extends ActionCreatorsMapObject {
   ) => IUpdatePluginTypeAction;
   fetchBotsUsingPackageAction: (
     packageResource,
+    anyVersion,
   ) => IFetchBotsUsingPackageAction;
   fetchPackagesUsingPluginAction: (
     pluginResource,
@@ -119,6 +128,8 @@ export interface IEddiApiActionDispatchers extends ActionCreatorsMapObject {
     data,
   ) => ICreateNewConfigAction;
   createNewPluginSuccessAction: (plugin) => ICreateNewPluginSuccessAction;
+  createNewBotAction: (botId) => ICreateNewBotAction;
+  createNewPackageAction: (pkg) => ICreateNewPackageAction;
   updatePackagesAction: (pluginResource, packages) => IUpdatePackagesAction;
   updatePackagesSuccessAction: (packages) => IUpdatePackagesSuccessAction;
   updatePackagesFailedAction: (error) => IUpdatePackagesFailedAction;
@@ -131,16 +142,16 @@ export interface IEddiApiActionDispatchers extends ActionCreatorsMapObject {
     conversationUrl,
   ) => IDeployBotSuccessAction;
   deployBotFailedAction: (error) => IDeployBotFailedAction;
-  updateBotDeploymentStatusAction: (
+  fetchBotDeploymentStatusAction: (
     botResource,
-  ) => IUpdateBotDeploymentStatusAction;
-  updateBotDeploymentStatusSuccessAction: (
+  ) => IFetchBotDeploymentStatusAction;
+  fetchBotDeploymentStatusSuccessAction: (
     botResource,
     status,
-  ) => IUpdateBotDeploymentStatusSuccessAction;
-  updateBotDeploymentStatusFailedAction: (
+  ) => IFetchBotDeploymentStatusSuccessAction;
+  fetchBotDeploymentStatusFailedAction: (
     error,
-  ) => IUpdateBotDeploymentStatusFailedAction;
+  ) => IFetchBotDeploymentStatusFailedAction;
 }
 
 const actions: IEddiApiActionDispatchers = {
@@ -167,6 +178,12 @@ const actions: IEddiApiActionDispatchers = {
   updateJsonDataAction,
   createNewConfigAction,
   createNewPluginSuccessAction,
+  createNewPackageAction,
+  createNewPackageFailedAction,
+  createNewPackageSuccessAction,
+  createNewBotAction,
+  createNewBotFailedAction,
+  createNewBotSuccessAction,
   updatePackagesAction,
   updatePackagesSuccessAction,
   updatePackagesFailedAction,
@@ -179,9 +196,9 @@ const actions: IEddiApiActionDispatchers = {
   undeployBotAction,
   undeployBotSuccessAction,
   undeployBotFailedAction,
-  updateBotDeploymentStatusAction,
-  updateBotDeploymentStatusSuccessAction,
-  updateBotDeploymentStatusFailedAction,
+  fetchBotDeploymentStatusAction,
+  fetchBotDeploymentStatusSuccessAction,
+  fetchBotDeploymentStatusFailedAction,
 };
 
 const eddiApiActionDispatchers: IEddiApiActionDispatchers = bindActionCreators<

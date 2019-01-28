@@ -16,11 +16,13 @@ import BlueButton from '../../Assets/Buttons/BlueButton';
 import WhiteButton from '../../Assets/Buttons/WhiteButton';
 import { ClimbingBoxLoader } from 'react-spinners';
 import { REGULAR_DICTIONARY } from '../../utils/EddiTypes';
+import { DEFAULT_LIMIT } from '../../utils/ApiFunctions';
 
 interface IState {
   selectedPlugins: string[];
   availablePlugins: string[];
   limitedToOneSelect: boolean;
+  loading: boolean;
 }
 
 interface IPublicProps {
@@ -33,6 +35,8 @@ interface IPrivateProps extends IPublicProps {
   error: Error;
   isLoading: boolean;
   plugins: IDescriptor[];
+  isAllPluginsLoaded: boolean;
+  loadedPlugins: number;
 }
 
 class AddPluginModal extends React.Component<IPrivateProps, IState> {
@@ -42,6 +46,7 @@ class AddPluginModal extends React.Component<IPrivateProps, IState> {
       selectedPlugins: [],
       availablePlugins: [],
       limitedToOneSelect: true,
+      loading: false,
     };
   }
 
@@ -51,7 +56,16 @@ class AddPluginModal extends React.Component<IPrivateProps, IState> {
         limitedToOneSelect: false,
       });
     }
-    eddiApiActionDispatchers.fetchPluginsAction(this.props.pluginType);
+    if (
+      this.props.plugins.length < DEFAULT_LIMIT &&
+      !this.props.isAllPluginsLoaded
+    ) {
+      eddiApiActionDispatchers.fetchPluginsAction(
+        this.props.pluginType,
+        DEFAULT_LIMIT,
+        0,
+      );
+    }
     this.discardChanges();
   }
 
@@ -164,6 +178,19 @@ class AddPluginModal extends React.Component<IPrivateProps, IState> {
     );
   };
 
+  loadMore = () => {
+    const fetchIndex = Math.floor(this.props.loadedPlugins / DEFAULT_LIMIT);
+    if (this.state.loading || _.isEmpty(this.props.plugins)) {
+      return;
+    }
+    this.setState({ loading: true });
+    eddiApiActionDispatchers.fetchPluginsAction(
+      this.props.pluginType,
+      DEFAULT_LIMIT,
+      fetchIndex,
+    );
+  };
+
   render() {
     return (
       <div>
@@ -196,31 +223,46 @@ class AddPluginModal extends React.Component<IPrivateProps, IState> {
             <div style={styles.lastModified}>{'Last modified'}</div>
           </div>
         </div>
-        {renderIf(this.props.isLoading)(() => (
-          <div style={styles.loadingWrapper}>
-            <ClimbingBoxLoader loading />
-          </div>
-        ))}
-        {renderIf(!this.props.isLoading)(() => (
-          <div style={styles.packageList}>
-            {renderIf(_.isEmpty(this.state.availablePlugins))(() => (
-              <p>{'this plugin does not exist'}</p>
-            ))}
-            {renderIf(!_.isEmpty(this.state.availablePlugins))(() => (
-              <div>
-                {this.state.availablePlugins.map((p, i) => (
-                  <Plugin
-                    key={i}
-                    selected={this.isPluginSelected(p)}
-                    pluginResource={p}
-                    handleClick={this.selectPlugin}
-                    selectVersion={this.selectVersion}
-                  />
-                ))}
-              </div>
-            ))}
-          </div>
-        ))}
+        <div style={styles.packageList}>
+          {renderIf(
+            this.props.isAllPluginsLoaded && _.isEmpty(this.props.plugins),
+          )(() => (
+            <p>
+              {'Found no plugins. Create a new ' +
+                Parser.getPluginName(this.props.pluginType, false) +
+                ' to select one.'}
+            </p>
+          ))}
+          {renderIf(!_.isEmpty(this.state.availablePlugins))(() => (
+            <div>
+              {this.state.availablePlugins.map((p, i) => (
+                <Plugin
+                  key={i}
+                  selected={this.isPluginSelected(p)}
+                  pluginResource={p}
+                  handleClick={this.selectPlugin}
+                  selectVersion={this.selectVersion}
+                />
+              ))}
+            </div>
+          ))}
+          {renderIf(this.props.isLoading)(() => (
+            <div style={styles.loadingWrapper}>
+              <ClimbingBoxLoader loading />
+            </div>
+          ))}
+          {renderIf(
+            !this.props.isAllPluginsLoaded &&
+              !this.props.isLoading &&
+              !this.state.loading,
+          )(() => (
+            <BlueButton
+              customStyles={styles.loadMoreButton}
+              onClick={this.loadMore}
+              text={'Load More'}
+            />
+          ))}
+        </div>
       </div>
     );
   }

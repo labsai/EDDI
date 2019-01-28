@@ -14,6 +14,7 @@ import WhiteButton from '../Assets/Buttons/WhiteButton';
 import ModalActionDispatchers from '../../actions/ModalActionDispatchers';
 import { ModalEnum } from '../utils/ModalEnum';
 import { history } from '../../history';
+import { ClipLoader } from 'react-spinners';
 
 interface IPrivateProps extends IPublicProps {
   packagePayload: IPackage;
@@ -38,8 +39,11 @@ class Package extends React.Component<IPrivateProps, IState> {
       showModal: false,
     };
   }
+
   async componentDidMount() {
-    eddiApiActionDispatchers.fetchPackageAction(this.props.packageResource);
+    if (_.isEmpty(this.props.packagePayload)) {
+      eddiApiActionDispatchers.fetchPackageAction(this.props.packageResource);
+    }
   }
 
   openViewJsonModal = () => {
@@ -53,7 +57,6 @@ class Package extends React.Component<IPrivateProps, IState> {
       : false;
     return (
       <div>
-        {renderIf(this.props.isLoading)(() => <p>{'Loading Package'}</p>)}
         {renderIf(!this.props.isLoading)(() => (
           <div>
             {renderIf(this.props.error)(() => (
@@ -61,7 +64,7 @@ class Package extends React.Component<IPrivateProps, IState> {
             ))}
             {renderIf(
               !this.props.error && _.isEmpty(this.props.packagePayload),
-            )(() => <p>{'This package does not exist'}</p>)}
+            )(() => <ClipLoader color={'#0070D2'} />)}
             {renderIf(
               !this.props.error && !_.isEmpty(this.props.packagePayload),
             )(() => (

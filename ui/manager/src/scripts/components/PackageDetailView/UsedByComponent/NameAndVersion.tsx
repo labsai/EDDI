@@ -3,6 +3,7 @@ import { Component, compose, pure, setDisplayName } from 'recompose';
 import * as Radium from 'radium';
 import { CSSProperties } from 'react';
 import { IDetailedDescriptor } from '../../utils/AxiosFunctions';
+import modalActionDispatchers from '../../../actions/ModalActionDispatchers';
 
 const styles: CSSProperties = {
   content: {
@@ -37,6 +38,7 @@ interface IProps {
   descriptor: IDetailedDescriptor;
   usedByOlderVersion: boolean;
   isSmallName: boolean;
+  onClick(): void;
 }
 
 class NameAndVersion extends React.Component<IProps> {
@@ -44,9 +46,14 @@ class NameAndVersion extends React.Component<IProps> {
     return this.props.isSmallName ? styles.smallName : styles.name;
   }
 
+  buttonClick = () => {
+    this.props.onClick();
+    modalActionDispatchers.closeModal();
+  };
+
   render() {
     return (
-      <div style={styles.content}>
+      <div style={styles.content} onClick={this.buttonClick}>
         <div style={this.getNameStyling()}>
           {this.props.descriptor.name || this.props.descriptor.id}
         </div>

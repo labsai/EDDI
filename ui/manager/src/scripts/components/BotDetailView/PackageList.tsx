@@ -46,12 +46,17 @@ class PackageList extends React.Component<IPrivateProps, IState> {
     super(props);
   }
 
+  componentDidMount() {
+    if (_.isUndefined(this.props.bot.packages)) {
+      eddiApiActionDispatchers.fetchBotDataAction(this.props.bot);
+    }
+  }
+
   openModal = () => {
     ModalActionDispatchers.showModal(ModalEnum.createPackage);
   };
 
   openAddPackagesModal = () => {
-    eddiApiActionDispatchers.fetchPackagesAction();
     ModalActionDispatchers.showAddPackagesModal(this.props.bot);
   };
 

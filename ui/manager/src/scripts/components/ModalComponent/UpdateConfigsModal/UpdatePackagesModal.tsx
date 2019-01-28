@@ -42,7 +42,7 @@ class UpdatePackagesModal extends React.Component<IPrivateProps, IState> {
   }
 
   componentDidMount() {
-    eddiApiActionDispatchers.fetchPackagesAction();
+    // eddiApiActionDispatchers.fetchPackagesAction();
   }
 
   closeModal = () => {

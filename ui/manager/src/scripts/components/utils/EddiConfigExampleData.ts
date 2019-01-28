@@ -58,7 +58,7 @@ export const OUTPUT_POST_EXAMPLE: string = `{
         {
           "type": "string",
           "valueAlternatives": [
-            {}
+            "string"
           ]
         }
       ],

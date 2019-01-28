@@ -1,5 +1,11 @@
 import { IAppState } from '../reducers';
 import Parser from '../components/utils/Parser';
+import {
+  BEHAVIOR,
+  HTTPCALLS,
+  OUTPUT,
+  REGULAR_DICTIONARY,
+} from '../components/utils/EddiTypes';
 
 export function defaultPluginTypesSelector(state: IAppState) {
   return {
@@ -28,6 +34,30 @@ export function pluginsSelector(
   state: IAppState,
   props: IPluginsSelectorProps,
 ) {
+  let isAllPluginsLoaded;
+  let loadedPlugins;
+  switch (props.pluginType) {
+    case REGULAR_DICTIONARY:
+      isAllPluginsLoaded = state.pluginState.allDictionariesLoaded;
+      loadedPlugins = state.pluginState.loadedDictionaries;
+      break;
+    case BEHAVIOR:
+      isAllPluginsLoaded = state.pluginState.allBehaviorsLoaded;
+      loadedPlugins = state.pluginState.loadedBehaviors;
+      break;
+    case OUTPUT:
+      isAllPluginsLoaded = state.pluginState.allOutputsLoaded;
+      loadedPlugins = state.pluginState.loadedOutputs;
+      break;
+    case HTTPCALLS:
+      isAllPluginsLoaded = state.pluginState.allHttpcallsLoaded;
+      loadedPlugins = state.pluginState.loadedHttpcalls;
+      break;
+    default:
+      isAllPluginsLoaded = false;
+      loadedPlugins = 0;
+      break;
+  }
   const plugins = state.pluginState.plugins.filter(
     plug =>
       plug.resource.includes(
@@ -38,7 +68,11 @@ export function pluginsSelector(
     return b.lastModifiedOn - a.lastModifiedOn;
   });
   return {
-    plugins: sortedPlugins || [],
+    plugins: sortedPlugins
+      ? sortedPlugins
+      : sortedPlugins.slice(0, loadedPlugins),
+    isAllPluginsLoaded,
+    loadedPlugins,
     isLoading: state.pluginState.isLoadingPlugins,
     error: state.pluginState.error,
   };

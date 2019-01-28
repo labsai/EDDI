@@ -1,6 +1,4 @@
 import axios from 'axios';
-import Parser from './Parser';
-import { IResponse, patchDescriptor } from './AxiosFunctions';
 
 let apiUrlPromise: Promise<string>;
 
@@ -42,4 +40,4 @@ export async function getAPIUrl(): Promise<string> {
   }
 }
 
-export const DEFAULT_LIMIT: number = 500;
+export const DEFAULT_LIMIT: number = 10;

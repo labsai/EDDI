@@ -31,16 +31,23 @@ import {
   IUpdatePackageSuccessAction,
   IUpdatePluginSuccessAction,
   ICreateNewPluginSuccessAction,
+  IFetchPackagesSuccessAction,
+  IFetchPluginsAction,
 } from '../actions/EddiApiActions';
 import {
+  getPluginTypes,
   IDefaultPluginTypes,
   IPackage,
   IPlugin,
 } from '../components/utils/AxiosFunctions';
 import * as _ from 'lodash';
-import ModalActionDispatchers, {
-  default as modalActionDispatchers,
-} from '../actions/ModalActionDispatchers';
+import {
+  BEHAVIOR,
+  HTTPCALLS,
+  OUTPUT,
+  REGULAR_DICTIONARY,
+} from '../components/utils/EddiTypes';
+import Parser from '../components/utils/Parser';
 
 export type IPluginReducer = Reducer<IPluginState>;
 
@@ -52,6 +59,16 @@ export interface IPluginState {
   isLoadingAllPluginData: boolean;
   defaultPluginTypes: IDefaultPluginTypes[];
   plugins: IPlugin[];
+
+  allDictionariesLoaded: boolean;
+  allBehaviorsLoaded: boolean;
+  allOutputsLoaded: boolean;
+  allHttpcallsLoaded: boolean;
+
+  loadedDictionaries: number;
+  loadedBehaviors: number;
+  loadedOutputs: number;
+  loadedHttpcalls: number;
 }
 
 export const initialState: IPluginState = {
@@ -62,6 +79,16 @@ export const initialState: IPluginState = {
   isLoadingAllPluginData: false,
   defaultPluginTypes: [],
   plugins: [],
+
+  allDictionariesLoaded: false,
+  allBehaviorsLoaded: false,
+  allOutputsLoaded: false,
+  allHttpcallsLoaded: false,
+
+  loadedDictionaries: 0,
+  loadedBehaviors: 0,
+  loadedOutputs: 0,
+  loadedHttpcalls: 0,
 };
 
 const PluginReducer: IPluginReducer = (
@@ -108,6 +135,12 @@ const PluginReducer: IPluginReducer = (
       });
 
     case FETCH_PLUGINS_SUCCESS:
+      const lastPage =
+        (action as IFetchPluginsSuccessAction).limit >
+        (action as IFetchPluginsSuccessAction).plugins.length;
+      const newPluginsLoaded = (action as IFetchPluginsSuccessAction).plugins
+        .length;
+      const pluginType = (action as IFetchPluginsSuccessAction).pluginType;
       return update(state, {
         isLoadingPlugins: {
           $set: false,
@@ -123,6 +156,45 @@ const PluginReducer: IPluginReducer = (
               return plugins;
             }
           },
+        },
+        loadedDictionaries: {
+          $set:
+            pluginType === REGULAR_DICTIONARY
+              ? state.loadedDictionaries + newPluginsLoaded
+              : state.loadedDictionaries,
+        },
+        allDictionariesLoaded: {
+          $set:
+            pluginType === REGULAR_DICTIONARY
+              ? lastPage
+              : state.allDictionariesLoaded,
+        },
+        loadedBehaviors: {
+          $set:
+            pluginType === BEHAVIOR
+              ? state.loadedBehaviors + newPluginsLoaded
+              : state.loadedBehaviors,
+        },
+        allBehaviorsLoaded: {
+          $set: pluginType === BEHAVIOR ? lastPage : state.allBehaviorsLoaded,
+        },
+        loadedOutputs: {
+          $set:
+            pluginType === OUTPUT
+              ? state.loadedOutputs + newPluginsLoaded
+              : state.loadedOutputs,
+        },
+        allOutputsLoaded: {
+          $set: pluginType === OUTPUT ? lastPage : state.allOutputsLoaded,
+        },
+        loadedHttpcalls: {
+          $set:
+            pluginType === HTTPCALLS
+              ? state.loadedHttpcalls + newPluginsLoaded
+              : state.loadedHttpcalls,
+        },
+        allHttpcallsLoaded: {
+          $set: pluginType === HTTPCALLS ? lastPage : state.allHttpcallsLoaded,
         },
       });
 
@@ -217,6 +289,9 @@ const PluginReducer: IPluginReducer = (
       });
 
     case CREATE_NEW_PLUGIN_SUCCESS:
+      const type = Parser.getExtensionType(
+        (action as ICreateNewPluginSuccessAction).plugin.resource,
+      );
       return update(state, {
         plugins: {
           $apply: (plugins: IPlugin[]) => {
@@ -224,6 +299,27 @@ const PluginReducer: IPluginReducer = (
               (action as ICreateNewPluginSuccessAction).plugin,
             );
           },
+        },
+        loadedDictionaries: {
+          $set:
+            type === REGULAR_DICTIONARY
+              ? state.loadedDictionaries + 1
+              : state.loadedDictionaries,
+        },
+        loadedBehaviors: {
+          $set:
+            type === BEHAVIOR
+              ? state.loadedBehaviors + 1
+              : state.loadedBehaviors,
+        },
+        loadedOutputs: {
+          $set: type === OUTPUT ? state.loadedOutputs + 1 : state.loadedOutputs,
+        },
+        loadedHttpcalls: {
+          $set:
+            type === HTTPCALLS
+              ? state.loadedHttpcalls + 1
+              : state.loadedHttpcalls,
         },
       });
 

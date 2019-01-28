@@ -5,6 +5,7 @@ import { IBot } from '../../utils/AxiosFunctions';
 import { connect } from 'react-redux';
 import { botSelector } from '../../../selectors/BotSelectors';
 import NameAndVersion from './NameAndVersion';
+import { history } from '../../../history';
 
 interface IPublicProps {
   botResource: string;
@@ -25,6 +26,7 @@ class Bot extends React.Component<IPrivateProps> {
         descriptor={this.props.bot}
         usedByOlderVersion={this.props.usedByOlderVersion}
         isSmallName={this.props.isSmallName}
+        onClick={() => history.push(`/botview/${this.props.bot.id}`)}
       />
     );
   }

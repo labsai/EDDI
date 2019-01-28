@@ -10,7 +10,9 @@ import { connect } from 'react-redux';
 import { botsSelector } from '../../selectors/BotSelectors';
 import styles from './Botlist.styles';
 import { ClimbingBoxLoader } from 'react-spinners';
-import { getAPIUrl } from '../utils/ApiFunctions';
+import { DEFAULT_LIMIT, getAPIUrl } from '../utils/ApiFunctions';
+import * as InfiniteScrollTypes from 'react-infinite-scroller';
+const InfiniteScroll = require('react-infinite-scroller') as InfiniteScrollTypes;
 
 interface IPublicProps {
   filterText: string;
@@ -19,11 +21,14 @@ interface IPublicProps {
 interface IPrivateProps extends IPublicProps {
   bots: IBot[];
   isLoading: boolean;
+  allBotsLoaded: boolean;
   error: Error;
+  botsLoaded: number;
 }
 
 interface IState {
   apiUrl: string;
+  loading: boolean;
 }
 
 class BotList extends React.Component<IPrivateProps, IState> {
@@ -31,12 +36,19 @@ class BotList extends React.Component<IPrivateProps, IState> {
     super(props);
     this.state = {
       apiUrl: '',
+      loading: false,
     };
   }
 
   async componentDidMount() {
-    eddiApiActionDispatchers.fetchBotsAction();
+    this.loadMore();
     this.setState({ apiUrl: await getAPIUrl() });
+  }
+
+  componentWillReceiveProps(nextProps) {
+    if (this.props.isLoading && !nextProps.isLoading) {
+      this.setState({ loading: false });
+    }
   }
 
   filterBots() {
@@ -52,16 +64,33 @@ class BotList extends React.Component<IPrivateProps, IState> {
       return this.props.bots;
     }
   }
+
+  loadMore = () => {
+    if (this.state.loading) {
+      return;
+    }
+    console.log('Loading more!!');
+    this.setState({ loading: true });
+    if (this.props.bots.length < 5 && !this.props.allBotsLoaded) {
+      eddiApiActionDispatchers.fetchBotsAction(5, 0);
+    } else {
+      eddiApiActionDispatchers.fetchBotsAction(
+        5,
+        Math.floor(this.props.botsLoaded / 5),
+      );
+    }
+  };
+
   render() {
     const botList = this.filterBots();
     return (
-      <div>
-        {renderIf(this.props.isLoading)(() => (
+      <div style={styles.botList}>
+        {renderIf(false)(() => (
           <div style={styles.loadingWrapper}>
             <ClimbingBoxLoader loading />
           </div>
         ))}
-        {renderIf(!this.props.isLoading)(() => (
+        {renderIf(true)(() => (
           <div>
             {renderIf(this.props.error)(() => (
               <p>{'Error: Could not load bots'}</p>
@@ -74,13 +103,23 @@ class BotList extends React.Component<IPrivateProps, IState> {
                 {renderIf(_.isEmpty(botList))(() => (
                   <p>{`Found no bots matching: "${this.props.filterText}"`}</p>
                 ))}
-                {botList.map(bot => (
-                  <Bot
-                    key={bot.resource}
-                    bot={bot}
-                    apiUrl={this.state.apiUrl}
-                  />
-                ))}
+                <InfiniteScroll
+                  pageStart={0}
+                  loadMore={this.loadMore}
+                  hasMore={!this.props.allBotsLoaded && !this.props.isLoading}
+                  loader={
+                    <div className="loader" key={0}>
+                      Loading ...
+                    </div>
+                  }>
+                  {botList.map(bot => (
+                    <Bot
+                      key={bot.resource}
+                      bot={bot}
+                      apiUrl={this.state.apiUrl}
+                    />
+                  ))}
+                </InfiniteScroll>
               </div>
             ))}
           </div>

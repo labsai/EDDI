@@ -13,13 +13,16 @@ export const botsSelector: (
 ) => {
   bots: IBot[];
   isLoading: boolean;
+  allBotsLoaded: boolean;
   error: Error;
 } = createSelector(BotStateSelector, function(
   botState: IBotState,
 ): {
   bots: IBot[];
   isLoading: boolean;
+  allBotsLoaded: boolean;
   error: Error;
+  botsLoaded: number;
 } {
   const bots = botState.bots.filter(bot => bot.version === bot.currentVersion);
   const sortedBots = bots.sort(function(a, b) {
@@ -28,7 +31,9 @@ export const botsSelector: (
   return {
     bots: sortedBots,
     isLoading: botState.isLoadingAllBots,
+    allBotsLoaded: botState.allBotsLoaded,
     error: botState.error,
+    botsLoaded: botState.botsLoaded,
   };
 });
 
@@ -83,7 +88,15 @@ export function botsWithPackageSelector(
   }
   return {
     botLists,
+    allBotsLoaded: state.botState.allBotsLoaded,
     isLoading: state.botState.isLoadingAllBots,
+  };
+}
+
+export function loadingBotSelector(state: IAppState) {
+  return {
+    isLoading: state.botState.isLoadingAllBots,
+    error: state.botState.error,
   };
 }
 

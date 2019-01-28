@@ -24,8 +24,10 @@ import {
   UPDATE_BOTS,
   DEPLOY_BOT,
   UNDEPLOY_BOT,
-  UPDATE_BOT_DEPLOYMENT_STATUS,
+  FETCH_BOT_DEPLOYMENT_STATUS,
   FETCH_CURRENT_BOT,
+  CREATE_NEW_BOT,
+  CREATE_NEW_PACKAGE,
 } from '../actions/EddiApiActionTypes';
 import {
   getPackage,
@@ -62,6 +64,7 @@ import {
   deployBot as axiosDeployBot,
   undeployBot as axiosUndeployBot,
   getDeploymentStatus,
+  getBotDescriptors,
 } from '../components/utils/AxiosFunctions';
 import {
   fetchBotFailedAction,
@@ -128,13 +131,19 @@ import {
   IUndeployBotAction,
   undeployBotSuccessAction,
   undeployBotFailedAction,
-  IUpdateBotDeploymentStatusAction,
-  updateBotDeploymentStatusSuccessAction,
-  updateBotDeploymentStatusFailedAction,
+  IFetchBotDeploymentStatusAction,
+  fetchBotDeploymentStatusSuccessAction,
+  fetchBotDeploymentStatusFailedAction,
   createNewBotSuccessAction,
   createNewPackageSuccessAction,
   createNewPluginSuccessAction,
   IFetchCurrentBotAction,
+  IFetchBotsAction,
+  IFetchPackagesAction,
+  ICreateNewBotAction,
+  createNewBotFailedAction,
+  ICreateNewPackageAction,
+  createNewPackageAction,
 } from '../actions/EddiApiActions';
 import * as Edditypes from '../components/utils/EddiTypes';
 import Parser from '../components/utils/Parser';
@@ -150,10 +159,14 @@ import { BOT_PATH } from '../components/utils/EddiTypes';
 import { PACKAGE } from '../components/utils/EddiTypes';
 import { getAPIUrl } from '../components/utils/ApiFunctions';
 
-export function* FetchBots() {
+export function* FetchBots(action: IFetchBotsAction) {
   try {
-    const bots: IBot[] = yield call(getAllBots);
-    yield put(fetchBotsSuccessAction(bots));
+    const bots: IBot[] = yield call(
+      getBotDescriptors,
+      action.limit,
+      action.index,
+    );
+    yield put(fetchBotsSuccessAction(bots, action.limit, action.index));
   } catch (err) {
     yield put(fetchBotsFailedAction(err));
   }
@@ -163,10 +176,14 @@ export function* watchFetchBots(): Iterator<{}> {
   yield takeEvery(FETCH_BOTS, FetchBots);
 }
 
-export function* FetchPackages() {
+export function* FetchPackages(action: IFetchPackagesAction) {
   try {
-    const packages: IPackage[] = yield call(getPackageDescriptors);
-    yield put(fetchPackagesSuccessAction(packages));
+    const packages: IPackage[] = yield call(
+      getPackageDescriptors,
+      action.limit,
+      action.index,
+    );
+    yield put(fetchPackagesSuccessAction(packages, action.limit, action.index));
   } catch (err) {
     yield put(fetchPackagesFailedAction(err));
   }
@@ -261,8 +278,17 @@ export function* FetchPlugins(action: IFetchPluginsAction) {
     const plugins: IPlugin[] = yield call(
       getPluginDescriptors,
       action.pluginType,
+      action.limit,
+      action.index,
     );
-    yield put(fetchPluginsSuccessAction(plugins));
+    yield put(
+      fetchPluginsSuccessAction(
+        plugins,
+        action.pluginType,
+        action.limit,
+        action.index,
+      ),
+    );
   } catch (err) {
     yield put(fetchPluginsFailedAction(err));
   }
@@ -422,10 +448,12 @@ export function* fetchBotsUsingPackage(
     const botsUsingPackage: IBot[] = yield call(
       getBotsUsingPackage,
       action.packageResource,
+      action.anyVersion,
     );
     yield put(
       fetchBotsUsingPackageSuccessAction(
         action.packageResource,
+        action.anyVersion,
         botsUsingPackage,
       ),
     );
@@ -459,6 +487,34 @@ export function* fetchPackagesUsingPlugin(
 
 export function* watchFetchPackagesUsingPlugin(): Iterator<{}> {
   yield takeEvery(FETCH_PACKAGES_USING_PLUGIN, fetchPackagesUsingPlugin);
+}
+
+export function* watchCreateNewBot(): Iterator<{}> {
+  yield takeEvery(CREATE_NEW_BOT, createNewBot);
+}
+
+export function* createNewBot(action: ICreateNewBotAction): Iterator<{}> {
+  try {
+    const bot: IBot = yield call(getCurrentBot, action.botId);
+    yield put(createNewBotSuccessAction(bot));
+  } catch (err) {
+    yield put(createNewBotFailedAction(err));
+  }
+}
+
+export function* watchCreateNewPackage(): Iterator<{}> {
+  yield takeEvery(CREATE_NEW_PACKAGE, createNewPackage);
+}
+
+export function* createNewPackage(
+  action: ICreateNewPackageAction,
+): Iterator<{}> {
+  try {
+    const pkg: IPackage = yield call(getCurrentPackage, action.packageId);
+    yield put(createNewPackageSuccessAction(pkg));
+  } catch (err) {
+    yield put(createNewPackageAction(err));
+  }
 }
 
 export function* watchCreateNewConfig(): Iterator<{}> {
@@ -584,19 +640,19 @@ export function* watchUndeployBot(): Iterator<{}> {
   yield takeEvery(UNDEPLOY_BOT, undeployBot);
 }
 
-export function* updateBotDeploymentStatus(
-  action: IUpdateBotDeploymentStatusAction,
+export function* fetchBotDeploymentStatus(
+  action: IFetchBotDeploymentStatusAction,
 ): Iterator<{}> {
   try {
     const status = yield call(getDeploymentStatus, action.botResource);
     yield put(
-      updateBotDeploymentStatusSuccessAction(action.botResource, status),
+      fetchBotDeploymentStatusSuccessAction(action.botResource, status),
     );
   } catch (err) {
-    yield put(updateBotDeploymentStatusFailedAction(err));
+    yield put(fetchBotDeploymentStatusFailedAction(err));
   }
 }
 
-export function* watchUpdateBotDeploymentStatus(): Iterator<{}> {
-  yield takeEvery(UPDATE_BOT_DEPLOYMENT_STATUS, updateBotDeploymentStatus);
+export function* watchFetchBotDeploymentStatus(): Iterator<{}> {
+  yield takeEvery(FETCH_BOT_DEPLOYMENT_STATUS, fetchBotDeploymentStatus);
 }
