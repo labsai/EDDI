@@ -26,16 +26,16 @@ $(document).ready(function () {
 
     $("#chat").click(function () {
         $("#about-container").hide();
+        $("#debug-container").hide();
         $("#chat-container").show();
     });
     $("#about").click(function () {
-        $("#chat-container").hide();
         $("#about-container").show();
+        $("#debug-container").hide();
+        $("#chat-container").hide();
     });
     $("#debug").click(function () {
-        if ($("#debug-container").is(":visible")) {
-            $("#debug-container").hide();
-        } else {
+        if (!$("#debug-container").is(":visible")) {
             $("#debug-container").show();
         }
     });
@@ -67,8 +67,6 @@ function smoothScrolling() {
 }
 
 // Recursive function that goes through the set of messages it is given
-let isFirstMessage = true;
-
 function createMessage(outputArray, quickRepliesArray, hasConversationEnded, i) {
 
     // i is optional - i is the current message in the array the system is displaying
@@ -97,13 +95,8 @@ function createMessage(outputArray, quickRepliesArray, hasConversationEnded, i) 
         }
     }
 
-    let delay = (i > 0 && i < outputArray.length) ? calculateDelay(message) : 1000;
-
     // delay override - Make first responses quick
-    if (isFirstMessage && i === 0) {
-        delay = 50;
-        isFirstMessage = false;
-    }
+    let delay = eddi.skipDelay || i === 0 ? 50 : calculateDelay(message);
 
     let typingIndicator = new Message('<img src="/binary/img/typing-indicator.svg" />');
     typingIndicator.draw();
@@ -162,9 +155,7 @@ function createAnswerField() {
     $('#answer').focus();
 
     //Special case for chat
-    if ($(".active").attr('id') === "chat") {
-        smoothScrollBottom();
-    }
+    smoothScrolling();
 }
 
 function createAnswerMessage(answer) {
@@ -184,7 +175,7 @@ function calculateDelay(text) {
 }
 
 function smoothScrollBottom() {
-    $('html,body').animate({scrollTop: $(document).height()}, 1000);
+    $('html,body').animate({scrollTop: $(document).height() - $(window).height()}, eddi.skipDelay ? 0 : 1000);
 }
 
 function preLoadImage(photoUrl) {
@@ -202,11 +193,13 @@ function preLoadImage(photoUrl) {
 }
 
 // Tabs
+let $defaultTab = $('#chat');
+let $tab;
+let $content;
 
 function tabHandler() {
     $tab = $('#menu ul li');
     $content = $('.content');
-    $defaultTab = $('#chat');
     let animationOver = true;
 
     $defaultTab.addClass('active');
@@ -239,7 +232,7 @@ function tabHandler() {
             }
 
             //Special case for about
-            if ($(".active").attr('id') === "about") {
+            if ($(".active").attr('id') === "about" || $(".active").attr('id') === "debug") {
                 $('html,body').animate({scrollTop: 0}, 0);
             }
         }

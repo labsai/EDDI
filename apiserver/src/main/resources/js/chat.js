@@ -1,5 +1,7 @@
 const eddi = {};
 eddi.isFirstConversation = true;
+eddi.isFirstMessage = true;
+eddi.skipDelay = false;
 
 class Message {
     constructor(text) {
@@ -78,6 +80,11 @@ class ConversationEnd {
 
 
 $(function () {
+    $("#skipDelay").change(function () {
+        eddi.skipDelay = $("#skipDelay").is(':checked');
+    });
+
+
     eddi.submitUserMessage = function (userMessage) {
         let requestBody = null;
         let contextValue = $('#contextValue').val().trim();
@@ -157,10 +164,10 @@ $(function () {
         $.post('/bots/' + environment + '/' + botId).done(function (data, status, xhr) {
             const conversationUriArray = xhr.getResponseHeader('Location').split('/');
 
-            if (!isFirstMessage) {
+            if (!eddi.isFirstMessage) {
                 new ConversationEnd('NEW CONVERSATION STARTED').draw();
                 smoothScrolling();
-                isFirstMessage = false;
+                eddi.isFirstMessage = false;
             }
 
             if (eddi.conversationId) {

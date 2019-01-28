@@ -96,9 +96,14 @@
 
                     </div>
                 </div>
+                <br/>
                 <button class="btn" type="button" onclick="eddi.createConversation(eddi.environment, eddi.botId, true)">
                     <span>New Conversation</span>
                 </button>
+                <div>
+                    <input type="checkbox" id="skipDelay" name="skipDelay" value="Skip Delay"> Skip Output Delay
+                    Animation<br>
+                </div>
             </div>
         </div>
     </div>
@@ -171,7 +176,7 @@
                 </a>
             </li>
             <li id="debug">
-                <a href="#debug-container">
+                <a href="#chat-container">
                     <i class="fas fa-toolbox fa-3x" style="margin-top: 5px"></i>
                     <div style="margin-top: 3px">Debug</div>
                 </a>
