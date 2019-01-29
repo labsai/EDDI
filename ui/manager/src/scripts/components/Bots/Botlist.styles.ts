@@ -8,8 +8,5 @@ const styles: CSSProperties = {
     height: '500px',
     justifyContent: 'center',
   },
-  botList: {
-    border: '1px solid red',
-  },
 };
 export default styles;
