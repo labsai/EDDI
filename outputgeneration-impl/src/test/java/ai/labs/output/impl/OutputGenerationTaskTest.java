@@ -38,6 +38,7 @@ public class OutputGenerationTaskTest {
     private static final String SOME_OTHER_EXPRESSION = "someOther(Expression)";
     private static final String OUTPUT_TEXT = "output:text:";
     private static final String QUICK_REPLIES = "quickReplies:";
+    public static final String OUTPUT_TYPE_TEXT = "text";
     private OutputGenerationTask outputGenerationTask;
     private IResourceClientLibrary resourceClientLibrary;
     private IOutputGeneration outputGeneration;
@@ -108,7 +109,7 @@ public class OutputGenerationTaskTest {
 
     private OutputEntry createOutputEntry() {
         List<OutputValue> outputs = new LinkedList<>();
-        outputs.add(new OutputValue(OutputValue.Type.text, Arrays.asList(ANSWER_ALTERNATIVE_1, ANSWER_ALTERNATIVE_2)));
+        outputs.add(new OutputValue(OUTPUT_TYPE_TEXT, Arrays.asList(ANSWER_ALTERNATIVE_1, ANSWER_ALTERNATIVE_2)));
         List<QuickReply> quickReplies = new LinkedList<>();
         quickReplies.add(new QuickReply(SOME_QUICK_REPLY, SOME_EXPRESSION, false));
         quickReplies.add(new QuickReply(SOME_OTHER_QUICK_REPLY, SOME_OTHER_EXPRESSION, false));
@@ -129,7 +130,7 @@ public class OutputGenerationTaskTest {
         outputConfiguration.setTimesOccurred(0);
         LinkedList<OutputConfiguration.OutputType> outputs = new LinkedList<>();
         OutputConfiguration.OutputType outputType = new OutputConfiguration.OutputType();
-        outputType.setType(OutputValue.Type.text.toString());
+        outputType.setType(OUTPUT_TYPE_TEXT);
         LinkedList<Object> valueAlternatives = new LinkedList<>();
         valueAlternatives.add(ANSWER_ALTERNATIVE_1);
         valueAlternatives.add(ANSWER_ALTERNATIVE_2);

@@ -41,6 +41,7 @@ public class OutputGenerationTask implements ILifecycleTask {
     private static final String KEY_VALUE = "value";
     private static final String KEY_EXPRESSIONS = "expressions";
     private static final String KEY_IS_DEFAULT = "isDefault";
+    private static final String OUTPUT_TYPE_QUICK_REPLY = "quickReply";
     private final IResourceClientLibrary resourceClientLibrary;
     private final IDataFactory dataFactory;
     private final IOutputGeneration outputGeneration;
@@ -121,9 +122,8 @@ public class OutputGenerationTask implements ILifecycleTask {
             Object randomValue = chooseRandomly(possibleValueAlternatives);
             if (randomValue instanceof Map) {
                 Map<String, String> randomValueMap = new LinkedHashMap<>((Map) randomValue);
-                randomValueMap.put("type", outputValue.getType().toString());
-
-                if (outputValue.getType().equals(OutputValue.Type.quickReply)) {
+                randomValueMap.put("type", outputValue.getType());
+                if (OUTPUT_TYPE_QUICK_REPLY.equals(outputValue.getType())) {
                     quickReplies.add(new QuickReply(randomValueMap.get(KEY_VALUE), randomValueMap.get(KEY_EXPRESSIONS),
                             Boolean.parseBoolean(randomValueMap.getOrDefault(KEY_IS_DEFAULT, "false"))));
                 }
@@ -220,7 +220,7 @@ public class OutputGenerationTask implements ILifecycleTask {
     private List<OutputValue> convertOutputTypesConfig(List<OutputConfiguration.OutputType> configOutputs) {
         return configOutputs.stream().map(configOutput -> {
             OutputValue outputValue = new OutputValue();
-            outputValue.setType(OutputValue.Type.valueOf(configOutput.getType()));
+            outputValue.setType(configOutput.getType());
             outputValue.setValueAlternatives(configOutput.getValueAlternatives());
             return outputValue;
         }).collect(Collectors.toCollection(LinkedList::new));
