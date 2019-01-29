@@ -68,64 +68,73 @@ function smoothScrolling() {
 
 // Recursive function that goes through the set of messages it is given
 function createMessage(outputArray, quickRepliesArray, hasConversationEnded, i) {
-
     // i is optional - i is the current message in the array the system is displaying
     i = typeof i !== 'undefined' ? i : 0;
 
-    // If this message is not the first, use the previous to calculate a delay, otherwise use a number
-    let messageObject = outputArray[i];
-    let message = null;
-    if (typeof messageObject === 'string') {
-        message = messageObject;
-    } else if (typeof messageObject === 'object') {
-        switch (messageObject.type) {
-            case 'text':
-            case 'title':
-                message = messageObject.text;
-                break;
-            case 'image':
-                message = '<img src="' + messageObject.uri + '" width="100%" alt="image send by the bot" />';
-                preLoadImage(messageObject.uri);
-                break;
-            case 'quickReplies':
-                quickRepliesArray.push({value: messageObject.value, expressions: messageObject.expressions});
-                break;
-            default:
-                console.log('output type is not recognized ' + messageObject.type);
-        }
-    }
-
-    // delay override - Make first responses quick
-    let delay = eddi.skipDelay || i === 0 ? 50 : calculateDelay(message);
-
-    let typingIndicator = new Message('<img src="/binary/img/typing-indicator.svg" />');
-    typingIndicator.draw();
-    smoothScrolling();
-
-    setTimeout(function () {
-
-        typingIndicator.remove();
-
-        if (message != null) {
-            const msg = new Message(message);
-            msg.draw();
+    if (outputArray.length > 0) {
+        // If this message is not the first, use the previous to calculate a delay, otherwise use a number
+        let messageObject = outputArray[i];
+        let message = null;
+        if (typeof messageObject === 'string') {
+            message = messageObject;
+        } else if (typeof messageObject === 'object') {
+            switch (messageObject.type) {
+                case 'text':
+                case 'title':
+                    message = messageObject.text;
+                    break;
+                case 'image':
+                    message = '<img src="' + messageObject.uri + '" width="100%" alt="image send by the bot" />';
+                    preLoadImage(messageObject.uri);
+                    break;
+                case 'quickReplies':
+                    quickRepliesArray.push({value: messageObject.value, expressions: messageObject.expressions});
+                    break;
+                default:
+                    console.log('output type is not recognized ' + messageObject.type);
+            }
         }
 
-        smoothScrolling();
-        if (i + 1 < outputArray.length) {
-            createMessage(outputArray, quickRepliesArray, hasConversationEnded, ++i);
+        // delay override - Make first responses quick
+        let delay;
+        if (eddi.skipDelay || (i === 0 && eddi.isFirstMessage)) {
+            delay = 50;
+            eddi.isFirstMessage = false;
         } else {
-            if (!hasConversationEnded && !displayQuickReplies(quickRepliesArray)) {
-                createAnswerField();
-                smoothScrolling();
+            delay = calculateDelay(message);
+        }
+
+        let typingIndicator = new Message('<img src="/binary/img/typing-indicator.svg" />');
+        typingIndicator.draw();
+        smoothScrolling();
+
+        setTimeout(function () {
+
+            typingIndicator.remove();
+
+            if (message != null) {
+                const msg = new Message(message);
+                msg.draw();
             }
 
-            if (hasConversationEnded) {
-                new ConversationEnd('CONVERSATION ENDED').draw();
-                eddi.createConversation(eddi.environment, eddi.botId);
+            smoothScrolling();
+            if (i + 1 < outputArray.length) {
+                createMessage(outputArray, quickRepliesArray, hasConversationEnded, ++i);
+            } else {
+                if (!hasConversationEnded && !displayQuickReplies(quickRepliesArray)) {
+                    createAnswerField();
+                    smoothScrolling();
+                }
+
+                if (hasConversationEnded) {
+                    new ConversationEnd('CONVERSATION ENDED').draw();
+                    eddi.createConversation(eddi.environment, eddi.botId);
+                }
             }
-        }
-    }, delay);
+        }, delay);
+    } else {
+        createAnswerField();
+    }
 }
 
 // Creates an answer input bubble
@@ -168,14 +177,18 @@ function createAnswerMessage(answer) {
 
 // Calculates the delay based on whatever string you give it
 function calculateDelay(text) {
-    let delayPerWord = 120;
-    let delay = text.trim().split(" ").length * delayPerWord;
-    delay = (delay < delayPerWord * 3) ? delay + 250 : delay;
+    let delayPerWord = 218;
+    let delay = text.split(" ").length * delayPerWord;
+    delay = (delay < delayPerWord * 3) ? delay + 400 : delay;
+
+    if (delay > 3000) {
+        delay = 3000;
+    }
     return delay;
 }
 
 function smoothScrollBottom() {
-    $('html,body').animate({scrollTop: $(document).height() - $(window).height()}, eddi.skipDelay ? 0 : 1000);
+    $('html,body').animate({scrollTop: $(document).height() - $(window).height()}, eddi.skipDelay ? 50 : 1000);
 }
 
 function preLoadImage(photoUrl) {
