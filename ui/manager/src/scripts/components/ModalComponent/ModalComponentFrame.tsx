@@ -230,7 +230,9 @@ class ModalComponentFrame extends React.Component<IPrivateProps, IState> {
           />
         );
       case ModalEnum.addNewPackageToBot:
-        return <AddNewPackageToBotModal />;
+        return (
+          <AddNewPackageToBotModal packagePayload={this.props.packagePayload} />
+        );
       default:
         return null;
     }

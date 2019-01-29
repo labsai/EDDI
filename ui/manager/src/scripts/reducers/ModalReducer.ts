@@ -44,6 +44,8 @@ import {
   UPDATE_PLUGIN_TYPE_IN_PACKAGE_SUCCESS,
 } from '../actions/EddiApiActionTypes';
 import {
+  ICreateNewPackageAction,
+  ICreateNewPackageSuccessAction,
   IDeployBotSuccessAction,
   IUndeployBotFailedAction,
   IUpdateDescriptorFailedAction,
@@ -62,7 +64,7 @@ export type IModalReducer = Reducer<IModalState>;
 export interface IModalState {
   isModalOpen: boolean;
   mode: ModalEnum;
-  bot?: IBot;
+  bot: IBot;
   packagePayload: IPackage;
   pluginType?: string;
   selectedResources?: string[];
@@ -445,16 +447,13 @@ const ModalReducer: IModalReducer = (
     case CREATE_NEW_PACKAGE:
       return update(state, {
         mode: {
-          $set: ModalEnum.error,
+          $set: ModalEnum.addNewPackageToBot,
         },
         isModalOpen: {
           $set: true,
         },
-        title: {
-          $set: 'Add new package to bots',
-        },
-        message: {
-          $set: 'Good job!',
+        packagePayload: {
+          $set: (action as ICreateNewPackageSuccessAction).pkg,
         },
       });
 
