@@ -168,7 +168,7 @@ class Extension extends React.Component<IPrivateProps> {
             {Parser.getExtensionType(this.props.pluginType.type)}
           </div>
         </button>
-        {renderIf(!isCurrentVersion)(() => (
+        {renderIf(!isCurrentVersion && !this.props.editDisabled)(() => (
           <WhiteButton
             onClick={this.updateVersion}
             text={`Update to ${pluginLatestVersion}`}

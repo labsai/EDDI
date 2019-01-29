@@ -182,7 +182,7 @@ class Plugin extends React.Component<IPrivateProps> {
             )}
           </div>
         </button>
-        {renderIf(!isCurrentVersion)(() => (
+        {renderIf(!isCurrentVersion && !this.props.editDisabled)(() => (
           <WhiteButton
             onClick={this.updateVersion}
             text={`Update to ${pluginLatestVersion}`}
