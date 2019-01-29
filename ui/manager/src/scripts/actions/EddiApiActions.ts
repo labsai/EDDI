@@ -82,6 +82,9 @@ import {
   CREATE_NEW_BOT_FAILED,
   CREATE_NEW_PACKAGE,
   CREATE_NEW_PACKAGE_FAILED,
+  ADD_NEW_PACKAGE_TO_BOTS,
+  ADD_NEW_PACKAGE_TO_BOTS_SUCCESS,
+  ADD_NEW_PACKAGE_TO_BOTS_FAILED,
 } from './EddiApiActionTypes';
 import {
   IBot,
@@ -1209,5 +1212,50 @@ export function fetchBotDeploymentStatusFailedAction(
   return {
     error,
     type: FETCH_BOT_DEPLOYMENT_STATUS_FAILED,
+  };
+}
+
+export interface IAddNewPackageToBotsAction extends Action {
+  packageResource: string;
+  bots: IBot[];
+}
+
+export function addNewPackageToBotsAction(
+  packageResource: string,
+  bots: IBot[],
+): IAddNewPackageToBotsAction {
+  return {
+    packageResource,
+    bots,
+    type: ADD_NEW_PACKAGE_TO_BOTS,
+  };
+}
+
+export interface IAddNewPackageToBotsSuccessAction extends Action {
+  packageResource: string;
+  bots: IBot[];
+}
+
+export function addNewPackageToBotsSuccessAction(
+  bots: IBot[],
+  packageResource: string,
+): IAddNewPackageToBotsSuccessAction {
+  return {
+    packageResource,
+    bots,
+    type: ADD_NEW_PACKAGE_TO_BOTS_SUCCESS,
+  };
+}
+
+export interface IAddNewPackageToBotsFailedAction extends Action {
+  error: Error;
+}
+
+export function addNewPackageToBotsFailedAction(
+  error: Error,
+): IAddNewPackageToBotsFailedAction {
+  return {
+    error,
+    type: ADD_NEW_PACKAGE_TO_BOTS_FAILED,
   };
 }

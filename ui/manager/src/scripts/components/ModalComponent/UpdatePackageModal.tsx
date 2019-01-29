@@ -122,7 +122,6 @@ class UpdatePackageModal extends React.Component<IPrivateProps, IState> {
               onClick={async () => {
                 const packageID = await this.createNewPackage();
                 history.push(`/packageview/${packageID}`);
-                modalActionDispatchers.closeModal();
               }}>
               {'Save'}
             </button>

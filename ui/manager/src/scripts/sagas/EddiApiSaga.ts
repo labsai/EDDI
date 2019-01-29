@@ -28,6 +28,7 @@ import {
   FETCH_CURRENT_BOT,
   CREATE_NEW_BOT,
   CREATE_NEW_PACKAGE,
+  ADD_NEW_PACKAGE_TO_BOTS,
 } from '../actions/EddiApiActionTypes';
 import {
   getPackage,
@@ -65,6 +66,7 @@ import {
   undeployBot as axiosUndeployBot,
   getDeploymentStatus,
   getBotDescriptors,
+  addPackageToBot,
 } from '../components/utils/AxiosFunctions';
 import {
   fetchBotFailedAction,
@@ -144,6 +146,9 @@ import {
   createNewBotFailedAction,
   ICreateNewPackageAction,
   createNewPackageAction,
+  IAddNewPackageToBotsAction,
+  addNewPackageToBotsFailedAction,
+  addNewPackageToBotsSuccessAction,
 } from '../actions/EddiApiActions';
 import * as Edditypes from '../components/utils/EddiTypes';
 import Parser from '../components/utils/Parser';
@@ -655,4 +660,29 @@ export function* fetchBotDeploymentStatus(
 
 export function* watchFetchBotDeploymentStatus(): Iterator<{}> {
   yield takeEvery(FETCH_BOT_DEPLOYMENT_STATUS, fetchBotDeploymentStatus);
+}
+
+export function* addNewPackageToBots(
+  action: IAddNewPackageToBotsAction,
+): Iterator<{}> {
+  try {
+    const newBots: IBot[] = [];
+    for (let i = 0; i < action.bots.length; i++) {
+      const newBot = yield call(
+        addPackageToBot,
+        action.bots[i],
+        action.packageResource,
+      );
+      newBots.push(newBot);
+    }
+    yield put(
+      addNewPackageToBotsSuccessAction(newBots, action.packageResource),
+    );
+  } catch (err) {
+    yield put(addNewPackageToBotsFailedAction(err));
+  }
+}
+
+export function* watchAddNewPackageToBots(): Iterator<{}> {
+  yield takeEvery(ADD_NEW_PACKAGE_TO_BOTS, addNewPackageToBots);
 }

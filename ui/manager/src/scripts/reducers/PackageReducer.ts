@@ -22,6 +22,7 @@ import {
   UPDATE_PACKAGES_SUCCESS,
   UPDATE_PACKAGES_FAILED,
   CREATE_NEW_PACKAGE_SUCCESS,
+  ADD_NEW_PACKAGE_TO_BOTS_SUCCESS,
 } from '../actions/EddiApiActionTypes';
 import * as update from 'immutability-helper';
 import {
@@ -43,6 +44,7 @@ import {
   IFetchBotsSuccessAction,
   ICreateNewPluginSuccessAction,
   ICreateNewPackageSuccessAction,
+  IAddNewPackageToBotsSuccessAction,
 } from '../actions/EddiApiActions';
 import * as _ from 'lodash';
 import { parsePluginExtensions } from '../components/utils/helpers/PluginParser';
@@ -480,6 +482,28 @@ const PackageReducer: IPackageReducer = (
         },
         packagesLoaded: {
           $set: state.packagesLoaded + 1,
+        },
+      });
+
+    case ADD_NEW_PACKAGE_TO_BOTS_SUCCESS:
+      return update(state, {
+        packages: {
+          $apply: (packages: IPackage[]) => {
+            return packages.map(pkg => {
+              if (
+                pkg.resource ===
+                (action as IAddNewPackageToBotsSuccessAction).packageResource
+              ) {
+                return update(pkg, {
+                  usedByBots: (action as IAddNewPackageToBotsSuccessAction).bots.map(
+                    bot => bot.resource,
+                  ),
+                });
+              } else {
+                return pkg;
+              }
+            });
+          },
         },
       });
 

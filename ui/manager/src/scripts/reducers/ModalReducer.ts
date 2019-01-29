@@ -33,6 +33,7 @@ import {
 } from '../components/utils/AxiosFunctions';
 import { ModalEnum } from '../components/utils/ModalEnum';
 import {
+  CREATE_NEW_PACKAGE,
   DEPLOY_BOT_SUCCESS,
   UNDEPLOY_BOT_FAILED,
   UPDATE_DESCRIPTOR_FAILED,
@@ -438,6 +439,22 @@ const ModalReducer: IModalReducer = (
         },
         message: {
           $set: (action as IUpdateJsonDataFailedAction).error.message,
+        },
+      });
+
+    case CREATE_NEW_PACKAGE:
+      return update(state, {
+        mode: {
+          $set: ModalEnum.error,
+        },
+        isModalOpen: {
+          $set: true,
+        },
+        title: {
+          $set: 'Add new package to bots',
+        },
+        message: {
+          $set: 'Good job!',
         },
       });
 

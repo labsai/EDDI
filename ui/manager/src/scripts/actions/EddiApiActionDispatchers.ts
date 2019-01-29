@@ -82,6 +82,12 @@ import {
   createNewPackageSuccessAction,
   createNewPackageFailedAction,
   ICreateNewPackageAction,
+  IAddNewPackageToBotsAction,
+  addNewPackageToBotsAction,
+  IAddNewPackageToBotsSuccessAction,
+  IAddNewPackageToBotsFailedAction,
+  addNewPackageToBotsSuccessAction,
+  addNewPackageToBotsFailedAction,
 } from './EddiApiActions';
 
 export interface IEddiApiActionDispatchers extends ActionCreatorsMapObject {
@@ -152,6 +158,15 @@ export interface IEddiApiActionDispatchers extends ActionCreatorsMapObject {
   fetchBotDeploymentStatusFailedAction: (
     error,
   ) => IFetchBotDeploymentStatusFailedAction;
+  addNewPackageToBotsAction: (
+    packageResource,
+    bots,
+  ) => IAddNewPackageToBotsAction;
+  addNewPackageToBotsSuccessAction: (
+    packageResource,
+    bots,
+  ) => IAddNewPackageToBotsSuccessAction;
+  addNewPackageToBotsFailedAction: (error) => IAddNewPackageToBotsFailedAction;
 }
 
 const actions: IEddiApiActionDispatchers = {
@@ -199,6 +214,9 @@ const actions: IEddiApiActionDispatchers = {
   fetchBotDeploymentStatusAction,
   fetchBotDeploymentStatusSuccessAction,
   fetchBotDeploymentStatusFailedAction,
+  addNewPackageToBotsAction,
+  addNewPackageToBotsSuccessAction,
+  addNewPackageToBotsFailedAction,
 };
 
 const eddiApiActionDispatchers: IEddiApiActionDispatchers = bindActionCreators<
