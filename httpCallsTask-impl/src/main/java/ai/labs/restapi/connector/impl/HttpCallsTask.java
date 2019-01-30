@@ -135,10 +135,9 @@ public class HttpCallsTask implements ILifecycleTask {
                             String message = "HttpCall (%s) didn't return http code 200, instead %s.";
                             log.warn(String.format(message, call.getName(), response.getHttpCode()));
                             log.warn("Error Msg:" + response.getHttpCodeMessage());
-                            continue;
                         }
 
-                        if (call.isSaveResponse()) {
+                        if (response.getHttpCode() == 200 && call.isSaveResponse()) {
                             final String responseBody = response.getContentAsString();
                             String actualContentType = response.getHttpHeader().get(CONTENT_TYPE);
                             if (actualContentType != null) {
@@ -161,9 +160,9 @@ public class HttpCallsTask implements ILifecycleTask {
                             IData<Object> httpResponseData = dataFactory.createData(memoryDataName, responseObject);
                             currentStep.storeData(httpResponseData);
                             currentStep.addConversationOutputMap(KEY_HTTP_CALLS, Map.of(responseObjectName, responseObject));
-
-                            runPostResponse(memory, call, templateDataObjects, response.getHttpCode());
                         }
+
+                        runPostResponse(memory, call, templateDataObjects, response.getHttpCode());
                     }
                 } catch (IRequest.HttpRequestException |
                         ITemplatingEngine.TemplateEngineException |
@@ -239,10 +238,10 @@ public class HttpCallsTask implements ILifecycleTask {
         if (httpCodeValidator == null) {
             httpCodeValidator = HttpCodeValidator.DEFAULT;
         } else {
-            if (isNullOrEmpty(httpCodeValidator.getRunOnHttpCode())) {
+            if (httpCodeValidator.getRunOnHttpCode() == null) {
                 httpCodeValidator.setRunOnHttpCode(HttpCodeValidator.DEFAULT.getRunOnHttpCode());
             }
-            if (isNullOrEmpty(httpCodeValidator.getSkipOnHttpCode())) {
+            if (httpCodeValidator.getSkipOnHttpCode() == null) {
                 httpCodeValidator.setSkipOnHttpCode(HttpCodeValidator.DEFAULT.getSkipOnHttpCode());
             }
         }
@@ -253,7 +252,7 @@ public class HttpCallsTask implements ILifecycleTask {
 
     private IRequest buildRequest(Request requestConfig, Map<String, Object> templateDataObjects) throws ITemplatingEngine.TemplateEngineException {
         String path = requestConfig.getPath().trim();
-        if (!path.startsWith(SLASH_CHAR)) {
+        if (!path.startsWith(SLASH_CHAR) && !path.isEmpty()) {
             path = SLASH_CHAR + path;
         }
         URI targetUri = URI.create(targetServerUri + templateValues(path, templateDataObjects));

@@ -4,11 +4,11 @@ import ai.labs.behavior.impl.BehaviorRule;
 import ai.labs.memory.IConversationMemory;
 import ai.labs.memory.IMemoryItemConverter;
 import lombok.extern.slf4j.Slf4j;
-import ognl.NoSuchPropertyException;
 import ognl.Ognl;
 import ognl.OgnlException;
 
 import javax.inject.Inject;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
@@ -56,6 +56,16 @@ public class DynamicValueMatcher implements IBehaviorExtension {
     }
 
     @Override
+    public Map<String, String> getValues() {
+        Map<String, String> result = new HashMap<>();
+        result.put(valuePathQualifier, valuePath);
+        result.put(containsQualifier, contains);
+        result.put(equalsQualifier, equals);
+
+        return result;
+    }
+
+    @Override
     public ExecutionState execute(IConversationMemory memory, List<BehaviorRule> trace) {
         boolean success = false;
         try {
@@ -75,10 +85,7 @@ public class DynamicValueMatcher implements IBehaviorExtension {
                     }
                 }
             }
-        } catch (NoSuchPropertyException e) {
-            log.info(e.getLocalizedMessage());
-        } catch (OgnlException e) {
-            log.error(e.getLocalizedMessage(), e);
+        } catch (OgnlException ignored) {
         }
 
         state = success ? ExecutionState.SUCCESS : ExecutionState.FAIL;
@@ -92,6 +99,8 @@ public class DynamicValueMatcher implements IBehaviorExtension {
 
     @Override
     public IBehaviorExtension clone() {
-        return new DynamicValueMatcher(memoryItemConverter);
+        DynamicValueMatcher clone = new DynamicValueMatcher(memoryItemConverter);
+        clone.setValues(getValues());
+        return clone;
     }
 }
