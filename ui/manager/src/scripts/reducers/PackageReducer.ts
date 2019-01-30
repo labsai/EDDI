@@ -486,6 +486,12 @@ const PackageReducer: IPackageReducer = (
       });
 
     case ADD_NEW_PACKAGE_TO_BOTS_SUCCESS:
+      console.log(action as IAddNewPackageToBotsSuccessAction);
+      console.log(
+        (action as IAddNewPackageToBotsSuccessAction).bots.map(
+          bot => bot.resource,
+        ),
+      );
       return update(state, {
         packages: {
           $apply: (packages: IPackage[]) => {

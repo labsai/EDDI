@@ -34,6 +34,7 @@ import {
 import { ModalEnum } from '../components/utils/ModalEnum';
 import {
   CREATE_NEW_PACKAGE,
+  CREATE_NEW_PACKAGE_SUCCESS,
   DEPLOY_BOT_SUCCESS,
   UNDEPLOY_BOT_FAILED,
   UPDATE_DESCRIPTOR_FAILED,
@@ -444,7 +445,7 @@ const ModalReducer: IModalReducer = (
         },
       });
 
-    case CREATE_NEW_PACKAGE:
+    case CREATE_NEW_PACKAGE_SUCCESS:
       return update(state, {
         mode: {
           $set: ModalEnum.addNewPackageToBot,

@@ -390,15 +390,24 @@ const BotReducer: IBotReducer = (
       });
 
     case ADD_NEW_PACKAGE_TO_BOTS_SUCCESS:
-      const updatedBots = (action as IAddNewPackageToBotsSuccessAction).bots;
-      const botList = state.bots.map(bot => {
+      console.log(
+        'action: ' + (action as IAddNewPackageToBotsSuccessAction).bots[0],
+      );
+      const updatedBots: IBot[] = (action as IAddNewPackageToBotsSuccessAction)
+        .bots;
+      console.log('UpdatedBots: ' + updatedBots);
+      const botList: IBot[] = state.bots.map(bot => {
         const newBot = updatedBots.find(newBot => newBot.id === bot.id);
         if (!_.isEmpty(newBot)) {
+          console.log('newBot' + newBot);
           return update(bot, {
             currentVersion: { $set: newBot.version },
           });
+        } else {
+          return bot;
         }
       });
+      console.log('botlist: ' + botList);
       const newBotList = _.uniqBy(
         updatedBots.concat(botList),
         bot => bot.resource,

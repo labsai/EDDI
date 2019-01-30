@@ -50,7 +50,10 @@ class AddNewPackageToBotModal extends React.Component<IPrivateProps, IState> {
   };
 
   updateSelectedBots = () => {
-    eddiApiActionDispatchers.updateBotsAction(this.state.selectedBots);
+    eddiApiActionDispatchers.addNewPackageToBotsAction(
+      this.props.packagePayload.resource,
+      this.state.selectedBots,
+    );
     this.closeModal();
   };
 
@@ -95,7 +98,11 @@ class AddNewPackageToBotModal extends React.Component<IPrivateProps, IState> {
                 styles.title
               }>{`Select bots you want to add the package to.`}</div>
             <div style={styles.centerFlex} />
-            <BlueButton customStyles={styles.button} text={'Update Bots'} />
+            <BlueButton
+              onClick={this.updateSelectedBots}
+              customStyles={styles.button}
+              text={'Update Bots'}
+            />
           </div>
           <div style={styles.bottomHeader}>
             <div style={styles.centerFlex} />
