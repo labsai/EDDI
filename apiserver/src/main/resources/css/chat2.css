@@ -10,7 +10,6 @@
 body {
     font-family: Muli, "Helvetica Neue", Helvetica, Arial, sans-serif;
     -webkit-font-smoothing: antialiased;
-    cursor: pointer; /* Changes the cursor into a pointing hand on PCs  */
     -webkit-tap-highlight-color: transparent; /* Removes the blue highlight when button tapped on mobile */
 }
 
@@ -21,6 +20,10 @@ input {
     -o-box-sizing: border-box;
     -ms-box-sizing: border-box;
     box-sizing: border-box;
+}
+
+button {
+    cursor: pointer;
 }
 
 a, a:visited {
@@ -81,6 +84,7 @@ a:active {
 
 .line {
     width: 100%;
+    display: inline-block;
 }
 
 .icons {

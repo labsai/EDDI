@@ -29,6 +29,134 @@ class Message {
     }
 }
 
+class InputField {
+    constructor(placeholder, defaultValue) {
+        this.placeholder = typeof placeholder !== 'undefined' ? placeholder : 'Type your response…';
+        this.defaultValue = typeof defaultValue !== 'undefined' ? defaultValue : '';
+        this.element = $('<div>');
+    }
+
+    get draw() {
+        return function () {
+            this.element = $('<div>');
+            this.element.addClass('line textInputContainer');
+            const $inputField = $('<input type="text" name="answer" required="required" autocomplete="off" autofocus="autofocus">');
+            if (this.placeholder !== '') {
+                $inputField.attr('placeholder', this.placeholder);
+            }
+
+            if (this.defaultValue !== '') {
+                $inputField.attr('value', this.defaultValue);
+            }
+
+            $inputField.addClass('textInput answer message message-right animated fadeInUp');
+            this.element.append($inputField);
+            $('#chat-container').append(this.element);
+
+            let _this = this;
+            $inputField.keyup(function (event) {
+                if (event.keyCode === 13) {
+                    $('.answer').each(function () {
+                        let answer = $(this).val();
+
+                        if (answer !== "") {
+                            _this.remove();
+                            createAnswerMessage(answer);
+                            eddi.submitUserMessage(answer);
+                        } else {
+                            $(this).removeClass('shake').removeClass('fadeInUp');
+                            $(this).addClass('shake');
+                            $(this).one('webkitAnimationEnd mozAnimationEnd MSAnimationEnd oanimationend animationend',
+                                function () {
+                                    $(this).removeClass('shake').removeClass('fadeInUp');
+                                });
+                        }
+                    });
+                }
+            });
+
+            $inputField.focus();
+
+            return setTimeout(function () {
+                return $inputField.addClass('appeared');
+            }, 0);
+        };
+    }
+
+    remove() {
+        this.element.remove();
+    }
+}
+
+class Button {
+    constructor(buttonObj) {
+        this.buttonObj = buttonObj;
+    }
+
+    get draw() {
+        return function () {
+            const _this = this;
+            const $button = $('<button/>', {
+                text: _this.buttonObj.label,
+                click: function () {
+                    let answer = '';
+                    /** @namespace buttonObj.onPress.submitField */
+                    let onPress = _this.buttonObj.onPress;
+                    let submitField;
+                    if (typeof onPress !== 'undefined') {
+                        submitField = onPress.submitField;
+                        if (typeof submitField === 'undefined') {
+                            submitField = 'inputText';
+                        }
+
+                        $('.' + submitField).each(function () {
+                            answer = answer + $(this).val();
+                        });
+
+                        answer = answer.trim();
+                        _this.convertInputFieldsToUserMessage(answer);
+                        if (typeof onPress !== 'undefined') {
+                            eddi.submitUserMessage(answer, onPress.context);
+                        } else {
+                            eddi.submitUserMessage(answer);
+                        }
+                    } else {
+                        $('.inputText').each(function () {
+                            answer = answer + $(this).val();
+                        });
+
+                        answer = answer.trim();
+                        _this.convertInputFieldsToUserMessage(answer);
+                        eddi.submitUserMessage(answer);
+                    }
+
+                    $('.quick_reply').remove();
+                }
+            });
+
+            $button.hide();
+            $button.addClass('message message-left animated fadeInUp bubbleLeft');
+            $button.addClass('quick_reply');
+            const $container = $('<div class="line">');
+            $container.append($button);
+            $('#chat-container').append($container);
+            $button.fadeIn({queue: false, duration: 1500});
+            return setTimeout(function () {
+                return $button.addClass('appeared');
+            }, 0);
+        };
+    }
+
+    convertInputFieldsToUserMessage(answer) {
+        let $inputText = $('.textInputContainer');
+        if ($inputText.length > 0) {
+            createAnswerMessage(answer);
+        }
+        $inputText.remove();
+    }
+}
+
+
 class QuickReply {
     constructor(text) {
         this.text = text;
@@ -78,6 +206,14 @@ class ConversationEnd {
     }
 }
 
+function createAnswerMessage(answer) {
+    let htmlWrapperBeginning = "<div class=\"line\"><div class=\"message message-right animated fadeInUp bubbleRight\">",
+        htmlWrapperEnding = "</div></div><div class=\"clear\"></div>";
+
+    $('.quickReply').remove();
+    $('#chat-container').append(htmlWrapperBeginning + answer + htmlWrapperEnding);
+}
+
 
 $(function () {
     $("#skipDelay").change(function () {
@@ -85,13 +221,22 @@ $(function () {
     });
 
 
-    eddi.submitUserMessage = function (userMessage) {
+    eddi.submitUserMessage = function (userMessage, context) {
         let requestBody = null;
         let contextValue = $('#contextValue').val().trim();
         if (contextValue !== null && contextValue !== '') {
+            let contextObj = JSON.parse(contextValue);
+            if (typeof context !== 'undefined') {
+                Object.assign(contextObj, context);
+            }
             requestBody = {
                 input: userMessage,
-                context: JSON.parse(contextValue)
+                context: contextObj
+            }
+        } else if (typeof context !== 'undefined') {
+            requestBody = {
+                input: userMessage,
+                context: context
             }
         } else {
             requestBody = {

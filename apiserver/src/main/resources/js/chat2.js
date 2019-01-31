@@ -59,13 +59,6 @@ function displayQuickReplies(quickReplies) {
     return true;
 }
 
-function smoothScrolling() {
-    //Special case for chat
-    if ($(".active").attr('id') === "chat") {
-        smoothScrollBottom();
-    }
-}
-
 // Recursive function that goes through the set of messages it is given
 function createMessage(outputArray, quickRepliesArray, hasConversationEnded, i) {
     // i is optional - i is the current message in the array the system is displaying
@@ -75,6 +68,8 @@ function createMessage(outputArray, quickRepliesArray, hasConversationEnded, i) 
         // If this message is not the first, use the previous to calculate a delay, otherwise use a number
         let messageObject = outputArray[i];
         let message = null;
+        let inputField = null;
+        let button = null;
         if (typeof messageObject === 'string') {
             message = messageObject;
         } else if (typeof messageObject === 'object') {
@@ -87,6 +82,12 @@ function createMessage(outputArray, quickRepliesArray, hasConversationEnded, i) 
                     message = '<img src="' + messageObject.uri + '" width="100%" alt="image send by the bot" />';
                     preLoadImage(messageObject.uri);
                     break;
+                case 'textInput':
+                    inputField = messageObject;
+                    break;
+                case 'button':
+                    button = messageObject;
+                    break;
                 case 'quickReplies':
                     quickRepliesArray.push({value: messageObject.value, expressions: messageObject.expressions});
                     break;
@@ -97,7 +98,7 @@ function createMessage(outputArray, quickRepliesArray, hasConversationEnded, i) 
 
         // delay override - Make first responses quick
         let delay;
-        if (eddi.skipDelay || (i === 0 && eddi.isFirstMessage)) {
+        if (eddi.skipDelay || message == null || (i === 0 && eddi.isFirstMessage)) {
             delay = 50;
             eddi.isFirstMessage = false;
         } else {
@@ -117,13 +118,23 @@ function createMessage(outputArray, quickRepliesArray, hasConversationEnded, i) 
                 msg.draw();
             }
 
+            if (inputField != null) {
+                createAnswerField(inputField);
+            }
+
+            if (button != null) {
+                createButton(button);
+            }
+
             smoothScrolling();
             if (i + 1 < outputArray.length) {
                 createMessage(outputArray, quickRepliesArray, hasConversationEnded, ++i);
             } else {
                 if (!hasConversationEnded && !displayQuickReplies(quickRepliesArray)) {
-                    createAnswerField();
-                    smoothScrolling();
+                    if (inputField == null && button == null) {
+                        createAnswerField();
+                        smoothScrolling();
+                    }
                 }
 
                 if (hasConversationEnded) {
@@ -137,54 +148,48 @@ function createMessage(outputArray, quickRepliesArray, hasConversationEnded, i) 
     }
 }
 
-// Creates an answer input bubble
-function createAnswerField() {
-    let htmlAnswerField = "<div id=\"answer-container\" class=\"line\"><form action=\"#\" onsubmit=\"return false;\"><input required=\"required\" novalidate=\"novalidate\" autocomplete=\"on\" min=\"2\" max=\"40\" formnovalidate=\"formnovalidate\" autofocus=\"autofocus\" type=\"text\" name=\"answer\" id=\"answer\" class=\"message message-right animated fadeInUp\" value=\"\" placeholder=\"Type your response…\"></form><div class=\"clear\"></div></div>";
-
-    $('#chat-container').append(htmlAnswerField);
-
-    $('#answer').keyup(function (event) {
-        if (event.keyCode === 13) {
-            let answer = $.trim($('#answer').val());
-            if (answer !== "") {
-                $('#answer-container').remove();
-                createAnswerMessage(answer);
-                eddi.submitUserMessage(answer);
-            } else {
-                $('#answer').removeClass('shake').removeClass('fadeInUp');
-                $('#answer').addClass('shake');
-                $('#answer').one('webkitAnimationEnd mozAnimationEnd MSAnimationEnd oanimationend animationend',
-                    function () {
-                        $(this).removeClass('shake').removeClass('fadeInUp');
-                    });
-            }
-        }
-    });
-
-    $('#answer').focus();
-
-    //Special case for chat
+function createButton(button) {
+    let buttonObj = new Button(button);
+    buttonObj.draw();
     smoothScrolling();
 }
 
-function createAnswerMessage(answer) {
-    let htmlWrapperBeginning = "<div class=\"line\"><div class=\"message message-right animated fadeInUp bubbleRight\">",
-        htmlWrapperEnding = "</div></div><div class=\"clear\"></div>";
+// Creates an answer input bubble
+function createAnswerField(inputField) {
+    let inputFieldObj;
 
-    $('.quickReply').remove();
-    $('#chat-container').append(htmlWrapperBeginning + answer + htmlWrapperEnding);
+    if (typeof inputField !== 'undefined') {
+        inputFieldObj = new InputField(inputField.placeholder, inputField.defaultValue);
+    } else {
+        inputFieldObj = new InputField();
+    }
+
+    inputFieldObj.draw();
+    smoothScrolling();
 }
 
 // Calculates the delay based on whatever string you give it
 function calculateDelay(text) {
-    let delayPerWord = 218;
-    let delay = text.split(" ").length * delayPerWord;
-    delay = (delay < delayPerWord * 3) ? delay + 400 : delay;
+    let delay;
+    if (text.startsWith('<')) {
+        delay = 50;
+    } else {
+        let delayPerWord = 218;
+        delay = text.split(" ").length * delayPerWord;
+        delay = (delay < delayPerWord * 3) ? delay + 400 : delay;
 
-    if (delay > 3000) {
-        delay = 3000;
+        if (delay > 3000) {
+            delay = 3000;
+        }
     }
     return delay;
+}
+
+function smoothScrolling() {
+    //Special case for chat
+    if ($(".active").attr('id') === "chat") {
+        smoothScrollBottom();
+    }
 }
 
 function smoothScrollBottom() {
