@@ -83,7 +83,7 @@ class BotList extends React.Component<IPrivateProps, IState> {
   render() {
     const botList = this.filterBots();
     return (
-      <div style={styles.botList}>
+      <div>
         {renderIf(false)(() => (
           <div style={styles.loadingWrapper}>
             <ClimbingBoxLoader loading />
