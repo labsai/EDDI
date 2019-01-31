@@ -26,6 +26,8 @@ import {
   UNDEPLOY_BOT_FAILED,
   CREATE_NEW_PACKAGE_SUCCESS,
   CREATE_NEW_BOT_SUCCESS,
+  ADD_NEW_PACKAGE_TO_BOTS,
+  ADD_NEW_PACKAGE_TO_BOTS_SUCCESS,
 } from '../actions/EddiApiActionTypes';
 import * as update from 'immutability-helper';
 import {
@@ -47,6 +49,7 @@ import {
   ICreateNewPackageSuccessAction,
   ICreateNewBotSuccessAction,
   IFetchPackagesSuccessAction,
+  IAddNewPackageToBotsSuccessAction,
 } from '../actions/EddiApiActions';
 import * as _ from 'lodash';
 import modalActionDispatchers from '../actions/ModalActionDispatchers';
@@ -383,6 +386,29 @@ const BotReducer: IBotReducer = (
         },
         botsLoaded: {
           $set: state.botsLoaded + 1,
+        },
+      });
+
+    case ADD_NEW_PACKAGE_TO_BOTS_SUCCESS:
+      const updatedBots: IBot[] = (action as IAddNewPackageToBotsSuccessAction)
+        .bots;
+      const botList: IBot[] = state.bots.map(bot => {
+        const newBot = updatedBots.find(newBot => newBot.id === bot.id);
+        if (!_.isEmpty(newBot)) {
+          return update(bot, {
+            currentVersion: { $set: newBot.version },
+          });
+        } else {
+          return bot;
+        }
+      });
+      const newBotList = _.uniqBy(
+        updatedBots.concat(botList),
+        bot => bot.resource,
+      );
+      return update(state, {
+        bots: {
+          $set: newBotList,
         },
       });
 

@@ -30,6 +30,7 @@ import UpdateBotsModal from './UpdateConfigsModal/UpdateBotsModal';
 import ConfirmModal from './ConfirmModal';
 import ErrorMessageModal from './ErrorMessageModal';
 import { CSSProperties } from 'react';
+import AddNewPackageToBotModal from './UpdateConfigsModal/AddNewPackageToBotModal';
 
 const customStyles = {
   content: {
@@ -227,6 +228,10 @@ class ModalComponentFrame extends React.Component<IPrivateProps, IState> {
             title={this.props.title}
             message={this.props.message}
           />
+        );
+      case ModalEnum.addNewPackageToBot:
+        return (
+          <AddNewPackageToBotModal packagePayload={this.props.packagePayload} />
         );
       default:
         return null;

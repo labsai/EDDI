@@ -480,6 +480,33 @@ export async function updateBotPackages(
   }
 }
 
+export async function addPackageToBot(
+  currentBot: IBot,
+  packageResource: string,
+): Promise<IBot> {
+  try {
+    const currentBotUri = `${await getAPIUrl()}/botstore/bots/${
+      currentBot.id
+    }?version=${currentBot.version}`;
+    let botData: IBotData;
+    if (_.isUndefined(currentBot.packages)) {
+      botData = await getBotData(currentBot.resource);
+    } else {
+      botData = {
+        packages: currentBot.packages,
+        channels: currentBot.channels,
+      };
+    }
+    botData.packages.push(packageResource);
+    await axios.put(currentBotUri, botData);
+    const updatedBot: IBot = await getCurrentBot(currentBot.id);
+    return updatedBot;
+  } catch (err) {
+    console.error(`Failed to add package to bot. Error: ${err.message}`);
+    throw err;
+  }
+}
+
 export async function updateResourcesInBot(
   botResource: string,
   packageResources: string[],

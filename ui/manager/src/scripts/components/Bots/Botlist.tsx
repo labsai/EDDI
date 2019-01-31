@@ -69,7 +69,6 @@ class BotList extends React.Component<IPrivateProps, IState> {
     if (this.state.loading) {
       return;
     }
-    console.log('Loading more!!');
     this.setState({ loading: true });
     if (this.props.bots.length < 5 && !this.props.allBotsLoaded) {
       eddiApiActionDispatchers.fetchBotsAction(5, 0);

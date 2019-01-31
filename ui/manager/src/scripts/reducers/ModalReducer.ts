@@ -33,6 +33,8 @@ import {
 } from '../components/utils/AxiosFunctions';
 import { ModalEnum } from '../components/utils/ModalEnum';
 import {
+  CREATE_NEW_PACKAGE,
+  CREATE_NEW_PACKAGE_SUCCESS,
   DEPLOY_BOT_SUCCESS,
   UNDEPLOY_BOT_FAILED,
   UPDATE_DESCRIPTOR_FAILED,
@@ -43,6 +45,8 @@ import {
   UPDATE_PLUGIN_TYPE_IN_PACKAGE_SUCCESS,
 } from '../actions/EddiApiActionTypes';
 import {
+  ICreateNewPackageAction,
+  ICreateNewPackageSuccessAction,
   IDeployBotSuccessAction,
   IUndeployBotFailedAction,
   IUpdateDescriptorFailedAction,
@@ -61,7 +65,7 @@ export type IModalReducer = Reducer<IModalState>;
 export interface IModalState {
   isModalOpen: boolean;
   mode: ModalEnum;
-  bot?: IBot;
+  bot: IBot;
   packagePayload: IPackage;
   pluginType?: string;
   selectedResources?: string[];
@@ -438,6 +442,19 @@ const ModalReducer: IModalReducer = (
         },
         message: {
           $set: (action as IUpdateJsonDataFailedAction).error.message,
+        },
+      });
+
+    case CREATE_NEW_PACKAGE_SUCCESS:
+      return update(state, {
+        mode: {
+          $set: ModalEnum.addNewPackageToBot,
+        },
+        isModalOpen: {
+          $set: true,
+        },
+        packagePayload: {
+          $set: (action as ICreateNewPackageSuccessAction).pkg,
         },
       });
 

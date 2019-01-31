@@ -83,13 +83,14 @@ class UpdatePackageModal extends React.Component<IPrivateProps, IState> {
     const list: object = this.state.addedPlugins.map(a => ({
       type: a.type,
     }));
-    const pkg = await createNewPackage(
+    const packageID = await createNewPackage(
       this.props.packageName,
       this.props.packageDescription,
       list,
     );
-    eddiApiActionDispatchers.createNewPackageAction(pkg);
-    return pkg;
+    modalActionDispatchers.closeModal();
+    eddiApiActionDispatchers.createNewPackageAction(packageID);
+    history.push(`/packageview/${packageID}`);
   };
 
   addPluginsInModal = (addedPlugin: IOptions) => {
@@ -119,11 +120,7 @@ class UpdatePackageModal extends React.Component<IPrivateProps, IState> {
             <div style={styles.modalTopHeaderCenter} />
             <button
               style={this.getButtonStyle()}
-              onClick={async () => {
-                const packageID = await this.createNewPackage();
-                history.push(`/packageview/${packageID}`);
-                modalActionDispatchers.closeModal();
-              }}>
+              onClick={this.createNewPackage}>
               {'Save'}
             </button>
           </div>
