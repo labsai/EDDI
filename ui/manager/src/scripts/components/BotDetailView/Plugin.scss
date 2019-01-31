@@ -9,7 +9,6 @@
   width: 100%;
 }
 
-,
 .pluginNameAndVersion {
   display: flex;
   height: 22px;
@@ -17,7 +16,6 @@
   margin-right: 5px;
 }
 
-,
 .pluginName {
   color: #4a90e2;
   display: inline-block;
@@ -29,7 +27,6 @@
   white-space: nowrap;
 }
 
-,
 .pluginVersion {
   color: #a8b7c7;
   display: inline-block;
@@ -40,7 +37,6 @@
   text-align: left;
 }
 
-,
 .pluginDate {
   color: #54698d;
   font-family: Roboto;
@@ -50,7 +46,6 @@
   text-align: left;
 }
 
-,
 .updateAvailableButton {
   background-color: #ffffff;
   border: 1px solid #d8dde6;
@@ -72,22 +67,18 @@
   cursor: pointer;
 }
 
-,
 .updateAvailableButton:hover {
   box-shadow: 0 0 3px #0070d2;
 }
 
-,
 .updateAvailablePluginNameAndVersion {
   margin-right: 100px;
 }
 
-,
 .hasNewVersionBorder {
   border: 1px solid #ff5976;
 }
 
-,
 .hasNewVersion {
   color: #ff5976;
 }

@@ -498,6 +498,7 @@ export async function addPackageToBot(
       };
     }
     botData.packages.push(packageResource);
+    await axios.put(currentBotUri, botData);
     const updatedBot: IBot = await getCurrentBot(currentBot.id);
     return updatedBot;
   } catch (err) {
