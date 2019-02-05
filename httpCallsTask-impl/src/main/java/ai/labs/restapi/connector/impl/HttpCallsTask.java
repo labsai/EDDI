@@ -151,7 +151,7 @@ public class HttpCallsTask implements ILifecycleTask {
                                 log.warn(String.format(message, call.getName(), actualContentType));
                                 //continue;
                             }
-
+                            log.info("Response: " + responseBody);
                             Object responseObject = jsonSerialization.deserialize(responseBody, Object.class);
                             String responseObjectName = call.getResponseObjectName();
                             templateDataObjects.put(responseObjectName, responseObject);
