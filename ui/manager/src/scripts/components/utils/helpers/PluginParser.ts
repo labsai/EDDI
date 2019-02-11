@@ -28,8 +28,8 @@ export const parsePlugin: (externalPackages: IPluginTypes) => string = (
   externalPackage: IPluginTypes,
 ) => {
   let plugin: string = '';
-  if (externalPackage.resource) {
-    plugin = externalPackage.resource;
+  if (externalPackage.config && externalPackage.config.uri) {
+    plugin = externalPackage.config.uri;
   }
   if (!_.isEmpty(externalPackage.extensions)) {
     for (let extensionTypes of Object.values(externalPackage.extensions)) {
@@ -77,4 +77,16 @@ export const parsePluginExtensions: (
     plugins.push(packageExtension);
   }
   return plugins;
+};
+
+export const hasExtensions = (plugin: IPluginExtensions) => {
+  if (_.isEmpty(plugin.extensions)) {
+    return false;
+  }
+  for (let extensions of Object.values(plugin.extensions)) {
+    if (extensions.length > 0) {
+      return true;
+    }
+  }
+  return false;
 };

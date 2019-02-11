@@ -29,7 +29,7 @@ const PluginList: React.StatelessComponent<IProps> = (props: IProps) => {
         <Plugin
           key={key}
           pluginType={plug}
-          pluginResource={plug.resource || ''}
+          pluginResource={plug.config.uri || ''}
           packagePayload={props.packagePayload}
         />
       ))}

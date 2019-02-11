@@ -7,7 +7,7 @@ import * as renderIf from 'render-if';
 import * as _ from 'lodash';
 import { CSSProperties } from 'react';
 import styles from './Plugin.styles';
-import { IPlugin } from '../../utils/AxiosFunctions';
+import { IPlugin, IPluginExtensions } from '../../utils/AxiosFunctions';
 import eddiApiActionDispatchers from '../../../actions/EddiApiActionDispatchers';
 import { getDate } from '../../utils/DateFormat';
 import { pluginSelector } from '../../../selectors/PluginSelectors';
@@ -53,7 +53,7 @@ const customStyles: CSSProperties = {
 };
 
 interface IPublicProps {
-  pluginType: IOptions;
+  pluginType: IPluginExtensions;
   index: number;
   pluginResource: string;
   editDisabled: boolean;
@@ -67,17 +67,17 @@ interface IPrivateProps extends IPublicProps {
 
 class Extension extends React.Component<IPrivateProps> {
   componentDidMount() {
-    if (this.props.pluginResource) {
+    if (!_.isEmpty(this.props.pluginResource)) {
       eddiApiActionDispatchers.fetchPluginAction(this.props.pluginResource);
     }
   }
 
   componentWillReceiveProps(nextProps) {
     if (
-      nextProps.pluginResource &&
+      !_.isEmpty(nextProps) &&
       nextProps.pluginResource !== this.props.pluginResource
     ) {
-      eddiApiActionDispatchers.fetchPluginAction(nextProps.pluginResource);
+      eddiApiActionDispatchers.fetchPluginAction(this.props.pluginResource);
     }
   }
 
@@ -150,7 +150,7 @@ class Extension extends React.Component<IPrivateProps> {
             <div style={this.getNameStyling()}>{this.getPluginName()}</div>
             <div style={styles.pluginVersion}>
               {PluginHelper.getVersion(
-                this.props.pluginType,
+                this.props.pluginType.type,
                 this.props.plugin,
                 true,
               )}
@@ -158,7 +158,7 @@ class Extension extends React.Component<IPrivateProps> {
           </div>
           <div style={styles.pluginDate}>
             {PluginHelper.getLastModified(
-              this.props.pluginType,
+              this.props.pluginType.type,
               this.props.plugin,
               true,
               <br />,

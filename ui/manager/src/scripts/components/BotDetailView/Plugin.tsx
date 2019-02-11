@@ -74,14 +74,14 @@ class Plugin extends React.Component<IPrivateProps> {
                       <div className={`pluginNameAndVersion`}>
                         <div className={`pluginName`}>
                           {PluginHelper.getName(
-                            this.props.pluginType,
+                            this.props.pluginType.type,
                             this.props.plugin,
                             true,
                           )}
                         </div>
                         <div className={`pluginVersion `}>
                           {PluginHelper.getVersion(
-                            this.props.pluginType,
+                            this.props.pluginType.type,
                             this.props.plugin,
                             true,
                           )}
@@ -92,7 +92,7 @@ class Plugin extends React.Component<IPrivateProps> {
                       </div>
                       <div className={`pluginDate`}>
                         {PluginHelper.getLastModified(
-                          this.props.pluginType,
+                          this.props.pluginType.type,
                           this.props.plugin,
                           true,
                           <br />,

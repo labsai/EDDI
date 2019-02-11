@@ -292,8 +292,8 @@ export async function getPlugin(pluginResource: string): Promise<IPlugin> {
 
 export interface IPluginExtensions {
   type: string;
-  config: { uri: string };
-  extensions: {
+  config?: { uri: string };
+  extensions?: {
     [property: string]: { type: string; config: { uri: string } }[];
   };
 }
@@ -720,7 +720,7 @@ export async function getAllDefaultPluginTypes(): Promise<
 export interface IPluginTypes {
   type: string;
   extensions?: IPluginTypes[];
-  resource: string;
+  config: { uri: string };
 }
 
 export const getPluginTypes: (
@@ -735,7 +735,7 @@ export const getPluginTypes: (
     if (!res.data) {
       return [];
     } else {
-      return parsePluginExtensions(res.data.packageExtensions);
+      return null;
     }
   } catch (e) {
     console.error(e);
