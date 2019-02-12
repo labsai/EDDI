@@ -162,8 +162,6 @@ class PackageView extends React.Component<IPrivateProps, IState> {
   };
 
   updatePlugin = (pluginKey: number, newPlugin: IOptions) => {
-    console.log({ ...newPlugin });
-    console.log(pluginKey);
     const newPluginList = this.state.selectedPlugins.map(plugin => {
       if (plugin.extensionKey === pluginKey) {
         return { ...newPlugin };
@@ -171,7 +169,6 @@ class PackageView extends React.Component<IPrivateProps, IState> {
         return { ...plugin };
       }
     });
-    console.log(newPluginList);
     this.setState({
       selectedPlugins: newPluginList,
       extensionKey: newPluginList.length,
@@ -179,7 +176,6 @@ class PackageView extends React.Component<IPrivateProps, IState> {
   };
 
   unsavedChanges(): boolean {
-    // todo: Refactor
     return !_.isEqual(
       JSON.stringify(this.state.selectedPlugins),
       JSON.stringify(this.state.initialSelectedPlugins),
@@ -210,7 +206,6 @@ class PackageView extends React.Component<IPrivateProps, IState> {
   }
 
   render() {
-    console.log(this.state.selectedPlugins);
     const isCurrentVersion =
       this.props.packagePayload.version ===
       this.props.packagePayload.currentVersion;
