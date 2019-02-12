@@ -11,6 +11,7 @@ import { connect } from 'react-redux';
 import { pluginSelector } from '../../../selectors/PluginSelectors';
 import ModalActionDispatchers from '../../../actions/ModalActionDispatchers';
 import WhiteButton from '../../Assets/Buttons/WhiteButton';
+import SquareXButton from '../../Assets/Buttons/SquareXButton';
 import * as PluginType from '../../utils/EddiTypes';
 import PluginHelper from '../../utils/helpers/PluginHelper';
 import { REGULAR_DICTIONARY } from '../../utils/EddiTypes';
@@ -42,8 +43,8 @@ class Plugin extends React.Component<IPrivateProps> {
     }
   }
 
-  deletePlugin = (extensionKey: number) => {
-    this.props.deletePlugin(extensionKey);
+  deletePlugin = () => {
+    this.props.deletePlugin(this.props.pluginType.extensionKey);
   };
 
   openAddPluginsModal = () => {
@@ -124,7 +125,11 @@ class Plugin extends React.Component<IPrivateProps> {
 
   getBoxStyling() {
     if (this.props.plugin.version === this.props.plugin.currentVersion) {
-      return { ...styles.pluginBox };
+      if (!_.isEmpty(this.props.plugin)) {
+        return { ...styles.pluginBox };
+      } else {
+        return { ...styles.pluginBox, cursor: 'default' };
+      }
     } else {
       return {
         ...styles.pluginBox,
@@ -172,13 +177,10 @@ class Plugin extends React.Component<IPrivateProps> {
     return (
       <div style={styles.pluginContainer}>
         {renderIf(!this.props.editDisabled)(() => (
-          <div
-            onClick={() => {
-              this.deletePlugin(this.props.pluginType.extensionKey);
-            }}
-            style={styles.closeButton}>
-            &times;
-          </div>
+          <SquareXButton
+            customStyles={styles.closeButton}
+            onClick={this.deletePlugin}
+          />
         ))}
         <button style={this.getBoxStyling()} onClick={this.openViewJsonModal}>
           <div style={styles.pluginHeader}>

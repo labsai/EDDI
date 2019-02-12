@@ -20,6 +20,7 @@ import ModalActionDispatchers from '../../../actions/ModalActionDispatchers';
 import * as PluginType from '../../utils/EddiTypes';
 import PluginHelper from '../../utils/helpers/PluginHelper';
 import * as Radium from 'radium';
+import SquareXButton from '../../Assets/Buttons/SquareXButton';
 import {
   CORRECTION,
   DICTIONARY,
@@ -172,7 +173,6 @@ class PluginWithExtensions extends React.Component<IPrivateProps> {
 
   updateExtension = (extensionResource: string) => {
     // todo: REFACTOR THIS
-    console.log('UPDATING');
     const newExtensionList = this.props.pluginType.extensions.dictionaries.map(
       ext => {
         if (
@@ -209,9 +209,10 @@ class PluginWithExtensions extends React.Component<IPrivateProps> {
     return (
       <div style={styles.pluginWithExtensionsContainer}>
         {renderIf(!this.props.editDisabled)(() => (
-          <div style={styles.closeButton} onClick={this.deletePlugin}>
-            &times;
-          </div>
+          <SquareXButton
+            customStyles={styles.packageWithExtensionCloseButton}
+            onClick={this.deletePlugin}
+          />
         ))}
         <div style={styles.pluginBoxWithExtensions}>
           <div style={styles.bigPluginName}>
@@ -250,28 +251,32 @@ class PluginWithExtensions extends React.Component<IPrivateProps> {
           {renderIf(!_.isEmpty(this.props.pluginType.extensions))(() => (
             <div>
               <div style={customStyles.extensionList}>
-                {this.props.pluginType.extensions.dictionaries.map((ext, i) => (
-                  <Extension
-                    key={i}
-                    index={i}
-                    pluginType={ext}
-                    deleteExtension={this.deleteExtension}
-                    pluginResource={this.getResource(ext)}
-                    updateExtension={this.updateExtension}
-                    editDisabled={this.props.editDisabled}
-                  />
-                ))}
-                {this.props.pluginType.extensions.corrections.map((ext, i) => (
-                  <Extension
-                    key={i}
-                    index={i}
-                    pluginType={ext}
-                    deleteExtension={this.deleteExtension}
-                    pluginResource={this.getResource(ext)}
-                    updateExtension={this.updateExtension}
-                    editDisabled={this.props.editDisabled}
-                  />
-                ))}
+                {this.props.pluginType.extensions.dictionaries &&
+                  this.props.pluginType.extensions.dictionaries.map(
+                    (ext, i) => (
+                      <Extension
+                        key={i}
+                        index={i}
+                        pluginType={ext}
+                        deleteExtension={this.deleteExtension}
+                        pluginResource={this.getResource(ext)}
+                        updateExtension={this.updateExtension}
+                        editDisabled={this.props.editDisabled}
+                      />
+                    ),
+                  )}
+                {this.props.pluginType.extensions.corrections &&
+                  this.props.pluginType.extensions.corrections.map((ext, i) => (
+                    <Extension
+                      key={i}
+                      index={i}
+                      pluginType={ext}
+                      deleteExtension={this.deleteExtension}
+                      pluginResource={this.getResource(ext)}
+                      updateExtension={this.updateExtension}
+                      editDisabled={this.props.editDisabled}
+                    />
+                  ))}
               </div>
             </div>
           ))}

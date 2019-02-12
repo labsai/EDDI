@@ -144,27 +144,12 @@ const styles: CSSProperties = {
   },
 
   closeButton: {
-    ':focus': {
-      color: '#FF5976',
-      border: '1px solid #FF5976',
-    },
-    ':hover': {
-      color: '#FF5976',
-      border: '1px solid #FF5976',
-    },
-    backgroundColor: '#FFF',
-    color: '#D8DDE6',
-    cursor: 'pointer',
-    fontSize: '25px',
-    position: 'relative',
-    border: '1px solid #D8DDE6',
-    borderRadius: '4px',
-    height: '23px',
-    width: '23px',
-    textAlign: 'center',
-    lineHeight: '23px',
-    marginLeft: 'auto',
+    float: 'right',
     marginRight: '10px',
+  },
+  packageWithExtensionCloseButton: {
+    marginRight: '10px',
+    marginLeft: 'auto',
   },
 };
 export default styles;

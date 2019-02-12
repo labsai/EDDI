@@ -13,6 +13,7 @@ import { getDate } from '../../utils/DateFormat';
 import { pluginSelector } from '../../../selectors/PluginSelectors';
 import { connect } from 'react-redux';
 import WhiteButton from '../../Assets/Buttons/WhiteButton';
+import SquareXButton from '../../Assets/Buttons/SquareXButton';
 import PluginHelper from '../../utils/helpers/PluginHelper';
 import ModalActionDispatchers from '../../../actions/ModalActionDispatchers';
 
@@ -118,7 +119,11 @@ class Extension extends React.Component<IPrivateProps> {
 
   getBoxStyling() {
     if (this.props.plugin.version === this.props.plugin.currentVersion) {
-      return { ...styles.extensionBox };
+      if (!_.isEmpty(this.props.plugin)) {
+        return { ...styles.extensionBox };
+      } else {
+        return { ...styles.extensionBox, cursor: 'default' };
+      }
     } else {
       return {
         ...styles.extensionBox,
@@ -144,9 +149,10 @@ class Extension extends React.Component<IPrivateProps> {
     return (
       <div style={styles.extensionContainer}>
         {renderIf(!this.props.editDisabled)(() => (
-          <div style={customStyles.closeButton} onClick={this.deleteExtension}>
-            &times;
-          </div>
+          <SquareXButton
+            customStyles={styles.closeButton}
+            onClick={this.deleteExtension}
+          />
         ))}
         <button style={this.getBoxStyling()} onClick={this.openViewJsonModal}>
           <div style={styles.pluginHeader}>
