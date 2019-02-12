@@ -2,7 +2,12 @@ import * as React from 'react';
 import * as renderIf from 'render-if';
 import styles from './Plugin.styles';
 import { Component, compose, pure, setDisplayName } from 'recompose';
-import { IPackage, IPlugin, IPluginTypes } from '../utils/AxiosFunctions';
+import {
+  IPackage,
+  IPlugin,
+  IPluginExtensions,
+  IPluginTypes,
+} from '../utils/AxiosFunctions';
 import { connect } from 'react-redux';
 import * as _ from 'lodash';
 import eddiApiActionDispatchers from '../../actions/EddiApiActionDispatchers';
@@ -17,7 +22,7 @@ import { ModalEnum } from '../utils/ModalEnum';
 
 interface IPublicProps {
   pluginResource: string;
-  pluginType: IPluginTypes;
+  pluginType: IPluginExtensions;
   packagePayload: IPackage;
 }
 

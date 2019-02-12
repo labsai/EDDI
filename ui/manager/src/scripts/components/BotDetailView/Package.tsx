@@ -38,9 +38,9 @@ class Package extends React.Component<IPrivateProps> {
   fetchPlugins(props = this.props) {
     if (
       !_.isUndefined(props.packagePayload) &&
-      _.isUndefined(props.packagePayload.pluginTypes)
+      _.isUndefined(props.packagePayload.packageData)
     ) {
-      eddiApiActionDispatchers.fetchPluginTypesAction(props.packageResource);
+      eddiApiActionDispatchers.fetchPackageDataAction(props.packageResource);
     }
   }
 
@@ -117,12 +117,7 @@ class Package extends React.Component<IPrivateProps> {
                 </button>
               </div>
               <div style={styles.packageContent}>
-                {renderIf(packagePayload.pluginTypes)(() => (
-                  <PluginList
-                    pluginTypes={packagePayload.pluginTypes}
-                    packagePayload={packagePayload}
-                  />
-                ))}
+                <PluginList packagePayload={packagePayload} />
               </div>
             </div>
           ))}

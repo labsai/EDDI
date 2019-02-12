@@ -2,9 +2,11 @@ import * as React from 'react';
 import * as Radium from 'radium';
 import { Component, compose, pure, setDisplayName } from 'recompose';
 import { CSSProperties } from 'react';
-import Plugin from './Plugin';
+import Plugin from '../PackageDetailView/PluginBoxes/Plugin';
 import { IPackage, IPluginTypes } from '../utils/AxiosFunctions';
 import { parsePlugin } from '../utils/helpers/PluginParser';
+import * as _ from 'lodash';
+import * as renderIf from 'render-if';
 
 const styles: CSSProperties = {
   pluginList: {
@@ -18,20 +20,29 @@ const styles: CSSProperties = {
 };
 
 interface IProps {
-  pluginTypes: IPluginTypes[];
   packagePayload: IPackage;
 }
 
 const PluginList: React.StatelessComponent<IProps> = (props: IProps) => {
   return (
-    <div style={styles.pluginList}>
-      {props.pluginTypes.map((plug, key) => (
-        <Plugin
-          key={key}
-          pluginType={plug}
-          pluginResource={plug.config.uri || ''}
-          packagePayload={props.packagePayload}
-        />
+    <div>
+      {renderIf(
+        !_.isEmpty(props.packagePayload.packageData) &&
+          !_.isEmpty(props.packagePayload.packageData.packageExtensions),
+      )(() => (
+        <div style={styles.pluginList}>
+          {props.packagePayload.packageData.packageExtensions.map(
+            (plug, key) => (
+              <Plugin
+                key={key}
+                pluginType={plug}
+                pluginResource={plug.config.uri || ''}
+                editDisabled={true}
+                packagePayload={props.packagePayload}
+              />
+            ),
+          )}
+        </div>
       ))}
     </div>
   );
