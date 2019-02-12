@@ -20,7 +20,11 @@ import ModalActionDispatchers from '../../../actions/ModalActionDispatchers';
 import * as PluginType from '../../utils/EddiTypes';
 import PluginHelper from '../../utils/helpers/PluginHelper';
 import * as Radium from 'radium';
-import { REGULAR_DICTIONARY } from '../../utils/EddiTypes';
+import {
+  CORRECTION,
+  DICTIONARY,
+  REGULAR_DICTIONARY,
+} from '../../utils/EddiTypes';
 
 const customStyles: CSSProperties = {
   extensionList: {
@@ -82,64 +86,36 @@ class PluginWithExtensions extends React.Component<IPrivateProps> {
     this.props.deletePlugin(this.props.pluginType.extensionKey);
   };
 
-  deleteExtension = (extensionKey: number) => {
-    // todo: refactor this
-    /*const newExtensionList = this.props.pluginType.extensions
-      .filter(e => e.extensionKey !== extensionKey)
-      .map((ext, i) => {
-        return { type: ext.type, resource: ext.resource, extensionKey: i };
-      });
-    this.props.updateExtensionsInPlugin(
-      this.props.pluginType.extensionKey,
-      newExtensionList,
-    );*/
-  };
-
-  selectExtensions = (newPluginResourceList: string[]) => {
+  deleteExtension = (extensionKey: number, type: string) => {
     // todo: REFACTOR THIS
-    /*
-    switch (this.props.pluginType.type) {
-      case PluginType.PARSER:
-        const newExtensionList = newPluginResourceList.map((ext, i) => {
-          return {
-            type: PluginType.REGULAR_DICTIONARY,
-            resource: ext,
-            extensionKey: i,
-          };
-        });
-        this.props.updateExtensionsInPlugin(
-          this.props.pluginType.extensionKey,
-          newExtensionList,
-        );
-        return;
-      case PluginType.BEHAVIOR:
-        break;
-      case PluginType.OUTPUT:
-        break;
-      default:
-        return;
+    let dictionaries = [];
+    let corrections = [];
+    if (type.includes(CORRECTION)) {
+      dictionaries = this.props.pluginType.extensions.dictionaries;
+      corrections = this.props.pluginType.extensions.corrections.filter(
+        (c, i) => i !== extensionKey,
+      );
+    } else if (type.includes(DICTIONARY)) {
+      dictionaries = this.props.pluginType.extensions.dictionaries.filter(
+        (d, i) => i !== extensionKey,
+      );
+      corrections = this.props.pluginType.extensions.corrections;
     }
-    const newExtensionList = newPluginResourceList.map((ext, i) => {
-      return {
-        type: PluginType.REGULAR_DICTIONARY,
-        resource: ext,
-        extensionKey: i,
-      };
-    });
-    this.props.updateExtensionsInPlugin(
-      this.props.pluginType.extensionKey,
-      newExtensionList,
-    );*/
+    const plugin: IPluginExtensions = {
+      ...this.props.pluginType,
+      extensions: {
+        dictionaries,
+        corrections,
+      },
+    };
+    this.props.updatePlugin(this.props.pluginType.extensionKey, plugin);
   };
 
   updatePluginResource = (newPluginResourceList: string[]) => {
     // todo: REFACTOR THIS!
-    console.log(newPluginResourceList[0]);
     if (this.props.pluginType.type === PluginType.PARSER) {
       const otherDictionaries = this.props.pluginType.extensions.dictionaries.filter(
-        d => {
-          return { ...d };
-        },
+        d => d.type !== REGULAR_DICTIONARY,
       );
       const newRegularDictionaryList = newPluginResourceList.map(resource => {
         return { type: REGULAR_DICTIONARY, config: { uri: resource } };
@@ -165,7 +141,6 @@ class PluginWithExtensions extends React.Component<IPrivateProps> {
   };
 
   openAddPluginsModal = () => {
-    console.log('test1');
     let extensionList: string[];
     let pluginType;
     if (this.props.pluginType.type === PluginType.PARSER) {
@@ -173,10 +148,11 @@ class PluginWithExtensions extends React.Component<IPrivateProps> {
         this.props.pluginType.config &&
         !_.isEmpty(this.props.pluginType.extensions.dictionaries)
       ) {
-        console.log('WHOPS');
-        extensionList = this.props.pluginType.extensions.dictionaries.map(p => {
-          return p.config.uri;
-        });
+        extensionList = this.props.pluginType.extensions.dictionaries
+          .filter(d => d.config && d.config.uri)
+          .map(resource => {
+            return resource.config.uri;
+          });
       }
       pluginType = PluginType.REGULAR_DICTIONARY;
     } else {
@@ -187,7 +163,6 @@ class PluginWithExtensions extends React.Component<IPrivateProps> {
         ]) ||
         [];
     }
-    console.log('test');
     ModalActionDispatchers.showAddPluginsModal(
       pluginType,
       extensionList,
@@ -197,18 +172,30 @@ class PluginWithExtensions extends React.Component<IPrivateProps> {
 
   updateExtension = (extensionResource: string) => {
     // todo: REFACTOR THIS
-    /*
-    const newExtensionList = this.props.pluginType.extensions.dictionary.map(ext => {
-      return {
-        type: ext.type,
-        config: ext.config,
-        extensionKey: ext.extensionKey,
-      };
-    });
-    this.props.updateExtensionsInPlugin(
-      this.props.pluginType.extensionKey,
-      newExtensionList,
-    );*/
+    console.log('UPDATING');
+    const newExtensionList = this.props.pluginType.extensions.dictionaries.map(
+      ext => {
+        if (
+          ext.config &&
+          Parser.getId(ext.config.uri) === Parser.getId(extensionResource)
+        ) {
+          return {
+            type: ext.type,
+            config: { ...ext.config, uri: extensionResource },
+          };
+        } else {
+          return ext;
+        }
+      },
+    );
+    const plugin: IPluginExtensions = {
+      ...this.props.pluginType,
+      extensions: {
+        dictionaries: newExtensionList,
+        corrections: this.props.pluginType.extensions.corrections,
+      },
+    };
+    this.props.updatePlugin(this.props.pluginType.extensionKey, plugin);
   };
 
   getResource(plugin: IPluginExtensions) {
@@ -264,6 +251,17 @@ class PluginWithExtensions extends React.Component<IPrivateProps> {
             <div>
               <div style={customStyles.extensionList}>
                 {this.props.pluginType.extensions.dictionaries.map((ext, i) => (
+                  <Extension
+                    key={i}
+                    index={i}
+                    pluginType={ext}
+                    deleteExtension={this.deleteExtension}
+                    pluginResource={this.getResource(ext)}
+                    updateExtension={this.updateExtension}
+                    editDisabled={this.props.editDisabled}
+                  />
+                ))}
+                {this.props.pluginType.extensions.corrections.map((ext, i) => (
                   <Extension
                     key={i}
                     index={i}

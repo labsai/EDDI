@@ -72,7 +72,6 @@ class Plugin extends React.Component<IPrivateProps> {
   };
 
   updatePluginResource = (newPluginResourceList: string[]) => {
-    // todo: REFACTOR THIS!
     if (this.props.pluginType.type === PluginType.PARSER) {
       let otherDictionaries = [];
       if (

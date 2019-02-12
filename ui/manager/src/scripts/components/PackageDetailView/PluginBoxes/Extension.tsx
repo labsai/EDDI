@@ -57,7 +57,7 @@ interface IPublicProps {
   index: number;
   pluginResource: string;
   editDisabled: boolean;
-  deleteExtension(extensionKey: number): void;
+  deleteExtension(extensionKey: number, type: string): void;
   updateExtension(extensionResource: string): void;
 }
 
@@ -74,15 +74,15 @@ class Extension extends React.Component<IPrivateProps> {
 
   componentWillReceiveProps(nextProps) {
     if (
-      !_.isEmpty(nextProps) &&
+      !_.isEmpty(nextProps.pluginResource) &&
       nextProps.pluginResource !== this.props.pluginResource
     ) {
-      eddiApiActionDispatchers.fetchPluginAction(this.props.pluginResource);
+      eddiApiActionDispatchers.fetchPluginAction(nextProps.pluginResource);
     }
   }
 
   deleteExtension = () => {
-    this.props.deleteExtension(this.props.index);
+    this.props.deleteExtension(this.props.index, this.props.pluginType.type);
   };
 
   updateVersion = () => {
@@ -96,9 +96,12 @@ class Extension extends React.Component<IPrivateProps> {
 
   getPluginName() {
     if (!_.isEmpty(this.props.plugin)) {
-      return (this.props.plugin && this.props.plugin.name) || 'Dictionary';
+      return (
+        (this.props.plugin && this.props.plugin.name) ||
+        Parser.getPluginName(this.props.pluginType.type, true)
+      );
     } else {
-      return 'Dictionary';
+      return Parser.getPluginName(this.props.pluginType.type, true);
     }
   }
 
