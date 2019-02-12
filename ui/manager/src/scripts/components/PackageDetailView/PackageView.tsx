@@ -88,7 +88,11 @@ class PackageView extends React.Component<IPrivateProps, IState> {
   openEditJsonModal = () => {
     ModalActionDispatchers.showEditJsonModal(
       this.props.packagePayload.resource,
-      JSON.stringify(this.props.packagePayload.packageData, null, '\t'),
+      JSON.stringify(
+        { packageExtensions: this.state.selectedPlugins },
+        null,
+        '\t',
+      ),
     );
   };
 
@@ -146,7 +150,7 @@ class PackageView extends React.Component<IPrivateProps, IState> {
       .map((plugin, i) => ({
         type: plugin.type,
         extensions: plugin.extensions,
-        config: { ...plugin.config, uri: plugin.config.uri },
+        config: plugin.config,
         extensionKey: i,
       }));
     this.setState({
