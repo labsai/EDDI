@@ -166,15 +166,15 @@ class Extension extends React.Component<IPrivateProps> {
             </div>
           </div>
           <div style={styles.pluginDate}>
+            {Parser.getExtensionType(this.props.pluginType.type)}
+          </div>
+          <div style={styles.pluginDate}>
             {PluginHelper.getLastModified(
               this.props.pluginType.type,
               this.props.plugin,
               true,
               <br />,
             )}
-          </div>
-          <div style={styles.pluginDate}>
-            {Parser.getExtensionType(this.props.pluginType.type)}
           </div>
         </button>
         {renderIf(!isCurrentVersion && !this.props.editDisabled)(() => (
