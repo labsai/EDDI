@@ -1,6 +1,6 @@
 import * as _ from 'lodash';
 import Parser from '../Parser';
-import { IPlugin } from '../AxiosFunctions';
+import { IPlugin, IPluginExtensions } from '../AxiosFunctions';
 import { IOptions } from '../../PackageDetailView/PackageView';
 import { getDate } from '../DateFormat';
 import { ReactDOM } from 'react';
@@ -45,5 +45,12 @@ export default class PluginHelper {
     } else {
       return '';
     }
+  }
+
+  static getResource(plugin: IPluginExtensions) {
+    if (plugin.config) {
+      return plugin.config.uri;
+    }
+    return null;
   }
 }

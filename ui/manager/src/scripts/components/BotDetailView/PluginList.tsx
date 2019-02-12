@@ -3,8 +3,7 @@ import * as Radium from 'radium';
 import { Component, compose, pure, setDisplayName } from 'recompose';
 import { CSSProperties } from 'react';
 import Plugin from '../PackageDetailView/PluginBoxes/Plugin';
-import { IPackage, IPluginTypes } from '../utils/AxiosFunctions';
-import { parsePlugin } from '../utils/helpers/PluginParser';
+import { IPackage } from '../utils/AxiosFunctions';
 import * as _ from 'lodash';
 import * as renderIf from 'render-if';
 

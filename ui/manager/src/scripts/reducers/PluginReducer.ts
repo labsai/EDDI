@@ -9,9 +9,7 @@ import {
   FETCH_PLUGINS,
   FETCH_PLUGINS_SUCCESS,
   FETCH_PLUGINS_FAILED,
-  FETCH_BOTS_USING_PACKAGE_SUCCESS,
   FETCH_PACKAGES_USING_PLUGIN_SUCCESS,
-  UPDATE_PACKAGE_SUCCESS,
   UPDATE_PLUGIN_SUCCESS,
   CREATE_NEW_PLUGIN_SUCCESS,
 } from '../actions/EddiApiActionTypes';
@@ -21,23 +19,14 @@ import {
   IFetchPluginSuccessAction,
   IFetchDefaultPluginTypesFailedAction,
   IFetchDefaultPluginTypesSuccessAction,
-  IFetchPackageSuccessAction,
   IFetchPluginsSuccessAction,
-  IFetchPackageFailedAction,
   IFetchPluginsFailedAction,
-  IFetchBotsUsingPackageSuccessAction,
-  IFetchPackagesUsingPluginAction,
   IFetchPackagesUsingPluginSuccessAction,
-  IUpdatePackageSuccessAction,
   IUpdatePluginSuccessAction,
   ICreateNewPluginSuccessAction,
-  IFetchPackagesSuccessAction,
-  IFetchPluginsAction,
 } from '../actions/EddiApiActions';
 import {
-  getPluginTypes,
   IDefaultPluginTypes,
-  IPackage,
   IPlugin,
 } from '../components/utils/AxiosFunctions';
 import * as _ from 'lodash';

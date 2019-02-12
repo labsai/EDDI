@@ -83,6 +83,7 @@ export async function getBot(botResourceOrId: string): Promise<IBot> {
     return await getCurrentBot(botResourceOrId);
   }
 }
+
 export async function getSpecificBot(botResource: string): Promise<IBot> {
   try {
     const id = Parser.getId(botResource);
@@ -320,7 +321,6 @@ export interface IBotDataResponse {
 export interface IPackage extends IDetailedDescriptor {
   updatablePlugins?: string[];
   packageData?: IPlugins;
-  pluginTypes?: IPluginTypes[];
   usedByBots?: string[];
 }
 
@@ -346,7 +346,6 @@ export async function getPackage(resource: string): Promise<IPackage> {
     const descriptor = await getDescriptor(id, version);
     const packageData: IPlugins = await getPackageData(resource);
     const currentVersion = await getCurrentVersion(resource);
-    const pluginTypes = await getPluginTypes(resource);
     return {
       id,
       version,
@@ -357,7 +356,6 @@ export async function getPackage(resource: string): Promise<IPackage> {
       resource: descriptor.resource,
       createdOn: descriptor.createdOn,
       packageData,
-      pluginTypes,
     };
   } catch (err) {
     console.error(`Failed to get package. Error: ${err.message}`);
@@ -371,9 +369,6 @@ export async function getCurrentPackage(id: string): Promise<IPackage> {
       `${await getAPIUrl()}/packagestore/packages/${id}/currentversion`,
     )).data;
     const descriptor = await getDescriptor(id, version);
-    const pluginTypes: IPluginTypes[] = await getPluginTypes(
-      descriptor.resource,
-    );
     return {
       id,
       version,
@@ -383,7 +378,6 @@ export async function getCurrentPackage(id: string): Promise<IPackage> {
       description: descriptor.description,
       resource: descriptor.resource,
       createdOn: descriptor.createdOn,
-      pluginTypes,
     };
   } catch (err) {
     console.error(`Failed to get current package. Error: ${err.message}`);
@@ -716,31 +710,6 @@ export async function getAllDefaultPluginTypes(): Promise<
     throw err;
   }
 }
-
-export interface IPluginTypes {
-  type: string;
-  extensions?: IPluginTypes[];
-  config: { uri: string };
-}
-
-export const getPluginTypes: (
-  resource: string,
-) => Promise<IPluginTypes[]> = async resource => {
-  try {
-    const res: IPluginsResponse = await axios.get(
-      `${await getAPIUrl()}/packagestore/packages/${Parser.getIdAndVersion(
-        resource,
-      )}`,
-    );
-    if (!res.data) {
-      return [];
-    } else {
-      return null;
-    }
-  } catch (e) {
-    console.error(e);
-  }
-};
 
 export interface IPluginExtension {
   type: string;

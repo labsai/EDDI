@@ -16,8 +16,6 @@ import {
   watchUpdatePackage,
   watchUpdateDescriptor,
   watchFetchCurrentPackage,
-  watchFetchPluginTypes,
-  watchUpdatePluginType,
   watchFetchBotsUsingPackage,
   watchFetchPackagesUsingPlugin,
   watchUpdateJsonData,
@@ -49,8 +47,6 @@ function* root() {
   yield fork(watchUpdatePackage);
   yield fork(watchFetchPackageData);
   yield fork(watchUpdateDescriptor);
-  yield fork(watchFetchPluginTypes);
-  yield fork(watchUpdatePluginType);
   yield fork(watchFetchBotsUsingPackage);
   yield fork(watchFetchPackagesUsingPlugin);
   yield fork(watchUpdateJsonData);

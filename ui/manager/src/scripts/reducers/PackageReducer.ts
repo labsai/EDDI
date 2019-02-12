@@ -1,5 +1,5 @@
 import { Reducer, Action } from 'redux';
-import { IBot, IPackage, IPlugin } from '../components/utils/AxiosFunctions';
+import { IPackage } from '../components/utils/AxiosFunctions';
 import {
   FETCH_PACKAGEDATA,
   FETCH_PACKAGEDATA_FAILED,
@@ -14,8 +14,6 @@ import {
   FETCH_PACKAGES_FAILED,
   FETCH_CURRENT_PACKAGE,
   UPDATE_DESCRIPTOR_SUCCESS,
-  FETCH_PLUGIN_TYPES_IN_PACKAGE_SUCCESS,
-  UPDATE_PLUGIN_TYPE_IN_PACKAGE_SUCCESS,
   FETCH_BOTS_USING_PACKAGE_SUCCESS,
   FETCH_PACKAGES_USING_PLUGIN_SUCCESS,
   UPDATE_PACKAGES,
@@ -35,19 +33,14 @@ import {
   IFetchPackagesSuccessAction,
   IFetchPackagesFailedAction,
   IUpdateDescriptorSuccessAction,
-  IUpdatePluginTypeSuccessAction,
-  IFetchPluginTypesSuccessAction,
   IFetchBotsUsingPackageSuccessAction,
   IFetchPackagesUsingPluginSuccessAction,
   IUpdatePackagesSuccessAction,
   IUpdatePackagesFailedAction,
-  IFetchBotsSuccessAction,
-  ICreateNewPluginSuccessAction,
   ICreateNewPackageSuccessAction,
   IAddNewPackageToBotsSuccessAction,
 } from '../actions/EddiApiActions';
 import * as _ from 'lodash';
-import { parsePluginExtensions } from '../components/utils/helpers/PluginParser';
 
 export type IPackageReducer = Reducer<IPackageState>;
 
@@ -156,7 +149,6 @@ const PackageReducer: IPackageReducer = (
             resource: pkg.resource,
             version: pkg.version,
             currentVersion: pkg.currentVersion,
-            pluginTypes: pkg.pluginTypes,
             packageData: pkg.packageData,
             usedByBots: pkg.usedByBots,
             name: newPackage.name,
@@ -330,51 +322,6 @@ const PackageReducer: IPackageReducer = (
                 return pack;
               }
             });
-          },
-        },
-      });
-
-    case FETCH_PLUGIN_TYPES_IN_PACKAGE_SUCCESS:
-      return update(state, {
-        packages: {
-          $apply: (packages: IPackage[]) => {
-            return packages.map(pack => {
-              if (
-                pack.resource ===
-                (action as IFetchPluginTypesSuccessAction).packageResource
-              ) {
-                return update(pack, {
-                  pluginTypes: {
-                    $set: (action as IFetchPluginTypesSuccessAction)
-                      .pluginTypes,
-                  },
-                });
-              } else {
-                return pack;
-              }
-            });
-          },
-        },
-      });
-
-    case UPDATE_PLUGIN_TYPE_IN_PACKAGE_SUCCESS:
-      return update(state, {
-        packages: {
-          $apply: (packages: IPackage[]) => {
-            const updatedPackage = (action as IUpdatePluginTypeSuccessAction)
-              .packagePayload;
-            const newPackageList = packages.map(pack => {
-              if (pack.id === updatedPackage.id) {
-                return update(pack, {
-                  currentVersion: { $set: updatedPackage.version },
-                  updatablePlugins: { $set: [] },
-                });
-              } else {
-                return pack;
-              }
-            });
-            newPackageList.push(updatedPackage);
-            return newPackageList;
           },
         },
       });

@@ -10,14 +10,11 @@ import PluginSelect from './DropDownComponents/PluginSelect';
 import * as _ from 'lodash';
 import {
   IDefaultPluginTypes,
-  IDetailedDescriptor,
   IPackage,
   IPluginExtensions,
 } from '../utils/AxiosFunctions';
-import { ModalEnum } from '../utils/ModalEnum';
 import eddiApiActionDispatchers from '../../actions/EddiApiActionDispatchers';
 import { connect } from 'react-redux';
-import { pluginTypesSelector } from '../../selectors/PackageSelectors';
 import { defaultPluginTypesSelector } from '../../selectors/PluginSelectors';
 import BlueButton from '../Assets/Buttons/BlueButton';
 import WhiteButton from '../Assets/Buttons/WhiteButton';
@@ -26,6 +23,7 @@ import VersionSelectComponent from '../Assets/VersionSelectComponent';
 import { history } from '../../history';
 import Parser from '../utils/Parser';
 import { hasExtensions } from '../utils/helpers/PluginParser';
+import PluginHelper from '../utils/helpers/PluginHelper';
 
 export interface IOptions extends IPluginExtensions {
   extensionKey: number;
@@ -36,16 +34,12 @@ interface IPublicProps {
 }
 
 interface IPrivateProps extends IPublicProps {
-  error: Error;
-  isLoading: boolean;
-  data: string;
   defaultPluginTypes: IDefaultPluginTypes[];
-  descriptor: IDetailedDescriptor;
 }
 
 interface IState {
   selectedPlugins: IOptions[];
-  initialSelectedPlugins: IOptions[];
+  initialSelectedPluginState: IOptions[];
   defaultPluginTypes: IDefaultPluginTypes[];
   extensionKey: number;
 }
@@ -58,7 +52,7 @@ class PackageView extends React.Component<IPrivateProps, IState> {
     super(props);
     this.state = {
       selectedPlugins: [],
-      initialSelectedPlugins: [],
+      initialSelectedPluginState: [],
       defaultPluginTypes: [],
       extensionKey: 0,
     };
@@ -102,7 +96,7 @@ class PackageView extends React.Component<IPrivateProps, IState> {
     if (_.isUndefined(props.packagePayload.packageData)) {
       return;
     }
-    const initialSelectedPlugins = props.packagePayload.packageData.packageExtensions.map(
+    const initialSelectedPluginState = props.packagePayload.packageData.packageExtensions.map(
       (o, i) => ({
         ...o,
         extensionKey: i,
@@ -110,8 +104,8 @@ class PackageView extends React.Component<IPrivateProps, IState> {
     );
     if (!_.isUndefined(props.packagePayload.packageData)) {
       this.setState({
-        selectedPlugins: initialSelectedPlugins,
-        initialSelectedPlugins: initialSelectedPlugins,
+        selectedPlugins: initialSelectedPluginState,
+        initialSelectedPluginState: initialSelectedPluginState,
         extensionKey: props.packagePayload.packageData.packageExtensions.length,
       });
     }
@@ -178,7 +172,7 @@ class PackageView extends React.Component<IPrivateProps, IState> {
   unsavedChanges(): boolean {
     return !_.isEqual(
       JSON.stringify(this.state.selectedPlugins),
-      JSON.stringify(this.state.initialSelectedPlugins),
+      JSON.stringify(this.state.initialSelectedPluginState),
     );
   }
 
@@ -197,13 +191,6 @@ class PackageView extends React.Component<IPrivateProps, IState> {
       );
     }
   };
-
-  getResource(plugin: IPluginExtensions) {
-    if (plugin.config) {
-      return plugin.config.uri;
-    }
-    return null;
-  }
 
   render() {
     const isCurrentVersion =
@@ -267,7 +254,7 @@ class PackageView extends React.Component<IPrivateProps, IState> {
                 <PluginWithExtension
                   key={key}
                   pluginType={ext}
-                  pluginResource={this.getResource(ext)}
+                  pluginResource={PluginHelper.getResource(ext)}
                   deletePlugin={this.deletePlugin}
                   updatePlugin={this.updatePlugin}
                   editDisabled={!isCurrentVersion}
@@ -281,7 +268,7 @@ class PackageView extends React.Component<IPrivateProps, IState> {
                     key={key}
                     pluginType={ext}
                     deletePlugin={this.deletePlugin}
-                    pluginResource={this.getResource(ext)}
+                    pluginResource={PluginHelper.getResource(ext)}
                     updatePlugin={this.updatePlugin}
                     editDisabled={!isCurrentVersion}
                   />
@@ -312,11 +299,8 @@ class PackageView extends React.Component<IPrivateProps, IState> {
 const ComposedPackageView: Component<IPublicProps> = compose<
   IPrivateProps,
   IPublicProps
->(
-  pure,
-  connect(pluginTypesSelector),
-  connect(defaultPluginTypesSelector),
-  setDisplayName('PackageView'),
-)(PackageView);
+>(pure, connect(defaultPluginTypesSelector), setDisplayName('PackageView'))(
+  PackageView,
+);
 
 export default ComposedPackageView;

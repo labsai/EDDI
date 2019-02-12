@@ -7,19 +7,11 @@ import * as _ from 'lodash';
 import { CSSProperties } from 'react';
 import styles from './Plugin.styles';
 import Extension from './Extension';
-import {
-  IDefaultPluginTypes,
-  IPlugin,
-  IPluginExtensions,
-  IPluginTypes,
-} from '../../utils/AxiosFunctions';
+import { IPlugin, IPluginExtensions } from '../../utils/AxiosFunctions';
 import eddiApiActionDispatchers from '../../../actions/EddiApiActionDispatchers';
-import { getDate } from '../../utils/DateFormat';
-import { ModalEnum } from '../../utils/ModalEnum';
 import ModalActionDispatchers from '../../../actions/ModalActionDispatchers';
 import * as PluginType from '../../utils/EddiTypes';
 import PluginHelper from '../../utils/helpers/PluginHelper';
-import * as Radium from 'radium';
 import SquareXButton from '../../Assets/Buttons/SquareXButton';
 import {
   CORRECTION,
@@ -88,7 +80,6 @@ class PluginWithExtensions extends React.Component<IPrivateProps> {
   };
 
   deleteExtension = (extensionKey: number, type: string) => {
-    // todo: REFACTOR THIS
     let dictionaries = [];
     let corrections = [];
     if (type.includes(CORRECTION)) {
@@ -113,7 +104,6 @@ class PluginWithExtensions extends React.Component<IPrivateProps> {
   };
 
   updatePluginResource = (newPluginResourceList: string[]) => {
-    // todo: REFACTOR THIS!
     if (this.props.pluginType.type === PluginType.PARSER) {
       const otherDictionaries = this.props.pluginType.extensions.dictionaries.filter(
         d => d.type !== REGULAR_DICTIONARY,
@@ -172,7 +162,6 @@ class PluginWithExtensions extends React.Component<IPrivateProps> {
   };
 
   updateExtension = (extensionResource: string) => {
-    // todo: REFACTOR THIS
     const newExtensionList = this.props.pluginType.extensions.dictionaries.map(
       ext => {
         if (

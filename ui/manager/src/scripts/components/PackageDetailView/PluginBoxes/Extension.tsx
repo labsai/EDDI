@@ -1,57 +1,17 @@
 import * as React from 'react';
-import * as Radium from 'radium';
 import { Component, compose, pure, setDisplayName } from 'recompose';
-import { IOptions } from '../PackageView';
 import Parser from '../../utils/Parser';
 import * as renderIf from 'render-if';
 import * as _ from 'lodash';
-import { CSSProperties } from 'react';
 import styles from './Plugin.styles';
 import { IPlugin, IPluginExtensions } from '../../utils/AxiosFunctions';
 import eddiApiActionDispatchers from '../../../actions/EddiApiActionDispatchers';
-import { getDate } from '../../utils/DateFormat';
 import { pluginSelector } from '../../../selectors/PluginSelectors';
 import { connect } from 'react-redux';
 import WhiteButton from '../../Assets/Buttons/WhiteButton';
 import SquareXButton from '../../Assets/Buttons/SquareXButton';
 import PluginHelper from '../../utils/helpers/PluginHelper';
 import ModalActionDispatchers from '../../../actions/ModalActionDispatchers';
-
-const customStyles: CSSProperties = {
-  closeButton: {
-    ':focus': {
-      color: '#FF5976',
-      border: '1px solid #FF5976',
-    },
-    ':hover': {
-      color: '#FF5976',
-      border: '1px solid #FF5976',
-    },
-    backgroundColor: '#FFF',
-    color: '#D8DDE6',
-    cursor: 'pointer',
-    float: 'right',
-    fontSize: '25px',
-    position: 'relative',
-    right: '8px',
-    border: '1px solid #D8DDE6',
-    borderRadius: '4px',
-    height: '23px',
-    width: '23px',
-    textAlign: 'center',
-    lineHeight: '23px',
-  },
-  pluginList: {
-    display: 'grid',
-    marginTop: '20px',
-    marginLeft: '5px',
-    marginRight: '5px',
-    gridGap: '20px',
-    gridTemplateColumns: 'repeat(auto-fill, minmax(252px, 1fr))',
-    minHeight: '5px',
-    minWidth: '5px',
-  },
-};
 
 interface IPublicProps {
   pluginType: IPluginExtensions;

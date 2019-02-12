@@ -35,12 +35,6 @@ import {
   UPDATE_DESCRIPTOR_FAILED,
   UPDATE_DESCRIPTOR_SUCCESS,
   FETCH_CURRENT_PACKAGE,
-  UPDATE_PLUGIN_TYPE_IN_PACKAGE,
-  UPDATE_PLUGIN_TYPE_IN_PACKAGE_SUCCESS,
-  UPDATE_PLUGIN_TYPE_IN_PACKAGE_FAILED,
-  FETCH_PLUGIN_TYPES_IN_PACKAGE,
-  FETCH_PLUGIN_TYPES_IN_PACKAGE_SUCCESS,
-  FETCH_PLUGIN_TYPES_IN_PACKAGE_FAILED,
   FETCH_PACKAGES,
   FETCH_PACKAGES_SUCCESS,
   FETCH_PACKAGES_FAILED,
@@ -77,7 +71,6 @@ import {
   FETCH_BOT_DEPLOYMENT_STATUS_SUCCESS,
   FETCH_BOT_DEPLOYMENT_STATUS_FAILED,
   FETCH_CURRENT_BOT,
-  FETCH_BOT_DETAILS,
   CREATE_NEW_BOT,
   CREATE_NEW_BOT_FAILED,
   CREATE_NEW_PACKAGE,
@@ -93,8 +86,6 @@ import {
   IPackage,
   IPlugin,
   IPluginsResponse,
-  IPluginTypes,
-  undeployBot,
 } from '../components/utils/AxiosFunctions';
 
 export interface IFetchBotsAction extends Action {
@@ -664,89 +655,6 @@ export function fetchPackageDataFailedAction(
   return {
     error,
     type: FETCH_PACKAGEDATA_FAILED,
-  };
-}
-
-export interface IFetchPluginTypesAction extends Action {
-  packageResource: string;
-}
-
-export function fetchPluginTypesAction(
-  packageResource: string,
-): IFetchPluginTypesAction {
-  return {
-    packageResource,
-    type: FETCH_PLUGIN_TYPES_IN_PACKAGE,
-  };
-}
-
-export interface IFetchPluginTypesSuccessAction extends Action {
-  packageResource: string;
-  pluginTypes: IPluginTypes[];
-}
-export function fetchPluginTypesSuccessAction(
-  packageResource: string,
-  pluginTypes: IPluginTypes[],
-): IFetchPluginTypesSuccessAction {
-  return {
-    packageResource,
-    pluginTypes,
-    type: FETCH_PLUGIN_TYPES_IN_PACKAGE_SUCCESS,
-  };
-}
-
-export interface IFetchPluginTypesFailedAction extends Action {
-  error: Error;
-}
-export function fetchPluginTypesFailedAction(
-  error: Error,
-): IFetchPluginTypesFailedAction {
-  return {
-    error,
-    type: FETCH_PLUGIN_TYPES_IN_PACKAGE_FAILED,
-  };
-}
-
-export interface IUpdatePluginTypeAction extends Action {
-  packageResource: string;
-  pluginTypes: object;
-}
-
-export function updatePluginTypeAction(
-  resource: string,
-  pluginType: object,
-): IUpdatePluginTypeAction {
-  return {
-    packageResource: resource,
-    pluginTypes: pluginType,
-    type: UPDATE_PLUGIN_TYPE_IN_PACKAGE,
-  };
-}
-
-export interface IUpdatePluginTypeSuccessAction extends Action {
-  packageResource: string;
-  packagePayload: IPackage;
-}
-export function updatePluginTypeSuccessAction(
-  resource: string,
-  packagePayload: IPackage,
-): IUpdatePluginTypeSuccessAction {
-  return {
-    packageResource: resource,
-    packagePayload,
-    type: UPDATE_PLUGIN_TYPE_IN_PACKAGE_SUCCESS,
-  };
-}
-
-export interface IUpdatePluginTypeFailedAction extends Action {
-  error: Error;
-}
-export function updatePluginTypeFailedAction(
-  error: Error,
-): IUpdatePluginTypeFailedAction {
-  return {
-    error,
-    type: UPDATE_PLUGIN_TYPE_IN_PACKAGE_FAILED,
   };
 }
 

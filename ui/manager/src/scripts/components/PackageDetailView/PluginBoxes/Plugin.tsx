@@ -170,9 +170,9 @@ class Plugin extends React.Component<IPrivateProps> {
     const { plugin } = this.props;
     const isCurrentVersion: boolean =
       plugin && plugin.version === plugin.currentVersion;
-    let pluginLatestVersion = 'v01';
+    let pluginCurrentVersion = 'v01';
     if (!isCurrentVersion) {
-      pluginLatestVersion = Parser.getVersionString(plugin.currentVersion);
+      pluginCurrentVersion = Parser.getVersionString(plugin.currentVersion);
     }
     return (
       <div style={styles.pluginContainer}>
@@ -212,7 +212,7 @@ class Plugin extends React.Component<IPrivateProps> {
         {renderIf(!isCurrentVersion && !this.props.editDisabled)(() => (
           <WhiteButton
             onClick={this.updateVersion}
-            text={`Update to ${pluginLatestVersion}`}
+            text={`Update to ${pluginCurrentVersion}`}
             customStyles={styles.updateAvailableButton}
           />
         ))}
