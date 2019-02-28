@@ -63,9 +63,11 @@ public abstract class RestVersionInfo<T> implements IRestVersionInfo {
         }
     }
 
-    protected Response create(T obj) {
+    protected Response create(T document) {
+        RuntimeUtilities.checkNotNull(document, "document");
+
         try {
-            IResourceStore.IResourceId resourceId = resourceStore.create(obj);
+            IResourceStore.IResourceId resourceId = resourceStore.create(document);
             URI createdUri = RestUtilities.createURI(resourceURI, resourceId.getId(), versionQueryParam, resourceId.getVersion());
             return Response.created(createdUri).location(createdUri).build();
         } catch (Exception e) {

@@ -16,7 +16,7 @@
         <dependency>
             <groupId>org.jboss.resteasy</groupId>
             <artifactId>resteasy-cache-core</artifactId>
-            <version>3.6.3.Final</version>
+            <version>3.6.2.Final</version>
             <exclusions>
                 <exclusion>
                     <groupId>org.infinispan</groupId>
