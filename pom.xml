@@ -62,6 +62,8 @@
         <module>normalizer-definition</module>
         <module>normalizer-impl</module>
         <module>basemodels</module>
+        <module>email-plugin-definition</module>
+        <module>email-plugin-impl</module>
     </modules>
 
     <build>
