@@ -1,5 +1,6 @@
 package ai.labs.memory;
 
+import ai.labs.memory.model.Data;
 import org.junit.After;
 import org.junit.Assert;
 import org.junit.Before;
@@ -14,23 +15,23 @@ public class ConversationMemoryTest {
     private ConversationMemory memory;
 
     @Before
-    public void setUp() throws Exception {
+    public void setUp() {
         memory = new ConversationMemory("", 0);
     }
 
     @After
-    public void tearDown() throws Exception {
+    public void tearDown() {
     }
 
     @Test
-    public void testInitialization() throws Exception {
+    public void testInitialization() {
         //assert
         Assert.assertNotNull(memory.getCurrentStep());
         Assert.assertEquals(0, memory.getPreviousSteps().size());
     }
 
     @Test
-    public void testQueryOrder() throws Exception {
+    public void testQueryOrder() {
         // setup
         IConversationMemory.IWritableConversationStep step1 = memory.getCurrentStep();
         IConversationMemory.IConversationStep step2 = memory.startNextStep();
@@ -80,7 +81,7 @@ public class ConversationMemoryTest {
      } */
 
     @Test
-    public void testStartNextStep() throws Exception {
+    public void testStartNextStep() {
         //setup
         IConversationMemory.IWritableConversationStep entry = memory.getCurrentStep();
 
@@ -91,8 +92,8 @@ public class ConversationMemoryTest {
         memory.startNextStep();
 
         //assert
-        Assert.assertTrue(memory.size() == 2);
-        Assert.assertTrue(memory.getPreviousSteps().size() == 1);
+        Assert.assertEquals(2, memory.size());
+        Assert.assertEquals(1, memory.getPreviousSteps().size());
         Assert.assertSame(entry, memory.getPreviousSteps().get(0));
     }
 

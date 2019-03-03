@@ -1,6 +1,8 @@
 package ai.labs.memory;
 
-import ai.labs.memory.model.ConversationState;
+import ai.labs.memory.model.ConversationOutput;
+import ai.labs.memory.model.ConversationProperties;
+import ai.labs.models.ConversationState;
 
 import java.util.ArrayList;
 import java.util.LinkedList;
@@ -12,26 +14,34 @@ import java.util.stream.Collectors;
  * @author ginccc
  */
 public class ConversationMemory implements IConversationMemory {
-    private String id;
+    private String conversationId;
     private String botId;
     private Integer botVersion;
+    private String userId;
 
     private IWritableConversationStep currentStep;
     private Stack<IConversationStep> previousSteps;
     private Stack<IConversationStep> redoCache = new Stack<>();
-    private IConversationMemory.IConversationContext context;
+    private List<ConversationOutput> conversationOutputs = new LinkedList<>();
+    private IConversationProperties conversationProperties = new ConversationProperties(this);
     private ConversationState conversationState;
 
-    ConversationMemory(String id, String botId, Integer botVersion) {
+    public ConversationMemory(String conversationId, String botId, Integer botVersion, String userId) {
+        this(botId, botVersion, userId);
+        this.conversationId = conversationId;
+    }
+
+    public ConversationMemory(String botId, Integer botVersion, String userId) {
         this(botId, botVersion);
-        this.id = id;
+        this.userId = userId;
     }
 
     public ConversationMemory(String botId, Integer botVersion) {
         this.botId = botId;
         this.botVersion = botVersion;
-        this.context = new ConversationContext();
-        this.currentStep = new ConversationStep(context);
+        ConversationOutput conversationOutput = new ConversationOutput();
+        this.conversationOutputs.add(conversationOutput);
+        this.currentStep = new ConversationStep(conversationOutput);
         this.previousSteps = new Stack<>();
     }
 
@@ -54,9 +64,17 @@ public class ConversationMemory implements IConversationMemory {
     }
 
     public IConversationStep startNextStep() {
+        return startNextStep(null);
+    }
+
+    IConversationStep startNextStep(ConversationOutput conversationOutput) {
         ((ConversationStep) currentStep).conversationStepNumber = previousSteps.size();
         previousSteps.push(currentStep);
-        currentStep = new ConversationStep(context);
+        if (conversationOutput == null) {
+            conversationOutput = new ConversationOutput();
+        }
+        conversationOutputs.add(conversationOutput);
+        currentStep = new ConversationStep(conversationOutput);
         return currentStep;
     }
 
@@ -96,11 +114,6 @@ public class ConversationMemory implements IConversationMemory {
     }
 
     @Override
-    public void setCurrentContext(String context) {
-        this.context.setContext(context);
-    }
-
-    @Override
     public ConversationState getConversationState() {
         return conversationState;
     }
@@ -110,8 +123,8 @@ public class ConversationMemory implements IConversationMemory {
     }
 
     @Override
-    public String getId() {
-        return id;
+    public String getConversationId() {
+        return conversationId;
     }
 
     @Override
@@ -120,8 +133,22 @@ public class ConversationMemory implements IConversationMemory {
     }
 
     @Override
+    public String getUserId() {
+        return this.userId;
+    }
+
+    @Override
     public Integer getBotVersion() {
         return botVersion;
+    }
+
+    public List<ConversationOutput> getConversationOutputs() {
+        return conversationOutputs;
+    }
+
+    @Override
+    public IConversationProperties getConversationProperties() {
+        return conversationProperties;
     }
 
     @Override
@@ -189,46 +216,6 @@ public class ConversationMemory implements IConversationMemory {
 
         public void add(IConversationStep step) {
             this.conversationSteps.add(step);
-        }
-    }
-
-    public static class ConversationContext implements IConversationContext {
-        private String context;
-
-        ConversationContext() {
-            this.context = "";
-        }
-
-        ConversationContext(String context) {
-            this.context = context;
-        }
-
-        ConversationContext(IConversationContext context) {
-            this.context = context.getContext();
-        }
-
-        public String getContext() {
-            return context;
-        }
-
-        public void setContext(String context) {
-            this.context = context;
-        }
-
-        @Override
-        public boolean equals(Object o) {
-            if (this == o) return true;
-            if (o == null || getClass() != o.getClass()) return false;
-
-            ConversationContext that = (ConversationContext) o;
-
-            return context != null ? context.equals(that.context) : that.context == null;
-
-        }
-
-        @Override
-        public int hashCode() {
-            return context != null ? context.hashCode() : 0;
         }
     }
 }

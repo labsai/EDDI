@@ -3,6 +3,7 @@ package ai.labs.normalizer.impl;
 /**
  * @author ginccc
  */
+@Deprecated
 public interface InputNormalizer {
     String DEFAULT_DEFINED_CHARS =
             "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz <=>#€+&.,:;!?1234567890äÄüÜöÖßéáß";

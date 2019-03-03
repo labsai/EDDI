@@ -1,10 +1,14 @@
 package ai.labs.resources.rest.http.model;
 
+import ai.labs.models.PropertyInstruction;
 import lombok.Getter;
 import lombok.Setter;
+
+import java.util.List;
 
 @Getter
 @Setter
 public class PostResponse {
-    private QuickRepliesBuildingInstruction qrBuildInstruction;
+    private List<PropertyInstruction> propertyInstructions;
+    private List<QuickRepliesBuildingInstruction> qrBuildInstructions;
 }

@@ -140,7 +140,7 @@ public class MongoResourceStorage<T> implements IResourceStorage<T> {
         Document object = new Document();
         object.put(ID_FIELD, query);
 
-        if (historyCollection.count(object) == 0) {
+        if (historyCollection.countDocuments(object) == 0) {
             return null;
         }
 

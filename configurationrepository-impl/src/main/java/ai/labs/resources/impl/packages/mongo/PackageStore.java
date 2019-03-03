@@ -9,11 +9,11 @@ import ai.labs.resources.rest.packages.IPackageStore;
 import ai.labs.resources.rest.packages.model.PackageConfiguration;
 import ai.labs.serialization.IDocumentBuilder;
 import ai.labs.utilities.RuntimeUtilities;
+import ai.labs.utilities.URIUtilities;
 import com.mongodb.client.MongoDatabase;
 import org.bson.Document;
 
 import javax.inject.Inject;
-import java.net.URI;
 import java.util.LinkedList;
 import java.util.List;
 
@@ -68,18 +68,45 @@ public class PackageStore implements IPackageStore {
     }
 
     @Override
-    public List<DocumentDescriptor> getPackageDescriptorsContainingResource(URI resourceURI)
+    public List<DocumentDescriptor> getPackageDescriptorsContainingResource(String resourceURI,
+                                                                            boolean includePreviousVersions)
             throws ResourceStoreException, ResourceNotFoundException {
 
         List<DocumentDescriptor> ret = new LinkedList<>();
-        List<IResourceId> packageIdsContainingPackageUri =
-                packageResourceStore.getPackageDescriptorsContainingResource(resourceURI);
 
-        for (IResourceId packageId : packageIdsContainingPackageUri) {
-            DocumentDescriptor documentDescriptor =
-                    documentDescriptorStore.readDescriptor(packageId.getId(), packageId.getVersion());
-            ret.add(documentDescriptor);
-        }
+        int startIndexVersion = resourceURI.lastIndexOf("=") + 1;
+        Integer version = Integer.parseInt(resourceURI.substring(startIndexVersion));
+        String resourceURIPart = resourceURI.substring(0, startIndexVersion);
+
+        do {
+            resourceURI = resourceURIPart + version;
+            List<IResourceId> packagesContainingResource =
+                    packageResourceStore.getPackageDescriptorsContainingResource(resourceURI);
+            for (IResourceId packageId : packagesContainingResource) {
+
+                if (packageId.getVersion() < getCurrentResourceId(packageId.getId()).getVersion()) {
+                    continue;
+                }
+
+                boolean alreadyContainsResource = !ret.stream().filter(
+                        resource ->
+                        {
+                            String id = URIUtilities.extractResourceId(resource.getResource()).getId();
+                            return id.equals(packageId.getId());
+                        }).
+                        findFirst().isEmpty();
+
+                if (alreadyContainsResource) {
+                    continue;
+                }
+
+                ret.add(documentDescriptorStore.readDescriptor(
+                        packageId.getId(),
+                        packageId.getVersion()));
+            }
+
+            version--;
+        } while (includePreviousVersions && version >= 1);
 
         return ret;
     }
@@ -89,7 +116,7 @@ public class PackageStore implements IPackageStore {
             super(database, collectionName, documentBuilder, documentType);
         }
 
-        List<IResourceId> getPackageDescriptorsContainingResource(URI resourceURI) throws ResourceNotFoundException {
+        List<IResourceId> getPackageDescriptorsContainingResource(String resourceURI) throws ResourceNotFoundException {
             String searchQuery = String.format("JSON.stringify(this).indexOf('%s')!=-1", resourceURI);
             Document filter = new Document("$where", searchQuery);
 
@@ -106,7 +133,7 @@ public class PackageStore implements IPackageStore {
             this.resourceStorage = resourceStorage;
         }
 
-        List<IResourceId> getPackageDescriptorsContainingResource(URI resourceURI)
+        List<IResourceId> getPackageDescriptorsContainingResource(String resourceURI)
                 throws ResourceNotFoundException {
             return resourceStorage.getPackageDescriptorsContainingResource(resourceURI);
         }

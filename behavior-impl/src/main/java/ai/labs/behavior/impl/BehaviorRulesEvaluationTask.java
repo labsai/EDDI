@@ -3,9 +3,9 @@ package ai.labs.behavior.impl;
 import ai.labs.lifecycle.ILifecycleTask;
 import ai.labs.lifecycle.LifecycleException;
 import ai.labs.lifecycle.PackageConfigurationException;
-import ai.labs.memory.Data;
 import ai.labs.memory.IConversationMemory;
 import ai.labs.memory.IData;
+import ai.labs.memory.model.Data;
 import ai.labs.resources.rest.behavior.model.BehaviorConfiguration;
 import ai.labs.resources.rest.extensions.model.ExtensionDescriptor;
 import ai.labs.resources.rest.extensions.model.ExtensionDescriptor.ConfigValue;
@@ -30,11 +30,15 @@ import java.util.stream.Collectors;
 @Slf4j
 public class BehaviorRulesEvaluationTask implements ILifecycleTask {
     public static final String ID = "ai.labs.behavior";
-    private BehaviorRulesEvaluator evaluator;
+    private static final String KEY_ACTIONS = "actions";
     private static final String BEHAVIOR_CONFIG_URI = "uri";
+    private static final String BEHAVIOR_CONFIG_APPEND_ACTIONS = "appendActions";
     private final IResourceClientLibrary resourceClientLibrary;
     private final IJsonSerialization jsonSerialization;
     private final IBehaviorDeserialization behaviorSerialization;
+
+    private BehaviorRulesEvaluator evaluator;
+    private boolean appendActions = true;
 
     @Inject
     public BehaviorRulesEvaluationTask(IResourceClientLibrary resourceClientLibrary,
@@ -81,18 +85,24 @@ public class BehaviorRulesEvaluationTask implements ILifecycleTask {
         successRules.forEach(successRule -> successRule.getActions().stream().
                 filter(action -> !allCurrentActions.contains(action)).forEach(allCurrentActions::add));
 
-        IData<List<String>> latestActions = memory.getCurrentStep().getLatestData("actions");
+        var currentStep = memory.getCurrentStep();
+
         List<String> actions = new LinkedList<>();
-        if (latestActions != null && latestActions.getResult() != null) {
-            actions.addAll(latestActions.getResult());
+        if (appendActions || allCurrentActions.isEmpty()) {
+            IData<List<String>> latestActions = currentStep.getLatestData(KEY_ACTIONS);
+            if (latestActions != null && latestActions.getResult() != null) {
+                actions.addAll(latestActions.getResult());
+            }
         }
 
         actions.addAll(allCurrentActions.stream().
                 filter(action -> !actions.contains(action)).collect(Collectors.toList()));
 
-        Data actionsData = new Data<>("actions", actions);
+        Data actionsData = new Data<>(KEY_ACTIONS, actions);
         actionsData.setPublic(true);
-        memory.getCurrentStep().storeData(actionsData);
+        currentStep.storeData(actionsData);
+        currentStep.resetConversationOutput(KEY_ACTIONS);
+        currentStep.addConversationOutputList(KEY_ACTIONS, actions);
     }
 
     private void storeResultIfNotEmpty(IConversationMemory memory, String key, List<BehaviorRule> result) {
@@ -117,6 +127,10 @@ public class BehaviorRulesEvaluationTask implements ILifecycleTask {
             BehaviorSet behaviorSet = behaviorSerialization.deserialize(behaviorConfigJson);
 
             evaluator = new BehaviorRulesEvaluator(behaviorSet);
+            Object appendActionsObj = configuration.get(BEHAVIOR_CONFIG_APPEND_ACTIONS);
+            if (appendActionsObj != null) {
+                appendActions = Boolean.parseBoolean(appendActionsObj.toString());
+            }
 
         } catch (IOException | DeserializationException e) {
             String message = "Error while configuring BehaviorRuleLifecycleTask!";
@@ -134,8 +148,14 @@ public class BehaviorRulesEvaluationTask implements ILifecycleTask {
         ExtensionDescriptor extensionDescriptor = new ExtensionDescriptor(ID);
         extensionDescriptor.setDisplayName("Behavior Rules");
 
-        ConfigValue configValue = new ConfigValue("Resource URI", FieldType.URI, false, null);
+        ConfigValue configValue =
+                new ConfigValue("Resource URI", FieldType.URI, false, null);
         extensionDescriptor.getConfigs().put(BEHAVIOR_CONFIG_URI, configValue);
+
+        ConfigValue appendActionsConfig =
+                new ConfigValue("Append Actions", FieldType.BOOLEAN, false, true);
+        extensionDescriptor.getConfigs().put(BEHAVIOR_CONFIG_APPEND_ACTIONS, appendActionsConfig);
+
         return extensionDescriptor;
     }
 }

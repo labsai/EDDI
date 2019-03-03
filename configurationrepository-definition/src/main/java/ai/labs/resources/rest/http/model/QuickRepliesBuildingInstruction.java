@@ -1,19 +1,20 @@
 package ai.labs.resources.rest.http.model;
 
+import ai.labs.models.HttpCodeValidator;
 import lombok.Getter;
 import lombok.Setter;
 
 @Getter
 @Setter
-public class QuickRepliesBuildingInstruction {
-    private String pathToTargetArray;
-    private String iterationObjectName;
+public class QuickRepliesBuildingInstruction extends BuildingInstruction {
     private String quickReplyValue;
     private String quickReplyExpressions;
+    private HttpCodeValidator httpCodeValidator;
 
     public QuickRepliesBuildingInstruction() {
-        iterationObjectName = "obj";
+        super();
         quickReplyValue = "";
         quickReplyExpressions = "";
+        httpCodeValidator = new HttpCodeValidator();
     }
 }

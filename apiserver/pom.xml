@@ -16,7 +16,13 @@
         <dependency>
             <groupId>org.jboss.resteasy</groupId>
             <artifactId>resteasy-cache-core</artifactId>
-            <version>3.1.4.Final</version>
+            <version>3.6.3.Final</version>
+            <exclusions>
+                <exclusion>
+                    <groupId>org.infinispan</groupId>
+                    <artifactId>infinispan-core</artifactId>
+                </exclusion>
+            </exclusions>
         </dependency>
 
         <dependency>
@@ -146,17 +152,17 @@
         </dependency>
         <dependency>
             <groupId>ai.labs</groupId>
-            <artifactId>backupservice-impl</artifactId>
-            <version>${project.version}</version>
-        </dependency>
-      <dependency>
-            <groupId>ai.labs</groupId>
             <artifactId>httpCallsTask-impl</artifactId>
             <version>${project.version}</version>
         </dependency>
-      <dependency>
+        <dependency>
             <groupId>ai.labs</groupId>
             <artifactId>normalizer-impl</artifactId>
+            <version>${project.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>ai.labs</groupId>
+            <artifactId>backupservice-impl</artifactId>
             <version>${project.version}</version>
         </dependency>
     </dependencies>
@@ -165,17 +171,8 @@
         <plugins>
             <plugin>
                 <groupId>org.apache.maven.plugins</groupId>
-                <artifactId>maven-compiler-plugin</artifactId>
-                <version>3.5.1</version>
-                <configuration>
-                    <source>1.8</source>
-                    <target>1.8</target>
-                </configuration>
-            </plugin>
-            <plugin>
-                <groupId>org.apache.maven.plugins</groupId>
                 <artifactId>maven-assembly-plugin</artifactId>
-                <version>2.6</version>
+                <version>3.1.0</version>
                 <configuration>
                     <descriptors>
                         <descriptor>src/assembly/assembly.xml</descriptor>

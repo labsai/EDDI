@@ -6,7 +6,7 @@ import ai.labs.facebookmessenger.IFacebookEndpoint;
 import ai.labs.httpclient.IHttpClient;
 import ai.labs.httpclient.IRequest;
 import ai.labs.httpclient.IResponse;
-import ai.labs.memory.model.Deployment;
+import ai.labs.models.Deployment;
 import ai.labs.resources.rest.bots.IBotStore;
 import ai.labs.resources.rest.bots.model.BotConfiguration;
 import ai.labs.rest.rest.IRestBotEngine;
@@ -50,7 +50,7 @@ import java.util.concurrent.Callable;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeoutException;
 
-import static ai.labs.memory.model.Deployment.Environment.unrestricted;
+import static ai.labs.models.Deployment.Environment.unrestricted;
 import static ai.labs.persistence.IResourceStore.ResourceNotFoundException;
 import static ai.labs.persistence.IResourceStore.ResourceStoreException;
 import static ai.labs.rest.restinterfaces.RestInterfaceFactory.RestInterfaceFactoryException;
@@ -108,7 +108,7 @@ public class FacebookEndpoint implements IFacebookEndpoint {
     }
 
     private Integer getLatestDeployedBotVersion(String botId) throws ServiceException {
-        return botFactory.getLatestBot(unrestricted, botId).getVersion();
+        return botFactory.getLatestBot(unrestricted, botId).getBotVersion();
     }
 
     private MessengerClient createMessageClient(String botId, Integer botVersion)
@@ -332,7 +332,7 @@ public class FacebookEndpoint implements IFacebookEndpoint {
         String conversationId;
         try {
             Response response = restInterfaceFactory.get(IRestBotEngine.class, apiServerURI).
-                    startConversation(environment, botId);
+                    startConversation(environment, botId, senderId);
             if (response.getStatus() == 201) {
                 URIUtilities.ResourceId resourceIdConversation =
                         URIUtilities.extractResourceId(response.getLocation());

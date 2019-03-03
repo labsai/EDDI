@@ -22,6 +22,7 @@ import javax.inject.Named;
 import javax.inject.Singleton;
 import java.io.File;
 import java.io.InputStream;
+import java.util.concurrent.ThreadPoolExecutor;
 
 /**
  * @author ginccc
@@ -61,6 +62,7 @@ public class ServerRuntimeModule extends AbstractBaseModule {
                                                Provider<SecurityHandler> securityHandlerProvider,
                                                GuiceResteasyBootstrapServletContextListener contextListener,
                                                SwaggerServletContextListener swaggerContextListener,
+                                               ThreadPoolExecutor threadPoolExecutor,
                                                HttpServletDispatcher httpServletDispatcher,
                                                LoginService mongoLoginService)
             throws ClassNotFoundException {
@@ -90,7 +92,7 @@ public class ServerRuntimeModule extends AbstractBaseModule {
         }
 
         return new ServerRuntime(options, contextListener, swaggerContextListener, httpServletDispatcher,
-                securityHandler, environment, resourceDir);
+                securityHandler, threadPoolExecutor, environment, resourceDir);
     }
 
     @Provides

@@ -6,7 +6,6 @@ import lombok.extern.slf4j.Slf4j;
 
 import javax.inject.Inject;
 import javax.inject.Named;
-import javax.ws.rs.InternalServerErrorException;
 import java.io.IOException;
 import java.io.InputStream;
 import java.nio.file.Files;
@@ -32,7 +31,7 @@ public class ResourceFileManager implements IResourceFileManager {
             return FileUtilities.readTextFromFile(path.toFile());
         } catch (IOException e) {
             log.error(e.getLocalizedMessage(), e);
-            throw new InternalServerErrorException();
+            throw new IResourceFileManager.NotFoundException(e.getLocalizedMessage(), e);
         }
     }
 
@@ -43,7 +42,7 @@ public class ResourceFileManager implements IResourceFileManager {
             return Files.newInputStream(path);
         } catch (IOException e) {
             log.error(e.getLocalizedMessage(), e);
-            throw new InternalServerErrorException();
+            throw new IResourceFileManager.NotFoundException(e.getLocalizedMessage(), e);
         }
     }
 

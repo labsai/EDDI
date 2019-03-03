@@ -67,10 +67,10 @@ public class RegularDictionaryProvider implements IDictionaryProvider {
     @Override
     public void setConfig(Map<String, Object> config) throws IllegalExtensionConfigurationException {
         try {
-            String uriString = config.get(KEY_URI).toString();
-            if (uriString.startsWith("eddi")) {
+            Object uriObj = config.get(KEY_URI);
+            if (!RuntimeUtilities.isNullOrEmpty(uriObj) && uriObj.toString().startsWith("eddi")) {
                 RegularDictionaryConfiguration regularDictionaryConfiguration =
-                        fetchRegularDictionaryConfiguration(URI.create(uriString));
+                        fetchRegularDictionaryConfiguration(URI.create(uriObj.toString()));
                 addConfigsToDictionary(regularDictionaryConfiguration);
             } else {
                 throw new ServiceException("No resource URI has been defined! [RegularDictionaryConfiguration]");

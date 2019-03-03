@@ -13,15 +13,6 @@ import java.util.List;
 @Setter
 @EqualsAndHashCode
 public class OutputValue {
-    public enum Type {
-        text,
-        html,
-        image,
-        video,
-        audio,
-        delay
-    }
-
-    private Type type;
-    private List<String> valueAlternatives;
+    private String type;
+    private List<Object> valueAlternatives;
 }

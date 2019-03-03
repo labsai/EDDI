@@ -3,11 +3,11 @@ package ai.labs.callback.impl;
 import ai.labs.callback.IConversationCallback;
 import ai.labs.callback.model.ConversationDataRequest;
 import ai.labs.callback.model.ConversationDataResponse;
-import ai.labs.lifecycle.LifecycleException;
 import ai.labs.lifecycle.PackageConfigurationException;
 import ai.labs.memory.ConversationMemory;
-import ai.labs.memory.Data;
 import ai.labs.memory.IConversationMemory;
+import ai.labs.memory.model.ConversationProperties;
+import ai.labs.memory.model.Data;
 import org.junit.Before;
 import org.junit.Test;
 
@@ -43,12 +43,13 @@ public class ConversationCallbackTaskTest {
         when(memory.getRedoCache()).thenAnswer(invocation -> new Stack<>());
         when(memory.getAllSteps()).thenAnswer(invocation ->
                 new ConversationMemory.ConversationStepStack(new LinkedList<>()));
-        when(currentStep.getLatestData(eq("action"))).thenAnswer(invocation ->
-                new Data<>("action", Collections.singletonList("action_1")));
+        when(currentStep.getLatestData(eq("actions"))).thenAnswer(invocation ->
+                new Data<>("actions", Collections.singletonList("action_1")));
+        when(memory.getConversationProperties()).thenAnswer(invocation -> new ConversationProperties(memory));
     }
 
     @Test
-    public void executeTask_executingCallback() throws LifecycleException, PackageConfigurationException {
+    public void executeTask_executingCallback() throws PackageConfigurationException {
         //setup
         ConversationCallbackTask conversationCallbackTask = createConfiguration("action_1");
 
@@ -60,7 +61,7 @@ public class ConversationCallbackTaskTest {
     }
 
     @Test
-    public void executeTask_executingCallback_NoActionDefined() throws LifecycleException, PackageConfigurationException {
+    public void executeTask_executingCallback_NoActionDefined() throws PackageConfigurationException {
         //setup
         ConversationCallbackTask conversationCallbackTask = createConfiguration("");
 
@@ -72,7 +73,7 @@ public class ConversationCallbackTaskTest {
     }
 
     @Test
-    public void executeTask_NotExecutingCallback() throws LifecycleException, PackageConfigurationException {
+    public void executeTask_NotExecutingCallback() throws PackageConfigurationException {
         //setup
         ConversationCallbackTask conversationCallbackTask = createConfiguration("action_2");
 

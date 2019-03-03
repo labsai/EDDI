@@ -2,8 +2,8 @@ package ai.labs.testing.impl;
 
 import ai.labs.memory.IConversationMemoryStore;
 import ai.labs.memory.model.ConversationMemorySnapshot;
-import ai.labs.memory.model.ConversationState;
-import ai.labs.memory.model.Deployment;
+import ai.labs.models.ConversationState;
+import ai.labs.models.Deployment;
 import ai.labs.rest.rest.IRestBotAdministration;
 import ai.labs.rest.rest.IRestBotEngine;
 import ai.labs.rest.restinterfaces.IRestInterfaceFactory;
@@ -43,7 +43,7 @@ public class TestCaseRuntime {
         this.conversationMemoryStore = conversationMemoryStore;
     }
 
-    public void executeTestCase(final String id, final TestCase testCase) throws Exception {
+    public void executeTestCase(final String id, final TestCase testCase) {
         SystemRuntime.getRuntime().submitCallable((Callable<Void>) () -> {
             try {
                 testCaseStore.setTestCaseState(id, TestCaseState.IN_PROGRESS);
@@ -96,7 +96,7 @@ public class TestCaseRuntime {
     private ConversationMemorySnapshot runTestCase(String botId, TestCase testCase) throws Exception {
         IRestBotEngine botEngine = restInterfaceFactory.get(IRestBotEngine.class, apiServerURI);
 
-        Response ConversationResponse = botEngine.startConversation(Deployment.Environment.test, botId);
+        Response ConversationResponse = botEngine.startConversation(Deployment.Environment.test, botId, "testCaseRunner");
         URI conversationURI = ConversationResponse.getLocation();
         String conversationURIPath = conversationURI.getPath();
         String conversationId = conversationURIPath.substring(conversationURIPath.lastIndexOf("/") + 1);
@@ -109,7 +109,9 @@ public class TestCaseRuntime {
             if (RuntimeUtilities.isNullOrEmpty(input)) {
                 input = " ";
             }
-            botEngine.say(Deployment.Environment.test, botId, conversationId, true, false, input, new MockAsyncResponse());
+            botEngine.say(Deployment.Environment.test, botId, conversationId,
+                    true, false,
+                    Collections.emptyList(), input, new MockAsyncResponse());
             while (botEngine.getConversationState(Deployment.Environment.test, conversationId) == ConversationState.IN_PROGRESS) {
                 Thread.sleep(1000);
             }

@@ -130,9 +130,9 @@ public class RestTestCaseStore implements IRestTestCaseStore {
     }
 
     @Override
-    public Response createTestCase(String conversationId) {
+    public Response createTestCase(String id) {
         try {
-            ConversationMemorySnapshot conversationMemorySnapshot = conversationMemoryStore.loadConversationMemorySnapshot(conversationId);
+            ConversationMemorySnapshot conversationMemorySnapshot = conversationMemoryStore.loadConversationMemorySnapshot(id);
 
             TestCase testCase = new TestCase();
             testCase.setBotId(conversationMemorySnapshot.getBotId());

@@ -2,7 +2,9 @@ package ai.labs.runtime.internal;
 
 import ai.labs.lifecycle.IConversation;
 import ai.labs.memory.IConversationMemory;
-import ai.labs.memory.model.Deployment;
+import ai.labs.memory.IPropertiesHandler;
+import ai.labs.models.Context;
+import ai.labs.models.Deployment;
 import ai.labs.runtime.IBot;
 import ai.labs.runtime.IBotFactory;
 import ai.labs.runtime.IExecutablePackage;
@@ -15,6 +17,8 @@ import javax.inject.Inject;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.stream.Collectors;
+
+import static ai.labs.lifecycle.IConversation.IConversationOutputRenderer;
 
 /**
  * @author ginccc
@@ -40,14 +44,14 @@ public class BotFactory implements IBotFactory {
     }
 
     @Override
-    public IBot getLatestBot(Deployment.Environment environment, String botId) throws ServiceException {
-        List<BotId> botVersions = new LinkedList<>();
+    public IBot getLatestBot(Deployment.Environment environment, String botId) {
 
         Map<BotId, IBot> bots = getBotEnvironment(environment);
-        botVersions.addAll(bots.keySet().stream().filter(id -> id.getId().equals(botId)).collect(Collectors.toList()));
-        botVersions.sort(Collections.reverseOrder((botId1, botId2) ->
+        List<BotId> botVersions = bots.keySet().stream().filter(id -> id.getId().equals(botId)).
+                sorted(Collections.reverseOrder((botId1, botId2) ->
                 botId1.getVersion() < botId2.getVersion() ?
-                        -1 : botId1.getVersion().equals(botId2.getVersion()) ? 0 : 1));
+                        -1 : botId1.getVersion().equals(botId2.getVersion()) ? 0 : 1)).
+                collect(Collectors.toCollection(LinkedList::new));
 
         IBot latestBot = null;
 
@@ -111,20 +115,18 @@ public class BotFactory implements IBotFactory {
     }
 
     @Override
-    public void undeployBot(Deployment.Environment environment, String botId, Integer version) throws ServiceException, IllegalAccessException {
+    public void undeployBot(Deployment.Environment environment, String botId, Integer version) {
         Map<BotId, IBot> botEnvironment = getBotEnvironment(environment);
 
         BotId id = new BotId(botId, version);
-        if (botEnvironment.containsKey(id)) {
-            botEnvironment.remove(id);
-        }
+        botEnvironment.remove(id);
     }
 
     private ConcurrentHashMap<BotId, IBot> getBotEnvironment(Deployment.Environment environment) {
         return environments.get(environment);
     }
 
-    private Bot createInProgressDummyBot(String botId, Integer version) throws IllegalAccessException {
+    private Bot createInProgressDummyBot(String botId, Integer version) {
         Bot bot = new Bot(botId, version) {
             @Override
             public void addPackage(IExecutablePackage executablePackage) throws IllegalAccessException {
@@ -132,15 +134,21 @@ public class BotFactory implements IBotFactory {
             }
 
             @Override
-            public IConversation startConversation(IConversation.IConversationOutputRenderer outputProvider)
-                    throws InstantiationException, IllegalAccessException {
+            public IConversation startConversation(String userId,
+                                                   Map<String, Context> context,
+                                                   IPropertiesHandler propertiesHandler,
+                                                   IConversationOutputRenderer outputProvider)
+                    throws IllegalAccessException {
+
                 throw createBotInProgressException();
             }
 
             @Override
             public IConversation continueConversation(IConversationMemory conversationMemory,
-                                                      IConversation.IConversationOutputRenderer outputProvider)
-                    throws InstantiationException, IllegalAccessException {
+                                                      IPropertiesHandler propertiesHandler,
+                                                      IConversationOutputRenderer outputProvider)
+                    throws IllegalAccessException {
+
                 throw createBotInProgressException();
             }
         };
@@ -155,10 +163,10 @@ public class BotFactory implements IBotFactory {
 
     private void logBotDeployment(String environment, String botId, Integer botVersion, Deployment.Status status) {
         if (status == Deployment.Status.IN_PROGRESS) {
-            log.info(String.format("Deploying Bot... (environment=%s, id=%s , version=%s)",
+            log.info(String.format("Deploying Bot... (environment=%s, botId=%s , version=%s)",
                     environment, botId, botVersion));
         } else {
-            log.info(String.format("Bot deployed with status: %s (environment=%s, id=%s , version=%s)", status,
+            log.info(String.format("Bot deployed with status: %s (environment=%s, botId=%s , version=%s)", status,
                     environment, botId, botVersion));
         }
     }

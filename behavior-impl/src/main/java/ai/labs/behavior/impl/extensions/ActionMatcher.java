@@ -107,7 +107,7 @@ public class ActionMatcher extends BaseMatcher implements IBehaviorExtension {
     }
 
     @Override
-    public IBehaviorExtension clone() throws CloneNotSupportedException {
+    public IBehaviorExtension clone() {
         IBehaviorExtension clone = new ActionMatcher();
         clone.setValues(getValues());
         return clone;

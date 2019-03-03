@@ -3,11 +3,13 @@ package ai.labs.property.impl;
 import ai.labs.expressions.Expression;
 import ai.labs.expressions.utilities.IExpressionProvider;
 import ai.labs.expressions.value.Value;
-import ai.labs.lifecycle.model.Context;
-import ai.labs.memory.Data;
+import ai.labs.lifecycle.LifecycleException;
 import ai.labs.memory.IConversationMemory;
 import ai.labs.memory.IData;
 import ai.labs.memory.IDataFactory;
+import ai.labs.memory.IMemoryItemConverter;
+import ai.labs.memory.model.Data;
+import ai.labs.models.Context;
 import ai.labs.property.IPropertyDisposer;
 import ai.labs.property.model.PropertyEntry;
 import org.junit.Before;
@@ -58,11 +60,13 @@ public class PropertyDisposerTaskTest {
 
             return expressions;
         });
-        propertyDisposerTask = new PropertyDisposerTask(propertyDisposer, expressionProvider, dataFactory);
+        IMemoryItemConverter memoryItemConverter = mock(IMemoryItemConverter.class);
+        propertyDisposerTask = new PropertyDisposerTask(propertyDisposer,
+                expressionProvider, memoryItemConverter, dataFactory);
     }
 
     @Test
-    public void executeTask() {
+    public void executeTask() throws LifecycleException {
         //setup
         final String userInput = "Some Input From the User";
         List<PropertyEntry> propertyEntries = new LinkedList<>();

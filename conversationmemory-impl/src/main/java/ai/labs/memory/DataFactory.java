@@ -1,5 +1,7 @@
 package ai.labs.memory;
 
+import ai.labs.memory.model.Data;
+
 import java.util.List;
 
 /**

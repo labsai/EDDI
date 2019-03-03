@@ -1,9 +1,9 @@
 package ai.labs.output.impl;
 
-import ai.labs.memory.Data;
 import ai.labs.memory.IConversationMemory;
 import ai.labs.memory.IData;
 import ai.labs.memory.IDataFactory;
+import ai.labs.memory.model.Data;
 import ai.labs.output.IOutputGeneration;
 import ai.labs.output.model.OutputEntry;
 import ai.labs.output.model.OutputValue;
@@ -38,13 +38,14 @@ public class OutputGenerationTaskTest {
     private static final String SOME_OTHER_EXPRESSION = "someOther(Expression)";
     private static final String OUTPUT_TEXT = "output:text:";
     private static final String QUICK_REPLIES = "quickReplies:";
+    public static final String OUTPUT_TYPE_TEXT = "text";
     private OutputGenerationTask outputGenerationTask;
     private IResourceClientLibrary resourceClientLibrary;
     private IOutputGeneration outputGeneration;
     private IDataFactory dataFactory;
 
     @Before
-    public void setUp() throws Exception {
+    public void setUp() {
         resourceClientLibrary = mock(IResourceClientLibrary.class);
         dataFactory = mock(IDataFactory.class);
         outputGeneration = mock(IOutputGeneration.class);
@@ -52,7 +53,7 @@ public class OutputGenerationTaskTest {
     }
 
     @Test
-    public void executeTask() throws Exception {
+    public void executeTask() {
         //setup
         when(outputGeneration.getOutputs(anyList())).thenAnswer(invocation -> {
             Map<String, List<OutputEntry>> ret = new LinkedHashMap<>();
@@ -60,14 +61,14 @@ public class OutputGenerationTaskTest {
             ret.put(ACTION_1, Collections.singletonList(outputEntry));
             return ret;
         });
-        IConversationMemory conversationMemory = mock(IConversationMemory.class);
-        IConversationMemory.IWritableConversationStep currentStep = mock(IConversationMemory.IWritableConversationStep.class);
+        var conversationMemory = mock(IConversationMemory.class);
+        var currentStep = mock(IConversationMemory.IWritableConversationStep.class);
         when(conversationMemory.getCurrentStep()).thenAnswer(invocation -> currentStep);
         when(currentStep.getLatestData(eq(ACTION))).thenAnswer(invocation ->
                 new Data<>(ACTION_1, Arrays.asList(SOME_ACTION_1, SOME_OTHER_ACTION_1)));
-        IConversationMemory.IConversationStepStack conversationStepStack = mock(IConversationMemory.IConversationStepStack.class);
+        var conversationStepStack = mock(IConversationMemory.IConversationStepStack.class);
         when(conversationMemory.getPreviousSteps()).then(invocation -> conversationStepStack);
-        IConversationMemory.IConversationStep conversationStep = mock(IConversationMemory.IConversationStep.class);
+        var conversationStep = mock(IConversationMemory.IConversationStep.class);
         when(conversationStepStack.get(anyInt())).then(invocation -> conversationStep);
         when(conversationStep.getLatestData(eq(ACTION))).then(invocation ->
                 new Data<>(ACTION_2, Arrays.asList(SOME_ACTION_2, SOME_OTHER_ACTION_2)));
@@ -85,9 +86,9 @@ public class OutputGenerationTaskTest {
         outputGenerationTask.executeTask(conversationMemory);
 
         //assert
-        verify(conversationMemory, times(2)).getCurrentStep();
-        //verify(currentStep).storeData(expectedOutputData);
-        //verify(currentStep).storeData(expectedQuickReplyData);
+        verify(conversationMemory, times(1)).getCurrentStep();
+        verify(currentStep, times(2)).storeData(any());
+        verify(currentStep, times(2)).addConversationOutputList(anyString(), anyList());
     }
 
     @Test
@@ -108,7 +109,7 @@ public class OutputGenerationTaskTest {
 
     private OutputEntry createOutputEntry() {
         List<OutputValue> outputs = new LinkedList<>();
-        outputs.add(new OutputValue(OutputValue.Type.text, Arrays.asList(ANSWER_ALTERNATIVE_1, ANSWER_ALTERNATIVE_2)));
+        outputs.add(new OutputValue(OUTPUT_TYPE_TEXT, Arrays.asList(ANSWER_ALTERNATIVE_1, ANSWER_ALTERNATIVE_2)));
         List<QuickReply> quickReplies = new LinkedList<>();
         quickReplies.add(new QuickReply(SOME_QUICK_REPLY, SOME_EXPRESSION, false));
         quickReplies.add(new QuickReply(SOME_OTHER_QUICK_REPLY, SOME_OTHER_EXPRESSION, false));
@@ -129,8 +130,8 @@ public class OutputGenerationTaskTest {
         outputConfiguration.setTimesOccurred(0);
         LinkedList<OutputConfiguration.OutputType> outputs = new LinkedList<>();
         OutputConfiguration.OutputType outputType = new OutputConfiguration.OutputType();
-        outputType.setType(OutputValue.Type.text.toString());
-        LinkedList<String> valueAlternatives = new LinkedList<>();
+        outputType.setType(OUTPUT_TYPE_TEXT);
+        LinkedList<Object> valueAlternatives = new LinkedList<>();
         valueAlternatives.add(ANSWER_ALTERNATIVE_1);
         valueAlternatives.add(ANSWER_ALTERNATIVE_2);
         outputType.setValueAlternatives(valueAlternatives);

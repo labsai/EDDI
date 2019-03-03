@@ -1,10 +1,11 @@
 package ai.labs.rest.rest;
 
 
-import ai.labs.memory.model.ConversationState;
-import ai.labs.memory.model.Deployment;
 import ai.labs.memory.model.SimpleConversationMemorySnapshot;
-import ai.labs.rest.model.InputData;
+import ai.labs.models.Context;
+import ai.labs.models.ConversationState;
+import ai.labs.models.Deployment;
+import ai.labs.models.InputData;
 import io.swagger.annotations.Api;
 import org.jboss.resteasy.annotations.cache.NoCache;
 
@@ -13,6 +14,8 @@ import javax.ws.rs.container.AsyncResponse;
 import javax.ws.rs.container.Suspended;
 import javax.ws.rs.core.MediaType;
 import javax.ws.rs.core.Response;
+import java.util.List;
+import java.util.Map;
 
 /**
  * @author ginccc
@@ -20,6 +23,7 @@ import javax.ws.rs.core.Response;
 @Api(value = "bot engine")
 @Path("/bots")
 public interface IRestBotEngine {
+
     /**
      * create new conversation
      *
@@ -30,7 +34,28 @@ public interface IRestBotEngine {
     @POST
     @Path("/{environment}/{botId}")
     Response startConversation(@PathParam("environment") Deployment.Environment environment,
-                               @PathParam("botId") String botId);
+                               @PathParam("botId") String botId,
+                               @QueryParam("userId") String userId);
+
+    /**
+     * create new conversation
+     *
+     * @param environment [restricted|unrestricted|test]
+     * @param botId       String
+     * @param context     json context Map<String, Context>
+     * @return Response HTTP 201 URI conversation ID
+     */
+    @POST
+    @Path("/{environment}/{botId}")
+    @Consumes(MediaType.APPLICATION_JSON)
+    Response startConversationWithContext(@PathParam("environment") Deployment.Environment environment,
+                                          @PathParam("botId") String botId,
+                                          @QueryParam("userId") String userId, Map<String, Context> context);
+
+    @POST
+    @Path("/{conversationId}/endConversation")
+    Response endConversation(@PathParam("conversationId") String conversationId);
+
 
     @GET
     @NoCache
@@ -39,7 +64,9 @@ public interface IRestBotEngine {
     SimpleConversationMemorySnapshot readConversation(@PathParam("environment") Deployment.Environment environment,
                                                       @PathParam("botId") String botId,
                                                       @PathParam("conversationId") String conversationId,
-                                                      @QueryParam("returnDetailed") @DefaultValue("false") Boolean returnDetailed);
+                                                      @QueryParam("returnDetailed") @DefaultValue("false") Boolean returnDetailed,
+                                                      @QueryParam("returnCurrentStepOnly") @DefaultValue("true") Boolean returnCurrentStepOnly,
+                                                      @QueryParam("returningFields") List<String> returningFields);
 
     @GET
     @Path("/{environment}/conversationstatus/{conversationId}")
@@ -65,6 +92,7 @@ public interface IRestBotEngine {
              @PathParam("conversationId") String conversationId,
              @QueryParam("returnDetailed") @DefaultValue("false") Boolean returnDetailed,
              @QueryParam("returnCurrentStepOnly") @DefaultValue("true") Boolean returnCurrentStepOnly,
+             @QueryParam("returningFields") List<String> returningFields,
              @DefaultValue("") String message,
              @Suspended final AsyncResponse response);
 
@@ -74,7 +102,8 @@ public interface IRestBotEngine {
      * @param environment
      * @param botId
      * @param conversationId
-     * @param inputData      of type ai.labs.rest.model.InputData
+     * @param returningFields
+     * @param inputData       of type ai.labs.models.InputData
      * @return
      * @throws Exception
      */
@@ -87,6 +116,7 @@ public interface IRestBotEngine {
                           @PathParam("conversationId") String conversationId,
                           @QueryParam("returnDetailed") @DefaultValue("false") Boolean returnDetailed,
                           @QueryParam("returnCurrentStepOnly") @DefaultValue("true") Boolean returnCurrentStepOnly,
+                          @QueryParam("returningFields") List<String> returningFields,
                           InputData inputData,
                           @Suspended final AsyncResponse response);
 

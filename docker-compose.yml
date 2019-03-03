@@ -1,9 +1,10 @@
-version: '2'
+version: '3'
 services:
   eddi:
     image: labsai/eddi:latest
     ports:
       - "7070:7070"
+      - "7443:7443"
     links:
       - mongodb
     depends_on:
@@ -16,12 +17,4 @@ services:
       #EDDI_JAVA_ENV_MONGODB_HOST: mongodb.hosts=mongodb
   mongodb:
     image: mongo:3.6
-    #ports:       #see override in your own repository with docker-compose.override.yml on each deployed machine for CRITICAL DATA
-    volumes_from:
-        - mongodata       #see override in your own repository with  docker-compose.override.yml on each deployed machine for CRITICAL DATA
     restart: always
-  mongodata:
-    image: alpine:3.6
-    volumes:
-      - "./persistence:/data/db"
-    command: echo Persistence for Mongo

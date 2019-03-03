@@ -1,11 +1,15 @@
 package ai.labs.memory;
 
 import ai.labs.memory.model.ConversationMemorySnapshot;
+import ai.labs.memory.model.ConversationOutput;
+import ai.labs.memory.model.Data;
 import ai.labs.memory.model.SimpleConversationMemorySnapshot;
-import ai.labs.persistence.IResourceStore;
+import ai.labs.models.Context;
 
+import java.util.HashMap;
 import java.util.LinkedList;
 import java.util.List;
+import java.util.Map;
 
 /**
  * @author ginccc
@@ -14,8 +18,12 @@ public class ConversationMemoryUtilities {
     public static ConversationMemorySnapshot convertConversationMemory(IConversationMemory conversationMemory) {
         ConversationMemorySnapshot snapshot = new ConversationMemorySnapshot();
 
-        if (conversationMemory.getId() != null) {
-            snapshot.setId(conversationMemory.getId());
+        if (conversationMemory.getUserId() != null) {
+            snapshot.setUserId(conversationMemory.getUserId());
+        }
+
+        if (conversationMemory.getConversationId() != null) {
+            snapshot.setConversationId(conversationMemory.getConversationId());
         }
 
         snapshot.setBotId(conversationMemory.getBotId());
@@ -32,19 +40,19 @@ public class ConversationMemoryUtilities {
             snapshot.getConversationSteps().add(iterateConversationStep(conversationStep));
         }
 
+        snapshot.getConversationOutputs().addAll(conversationMemory.getConversationOutputs());
+        snapshot.getConversationProperties().putAll(conversationMemory.getConversationProperties());
+
         return snapshot;
     }
 
     private static ConversationMemorySnapshot.ConversationStepSnapshot iterateConversationStep(IConversationMemory.IConversationStep conversationStep) {
         ConversationMemorySnapshot.ConversationStepSnapshot conversationStepSnapshot = new ConversationMemorySnapshot.ConversationStepSnapshot();
-        for (IConversationMemory.IConversationContext context : conversationStep.getAllConversationContexts()) {
-            if (conversationStep.isEmpty()) {
-                continue;
-            }
+
+        if (!conversationStep.isEmpty()) {
             ConversationMemorySnapshot.PackageRunSnapshot packageRunSnapshot = new ConversationMemorySnapshot.PackageRunSnapshot();
-            packageRunSnapshot.setContext(context.getContext());
             conversationStepSnapshot.getPackages().add(packageRunSnapshot);
-            for (IData data : conversationStep.getAllElements(context)) {
+            for (IData data : conversationStep.getAllElements()) {
                 ConversationMemorySnapshot.ResultSnapshot resultSnapshot = new ConversationMemorySnapshot.ResultSnapshot(data.getKey(), data.getResult(), data.getPossibleResults(), data.getTimestamp(), data.isPublic());
                 packageRunSnapshot.getLifecycleTasks().add(resultSnapshot);
             }
@@ -56,10 +64,9 @@ public class ConversationMemoryUtilities {
     private static List<IConversationMemory.IConversationStep> iterateRedoCache(List<ConversationMemorySnapshot.ConversationStepSnapshot> redoSteps) {
         List<IConversationMemory.IConversationStep> conversationSteps = new LinkedList<>();
         for (ConversationMemorySnapshot.ConversationStepSnapshot redoStep : redoSteps) {
-            IConversationMemory.IWritableConversationStep conversationStep = new ConversationStep(new ConversationMemory.ConversationContext());
+            IConversationMemory.IWritableConversationStep conversationStep = new ConversationStep(new ConversationOutput());
             conversationSteps.add(conversationStep);
             for (ConversationMemorySnapshot.PackageRunSnapshot packageRunSnapshot : redoStep.getPackages()) {
-                conversationStep.setCurrentConversationContext(new ConversationMemory.ConversationContext(packageRunSnapshot.getContext()));
                 for (ConversationMemorySnapshot.ResultSnapshot resultSnapshot : packageRunSnapshot.getLifecycleTasks()) {
                     Data data = new Data(resultSnapshot.getKey(), resultSnapshot.getResult(), resultSnapshot.getPossibleResults(), resultSnapshot.getTimestamp(), resultSnapshot.isPublic());
                     conversationStep.storeData(data);
@@ -70,9 +77,12 @@ public class ConversationMemoryUtilities {
         return conversationSteps;
     }
 
-    public static IConversationMemory convertConversationMemorySnapshot(ConversationMemorySnapshot snapshot) throws IResourceStore.ResourceStoreException, IResourceStore.ResourceNotFoundException {
-        IConversationMemory conversationMemory = new ConversationMemory(snapshot.getId(), snapshot.getBotId(), snapshot.getBotVersion());
+    public static IConversationMemory convertConversationMemorySnapshot(ConversationMemorySnapshot snapshot) {
+        ConversationMemory conversationMemory = new ConversationMemory(snapshot.getConversationId(),
+                snapshot.getBotId(), snapshot.getBotVersion(), snapshot.getUserId());
+
         conversationMemory.setConversationState(snapshot.getConversationState());
+        conversationMemory.getConversationProperties().putAll(snapshot.getConversationProperties());
 
         List<IConversationMemory.IConversationStep> redoSteps = iterateRedoCache(snapshot.getRedoCache());
         for (IConversationMemory.IConversationStep redoStep : redoSteps) {
@@ -81,14 +91,14 @@ public class ConversationMemoryUtilities {
 
         List<ConversationMemorySnapshot.ConversationStepSnapshot> conversationSteps = snapshot.getConversationSteps();
         for (int i = 0; i < conversationSteps.size(); i++) {
+            ConversationOutput conversationOutput = snapshot.getConversationOutputs().get(i);
             ConversationMemorySnapshot.ConversationStepSnapshot conversationStepSnapshot = conversationSteps.get(i);
 
             if (i > 0) {
-                ((ConversationMemory) conversationMemory).startNextStep();
+                conversationMemory.startNextStep(conversationOutput);
             }
 
             for (ConversationMemorySnapshot.PackageRunSnapshot packageRunSnapshot : conversationStepSnapshot.getPackages()) {
-                conversationMemory.setCurrentContext(packageRunSnapshot.getContext());
                 for (ConversationMemorySnapshot.ResultSnapshot resultSnapshot : packageRunSnapshot.getLifecycleTasks()) {
                     Data data = new Data(resultSnapshot.getKey(), resultSnapshot.getResult(), resultSnapshot.getPossibleResults(), resultSnapshot.getTimestamp(), resultSnapshot.isPublic());
                     conversationMemory.getCurrentStep().storeData(data);
@@ -102,11 +112,18 @@ public class ConversationMemoryUtilities {
     public static SimpleConversationMemorySnapshot convertSimpleConversationMemory(ConversationMemorySnapshot conversationMemorySnapshot, boolean returnDetailed) {
         SimpleConversationMemorySnapshot simpleSnapshot = new SimpleConversationMemorySnapshot();
 
+        if (conversationMemorySnapshot.getUserId() != null) {
+            simpleSnapshot.setUserId(conversationMemorySnapshot.getUserId());
+        }
+
         simpleSnapshot.setBotId(conversationMemorySnapshot.getBotId());
         simpleSnapshot.setBotVersion(conversationMemorySnapshot.getBotVersion());
         simpleSnapshot.setConversationState(conversationMemorySnapshot.getConversationState());
         simpleSnapshot.setEnvironment(conversationMemorySnapshot.getEnvironment());
         simpleSnapshot.setRedoCacheSize(conversationMemorySnapshot.getRedoCache().size());
+
+        simpleSnapshot.getConversationOutputs().addAll(conversationMemorySnapshot.getConversationOutputs());
+        simpleSnapshot.getConversationProperties().putAll(conversationMemorySnapshot.getConversationProperties());
 
         for (ConversationMemorySnapshot.ConversationStepSnapshot conversationStepSnapshot : conversationMemorySnapshot.getConversationSteps()) {
             SimpleConversationMemorySnapshot.SimpleConversationStep simpleConversationStep = new SimpleConversationMemorySnapshot.SimpleConversationStep();
@@ -127,5 +144,18 @@ public class ConversationMemoryUtilities {
         }
 
         return simpleSnapshot;
+    }
+
+    public static Map<String, Object> prepareContext(List<IData<Context>> contextDataList) {
+        Map<String, Object> dynamicAttributesMap = new HashMap<>();
+        contextDataList.forEach(contextData -> {
+            Context context = contextData.getResult();
+            Context.ContextType contextType = context.getType();
+            if (contextType.equals(Context.ContextType.object) || contextType.equals(Context.ContextType.string)) {
+                String dataKey = contextData.getKey();
+                dynamicAttributesMap.put(dataKey.substring(dataKey.indexOf(":") + 1), context.getValue());
+            }
+        });
+        return dynamicAttributesMap;
     }
 }

@@ -27,6 +27,7 @@ public class ContentTypeProvider implements IContentTypeProvider {
         mimeTypes.put("ttf", "application/x-font-ttf");
         mimeTypes.put("mp3", "audio/mpeg");
         mimeTypes.put("pdf", "application/pdf");
+        mimeTypes.put("svg", "image/svg+xml");
     }
 
     @Override

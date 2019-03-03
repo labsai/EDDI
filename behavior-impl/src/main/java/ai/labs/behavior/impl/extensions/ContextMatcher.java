@@ -3,9 +3,9 @@ package ai.labs.behavior.impl.extensions;
 import ai.labs.behavior.impl.BehaviorRule;
 import ai.labs.expressions.Expression;
 import ai.labs.expressions.utilities.IExpressionProvider;
-import ai.labs.lifecycle.model.Context;
 import ai.labs.memory.IConversationMemory;
 import ai.labs.memory.IData;
+import ai.labs.models.Context;
 import ai.labs.serialization.IJsonSerialization;
 import ai.labs.utilities.StringUtilities;
 import com.jayway.jsonpath.JsonPath;
@@ -29,6 +29,7 @@ import java.util.Map;
 @Slf4j
 public class ContextMatcher implements IBehaviorExtension {
     private static final String ID = "contextmatcher";
+    private static final String CONTEXT = "context";
 
     enum ContextType {
         expressions,
@@ -107,12 +108,12 @@ public class ContextMatcher implements IBehaviorExtension {
 
     @Override
     public ExecutionState execute(IConversationMemory memory, List<BehaviorRule> trace) {
-        List<IData<Context>> contextData = memory.getCurrentStep().getAllData("context");
+        List<IData<Context>> contextData = memory.getCurrentStep().getAllData(CONTEXT);
 
         boolean success = false;
         for (IData<Context> contextDatum : contextData) {
             Context context = contextDatum.getResult();
-            if (contextDatum.getKey().equals("context:" + contextKey)) {
+            if (contextDatum.getKey().equals(CONTEXT + ":" + contextKey)) {
                 switch (context.getType()) {
                     case expressions:
                         List<Expression> contextExpressions = expressionProvider.
@@ -162,7 +163,7 @@ public class ContextMatcher implements IBehaviorExtension {
     }
 
     @Override
-    public IBehaviorExtension clone() throws CloneNotSupportedException {
+    public IBehaviorExtension clone() {
         IBehaviorExtension clone = new ContextMatcher(expressionProvider, jsonSerialization);
         clone.setValues(getValues());
         return clone;

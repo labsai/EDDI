@@ -5,6 +5,7 @@ import ai.labs.normalizer.impl.NormalizeInputTask;
 import ai.labs.runtime.bootstrap.AbstractBaseModule;
 import com.google.inject.multibindings.MapBinder;
 
+@Deprecated
 public class NormalizerModule extends AbstractBaseModule {
     @Override
     protected void configure() {

@@ -3,33 +3,44 @@ package ai.labs.runtime.internal;
 import ai.labs.lifecycle.IConversation;
 import ai.labs.lifecycle.ILifecycleManager;
 import ai.labs.lifecycle.LifecycleException;
-import ai.labs.lifecycle.model.Context;
-import ai.labs.memory.ConversationMemory;
-import ai.labs.memory.Data;
-import ai.labs.memory.IConversationMemory;
-import ai.labs.memory.IData;
-import ai.labs.memory.model.ConversationState;
+import ai.labs.memory.*;
+import ai.labs.memory.IConversationMemory.IConversationProperties;
+import ai.labs.memory.model.Data;
+import ai.labs.models.Context;
+import ai.labs.models.ConversationState;
+import ai.labs.models.Property;
+import ai.labs.models.Property.Scope;
+import ai.labs.persistence.IResourceStore;
+import ai.labs.resources.rest.properties.model.Properties;
 import ai.labs.runtime.IExecutablePackage;
 
-import java.util.LinkedList;
-import java.util.List;
-import java.util.Map;
-import java.util.Objects;
+import java.util.*;
+import java.util.stream.Collectors;
+
+import static ai.labs.memory.IConversationMemory.IWritableConversationStep;
 
 /**
  * @author ginccc
  */
 public class Conversation implements IConversation {
     private static final String CONVERSATION_END = "CONVERSATION_END";
+    private static final String KEY_USER_INFO = "userInfo";
+    private static final String KEY_INPUT = "input";
+    private static final String KEY_CONTEXT = "context";
+    private static final String KEY_ACTIONS = "actions";
+    private static final String CONVERSATION_START = "CONVERSATION_START";
     private final List<IExecutablePackage> executablePackages;
     private final IConversationMemory conversationMemory;
+    private final IPropertiesHandler propertiesHandler;
     private final IConversation.IConversationOutputRenderer outputProvider;
 
     Conversation(List<IExecutablePackage> executablePackages,
                  IConversationMemory conversationMemory,
+                 IPropertiesHandler propertiesHandler,
                  IConversationOutputRenderer outputProvider) {
         this.executablePackages = executablePackages;
         this.conversationMemory = conversationMemory;
+        this.propertiesHandler = propertiesHandler;
         this.outputProvider = outputProvider;
     }
 
@@ -49,13 +60,43 @@ public class Conversation implements IConversation {
     }
 
     @Override
-    public void init() throws LifecycleException {
+    public void init(Map<String, Context> context) throws LifecycleException {
         setConversationState(ConversationState.READY);
-        executePackages(new LinkedList<>());
+
+        addConversationStartAction(conversationMemory.getCurrentStep());
+        loadLongTermProperties(conversationMemory);
+
+        executePackages(new LinkedList<>(createContextData(context)));
     }
 
     private void setConversationState(ConversationState conversationState) {
         this.conversationMemory.setConversationState(conversationState);
+    }
+
+    private static void addConversationStartAction(IWritableConversationStep currentStep) {
+        List<String> conversationEndArray = Collections.singletonList(CONVERSATION_START);
+        currentStep.storeData(new Data<>(KEY_ACTIONS, conversationEndArray));
+        currentStep.addConversationOutputList(KEY_ACTIONS, conversationEndArray);
+    }
+
+    private void loadLongTermProperties(IConversationMemory conversationMemory) throws LifecycleException {
+        try {
+            Properties properties = propertiesHandler.loadProperties();
+
+            if (properties.containsKey(KEY_USER_INFO)) {
+                Object userInfo = properties.get(KEY_USER_INFO);
+                if (userInfo instanceof Map) {
+                    conversationMemory.getConversationProperties().
+                            put(KEY_USER_INFO, new Property(KEY_USER_INFO, userInfo, Scope.conversation));
+                }
+            }
+
+            conversationMemory.getConversationProperties().putAll(convertProperties(properties));
+
+        } catch (IResourceStore.ResourceStoreException | IResourceStore.ResourceNotFoundException e) {
+            throw new LifecycleException(e.getLocalizedMessage(), e);
+        }
+
     }
 
     private ConversationState getConversationState() {
@@ -75,37 +116,34 @@ public class Conversation implements IConversation {
             setConversationState(ConversationState.IN_PROGRESS);
 
             ((ConversationMemory) conversationMemory).startNextStep();
-            List<IData> data = new LinkedList<>();
+            var contextData = createContextData(contexts);
+            addContextToConversationOutput(conversationMemory.getCurrentStep(), contextData);
+            var lifecycleData = new LinkedList<IData>(contextData);
 
             //store user input in memory
             IData initialData;
+            IWritableConversationStep currentStep = conversationMemory.getCurrentStep();
             if (!"".equals(message.trim())) {
-                initialData = new Data<>("input:initial", message);
+                initialData = new Data<>(KEY_INPUT + ":initial", message);
                 initialData.setPublic(true);
-                data.add(initialData);
+                lifecycleData.add(initialData);
+                currentStep.addConversationOutputString(KEY_INPUT, message);
             }
-
-            //store context data
-            List<IData<Context>> contextData = new LinkedList<>();
-            for (String key : contexts.keySet()) {
-                Context context = contexts.get(key);
-                contextData.add(new Data<>("context:" + key, context));
-
-            }
-            data.addAll(contextData);
 
             //execute input processing
-            executePackages(data);
+            executePackages(lifecycleData);
 
-
-            IConversationMemory.IWritableConversationStep currentStep = conversationMemory.getCurrentStep();
-            IData<List<String>> actionData = currentStep.getLatestData("action");
+            IData<List<String>> actionData = currentStep.getLatestData(KEY_ACTIONS);
             if (actionData != null) {
                 List<String> result = actionData.getResult();
                 if (result != null && result.contains(CONVERSATION_END)) {
                     endConversation();
                 }
             }
+
+            removeOldInvalidProperties();
+            storePropertiesPermanently();
+
         } catch (LifecycleException.LifecycleInterruptedException e) {
             setConversationState(ConversationState.EXECUTION_INTERRUPTED);
             throw e;
@@ -123,9 +161,58 @@ public class Conversation implements IConversation {
         }
     }
 
+    private void addContextToConversationOutput(IWritableConversationStep currentStep,
+                                                List<IData<Context>> contextData) {
+
+        if (!contextData.isEmpty()) {
+            var context = ConversationMemoryUtilities.prepareContext(contextData);
+            currentStep.addConversationOutputMap(KEY_CONTEXT, context);
+        }
+    }
+
+    private Map<String, Property> convertProperties(Properties properties) {
+        return properties.keySet().stream().collect(
+                Collectors.toMap(name -> name,
+                        name -> new Property(name, properties.get(name), Scope.longTerm),
+                        (a, b) -> b, LinkedHashMap::new));
+
+    }
+
+    private void removeOldInvalidProperties() {
+        IConversationProperties conversationProperties = conversationMemory.getConversationProperties();
+        Map<String, Property> filteredConversationProperties =
+                conversationProperties.entrySet().stream()
+                        .filter(property -> property.getValue().getScope() != Scope.step)
+                        .collect(Collectors.toMap(Map.Entry::getKey, Map.Entry::getValue));
+
+        conversationProperties.clear();
+        conversationProperties.putAll(filteredConversationProperties);
+    }
+
+    private void storePropertiesPermanently()
+            throws IResourceStore.ResourceStoreException {
+
+        Properties longTermConversationProperties = conversationMemory.getConversationProperties().values().stream()
+                .filter(property -> property.getScope() == Scope.longTerm)
+                .filter(property -> property.getValue() != null)
+                .collect(Collectors.toMap(Property::getName, Property::getValue, (a, b) -> b, Properties::new));
+
+        propertiesHandler.mergeProperties(longTermConversationProperties);
+    }
+
+    private List<IData<Context>> createContextData(Map<String, Context> context) {
+        List<IData<Context>> contextData = new LinkedList<>();
+        if (context != null) {
+            for (String key : context.keySet()) {
+                contextData.add(new Data<>(KEY_CONTEXT + ":" + key, context.get(key)));
+
+            }
+        }
+        return contextData;
+    }
+
     private void executePackages(List<IData> data) throws LifecycleException {
         for (IExecutablePackage executablePackage : executablePackages) {
-            conversationMemory.setCurrentContext(executablePackage.getName());
             data.stream().filter(Objects::nonNull).
                     forEach(datum -> conversationMemory.getCurrentStep().storeData(datum));
             ILifecycleManager lifecycleManager = executablePackage.getLifecycleManager();

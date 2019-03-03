@@ -1,7 +1,7 @@
 package ai.labs.lifecycle;
 
-import ai.labs.lifecycle.model.Context;
 import ai.labs.memory.IConversationMemory;
+import ai.labs.models.Context;
 
 import java.util.Map;
 
@@ -11,7 +11,7 @@ import java.util.Map;
 public interface IConversation {
     IConversationMemory getConversationMemory();
 
-    void init() throws LifecycleException;
+    void init(Map<String, Context> context) throws LifecycleException;
 
     boolean isEnded();
 
