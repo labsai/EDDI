@@ -14,7 +14,6 @@ import javax.ws.rs.ext.Provider;
 /**
  * @author ginccc
  */
-import java.io.IOException;
 
 @Provider
 public class AuthorizationHeaderFilter implements ContainerRequestFilter {
@@ -23,7 +22,7 @@ public class AuthorizationHeaderFilter implements ContainerRequestFilter {
     SecurityContext securityContext;
 
     @Override
-    public void filter(ContainerRequestContext requestContext) throws IOException {
+    public void filter(ContainerRequestContext requestContext) {
         KeycloakPrincipal<KeycloakSecurityContext> userPrincipal =
                 (KeycloakPrincipal<KeycloakSecurityContext>) this.securityContext.getUserPrincipal();
         KeycloakSecurityContext securityContext = userPrincipal.getKeycloakSecurityContext();

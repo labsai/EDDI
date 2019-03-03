@@ -116,12 +116,12 @@
         <dependency>
             <groupId>org.keycloak</groupId>
             <artifactId>keycloak-core</artifactId>
-            <version>4.2.1.Final</version>
+            <version>4.8.3.Final</version>
         </dependency>
         <dependency>
             <groupId>org.keycloak</groupId>
             <artifactId>keycloak-jetty94-adapter</artifactId>
-            <version>4.2.1.Final</version>
+            <version>4.8.3.Final</version>
         </dependency>
     </dependencies>
 
