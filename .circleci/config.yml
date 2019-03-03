@@ -36,7 +36,7 @@ jobs:
       - deploy:
           name: Build and push Docker image
           command: |
-            if [ "${CIRCLE_BRANCH}" == "master" ]; then
+            if [ "${CIRCLE_BRANCH}" == "release/4.4.0" ]; then
             docker login -u $DOCKER_USER -p $DOCKER_PASS
 
             docker build --build-arg EDDI_VERSION=4.4 --build-arg EDDI_ENV=production -t labsai/eddi:4.4.0-b$CIRCLE_BUILD_NUM .
@@ -45,12 +45,12 @@ jobs:
             docker build --build-arg EDDI_VERSION=4.4 --build-arg EDDI_ENV=production -t labsai/eddi:latest .
             docker push labsai/eddi:latest
 
-            # docker build --build-arg EDDI_VERSION=4.4 --build-arg EDDI_ENV=production -t labsai/eddi:4.4.0 .
-            # docker push labsai/eddi:4.4.0
+            docker build --build-arg EDDI_VERSION=4.4 --build-arg EDDI_ENV=production -t labsai/eddi:4.4.0 .
+            docker push labsai/eddi:4.4.0
 
-            # docker build --build-arg EDDI_VERSION=4.4 --build-arg EDDI_ENV=production -t labsai/eddi:4.4 .
-            # docker push labsai/eddi:4.4
+            docker build --build-arg EDDI_VERSION=4.4 --build-arg EDDI_ENV=production -t labsai/eddi:4.4 .
+            docker push labsai/eddi:4.4
 
-            # docker build --build-arg EDDI_VERSION=4.4 --build-arg EDDI_ENV=production -t labsai/eddi:4 .
-            # docker push labsai/eddi:4
+            docker build --build-arg EDDI_VERSION=4.4 --build-arg EDDI_ENV=production -t labsai/eddi:4 .
+            docker push labsai/eddi:4
             fi
