@@ -14,6 +14,7 @@ For professional support, check out: https://www.labs.ai
 
 Check out the full documentation [here](https://labsai.atlassian.net/wiki/display/EDDI/).
 
+[![Codacy Badge](https://api.codacy.com/project/badge/Grade/17f0bf1c32b346fc9232e7601327d212)](https://app.codacy.com/app/ginccc/EDDI?utm_source=github.com&utm_medium=referral&utm_content=labsai/EDDI&utm_campaign=Badge_Grade_Dashboard)
 [![CircleCI](https://circleci.com/gh/labsai/EDDI/tree/master.svg?style=svg)](https://circleci.com/gh/labsai/EDDI/tree/master)
 
 ## Intro
