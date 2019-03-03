@@ -29,10 +29,7 @@ import javax.inject.Named;
 import javax.ws.rs.InternalServerErrorException;
 import javax.ws.rs.container.AsyncResponse;
 import javax.ws.rs.core.Response;
-import java.io.File;
-import java.io.FileNotFoundException;
-import java.io.IOException;
-import java.io.InputStream;
+import java.io.*;
 import java.net.URI;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -293,13 +290,19 @@ public class RestImportService extends AbstractBackupService implements IRestImp
 
     private <T> List<T> readResources(List<URI> uris, Path packagePath, String extension, Class<T> clazz) {
         return uris.stream().map(uri -> {
+            Path resourcePath = null;
+            String resourceContent = null;
             try {
                 IResourceId resourceId = RestUtilities.extractResourceId(uri);
-                Path resourcePath = createResourcePath(packagePath, resourceId.getId(), extension);
-                String resourceContent = readFile(resourcePath);
+                resourcePath = createResourcePath(packagePath, resourceId.getId(), extension);
+                resourceContent = readFile(resourcePath);
                 return jsonSerialization.deserialize(resourceContent, clazz);
             } catch (IOException e) {
-                e.printStackTrace();
+                log.error(e.getLocalizedMessage(), e);
+                log.error(String.format("uri is: %s", uri));
+                log.error(String.format("packagePath is: %s", packagePath));
+                log.error(String.format("resourcePath is: %s", resourcePath));
+                log.error(String.format("resourceContent is:\n%s", resourceContent));
                 return null;
             }
         }).collect(Collectors.toList());
@@ -309,14 +312,16 @@ public class RestImportService extends AbstractBackupService implements IRestImp
         return Paths.get(FileUtilities.buildPath(packagePath.toString(), resourceId + "." + extension + ".json"));
     }
 
-    private String readFile(Path path) throws FileNotFoundException {
-        StringBuilder ret = new StringBuilder();
-        try (Scanner scanner = new Scanner(new File(path.toString()))) {
-            while (scanner.hasNext()) {
-                ret.append(scanner.nextLine());
+    private String readFile(Path path) throws IOException {
+        try (BufferedReader reader = new BufferedReader(new FileReader(path.toFile()))) {
+            StringBuilder builder = new StringBuilder();
+            String currentLine = reader.readLine();
+            while (currentLine != null) {
+                builder.append(currentLine);
+                currentLine = reader.readLine();
             }
-        }
 
-        return ret.toString();
+            return builder.toString();
+        }
     }
 }

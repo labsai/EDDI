@@ -23,7 +23,6 @@ import ai.labs.runtime.client.configuration.IResourceClientLibrary;
 import ai.labs.runtime.service.ServiceException;
 import ai.labs.serialization.IJsonSerialization;
 import ai.labs.templateengine.ITemplatingEngine;
-import ai.labs.utilities.RuntimeUtilities;
 import lombok.extern.slf4j.Slf4j;
 import ognl.Ognl;
 import ognl.OgnlException;
@@ -37,6 +36,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.stream.Collectors;
 
+import static ai.labs.utilities.RuntimeUtilities.checkNotNull;
 import static ai.labs.utilities.RuntimeUtilities.isNullOrEmpty;
 
 @Slf4j
@@ -135,10 +135,9 @@ public class HttpCallsTask implements ILifecycleTask {
                             String message = "HttpCall (%s) didn't return http code 200, instead %s.";
                             log.warn(String.format(message, call.getName(), response.getHttpCode()));
                             log.warn("Error Msg:" + response.getHttpCodeMessage());
-                            continue;
                         }
 
-                        if (call.isSaveResponse()) {
+                        if (response.getHttpCode() == 200 && call.isSaveResponse()) {
                             final String responseBody = response.getContentAsString();
                             String actualContentType = response.getHttpHeader().get(CONTENT_TYPE);
                             if (actualContentType != null) {
@@ -161,9 +160,9 @@ public class HttpCallsTask implements ILifecycleTask {
                             IData<Object> httpResponseData = dataFactory.createData(memoryDataName, responseObject);
                             currentStep.storeData(httpResponseData);
                             currentStep.addConversationOutputMap(KEY_HTTP_CALLS, Map.of(responseObjectName, responseObject));
-
-                            runPostResponse(memory, call, templateDataObjects, response.getHttpCode());
                         }
+
+                        runPostResponse(memory, call, templateDataObjects, response.getHttpCode());
                     }
                 } catch (IRequest.HttpRequestException |
                         ITemplatingEngine.TemplateEngineException |
@@ -191,14 +190,20 @@ public class HttpCallsTask implements ILifecycleTask {
                     if (verifyHttpCode(propertyInstruction.getHttpCodeValidator(), httpCode)) {
 
                         String propertyName = propertyInstruction.getName();
-                        RuntimeUtilities.checkNotNull(propertyName, "name");
+                        checkNotNull(propertyName, "name");
 
                         String path = propertyInstruction.getFromObjectPath();
-                        RuntimeUtilities.checkNotNull(path, "fromObjectPath");
+                        checkNotNull(path, "fromObjectPath");
 
                         Property.Scope scope = propertyInstruction.getScope();
-                        memory.getConversationProperties().put(propertyName, new Property(propertyName,
-                                Ognl.getValue(path, templateDataObjects), scope));
+                        Object propertyValue;
+                        if (!isNullOrEmpty(path)) {
+                            propertyValue = Ognl.getValue(path, templateDataObjects);
+                        } else {
+                            propertyValue = propertyInstruction.getValue();
+                        }
+                        memory.getConversationProperties().put(propertyName,
+                                new Property(propertyName, propertyValue, scope));
                     }
                 }
             }
@@ -230,13 +235,24 @@ public class HttpCallsTask implements ILifecycleTask {
     }
 
     private boolean verifyHttpCode(HttpCodeValidator httpCodeValidator, int httpCode) {
+        if (httpCodeValidator == null) {
+            httpCodeValidator = HttpCodeValidator.DEFAULT;
+        } else {
+            if (httpCodeValidator.getRunOnHttpCode() == null) {
+                httpCodeValidator.setRunOnHttpCode(HttpCodeValidator.DEFAULT.getRunOnHttpCode());
+            }
+            if (httpCodeValidator.getSkipOnHttpCode() == null) {
+                httpCodeValidator.setSkipOnHttpCode(HttpCodeValidator.DEFAULT.getSkipOnHttpCode());
+            }
+        }
+
         return httpCodeValidator.getRunOnHttpCode().contains(httpCode) &&
                 !httpCodeValidator.getSkipOnHttpCode().contains(httpCode);
     }
 
     private IRequest buildRequest(Request requestConfig, Map<String, Object> templateDataObjects) throws ITemplatingEngine.TemplateEngineException {
         String path = requestConfig.getPath().trim();
-        if (!path.startsWith(SLASH_CHAR)) {
+        if (!path.startsWith(SLASH_CHAR) && !path.isEmpty()) {
             path = SLASH_CHAR + path;
         }
         URI targetUri = URI.create(targetServerUri + templateValues(path, templateDataObjects));

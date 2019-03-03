@@ -20,6 +20,7 @@ public class OutputGenerationTest {
     private static final String ACTION_1 = "action1";
     private static final String ACTION_2 = "action2";
     private static final String ACTION_3 = "action3";
+    public static final String OUTPUT_TYPE_TEXT = "text";
     private OutputGeneration outputGeneration;
 
     @Before
@@ -109,8 +110,8 @@ public class OutputGenerationTest {
         List<OutputEntry> outputEntries = new LinkedList<>();
         List<Object> valueAlternatives1 = Arrays.asList("Text1 Alternative 1", "Text1 Alternative 2");
         List<Object> valueAlternatives2 = Arrays.asList("Text2 Alternative 1", "Text2 Alternative 2");
-        List<OutputValue> outputValues = Arrays.asList(new OutputValue(OutputValue.Type.text, valueAlternatives1),
-                new OutputValue(OutputValue.Type.text, valueAlternatives2));
+        List<OutputValue> outputValues = Arrays.asList(new OutputValue(OUTPUT_TYPE_TEXT, valueAlternatives1),
+                new OutputValue(OUTPUT_TYPE_TEXT, valueAlternatives2));
         List<QuickReply> quickReply = Arrays.asList(new QuickReply("Some QuickReply", "some(Expression)", false),
                 new QuickReply("Some Other QuickReply", "someOther(Expression", false));
 

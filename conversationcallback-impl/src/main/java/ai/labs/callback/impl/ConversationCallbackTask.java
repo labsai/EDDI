@@ -36,9 +36,9 @@ public class ConversationCallbackTask implements ILifecycleTask {
     private static final long DEFAULT_TIMEOUT_IN_MILLIS = 10000L;
 
     private final IConversationCallback conversationCallback;
-    private List<String> callOnActions;
+    private List<String> callOnActions = Collections.emptyList();
     private URI callback;
-    private long timeoutInMillis;
+    private long timeoutInMillis = DEFAULT_TIMEOUT_IN_MILLIS;
 
     @Inject
     public ConversationCallbackTask(IConversationCallback conversationCallback) {
@@ -129,8 +129,6 @@ public class ConversationCallbackTask implements ILifecycleTask {
                 } catch (NumberFormatException e) {
                     throw new PackageConfigurationException(e.getLocalizedMessage(), e);
                 }
-            } else {
-                timeoutInMillis = DEFAULT_TIMEOUT_IN_MILLIS;
             }
         }
 
@@ -138,8 +136,6 @@ public class ConversationCallbackTask implements ILifecycleTask {
             Object configValue = configuration.get(KEY_CALL_ON_ACTIONS);
             if (configValue != null) {
                 callOnActions = StringUtilities.parseCommaSeparatedString(configValue.toString());
-            } else {
-                callOnActions = Collections.emptyList();
             }
         }
     }

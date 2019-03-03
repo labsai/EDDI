@@ -1,27 +1,165 @@
 const eddi = {};
+eddi.isFirstConversation = true;
+eddi.isFirstMessage = true;
+eddi.skipDelay = false;
 
 class Message {
-    constructor(text, message_side) {
+    constructor(text) {
         this.text = text;
-        this.message_side = message_side;
+        this.element = $('<div>');
     }
 
     get draw() {
         return function () {
-            const $message = $($('.message_template').clone().html());
-            $message.addClass(this.message_side).find('.text').html(this.text);
-            $('.messages').append($message);
+            this.element = $('<div>');
+            this.element.addClass('line');
+            const $message = $('<div>');
+            this.element.append($message);
+            $message.addClass('message message-left animated fadeInUp bubbleLeft');
+            $message.html(this.text.replace('\n', '<br>'));
+            $('#chat-container').append(this.element);
             return setTimeout(function () {
                 return $message.addClass('appeared');
             }, 0);
         };
     }
+
+    remove() {
+        this.element.remove();
+    }
 }
 
+class InputField {
+    constructor(placeholder, defaultValue) {
+        this.placeholder = typeof placeholder !== 'undefined' ? placeholder : 'Type your response…';
+        this.defaultValue = typeof defaultValue !== 'undefined' ? defaultValue : '';
+        this.element = $('<div>');
+    }
+
+    get draw() {
+        return function () {
+            this.element = $('<div>');
+            this.element.addClass('line textInputContainer');
+            const $inputField = $('<input type="text" name="answer" required="required" autocomplete="off" autofocus="autofocus">');
+            if (this.placeholder !== '') {
+                $inputField.attr('placeholder', this.placeholder);
+            }
+
+            if (this.defaultValue !== '') {
+                $inputField.attr('value', this.defaultValue);
+            }
+
+            $inputField.addClass('textInput answer message message-right animated fadeInUp');
+            this.element.append($inputField);
+            $('#chat-container').append(this.element);
+
+            let _this = this;
+            $inputField.keyup(function (event) {
+                if (event.keyCode === 13) {
+                    $('.answer').each(function () {
+                        let answer = $(this).val();
+
+                        if (answer !== "") {
+                            _this.remove();
+                            createAnswerMessage(answer);
+                            eddi.submitUserMessage(answer);
+                        } else {
+                            $(this).removeClass('shake').removeClass('fadeInUp');
+                            $(this).addClass('shake');
+                            $(this).one('webkitAnimationEnd mozAnimationEnd MSAnimationEnd oanimationend animationend',
+                                function () {
+                                    $(this).removeClass('shake').removeClass('fadeInUp');
+                                });
+                        }
+                    });
+                }
+            });
+
+            $inputField.focus();
+
+            return setTimeout(function () {
+                return $inputField.addClass('appeared');
+            }, 0);
+        };
+    }
+
+    remove() {
+        this.element.remove();
+    }
+}
+
+class Button {
+    constructor(buttonObj) {
+        this.buttonObj = buttonObj;
+    }
+
+    get draw() {
+        return function () {
+            const _this = this;
+            const $button = $('<button/>', {
+                text: _this.buttonObj.label,
+                click: function () {
+                    let answer = '';
+                    /** @namespace buttonObj.onPress.submitField */
+                    let onPress = _this.buttonObj.onPress;
+                    let submitField;
+                    if (typeof onPress !== 'undefined') {
+                        submitField = onPress.submitField;
+                        if (typeof submitField === 'undefined') {
+                            submitField = 'inputText';
+                        }
+
+                        $('.' + submitField).each(function () {
+                            answer = answer + $(this).val();
+                        });
+
+                        answer = answer.trim();
+                        _this.convertInputFieldsToUserMessage(answer);
+                        if (typeof onPress !== 'undefined') {
+                            eddi.submitUserMessage(answer, onPress.context);
+                        } else {
+                            eddi.submitUserMessage(answer);
+                        }
+                    } else {
+                        $('.inputText').each(function () {
+                            answer = answer + $(this).val();
+                        });
+
+                        answer = answer.trim();
+                        _this.convertInputFieldsToUserMessage(answer);
+                        eddi.submitUserMessage(answer);
+                    }
+
+                    $('.quick_reply').remove();
+                }
+            });
+
+            $button.hide();
+            $button.addClass('message message-left animated fadeInUp bubbleLeft');
+            $button.addClass('quick_reply');
+            const $container = $('<div class="line">');
+            $container.append($button);
+            $('#chat-container').append($container);
+            $button.fadeIn({queue: false, duration: 1500});
+            return setTimeout(function () {
+                return $button.addClass('appeared');
+            }, 0);
+        };
+    }
+
+    convertInputFieldsToUserMessage(answer) {
+        let $inputText = $('.textInputContainer');
+        if ($inputText.length > 0) {
+            createAnswerMessage(answer);
+        }
+        $inputText.remove();
+    }
+}
+
+
 class QuickReply {
-    constructor(text, message_side) {
+    constructor(text) {
         this.text = text;
-        this.message_side = message_side;
     }
 
     get draw() {
@@ -30,14 +168,17 @@ class QuickReply {
             const $quickReply = $('<button/>', {
                 text: this.text,
                 click: function () {
+                    createAnswerMessage(_this.text);
                     eddi.submitUserMessage(_this.text);
-                    eddi.displayMessage(_this.text, 'right');
                     $('.quick_reply').remove();
                 }
             });
-            $quickReply.addClass(this.message_side);
+
+            $quickReply.hide();
+            $quickReply.addClass('message message-left animated fadeInUp bubbleLeft');
             $quickReply.addClass('quick_reply');
-            $('.messages').append($quickReply);
+            $('#chat-container').append($quickReply);
+            $quickReply.fadeIn({queue: false, duration: 1500});
             return setTimeout(function () {
                 return $quickReply.addClass('appeared');
             }, 0);
@@ -45,61 +186,57 @@ class QuickReply {
     }
 }
 
+class ConversationEnd {
+    constructor(infoMessage) {
+        this.infoMessage = infoMessage;
+    }
+
+    get draw() {
+        return function () {
+            this.element = $('<div style="margin: 1em;">');
+            this.element.addClass('line');
+            const $message = $('<div style="color:darkgray;">*** ' + this.infoMessage + ' ***</div>');
+            this.element.append($message);
+            $message.html(this.text);
+            $('#chat-container').append(this.element);
+            return setTimeout(function () {
+                return $message.addClass('appeared');
+            }, 0);
+        };
+    }
+}
+
+function createAnswerMessage(answer) {
+    let htmlWrapperBeginning = "<div class=\"line\"><div class=\"message message-right animated fadeInUp bubbleRight\">",
+        htmlWrapperEnding = "</div></div><div class=\"clear\"></div>";
+
+    $('.quickReply').remove();
+    $('#chat-container').append(htmlWrapperBeginning + answer + htmlWrapperEnding);
+}
+
+
 $(function () {
-    let message_side = 'right';
-
-    function getMessageText() {
-        const $message_input = $('.message_input');
-        return $message_input.val();
-    }
-
-    eddi.displayMessage = function (text, side) {
-        let $messages, message;
-        if (text.trim() === '') {
-            return;
-        }
-        $('.message_input').val('');
-        $messages = $('.messages');
-        message_side = side ? 'right' : 'left';
-        message = new Message(text, side);
-        message.draw();
-        return $messages.animate({scrollTop: $messages.prop('scrollHeight')}, 300);
-    };
-
-    function displayQuickReplies(quickReplies) {
-        let $messages, quickReply;
-        if (quickReplies.length === 0) {
-            return;
-        }
-
-        $messages = $('.messages');
-        for (let i = 0; i < quickReplies.length; i++) {
-            quickReply = new QuickReply(quickReplies[i].value, 'left');
-            quickReply.draw();
-        }
-        return $messages.animate({scrollTop: $messages.prop('scrollHeight')}, 300);
-    }
-
-    $('.send_message').click(function () {
-        const userMessage = getMessageText();
-        eddi.submitUserMessage(userMessage);
-        return eddi.displayMessage(userMessage, 'right');
-    });
-    $('.message_input').keyup(function (e) {
-        if (e.which === 13) {
-            const userMessage = getMessageText();
-            eddi.submitUserMessage(userMessage);
-            return eddi.displayMessage(userMessage, 'right');
-        }
+    $("#skipDelay").change(function () {
+        eddi.skipDelay = $("#skipDelay").is(':checked');
     });
 
-    eddi.submitUserMessage = function (userMessage) {
+
+    eddi.submitUserMessage = function (userMessage, context) {
         let requestBody = null;
         let contextValue = $('#contextValue').val().trim();
         if (contextValue !== null && contextValue !== '') {
+            let contextObj = JSON.parse(contextValue);
+            if (typeof context !== 'undefined') {
+                Object.assign(contextObj, context);
+            }
             requestBody = {
                 input: userMessage,
-                context: JSON.parse(contextValue)
+                context: contextObj
+            }
+        } else if (typeof context !== 'undefined') {
+            requestBody = {
+                input: userMessage,
+                context: context
             }
         } else {
             requestBody = {
@@ -126,15 +263,11 @@ $(function () {
             });
     };
 
-    const displayImage = function (imageUrl) {
-        eddi.displayMessage('<img src="' + imageUrl + '" alt="" style="max-width: 100%" />', 'left');
-    };
-
     const refreshConversationLog = function (conversationMemory) {
         const conversationState = conversationMemory.conversationState;
 
         if (conversationState === 'ERROR') {
-            log('ERROR', 'An Error has occurred. Please contact the administrator!');
+            console.log('ERROR', 'An Error has occurred. Please contact the administrator!');
             return;
         }
 
@@ -143,80 +276,12 @@ $(function () {
             return;
         }
 
-        let ioList = [];
-        for (let i = 0; i < conversationMemory.conversationSteps.length; i++) {
-            let step = conversationMemory.conversationSteps[i];
-
-            let input = null;
-            let action = null;
-            let outputs = [];
-            let images = [];
-            let quickReplies = [];
-            for (let x = 0; x < step.conversationStep.length; x++) {
-                let obj = step.conversationStep[x];
-                if (obj.key.indexOf('input') === 0) {
-                    input = obj.value;
-                } else if (obj.key.indexOf('actions') === 0) {
-                    action = obj.value;
-                } else if (obj.key.indexOf('output:text') === 0) {
-                    let item = obj.value;
-                    if (item != null && typeof item === 'object') {
-                        if (item.value != null) {
-                            item = item.value;
-                        } else if (item.text != null) {
-                            item = item.text;
-                        }
-                    }
-                    outputs.push(item);
-                } else if (obj.key.indexOf('output:image') === 0) {
-                    images.push(obj.value);
-                } else if (obj.key.indexOf('quickReplies') === 0) {
-                    pushArray(quickReplies, obj.value);
-                } else if (obj.key.indexOf('output:quickReply') === 0) {
-                    pushArray(quickReplies, obj.value);
-                }
-            }
-
-            ioList.push({input: input, outputs: outputs, images: images, quickReplies: quickReplies});
-        }
-
-        if (ioList.length > 0) {
-            let latestInteraction = ioList[ioList.length - 1];
-            if (latestInteraction === 'undefined') {
-                latestInteraction = {};
-            }
-
-            for (let output of latestInteraction.outputs) {
-                if (output.indexOf("http://") === 0 || output.indexOf("https://") === 0) {
-                    let indexEnd = output.indexOf(" ");
-                    if (indexEnd === -1) {
-                        indexEnd = output.length;
-                    }
-                    displayImage(output.substr(0, indexEnd));
-                } else {
-                    eddi.displayMessage(output, 'left');
-                }
-            }
-            for (let image of latestInteraction.images) {
-                if (typeof image === 'object') {
-                    displayImage(image.uri);
-                } else {
-                    displayImage('/binary/img/' + image);
-                }
-            }
-            displayQuickReplies(latestInteraction.quickReplies);
-
-            $('.message_input').focus();
-        }
-
-        if (conversationState === 'ENDED') {
-            $('<div style="padding-bottom: 1rem; color:darkgray;"><hr>Conversation Ended</div>').appendTo($('.messages'));
-            eddi.createConversation(eddi.environment, eddi.botId);
-        }
-    };
-
-    const pushArray = function (arr, arr2) {
-        arr.push.apply(arr, arr2);
+        /** @namespace conversationMemory.conversationOutputs */
+        /** @namespace conversationOutput.quickReplies */
+        let conversationOutput = conversationMemory.conversationOutputs[0];
+        let outputArray = conversationOutput.output ? conversationOutput.output : [];
+        let quickReplyArray = conversationOutput.quickReplies ? conversationOutput.quickReplies : [];
+        createMessage(outputArray, quickReplyArray, conversationState === 'ENDED');
     };
 
     const deployBot = function (environment, botId, botVersion) {
@@ -243,6 +308,12 @@ $(function () {
         }
         $.post('/bots/' + environment + '/' + botId).done(function (data, status, xhr) {
             const conversationUriArray = xhr.getResponseHeader('Location').split('/');
+
+            if (!eddi.isFirstMessage) {
+                new ConversationEnd('NEW CONVERSATION STARTED').draw();
+                smoothScrolling();
+                eddi.isFirstMessage = false;
+            }
 
             if (eddi.conversationId) {
                 $('#previousConversationId').text(eddi.conversationId);

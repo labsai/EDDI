@@ -194,6 +194,7 @@ public class Conversation implements IConversation {
 
         Properties longTermConversationProperties = conversationMemory.getConversationProperties().values().stream()
                 .filter(property -> property.getScope() == Scope.longTerm)
+                .filter(property -> property.getValue() != null)
                 .collect(Collectors.toMap(Property::getName, Property::getValue, (a, b) -> b, Properties::new));
 
         propertiesHandler.mergeProperties(longTermConversationProperties);

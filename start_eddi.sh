@@ -25,4 +25,3 @@ fi
 echo "memory params: ${memory_string}"
 
 java -server ${memory_string} -classpath '.:lib/*' -DEDDI_ENV=$EDDI_ENV ${argument_string} --add-opens java.base/java.lang=ALL-UNNAMED ai.labs.api.ApiServer
-

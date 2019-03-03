@@ -94,7 +94,7 @@ public class Dependency implements IBehaviorExtension {
     }
 
     @Override
-    public IBehaviorExtension clone() throws CloneNotSupportedException {
+    public IBehaviorExtension clone() {
         Dependency clone = new Dependency(reference);
         clone.setValues(getValues());
         clone.setContainingBehaviorRuleSet(behaviorSet);
