@@ -11,11 +11,22 @@
 
     <artifactId>email-plugin-impl</artifactId>
     <dependencies>
+        <dependency>
+            <groupId>ai.labs</groupId>
+            <artifactId>email-plugin-definition</artifactId>
+            <version>${project.version}</version>
+        </dependency>
         <!-- https://mvnrepository.com/artifact/javax.mail/mail -->
         <dependency>
             <groupId>javax.mail</groupId>
             <artifactId>mail</artifactId>
             <version>1.4</version>
+        </dependency>
+        <dependency>
+            <groupId>ai.labs</groupId>
+            <artifactId>conversationlifecycle-definition</artifactId>
+            <version>${project.version}</version>
+            <scope>compile</scope>
         </dependency>
 
     </dependencies>
