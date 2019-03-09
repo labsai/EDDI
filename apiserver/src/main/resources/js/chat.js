@@ -214,6 +214,33 @@ function createAnswerMessage(answer) {
     $('#chat-container').append(htmlWrapperBeginning + answer + htmlWrapperEnding);
 }
 
+function smoothScrollBottom() {
+    $('html,body').animate({
+        scrollTop: $(document).height()
+    }, 1000);
+}
+//Special case for chat
+if ($(".active").attr('id') == "chat") {
+    smoothScrollBottom();
+}
+
+// Make content active
+$(tabContent).show().addClass('activeContent');
+
+//Special case for chat
+if ($(".active").attr('id') == "chat") {
+    smoothScrollBottom();
+    $(".message").each(function() {
+        $(this).removeClass('tada').removeClass('fadeInUp').addClass('fadeIn');
+    });
+}
+
+//Special case for about
+if ($(".active").attr('id') == "about") {
+    $('html,body').animate({
+        scrollTop: 0
+    }, 0);
+}
 
 $(function () {
     $("#skipDelay").change(function () {
