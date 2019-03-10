@@ -1,29 +1,26 @@
 package ai.labs.smtpclient.impl;
 
-import java.io.UnsupportedEncodingException;
-import java.util.Date;
-import java.util.concurrent.ExecutionException;
+import ai.labs.stmpplugin.ISendMail;
 
-import javax.activation.DataHandler;
-import javax.activation.DataSource;
-import javax.activation.FileDataSource;
-import javax.mail.BodyPart;
 import javax.mail.Message;
-import javax.mail.MessagingException;
-import javax.mail.Multipart;
 import javax.mail.Session;
 import javax.mail.Transport;
 import javax.mail.internet.InternetAddress;
-import javax.mail.internet.MimeBodyPart;
 import javax.mail.internet.MimeMessage;
-import javax.mail.internet.MimeMultipart;
+import java.util.Date;
+import java.util.List;
+import java.util.Properties;
 
-public class EmailUtil {
-    /**
-     * Send a simple mail
-     */
-    public static void sendMail(Session session, String toEmail, String subject, String body) {
+public class SendMail implements ISendMail {
+
+    //todo handover smtp details here
+    public SendMail() {
+    }
+
+    //todo send email to with message and subject
+    void sendMail(Session session, String toEmail, String subject, String body) {
         try {
+
             MimeMessage msg = new MimeMessage(session);
             msg.addHeader("Content-type", "text/html");
             msg.addHeader("format", "flowed");
@@ -38,5 +35,21 @@ public class EmailUtil {
         } catch (Exception e) {
             e.printStackTrace();
         }
+    }
+
+    @Override
+    public void sendMail(List<String> addressee, String subject, String body) {
+        //sendmail
+    }
+
+    public static void main(String[] args) {
+        System.out.println("SimpleEmail Start");
+        String smtpHostServer = "smtp.example.com";
+        String emailId = "test@example.com";
+
+        Properties props = System.getProperties();
+        props.put("mail.smtp.host", smtpHostServer);
+        Session session = Session.getInstance(props, null);
+        //SendMail.sendMail(session, emailId, "Test mail", "Test mail");
     }
 }

@@ -28,6 +28,17 @@
             <version>${project.version}</version>
             <scope>compile</scope>
         </dependency>
+        <dependency>
+            <groupId>ai.labs</groupId>
+            <artifactId>runtime-definition</artifactId>
+            <version>${project.version}</version>
+            <scope>compile</scope>
+        </dependency>
+        <dependency>
+            <groupId>ai.labs</groupId>
+            <artifactId>runtime-definition</artifactId>
+            <version>${project.version}</version>
+        </dependency>
 
     </dependencies>
 

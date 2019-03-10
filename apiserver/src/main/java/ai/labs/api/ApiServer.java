@@ -26,6 +26,7 @@ import ai.labs.runtime.bootstrap.SwaggerModule;
 import ai.labs.serialization.bootstrap.SerializationModule;
 import ai.labs.server.IServerRuntime;
 import ai.labs.server.bootstrap.ServerRuntimeModule;
+import ai.labs.smtpclient.bootstrap.EmailModule;
 import ai.labs.staticresources.bootstrap.StaticResourcesModule;
 import ai.labs.templateengine.bootstrap.TemplateEngineModule;
 import ai.labs.testing.bootstrap.AutomatedtestingModule;
@@ -89,7 +90,8 @@ public class ApiServer {
                 new FacebookMessengerModule(),
                 new BackupServiceModule(),
                 new HttpCallsModule(),
-                new XmppModule()
+                new XmppModule(),
+                new EmailModule()
         };
 
         //init modules
