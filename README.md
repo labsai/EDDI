@@ -61,6 +61,8 @@ Go to the root directory and execute
     ```
 3. Go to Browser --> http://localhost:7070
 
+Note: If running locally inside an IDE you need *lombok* to be enabled (otherwise you will get compile errors complaining about missing constructors). Either download as plugin (e.g. inside Intellij) or follow instructions here https://projectlombok.org/
+
 ## Docker
 
 For development, use
