@@ -193,7 +193,9 @@ function smoothScrolling() {
 }
 
 function smoothScrollBottom() {
-    $('html,body').animate({scrollTop: $(document).height() - $(window).height()}, eddi.skipDelay ? 50 : 1000);
+    $('html,body').animate({
+        scrollTop: $(document).height()
+    }, eddi.skipDelay ? 50 : 1000);
 }
 
 function preLoadImage(photoUrl) {
@@ -251,7 +253,7 @@ function tabHandler() {
 
             //Special case for about
             if ($(".active").attr('id') === "about" || $(".active").attr('id') === "debug") {
-                $('html,body').animate({scrollTop: 0}, 0);
+                $('html,body').animate({scrollBottom: 0}, 0);
             }
         }
     });
