@@ -20,4 +20,9 @@ public interface IRestVersionInfo {
     @Path("/{id}/currentversion")
     @Produces(MediaType.TEXT_PLAIN)
     Integer getCurrentVersion(@PathParam("id") String id);
+
+    @POST
+    @Path("/{id}")
+    @ApiOperation(value = "Duplicate this resource.")
+    Response duplicateResource(@PathParam("id") String id, @QueryParam("version") Integer version);
 }
