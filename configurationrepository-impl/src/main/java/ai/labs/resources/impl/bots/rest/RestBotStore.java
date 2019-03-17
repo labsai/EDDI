@@ -10,6 +10,8 @@ import ai.labs.resources.rest.bots.model.BotConfiguration;
 import ai.labs.resources.rest.documentdescriptor.IDocumentDescriptorStore;
 import ai.labs.resources.rest.documentdescriptor.model.DocumentDescriptor;
 import ai.labs.resources.rest.packages.IRestPackageStore;
+import ai.labs.rest.restinterfaces.IRestInterfaceFactory;
+import ai.labs.rest.restinterfaces.RestInterfaceFactory;
 import ai.labs.utilities.RestUtilities;
 import lombok.extern.slf4j.Slf4j;
 
@@ -30,12 +32,24 @@ import static javax.ws.rs.core.Response.Status.BAD_REQUEST;
 public class RestBotStore extends RestVersionInfo<BotConfiguration> implements IRestBotStore {
     private static final String PACKAGE_URI = IRestPackageStore.resourceURI;
     private final IBotStore botStore;
+    private IRestBotStore restBotStore;
 
     @Inject
     public RestBotStore(IBotStore botStore,
+                        IRestInterfaceFactory restInterfaceFactory,
                         IDocumentDescriptorStore documentDescriptorStore) {
         super(resourceURI, botStore, documentDescriptorStore);
         this.botStore = botStore;
+        initRestClient(restInterfaceFactory);
+    }
+
+    private void initRestClient(IRestInterfaceFactory restInterfaceFactory) {
+        try {
+            restBotStore = restInterfaceFactory.get(IRestBotStore.class);
+        } catch (RestInterfaceFactory.RestInterfaceFactoryException e) {
+            restBotStore = null;
+            log.error(e.getLocalizedMessage(), e);
+        }
     }
 
     @Override
@@ -101,6 +115,13 @@ public class RestBotStore extends RestVersionInfo<BotConfiguration> implements I
     @Override
     public Response deleteBot(String id, Integer version) {
         return delete(id, version);
+    }
+
+    @Override
+    public Response duplicateResource(String id, Integer version) {
+        validateParameters(id, version);
+        BotConfiguration botConfiguration = restBotStore.readBot(id, version);
+        return restBotStore.createBot(botConfiguration);
     }
 
     @Override

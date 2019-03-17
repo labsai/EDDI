@@ -8,6 +8,8 @@ import ai.labs.resources.rest.documentdescriptor.model.DocumentDescriptor;
 import ai.labs.resources.rest.packages.IPackageStore;
 import ai.labs.resources.rest.packages.IRestPackageStore;
 import ai.labs.resources.rest.packages.model.PackageConfiguration;
+import ai.labs.rest.restinterfaces.IRestInterfaceFactory;
+import ai.labs.rest.restinterfaces.RestInterfaceFactory;
 import ai.labs.utilities.RestUtilities;
 import lombok.extern.slf4j.Slf4j;
 
@@ -26,12 +28,24 @@ public class RestPackageStore extends RestVersionInfo<PackageConfiguration> impl
     private static final String KEY_URI = "uri";
     private static final String KEY_CONFIG = "config";
     private final IPackageStore packageStore;
+    private IRestPackageStore restPackageStore;
 
     @Inject
     public RestPackageStore(IPackageStore packageStore,
+                            IRestInterfaceFactory restInterfaceFactory,
                             IDocumentDescriptorStore documentDescriptorStore) {
         super(resourceURI, packageStore, documentDescriptorStore);
         this.packageStore = packageStore;
+        initRestClient(restInterfaceFactory);
+    }
+
+    private void initRestClient(IRestInterfaceFactory restInterfaceFactory) {
+        try {
+            restPackageStore = restInterfaceFactory.get(IRestPackageStore.class);
+        } catch (RestInterfaceFactory.RestInterfaceFactoryException e) {
+            restPackageStore = null;
+            log.error(e.getLocalizedMessage(), e);
+        }
     }
 
     @Override
@@ -127,6 +141,13 @@ public class RestPackageStore extends RestVersionInfo<PackageConfiguration> impl
     @Override
     public Response deletePackage(String id, Integer version) {
         return delete(id, version);
+    }
+
+    @Override
+    public Response duplicateResource(String id, Integer version) {
+        validateParameters(id, version);
+        PackageConfiguration packageConfiguration = restPackageStore.readPackage(id, version);
+        return restPackageStore.createPackage(packageConfiguration);
     }
 
     @Override

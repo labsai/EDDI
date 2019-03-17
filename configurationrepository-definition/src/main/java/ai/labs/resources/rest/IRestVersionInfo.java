@@ -1,5 +1,7 @@
 package ai.labs.resources.rest;
 
+import io.swagger.annotations.ApiOperation;
+
 import javax.ws.rs.*;
 import javax.ws.rs.core.MediaType;
 import javax.ws.rs.core.Response;

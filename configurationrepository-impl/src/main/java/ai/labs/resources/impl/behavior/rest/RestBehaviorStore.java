@@ -7,6 +7,8 @@ import ai.labs.resources.rest.behavior.IRestBehaviorStore;
 import ai.labs.resources.rest.behavior.model.BehaviorConfiguration;
 import ai.labs.resources.rest.documentdescriptor.IDocumentDescriptorStore;
 import ai.labs.resources.rest.documentdescriptor.model.DocumentDescriptor;
+import ai.labs.rest.restinterfaces.IRestInterfaceFactory;
+import ai.labs.rest.restinterfaces.RestInterfaceFactory;
 import lombok.extern.slf4j.Slf4j;
 
 import javax.inject.Inject;
@@ -19,12 +21,24 @@ import java.util.List;
 @Slf4j
 public class RestBehaviorStore extends RestVersionInfo<BehaviorConfiguration> implements IRestBehaviorStore {
     private final IBehaviorStore behaviorStore;
+    private IRestBehaviorStore restBehaviorStore;
 
     @Inject
     public RestBehaviorStore(IBehaviorStore behaviorStore,
+                             IRestInterfaceFactory restInterfaceFactory,
                              IDocumentDescriptorStore documentDescriptorStore) {
         super(resourceURI, behaviorStore, documentDescriptorStore);
         this.behaviorStore = behaviorStore;
+        initRestClient(restInterfaceFactory);
+    }
+
+    private void initRestClient(IRestInterfaceFactory restInterfaceFactory) {
+        try {
+            restBehaviorStore = restInterfaceFactory.get(IRestBehaviorStore.class);
+        } catch (RestInterfaceFactory.RestInterfaceFactoryException e) {
+            restBehaviorStore = null;
+            log.error(e.getLocalizedMessage(), e);
+        }
     }
 
     @Override
@@ -50,6 +64,13 @@ public class RestBehaviorStore extends RestVersionInfo<BehaviorConfiguration> im
     @Override
     public Response deleteBehaviorRuleSet(String id, Integer version) {
         return delete(id, version);
+    }
+
+    @Override
+    public Response duplicateResource(String id, Integer version) {
+        validateParameters(id, version);
+        var behaviorConfiguration = restBehaviorStore.readBehaviorRuleSet(id, version);
+        return restBehaviorStore.createBehaviorRuleSet(behaviorConfiguration);
     }
 
     @Override
