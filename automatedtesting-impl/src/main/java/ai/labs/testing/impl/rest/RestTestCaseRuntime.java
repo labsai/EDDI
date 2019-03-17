@@ -10,7 +10,6 @@ import lombok.extern.slf4j.Slf4j;
 import org.jboss.resteasy.plugins.guice.RequestScoped;
 
 import javax.inject.Inject;
-import javax.inject.Named;
 import javax.ws.rs.InternalServerErrorException;
 import javax.ws.rs.core.Response;
 
@@ -23,17 +22,14 @@ public class RestTestCaseRuntime implements IRestTestCaseRuntime {
     private final IRestInterfaceFactory restInterfaceFactory;
     private final ITestCaseStore testCaseStore;
     private final IConversationMemoryStore conversationMemoryStore;
-    private final String apiServerURI;
 
     @Inject
     public RestTestCaseRuntime(IRestInterfaceFactory restInterfaceFactory,
                                ITestCaseStore testCaseStore,
-                               IConversationMemoryStore conversationMemoryStore,
-                               @Named("system.apiServerURI") String apiServerURI) {
+                               IConversationMemoryStore conversationMemoryStore) {
         this.restInterfaceFactory = restInterfaceFactory;
         this.testCaseStore = testCaseStore;
         this.conversationMemoryStore = conversationMemoryStore;
-        this.apiServerURI = apiServerURI;
     }
 
     public Response runTestCase(String id) {
@@ -47,7 +43,7 @@ public class RestTestCaseRuntime implements IRestTestCaseRuntime {
     }
 
     private TestCaseRuntime createTestCaseRuntime() {
-        return new TestCaseRuntime(restInterfaceFactory, apiServerURI, testCaseStore, conversationMemoryStore);
+        return new TestCaseRuntime(restInterfaceFactory, testCaseStore, conversationMemoryStore);
     }
 
     public TestCaseState getTestCaseState(String id) {

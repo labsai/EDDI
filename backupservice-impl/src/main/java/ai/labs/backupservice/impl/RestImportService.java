@@ -25,7 +25,6 @@ import ai.labs.utilities.RestUtilities;
 import lombok.extern.slf4j.Slf4j;
 
 import javax.inject.Inject;
-import javax.inject.Named;
 import javax.ws.rs.InternalServerErrorException;
 import javax.ws.rs.container.AsyncResponse;
 import javax.ws.rs.core.Response;
@@ -53,17 +52,14 @@ public class RestImportService extends AbstractBackupService implements IRestImp
     private final IZipArchive zipArchive;
     private final IJsonSerialization jsonSerialization;
     private final IRestInterfaceFactory restInterfaceFactory;
-    private final String apiServerURI;
 
     @Inject
     public RestImportService(IZipArchive zipArchive,
                              IJsonSerialization jsonSerialization,
-                             IRestInterfaceFactory restInterfaceFactory,
-                             @Named("system.apiServerURI") String apiServerURI) {
+                             IRestInterfaceFactory restInterfaceFactory) {
         this.zipArchive = zipArchive;
         this.jsonSerialization = jsonSerialization;
         this.restInterfaceFactory = restInterfaceFactory;
-        this.apiServerURI = apiServerURI;
     }
 
     @Override
@@ -285,7 +281,7 @@ public class RestImportService extends AbstractBackupService implements IRestImp
     }
 
     private <T> T getRestResourceStore(Class<T> clazz) throws RestInterfaceFactory.RestInterfaceFactoryException {
-        return restInterfaceFactory.get(clazz, apiServerURI);
+        return restInterfaceFactory.get(clazz);
     }
 
     private <T> List<T> readResources(List<URI> uris, Path packagePath, String extension, Class<T> clazz) {

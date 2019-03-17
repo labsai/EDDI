@@ -10,7 +10,6 @@ import ai.labs.runtime.service.ServiceException;
 import ai.labs.utilities.URIUtilities;
 
 import javax.inject.Inject;
-import javax.inject.Named;
 import java.net.URI;
 import java.util.HashMap;
 import java.util.Map;
@@ -20,14 +19,11 @@ import java.util.Map;
  */
 public class ResourceClientLibrary implements IResourceClientLibrary {
     private final IRestInterfaceFactory restInterfaceFactory;
-    private final String apiServerURI;
     private Map<String, IResourceService> restInterfaces;
 
     @Inject
-    public ResourceClientLibrary(IRestInterfaceFactory restInterfaceFactory,
-                                 @Named("system.apiServerURI") String apiServerURI) {
+    public ResourceClientLibrary(IRestInterfaceFactory restInterfaceFactory) {
         this.restInterfaceFactory = restInterfaceFactory;
-        this.apiServerURI = apiServerURI;
         init();
     }
 
@@ -36,8 +32,7 @@ public class ResourceClientLibrary implements IResourceClientLibrary {
         this.restInterfaces = new HashMap<>();
         restInterfaces.put("ai.labs.parser", (id, version) -> {
             try {
-                IRestParserStore parserStore = restInterfaceFactory.get(IRestParserStore.class,
-                        apiServerURI);
+                IRestParserStore parserStore = restInterfaceFactory.get(IRestParserStore.class);
                 return parserStore.readParser(id, version);
             } catch (Exception e) {
                 throw new ServiceException(e.getLocalizedMessage(), e);
@@ -46,8 +41,7 @@ public class ResourceClientLibrary implements IResourceClientLibrary {
 
         restInterfaces.put("ai.labs.regulardictionary", (id, version) -> {
             try {
-                IRestRegularDictionaryStore dictionaryStore = restInterfaceFactory.get(IRestRegularDictionaryStore.class,
-                        apiServerURI);
+                IRestRegularDictionaryStore dictionaryStore = restInterfaceFactory.get(IRestRegularDictionaryStore.class);
                 return dictionaryStore.readRegularDictionary(id, version, "", "", 0, 0);
             } catch (Exception e) {
                 throw new ServiceException(e.getLocalizedMessage(), e);
@@ -56,8 +50,7 @@ public class ResourceClientLibrary implements IResourceClientLibrary {
 
         restInterfaces.put("ai.labs.behavior", (id, version) -> {
             try {
-                IRestBehaviorStore behaviorStore = restInterfaceFactory.get(IRestBehaviorStore.class,
-                        apiServerURI);
+                IRestBehaviorStore behaviorStore = restInterfaceFactory.get(IRestBehaviorStore.class);
                 return behaviorStore.readBehaviorRuleSet(id, version);
             } catch (Exception e) {
                 throw new ServiceException(e.getLocalizedMessage(), e);
@@ -66,8 +59,7 @@ public class ResourceClientLibrary implements IResourceClientLibrary {
 
         restInterfaces.put("ai.labs.httpcalls", (id, version) -> {
             try {
-                IRestHttpCallsStore httpCallsStore = restInterfaceFactory.get(IRestHttpCallsStore.class,
-                        apiServerURI);
+                IRestHttpCallsStore httpCallsStore = restInterfaceFactory.get(IRestHttpCallsStore.class);
                 return httpCallsStore.readHttpCalls(id, version);
             } catch (Exception e) {
                 throw new ServiceException(e.getLocalizedMessage(), e);
@@ -76,8 +68,7 @@ public class ResourceClientLibrary implements IResourceClientLibrary {
 
         restInterfaces.put("ai.labs.output", (id, version) -> {
             try {
-                IRestOutputStore outputStore = restInterfaceFactory.get(IRestOutputStore.class,
-                        apiServerURI);
+                IRestOutputStore outputStore = restInterfaceFactory.get(IRestOutputStore.class);
                 return outputStore.readOutputSet(id, version, "", "", 0, 0);
             } catch (Exception e) {
                 throw new ServiceException(e.getLocalizedMessage(), e);
