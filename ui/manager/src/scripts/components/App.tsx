@@ -70,7 +70,6 @@ class App extends React.Component<IPrivateProps, IState> {
   };
 
   render() {
-    console.log(process.env.authMethod);
     return (
       <div className="ui container">
         {renderIf(this.props.isAppReady)(() => (
