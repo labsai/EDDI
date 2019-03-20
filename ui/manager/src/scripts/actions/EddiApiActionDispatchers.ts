@@ -116,6 +116,7 @@ export interface IEddiApiActionDispatchers extends ActionCreatorsMapObject {
   ) => IFetchBotsUsingPackageAction;
   fetchPackagesUsingPluginAction: (
     pluginResource,
+    anyVersion,
   ) => IFetchPackagesUsingPluginAction;
   updateJsonDataAction: (resource, data) => IUpdateJsonDataAction;
   createNewConfigAction: (

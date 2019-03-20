@@ -429,10 +429,12 @@ export function* fetchPackagesUsingPlugin(
     const packagesUsingPlugin: IPackage[] = yield call(
       getPackagesUsingPlugin,
       action.pluginResource,
+      action.anyVersion,
     );
     yield put(
       fetchPackagesUsingPluginSuccessAction(
         action.pluginResource,
+        action.anyVersion,
         packagesUsingPlugin,
       ),
     );

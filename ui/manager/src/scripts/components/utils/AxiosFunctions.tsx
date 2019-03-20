@@ -566,13 +566,15 @@ export function updatePackageExtension(
     }
     if (!_.isEmpty(externalPackage.extensions)) {
       for (let extensions of Object.values(externalPackage.extensions)) {
-        for (let extension of extensions) {
-          if (
-            extension.config &&
-            extension.config.uri &&
-            Parser.getId(extension.config.uri) === newExtensionId
-          ) {
-            extension.config.uri = newExtensionResource;
+        if (!_.isEmpty(extensions)) {
+          for (let extension of extensions) {
+            if (
+              extension.config &&
+              extension.config.uri &&
+              Parser.getId(extension.config.uri) === newExtensionId
+            ) {
+              extension.config.uri = newExtensionResource;
+            }
           }
         }
       }
@@ -877,13 +879,16 @@ export async function postNewConfig(
 
 export async function updatePackages(
   pluginResource: string,
-  packages: IPackage[],
+  packages: string[],
 ) {
   try {
     const updatedPackages: IPackage[] = [];
     for (let i = 0; i < _.size(packages); i++) {
+      const currentPackage: IPackage = await getCurrentPackage(
+        Parser.getId(packages[i]),
+      );
       const updatedPackage: IPackage = await updatePackage(
-        packages[i],
+        currentPackage,
         pluginResource,
       );
       updatedPackages.push(updatedPackage);

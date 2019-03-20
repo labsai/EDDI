@@ -26,7 +26,7 @@ const PluginList: React.StatelessComponent<IProps> = (props: IProps) => {
   return (
     <div>
       {renderIf(
-        !_.isEmpty(props.packagePayload.packageData) &&
+        props.packagePayload.packageData &&
           !_.isEmpty(props.packagePayload.packageData.packageExtensions),
       )(() => (
         <div style={styles.pluginList}>

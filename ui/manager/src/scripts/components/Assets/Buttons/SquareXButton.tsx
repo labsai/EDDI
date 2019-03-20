@@ -2,23 +2,31 @@ import * as React from 'react';
 import { Component, compose, pure, setDisplayName } from 'recompose';
 import { CSSProperties } from 'react';
 import * as Radium from 'radium';
+import {
+  LARGE_FONT2,
+  LIGHT_GREY_BORDER,
+  LIGHT_GREY_COLOR,
+  RED_BORDER,
+  RED_COLOR,
+  WHITE_COLOR,
+} from '../../../../styles/DefaultStylingProperties';
 
 const styles: CSSProperties = {
   container: {
-    ':focus': {
-      color: '#FF5976',
-      border: '1px solid #FF5976',
-    },
     ':hover': {
-      color: '#FF5976',
-      border: '1px solid #FF5976',
+      color: RED_COLOR,
+      border: RED_BORDER,
     },
-    backgroundColor: '#FFF',
-    color: '#D8DDE6',
+    ':focus': {
+      color: RED_COLOR,
+      border: RED_BORDER,
+    },
+    backgroundColor: WHITE_COLOR,
+    color: LIGHT_GREY_COLOR,
     cursor: 'pointer',
-    fontSize: '25px',
+    fontSize: LARGE_FONT2,
     position: 'relative',
-    border: '1px solid #D8DDE6',
+    border: LIGHT_GREY_BORDER,
     borderRadius: '4px',
     height: '23px',
     width: '23px',

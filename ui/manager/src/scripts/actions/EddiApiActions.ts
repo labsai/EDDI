@@ -708,28 +708,34 @@ export function fetchBotsUsingPackageFailedAction(
 
 export interface IFetchPackagesUsingPluginAction extends Action {
   pluginResource: string;
+  anyVersion: boolean;
 }
 
 export function fetchPackagesUsingPluginAction(
   pluginResource: string,
+  anyVersion: boolean,
 ): IFetchPackagesUsingPluginAction {
   return {
     pluginResource,
+    anyVersion,
     type: FETCH_PACKAGES_USING_PLUGIN,
   };
 }
 
 export interface IFetchPackagesUsingPluginSuccessAction extends Action {
   pluginResource: string;
+  anyVersion: boolean;
   packages: IPackage[];
 }
 
 export function fetchPackagesUsingPluginSuccessAction(
   pluginResource: string,
+  anyVersion: boolean,
   packages: IPackage[],
 ): IFetchPackagesUsingPluginSuccessAction {
   return {
     pluginResource,
+    anyVersion,
     packages,
     type: FETCH_PACKAGES_USING_PLUGIN_SUCCESS,
   };
@@ -923,12 +929,12 @@ export function createNewPluginSuccessAction(
 
 export interface IUpdatePackagesAction extends Action {
   pluginResource: string;
-  packages: IPackage[];
+  packages: string[];
 }
 
 export function updatePackagesAction(
   pluginResource: string,
-  packages: IPackage[],
+  packages: string[],
 ): IUpdatePackagesAction {
   return {
     pluginResource,

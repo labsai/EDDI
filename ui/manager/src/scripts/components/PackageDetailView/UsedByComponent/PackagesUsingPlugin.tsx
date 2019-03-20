@@ -48,6 +48,7 @@ class PackagesUsingPlugin extends React.Component<IProps, IState> {
     if (!_.isEmpty(this.props.plugin)) {
       eddiApiActionDispatchers.fetchPackagesUsingPluginAction(
         this.props.plugin.resource,
+        false,
       );
     }
   }
@@ -55,6 +56,7 @@ class PackagesUsingPlugin extends React.Component<IProps, IState> {
     if (!nextProps.plugin.usedByPackages) {
       eddiApiActionDispatchers.fetchPackagesUsingPluginAction(
         nextProps.plugin.resource,
+        false,
       );
     }
   }

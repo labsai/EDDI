@@ -80,9 +80,7 @@ class Plugin extends React.Component<IPrivateProps> {
         !_.isEmpty(this.props.pluginType.extensions.dictionaries)
       ) {
         otherDictionaries = this.props.pluginType.extensions.dictionaries.filter(
-          d => {
-            return { ...d };
-          },
+          d => d.type !== REGULAR_DICTIONARY,
         );
       }
       const newRegularDictionaryList = newPluginResourceList.map(resource => {

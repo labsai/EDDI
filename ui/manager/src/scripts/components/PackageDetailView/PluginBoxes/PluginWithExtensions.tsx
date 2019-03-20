@@ -55,16 +55,16 @@ class PluginWithExtensions extends React.Component<IPrivateProps> {
     if (!_.isEmpty(this.props.pluginType.extensions)) {
       if (!_.isEmpty(this.props.pluginType.extensions.dictionaries)) {
         dictionaries = this.props.pluginType.extensions.dictionaries.map(
-          (d, i) => ({
-            ...d,
+          (dictionary, i) => ({
+            ...dictionary,
             extensionKey: i,
           }),
         );
       }
       if (!_.isEmpty(this.props.pluginType.extensions.corrections)) {
         corrections = this.props.pluginType.extensions.corrections.map(
-          (c, i) => ({
-            ...c,
+          (correction, i) => ({
+            ...correction,
             extensionKey: i,
           }),
         );
@@ -84,12 +84,18 @@ class PluginWithExtensions extends React.Component<IPrivateProps> {
     let corrections = [];
     if (type.includes(CORRECTION)) {
       dictionaries = this.props.pluginType.extensions.dictionaries;
-      corrections = this.props.pluginType.extensions.corrections.filter(
-        (c, i) => i !== extensionKey,
+      corrections = this.props.pluginType.extensions.corrrections.splice(
+        this.props.pluginType.extensions.corrections.findIndex(
+          (c, i) => i === extensionKey,
+        ),
+        1,
       );
     } else if (type.includes(DICTIONARY)) {
-      dictionaries = this.props.pluginType.extensions.dictionaries.filter(
-        (d, i) => i !== extensionKey,
+      dictionaries = this.props.pluginType.extensions.dictionaries.splice(
+        this.props.pluginType.extensions.dictionaries.findIndex(
+          (d, i) => i === extensionKey,
+        ),
+        1,
       );
       corrections = this.props.pluginType.extensions.corrections;
     }

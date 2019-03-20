@@ -73,8 +73,8 @@ class PackageView extends React.Component<IPrivateProps, IState> {
       );
     }
     if (
-      this.props.packagePayload.packageData !==
-      nextProps.packagePayload.packageData
+      _.isEmpty(this.props.packagePayload.packageData) &&
+      !_.isEmpty(nextProps.packagePayload.packageData)
     ) {
       this.discardChanges(nextProps);
     }

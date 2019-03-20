@@ -53,7 +53,7 @@ export const hasExtensions = (plugin: IPluginExtensions) => {
     return false;
   }
   for (let extensions of Object.values(plugin.extensions)) {
-    if (extensions && extensions.length > 0) {
+    if (_.some(extensions)) {
       return true;
     }
   }
