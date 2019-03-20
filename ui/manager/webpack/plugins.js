@@ -42,7 +42,9 @@ export function getPlugins() {
 
     new CopyWebpackPlugin([{from: 'public'}]),
 
-    new webpack.EnvironmentPlugin(_.defaults({appVersion: appVersion}, {eddiApiUrl: process.env.EDDI_API_URL}, defaultEnvironment)),
+    new webpack.EnvironmentPlugin(_.defaults({appVersion: appVersion}, {eddiApiUrl: process.env.EDDI_API_URL},
+      {authMethod: process.env.AUTH_METHOD}, {authRealm: process.env.AUTH_REALM}, {authUrl: process.env.AUTH_URL},
+      {authClientId: process.env.AUTH_CLIENT_ID}, defaultEnvironment)),
 
     new webpack.DefinePlugin({
       '__DEV__': JSON.stringify(ENV !== 'production' && ENV !== 'staging'),

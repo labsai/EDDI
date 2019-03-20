@@ -1,0 +1,35 @@
+version: '3'
+services:
+  eddi:
+    image: labsai/eddi:keycloak
+    ports:
+      - "7070:7070"
+      - "7443:7443"
+    links:
+      - mongodb
+    depends_on:
+      - mongodb
+    environment:
+      EDDI_VERSION: 4.5
+      EDDI_ENV: production
+      EDDI_MEMORY_MIN: 128m
+      EDDI_MEMORY_MAX: 128m
+      EDDI_JAVA_ENV_KEYCLOAK_ENABLED: webServer.securityHandlerType=keycloak
+  eddi-config-ui:
+    image: labsai/eddi-config-ui:latest
+    ports:
+    - "7071:7071"
+    links:
+    - eddi
+    depends_on:
+    - eddi
+    environment:
+      EDDI_API_URL: "http://localhost:7070"
+      PORT: 7071
+      AUTH_METHOD: 'keycloak'
+      AUTH_URL: 'https://auth.labs.ai/auth'
+      AUTH_REALM: 'EDDI'
+      AUTH_CLIENT_ID: 'eddi-config-ui'
+  mongodb:
+    image: mongo:3.6
+    restart: always
