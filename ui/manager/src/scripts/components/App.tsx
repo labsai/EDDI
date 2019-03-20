@@ -10,32 +10,91 @@ import * as renderIf from 'render-if';
 import { connect } from 'react-redux';
 import PackageViewPage from './pages/PackageViewPage';
 import RegularDictionaryPage from './pages/ExtensionsPage';
+import * as Keycloak from 'keycloak-js';
+import * as kcHelper from './utils/keycloakFunctions';
+import { history } from '../history';
+import WhiteButton from './Assets/Buttons/WhiteButton';
+import { CSSProperties } from 'react';
 
-interface IPublicProps {}
+const styles: CSSProperties = {
+  logoutButton: {
+    height: '36px',
+    marginTop: '7px',
+    float: 'right',
+  },
+};
 
-interface IPrivateProps extends IPublicProps {
+interface IPrivateProps {
   isAppReady: boolean;
 }
 
-class App extends React.Component<IPrivateProps> {
+interface IState {
+  keycloak: Keycloak.KeycloakInstance;
+  isAuthenticated: boolean;
+}
+
+class App extends React.Component<IPrivateProps, IState> {
+  constructor(props) {
+    super(props);
+    this.state = {
+      keycloak: null,
+      isAuthenticated: !kcHelper.keycloakEnabled(),
+    };
+  }
+
   async componentDidMount() {
     await runSagaMiddleware();
     SystemActionDispatchers.appReady();
+    if (kcHelper.keycloakEnabled()) {
+      await this.initKeycloak();
+    }
   }
 
+  async initKeycloak() {
+    const k = await kcHelper.createKeycloakInstance();
+    this.setState({
+      keycloak: k,
+    });
+    await kcHelper.initKeycloak(k, this.authenticate);
+  }
+
+  authenticate = () => {
+    this.setState({
+      isAuthenticated: true,
+    });
+  };
+
+  logout = () => {
+    history.push('/');
+    kcHelper.logout(this.state.keycloak);
+  };
+
   render() {
+    console.log(process.env.authMethod);
     return (
       <div className="ui container">
         {renderIf(this.props.isAppReady)(() => (
           <div>
-            <Route path="/" exact component={Dashboard} />
-            <Route path="/botview/:id" component={BotViewPage} />
-            <Route path="/packageview/:id" component={PackageViewPage} />
-            <Route
-              path="/resources/:type"
-              exact
-              component={RegularDictionaryPage}
-            />
+            {renderIf(!this.state.isAuthenticated)(() => (
+              <div>{'You need to login to see this page'}</div>
+            ))}
+            {renderIf(this.state.isAuthenticated)(() => (
+              <div>
+                <WhiteButton
+                  text={'Logout'}
+                  customStyles={styles.logoutButton}
+                  onClick={this.logout}
+                />
+                <Route path="/" exact component={Dashboard} />
+                <Route path="/botview/:id" component={BotViewPage} />
+                <Route path="/packageview/:id" component={PackageViewPage} />
+                <Route
+                  path="/resources/:type"
+                  exact
+                  component={RegularDictionaryPage}
+                />
+              </div>
+            ))}
             <ModalComponentFrame />
           </div>
         ))}
