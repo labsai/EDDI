@@ -44,7 +44,7 @@ class UpdatePackagesModal extends React.Component<IPrivateProps, IState> {
     super(props);
     this.state = {
       selectedPackages: [],
-      packages: undefined,
+      packages: [],
     };
   }
 
@@ -57,7 +57,6 @@ class UpdatePackagesModal extends React.Component<IPrivateProps, IState> {
   };
 
   updateSelectedPackages = () => {
-    console.log(this.state.selectedPackages);
     eddiApiActionDispatchers.updatePackagesAction(
       this.props.pluginResource,
       this.state.selectedPackages,
@@ -70,7 +69,7 @@ class UpdatePackagesModal extends React.Component<IPrivateProps, IState> {
       this.props.pluginResource,
       true,
     );
-    let packages: IPackage[] = await getPackagesUsingPlugin(
+    const packages: IPackage[] = await getPackagesUsingPlugin(
       this.props.pluginResource,
       true,
     );
@@ -99,7 +98,6 @@ class UpdatePackagesModal extends React.Component<IPrivateProps, IState> {
   }
 
   render() {
-    console.log(this.state.packages);
     return (
       <div>
         <div style={styles.header}>
@@ -133,15 +131,14 @@ class UpdatePackagesModal extends React.Component<IPrivateProps, IState> {
               ))}
             </div>
           ))}
-          {renderIf(_.isUndefined(this.state.packages))(() => (
+          {renderIf(this.state.packages)(() => (
             <div style={styles.loadingWrapper}>
               <ClimbingBoxLoader loading />
             </div>
           ))}
-          {renderIf(
-            !_.isUndefined(this.state.packages) &&
-              _.isEmpty(this.state.packages),
-          )(() => <div>{'Found no packages that can be updated'}</div>)}
+          {renderIf(_.isEmpty(this.state.packages))(() => (
+            <div>{'Found no packages that can be updated'}</div>
+          ))}
         </div>
       </div>
     );
