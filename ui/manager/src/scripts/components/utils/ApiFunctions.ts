@@ -40,11 +40,11 @@ export async function getAPIUrl(): Promise<string> {
   }
 }
 
-let authPromise: Promise<string>;
+let authMethodPromise: Promise<string>;
 
 export async function getAuthMethod(): Promise<string> {
-  if (!authPromise) {
-    return (authPromise = axios
+  if (!authMethodPromise) {
+    return (authMethodPromise = axios
       .get('/_/env.json')
       .then(overrides => {
         if (overrides.data.AUTH_METHOD) {
@@ -60,15 +60,15 @@ export async function getAuthMethod(): Promise<string> {
       })
       .catch(err => {
         if (process.env.environment === 'local') {
-          return (authPromise = Promise.resolve(process.env.authMethod));
+          return (authMethodPromise = Promise.resolve(process.env.authMethod));
         } else {
           console.error(`Failed to get API url. Error: ${err.message}`);
-          authPromise = null;
+          authMethodPromise = null;
           throw err;
         }
       }));
   } else {
-    let authMethod = await authPromise;
+    let authMethod = await authMethodPromise;
     if (authMethod[authMethod.length - 1] === '/') {
       authMethod = authMethod.substring(0, authMethod.length - 1);
     }
@@ -76,9 +76,11 @@ export async function getAuthMethod(): Promise<string> {
   }
 }
 
+let authRealmPromise: Promise<string>;
+
 export async function getAuthRealm(): Promise<string> {
-  if (!authPromise) {
-    return (authPromise = axios
+  if (!authRealmPromise) {
+    return (authRealmPromise = axios
       .get('/_/env.json')
       .then(overrides => {
         if (overrides.data.AUTH_REALM) {
@@ -94,15 +96,15 @@ export async function getAuthRealm(): Promise<string> {
       })
       .catch(err => {
         if (process.env.environment === 'local') {
-          return (authPromise = Promise.resolve(process.env.authRealm));
+          return (authRealmPromise = Promise.resolve(process.env.authRealm));
         } else {
           console.error(`Failed to get API url. Error: ${err.message}`);
-          authPromise = null;
+          authRealmPromise = null;
           throw err;
         }
       }));
   } else {
-    let authRealm = await authPromise;
+    let authRealm = await authRealmPromise;
     if (authRealm[authRealm.length - 1] === '/') {
       authRealm = authRealm.substring(0, authRealm.length - 1);
     }
@@ -110,9 +112,10 @@ export async function getAuthRealm(): Promise<string> {
   }
 }
 
+let authUrlPromise: Promise<string>;
 export async function getAuthUrl(): Promise<string> {
-  if (!authPromise) {
-    return (authPromise = axios
+  if (!authUrlPromise) {
+    return (authUrlPromise = axios
       .get('/_/env.json')
       .then(overrides => {
         if (overrides.data.AUTH_URL) {
@@ -128,15 +131,15 @@ export async function getAuthUrl(): Promise<string> {
       })
       .catch(err => {
         if (process.env.environment === 'local') {
-          return (authPromise = Promise.resolve(process.env.authUrl));
+          return (authUrlPromise = Promise.resolve(process.env.authUrl));
         } else {
           console.error(`Failed to get API url. Error: ${err.message}`);
-          authPromise = null;
+          authUrlPromise = null;
           throw err;
         }
       }));
   } else {
-    let authUrl = await authPromise;
+    let authUrl = await authUrlPromise;
     if (authUrl[authUrl.length - 1] === '/') {
       authUrl = authUrl.substring(0, authUrl.length - 1);
     }
@@ -144,9 +147,11 @@ export async function getAuthUrl(): Promise<string> {
   }
 }
 
+let authClientIdPromise: Promise<string>;
+
 export async function getAuthClientId(): Promise<string> {
-  if (!authPromise) {
-    return (authPromise = axios
+  if (!authClientIdPromise) {
+    return (authClientIdPromise = axios
       .get('/_/env.json')
       .then(overrides => {
         if (overrides.data.AUTH_CLIENT_ID) {
@@ -162,15 +167,17 @@ export async function getAuthClientId(): Promise<string> {
       })
       .catch(err => {
         if (process.env.environment === 'local') {
-          return (authPromise = Promise.resolve(process.env.authClientId));
+          return (authClientIdPromise = Promise.resolve(
+            process.env.authClientId,
+          ));
         } else {
           console.error(`Failed to get API url. Error: ${err.message}`);
-          authPromise = null;
+          authClientIdPromise = null;
           throw err;
         }
       }));
   } else {
-    let authClientId = await authPromise;
+    let authClientId = await authClientIdPromise;
     if (authClientId[authClientId.length - 1] === '/') {
       authClientId = authClientId.substring(0, authClientId.length - 1);
     }

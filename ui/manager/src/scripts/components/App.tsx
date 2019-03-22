@@ -16,7 +16,12 @@ import { history } from '../history';
 import WhiteButton from './Assets/Buttons/WhiteButton';
 import { CSSProperties } from 'react';
 import * as _ from 'lodash';
-import { getAuthMethod } from './utils/ApiFunctions';
+import {
+  getAuthClientId,
+  getAuthMethod,
+  getAuthRealm,
+  getAuthUrl,
+} from './utils/ApiFunctions';
 
 const styles: CSSProperties = {
   logoutButton: {
