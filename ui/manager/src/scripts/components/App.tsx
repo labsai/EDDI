@@ -15,6 +15,7 @@ import * as kcHelper from './utils/keycloakFunctions';
 import { history } from '../history';
 import WhiteButton from './Assets/Buttons/WhiteButton';
 import { CSSProperties } from 'react';
+import * as _ from 'lodash';
 
 const styles: CSSProperties = {
   logoutButton: {
@@ -32,6 +33,10 @@ interface IState {
   keycloak: Keycloak.KeycloakInstance;
   isAuthenticated: boolean;
 }
+
+const sleep = milliseconds => {
+  return new Promise(resolve => setTimeout(resolve, milliseconds));
+};
 
 class App extends React.Component<IPrivateProps, IState> {
   constructor(props) {
@@ -62,7 +67,13 @@ class App extends React.Component<IPrivateProps, IState> {
     this.setState({
       isAuthenticated: true,
     });
+    this.refreshToken();
   };
+
+  async refreshToken() {
+    kcHelper.updateToken(this.state.keycloak);
+    await sleep(240000).then(() => this.refreshToken());
+  }
 
   logout = () => {
     history.push('/');

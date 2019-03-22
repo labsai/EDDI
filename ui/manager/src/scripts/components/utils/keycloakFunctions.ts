@@ -26,12 +26,25 @@ export async function initKeycloak(
       setAuthorizationHeader(keycloak);
     });
   } catch (err) {
-    console.error('Failed to initialize keycloak.');
+    console.error(`Failed to initialize keycloak. Error: ${err.message}`);
   }
 }
 
 export function setAuthorizationHeader(kc: Keycloak.KeycloakInstance): void {
   setDefaultGlobalHeader('Authorization', 'Bearer ' + kc.token);
+}
+
+export async function updateToken(kc: Keycloak.KeycloakInstance) {
+  try {
+    await kc
+      .updateToken(300)
+      .success(() => setAuthorizationHeader(kc))
+      .error(() => {
+        throw new Error('Failed to update token.');
+      });
+  } catch (err) {
+    console.error(`Failed to update token. Error: ${err.message}`);
+  }
 }
 
 export function logout(keycloak: Keycloak.KeycloakInstance): void {
