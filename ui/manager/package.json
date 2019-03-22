@@ -4,7 +4,7 @@
   "description": "eddi-config-ui",
   "main": "index.js",
   "scripts": {
-    "server": "node server.js --path ./dist --port 3000 --env \"{\\\"EDDI_API_URL\\\":\\\"$EDDI_API_URL\\\"}\"",
+    "server": "node server.js --path ./dist --port 3000 --env \"{\\\"EDDI_API_URL\\\":\\\"$EDDI_API_URL\\\", \\\"AUTH_METHOD\\\":\\\"$AUTH_METHOD\\\", \\\"AUTH_REALM\\\":\\\"$AUTH_REALM\\\", \\\"AUTH_URL\\\":\\\"$AUTH_URL\\\", \\\"AUTH_CLIENT_ID\\\":\\\"$AUTH_CLIENT_ID\\\"}\"",
     "autoformat": "prettier --write '**/*.{ts,tsx,js,jsx,json,css,scss}'",
     "start": "cross-env PORT=1338 NODE_ENV=local \"(echo $PORT && npm run open-browser & webpack-dev-server)\"",
     "open-browser": "wait-on --timeout 8000 tcp:$PORT && open-url localhost:$PORT",
