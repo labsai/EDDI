@@ -1,14 +1,15 @@
 import * as Keycloak from 'keycloak-js';
 import { setDefaultGlobalHeader } from './AxiosFunctions';
+import { getAuthClientId, getAuthRealm, getAuthUrl } from './ApiFunctions';
 
 export async function createKeycloakInstance(): Promise<
   Keycloak.KeycloakInstance
 > {
   try {
     const keycloak = await Keycloak({
-      url: process.env.authUrl,
-      realm: process.env.authRealm,
-      clientId: process.env.authClientId,
+      url: await getAuthUrl(),
+      realm: await getAuthRealm(),
+      clientId: await getAuthClientId(),
     });
     return keycloak;
   } catch (err) {

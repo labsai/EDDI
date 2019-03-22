@@ -57,7 +57,6 @@ class App extends React.Component<IPrivateProps, IState> {
   }
 
   async initKeycloak() {
-    console.log('Auth Method:' + (await getAuthMethod()));
     const k = await kcHelper.createKeycloakInstance();
     this.setState({
       keycloak: k,
