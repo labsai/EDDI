@@ -90,11 +90,13 @@ class App extends React.Component<IPrivateProps, IState> {
             ))}
             {renderIf(this.state.isAuthenticated)(() => (
               <div>
-                <WhiteButton
-                  text={'Logout'}
-                  customStyles={styles.logoutButton}
-                  onClick={this.logout}
-                />
+                {renderIf(kcHelper.keycloakEnabled())(() => (
+                  <WhiteButton
+                    text={'Logout'}
+                    customStyles={styles.logoutButton}
+                    onClick={this.logout}
+                  />
+                ))}
                 <Route path="/" exact component={Dashboard} />
                 <Route path="/botview/:id" component={BotViewPage} />
                 <Route path="/packageview/:id" component={PackageViewPage} />
