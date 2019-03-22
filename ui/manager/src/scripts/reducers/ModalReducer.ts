@@ -33,7 +33,6 @@ import {
 } from '../components/utils/AxiosFunctions';
 import { ModalEnum } from '../components/utils/ModalEnum';
 import {
-  CREATE_NEW_PACKAGE,
   CREATE_NEW_PACKAGE_SUCCESS,
   DEPLOY_BOT_SUCCESS,
   UNDEPLOY_BOT_FAILED,
@@ -42,10 +41,8 @@ import {
   UPDATE_PACKAGE_SUCCESS,
   UPDATE_PACKAGES_SUCCESS,
   UPDATE_PLUGIN_SUCCESS,
-  UPDATE_PLUGIN_TYPE_IN_PACKAGE_SUCCESS,
 } from '../actions/EddiApiActionTypes';
 import {
-  ICreateNewPackageAction,
   ICreateNewPackageSuccessAction,
   IDeployBotSuccessAction,
   IUndeployBotFailedAction,
@@ -54,11 +51,7 @@ import {
   IUpdatePackagesSuccessAction,
   IUpdatePackageSuccessAction,
   IUpdatePluginSuccessAction,
-  IUpdatePluginTypeSuccessAction,
 } from '../actions/EddiApiActions';
-import modalActionDispatchers from '../actions/ModalActionDispatchers';
-import { getAPIUrl } from '../components/utils/ApiFunctions';
-import Parser from '../components/utils/Parser';
 
 export type IModalReducer = Reducer<IModalState>;
 
@@ -316,21 +309,6 @@ const ModalReducer: IModalReducer = (
         },
         selectedResources: {
           $set: [(action as IUpdatePackageSuccessAction).package.resource],
-        },
-      });
-
-    case UPDATE_PLUGIN_TYPE_IN_PACKAGE_SUCCESS:
-      return update(state, {
-        mode: {
-          $set: ModalEnum.updateBots,
-        },
-        isModalOpen: {
-          $set: true,
-        },
-        selectedResources: {
-          $set: [
-            (action as IUpdatePluginTypeSuccessAction).packagePayload.resource,
-          ],
         },
       });
 

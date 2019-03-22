@@ -4,23 +4,24 @@ import { IOptions } from '../PackageView';
 import Parser from '../../utils/Parser';
 import * as renderIf from 'render-if';
 import * as _ from 'lodash';
-import { IPlugin } from '../../utils/AxiosFunctions';
+import { IPlugin, IPluginExtensions } from '../../utils/AxiosFunctions';
 import eddiApiActionDispatchers from '../../../actions/EddiApiActionDispatchers';
 import styles from './Plugin.styles';
 import { connect } from 'react-redux';
 import { pluginSelector } from '../../../selectors/PluginSelectors';
 import ModalActionDispatchers from '../../../actions/ModalActionDispatchers';
 import WhiteButton from '../../Assets/Buttons/WhiteButton';
+import SquareXButton from '../../Assets/Buttons/SquareXButton';
 import * as PluginType from '../../utils/EddiTypes';
 import PluginHelper from '../../utils/helpers/PluginHelper';
+import { REGULAR_DICTIONARY } from '../../utils/EddiTypes';
 
 interface IPublicProps {
   pluginType: IOptions;
   pluginResource: string;
   editDisabled: boolean;
   deletePlugin(extensionKey: number): void;
-  updateExtensionsInPlugin(extensionKey: number, extensions: IOptions[]): void;
-  updateResourceInPlugin(extensionKey: number, newResource: string): void;
+  updatePlugin(extensionKey: number, newPlugin: IPluginExtensions): void;
 }
 interface IPrivateProps extends IPublicProps {
   plugin: IPlugin;
@@ -42,51 +43,70 @@ class Plugin extends React.Component<IPrivateProps> {
     }
   }
 
-  deletePlugin = (extensionKey: number) => {
-    this.props.deletePlugin(extensionKey);
+  deletePlugin = () => {
+    this.props.deletePlugin(this.props.pluginType.extensionKey);
   };
 
   openAddPluginsModal = () => {
-    let extensionList: string[];
+    let extensionList: string[] = [];
     let pluginType;
     if (this.props.pluginType.type === PluginType.PARSER) {
-      extensionList = this.props.pluginType.extensions.map(p => {
-        return p.resource;
-      });
+      if (
+        this.props.pluginType.config &&
+        !_.isEmpty(this.props.pluginType.extensions.dictionaries)
+      ) {
+        extensionList = this.props.pluginType.extensions.dictionaries.map(p => {
+          return p.config.uri;
+        });
+      }
       pluginType = PluginType.REGULAR_DICTIONARY;
     } else {
       pluginType = this.props.pluginType.type;
       extensionList =
-        (this.props.pluginType.resource && [this.props.pluginType.resource]) ||
-        [];
+        (this.props.pluginResource && [this.props.pluginResource]) || [];
     }
     ModalActionDispatchers.showAddPluginsModal(
       pluginType,
       extensionList,
-      this.selectExtensions,
+      this.updatePluginResource,
     );
   };
 
-  selectExtensions = (newPluginResourceList: string[]) => {
+  updatePluginResource = (newPluginResourceList: string[]) => {
     if (this.props.pluginType.type === PluginType.PARSER) {
-      const newExtensionList: IOptions[] = newPluginResourceList.map(
-        (ext, i) => {
-          return {
-            type: PluginType.REGULAR_DICTIONARY,
-            resource: ext,
-            extensionKey: i,
-          };
+      let otherDictionaries = [];
+      if (
+        !_.isEmpty(this.props.pluginType.extensions) &&
+        !_.isEmpty(this.props.pluginType.extensions.dictionaries)
+      ) {
+        otherDictionaries = this.props.pluginType.extensions.dictionaries.filter(
+          d => d.type !== REGULAR_DICTIONARY,
+        );
+      }
+      const newRegularDictionaryList = newPluginResourceList.map(resource => {
+        return { type: REGULAR_DICTIONARY, config: { uri: resource } };
+      });
+      const newPlugin: IPluginExtensions = {
+        ...this.props.pluginType,
+        extensions: {
+          dictionaries: otherDictionaries.concat(newRegularDictionaryList),
+          corrections:
+            !_.isEmpty(this.props.pluginType.extensions) &&
+            !_.isEmpty(this.props.pluginType.extensions.corrections)
+              ? this.props.pluginType.extensions.corrections
+              : null,
         },
-      );
-      this.props.updateExtensionsInPlugin(
-        this.props.pluginType.extensionKey,
-        newExtensionList,
-      );
+      };
+      this.props.updatePlugin(this.props.pluginType.extensionKey, newPlugin);
     } else if (!_.isEmpty(newPluginResourceList)) {
-      this.props.updateResourceInPlugin(
-        this.props.pluginType.extensionKey,
-        newPluginResourceList[0],
-      );
+      const plugin: IPluginExtensions = {
+        ...this.props.pluginType,
+        config: {
+          ...this.props.pluginType.config,
+          uri: newPluginResourceList[0],
+        },
+      };
+      this.props.updatePlugin(this.props.pluginType.extensionKey, plugin);
     }
   };
 
@@ -103,7 +123,11 @@ class Plugin extends React.Component<IPrivateProps> {
 
   getBoxStyling() {
     if (this.props.plugin.version === this.props.plugin.currentVersion) {
-      return { ...styles.pluginBox };
+      if (!_.isEmpty(this.props.plugin)) {
+        return { ...styles.pluginBox };
+      } else {
+        return { ...styles.pluginBox, cursor: 'default' };
+      }
     } else {
       return {
         ...styles.pluginBox,
@@ -113,13 +137,17 @@ class Plugin extends React.Component<IPrivateProps> {
   }
 
   updateVersion = () => {
-    this.props.updateResourceInPlugin(
-      this.props.pluginType.extensionKey,
-      Parser.replaceResourceVersion(
-        this.props.plugin.resource,
-        this.props.plugin.currentVersion,
-      ),
-    );
+    const newPlugin: IPluginExtensions = {
+      ...this.props.pluginType,
+      config: {
+        ...this.props.pluginType.config,
+        uri: Parser.replaceResourceVersion(
+          this.props.plugin.resource,
+          this.props.plugin.currentVersion,
+        ),
+      },
+    };
+    this.props.updatePlugin(this.props.pluginType.extensionKey, newPlugin);
   };
 
   getButtonName(type: string) {
@@ -140,33 +168,30 @@ class Plugin extends React.Component<IPrivateProps> {
     const { plugin } = this.props;
     const isCurrentVersion: boolean =
       plugin && plugin.version === plugin.currentVersion;
-    let pluginLatestVersion = 'v01';
+    let pluginCurrentVersion = 'v01';
     if (!isCurrentVersion) {
-      pluginLatestVersion = Parser.getVersionString(plugin.currentVersion);
+      pluginCurrentVersion = Parser.getVersionString(plugin.currentVersion);
     }
     return (
       <div style={styles.pluginContainer}>
         {renderIf(!this.props.editDisabled)(() => (
-          <div
-            onClick={() => {
-              this.deletePlugin(this.props.pluginType.extensionKey);
-            }}
-            style={styles.closeButton}>
-            &times;
-          </div>
+          <SquareXButton
+            customStyles={styles.closeButton}
+            onClick={this.deletePlugin}
+          />
         ))}
         <button style={this.getBoxStyling()} onClick={this.openViewJsonModal}>
           <div style={styles.pluginHeader}>
             <div style={this.getNameStyling()}>
               {PluginHelper.getName(
-                this.props.pluginType,
+                this.props.pluginType.type,
                 this.props.plugin,
                 true,
               )}
             </div>
             <div style={styles.pluginVersion}>
               {PluginHelper.getVersion(
-                this.props.pluginType,
+                this.props.pluginType.type,
                 this.props.plugin,
                 true,
               )}
@@ -175,7 +200,7 @@ class Plugin extends React.Component<IPrivateProps> {
           <div style={styles.pluginDate}>{this.props.pluginType.type}</div>
           <div style={styles.pluginDate}>
             {PluginHelper.getLastModified(
-              this.props.pluginType,
+              this.props.pluginType.type,
               this.props.plugin,
               true,
               <br />,
@@ -185,7 +210,7 @@ class Plugin extends React.Component<IPrivateProps> {
         {renderIf(!isCurrentVersion && !this.props.editDisabled)(() => (
           <WhiteButton
             onClick={this.updateVersion}
-            text={`Update to ${pluginLatestVersion}`}
+            text={`Update to ${pluginCurrentVersion}`}
             customStyles={styles.updateAvailableButton}
           />
         ))}

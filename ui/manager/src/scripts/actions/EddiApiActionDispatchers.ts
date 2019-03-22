@@ -29,10 +29,6 @@ import {
   IUpdateDescriptorAction,
   IFetchCurrentPackageAction,
   fetchCurrentPackageAction,
-  IUpdatePluginTypeAction,
-  IFetchPluginTypesAction,
-  fetchPluginTypesAction,
-  updatePluginTypeAction,
   fetchPluginsAction,
   IFetchPluginsAction,
   IFetchBotsUsingPackageAction,
@@ -114,17 +110,13 @@ export interface IEddiApiActionDispatchers extends ActionCreatorsMapObject {
     packageResource,
     pluginResource,
   ) => IAddAvailableUpdateForPackageAction;
-  fetchPluginTypesAction: (packageResource) => IFetchPluginTypesAction;
-  updatePluginTypeAction: (
-    packageResource,
-    pluginTypes,
-  ) => IUpdatePluginTypeAction;
   fetchBotsUsingPackageAction: (
     packageResource,
     anyVersion,
   ) => IFetchBotsUsingPackageAction;
   fetchPackagesUsingPluginAction: (
     pluginResource,
+    anyVersion,
   ) => IFetchPackagesUsingPluginAction;
   updateJsonDataAction: (resource, data) => IUpdateJsonDataAction;
   createNewConfigAction: (
@@ -186,8 +178,6 @@ const actions: IEddiApiActionDispatchers = {
   updatePackageAction,
   addAvailableUpdateForPackageAction,
   updateDescriptorAction,
-  fetchPluginTypesAction,
-  updatePluginTypeAction,
   fetchBotsUsingPackageAction,
   fetchPackagesUsingPluginAction,
   updateJsonDataAction,

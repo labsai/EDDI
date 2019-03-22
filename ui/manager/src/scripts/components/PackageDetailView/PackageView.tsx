@@ -10,13 +10,11 @@ import PluginSelect from './DropDownComponents/PluginSelect';
 import * as _ from 'lodash';
 import {
   IDefaultPluginTypes,
-  IDetailedDescriptor,
   IPackage,
+  IPluginExtensions,
 } from '../utils/AxiosFunctions';
-import { ModalEnum } from '../utils/ModalEnum';
 import eddiApiActionDispatchers from '../../actions/EddiApiActionDispatchers';
 import { connect } from 'react-redux';
-import { pluginTypesSelector } from '../../selectors/PackageSelectors';
 import { defaultPluginTypesSelector } from '../../selectors/PluginSelectors';
 import BlueButton from '../Assets/Buttons/BlueButton';
 import WhiteButton from '../Assets/Buttons/WhiteButton';
@@ -24,12 +22,11 @@ import BotsUsingPackage from './UsedByComponent/BotsUsingPackage';
 import VersionSelectComponent from '../Assets/VersionSelectComponent';
 import { history } from '../../history';
 import Parser from '../utils/Parser';
+import { hasExtensions } from '../utils/helpers/PluginParser';
+import PluginHelper from '../utils/helpers/PluginHelper';
 
-export interface IOptions {
-  type: string;
-  resource?: string;
-  extensions?: IOptions[];
-  extensionKey?: number;
+export interface IOptions extends IPluginExtensions {
+  extensionKey: number;
 }
 
 interface IPublicProps {
@@ -37,15 +34,12 @@ interface IPublicProps {
 }
 
 interface IPrivateProps extends IPublicProps {
-  error: Error;
-  isLoading: boolean;
-  data: string;
   defaultPluginTypes: IDefaultPluginTypes[];
-  descriptor: IDetailedDescriptor;
 }
 
 interface IState {
   selectedPlugins: IOptions[];
+  initialSelectedPluginState: IOptions[];
   defaultPluginTypes: IDefaultPluginTypes[];
   extensionKey: number;
 }
@@ -58,13 +52,14 @@ class PackageView extends React.Component<IPrivateProps, IState> {
     super(props);
     this.state = {
       selectedPlugins: [],
+      initialSelectedPluginState: [],
       defaultPluginTypes: [],
       extensionKey: 0,
     };
   }
 
   componentDidMount() {
-    eddiApiActionDispatchers.fetchPluginTypesAction(
+    eddiApiActionDispatchers.fetchPackageDataAction(
       this.props.packagePayload.resource,
     );
     eddiApiActionDispatchers.fetchDefaultPluginTypesAction();
@@ -77,7 +72,12 @@ class PackageView extends React.Component<IPrivateProps, IState> {
         nextProps.packagePayload.resource,
       );
     }
-    this.discardChanges(nextProps);
+    if (
+      _.isEmpty(this.props.packagePayload.packageData) &&
+      !_.isEmpty(nextProps.packagePayload.packageData)
+    ) {
+      this.discardChanges(nextProps);
+    }
     this.setState({ defaultPluginTypes: nextProps.defaultPluginTypes });
   }
 
@@ -85,44 +85,51 @@ class PackageView extends React.Component<IPrivateProps, IState> {
     ModalActionDispatchers.showEditPackageModal(this.props.packagePayload);
   };
 
+  replacer(key, value) {
+    if (key === 'extensionKey') {
+      return undefined;
+    } else {
+      return value;
+    }
+  }
+
   openEditJsonModal = () => {
     ModalActionDispatchers.showEditJsonModal(
       this.props.packagePayload.resource,
-      JSON.stringify(this.props.packagePayload.packageData, null, '\t'),
+      JSON.stringify(
+        { packageExtensions: this.state.selectedPlugins },
+        this.replacer,
+        '\t',
+      ),
     );
   };
 
   discardChanges(props = this.props): void {
-    this.setState({
-      selectedPlugins: props.packagePayload.pluginTypes.map((o, i) => ({
-        type: o.type,
-        resource: o.resource,
-        extensions: !_.isEmpty(o.extensions)
-          ? o.extensions.map((e, key) => {
-              return { ...e, extensionKey: key };
-            })
-          : [],
+    if (_.isUndefined(props.packagePayload.packageData)) {
+      return;
+    }
+    const initialSelectedPluginState = props.packagePayload.packageData.packageExtensions.map(
+      (o, i) => ({
+        ...o,
         extensionKey: i,
-      })),
-      extensionKey: props.packagePayload.pluginTypes.length,
-    });
+      }),
+    );
+    if (!_.isUndefined(props.packagePayload.packageData)) {
+      this.setState({
+        selectedPlugins: initialSelectedPluginState,
+        initialSelectedPluginState: initialSelectedPluginState,
+        extensionKey: props.packagePayload.packageData.packageExtensions.length,
+      });
+    }
   }
 
-  addPlugin = (addedExtension: IOptions) => {
+  addPlugin = (addedExtension: IPluginExtensions) => {
     const newPluginList = this.state.selectedPlugins.map((plugin, i) => ({
-      type: plugin.type,
-      resource: plugin.resource,
-      extensions: !_.isEmpty(plugin.extensions)
-        ? plugin.extensions.map(extension => {
-            return extension;
-          })
-        : [],
+      ...plugin,
       extensionKey: i,
     }));
     newPluginList.push({
-      type: addedExtension.type,
-      resource: null,
-      extensions: [],
+      ...addedExtension,
       extensionKey: this.state.extensionKey,
     });
     this.setState({
@@ -131,36 +138,13 @@ class PackageView extends React.Component<IPrivateProps, IState> {
     });
   };
 
-  saveExtensions = async () => {
+  saveChanges = async () => {
     const list = this.state.selectedPlugins.map(selected => {
-      if (
-        selected.type === 'eddi://ai.labs.parser' &&
-        selected.extensions.find(ext => !!ext.resource)
-      ) {
-        return {
-          type: selected.type,
-          config: { uri: selected.resource },
-          extensions: {
-            dictionaries: selected.extensions.map(ext => ({
-              type: ext.type,
-              config: { uri: ext.resource },
-            })),
-          },
-        };
-      } else if (!selected.resource) {
-        return {
-          type: selected.type,
-        };
-      } else {
-        return {
-          type: selected.type,
-          config: { uri: selected.resource },
-        };
-      }
+      return { ...selected };
     });
-    eddiApiActionDispatchers.updatePluginTypeAction(
+    eddiApiActionDispatchers.updateJsonDataAction(
       this.props.packagePayload.resource,
-      list,
+      { packageExtensions: list },
     );
   };
 
@@ -173,12 +157,8 @@ class PackageView extends React.Component<IPrivateProps, IState> {
       .filter(plugin => plugin.extensionKey !== extensionKey)
       .map((plugin, i) => ({
         type: plugin.type,
-        resource: plugin.resource,
-        extensions: !_.isEmpty(plugin.extensions)
-          ? plugin.extensions.map(extension => {
-              return extension;
-            })
-          : [],
+        extensions: plugin.extensions,
+        config: plugin.config,
         extensionKey: i,
       }));
     this.setState({
@@ -187,42 +167,12 @@ class PackageView extends React.Component<IPrivateProps, IState> {
     });
   };
 
-  updateResourceInPlugin = (pluginKey: number, newResource: string) => {
-    const newPluginList = this.state.selectedPlugins.map((plugin, i) => {
-      return {
-        type: plugin.type,
-        resource:
-          pluginKey === plugin.extensionKey ? newResource : plugin.resource,
-        extensions: plugin.extensions.map(ext => ext),
-        extensionKey: i,
-      };
-    });
-    this.setState({
-      selectedPlugins: newPluginList,
-      extensionKey: newPluginList.length,
-    });
-  };
-
-  updateExtensionsInPlugin = (pluginKey: number, extensions: IOptions[]) => {
-    const newPluginList = this.state.selectedPlugins.map((plugin, i) => {
+  updatePlugin = (pluginKey: number, newPlugin: IOptions) => {
+    const newPluginList = this.state.selectedPlugins.map(plugin => {
       if (plugin.extensionKey === pluginKey) {
-        return {
-          type: plugin.type,
-          resource: plugin.resource,
-          extensions,
-          extensionKey: i,
-        };
+        return { ...newPlugin };
       } else {
-        return {
-          type: plugin.type,
-          resource: plugin.resource,
-          extensions: !_.isEmpty(plugin.extensions)
-            ? plugin.extensions.map(extension => {
-                return extension;
-              })
-            : [],
-          extensionKey: i,
-        };
+        return { ...plugin };
       }
     });
     this.setState({
@@ -232,48 +182,10 @@ class PackageView extends React.Component<IPrivateProps, IState> {
   };
 
   unsavedChanges(): boolean {
-    if (
-      _.size(this.state.selectedPlugins) ===
-      _.size(this.props.packagePayload.pluginTypes)
-    ) {
-      for (let i = 0; i < this.state.selectedPlugins.length; i++) {
-        if (
-          this.state.selectedPlugins[i].type ===
-            this.props.packagePayload.pluginTypes[i].type &&
-          this.state.selectedPlugins[i].resource ===
-            this.props.packagePayload.pluginTypes[i].resource
-        ) {
-          if (
-            _.size(this.state.selectedPlugins[i].extensions) ===
-            _.size(this.props.packagePayload.pluginTypes[i].extensions)
-          ) {
-            for (
-              let e = 0;
-              e < this.state.selectedPlugins[i].extensions.length;
-              e++
-            ) {
-              if (
-                this.state.selectedPlugins[i].extensions[e].resource !==
-                this.props.packagePayload.pluginTypes[i].extensions[e].resource
-              ) {
-                return true;
-              }
-            }
-          } else {
-            return true;
-          }
-        } else {
-          return true;
-        }
-      }
-      return false;
-    } else {
-      return true;
-    }
-  }
-
-  buttonDisabled() {
-    return !this.unsavedChanges();
+    return !_.isEqual(
+      JSON.stringify(this.state.selectedPlugins),
+      JSON.stringify(this.state.initialSelectedPluginState),
+    );
   }
 
   selectVersion = (newVersion: number) => {
@@ -337,8 +249,8 @@ class PackageView extends React.Component<IPrivateProps, IState> {
           ))}
           <BlueButton
             text={'Save'}
-            disabled={this.buttonDisabled()}
-            onClick={this.saveExtensions}
+            disabled={!this.unsavedChanges()}
+            onClick={this.saveChanges}
           />
         </div>
         <PackageDescriptor packagePayload={this.props.packagePayload} />
@@ -349,28 +261,27 @@ class PackageView extends React.Component<IPrivateProps, IState> {
         {renderIf(this.state.selectedPlugins)(() => (
           <div>
             {this.state.selectedPlugins
-              .filter(p => _.size(p.extensions) > 0)
+              .filter(p => hasExtensions(p))
               .map((ext, key) => (
                 <PluginWithExtension
                   key={key}
                   pluginType={ext}
-                  pluginResource={ext.resource}
+                  pluginResource={PluginHelper.getResource(ext)}
                   deletePlugin={this.deletePlugin}
-                  updateExtensionsInPlugin={this.updateExtensionsInPlugin}
+                  updatePlugin={this.updatePlugin}
                   editDisabled={!isCurrentVersion}
                 />
               ))}
             <div style={styles.pluginList}>
               {this.state.selectedPlugins
-                .filter(p => _.size(p.extensions) === 0)
+                .filter(p => !hasExtensions(p))
                 .map((ext, key) => (
                   <Plugin
                     key={key}
                     pluginType={ext}
                     deletePlugin={this.deletePlugin}
-                    pluginResource={ext.resource}
-                    updateResourceInPlugin={this.updateResourceInPlugin}
-                    updateExtensionsInPlugin={this.updateExtensionsInPlugin}
+                    pluginResource={PluginHelper.getResource(ext)}
+                    updatePlugin={this.updatePlugin}
                     editDisabled={!isCurrentVersion}
                   />
                 ))}
@@ -400,11 +311,8 @@ class PackageView extends React.Component<IPrivateProps, IState> {
 const ComposedPackageView: Component<IPublicProps> = compose<
   IPrivateProps,
   IPublicProps
->(
-  pure,
-  connect(pluginTypesSelector),
-  connect(defaultPluginTypesSelector),
-  setDisplayName('PackageView'),
-)(PackageView);
+>(pure, connect(defaultPluginTypesSelector), setDisplayName('PackageView'))(
+  PackageView,
+);
 
 export default ComposedPackageView;

@@ -11,8 +11,6 @@ import {
   UPDATE_PACKAGE,
   UPDATE_DESCRIPTOR,
   FETCH_CURRENT_PACKAGE,
-  UPDATE_PLUGIN_TYPE_IN_PACKAGE,
-  FETCH_PLUGIN_TYPES_IN_PACKAGE,
   UPDATE_BOT_PACKAGES,
   FETCH_PACKAGES,
   FETCH_PLUGINS,
@@ -40,17 +38,14 @@ import {
   IBot,
   IPackage,
   IPlugin,
-  getAllBots,
   getPackageData,
   IPluginsResponse,
   getBotData,
   patchDescriptor,
   getCurrentPackage,
   addPluginType,
-  getPluginTypes,
   getPackageDescriptors,
   getBot,
-  IPluginTypes,
   getAllDefaultPluginTypes,
   IDefaultPluginTypes,
   getPluginDescriptors,
@@ -60,7 +55,6 @@ import {
   getCurrentPlugin,
   postNewConfig,
   updatePackages as axiosUpdatePackages,
-  updateResourcesInBot,
   updateBots as axiosUpdateBots,
   deployBot as axiosDeployBot,
   undeployBot as axiosUndeployBot,
@@ -98,12 +92,6 @@ import {
   updateDescriptorSuccessAction,
   updateDescriptorFailedAction,
   IFetchCurrentPackageAction,
-  updatePluginTypeSuccessAction,
-  updatePluginTypeFailedAction,
-  IFetchPluginTypesAction,
-  fetchPluginTypesSuccessAction,
-  fetchPluginTypesFailedAction,
-  IUpdatePluginTypeAction,
   IUpdateBotPackagesAction,
   fetchPackagesSuccessAction,
   fetchPackagesFailedAction,
@@ -409,43 +397,6 @@ export function* watchFetchPackageData(): Iterator<{}> {
   yield takeEvery(FETCH_PACKAGEDATA, FetchPackageData);
 }
 
-export function* fetchPluginTypes(action: IFetchPluginTypesAction) {
-  try {
-    const pluginTypes: IPluginTypes[] = yield call(
-      getPluginTypes,
-      action.packageResource,
-    );
-    yield put(
-      fetchPluginTypesSuccessAction(action.packageResource, pluginTypes),
-    );
-  } catch (err) {
-    yield put(fetchPluginTypesFailedAction(err));
-  }
-}
-
-export function* watchFetchPluginTypes(): Iterator<{}> {
-  yield takeEvery(FETCH_PLUGIN_TYPES_IN_PACKAGE, fetchPluginTypes);
-}
-
-export function* updatePluginType(action: IUpdatePluginTypeAction) {
-  try {
-    const extensions: IPackage = yield call(
-      addPluginType,
-      action.packageResource,
-      action.pluginTypes,
-    );
-    yield put(
-      updatePluginTypeSuccessAction(action.packageResource, extensions),
-    );
-  } catch (err) {
-    yield put(updatePluginTypeFailedAction(err));
-  }
-}
-
-export function* watchUpdatePluginType(): Iterator<{}> {
-  yield takeEvery(UPDATE_PLUGIN_TYPE_IN_PACKAGE, updatePluginType);
-}
-
 export function* fetchBotsUsingPackage(
   action: IFetchBotsUsingPackageAction,
 ): Iterator<{}> {
@@ -478,10 +429,12 @@ export function* fetchPackagesUsingPlugin(
     const packagesUsingPlugin: IPackage[] = yield call(
       getPackagesUsingPlugin,
       action.pluginResource,
+      action.anyVersion,
     );
     yield put(
       fetchPackagesUsingPluginSuccessAction(
         action.pluginResource,
+        action.anyVersion,
         packagesUsingPlugin,
       ),
     );

@@ -5,7 +5,10 @@ import * as _ from 'lodash';
 import Parser from '../../utils/Parser';
 import { CSSProperties } from 'react';
 import { IOptions } from '../PackageView';
-import { IDefaultPluginTypes } from '../../utils/AxiosFunctions';
+import {
+  IDefaultPluginTypes,
+  IPluginExtensions,
+} from '../../utils/AxiosFunctions';
 
 const styling: CSSProperties = {
   dropDown: {
@@ -25,7 +28,7 @@ interface IState {
 }
 interface IProps {
   packageExtensions: IDefaultPluginTypes[];
-  addExtension: (addedExtension: IOptions) => void;
+  addExtension: (addedExtension: IPluginExtensions) => void;
 }
 
 class VersionDropDownComponent extends React.Component<IProps, IState> {

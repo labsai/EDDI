@@ -3,7 +3,12 @@ import '../ModalComponent.styles.scss';
 import { Link, browserHistory } from 'react-router-dom';
 import { Component, compose, pure, setDisplayName } from 'recompose';
 import Package from '../AddPackagesModal/Package';
-import { IBot, IPackage } from '../../utils/AxiosFunctions';
+import {
+  getBotsUsingPackage,
+  getPackagesUsingPlugin,
+  IBot,
+  IPackage,
+} from '../../utils/AxiosFunctions';
 import {
   packagesSelector,
   packagesWithPluginSelector,
@@ -21,6 +26,7 @@ import SelectableConfig from './SelectableConfig';
 
 interface IState {
   selectedPackages: string[];
+  packages: IPackage[];
 }
 
 interface IPublicProps {
@@ -38,11 +44,12 @@ class UpdatePackagesModal extends React.Component<IPrivateProps, IState> {
     super(props);
     this.state = {
       selectedPackages: [],
+      packages: [],
     };
   }
 
   componentDidMount() {
-    // eddiApiActionDispatchers.fetchPackagesAction();
+    this.loadPackagesUsingPlugin();
   }
 
   closeModal = () => {
@@ -50,15 +57,24 @@ class UpdatePackagesModal extends React.Component<IPrivateProps, IState> {
   };
 
   updateSelectedPackages = () => {
-    const selectedPackagesForUpdate = this.props.packages.filter(pkg =>
-      this.state.selectedPackages.includes(pkg.resource),
-    );
     eddiApiActionDispatchers.updatePackagesAction(
       this.props.pluginResource,
-      selectedPackagesForUpdate,
+      this.state.selectedPackages,
     );
     this.closeModal();
   };
+
+  async loadPackagesUsingPlugin() {
+    eddiApiActionDispatchers.fetchPackagesUsingPluginAction(
+      this.props.pluginResource,
+      true,
+    );
+    const packages: IPackage[] = await getPackagesUsingPlugin(
+      this.props.pluginResource,
+      true,
+    );
+    this.setState({ packages });
+  }
 
   selectPackage = (packageResource: string) => {
     if (this.state.selectedPackages.includes(packageResource)) {
@@ -103,28 +119,26 @@ class UpdatePackagesModal extends React.Component<IPrivateProps, IState> {
           </div>
         </div>
         <div>
-          {renderIf(!this.props.isLoading && !_.isEmpty(this.props.packages))(
-            () => (
-              <div style={styles.packageList}>
-                {this.props.packages.map((pack, i) => (
-                  <SelectableConfig
-                    key={i}
-                    selected={this.isPackageSelected(pack.resource)}
-                    descriptor={pack}
-                    handleClick={this.selectPackage}
-                  />
-                ))}
-              </div>
-            ),
-          )}
-          {renderIf(this.props.isLoading)(() => (
+          {renderIf(!_.isEmpty(this.state.packages))(() => (
+            <div style={styles.packageList}>
+              {this.state.packages.map((pack, i) => (
+                <SelectableConfig
+                  key={i}
+                  selected={this.isPackageSelected(pack.resource)}
+                  descriptor={pack}
+                  handleClick={this.selectPackage}
+                />
+              ))}
+            </div>
+          ))}
+          {renderIf(this.state.packages)(() => (
             <div style={styles.loadingWrapper}>
               <ClimbingBoxLoader loading />
             </div>
           ))}
-          {renderIf(!this.props.isLoading && _.isEmpty(this.props.packages))(
-            () => <div>{'Found no packages that can be updated'}</div>,
-          )}
+          {renderIf(_.isEmpty(this.state.packages))(() => (
+            <div>{'Found no packages that can be updated'}</div>
+          ))}
         </div>
       </div>
     );

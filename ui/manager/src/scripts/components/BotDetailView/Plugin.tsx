@@ -2,22 +2,18 @@ import * as React from 'react';
 import * as renderIf from 'render-if';
 import styles from './Plugin.styles';
 import { Component, compose, pure, setDisplayName } from 'recompose';
-import { IPackage, IPlugin, IPluginTypes } from '../utils/AxiosFunctions';
+import { IPackage, IPlugin, IPluginExtensions } from '../utils/AxiosFunctions';
 import { connect } from 'react-redux';
 import * as _ from 'lodash';
 import eddiApiActionDispatchers from '../../actions/EddiApiActionDispatchers';
 import { pluginSelector } from '../../selectors/PluginSelectors';
 import './Plugin.scss';
-import WhiteButton from '../Assets/Buttons/WhiteButton';
-import Parser from '../utils/Parser';
-import { getDate } from '../utils/DateFormat';
 import PluginHelper from '../utils/helpers/PluginHelper';
 import ModalActionDispatchers from '../../actions/ModalActionDispatchers';
-import { ModalEnum } from '../utils/ModalEnum';
 
 interface IPublicProps {
   pluginResource: string;
-  pluginType: IPluginTypes;
+  pluginType: IPluginExtensions;
   packagePayload: IPackage;
 }
 
@@ -74,14 +70,14 @@ class Plugin extends React.Component<IPrivateProps> {
                       <div className={`pluginNameAndVersion`}>
                         <div className={`pluginName`}>
                           {PluginHelper.getName(
-                            this.props.pluginType,
+                            this.props.pluginType.type,
                             this.props.plugin,
                             true,
                           )}
                         </div>
                         <div className={`pluginVersion `}>
                           {PluginHelper.getVersion(
-                            this.props.pluginType,
+                            this.props.pluginType.type,
                             this.props.plugin,
                             true,
                           )}
@@ -92,7 +88,7 @@ class Plugin extends React.Component<IPrivateProps> {
                       </div>
                       <div className={`pluginDate`}>
                         {PluginHelper.getLastModified(
-                          this.props.pluginType,
+                          this.props.pluginType.type,
                           this.props.plugin,
                           true,
                           <br />,

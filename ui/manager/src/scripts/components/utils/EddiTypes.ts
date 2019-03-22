@@ -1,5 +1,7 @@
 export const REGULAR_DICTIONARY: string =
   'eddi://ai.labs.parser.dictionaries.regular';
+export const DICTIONARY: string = 'eddi://ai.labs.parser.dictionaries';
+export const CORRECTION: string = 'eddi://ai.labs.parser.corrections';
 export const PARSER: string = 'eddi://ai.labs.parser';
 export const BEHAVIOR: string = 'eddi://ai.labs.behavior';
 export const OUTPUT: string = 'eddi://ai.labs.output';

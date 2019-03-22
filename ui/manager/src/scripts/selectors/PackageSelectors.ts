@@ -115,15 +115,3 @@ export function specificPackageSelector(
     isLoading: state.packageState.isLoadingPackage,
   };
 }
-
-export function pluginTypesSelector(
-  state: IAppState,
-  props: IPackageSelectorProps,
-) {
-  const pack = state.packageState.packages.find(
-    pack => pack.resource === props.packagePayload.resource,
-  );
-  return {
-    oldTypes: pack.pluginTypes || [],
-  };
-}

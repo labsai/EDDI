@@ -1,8 +1,4 @@
-import {
-  IPluginExtensions,
-  IPluginTypes,
-  IPluginExtension,
-} from '../AxiosFunctions';
+import { IPluginExtensions, IPluginExtension } from '../AxiosFunctions';
 import * as _ from 'lodash';
 
 export const parsePlugins: (
@@ -22,33 +18,6 @@ export const parsePlugins: (
     }
   });
   return plugins;
-};
-
-export const parsePlugin: (externalPackages: IPluginTypes) => string = (
-  externalPackage: IPluginTypes,
-) => {
-  let plugin: string = '';
-  if (externalPackage.resource) {
-    plugin = externalPackage.resource;
-  }
-  if (!_.isEmpty(externalPackage.extensions)) {
-    for (let extensionTypes of Object.values(externalPackage.extensions)) {
-      for (let extension of extensionTypes.extensions) {
-        if (extension.resource) {
-          plugin = extension.resource;
-        }
-      }
-    }
-  }
-  return plugin;
-};
-
-export const parsePluginTypes: (pluginTypes: IPluginTypes[]) => string[] = (
-  pluginTypes: IPluginTypes[],
-) => {
-  return pluginTypes
-    .filter(pluginType => pluginType.type)
-    .map(pluginType => pluginType.type);
 };
 
 export const parsePluginExtensions: (
@@ -77,4 +46,16 @@ export const parsePluginExtensions: (
     plugins.push(packageExtension);
   }
   return plugins;
+};
+
+export const hasExtensions = (plugin: IPluginExtensions) => {
+  if (_.isEmpty(plugin.extensions)) {
+    return false;
+  }
+  for (let extensions of Object.values(plugin.extensions)) {
+    if (_.some(extensions)) {
+      return true;
+    }
+  }
+  return false;
 };

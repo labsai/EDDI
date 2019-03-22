@@ -87,6 +87,7 @@ export async function getBot(botResourceOrId: string): Promise<IBot> {
     return await getCurrentBot(botResourceOrId);
   }
 }
+
 export async function getSpecificBot(botResource: string): Promise<IBot> {
   try {
     const id = Parser.getId(botResource);
@@ -296,8 +297,8 @@ export async function getPlugin(pluginResource: string): Promise<IPlugin> {
 
 export interface IPluginExtensions {
   type: string;
-  config: { uri: string };
-  extensions: {
+  config?: { uri: string };
+  extensions?: {
     [property: string]: { type: string; config: { uri: string } }[];
   };
 }
@@ -324,7 +325,6 @@ export interface IBotDataResponse {
 export interface IPackage extends IDetailedDescriptor {
   updatablePlugins?: string[];
   packageData?: IPlugins;
-  pluginTypes?: IPluginTypes[];
   usedByBots?: string[];
 }
 
@@ -350,7 +350,6 @@ export async function getPackage(resource: string): Promise<IPackage> {
     const descriptor = await getDescriptor(id, version);
     const packageData: IPlugins = await getPackageData(resource);
     const currentVersion = await getCurrentVersion(resource);
-    const pluginTypes = await getPluginTypes(resource);
     return {
       id,
       version,
@@ -361,7 +360,6 @@ export async function getPackage(resource: string): Promise<IPackage> {
       resource: descriptor.resource,
       createdOn: descriptor.createdOn,
       packageData,
-      pluginTypes,
     };
   } catch (err) {
     console.error(`Failed to get package. Error: ${err.message}`);
@@ -375,9 +373,6 @@ export async function getCurrentPackage(id: string): Promise<IPackage> {
       `${await getAPIUrl()}/packagestore/packages/${id}/currentversion`,
     )).data;
     const descriptor = await getDescriptor(id, version);
-    const pluginTypes: IPluginTypes[] = await getPluginTypes(
-      descriptor.resource,
-    );
     return {
       id,
       version,
@@ -387,7 +382,6 @@ export async function getCurrentPackage(id: string): Promise<IPackage> {
       description: descriptor.description,
       resource: descriptor.resource,
       createdOn: descriptor.createdOn,
-      pluginTypes,
     };
   } catch (err) {
     console.error(`Failed to get current package. Error: ${err.message}`);
@@ -576,13 +570,15 @@ export function updatePackageExtension(
     }
     if (!_.isEmpty(externalPackage.extensions)) {
       for (let extensions of Object.values(externalPackage.extensions)) {
-        for (let extension of extensions) {
-          if (
-            extension.config &&
-            extension.config.uri &&
-            Parser.getId(extension.config.uri) === newExtensionId
-          ) {
-            extension.config.uri = newExtensionResource;
+        if (!_.isEmpty(extensions)) {
+          for (let extension of extensions) {
+            if (
+              extension.config &&
+              extension.config.uri &&
+              Parser.getId(extension.config.uri) === newExtensionId
+            ) {
+              extension.config.uri = newExtensionResource;
+            }
           }
         }
       }
@@ -720,31 +716,6 @@ export async function getAllDefaultPluginTypes(): Promise<
     throw err;
   }
 }
-
-export interface IPluginTypes {
-  type: string;
-  extensions?: IPluginTypes[];
-  resource: string;
-}
-
-export const getPluginTypes: (
-  resource: string,
-) => Promise<IPluginTypes[]> = async resource => {
-  try {
-    const res: IPluginsResponse = await axios.get(
-      `${await getAPIUrl()}/packagestore/packages/${Parser.getIdAndVersion(
-        resource,
-      )}`,
-    );
-    if (!res.data) {
-      return [];
-    } else {
-      return parsePluginExtensions(res.data.packageExtensions);
-    }
-  } catch (e) {
-    console.error(e);
-  }
-};
 
 export interface IPluginExtension {
   type: string;
@@ -912,13 +883,16 @@ export async function postNewConfig(
 
 export async function updatePackages(
   pluginResource: string,
-  packages: IPackage[],
+  packages: string[],
 ) {
   try {
     const updatedPackages: IPackage[] = [];
     for (let i = 0; i < _.size(packages); i++) {
+      const currentPackage: IPackage = await getCurrentPackage(
+        Parser.getId(packages[i]),
+      );
       const updatedPackage: IPackage = await updatePackage(
-        packages[i],
+        currentPackage,
         pluginResource,
       );
       updatedPackages.push(updatedPackage);
