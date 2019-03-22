@@ -16,6 +16,7 @@ import { history } from '../history';
 import WhiteButton from './Assets/Buttons/WhiteButton';
 import { CSSProperties } from 'react';
 import * as _ from 'lodash';
+import { getAuthMethod } from './utils/ApiFunctions';
 
 const styles: CSSProperties = {
   logoutButton: {
@@ -56,6 +57,7 @@ class App extends React.Component<IPrivateProps, IState> {
   }
 
   async initKeycloak() {
+    console.log('Auth Method:' + (await getAuthMethod()));
     const k = await kcHelper.createKeycloakInstance();
     this.setState({
       keycloak: k,

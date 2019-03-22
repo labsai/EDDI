@@ -40,4 +40,40 @@ export async function getAPIUrl(): Promise<string> {
   }
 }
 
+let authMethodPromise: Promise<string>;
+
+export async function getAuthMethod(): Promise<string> {
+  if (!authMethodPromise) {
+    return (authMethodPromise = axios
+      .get('/_/env.json')
+      .then(overrides => {
+        if (overrides.data.AUTH_METHOD) {
+          let authMethod = overrides.data.AUTH_METHOD;
+          return authMethod;
+        } else {
+          if (process.env.authMethod) {
+            return process.env.authMethod;
+          } else {
+            throw new Error('No authMethod defined');
+          }
+        }
+      })
+      .catch(err => {
+        if (process.env.environment === 'local') {
+          return (authMethodPromise = Promise.resolve(process.env.authMethod));
+        } else {
+          console.error(`Failed to get API url. Error: ${err.message}`);
+          authMethodPromise = null;
+          throw err;
+        }
+      }));
+  } else {
+    let authMethod = await authMethodPromise;
+    if (authMethod[authMethod.length - 1] === '/') {
+      authMethod = authMethod.substring(0, authMethod.length - 1);
+    }
+    return authMethod;
+  }
+}
+
 export const DEFAULT_LIMIT: number = 10;
