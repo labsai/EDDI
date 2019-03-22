@@ -44,7 +44,7 @@ class UpdatePackagesModal extends React.Component<IPrivateProps, IState> {
     super(props);
     this.state = {
       selectedPackages: [],
-      packages: [],
+      packages: null,
     };
   }
 
@@ -131,14 +131,14 @@ class UpdatePackagesModal extends React.Component<IPrivateProps, IState> {
               ))}
             </div>
           ))}
-          {renderIf(this.state.packages)(() => (
+          {renderIf(!this.state.packages)(() => (
             <div style={styles.loadingWrapper}>
               <ClimbingBoxLoader loading />
             </div>
           ))}
-          {renderIf(_.isEmpty(this.state.packages))(() => (
-            <div>{'Found no packages that can be updated'}</div>
-          ))}
+          {renderIf(this.state.packages && _.isEmpty(this.state.packages))(
+            () => <div>{'Found no packages that can be updated'}</div>,
+          )}
         </div>
       </div>
     );
