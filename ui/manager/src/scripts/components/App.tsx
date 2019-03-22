@@ -56,6 +56,10 @@ class App extends React.Component<IPrivateProps, IState> {
   async componentDidMount() {
     await runSagaMiddleware();
     SystemActionDispatchers.appReady();
+    console.log(await getAuthMethod());
+    console.log(await getAuthRealm());
+    console.log(await getAuthUrl());
+    console.log(await getAuthClientId());
     if (await kcHelper.keycloakEnabled()) {
       await this.initKeycloak();
     } else {
