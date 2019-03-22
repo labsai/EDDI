@@ -24,6 +24,10 @@ import {
   HTTPCALLS_PATH,
 } from './EddiTypes';
 
+export function setDefaultGlobalHeader(key: string, value: string): void {
+  axios.defaults.headers.common[key] = value;
+}
+
 export interface IDescriptor {
   createdBy?: string;
   createdOn: number;
