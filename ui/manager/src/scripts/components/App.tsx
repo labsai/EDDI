@@ -44,15 +44,17 @@ class App extends React.Component<IPrivateProps, IState> {
     super(props);
     this.state = {
       keycloak: null,
-      isAuthenticated: !kcHelper.keycloakEnabled(),
+      isAuthenticated: false,
     };
   }
 
   async componentDidMount() {
     await runSagaMiddleware();
     SystemActionDispatchers.appReady();
-    if (kcHelper.keycloakEnabled()) {
+    if (await kcHelper.keycloakEnabled()) {
       await this.initKeycloak();
+    } else {
+      this.setState({ isAuthenticated: true });
     }
   }
 
@@ -91,7 +93,7 @@ class App extends React.Component<IPrivateProps, IState> {
             ))}
             {renderIf(this.state.isAuthenticated)(() => (
               <div>
-                {renderIf(kcHelper.keycloakEnabled())(() => (
+                {renderIf(!!this.state.keycloak)(() => (
                   <WhiteButton
                     text={'Logout'}
                     customStyles={styles.logoutButton}

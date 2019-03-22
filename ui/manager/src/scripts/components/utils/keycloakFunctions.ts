@@ -1,6 +1,11 @@
 import * as Keycloak from 'keycloak-js';
 import { setDefaultGlobalHeader } from './AxiosFunctions';
-import { getAuthClientId, getAuthRealm, getAuthUrl } from './ApiFunctions';
+import {
+  getAuthClientId,
+  getAuthMethod,
+  getAuthRealm,
+  getAuthUrl,
+} from './ApiFunctions';
 
 export async function createKeycloakInstance(): Promise<
   Keycloak.KeycloakInstance
@@ -52,6 +57,6 @@ export function logout(keycloak: Keycloak.KeycloakInstance): void {
   keycloak.logout();
 }
 
-export function keycloakEnabled(): boolean {
-  return process.env.authMethod === 'keycloak';
+export async function keycloakEnabled() {
+  return (await getAuthMethod()) === 'keycloak';
 }
