@@ -143,18 +143,18 @@
             <artifactId>resteasy-jaxrs</artifactId>
             <version>3.6.3.Final</version>
             <exclusions>
-                    <exclusion>
-                        <artifactId>slf4j-simple</artifactId>
-                        <groupId>org.slf4j</groupId>
-                    </exclusion>
-                    <exclusion>
-                        <artifactId>jboss-annotations-api_1.1_spec</artifactId>
-                        <groupId>org.jboss.spec.javax.annotation</groupId>
-                    </exclusion>
-                    <exclusion>
-                        <artifactId>jcip-annotations</artifactId>
-                        <groupId>net.jcip</groupId>
-                    </exclusion>
+                <exclusion>
+                    <artifactId>slf4j-simple</artifactId>
+                    <groupId>org.slf4j</groupId>
+                </exclusion>
+                <exclusion>
+                    <artifactId>jboss-annotations-api_1.1_spec</artifactId>
+                    <groupId>org.jboss.spec.javax.annotation</groupId>
+                </exclusion>
+                <exclusion>
+                    <artifactId>jcip-annotations</artifactId>
+                    <groupId>net.jcip</groupId>
+                </exclusion>
             </exclusions>
         </dependency>
         <dependency>
@@ -167,18 +167,18 @@
             <artifactId>resteasy-jackson2-provider</artifactId>
             <version>3.6.3.Final</version>
             <exclusions>
-                 <exclusion>
-                     <groupId>com.fasterxml.jackson.core</groupId>
-                     <artifactId>jackson-core</artifactId>
-                 </exclusion>
-                 <exclusion>
-                     <groupId>com.fasterxml.jackson.core</groupId>
-                     <artifactId>jackson-databind</artifactId>
-                 </exclusion>
-                 <exclusion>
-                     <groupId>com.fasterxml.jackson.core</groupId>
-                     <artifactId>jackson-annotations</artifactId>
-                 </exclusion>
+                <exclusion>
+                    <groupId>com.fasterxml.jackson.core</groupId>
+                    <artifactId>jackson-core</artifactId>
+                </exclusion>
+                <exclusion>
+                    <groupId>com.fasterxml.jackson.core</groupId>
+                    <artifactId>jackson-databind</artifactId>
+                </exclusion>
+                <exclusion>
+                    <groupId>com.fasterxml.jackson.core</groupId>
+                    <artifactId>jackson-annotations</artifactId>
+                </exclusion>
             </exclusions>
         </dependency>
 
@@ -186,12 +186,12 @@
         <dependency>
             <groupId>io.swagger</groupId>
             <artifactId>swagger-core</artifactId>
-            <version>1.5.13</version>
+            <version>1.5.22</version>
         </dependency>
         <dependency>
             <groupId>io.swagger</groupId>
             <artifactId>swagger-annotations</artifactId>
-            <version>1.5.13</version>
+            <version>1.5.22</version>
         </dependency>
         <!-- swagger END -->
 
