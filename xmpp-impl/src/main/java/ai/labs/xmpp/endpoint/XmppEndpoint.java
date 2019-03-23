@@ -2,17 +2,17 @@ package ai.labs.xmpp.endpoint;
 
 import ai.labs.caching.ICache;
 import ai.labs.caching.ICacheFactory;
-import ai.labs.httpclient.IHttpClient;
-import ai.labs.httpclient.IRequest;
-import ai.labs.httpclient.IResponse;
+import ai.labs.memory.model.ConversationOutput;
+import ai.labs.memory.model.SimpleConversationMemorySnapshot;
+import ai.labs.models.ConversationState;
 import ai.labs.models.Deployment;
 import ai.labs.resources.rest.bots.IBotStore;
+import ai.labs.resources.rest.bots.IRestBotStore;
 import ai.labs.resources.rest.bots.model.BotConfiguration;
+import ai.labs.resources.rest.documentdescriptor.model.DocumentDescriptor;
 import ai.labs.rest.rest.IRestBotEngine;
-import ai.labs.rest.restinterfaces.IRestInterfaceFactory;
 import ai.labs.runtime.IBotFactory;
 import ai.labs.runtime.service.ServiceException;
-import ai.labs.utilities.RestUtilities;
 import ai.labs.utilities.URIUtilities;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -28,15 +28,12 @@ import org.jivesoftware.smack.tcp.XMPPTCPConnectionConfiguration;
 import org.jxmpp.jid.EntityBareJid;
 
 import javax.inject.Inject;
-import javax.inject.Named;
-import javax.ws.rs.core.MediaType;
+import javax.ws.rs.container.AsyncResponse;
+import javax.ws.rs.container.TimeoutHandler;
 import javax.ws.rs.core.Response;
 import java.io.IOException;
 import java.net.InetAddress;
-import java.net.URI;
-import java.util.ArrayList;
-import java.util.List;
-import java.util.Map;
+import java.util.*;
 import java.util.concurrent.TimeUnit;
 
 import static ai.labs.models.Deployment.Environment.unrestricted;
@@ -47,16 +44,11 @@ import static ai.labs.rest.restinterfaces.RestInterfaceFactory.RestInterfaceFact
 @Slf4j
 public class XmppEndpoint implements IXmppEndpoint {
     private static final String RESOURCE_URI_CHANNEL_CONNECTOR = "eddi://ai.labs.channel.xmpp";
-    private static final String AI_LABS_USER_AGENT = "Jetty 9.4/HTTP CLIENT - AI.LABS.EDDI";
-    private static final String ENCODING = "UTF-8";
-    private static final int EDDI_TIMEOUT = 10000;
-
 
     private final IBotStore botStore;
     private final IBotFactory botFactory;
-    private final IHttpClient httpClient;
-    private final IRestInterfaceFactory restInterfaceFactory;
-    private final String apiServerURI;
+    private final IRestBotStore restBotStore;
+    private final IRestBotEngine restBotEngine;
     private final ICache<String, String> conversationIdCache;
 
     private XMPPTCPConnection connection;
@@ -65,30 +57,25 @@ public class XmppEndpoint implements IXmppEndpoint {
 
     @Inject
     public XmppEndpoint(IBotStore botStore,
-                            IBotFactory botFactory,
-                            IHttpClient httpClient,
-                            IRestInterfaceFactory restInterfaceFactory,
-                            @Named("system.apiServerURI") String apiServerURI,
-                            ICacheFactory cacheFactory) {
+                        IBotFactory botFactory,
+                        IRestBotStore restBotStore,
+                        IRestBotEngine restBotEngine,
+                        ICacheFactory cacheFactory) {
         this.botStore = botStore;
         this.botFactory = botFactory;
-        this.httpClient = httpClient;
-        this.restInterfaceFactory = restInterfaceFactory;
-        this.apiServerURI = apiServerURI;
+        this.restBotStore = restBotStore;
+        this.restBotEngine = restBotEngine;
 
         this.conversationIdCache = cacheFactory.getCache("xmpp.conversationIds");
         log.info("XMPP STARTING");
     }
 
     public void init() {
-        URI uri = RestUtilities.createURI(apiServerURI, "/botstore/bots/descriptors");
         try {
-            IResponse httpResponse = httpClient.newRequest(uri, IHttpClient.Method.GET)
-                    .setUserAgent(AI_LABS_USER_AGENT)
-                    .setTimeout(EDDI_TIMEOUT, TimeUnit.MILLISECONDS)
-                    .send();
-            List<String> botids = extractBotIdsFromResponse(httpResponse.getContentAsString());
-            for (String botId : botids) {
+            List<DocumentDescriptor> documentDescriptors = restBotStore.readBotDescriptors("", 0, 20);
+            for (DocumentDescriptor documentDescriptor : documentDescriptors) {
+                URIUtilities.ResourceId resourceId = URIUtilities.extractResourceId(documentDescriptor.getResource());
+                String botId = resourceId.getId();
                 Integer version = getLatestDeployedBotVersion(botId);
                 BotConfiguration botConfiguration = botStore.read(botId, version);
                 for (BotConfiguration.ChannelConnector channelConnector : botConfiguration.getChannels()) {
@@ -98,7 +85,7 @@ public class XmppEndpoint implements IXmppEndpoint {
                         String password = channelConnectorConfig.get("password");
                         String hostname = channelConnectorConfig.get("hostname");
 
-                        log.info("opening connection to: {}", hostname );
+                        log.info("opening connection to: {}", hostname);
                         XMPPTCPConnectionConfiguration config = XMPPTCPConnectionConfiguration.builder()
                                 .setUsernameAndPassword(username, password)
                                 .setHost(hostname)
@@ -117,8 +104,6 @@ public class XmppEndpoint implements IXmppEndpoint {
                     }
                 }
             }
-        } catch (IRequest.HttpRequestException e) {
-            log.error("error getting all bots", e);
         } catch (ServiceException e) {
             log.error("service exception on getting bot version", e);
         } catch (ResourceStoreException e) {
@@ -126,7 +111,7 @@ public class XmppEndpoint implements IXmppEndpoint {
         } catch (ResourceNotFoundException e) {
             log.error("botid not found", e);
         } catch (InterruptedException e) {
-            log.error("smack connection interruped" ,e);
+            log.error("smack connection interruped", e);
         } catch (IOException e) {
             log.error("smack io exception", e);
         } catch (SmackException e) {
@@ -136,31 +121,9 @@ public class XmppEndpoint implements IXmppEndpoint {
         }
     }
 
-    private List<String> extractBotIdsFromResponse(String json) {
-        List<String> botIds = new ArrayList<>();
-
-        ObjectMapper mapper = new ObjectMapper();
-        try {
-            JsonNode rootNode = mapper.readValue(json, JsonNode.class);
-            for (JsonNode bot : rootNode) {
-                if (bot.get("resource") != null) {
-                    String[] urlParts = bot.get("resource").asText().split("/");
-                    if (urlParts.length > 0) {
-                        String[] requestParts = urlParts[urlParts.length-1].split("\\?");
-                        botIds.add(requestParts[0]);
-                        log.debug("added botid: {}" + requestParts[0]);
-                    }
-                }
-            }
-        } catch (IOException e) {
-            log.error("json parsing error", e);
-        }
-
-        return botIds;
-    }
-
     private Integer getLatestDeployedBotVersion(String botId) throws ServiceException {
-        return botFactory.getLatestBot(unrestricted, botId) != null ? botFactory.getLatestBot(unrestricted, botId).getBotVersion() : Integer.valueOf(1);
+        return botFactory.getLatestBot(unrestricted, botId) != null ?
+                botFactory.getLatestBot(unrestricted, botId).getBotVersion() : Integer.valueOf(1);
     }
 
     private void say(Deployment.Environment environment,
@@ -168,61 +131,40 @@ public class XmppEndpoint implements IXmppEndpoint {
                      String conversationId,
                      String senderId,
                      String message,
-                     Chat chat)
-            throws IRequest.HttpRequestException {
-
-        URI uri = RestUtilities.createURI(
-                apiServerURI, "/bots/",
-                environment, "/",
-                botId, "/",
-                conversationId);
-
+                     Chat chat) {
 
         final String jsonRequestBody = "{ \"input\": \"" + message + "\", \"context\": {} }";
-        try {
-            IResponse httpResponse = httpClient.newRequest(uri, IHttpClient.Method.POST)
-                    .setUserAgent(AI_LABS_USER_AGENT)
-                    .setTimeout(EDDI_TIMEOUT, TimeUnit.MILLISECONDS)
-                    .setBodyEntity(jsonRequestBody, ENCODING, MediaType.APPLICATION_JSON)
-                    .send();
-            log.debug("response: {}", httpResponse.getContentAsString());
-            final List<String> output = getOutputText(httpResponse.getContentAsString());
 
-            for (String outputText : output) {
-                chat.send(outputText);
-            }
+        restBotEngine.say(environment, botId, conversationId, false, true,
+                Collections.emptyList(), jsonRequestBody,
+                new AsyncDummy() {
+                    @Override
+                    public boolean resume(Object response) {
+                        try {
+                            SimpleConversationMemorySnapshot memorySnapshot = (SimpleConversationMemorySnapshot) response;
 
-            final String state = getConversationState(httpResponse.getContentAsString());
-            if (state != null && !state.equals("READY")) {
-                conversationIdCache.remove(senderId);
-            }
-        } catch (SmackException.NotConnectedException e) {
-            log.error("not connected to xmpp server", e);
-        } catch (InterruptedException e) {
-            log.error("interrupted exception", e);
-        }
-    }
+                            for (ConversationOutput conversationOutput : memorySnapshot.getConversationOutputs()) {
+                                List outputs = conversationOutput.get("output", List.class);
+                                for (Object output : outputs) {
+                                    chat.send(output.toString());
 
-    private List<String> getOutputText(String json) {
+                                }
+                            }
 
-        List<String> output = new ArrayList<>();
+                            final ConversationState state = memorySnapshot.getConversationState();
+                            if (state != null && !state.equals(ConversationState.READY)) {
+                                conversationIdCache.remove(senderId);
+                            }
+                            return true;
+                        } catch (SmackException.NotConnectedException e) {
+                            log.error("not connected to xmpp server", e);
+                        } catch (InterruptedException e) {
+                            log.error("interrupted exception", e);
+                        }
 
-        ObjectMapper mapper = new ObjectMapper();
-        try {
-            JsonNode rootNode = mapper.readValue(json, JsonNode.class);
-            JsonNode conversationStepsArray = rootNode.path("conversationSteps");
-            for (JsonNode conversationStep : conversationStepsArray) {
-                for (JsonNode conversationStepValues : conversationStep.get("conversationStep")) {
-                    if (conversationStepValues.get("key") != null && conversationStepValues.get("key").asText().startsWith("output:text")) {
-                        output.add(conversationStepValues.get("value").asText());
+                        return false;
                     }
-                }
-            }
-        } catch (IOException e) {
-            log.error("json parsing error", e);
-        }
-
-        return output;
+                });
     }
 
     private String getConversationState(String json) {
@@ -259,8 +201,7 @@ public class XmppEndpoint implements IXmppEndpoint {
             throws RestInterfaceFactoryException {
         String conversationId;
         try {
-            Response response = restInterfaceFactory.get(IRestBotEngine.class, apiServerURI).
-                    startConversation(environment, botId, senderId);
+            Response response = restBotEngine.startConversation(environment, botId, senderId);
             if (response.getStatus() == 201) {
                 URIUtilities.ResourceId resourceIdConversation =
                         URIUtilities.extractResourceId(response.getLocation());
@@ -283,13 +224,84 @@ public class XmppEndpoint implements IXmppEndpoint {
             log.info("xmpp incoming: {}", message.getBody());
             String conversationId = getConversationId(unrestricted, configuredBotId, entityBareJid.asEntityBareJidString());
             if (conversationId == null) {
-                conversationId = createConversation(unrestricted,configuredBotId, entityBareJid.asEntityBareJidString());
+                conversationId = createConversation(unrestricted, configuredBotId, entityBareJid.asEntityBareJidString());
             }
             say(unrestricted, configuredBotId, conversationId, entityBareJid.asEntityBareJidString(), message.getBody(), chat);
         } catch (RestInterfaceFactoryException e) {
             log.error("rest interface exception", e);
-        } catch (IRequest.HttpRequestException e) {
-            log.error("http exception", e);
+        }
+    }
+
+    private class AsyncDummy implements AsyncResponse {
+
+        @Override
+        public boolean resume(Object response) {
+            return false;
+        }
+
+        @Override
+        public boolean resume(Throwable response) {
+            return false;
+        }
+
+        @Override
+        public boolean cancel() {
+            return false;
+        }
+
+        @Override
+        public boolean cancel(int retryAfter) {
+            return false;
+        }
+
+        @Override
+        public boolean cancel(Date retryAfter) {
+            return false;
+        }
+
+        @Override
+        public boolean isSuspended() {
+            return false;
+        }
+
+        @Override
+        public boolean isCancelled() {
+            return false;
+        }
+
+        @Override
+        public boolean isDone() {
+            return false;
+        }
+
+        @Override
+        public boolean setTimeout(long time, TimeUnit unit) {
+            return false;
+        }
+
+        @Override
+        public void setTimeoutHandler(TimeoutHandler handler) {
+
+        }
+
+        @Override
+        public Collection<Class<?>> register(Class<?> callback) {
+            return null;
+        }
+
+        @Override
+        public Map<Class<?>, Collection<Class<?>>> register(Class<?> callback, Class<?>... callbacks) {
+            return null;
+        }
+
+        @Override
+        public Collection<Class<?>> register(Object callback) {
+            return null;
+        }
+
+        @Override
+        public Map<Class<?>, Collection<Class<?>>> register(Object callback, Object... callbacks) {
+            return null;
         }
     }
 }

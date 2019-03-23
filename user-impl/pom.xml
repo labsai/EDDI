@@ -39,6 +39,11 @@
             <artifactId>runtime-definition</artifactId>
             <version>${project.version}</version>
         </dependency>
+        <dependency>
+            <groupId>org.keycloak</groupId>
+            <artifactId>keycloak-core</artifactId>
+            <version>4.8.3.Final</version>
+        </dependency>
     </dependencies>
 
     <properties>

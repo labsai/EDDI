@@ -6,10 +6,17 @@ import ai.labs.server.IServerRuntime;
 import ai.labs.server.MongoLoginService;
 import ai.labs.server.ServerRuntime;
 import ai.labs.utilities.StringUtilities;
+import com.google.inject.Provider;
 import com.google.inject.Provides;
+import org.eclipse.jetty.security.ConstraintMapping;
+import org.eclipse.jetty.security.ConstraintSecurityHandler;
 import org.eclipse.jetty.security.LoginService;
+import org.eclipse.jetty.security.SecurityHandler;
+import org.eclipse.jetty.util.security.Constraint;
 import org.jboss.resteasy.plugins.guice.GuiceResteasyBootstrapServletContextListener;
 import org.jboss.resteasy.plugins.server.servlet.HttpServletDispatcher;
+import org.keycloak.adapters.jetty.KeycloakJettyAuthenticator;
+import org.keycloak.representations.adapters.config.AdapterConfig;
 
 import javax.inject.Named;
 import javax.inject.Singleton;
@@ -21,6 +28,9 @@ import java.util.concurrent.ThreadPoolExecutor;
  * @author ginccc
  */
 public class ServerRuntimeModule extends AbstractBaseModule {
+    private static final String AUTHENTICATION_BASIC_AUTH = "basic";
+    private static final String AUTHENTICATION_KEYCLOAK = "keycloak";
+
     public ServerRuntimeModule(InputStream... configFile) {
         super(configFile);
     }
@@ -47,11 +57,15 @@ public class ServerRuntimeModule extends AbstractBaseModule {
                                                @Named("webServer.useCrossSiteScriptingHeaderParam") Boolean useCrossSiteScriptingHeaderParam,
                                                @Named("webServer.idleTime") Long idleTime,
                                                @Named("webServer.outputBufferSize") Integer outputBufferSize,
+                                               @Named("webServer.securityHandlerType") String securityHandlerType,
+            /*@Named("webServer.securityPaths") String securityPaths,*/
+                                               Provider<SecurityHandler> securityHandlerProvider,
                                                GuiceResteasyBootstrapServletContextListener contextListener,
                                                SwaggerServletContextListener swaggerContextListener,
                                                ThreadPoolExecutor threadPoolExecutor,
                                                HttpServletDispatcher httpServletDispatcher,
-                                               LoginService mongoLoginService) throws ClassNotFoundException {
+                                               LoginService mongoLoginService)
+            throws ClassNotFoundException {
 
         ServerRuntime.Options options = new ServerRuntime.Options();
         options.applicationConfiguration = Class.forName(applicationConfigurationClass);
@@ -70,7 +84,67 @@ public class ServerRuntimeModule extends AbstractBaseModule {
         options.idleTime = idleTime;
         options.outputBufferSize = outputBufferSize;
 
+        SecurityHandler securityHandler = null;
+        if (AUTHENTICATION_BASIC_AUTH.equals(securityHandlerType)) {
+            securityHandler = null; // todo add mongo
+        } else if (AUTHENTICATION_KEYCLOAK.equals(securityHandlerType)) {
+            securityHandler = securityHandlerProvider.get();
+        }
+
         return new ServerRuntime(options, contextListener, swaggerContextListener, httpServletDispatcher,
-                null, threadPoolExecutor, environment, resourceDir);
+                securityHandler, threadPoolExecutor, environment, resourceDir);
+    }
+
+    @Provides
+    @Singleton
+    private SecurityHandler provideAuthenticationService(@Named("webserver.keycloak.admin") String admin,
+                                                         @Named("webserver.keycloak.user") String user,
+                                                         @Named("webserver.keycloak.publicAccessPaths") String publicAccessPaths,
+                                                         @Named("webserver.keycloak.realm") String realm,
+                                                         @Named("webserver.keycloak.realmKey") String realmKey,
+                                                         @Named("webserver.keycloak.authServerUrl") String authServerUrl,
+                                                         @Named("webserver.keycloak.sslRequired") String sslRequired,
+                                                         @Named("webserver.keycloak.resource") String resource,
+                                                         @Named("webserver.keycloak.publicClient") Boolean publicClient) {
+        // Standard Login
+        ConstraintSecurityHandler securityHandler = new ConstraintSecurityHandler();
+        securityHandler.addRole(admin);
+        securityHandler.addRole(user);
+
+        Constraint constraint = new Constraint();
+        constraint.setAuthenticate(true);
+        constraint.setRoles(new String[]{admin, user});
+
+        // require auth on all paths
+        ConstraintMapping mapping = new ConstraintMapping();
+        mapping.setConstraint(constraint);
+        mapping.setPathSpec("/*");
+        securityHandler.addConstraintMapping(mapping);
+
+        // expect those paths given in webserver.keycloak.publicAccessPaths , separated by ";"
+        constraint = new Constraint();
+        constraint.setAuthenticate(false);
+
+        for (String path : publicAccessPaths.split(";")) {
+            mapping = new ConstraintMapping();
+            mapping.setConstraint(constraint);
+            mapping.setPathSpec(path);
+            securityHandler.addConstraintMapping(mapping);
+        }
+
+        // Keycloak
+        KeycloakJettyAuthenticator keycloakAuthenticator = new KeycloakJettyAuthenticator();
+        AdapterConfig keycloakAdapterConfig = new AdapterConfig();
+        keycloakAdapterConfig.setRealm(realm);
+        keycloakAdapterConfig.setRealmKey(realmKey);
+        keycloakAdapterConfig.setAuthServerUrl(authServerUrl);
+        keycloakAdapterConfig.setSslRequired(sslRequired);
+        keycloakAdapterConfig.setResource(resource);
+        keycloakAdapterConfig.setPublicClient(publicClient);
+        keycloakAdapterConfig.setCors(true);
+        /*keycloakAdapterConfig.setTokenStore("cookie");*/
+        keycloakAuthenticator.setAdapterConfig(keycloakAdapterConfig);
+        securityHandler.setAuthenticator(keycloakAuthenticator);
+        return securityHandler;
     }
 }
