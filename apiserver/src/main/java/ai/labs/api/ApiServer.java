@@ -49,6 +49,8 @@ public class ApiServer {
     private static final String USER_DIR = System.getProperty("user.dir");
 
     public static void main(String[] args) throws Exception {
+        System.out.println("Starting Server...");
+        long serverStartupBegin = System.currentTimeMillis();
         String eddiEnv = System.getProperty(ENVIRONMENT_KEY);
         if (eddiEnv == null || eddiEnv.isEmpty()) {
             System.err.println("Environment Variable must not be null nor empty! (e.g. -DEDDI_ENV=[development/production])");
@@ -100,6 +102,14 @@ public class ApiServer {
             //auto re-deploy bots
             injector.getInstance(IAutoBotDeployment.class).autoDeployBots();
             injector.getInstance(IXmppEndpoint.class).init();
+
+            logServerStartupTime(serverStartupBegin);
         });
+    }
+
+    private static void logServerStartupTime(long serverStartupBegin) {
+        long startupDuration = System.currentTimeMillis() - serverStartupBegin;
+        String startupTimeMessage = String.format("Server Startup successful. (%dms)", startupDuration);
+        System.out.println(startupTimeMessage);
     }
 }

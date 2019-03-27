@@ -108,9 +108,9 @@ public class ServerRuntime implements IServerRuntime {
                             Collections.singletonList(new FilterMappingHolder(new WroFilter(), "/text/*")),
                             Arrays.asList(new HttpServletHolder(httpServletDispatcher, "/*"),
                                     new HttpServletHolder(new JSAPIServlet(), "/rest-js")),
-                            FileUtilities.buildPath(System.getProperty("user.dir"), resourceDir),
-                            completeListener);
+                            FileUtilities.buildPath(System.getProperty("user.dir"), resourceDir));
                     log.info("Jetty has successfully started.");
+                    completeListener.onComplete();
                 } catch (Exception e) {
                     log.error(e.getLocalizedMessage(), e);
                 }
@@ -122,8 +122,7 @@ public class ServerRuntime implements IServerRuntime {
                               List<EventListener> eventListeners,
                               final List<FilterMappingHolder> filters,
                               final List<HttpServletHolder> servlets,
-                              final String resourcePath,
-                              final IStartupCompleteListener completeListener) throws Exception {
+                              final String resourcePath) throws Exception {
 
         Log.setLog(new Slf4jLog());
 
@@ -207,10 +206,9 @@ public class ServerRuntime implements IServerRuntime {
         server.setHandler(handlers);
 
         // Start the server
+        server.setStopAtShutdown(true);
         server.start();
-        completeListener.onComplete();
-        server.join();
-
+        //server.join();
     }
 
     private Filter createRedirectFilter(final String defaultPath) {
