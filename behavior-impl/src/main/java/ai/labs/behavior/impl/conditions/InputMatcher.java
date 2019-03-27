@@ -1,4 +1,4 @@
-package ai.labs.behavior.impl.extensions;
+package ai.labs.behavior.impl.conditions;
 
 import ai.labs.behavior.impl.BehaviorRule;
 import ai.labs.expressions.Expression;
@@ -15,14 +15,14 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
-import static ai.labs.behavior.impl.extensions.IBehaviorExtension.ExecutionState.FAIL;
-import static ai.labs.behavior.impl.extensions.IBehaviorExtension.ExecutionState.SUCCESS;
+import static ai.labs.behavior.impl.conditions.IBehaviorCondition.ExecutionState.FAIL;
+import static ai.labs.behavior.impl.conditions.IBehaviorCondition.ExecutionState.SUCCESS;
 import static ai.labs.memory.IConversationMemory.IConversationStepStack;
 
 /**
  * @author ginccc
  */
-public class InputMatcher extends BaseMatcher implements IBehaviorExtension {
+public class InputMatcher extends BaseMatcher implements IBehaviorCondition {
     private static final String ID = "inputmatcher";
     private static final String KEY_EXPRESSIONS = "expressions";
 
@@ -112,8 +112,8 @@ public class InputMatcher extends BaseMatcher implements IBehaviorExtension {
     }
 
     @Override
-    public IBehaviorExtension clone() {
-        IBehaviorExtension clone = new InputMatcher(expressionProvider);
+    public IBehaviorCondition clone() {
+        IBehaviorCondition clone = new InputMatcher(expressionProvider);
         clone.setValues(getValues());
         return clone;
     }

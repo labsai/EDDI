@@ -1,4 +1,4 @@
-package ai.labs.behavior.impl.extensions;
+package ai.labs.behavior.impl.conditions;
 
 import ai.labs.behavior.impl.BehaviorRule;
 import ai.labs.memory.IConversationMemory;
@@ -14,13 +14,13 @@ import java.util.Map;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
-import static ai.labs.behavior.impl.extensions.IBehaviorExtension.ExecutionState.FAIL;
-import static ai.labs.behavior.impl.extensions.IBehaviorExtension.ExecutionState.SUCCESS;
+import static ai.labs.behavior.impl.conditions.IBehaviorCondition.ExecutionState.FAIL;
+import static ai.labs.behavior.impl.conditions.IBehaviorCondition.ExecutionState.SUCCESS;
 
 /**
  * @author ginccc
  */
-public class ActionMatcher extends BaseMatcher implements IBehaviorExtension {
+public class ActionMatcher extends BaseMatcher implements IBehaviorCondition {
     private static final String ID = "actionmatcher";
     private static final String KEY_ACTIONS = "actions";
 
@@ -107,8 +107,8 @@ public class ActionMatcher extends BaseMatcher implements IBehaviorExtension {
     }
 
     @Override
-    public IBehaviorExtension clone() {
-        IBehaviorExtension clone = new ActionMatcher();
+    public IBehaviorCondition clone() {
+        IBehaviorCondition clone = new ActionMatcher();
         clone.setValues(getValues());
         return clone;
     }

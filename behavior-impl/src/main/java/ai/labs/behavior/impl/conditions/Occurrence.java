@@ -1,4 +1,4 @@
-package ai.labs.behavior.impl.extensions;
+package ai.labs.behavior.impl.conditions;
 
 import ai.labs.behavior.impl.BehaviorRule;
 import ai.labs.memory.IConversationMemory;
@@ -15,7 +15,7 @@ import java.util.Map;
  * @author ginccc
  */
 @NoArgsConstructor
-public class Occurrence implements IBehaviorExtension {
+public class Occurrence implements IBehaviorCondition {
     private static final String ID = "occurrence";
     private static final String BEHAVIOR_RULES_SUCCESS = "behavior_rules:success";
 
@@ -127,8 +127,8 @@ public class Occurrence implements IBehaviorExtension {
     }
 
     @Override
-    public IBehaviorExtension clone() {
-        IBehaviorExtension occurrence = new Occurrence();
+    public IBehaviorCondition clone() {
+        IBehaviorCondition occurrence = new Occurrence();
         occurrence.setValues(getValues());
 
         return occurrence;

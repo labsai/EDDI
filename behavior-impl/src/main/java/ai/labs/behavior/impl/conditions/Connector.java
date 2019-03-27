@@ -1,19 +1,21 @@
-package ai.labs.behavior.impl.extensions;
+package ai.labs.behavior.impl.conditions;
 
 import ai.labs.behavior.impl.BehaviorRule;
 import ai.labs.memory.IConversationMemory;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
-import lombok.Setter;
 
-import java.util.*;
+import java.util.HashMap;
+import java.util.LinkedList;
+import java.util.List;
+import java.util.Map;
 
 
 /**
  * @author ginccc
  */
 @NoArgsConstructor
-public class Connector implements IBehaviorExtension {
+public class Connector implements IBehaviorCondition {
     private static final String ID = "connector";
     private final String operatorQualifier = "operator";
 
@@ -24,8 +26,7 @@ public class Connector implements IBehaviorExtension {
     private Operator operator;
 
     @Getter
-    @Setter
-    private List<IBehaviorExtension> extensions = new LinkedList<>();
+    private List<IBehaviorCondition> conditions = new LinkedList<>();
 
     private ExecutionState state = ExecutionState.NOT_EXECUTED;
 
@@ -59,23 +60,17 @@ public class Connector implements IBehaviorExtension {
         }
     }
 
-
-    @Override
-    public IBehaviorExtension[] getChildren() {
-        return extensions.toArray(new IBehaviorExtension[extensions.size()]);
-    }
-
     public ExecutionState execute(IConversationMemory memory, List<BehaviorRule> trace)
-            throws BehaviorRule.InfiniteLoopException {
+            throws BehaviorRule.InfiniteLoopException, BehaviorRule.RuntimeException {
         if (operator == Operator.OR) {
             state = ExecutionState.FAIL;
 
-            for (IBehaviorExtension extension : extensions) {
-                extension.execute(memory, trace);
-                if (extension.getExecutionState() == ExecutionState.SUCCESS) {
+            for (IBehaviorCondition condition : conditions) {
+                condition.execute(memory, trace);
+                if (condition.getExecutionState() == ExecutionState.SUCCESS) {
                     state = ExecutionState.SUCCESS;
                     break;
-                } else if (extension.getExecutionState() == ExecutionState.ERROR) {
+                } else if (condition.getExecutionState() == ExecutionState.ERROR) {
                     state = ExecutionState.ERROR;
                     break;
                 }
@@ -84,12 +79,12 @@ public class Connector implements IBehaviorExtension {
         {
             state = ExecutionState.SUCCESS;
 
-            for (IBehaviorExtension extension : extensions) {
-                extension.execute(memory, trace);
-                if (extension.getExecutionState() == ExecutionState.FAIL) {
+            for (IBehaviorCondition condition : conditions) {
+                condition.execute(memory, trace);
+                if (condition.getExecutionState() == ExecutionState.FAIL) {
                     state = ExecutionState.FAIL;
                     break;
-                } else if (extension.getExecutionState() == ExecutionState.ERROR) {
+                } else if (condition.getExecutionState() == ExecutionState.ERROR) {
                     state = ExecutionState.ERROR;
                     break;
                 }
@@ -100,7 +95,7 @@ public class Connector implements IBehaviorExtension {
     }
 
     public boolean isEmpty() {
-        return extensions.isEmpty();
+        return conditions.isEmpty();
     }
 
     @Override
@@ -109,22 +104,22 @@ public class Connector implements IBehaviorExtension {
     }
 
     @Override
-    public IBehaviorExtension clone() throws CloneNotSupportedException {
+    public IBehaviorCondition clone() throws CloneNotSupportedException {
         Connector clone = new Connector(operator);
 
-        List<IBehaviorExtension> extensionClone = new LinkedList<>();
-        for (IBehaviorExtension extension : extensions) {
-            extensionClone.add(extension.clone());
+        List<IBehaviorCondition> conditionClone = new LinkedList<>();
+        for (IBehaviorCondition condition : conditions) {
+            conditionClone.add(condition.clone());
         }
 
-        clone.setExtensions(extensionClone);
+        clone.setConditions(conditionClone);
         clone.setValues(getValues());
 
         return clone;
     }
 
     @Override
-    public void setChildren(IBehaviorExtension... extensions) {
-        this.extensions.addAll(Arrays.asList(extensions));
+    public void setConditions(List<IBehaviorCondition> conditions) {
+        this.conditions.addAll(conditions);
     }
 }

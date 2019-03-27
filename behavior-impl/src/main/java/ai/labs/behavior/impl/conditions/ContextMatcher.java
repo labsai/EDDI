@@ -1,4 +1,4 @@
-package ai.labs.behavior.impl.extensions;
+package ai.labs.behavior.impl.conditions;
 
 import ai.labs.behavior.impl.BehaviorRule;
 import ai.labs.expressions.Expression;
@@ -27,7 +27,7 @@ import java.util.Map;
  * @author ginccc
  */
 @Slf4j
-public class ContextMatcher implements IBehaviorExtension {
+public class ContextMatcher implements IBehaviorCondition {
     private static final String ID = "contextmatcher";
     private static final String CONTEXT = "context";
 
@@ -163,8 +163,8 @@ public class ContextMatcher implements IBehaviorExtension {
     }
 
     @Override
-    public IBehaviorExtension clone() {
-        IBehaviorExtension clone = new ContextMatcher(expressionProvider, jsonSerialization);
+    public IBehaviorCondition clone() {
+        IBehaviorCondition clone = new ContextMatcher(expressionProvider, jsonSerialization);
         clone.setValues(getValues());
         return clone;
     }

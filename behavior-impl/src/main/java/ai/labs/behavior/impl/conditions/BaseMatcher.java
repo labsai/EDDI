@@ -1,4 +1,4 @@
-package ai.labs.behavior.impl.extensions;
+package ai.labs.behavior.impl.conditions;
 
 import ai.labs.memory.IConversationMemory;
 import ai.labs.memory.IData;
@@ -11,15 +11,15 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
-import static ai.labs.behavior.impl.extensions.BaseMatcher.ConversationStepOccurrence.*;
-import static ai.labs.behavior.impl.extensions.IBehaviorExtension.ExecutionState.NOT_EXECUTED;
-import static ai.labs.behavior.impl.extensions.IBehaviorExtension.ExecutionState.SUCCESS;
+import static ai.labs.behavior.impl.conditions.BaseMatcher.ConversationStepOccurrence.*;
+import static ai.labs.behavior.impl.conditions.IBehaviorCondition.ExecutionState.NOT_EXECUTED;
+import static ai.labs.behavior.impl.conditions.IBehaviorCondition.ExecutionState.SUCCESS;
 
 /**
  * @author ginccc
  */
 @Slf4j
-public abstract class BaseMatcher implements IBehaviorExtension {
+public abstract class BaseMatcher implements IBehaviorCondition {
     private static final String KEY_OCCURRENCE = "occurrence";
     static final String KEY_EMPTY = "empty";
 
@@ -43,7 +43,7 @@ public abstract class BaseMatcher implements IBehaviorExtension {
     }
 
     @Override
-    public IBehaviorExtension clone() throws CloneNotSupportedException {
+    public IBehaviorCondition clone() throws CloneNotSupportedException {
         throw new CloneNotSupportedException("Should be Overridden by Subclass!");
     }
 

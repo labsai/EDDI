@@ -1,7 +1,7 @@
-package ai.labs.behavior.impl.extensions;
+package ai.labs.behavior.impl.conditions;
 
-import ai.labs.behavior.impl.extensions.BaseMatcher.ConversationStepOccurrence;
-import ai.labs.behavior.impl.extensions.IBehaviorExtension.ExecutionState;
+import ai.labs.behavior.impl.conditions.BaseMatcher.ConversationStepOccurrence;
+import ai.labs.behavior.impl.conditions.IBehaviorCondition.ExecutionState;
 import ai.labs.expressions.Expression;
 import ai.labs.expressions.utilities.IExpressionProvider;
 import ai.labs.expressions.value.Value;

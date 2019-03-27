@@ -1,4 +1,4 @@
-package ai.labs.behavior.impl.extensions;
+package ai.labs.behavior.impl.conditions;
 
 import ai.labs.memory.IConversationMemory;
 import ai.labs.memory.IMemoryItemConverter;
@@ -12,7 +12,7 @@ import java.util.LinkedHashMap;
 import java.util.LinkedList;
 import java.util.Map;
 
-import static ai.labs.behavior.impl.extensions.IBehaviorExtension.ExecutionState;
+import static ai.labs.behavior.impl.conditions.IBehaviorCondition.ExecutionState;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;

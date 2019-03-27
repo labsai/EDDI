@@ -1,8 +1,8 @@
 package ai.labs.behavior.impl;
 
-import ai.labs.behavior.impl.extensions.IBehaviorExtension;
+import ai.labs.behavior.impl.conditions.IBehaviorCondition;
 import ai.labs.resources.rest.behavior.model.BehaviorConfiguration;
-import ai.labs.resources.rest.behavior.model.BehaviorRuleElementConfiguration;
+import ai.labs.resources.rest.behavior.model.BehaviorRuleConditionConfiguration;
 import ai.labs.serialization.DeserializationException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.extern.slf4j.Slf4j;
@@ -10,9 +10,13 @@ import lombok.extern.slf4j.Slf4j;
 import javax.inject.Inject;
 import javax.inject.Provider;
 import java.io.IOException;
+import java.util.LinkedList;
 import java.util.List;
 import java.util.Map;
 import java.util.stream.Collectors;
+
+import static ai.labs.utilities.RuntimeUtilities.checkNotNull;
+import static ai.labs.utilities.RuntimeUtilities.isNullOrEmpty;
 
 /**
  * @author ginccc
@@ -20,13 +24,13 @@ import java.util.stream.Collectors;
 @Slf4j
 public class BehaviorDeserialization implements IBehaviorDeserialization {
     private final ObjectMapper objectMapper;
-    private final Map<String, Provider<IBehaviorExtension>> extensionProvider;
+    private final Map<String, Provider<IBehaviorCondition>> conditionProvider;
 
     @Inject
     public BehaviorDeserialization(ObjectMapper objectMapper,
-                                   Map<String, Provider<IBehaviorExtension>> extensionProvider) {
+                                   Map<String, Provider<IBehaviorCondition>> conditionProvider) {
         this.objectMapper = objectMapper;
-        this.extensionProvider = extensionProvider;
+        this.conditionProvider = conditionProvider;
     }
 
     @Override
@@ -44,7 +48,7 @@ public class BehaviorDeserialization implements IBehaviorDeserialization {
                                 behaviorRuleJson -> {
                                     BehaviorRule behaviorRule = new BehaviorRule(behaviorRuleJson.getName());
                                     behaviorRule.setActions(behaviorRuleJson.getActions());
-                                    behaviorRule.setExtensions(convert(behaviorRuleJson.getChildren(), behaviorSet));
+                                    behaviorRule.setConditions(convert(behaviorRuleJson.getConditions(), behaviorSet));
                                     return behaviorRule;
                                 }
                         ).collect(Collectors.toList()));
@@ -59,18 +63,32 @@ public class BehaviorDeserialization implements IBehaviorDeserialization {
         }
     }
 
-    private List<IBehaviorExtension> convert(List<BehaviorRuleElementConfiguration> children, BehaviorSet behaviorSet) {
-        return children.stream().map(
-                child -> {
+    private List<IBehaviorCondition> convert(List<BehaviorRuleConditionConfiguration> conditionConfigs,
+                                             BehaviorSet behaviorSet) {
+        return conditionConfigs.stream().map(
+                conditionConfiguration -> {
                     try {
-                        String key = IBehaviorExtension.EXTENSION_PREFIX + child.getType();
-                        IBehaviorExtension extension = extensionProvider.get(key).get();
-                        extension.setValues(child.getValues());
-                        List<IBehaviorExtension> convert = convert(child.getChildren(), behaviorSet);
-                        IBehaviorExtension[] executablesClone = deepCopy(child, convert);
-                        extension.setChildren(executablesClone);
-                        extension.setContainingBehaviorRuleSet(behaviorSet);
-                        return extension;
+                        String type = conditionConfiguration.getType();
+                        checkNotNull(type, "behaviorRule.condition.type");
+
+                        String key = IBehaviorCondition.CONDITION_PREFIX + type;
+                        if (!conditionProvider.containsKey(key)) {
+                            String errorMessage = String.format("behaviorRule.condition.type=%s does not exist", key);
+                            throw new IllegalArgumentException(errorMessage);
+                        }
+                        IBehaviorCondition condition = conditionProvider.get(key).get();
+                        var values = conditionConfiguration.getValues();
+                        if (!isNullOrEmpty(values)) {
+                            condition.setValues(values);
+                        }
+                        var conditions = conditionConfiguration.getConditions();
+                        if (!isNullOrEmpty(conditions)) {
+                            var convert = convert(conditions, behaviorSet);
+                            List<IBehaviorCondition> conditionsClone = deepCopy(convert);
+                            condition.setConditions(conditionsClone);
+                        }
+                        condition.setContainingBehaviorRuleSet(behaviorSet);
+                        return condition;
                     } catch (CloneNotSupportedException e) {
                         log.error(e.getLocalizedMessage(), e);
                         return null;
@@ -79,16 +97,15 @@ public class BehaviorDeserialization implements IBehaviorDeserialization {
         ).collect(Collectors.toList());
     }
 
-    private IBehaviorExtension[] deepCopy(BehaviorRuleElementConfiguration child,
-                                          List<IBehaviorExtension> behaviorExtensionList)
+    private List<IBehaviorCondition> deepCopy(List<IBehaviorCondition> behaviorConditionList)
             throws CloneNotSupportedException {
-        IBehaviorExtension[] behaviorExtensions = behaviorExtensionList.
-                toArray(new IBehaviorExtension[child.getChildren().size()]);
-        IBehaviorExtension[] executablesClone = new IBehaviorExtension[behaviorExtensions.length];
+        List<IBehaviorCondition> executablesClone = new LinkedList<>();
+
         //deep copy
-        for (int i = 0, executablesLength = behaviorExtensions.length; i < executablesLength; i++) {
-            executablesClone[i] = behaviorExtensions[i].clone();
+        for (IBehaviorCondition behaviorCondition : behaviorConditionList) {
+            executablesClone.add(behaviorCondition.clone());
         }
+
         return executablesClone;
     }
 }

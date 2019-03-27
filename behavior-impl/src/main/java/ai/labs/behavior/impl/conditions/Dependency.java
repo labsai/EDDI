@@ -1,4 +1,4 @@
-package ai.labs.behavior.impl.extensions;
+package ai.labs.behavior.impl.conditions;
 
 import ai.labs.behavior.impl.BehaviorGroup;
 import ai.labs.behavior.impl.BehaviorRule;
@@ -17,7 +17,7 @@ import java.util.Map;
  */
 @Slf4j
 @NoArgsConstructor
-public class Dependency implements IBehaviorExtension {
+public class Dependency implements IBehaviorCondition {
     private static final String ID = "dependency";
 
     private String reference;
@@ -53,7 +53,7 @@ public class Dependency implements IBehaviorExtension {
 
     @Override
     public ExecutionState execute(IConversationMemory memory, List<BehaviorRule> trace)
-            throws BehaviorRule.InfiniteLoopException {
+            throws BehaviorRule.InfiniteLoopException, BehaviorRule.RuntimeException {
 
         //before we execute the behavior rules we make deep copies, so that we don't change the rules in conversation memory!
         List<BehaviorRule> filteredBehaviorRules = new LinkedList<>();
@@ -94,7 +94,7 @@ public class Dependency implements IBehaviorExtension {
     }
 
     @Override
-    public IBehaviorExtension clone() {
+    public IBehaviorCondition clone() {
         Dependency clone = new Dependency(reference);
         clone.setValues(getValues());
         clone.setContainingBehaviorRuleSet(behaviorSet);

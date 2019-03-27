@@ -3,7 +3,7 @@ package ai.labs.behavior.bootstrap;
 import ai.labs.behavior.impl.BehaviorDeserialization;
 import ai.labs.behavior.impl.BehaviorRulesEvaluationTask;
 import ai.labs.behavior.impl.IBehaviorDeserialization;
-import ai.labs.behavior.impl.extensions.*;
+import ai.labs.behavior.impl.conditions.*;
 import ai.labs.lifecycle.ILifecycleTask;
 import ai.labs.runtime.bootstrap.AbstractBaseModule;
 import com.google.inject.Scopes;
@@ -20,25 +20,25 @@ public class BehaviorModule extends AbstractBaseModule {
                 = MapBinder.newMapBinder(binder(), String.class, ILifecycleTask.class);
         lifecycleTaskPlugins.addBinding("ai.labs.behavior").to(BehaviorRulesEvaluationTask.class);
 
-        MapBinder<String, IBehaviorExtension> behaviorExtensionPlugins
-                = MapBinder.newMapBinder(binder(), String.class, IBehaviorExtension.class);
-        behaviorExtensionPlugins.addBinding("ai.labs.behavior.extension.inputmatcher").
+        MapBinder<String, IBehaviorCondition> behaviorConditionPlugins
+                = MapBinder.newMapBinder(binder(), String.class, IBehaviorCondition.class);
+        behaviorConditionPlugins.addBinding("ai.labs.behavior.conditions.inputmatcher").
                 to(InputMatcher.class);
-        behaviorExtensionPlugins.addBinding("ai.labs.behavior.extension.actionmatcher").
+        behaviorConditionPlugins.addBinding("ai.labs.behavior.conditions.actionmatcher").
                 to(ActionMatcher.class);
-        behaviorExtensionPlugins.addBinding("ai.labs.behavior.extension.contextmatcher").
+        behaviorConditionPlugins.addBinding("ai.labs.behavior.conditions.contextmatcher").
                 to(ContextMatcher.class);
-        behaviorExtensionPlugins.addBinding("ai.labs.behavior.extension.dynamicvaluematcher").
+        behaviorConditionPlugins.addBinding("ai.labs.behavior.conditions.dynamicvaluematcher").
                 to(DynamicValueMatcher.class);
-        behaviorExtensionPlugins.addBinding("ai.labs.behavior.extension.connector").
+        behaviorConditionPlugins.addBinding("ai.labs.behavior.conditions.connector").
                 to(Connector.class);
-        behaviorExtensionPlugins.addBinding("ai.labs.behavior.extension.dependency").
+        behaviorConditionPlugins.addBinding("ai.labs.behavior.conditions.dependency").
                 to(Dependency.class);
-        behaviorExtensionPlugins.addBinding("ai.labs.behavior.extension.negation").
+        behaviorConditionPlugins.addBinding("ai.labs.behavior.conditions.negation").
                 to(Negation.class);
-        behaviorExtensionPlugins.addBinding("ai.labs.behavior.extension.occurrence").
+        behaviorConditionPlugins.addBinding("ai.labs.behavior.conditions.occurrence").
                 to(Occurrence.class);
-        behaviorExtensionPlugins.addBinding("ai.labs.behavior.extension.resultsize").
-                to(ResultSize.class);
+        behaviorConditionPlugins.addBinding("ai.labs.behavior.conditions.sizematcher").
+                to(SizeMatcher.class);
     }
 }

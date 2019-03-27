@@ -1,4 +1,4 @@
-package ai.labs.behavior.impl.extensions;
+package ai.labs.behavior.impl.conditions;
 
 import ai.labs.behavior.impl.BehaviorRule;
 import ai.labs.memory.IConversationMemory;
@@ -15,7 +15,7 @@ import java.util.Map;
 import static ai.labs.utilities.RuntimeUtilities.isNullOrEmpty;
 
 @Slf4j
-public class DynamicValueMatcher implements IBehaviorExtension {
+public class DynamicValueMatcher implements IBehaviorCondition {
     private static final String ID = "dynamicvaluematcher";
     private final IMemoryItemConverter memoryItemConverter;
 
@@ -98,7 +98,7 @@ public class DynamicValueMatcher implements IBehaviorExtension {
     }
 
     @Override
-    public IBehaviorExtension clone() {
+    public IBehaviorCondition clone() {
         DynamicValueMatcher clone = new DynamicValueMatcher(memoryItemConverter);
         clone.setValues(getValues());
         return clone;

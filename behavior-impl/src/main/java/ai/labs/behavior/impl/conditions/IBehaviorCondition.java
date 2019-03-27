@@ -1,4 +1,4 @@
-package ai.labs.behavior.impl.extensions;
+package ai.labs.behavior.impl.conditions;
 
 import ai.labs.behavior.impl.BehaviorRule;
 import ai.labs.behavior.impl.BehaviorSet;
@@ -11,8 +11,8 @@ import java.util.Map;
 /**
  * @author ginccc
  */
-public interface IBehaviorExtension extends Cloneable {
-    String EXTENSION_PREFIX = "ai.labs.behavior.extension.";
+public interface IBehaviorCondition extends Cloneable {
+    String CONDITION_PREFIX = "ai.labs.behavior.conditions.";
 
     String getId();
 
@@ -24,11 +24,11 @@ public interface IBehaviorExtension extends Cloneable {
         // not implemented
     }
 
-    default IBehaviorExtension[] getChildren() {
-        return new IBehaviorExtension[0];
+    default List<IBehaviorCondition> getConditions() {
+        return Collections.emptyList();
     }
 
-    default void setChildren(IBehaviorExtension... extensions) {
+    default void setConditions(List<IBehaviorCondition> conditions) {
         // not implemented
     }
 
@@ -43,9 +43,10 @@ public interface IBehaviorExtension extends Cloneable {
         ERROR
     }
 
-    ExecutionState execute(IConversationMemory memory, List<BehaviorRule> trace) throws BehaviorRule.InfiniteLoopException;
+    ExecutionState execute(IConversationMemory memory, List<BehaviorRule> trace)
+            throws BehaviorRule.InfiniteLoopException, BehaviorRule.RuntimeException;
 
     ExecutionState getExecutionState();
 
-    IBehaviorExtension clone() throws CloneNotSupportedException;
+    IBehaviorCondition clone() throws CloneNotSupportedException;
 }

@@ -1,20 +1,21 @@
-package ai.labs.behavior.impl.extensions;
+package ai.labs.behavior.impl.conditions;
 
 import ai.labs.behavior.impl.BehaviorRule;
 import ai.labs.memory.IConversationMemory;
 import lombok.NoArgsConstructor;
 import lombok.Setter;
 
+import java.util.Collections;
 import java.util.List;
 
 /**
  * @author ginccc
  */
 @NoArgsConstructor
-public class Negation implements IBehaviorExtension {
+public class Negation implements IBehaviorCondition {
     private static final String ID = "negation";
     @Setter
-    private IBehaviorExtension extension;
+    private IBehaviorCondition condition;
     private ExecutionState state = ExecutionState.NOT_EXECUTED;
 
     @Override
@@ -23,15 +24,15 @@ public class Negation implements IBehaviorExtension {
     }
 
     @Override
-    public IBehaviorExtension[] getChildren() {
-        return new IBehaviorExtension[]{extension};
+    public List<IBehaviorCondition> getConditions() {
+        return Collections.singletonList(condition);
     }
 
     @Override
     public ExecutionState execute(IConversationMemory memory, List<BehaviorRule> trace)
-            throws BehaviorRule.InfiniteLoopException {
-        if (extension != null) {
-            ExecutionState stateOfExecutable = extension.execute(memory, trace);
+            throws BehaviorRule.InfiniteLoopException, BehaviorRule.RuntimeException {
+        if (condition != null) {
+            ExecutionState stateOfExecutable = condition.execute(memory, trace);
 
             if (stateOfExecutable == ExecutionState.SUCCESS)
                 state = ExecutionState.FAIL;
@@ -49,16 +50,16 @@ public class Negation implements IBehaviorExtension {
     }
 
     @Override
-    public IBehaviorExtension clone() throws CloneNotSupportedException {
+    public IBehaviorCondition clone() throws CloneNotSupportedException {
         Negation negation = new Negation();
-        negation.setExtension(extension.clone());
+        negation.setCondition(condition.clone());
         return negation;
     }
 
     @Override
-    public void setChildren(IBehaviorExtension... extensions) {
-        if (extensions.length == 1) {
-            this.extension = extensions[0];
+    public void setConditions(List<IBehaviorCondition> conditions) {
+        if (conditions.size() == 1) {
+            this.condition = conditions.get(0);
         }
     }
 }
