@@ -148,11 +148,8 @@ public class InputParser implements IInputParser {
         List<RawSolution> possibleSolutions = new LinkedList<>();
         Iterator<Suggestion> suggestionIterator = holder.createSolutionIterator();
 
-        int maxIterations = 2;
-        int currentIteration = 0;
         while (suggestionIterator.hasNext()) {
             throwExceptionIfInterrupted("phrases");
-            currentIteration++;
             Suggestion suggestion = suggestionIterator.next();
             List<IDictionary.IFoundWord> foundWords = suggestion.build();
             List<IDictionary.IPhrase> phrasesContainingFoundWords =
@@ -173,7 +170,7 @@ public class InputParser implements IInputParser {
                         rawSolution = new RawSolution(RawSolution.Match.FULLY);
                     }
 
-                    if (!anyWordsLeft(foundWords)) {
+                    if (noWordsLeft(foundWords)) {
                         matchingCompleted = true;
                         break;
                     }
@@ -201,7 +198,7 @@ public class InputParser implements IInputParser {
                         }
                     }
 
-                    if (!anyWordsLeft(foundWords)) {
+                    if (noWordsLeft(foundWords)) {
                         matchingCompleted = true;
                         break;
                     }
@@ -246,10 +243,6 @@ public class InputParser implements IInputParser {
                     }
                 }
             }
-
-            if (currentIteration > maxIterations) {
-                break;
-            }
         }
 
         return possibleSolutions;
@@ -273,8 +266,8 @@ public class InputParser implements IInputParser {
         return Thread.currentThread().isInterrupted();
     }
 
-    private boolean anyWordsLeft(List<IDictionary.IFoundWord> foundWords) {
-        return foundWords.stream().anyMatch(foundWord -> foundWord.getFoundWord().isPartOfPhrase());
+    private boolean noWordsLeft(List<IDictionary.IFoundWord> foundWords) {
+        return foundWords.stream().noneMatch(foundWord -> foundWord.getFoundWord().isPartOfPhrase());
     }
 
     /**
