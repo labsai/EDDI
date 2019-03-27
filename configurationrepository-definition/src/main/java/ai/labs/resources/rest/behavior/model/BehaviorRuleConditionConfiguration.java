@@ -1,6 +1,7 @@
 package ai.labs.resources.rest.behavior.model;
 
 
+import com.fasterxml.jackson.annotation.JsonAlias;
 import com.fasterxml.jackson.annotation.JsonInclude;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
@@ -19,5 +20,6 @@ import java.util.Map;
 public class BehaviorRuleConditionConfiguration {
     private String type;
     private Map<String, String> values;
+    @JsonAlias("children")
     private List<BehaviorRuleConditionConfiguration> conditions;
 }
