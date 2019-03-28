@@ -33,7 +33,7 @@ public class ConversationCoordinator implements IConversationCoordinator {
         if (queue.isEmpty()) {
             queue.offer(callable);
             runtime.submitCallable(callable,
-                    new IRuntime.IFinishedExecution<Void>() {
+                    new IRuntime.IFinishedExecution<>() {
                         @Override
                         public void onComplete(Void result) {
                             submitNext();
