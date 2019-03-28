@@ -2,6 +2,7 @@ package ai.labs.runtime.bootstrap;
 
 import ai.labs.runtime.DatabaseLogs;
 import ai.labs.runtime.IDatabaseLogs;
+import ai.labs.utilities.RuntimeUtilities;
 import com.bugsnag.Bugsnag;
 import com.google.inject.Provides;
 import com.google.inject.Scopes;
@@ -18,6 +19,10 @@ public class LoggingModule extends AbstractBaseModule {
     @Provides
     @Singleton
     private Bugsnag provideBugsnag(@Named("bugsnagApiKey") String bugsnagApiKey) {
-        return new Bugsnag(bugsnagApiKey);
+        if (!RuntimeUtilities.isNullOrEmpty(bugsnagApiKey)) {
+            return new Bugsnag(bugsnagApiKey);
+        }
+
+        return null;
     }
 }
