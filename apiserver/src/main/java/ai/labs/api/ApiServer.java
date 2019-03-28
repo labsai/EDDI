@@ -21,6 +21,7 @@ import ai.labs.rest.bootstrap.RestInterfaceModule;
 import ai.labs.restapi.connector.bootstrap.HttpCallsModule;
 import ai.labs.runtime.DependencyInjector;
 import ai.labs.runtime.IAutoBotDeployment;
+import ai.labs.runtime.bootstrap.LoggingModule;
 import ai.labs.runtime.bootstrap.RuntimeModule;
 import ai.labs.runtime.bootstrap.SwaggerModule;
 import ai.labs.serialization.bootstrap.SerializationModule;
@@ -32,6 +33,7 @@ import ai.labs.testing.bootstrap.AutomatedtestingModule;
 import ai.labs.utilities.FileUtilities;
 import ai.labs.xmpp.bootstrap.XmppModule;
 import ai.labs.xmpp.endpoint.IXmppEndpoint;
+import com.bugsnag.Bugsnag;
 import com.google.inject.Module;
 import org.jboss.resteasy.plugins.guice.ext.RequestScopeModule;
 
@@ -65,6 +67,7 @@ public class ApiServer {
                 new RuntimeModule(
                         new FileInputStream(configDir + "threads.properties"),
                         new FileInputStream(configDir + "systemRuntime.properties")),
+                new LoggingModule(),
                 new RequestScopeModule(),
                 new RestInterfaceModule(),
                 new SerializationModule(),
@@ -99,6 +102,8 @@ public class ApiServer {
 
         //init modules
         final DependencyInjector injector = DependencyInjector.init(environment, modules);
+
+        injector.getInstance(Bugsnag.class);
 
         //init webserver
         injector.getInstance(IServerRuntime.class).startup(() -> {

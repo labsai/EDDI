@@ -27,7 +27,6 @@ import ai.labs.utilities.RuntimeUtilities;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.lang3.RandomStringUtils;
 import org.jboss.resteasy.spi.NoLogWebApplicationException;
-import org.slf4j.MDC;
 
 import javax.inject.Inject;
 import javax.inject.Named;
@@ -52,11 +51,13 @@ import static ai.labs.persistence.IResourceStore.ResourceStoreException;
 public class RestBotEngine implements IRestBotEngine {
     private static final String resourceURI = "eddi://ai.labs.conversation/conversationstore/conversations/";
     private static final String CACHE_NAME_CONVERSATION_STATE = "conversationState";
+    private static final String USER_ID = "userId";
     private final IBotFactory botFactory;
     private final IConversationMemoryStore conversationMemoryStore;
     private final IPropertiesStore propertiesStore;
     private final IConversationCoordinator conversationCoordinator;
     private final SystemRuntime.IRuntime runtime;
+    private final IContextLogger contextLogger;
     private final int botTimeout;
     private final ICache<String, ConversationState> conversationStateCache;
 
@@ -67,6 +68,7 @@ public class RestBotEngine implements IRestBotEngine {
                          IConversationCoordinator conversationCoordinator,
                          ICacheFactory cacheFactory,
                          SystemRuntime.IRuntime runtime,
+                         IContextLogger contextLogger,
                          @Named("system.botTimeoutInSeconds") int botTimeout) {
         this.botFactory = botFactory;
         this.conversationMemoryStore = conversationMemoryStore;
@@ -74,6 +76,7 @@ public class RestBotEngine implements IRestBotEngine {
         this.conversationCoordinator = conversationCoordinator;
         this.conversationStateCache = cacheFactory.getCache(CACHE_NAME_CONVERSATION_STATE);
         this.runtime = runtime;
+        this.contextLogger = contextLogger;
         this.botTimeout = botTimeout;
     }
 
@@ -116,6 +119,7 @@ public class RestBotEngine implements IRestBotEngine {
                 InstantiationException |
                 LifecycleException |
                 IllegalAccessException e) {
+            contextLogger.setLoggingContext(contextLogger.createLoggingContext(environment, botId, null, userId));
             log.error(e.getLocalizedMessage(), e);
             throw new InternalServerErrorException(e.getLocalizedMessage(), e);
         }
@@ -165,9 +169,8 @@ public class RestBotEngine implements IRestBotEngine {
                                                              Boolean returnCurrentStepOnly,
                                                              List<String> returningFields) {
 
-        RuntimeUtilities.checkNotNull(environment, "environment");
-        RuntimeUtilities.checkNotNull(botId, "botId");
-        RuntimeUtilities.checkNotNull(conversationId, "conversationId");
+        validateParams(environment, botId, conversationId);
+        contextLogger.setLoggingContext(contextLogger.createLoggingContext(environment, botId, conversationId, null));
         try {
             var conversationMemorySnapshot = conversationMemoryStore.loadConversationMemorySnapshot(conversationId);
             if (!botId.equals(conversationMemorySnapshot.getBotId())) {
@@ -181,7 +184,6 @@ public class RestBotEngine implements IRestBotEngine {
                     returnCurrentStepOnly,
                     returningFields);
         } catch (ResourceStoreException | IllegalAccessException e) {
-            createLoggingContext(environment, botId, conversationId);
             log.error(e.getLocalizedMessage(), e);
             throw new InternalServerErrorException(e.getLocalizedMessage(), e);
         } catch (ResourceNotFoundException e) {
@@ -226,20 +228,19 @@ public class RestBotEngine implements IRestBotEngine {
                                  final List<String> returningFields, final InputData inputData,
                                  final AsyncResponse response) {
 
-        RuntimeUtilities.checkNotNull(environment, "environment");
-        RuntimeUtilities.checkNotNull(botId, "botId");
-        RuntimeUtilities.checkNotNull(conversationId, "conversationId");
+        validateParams(environment, botId, conversationId);
         RuntimeUtilities.checkNotNull(inputData, "inputData");
         RuntimeUtilities.checkNotNull(inputData.getInput(), "inputData.input");
 
         response.setTimeout(botTimeout, TimeUnit.SECONDS);
         response.setTimeoutHandler((asyncResp) ->
                 asyncResp.resume(Response.status(Response.Status.REQUEST_TIMEOUT).build()));
-        final var loggingContext = createLoggingContext(environment, botId, conversationId);
         try {
             final IConversationMemory conversationMemory = loadConversationMemory(conversationId);
             checkConversationMemoryNotNull(conversationMemory, conversationId);
+            var loggingContext = contextLogger.createLoggingContext(environment, botId, conversationId, conversationMemory.getUserId());
             loggingContext.put("botVersion", conversationMemory.getBotVersion().toString());
+            contextLogger.setLoggingContext(loggingContext);
             if (!botId.equals(conversationMemory.getBotId())) {
                 String message = "Supplied botId (%s) is incompatible with conversationId (%s)";
                 message = String.format(message, botId, conversationId);
@@ -287,13 +288,11 @@ public class RestBotEngine implements IRestBotEngine {
             conversationCoordinator.submitInOrder(conversationId, processUserInput);
         } catch (InstantiationException | IllegalAccessException e) {
             String errorMsg = "Error while processing message!";
-            setLoggingContext(loggingContext);
             log.error(errorMsg, e);
             throw new InternalServerErrorException(errorMsg, e);
         } catch (ResourceNotFoundException e) {
             throw new NoLogWebApplicationException(Response.Status.NOT_FOUND);
         } catch (Exception e) {
-            setLoggingContext(loggingContext);
             log.error(e.getLocalizedMessage(), e);
             throw new InternalServerErrorException(e.getLocalizedMessage(), e);
         }
@@ -310,7 +309,7 @@ public class RestBotEngine implements IRestBotEngine {
                         try {
                             conversation.say(message, convertContext(inputDataContext));
                         } catch (LifecycleException | IConversation.ConversationNotReadyException e) {
-                            setLoggingContext(loggingContext);
+                            contextLogger.setLoggingContext(loggingContext);
                             log.error(e.getLocalizedMessage(), e);
                         }
                         return null;
@@ -330,10 +329,12 @@ public class RestBotEngine implements IRestBotEngine {
                             if (t instanceof LifecycleException.LifecycleInterruptedException) {
                                 String errorMessage = "Conversation processing got interrupted! (conversationId=%s)";
                                 errorMessage = String.format(errorMessage, conversationId);
+                                contextLogger.setLoggingContext(loggingContext);
                                 log.warn(errorMessage, t);
                             } else if (t instanceof IConversation.ConversationNotReadyException) {
                                 String msg = "Conversation not ready! (conversationId=%s)";
                                 msg = String.format(msg, conversationId);
+                                contextLogger.setLoggingContext(loggingContext);
                                 log.error(msg + "\n" + t.getLocalizedMessage(), t);
                             } else {
                                 logConversationError(loggingContext, conversationId, t);
@@ -352,6 +353,7 @@ public class RestBotEngine implements IRestBotEngine {
         } catch (TimeoutException | InterruptedException e) {
             setConversationState(conversationId, ConversationState.EXECUTION_INTERRUPTED);
             String errorMessage = "Execution of Packages interrupted or timed out.";
+            contextLogger.setLoggingContext(loggingContext);
             log.error(errorMessage, e);
             future.cancel(true);
         } catch (ExecutionException e) {
@@ -364,26 +366,8 @@ public class RestBotEngine implements IRestBotEngine {
         setConversationState(conversationId, ConversationState.ERROR);
         String msg = "Error while processing user input (conversationId=%s , conversationState=%s)";
         msg = String.format(msg, conversationId, ConversationState.ERROR);
-        setLoggingContext(loggingContext);
+        contextLogger.setLoggingContext(loggingContext);
         log.error(msg, t);
-    }
-
-    private static Map<String, String> createLoggingContext(Environment environment,
-                                                            String botId,
-                                                            String conversationId) {
-
-
-        Map<String, String> context = new HashMap<>();
-
-        context.put("environment", environment.toString());
-        context.put("botId", botId);
-        context.put("conversationId", conversationId);
-
-        return context;
-    }
-
-    private void setLoggingContext(Map<String, String> loggingContext) {
-        MDC.setContextMap(loggingContext);
     }
 
     private Map<String, Context> convertContext(Map<String, Context> inputDataContext) {
@@ -406,14 +390,14 @@ public class RestBotEngine implements IRestBotEngine {
 
     @Override
     public Boolean isUndoAvailable(Environment environment, String botId, String conversationId) {
-        RuntimeUtilities.checkNotNull(environment, "environment");
-        RuntimeUtilities.checkNotNull(botId, "botId");
-        RuntimeUtilities.checkNotNull(conversationId, "conversationId");
+        validateParams(environment, botId, conversationId);
+        var loggingContext = contextLogger.createLoggingContext(environment, botId, conversationId, null);
         final IConversationMemory conversationMemory;
         try {
             conversationMemory = loadConversationMemory(conversationId);
             return conversationMemory.isUndoAvailable();
         } catch (ResourceStoreException e) {
+            contextLogger.setLoggingContext(loggingContext);
             log.error(e.getLocalizedMessage(), e);
             throw new InternalServerErrorException();
         } catch (ResourceNotFoundException e) {
@@ -423,12 +407,11 @@ public class RestBotEngine implements IRestBotEngine {
 
     @Override
     public Response undo(final Environment environment, String botId, final String conversationId) {
-        RuntimeUtilities.checkNotNull(environment, "environment");
-        RuntimeUtilities.checkNotNull(botId, "botId");
-        RuntimeUtilities.checkNotNull(conversationId, "conversationId");
-
+        validateParams(environment, botId, conversationId);
+        var loggingContext = contextLogger.createLoggingContext(environment, botId, conversationId, null);
         try {
             IConversationMemory conversationMemory = loadAndValidateConversationMemory(botId, conversationId);
+            loggingContext.put(USER_ID, conversationMemory.getUserId());
             Callable<Void> processUserInput = () -> {
 
                 try {
@@ -437,6 +420,7 @@ public class RestBotEngine implements IRestBotEngine {
                         storeConversationMemory(conversationMemory, environment);
                     }
                 } catch (Exception e) {
+                    contextLogger.setLoggingContext(loggingContext);
                     log.error("Error while Undo!", e);
                     throw e;
                 }
@@ -448,12 +432,14 @@ public class RestBotEngine implements IRestBotEngine {
 
             return Response.accepted().build();
         } catch (IllegalAccessException e) {
+            contextLogger.setLoggingContext(loggingContext);
             String errorMsg = "Error while processing message!";
             log.error(errorMsg, e);
             throw new InternalServerErrorException(errorMsg, e);
         } catch (ResourceNotFoundException e) {
             throw new NoLogWebApplicationException(Response.Status.NOT_FOUND);
         } catch (Exception e) {
+            contextLogger.setLoggingContext(loggingContext);
             log.error(e.getLocalizedMessage(), e);
             throw new InternalServerErrorException(e.getLocalizedMessage(), e);
         }
@@ -473,15 +459,17 @@ public class RestBotEngine implements IRestBotEngine {
 
     @Override
     public Boolean isRedoAvailable(final Environment environment, String botId, String conversationId) {
-        RuntimeUtilities.checkNotNull(environment, "environment");
-        RuntimeUtilities.checkNotNull(botId, "botId");
-        RuntimeUtilities.checkNotNull(conversationId, "conversationId");
+        validateParams(environment, botId, conversationId);
+        var loggingContext = contextLogger.createLoggingContext(environment, botId, conversationId, null);
+
         try {
             var conversationMemory = loadConversationMemory(conversationId);
+            loggingContext.put(USER_ID, conversationMemory.getUserId());
             return conversationMemory.isRedoAvailable();
         } catch (ResourceStoreException e) {
             throw new NoLogWebApplicationException(Response.Status.NOT_FOUND);
         } catch (ResourceNotFoundException e) {
+            contextLogger.setLoggingContext(loggingContext);
             log.error(e.getLocalizedMessage(), e);
             throw new InternalServerErrorException();
         }
@@ -489,9 +477,7 @@ public class RestBotEngine implements IRestBotEngine {
 
     @Override
     public Response redo(final Environment environment, String botId, final String conversationId) {
-        RuntimeUtilities.checkNotNull(environment, "environment");
-        RuntimeUtilities.checkNotNull(botId, "botId");
-        RuntimeUtilities.checkNotNull(conversationId, "conversationId");
+        validateParams(environment, botId, conversationId);
 
         try {
             IConversationMemory conversationMemory = loadAndValidateConversationMemory(botId, conversationId);
@@ -521,6 +507,12 @@ public class RestBotEngine implements IRestBotEngine {
             log.error(e.getLocalizedMessage(), e);
             throw new InternalServerErrorException(e.getLocalizedMessage(), e);
         }
+    }
+
+    private static void validateParams(Environment environment, String botId, String conversationId) {
+        RuntimeUtilities.checkNotNull(environment, "environment");
+        RuntimeUtilities.checkNotNull(botId, "botId");
+        RuntimeUtilities.checkNotNull(conversationId, "conversationId");
     }
 
     private IConversationMemory loadConversationMemory(String conversationId)

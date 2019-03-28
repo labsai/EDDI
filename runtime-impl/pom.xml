@@ -70,6 +70,12 @@
             <artifactId>sharedutilities</artifactId>
             <version>${project.version}</version>
         </dependency>
+
+        <dependency>
+            <groupId>com.bugsnag</groupId>
+            <version>[3.0,4.0)</version>
+            <artifactId>bugsnag</artifactId>
+        </dependency>
     </dependencies>
 
 

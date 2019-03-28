@@ -14,19 +14,19 @@ import javax.inject.Named;
 public class BotStoreService implements IBotStoreService {
 
     private final IRestInterfaceFactory restInterfaceFactory;
-    private final String configurationServerURI;
+    private final String apiServerURI;
 
     @Inject
     public BotStoreService(IRestInterfaceFactory restInterfaceFactory,
-                           @Named("system.apiServerURI") String configurationServerURI) {
+                           @Named("system.apiServerURI") String apiServerURI) {
         this.restInterfaceFactory = restInterfaceFactory;
-        this.configurationServerURI = configurationServerURI;
+        this.apiServerURI = apiServerURI;
     }
 
     @Override
     public BotConfiguration getBotConfiguration(String botId, Integer version) throws ServiceException {
         try {
-            IRestBotStore restBotStore = restInterfaceFactory.get(IRestBotStore.class, configurationServerURI);
+            IRestBotStore restBotStore = restInterfaceFactory.get(IRestBotStore.class, apiServerURI);
             return restBotStore.readBot(botId, version);
         } catch (Exception e) {
             throw new ServiceException(e.getLocalizedMessage(), e);
