@@ -45,6 +45,7 @@ import java.util.concurrent.ThreadPoolExecutor;
 @Singleton
 @Slf4j
 public class ServerRuntime implements IServerRuntime {
+    private static final String BASIC_AUTH_SECURITY_HANDLER_TYPE = "basic";
 
     public static class Options {
         public Class<?> applicationConfiguration;
@@ -60,6 +61,7 @@ public class ServerRuntime implements IServerRuntime {
         public long responseDelayInMillis;
         public long idleTime;
         public int outputBufferSize;
+        public String securityHandlerType;
     }
 
     private static final String ANY_PATH = "/*";
@@ -70,6 +72,7 @@ public class ServerRuntime implements IServerRuntime {
     private final HttpServletDispatcher httpServletDispatcher;
     private final SecurityHandler securityHandler;
     private final ThreadPoolExecutor threadPoolExecutor;
+    private final MongoLoginService mongoLoginService;
     private final String environment;
     private final String resourceDir;
 
@@ -79,6 +82,7 @@ public class ServerRuntime implements IServerRuntime {
                          HttpServletDispatcher httpServletDispatcher,
                          SecurityHandler securityHandler,
                          ThreadPoolExecutor threadPoolExecutor,
+                         MongoLoginService mongoLoginService,
                          @Named("system.environment") String environment,
                          @Named("systemRuntime.resourceDir") String resourceDir) {
         this.options = options;
@@ -87,6 +91,7 @@ public class ServerRuntime implements IServerRuntime {
         this.httpServletDispatcher = httpServletDispatcher;
         this.securityHandler = securityHandler;
         this.threadPoolExecutor = threadPoolExecutor;
+        this.mongoLoginService = mongoLoginService;
         this.environment = environment;
         this.resourceDir = resourceDir;
         RegisterBuiltin.register(ResteasyProviderFactory.getInstance());
@@ -194,6 +199,12 @@ public class ServerRuntime implements IServerRuntime {
 
         servletHandler.addFilter(new FilterHolder(createRedirectFilter(options.defaultPath)), ANY_PATH, getAllDispatcherTypes());
 
+        if (BASIC_AUTH_SECURITY_HANDLER_TYPE.equals(options.securityHandlerType)) {
+            if (securityHandler != null) {
+                securityHandler.setLoginService(mongoLoginService);
+                log.info("Basic Authentication has been enabled...");
+            }
+        }
         servletHandler.addFilter(new FilterHolder(createInitThreadBoundValuesFilter()), ANY_PATH, getAllDispatcherTypes());
 
         if (options.useCrossSiteScripting) {

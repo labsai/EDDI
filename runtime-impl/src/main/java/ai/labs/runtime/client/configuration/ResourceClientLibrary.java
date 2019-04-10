@@ -5,12 +5,10 @@ import ai.labs.resources.rest.http.IRestHttpCallsStore;
 import ai.labs.resources.rest.output.IRestOutputStore;
 import ai.labs.resources.rest.parser.IRestParserStore;
 import ai.labs.resources.rest.regulardictionary.IRestRegularDictionaryStore;
-import ai.labs.rest.restinterfaces.IRestInterfaceFactory;
 import ai.labs.runtime.service.ServiceException;
 import ai.labs.utilities.URIUtilities;
 
 import javax.inject.Inject;
-import javax.inject.Named;
 import java.net.URI;
 import java.util.HashMap;
 import java.util.Map;
@@ -19,15 +17,25 @@ import java.util.Map;
  * @author ginccc
  */
 public class ResourceClientLibrary implements IResourceClientLibrary {
-    private final IRestInterfaceFactory restInterfaceFactory;
-    private final String apiServerURI;
+    private final IRestParserStore restParserStore;
+    private final IRestRegularDictionaryStore restRegularDictionaryStore;
+    private final IRestBehaviorStore restBehaviorStore;
+    private final IRestHttpCallsStore restHttpCallsStore;
+    private final IRestOutputStore restOutputStore;
     private Map<String, IResourceService> restInterfaces;
 
     @Inject
-    public ResourceClientLibrary(IRestInterfaceFactory restInterfaceFactory,
-                                 @Named("system.apiServerURI") String apiServerURI) {
-        this.restInterfaceFactory = restInterfaceFactory;
-        this.apiServerURI = apiServerURI;
+    public ResourceClientLibrary(IRestParserStore restParserStore,
+                                 IRestRegularDictionaryStore restRegularDictionaryStore,
+                                 IRestBehaviorStore restBehaviorStore,
+                                 IRestHttpCallsStore restHttpCallsStore,
+                                 IRestOutputStore restOutputStore) {
+        this.restParserStore = restParserStore;
+        this.restRegularDictionaryStore = restRegularDictionaryStore;
+        this.restBehaviorStore = restBehaviorStore;
+        this.restHttpCallsStore = restHttpCallsStore;
+        this.restOutputStore = restOutputStore;
+
         init();
     }
 
@@ -36,9 +44,7 @@ public class ResourceClientLibrary implements IResourceClientLibrary {
         this.restInterfaces = new HashMap<>();
         restInterfaces.put("ai.labs.parser", (id, version) -> {
             try {
-                IRestParserStore parserStore = restInterfaceFactory.get(IRestParserStore.class,
-                        apiServerURI);
-                return parserStore.readParser(id, version);
+                return restParserStore.readParser(id, version);
             } catch (Exception e) {
                 throw new ServiceException(e.getLocalizedMessage(), e);
             }
@@ -46,9 +52,7 @@ public class ResourceClientLibrary implements IResourceClientLibrary {
 
         restInterfaces.put("ai.labs.regulardictionary", (id, version) -> {
             try {
-                IRestRegularDictionaryStore dictionaryStore = restInterfaceFactory.get(IRestRegularDictionaryStore.class,
-                        apiServerURI);
-                return dictionaryStore.readRegularDictionary(id, version, "", "", 0, 0);
+                return restRegularDictionaryStore.readRegularDictionary(id, version, "", "", 0, 0);
             } catch (Exception e) {
                 throw new ServiceException(e.getLocalizedMessage(), e);
             }
@@ -56,9 +60,7 @@ public class ResourceClientLibrary implements IResourceClientLibrary {
 
         restInterfaces.put("ai.labs.behavior", (id, version) -> {
             try {
-                IRestBehaviorStore behaviorStore = restInterfaceFactory.get(IRestBehaviorStore.class,
-                        apiServerURI);
-                return behaviorStore.readBehaviorRuleSet(id, version);
+                return restBehaviorStore.readBehaviorRuleSet(id, version);
             } catch (Exception e) {
                 throw new ServiceException(e.getLocalizedMessage(), e);
             }
@@ -66,9 +68,7 @@ public class ResourceClientLibrary implements IResourceClientLibrary {
 
         restInterfaces.put("ai.labs.httpcalls", (id, version) -> {
             try {
-                IRestHttpCallsStore httpCallsStore = restInterfaceFactory.get(IRestHttpCallsStore.class,
-                        apiServerURI);
-                return httpCallsStore.readHttpCalls(id, version);
+                return restHttpCallsStore.readHttpCalls(id, version);
             } catch (Exception e) {
                 throw new ServiceException(e.getLocalizedMessage(), e);
             }
@@ -76,9 +76,7 @@ public class ResourceClientLibrary implements IResourceClientLibrary {
 
         restInterfaces.put("ai.labs.output", (id, version) -> {
             try {
-                IRestOutputStore outputStore = restInterfaceFactory.get(IRestOutputStore.class,
-                        apiServerURI);
-                return outputStore.readOutputSet(id, version, "", "", 0, 0);
+                return restOutputStore.readOutputSet(id, version, "", "", 0, 0);
             } catch (Exception e) {
                 throw new ServiceException(e.getLocalizedMessage(), e);
             }
