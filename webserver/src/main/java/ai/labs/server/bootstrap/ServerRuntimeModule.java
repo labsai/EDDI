@@ -104,7 +104,7 @@ public class ServerRuntimeModule extends AbstractBaseModule {
 
     @Provides
     @Singleton
-    private BasicSecurityHandler provideBasicAuthenticationService(@Named("webserver.publicAccessPaths") String publicAccessPaths,
+    private BasicSecurityHandler provideBasicAuthenticationService(@Named("webServer.publicAccessPaths") String publicAccessPaths,
                                                                    @Named("webServer.basicAuth.defaultUsername") String defaultUsername,
                                                                    @Named("webServer.basicAuth.defaultPassword") String defaultPassword,
                                                                    IUserStore userStore) throws IResourceStore.ResourceStoreException {
@@ -131,7 +131,7 @@ public class ServerRuntimeModule extends AbstractBaseModule {
 
     @Provides
     @Singleton
-    private KeycloakSecurityHandler provideKeycloakAuthenticationService(@Named("webserver.publicAccessPaths") String publicAccessPaths,
+    private KeycloakSecurityHandler provideKeycloakAuthenticationService(@Named("webServer.publicAccessPaths") String publicAccessPaths,
                                                                          @Named("webserver.keycloak.admin") String admin,
                                                                          @Named("webserver.keycloak.user") String user,
                                                                          @Named("webserver.keycloak.realm") String realm,
@@ -177,7 +177,7 @@ public class ServerRuntimeModule extends AbstractBaseModule {
         mapping.setPathSpec("/*");
         securityHandler.addConstraintMapping(mapping);
 
-        // expect those paths given in webserver.publicAccessPaths , separated by ";"
+        // expect those paths given in webServer.publicAccessPaths , separated by ";"
         constraint = new Constraint();
         constraint.setAuthenticate(false);
 
