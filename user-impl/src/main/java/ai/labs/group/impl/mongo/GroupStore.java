@@ -3,7 +3,7 @@ package ai.labs.group.impl.mongo;
 import ai.labs.group.IGroupStore;
 import ai.labs.group.model.Group;
 import ai.labs.persistence.IResourceStore;
-import ai.labs.serialization.IJsonSerialization;
+import ai.labs.serialization.IDocumentBuilder;
 import com.mongodb.BasicDBObject;
 import com.mongodb.client.MongoCollection;
 import com.mongodb.client.MongoDatabase;
@@ -21,12 +21,12 @@ import java.io.IOException;
 public class GroupStore implements IGroupStore {
     private static final String COLLECTION_GROUPS = "groups";
     private final MongoCollection<Document> collection;
-    private final IJsonSerialization jsonSerialization;
+    private final IDocumentBuilder documentBuilder;
 
     @Inject
-    public GroupStore(MongoDatabase database, IJsonSerialization jsonSerialization) {
+    public GroupStore(MongoDatabase database, IDocumentBuilder documentBuilder) {
         collection = database.getCollection(COLLECTION_GROUPS);
-        this.jsonSerialization = jsonSerialization;
+        this.documentBuilder = documentBuilder;
     }
 
     public Group readGroup(String groupId) throws IResourceStore.ResourceStoreException, IResourceStore.ResourceNotFoundException {
@@ -41,9 +41,8 @@ public class GroupStore implements IGroupStore {
 
             groupDocument.remove("_id");
 
-            return jsonSerialization.deserialize(groupDocument.toString(), Group.class);
+            return documentBuilder.build(groupDocument, Group.class);
         } catch (IOException e) {
-            log.debug(e.getLocalizedMessage(), e);
             throw new IResourceStore.ResourceStoreException("Cannot parse json structure into Group entity.", e);
         }
     }
@@ -52,7 +51,7 @@ public class GroupStore implements IGroupStore {
     @Override
     public void updateGroup(String groupId, Group group) throws IResourceStore.ResourceStoreException {
         try {
-            String jsonGroup = jsonSerialization.serialize(group);
+            String jsonGroup = documentBuilder.toString(group);
             Document document = Document.parse(jsonGroup);
 
             document.put("_id", new ObjectId(groupId));
@@ -75,9 +74,8 @@ public class GroupStore implements IGroupStore {
 
     private String serialize(Group group) throws IResourceStore.ResourceStoreException {
         try {
-            return jsonSerialization.serialize(group);
+            return documentBuilder.toString(group);
         } catch (IOException e) {
-            log.debug(e.getLocalizedMessage(), e);
             throw new IResourceStore.ResourceStoreException("Cannot serialize Group entity into json.", e);
         }
     }

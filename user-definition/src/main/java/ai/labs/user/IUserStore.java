@@ -16,4 +16,6 @@ public interface IUserStore {
     String createUser(User user) throws IResourceStore.ResourceStoreException;
 
     void deleteUser(String userId);
+
+    int getUsersCount();
 }

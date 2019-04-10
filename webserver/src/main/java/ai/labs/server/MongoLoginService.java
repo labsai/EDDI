@@ -33,7 +33,7 @@ public class MongoLoginService implements LoginService {
 
     @Override
     public String getName() {
-        return "Please log in via your credentials!";
+        return "Please log in into EDDI with username and password!";
     }
 
     @Override
