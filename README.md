@@ -2,9 +2,9 @@
 
 A Platform for creating, running and maintaining chatbots of all kinds.
 
-v4.5.0 - LATEST
+v4.6.0 - LATEST
 
-v4.4.0 - STABLE
+v4.5.0 - STABLE
 
 License: Apache License 2.0
 
