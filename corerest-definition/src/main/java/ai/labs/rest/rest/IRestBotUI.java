@@ -1,6 +1,7 @@
 package ai.labs.rest.rest;
 
 import ai.labs.models.Deployment;
+import io.swagger.annotations.Api;
 import org.jboss.resteasy.annotations.cache.NoCache;
 
 import javax.ws.rs.*;
@@ -9,6 +10,7 @@ import javax.ws.rs.core.MediaType;
 /**
  * @author ginccc
  */
+@Api(value = "Bot Engine -> Channels")
 @Path("/ui")
 public interface IRestBotUI {
     @GET

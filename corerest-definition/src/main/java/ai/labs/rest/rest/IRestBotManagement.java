@@ -12,7 +12,7 @@ import javax.ws.rs.core.MediaType;
 import javax.ws.rs.core.Response;
 import java.util.List;
 
-@Api(value = "bot engine")
+@Api(value = "Bot Management")
 @Path("/managedbots")
 public interface IRestBotManagement {
 

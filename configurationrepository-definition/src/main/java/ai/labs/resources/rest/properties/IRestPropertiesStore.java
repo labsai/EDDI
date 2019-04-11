@@ -7,7 +7,7 @@ import javax.ws.rs.*;
 import javax.ws.rs.core.MediaType;
 import javax.ws.rs.core.Response;
 
-@Api(value = "configurations")
+@Api(value = "Bot Engine -> Properties")
 @Path("/propertiesstore/properties")
 public interface IRestPropertiesStore {
     String resourceURI = "eddi://ai.labs.properties/propertiesstore/properties/";

@@ -14,4 +14,4 @@ services:
       EDDI_ENV: production
       EDDI_MEMORY_MIN: 128m
       EDDI_MEMORY_MAX: 128m
-      EDDI_JAVA_ENV_KEYCLOAK_ENABLED: webServer.securityHandlerType=keycloak
+      EDDI_JAVA_ENV_BASIC_AUTH_ENABLED: webServer.securityHandlerType=basic

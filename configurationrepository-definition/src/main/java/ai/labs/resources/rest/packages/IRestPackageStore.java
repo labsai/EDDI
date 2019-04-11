@@ -15,7 +15,7 @@ import java.util.List;
 /**
  * @author ginccc
  */
-@Api(value = "configurations")
+@Api(value = "Configurations -> (3) Packages")
 @Path("/packagestore/packages")
 public interface IRestPackageStore extends IRestVersionInfo {
     String resourceURI = "eddi://ai.labs.package/packagestore/packages/";

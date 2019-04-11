@@ -12,7 +12,7 @@ import javax.ws.rs.core.Response;
 /**
  * @author ginccc
  */
-@Api(value = "testcases")
+@Api(value = "Bot Engine -> Testing")
 @Path("/testcases/run")
 public interface IRestTestCaseRuntime {
     @GET

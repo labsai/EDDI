@@ -16,7 +16,7 @@ import java.util.List;
 /**
  * @author ginccc
  */
-@Api(value = "testcases")
+@Api(value = "Bot Engine -> Testing")
 @Path("/testcasestore/testcases")
 public interface IRestTestCaseStore {
     String resourceURI = "eddi://ai.labs.testcases/testcasestore/testcases/";

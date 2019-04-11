@@ -20,7 +20,7 @@ import java.util.Map;
 /**
  * @author ginccc
  */
-@Api(value = "bot engine")
+@Api(value = "Bot Engine")
 @Path("/bots")
 public interface IRestBotEngine {
 

@@ -16,7 +16,7 @@ import java.net.URI;
 /**
  * @author ginccc
  */
-@Api(value = "backup")
+@Api(value = "Backup")
 @Path("backup/import")
 public interface IRestImportService {
     @POST

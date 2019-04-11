@@ -10,7 +10,7 @@ import java.util.List;
 /**
  * @author ginccc
  */
-@Api(value = "configurations")
+@Api(value = "Configurations -> (1) General")
 @Path("/extensionstore/extensions")
 public interface IRestExtensionStore {
     String resourceURI = "eddi://ai.labs.extensions/extensionstore/extensions/";

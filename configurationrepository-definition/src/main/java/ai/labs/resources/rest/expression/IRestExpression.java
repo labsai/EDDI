@@ -9,7 +9,7 @@ import java.util.List;
 /**
  * @author ginccc
  */
-@Api(value = "expressions")
+@Api(value = "Configurations -> (2) Conversation LifeCycle Tasks -> (1) Regular Dictionary")
 @Path("/expressions")
 public interface IRestExpression {
     @GET

@@ -14,7 +14,7 @@ import java.util.List;
 /**
  * @author ginccc
  */
-@Api(value = "configurations")
+@Api(value = "Configurations -> (2) Conversation LifeCycle Tasks -> (3) HttpCalls")
 @Path("/httpcallsstore/httpcalls")
 public interface IRestHttpCallsStore extends IRestVersionInfo {
     String resourceURI = "eddi://ai.labs.httpcalls/httpcallsstore/httpcalls/";

@@ -13,7 +13,7 @@ import java.net.URI;
 /**
  * @author ginccc
  */
-@Api(value = "backup")
+@Api(value = "Backup")
 @Path("/backup/export")
 public interface IRestExportService {
     @GET

@@ -10,7 +10,7 @@ import javax.ws.rs.core.Response;
 /**
  * @author ginccc
  */
-@Api(value = "user management")
+@Api(value = "User Management -> (2) Groups")
 @Path("/groupstore/groups")
 public interface IRestGroupStore {
     String resourceURI = "eddi://ai.labs.group/groupstore/groups/";

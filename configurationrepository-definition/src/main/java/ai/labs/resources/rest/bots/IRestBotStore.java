@@ -15,7 +15,7 @@ import java.util.List;
 /**
  * @author ginccc
  */
-@Api(value = "configurations")
+@Api(value = "Configurations -> (4) Bots")
 @Path("/botstore/bots")
 public interface IRestBotStore extends IRestVersionInfo {
     String resourceURI = "eddi://ai.labs.bot/botstore/bots/";

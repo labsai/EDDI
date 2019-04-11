@@ -9,7 +9,7 @@ import javax.ws.rs.Path;
 import javax.ws.rs.PathParam;
 import java.util.List;
 
-@Api(value = "logs")
+@Api(value = "Bot Engine -> Logs")
 @Path("logs")
 public interface IRestLogs {
     @GET

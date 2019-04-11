@@ -30,9 +30,7 @@ public class RestHtmlApiResource implements IRestHtmlApiResource {
     public String viewHtml(String path) {
         try {
             path = preparePath(path);
-            String htmlString = resourceFileManager.getResourceAsString("html", path);
-            htmlString = htmlString.replace("<EDDI-VERSION/>", runtime.getVersion());
-            return htmlString;
+            return resourceFileManager.getResourceAsString("html", path);
         } catch (IResourceFileManager.NotFoundException e) {
             throw new NoLogWebApplicationException(Response.Status.NOT_FOUND);
         }

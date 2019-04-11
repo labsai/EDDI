@@ -12,7 +12,7 @@ import java.util.List;
 /**
  * @author ginccc
  */
-@Api(value = "package extensions")
+@Api(value = "Configurations -> (3) Packages")
 @Path("/packagestore/extensions")
 public interface IRestPackageExtensionStore {
     @GET

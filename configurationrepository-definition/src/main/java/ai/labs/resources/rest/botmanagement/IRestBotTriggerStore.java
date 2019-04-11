@@ -7,7 +7,7 @@ import javax.ws.rs.*;
 import javax.ws.rs.core.MediaType;
 import javax.ws.rs.core.Response;
 
-@Api(value = "configurations")
+@Api(value = "Configurations -> (5) Bot Management")
 @Path("/bottriggerstore/bottriggers")
 public interface IRestBotTriggerStore {
     String resourceURI = "eddi://ai.labs.bottrigger/bottriggerstore/bottriggers/";

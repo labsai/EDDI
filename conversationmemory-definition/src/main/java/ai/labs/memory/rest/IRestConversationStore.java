@@ -16,7 +16,7 @@ import java.util.List;
 /**
  * @author ginccc
  */
-@Api(value = "configurations")
+@Api(value = "Bot Engine -> Conversations")
 @Path("/conversationstore/conversations")
 public interface IRestConversationStore {
     @GET

@@ -12,7 +12,7 @@ import java.util.List;
 /**
  * @author ginccc
  */
-@Api(value = "bot administration")
+@Api(value = "Bot Administration")
 @Path("/deploymentstore/deployments")
 public interface IRestDeploymentStore {
     @GET

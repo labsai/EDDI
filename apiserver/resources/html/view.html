@@ -29,19 +29,16 @@
 </head>
 
 <body>
-<div class="header">
-    <div>
-        <a id="logo" href="/"><img class="logo__img" alt="swagger" height="30" width="30"
-                                   src="/binary/img/logo_small.png"/><span
-                class="logo__title">Enhanced Dialog Driven Intelligence / Restful API</span></a>
-    </div>
-    <div style="position:absolute; top:30px; right:5px; color: #999;">
-        v
-        <EDDI-VERSION/>
-    </div>
+<div class="swagger-ui eddi-header">
+    <header>
+        <div>
+            <img src="/binary/img/logo_high.png"/>
+            <span>Enhanced Dialog Driven Intelligence / Restful API</span>
+        </div>
+    </header>
 </div>
-
 <div id="message-bar" class="swagger-ui-wrap" data-sw-translate>&nbsp;</div>
+<br><br>
 <div id="swagger-ui"></div>
 
 <script src="/text/js/swagger-standalone.js"></script>
@@ -93,16 +90,12 @@
                     }).error(function () {
                         console.log('Init Error');
                     });
-                    /*
+
                     initOAuth({
-                        clientId: "your-client-id",
-                        clientSecret: "your-client-secret-if-required",
+                        clientId: "eddi-engine",
                         realm: "EDDI",
-                        appName: "your-app-name",
-                        scopeSeparator: " ",
-                        additionalQueryStringParams: {}
+                        appName: "eddi-engine",
                     });
-*/
 
                     if (window.SwaggerTranslator) {
                         window.SwaggerTranslator.translate();
@@ -121,8 +114,7 @@
 
             window.ui = ui
         });
-      
-          }
+    }
 </script>
 </body>
 </html>

@@ -7,7 +7,7 @@ import javax.ws.rs.core.MediaType;
 import javax.ws.rs.core.Response;
 
 @Path("/channels/facebook")
-@Api(description = "channels")
+@Api(value = "Bot Engine -> Channels")
 public interface IFacebookEndpoint {
     @POST
     @Path("{botId}")

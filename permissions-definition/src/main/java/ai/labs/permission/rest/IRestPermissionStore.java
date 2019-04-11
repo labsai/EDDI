@@ -9,7 +9,7 @@ import javax.ws.rs.core.MediaType;
 /**
  * @author ginccc
  */
-@Api(value = "configurations")
+@Api(value = "User Management -> (3) Permissions")
 @Path("/permissionstore/permissions")
 public interface IRestPermissionStore {
     @GET

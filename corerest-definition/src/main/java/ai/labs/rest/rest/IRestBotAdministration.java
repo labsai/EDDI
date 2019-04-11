@@ -11,7 +11,7 @@ import javax.ws.rs.core.Response;
 /**
  * @author ginccc
  */
-@Api(value = "bot administration")
+@Api(value = "Bot Administration")
 @Path("/administration")
 public interface IRestBotAdministration {
     @POST
