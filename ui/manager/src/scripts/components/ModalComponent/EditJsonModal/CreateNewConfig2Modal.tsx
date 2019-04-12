@@ -1,17 +1,20 @@
 import * as React from 'react';
-import styles from './ModalComponent.styles';
-import './ModalComponent.styles.scss';
+import styles from '../ModalComponent.styles';
+import '../ModalComponent.styles.scss';
 import { Component, compose, pure, setDisplayName } from 'recompose';
 import AceEditor from 'react-ace';
-import eddiApiActionDispatchers from '../../actions/EddiApiActionDispatchers';
-import BlueButton from '../Assets/Buttons/BlueButton';
-import WhiteButton from '../Assets/Buttons/WhiteButton';
-import modalActionDispatchers from '../../actions/ModalActionDispatchers';
+import eddiApiActionDispatchers from '../../../actions/EddiApiActionDispatchers';
+import BlueButton from '../../Assets/Buttons/BlueButton';
+import WhiteButton from '../../Assets/Buttons/WhiteButton';
+import modalActionDispatchers from '../../../actions/ModalActionDispatchers';
 import * as renderIf from 'render-if';
-import Parser from '../utils/Parser';
-import { getPostExample } from '../utils/EddiConfigExampleData';
+import Parser from '../../utils/Parser';
+import { getPostExample } from '../../utils/EddiConfigExampleData';
 import * as _ from 'lodash';
-import { BOT } from '../utils/EddiTypes';
+import JsonErrors from './JsonErrors';
+import { DICTIONARY_SCHEMA } from '../../utils/JsonSchemas/JsonSchemas';
+import { compileJsonSchema } from '../../utils/helpers/JsonHelpers';
+import * as Ajv from 'ajv';
 
 require('brace/mode/json');
 require('brace/theme/monokai');
@@ -20,6 +23,7 @@ interface IState {
   editorText: string;
   initialEditorText: string;
   showExample: boolean;
+  errors: Ajv.ErrorObject[];
 }
 
 interface IProps {
@@ -37,6 +41,7 @@ class CreateNewConfig2Modal extends React.Component<IProps, IState> {
       editorText: '',
       initialEditorText: '',
       showExample: false,
+      errors: [],
     };
   }
 
@@ -78,14 +83,17 @@ class CreateNewConfig2Modal extends React.Component<IProps, IState> {
   }
 
   createNew = () => {
-    eddiApiActionDispatchers.createNewConfigAction(
-      this.props.type,
-      this.props.name,
-      this.props.description,
-      this.state.editorText,
-    );
+    console.log(this.validateJson());
+    if (this.validateJson()) {
+      eddiApiActionDispatchers.createNewConfigAction(
+        this.props.type,
+        this.props.name,
+        this.props.description,
+        this.state.editorText,
+      );
+      this.props.onConfirm();
+    }
     // modalActionDispatchers.closeModal();
-    this.props.onConfirm();
   };
 
   back = () => {
@@ -103,6 +111,17 @@ class CreateNewConfig2Modal extends React.Component<IProps, IState> {
     });
   };
 
+  validateJson(): boolean {
+    const errors = compileJsonSchema(
+      DICTIONARY_SCHEMA,
+      JSON.parse(this.state.editorText),
+    );
+    this.setState({
+      errors,
+    });
+    return _.isEmpty(errors);
+  }
+
   render() {
     const typeName = Parser.getPluginName(this.props.type, false);
     return (
@@ -117,7 +136,7 @@ class CreateNewConfig2Modal extends React.Component<IProps, IState> {
             {renderIf(this.unsavedChanges())(() => (
               <button
                 style={styles.discardChanges}
-                onClick={() => this.discardChanges()}>
+                onClick={() => this.validateJson()}>
                 {'Discard changes'}
               </button>
             ))}
@@ -133,6 +152,9 @@ class CreateNewConfig2Modal extends React.Component<IProps, IState> {
             />
           </div>
         </div>
+        {renderIf(!_.isEmpty(this.state.errors))(() => (
+          <JsonErrors errors={this.state.errors} />
+        ))}
         <button onClick={this.exampleClick} style={styles.collapsibleButton}>
           <div>{`${
             this.state.showExample ? 'Hide' : 'Show'

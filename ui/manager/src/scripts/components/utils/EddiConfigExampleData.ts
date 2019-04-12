@@ -9,19 +9,20 @@ import {
 } from './EddiTypes';
 
 export const REGULAR_DICTIONARY_POST_EXAMPLE: string = `{
-  "words": [
-    {
-      "word": "string",
-      "exp": "string",
-      "frequency": 0
-    }
-  ],
-  "phrases": [
-    {
-      "phrase": "string",
-      "exp": "string"
-    }
-  ]
+    "language": "en",
+    "words": [
+        {
+            "word": "Hello",
+            "exp": "greeting(hello)",
+            "frequency": 0
+        }
+    ],
+    "phrases": [
+        {
+            "phrase": "Good morning",
+            "exp": "greeting(good_morning)"
+        }
+    ]
 }`;
 
 export const BEHAVIOUR_POST_EXAMPLE: string = `{

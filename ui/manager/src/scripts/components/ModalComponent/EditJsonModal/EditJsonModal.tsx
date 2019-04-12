@@ -1,12 +1,14 @@
 import * as React from 'react';
-import styles from './ModalComponent.styles';
-import './ModalComponent.styles.scss';
+import styles from '../ModalComponent.styles';
+import '../ModalComponent.styles.scss';
 import { Component, compose, pure, setDisplayName } from 'recompose';
 import AceEditor from 'react-ace';
-import eddiApiActionDispatchers from '../../actions/EddiApiActionDispatchers';
-import BlueButton from '../Assets/Buttons/BlueButton';
-import modalActionDispatchers from '../../actions/ModalActionDispatchers';
+import eddiApiActionDispatchers from '../../../actions/EddiApiActionDispatchers';
+import BlueButton from '../../Assets/Buttons/BlueButton';
+import modalActionDispatchers from '../../../actions/ModalActionDispatchers';
 import * as renderIf from 'render-if';
+import { compileJsonSchema } from '../../utils/helpers/JsonHelpers';
+import { DICTIONARY_SCHEMA } from '../../utils/JsonSchemas/JsonSchemas';
 
 require('brace/mode/json');
 require('brace/theme/monokai');
@@ -71,6 +73,10 @@ class EditJsonModal extends React.Component<IPrivateProps, IState> {
     return true;
   }
 
+  validateJson() {
+    compileJsonSchema(DICTIONARY_SCHEMA, JSON.parse(this.state.editorText));
+  }
+
   render() {
     return (
       <div>
@@ -81,7 +87,7 @@ class EditJsonModal extends React.Component<IPrivateProps, IState> {
             {renderIf(this.unsavedChanges())(() => (
               <button
                 style={styles.discardChanges}
-                onClick={() => this.discardChanges()}>
+                onClick={() => this.validateJson()}>
                 {'Discard changes'}
               </button>
             ))}

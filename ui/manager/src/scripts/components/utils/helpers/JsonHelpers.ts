@@ -6,6 +6,8 @@ import {
   IDetailedDescriptor,
   IResponse,
 } from '../AxiosFunctions';
+import { DICTIONARY_SCHEMA } from '../JsonSchemas/JsonSchemas';
+import * as Ajv from 'ajv';
 
 export async function postJsonHelper(
   url: string,
@@ -52,4 +54,15 @@ export function mapDataToDetailedDescriptors(
     };
   });
   return detailedDescriptors;
+}
+
+export function compileJsonSchema(schema: {}, data: {}): Ajv.ErrorObject[] {
+  const ajv = new Ajv({ allErrors: true });
+  const validate = ajv.compile(schema);
+  console.log(validate);
+  console.log(validate.errors);
+  const validJson = validate(data);
+  console.log(validJson);
+  console.log(validate.errors);
+  return validate.errors;
 }
