@@ -1,12 +1,12 @@
 package ai.labs.resources.impl.behavior.rest;
 
+import ai.labs.models.DocumentDescriptor;
 import ai.labs.persistence.IResourceStore;
 import ai.labs.resources.impl.resources.rest.RestVersionInfo;
 import ai.labs.resources.rest.behavior.IBehaviorStore;
 import ai.labs.resources.rest.behavior.IRestBehaviorStore;
 import ai.labs.resources.rest.behavior.model.BehaviorConfiguration;
 import ai.labs.resources.rest.documentdescriptor.IDocumentDescriptorStore;
-import ai.labs.resources.rest.documentdescriptor.model.DocumentDescriptor;
 import lombok.extern.slf4j.Slf4j;
 
 import javax.inject.Inject;

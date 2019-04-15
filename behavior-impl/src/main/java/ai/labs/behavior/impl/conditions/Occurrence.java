@@ -62,28 +62,28 @@ public class Occurrence implements IBehaviorCondition {
     }
 
     @Override
-    public Map<String, String> getValues() {
-        HashMap<String, String> result = new HashMap<>();
-        result.put(maxTimesOccurredQualifier, String.valueOf(maxTimesOccurred));
-        result.put(minTimesOccurredQualifier, String.valueOf(minTimesOccurred));
-        result.put(behaviorRuleNameQualifier, behaviorRuleName);
-        return result;
+    public Map<String, String> getConfigs() {
+        HashMap<String, String> configs = new HashMap<>();
+        configs.put(maxTimesOccurredQualifier, String.valueOf(maxTimesOccurred));
+        configs.put(minTimesOccurredQualifier, String.valueOf(minTimesOccurred));
+        configs.put(behaviorRuleNameQualifier, behaviorRuleName);
+        return configs;
     }
 
     @Override
-    public void setValues(Map<String, String> values) {
-        if (values != null && !values.isEmpty()) {
-            if (values.containsKey(behaviorRuleNameQualifier)) {
-                behaviorRuleName = values.get(behaviorRuleNameQualifier);
+    public void setConfigs(Map<String, String> configs) {
+        if (configs != null && !configs.isEmpty()) {
+            if (configs.containsKey(behaviorRuleNameQualifier)) {
+                behaviorRuleName = configs.get(behaviorRuleNameQualifier);
             }
 
-            if (values.containsKey(maxTimesOccurredQualifier)) {
-                int timesOccurred = Integer.parseInt(values.get(maxTimesOccurredQualifier));
+            if (configs.containsKey(maxTimesOccurredQualifier)) {
+                int timesOccurred = Integer.parseInt(configs.get(maxTimesOccurredQualifier));
                 setMaxTimesOccurred(timesOccurred);
             }
 
-            if (values.containsKey(minTimesOccurredQualifier)) {
-                int timesOccurred = Integer.parseInt(values.get(minTimesOccurredQualifier));
+            if (configs.containsKey(minTimesOccurredQualifier)) {
+                int timesOccurred = Integer.parseInt(configs.get(minTimesOccurredQualifier));
                 setMinTimesOccurred(timesOccurred);
             }
 
@@ -129,7 +129,7 @@ public class Occurrence implements IBehaviorCondition {
     @Override
     public IBehaviorCondition clone() {
         IBehaviorCondition occurrence = new Occurrence();
-        occurrence.setValues(getValues());
+        occurrence.setConfigs(getConfigs());
 
         return occurrence;
     }

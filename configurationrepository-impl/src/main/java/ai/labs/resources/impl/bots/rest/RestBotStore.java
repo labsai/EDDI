@@ -1,5 +1,6 @@
 package ai.labs.resources.impl.bots.rest;
 
+import ai.labs.models.DocumentDescriptor;
 import ai.labs.persistence.IResourceStore;
 import ai.labs.resources.impl.packages.rest.RestPackageStore;
 import ai.labs.resources.impl.resources.rest.RestVersionInfo;
@@ -8,7 +9,6 @@ import ai.labs.resources.rest.bots.IBotStore;
 import ai.labs.resources.rest.bots.IRestBotStore;
 import ai.labs.resources.rest.bots.model.BotConfiguration;
 import ai.labs.resources.rest.documentdescriptor.IDocumentDescriptorStore;
-import ai.labs.resources.rest.documentdescriptor.model.DocumentDescriptor;
 import ai.labs.resources.rest.packages.IRestPackageStore;
 import ai.labs.utilities.RestUtilities;
 import lombok.extern.slf4j.Slf4j;

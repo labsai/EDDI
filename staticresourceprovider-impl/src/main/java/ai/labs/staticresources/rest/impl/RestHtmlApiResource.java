@@ -1,6 +1,5 @@
 package ai.labs.staticresources.rest.impl;
 
-import ai.labs.runtime.SystemRuntime;
 import ai.labs.staticresources.rest.IResourceFileManager;
 import ai.labs.staticresources.rest.IRestHtmlApiResource;
 import org.jboss.resteasy.spi.NoLogWebApplicationException;
@@ -13,12 +12,10 @@ import javax.ws.rs.core.Response;
  */
 public class RestHtmlApiResource implements IRestHtmlApiResource {
     private final IResourceFileManager resourceFileManager;
-    private final SystemRuntime.IRuntime runtime;
 
     @Inject
-    public RestHtmlApiResource(IResourceFileManager resourceFileManager, SystemRuntime.IRuntime runtime) {
+    public RestHtmlApiResource(IResourceFileManager resourceFileManager) {
         this.resourceFileManager = resourceFileManager;
-        this.runtime = runtime;
     }
 
     @Override
@@ -38,7 +35,7 @@ public class RestHtmlApiResource implements IRestHtmlApiResource {
 
     private static String preparePath(String path) {
         if (path.equals("") || path.equals("/")) {
-            return "view.html";
+            return "index.html";
         }
 
         if (!path.startsWith("/")) {

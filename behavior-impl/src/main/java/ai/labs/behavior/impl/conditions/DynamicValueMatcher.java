@@ -39,30 +39,30 @@ public class DynamicValueMatcher implements IBehaviorCondition {
     }
 
     @Override
-    public void setValues(Map<String, String> values) {
-        if (values != null && !values.isEmpty()) {
-            if (values.containsKey(valuePathQualifier)) {
-                valuePath = values.get(valuePathQualifier);
+    public void setConfigs(Map<String, String> configs) {
+        if (configs != null && !configs.isEmpty()) {
+            if (configs.containsKey(valuePathQualifier)) {
+                valuePath = configs.get(valuePathQualifier);
             }
 
-            if (values.containsKey(containsQualifier)) {
-                contains = values.get(containsQualifier);
+            if (configs.containsKey(containsQualifier)) {
+                contains = configs.get(containsQualifier);
             }
 
-            if (values.containsKey(equalsQualifier)) {
-                equals = values.get(equalsQualifier);
+            if (configs.containsKey(equalsQualifier)) {
+                equals = configs.get(equalsQualifier);
             }
         }
     }
 
     @Override
-    public Map<String, String> getValues() {
-        Map<String, String> result = new HashMap<>();
-        result.put(valuePathQualifier, valuePath);
-        result.put(containsQualifier, contains);
-        result.put(equalsQualifier, equals);
+    public Map<String, String> getConfigs() {
+        Map<String, String> configs = new HashMap<>();
+        configs.put(valuePathQualifier, valuePath);
+        configs.put(containsQualifier, contains);
+        configs.put(equalsQualifier, equals);
 
-        return result;
+        return configs;
     }
 
     @Override
@@ -100,7 +100,7 @@ public class DynamicValueMatcher implements IBehaviorCondition {
     @Override
     public IBehaviorCondition clone() {
         DynamicValueMatcher clone = new DynamicValueMatcher(memoryItemConverter);
-        clone.setValues(getValues());
+        clone.setConfigs(getConfigs());
         return clone;
     }
 }

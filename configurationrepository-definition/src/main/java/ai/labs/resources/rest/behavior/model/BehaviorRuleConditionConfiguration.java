@@ -19,7 +19,8 @@ import java.util.Map;
 @Setter
 public class BehaviorRuleConditionConfiguration {
     private String type;
-    private Map<String, String> values;
+    @JsonAlias("values")
+    private Map<String, String> configs;
     @JsonAlias("children")
     private List<BehaviorRuleConditionConfiguration> conditions;
 }

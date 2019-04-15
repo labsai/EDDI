@@ -1,8 +1,8 @@
 package ai.labs.resources.rest.bots;
 
+import ai.labs.models.DocumentDescriptor;
 import ai.labs.resources.rest.IRestVersionInfo;
 import ai.labs.resources.rest.bots.model.BotConfiguration;
-import ai.labs.resources.rest.documentdescriptor.model.DocumentDescriptor;
 import io.swagger.annotations.Api;
 import io.swagger.annotations.ApiParam;
 

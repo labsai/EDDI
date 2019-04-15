@@ -2,12 +2,12 @@ package ai.labs.backupservice.impl;
 
 import ai.labs.backupservice.IRestImportService;
 import ai.labs.backupservice.IZipArchive;
+import ai.labs.models.DocumentDescriptor;
 import ai.labs.resources.rest.behavior.IRestBehaviorStore;
 import ai.labs.resources.rest.behavior.model.BehaviorConfiguration;
 import ai.labs.resources.rest.bots.IRestBotStore;
 import ai.labs.resources.rest.bots.model.BotConfiguration;
 import ai.labs.resources.rest.documentdescriptor.IRestDocumentDescriptorStore;
-import ai.labs.resources.rest.documentdescriptor.model.DocumentDescriptor;
 import ai.labs.resources.rest.http.IRestHttpCallsStore;
 import ai.labs.resources.rest.http.model.HttpCallsConfiguration;
 import ai.labs.resources.rest.output.IRestOutputStore;

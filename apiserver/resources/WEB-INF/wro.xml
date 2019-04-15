@@ -39,4 +39,14 @@
         <js>classpath:js/jquery-3.3.1.min.js</js>
         <js>classpath:js/jquery.urldecoder.edited.js</js>
     </group>
+
+    <group name="dashboard">
+        <group-ref>jquery3</group-ref>
+        <js>classpath:js/bootstrap.min.js</js>
+        <js>classpath:js/bootstrap.bundle.min.js</js>
+        <js>classpath:js/moment.min.js</js>
+        <js>classpath:js/dashboard.js</js>
+        <css>classpath:css/bootstrap.min.css</css>
+        <css>classpath:css/dashboard.css</css>
+    </group>
 </groups>

@@ -48,16 +48,16 @@ public abstract class BaseMatcher implements IBehaviorCondition {
     }
 
     @Override
-    public Map<String, String> getValues() {
-        Map<String, String> result = new HashMap<>();
-        result.put(conversationOccurrenceQualifier, occurrence.toString());
+    public Map<String, String> getConfigs() {
+        Map<String, String> configs = new HashMap<>();
+        configs.put(conversationOccurrenceQualifier, occurrence.toString());
 
-        return result;
+        return configs;
     }
 
-    void setConversationOccurrenceQualifier(Map<String, String> values) {
-        if (values.containsKey(conversationOccurrenceQualifier)) {
-            String conversationOccurrence = values.get(conversationOccurrenceQualifier);
+    void setConversationOccurrenceQualifier(Map<String, String> configs) {
+        if (configs.containsKey(conversationOccurrenceQualifier)) {
+            String conversationOccurrence = configs.get(conversationOccurrenceQualifier);
             switch (conversationOccurrence) {
                 case "currentStep":
                     occurrence = currentStep;
@@ -73,7 +73,7 @@ public abstract class BaseMatcher implements IBehaviorCondition {
                     break;
                 default:
                     String errorMessage = getId() + " config param: " + conversationOccurrenceQualifier +
-                            ". Needs to have one of the following values: %s, actual value: '%s'.\n" +
+                            ". Needs to have one of the following configs: %s, actual value: '%s'.\n" +
                             "'currentStep' has been set as default now.";
                     errorMessage = String.format(errorMessage, Arrays.toString(values()), conversationOccurrence);
                     log.error(errorMessage, new IllegalArgumentException(errorMessage));

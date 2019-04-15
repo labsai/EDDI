@@ -35,22 +35,22 @@ public class ActionMatcher extends BaseMatcher implements IBehaviorCondition {
     }
 
     @Override
-    public Map<String, String> getValues() {
-        Map<String, String> result = new HashMap<>();
-        result.put(actionsQualifier, StringUtilities.joinStrings(",", actions));
-        result.putAll(super.getValues());
+    public Map<String, String> getConfigs() {
+        Map<String, String> configs = new HashMap<>();
+        configs.put(actionsQualifier, StringUtilities.joinStrings(",", actions));
+        configs.putAll(super.getConfigs());
 
-        return result;
+        return configs;
     }
 
     @Override
-    public void setValues(Map<String, String> values) {
-        if (values != null && !values.isEmpty()) {
-            if (values.containsKey(actionsQualifier)) {
-                actions = convertToActions(values.get(actionsQualifier));
+    public void setConfigs(Map<String, String> configs) {
+        if (configs != null && !configs.isEmpty()) {
+            if (configs.containsKey(actionsQualifier)) {
+                actions = convertToActions(configs.get(actionsQualifier));
             }
 
-            setConversationOccurrenceQualifier(values);
+            setConversationOccurrenceQualifier(configs);
         }
     }
 
@@ -109,7 +109,7 @@ public class ActionMatcher extends BaseMatcher implements IBehaviorCondition {
     @Override
     public IBehaviorCondition clone() {
         IBehaviorCondition clone = new ActionMatcher();
-        clone.setValues(getValues());
+        clone.setConfigs(this.getConfigs());
         return clone;
     }
 }

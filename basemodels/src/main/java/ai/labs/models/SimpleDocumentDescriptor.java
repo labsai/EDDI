@@ -1,4 +1,4 @@
-package ai.labs.resources.rest.documentdescriptor.model;
+package ai.labs.models;
 
 import lombok.AllArgsConstructor;
 import lombok.Getter;

@@ -1,10 +1,10 @@
 package ai.labs.resources.impl.descriptor.rest;
 
+import ai.labs.models.DocumentDescriptor;
+import ai.labs.models.SimpleDocumentDescriptor;
 import ai.labs.persistence.IResourceStore;
 import ai.labs.resources.rest.documentdescriptor.IDocumentDescriptorStore;
 import ai.labs.resources.rest.documentdescriptor.IRestDocumentDescriptorStore;
-import ai.labs.resources.rest.documentdescriptor.model.DocumentDescriptor;
-import ai.labs.resources.rest.documentdescriptor.model.SimpleDocumentDescriptor;
 import ai.labs.resources.rest.patch.PatchInstruction;
 import lombok.extern.slf4j.Slf4j;
 
