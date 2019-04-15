@@ -3,6 +3,7 @@ package ai.labs.rest.rest;
 import ai.labs.models.BotDeploymentStatus;
 import io.swagger.annotations.Api;
 import io.swagger.annotations.ApiParam;
+import org.jboss.resteasy.annotations.cache.NoCache;
 
 import javax.ws.rs.*;
 import javax.ws.rs.core.MediaType;
@@ -33,6 +34,7 @@ public interface IRestBotAdministration {
                          @QueryParam("version") Integer version);
 
     @GET
+    @NoCache
     @Path("/{environment}/deploymentstatus/{botId}")
     @Produces(MediaType.TEXT_PLAIN)
     String getDeploymentStatus(@PathParam("environment") Environment environment,
@@ -41,6 +43,7 @@ public interface IRestBotAdministration {
                                @QueryParam("version") Integer version);
 
     @GET
+    @NoCache
     @Path("/{environment}/deploymentstatus")
     @Produces(MediaType.APPLICATION_JSON)
     List<BotDeploymentStatus> getDeploymentStatuses(@PathParam("environment")

@@ -70,8 +70,9 @@ public class BotFactory implements IBotFactory {
 
     @Override
     public List<IBot> getAllLatestBots(Deployment.Environment environment) {
-        return getBotEnvironment(environment).keySet().stream().map(
-                botId -> getLatestBot(environment, botId.getId())).collect(Collectors.toList());
+        return getBotEnvironment(environment).keySet().stream().
+                filter(botId -> getLatestBot(environment, botId.getId()) != null).
+                map(botId -> getLatestBot(environment, botId.getId())).collect(Collectors.toList());
     }
 
     @Override
