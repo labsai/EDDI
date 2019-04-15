@@ -48,7 +48,7 @@ public class DynamicValueMatcherTest {
         //setup
         initOutput();
         DynamicValueMatcher dynamicValueMatcher = new DynamicValueMatcher(memoryItemConverter);
-        dynamicValueMatcher.setValues(createValues(false, false, false));
+        dynamicValueMatcher.setConfigs(createValues(false, false, false));
 
         //test
         dynamicValueMatcher.execute(conversationMemory, new LinkedList<>());
@@ -62,7 +62,7 @@ public class DynamicValueMatcherTest {
         //setup
         initOutput();
         DynamicValueMatcher dynamicValueMatcher = new DynamicValueMatcher(memoryItemConverter);
-        dynamicValueMatcher.setValues(createValues(true, false, false));
+        dynamicValueMatcher.setConfigs(createValues(true, false, false));
 
         //test
         dynamicValueMatcher.execute(conversationMemory, new LinkedList<>());
@@ -76,7 +76,7 @@ public class DynamicValueMatcherTest {
         //setup
         initOutput();
         DynamicValueMatcher dynamicValueMatcher = new DynamicValueMatcher(memoryItemConverter);
-        dynamicValueMatcher.setValues(createValues(true, true, false));
+        dynamicValueMatcher.setConfigs(createValues(true, true, false));
 
         //test
         dynamicValueMatcher.execute(conversationMemory, new LinkedList<>());
@@ -90,7 +90,7 @@ public class DynamicValueMatcherTest {
         //setup
         initOutput();
         DynamicValueMatcher dynamicValueMatcher = new DynamicValueMatcher(memoryItemConverter);
-        dynamicValueMatcher.setValues(createValues(true, false, true));
+        dynamicValueMatcher.setConfigs(createValues(true, false, true));
 
         //test
         dynamicValueMatcher.execute(conversationMemory, new LinkedList<>());
@@ -104,7 +104,7 @@ public class DynamicValueMatcherTest {
         //setup
         initOutput("name", "Tom");
         DynamicValueMatcher dynamicValueMatcher = new DynamicValueMatcher(memoryItemConverter);
-        dynamicValueMatcher.setValues(createValues(true, false, false));
+        dynamicValueMatcher.setConfigs(createValues(true, false, false));
 
         //test
         dynamicValueMatcher.execute(conversationMemory, new LinkedList<>());

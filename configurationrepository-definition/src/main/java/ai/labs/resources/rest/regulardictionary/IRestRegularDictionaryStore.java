@@ -1,7 +1,7 @@
 package ai.labs.resources.rest.regulardictionary;
 
+import ai.labs.models.DocumentDescriptor;
 import ai.labs.resources.rest.IRestVersionInfo;
-import ai.labs.resources.rest.documentdescriptor.model.DocumentDescriptor;
 import ai.labs.resources.rest.method.PATCH;
 import ai.labs.resources.rest.patch.PatchInstruction;
 import ai.labs.resources.rest.regulardictionary.model.RegularDictionaryConfiguration;

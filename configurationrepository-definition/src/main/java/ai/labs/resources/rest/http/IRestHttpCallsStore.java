@@ -1,7 +1,7 @@
 package ai.labs.resources.rest.http;
 
+import ai.labs.models.DocumentDescriptor;
 import ai.labs.resources.rest.IRestVersionInfo;
-import ai.labs.resources.rest.documentdescriptor.model.DocumentDescriptor;
 import ai.labs.resources.rest.http.model.HttpCallsConfiguration;
 import io.swagger.annotations.Api;
 import io.swagger.annotations.ApiParam;

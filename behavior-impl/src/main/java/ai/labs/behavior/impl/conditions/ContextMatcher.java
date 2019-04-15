@@ -66,41 +66,41 @@ public class ContextMatcher implements IBehaviorCondition {
     }
 
     @Override
-    public Map<String, String> getValues() {
-        HashMap<String, String> result = new HashMap<>();
-        result.put(contextKeyQualifier, contextKey);
-        result.put(contextTypeQualifier, contextType);
+    public Map<String, String> getConfigs() {
+        HashMap<String, String> configs = new HashMap<>();
+        configs.put(contextKeyQualifier, contextKey);
+        configs.put(contextTypeQualifier, contextType);
         if (expressions != null) {
-            result.put(expressionsQualifier, StringUtilities.joinStrings(",", expressions));
+            configs.put(expressionsQualifier, StringUtilities.joinStrings(",", expressions));
         }
 
         if (object != null) {
-            result.put(objectKeyPathQualifier, object.objectKeyPath);
-            result.put(objectValueQualifier, object.objectValue);
+            configs.put(objectKeyPathQualifier, object.objectKeyPath);
+            configs.put(objectValueQualifier, object.objectValue);
         }
 
         if (string != null) {
-            result.put(stringQualifier, string);
+            configs.put(stringQualifier, string);
         }
 
-        return result;
+        return configs;
     }
 
     @Override
-    public void setValues(Map<String, String> values) {
-        if (values != null && !values.isEmpty()) {
-            if (values.containsKey(contextKeyQualifier)) {
-                contextKey = values.get(contextKeyQualifier);
+    public void setConfigs(Map<String, String> configs) {
+        if (configs != null && !configs.isEmpty()) {
+            if (configs.containsKey(contextKeyQualifier)) {
+                contextKey = configs.get(contextKeyQualifier);
             }
 
-            if (values.containsKey(contextTypeQualifier)) {
-                contextType = values.get(contextTypeQualifier);
-                if (values.get(contextTypeQualifier).equals(expressionsQualifier)) {
-                    expressions = expressionProvider.parseExpressions(values.get(expressionsQualifier));
-                } else if (values.get(contextTypeQualifier).equals(objectQualifier)) {
-                    object = new ObjectValue(values.get(objectKeyPathQualifier), values.get(objectValueQualifier));
+            if (configs.containsKey(contextTypeQualifier)) {
+                contextType = configs.get(contextTypeQualifier);
+                if (configs.get(contextTypeQualifier).equals(expressionsQualifier)) {
+                    expressions = expressionProvider.parseExpressions(configs.get(expressionsQualifier));
+                } else if (configs.get(contextTypeQualifier).equals(objectQualifier)) {
+                    object = new ObjectValue(configs.get(objectKeyPathQualifier), configs.get(objectValueQualifier));
                 } else {
-                    string = values.get(stringQualifier);
+                    string = configs.get(stringQualifier);
                 }
             }
         }
@@ -165,7 +165,7 @@ public class ContextMatcher implements IBehaviorCondition {
     @Override
     public IBehaviorCondition clone() {
         IBehaviorCondition clone = new ContextMatcher(expressionProvider, jsonSerialization);
-        clone.setValues(getValues());
+        clone.setConfigs(getConfigs());
         return clone;
     }
 

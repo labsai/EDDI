@@ -1,7 +1,7 @@
 package ai.labs.resources.rest.parser;
 
+import ai.labs.models.DocumentDescriptor;
 import ai.labs.resources.rest.IRestVersionInfo;
-import ai.labs.resources.rest.documentdescriptor.model.DocumentDescriptor;
 import ai.labs.resources.rest.parser.model.ParserConfiguration;
 import io.swagger.annotations.*;
 

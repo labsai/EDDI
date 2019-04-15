@@ -1,8 +1,8 @@
 package ai.labs.resources.rest.behavior;
 
+import ai.labs.models.DocumentDescriptor;
 import ai.labs.resources.rest.IRestVersionInfo;
 import ai.labs.resources.rest.behavior.model.BehaviorConfiguration;
-import ai.labs.resources.rest.documentdescriptor.model.DocumentDescriptor;
 import io.swagger.annotations.*;
 
 import javax.ws.rs.*;

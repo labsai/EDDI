@@ -46,7 +46,7 @@ public class InputMatcherTest extends BaseMatcherTest {
         values.put(KEY_EXPRESSIONS, expressionsValue);
 
         //test
-        matcher.setValues(values);
+        matcher.setConfigs(values);
 
         //assert
         Assert.assertEquals(expectedExpressions, ((InputMatcher) matcher).getExpressions());
@@ -58,7 +58,7 @@ public class InputMatcherTest extends BaseMatcherTest {
         Map<String, String> values = new HashMap<>();
         values.put(KEY_EXPRESSIONS, expressionsValue);
         values.put(KEY_OCCURRENCE, ConversationStepOccurrence.currentStep.toString());
-        matcher.setValues(values);
+        matcher.setConfigs(values);
         IConversationMemory memory = mock(IConversationMemory.class);
         IWritableConversationStep currentConversationStep = mock(IWritableConversationStep.class);
         when(currentConversationStep.getLatestData(eq(KEY_EXPRESSIONS))).thenAnswer(invocation ->
@@ -86,7 +86,7 @@ public class InputMatcherTest extends BaseMatcherTest {
         Map<String, String> values = new HashMap<>();
         values.put(KEY_EXPRESSIONS, expressionsValue);
         values.put(KEY_OCCURRENCE, ConversationStepOccurrence.lastStep.toString());
-        matcher.setValues(values);
+        matcher.setConfigs(values);
         IConversationMemory memory = mock(IConversationMemory.class);
         IConversationStep previousConversationStep = mock(IConversationStep.class);
         when(previousConversationStep.getLatestData(eq(KEY_EXPRESSIONS))).thenAnswer(invocation ->
@@ -115,7 +115,7 @@ public class InputMatcherTest extends BaseMatcherTest {
         Map<String, String> values = new HashMap<>();
         values.put(KEY_EXPRESSIONS, expressionsValue);
         values.put(KEY_OCCURRENCE, ConversationStepOccurrence.anyStep.toString());
-        matcher.setValues(values);
+        matcher.setConfigs(values);
         IConversationMemory memory = mock(IConversationMemory.class);
         IConversationStep previousConversationStep1 = mock(IConversationStep.class);
         IConversationStep previousConversationStep2 = mock(IConversationStep.class);
@@ -158,7 +158,7 @@ public class InputMatcherTest extends BaseMatcherTest {
                         Collections.singletonList(
                                 new Expression("nonMatchingExpression",
                                         new Value("nonMatchingValue"))));
-        matcher.setValues(values);
+        matcher.setConfigs(values);
 
         when(expressionProvider.parseExpressions(eq("someNonMatchingExpression"))).
                 thenAnswer(invocation ->

@@ -42,7 +42,7 @@ public class ContextMatcherTest {
         final HashMap<String, String> expected = setupValuesWithExpressions();
 
         //test
-        Map<String, String> actual = contextMatcher.getValues();
+        Map<String, String> actual = contextMatcher.getConfigs();
 
         //assert
         Assert.assertEquals(expected, actual);
@@ -60,7 +60,7 @@ public class ContextMatcherTest {
             ret.add(new Expression("anotherExpression", new Expression("test1")));
             return ret;
         });
-        contextMatcher.setValues(expected);
+        contextMatcher.setConfigs(expected);
         return expected;
     }
 
@@ -70,7 +70,7 @@ public class ContextMatcherTest {
         final HashMap<String, String> expected = setupValuesWithObject(true);
 
         //test
-        Map<String, String> actual = contextMatcher.getValues();
+        Map<String, String> actual = contextMatcher.getConfigs();
 
         //assert
         Assert.assertEquals(expected, actual);
@@ -86,7 +86,7 @@ public class ContextMatcherTest {
             final String objectValue = "John";
             expected.put("objectValue", objectValue);
         }
-        contextMatcher.setValues(expected);
+        contextMatcher.setConfigs(expected);
         return expected;
     }
 
@@ -96,7 +96,7 @@ public class ContextMatcherTest {
         final HashMap<String, String> expected = setupValuesWithString();
 
         //test
-        Map<String, String> actual = contextMatcher.getValues();
+        Map<String, String> actual = contextMatcher.getConfigs();
 
         //assert
         Assert.assertEquals(expected, actual);
@@ -107,7 +107,7 @@ public class ContextMatcherTest {
         expected.put("contextKey", "someContextKey");
         expected.put("contextType", ContextMatcher.ContextType.string.toString());
         expected.put("string", "someString");
-        contextMatcher.setValues(expected);
+        contextMatcher.setConfigs(expected);
         return expected;
     }
 

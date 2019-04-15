@@ -54,8 +54,8 @@ public class ZipArchive implements IZipArchive {
     private static void addToZip(File directoryToZip, File file, ZipOutputStream zos) throws IOException {
         FileInputStream fis = new FileInputStream(file);
 
-        String zipFilePath = file.getCanonicalPath().substring(directoryToZip.getCanonicalPath().length() + 1,
-                file.getCanonicalPath().length()).replace('\\', '/');
+        String zipFilePath = file.getCanonicalPath().
+                substring(directoryToZip.getCanonicalPath().length() + 1).replace('\\', '/');
         ZipEntry zipEntry = new ZipEntry(zipFilePath);
         zos.putNextEntry(zipEntry);
 

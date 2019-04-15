@@ -1,10 +1,10 @@
 package ai.labs.resources.impl.packages.mongo;
 
+import ai.labs.models.DocumentDescriptor;
 import ai.labs.persistence.mongo.HistorizedResourceStore;
 import ai.labs.persistence.mongo.MongoResourceStorage;
 import ai.labs.resources.impl.utilities.ResourceUtilities;
 import ai.labs.resources.rest.documentdescriptor.IDocumentDescriptorStore;
-import ai.labs.resources.rest.documentdescriptor.model.DocumentDescriptor;
 import ai.labs.resources.rest.packages.IPackageStore;
 import ai.labs.resources.rest.packages.model.PackageConfiguration;
 import ai.labs.serialization.IDocumentBuilder;

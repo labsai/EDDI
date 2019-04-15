@@ -39,7 +39,7 @@ public class ActionMatcherTest extends BaseMatcherTest {
         values.put(KEY_ACTIONS, actionsValue);
 
         //test
-        matcher.setValues(values);
+        matcher.setConfigs(values);
 
         //assert
         Assert.assertEquals(expectedActions, ((ActionMatcher) matcher).getActions());
@@ -51,7 +51,7 @@ public class ActionMatcherTest extends BaseMatcherTest {
         Map<String, String> values = new HashMap<>();
         values.put(KEY_ACTIONS, actionsValue);
         values.put(KEY_OCCURRENCE, ConversationStepOccurrence.currentStep.toString());
-        matcher.setValues(values);
+        matcher.setConfigs(values);
         IConversationMemory memory = mock(IConversationMemory.class);
         IWritableConversationStep currentConversationStep = mock(IWritableConversationStep.class);
         when(currentConversationStep.getLatestData(eq(KEY_ACTIONS))).thenAnswer(invocation ->
@@ -74,7 +74,7 @@ public class ActionMatcherTest extends BaseMatcherTest {
         Map<String, String> values = new HashMap<>();
         values.put(KEY_ACTIONS, actionsValue);
         values.put(KEY_OCCURRENCE, ConversationStepOccurrence.lastStep.toString());
-        matcher.setValues(values);
+        matcher.setConfigs(values);
         IConversationMemory memory = mock(IConversationMemory.class);
         IConversationStep previousConversationStep = mock(IConversationStep.class);
         when(previousConversationStep.getLatestData(eq(KEY_ACTIONS))).thenAnswer(invocation ->
@@ -98,7 +98,7 @@ public class ActionMatcherTest extends BaseMatcherTest {
         Map<String, String> values = new HashMap<>();
         values.put(KEY_ACTIONS, actionsValue);
         values.put(KEY_OCCURRENCE, ConversationStepOccurrence.anyStep.toString());
-        matcher.setValues(values);
+        matcher.setConfigs(values);
         IConversationMemory memory = mock(IConversationMemory.class);
         IConversationStep previousConversationStep1 = mock(IConversationStep.class);
         IConversationStep previousConversationStep2 = mock(IConversationStep.class);
@@ -131,7 +131,7 @@ public class ActionMatcherTest extends BaseMatcherTest {
         IConversationMemory memory = mock(IConversationMemory.class);
         IConversationStep previousConversationStep1 = mock(IConversationStep.class);
         IConversationStep previousConversationStep2 = mock(IConversationStep.class);
-        matcher.setValues(values);
+        matcher.setConfigs(values);
 
         when(previousConversationStep1.getLatestData(eq(KEY_ACTIONS))).thenAnswer(invocation ->
                 new Data<>(KEY_ACTIONS, Collections.singletonList("someNonMatchingAction")));

@@ -40,17 +40,17 @@ public class Connector implements IBehaviorCondition {
     }
 
     @Override
-    public Map<String, String> getValues() {
-        Map<String, String> values = new HashMap<>();
-        values.put(operatorQualifier, operator.name());
-        return values;
+    public Map<String, String> getConfigs() {
+        Map<String, String> configs = new HashMap<>();
+        configs.put(operatorQualifier, operator.name());
+        return configs;
     }
 
     @Override
-    public void setValues(Map<String, String> values) {
-        if (values != null && !values.isEmpty()) {
-            if (values.containsKey(operatorQualifier)) {
-                String operator = values.get(operatorQualifier);
+    public void setConfigs(Map<String, String> configs) {
+        if (configs != null && !configs.isEmpty()) {
+            if (configs.containsKey(operatorQualifier)) {
+                String operator = configs.get(operatorQualifier);
                 if (operator.equals(Operator.AND.name())) {
                     this.operator = Operator.AND;
                 } else {
@@ -113,7 +113,7 @@ public class Connector implements IBehaviorCondition {
         }
 
         clone.setConditions(conditionClone);
-        clone.setValues(getValues());
+        clone.setConfigs(getConfigs());
 
         return clone;
     }

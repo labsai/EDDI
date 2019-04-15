@@ -1,7 +1,6 @@
-package ai.labs.resources.rest.documentdescriptor.model;
+package ai.labs.models;
 
 
-import ai.labs.resources.rest.model.ResourceDescriptor;
 import lombok.Getter;
 import lombok.Setter;
 

@@ -1,10 +1,10 @@
 package ai.labs.resources.impl.packages.rest;
 
+import ai.labs.models.DocumentDescriptor;
 import ai.labs.persistence.IResourceStore;
 import ai.labs.resources.impl.resources.rest.RestVersionInfo;
 import ai.labs.resources.impl.utilities.ResourceUtilities;
 import ai.labs.resources.rest.documentdescriptor.IDocumentDescriptorStore;
-import ai.labs.resources.rest.documentdescriptor.model.DocumentDescriptor;
 import ai.labs.resources.rest.packages.IPackageStore;
 import ai.labs.resources.rest.packages.IRestPackageStore;
 import ai.labs.resources.rest.packages.model.PackageConfiguration;

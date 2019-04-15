@@ -16,11 +16,11 @@ public interface IBehaviorCondition extends Cloneable {
 
     String getId();
 
-    default Map<String, String> getValues() {
+    default Map<String, String> getConfigs() {
         return Collections.emptyMap();
     }
 
-    default void setValues(Map<String, String> values) {
+    default void setConfigs(Map<String, String> configs) {
         // not implemented
     }
 

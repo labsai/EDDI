@@ -2,12 +2,12 @@ package ai.labs.resources.impl.interceptors;
 
 import ai.labs.memory.descriptor.IConversationDescriptorStore;
 import ai.labs.memory.descriptor.model.ConversationDescriptor;
+import ai.labs.models.DocumentDescriptor;
+import ai.labs.models.ResourceDescriptor;
 import ai.labs.persistence.IDescriptorStore;
 import ai.labs.persistence.IResourceStore;
 import ai.labs.resources.rest.documentdescriptor.IDocumentDescriptorStore;
-import ai.labs.resources.rest.documentdescriptor.model.DocumentDescriptor;
 import ai.labs.resources.rest.method.PATCH;
-import ai.labs.resources.rest.model.ResourceDescriptor;
 import ai.labs.runtime.DependencyInjector;
 import ai.labs.runtime.ThreadContext;
 import ai.labs.testing.descriptor.ITestCaseDescriptorStore;
