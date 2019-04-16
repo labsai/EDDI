@@ -5,16 +5,16 @@ eddi.environments = ['unrestricted', 'restricted', 'test'];
 eddi.deployExampleBots = function () {
     $('#no-bots-deployed').html('Deploying Bots...');
     let deploymentStatuses = IRestImportService.importBotExamples();
-    eddi.addBotDeployments(deploymentStatuses);
+    eddi.addBotDeployments(eddi.environments[0], deploymentStatuses);
 };
 
-eddi.addBotDeployments = function (deploymentStatuses) {
+eddi.addBotDeployments = function (environment, deploymentStatuses) {
     let $card = $('#card-1');
     let $bot = '';
     for (let i = 0; i < deploymentStatuses.length; i++) {
         $('#no-bots-deployed').remove();
         let deploymentStatus = deploymentStatuses[i];
-        let link = REST.apiURL + '/chat' + '/' + eddi.environment + '/' + deploymentStatus.botId;
+        let link = REST.apiURL + '/chat' + '/' + environment + '/' + deploymentStatus.botId;
 
         let description = deploymentStatus.descriptor.description;
         let name = deploymentStatus.descriptor.name;
@@ -38,8 +38,8 @@ eddi.addBotDeployments = function (deploymentStatuses) {
 
 $(function () {
     for (let n = 0; n < eddi.environments.length; n++) {
-        eddi.environment = eddi.environments[n];
-        let deploymentStatuses = IRestBotAdministration.getDeploymentStatuses({environment: eddi.environment});
-        eddi.addBotDeployments(deploymentStatuses);
+        let environment = eddi.environments[n];
+        let deploymentStatuses = IRestBotAdministration.getDeploymentStatuses({environment: environment});
+        eddi.addBotDeployments(environment, deploymentStatuses);
     }
 });
