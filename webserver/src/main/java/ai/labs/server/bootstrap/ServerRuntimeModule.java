@@ -70,7 +70,8 @@ public class ServerRuntimeModule extends AbstractBaseModule {
                                                SwaggerServletContextListener swaggerContextListener,
                                                ThreadPoolExecutor threadPoolExecutor,
                                                HttpServletDispatcher httpServletDispatcher,
-                                               MongoLoginService mongoLoginService)
+                                               MongoLoginService mongoLoginService,
+                                               AdapterConfig keycloakAdapterConfig)
             throws ClassNotFoundException {
 
         ServerRuntime.Options options = new ServerRuntime.Options();
@@ -99,7 +100,7 @@ public class ServerRuntimeModule extends AbstractBaseModule {
         }
 
         return new ServerRuntime(options, contextListener, swaggerContextListener, httpServletDispatcher,
-                securityHandler, threadPoolExecutor, mongoLoginService, environment, resourceDir);
+                securityHandler, threadPoolExecutor, mongoLoginService, keycloakAdapterConfig, environment, resourceDir);
     }
 
     @Provides
@@ -139,14 +140,14 @@ public class ServerRuntimeModule extends AbstractBaseModule {
                                                                          @Named("webserver.keycloak.authServerUrl") String authServerUrl,
                                                                          @Named("webserver.keycloak.sslRequired") String sslRequired,
                                                                          @Named("webserver.keycloak.resource") String resource,
-                                                                         @Named("webserver.keycloak.publicClient") Boolean publicClient) {
+                                                                         @Named("webserver.keycloak.publicClient") Boolean publicClient,
+                                                                         AdapterConfig keycloakAdapterConfig) {
         // Standard Login
         var securityHandler = new KeycloakSecurityHandler();
         setupSecurityHandler(securityHandler, publicAccessPaths, admin, user);
 
         // Keycloak
         var keycloakAuthenticator = new KeycloakJettyAuthenticator();
-        AdapterConfig keycloakAdapterConfig = new AdapterConfig();
         keycloakAdapterConfig.setRealm(realm);
         keycloakAdapterConfig.setRealmKey(realmKey);
         keycloakAdapterConfig.setAuthServerUrl(authServerUrl);
@@ -160,9 +161,14 @@ public class ServerRuntimeModule extends AbstractBaseModule {
         return securityHandler;
     }
 
-    private SecurityHandler setupSecurityHandler(ConstraintSecurityHandler securityHandler,
-                                                 String publicAccessPaths, String admin, String user) {
+    @Provides
+    @Singleton
+    private AdapterConfig provideAdapterConfig() {
+        return new AdapterConfig();
+    }
 
+    private void setupSecurityHandler(ConstraintSecurityHandler securityHandler,
+                                      String publicAccessPaths, String admin, String user) {
 
         securityHandler.addRole(admin);
         securityHandler.addRole(user);
@@ -187,14 +193,13 @@ public class ServerRuntimeModule extends AbstractBaseModule {
             mapping.setPathSpec(path.trim());
             securityHandler.addConstraintMapping(mapping);
         }
-        return securityHandler;
     }
 
     private static class BasicSecurityHandler extends ConstraintSecurityHandler {
-
+        //for reflection purpose
     }
 
     private static class KeycloakSecurityHandler extends ConstraintSecurityHandler {
-
+        //for reflection purpose
     }
 }

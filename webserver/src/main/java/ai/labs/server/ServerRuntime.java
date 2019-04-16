@@ -6,6 +6,7 @@ import ai.labs.utilities.FileUtilities;
 import lombok.AllArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.eclipse.jetty.alpn.server.ALPNServerConnectionFactory;
+import org.eclipse.jetty.http.HttpURI;
 import org.eclipse.jetty.http2.HTTP2Cipher;
 import org.eclipse.jetty.http2.server.HTTP2ServerConnectionFactory;
 import org.eclipse.jetty.security.LoginService;
@@ -25,12 +26,16 @@ import org.jboss.resteasy.plugins.guice.GuiceResteasyBootstrapServletContextList
 import org.jboss.resteasy.plugins.providers.RegisterBuiltin;
 import org.jboss.resteasy.plugins.server.servlet.HttpServletDispatcher;
 import org.jboss.resteasy.spi.ResteasyProviderFactory;
+import org.keycloak.adapters.KeycloakDeploymentBuilder;
+import org.keycloak.adapters.servlet.KeycloakOIDCFilter;
+import org.keycloak.representations.adapters.config.AdapterConfig;
 import ro.isdc.wro.http.WroFilter;
 
 import javax.inject.Named;
 import javax.inject.Singleton;
 import javax.servlet.*;
 import javax.servlet.http.HttpServletRequest;
+import javax.servlet.http.HttpServletRequestWrapper;
 import javax.servlet.http.HttpServletResponse;
 import java.io.IOException;
 import java.net.MalformedURLException;
@@ -73,6 +78,7 @@ public class ServerRuntime implements IServerRuntime {
     private final SecurityHandler securityHandler;
     private final ThreadPoolExecutor threadPoolExecutor;
     private final MongoLoginService mongoLoginService;
+    private final AdapterConfig keycloakAdapterConfig;
     private final String environment;
     private final String resourceDir;
 
@@ -83,6 +89,7 @@ public class ServerRuntime implements IServerRuntime {
                          SecurityHandler securityHandler,
                          ThreadPoolExecutor threadPoolExecutor,
                          MongoLoginService mongoLoginService,
+                         AdapterConfig keycloakAdapterConfig,
                          @Named("system.environment") String environment,
                          @Named("systemRuntime.resourceDir") String resourceDir) {
         this.options = options;
@@ -92,6 +99,7 @@ public class ServerRuntime implements IServerRuntime {
         this.securityHandler = securityHandler;
         this.threadPoolExecutor = threadPoolExecutor;
         this.mongoLoginService = mongoLoginService;
+        this.keycloakAdapterConfig = keycloakAdapterConfig;
         this.environment = environment;
         this.resourceDir = resourceDir;
         RegisterBuiltin.register(ResteasyProviderFactory.getInstance());
@@ -110,7 +118,10 @@ public class ServerRuntime implements IServerRuntime {
 
                     startupJetty(contextParameter,
                             Arrays.asList(resteasyContextListener, swaggerContextListener),
-                            Collections.singletonList(new FilterMappingHolder(new WroFilter(), "/text/*")),
+                            Arrays.asList(new FilterMappingHolder(
+                                            new KeycloakOIDCFilter(
+                                                    facade -> KeycloakDeploymentBuilder.build(keycloakAdapterConfig)), "/keycloak/*"),
+                                    new FilterMappingHolder(new WroFilter(), "/text/*")),
                             Arrays.asList(new HttpServletHolder(httpServletDispatcher, "/*"),
                                     new HttpServletHolder(new JSAPIServlet(), "/rest-js")),
                             FileUtilities.buildPath(System.getProperty("user.dir"), resourceDir));
@@ -286,9 +297,20 @@ public class ServerRuntime implements IServerRuntime {
 
             @Override
             public void doFilter(ServletRequest servletRequest, ServletResponse servletResponse, FilterChain filterChain) throws IOException, ServletException {
-                HttpServletRequest httpservletRequest = (HttpServletRequest) servletRequest;
-                URL requestURL = URI.create(httpservletRequest.getRequestURL().toString()).toURL();
-                String currentResourceURI = ((Request) httpservletRequest).getHttpURI().getPathQuery();
+                HttpURI httpURI;
+                String requestUrl;
+                if (servletRequest instanceof Request) {
+                    httpURI = ((Request) servletRequest).getHttpURI();
+                    requestUrl = ((Request) servletRequest).getRequestURL().toString();
+                } else {
+                    HttpServletRequest httpservletRequest = (HttpServletRequest) servletRequest;
+                    requestUrl = httpservletRequest.getRequestURL().toString();
+                    Request request = Request.getBaseRequest(((HttpServletRequestWrapper) httpservletRequest).getRequest());
+                    httpURI = request.getHttpURI();
+                }
+
+                URL requestURL = URI.create(requestUrl).toURL();
+                String currentResourceURI = httpURI.getPathQuery();
                 ThreadContext.put("currentResourceURI", currentResourceURI);
                 ThreadContext.put("currentURLProtocol", requestURL.getProtocol());
                 ThreadContext.put("currentURLHost", requestURL.getHost());

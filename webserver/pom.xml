@@ -123,6 +123,12 @@
             <artifactId>keycloak-jetty94-adapter</artifactId>
             <version>4.8.3.Final</version>
         </dependency>
+
+        <dependency>
+            <groupId>org.keycloak</groupId>
+            <artifactId>keycloak-servlet-filter-adapter</artifactId>
+            <version>4.8.3.Final</version>
+        </dependency>
     </dependencies>
 
     <properties>

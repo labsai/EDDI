@@ -37,6 +37,17 @@ eddi.addBotDeployments = function (environment, deploymentStatuses) {
 };
 
 $(function () {
+    $.ajax({
+        url: '/user/isAuthenticated', statusCode: {
+            200: function () {
+                $('#logoutBtn').prop('disabled', false);
+                $('#logoutBtn').prop('href', '/user/logout');
+                $('#logoutBtn').prop('onclick', '');
+                $('#logoutBtn').removeClass('disabled');
+            }
+        }
+    });
+
     for (let n = 0; n < eddi.environments.length; n++) {
         let environment = eddi.environments[n];
         let deploymentStatuses = IRestBotAdministration.getDeploymentStatuses({environment: environment});
