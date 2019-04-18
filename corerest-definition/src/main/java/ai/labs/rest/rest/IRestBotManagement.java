@@ -3,6 +3,7 @@ package ai.labs.rest.rest;
 import ai.labs.memory.model.SimpleConversationMemorySnapshot;
 import ai.labs.models.InputData;
 import io.swagger.annotations.Api;
+import io.swagger.annotations.ApiOperation;
 import io.swagger.annotations.ApiParam;
 
 import javax.ws.rs.*;
@@ -19,6 +20,7 @@ public interface IRestBotManagement {
     @GET
     @Path("/{intent}/{userId}")
     @Produces(MediaType.APPLICATION_JSON)
+    @ApiOperation(value = "Read conversation.")
     SimpleConversationMemorySnapshot loadConversationMemory(@PathParam("intent") String intent,
                                                             @PathParam("userId") String userId,
                                                             @ApiParam(name = "returnDetailed", format = "boolean", example = "false")
@@ -31,6 +33,7 @@ public interface IRestBotManagement {
     @Path("/{intent}/{userId}")
     @Consumes(MediaType.APPLICATION_JSON)
     @Produces(MediaType.APPLICATION_JSON)
+    @ApiOperation(value = "Talk to bot with context.")
     void sayWithinContext(@PathParam("intent") String intent,
                           @PathParam("userId") String userId,
                           @QueryParam("returnDetailed") @DefaultValue("false") Boolean returnDetailed,
@@ -41,5 +44,6 @@ public interface IRestBotManagement {
 
     @POST
     @Path("/{intent}/{userId}/endConversation")
+    @ApiOperation(value = "End conversation.")
     Response endCurrentConversation(@PathParam("intent") String intent, @PathParam("userId") String userId);
 }

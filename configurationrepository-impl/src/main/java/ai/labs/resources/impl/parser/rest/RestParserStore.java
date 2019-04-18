@@ -67,7 +67,7 @@ public class RestParserStore extends RestVersionInfo<ParserConfiguration> implem
     }
 
     @Override
-    public Response duplicateResource(String id, Integer version) {
+    public Response duplicateParser(String id, Integer version) {
         validateParameters(id, version);
         ParserConfiguration parserConfiguration = restParserStore.readParser(id, version);
         return restParserStore.createParser(parserConfiguration);

@@ -67,7 +67,7 @@ public class RestBehaviorStore extends RestVersionInfo<BehaviorConfiguration> im
     }
 
     @Override
-    public Response duplicateResource(String id, Integer version) {
+    public Response duplicateBehaviorRuleSet(String id, Integer version) {
         validateParameters(id, version);
         var behaviorConfiguration = restBehaviorStore.readBehaviorRuleSet(id, version);
         return restBehaviorStore.createBehaviorRuleSet(behaviorConfiguration);

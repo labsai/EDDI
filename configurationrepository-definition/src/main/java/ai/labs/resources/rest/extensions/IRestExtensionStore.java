@@ -2,6 +2,7 @@ package ai.labs.resources.rest.extensions;
 
 import ai.labs.resources.rest.extensions.model.ExtensionDescriptor;
 import io.swagger.annotations.Api;
+import io.swagger.annotations.ApiOperation;
 
 import javax.ws.rs.*;
 import javax.ws.rs.core.MediaType;
@@ -17,5 +18,6 @@ public interface IRestExtensionStore {
 
     @GET
     @Produces(MediaType.APPLICATION_JSON)
+    @ApiOperation(value = "Read extension descriptors.")
     List<ExtensionDescriptor> readExtensionDescriptors(@QueryParam("filter") @DefaultValue("") String filter);
 }

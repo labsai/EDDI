@@ -37,7 +37,7 @@ import java.security.Principal;
 @Slf4j
 public class PermissionResponseInterceptor implements ContainerResponseFilter {
     private static final String METHOD_NAME_CREATE_USER = "createUser";
-    private static final String METHOD_NAME_DUPLICATE_RESOURCE = "duplicateResource";
+    private static final String METHOD_NAME_DUPLICATE_RESOURCE = "duplicate";
     private static final String METHOD_NAME_START_CONVERSATION = "startConversation";
     private static final String METHOD_NAME_CREATE_TESTCASE = "createTestCase";
     private final IUserStore userStore;
@@ -72,7 +72,7 @@ public class PermissionResponseInterceptor implements ContainerResponseFilter {
                     //if the created resource is a user, we treat it differently
                     if (methodName.equals(METHOD_NAME_CREATE_USER)) {
                         permissionStore.createPermissions(respondedResourceId.getId(), PermissionUtilities.createDefaultPermissions(respondedResourceURI));
-                    } else if (!methodName.equals(METHOD_NAME_DUPLICATE_RESOURCE)) {
+                    } else if (!methodName.startsWith(METHOD_NAME_DUPLICATE_RESOURCE)) {
                         Principal userPrincipal = SecurityUtilities.getPrincipal(ThreadContext.getSubject());
                         URI userURI = UserUtilities.getUserURI(userStore, userPrincipal);
                         if (methodName.equals(METHOD_NAME_START_CONVERSATION)) {

@@ -120,7 +120,7 @@ public class RestRegularDictionaryStore extends RestVersionInfo<RegularDictionar
     }
 
     @Override
-    public Response duplicateResource(String id, Integer version) {
+    public Response duplicateRegularDictionary(String id, Integer version) {
         validateParameters(id, version);
         try {
             var regularDictionaryConfiguration = regularDictionaryStore.read(id, version);

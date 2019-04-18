@@ -2,6 +2,7 @@ package ai.labs.rest.rest;
 
 import ai.labs.models.Deployment;
 import io.swagger.annotations.Api;
+import io.swagger.annotations.ApiOperation;
 import io.swagger.annotations.ApiParam;
 
 import javax.ws.rs.*;
@@ -16,6 +17,7 @@ import javax.ws.rs.core.Response;
 public interface IRestBotAdministration {
     @POST
     @Path("/{environment}/deploy/{botId}")
+    @ApiOperation(value = "Deploy bot.")
     Response deployBot(@PathParam("environment") Deployment.Environment environment,
                        @PathParam("botId") String botId,
                        @ApiParam(name = "version", required = true, format = "integer", example = "1")
@@ -24,6 +26,7 @@ public interface IRestBotAdministration {
 
     @POST
     @Path("/{environment}/undeploy/{botId}")
+    @ApiOperation(value = "Undeploy bot.")
     Response undeployBot(@PathParam("environment") Deployment.Environment environment,
                          @PathParam("botId") String botId,
                          @ApiParam(name = "version", required = true, format = "integer", example = "1")
@@ -32,6 +35,7 @@ public interface IRestBotAdministration {
     @GET
     @Path("/{environment}/deploymentstatus/{botId}")
     @Produces(MediaType.TEXT_PLAIN)
+    @ApiOperation(value = "Get deployment status.")
     String getDeploymentStatus(@PathParam("environment") Deployment.Environment environment,
                                @PathParam("botId") String botId,
                                @ApiParam(name = "version", required = true, format = "integer", example = "1")

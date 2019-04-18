@@ -14,15 +14,12 @@ public interface IRestVersionInfo {
 
     @POST
     @Path("/{id}/currentversion")
+    @ApiOperation(value = "Redirect to latest version.")
     Response redirectToLatestVersion(@PathParam("id") String id);
 
     @GET
     @Path("/{id}/currentversion")
     @Produces(MediaType.TEXT_PLAIN)
+    @ApiOperation(value = "Get current version of this resource.")
     Integer getCurrentVersion(@PathParam("id") String id);
-
-    @POST
-    @Path("/{id}")
-    @ApiOperation(value = "Duplicate this resource.")
-    Response duplicateResource(@PathParam("id") String id, @QueryParam("version") Integer version);
 }

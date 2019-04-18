@@ -133,7 +133,7 @@ public class RestOutputStore extends RestVersionInfo<OutputConfigurationSet> imp
     }
 
     @Override
-    public Response duplicateResource(String id, Integer version) {
+    public Response duplicateOutputSet(String id, Integer version) {
         validateParameters(id, version);
         try {
             var outputConfigurationSet = outputStore.read(id, version);

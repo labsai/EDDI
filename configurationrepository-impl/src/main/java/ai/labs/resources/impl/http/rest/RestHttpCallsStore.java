@@ -67,7 +67,7 @@ public class RestHttpCallsStore extends RestVersionInfo<HttpCallsConfiguration> 
     }
 
     @Override
-    public Response duplicateResource(String id, Integer version) {
+    public Response duplicateHttpCalls(String id, Integer version) {
         validateParameters(id, version);
         HttpCallsConfiguration httpCallsConfiguration = restHttpCallsStore.readHttpCalls(id, version);
         return restHttpCallsStore.createHttpCalls(httpCallsConfiguration);
