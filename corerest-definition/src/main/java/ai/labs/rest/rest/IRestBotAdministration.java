@@ -21,9 +21,8 @@ import static ai.labs.models.Deployment.Environment;
 public interface IRestBotAdministration {
     @POST
     @Path("/{environment}/deploy/{botId}")
-    Response deployBot(@PathParam("environment") Environment environment,
     @ApiOperation(value = "Deploy bot.")
-    Response deployBot(@PathParam("environment") Deployment.Environment environment,
+    Response deployBot(@PathParam("environment") Environment environment,
                        @PathParam("botId") String botId,
                        @ApiParam(name = "version", required = true, format = "integer", example = "1")
                        @QueryParam("version") Integer version,
@@ -31,9 +30,8 @@ public interface IRestBotAdministration {
 
     @POST
     @Path("/{environment}/undeploy/{botId}")
-    Response undeployBot(@PathParam("environment") Environment environment,
     @ApiOperation(value = "Undeploy bot.")
-    Response undeployBot(@PathParam("environment") Deployment.Environment environment,
+    Response undeployBot(@PathParam("environment") Environment environment,
                          @PathParam("botId") String botId,
                          @ApiParam(name = "version", required = true, format = "integer", example = "1")
                          @QueryParam("version") Integer version);
@@ -42,9 +40,8 @@ public interface IRestBotAdministration {
     @NoCache
     @Path("/{environment}/deploymentstatus/{botId}")
     @Produces(MediaType.TEXT_PLAIN)
-    String getDeploymentStatus(@PathParam("environment") Environment environment,
     @ApiOperation(value = "Get deployment status.")
-    String getDeploymentStatus(@PathParam("environment") Deployment.Environment environment,
+    String getDeploymentStatus(@PathParam("environment") Environment environment,
                                @PathParam("botId") String botId,
                                @ApiParam(name = "version", required = true, format = "integer", example = "1")
                                @QueryParam("version") Integer version);

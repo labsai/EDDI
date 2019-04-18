@@ -5,8 +5,6 @@ import ai.labs.resources.rest.http.IRestHttpCallsStore;
 import ai.labs.resources.rest.output.IRestOutputStore;
 import ai.labs.resources.rest.parser.IRestParserStore;
 import ai.labs.resources.rest.regulardictionary.IRestRegularDictionaryStore;
-import ai.labs.rest.restinterfaces.IRestInterfaceFactory;
-import ai.labs.rest.restinterfaces.RestInterfaceFactory;
 import ai.labs.runtime.service.ServiceException;
 import ai.labs.utilities.RuntimeUtilities;
 import ai.labs.utilities.URIUtilities;
@@ -49,111 +47,61 @@ public class ResourceClientLibrary implements IResourceClientLibrary {
         this.restInterfaces = new HashMap<>();
         restInterfaces.put("ai.labs.parser", new IResourceService() {
             @Override
-            public Object read(String id, Integer version) throws ServiceException {
-                {
-                    try {
-                        return restParserStore.readParser(id, version);
-                    } catch (Exception e) {
-                        throw new ServiceException(e.getLocalizedMessage(), e);
-                    }
-                }
+            public Object read(String id, Integer version) {
+                return restParserStore.readParser(id, version);
             }
 
             @Override
-            public Response duplicate(String id, Integer version) throws ServiceException {
-                try {
-                    return restParserStore.duplicateParser(id, version);
-                } catch (RestInterfaceFactory.RestInterfaceFactoryException e) {
-                    throw new ServiceException(e.getLocalizedMessage(), e);
-                }
+            public Response duplicate(String id, Integer version) {
+                return restParserStore.duplicateParser(id, version);
             }
         });
 
         restInterfaces.put("ai.labs.regulardictionary", new IResourceService() {
             @Override
-            public Object read(String id, Integer version) throws ServiceException {
-                {
-                    try {
-                        return restRegularDictionaryStore.readRegularDictionary(id, version, "", "", 0, 0);
-                    } catch (Exception e) {
-                        throw new ServiceException(e.getLocalizedMessage(), e);
-                    }
-                }
+            public Object read(String id, Integer version) {
+                return restRegularDictionaryStore.readRegularDictionary(id, version, "", "", 0, 0);
             }
 
             @Override
-            public Response duplicate(String id, Integer version) throws ServiceException {
-                try {
-                    return restRegularDictionaryStore.duplicateRegularDictionary(id, version);
-                } catch (RestInterfaceFactory.RestInterfaceFactoryException e) {
-                    throw new ServiceException(e.getLocalizedMessage(), e);
-                }
+            public Response duplicate(String id, Integer version) {
+                return restRegularDictionaryStore.duplicateRegularDictionary(id, version);
             }
         });
 
         restInterfaces.put("ai.labs.behavior", new IResourceService() {
             @Override
-            public Object read(String id, Integer version) throws ServiceException {
-                {
-                    try {
-                        return restBehaviorStore.readBehaviorRuleSet(id, version);
-                    } catch (Exception e) {
-                        throw new ServiceException(e.getLocalizedMessage(), e);
-                    }
-                }
+            public Object read(String id, Integer version) {
+                return restBehaviorStore.readBehaviorRuleSet(id, version);
             }
 
             @Override
-            public Response duplicate(String id, Integer version) throws ServiceException {
-                try {
-                    return restBehaviorStore.duplicateBehaviorRuleSet(id, version);
-                } catch (RestInterfaceFactory.RestInterfaceFactoryException e) {
-                    throw new ServiceException(e.getLocalizedMessage(), e);
-                }
+            public Response duplicate(String id, Integer version) {
+                return restBehaviorStore.duplicateBehaviorRuleSet(id, version);
             }
         });
 
         restInterfaces.put("ai.labs.httpcalls", new IResourceService() {
             @Override
-            public Object read(String id, Integer version) throws ServiceException {
-                {
-                    try {
-                        return restHttpCallsStore.readHttpCalls(id, version);
-                    } catch (Exception e) {
-                        throw new ServiceException(e.getLocalizedMessage(), e);
-                    }
-                }
+            public Object read(String id, Integer version) {
+                return restHttpCallsStore.readHttpCalls(id, version);
             }
 
             @Override
-            public Response duplicate(String id, Integer version) throws ServiceException {
-                try {
-                    return restHttpCallsStore.duplicateHttpCalls(id, version);
-                } catch (RestInterfaceFactory.RestInterfaceFactoryException e) {
-                    throw new ServiceException(e.getLocalizedMessage(), e);
-                }
+            public Response duplicate(String id, Integer version) {
+                return restHttpCallsStore.duplicateHttpCalls(id, version);
             }
         });
 
         restInterfaces.put("ai.labs.output", new IResourceService() {
             @Override
-            public Object read(String id, Integer version) throws ServiceException {
-                {
-                    try {
-                        return restOutputStore.readOutputSet(id, version, "", "", 0, 0);
-                    } catch (Exception e) {
-                        throw new ServiceException(e.getLocalizedMessage(), e);
-                    }
-                }
+            public Object read(String id, Integer version) {
+                return restOutputStore.readOutputSet(id, version, "", "", 0, 0);
             }
 
             @Override
-            public Response duplicate(String id, Integer version) throws ServiceException {
-                try {
-                    return restOutputStore.duplicateOutputSet(id, version);
-                } catch (RestInterfaceFactory.RestInterfaceFactoryException e) {
-                    throw new ServiceException(e.getLocalizedMessage(), e);
-                }
+            public Response duplicate(String id, Integer version) {
+                return restOutputStore.duplicateOutputSet(id, version);
             }
         });
     }

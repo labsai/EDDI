@@ -335,7 +335,7 @@ public class RestImportService extends AbstractBackupService implements IRestImp
     }
 
     private <T> T getRestResourceStore(Class<T> clazz) throws RestInterfaceFactory.RestInterfaceFactoryException {
-        return restInterfaceFactory.get(clazz, apiServerURI);
+        return restInterfaceFactory.get(clazz);
     }
 
     private <T> List<T> readResources(List<URI> uris, Path packagePath, String extension, Class<T> clazz) {
