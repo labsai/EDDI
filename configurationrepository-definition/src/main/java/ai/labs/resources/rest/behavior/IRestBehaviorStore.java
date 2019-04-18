@@ -28,6 +28,7 @@ public interface IRestBehaviorStore extends IRestVersionInfo {
     @ApiResponse(code = 200, response = DocumentDescriptor.class, responseContainer = "List",
             message = "Array of DocumentDescriptors")
     @Produces(MediaType.APPLICATION_JSON)
+    @ApiOperation(value = "Read list of behavior descriptors.")
     List<DocumentDescriptor> readBehaviorDescriptors(@QueryParam("filter") @DefaultValue("") String filter,
                                                      @QueryParam("index") @DefaultValue("0") Integer index,
                                                      @QueryParam("limit") @DefaultValue("20") Integer limit);
@@ -35,6 +36,7 @@ public interface IRestBehaviorStore extends IRestVersionInfo {
     @GET
     @Path("/{id}")
     @Produces(MediaType.APPLICATION_JSON)
+    @ApiOperation(value = "Read behavior rule set.")
     BehaviorConfiguration readBehaviorRuleSet(@PathParam("id") String id,
                                               @ApiParam(name = "version", required = true, format = "integer", example = "1")
                                               @QueryParam("version") Integer version);
@@ -42,16 +44,24 @@ public interface IRestBehaviorStore extends IRestVersionInfo {
     @PUT
     @Path("/{id}")
     @Consumes(MediaType.APPLICATION_JSON)
+    @ApiOperation(value = "Update behavior rule set.")
     Response updateBehaviorRuleSet(@PathParam("id") String id,
                                    @ApiParam(name = "version", required = true, format = "integer", example = "1")
                                    @QueryParam("version") Integer version, BehaviorConfiguration behaviorConfiguration);
 
     @POST
     @Consumes(MediaType.APPLICATION_JSON)
+    @ApiOperation(value = "Create behavior rule set.")
     Response createBehaviorRuleSet(BehaviorConfiguration behaviorConfiguration);
+
+    @POST
+    @Path("/{id}")
+    @ApiOperation(value = "Duplicate this behavior rule set.")
+    Response duplicateBehaviorRuleSet(@PathParam("id") String id, @QueryParam("version") Integer version);
 
     @DELETE
     @Path("/{id}")
+    @ApiOperation(value = "Delete behavior rule set.")
     Response deleteBehaviorRuleSet(@PathParam("id") String id,
                                    @ApiParam(name = "version", required = true, format = "integer", example = "1")
                                    @QueryParam("version") Integer version);

@@ -126,7 +126,7 @@ public abstract class RestVersionInfo<T> implements IRestVersionInfo {
         }
     }
 
-    private Integer validateParameters(String id, Integer version) {
+    protected Integer validateParameters(String id, Integer version) {
         RuntimeUtilities.checkNotNull(id, "id");
         RuntimeUtilities.checkNotNull(version, "version");
         RuntimeUtilities.checkNotNegative(version, "version");

@@ -8,6 +8,8 @@ import ai.labs.resources.rest.patch.PatchInstruction;
 import ai.labs.resources.rest.regulardictionary.IRegularDictionaryStore;
 import ai.labs.resources.rest.regulardictionary.IRestRegularDictionaryStore;
 import ai.labs.resources.rest.regulardictionary.model.RegularDictionaryConfiguration;
+import ai.labs.rest.restinterfaces.IRestInterfaceFactory;
+import ai.labs.rest.restinterfaces.RestInterfaceFactory;
 import lombok.extern.slf4j.Slf4j;
 
 import javax.inject.Inject;
@@ -22,12 +24,24 @@ import java.util.List;
 @Slf4j
 public class RestRegularDictionaryStore extends RestVersionInfo<RegularDictionaryConfiguration> implements IRestRegularDictionaryStore {
     private final IRegularDictionaryStore regularDictionaryStore;
+    private IRestRegularDictionaryStore restRegularDictionaryStore;
 
     @Inject
     public RestRegularDictionaryStore(IRegularDictionaryStore regularDictionaryStore,
+                                      IRestInterfaceFactory restInterfaceFactory,
                                       IDocumentDescriptorStore documentDescriptorStore) {
         super(resourceURI, regularDictionaryStore, documentDescriptorStore);
         this.regularDictionaryStore = regularDictionaryStore;
+        initRestClient(restInterfaceFactory);
+    }
+
+    private void initRestClient(IRestInterfaceFactory restInterfaceFactory) {
+        try {
+            restRegularDictionaryStore = restInterfaceFactory.get(IRestRegularDictionaryStore.class);
+        } catch (RestInterfaceFactory.RestInterfaceFactoryException e) {
+            restRegularDictionaryStore = null;
+            log.error(e.getLocalizedMessage(), e);
+        }
     }
 
     @Override
@@ -103,6 +117,20 @@ public class RestRegularDictionaryStore extends RestVersionInfo<RegularDictionar
         }
 
         return currentRegularDictionaryConfiguration;
+    }
+
+    @Override
+    public Response duplicateRegularDictionary(String id, Integer version) {
+        validateParameters(id, version);
+        try {
+            var regularDictionaryConfiguration = regularDictionaryStore.read(id, version);
+            return restRegularDictionaryStore.createRegularDictionary(regularDictionaryConfiguration);
+        } catch (IResourceStore.ResourceNotFoundException e) {
+            throw new NotFoundException();
+        } catch (IResourceStore.ResourceStoreException e) {
+            log.error(e.getLocalizedMessage(), e);
+            throw new InternalServerErrorException();
+        }
     }
 
     @Override

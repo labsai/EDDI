@@ -26,7 +26,6 @@ import javax.ws.rs.container.ResourceInfo;
 import javax.ws.rs.core.Context;
 import javax.ws.rs.core.HttpHeaders;
 import javax.ws.rs.ext.Provider;
-import java.io.IOException;
 import java.net.URI;
 import java.security.Principal;
 
@@ -37,7 +36,8 @@ import java.security.Principal;
 @Provider
 @Slf4j
 public class PermissionResponseInterceptor implements ContainerResponseFilter {
-    public static final String METHOD_NAME_CREATE_USER = "createUser";
+    private static final String METHOD_NAME_CREATE_USER = "createUser";
+    private static final String METHOD_NAME_DUPLICATE_RESOURCE = "duplicate";
     private static final String METHOD_NAME_START_CONVERSATION = "startConversation";
     private static final String METHOD_NAME_CREATE_TESTCASE = "createTestCase";
     private final IUserStore userStore;
@@ -57,7 +57,7 @@ public class PermissionResponseInterceptor implements ContainerResponseFilter {
     }
 
     @Override
-    public void filter(ContainerRequestContext request, ContainerResponseContext response) throws IOException {
+    public void filter(ContainerRequestContext request, ContainerResponseContext response) {
         try {
             // it was most likely a CREATE request
             if (resourceInfo.getResourceMethod() != null && resourceInfo.getResourceMethod().isAnnotationPresent(POST.class)) {
@@ -72,7 +72,7 @@ public class PermissionResponseInterceptor implements ContainerResponseFilter {
                     //if the created resource is a user, we treat it differently
                     if (methodName.equals(METHOD_NAME_CREATE_USER)) {
                         permissionStore.createPermissions(respondedResourceId.getId(), PermissionUtilities.createDefaultPermissions(respondedResourceURI));
-                    } else {
+                    } else if (!methodName.startsWith(METHOD_NAME_DUPLICATE_RESOURCE)) {
                         Principal userPrincipal = SecurityUtilities.getPrincipal(ThreadContext.getSubject());
                         URI userURI = UserUtilities.getUserURI(userStore, userPrincipal);
                         if (methodName.equals(METHOD_NAME_START_CONVERSATION)) {

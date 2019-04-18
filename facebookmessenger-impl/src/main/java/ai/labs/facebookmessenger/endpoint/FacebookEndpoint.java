@@ -331,7 +331,7 @@ public class FacebookEndpoint implements IFacebookEndpoint {
             throws RestInterfaceFactoryException {
         String conversationId;
         try {
-            Response response = restInterfaceFactory.get(IRestBotEngine.class, apiServerURI).
+            Response response = restInterfaceFactory.get(IRestBotEngine.class).
                     startConversation(environment, botId, senderId);
             if (response.getStatus() == 201) {
                 URIUtilities.ResourceId resourceIdConversation =

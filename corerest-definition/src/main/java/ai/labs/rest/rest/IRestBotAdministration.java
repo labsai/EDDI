@@ -2,6 +2,7 @@ package ai.labs.rest.rest;
 
 import ai.labs.models.BotDeploymentStatus;
 import io.swagger.annotations.Api;
+import io.swagger.annotations.ApiOperation;
 import io.swagger.annotations.ApiParam;
 import org.jboss.resteasy.annotations.cache.NoCache;
 
@@ -21,6 +22,8 @@ public interface IRestBotAdministration {
     @POST
     @Path("/{environment}/deploy/{botId}")
     Response deployBot(@PathParam("environment") Environment environment,
+    @ApiOperation(value = "Deploy bot.")
+    Response deployBot(@PathParam("environment") Deployment.Environment environment,
                        @PathParam("botId") String botId,
                        @ApiParam(name = "version", required = true, format = "integer", example = "1")
                        @QueryParam("version") Integer version,
@@ -29,6 +32,8 @@ public interface IRestBotAdministration {
     @POST
     @Path("/{environment}/undeploy/{botId}")
     Response undeployBot(@PathParam("environment") Environment environment,
+    @ApiOperation(value = "Undeploy bot.")
+    Response undeployBot(@PathParam("environment") Deployment.Environment environment,
                          @PathParam("botId") String botId,
                          @ApiParam(name = "version", required = true, format = "integer", example = "1")
                          @QueryParam("version") Integer version);
@@ -38,6 +43,8 @@ public interface IRestBotAdministration {
     @Path("/{environment}/deploymentstatus/{botId}")
     @Produces(MediaType.TEXT_PLAIN)
     String getDeploymentStatus(@PathParam("environment") Environment environment,
+    @ApiOperation(value = "Get deployment status.")
+    String getDeploymentStatus(@PathParam("environment") Deployment.Environment environment,
                                @PathParam("botId") String botId,
                                @ApiParam(name = "version", required = true, format = "integer", example = "1")
                                @QueryParam("version") Integer version);

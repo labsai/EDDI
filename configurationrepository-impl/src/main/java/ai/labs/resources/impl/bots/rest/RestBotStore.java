@@ -10,7 +10,10 @@ import ai.labs.resources.rest.bots.IRestBotStore;
 import ai.labs.resources.rest.bots.model.BotConfiguration;
 import ai.labs.resources.rest.documentdescriptor.IDocumentDescriptorStore;
 import ai.labs.resources.rest.packages.IRestPackageStore;
+import ai.labs.rest.restinterfaces.IRestInterfaceFactory;
+import ai.labs.rest.restinterfaces.RestInterfaceFactory;
 import ai.labs.utilities.RestUtilities;
+import ai.labs.utilities.URIUtilities;
 import lombok.extern.slf4j.Slf4j;
 
 import javax.inject.Inject;
@@ -30,12 +33,27 @@ import static javax.ws.rs.core.Response.Status.BAD_REQUEST;
 public class RestBotStore extends RestVersionInfo<BotConfiguration> implements IRestBotStore {
     private static final String PACKAGE_URI = IRestPackageStore.resourceURI;
     private final IBotStore botStore;
+    private final IRestPackageStore restPackageStore;
+    private IRestBotStore restBotStore;
 
     @Inject
     public RestBotStore(IBotStore botStore,
+                        IRestPackageStore restPackageStore,
+                        IRestInterfaceFactory restInterfaceFactory,
                         IDocumentDescriptorStore documentDescriptorStore) {
         super(resourceURI, botStore, documentDescriptorStore);
         this.botStore = botStore;
+        this.restPackageStore = restPackageStore;
+        initRestClient(restInterfaceFactory);
+    }
+
+    private void initRestClient(IRestInterfaceFactory restInterfaceFactory) {
+        try {
+            restBotStore = restInterfaceFactory.get(IRestBotStore.class);
+        } catch (RestInterfaceFactory.RestInterfaceFactoryException e) {
+            restBotStore = null;
+            log.error(e.getLocalizedMessage(), e);
+        }
     }
 
     @Override
@@ -96,6 +114,25 @@ public class RestBotStore extends RestVersionInfo<BotConfiguration> implements I
     @Override
     public Response createBot(BotConfiguration botConfiguration) {
         return create(botConfiguration);
+    }
+
+    @Override
+    public Response duplicateBot(String id, Integer version, Boolean deepCopy) {
+        validateParameters(id, version);
+        BotConfiguration botConfiguration = restBotStore.readBot(id, version);
+        if (deepCopy) {
+            List<URI> packages = botConfiguration.getPackages();
+            for (int i = 0; i < packages.size(); i++) {
+                URI packageUri = packages.get(i);
+                URIUtilities.ResourceId resourceId = URIUtilities.extractResourceId(packageUri);
+                Response duplicateResourceResponse = restPackageStore.
+                        duplicatePackage(resourceId.getId(), resourceId.getVersion(), true);
+                URI newResourceLocation = duplicateResourceResponse.getLocation();
+                packages.set(i, newResourceLocation);
+            }
+        }
+
+        return restBotStore.createBot(botConfiguration);
     }
 
     @Override

@@ -29,6 +29,7 @@ public interface IRestRegularDictionaryStore extends IRestVersionInfo {
             @ApiImplicitParam(name = "limit", paramType = "query", dataType = "integer", format = "integer", example = "20")})
     @ApiResponse(code = 200, response = DocumentDescriptor.class, responseContainer = "List",
             message = "Array of DocumentDescriptors")
+    @ApiOperation(value = "Read list of regular dictionary descriptors.")
     List<DocumentDescriptor> readRegularDictionaryDescriptors(@QueryParam("filter") @DefaultValue("") String filter,
                                                               @QueryParam("index") @DefaultValue("0") Integer index,
                                                               @QueryParam("limit") @DefaultValue("20") Integer limit);
@@ -37,6 +38,7 @@ public interface IRestRegularDictionaryStore extends IRestVersionInfo {
     @Path("/{id}")
     @Produces(MediaType.APPLICATION_JSON)
     @ApiResponse(code = 200, response = RegularDictionaryConfiguration.class, message = "configuration of regular dictionary")
+    @ApiOperation(value = "Read regular dictionary.")
     RegularDictionaryConfiguration readRegularDictionary(@PathParam("id") String id,
                                                          @ApiParam(name = "version", required = true, format = "integer", example = "1")
                                                          @QueryParam("version") Integer version,
@@ -48,6 +50,7 @@ public interface IRestRegularDictionaryStore extends IRestVersionInfo {
     @GET
     @Path("/{id}/expressions")
     @Produces(MediaType.APPLICATION_JSON)
+    @ApiOperation(value = "Read expressions of regular dictionary.")
     List<String> readExpressions(@PathParam("id") String id,
                                  @ApiParam(name = "version", required = true, format = "integer", example = "1")
                                  @QueryParam("version") Integer version,
@@ -59,6 +62,7 @@ public interface IRestRegularDictionaryStore extends IRestVersionInfo {
     @PUT
     @Path("/{id}")
     @Consumes(MediaType.APPLICATION_JSON)
+    @ApiOperation(value = "Update regular dictionary.")
     Response updateRegularDictionary(@PathParam("id") String id,
                                      @ApiParam(name = "version", required = true, format = "integer", example = "1")
                                      @QueryParam("version") Integer version, RegularDictionaryConfiguration regularDictionaryConfiguration);
@@ -90,10 +94,17 @@ public interface IRestRegularDictionaryStore extends IRestVersionInfo {
 
     @POST
     @Consumes(MediaType.APPLICATION_JSON)
+    @ApiOperation(value = "Create regular dictionary.")
     Response createRegularDictionary(RegularDictionaryConfiguration regularDictionaryConfiguration);
+
+    @POST
+    @Path("/{id}")
+    @ApiOperation(value = "Duplicate regular dictionary.")
+    Response duplicateRegularDictionary(@PathParam("id") String id, @QueryParam("version") Integer version);
 
     @DELETE
     @Path("/{id}")
+    @ApiOperation(value = "Delete regular dictionary.")
     Response deleteRegularDictionary(@PathParam("id") String id,
                                      @ApiParam(name = "version", required = true, format = "integer", example = "1")
                                      @QueryParam("version") Integer version);
@@ -101,6 +112,7 @@ public interface IRestRegularDictionaryStore extends IRestVersionInfo {
     @PATCH
     @Path("/{id}")
     @Consumes(MediaType.APPLICATION_JSON)
+    @ApiOperation(value = "Partial update regular dictionary.")
     Response patchRegularDictionary(@PathParam("id") String id,
                                     @ApiParam(name = "version", required = true, format = "integer", example = "1")
                                     @QueryParam("version") Integer version, PatchInstruction<RegularDictionaryConfiguration>[] patchInstructions);
