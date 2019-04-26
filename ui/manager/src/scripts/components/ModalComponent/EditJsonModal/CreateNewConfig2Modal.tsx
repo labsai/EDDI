@@ -13,8 +13,10 @@ import { getPostExample } from '../../utils/EddiConfigExampleData';
 import * as _ from 'lodash';
 import JsonErrors from './JsonErrors';
 import { DICTIONARY_SCHEMA } from '../../utils/JsonSchemas/JsonSchemas';
-import { compileJsonSchema } from '../../utils/helpers/JsonHelpers';
+import { compileJsonSchema, IJsonError } from '../../utils/helpers/JsonHelpers';
+import * as AE from 'react-ace';
 import * as Ajv from 'ajv';
+import * as Jsm from 'json-source-map';
 
 require('brace/mode/json');
 require('brace/theme/monokai');
@@ -23,7 +25,7 @@ interface IState {
   editorText: string;
   initialEditorText: string;
   showExample: boolean;
-  errors: Ajv.ErrorObject[];
+  errors: IJsonError[];
 }
 
 interface IProps {
@@ -47,6 +49,7 @@ class CreateNewConfig2Modal extends React.Component<IProps, IState> {
 
   componentDidMount() {
     this.discardChanges();
+    // const editor: AE.AceEditor = this.refs.ace['editor'];
   }
 
   componentWillReceiveProps(nextProps) {
@@ -83,7 +86,6 @@ class CreateNewConfig2Modal extends React.Component<IProps, IState> {
   }
 
   createNew = () => {
-    console.log(this.validateJson());
     if (this.validateJson()) {
       eddiApiActionDispatchers.createNewConfigAction(
         this.props.type,
@@ -112,10 +114,7 @@ class CreateNewConfig2Modal extends React.Component<IProps, IState> {
   };
 
   validateJson(): boolean {
-    const errors = compileJsonSchema(
-      DICTIONARY_SCHEMA,
-      JSON.parse(this.state.editorText),
-    );
+    const errors = compileJsonSchema(DICTIONARY_SCHEMA, this.state.editorText);
     this.setState({
       errors,
     });
@@ -124,6 +123,13 @@ class CreateNewConfig2Modal extends React.Component<IProps, IState> {
 
   render() {
     const typeName = Parser.getPluginName(this.props.type, false);
+    const test: AE.AceEditorProps = this.refs.ace;
+    console.log(test);
+    if (!_.isUndefined(test)) {
+      console.log(test['editor']);
+      console.log(test.editorProps);
+      console.log(test);
+    }
     return (
       <div>
         <div style={styles.modalHeader}>
@@ -169,12 +175,25 @@ class CreateNewConfig2Modal extends React.Component<IProps, IState> {
           </div>
         ))}
         <AceEditor
+          ref={'ace'}
           mode={'json'}
           height={'800px'}
           width={'100%'}
           name={'OutputJson'}
           theme={'monokai'}
           highlightActiveLine={true}
+          annotations={
+            _.isEmpty(this.state.errors)
+              ? null
+              : this.state.errors.map(err => {
+                  return {
+                    row: err.line,
+                    column: 1,
+                    type: 'error',
+                    text: err.message,
+                  };
+                })
+          }
           showGutter={true}
           showPrintMargin={false}
           focus={true}

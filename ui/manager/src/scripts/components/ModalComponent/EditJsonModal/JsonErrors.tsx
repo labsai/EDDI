@@ -11,6 +11,7 @@ import {
 } from '../../../../styles/DefaultStylingProperties';
 import { CSSProperties } from 'react';
 import * as Ajv from 'ajv';
+import { IJsonError } from '../../utils/helpers/JsonHelpers';
 
 const warningIcon = require('../../../../public/images/WarningIcon@3x.png');
 
@@ -50,7 +51,7 @@ const styles: CSSProperties = {
 };
 
 interface IProps {
-  errors: Ajv.ErrorObject[];
+  errors: IJsonError[];
 }
 
 class JsonErrors extends React.Component<IProps> {
@@ -64,17 +65,16 @@ class JsonErrors extends React.Component<IProps> {
           } Error(s):`}</div>
         </div>
         <div>
-          {this.props.errors.map(error => (
-            <div style={styles.errorContainer}>
+          {this.props.errors.map((error, i) => (
+            <div style={styles.errorContainer} key={i}>
               <div style={styles.error}>
-                <div style={styles.key}>{'Message:'}</div>
-                <div style={styles.errorMessage}>{`${error.message}`}</div>
+                <div style={styles.key}>{'Location:'}</div>
+                <div style={styles.errorMessage}>{`ERROR at line: ${error.line +
+                  1}`}</div>
               </div>
               <div style={styles.error}>
-                <div style={styles.key}>{'Schema path:'}</div>
-                <div style={styles.errorSchemaPath}>{`${
-                  error.schemaPath
-                }`}</div>
+                <div style={styles.key}>{'Message:'}</div>
+                <div style={styles.errorSchemaPath}>{`${error.message}`}</div>
               </div>
             </div>
           ))}

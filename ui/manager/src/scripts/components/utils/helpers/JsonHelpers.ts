@@ -8,6 +8,8 @@ import {
 } from '../AxiosFunctions';
 import { DICTIONARY_SCHEMA } from '../JsonSchemas/JsonSchemas';
 import * as Ajv from 'ajv';
+import * as Jsm from 'json-source-map';
+import * as _ from 'lodash';
 
 export async function postJsonHelper(
   url: string,
@@ -56,13 +58,42 @@ export function mapDataToDetailedDescriptors(
   return detailedDescriptors;
 }
 
-export function compileJsonSchema(schema: {}, data: {}): Ajv.ErrorObject[] {
+export interface IJsonError {
+  message: string;
+  line: number;
+}
+
+function formatKeyPath(path: string): string {
+  let key = path
+    .split('.')
+    .join('/')
+    .split('[')
+    .join('/')
+    .split(']')
+    .join('');
+  console.log(key);
+  return key;
+}
+
+export function compileJsonSchema(schema: {}, jsonText: string): IJsonError[] {
+  const json = Jsm.parse(jsonText);
   const ajv = new Ajv({ allErrors: true });
   const validate = ajv.compile(schema);
   console.log(validate);
   console.log(validate.errors);
-  const validJson = validate(data);
+  const validJson = validate(json.data);
   console.log(validJson);
   console.log(validate.errors);
-  return validate.errors;
+  console.log(json.pointers);
+  if (_.isEmpty(validate.errors)) {
+    return [];
+  }
+  const errors: IJsonError[] = validate.errors.map(err => {
+    return {
+      message: err.message,
+      line: json.pointers[formatKeyPath(err.dataPath)].value.line,
+    };
+  });
+  console.log(errors);
+  return errors;
 }

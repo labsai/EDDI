@@ -23,7 +23,7 @@ export const DICTIONARY_SCHEMA = {
       type: 'array',
       items: {
         type: 'object',
-        required: ['word', 'exp', 'frequency'],
+        required: ['word'],
         properties: {
           word: {
             type: 'string',
@@ -44,7 +44,7 @@ export const DICTIONARY_SCHEMA = {
       type: 'array',
       items: {
         type: 'object',
-        required: ['phrase', 'exp'],
+        required: ['phrase'],
         properties: {
           phrase: {
             type: 'string',
