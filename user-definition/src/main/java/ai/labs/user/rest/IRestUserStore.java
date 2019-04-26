@@ -2,6 +2,7 @@ package ai.labs.user.rest;
 
 import ai.labs.user.model.User;
 import io.swagger.annotations.Api;
+import io.swagger.annotations.ApiOperation;
 
 import javax.ws.rs.*;
 import javax.ws.rs.core.MediaType;
@@ -18,27 +19,33 @@ public interface IRestUserStore {
 
     @GET
     @Produces(MediaType.APPLICATION_JSON)
+    @ApiOperation(value = "Search user.")
     URI searchUser(@QueryParam("username") String username);
 
     @GET
     @Path("/{userId}")
     @Produces(MediaType.APPLICATION_JSON)
+    @ApiOperation(value = "Read user.")
     User readUser(@PathParam("userId") String userId);
 
     @PUT
     @Path("/{userId}")
     @Consumes(MediaType.APPLICATION_JSON)
+    @ApiOperation(value = "Update user.")
     void updateUser(@PathParam("userId") String userId, User user);
 
     @POST
     @Consumes(MediaType.APPLICATION_JSON)
+    @ApiOperation(value = "Create user.")
     Response createUser(User user);
 
     @DELETE
     @Path("/{userId}")
+    @ApiOperation(value = "Delete user.")
     void deleteUser(@PathParam("userId") String userId);
 
     @POST
     @Path("/changepassword")
+    @ApiOperation(value = "Change password of user.")
     void changePassword(@QueryParam("userId") String userId, @QueryParam("newPassword") String newPassword);
 }
