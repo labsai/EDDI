@@ -149,7 +149,7 @@ public class HttpCallsTask implements ILifecycleTask {
                             if (!CONTENT_TYPE_APPLICATION_JSON.startsWith(actualContentType)) {
                                 String message = "HttpCall (%s) didn't return application/json as content-type, instead was (%s)";
                                 log.warn(String.format(message, call.getName(), actualContentType));
-                                continue;
+                                //continue;
                             }
 
                             Object responseObject = jsonSerialization.deserialize(responseBody, Object.class);
