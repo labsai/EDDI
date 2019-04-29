@@ -1,9 +1,9 @@
 package ai.labs.resources.impl.resources.rest;
 
+import ai.labs.models.DocumentDescriptor;
 import ai.labs.persistence.IResourceStore;
 import ai.labs.resources.rest.IRestVersionInfo;
 import ai.labs.resources.rest.documentdescriptor.IDocumentDescriptorStore;
-import ai.labs.resources.rest.documentdescriptor.model.DocumentDescriptor;
 import ai.labs.utilities.RestUtilities;
 import ai.labs.utilities.RuntimeUtilities;
 import lombok.extern.slf4j.Slf4j;
@@ -126,7 +126,7 @@ public abstract class RestVersionInfo<T> implements IRestVersionInfo {
         }
     }
 
-    private Integer validateParameters(String id, Integer version) {
+    protected Integer validateParameters(String id, Integer version) {
         RuntimeUtilities.checkNotNull(id, "id");
         RuntimeUtilities.checkNotNull(version, "version");
         RuntimeUtilities.checkNotNegative(version, "version");

@@ -1,12 +1,14 @@
 package ai.labs.resources.impl.http.rest;
 
+import ai.labs.models.DocumentDescriptor;
 import ai.labs.persistence.IResourceStore;
 import ai.labs.resources.impl.resources.rest.RestVersionInfo;
 import ai.labs.resources.rest.documentdescriptor.IDocumentDescriptorStore;
-import ai.labs.resources.rest.documentdescriptor.model.DocumentDescriptor;
 import ai.labs.resources.rest.http.IHttpCallsStore;
 import ai.labs.resources.rest.http.IRestHttpCallsStore;
 import ai.labs.resources.rest.http.model.HttpCallsConfiguration;
+import ai.labs.rest.restinterfaces.IRestInterfaceFactory;
+import ai.labs.rest.restinterfaces.RestInterfaceFactory;
 import lombok.extern.slf4j.Slf4j;
 
 import javax.inject.Inject;
@@ -19,12 +21,24 @@ import java.util.List;
 @Slf4j
 public class RestHttpCallsStore extends RestVersionInfo<HttpCallsConfiguration> implements IRestHttpCallsStore {
     private final IHttpCallsStore httpCallsStore;
+    private IRestHttpCallsStore restHttpCallsStore;
 
     @Inject
     public RestHttpCallsStore(IHttpCallsStore httpCallsStore,
+                              IRestInterfaceFactory restInterfaceFactory,
                               IDocumentDescriptorStore documentDescriptorStore) {
         super(resourceURI, httpCallsStore, documentDescriptorStore);
         this.httpCallsStore = httpCallsStore;
+        initRestClient(restInterfaceFactory);
+    }
+
+    private void initRestClient(IRestInterfaceFactory restInterfaceFactory) {
+        try {
+            restHttpCallsStore = restInterfaceFactory.get(IRestHttpCallsStore.class);
+        } catch (RestInterfaceFactory.RestInterfaceFactoryException e) {
+            restHttpCallsStore = null;
+            log.error(e.getLocalizedMessage(), e);
+        }
     }
 
     @Override
@@ -50,6 +64,13 @@ public class RestHttpCallsStore extends RestVersionInfo<HttpCallsConfiguration> 
     @Override
     public Response deleteHttpCalls(String id, Integer version) {
         return delete(id, version);
+    }
+
+    @Override
+    public Response duplicateHttpCalls(String id, Integer version) {
+        validateParameters(id, version);
+        HttpCallsConfiguration httpCallsConfiguration = restHttpCallsStore.readHttpCalls(id, version);
+        return restHttpCallsStore.createHttpCalls(httpCallsConfiguration);
     }
 
     @Override

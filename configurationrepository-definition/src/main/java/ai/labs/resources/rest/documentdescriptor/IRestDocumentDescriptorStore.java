@@ -1,10 +1,11 @@
 package ai.labs.resources.rest.documentdescriptor;
 
-import ai.labs.resources.rest.documentdescriptor.model.DocumentDescriptor;
-import ai.labs.resources.rest.documentdescriptor.model.SimpleDocumentDescriptor;
+import ai.labs.models.DocumentDescriptor;
+import ai.labs.models.SimpleDocumentDescriptor;
 import ai.labs.resources.rest.method.PATCH;
 import ai.labs.resources.rest.patch.PatchInstruction;
 import io.swagger.annotations.Api;
+import io.swagger.annotations.ApiOperation;
 import io.swagger.annotations.ApiParam;
 
 import javax.ws.rs.*;
@@ -21,6 +22,7 @@ public interface IRestDocumentDescriptorStore {
 
     @GET
     @Produces(MediaType.APPLICATION_JSON)
+    @ApiOperation(value = "Read list of descriptors.")
     List<DocumentDescriptor> readDescriptors(@QueryParam("type") @DefaultValue("") String type,
                                              @QueryParam("filter") @DefaultValue("") String filter,
                                              @QueryParam("index") @DefaultValue("0") Integer index,
@@ -29,6 +31,7 @@ public interface IRestDocumentDescriptorStore {
     @GET
     @Path("/{id}")
     @Produces(MediaType.APPLICATION_JSON)
+    @ApiOperation(value = "Read descriptor.")
     DocumentDescriptor readDescriptor(@PathParam("id") String id,
                                       @ApiParam(name = "version", required = true, format = "integer", example = "1")
                                       @QueryParam("version") Integer version);
@@ -36,6 +39,7 @@ public interface IRestDocumentDescriptorStore {
     @GET
     @Path("/{id}/simple")
     @Produces(MediaType.APPLICATION_JSON)
+    @ApiOperation(value = "Read simple descriptor.")
     SimpleDocumentDescriptor readSimpleDescriptor(@PathParam("id") String id,
                                                   @ApiParam(name = "version", required = true, format = "integer", example = "1")
                                                   @QueryParam("version") Integer version);
@@ -43,6 +47,7 @@ public interface IRestDocumentDescriptorStore {
     @PATCH
     @Path("/{id}")
     @Consumes(MediaType.APPLICATION_JSON)
+    @ApiOperation(value = "Partial update descriptor.")
     void patchDescriptor(@PathParam("id") String id,
                          @ApiParam(name = "version", required = true, format = "integer", example = "1")
                          @QueryParam("version") Integer version, PatchInstruction<DocumentDescriptor> patchInstruction);

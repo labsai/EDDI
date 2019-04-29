@@ -1,7 +1,7 @@
 package ai.labs.resources.rest.parser;
 
+import ai.labs.models.DocumentDescriptor;
 import ai.labs.resources.rest.IRestVersionInfo;
-import ai.labs.resources.rest.documentdescriptor.model.DocumentDescriptor;
 import ai.labs.resources.rest.parser.model.ParserConfiguration;
 import io.swagger.annotations.*;
 
@@ -28,6 +28,7 @@ public interface IRestParserStore extends IRestVersionInfo {
             @ApiImplicitParam(name = "limit", paramType = "query", dataType = "integer", format = "integer", example = "20")})
     @ApiResponse(code = 200, response = DocumentDescriptor.class, responseContainer = "List",
             message = "Array of DocumentDescriptors")
+    @ApiOperation(value = "Read list of parser descriptors.")
     List<DocumentDescriptor> readParserDescriptors(@QueryParam("filter") @DefaultValue("") String filter,
                                                    @QueryParam("index") @DefaultValue("0") Integer index,
                                                    @QueryParam("limit") @DefaultValue("20") Integer limit);
@@ -37,16 +38,18 @@ public interface IRestParserStore extends IRestVersionInfo {
     @Path("/{id}")
     @Produces(MediaType.APPLICATION_JSON)
     @ApiResponse(code = 200, response = ParserConfiguration.class, message = "configuration of parser")
+    @ApiOperation(value = "Read parser.")
     ParserConfiguration readParser(@PathParam("id") String id,
                                    @ApiParam(name = "version", required = true, format = "integer", example = "1")
-                        @QueryParam("version") Integer version);
+                                   @QueryParam("version") Integer version);
 
     @PUT
     @Path("/{id}")
     @Consumes(MediaType.APPLICATION_JSON)
+    @ApiOperation(value = "Update parser.")
     Response updateParser(@PathParam("id") String id,
                           @ApiParam(name = "version", required = true, format = "integer", example = "1")
-                     @QueryParam("version") Integer version,
+                          @QueryParam("version") Integer version,
                           ParserConfiguration parserConfiguration);
 
     /**
@@ -105,11 +108,18 @@ public interface IRestParserStore extends IRestVersionInfo {
      */
     @POST
     @Consumes(MediaType.APPLICATION_JSON)
+    @ApiOperation(value = "Create parser.")
     Response createParser(ParserConfiguration parserConfiguration);
+
+    @POST
+    @Path("/{id}")
+    @ApiOperation(value = "Duplicate this parser.")
+    Response duplicateParser(@PathParam("id") String id, @QueryParam("version") Integer version);
 
     @DELETE
     @Path("/{id}")
+    @ApiOperation(value = "Delete parser.")
     Response deleteParser(@PathParam("id") String id,
                           @ApiParam(name = "version", required = true, format = "integer", example = "1")
-                      @QueryParam("version") Integer version);
+                          @QueryParam("version") Integer version);
 }

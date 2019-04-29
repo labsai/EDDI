@@ -77,9 +77,9 @@ public class BehaviorDeserialization implements IBehaviorDeserialization {
                             throw new IllegalArgumentException(errorMessage);
                         }
                         IBehaviorCondition condition = conditionProvider.get(key).get();
-                        var values = conditionConfiguration.getValues();
-                        if (!isNullOrEmpty(values)) {
-                            condition.setValues(values);
+                        var configs = conditionConfiguration.getConfigs();
+                        if (!isNullOrEmpty(configs)) {
+                            condition.setConfigs(configs);
                         }
                         var conditions = conditionConfiguration.getConditions();
                         if (!isNullOrEmpty(conditions)) {

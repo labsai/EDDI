@@ -1,11 +1,12 @@
 package ai.labs.resources.rest.output;
 
+import ai.labs.models.DocumentDescriptor;
 import ai.labs.resources.rest.IRestVersionInfo;
-import ai.labs.resources.rest.documentdescriptor.model.DocumentDescriptor;
 import ai.labs.resources.rest.method.PATCH;
 import ai.labs.resources.rest.output.model.OutputConfigurationSet;
 import ai.labs.resources.rest.patch.PatchInstruction;
 import io.swagger.annotations.Api;
+import io.swagger.annotations.ApiOperation;
 import io.swagger.annotations.ApiParam;
 
 import javax.ws.rs.*;
@@ -25,6 +26,7 @@ public interface IRestOutputStore extends IRestVersionInfo {
     @GET
     @Path("descriptors")
     @Produces(MediaType.APPLICATION_JSON)
+    @ApiOperation(value = "Read list of output descriptors.")
     List<DocumentDescriptor> readOutputDescriptors(@QueryParam("filter") @DefaultValue("") String filter,
                                                    @QueryParam("index") @DefaultValue("0") Integer index,
                                                    @QueryParam("limit") @DefaultValue("20") Integer limit);
@@ -32,6 +34,7 @@ public interface IRestOutputStore extends IRestVersionInfo {
     @GET
     @Path("/{id}")
     @Produces(MediaType.APPLICATION_JSON)
+    @ApiOperation(value = "Read output.")
     OutputConfigurationSet readOutputSet(@PathParam("id") String id,
                                          @ApiParam(name = "version", required = true, format = "integer", example = "1")
                                          @QueryParam("version") Integer version,
@@ -43,6 +46,7 @@ public interface IRestOutputStore extends IRestVersionInfo {
     @GET
     @Path("/{id}/outputKeys")
     @Produces(MediaType.APPLICATION_JSON)
+    @ApiOperation(value = "Read output keys.")
     List<String> readOutputKeys(@PathParam("id") String id,
                                 @ApiParam(name = "version", required = true, format = "integer", example = "1")
                                 @QueryParam("version") Integer version,
@@ -53,24 +57,32 @@ public interface IRestOutputStore extends IRestVersionInfo {
     @PUT
     @Path("/{id}")
     @Consumes(MediaType.APPLICATION_JSON)
+    @ApiOperation(value = "Update output.")
     Response updateOutputSet(@PathParam("id") String id,
                              @ApiParam(name = "version", required = true, format = "integer", example = "1")
-                        @QueryParam("version") Integer version, OutputConfigurationSet outputConfigurationSet);
+                             @QueryParam("version") Integer version, OutputConfigurationSet outputConfigurationSet);
 
     @POST
     @Consumes(MediaType.APPLICATION_JSON)
+    @ApiOperation(value = "Create output.")
     Response createOutputSet(OutputConfigurationSet outputConfigurationSet);
+
+    @POST
+    @Path("/{id}")
+    @ApiOperation(value = "Duplicate this output.")
+    Response duplicateOutputSet(@PathParam("id") String id, @QueryParam("version") Integer version);
 
     @DELETE
     @Path("/{id}")
+    @ApiOperation(value = "Delete output.")
     Response deleteOutputSet(@PathParam("id") String id,
                              @ApiParam(name = "version", required = true, format = "integer", example = "1")
-                         @QueryParam("version") Integer version);
+                             @QueryParam("version") Integer version);
 
     @PATCH
     @Path("/{id}")
     @Consumes(MediaType.APPLICATION_JSON)
     Response patchOutputSet(@PathParam("id") String id,
                             @ApiParam(name = "version", required = true, format = "integer", example = "1")
-                       @QueryParam("version") Integer version, PatchInstruction<OutputConfigurationSet>[] patchInstructions);
+                            @QueryParam("version") Integer version, PatchInstruction<OutputConfigurationSet>[] patchInstructions);
 }

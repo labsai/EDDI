@@ -1,6 +1,7 @@
 package ai.labs.resources.rest.expression;
 
 import io.swagger.annotations.Api;
+import io.swagger.annotations.ApiOperation;
 
 import javax.ws.rs.*;
 import javax.ws.rs.core.MediaType;
@@ -14,6 +15,7 @@ import java.util.List;
 public interface IRestExpression {
     @GET
     @Produces(MediaType.APPLICATION_JSON)
+    @ApiOperation(value = "Read expressions.")
     List<String> readExpressions(@QueryParam("packageId") String packageId,
                                  @QueryParam("packageVersion") Integer packageVersion,
                                  @QueryParam("filter") @DefaultValue("") String filter,

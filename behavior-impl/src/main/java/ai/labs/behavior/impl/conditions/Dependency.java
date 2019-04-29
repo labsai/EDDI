@@ -36,17 +36,17 @@ public class Dependency implements IBehaviorCondition {
     }
 
     @Override
-    public Map<String, String> getValues() {
-        HashMap<String, String> result = new HashMap<>();
-        result.put(referenceQualifier, reference);
-        return result;
+    public Map<String, String> getConfigs() {
+        HashMap<String, String> configs = new HashMap<>();
+        configs.put(referenceQualifier, reference);
+        return configs;
     }
 
     @Override
-    public void setValues(Map<String, String> values) {
-        if (values != null && !values.isEmpty()) {
-            if (values.containsKey(referenceQualifier)) {
-                reference = values.get(referenceQualifier);
+    public void setConfigs(Map<String, String> configs) {
+        if (configs != null && !configs.isEmpty()) {
+            if (configs.containsKey(referenceQualifier)) {
+                reference = configs.get(referenceQualifier);
             }
         }
     }
@@ -96,7 +96,7 @@ public class Dependency implements IBehaviorCondition {
     @Override
     public IBehaviorCondition clone() {
         Dependency clone = new Dependency(reference);
-        clone.setValues(getValues());
+        clone.setConfigs(getConfigs());
         clone.setContainingBehaviorRuleSet(behaviorSet);
         return clone;
     }

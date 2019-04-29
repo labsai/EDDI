@@ -1,6 +1,6 @@
 package ai.labs.models;
 
-import java.util.HashMap;
+import java.util.LinkedHashMap;
 
-public class DatabaseLog extends HashMap<String, Object> {
+public class DatabaseLog extends LinkedHashMap<String, Object> {
 }

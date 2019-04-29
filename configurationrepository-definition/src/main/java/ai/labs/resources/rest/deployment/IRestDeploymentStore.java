@@ -2,6 +2,7 @@ package ai.labs.resources.rest.deployment;
 
 import ai.labs.resources.rest.deployment.model.DeploymentInfo;
 import io.swagger.annotations.Api;
+import io.swagger.annotations.ApiOperation;
 
 import javax.ws.rs.GET;
 import javax.ws.rs.Path;
@@ -17,5 +18,6 @@ import java.util.List;
 public interface IRestDeploymentStore {
     @GET
     @Produces(MediaType.APPLICATION_JSON)
+    @ApiOperation(value = "Read deployment infos.")
     List<DeploymentInfo> readDeploymentInfos();
 }

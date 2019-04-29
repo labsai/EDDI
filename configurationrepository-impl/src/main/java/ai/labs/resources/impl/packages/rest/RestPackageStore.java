@@ -1,13 +1,18 @@
 package ai.labs.resources.impl.packages.rest;
 
+import ai.labs.models.DocumentDescriptor;
 import ai.labs.persistence.IResourceStore;
 import ai.labs.resources.impl.resources.rest.RestVersionInfo;
 import ai.labs.resources.impl.utilities.ResourceUtilities;
 import ai.labs.resources.rest.documentdescriptor.IDocumentDescriptorStore;
-import ai.labs.resources.rest.documentdescriptor.model.DocumentDescriptor;
 import ai.labs.resources.rest.packages.IPackageStore;
 import ai.labs.resources.rest.packages.IRestPackageStore;
 import ai.labs.resources.rest.packages.model.PackageConfiguration;
+import ai.labs.resources.rest.packages.model.PackageConfiguration.PackageExtension;
+import ai.labs.rest.restinterfaces.IRestInterfaceFactory;
+import ai.labs.rest.restinterfaces.RestInterfaceFactory;
+import ai.labs.runtime.client.configuration.ResourceClientLibrary;
+import ai.labs.runtime.service.ServiceException;
 import ai.labs.utilities.RestUtilities;
 import lombok.extern.slf4j.Slf4j;
 
@@ -26,12 +31,27 @@ public class RestPackageStore extends RestVersionInfo<PackageConfiguration> impl
     private static final String KEY_URI = "uri";
     private static final String KEY_CONFIG = "config";
     private final IPackageStore packageStore;
+    private final ResourceClientLibrary resourceClientLibrary;
+    private IRestPackageStore restPackageStore;
 
     @Inject
     public RestPackageStore(IPackageStore packageStore,
+                            IRestInterfaceFactory restInterfaceFactory,
+                            ResourceClientLibrary resourceClientLibrary,
                             IDocumentDescriptorStore documentDescriptorStore) {
         super(resourceURI, packageStore, documentDescriptorStore);
         this.packageStore = packageStore;
+        this.resourceClientLibrary = resourceClientLibrary;
+        initRestClient(restInterfaceFactory);
+    }
+
+    private void initRestClient(IRestInterfaceFactory restInterfaceFactory) {
+        try {
+            restPackageStore = restInterfaceFactory.get(IRestPackageStore.class);
+        } catch (RestInterfaceFactory.RestInterfaceFactoryException e) {
+            restPackageStore = null;
+            log.error(e.getLocalizedMessage(), e);
+        }
     }
 
     @Override
@@ -78,7 +98,7 @@ public class RestPackageStore extends RestVersionInfo<PackageConfiguration> impl
 
         boolean updated = false;
         PackageConfiguration packageConfiguration = readPackage(id, version);
-        for (PackageConfiguration.PackageExtension packageExtension : packageConfiguration.getPackageExtensions()) {
+        for (PackageExtension packageExtension : packageConfiguration.getPackageExtensions()) {
             Map<String, Object> packageConfig = packageExtension.getConfig();
             if (updateResourceURI(resourceURI, resourceURIWithoutVersion, packageConfig)) {
                 updated = true;
@@ -127,6 +147,26 @@ public class RestPackageStore extends RestVersionInfo<PackageConfiguration> impl
     @Override
     public Response deletePackage(String id, Integer version) {
         return delete(id, version);
+    }
+
+    @Override
+    public Response duplicatePackage(String id, Integer version, Boolean deepCopy) {
+        validateParameters(id, version);
+        try {
+            PackageConfiguration packageConfiguration = restPackageStore.readPackage(id, version);
+            if (deepCopy) {
+                for (var packageExtension : packageConfiguration.getPackageExtensions()) {
+                    URI type = packageExtension.getType();
+                    Response duplicateResourceResponse = resourceClientLibrary.duplicateResource(type);
+                    URI newResourceLocation = duplicateResourceResponse.getLocation();
+                    packageExtension.setType(newResourceLocation);
+                }
+            }
+            return restPackageStore.createPackage(packageConfiguration);
+        } catch (ServiceException e) {
+            log.error(e.getLocalizedMessage(), e);
+            throw new InternalServerErrorException();
+        }
     }
 
     @Override

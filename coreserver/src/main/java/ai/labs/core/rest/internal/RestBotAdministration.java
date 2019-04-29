@@ -1,9 +1,12 @@
 package ai.labs.core.rest.internal;
 
 import ai.labs.memory.IConversationMemoryStore;
+import ai.labs.models.BotDeploymentStatus;
 import ai.labs.models.Deployment;
 import ai.labs.models.Deployment.Status;
+import ai.labs.models.DocumentDescriptor;
 import ai.labs.resources.rest.deployment.IDeploymentStore;
+import ai.labs.resources.rest.documentdescriptor.IDocumentDescriptorStore;
 import ai.labs.rest.rest.IRestBotAdministration;
 import ai.labs.runtime.IBot;
 import ai.labs.runtime.IBotFactory;
@@ -19,9 +22,11 @@ import javax.inject.Inject;
 import javax.ws.rs.InternalServerErrorException;
 import javax.ws.rs.core.MediaType;
 import javax.ws.rs.core.Response;
-import java.util.EnumSet;
+import java.util.*;
 import java.util.concurrent.Callable;
 
+import static ai.labs.persistence.IResourceStore.ResourceNotFoundException;
+import static ai.labs.persistence.IResourceStore.ResourceStoreException;
 import static ai.labs.resources.rest.deployment.model.DeploymentInfo.DeploymentStatus;
 
 /**
@@ -33,14 +38,17 @@ public class RestBotAdministration implements IRestBotAdministration {
     private final IBotFactory botFactory;
     private final IDeploymentStore deploymentStore;
     private final IConversationMemoryStore conversationMemoryStore;
+    private final IDocumentDescriptorStore documentDescriptorStore;
 
     @Inject
     public RestBotAdministration(IBotFactory botFactory,
                                  IDeploymentStore deploymentStore,
-                                 IConversationMemoryStore conversationMemoryStore) {
+                                 IConversationMemoryStore conversationMemoryStore,
+                                 IDocumentDescriptorStore documentDescriptorStore) {
         this.botFactory = botFactory;
         this.deploymentStore = deploymentStore;
         this.conversationMemoryStore = conversationMemoryStore;
+        this.documentDescriptorStore = documentDescriptorStore;
     }
 
     @Override
@@ -147,6 +155,33 @@ public class RestBotAdministration implements IRestBotAdministration {
         RuntimeUtilities.checkNotNull(version, "version");
 
         return checkDeploymentStatus(environment, botId, version).toString();
+    }
+
+    @Override
+    public List<BotDeploymentStatus> getDeploymentStatuses(Deployment.Environment environment) {
+        RuntimeUtilities.checkNotNull(environment, "environment");
+
+        try {
+            List<BotDeploymentStatus> botDeploymentStatuses = new LinkedList<>();
+            for (IBot latestBot : botFactory.getAllLatestBots(environment)) {
+                String botId = latestBot.getBotId();
+                Integer botVersion = latestBot.getBotVersion();
+                DocumentDescriptor documentDescriptor = documentDescriptorStore.readDescriptor(botId, botVersion);
+                botDeploymentStatuses.add(new BotDeploymentStatus(
+                        environment,
+                        botId,
+                        botVersion,
+                        latestBot.getDeploymentStatus(),
+                        documentDescriptor));
+            }
+
+            botDeploymentStatuses.sort(Comparator.comparing(o -> o.getDescriptor().getLastModifiedOn()));
+            Collections.reverse(botDeploymentStatuses);
+
+            return botDeploymentStatuses;
+        } catch (ServiceException | ResourceStoreException | ResourceNotFoundException e) {
+            throw new InternalServerErrorException(e.getLocalizedMessage(), e);
+        }
     }
 
     private Status checkDeploymentStatus(Deployment.Environment environment, String botId, Integer version) {

@@ -1,12 +1,14 @@
 package ai.labs.resources.impl.parser.rest;
 
+import ai.labs.models.DocumentDescriptor;
 import ai.labs.persistence.IResourceStore;
 import ai.labs.resources.impl.resources.rest.RestVersionInfo;
 import ai.labs.resources.rest.documentdescriptor.IDocumentDescriptorStore;
-import ai.labs.resources.rest.documentdescriptor.model.DocumentDescriptor;
 import ai.labs.resources.rest.parser.IParserStore;
 import ai.labs.resources.rest.parser.IRestParserStore;
 import ai.labs.resources.rest.parser.model.ParserConfiguration;
+import ai.labs.rest.restinterfaces.IRestInterfaceFactory;
+import ai.labs.rest.restinterfaces.RestInterfaceFactory;
 import lombok.extern.slf4j.Slf4j;
 
 import javax.inject.Inject;
@@ -19,11 +21,24 @@ import java.util.List;
 @Slf4j
 public class RestParserStore extends RestVersionInfo<ParserConfiguration> implements IRestParserStore {
     private final IParserStore parserStore;
+    private IRestParserStore restParserStore;
 
     @Inject
-    public RestParserStore(IParserStore parserStore, IDocumentDescriptorStore documentDescriptorStore) {
+    public RestParserStore(IParserStore parserStore,
+                           IRestInterfaceFactory restInterfaceFactory,
+                           IDocumentDescriptorStore documentDescriptorStore) {
         super(resourceURI, parserStore, documentDescriptorStore);
         this.parserStore = parserStore;
+        initRestClient(restInterfaceFactory);
+    }
+
+    private void initRestClient(IRestInterfaceFactory restInterfaceFactory) {
+        try {
+            restParserStore = restInterfaceFactory.get(IRestParserStore.class);
+        } catch (RestInterfaceFactory.RestInterfaceFactoryException e) {
+            restParserStore = null;
+            log.error(e.getLocalizedMessage(), e);
+        }
     }
 
     @Override
@@ -49,6 +64,13 @@ public class RestParserStore extends RestVersionInfo<ParserConfiguration> implem
     @Override
     public Response deleteParser(String id, Integer version) {
         return delete(id, version);
+    }
+
+    @Override
+    public Response duplicateParser(String id, Integer version) {
+        validateParameters(id, version);
+        ParserConfiguration parserConfiguration = restParserStore.readParser(id, version);
+        return restParserStore.createParser(parserConfiguration);
     }
 
     @Override

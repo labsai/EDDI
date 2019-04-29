@@ -8,6 +8,7 @@ import org.jboss.resteasy.client.jaxrs.ResteasyWebTarget;
 import org.jboss.resteasy.client.jaxrs.engines.jetty.JettyClientEngine;
 
 import javax.inject.Inject;
+import javax.inject.Named;
 import javax.inject.Singleton;
 import javax.ws.rs.client.ClientRequestFilter;
 import java.util.HashMap;
@@ -20,23 +21,26 @@ import java.util.Map;
 public class RestInterfaceFactory implements IRestInterfaceFactory {
     private final Map<String, ResteasyClient> clients = new HashMap<>();
     private final HttpClient httpClient;
+    private final String apiServerURI;
 
     @Inject
-    public RestInterfaceFactory(HttpClient httpClient) {
+    public RestInterfaceFactory(HttpClient httpClient,
+                                @Named("system.apiServerURI") String apiServerURI) {
         this.httpClient = httpClient;
+        this.apiServerURI = apiServerURI;
     }
 
     @Override
-    public <T> T get(Class<T> clazz, String targetServerUri) {
+    public <T> T get(Class<T> clazz) {
         Object context = ThreadContext.get("security.token");
-        String securityToken = context != null ? context.toString(): null;
-        return get(clazz, targetServerUri, securityToken);
+        String securityToken = context != null ? context.toString() : null;
+        return get(clazz, apiServerURI, securityToken);
     }
 
     @Override
-    public <T> T get(Class<T> clazz, String targetServerUri, String securityToken) {
-        ResteasyClient client = getResteasyClient(targetServerUri);
-        ResteasyWebTarget target = client.target(targetServerUri);
+    public <T> T get(Class<T> clazz, String apiServerURI, String securityToken) {
+        ResteasyClient client = getResteasyClient(apiServerURI);
+        ResteasyWebTarget target = client.target(apiServerURI);
 
         if (securityToken != null) {
             target.register((ClientRequestFilter) requestContext ->
@@ -48,7 +52,7 @@ public class RestInterfaceFactory implements IRestInterfaceFactory {
 
     private ResteasyClient getResteasyClient(String targetServerUri) {
         ResteasyClient client = clients.get(targetServerUri);
-        if(client == null) {
+        if (client == null) {
 
             JettyClientEngine engine = new JettyClientEngine(httpClient);
             ResteasyClientBuilder clientBuilder = new ResteasyClientBuilder();

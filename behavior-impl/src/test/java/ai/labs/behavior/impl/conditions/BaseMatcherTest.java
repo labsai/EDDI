@@ -23,7 +23,7 @@ class BaseMatcherTest {
         values.put(KEY_OCCURRENCE, expectedOccurrence.toString());
 
         //test
-        matcher.setValues(values);
+        matcher.setConfigs(values);
 
         //assert
         Assert.assertEquals(expectedOccurrence, matcher.getOccurrence());
@@ -37,7 +37,7 @@ class BaseMatcherTest {
         values.put(KEY_OCCURRENCE, expectedOccurrence.toString());
 
         //test
-        matcher.setValues(values);
+        matcher.setConfigs(values);
 
         //assert
         Assert.assertEquals(expectedOccurrence, matcher.getOccurrence());
@@ -51,7 +51,7 @@ class BaseMatcherTest {
         values.put(KEY_OCCURRENCE, expectedOccurrence.toString());
 
         //test
-        matcher.setValues(values);
+        matcher.setConfigs(values);
 
         //assert
         Assert.assertEquals(expectedOccurrence, matcher.getOccurrence());
@@ -65,7 +65,7 @@ class BaseMatcherTest {
         values.put(KEY_OCCURRENCE, expectedOccurrence.toString());
 
         //test
-        matcher.setValues(values);
+        matcher.setConfigs(values);
 
         //assert
         Assert.assertEquals(expectedOccurrence, matcher.getOccurrence());

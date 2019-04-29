@@ -15,7 +15,6 @@ import ai.labs.testing.model.TestCaseState;
 import ai.labs.utilities.RuntimeUtilities;
 
 import javax.inject.Inject;
-import javax.inject.Named;
 import javax.ws.rs.container.AsyncResponse;
 import javax.ws.rs.container.TimeoutHandler;
 import javax.ws.rs.core.Response;
@@ -29,16 +28,13 @@ import java.util.concurrent.TimeUnit;
  */
 public class TestCaseRuntime {
     private final IRestInterfaceFactory restInterfaceFactory;
-    private final String apiServerURI;
     private final ITestCaseStore testCaseStore;
     private final IConversationMemoryStore conversationMemoryStore;
 
     @Inject
     public TestCaseRuntime(IRestInterfaceFactory restInterfaceFactory,
-                           @Named("system.apiServerURI") String apiServerURI,
                            ITestCaseStore testCaseStore, IConversationMemoryStore conversationMemoryStore) {
         this.restInterfaceFactory = restInterfaceFactory;
-        this.apiServerURI = apiServerURI;
         this.testCaseStore = testCaseStore;
         this.conversationMemoryStore = conversationMemoryStore;
     }
@@ -66,7 +62,7 @@ public class TestCaseRuntime {
     }
 
     private boolean isBotDeployed(String botId, Integer botVersion) throws Exception {
-        IRestBotAdministration restBotAdministration = restInterfaceFactory.get(IRestBotAdministration.class, apiServerURI);
+        IRestBotAdministration restBotAdministration = restInterfaceFactory.get(IRestBotAdministration.class);
         String deploymentStatus;
         do {
             deploymentStatus = restBotAdministration.getDeploymentStatus(Deployment.Environment.test, botId, botVersion);
@@ -81,7 +77,7 @@ public class TestCaseRuntime {
     }
 
     private void deployBot(String botId, Integer botVersion) throws Exception {
-        IRestBotAdministration restBotAdministration = restInterfaceFactory.get(IRestBotAdministration.class, apiServerURI);
+        IRestBotAdministration restBotAdministration = restInterfaceFactory.get(IRestBotAdministration.class);
         restBotAdministration.deployBot(Deployment.Environment.test, botId, botVersion, false);
         while (true) {
             //wait until deployment has finished
@@ -94,7 +90,7 @@ public class TestCaseRuntime {
     }
 
     private ConversationMemorySnapshot runTestCase(String botId, TestCase testCase) throws Exception {
-        IRestBotEngine botEngine = restInterfaceFactory.get(IRestBotEngine.class, apiServerURI);
+        IRestBotEngine botEngine = restInterfaceFactory.get(IRestBotEngine.class);
 
         Response ConversationResponse = botEngine.startConversation(Deployment.Environment.test, botId, "testCaseRunner");
         URI conversationURI = ConversationResponse.getLocation();

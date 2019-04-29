@@ -41,34 +41,34 @@ public class SizeMatcher implements IBehaviorCondition {
     }
 
     @Override
-    public Map<String, String> getValues() {
-        Map<String, String> values = new HashMap<>();
+    public Map<String, String> getConfigs() {
+        Map<String, String> configs = new HashMap<>();
 
-        values.put(valuePathQualifier, valuePath);
-        values.put(minQualifier, String.valueOf(min));
-        values.put(maxQualifier, String.valueOf(max));
-        values.put(equalQualifier, String.valueOf(equal));
+        configs.put(valuePathQualifier, valuePath);
+        configs.put(minQualifier, String.valueOf(min));
+        configs.put(maxQualifier, String.valueOf(max));
+        configs.put(equalQualifier, String.valueOf(equal));
 
-        return values;
+        return configs;
     }
 
     @Override
-    public void setValues(Map<String, String> values) {
-        if (values != null && !values.isEmpty()) {
-            if (values.containsKey(valuePathQualifier)) {
-                valuePath = values.get(valuePathQualifier);
+    public void setConfigs(Map<String, String> configs) {
+        if (configs != null && !configs.isEmpty()) {
+            if (configs.containsKey(valuePathQualifier)) {
+                valuePath = configs.get(valuePathQualifier);
             }
 
-            if (values.containsKey(minQualifier)) {
-                min = Integer.parseInt(values.get(minQualifier));
+            if (configs.containsKey(minQualifier)) {
+                min = Integer.parseInt(configs.get(minQualifier));
             }
 
-            if (values.containsKey(maxQualifier)) {
-                max = Integer.parseInt(values.get(maxQualifier));
+            if (configs.containsKey(maxQualifier)) {
+                max = Integer.parseInt(configs.get(maxQualifier));
             }
 
-            if (values.containsKey(equalQualifier)) {
-                equal = Integer.parseInt(values.get(equalQualifier));
+            if (configs.containsKey(equalQualifier)) {
+                equal = Integer.parseInt(configs.get(equalQualifier));
             }
         }
     }
@@ -119,7 +119,7 @@ public class SizeMatcher implements IBehaviorCondition {
 
     public IBehaviorCondition clone() {
         IBehaviorCondition clone = new SizeMatcher(memoryItemConverter);
-        clone.setValues(getValues());
+        clone.setConfigs(getConfigs());
         return clone;
     }
 }

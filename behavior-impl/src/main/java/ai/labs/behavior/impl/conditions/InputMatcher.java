@@ -44,22 +44,22 @@ public class InputMatcher extends BaseMatcher implements IBehaviorCondition {
     }
 
     @Override
-    public Map<String, String> getValues() {
-        Map<String, String> result = new HashMap<>();
-        result.put(expressionsQualifier, StringUtilities.joinStrings(",", expressions));
-        result.putAll(super.getValues());
+    public Map<String, String> getConfigs() {
+        Map<String, String> configs = new HashMap<>();
+        configs.put(expressionsQualifier, StringUtilities.joinStrings(",", expressions));
+        configs.putAll(super.getConfigs());
 
-        return result;
+        return configs;
     }
 
     @Override
-    public void setValues(Map<String, String> values) {
-        if (values != null && !values.isEmpty()) {
-            if (values.containsKey(expressionsQualifier)) {
-                expressions = expressionProvider.parseExpressions(values.get(expressionsQualifier));
+    public void setConfigs(Map<String, String> configs) {
+        if (configs != null && !configs.isEmpty()) {
+            if (configs.containsKey(expressionsQualifier)) {
+                expressions = expressionProvider.parseExpressions(configs.get(expressionsQualifier));
             }
 
-            setConversationOccurrenceQualifier(values);
+            setConversationOccurrenceQualifier(configs);
         }
     }
 
@@ -114,7 +114,7 @@ public class InputMatcher extends BaseMatcher implements IBehaviorCondition {
     @Override
     public IBehaviorCondition clone() {
         IBehaviorCondition clone = new InputMatcher(expressionProvider);
-        clone.setValues(getValues());
+        clone.setConfigs(getConfigs());
         return clone;
     }
 }
