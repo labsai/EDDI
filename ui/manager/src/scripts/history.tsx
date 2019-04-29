@@ -5,7 +5,7 @@ import * as _ from 'lodash';
 export const history = createBrowserHistory();
 
 export function historyPush(path: string, queryParams?: string[]) {
-  const apiUrlQuery = encodeURIComponent(getApiUrlQuery());
+  const apiUrlQuery = `apiUrl=${encodeURIComponent(getApiUrlQuery())}`;
   let queryParameterList = [];
   if (!_.isEmpty(apiUrlQuery)) {
     queryParameterList.push(apiUrlQuery);
