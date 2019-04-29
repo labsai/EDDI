@@ -6,6 +6,7 @@ import ai.labs.parser.model.FoundWord;
 import ai.labs.parser.model.Word;
 import ai.labs.utilities.LanguageUtilities;
 
+import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Date;
 import java.util.List;
@@ -28,8 +29,19 @@ public class TimeExpressionDictionary implements IDictionary {
         if (timeAsDate != null) {
             final String timeString = timeAsDate.toString();
             Expression timeExp = expressionProvider.createExpression("time", timeAsDate.getTime());
+            Expression hourExp = expressionProvider.createExpression("hour", timeAsDate.getHours());
+            Expression minuteExp = expressionProvider.createExpression("minute", timeAsDate.getMinutes());
+            Expression secondExp = expressionProvider.createExpression("second", timeAsDate.getSeconds());
             IWord timeExpression = new Word(timeString, Collections.singletonList(timeExp), ID);
-            return Collections.singletonList(new FoundWord(timeExpression, false, 1.0));
+            IWord hourExpression = new Word(String.valueOf(timeAsDate.getHours()), Collections.singletonList(hourExp), ID);
+            IWord minuteExpression = new Word(String.valueOf(timeAsDate.getMinutes()), Collections.singletonList(minuteExp), ID);
+            IWord secondExpression = new Word(String.valueOf(timeAsDate.getSeconds()), Collections.singletonList(secondExp), ID);
+            List<IFoundWord> foundWords = new ArrayList<>();
+            foundWords.add(new FoundWord(timeExpression, false, 1.0));
+            foundWords.add(new FoundWord(hourExpression, false, 1.0));
+            foundWords.add(new FoundWord(minuteExpression, false, 1.0));
+            foundWords.add(new FoundWord(secondExpression, false, 1.0));
+            return foundWords;
         }
 
         return IDictionary.NO_WORDS_FOUND;
