@@ -12,16 +12,19 @@ import PackageViewPage from './pages/PackageViewPage';
 import RegularDictionaryPage from './pages/ExtensionsPage';
 import * as Keycloak from 'keycloak-js';
 import * as kcHelper from './utils/keycloakFunctions';
-import { history } from '../history';
+import { history, historyPush } from '../history';
 import WhiteButton from './Assets/Buttons/WhiteButton';
 import { CSSProperties } from 'react';
 import * as _ from 'lodash';
 import {
+  getAPIUrl,
   getAuthClientId,
   getAuthMethod,
   getAuthRealm,
   getAuthUrl,
+  setApiUrlQuery,
 } from './utils/ApiFunctions';
+import Parser from './utils/Parser';
 
 const styles: CSSProperties = {
   logoutButton: {
@@ -31,7 +34,12 @@ const styles: CSSProperties = {
   },
 };
 
-interface IPrivateProps {
+interface IRouteProps {
+  match: { params: { id: string } };
+  location: { search: string };
+}
+
+interface IPrivateProps extends IRouteProps {
   isAppReady: boolean;
 }
 
@@ -55,6 +63,18 @@ class App extends React.Component<IPrivateProps, IState> {
 
   async componentDidMount() {
     await runSagaMiddleware();
+    const queryStrings = Parser.getQueryStrings(this.props.location.search);
+    console.log(queryStrings.apiUrl);
+    console.log(decodeURIComponent('http%3A%2F%2Flocalhost%3A7070'));
+    if (
+      queryStrings.apiUrl &&
+      decodeURIComponent(queryStrings.apiUrl) !== (await getAPIUrl())
+    ) {
+      console.log(decodeURIComponent(queryStrings.apiUrl));
+      setApiUrlQuery(decodeURIComponent(queryStrings.apiUrl));
+    }
+    console.log('test');
+    console.log(await getAPIUrl());
     SystemActionDispatchers.appReady();
     if (await kcHelper.keycloakEnabled()) {
       await this.initKeycloak();
@@ -84,11 +104,12 @@ class App extends React.Component<IPrivateProps, IState> {
   }
 
   logout = () => {
-    history.push('/');
+    historyPush('/');
     kcHelper.logout(this.state.keycloak);
   };
 
   render() {
+    console.log(this.props);
     return (
       <div className="ui container">
         {renderIf(this.props.isAppReady)(() => (

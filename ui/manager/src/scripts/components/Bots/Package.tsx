@@ -13,7 +13,7 @@ import * as _ from 'lodash';
 import WhiteButton from '../Assets/Buttons/WhiteButton';
 import ModalActionDispatchers from '../../actions/ModalActionDispatchers';
 import { ModalEnum } from '../utils/ModalEnum';
-import { history } from '../../history';
+import { history, historyPush } from '../../history';
 import { ClipLoader } from 'react-spinners';
 
 interface IPrivateProps extends IPublicProps {
@@ -71,13 +71,12 @@ class Package extends React.Component<IPrivateProps, IState> {
               <div>
                 <button
                   onClick={() =>
-                    history.push(
+                    historyPush(
                       this.props.packagePayload.version ===
                       this.props.packagePayload.currentVersion
                         ? `/packageview/${this.props.packagePayload.id}`
-                        : `/packageview/${
-                            this.props.packagePayload.id
-                          }?version=${this.props.packagePayload.version}`,
+                        : `/packageview/${this.props.packagePayload.id}`,
+                      [`version=${this.props.packagePayload.version}`],
                     )
                   }
                   style={styles.botPackageButton}>

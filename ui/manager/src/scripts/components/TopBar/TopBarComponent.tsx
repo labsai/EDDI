@@ -6,8 +6,6 @@ import { CSSProperties } from 'react';
 import { Link } from 'react-router-dom';
 import { ModalEnum } from '../utils/ModalEnum';
 import BlueButton from '../Assets/Buttons/BlueButton';
-import { history } from '../../history';
-import * as EddiTypes from '../utils/EddiTypes';
 
 const styles: CSSProperties = {
   createNewBotButton: {

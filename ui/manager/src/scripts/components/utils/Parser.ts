@@ -21,6 +21,7 @@ export interface IUsedResource {
 
 export interface IQueryStringProperties {
   version?: string;
+  apiUrl?: string;
 }
 
 export default class Parser {

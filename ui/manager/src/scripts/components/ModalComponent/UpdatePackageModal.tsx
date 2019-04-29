@@ -16,7 +16,7 @@ import * as _ from 'lodash';
 import eddiApiActionDispatchers from '../../actions/EddiApiActionDispatchers';
 import { connect } from 'react-redux';
 import { defaultPluginTypesSelector } from '../../selectors/PluginSelectors';
-import { history } from '../../history';
+import { historyPush } from '../../history';
 import modalActionDispatchers from '../../actions/ModalActionDispatchers';
 
 const customStyles = {
@@ -90,7 +90,7 @@ class UpdatePackageModal extends React.Component<IPrivateProps, IState> {
     );
     modalActionDispatchers.closeModal();
     eddiApiActionDispatchers.createNewPackageAction(packageID);
-    history.push(`/packageview/${packageID}`);
+    historyPush(`/packageview/${packageID}`);
   };
 
   addPluginsInModal = (addedPlugin: IOptions) => {

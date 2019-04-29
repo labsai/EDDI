@@ -5,16 +5,14 @@ import PackageList from './PackageList';
 import * as renderIf from 'render-if';
 import styles from './BotView.styles';
 import { Component, compose, pure, setDisplayName } from 'recompose';
-import { IBot, getDeploymentStatus } from '../utils/AxiosFunctions';
-import { botSelector } from '../../selectors/BotSelectors';
-import { connect } from 'react-redux';
+import { IBot } from '../utils/AxiosFunctions';
 import VersionSelectComponent from '../Assets/VersionSelectComponent';
 import WhiteButton from '../Assets/Buttons/WhiteButton';
 import DeployButton from '../Assets/Buttons/DeployButton';
-import { IN_PROGRESS, READY } from '../utils/helpers/BotHelper';
+import { READY } from '../utils/helpers/BotHelper';
 import eddiApiActionDispatchers from '../../actions/EddiApiActionDispatchers';
 import Parser from '../utils/Parser';
-import { history } from '../../history';
+import { historyPush } from '../../history';
 import { getAPIUrl } from '../utils/ApiFunctions';
 
 interface IProps {
@@ -61,7 +59,7 @@ class BotView extends React.Component<IProps, IState> {
     eddiApiActionDispatchers.fetchBotAction(
       Parser.replaceResourceVersion(this.props.bot.resource, newVersion),
     );
-    history.push(`${this.props.bot.id}?version=${newVersion}`);
+    historyPush(`${this.props.bot.id}`, [`version=${newVersion}`]);
   };
 
   render() {

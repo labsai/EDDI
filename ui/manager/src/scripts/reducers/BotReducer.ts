@@ -1,10 +1,5 @@
 import { Reducer, Action } from 'redux';
-import {
-  IBot,
-  IDescriptor,
-  IPackage,
-  IPlugin,
-} from '../components/utils/AxiosFunctions';
+import { IBot } from '../components/utils/AxiosFunctions';
 import {
   FETCH_BOT,
   FETCH_BOT_FAILED,
@@ -18,15 +13,10 @@ import {
   UPDATE_BOT_PACKAGES_SUCCESS,
   FETCH_BOTS_USING_PACKAGE_SUCCESS,
   UPDATE_BOTS_SUCCESS,
-  DEPLOY_BOT,
   DEPLOY_BOT_SUCCESS,
   UNDEPLOY_BOT_SUCCESS,
   FETCH_BOT_DEPLOYMENT_STATUS_SUCCESS,
-  DEPLOY_BOT_FAILED,
-  UNDEPLOY_BOT_FAILED,
-  CREATE_NEW_PACKAGE_SUCCESS,
   CREATE_NEW_BOT_SUCCESS,
-  ADD_NEW_PACKAGE_TO_BOTS,
   ADD_NEW_PACKAGE_TO_BOTS_SUCCESS,
 } from '../actions/EddiApiActionTypes';
 import * as update from 'immutability-helper';
@@ -38,24 +28,15 @@ import {
   IUpdateBotSuccessAction,
   IUpdateDescriptorSuccessAction,
   IUpdateBotPackagesSuccessAction,
-  IFetchPluginsSuccessAction,
   IFetchBotsUsingPackageSuccessAction,
-  IUpdatePackagesSuccessAction,
   IUpdateBotsSuccessAction,
   IDeployBotSuccessAction,
   IUndeployBotSuccessAction,
   IFetchBotDeploymentStatusSuccessAction,
-  IUndeployBotFailedAction,
-  ICreateNewPackageSuccessAction,
   ICreateNewBotSuccessAction,
-  IFetchPackagesSuccessAction,
   IAddNewPackageToBotsSuccessAction,
 } from '../actions/EddiApiActions';
 import * as _ from 'lodash';
-import modalActionDispatchers from '../actions/ModalActionDispatchers';
-import eddiApiActionDispatchers from '../actions/EddiApiActionDispatchers';
-import { history } from '../history';
-
 export type IBotReducer = Reducer<IBotState>;
 
 export interface IBotState {

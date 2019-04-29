@@ -3,16 +3,17 @@ import * as Radium from 'radium';
 import { Link } from 'react-router-dom';
 import { Component, compose, pure, setDisplayName } from 'recompose';
 import styles from './HomeButton.styles';
+import { historyPush } from '../../history';
 
 interface IProps {}
 
 const HomeButton: React.StatelessComponent<IProps> = () => (
   <div style={styles.navigationBar}>
-    <Link to="/" style={styles.homeButton}>
+    <div onClick={() => historyPush('/')} style={styles.homeButton}>
       <div style={styles.homeArrow}> </div>
       <div style={styles.homeSquare}> </div>
       <div style={styles.homeText}>{'Home'}</div>
-    </Link>
+    </div>
     <div style={styles.navigationBarRightSide} />
   </div>
 );
