@@ -64,17 +64,9 @@ class App extends React.Component<IPrivateProps, IState> {
   async componentDidMount() {
     await runSagaMiddleware();
     const queryStrings = Parser.getQueryStrings(this.props.location.search);
-    console.log(queryStrings.apiUrl);
-    console.log(decodeURIComponent('http%3A%2F%2Flocalhost%3A7070'));
-    if (
-      queryStrings.apiUrl &&
-      decodeURIComponent(queryStrings.apiUrl) !== (await getAPIUrl())
-    ) {
-      console.log(decodeURIComponent(queryStrings.apiUrl));
+    if (queryStrings.apiUrl) {
       setApiUrlQuery(decodeURIComponent(queryStrings.apiUrl));
     }
-    console.log('test');
-    console.log(await getAPIUrl());
     SystemActionDispatchers.appReady();
     if (await kcHelper.keycloakEnabled()) {
       await this.initKeycloak();
@@ -109,7 +101,6 @@ class App extends React.Component<IPrivateProps, IState> {
   };
 
   render() {
-    console.log(this.props);
     return (
       <div className="ui container">
         {renderIf(this.props.isAppReady)(() => (
