@@ -29,19 +29,8 @@ public class TimeExpressionDictionary implements IDictionary {
         if (timeAsDate != null) {
             final String timeString = timeAsDate.toString();
             Expression timeExp = expressionProvider.createExpression("time", timeAsDate.getTime());
-            Expression hourExp = expressionProvider.createExpression("hour", timeAsDate.getHours());
-            Expression minuteExp = expressionProvider.createExpression("minute", timeAsDate.getMinutes());
-            Expression secondExp = expressionProvider.createExpression("second", timeAsDate.getSeconds());
             IWord timeExpression = new Word(timeString, Collections.singletonList(timeExp), ID);
-            IWord hourExpression = new Word(String.valueOf(timeAsDate.getHours()), Collections.singletonList(hourExp), ID);
-            IWord minuteExpression = new Word(String.valueOf(timeAsDate.getMinutes()), Collections.singletonList(minuteExp), ID);
-            IWord secondExpression = new Word(String.valueOf(timeAsDate.getSeconds()), Collections.singletonList(secondExp), ID);
-            List<IFoundWord> foundWords = new ArrayList<>();
-            foundWords.add(new FoundWord(timeExpression, false, 1.0));
-            foundWords.add(new FoundWord(hourExpression, false, 1.0));
-            foundWords.add(new FoundWord(minuteExpression, false, 1.0));
-            foundWords.add(new FoundWord(secondExpression, false, 1.0));
-            return foundWords;
+            return Collections.singletonList(new FoundWord(timeExpression, false, 1.0));
         }
 
         return IDictionary.NO_WORDS_FOUND;
