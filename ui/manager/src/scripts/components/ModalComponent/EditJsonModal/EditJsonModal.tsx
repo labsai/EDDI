@@ -9,9 +9,27 @@ import modalActionDispatchers from '../../../actions/ModalActionDispatchers';
 import * as renderIf from 'render-if';
 import { compileJsonSchema } from '../../utils/helpers/JsonHelpers';
 import { DICTIONARY_SCHEMA } from '../../utils/JsonSchemas/JsonSchemas';
+import 'brace';
 
 require('brace/mode/json');
 require('brace/theme/monokai');
+const langTools = require('brace/ext/language_tools');
+
+const staticWordCompleter = {
+  getCompletions: function(editor, session, pos, prefix, callback) {
+    const wordList = ['foo', 'bar', 'baz'];
+    callback(
+      null,
+      wordList.map(function(word) {
+        return {
+          caption: word,
+          value: word,
+          meta: 'static',
+        };
+      }),
+    );
+  },
+};
 
 interface IState {
   editorText: string;
@@ -34,6 +52,8 @@ class EditJsonModal extends React.Component<IPrivateProps, IState> {
 
   componentDidMount() {
     this.discardChanges();
+    langTools.addCompleter(staticWordCompleter);
+    console.log(langTools);
   }
 
   componentWillReceiveProps(nextProps) {
@@ -99,6 +119,7 @@ class EditJsonModal extends React.Component<IPrivateProps, IState> {
           </div>
         </div>
         <AceEditor
+          ref={'aceEditor'}
           mode={'json'}
           height={'800px'}
           width={'100%'}
@@ -109,6 +130,11 @@ class EditJsonModal extends React.Component<IPrivateProps, IState> {
           showPrintMargin={false}
           focus={true}
           onChange={this.onChange}
+          setOptions={{
+            enableBasicAutocompletion: true,
+            enableSnippets: true,
+            enableLiveAutocompletion: true,
+          }}
           value={this.state.editorText}
           editorProps={{ $blockScrolling: true }}
         />

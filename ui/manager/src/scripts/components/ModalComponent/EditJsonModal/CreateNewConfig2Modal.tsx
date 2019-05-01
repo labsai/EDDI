@@ -14,12 +14,11 @@ import * as _ from 'lodash';
 import JsonErrors from './JsonErrors';
 import { DICTIONARY_SCHEMA } from '../../utils/JsonSchemas/JsonSchemas';
 import { compileJsonSchema, IJsonError } from '../../utils/helpers/JsonHelpers';
-import * as AE from 'react-ace';
-import * as Ajv from 'ajv';
-import * as Jsm from 'json-source-map';
-
-require('brace/mode/json');
-require('brace/theme/monokai');
+import * as ace from 'brace';
+import * as fs from 'fs';
+import 'brace/mode/json';
+import 'brace/theme/monokai';
+import 'brace/snippets/json';
 
 interface IState {
   editorText: string;
@@ -35,6 +34,52 @@ interface IProps {
   data: string;
   onConfirm(): void;
 }
+let staticWordCompleter = {
+  getCompletions: function(editor, session, pos, prefix, callback) {
+    const wordList = ['word', 'words', 'baz'];
+    callback(
+      null,
+      wordList.map(function(word) {
+        return {
+          caption: word,
+          value: word,
+          meta: 'static',
+        };
+      }),
+    );
+  },
+};
+
+const snippet: string =
+  '# AddPhrases\nsnippet phrases\n\t"phrases": [${1:}]\n# AddPhrase\nsnippet phrase\n\t{\n\t\t"phrase": "${1:phrase}",\n\t\t"exp": "${2:exp_name}(${3:exp_value})",\n\t\t"frequency": 0\n\t}\n# AddWords\nsnippet words\n\t"words": [${1:}]\n# AddWord\n\
+snippet word\n\
+	{\n\
+		"word": "${1:word}",\n\
+		"exp": "${2:exp_name}(${3:exp_value})",\n\
+		"frequency": 0\n\
+	}\n\
+';
+
+const snippet2: string = '# AddWords\n\
+snippet words\n\
+		"words": [${1:}]\n\
+';
+
+const snippet3: string =
+  '# AddPhrase\n\
+snippet phrase\n\
+	{\n\
+		"phrase": "${1:phrase}",\n\
+		"exp": "${2:exp_name}(${3:exp_value})",\n\
+		"frequency": 0\n\
+	}\n\
+';
+
+const snippet4: string =
+  '# AddPhrases\n\
+snippet phrases\n\
+		"phrases": [${1:}]\n\
+';
 
 class CreateNewConfig2Modal extends React.Component<IProps, IState> {
   constructor(props) {
@@ -49,7 +94,15 @@ class CreateNewConfig2Modal extends React.Component<IProps, IState> {
 
   componentDidMount() {
     this.discardChanges();
-    // const editor: AE.AceEditor = this.refs.ace['editor'];
+    const langTools = ace.acequire('ace/ext/language_tools');
+    // langTools.addCompleter(staticWordCompleter);
+    const snippetManager = ace.acequire('ace/snippets').snippetManager;
+    const editor = ace.edit('OutputJson');
+    console.log(snippet2.concat(snippet));
+    const customSnippets = snippetManager.parseSnippetFile(snippet, 'json');
+    const customSnippet2 = snippetManager.parseSnippetFile(snippet2, 'json');
+    console.log(customSnippets);
+    snippetManager.register(customSnippets, 'json');
   }
 
   componentWillReceiveProps(nextProps) {
@@ -123,13 +176,6 @@ class CreateNewConfig2Modal extends React.Component<IProps, IState> {
 
   render() {
     const typeName = Parser.getPluginName(this.props.type, false);
-    const test: AE.AceEditorProps = this.refs.ace;
-    console.log(test);
-    if (!_.isUndefined(test)) {
-      console.log(test['editor']);
-      console.log(test.editorProps);
-      console.log(test);
-    }
     return (
       <div>
         <div style={styles.modalHeader}>
@@ -175,7 +221,7 @@ class CreateNewConfig2Modal extends React.Component<IProps, IState> {
           </div>
         ))}
         <AceEditor
-          ref={'ace'}
+          ref={'aceEditor'}
           mode={'json'}
           height={'800px'}
           width={'100%'}
@@ -194,6 +240,7 @@ class CreateNewConfig2Modal extends React.Component<IProps, IState> {
                   };
                 })
           }
+          setOptions={{ enableLiveAutocompletion: true, enableSnippets: true }}
           showGutter={true}
           showPrintMargin={false}
           focus={true}
