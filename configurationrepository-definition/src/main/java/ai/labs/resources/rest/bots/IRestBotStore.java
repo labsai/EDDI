@@ -6,12 +6,14 @@ import ai.labs.resources.rest.bots.model.BotConfiguration;
 import io.swagger.annotations.Api;
 import io.swagger.annotations.ApiOperation;
 import io.swagger.annotations.ApiParam;
+import io.swagger.annotations.ApiResponse;
 
 import javax.ws.rs.*;
 import javax.ws.rs.core.MediaType;
 import javax.ws.rs.core.Response;
 import java.net.URI;
 import java.util.List;
+import java.util.Map;
 
 /**
  * @author ginccc
@@ -20,6 +22,13 @@ import java.util.List;
 @Path("/botstore/bots")
 public interface IRestBotStore extends IRestVersionInfo {
     String resourceURI = "eddi://ai.labs.bot/botstore/bots/";
+
+    @GET
+    @Path("/jsonSchema")
+    @Produces(MediaType.APPLICATION_JSON)
+    @ApiResponse(code = 200, response = Map.class, message = "JSON Schema (for validation).")
+    @ApiOperation(value = "Read JSON Schema for bot definition.")
+    Response readJsonSchema();
 
     @GET
     @Path("descriptors")

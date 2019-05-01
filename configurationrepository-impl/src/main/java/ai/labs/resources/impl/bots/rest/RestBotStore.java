@@ -12,6 +12,7 @@ import ai.labs.resources.rest.documentdescriptor.IDocumentDescriptorStore;
 import ai.labs.resources.rest.packages.IRestPackageStore;
 import ai.labs.rest.restinterfaces.IRestInterfaceFactory;
 import ai.labs.rest.restinterfaces.RestInterfaceFactory;
+import ai.labs.schema.IJsonSchemaCreator;
 import ai.labs.utilities.RestUtilities;
 import ai.labs.utilities.URIUtilities;
 import lombok.extern.slf4j.Slf4j;
@@ -34,16 +35,19 @@ public class RestBotStore extends RestVersionInfo<BotConfiguration> implements I
     private static final String PACKAGE_URI = IRestPackageStore.resourceURI;
     private final IBotStore botStore;
     private final IRestPackageStore restPackageStore;
+    private final IJsonSchemaCreator jsonSchemaCreator;
     private IRestBotStore restBotStore;
 
     @Inject
     public RestBotStore(IBotStore botStore,
                         IRestPackageStore restPackageStore,
                         IRestInterfaceFactory restInterfaceFactory,
-                        IDocumentDescriptorStore documentDescriptorStore) {
+                        IDocumentDescriptorStore documentDescriptorStore,
+                        IJsonSchemaCreator jsonSchemaCreator) {
         super(resourceURI, botStore, documentDescriptorStore);
         this.botStore = botStore;
         this.restPackageStore = restPackageStore;
+        this.jsonSchemaCreator = jsonSchemaCreator;
         initRestClient(restInterfaceFactory);
     }
 
@@ -54,6 +58,11 @@ public class RestBotStore extends RestVersionInfo<BotConfiguration> implements I
             restBotStore = null;
             log.error(e.getLocalizedMessage(), e);
         }
+    }
+
+    @Override
+    public Response readJsonSchema() {
+        return Response.ok(jsonSchemaCreator.generateSchema(BotConfiguration.class)).build();
     }
 
     @Override

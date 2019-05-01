@@ -9,6 +9,7 @@ import ai.labs.resources.rest.http.IRestHttpCallsStore;
 import ai.labs.resources.rest.http.model.HttpCallsConfiguration;
 import ai.labs.rest.restinterfaces.IRestInterfaceFactory;
 import ai.labs.rest.restinterfaces.RestInterfaceFactory;
+import ai.labs.schema.IJsonSchemaCreator;
 import lombok.extern.slf4j.Slf4j;
 
 import javax.inject.Inject;
@@ -21,14 +22,17 @@ import java.util.List;
 @Slf4j
 public class RestHttpCallsStore extends RestVersionInfo<HttpCallsConfiguration> implements IRestHttpCallsStore {
     private final IHttpCallsStore httpCallsStore;
+    private final IJsonSchemaCreator jsonSchemaCreator;
     private IRestHttpCallsStore restHttpCallsStore;
 
     @Inject
     public RestHttpCallsStore(IHttpCallsStore httpCallsStore,
                               IRestInterfaceFactory restInterfaceFactory,
-                              IDocumentDescriptorStore documentDescriptorStore) {
+                              IDocumentDescriptorStore documentDescriptorStore,
+                              IJsonSchemaCreator jsonSchemaCreator) {
         super(resourceURI, httpCallsStore, documentDescriptorStore);
         this.httpCallsStore = httpCallsStore;
+        this.jsonSchemaCreator = jsonSchemaCreator;
         initRestClient(restInterfaceFactory);
     }
 
@@ -39,6 +43,11 @@ public class RestHttpCallsStore extends RestVersionInfo<HttpCallsConfiguration> 
             restHttpCallsStore = null;
             log.error(e.getLocalizedMessage(), e);
         }
+    }
+
+    @Override
+    public Response readJsonSchema() {
+        return Response.ok(jsonSchemaCreator.generateSchema(HttpCallsConfiguration.class)).build();
     }
 
     @Override

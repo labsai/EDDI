@@ -11,6 +11,7 @@ import javax.ws.rs.*;
 import javax.ws.rs.core.MediaType;
 import javax.ws.rs.core.Response;
 import java.util.List;
+import java.util.Map;
 
 /**
  * @author ginccc
@@ -19,6 +20,13 @@ import java.util.List;
 @Path("/regulardictionarystore/regulardictionaries")
 public interface IRestRegularDictionaryStore extends IRestVersionInfo {
     String resourceURI = "eddi://ai.labs.regulardictionary/regulardictionarystore/regulardictionaries/";
+
+    @GET
+    @Path("/jsonSchema")
+    @Produces(MediaType.APPLICATION_JSON)
+    @ApiResponse(code = 200, response = Map.class, message = "JSON Schema (for validation).")
+    @ApiOperation(value = "Read JSON Schema for regular dictionary definition.")
+    Response readJsonSchema();
 
     @GET
     @Path("/descriptors")

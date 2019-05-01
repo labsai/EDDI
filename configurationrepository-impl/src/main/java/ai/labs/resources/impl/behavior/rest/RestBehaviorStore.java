@@ -9,6 +9,7 @@ import ai.labs.resources.rest.behavior.model.BehaviorConfiguration;
 import ai.labs.resources.rest.documentdescriptor.IDocumentDescriptorStore;
 import ai.labs.rest.restinterfaces.IRestInterfaceFactory;
 import ai.labs.rest.restinterfaces.RestInterfaceFactory;
+import ai.labs.schema.IJsonSchemaCreator;
 import lombok.extern.slf4j.Slf4j;
 
 import javax.inject.Inject;
@@ -21,14 +22,17 @@ import java.util.List;
 @Slf4j
 public class RestBehaviorStore extends RestVersionInfo<BehaviorConfiguration> implements IRestBehaviorStore {
     private final IBehaviorStore behaviorStore;
+    private final IJsonSchemaCreator jsonSchemaCreator;
     private IRestBehaviorStore restBehaviorStore;
 
     @Inject
     public RestBehaviorStore(IBehaviorStore behaviorStore,
                              IRestInterfaceFactory restInterfaceFactory,
-                             IDocumentDescriptorStore documentDescriptorStore) {
+                             IDocumentDescriptorStore documentDescriptorStore,
+                             IJsonSchemaCreator jsonSchemaCreator) {
         super(resourceURI, behaviorStore, documentDescriptorStore);
         this.behaviorStore = behaviorStore;
+        this.jsonSchemaCreator = jsonSchemaCreator;
         initRestClient(restInterfaceFactory);
     }
 
@@ -39,6 +43,11 @@ public class RestBehaviorStore extends RestVersionInfo<BehaviorConfiguration> im
             restBehaviorStore = null;
             log.error(e.getLocalizedMessage(), e);
         }
+    }
+
+    @Override
+    public Response readJsonSchema() {
+        return Response.ok(jsonSchemaCreator.generateSchema(BehaviorConfiguration.class)).build();
     }
 
     @Override

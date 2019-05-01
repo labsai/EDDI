@@ -155,7 +155,7 @@ public class ServerRuntime implements IServerRuntime {
         alpn.setDefaultProtocol("h2");
 
         // SSL Connection Factory
-        SslContextFactory sslContextFactory = new SslContextFactory();
+        SslContextFactory.Server sslContextFactory = new SslContextFactory.Server();
         sslContextFactory.setKeyStorePath(options.keyStorePath);
         sslContextFactory.setKeyStorePassword(options.keyStorePassword);
         sslContextFactory.setKeyManagerPassword(options.keyStorePassword);

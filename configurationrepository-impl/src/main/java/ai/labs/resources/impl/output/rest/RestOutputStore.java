@@ -10,6 +10,7 @@ import ai.labs.resources.rest.output.model.OutputConfigurationSet;
 import ai.labs.resources.rest.patch.PatchInstruction;
 import ai.labs.rest.restinterfaces.IRestInterfaceFactory;
 import ai.labs.rest.restinterfaces.RestInterfaceFactory;
+import ai.labs.schema.IJsonSchemaCreator;
 import lombok.extern.slf4j.Slf4j;
 
 import javax.inject.Inject;
@@ -24,14 +25,17 @@ import java.util.List;
 @Slf4j
 public class RestOutputStore extends RestVersionInfo<OutputConfigurationSet> implements IRestOutputStore {
     private final IOutputStore outputStore;
+    private final IJsonSchemaCreator jsonSchemaCreator;
     private IRestOutputStore restOutputStore;
 
     @Inject
     public RestOutputStore(IOutputStore outputStore,
                            IRestInterfaceFactory restInterfaceFactory,
-                           IDocumentDescriptorStore documentDescriptorStore) {
+                           IDocumentDescriptorStore documentDescriptorStore,
+                           IJsonSchemaCreator jsonSchemaCreator) {
         super(resourceURI, outputStore, documentDescriptorStore);
         this.outputStore = outputStore;
+        this.jsonSchemaCreator = jsonSchemaCreator;
         initRestClient(restInterfaceFactory);
     }
 
@@ -42,6 +46,11 @@ public class RestOutputStore extends RestVersionInfo<OutputConfigurationSet> imp
             restOutputStore = null;
             log.error(e.getLocalizedMessage(), e);
         }
+    }
+
+    @Override
+    public Response readJsonSchema() {
+        return Response.ok(jsonSchemaCreator.generateSchema(OutputConfigurationSet.class)).build();
     }
 
     @Override

@@ -13,6 +13,7 @@ import ai.labs.rest.restinterfaces.IRestInterfaceFactory;
 import ai.labs.rest.restinterfaces.RestInterfaceFactory;
 import ai.labs.runtime.client.configuration.ResourceClientLibrary;
 import ai.labs.runtime.service.ServiceException;
+import ai.labs.schema.IJsonSchemaCreator;
 import ai.labs.utilities.RestUtilities;
 import lombok.extern.slf4j.Slf4j;
 
@@ -32,16 +33,19 @@ public class RestPackageStore extends RestVersionInfo<PackageConfiguration> impl
     private static final String KEY_CONFIG = "config";
     private final IPackageStore packageStore;
     private final ResourceClientLibrary resourceClientLibrary;
+    private final IJsonSchemaCreator jsonSchemaCreator;
     private IRestPackageStore restPackageStore;
 
     @Inject
     public RestPackageStore(IPackageStore packageStore,
                             IRestInterfaceFactory restInterfaceFactory,
                             ResourceClientLibrary resourceClientLibrary,
-                            IDocumentDescriptorStore documentDescriptorStore) {
+                            IDocumentDescriptorStore documentDescriptorStore,
+                            IJsonSchemaCreator jsonSchemaCreator) {
         super(resourceURI, packageStore, documentDescriptorStore);
         this.packageStore = packageStore;
         this.resourceClientLibrary = resourceClientLibrary;
+        this.jsonSchemaCreator = jsonSchemaCreator;
         initRestClient(restInterfaceFactory);
     }
 
@@ -52,6 +56,11 @@ public class RestPackageStore extends RestVersionInfo<PackageConfiguration> impl
             restPackageStore = null;
             log.error(e.getLocalizedMessage(), e);
         }
+    }
+
+    @Override
+    public Response readJsonSchema() {
+        return Response.ok(jsonSchemaCreator.generateSchema(PackageConfiguration.class)).build();
     }
 
     @Override

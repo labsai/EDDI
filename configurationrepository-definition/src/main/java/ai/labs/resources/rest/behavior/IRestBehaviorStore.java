@@ -9,6 +9,7 @@ import javax.ws.rs.*;
 import javax.ws.rs.core.MediaType;
 import javax.ws.rs.core.Response;
 import java.util.List;
+import java.util.Map;
 
 /**
  * @author ginccc
@@ -18,6 +19,13 @@ import java.util.List;
 public interface IRestBehaviorStore extends IRestVersionInfo {
     String resourceURI = "eddi://ai.labs.behavior/behaviorstore/behaviorsets/";
     String versionQueryParam = "?version=";
+
+    @GET
+    @Path("/jsonSchema")
+    @Produces(MediaType.APPLICATION_JSON)
+    @ApiResponse(code = 200, response = Map.class, message = "JSON Schema (for validation).")
+    @ApiOperation(value = "Read JSON Schema for behavior definition.")
+    Response readJsonSchema();
 
     @GET
     @Path("descriptors")

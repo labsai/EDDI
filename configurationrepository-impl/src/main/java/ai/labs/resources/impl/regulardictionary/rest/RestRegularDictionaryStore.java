@@ -10,6 +10,7 @@ import ai.labs.resources.rest.regulardictionary.IRestRegularDictionaryStore;
 import ai.labs.resources.rest.regulardictionary.model.RegularDictionaryConfiguration;
 import ai.labs.rest.restinterfaces.IRestInterfaceFactory;
 import ai.labs.rest.restinterfaces.RestInterfaceFactory;
+import ai.labs.schema.IJsonSchemaCreator;
 import lombok.extern.slf4j.Slf4j;
 
 import javax.inject.Inject;
@@ -24,14 +25,17 @@ import java.util.List;
 @Slf4j
 public class RestRegularDictionaryStore extends RestVersionInfo<RegularDictionaryConfiguration> implements IRestRegularDictionaryStore {
     private final IRegularDictionaryStore regularDictionaryStore;
+    private final IJsonSchemaCreator jsonSchemaCreator;
     private IRestRegularDictionaryStore restRegularDictionaryStore;
 
     @Inject
     public RestRegularDictionaryStore(IRegularDictionaryStore regularDictionaryStore,
                                       IRestInterfaceFactory restInterfaceFactory,
-                                      IDocumentDescriptorStore documentDescriptorStore) {
+                                      IDocumentDescriptorStore documentDescriptorStore,
+                                      IJsonSchemaCreator jsonSchemaCreator) {
         super(resourceURI, regularDictionaryStore, documentDescriptorStore);
         this.regularDictionaryStore = regularDictionaryStore;
+        this.jsonSchemaCreator = jsonSchemaCreator;
         initRestClient(restInterfaceFactory);
     }
 
@@ -42,6 +46,11 @@ public class RestRegularDictionaryStore extends RestVersionInfo<RegularDictionar
             restRegularDictionaryStore = null;
             log.error(e.getLocalizedMessage(), e);
         }
+    }
+
+    @Override
+    public Response readJsonSchema() {
+        return Response.ok(jsonSchemaCreator.generateSchema(RegularDictionaryConfiguration.class)).build();
     }
 
     @Override
