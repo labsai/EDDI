@@ -1,6 +1,6 @@
 # EDDI - Enhanced Dialog Driven Intelligence
 
-A Platform for creating, running and maintaining chatbots of all kinds.
+High Performance, In-Memory Chatbot Platform. Build multiple Chatbots with NLP, Behavior Rules, API Connector, Templating. 
 
 v4.6.0 - LATEST
 
@@ -12,7 +12,7 @@ Visit https://eddi.labs.ai for further references.
 
 For professional support, check out: https://www.labs.ai
 
-Check out the full documentation [here](https://labsai.atlassian.net/wiki/display/EDDI/).
+Check out the full documentation [here](http://docs.labs.ai/).
 
 [![Codacy Badge](https://api.codacy.com/project/badge/Grade/17f0bf1c32b346fc9232e7601327d212)](https://app.codacy.com/app/ginccc/EDDI?utm_source=github.com&utm_medium=referral&utm_content=labsai/EDDI&utm_campaign=Badge_Grade_Dashboard)
 [![CircleCI](https://circleci.com/gh/labsai/EDDI/tree/master.svg?style=svg)](https://circleci.com/gh/labsai/EDDI/tree/master)
@@ -26,13 +26,15 @@ the ease of connecting it to other resources (such as databases or other Service
 This platform has been developed for over six years and completely restructured from scratch four times 
 because of logical "dead ends" in the art of building chatbots - thus version 4.
 
-The most outstanding features are: 
-* it is highly extensible (plugins), 
-* very flexible in dialog structure and 
-* allows sharing of knowledge between bots
+The most outstanding features are:
+* Flexible in NLP and Behavior
+* Fluently connect to REST APIs
+* Powerful Templating
+* Reuse Conversation Flows in multiple bots
 
 technical spec:
 * Resource- / REST-oriented architecture
+* OAuth 2.0 / Basic Authentication
 * Java
 * JAX-RS
 * Dependency Injection
@@ -81,3 +83,5 @@ or
 ```
 docker-compose -f docker-compose.yml -f docker-compose.local.yml -f docker-compose.testing.yml -p ci up -d
 ```
+
+For running in cloud (with authentication), check: https://hub.docker.com/r/labsai/eddi
