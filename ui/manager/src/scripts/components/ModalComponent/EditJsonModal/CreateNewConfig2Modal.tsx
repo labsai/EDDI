@@ -97,11 +97,15 @@ class CreateNewConfig2Modal extends React.Component<IProps, IState> {
     const langTools = ace.acequire('ace/ext/language_tools');
     // langTools.addCompleter(staticWordCompleter);
     const snippetManager = ace.acequire('ace/snippets').snippetManager;
-    const editor = ace.edit('OutputJson');
+    const editor: ace.Editor = ace.edit('OutputJson');
     console.log(snippet2.concat(snippet));
     const customSnippets = snippetManager.parseSnippetFile(snippet, 'json');
     const customSnippet2 = snippetManager.parseSnippetFile(snippet2, 'json');
     console.log(customSnippets);
+    const editorSession = editor.getSession();
+    const completer = editor['completers'][0];
+    langTools.removeCompleters();
+    langTools.addCompleter(completer);
     snippetManager.register(customSnippets, 'json');
   }
 
