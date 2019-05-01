@@ -1,8 +1,21 @@
 import axios from 'axios';
+import * as _ from 'lodash';
 
 let apiUrlPromise: Promise<string>;
+let apiUrlQuery: string;
+
+export function setApiUrlQuery(url: string) {
+  apiUrlQuery = url;
+}
+
+export function getApiUrlQuery(): string {
+  return apiUrlQuery;
+}
 
 export async function getAPIUrl(): Promise<string> {
+  if (!_.isEmpty(apiUrlQuery)) {
+    return apiUrlQuery;
+  }
   if (!apiUrlPromise) {
     return (apiUrlPromise = axios
       .get('/_/env.json')

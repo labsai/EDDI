@@ -10,7 +10,7 @@ import { packageSelector } from '../../selectors/PackageSelectors';
 import * as _ from 'lodash';
 import VersionSelectComponent from '../Assets/VersionSelectComponent';
 import { Link, browserHistory } from 'react-router-dom';
-import { history } from '../../history';
+import { historyPush } from '../../history';
 import eddiApiActionDispatchers from '../../actions/EddiApiActionDispatchers';
 
 interface IPublicProps {
@@ -111,7 +111,7 @@ class Package extends React.Component<IPrivateProps> {
                   disabled={!isCurrentVersion}
                   style={this.getEditPackageStyle()}
                   onClick={() =>
-                    history.push(`/packageview/${packagePayload.id}`)
+                    historyPush(`/packageview/${packagePayload.id}`)
                   }>
                   {'Edit package'}
                 </button>
