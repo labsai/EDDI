@@ -1,7 +1,7 @@
 version: '3'
 services:
   eddi:
-    image: labsai/eddi:keycloak
+    image: labsai/eddi:latest
     ports:
       - "7070:7070"
       - "7443:7443"
