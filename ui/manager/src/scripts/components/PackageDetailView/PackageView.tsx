@@ -20,7 +20,7 @@ import BlueButton from '../Assets/Buttons/BlueButton';
 import WhiteButton from '../Assets/Buttons/WhiteButton';
 import BotsUsingPackage from './UsedByComponent/BotsUsingPackage';
 import VersionSelectComponent from '../Assets/VersionSelectComponent';
-import { history } from '../../history';
+import { historyPush } from '../../history';
 import Parser from '../utils/Parser';
 import { hasExtensions } from '../utils/helpers/PluginParser';
 import PluginHelper from '../utils/helpers/PluginHelper';
@@ -196,11 +196,11 @@ class PackageView extends React.Component<IPrivateProps, IState> {
       ),
     );
     if (newVersion === this.props.packagePayload.currentVersion) {
-      history.push(`/packageview/${this.props.packagePayload.id}`);
+      historyPush(`/packageview/${this.props.packagePayload.id}`);
     } else {
-      history.push(
-        `/packageview/${this.props.packagePayload.id}?version=${newVersion}`,
-      );
+      historyPush(`/packageview/${this.props.packagePayload.id}`, [
+        `version=${newVersion}`,
+      ]);
     }
   };
 
