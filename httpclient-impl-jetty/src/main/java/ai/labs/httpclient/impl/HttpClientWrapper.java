@@ -186,6 +186,7 @@ public class HttpClientWrapper implements IHttpClient {
                     "uri=" + uri +
                     ", request=" + request.toString() +
                     ", maxLength=" + maxLength +
+                    ", queryparams=" + request.getParams() +
                     '}';
         }
     }
