@@ -4,7 +4,7 @@ import styles from './ModalComponent.styles';
 import './ModalComponent.styles.scss';
 import { Component, compose, pure, setDisplayName } from 'recompose';
 import { createNewBot } from '../utils/AxiosFunctions';
-import { history } from '../../history';
+import { historyPush } from '../../history';
 import modalActionDispatchers from '../../actions/ModalActionDispatchers';
 import eddiApiActionDispatchers from '../../actions/EddiApiActionDispatchers';
 
@@ -53,7 +53,7 @@ class CreateBotModal extends React.Component<IProps, IState> {
   async createBot() {
     const botID = await createNewBot(this.state.name, this.state.description);
     eddiApiActionDispatchers.createNewBotAction(botID);
-    history.push(`/botview/${botID}`);
+    historyPush(`/botview/${botID}`);
     modalActionDispatchers.closeModal();
   }
 

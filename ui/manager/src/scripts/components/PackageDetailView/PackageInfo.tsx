@@ -9,12 +9,8 @@ import styles from '../Bots/Botlist.styles';
 import * as _ from 'lodash';
 import { ClimbingBoxLoader } from 'react-spinners';
 import * as renderIf from 'render-if';
-import {
-  latestPackageSelector,
-  specificPackageSelector,
-} from '../../selectors/PackageSelectors';
+import { specificPackageSelector } from '../../selectors/PackageSelectors';
 import { PACKAGE, PACKAGE_PATH } from '../utils/EddiTypes';
-import { history } from '../../history';
 
 interface IPublicProps {
   packageId: string;

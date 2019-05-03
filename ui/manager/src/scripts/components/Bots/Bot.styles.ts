@@ -57,6 +57,7 @@ const styles: CSSProperties = {
     display: 'flex',
     flex: '1',
     textDecoration: 'none',
+    cursor: 'pointer',
   },
   deployButton: {
     height: '35px',

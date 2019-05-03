@@ -13,6 +13,7 @@ import DeployButton from '../Assets/Buttons/DeployButton';
 import WhiteButton from '../Assets/Buttons/WhiteButton';
 import { READY } from '../utils/helpers/BotHelper';
 import { ClipLoader } from 'react-spinners';
+import { historyPush } from '../../history';
 
 interface IProps {
   bot: IBot;
@@ -41,11 +42,9 @@ class Bot extends React.Component<IProps> {
       <div>
         <div style={styles.botBox}>
           <div style={styles.botHeader}>
-            <Link
+            <div
               style={styles.link}
-              to={{
-                pathname: `/botview/${this.props.bot.id}`,
-              }}>
+              onClick={() => historyPush(`/botview/${this.props.bot.id}`)}>
               <div style={styles.botHeaderName}>
                 {this.props.bot.name || this.props.bot.id}
               </div>
@@ -72,7 +71,7 @@ class Bot extends React.Component<IProps> {
                   {moment(this.props.bot.lastModifiedOn).format('DD.MM.YYYY')}
                 </span>
               </div>
-            </Link>
+            </div>
             <WhiteButton
               text={'Open Chat'}
               customStyles={styles.chatButton}
