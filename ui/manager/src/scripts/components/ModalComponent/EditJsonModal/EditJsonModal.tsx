@@ -13,23 +13,7 @@ import 'brace';
 
 require('brace/mode/json');
 require('brace/theme/monokai');
-const langTools = require('brace/ext/language_tools');
-
-const staticWordCompleter = {
-  getCompletions: function(editor, session, pos, prefix, callback) {
-    const wordList = ['foo', 'bar', 'baz'];
-    callback(
-      null,
-      wordList.map(function(word) {
-        return {
-          caption: word,
-          value: word,
-          meta: 'static',
-        };
-      }),
-    );
-  },
-};
+require('brace/ext/language_tools');
 
 interface IState {
   editorText: string;
@@ -52,8 +36,6 @@ class EditJsonModal extends React.Component<IPrivateProps, IState> {
 
   componentDidMount() {
     this.discardChanges();
-    langTools.addCompleter(staticWordCompleter);
-    console.log(langTools);
   }
 
   componentWillReceiveProps(nextProps) {

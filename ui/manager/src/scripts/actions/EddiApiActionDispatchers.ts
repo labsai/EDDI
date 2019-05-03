@@ -84,6 +84,12 @@ import {
   IAddNewPackageToBotsFailedAction,
   addNewPackageToBotsSuccessAction,
   addNewPackageToBotsFailedAction,
+  IFetchJsonSchemaAction,
+  IFetchJsonSchemaSuccessAction,
+  fetchBotJsonSchemaSuccessAction,
+  fetchJsonSchemaAction,
+  fetchPackageJsonSchemaSuccessAction,
+  fetchPluginJsonSchemaSuccessAction,
 } from './EddiApiActions';
 
 export interface IEddiApiActionDispatchers extends ActionCreatorsMapObject {
@@ -159,6 +165,19 @@ export interface IEddiApiActionDispatchers extends ActionCreatorsMapObject {
     bots,
   ) => IAddNewPackageToBotsSuccessAction;
   addNewPackageToBotsFailedAction: (error) => IAddNewPackageToBotsFailedAction;
+  fetchJsonSchemaAction: (eddiType) => IFetchJsonSchemaAction;
+  fetchBotJsonSchemaSuccessAction: (
+    eddiType,
+    schema,
+  ) => IFetchJsonSchemaSuccessAction;
+  fetchPackageJsonSchemaSuccessAction: (
+    eddiType,
+    schema,
+  ) => IFetchJsonSchemaSuccessAction;
+  fetchPluginJsonSchemaSuccessAction: (
+    eddiType,
+    schema,
+  ) => IFetchJsonSchemaSuccessAction;
 }
 
 const actions: IEddiApiActionDispatchers = {
@@ -207,6 +226,10 @@ const actions: IEddiApiActionDispatchers = {
   addNewPackageToBotsAction,
   addNewPackageToBotsSuccessAction,
   addNewPackageToBotsFailedAction,
+  fetchJsonSchemaAction,
+  fetchBotJsonSchemaSuccessAction,
+  fetchPackageJsonSchemaSuccessAction,
+  fetchPluginJsonSchemaSuccessAction,
 };
 
 const eddiApiActionDispatchers: IEddiApiActionDispatchers = bindActionCreators<

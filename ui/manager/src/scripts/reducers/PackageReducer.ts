@@ -21,6 +21,7 @@ import {
   UPDATE_PACKAGES_FAILED,
   CREATE_NEW_PACKAGE_SUCCESS,
   ADD_NEW_PACKAGE_TO_BOTS_SUCCESS,
+  FETCH_PACKAGE_JSON_SCHEMA_SUCCESS,
 } from '../actions/EddiApiActionTypes';
 import * as update from 'immutability-helper';
 import {
@@ -39,6 +40,7 @@ import {
   IUpdatePackagesFailedAction,
   ICreateNewPackageSuccessAction,
   IAddNewPackageToBotsSuccessAction,
+  IFetchJsonSchemaSuccessAction,
 } from '../actions/EddiApiActions';
 import * as _ from 'lodash';
 
@@ -52,6 +54,7 @@ export interface IPackageState {
   packages: IPackage[];
   allPackagesLoaded: boolean;
   packagesLoaded: number;
+  schema: {};
 }
 
 export const initialState: IPackageState = {
@@ -62,6 +65,7 @@ export const initialState: IPackageState = {
   packages: [],
   allPackagesLoaded: false,
   packagesLoaded: 0,
+  schema: null,
 };
 
 const PackageReducer: IPackageReducer = (
@@ -454,6 +458,13 @@ const PackageReducer: IPackageReducer = (
               }
             });
           },
+        },
+      });
+
+    case FETCH_PACKAGE_JSON_SCHEMA_SUCCESS:
+      return update(state, {
+        schema: {
+          $set: (action as IFetchJsonSchemaSuccessAction).schema.value,
         },
       });
 

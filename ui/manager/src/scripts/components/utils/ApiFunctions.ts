@@ -1,4 +1,18 @@
 import axios from 'axios';
+import {
+  BEHAVIOR,
+  BEHAVIOR_PATH,
+  BOT,
+  BOT_PATH,
+  HTTPCALLS,
+  HTTPCALLS_PATH,
+  OUTPUT,
+  OUTPUT_PATH,
+  PACKAGE,
+  PACKAGE_PATH,
+  REGULAR_DICTIONARY,
+  REGULAR_DICTIONARY_PATH,
+} from './EddiTypes';
 
 let apiUrlPromise: Promise<string>;
 
@@ -182,6 +196,25 @@ export async function getAuthClientId(): Promise<string> {
       authClientId = authClientId.substring(0, authClientId.length - 1);
     }
     return authClientId;
+  }
+}
+
+export function getTypePath(type: string): string {
+  switch (type) {
+    case REGULAR_DICTIONARY:
+      return REGULAR_DICTIONARY_PATH;
+    case BEHAVIOR:
+      return BEHAVIOR_PATH;
+    case OUTPUT:
+      return OUTPUT_PATH;
+    case HTTPCALLS:
+      return HTTPCALLS_PATH;
+    case BOT:
+      return BOT_PATH;
+    case PACKAGE:
+      return PACKAGE_PATH;
+    default:
+      return null;
   }
 }
 

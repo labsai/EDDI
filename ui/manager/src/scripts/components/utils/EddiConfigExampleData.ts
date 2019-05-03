@@ -4,12 +4,10 @@ import {
   HTTPCALLS,
   OUTPUT,
   PACKAGE,
-  PACKAGE_PATH,
   REGULAR_DICTIONARY,
 } from './EddiTypes';
 
 export const REGULAR_DICTIONARY_POST_EXAMPLE: string = `{
-    "language": "en",
     "words": [
         {
             "word": "Hello",
@@ -28,20 +26,20 @@ export const REGULAR_DICTIONARY_POST_EXAMPLE: string = `{
 export const BEHAVIOUR_POST_EXAMPLE: string = `{
   "behaviorGroups": [
     {
-      "name": "string",
+      "name": "Smalltalk",
       "behaviorRules": [
         {
-          "name": "string",
+          "name": "Greeting",
           "actions": [
-            "string"
+            "greet"
           ],
-          "children": [
+          "conditions": [
             {
-              "type": "string",
-              "values": {},
-              "children": [
-                {}
-              ]
+              "type": "inputmatcher",
+              "configs": {
+                "expressions": "greeting(*)",
+                "occurrence": "currentStep"
+              }
             }
           ]
         }
@@ -53,20 +51,15 @@ export const BEHAVIOUR_POST_EXAMPLE: string = `{
 export const OUTPUT_POST_EXAMPLE: string = `{
   "outputSet": [
     {
-      "action": "string",
+      "action": "greet",
       "timesOccurred": 0,
       "outputs": [
         {
-          "type": "string",
+          "type": "text",
           "valueAlternatives": [
-            "string"
+            "Hi there! Nice to meet up! :-)",
+            "Hey you!"
           ]
-        }
-      ],
-      "quickReplies": [
-        {
-          "value": "string",
-          "expressions": "string"
         }
       ]
     }
@@ -74,55 +67,72 @@ export const OUTPUT_POST_EXAMPLE: string = `{
 }`;
 
 export const HTTPCALLS_POST_EXAMPLE: string = `{
-  "targetServer": "string",
+  "targetServer": "https://api.openweathermap.org/data/2.5/weather",
   "httpCalls": [
     {
-      "name": "string",
-      "fireAndForget": true,
+      "name": "currentWeather",
       "saveResponse": true,
-      "responseObjectName": "string",
+      "responseObjectName": "currentWeather",
       "actions": [
-        "string"
+        "current_weather_in_city"
       ],
       "request": {
-        "path": "string",
+        "path": "",
         "headers": {},
-        "queryParams": {},
-        "method": "string",
-        "contentType": "string",
-        "body": "string"
-      },
-      "postResponse": {
-        "qrBuildInstruction": {
-          "pathToTargetArray": "string",
-          "iterationObjectName": "string",
-          "templateFilterExpression": "string",
-          "quickReplyValue": "string",
-          "quickReplyExpressions": "string"
-        }
+        "queryParams": {
+          "APPID": "c3366d78c7c0f76d63eb4cdf1384ddbf",
+          "units": "metric",
+          "q": "[[\${memory.current.input}]]"
+        },
+        "method": "get",
+        "contentType": "",
+        "body": ""
       }
     }
   ]
 }`;
 
 export const BOT_POST_EXAMPLE: string = `{
-  "packages": [
-    "string"
-  ],
-  "channels": [
-    {
-      "type": "string",
-      "config": {}
-    }
-  ]
+"packages": [
+"eddi://ai.labs.package/packagestore/packages/<UNIQUE_PACKAGE_ID>?version=<PACKAGE_VERSION>"
+],
+"channels": []
 }`;
 
 export const PACKAGE_POST_EXAMPLE: string = `{
   "packageExtensions": [
     {
-      "type": "string",
-      "extensions": {},
+      "type": "eddi://ai.labs.normalizer",
+      "config": {
+        "allowedChars": "1234567890abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ !?:;.,",
+        "convertUmlaute": "true"
+      }
+    },
+    {
+      "type": "eddi://ai.labs.parser",
+      "extensions": {
+        "dictionaries": [
+          {
+            "type": "eddi://ai.labs.parser.dictionaries.regular",
+            "config": {
+              "uri": "eddi://ai.labs.regulardictionary/regulardictionarystore/regulardictionaries/<UNIQUE_DICTIONARY_ID>?version=<DICTIONARY_VERSION>"
+            }
+          }
+        ]
+      },
       "config": {}
+    },
+    {
+      "type": "eddi://ai.labs.behavior",
+      "config": {
+        "uri": "eddi://ai.labs.behavior/behaviorstore/behaviorsets/<UNIQUE_BEHAVIOR_ID>?version=<BEHAVIOR_VERSION>"
+      }
+    },
+    {
+      "type": "eddi://ai.labs.output",
+      "config": {
+        "uri": "eddi://ai.labs.output/outputstore/outputsets/<UNIQUE_OUTPUTSET_ID>?version=<OUTPUTSET_VERSION>"
+      }
     }
   ]
 }`;

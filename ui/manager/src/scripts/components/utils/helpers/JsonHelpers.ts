@@ -10,6 +10,8 @@ import { DICTIONARY_SCHEMA } from '../JsonSchemas/JsonSchemas';
 import * as Ajv from 'ajv';
 import * as Jsm from 'json-source-map';
 import * as _ from 'lodash';
+import { REGULAR_DICTIONARY } from '../EddiTypes';
+import * as Snippets from './Snippets';
 
 export async function postJsonHelper(
   url: string,
@@ -71,20 +73,15 @@ function formatKeyPath(path: string): string {
     .join('/')
     .split(']')
     .join('');
-  console.log(key);
   return key;
 }
 
 export function compileJsonSchema(schema: {}, jsonText: string): IJsonError[] {
   const json = Jsm.parse(jsonText);
-  const ajv = new Ajv({ allErrors: true });
+  const ajv = new Ajv({ schemaId: 'id', allErrors: true });
+  ajv.addMetaSchema(require('ajv/lib/refs/json-schema-draft-04.json'));
   const validate = ajv.compile(schema);
-  console.log(validate);
-  console.log(validate.errors);
-  const validJson = validate(json.data);
-  console.log(validJson);
-  console.log(validate.errors);
-  console.log(json.pointers);
+  validate(json.data);
   if (_.isEmpty(validate.errors)) {
     return [];
   }
@@ -94,6 +91,14 @@ export function compileJsonSchema(schema: {}, jsonText: string): IJsonError[] {
       line: json.pointers[formatKeyPath(err.dataPath)].value.line,
     };
   });
-  console.log(errors);
   return errors;
+}
+
+export function getSnippets(type: string): string {
+  switch (type) {
+    case REGULAR_DICTIONARY:
+      return Snippets.regularDictionarySnippets;
+    default:
+      return '';
+  }
 }

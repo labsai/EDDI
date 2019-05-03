@@ -4,6 +4,7 @@ import { IBotState } from '../reducers/BotReducer';
 import { IBot } from '../components/utils/AxiosFunctions';
 import * as _ from 'lodash';
 import Parser from '../components/utils/Parser';
+import { BOT, PACKAGE } from '../components/utils/EddiTypes';
 
 export const BotStateSelector: (state: IAppState) => IBotState = state =>
   state.botState;

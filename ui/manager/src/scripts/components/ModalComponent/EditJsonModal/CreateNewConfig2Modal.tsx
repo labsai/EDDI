@@ -13,12 +13,17 @@ import { getPostExample } from '../../utils/EddiConfigExampleData';
 import * as _ from 'lodash';
 import JsonErrors from './JsonErrors';
 import { DICTIONARY_SCHEMA } from '../../utils/JsonSchemas/JsonSchemas';
-import { compileJsonSchema, IJsonError } from '../../utils/helpers/JsonHelpers';
+import {
+  compileJsonSchema,
+  getSnippets,
+  IJsonError,
+} from '../../utils/helpers/JsonHelpers';
 import * as ace from 'brace';
-import * as fs from 'fs';
 import 'brace/mode/json';
 import 'brace/theme/monokai';
 import 'brace/snippets/json';
+import { schemaSelector } from '../../../selectors/SystemSelectors';
+import { connect } from 'react-redux';
 
 interface IState {
   editorText: string;
@@ -27,61 +32,19 @@ interface IState {
   errors: IJsonError[];
 }
 
-interface IProps {
+interface IPublicProps {
   type: string;
   name: string;
   description: string;
   data: string;
   onConfirm(): void;
 }
-let staticWordCompleter = {
-  getCompletions: function(editor, session, pos, prefix, callback) {
-    const wordList = ['word', 'words', 'baz'];
-    callback(
-      null,
-      wordList.map(function(word) {
-        return {
-          caption: word,
-          value: word,
-          meta: 'static',
-        };
-      }),
-    );
-  },
-};
 
-const snippet: string =
-  '# AddPhrases\nsnippet phrases\n\t"phrases": [${1:}]\n# AddPhrase\nsnippet phrase\n\t{\n\t\t"phrase": "${1:phrase}",\n\t\t"exp": "${2:exp_name}(${3:exp_value})",\n\t\t"frequency": 0\n\t}\n# AddWords\nsnippet words\n\t"words": [${1:}]\n# AddWord\n\
-snippet word\n\
-	{\n\
-		"word": "${1:word}",\n\
-		"exp": "${2:exp_name}(${3:exp_value})",\n\
-		"frequency": 0\n\
-	}\n\
-';
+interface IPrivateProps extends IPublicProps {
+  schema?: object;
+}
 
-const snippet2: string = '# AddWords\n\
-snippet words\n\
-		"words": [${1:}]\n\
-';
-
-const snippet3: string =
-  '# AddPhrase\n\
-snippet phrase\n\
-	{\n\
-		"phrase": "${1:phrase}",\n\
-		"exp": "${2:exp_name}(${3:exp_value})",\n\
-		"frequency": 0\n\
-	}\n\
-';
-
-const snippet4: string =
-  '# AddPhrases\n\
-snippet phrases\n\
-		"phrases": [${1:}]\n\
-';
-
-class CreateNewConfig2Modal extends React.Component<IProps, IState> {
+class CreateNewConfig2Modal extends React.Component<IPrivateProps, IState> {
   constructor(props) {
     super(props);
     this.state = {
@@ -93,20 +56,26 @@ class CreateNewConfig2Modal extends React.Component<IProps, IState> {
   }
 
   componentDidMount() {
+    eddiApiActionDispatchers.fetchJsonSchemaAction(this.props.type);
     this.discardChanges();
-    const langTools = ace.acequire('ace/ext/language_tools');
-    // langTools.addCompleter(staticWordCompleter);
+    this.initEditor();
+  }
+
+  componentWillUnmount() {
     const snippetManager = ace.acequire('ace/snippets').snippetManager;
-    const editor: ace.Editor = ace.edit('OutputJson');
-    console.log(snippet2.concat(snippet));
-    const customSnippets = snippetManager.parseSnippetFile(snippet, 'json');
-    const customSnippet2 = snippetManager.parseSnippetFile(snippet2, 'json');
-    console.log(customSnippets);
-    const editorSession = editor.getSession();
-    const completer = editor['completers'][0];
-    langTools.removeCompleters();
-    langTools.addCompleter(completer);
+    snippetManager.snippetMap.json = [];
+  }
+
+  initEditor() {
+    const langTools = ace.acequire('ace/ext/language_tools');
+    const snippetManager = ace.acequire('ace/snippets').snippetManager;
+    const typeSnippets = getSnippets(this.props.type);
+    const customSnippets = snippetManager.parseSnippetFile(
+      typeSnippets,
+      'json',
+    );
     snippetManager.register(customSnippets, 'json');
+    langTools.setCompleters([langTools.snippetCompleter]);
   }
 
   componentWillReceiveProps(nextProps) {
@@ -171,7 +140,7 @@ class CreateNewConfig2Modal extends React.Component<IProps, IState> {
   };
 
   validateJson(): boolean {
-    const errors = compileJsonSchema(DICTIONARY_SCHEMA, this.state.editorText);
+    const errors = compileJsonSchema(this.props.schema, this.state.editorText);
     this.setState({
       errors,
     });
@@ -257,9 +226,10 @@ class CreateNewConfig2Modal extends React.Component<IProps, IState> {
   }
 }
 
-const ComposedCreateNewConfig2Modal: Component<IProps> = compose<IProps>(
-  pure,
-  setDisplayName('CreateNewConfig2Modal'),
-)(CreateNewConfig2Modal);
+const ComposedCreateNewConfig2Modal: Component<IPrivateProps> = compose<
+  IPrivateProps
+>(pure, connect(schemaSelector), setDisplayName('CreateNewConfig2Modal'))(
+  CreateNewConfig2Modal,
+);
 
 export default ComposedCreateNewConfig2Modal;

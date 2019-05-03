@@ -128,6 +128,7 @@
     "express": "4.16.2",
     "express-session": "^1.15.6",
     "immutability-helper": "2.2.0",
+    "json-schema-migrate": "^0.2.0",
     "json-source-map": "^0.4.0",
     "keycloak-js": "^5.0.0",
     "lodash": "4.13.1",
