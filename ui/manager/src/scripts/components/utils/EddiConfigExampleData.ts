@@ -91,7 +91,7 @@ export const HTTPCALLS_POST_EXAMPLE: string = `{
     }
   ]
 }`;
-
+/* eslint-disable */
 export const BOT_POST_EXAMPLE: string = `{
 "packages": [
 "eddi://ai.labs.package/packagestore/packages/<UNIQUE_PACKAGE_ID>?version=<PACKAGE_VERSION>"
@@ -136,7 +136,7 @@ export const PACKAGE_POST_EXAMPLE: string = `{
     }
   ]
 }`;
-
+/* eslint-enable */
 export function getPostExample(eddiType: string) {
   switch (eddiType) {
     case REGULAR_DICTIONARY:
