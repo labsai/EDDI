@@ -161,7 +161,7 @@ class CreateNewConfig2Modal extends React.Component<IPrivateProps, IState> {
             {renderIf(this.unsavedChanges())(() => (
               <button
                 style={styles.discardChanges}
-                onClick={() => this.validateJson()}>
+                onClick={() => this.discardChanges()}>
                 {'Discard changes'}
               </button>
             ))}
