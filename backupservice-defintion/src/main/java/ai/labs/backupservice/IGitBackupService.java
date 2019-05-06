@@ -22,7 +22,7 @@ public interface IGitBackupService {
     @GET
     @Path("/commit/{botid}")
     @ApiResponse(code = 200, message = "returns the gitmessage of the attempted commit.")
-    Response gitCommit(@PathParam("botid") String botid);
+    Response gitCommit(@PathParam("botid") String botid, @PathParam("commit_msg") String commitMessage);
 
     @GET
     @Path("/push/{botid}")
