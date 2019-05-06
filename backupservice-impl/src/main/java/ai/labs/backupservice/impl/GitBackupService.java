@@ -124,7 +124,12 @@ public class GitBackupService implements IGitBackupService {
                             .setDirectory(tmpPath.toFile())
                             .call();
                     exportService.exportBot(botid, resourceId.getVersion());
-                    return Response.status(Response.Status.OK).build();
+                    RevCommit commit = Git.open(tmpPath.toFile())
+                            .commit()
+                            .setMessage(commitMessage)
+                            .setCommitter("EDDI", "eddi@labs.ai")
+                            .call();
+                    return Response.status(Response.Status.OK).entity(commit.getFullMessage()).build();
                 } else {
                     RevCommit commit = Git.open(tmpPath.toFile())
                             .commit()
