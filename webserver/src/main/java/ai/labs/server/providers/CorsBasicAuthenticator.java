@@ -57,12 +57,13 @@ public class CorsBasicAuthenticator extends BasicAuthenticator {
             if (DeferredAuthentication.isDeferred(response))
                 return Authentication.UNAUTHENTICATED;
 
-            if (!"OPTIONS".equalsIgnoreCase(((HttpServletRequest) req).getMethod())) {
+            if ("OPTIONS".equalsIgnoreCase(((HttpServletRequest) req).getMethod())) {
+                return Authentication.NOT_CHECKED;
+            } else {
                 response.setHeader(HttpHeader.WWW_AUTHENTICATE.asString(), "basic realm=\"" + _loginService.getName() + '"');
                 response.sendError(HttpServletResponse.SC_UNAUTHORIZED);
+                return Authentication.SEND_CONTINUE;
             }
-
-            return Authentication.SEND_CONTINUE;
         } catch (IOException e) {
             throw new ServerAuthException(e);
         }
