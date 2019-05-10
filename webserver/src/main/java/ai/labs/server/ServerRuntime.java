@@ -16,6 +16,7 @@ import org.eclipse.jetty.server.handler.HandlerList;
 import org.eclipse.jetty.servlet.FilterHolder;
 import org.eclipse.jetty.servlet.ServletContextHandler;
 import org.eclipse.jetty.servlet.ServletHolder;
+import org.eclipse.jetty.servlets.CrossOriginFilter;
 import org.eclipse.jetty.util.log.Log;
 import org.eclipse.jetty.util.log.Slf4jLog;
 import org.eclipse.jetty.util.ssl.SslContextFactory;
@@ -43,6 +44,8 @@ import java.net.URI;
 import java.net.URL;
 import java.util.*;
 import java.util.concurrent.ThreadPoolExecutor;
+
+import static org.eclipse.jetty.servlets.CrossOriginFilter.*;
 
 /**
  * @author ginccc
@@ -219,9 +222,8 @@ public class ServerRuntime implements IServerRuntime {
         servletHandler.addFilter(new FilterHolder(createInitThreadBoundValuesFilter()), ANY_PATH, getAllDispatcherTypes());
 
         if (options.useCrossSiteScripting) {
-            //TODO check for production
             //add header param in order to enable cross-site-scripting
-            servletHandler.addFilter(new FilterHolder(createCrossSiteScriptFilter()), ANY_PATH, getAllDispatcherTypes());
+            servletHandler.addFilter(createCrossSiteScriptFilter(), ANY_PATH, getAllDispatcherTypes());
             log.info("CrossSiteScriptFilter has been enabled...");
         }
 
@@ -328,30 +330,16 @@ public class ServerRuntime implements IServerRuntime {
         };
     }
 
-    private Filter createCrossSiteScriptFilter() {
-        return new Filter() {
+    private FilterHolder createCrossSiteScriptFilter() {
+        FilterHolder cors = new FilterHolder(CrossOriginFilter.class);
+        cors.setInitParameter(ALLOWED_ORIGINS_PARAM, "*");
+        cors.setInitParameter(ACCESS_CONTROL_ALLOW_ORIGIN_HEADER, "*");
+        cors.setInitParameter(ALLOWED_METHODS_PARAM, "OPTIONS,HEAD,GET,PUT,POST,PATCH,DELETE");
+        cors.setInitParameter(ALLOWED_HEADERS_PARAM, "Authorization,X-Requested-With,Content-Type,Accept,Origin,Cache-Control");
+        cors.setInitParameter(ACCESS_CONTROL_EXPOSE_HEADERS_HEADER, "location");
+        cors.setInitParameter(CHAIN_PREFLIGHT_PARAM, "false");
 
-            @Override
-            public void init(FilterConfig filterConfig) {
-                // not implemented
-            }
-
-            @Override
-            public void doFilter(ServletRequest request, ServletResponse response, FilterChain filterChain)
-                    throws IOException, ServletException {
-                HttpServletResponse httpResponse = (HttpServletResponse) response;
-                httpResponse.setHeader("Access-Control-Allow-Origin", "*");
-                httpResponse.setHeader("Access-Control-Allow-Headers", "authorization, Content-Type");
-                httpResponse.setHeader("Access-Control-Allow-Methods", "GET, PUT, POST, DELETE, PATCH, OPTIONS");
-                httpResponse.setHeader("Access-Control-Expose-Headers", "location");
-                filterChain.doFilter(request, response);
-            }
-
-            @Override
-            public void destroy() {
-                // not implemented
-            }
-        };
+        return cors;
     }
 
     private static EnumSet<DispatcherType> getAllDispatcherTypes() {
