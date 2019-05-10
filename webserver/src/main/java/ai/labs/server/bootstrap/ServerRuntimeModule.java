@@ -6,6 +6,7 @@ import ai.labs.runtime.bootstrap.AbstractBaseModule;
 import ai.labs.server.IServerRuntime;
 import ai.labs.server.MongoLoginService;
 import ai.labs.server.ServerRuntime;
+import ai.labs.server.providers.CorsBasicAuthenticator;
 import ai.labs.user.IUserStore;
 import ai.labs.user.model.User;
 import ai.labs.utilities.StringUtilities;
@@ -15,7 +16,6 @@ import org.eclipse.jetty.security.ConstraintMapping;
 import org.eclipse.jetty.security.ConstraintSecurityHandler;
 import org.eclipse.jetty.security.LoginService;
 import org.eclipse.jetty.security.SecurityHandler;
-import org.eclipse.jetty.security.authentication.BasicAuthenticator;
 import org.eclipse.jetty.util.security.Constraint;
 import org.jboss.resteasy.plugins.guice.GuiceResteasyBootstrapServletContextListener;
 import org.jboss.resteasy.plugins.server.servlet.HttpServletDispatcher;
@@ -111,7 +111,7 @@ public class ServerRuntimeModule extends AbstractBaseModule {
                                                                    IUserStore userStore) throws IResourceStore.ResourceStoreException {
         var securityHandler = new BasicSecurityHandler();
         setupSecurityHandler(securityHandler, publicAccessPaths, "admin", "user");
-        securityHandler.setAuthenticator(new BasicAuthenticator());
+        securityHandler.setAuthenticator(new CorsBasicAuthenticator());
 
         try {
             userStore.searchUser(defaultUsername);

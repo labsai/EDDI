@@ -337,7 +337,6 @@ public class ServerRuntime implements IServerRuntime {
         cors.setInitParameter(ALLOWED_METHODS_PARAM, "OPTIONS,HEAD,GET,PUT,POST,PATCH,DELETE");
         cors.setInitParameter(ALLOWED_HEADERS_PARAM, "Authorization,X-Requested-With,Content-Type,Accept,Origin,Cache-Control");
         cors.setInitParameter(ACCESS_CONTROL_EXPOSE_HEADERS_HEADER, "location");
-        cors.setInitParameter(CHAIN_PREFLIGHT_PARAM, "false");
 
         return cors;
     }
