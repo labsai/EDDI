@@ -45,7 +45,6 @@ import java.net.URL;
 import java.util.*;
 import java.util.concurrent.ThreadPoolExecutor;
 
-import static org.eclipse.jetty.servlets.CrossOriginFilter.*;
 
 /**
  * @author ginccc
@@ -332,11 +331,11 @@ public class ServerRuntime implements IServerRuntime {
 
     private FilterHolder createCrossSiteScriptFilter() {
         FilterHolder cors = new FilterHolder(CrossOriginFilter.class);
-        cors.setInitParameter(ALLOWED_ORIGINS_PARAM, "*");
-        cors.setInitParameter(ACCESS_CONTROL_ALLOW_ORIGIN_HEADER, "*");
-        cors.setInitParameter(ALLOWED_METHODS_PARAM, "OPTIONS,HEAD,GET,PUT,POST,PATCH,DELETE");
-        cors.setInitParameter(ALLOWED_HEADERS_PARAM, "Authorization,X-Requested-With,Content-Type,Accept,Origin,Cache-Control");
-        cors.setInitParameter(ACCESS_CONTROL_EXPOSE_HEADERS_HEADER, "location");
+        cors.setInitParameter(CrossOriginFilter.ALLOWED_ORIGINS_PARAM, "*");
+        cors.setInitParameter(CrossOriginFilter.ACCESS_CONTROL_ALLOW_ORIGIN_HEADER, "*");
+        cors.setInitParameter(CrossOriginFilter.ALLOWED_METHODS_PARAM, "OPTIONS,HEAD,GET,PUT,POST,PATCH,DELETE");
+        cors.setInitParameter(CrossOriginFilter.ALLOWED_HEADERS_PARAM, "Authorization,X-Requested-With,Content-Type,Accept,Origin,Cache-Control");
+        cors.setInitParameter(CrossOriginFilter.ACCESS_CONTROL_EXPOSE_HEADERS_HEADER, "location");
 
         return cors;
     }

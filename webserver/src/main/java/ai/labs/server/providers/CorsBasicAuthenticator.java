@@ -58,6 +58,10 @@ public class CorsBasicAuthenticator extends BasicAuthenticator {
                 return Authentication.UNAUTHENTICATED;
 
             if ("OPTIONS".equalsIgnoreCase(((HttpServletRequest) req).getMethod())) {
+                response.setHeader("Access-Control-Allow-Origin", "*");
+                response.setHeader("Access-Control-Allow-Credentials", "true");
+                response.setHeader("Access-Control-Allow-Methods", "OPTIONS,HEAD,GET,PUT,POST,PATCH,DELETE");
+                response.setHeader("Access-Control-Allow-Headers", "Authorization,X-Requested-With,Content-Type,Accept,Origin,Cache-Control");
                 return Authentication.NOT_CHECKED;
             } else {
                 response.setHeader(HttpHeader.WWW_AUTHENTICATE.asString(), "basic realm=\"" + _loginService.getName() + '"');
