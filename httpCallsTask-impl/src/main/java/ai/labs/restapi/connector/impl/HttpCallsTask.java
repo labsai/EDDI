@@ -253,7 +253,7 @@ public class HttpCallsTask implements ILifecycleTask {
 
     private IRequest buildRequest(Request requestConfig, Map<String, Object> templateDataObjects) throws ITemplatingEngine.TemplateEngineException {
         String path = requestConfig.getPath().trim();
-        if (!path.startsWith(SLASH_CHAR) && !path.isEmpty()) {
+        if (!path.startsWith(SLASH_CHAR) && !path.isEmpty() && !path.startsWith("http")) {
             path = SLASH_CHAR + path;
         }
         URI targetUri = URI.create(targetServerUri + templateValues(path, templateDataObjects));
