@@ -199,7 +199,12 @@ public class HttpCallsTask implements ILifecycleTask {
                         Property.Scope scope = propertyInstruction.getScope();
                         Object propertyValue;
                         if (!isNullOrEmpty(path)) {
-                            propertyValue = Ognl.getValue(path, templateDataObjects);
+                            try {
+                                propertyValue = Ognl.getValue(path, templateDataObjects);
+                            } catch (OgnlException oglnExeption) {
+                                log.error("configured path is not correct or value does not exist!", oglnExeption);
+                                propertyValue = "";
+                            }
                         } else {
                             propertyValue = propertyInstruction.getValue();
                         }
