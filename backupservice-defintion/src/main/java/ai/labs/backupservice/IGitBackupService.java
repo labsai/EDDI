@@ -9,7 +9,7 @@ import javax.ws.rs.PathParam;
 import javax.ws.rs.QueryParam;
 import javax.ws.rs.core.Response;
 
-@Api(value = "backup")
+@Api(value = "Backup")
 @Path("/backup/git")
 public interface IGitBackupService {
 
@@ -22,7 +22,7 @@ public interface IGitBackupService {
     @GET
     @Path("/commit/{botid}")
     @ApiResponse(code = 200, message = "returns the gitmessage of the attempted commit.")
-    Response gitCommit(@PathParam("botid") String botid, @PathParam("commit_msg") String commitMessage);
+    Response gitCommit(@PathParam("botid") String botid, @QueryParam("commit_msg") String commitMessage);
 
     @GET
     @Path("/push/{botid}")
