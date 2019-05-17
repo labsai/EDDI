@@ -73,7 +73,7 @@ public class GitBackupService implements IGitBackupService {
             BotConfiguration botConfiguration = botStore.read(botid, resourceId.getVersion());
             BotConfiguration.GitBackupSettings gitBackupSettings = botConfiguration.getGitBackupSettings();
 
-            if (gitBackupSettings != null) {
+            if (gitBackupSettings != null && gitBackupSettings.getRepositoryUrl() != null) {
                 if (isDirEmpty(tmpPath)) {
                     Git.cloneRepository()
                             .setBranch(gitBackupSettings.getBranch())
@@ -115,7 +115,7 @@ public class GitBackupService implements IGitBackupService {
             IResourceStore.IResourceId resourceId =  botStore.getCurrentResourceId(botid);
             BotConfiguration botConfiguration = botStore.read(botid, resourceId.getVersion());
             BotConfiguration.GitBackupSettings gitBackupSettings = botConfiguration.getGitBackupSettings();
-            if (gitBackupSettings != null) {
+            if (gitBackupSettings != null && gitBackupSettings.getRepositoryUrl() != null) {
                 if (isDirEmpty(tmpPath)) {
                     Git.cloneRepository()
                             .setBranch(gitBackupSettings.getBranch())
@@ -155,7 +155,7 @@ public class GitBackupService implements IGitBackupService {
             IResourceStore.IResourceId resourceId =  botStore.getCurrentResourceId(botid);
             BotConfiguration botConfiguration = botStore.read(botid, resourceId.getVersion());
             BotConfiguration.GitBackupSettings gitBackupSettings = botConfiguration.getGitBackupSettings();
-            if (gitBackupSettings != null) {
+            if (gitBackupSettings != null && gitBackupSettings.getRepositoryUrl() != null) {
                 if (isDirEmpty(tmpPath)) {
                     return Response.status(Response.Status.NOT_FOUND).entity("The repository is in the directory " + tmpPath.toString() + " was empty! Please use commit or pull before pushing!").build();
                 } else {
