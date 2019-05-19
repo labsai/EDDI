@@ -125,6 +125,7 @@
     "@types/ace": "0.0.42",
     "ajv": "^6.10.0",
     "axios": "0.17.1",
+    "cors": "^2.8.5",
     "express": "4.16.2",
     "express-session": "^1.15.6",
     "immutability-helper": "2.2.0",

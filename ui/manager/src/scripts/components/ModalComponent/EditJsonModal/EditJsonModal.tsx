@@ -2,18 +2,16 @@ import * as React from 'react';
 import styles from '../ModalComponent.styles';
 import '../ModalComponent.styles.scss';
 import { Component, compose, pure, setDisplayName } from 'recompose';
-import AceEditor from 'react-ace';
 import eddiApiActionDispatchers from '../../../actions/EddiApiActionDispatchers';
 import BlueButton from '../../Assets/Buttons/BlueButton';
 import modalActionDispatchers from '../../../actions/ModalActionDispatchers';
 import * as renderIf from 'render-if';
 import { compileJsonSchema } from '../../utils/helpers/JsonHelpers';
 import { DICTIONARY_SCHEMA } from '../../utils/JsonSchemas/JsonSchemas';
+import Editor from './Editor';
 import 'brace';
-
-require('brace/mode/json');
-require('brace/theme/monokai');
-require('brace/ext/language_tools');
+import { getTypeFromResource, getTypePath } from '../../utils/ApiFunctions';
+import { DICTIONARY, REGULAR_DICTIONARY } from '../../utils/EddiTypes';
 
 interface IState {
   editorText: string;
@@ -58,7 +56,7 @@ class EditJsonModal extends React.Component<IPrivateProps, IState> {
     return this.state.editorText !== this.props.data;
   }
 
-  onClick = () => {
+  updateJson = () => {
     eddiApiActionDispatchers.updateJsonDataAction(
       this.props.resource,
       JSON.parse(this.state.editorText),
@@ -80,6 +78,7 @@ class EditJsonModal extends React.Component<IPrivateProps, IState> {
   }
 
   render() {
+    const type = getTypeFromResource(this.props.resource);
     return (
       <div>
         <div style={styles.modalHeader}>
@@ -94,31 +93,17 @@ class EditJsonModal extends React.Component<IPrivateProps, IState> {
               </button>
             ))}
             <BlueButton
-              onClick={this.onClick}
+              onClick={this.updateJson}
               disabled={!this.unsavedChanges || !this.isJsonString()}
               text={'Save changes'}
             />
           </div>
         </div>
-        <AceEditor
-          ref={'aceEditor'}
-          mode={'json'}
-          height={'800px'}
-          width={'100%'}
-          name={'OutputJson'}
-          theme={'monokai'}
-          highlightActiveLine={true}
-          showGutter={true}
-          showPrintMargin={false}
-          focus={true}
+        <Editor
+          type={type}
+          data={this.state.editorText}
+          onConfirm={this.updateJson}
           onChange={this.onChange}
-          setOptions={{
-            enableBasicAutocompletion: true,
-            enableSnippets: true,
-            enableLiveAutocompletion: true,
-          }}
-          value={this.state.editorText}
-          editorProps={{ $blockScrolling: true }}
         />
       </div>
     );

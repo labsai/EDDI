@@ -1,0 +1,60 @@
+import * as React from 'react';
+import styles from '../ModalComponent.styles';
+import '../ModalComponent.styles.scss';
+import { Component, compose, pure, setDisplayName } from 'recompose';
+import * as renderIf from 'render-if';
+import Parser from '../../utils/Parser';
+import { getPostExample } from '../../utils/EddiConfigExampleData';
+
+interface IState {
+  showExample: boolean;
+}
+
+interface IPublicProps {
+  type: string;
+}
+
+interface IPrivateProps extends IPublicProps {}
+
+class JsonExample extends React.Component<IPrivateProps, IState> {
+  constructor(props) {
+    super(props);
+    this.state = {
+      showExample: false,
+    };
+  }
+
+  onButtonClick = () => {
+    this.setState({
+      showExample: !this.state.showExample,
+    });
+  };
+
+  render() {
+    const typeName = Parser.getPluginName(this.props.type, false);
+    return (
+      <div>
+        <button onClick={this.onButtonClick} style={styles.collapsibleButton}>
+          <div>{`${
+            this.state.showExample ? 'Hide' : 'Show'
+          } ${typeName.toLowerCase()} example data`}</div>
+          <div style={styles.collapsibleRightSign}>
+            {this.state.showExample ? '-' : '+'}
+          </div>
+        </button>
+        {renderIf(this.state.showExample)(() => (
+          <div style={styles.exampleData}>
+            {getPostExample(this.props.type)}
+          </div>
+        ))}
+      </div>
+    );
+  }
+}
+
+const ComposedJsonExample: Component<IPrivateProps> = compose<IPrivateProps>(
+  pure,
+  setDisplayName('JsonExample'),
+)(JsonExample);
+
+export default ComposedJsonExample;

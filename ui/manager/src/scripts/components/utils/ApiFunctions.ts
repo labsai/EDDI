@@ -212,6 +212,22 @@ export async function getAuthClientId(): Promise<string> {
   }
 }
 
+export function getTypeFromResource(resource: string): string {
+  if (resource.includes(REGULAR_DICTIONARY_PATH)) {
+    return REGULAR_DICTIONARY;
+  } else if (resource.includes(BEHAVIOR_PATH)) {
+    return BEHAVIOR;
+  } else if (resource.includes(OUTPUT_PATH)) {
+    return OUTPUT;
+  } else if (resource.includes(HTTPCALLS_PATH)) {
+    return HTTPCALLS;
+  } else if (resource.includes(BOT_PATH)) {
+    return BOT;
+  } else if (resource.includes(PACKAGE_PATH)) {
+    return PACKAGE;
+  }
+}
+
 export function getTypePath(type: string): string {
   switch (type) {
     case REGULAR_DICTIONARY:

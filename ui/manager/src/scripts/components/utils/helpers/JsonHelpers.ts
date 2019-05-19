@@ -41,25 +41,6 @@ export async function putHelper(
   );
 }
 
-export function mapDataToDetailedDescriptors(
-  data: IDescriptorResponse,
-): IDetailedDescriptor[] {
-  const detailedDescriptors: IDetailedDescriptor[] = data.data.map(pkg => {
-    const version = Parser.getVersion(pkg.resource);
-    return {
-      id: Parser.getId(pkg.resource),
-      version,
-      currentVersion: version,
-      createdOn: pkg.createdOn,
-      description: pkg.description,
-      lastModifiedOn: pkg.lastModifiedOn,
-      name: pkg.name,
-      resource: pkg.resource,
-    };
-  });
-  return detailedDescriptors;
-}
-
 export interface IJsonError {
   message: string;
   line: number;
