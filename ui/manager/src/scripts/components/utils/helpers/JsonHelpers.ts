@@ -10,8 +10,16 @@ import { DICTIONARY_SCHEMA } from '../JsonSchemas/JsonSchemas';
 import * as Ajv from 'ajv';
 import * as Jsm from 'json-source-map';
 import * as _ from 'lodash';
-import { REGULAR_DICTIONARY } from '../EddiTypes';
+import {
+  BEHAVIOR,
+  BOT,
+  HTTPCALLS,
+  OUTPUT,
+  PACKAGE,
+  REGULAR_DICTIONARY,
+} from '../EddiTypes';
 import * as Snippets from './Snippets';
+import { ISnippet } from './Snippets';
 
 export async function postJsonHelper(
   url: string,
@@ -75,11 +83,21 @@ export function compileJsonSchema(schema: {}, jsonText: string): IJsonError[] {
   return errors;
 }
 
-export function getSnippets(type: string): string {
+export function getSnippets(type: string): ISnippet[] {
   switch (type) {
     case REGULAR_DICTIONARY:
       return Snippets.regularDictionarySnippets;
+    case BEHAVIOR:
+      return Snippets.behaviorSnippets;
+    case OUTPUT:
+      return Snippets.outputSnippets;
+    case HTTPCALLS:
+      return Snippets.httpCallsSnippets;
+    case PACKAGE:
+      return Snippets.packageSnippets;
+    case BOT:
+      return Snippets.botSnippets;
     default:
-      return '';
+      return [];
   }
 }

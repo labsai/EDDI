@@ -61,11 +61,7 @@ class CreateNewConfig2Modal extends React.Component<IPrivateProps, IState> {
   }
 
   initEditor() {
-    const typeSnippets = getSnippets(this.props.type);
-    const customSnippets = snippetManager.parseSnippetFile(
-      typeSnippets,
-      'json',
-    );
+    const customSnippets = getSnippets(this.props.type);
     snippetManager.register(customSnippets, 'json');
     langTools.setCompleters([langTools.snippetCompleter]);
   }
