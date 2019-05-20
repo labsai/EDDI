@@ -16,7 +16,6 @@ import org.eclipse.jetty.server.handler.HandlerList;
 import org.eclipse.jetty.servlet.FilterHolder;
 import org.eclipse.jetty.servlet.ServletContextHandler;
 import org.eclipse.jetty.servlet.ServletHolder;
-import org.eclipse.jetty.servlets.CrossOriginFilter;
 import org.eclipse.jetty.util.log.Log;
 import org.eclipse.jetty.util.log.Slf4jLog;
 import org.eclipse.jetty.util.ssl.SslContextFactory;
@@ -222,7 +221,7 @@ public class ServerRuntime implements IServerRuntime {
 
         if (options.useCrossSiteScripting) {
             //add header param in order to enable cross-site-scripting
-            servletHandler.addFilter(createCrossSiteScriptFilter(), ANY_PATH, getAllDispatcherTypes());
+            servletHandler.addFilter(new FilterHolder(createCrossSiteScriptFilter()), ANY_PATH, getAllDispatcherTypes());
             log.info("CrossSiteScriptFilter has been enabled...");
         }
 
@@ -329,15 +328,30 @@ public class ServerRuntime implements IServerRuntime {
         };
     }
 
-    private FilterHolder createCrossSiteScriptFilter() {
-        FilterHolder cors = new FilterHolder(CrossOriginFilter.class);
-        cors.setInitParameter(CrossOriginFilter.ALLOWED_ORIGINS_PARAM, "*");
-        cors.setInitParameter(CrossOriginFilter.ACCESS_CONTROL_ALLOW_ORIGIN_HEADER, "*");
-        cors.setInitParameter(CrossOriginFilter.ALLOWED_METHODS_PARAM, "OPTIONS,HEAD,GET,PUT,POST,PATCH,DELETE");
-        cors.setInitParameter(CrossOriginFilter.ALLOWED_HEADERS_PARAM, "Authorization,X-Requested-With,Content-Type,Accept,Origin,Cache-Control");
-        cors.setInitParameter(CrossOriginFilter.ACCESS_CONTROL_EXPOSE_HEADERS_HEADER, "location");
+    private Filter createCrossSiteScriptFilter() {
+        return new Filter() {
 
-        return cors;
+            @Override
+            public void init(FilterConfig filterConfig) {
+                // not implemented
+            }
+
+            @Override
+            public void doFilter(ServletRequest request, ServletResponse response, FilterChain filterChain)
+                    throws IOException, ServletException {
+                HttpServletResponse httpResponse = (HttpServletResponse) response;
+                httpResponse.setHeader("Access-Control-Allow-Origin", "*");
+                httpResponse.setHeader("Access-Control-Allow-Headers", "Authorization,X-Requested-With,Content-Type,Accept,Origin,Cache-Control");
+                httpResponse.setHeader("Access-Control-Allow-Methods", "HEAD,GET,PUT,POST,DELETE,PATCH,OPTIONS");
+                httpResponse.setHeader("Access-Control-Expose-Headers", "Location");
+                filterChain.doFilter(request, response);
+            }
+
+            @Override
+            public void destroy() {
+                // not implemented
+            }
+        };
     }
 
     private static EnumSet<DispatcherType> getAllDispatcherTypes() {
