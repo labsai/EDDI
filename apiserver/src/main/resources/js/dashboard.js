@@ -38,7 +38,7 @@ eddi.addBotDeployments = function (environment, deploymentStatuses) {
 
 $(function () {
     eddi.baseUri = window.location.protocol + "//" + window.location.host;
-    $('#botBuilderUrl').prop('href', 'http://demo.labs.ai:7071?apiUrl=' + encodeURIComponent(eddi.baseUri));
+    $('#botBuilderUrl').prop('href', 'https://manager.labs.ai?apiUrl=' + encodeURIComponent(eddi.baseUri));
 
     $.ajax({
         url: '/user/isAuthenticated', statusCode: {
