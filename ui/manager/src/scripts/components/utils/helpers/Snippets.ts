@@ -38,6 +38,7 @@ export const regularDictionarySnippets: ISnippet[] = [
 }`,
   },
 ];
+
 export const behaviorSnippets: ISnippet[] = [
   {
     scope: 'json',
@@ -158,9 +159,9 @@ export const behaviorSnippets: ISnippet[] = [
     name: 'dependency',
     tabTrigger: 'dependency',
     content: `{
-      "type": "dependency",
-      "values": {
-        "reference": "\${1:reference}",
+  "type": "dependency",
+  "values": {
+    "reference": "\${1:reference}",
   }
 }`,
   },
@@ -190,6 +191,7 @@ export const behaviorSnippets: ISnippet[] = [
 }`,
   },
 ];
+
 export const outputSnippets: ISnippet[] = [
   {
     scope: 'json',
@@ -201,8 +203,7 @@ export const outputSnippets: ISnippet[] = [
     scope: 'json',
     name: 'output',
     tabTrigger: 'output',
-    content: `
-{
+    content: `{
   "action": "\${1:action}",
   "timesOccurred": \${2:0},
   "outputs": [\${3:}]
@@ -233,7 +234,44 @@ export const outputSnippets: ISnippet[] = [
 }`,
   },
 ];
-export const httpCallsSnippets: ISnippet[] = [];
+// todo: Finish httpCallsSnippets
+export const httpCallsSnippets: ISnippet[] = [
+  {
+    scope: 'json',
+    name: 'targetServer',
+    tabTrigger: 'targetServer',
+    content: `"targetServer": "\${1:targetServer}"`,
+  },
+  {
+    scope: 'json',
+    name: 'httpCalls',
+    tabTrigger: 'httpCalls',
+    content: `"httpCalls": [\${1:}]`,
+  },
+  {
+    scope: 'json',
+    name: 'httpCall',
+    tabTrigger: 'httpCall',
+    content: `{
+  "httpCall": "\${1:name}",
+  "saveResponse": "\${2:saveResponse}",
+  "fireAndForget": "\${3:fireAndForget}",
+  "responseObjectName": "\${4:responseObjectName}",
+  "actions": [\${5:}],
+  "preRequest": {\${6:}}
+}`,
+  },
+  {
+    scope: 'json',
+    name: 'batchRequests',
+    tabTrigger: 'batchRequests',
+    content: `"batchRequests": {
+  "pathToTargetArray": "\${1:pathToTargetArray}",
+  "iterationObjectName": "\${2:iterationObjectName}"
+}`,
+  },
+];
+
 export const packageSnippets: ISnippet[] = [
   {
     scope: 'json',
@@ -265,8 +303,99 @@ export const packageSnippets: ISnippet[] = [
   },
   {
     scope: 'json',
-    name: 'regularDictionary',
-    tabTrigger: 'regularDictionary',
+    name: 'corrections:stemming',
+    tabTrigger: 'corrections:stemming',
+    content: `{
+  "type": "eddi://ai.labs.parser.corrections.stemming",
+  "config": {
+    "language": "\${1:english}",
+    "lookupIfKnown": "\${2:false}"
+  }
+}`,
+  },
+  {
+    scope: 'json',
+    name: 'corrections:levenshtein',
+    tabTrigger: 'corrections:levenshtein',
+    content: `{
+  "type": "eddi://ai.labs.parser.corrections.levenshtein",
+  "config": {
+    "distance": "\${1:distance}"
+  }
+}`,
+  },
+  {
+    scope: 'json',
+    name: 'corrections:stemming',
+    tabTrigger: 'corrections:stemming',
+    content: `{
+  "type": "eddi://ai.labs.parser.corrections.stemming",
+  "config": {
+    "language": "\${1:english}",
+    "lookupIfKnown": "\${2:false}"
+  }
+}`,
+  },
+  {
+    scope: 'json',
+    name: 'corrections:mergedTerms',
+    tabTrigger: 'corrections:mergedTerms',
+    content: `{
+  "type": "eddi://ai.labs.parser.corrections.mergedTerms"
+}`,
+  },
+  {
+    scope: 'json',
+    name: 'dictionaries:integer',
+    tabTrigger: 'dictionaries:integer',
+    content: `{
+  "type": "eddi://ai.labs.parser.dictionaries.integer"
+}`,
+  },
+  {
+    scope: 'json',
+    name: 'dictionaries:decimal',
+    tabTrigger: 'dictionaries:decimal',
+    content: `{
+  "type": "eddi://ai.labs.parser.dictionaries.decimal"
+}`,
+  },
+  {
+    scope: 'json',
+    name: 'dictionaries:punctuation',
+    tabTrigger: 'dictionaries:punctuation',
+    content: `{
+  "type": "eddi://ai.labs.parser.dictionaries.punctuation"
+}`,
+  },
+  {
+    scope: 'json',
+    name: 'dictionaries:email',
+    tabTrigger: 'dictionaries:email',
+    content: `{
+  "type": "eddi://ai.labs.parser.dictionaries.email"
+}`,
+  },
+  {
+    scope: 'json',
+    name: 'dictionaries:time',
+    tabTrigger: 'dictionaries:time',
+    content: `{
+  "type": "eddi://ai.labs.parser.dictionaries.time"
+}`,
+  },
+  {
+    scope: 'json',
+    name: 'dictionaries:ordinalNumber',
+    tabTrigger: 'dictionaries:ordinalNumber',
+    content: `{
+  "type": "eddi://ai.labs.parser.dictionaries.ordinalNumber"
+}`,
+  },
+  {
+    scope: 'json',
+    name: 'dictionaries:regular',
+    tabTrigger: 'dictionaries:regular',
     content: `{
   "type": "eddi://ai.labs.parser.dictionaries.regular",
   "config": {
@@ -287,6 +416,7 @@ export const packageSnippets: ISnippet[] = [
 }`,
   },
 ];
+
 export const botSnippets: ISnippet[] = [
   {
     scope: 'json',
