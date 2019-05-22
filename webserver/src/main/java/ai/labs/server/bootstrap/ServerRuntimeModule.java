@@ -36,6 +36,7 @@ import static ai.labs.utilities.SecurityUtilities.generateSalt;
 public class ServerRuntimeModule extends AbstractBaseModule {
     private static final String AUTHENTICATION_BASIC_AUTH = "basic";
     private static final String AUTHENTICATION_KEYCLOAK = "keycloak";
+    public static final String HTTP_METHOD_OPTIONS = "OPTIONS";
 
     public ServerRuntimeModule(InputStream... configFile) {
         super(configFile);
@@ -186,6 +187,7 @@ public class ServerRuntimeModule extends AbstractBaseModule {
         // expect those paths given in webServer.publicAccessPaths , separated by ";"
         constraint = new Constraint();
         constraint.setAuthenticate(false);
+        constraint.setRoles(new String[]{admin, user});
 
         for (String path : publicAccessPaths.split(";")) {
             mapping = new ConstraintMapping();
@@ -193,6 +195,16 @@ public class ServerRuntimeModule extends AbstractBaseModule {
             mapping.setPathSpec(path.trim());
             securityHandler.addConstraintMapping(mapping);
         }
+
+        // exclude OPTIONS method from authentication
+        constraint = new Constraint();
+        constraint.setAuthenticate(false);
+        constraint.setRoles(new String[]{admin, user});
+        mapping = new ConstraintMapping();
+        mapping.setMethod(HTTP_METHOD_OPTIONS);
+        mapping.setConstraint(constraint);
+        mapping.setPathSpec("/");
+        securityHandler.addConstraintMapping(mapping);
     }
 
     private static class BasicSecurityHandler extends ConstraintSecurityHandler {
