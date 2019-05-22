@@ -27,7 +27,6 @@ import ai.labs.utilities.RestUtilities;
 import lombok.extern.slf4j.Slf4j;
 
 import javax.inject.Inject;
-import javax.inject.Named;
 import javax.ws.rs.InternalServerErrorException;
 import javax.ws.rs.container.AsyncResponse;
 import javax.ws.rs.container.TimeoutHandler;
@@ -60,19 +59,16 @@ public class RestImportService extends AbstractBackupService implements IRestImp
     private final IJsonSerialization jsonSerialization;
     private final IRestInterfaceFactory restInterfaceFactory;
     private final IRestBotAdministration restBotAdministration;
-    private final String apiServerURI;
 
     @Inject
     public RestImportService(IZipArchive zipArchive,
                              IJsonSerialization jsonSerialization,
                              IRestInterfaceFactory restInterfaceFactory,
-                             IRestBotAdministration restBotAdministration,
-                             @Named("system.apiServerURI") String apiServerURI) {
+                             IRestBotAdministration restBotAdministration) {
         this.zipArchive = zipArchive;
         this.jsonSerialization = jsonSerialization;
         this.restInterfaceFactory = restInterfaceFactory;
         this.restBotAdministration = restBotAdministration;
-        this.apiServerURI = apiServerURI;
     }
 
     @Override
@@ -231,6 +227,7 @@ public class RestImportService extends AbstractBackupService implements IRestImp
             throws RestInterfaceFactory.RestInterfaceFactoryException {
         IRestBotStore restPackageStore = getRestResourceStore(IRestBotStore.class);
         Response botResponse = restPackageStore.createBot(botConfiguration);
+        checkIfCreatedResponse(botResponse);
         return botResponse.getLocation();
     }
 
@@ -240,6 +237,7 @@ public class RestImportService extends AbstractBackupService implements IRestImp
                 jsonSerialization.deserialize(packageFileString, PackageConfiguration.class);
         IRestPackageStore restPackageStore = getRestResourceStore(IRestPackageStore.class);
         Response packageResponse = restPackageStore.createPackage(packageConfiguration);
+        checkIfCreatedResponse(packageResponse);
         return packageResponse.getLocation();
     }
 
@@ -248,6 +246,7 @@ public class RestImportService extends AbstractBackupService implements IRestImp
         IRestRegularDictionaryStore restDictionaryStore = getRestResourceStore(IRestRegularDictionaryStore.class);
         return dictionaryConfigurations.stream().map(regularDictionaryConfiguration -> {
             Response dictionaryResponse = restDictionaryStore.createRegularDictionary(regularDictionaryConfiguration);
+            checkIfCreatedResponse(dictionaryResponse);
             return dictionaryResponse.getLocation();
         }).collect(Collectors.toList());
     }
@@ -257,6 +256,7 @@ public class RestImportService extends AbstractBackupService implements IRestImp
         IRestBehaviorStore restBehaviorStore = getRestResourceStore(IRestBehaviorStore.class);
         return behaviorConfigurations.stream().map(behaviorConfiguration -> {
             Response behaviorResponse = restBehaviorStore.createBehaviorRuleSet(behaviorConfiguration);
+            checkIfCreatedResponse(behaviorResponse);
             return behaviorResponse.getLocation();
         }).collect(Collectors.toList());
     }
@@ -266,6 +266,7 @@ public class RestImportService extends AbstractBackupService implements IRestImp
         IRestHttpCallsStore restHttpCallsStore = getRestResourceStore(IRestHttpCallsStore.class);
         return httpCallsConfigurations.stream().map(httpCallsConfiguration -> {
             Response httpCallsResponse = restHttpCallsStore.createHttpCalls(httpCallsConfiguration);
+            checkIfCreatedResponse(httpCallsResponse);
             return httpCallsResponse.getLocation();
         }).collect(Collectors.toList());
     }
@@ -274,8 +275,9 @@ public class RestImportService extends AbstractBackupService implements IRestImp
             throws RestInterfaceFactory.RestInterfaceFactoryException {
         IRestOutputStore restOutputStore = getRestResourceStore(IRestOutputStore.class);
         return outputConfigurations.stream().map(outputConfiguration -> {
-            Response dictionaryResponse = restOutputStore.createOutputSet(outputConfiguration);
-            return dictionaryResponse.getLocation();
+            Response outputResponse = restOutputStore.createOutputSet(outputConfiguration);
+            checkIfCreatedResponse(outputResponse);
+            return outputResponse.getLocation();
         }).collect(Collectors.toList());
     }
 
@@ -372,6 +374,13 @@ public class RestImportService extends AbstractBackupService implements IRestImp
             }
 
             return builder.toString();
+        }
+    }
+
+    private void checkIfCreatedResponse(Response response) {
+        int status = response.getStatus();
+        if (status != 201) {
+            log.error(String.format("Http Response Code was not 201 when attempting resource creation, but %s", status));
         }
     }
 

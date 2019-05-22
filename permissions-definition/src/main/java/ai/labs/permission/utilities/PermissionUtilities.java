@@ -33,7 +33,9 @@ public final class PermissionUtilities {
         Permissions permissions = new Permissions();
 
         AuthorizedSubjects authorizedSubjects = new AuthorizedSubjects();
-        authorizedSubjects.getUsers().add(new AuthorizedUser(user, null));
+        if (user != null) {
+            authorizedSubjects.getUsers().add(new AuthorizedUser(user, null));
+        }
         permissions.getPermissions().put(IAuthorization.Type.ADMINISTRATION, authorizedSubjects);
 
         return permissions;
