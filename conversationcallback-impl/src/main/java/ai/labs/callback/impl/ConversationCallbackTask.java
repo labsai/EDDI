@@ -115,10 +115,10 @@ public class ConversationCallbackTask implements ILifecycleTask {
                     throw new PackageConfigurationException(e.getLocalizedMessage(), e);
                 }
             } else {
-                String errorMessage = String.format("Parameter '%s' must be defined!", KEY_CALLBACK_URI);
-                throw new PackageConfigurationException(errorMessage);
+                throw throwParamNotDefinedError();
             }
-
+        } else {
+            throw throwParamNotDefinedError();
         }
 
         if (configuration.containsKey(KEY_TIMEOUT_IN_MILLIS)) {
@@ -138,6 +138,11 @@ public class ConversationCallbackTask implements ILifecycleTask {
                 callOnActions = StringUtilities.parseCommaSeparatedString(configValue.toString());
             }
         }
+    }
+
+    private PackageConfigurationException throwParamNotDefinedError() {
+        String errorMessage = String.format("Parameter '%s' must be defined!", KEY_CALLBACK_URI);
+        return new PackageConfigurationException(errorMessage);
     }
 
     @Override
