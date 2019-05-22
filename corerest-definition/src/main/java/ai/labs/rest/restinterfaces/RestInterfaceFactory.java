@@ -22,30 +22,38 @@ public class RestInterfaceFactory implements IRestInterfaceFactory {
     private final Map<String, ResteasyClient> clients = new HashMap<>();
     private final HttpClient httpClient;
     private final String apiServerURI;
+    private final String securityHandlerType;
 
     @Inject
     public RestInterfaceFactory(HttpClient httpClient,
-                                @Named("system.apiServerURI") String apiServerURI) {
+                                @Named("system.apiServerURI") String apiServerURI,
+                                @Named("webServer.securityHandlerType") String securityHandlerType) {
         this.httpClient = httpClient;
         this.apiServerURI = apiServerURI;
+        this.securityHandlerType = securityHandlerType;
     }
 
     @Override
     public <T> T get(Class<T> clazz) {
-        Object context = ThreadContext.get("security.token");
-        String securityToken = context != null ? context.toString() : null;
-        return get(clazz, apiServerURI, securityToken);
-    }
-
-    @Override
-    public <T> T get(Class<T> clazz, String apiServerURI, String securityToken) {
         ResteasyClient client = getResteasyClient(apiServerURI);
         ResteasyWebTarget target = client.target(apiServerURI);
 
-        if (securityToken != null) {
-            target.register((ClientRequestFilter) requestContext ->
-                    requestContext.getHeaders().add("Authorization", "Bearer " + securityToken));
-        }
+        target.register((ClientRequestFilter) requestContext -> {
+            String authorizationString = null;
+            if ("basic".equals(securityHandlerType)) {
+                Object context = ThreadContext.get("currentuser:credentials");
+                authorizationString = context != null ? context.toString() : null;
+            } else if ("keycloak".equals(securityHandlerType)) {
+                Object context = ThreadContext.get("security.token");
+                String securityToken = context != null ? context.toString() : null;
+                if (securityToken != null) {
+                    authorizationString = "Bearer " + securityToken;
+                }
+            }
+            if (authorizationString != null) {
+                requestContext.getHeaders().add("Authorization", authorizationString);
+            }
+        });
 
         return target.proxy(clazz);
     }
