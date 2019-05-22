@@ -16,6 +16,7 @@ import ai.labs.utilities.RestUtilities;
 import ai.labs.utilities.SecurityUtilities;
 import lombok.extern.slf4j.Slf4j;
 
+import javax.inject.Inject;
 import javax.servlet.http.HttpServletRequest;
 import javax.ws.rs.InternalServerErrorException;
 import javax.ws.rs.POST;
@@ -43,9 +44,11 @@ public class PermissionResponseInterceptor implements ContainerResponseFilter {
     private final IUserStore userStore;
     private final IPermissionStore permissionStore;
 
+    @Inject
     @Context
     private HttpServletRequest httpServletRequest;
 
+    @Inject
     @Context
     private ResourceInfo resourceInfo;
     private final DependencyInjector injector;
@@ -75,19 +78,21 @@ public class PermissionResponseInterceptor implements ContainerResponseFilter {
                     } else if (!methodName.startsWith(METHOD_NAME_DUPLICATE_RESOURCE)) {
                         Principal userPrincipal = SecurityUtilities.getPrincipal(ThreadContext.getSubject());
                         URI userURI = UserUtilities.getUserURI(userStore, userPrincipal);
-                        if (methodName.equals(METHOD_NAME_START_CONVERSATION)) {
-                            IResourceStore.IResourceId resourceId = RestUtilities.extractResourceId(URI.create(httpServletRequest.getRequestURI()));
-                            Permissions permissions = permissionStore.readPermissions(resourceId.getId());
-                            PermissionUtilities.addAuthorizedUser(permissions, IAuthorization.Type.WRITE, new AuthorizedUser(userURI, null));
-                            permissionStore.createPermissions(respondedResourceId.getId(), permissions);
-                        } else if (methodName.equals(METHOD_NAME_CREATE_TESTCASE)) {
-                            ITestCaseStore testCaseStore = injector.getInstance(ITestCaseStore.class);
-                            TestCase testCase = testCaseStore.loadTestCase(respondedResourceId.getId());
-                            Permissions permissions = permissionStore.readPermissions(testCase.getBotId());
-                            PermissionUtilities.addAuthorizedUser(permissions, IAuthorization.Type.ADMINISTRATION, new AuthorizedUser(userURI, null));
-                            permissionStore.createPermissions(respondedResourceId.getId(), permissions);
-                        } else {
-                            permissionStore.createPermissions(respondedResourceId.getId(), PermissionUtilities.createDefaultPermissions(userURI));
+                        if (userURI != null) {
+                            if (methodName.equals(METHOD_NAME_START_CONVERSATION)) {
+                                IResourceStore.IResourceId resourceId = RestUtilities.extractResourceId(URI.create(httpServletRequest.getRequestURI()));
+                                Permissions permissions = permissionStore.readPermissions(resourceId.getId());
+                                PermissionUtilities.addAuthorizedUser(permissions, IAuthorization.Type.WRITE, new AuthorizedUser(userURI, null));
+                                permissionStore.createPermissions(respondedResourceId.getId(), permissions);
+                            } else if (methodName.equals(METHOD_NAME_CREATE_TESTCASE)) {
+                                ITestCaseStore testCaseStore = injector.getInstance(ITestCaseStore.class);
+                                TestCase testCase = testCaseStore.loadTestCase(respondedResourceId.getId());
+                                Permissions permissions = permissionStore.readPermissions(testCase.getBotId());
+                                PermissionUtilities.addAuthorizedUser(permissions, IAuthorization.Type.ADMINISTRATION, new AuthorizedUser(userURI, null));
+                                permissionStore.createPermissions(respondedResourceId.getId(), permissions);
+                            } else {
+                                permissionStore.createPermissions(respondedResourceId.getId(), PermissionUtilities.createDefaultPermissions(userURI));
+                            }
                         }
                     }
                 }
