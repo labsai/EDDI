@@ -69,6 +69,7 @@ public class GitBackupService implements IGitBackupService {
     @Override
     public Response gitPull(String botid, boolean force) {
         try {
+            createDirIfNotExists(tmpPath);
             IResourceStore.IResourceId resourceId =  botStore.getCurrentResourceId(botid);
             BotConfiguration botConfiguration = botStore.read(botid, resourceId.getVersion());
             BotConfiguration.GitBackupSettings gitBackupSettings = botConfiguration.getGitBackupSettings();
@@ -112,6 +113,7 @@ public class GitBackupService implements IGitBackupService {
     @Override
     public Response gitCommit(String botid, String commitMessage) {
         try {
+            createDirIfNotExists(tmpPath);
             IResourceStore.IResourceId resourceId =  botStore.getCurrentResourceId(botid);
             BotConfiguration botConfiguration = botStore.read(botid, resourceId.getVersion());
             BotConfiguration.GitBackupSettings gitBackupSettings = botConfiguration.getGitBackupSettings();
@@ -152,6 +154,7 @@ public class GitBackupService implements IGitBackupService {
     @Override
     public Response gitPush(String botid) {
         try {
+            createDirIfNotExists(tmpPath);
             IResourceStore.IResourceId resourceId =  botStore.getCurrentResourceId(botid);
             BotConfiguration botConfiguration = botStore.read(botid, resourceId.getVersion());
             BotConfiguration.GitBackupSettings gitBackupSettings = botConfiguration.getGitBackupSettings();
@@ -186,6 +189,12 @@ public class GitBackupService implements IGitBackupService {
     private void deleteFileIfExists(Path path) throws IOException {
         if (Files.exists(path)) {
             Files.delete(path);
+        }
+    }
+
+    private void createDirIfNotExists(final Path tmpPath) throws IOException {
+        if (!Files.exists(tmpPath)) {
+            Files.createDirectory(tmpPath);
         }
     }
 
