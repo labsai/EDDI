@@ -163,8 +163,9 @@ public class ResourceFilter<T> implements IResourceFilter<T> {
         return permissions;
     }
 
-    private Integer getHighestPermittedVersion(Integer latestVersion, Map<IAuthorization.Type, AuthorizedSubjects> permissions) throws IResourceStore.ResourceStoreException, IResourceStore.ResourceNotFoundException {
-        int highestVersion = Integer.MIN_VALUE;
+    private Integer getHighestPermittedVersion(Integer latestVersion,
+                                               Map<IAuthorization.Type, AuthorizedSubjects> permissions) {
+        int highestVersion = 1;
 
         for (IAuthorization.Type type : IAuthorization.Type.values()) {
             AuthorizedSubjects authorizedSubjects = permissions.get(type);
