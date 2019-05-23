@@ -65,40 +65,48 @@ public class GitBackupService implements IGitBackupService {
         this.exportService = exportService;
     }
 
-
     @Override
-    public Response gitPull(String botid, boolean force) {
+    public Response gitInit(String botid) {
         try {
+            Files.delete(tmpPath);
             createDirIfNotExists(tmpPath);
             IResourceStore.IResourceId resourceId =  botStore.getCurrentResourceId(botid);
             BotConfiguration botConfiguration = botStore.read(botid, resourceId.getVersion());
             BotConfiguration.GitBackupSettings gitBackupSettings = botConfiguration.getGitBackupSettings();
 
-            if (gitBackupSettings != null && gitBackupSettings.getRepositoryUrl() != null) {
-                if (isDirEmpty(tmpPath)) {
-                    Git.cloneRepository()
-                            .setBranch(gitBackupSettings.getBranch())
-                            .setURI(gitBackupSettings.getRepositoryUrl().toString())
-                            .setCredentialsProvider(new UsernamePasswordCredentialsProvider(gitBackupSettings.getUsername(), gitBackupSettings.getPassword()))
-                            .setDirectory(tmpPath.toFile())
-                            .call();
-                    importBot(botid, resourceId.getVersion());
-                } else {
-                    PullResult pullResult = Git.open(tmpPath.toFile())
-                            .pull()
-                            .call();
-                    if (pullResult.isSuccessful()) {
-                        importBot(botid, resourceId.getVersion());
-                        return Response.status(Response.Status.OK).entity("Pulled from: " + pullResult.getFetchedFrom()+ ". Was successfull!").build();
-                    } else {
-                        return Response.status(Response.Status.OK).entity("Pull from repository was not successfull! Please check your git settings! Maybe the path " + tmpPath.toString() + " is not empty or not a git repository").build();
-                    }
-                }
+            Git.cloneRepository()
+                    .setBranch(gitBackupSettings.getBranch())
+                    .setURI(gitBackupSettings.getRepositoryUrl().toString())
+                    .setCredentialsProvider(new UsernamePasswordCredentialsProvider(gitBackupSettings.getUsername(), gitBackupSettings.getPassword()))
+                    .setDirectory(tmpPath.toFile())
+                    .call();
 
-                return Response.status(Response.Status.OK).build();
-            } else {
-                return Response.status(Response.Status.NOT_FOUND).entity("No git settings in bot configuration, please add git settings!").build();
+        } catch (IOException | IResourceStore.ResourceNotFoundException | IResourceStore.ResourceStoreException | GitAPIException e) {
+            return Response.status(Response.Status.INTERNAL_SERVER_ERROR).entity("Initialisation of Git repository failed " + e.getMessage()).build();
+        }
+        return null;
+    }
+
+    @Override
+    public Response gitPull(String botid, boolean force) {
+        try {
+            IResourceStore.IResourceId resourceId =  botStore.getCurrentResourceId(botid);
+            BotConfiguration botConfiguration = botStore.read(botid, resourceId.getVersion());
+            BotConfiguration.GitBackupSettings gitBackupSettings = botConfiguration.getGitBackupSettings();
+
+            if (gitBackupSettings != null && gitBackupSettings.getRepositoryUrl() != null) {
+                PullResult pullResult = Git.open(tmpPath.toFile())
+                        .pull()
+                        .call();
+                if (pullResult.isSuccessful()) {
+                    importBot(botid, resourceId.getVersion());
+                    return Response.status(Response.Status.OK).entity("Pulled from: " + pullResult.getFetchedFrom()+ ". Was successfull!").build();
+                } else {
+                    return Response.status(Response.Status.OK).entity("Pull from repository was not successfull! Please check your git settings! Maybe the path " + tmpPath.toString() + " is not empty or not a git repository").build();
+                }
             }
+
+            return Response.status(Response.Status.OK).build();
         } catch (IResourceStore.ResourceNotFoundException e) {
             return Response.status(Response.Status.NOT_FOUND).build();
         } catch (IResourceStore.ResourceStoreException e) {
@@ -118,28 +126,13 @@ public class GitBackupService implements IGitBackupService {
             BotConfiguration botConfiguration = botStore.read(botid, resourceId.getVersion());
             BotConfiguration.GitBackupSettings gitBackupSettings = botConfiguration.getGitBackupSettings();
             if (gitBackupSettings != null && gitBackupSettings.getRepositoryUrl() != null) {
-                if (isDirEmpty(tmpPath)) {
-                    Git.cloneRepository()
-                            .setBranch(gitBackupSettings.getBranch())
-                            .setURI(gitBackupSettings.getRepositoryUrl().toString())
-                            .setCredentialsProvider(new UsernamePasswordCredentialsProvider(gitBackupSettings.getUsername(), gitBackupSettings.getPassword()))
-                            .setDirectory(tmpPath.toFile())
-                            .call();
-                    exportService.exportBot(botid, resourceId.getVersion());
-                    RevCommit commit = Git.open(tmpPath.toFile())
-                            .commit()
-                            .setMessage(commitMessage)
-                            .setCommitter("EDDI", "eddi@labs.ai")
-                            .call();
-                    return Response.status(Response.Status.OK).entity(commit.getFullMessage()).build();
-                } else {
-                    RevCommit commit = Git.open(tmpPath.toFile())
-                            .commit()
-                            .setMessage(commitMessage)
-                            .setCommitter("EDDI", "eddi@labs.ai")
-                            .call();
-                    return Response.status(Response.Status.OK).entity(commit.getFullMessage()).build();
-                }
+                exportService.exportBot(botid, resourceId.getVersion());
+                RevCommit commit = Git.open(tmpPath.toFile())
+                        .commit()
+                        .setMessage(commitMessage)
+                        .setCommitter("EDDI", "eddi@labs.ai")
+                        .call();
+                return Response.status(Response.Status.OK).entity(commit.getFullMessage()).build();
             } else {
                 return Response.status(Response.Status.NOT_FOUND).entity("No git settings in bot configuration, please add git settings!").build();
             }
@@ -159,18 +152,14 @@ public class GitBackupService implements IGitBackupService {
             BotConfiguration botConfiguration = botStore.read(botid, resourceId.getVersion());
             BotConfiguration.GitBackupSettings gitBackupSettings = botConfiguration.getGitBackupSettings();
             if (gitBackupSettings != null && gitBackupSettings.getRepositoryUrl() != null) {
-                if (isDirEmpty(tmpPath)) {
-                    return Response.status(Response.Status.NOT_FOUND).entity("The repository is in the directory " + tmpPath.toString() + " was empty! Please use commit or pull before pushing!").build();
-                } else {
-                    Iterable<PushResult> pushResults = Git.open(tmpPath.toFile())
-                            .push()
-                            .call();
-                    StringBuilder pushResultMessage = new StringBuilder();
-                    for (PushResult pushResult : pushResults) {
-                        pushResultMessage.append(pushResult.getMessages());
-                    }
-                    return Response.status(Response.Status.OK).entity(pushResultMessage.toString()).build();
+                Iterable<PushResult> pushResults = Git.open(tmpPath.toFile())
+                        .push()
+                        .call();
+                StringBuilder pushResultMessage = new StringBuilder();
+                for (PushResult pushResult : pushResults) {
+                    pushResultMessage.append(pushResult.getMessages());
                 }
+                return Response.status(Response.Status.OK).entity(pushResultMessage.toString()).build();
             } else {
                 return Response.status(Response.Status.NOT_FOUND).entity("No git settings in bot configuration, please add git settings!").build();
             }

@@ -14,6 +14,12 @@ import javax.ws.rs.core.Response;
 public interface IGitBackupService {
 
     @GET
+    @Path("/init/{botid}")
+    @ApiResponse(code = 200, message = "returns if the repository could be cloned. Deletes the tmp repository first")
+    Response gitInit(@PathParam("botid") String botid);
+
+
+    @GET
     @Path("/pull/{botid}")
     @ApiResponse(code = 200, message = "returns the gitmessage of the attempted pull into edde from the configured git repository")
     Response gitPull(@PathParam("botid") String botid,
