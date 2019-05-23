@@ -49,7 +49,7 @@ import static ai.labs.models.Deployment.Environment.unrestricted;
 @Slf4j
 public class GitBackupService implements IGitBackupService {
     private final IBotStore botStore;
-    private final Path tmpPath = Paths.get(FileUtilities.buildPath(System.getProperty("user.dir"), "tmp"));
+    private final String tmpPath = System.getProperty("user.dir") + "/tmp/";
     private final IZipArchive zipArchive;
     private final IRestImportService importService;
     private final IRestExportService exportService;
@@ -68,17 +68,16 @@ public class GitBackupService implements IGitBackupService {
     @Override
     public Response gitInit(String botid) {
         try {
-            Files.delete(tmpPath);
-            createDirIfNotExists(tmpPath);
             IResourceStore.IResourceId resourceId =  botStore.getCurrentResourceId(botid);
             BotConfiguration botConfiguration = botStore.read(botid, resourceId.getVersion());
             BotConfiguration.GitBackupSettings gitBackupSettings = botConfiguration.getGitBackupSettings();
-
+            deleteFileIfExists(Paths.get(tmpPath + botid));
+            Path gitPath = Files.createDirectory(Paths.get(tmpPath + botid));
             Git.cloneRepository()
                     .setBranch(gitBackupSettings.getBranch())
                     .setURI(gitBackupSettings.getRepositoryUrl().toString())
                     .setCredentialsProvider(new UsernamePasswordCredentialsProvider(gitBackupSettings.getUsername(), gitBackupSettings.getPassword()))
-                    .setDirectory(tmpPath.toFile())
+                    .setDirectory(gitPath.toFile())
                     .call();
 
         } catch (IOException | IResourceStore.ResourceNotFoundException | IResourceStore.ResourceStoreException | GitAPIException e) {
@@ -93,9 +92,10 @@ public class GitBackupService implements IGitBackupService {
             IResourceStore.IResourceId resourceId =  botStore.getCurrentResourceId(botid);
             BotConfiguration botConfiguration = botStore.read(botid, resourceId.getVersion());
             BotConfiguration.GitBackupSettings gitBackupSettings = botConfiguration.getGitBackupSettings();
+            Path gitPath = Paths.get(tmpPath + botid);
 
             if (gitBackupSettings != null && gitBackupSettings.getRepositoryUrl() != null) {
-                PullResult pullResult = Git.open(tmpPath.toFile())
+                PullResult pullResult = Git.open(gitPath.toFile())
                         .pull()
                         .call();
                 if (pullResult.isSuccessful()) {
@@ -121,13 +121,13 @@ public class GitBackupService implements IGitBackupService {
     @Override
     public Response gitCommit(String botid, String commitMessage) {
         try {
-            createDirIfNotExists(tmpPath);
             IResourceStore.IResourceId resourceId =  botStore.getCurrentResourceId(botid);
             BotConfiguration botConfiguration = botStore.read(botid, resourceId.getVersion());
             BotConfiguration.GitBackupSettings gitBackupSettings = botConfiguration.getGitBackupSettings();
+            Path gitPath = Paths.get(tmpPath + botid);
             if (gitBackupSettings != null && gitBackupSettings.getRepositoryUrl() != null) {
                 exportService.exportBot(botid, resourceId.getVersion());
-                RevCommit commit = Git.open(tmpPath.toFile())
+                RevCommit commit = Git.open(gitPath.toFile())
                         .commit()
                         .setMessage(commitMessage)
                         .setCommitter("EDDI", "eddi@labs.ai")
@@ -147,12 +147,13 @@ public class GitBackupService implements IGitBackupService {
     @Override
     public Response gitPush(String botid) {
         try {
-            createDirIfNotExists(tmpPath);
             IResourceStore.IResourceId resourceId =  botStore.getCurrentResourceId(botid);
             BotConfiguration botConfiguration = botStore.read(botid, resourceId.getVersion());
             BotConfiguration.GitBackupSettings gitBackupSettings = botConfiguration.getGitBackupSettings();
+            Path gitPath = Paths.get(tmpPath + botid);
+
             if (gitBackupSettings != null && gitBackupSettings.getRepositoryUrl() != null) {
-                Iterable<PushResult> pushResults = Git.open(tmpPath.toFile())
+                Iterable<PushResult> pushResults = Git.open(gitPath.toFile())
                         .push()
                         .call();
                 StringBuilder pushResultMessage = new StringBuilder();
