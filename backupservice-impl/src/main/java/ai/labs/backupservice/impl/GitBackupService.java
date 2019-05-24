@@ -97,6 +97,7 @@ public class GitBackupService implements IGitBackupService {
             if (gitBackupSettings != null && gitBackupSettings.getRepositoryUrl() != null) {
                 PullResult pullResult = Git.open(gitPath.toFile())
                         .pull()
+                        .setCredentialsProvider(new UsernamePasswordCredentialsProvider(gitBackupSettings.getUsername(), gitBackupSettings.getPassword()))
                         .call();
                 if (pullResult.isSuccessful()) {
                     importBot(botid, resourceId.getVersion());
@@ -163,6 +164,7 @@ public class GitBackupService implements IGitBackupService {
             if (gitBackupSettings != null && gitBackupSettings.getRepositoryUrl() != null) {
                 Iterable<PushResult> pushResults = Git.open(gitPath.toFile())
                         .push()
+                        .setCredentialsProvider(new UsernamePasswordCredentialsProvider(gitBackupSettings.getUsername(), gitBackupSettings.getPassword()))
                         .call();
                 StringBuilder pushResultMessage = new StringBuilder();
                 for (PushResult pushResult : pushResults) {
