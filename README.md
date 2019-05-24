@@ -33,7 +33,7 @@ The Chatbot System - E.D.D.I (Enhanced Dialog Driven Intelligence),
 has been developed with the focus on the use in enterprise applications as well as 
 the ease of connecting it to other resources (such as databases or other Services). 
 
-This platform has been developed for over six years and completely restructured from scratch four times 
+This platform has been developed for over many years and completely restructured from scratch four times 
 because of logical "dead ends" in the art of building chatbots - thus version 4.
 
 The most outstanding features are:
