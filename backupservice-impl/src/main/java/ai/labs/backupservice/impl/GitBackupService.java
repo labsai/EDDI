@@ -28,10 +28,7 @@ import org.eclipse.jgit.transport.UsernamePasswordCredentialsProvider;
 
 import javax.inject.Inject;
 import javax.ws.rs.core.Response;
-import java.io.BufferedWriter;
-import java.io.FileInputStream;
-import java.io.IOException;
-import java.io.UnsupportedEncodingException;
+import java.io.*;
 import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.DirectoryStream;
@@ -81,7 +78,10 @@ public class GitBackupService implements IGitBackupService {
                     .call();
 
         } catch (IOException | IResourceStore.ResourceNotFoundException | IResourceStore.ResourceStoreException | GitAPIException e) {
-            return Response.status(Response.Status.INTERNAL_SERVER_ERROR).entity("Initialisation of Git repository failed " + e.getMessage()).build();
+            StringWriter sw = new StringWriter();
+            PrintWriter pw = new PrintWriter(sw);
+            e.printStackTrace(pw);
+            return Response.status(Response.Status.INTERNAL_SERVER_ERROR).entity("Initialisation of Git repository failed " + e.getMessage() + " exception " + sw.toString()).build();
         }
         return null;
     }
@@ -107,14 +107,16 @@ public class GitBackupService implements IGitBackupService {
             }
 
             return Response.status(Response.Status.OK).build();
-        } catch (IResourceStore.ResourceNotFoundException e) {
-            return Response.status(Response.Status.NOT_FOUND).build();
-        } catch (IResourceStore.ResourceStoreException e) {
-            return Response.status(Response.Status.INTERNAL_SERVER_ERROR).build();
-        } catch (InvalidRemoteException e) {
-            return Response.status(Response.Status.NOT_FOUND).entity(e.getMessage()).build();
-        } catch (GitAPIException | IOException e) {
-            return Response.status(Response.Status.INTERNAL_SERVER_ERROR).entity(e.getMessage()).build();
+        } catch (IResourceStore.ResourceNotFoundException | InvalidRemoteException e) {
+            StringWriter sw = new StringWriter();
+            PrintWriter pw = new PrintWriter(sw);
+            e.printStackTrace(pw);
+            return Response.status(Response.Status.NOT_FOUND).entity("pull " + e.getMessage() + " exception " + sw.toString()).build();
+        } catch (GitAPIException | IOException | IResourceStore.ResourceStoreException e) {
+            StringWriter sw = new StringWriter();
+            PrintWriter pw = new PrintWriter(sw);
+            e.printStackTrace(pw);
+            return Response.status(Response.Status.INTERNAL_SERVER_ERROR).entity("pull " + e.getMessage() + " exception " + sw.toString()).build();
         }
     }
 
@@ -137,9 +139,15 @@ public class GitBackupService implements IGitBackupService {
                 return Response.status(Response.Status.NOT_FOUND).entity("No git settings in bot configuration, please add git settings!").build();
             }
         } catch (IResourceStore.ResourceNotFoundException e) {
-            return Response.status(Response.Status.NOT_FOUND).build();
+            StringWriter sw = new StringWriter();
+            PrintWriter pw = new PrintWriter(sw);
+            e.printStackTrace(pw);
+            return Response.status(Response.Status.NOT_FOUND).entity("commit " + e.getMessage() + " exception " + sw.toString()).build();
         } catch (IResourceStore.ResourceStoreException | IOException | GitAPIException e) {
-            return Response.status(Response.Status.INTERNAL_SERVER_ERROR).entity(e.getMessage()).build();
+            StringWriter sw = new StringWriter();
+            PrintWriter pw = new PrintWriter(sw);
+            e.printStackTrace(pw);
+            return Response.status(Response.Status.INTERNAL_SERVER_ERROR).entity("commit " + e.getMessage() + " exception " + sw.toString()).build();
         }
 
     }
@@ -165,9 +173,15 @@ public class GitBackupService implements IGitBackupService {
                 return Response.status(Response.Status.NOT_FOUND).entity("No git settings in bot configuration, please add git settings!").build();
             }
         } catch (IResourceStore.ResourceNotFoundException e) {
-            return Response.status(Response.Status.NOT_FOUND).build();
+            StringWriter sw = new StringWriter();
+            PrintWriter pw = new PrintWriter(sw);
+            e.printStackTrace(pw);
+            return Response.status(Response.Status.NOT_FOUND).entity("commit " + e.getMessage() + " exception " + sw.toString()).build();
         } catch (IResourceStore.ResourceStoreException | IOException | GitAPIException e) {
-            return Response.status(Response.Status.INTERNAL_SERVER_ERROR).entity(e.getMessage()).build();
+            StringWriter sw = new StringWriter();
+            PrintWriter pw = new PrintWriter(sw);
+            e.printStackTrace(pw);
+            return Response.status(Response.Status.INTERNAL_SERVER_ERROR).entity("commit " + e.getMessage() + " exception " + sw.toString()).build();
         }
     }
 
