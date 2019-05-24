@@ -17,9 +17,19 @@ Check out the full documentation [here](http://docs.labs.ai/).
 [![Codacy Badge](https://api.codacy.com/project/badge/Grade/17f0bf1c32b346fc9232e7601327d212)](https://app.codacy.com/app/ginccc/EDDI?utm_source=github.com&utm_medium=referral&utm_content=labsai/EDDI&utm_campaign=Badge_Grade_Dashboard)
 [![CircleCI](https://circleci.com/gh/labsai/EDDI/tree/master.svg?style=svg)](https://circleci.com/gh/labsai/EDDI/tree/master)
 
+## Why choose E.D.D.I over other technologies? 
+### We have asked that question to our users and here are some reasons they mentioned:
+* it is open source 💚
+* the configuration is extremely open and flexible
+* the code is self-explanatory and easy to extend
+* eddi is channel independent, therefore can be used anywhere
+* the (NLP) parser is extremely cool
+* the framework is focused and does not pretend to be the magic bullet that solves it all
+* great tech stack, when you want to build a chatbot product yourself
+
 ## Intro
 
-The Chatbot System - E.D.D.I. (Enhanced Dialog Driven Intelligence), 
+The Chatbot System - E.D.D.I (Enhanced Dialog Driven Intelligence), 
 has been developed with the focus on the use in enterprise applications as well as 
 the ease of connecting it to other resources (such as databases or other Services). 
 
