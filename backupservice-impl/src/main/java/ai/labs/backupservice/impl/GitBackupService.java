@@ -216,9 +216,9 @@ public class GitBackupService implements IGitBackupService {
 
     private void importBot(String botid, Integer version) throws IOException {
         String zipFilename = prepareZipFilename(botid, version);
-        String targetZipPath = FileUtilities.buildPath(tmpPath.toString(), zipFilename);
+        String targetZipPath = FileUtilities.buildPath(tmpPath, zipFilename);
         deleteFileIfExists(Paths.get(targetZipPath));
-        this.zipArchive.createZip(tmpPath.toString(), targetZipPath);
+        this.zipArchive.createZip(tmpPath, targetZipPath);
         importService.importBot(new FileInputStream(targetZipPath), null);
     }
 

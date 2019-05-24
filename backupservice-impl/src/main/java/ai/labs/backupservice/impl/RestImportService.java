@@ -115,7 +115,7 @@ public class RestImportService extends AbstractBackupService implements IRestImp
     @Override
     public void importBot(InputStream zippedBotConfigFiles, AsyncResponse response) {
         try {
-            response.setTimeout(60, TimeUnit.SECONDS);
+            if (response != null) response.setTimeout(60, TimeUnit.SECONDS);
             File targetDir = new File(FileUtilities.buildPath(tmpPath.toString(), UUID.randomUUID().toString()));
             importBotZipFile(zippedBotConfigFiles, targetDir, response);
         } catch (IOException e) {
