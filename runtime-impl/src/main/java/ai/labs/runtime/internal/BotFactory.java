@@ -70,9 +70,23 @@ public class BotFactory implements IBotFactory {
 
     @Override
     public List<IBot> getAllLatestBots(Deployment.Environment environment) {
-        return getBotEnvironment(environment).keySet().stream().
-                filter(botId -> getLatestBot(environment, botId.getId()) != null).
-                map(botId -> getLatestBot(environment, botId.getId())).collect(Collectors.toList());
+        Map<String, IBot> ret = new LinkedHashMap<>();
+
+        for (BotId botIdObj : getBotEnvironment(environment).keySet()) {
+            IBot nextBot = getLatestBot(environment, botIdObj.getId());
+            String botId = botIdObj.getId();
+            IBot currentBot = ret.get(botId);
+            if (ret.containsKey(botId)) {
+                if (currentBot.getBotVersion() < nextBot.getBotVersion()) {
+                    ret.put(botId, nextBot);
+                }
+            } else {
+                ret.put(botIdObj.getId(), nextBot);
+            }
+
+        }
+
+        return new LinkedList<>(ret.values());
     }
 
     @Override
