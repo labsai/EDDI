@@ -69,7 +69,7 @@ public class GitBackupService implements IGitBackupService {
             BotConfiguration botConfiguration = botStore.read(botid, resourceId.getVersion());
             BotConfiguration.GitBackupSettings gitBackupSettings = botConfiguration.getGitBackupSettings();
             deleteFileIfExists(Paths.get(tmpPath + botid));
-            Path gitPath = Files.createDirectory(Paths.get(tmpPath + botid));
+            Path gitPath = Files.createDirectories(Paths.get(tmpPath + botid));
             Git.cloneRepository()
                     .setBranch(gitBackupSettings.getBranch())
                     .setURI(gitBackupSettings.getRepositoryUrl().toString())
