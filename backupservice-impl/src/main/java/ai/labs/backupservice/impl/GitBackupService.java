@@ -130,6 +130,10 @@ public class GitBackupService implements IGitBackupService {
             Path gitPath = Paths.get(tmpPath + botid);
             if (gitBackupSettings != null && gitBackupSettings.getRepositoryUrl() != null) {
                 exportService.exportBot(botid, resourceId.getVersion());
+                Git.open(gitPath.toFile())
+                        .add()
+                        .addFilepattern(".")
+                        .call();
                 RevCommit commit = Git.open(gitPath.toFile())
                         .commit()
                         .setMessage(commitMessage)
