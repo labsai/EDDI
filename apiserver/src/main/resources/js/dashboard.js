@@ -1,4 +1,4 @@
-REST.apiURL = REST.apiURL.substr(0, REST.apiURL.length - 1);
+REST.apiURL = '';
 let eddi = {};
 eddi.environments = ['unrestricted', 'restricted', 'test'];
 
