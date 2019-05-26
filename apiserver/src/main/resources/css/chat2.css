@@ -413,6 +413,12 @@ a:active {
     transition: width .2s ease-out, padding-top .2s ease-out;
 }
 
+.message ul,
+ .message ol {
+    text-indent: 5px;
+    margin-left: 18px;
+}
+
 @keyframes loading {
     0%, 60%, 100% {
         transform: scaleY(0.01);
