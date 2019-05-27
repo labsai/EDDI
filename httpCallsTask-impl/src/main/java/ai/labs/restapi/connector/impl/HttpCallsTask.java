@@ -149,9 +149,10 @@ public class HttpCallsTask implements ILifecycleTask {
                             if (!CONTENT_TYPE_APPLICATION_JSON.startsWith(actualContentType)) {
                                 String message = "HttpCall (%s) didn't return application/json as content-type, instead was (%s)";
                                 log.warn(String.format(message, call.getName(), actualContentType));
-                                continue;
+                                //continue;
                             }
 
+                            log.info("responseBody: {}", responseBody);
                             Object responseObject = jsonSerialization.deserialize(responseBody, Object.class);
                             String responseObjectName = call.getResponseObjectName();
                             templateDataObjects.put(responseObjectName, responseObject);
@@ -198,7 +199,12 @@ public class HttpCallsTask implements ILifecycleTask {
                         Property.Scope scope = propertyInstruction.getScope();
                         Object propertyValue;
                         if (!isNullOrEmpty(path)) {
-                            propertyValue = Ognl.getValue(path, templateDataObjects);
+                            try {
+                                propertyValue = Ognl.getValue(path, templateDataObjects);
+                            } catch (OgnlException oglnExeption) {
+                                log.error("configured path is not correct or value does not exist!", oglnExeption);
+                                propertyValue = "";
+                            }
                         } else {
                             propertyValue = propertyInstruction.getValue();
                         }
@@ -252,7 +258,7 @@ public class HttpCallsTask implements ILifecycleTask {
 
     private IRequest buildRequest(Request requestConfig, Map<String, Object> templateDataObjects) throws ITemplatingEngine.TemplateEngineException {
         String path = requestConfig.getPath().trim();
-        if (!path.startsWith(SLASH_CHAR) && !path.isEmpty()) {
+        if (!path.startsWith(SLASH_CHAR) && !path.isEmpty() && !path.startsWith("http")) {
             path = SLASH_CHAR + path;
         }
         URI targetUri = URI.create(targetServerUri + templateValues(path, templateDataObjects));

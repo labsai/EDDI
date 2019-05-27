@@ -19,6 +19,7 @@ import java.util.Map;
 public class BotConfiguration {
     private List<URI> packages = new ArrayList<>();
     private List<ChannelConnector> channels = new ArrayList<>();
+    private GitBackupSettings gitBackupSettings = new GitBackupSettings();
 
     @Getter
     @Setter
@@ -26,4 +27,17 @@ public class BotConfiguration {
         private URI type;
         private Map<String, String> config = new HashMap<>();
     }
+
+    @Getter
+    @Setter
+    public static class GitBackupSettings {
+        private URI repositoryUrl;
+        private String branch;
+        private String username;
+        private String password;
+        private String committerEmail;
+        private String committerName;
+    }
+
+
 }
