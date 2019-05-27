@@ -4,12 +4,13 @@ import ai.labs.models.DatabaseLog;
 import ai.labs.models.Deployment;
 import io.swagger.annotations.Api;
 import io.swagger.annotations.ApiOperation;
+import io.swagger.annotations.Authorization;
 
 import javax.ws.rs.*;
 import javax.ws.rs.core.MediaType;
 import java.util.List;
 
-@Api(value = "Bot Engine -> Logs")
+@Api(value = "Bot Engine -> Logs", authorizations = {@Authorization(value = "eddi_auth")})
 @Path("logs")
 public interface IRestLogs {
     @GET

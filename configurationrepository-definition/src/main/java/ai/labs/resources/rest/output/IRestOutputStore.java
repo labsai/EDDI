@@ -5,10 +5,7 @@ import ai.labs.resources.rest.IRestVersionInfo;
 import ai.labs.resources.rest.method.PATCH;
 import ai.labs.resources.rest.output.model.OutputConfigurationSet;
 import ai.labs.resources.rest.patch.PatchInstruction;
-import io.swagger.annotations.Api;
-import io.swagger.annotations.ApiOperation;
-import io.swagger.annotations.ApiParam;
-import io.swagger.annotations.ApiResponse;
+import io.swagger.annotations.*;
 
 import javax.ws.rs.*;
 import javax.ws.rs.core.MediaType;
@@ -19,7 +16,7 @@ import java.util.Map;
 /**
  * @author ginccc
  */
-@Api(value = "Configurations -> (2) Conversation LifeCycle Tasks -> (3) Output")
+@Api(value = "Configurations -> (2) Conversation LifeCycle Tasks -> (3) Output", authorizations = {@Authorization(value = "eddi_auth")})
 @Path("/outputstore/outputsets")
 public interface IRestOutputStore extends IRestVersionInfo {
     String resourceURI = "eddi://ai.labs.output/outputstore/outputsets/";

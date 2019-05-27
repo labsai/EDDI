@@ -3,6 +3,7 @@ package ai.labs.group.rest;
 import ai.labs.group.model.Group;
 import io.swagger.annotations.Api;
 import io.swagger.annotations.ApiOperation;
+import io.swagger.annotations.Authorization;
 
 import javax.ws.rs.*;
 import javax.ws.rs.core.MediaType;
@@ -11,7 +12,7 @@ import javax.ws.rs.core.Response;
 /**
  * @author ginccc
  */
-@Api(value = "User Management -> (2) Groups")
+@Api(value = "User Management -> (2) Groups", authorizations = {@Authorization(value = "eddi_auth")})
 @Path("/groupstore/groups")
 public interface IRestGroupStore {
     String resourceURI = "eddi://ai.labs.group/groupstore/groups/";

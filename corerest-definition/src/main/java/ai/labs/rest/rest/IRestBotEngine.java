@@ -8,6 +8,7 @@ import ai.labs.models.Deployment;
 import ai.labs.models.InputData;
 import io.swagger.annotations.Api;
 import io.swagger.annotations.ApiOperation;
+import io.swagger.annotations.Authorization;
 import org.jboss.resteasy.annotations.cache.NoCache;
 
 import javax.ws.rs.*;
@@ -21,7 +22,7 @@ import java.util.Map;
 /**
  * @author ginccc
  */
-@Api(value = "Bot Engine")
+@Api(value = "Bot Engine", authorizations = {@Authorization(value = "eddi_auth")})
 @Path("/bots")
 public interface IRestBotEngine {
 

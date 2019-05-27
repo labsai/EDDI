@@ -109,7 +109,7 @@ public class XmppEndpoint implements IXmppEndpoint {
         } catch (ResourceStoreException e) {
             log.error("resource store exception", e);
         } catch (ResourceNotFoundException e) {
-            log.error("botid not found", e);
+            log.error("botId not found", e);
         } catch (InterruptedException e) {
             log.error("smack connection interruped", e);
         } catch (IOException e) {

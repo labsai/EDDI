@@ -3,10 +3,7 @@ package ai.labs.resources.rest.packages;
 import ai.labs.models.DocumentDescriptor;
 import ai.labs.resources.rest.IRestVersionInfo;
 import ai.labs.resources.rest.packages.model.PackageConfiguration;
-import io.swagger.annotations.Api;
-import io.swagger.annotations.ApiOperation;
-import io.swagger.annotations.ApiParam;
-import io.swagger.annotations.ApiResponse;
+import io.swagger.annotations.*;
 
 import javax.ws.rs.*;
 import javax.ws.rs.core.MediaType;
@@ -18,7 +15,7 @@ import java.util.Map;
 /**
  * @author ginccc
  */
-@Api(value = "Configurations -> (3) Packages")
+@Api(value = "Configurations -> (3) Packages", authorizations = {@Authorization(value = "eddi_auth")})
 @Path("/packagestore/packages")
 public interface IRestPackageStore extends IRestVersionInfo {
     String resourceURI = "eddi://ai.labs.package/packagestore/packages/";

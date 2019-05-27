@@ -4,6 +4,7 @@ import ai.labs.models.BotDeploymentStatus;
 import io.swagger.annotations.Api;
 import io.swagger.annotations.ApiOperation;
 import io.swagger.annotations.ApiParam;
+import io.swagger.annotations.Authorization;
 import org.jboss.resteasy.annotations.cache.NoCache;
 
 import javax.ws.rs.*;
@@ -16,7 +17,7 @@ import static ai.labs.models.Deployment.Environment;
 /**
  * @author ginccc
  */
-@Api(value = "Bot Administration")
+@Api(value = "Bot Administration", authorizations = {@Authorization(value = "eddi_auth")})
 @Path("/administration")
 public interface IRestBotAdministration {
     @POST

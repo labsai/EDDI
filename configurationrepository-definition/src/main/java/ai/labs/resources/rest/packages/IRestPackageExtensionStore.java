@@ -2,6 +2,7 @@ package ai.labs.resources.rest.packages;
 
 import ai.labs.resources.rest.packages.model.PackageConfiguration;
 import io.swagger.annotations.Api;
+import io.swagger.annotations.Authorization;
 
 import javax.ws.rs.GET;
 import javax.ws.rs.Path;
@@ -12,7 +13,7 @@ import java.util.List;
 /**
  * @author ginccc
  */
-@Api(value = "Configurations -> (3) Packages")
+@Api(value = "Configurations -> (3) Packages", authorizations = {@Authorization(value = "eddi_auth")})
 @Path("/packagestore/extensions")
 public interface IRestPackageExtensionStore {
     @GET

@@ -1,7 +1,7 @@
 package ai.labs.backupservice.impl;
 
-import ai.labs.backupservice.IRestGitBackupService;
 import ai.labs.backupservice.IRestExportService;
+import ai.labs.backupservice.IRestGitBackupService;
 import ai.labs.backupservice.IRestImportService;
 import ai.labs.backupservice.IZipArchive;
 import ai.labs.persistence.IResourceStore;
@@ -11,15 +11,17 @@ import ai.labs.utilities.FileUtilities;
 import lombok.extern.slf4j.Slf4j;
 import org.eclipse.jgit.api.Git;
 import org.eclipse.jgit.api.PullResult;
-import org.eclipse.jgit.api.errors.*;
+import org.eclipse.jgit.api.errors.GitAPIException;
+import org.eclipse.jgit.api.errors.InvalidRemoteException;
 import org.eclipse.jgit.revwalk.RevCommit;
 import org.eclipse.jgit.transport.PushResult;
 import org.eclipse.jgit.transport.UsernamePasswordCredentialsProvider;
-import org.jboss.resteasy.spi.InternalServerErrorException;
 
 import javax.inject.Inject;
+import javax.ws.rs.InternalServerErrorException;
 import javax.ws.rs.core.Response;
-import java.io.*;
+import java.io.FileInputStream;
+import java.io.IOException;
 import java.nio.file.DirectoryStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -48,13 +50,13 @@ public class RestGitBackupService implements IRestGitBackupService {
     }
 
     @Override
-    public Response gitInit(String botid) {
+    public Response gitInit(String botId) {
         try {
-            IResourceStore.IResourceId resourceId =  botStore.getCurrentResourceId(botid);
-            BotConfiguration botConfiguration = botStore.read(botid, resourceId.getVersion());
+            IResourceStore.IResourceId resourceId = botStore.getCurrentResourceId(botId);
+            BotConfiguration botConfiguration = botStore.read(botId, resourceId.getVersion());
             BotConfiguration.GitBackupSettings gitBackupSettings = botConfiguration.getGitBackupSettings();
-            deleteFileIfExists(Paths.get(tmpPath + botid));
-            Path gitPath = Files.createDirectories(Paths.get(tmpPath + botid));
+            deleteFileIfExists(Paths.get(tmpPath + botId));
+            Path gitPath = Files.createDirectories(Paths.get(tmpPath + botId));
             Git.cloneRepository()
                     .setBranch(gitBackupSettings.getBranch())
                     .setURI(gitBackupSettings.getRepositoryUrl().toString())
@@ -64,18 +66,18 @@ public class RestGitBackupService implements IRestGitBackupService {
 
         } catch (IOException | IResourceStore.ResourceNotFoundException | IResourceStore.ResourceStoreException | GitAPIException e) {
             log.error(e.getLocalizedMessage(), e);
-            throw new InternalServerErrorException(e.getLocalizedMessage());
+            throw new InternalServerErrorException();
         }
-        return null;
+        return Response.accepted().build();
     }
 
     @Override
-    public Response gitPull(String botid, boolean force) {
+    public Response gitPull(String botId, boolean force) {
         try {
-            IResourceStore.IResourceId resourceId =  botStore.getCurrentResourceId(botid);
-            BotConfiguration botConfiguration = botStore.read(botid, resourceId.getVersion());
+            IResourceStore.IResourceId resourceId = botStore.getCurrentResourceId(botId);
+            BotConfiguration botConfiguration = botStore.read(botId, resourceId.getVersion());
             BotConfiguration.GitBackupSettings gitBackupSettings = botConfiguration.getGitBackupSettings();
-            Path gitPath = Paths.get(tmpPath + botid);
+            Path gitPath = Paths.get(tmpPath + botId);
 
             if (gitBackupSettings != null && gitBackupSettings.getRepositoryUrl() != null) {
                 PullResult pullResult = Git.open(gitPath.toFile())
@@ -83,10 +85,10 @@ public class RestGitBackupService implements IRestGitBackupService {
                         .setCredentialsProvider(new UsernamePasswordCredentialsProvider(gitBackupSettings.getUsername(), gitBackupSettings.getPassword()))
                         .call();
                 if (pullResult.isSuccessful()) {
-                    importBot(botid, resourceId.getVersion());
-                    return Response.status(Response.Status.OK).entity("Pulled from: " + pullResult.getFetchedFrom()+ ". Was successfull!").build();
+                    importBot(botId, resourceId.getVersion());
+                    return Response.status(Response.Status.OK).entity("Pulled from: " + pullResult.getFetchedFrom() + ". Was successfull!").build();
                 } else {
-                    return Response.status(Response.Status.OK).entity("Pull from repository was not successfull! Please check your git settings! Maybe the path " + tmpPath.toString() + " is not empty or not a git repository").build();
+                    return Response.status(Response.Status.OK).entity("Pull from repository was not successful! Please check your git settings! Maybe the path " + tmpPath.toString() + " is not empty or not a git repository").build();
                 }
             }
 
@@ -95,19 +97,19 @@ public class RestGitBackupService implements IRestGitBackupService {
             return Response.status(Response.Status.NOT_FOUND).entity("pull from configured repository failed - repository was not found, please check your settings").build();
         } catch (GitAPIException | IOException | IResourceStore.ResourceStoreException e) {
             log.error(e.getLocalizedMessage(), e);
-            throw new InternalServerErrorException(e.getLocalizedMessage());
+            throw new InternalServerErrorException();
         }
     }
 
     @Override
-    public Response gitCommit(String botid, String commitMessage) {
+    public Response gitCommit(String botId, String commitMessage) {
         try {
-            IResourceStore.IResourceId resourceId =  botStore.getCurrentResourceId(botid);
-            BotConfiguration botConfiguration = botStore.read(botid, resourceId.getVersion());
+            IResourceStore.IResourceId resourceId = botStore.getCurrentResourceId(botId);
+            BotConfiguration botConfiguration = botStore.read(botId, resourceId.getVersion());
             BotConfiguration.GitBackupSettings gitBackupSettings = botConfiguration.getGitBackupSettings();
-            Path gitPath = Paths.get(tmpPath + botid);
+            Path gitPath = Paths.get(tmpPath + botId);
             if (gitBackupSettings != null && gitBackupSettings.getRepositoryUrl() != null) {
-                exportService.exportBot(botid, resourceId.getVersion());
+                exportService.exportBot(botId, resourceId.getVersion());
                 Git.open(gitPath.toFile())
                         .add()
                         .addFilepattern(".")
@@ -125,18 +127,18 @@ public class RestGitBackupService implements IRestGitBackupService {
             return Response.status(Response.Status.NOT_FOUND).entity("commit failed - bot id is incorrect").build();
         } catch (IResourceStore.ResourceStoreException | IOException | GitAPIException e) {
             log.error(e.getLocalizedMessage(), e);
-            throw new InternalServerErrorException(e.getLocalizedMessage());
+            throw new InternalServerErrorException();
         }
 
     }
 
     @Override
-    public Response gitPush(String botid) {
+    public Response gitPush(String botId) {
         try {
-            IResourceStore.IResourceId resourceId =  botStore.getCurrentResourceId(botid);
-            BotConfiguration botConfiguration = botStore.read(botid, resourceId.getVersion());
+            IResourceStore.IResourceId resourceId = botStore.getCurrentResourceId(botId);
+            BotConfiguration botConfiguration = botStore.read(botId, resourceId.getVersion());
             BotConfiguration.GitBackupSettings gitBackupSettings = botConfiguration.getGitBackupSettings();
-            Path gitPath = Paths.get(tmpPath + botid);
+            Path gitPath = Paths.get(tmpPath + botId);
 
             if (gitBackupSettings != null && gitBackupSettings.getRepositoryUrl() != null) {
                 Iterable<PushResult> pushResults = Git.open(gitPath.toFile())
@@ -155,7 +157,7 @@ public class RestGitBackupService implements IRestGitBackupService {
             return Response.status(Response.Status.NOT_FOUND).entity("push failed - bot id was not found").build();
         } catch (IResourceStore.ResourceStoreException | IOException | GitAPIException e) {
             log.error(e.getLocalizedMessage(), e);
-            throw new InternalServerErrorException(e.getLocalizedMessage());
+            throw new InternalServerErrorException();
         }
     }
 
@@ -177,13 +179,13 @@ public class RestGitBackupService implements IRestGitBackupService {
     }
 
     private boolean isDirEmpty(final Path directory) throws IOException {
-        try(DirectoryStream<Path> dirStream = Files.newDirectoryStream(directory)) {
+        try (DirectoryStream<Path> dirStream = Files.newDirectoryStream(directory)) {
             return !dirStream.iterator().hasNext();
         }
     }
 
-    private void importBot(String botid, Integer version) throws IOException {
-        String zipFilename = prepareZipFilename(botid, version);
+    private void importBot(String botId, Integer version) throws IOException {
+        String zipFilename = prepareZipFilename(botId, version);
         String targetZipPath = FileUtilities.buildPath(tmpPath, zipFilename);
         deleteFileIfExists(Paths.get(targetZipPath));
         this.zipArchive.createZip(tmpPath, targetZipPath);

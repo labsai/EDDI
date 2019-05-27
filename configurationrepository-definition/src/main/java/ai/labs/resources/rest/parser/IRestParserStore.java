@@ -14,7 +14,7 @@ import java.util.List;
  * @author ginccc
  */
 
-@Api(value = "Configurations -> Endpoint Parser Only")
+@Api(value = "Configurations -> Endpoint Parser Only", authorizations = {@Authorization(value = "eddi_auth")})
 @Path("/parserstore/parsers")
 public interface IRestParserStore extends IRestVersionInfo {
     String resourceURI = "eddi://ai.labs.parser/parserstore/parsers/";

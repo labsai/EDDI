@@ -3,10 +3,7 @@ package ai.labs.resources.rest.http;
 import ai.labs.models.DocumentDescriptor;
 import ai.labs.resources.rest.IRestVersionInfo;
 import ai.labs.resources.rest.http.model.HttpCallsConfiguration;
-import io.swagger.annotations.Api;
-import io.swagger.annotations.ApiOperation;
-import io.swagger.annotations.ApiParam;
-import io.swagger.annotations.ApiResponse;
+import io.swagger.annotations.*;
 
 import javax.ws.rs.*;
 import javax.ws.rs.core.MediaType;
@@ -17,7 +14,7 @@ import java.util.Map;
 /**
  * @author ginccc
  */
-@Api(value = "Configurations -> (2) Conversation LifeCycle Tasks -> (3) HttpCalls")
+@Api(value = "Configurations -> (2) Conversation LifeCycle Tasks -> (3) HttpCalls", authorizations = {@Authorization(value = "eddi_auth")})
 @Path("/httpcallsstore/httpcalls")
 public interface IRestHttpCallsStore extends IRestVersionInfo {
     String resourceURI = "eddi://ai.labs.httpcalls/httpcallsstore/httpcalls/";

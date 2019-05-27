@@ -5,6 +5,9 @@ import com.google.inject.Key;
 import com.google.inject.name.Names;
 import io.swagger.config.ScannerFactory;
 import io.swagger.jaxrs.config.BeanConfig;
+import io.swagger.models.Swagger;
+import io.swagger.models.auth.BasicAuthDefinition;
+import io.swagger.models.auth.OAuth2Definition;
 import org.jboss.resteasy.util.GetRestful;
 
 import javax.inject.Inject;
@@ -54,6 +57,17 @@ public class SwaggerServletContextListener implements ServletContextListener {
         // Must be called last
         beanConfig.setResourcePackage(resourcePackages());
         beanConfig.setScan(true);
+
+        Swagger swagger = beanConfig.getSwagger();
+
+        if ("basic".equals(getConfig("webServer.securityHandlerType"))) {
+            swagger.securityDefinition("eddi_auth", new BasicAuthDefinition());
+        } else if ("keycloak".equals(getConfig("webServer.securityHandlerType"))) {
+            OAuth2Definition oAuth2Definition = new OAuth2Definition()
+                    .implicit(getConfig("swagger.oauth2.implicitAuthorizationUrl"));
+            oAuth2Definition.setDescription("client_id is 'eddi-engine'");
+            swagger.securityDefinition("eddi_auth", oAuth2Definition);
+        }
 
         return beanConfig;
     }

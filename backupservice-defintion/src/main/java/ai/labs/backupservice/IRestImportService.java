@@ -1,10 +1,7 @@
 package ai.labs.backupservice;
 
 import ai.labs.models.BotDeploymentStatus;
-import io.swagger.annotations.Api;
-import io.swagger.annotations.ApiImplicitParam;
-import io.swagger.annotations.ApiResponse;
-import io.swagger.annotations.ResponseHeader;
+import io.swagger.annotations.*;
 
 import javax.ws.rs.Consumes;
 import javax.ws.rs.POST;
@@ -20,7 +17,7 @@ import java.util.List;
 /**
  * @author ginccc
  */
-@Api(value = "Backup")
+@Api(value = "Backup", authorizations = {@Authorization(value = "eddi_auth")})
 @Path("backup/import")
 public interface IRestImportService {
     @POST

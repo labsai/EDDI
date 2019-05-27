@@ -14,7 +14,7 @@ import java.util.Map;
 /**
  * @author ginccc
  */
-@Api(value = "Configurations -> (2) Conversation LifeCycle Tasks -> (2) Behavior Rules")
+@Api(value = "Configurations -> (2) Conversation LifeCycle Tasks -> (2) Behavior Rules", authorizations = {@Authorization(value = "eddi_auth")})
 @Path("/behaviorstore/behaviorsets")
 public interface IRestBehaviorStore extends IRestVersionInfo {
     String resourceURI = "eddi://ai.labs.behavior/behaviorstore/behaviorsets/";

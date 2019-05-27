@@ -3,10 +3,7 @@ package ai.labs.resources.rest.bots;
 import ai.labs.models.DocumentDescriptor;
 import ai.labs.resources.rest.IRestVersionInfo;
 import ai.labs.resources.rest.bots.model.BotConfiguration;
-import io.swagger.annotations.Api;
-import io.swagger.annotations.ApiOperation;
-import io.swagger.annotations.ApiParam;
-import io.swagger.annotations.ApiResponse;
+import io.swagger.annotations.*;
 
 import javax.ws.rs.*;
 import javax.ws.rs.core.MediaType;
@@ -18,7 +15,7 @@ import java.util.Map;
 /**
  * @author ginccc
  */
-@Api(value = "Configurations -> (4) Bots")
+@Api(value = "Configurations -> (4) Bots", authorizations = {@Authorization(value = "eddi_auth")})
 @Path("/botstore/bots")
 public interface IRestBotStore extends IRestVersionInfo {
     String resourceURI = "eddi://ai.labs.bot/botstore/bots/";

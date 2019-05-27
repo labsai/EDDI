@@ -5,6 +5,7 @@ import ai.labs.models.InputData;
 import io.swagger.annotations.Api;
 import io.swagger.annotations.ApiOperation;
 import io.swagger.annotations.ApiParam;
+import io.swagger.annotations.Authorization;
 
 import javax.ws.rs.*;
 import javax.ws.rs.container.AsyncResponse;
@@ -13,7 +14,7 @@ import javax.ws.rs.core.MediaType;
 import javax.ws.rs.core.Response;
 import java.util.List;
 
-@Api(value = "Bot Management")
+@Api(value = "Bot Management", authorizations = {@Authorization(value = "eddi_auth")})
 @Path("/managedbots")
 public interface IRestBotManagement {
 

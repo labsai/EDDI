@@ -2,6 +2,7 @@ package ai.labs.resources.rest.expression;
 
 import io.swagger.annotations.Api;
 import io.swagger.annotations.ApiOperation;
+import io.swagger.annotations.Authorization;
 
 import javax.ws.rs.*;
 import javax.ws.rs.core.MediaType;
@@ -10,7 +11,7 @@ import java.util.List;
 /**
  * @author ginccc
  */
-@Api(value = "Configurations -> (2) Conversation LifeCycle Tasks -> (1) Regular Dictionary")
+@Api(value = "Configurations -> (2) Conversation LifeCycle Tasks -> (1) Regular Dictionary", authorizations = {@Authorization(value = "eddi_auth")})
 @Path("/expressions")
 public interface IRestExpression {
     @GET

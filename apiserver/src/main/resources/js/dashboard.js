@@ -36,16 +36,44 @@ eddi.addBotDeployments = function (environment, deploymentStatuses) {
     }
 };
 
+eddi.logout = function () {
+    eddi.keycloak.logout();
+};
+
 $(function () {
+    $.ajax({
+        url: '/user/securityType', statusCode: {
+            200: function (response) {
+                if (response === 'keycloak') {
+                    console.log('securityType is ' + response);
+
+                    eddi.keycloak = Keycloak(
+                        {
+                            "realm": "EDDI",
+                            "auth-server-url": "https://auth.labs.ai/auth",
+                            "ssl-required": "external",
+                            "resource": "eddi-engine",
+                            "clientId": "eddi-engine",
+                            "public-client": true,
+                            "confidential-port": 0
+                        });
+
+                    eddi.keycloak.init({onLoad: 'login-required'});
+
+                    $('#logoutBtn').prop('href', eddi.keycloak.createLogoutUrl());
+                }
+            }
+        }
+    });
+
     eddi.baseUri = window.location.protocol + "//" + window.location.host;
     $('#botBuilderUrl').prop('href', '//manager.labs.ai?apiUrl=' + encodeURIComponent(eddi.baseUri));
 
     $.ajax({
         url: '/user/isAuthenticated', statusCode: {
-            200: function () {
+            204: function () {
                 $('#logoutBtn').prop('disabled', false);
-                $('#logoutBtn').prop('href', '/user/logout');
-                $('#logoutBtn').prop('onclick', '');
+                $('#logoutBtn').prop('onclick', 'eddi.logout()');
                 $('#logoutBtn').removeClass('disabled');
             }
         }

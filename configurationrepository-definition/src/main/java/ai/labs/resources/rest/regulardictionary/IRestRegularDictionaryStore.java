@@ -16,7 +16,7 @@ import java.util.Map;
 /**
  * @author ginccc
  */
-@Api(value = "Configurations -> (2) Conversation LifeCycle Tasks -> (1) Regular Dictionary")
+@Api(value = "Configurations -> (2) Conversation LifeCycle Tasks -> (1) Regular Dictionary", authorizations = {@Authorization(value = "eddi_auth")})
 @Path("/regulardictionarystore/regulardictionaries")
 public interface IRestRegularDictionaryStore extends IRestVersionInfo {
     String resourceURI = "eddi://ai.labs.regulardictionary/regulardictionarystore/regulardictionaries/";

@@ -44,6 +44,7 @@ public class PermissionRequestInterceptor implements ContainerRequestFilter {
 
     private final IAuthorizationManager authorizationManager;
     private final IUserStore userStore;
+    private final boolean skipPermissionCheck;
 
     @Inject
     @Context
@@ -57,10 +58,15 @@ public class PermissionRequestInterceptor implements ContainerRequestFilter {
         authorizationManager = new AuthorizationManager(injector.getInstance(IGroupStore.class),
                 permissionStore);
         this.pathPermissionStore = injector.getInstance(Key.get(String.class, Names.named("system.pathOfPermissionStore")));
+        this.skipPermissionCheck = Boolean.parseBoolean(injector.getInstance(Key.get(String.class, Names.named("system.skipPermissionCheck"))));
     }
 
     @Override
     public void filter(ContainerRequestContext request) {
+        if (skipPermissionCheck) {
+            return;
+        }
+
         try {
             String httpMethod = request.getMethod();
             URI uri = request.getUriInfo().getRequestUri();
