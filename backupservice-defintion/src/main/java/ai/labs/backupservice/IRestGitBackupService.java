@@ -11,7 +11,7 @@ import javax.ws.rs.core.Response;
 
 @Api(value = "Backup")
 @Path("/backup/git")
-public interface IGitBackupService {
+public interface IRestGitBackupService {
 
     @GET
     @Path("/init/{botid}")

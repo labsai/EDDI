@@ -6,7 +6,6 @@ import ai.labs.parser.model.FoundWord;
 import ai.labs.parser.model.Word;
 import ai.labs.utilities.LanguageUtilities;
 
-import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Date;
 import java.util.List;

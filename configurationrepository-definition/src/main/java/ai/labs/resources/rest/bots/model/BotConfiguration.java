@@ -35,6 +35,8 @@ public class BotConfiguration {
         private String branch;
         private String username;
         private String password;
+        private String committerEmail;
+        private String committerName;
     }
 
 

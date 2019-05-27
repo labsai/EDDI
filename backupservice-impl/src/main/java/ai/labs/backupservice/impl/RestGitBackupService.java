@@ -1,50 +1,35 @@
 package ai.labs.backupservice.impl;
 
-import ai.labs.backupservice.IGitBackupService;
+import ai.labs.backupservice.IRestGitBackupService;
 import ai.labs.backupservice.IRestExportService;
 import ai.labs.backupservice.IRestImportService;
 import ai.labs.backupservice.IZipArchive;
-import ai.labs.models.DocumentDescriptor;
 import ai.labs.persistence.IResourceStore;
-import ai.labs.resources.rest.behavior.IBehaviorStore;
 import ai.labs.resources.rest.bots.IBotStore;
 import ai.labs.resources.rest.bots.model.BotConfiguration;
-import ai.labs.resources.rest.documentdescriptor.IDocumentDescriptorStore;
-import ai.labs.resources.rest.http.IHttpCallsStore;
-import ai.labs.resources.rest.output.IOutputStore;
-import ai.labs.resources.rest.packages.IPackageStore;
-import ai.labs.resources.rest.regulardictionary.IRegularDictionaryStore;
-import ai.labs.serialization.IJsonSerialization;
 import ai.labs.utilities.FileUtilities;
-import ai.labs.utilities.RuntimeUtilities;
 import lombok.extern.slf4j.Slf4j;
-import org.eclipse.jgit.api.CloneCommand;
 import org.eclipse.jgit.api.Git;
 import org.eclipse.jgit.api.PullResult;
 import org.eclipse.jgit.api.errors.*;
 import org.eclipse.jgit.revwalk.RevCommit;
 import org.eclipse.jgit.transport.PushResult;
 import org.eclipse.jgit.transport.UsernamePasswordCredentialsProvider;
+import org.jboss.resteasy.spi.InternalServerErrorException;
 
 import javax.inject.Inject;
 import javax.ws.rs.core.Response;
 import java.io.*;
-import java.net.URLEncoder;
-import java.nio.charset.StandardCharsets;
 import java.nio.file.DirectoryStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
-import java.text.MessageFormat;
-import java.util.List;
-
-import static ai.labs.models.Deployment.Environment.unrestricted;
 
 /**
  * @author rpi
  */
 @Slf4j
-public class GitBackupService implements IGitBackupService {
+public class RestGitBackupService implements IRestGitBackupService {
     private final IBotStore botStore;
     private final String tmpPath = System.getProperty("user.dir") + "/tmp/";
     private final IZipArchive zipArchive;
@@ -52,10 +37,10 @@ public class GitBackupService implements IGitBackupService {
     private final IRestExportService exportService;
 
     @Inject
-    public GitBackupService(IBotStore botStore,
-                            IZipArchive zipArchive,
-                            IRestImportService importService,
-                            IRestExportService exportService) {
+    public RestGitBackupService(IBotStore botStore,
+                                IZipArchive zipArchive,
+                                IRestImportService importService,
+                                IRestExportService exportService) {
         this.botStore = botStore;
         this.zipArchive = zipArchive;
         this.importService = importService;
@@ -78,10 +63,8 @@ public class GitBackupService implements IGitBackupService {
                     .call();
 
         } catch (IOException | IResourceStore.ResourceNotFoundException | IResourceStore.ResourceStoreException | GitAPIException e) {
-            StringWriter sw = new StringWriter();
-            PrintWriter pw = new PrintWriter(sw);
-            e.printStackTrace(pw);
-            return Response.status(Response.Status.INTERNAL_SERVER_ERROR).entity("Initialisation of Git repository failed " + e.getMessage() + " exception " + sw.toString()).build();
+            log.error(e.getLocalizedMessage(), e);
+            throw new InternalServerErrorException(e.getLocalizedMessage());
         }
         return null;
     }
@@ -109,15 +92,10 @@ public class GitBackupService implements IGitBackupService {
 
             return Response.status(Response.Status.OK).build();
         } catch (IResourceStore.ResourceNotFoundException | InvalidRemoteException e) {
-            StringWriter sw = new StringWriter();
-            PrintWriter pw = new PrintWriter(sw);
-            e.printStackTrace(pw);
-            return Response.status(Response.Status.NOT_FOUND).entity("pull " + e.getMessage() + " exception " + sw.toString()).build();
+            return Response.status(Response.Status.NOT_FOUND).entity("pull from configured repository failed - repository was not found, please check your settings").build();
         } catch (GitAPIException | IOException | IResourceStore.ResourceStoreException e) {
-            StringWriter sw = new StringWriter();
-            PrintWriter pw = new PrintWriter(sw);
-            e.printStackTrace(pw);
-            return Response.status(Response.Status.INTERNAL_SERVER_ERROR).entity("pull " + e.getMessage() + " exception " + sw.toString()).build();
+            log.error(e.getLocalizedMessage(), e);
+            throw new InternalServerErrorException(e.getLocalizedMessage());
         }
     }
 
@@ -137,22 +115,17 @@ public class GitBackupService implements IGitBackupService {
                 RevCommit commit = Git.open(gitPath.toFile())
                         .commit()
                         .setMessage(commitMessage)
-                        .setCommitter("EDDI", "eddi@labs.ai")
+                        .setCommitter(gitBackupSettings.getCommitterName(), gitBackupSettings.getCommitterEmail())
                         .call();
                 return Response.status(Response.Status.OK).entity(commit.getFullMessage()).build();
             } else {
                 return Response.status(Response.Status.NOT_FOUND).entity("No git settings in bot configuration, please add git settings!").build();
             }
         } catch (IResourceStore.ResourceNotFoundException e) {
-            StringWriter sw = new StringWriter();
-            PrintWriter pw = new PrintWriter(sw);
-            e.printStackTrace(pw);
-            return Response.status(Response.Status.NOT_FOUND).entity("commit " + e.getMessage() + " exception " + sw.toString()).build();
+            return Response.status(Response.Status.NOT_FOUND).entity("commit failed - bot id is incorrect").build();
         } catch (IResourceStore.ResourceStoreException | IOException | GitAPIException e) {
-            StringWriter sw = new StringWriter();
-            PrintWriter pw = new PrintWriter(sw);
-            e.printStackTrace(pw);
-            return Response.status(Response.Status.INTERNAL_SERVER_ERROR).entity("commit " + e.getMessage() + " exception " + sw.toString()).build();
+            log.error(e.getLocalizedMessage(), e);
+            throw new InternalServerErrorException(e.getLocalizedMessage());
         }
 
     }
@@ -179,15 +152,10 @@ public class GitBackupService implements IGitBackupService {
                 return Response.status(Response.Status.NOT_FOUND).entity("No git settings in bot configuration, please add git settings!").build();
             }
         } catch (IResourceStore.ResourceNotFoundException e) {
-            StringWriter sw = new StringWriter();
-            PrintWriter pw = new PrintWriter(sw);
-            e.printStackTrace(pw);
-            return Response.status(Response.Status.NOT_FOUND).entity("commit " + e.getMessage() + " exception " + sw.toString()).build();
+            return Response.status(Response.Status.NOT_FOUND).entity("push failed - bot id was not found").build();
         } catch (IResourceStore.ResourceStoreException | IOException | GitAPIException e) {
-            StringWriter sw = new StringWriter();
-            PrintWriter pw = new PrintWriter(sw);
-            e.printStackTrace(pw);
-            return Response.status(Response.Status.INTERNAL_SERVER_ERROR).entity("commit " + e.getMessage() + " exception " + sw.toString()).build();
+            log.error(e.getLocalizedMessage(), e);
+            throw new InternalServerErrorException(e.getLocalizedMessage());
         }
     }
 
