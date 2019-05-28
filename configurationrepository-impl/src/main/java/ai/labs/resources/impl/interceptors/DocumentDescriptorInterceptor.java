@@ -17,6 +17,7 @@ import ai.labs.user.impl.utilities.UserUtilities;
 import ai.labs.utilities.RestUtilities;
 import ai.labs.utilities.SecurityUtilities;
 import lombok.extern.slf4j.Slf4j;
+import org.jboss.resteasy.plugins.guice.RequestScoped;
 
 import javax.inject.Inject;
 import javax.ws.rs.*;
@@ -27,7 +28,6 @@ import javax.ws.rs.container.ResourceInfo;
 import javax.ws.rs.core.Context;
 import javax.ws.rs.core.HttpHeaders;
 import javax.ws.rs.ext.Provider;
-import java.io.IOException;
 import java.lang.reflect.Method;
 import java.net.URI;
 import java.security.Principal;
@@ -38,6 +38,7 @@ import java.util.Date;
  */
 @Provider
 @Slf4j
+@RequestScoped
 public class DocumentDescriptorInterceptor implements ContainerResponseFilter {
     private static final String METHOD_NAME_UPDATE_DESCRIPTOR = "updateDescriptor";
     private static final String METHOD_NAME_UPDATE_PERMISSIONS = "updatePermissions";
@@ -59,11 +60,16 @@ public class DocumentDescriptorInterceptor implements ContainerResponseFilter {
     }
 
     @Override
-    public void filter(ContainerRequestContext contextRequest, ContainerResponseContext contextResponse) throws IOException {
+    public void filter(ContainerRequestContext contextRequest, ContainerResponseContext contextResponse) {
         try {
             int httpStatus = contextResponse.getStatus();
+
+            if (httpStatus < 200 || httpStatus >= 300 || resourceInfo == null) {
+                return;
+            }
+
             Method resourceMethod = resourceInfo.getResourceMethod();
-            if (resourceMethod != null && (isPUT(resourceMethod) || isPATCH(resourceMethod) || isPOST(resourceMethod) || isDELETE(resourceMethod)) && httpStatus >= 200 && httpStatus < 300) {
+            if (resourceMethod != null && (isPUT(resourceMethod) || isPATCH(resourceMethod) || isPOST(resourceMethod) || isDELETE(resourceMethod))) {
                 String resourceLocationUri = contextResponse.getHeaderString(HttpHeaders.LOCATION);
                 if (resourceLocationUri != null) {
                     if (resourceLocationUri.contains("://")) {
