@@ -88,21 +88,25 @@ public class PackageStore implements IPackageStore {
                     continue;
                 }
 
-                boolean alreadyContainsResource = !ret.stream().filter(
+                boolean alreadyContainsResource = ret.stream().anyMatch(
                         resource ->
                         {
                             String id = URIUtilities.extractResourceId(resource.getResource()).getId();
                             return id.equals(packageId.getId());
-                        }).
-                        findFirst().isEmpty();
+                        });
 
                 if (alreadyContainsResource) {
                     continue;
                 }
 
-                ret.add(documentDescriptorStore.readDescriptor(
-                        packageId.getId(),
-                        packageId.getVersion()));
+                try {
+                    var packageDescriptor = documentDescriptorStore.readDescriptor(
+                            packageId.getId(),
+                            packageId.getVersion());
+                    ret.add(packageDescriptor);
+                } catch (ResourceNotFoundException e) {
+                    //skip, as this resource is not available anymore due to deletion
+                }
             }
 
             version--;

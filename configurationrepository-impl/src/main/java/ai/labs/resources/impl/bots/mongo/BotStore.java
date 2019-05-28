@@ -85,16 +85,20 @@ public class BotStore implements IBotStore {
                     continue;
                 }
 
-                boolean alreadyContainsResource = !ret.stream().filter(
+                boolean alreadyContainsResource = ret.stream().anyMatch(
                         descriptor ->
-                                URIUtilities.extractResourceId(descriptor.getResource()).getId().equals(botId.getId())).
-                        findFirst().isEmpty();
+                                URIUtilities.extractResourceId(descriptor.getResource()).getId().equals(botId.getId()));
 
                 if (alreadyContainsResource) {
                     continue;
                 }
 
-                ret.add(documentDescriptorStore.readDescriptor(botId.getId(), botId.getVersion()));
+                try {
+                    var botDescriptor = documentDescriptorStore.readDescriptor(botId.getId(), botId.getVersion());
+                    ret.add(botDescriptor);
+                } catch (ResourceNotFoundException e) {
+                    //skip, as this resource is not available anymore due to deletion
+                }
             }
 
             packageVersion--;
