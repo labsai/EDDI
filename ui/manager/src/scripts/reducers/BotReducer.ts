@@ -39,6 +39,7 @@ import {
   IFetchJsonSchemaSuccessAction,
 } from '../actions/EddiApiActions';
 import * as _ from 'lodash';
+import { JSONSchema4 } from 'json-schema';
 export type IBotReducer = Reducer<IBotState>;
 
 export interface IBotState {
@@ -48,7 +49,7 @@ export interface IBotState {
   isLoadingBot: boolean;
   allBotsLoaded: boolean;
   botsLoaded: number;
-  schema: object;
+  schema: JSONSchema4;
 }
 
 export const initialState: IBotState = {

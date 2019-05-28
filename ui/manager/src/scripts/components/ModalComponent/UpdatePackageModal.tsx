@@ -80,7 +80,7 @@ class UpdatePackageModal extends React.Component<IPrivateProps, IState> {
   }
 
   createNewPackage = async () => {
-    const list: object = this.state.addedPlugins.map(a => ({
+    const list = this.state.addedPlugins.map(a => ({
       type: a.type,
     }));
     const packageID = await createNewPackage(

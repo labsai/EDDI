@@ -7,6 +7,7 @@ import * as renderIf from 'render-if';
 import * as _ from 'lodash';
 import JsonErrors from './JsonErrors';
 import JsonExample from './JsonExample';
+import styles from './Editor.styles';
 import {
   compileJsonSchema,
   getSnippets,
@@ -19,25 +20,33 @@ import 'brace/theme/monokai';
 import 'brace/snippets/json';
 import { schemaSelector } from '../../../selectors/SystemSelectors';
 import { connect } from 'react-redux';
+import { JSONSchema4 } from 'json-schema';
+import CheckBox from './EditorButtons/CheckBox';
+import ExpandButton from './EditorButtons/ExpandButton';
+import UndoButton from './EditorButtons/UndoButton';
+import RedoButton from './EditorButtons/RedoButton';
 
 const langTools = ace.acequire('ace/ext/language_tools');
 const snippetManager = ace.acequire('ace/snippets').snippetManager;
 
 interface IState {
   editorText: string;
-  showExample: boolean;
-  errors: IJsonError[];
+  editor: ace.Editor;
+  expanded: boolean;
+  enableBasicAutocompletion: boolean;
+  enableLiveAutocompletion: boolean;
 }
 
 interface IPublicProps {
   type: string;
   data: string;
+  errors: IJsonError[];
   onConfirm(): void;
   onChange(value): void;
 }
 
 interface IPrivateProps extends IPublicProps {
-  schema?: object;
+  schema?: JSONSchema4;
 }
 
 class CreateNewConfig2Modal extends React.Component<IPrivateProps, IState> {
@@ -45,13 +54,16 @@ class CreateNewConfig2Modal extends React.Component<IPrivateProps, IState> {
     super(props);
     this.state = {
       editorText: '',
-      showExample: false,
-      errors: [],
+      editor: null,
+      expanded: false,
+      enableBasicAutocompletion: true,
+      enableLiveAutocompletion: false,
     };
   }
 
   componentDidMount() {
     eddiApiActionDispatchers.fetchJsonSchemaAction(this.props.type);
+    this.setState({ editor: ace.edit('OutputJson') });
     this.discardChanges();
     this.initEditor();
   }
@@ -84,55 +96,80 @@ class CreateNewConfig2Modal extends React.Component<IPrivateProps, IState> {
     });
   }
 
-  onConfirm = () => {
-    if (this.validateJson()) {
-      this.props.onConfirm();
-    }
-  };
-
-  validateJson(): boolean {
-    const errors = compileJsonSchema(this.props.schema, this.state.editorText);
-    this.setState({
-      errors,
-    });
-    return _.isEmpty(errors);
-  }
-
   render() {
     return (
       <div>
-        {renderIf(!_.isEmpty(this.state.errors))(() => (
-          <JsonErrors errors={this.state.errors} />
-        ))}
-        <JsonExample type={this.props.type} />
-        <AceEditor
-          ref={'aceEditor'}
-          mode={'json'}
-          height={'800px'}
-          width={'100%'}
-          name={'OutputJson'}
-          theme={'monokai'}
-          highlightActiveLine={true}
-          annotations={
-            _.isEmpty(this.state.errors)
-              ? null
-              : this.state.errors.map(err => {
-                  return {
-                    row: err.line,
-                    column: 1,
-                    type: 'error',
-                    text: err.message,
-                  };
-                })
-          }
-          setOptions={{ enableLiveAutocompletion: true, enableSnippets: true }}
-          showGutter={true}
-          showPrintMargin={false}
-          focus={true}
-          onChange={this.onChange}
-          value={this.state.editorText}
-          editorProps={{ $blockScrolling: true }}
-        />
+        <div style={this.state.expanded ? styles.expand : {}}>
+          <div style={styles.editorUI}>
+            <div style={styles.editorButtons}>
+              <UndoButton onClick={() => this.state.editor.undo()} />
+              <RedoButton onClick={() => this.state.editor.redo()} />
+              <CheckBox
+                checked={this.state.enableBasicAutocompletion}
+                onClick={() =>
+                  this.setState({
+                    enableBasicAutocompletion: !this.state
+                      .enableBasicAutocompletion,
+                  })
+                }
+              />
+              <div style={styles.checkBoxText}>
+                {'Enable Basic Autocomplete'}
+              </div>
+              <CheckBox
+                checked={this.state.enableLiveAutocompletion}
+                onClick={() =>
+                  this.setState({
+                    enableLiveAutocompletion: !this.state
+                      .enableLiveAutocompletion,
+                  })
+                }
+              />
+              <div style={styles.checkBoxText}>
+                {'Enable Live Autocomplete'}
+              </div>
+              <ExpandButton
+                customStyles={styles.expandButton}
+                expanded={this.state.expanded}
+                onClick={() =>
+                  this.setState({ expanded: !this.state.expanded })
+                }
+              />
+            </div>
+            <AceEditor
+              ref={'aceEditor'}
+              mode={'json'}
+              height={this.state.expanded ? '100%' : '800px'}
+              width={'100%'}
+              name={'OutputJson'}
+              theme={'monokai'}
+              highlightActiveLine={true}
+              annotations={
+                _.isEmpty(this.props.errors)
+                  ? null
+                  : this.props.errors.map(err => {
+                      return {
+                        row: err.line,
+                        column: 1,
+                        type: 'error',
+                        text: err.message,
+                      };
+                    })
+              }
+              setOptions={{
+                enableBasicAutocompletion: this.state.enableBasicAutocompletion,
+                enableLiveAutocompletion: this.state.enableLiveAutocompletion,
+                enableSnippets: true,
+              }}
+              showGutter={true}
+              showPrintMargin={false}
+              focus={true}
+              onChange={this.onChange}
+              value={this.state.editorText}
+              editorProps={{ $blockScrolling: true }}
+            />
+          </div>
+        </div>
       </div>
     );
   }

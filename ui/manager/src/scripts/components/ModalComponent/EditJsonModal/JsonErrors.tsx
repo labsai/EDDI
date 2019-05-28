@@ -54,35 +54,31 @@ interface IProps {
   errors: IJsonError[];
 }
 
-class JsonErrors extends React.Component<IProps> {
-  render() {
-    return (
-      <div style={styles.content}>
-        <div style={styles.header}>
-          <img src={warningIcon} style={styles.warningIcon} />
-          <div style={styles.errorTitle}>{`Found ${
-            this.props.errors.length
-          } Error(s):`}</div>
+const JsonErrors: React.StatelessComponent<IProps> = (props: IProps) => (
+  <div style={styles.content}>
+    <div style={styles.header}>
+      <img src={warningIcon} style={styles.warningIcon} />
+      <div style={styles.errorTitle}>{`Found ${
+        props.errors.length
+      } Error(s):`}</div>
+    </div>
+    <div>
+      {props.errors.map((error, i) => (
+        <div style={styles.errorContainer} key={i}>
+          <div style={styles.error}>
+            <div style={styles.key}>{'Location:'}</div>
+            <div style={styles.errorMessage}>{`ERROR at line: ${error.line +
+              1}`}</div>
+          </div>
+          <div style={styles.error}>
+            <div style={styles.key}>{'Message:'}</div>
+            <div style={styles.errorSchemaPath}>{`${error.message}`}</div>
+          </div>
         </div>
-        <div>
-          {this.props.errors.map((error, i) => (
-            <div style={styles.errorContainer} key={i}>
-              <div style={styles.error}>
-                <div style={styles.key}>{'Location:'}</div>
-                <div style={styles.errorMessage}>{`ERROR at line: ${error.line +
-                  1}`}</div>
-              </div>
-              <div style={styles.error}>
-                <div style={styles.key}>{'Message:'}</div>
-                <div style={styles.errorSchemaPath}>{`${error.message}`}</div>
-              </div>
-            </div>
-          ))}
-        </div>
-      </div>
-    );
-  }
-}
+      ))}
+    </div>
+  </div>
+);
 
 const ComposedJsonErrors: Component<IProps> = compose<IProps>(
   pure,

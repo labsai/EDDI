@@ -47,24 +47,24 @@ import * as _ from 'lodash';
 export type IPackageReducer = Reducer<IPackageState>;
 
 export interface IPackageState {
-  error: Error;
   isLoadingAllPackages: boolean;
   isLoadingPackageData: boolean;
   isLoadingPackage: boolean;
   packages: IPackage[];
   allPackagesLoaded: boolean;
   packagesLoaded: number;
-  schema: {};
+  error?: Error;
+  schema?: {};
 }
 
 export const initialState: IPackageState = {
-  error: null,
   isLoadingAllPackages: false,
   isLoadingPackageData: false,
   isLoadingPackage: false,
   packages: [],
   allPackagesLoaded: false,
   packagesLoaded: 0,
+  error: null,
   schema: null,
 };
 

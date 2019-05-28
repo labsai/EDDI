@@ -123,6 +123,7 @@
   },
   "dependencies": {
     "@types/ace": "0.0.42",
+    "@types/json-schema": "^7.0.3",
     "ajv": "^6.10.0",
     "axios": "0.17.1",
     "cors": "^2.8.5",

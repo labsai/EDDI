@@ -6,22 +6,32 @@ import eddiApiActionDispatchers from '../../../actions/EddiApiActionDispatchers'
 import BlueButton from '../../Assets/Buttons/BlueButton';
 import modalActionDispatchers from '../../../actions/ModalActionDispatchers';
 import * as renderIf from 'render-if';
-import { compileJsonSchema } from '../../utils/helpers/JsonHelpers';
+import { compileJsonSchema, IJsonError } from '../../utils/helpers/JsonHelpers';
 import { DICTIONARY_SCHEMA } from '../../utils/JsonSchemas/JsonSchemas';
 import Editor from './Editor';
 import 'brace';
 import { getTypeFromResource, getTypePath } from '../../utils/ApiFunctions';
-import { DICTIONARY, REGULAR_DICTIONARY } from '../../utils/EddiTypes';
+import * as _ from 'lodash';
+import JsonErrors from './JsonErrors';
+import JsonExample from './JsonExample';
+import { connect } from 'react-redux';
+import { schemaSelector } from '../../../selectors/SystemSelectors';
+import { JSONSchema4 } from 'json-schema';
 
 interface IState {
   editorText: string;
+  showExample: boolean;
+  errors: IJsonError[];
 }
 
-interface IPrivateProps extends IPublicProps {}
-
-interface IPublicProps {
+interface IPrivateProps extends IPublicProps {
   resource: string;
   data: string;
+  type: string;
+}
+
+interface IPublicProps {
+  schema?: JSONSchema4;
 }
 
 class EditJsonModal extends React.Component<IPrivateProps, IState> {
@@ -29,6 +39,8 @@ class EditJsonModal extends React.Component<IPrivateProps, IState> {
     super(props);
     this.state = {
       editorText: '',
+      showExample: false,
+      errors: [],
     };
   }
 
@@ -57,11 +69,13 @@ class EditJsonModal extends React.Component<IPrivateProps, IState> {
   }
 
   updateJson = () => {
-    eddiApiActionDispatchers.updateJsonDataAction(
-      this.props.resource,
-      JSON.parse(this.state.editorText),
-    );
-    modalActionDispatchers.closeModal();
+    if (this.validateJson()) {
+      eddiApiActionDispatchers.updateJsonDataAction(
+        this.props.resource,
+        JSON.parse(this.state.editorText),
+      );
+      modalActionDispatchers.closeModal();
+    }
   };
 
   isJsonString() {
@@ -73,12 +87,15 @@ class EditJsonModal extends React.Component<IPrivateProps, IState> {
     return true;
   }
 
-  validateJson() {
-    compileJsonSchema(DICTIONARY_SCHEMA, JSON.parse(this.state.editorText));
+  validateJson(): boolean {
+    const errors = compileJsonSchema(this.props.schema, this.state.editorText);
+    this.setState({
+      errors,
+    });
+    return _.isEmpty(errors);
   }
 
   render() {
-    const type = getTypeFromResource(this.props.resource);
     return (
       <div>
         <div style={styles.modalHeader}>
@@ -99,8 +116,12 @@ class EditJsonModal extends React.Component<IPrivateProps, IState> {
             />
           </div>
         </div>
+        {renderIf(!_.isEmpty(this.state.errors))(() => (
+          <JsonErrors errors={this.state.errors} />
+        ))}
+        <JsonExample type={this.props.type} />
         <Editor
-          type={type}
+          type={this.props.type}
           data={this.state.editorText}
           onConfirm={this.updateJson}
           onChange={this.onChange}
@@ -113,6 +134,8 @@ class EditJsonModal extends React.Component<IPrivateProps, IState> {
 const ComposedEditJsonModal: Component<IPublicProps> = compose<
   IPrivateProps,
   IPublicProps
->(pure, setDisplayName('EditJsonModal'))(EditJsonModal);
+>(pure, connect(schemaSelector), setDisplayName('EditJsonModal'))(
+  EditJsonModal,
+);
 
 export default ComposedEditJsonModal;

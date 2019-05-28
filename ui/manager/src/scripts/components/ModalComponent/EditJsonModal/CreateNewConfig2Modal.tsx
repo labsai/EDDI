@@ -11,12 +11,17 @@ import * as renderIf from 'render-if';
 import Parser from '../../utils/Parser';
 import * as _ from 'lodash';
 import Editor from './Editor';
-import { IJsonError } from '../../utils/helpers/JsonHelpers';
+import { compileJsonSchema, IJsonError } from '../../utils/helpers/JsonHelpers';
 import { schemaSelector } from '../../../selectors/SystemSelectors';
 import { connect } from 'react-redux';
+import JsonErrors from './JsonErrors';
+import JsonExample from './JsonExample';
+import { JSONSchema4 } from 'json-schema';
 
 interface IState {
   editorText: string;
+  showExample: boolean;
+  errors: IJsonError[];
 }
 
 interface IPublicProps {
@@ -28,7 +33,7 @@ interface IPublicProps {
 }
 
 interface IPrivateProps extends IPublicProps {
-  schema?: object;
+  schema?: JSONSchema4;
 }
 
 class CreateNewConfig2Modal extends React.Component<IPrivateProps, IState> {
@@ -36,6 +41,8 @@ class CreateNewConfig2Modal extends React.Component<IPrivateProps, IState> {
     super(props);
     this.state = {
       editorText: '',
+      showExample: false,
+      errors: [],
     };
   }
 
@@ -77,13 +84,15 @@ class CreateNewConfig2Modal extends React.Component<IPrivateProps, IState> {
   }
 
   createNew = () => {
-    eddiApiActionDispatchers.createNewConfigAction(
-      this.props.type,
-      this.props.name,
-      this.props.description,
-      this.state.editorText,
-    );
-    this.props.onConfirm();
+    if (this.validateJson()) {
+      eddiApiActionDispatchers.createNewConfigAction(
+        this.props.type,
+        this.props.name,
+        this.props.description,
+        this.state.editorText,
+      );
+      this.props.onConfirm();
+    }
   };
 
   back = () => {
@@ -94,6 +103,20 @@ class CreateNewConfig2Modal extends React.Component<IPrivateProps, IState> {
       this.state.editorText,
     );
   };
+
+  onConfirm = () => {
+    if (this.validateJson()) {
+      this.props.onConfirm();
+    }
+  };
+
+  validateJson(): boolean {
+    const errors = compileJsonSchema(this.props.schema, this.state.editorText);
+    this.setState({
+      errors,
+    });
+    return _.isEmpty(errors);
+  }
 
   render() {
     const typeName = Parser.getPluginName(this.props.type, false);
@@ -125,6 +148,10 @@ class CreateNewConfig2Modal extends React.Component<IPrivateProps, IState> {
             />
           </div>
         </div>
+        {renderIf(!_.isEmpty(this.state.errors))(() => (
+          <JsonErrors errors={this.state.errors} />
+        ))}
+        <JsonExample type={this.props.type} />
         <Editor
           type={this.props.type}
           data={this.state.editorText}

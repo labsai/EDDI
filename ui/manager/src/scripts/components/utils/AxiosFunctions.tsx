@@ -643,7 +643,7 @@ export interface IResponse {
 
 export async function createNewBot(name: string, description: string) {
   try {
-    const response: IResponse = await postJsonHelper('/botstore/bots', {});
+    const response: IResponse = await postJsonHelper('/botstore/bots', '');
     const resource = response.headers.location;
     await patchDescriptor(resource, name, description);
     return Parser.getId(response.headers.location);
@@ -661,7 +661,7 @@ export async function createNewPackage(
   try {
     const response: IResponse = await postJsonHelper(
       '/packagestore/packages/',
-      { packageExtensions: extensions },
+      JSON.stringify({ packageExtensions: extensions }),
     );
     const resource = response.headers.location;
     patchDescriptor(resource, name, description);
@@ -674,9 +674,13 @@ export async function createNewPackage(
 
 export async function addPluginType(resource: string, extensions: object) {
   try {
-    await putHelper(resource, Parser.getApiPath(resource), {
-      packageExtensions: extensions,
-    });
+    await putHelper(
+      resource,
+      Parser.getApiPath(resource),
+      JSON.stringify({
+        packageExtensions: extensions,
+      }),
+    );
     const newPackage: IPackage = await getCurrentPackage(
       Parser.getId(resource),
     );

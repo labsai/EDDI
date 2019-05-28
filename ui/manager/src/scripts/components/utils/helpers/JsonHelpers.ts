@@ -23,26 +23,22 @@ import { ISnippet } from './Snippets';
 
 export async function postJsonHelper(
   url: string,
-  payload: object,
+  payload: string,
 ): Promise<IResponse> {
-  const res = await axios.post(
-    `${await getAPIUrl()}${url}`,
-    JSON.stringify(payload),
-    {
-      headers: { 'Content-Type': 'application/json' },
-    },
-  );
+  const res = await axios.post(`${await getAPIUrl()}${url}`, payload, {
+    headers: { 'Content-Type': 'application/json' },
+  });
   return res;
 }
 
 export async function putHelper(
   resource: string,
   url: string,
-  payload: object,
+  payload: string,
 ) {
   await axios.put(
     `${await getAPIUrl()}${url}${Parser.getIdAndVersion(resource)}`,
-    JSON.stringify(payload),
+    payload,
     {
       headers: { 'Content-Type': 'application/json' },
     },
@@ -55,13 +51,7 @@ export interface IJsonError {
 }
 
 function formatKeyPath(path: string): string {
-  let key = path
-    .split('.')
-    .join('/')
-    .split('[')
-    .join('/')
-    .split(']')
-    .join('');
+  const key = path.replace(/\.|\[/g, '/').replace(']', '');
   return key;
 }
 

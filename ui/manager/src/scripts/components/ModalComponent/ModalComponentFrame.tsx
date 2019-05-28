@@ -31,6 +31,7 @@ import ConfirmModal from './ConfirmModal';
 import ErrorMessageModal from './ErrorMessageModal';
 import { CSSProperties } from 'react';
 import AddNewPackageToBotModal from './UpdateConfigsModal/AddNewPackageToBotModal';
+import { getTypeFromResource } from '../utils/ApiFunctions';
 
 const customStyles = {
   content: {
@@ -174,8 +175,10 @@ class ModalComponentFrame extends React.Component<IPrivateProps, IState> {
       case ModalEnum.addPackages:
         return <AddPackagesModal bot={this.props.bot} />;
       case ModalEnum.editJson:
+        const type = getTypeFromResource(this.props.resource);
         return (
           <EditJsonModal
+            type={type}
             resource={this.props.resource}
             data={this.props.data}
           />
