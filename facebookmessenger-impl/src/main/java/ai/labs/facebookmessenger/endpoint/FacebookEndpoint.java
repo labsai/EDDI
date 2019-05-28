@@ -145,6 +145,7 @@ public class FacebookEndpoint implements IFacebookEndpoint {
         return event -> {
             try {
                 String message = event.getText();
+                log.info("fb message text: {}", message);
                 String senderId = event.getSender().getId();
                 final String conversationId = getConversationId(environment, botId, senderId);
                 say(environment, botId, botVersion, conversationId, senderId, message);
@@ -161,6 +162,7 @@ public class FacebookEndpoint implements IFacebookEndpoint {
             try {
                 String message = event.getQuickReply().getPayload();
                 String senderId = event.getSender().getId();
+                log.info("fb quick message text: {}", message);
                 final String conversationId = getConversationId(environment, botId, senderId);
                 say(environment, botId, botVersion, conversationId, senderId, message);
 
