@@ -22,7 +22,7 @@
         <dependency>
             <groupId>org.jboss.resteasy</groupId>
             <artifactId>resteasy-client</artifactId>
-            <version>3.6.3.Final</version>
+            <version>3.7.0.Final</version>
             <exclusions>
                 <exclusion>
                     <groupId>commons-io</groupId>
@@ -33,7 +33,7 @@
         <dependency>
             <groupId>org.jboss.resteasy</groupId>
             <artifactId>resteasy-client-jetty</artifactId>
-            <version>3.6.3.Final</version>
+            <version>3.7.0.Final</version>
             <exclusions>
                 <exclusion>
                     <groupId>commons-io</groupId>
