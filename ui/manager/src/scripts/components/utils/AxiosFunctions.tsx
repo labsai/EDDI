@@ -643,7 +643,7 @@ export interface IResponse {
 
 export async function createNewBot(name: string, description: string) {
   try {
-    const response: IResponse = await postJsonHelper('/botstore/bots', '');
+    const response: IResponse = await postJsonHelper('/botstore/bots', '{}');
     const resource = response.headers.location;
     await patchDescriptor(resource, name, description);
     return Parser.getId(response.headers.location);
