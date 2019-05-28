@@ -68,10 +68,12 @@ class CreateNewConfig2Modal extends React.Component<IPrivateProps, IState> {
   }
 
   unsavedChanges() {
-    return (
+    // todo: reduxify and refactor editor
+    return false;
+    /*return (
       this.state.editorText !==
       (_.isEmpty(this.props.data) ? '{\n\t\n}' : this.props.data)
-    );
+    );*/
   }
 
   isJsonString() {

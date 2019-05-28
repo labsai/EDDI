@@ -65,7 +65,11 @@ class EditJsonModal extends React.Component<IPrivateProps, IState> {
   }
 
   unsavedChanges() {
+    // todo: reduxify editor
+    return false;
+    /*
     return this.state.editorText !== this.props.data;
+    */
   }
 
   updateJson = () => {

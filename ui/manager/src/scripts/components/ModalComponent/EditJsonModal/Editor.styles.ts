@@ -11,6 +11,10 @@ const styles: CSSProperties = {
     left: '0',
     marginBottom: '0px',
   },
+  expandButton: {
+    marginLeft: 'auto',
+    marginRight: '4px',
+  },
   editorUI: {
     width: '100%',
     height: '100%',
