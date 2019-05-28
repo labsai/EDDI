@@ -86,7 +86,12 @@ public class DocumentDescriptorInterceptor implements ContainerResponseFilter {
                                 } else if (resourceLocationUri.startsWith("eddi://ai.labs.conversation")) {
                                     conversationDescriptorStore.createDescriptor(resourceId.getId(), resourceId.getVersion(), createConversationDescriptor(createdResourceURI, userURI));
                                 } else if (isResourceIdValid(resourceId)) {
-                                    documentDescriptorStore.createDescriptor(resourceId.getId(), resourceId.getVersion(), createDocumentDescriptor(createdResourceURI, userURI));
+                                    try {
+                                        documentDescriptorStore.readDescriptor(resourceId.getId(), resourceId.getVersion());
+                                    } catch (IResourceStore.ResourceNotFoundException e) {
+                                        documentDescriptorStore.createDescriptor(resourceId.getId(), resourceId.getVersion(),
+                                                createDocumentDescriptor(createdResourceURI, userURI));
+                                    }
                                 }
                             }
 

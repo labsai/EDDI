@@ -4,7 +4,6 @@ import ai.labs.models.DocumentDescriptor;
 import ai.labs.persistence.IResourceStore;
 import ai.labs.resources.impl.packages.rest.RestPackageStore;
 import ai.labs.resources.impl.resources.rest.RestVersionInfo;
-import ai.labs.resources.impl.utilities.ResourceUtilities;
 import ai.labs.resources.rest.bots.IBotStore;
 import ai.labs.resources.rest.bots.IRestBotStore;
 import ai.labs.resources.rest.bots.model.BotConfiguration;
@@ -24,7 +23,7 @@ import javax.ws.rs.core.Response;
 import java.net.URI;
 import java.util.List;
 
-import static ai.labs.resources.impl.utilities.ResourceUtilities.createMalFormattedResourceUriException;
+import static ai.labs.resources.impl.utilities.ResourceUtilities.*;
 import static javax.ws.rs.core.Response.Status.BAD_REQUEST;
 
 /**
@@ -72,7 +71,7 @@ public class RestBotStore extends RestVersionInfo<BotConfiguration> implements I
 
     @Override
     public List<DocumentDescriptor> readBotDescriptors(String filter, Integer index, Integer limit, String containingPackageUri, Boolean includePreviousVersions) {
-        IResourceStore.IResourceId validatedResourceId = ResourceUtilities.validateUri(containingPackageUri);
+        IResourceStore.IResourceId validatedResourceId = validateUri(containingPackageUri);
         if (validatedResourceId == null || !containingPackageUri.startsWith(PACKAGE_URI)) {
             return createMalFormattedResourceUriException(containingPackageUri);
         }
@@ -141,7 +140,15 @@ public class RestBotStore extends RestVersionInfo<BotConfiguration> implements I
             }
         }
 
-        return restBotStore.createBot(botConfiguration);
+        try {
+            Response createBotResponse = restBotStore.createBot(botConfiguration);
+            createDocumentDescriptorForDuplicate(documentDescriptorStore, id, version, createBotResponse.getLocation());
+
+            return createBotResponse;
+        } catch (Exception e) {
+            log.error(e.getLocalizedMessage(), e);
+            throw new InternalServerErrorException();
+        }
     }
 
     @Override
