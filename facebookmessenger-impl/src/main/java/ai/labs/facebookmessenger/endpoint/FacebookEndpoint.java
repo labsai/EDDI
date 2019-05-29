@@ -204,10 +204,10 @@ public class FacebookEndpoint implements IFacebookEndpoint {
         final List<Map<String, String>> quickReplies = getQuickReplies(httpResponse.getContentAsString());
 
         final List<QuickReply> fbQuickReplies = new ArrayList<>();
-        if (quickReplies != null && quickReplies.size() > 0) {
+        if (!quickReplies.isEmpty()) {
             QuickReply.ListBuilder listBuilder = QuickReply.newListBuilder();
             for (Map<String, String> quickReply : quickReplies) {
-                listBuilder.addTextQuickReply(quickReply.get("value"), quickReply.get("expressions")).toList();
+                listBuilder.addTextQuickReply(quickReply.get("value"), quickReply.get("value")).toList();
             }
             fbQuickReplies.addAll(listBuilder.build());
         }
