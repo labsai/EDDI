@@ -61,7 +61,7 @@ const FilterComponent = (props: IProps) => (
       <img src={SearchIcon} style={styles.searchBoxIcon} />
       <input
         type={'text'}
-        placeholder={'Find List'}
+        placeholder={'Find bots'}
         style={styles.searchBoxInput}
         onChange={f => props.filter(f.target.value)}
       />

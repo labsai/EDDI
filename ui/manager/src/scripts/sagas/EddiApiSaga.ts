@@ -27,6 +27,7 @@ import {
   CREATE_NEW_BOT,
   CREATE_NEW_PACKAGE,
   ADD_NEW_PACKAGE_TO_BOTS,
+  FETCH_JSON_SCHEMA,
 } from '../actions/EddiApiActionTypes';
 import {
   getPackage,
@@ -61,6 +62,8 @@ import {
   getDeploymentStatus,
   getBotDescriptors,
   addPackageToBot,
+  IEddiSchema,
+  getSchema,
 } from '../components/utils/AxiosFunctions';
 import {
   fetchBotFailedAction,
@@ -137,6 +140,11 @@ import {
   IAddNewPackageToBotsAction,
   addNewPackageToBotsFailedAction,
   addNewPackageToBotsSuccessAction,
+  fetchJsonSchemaFailedAction,
+  IFetchJsonSchemaAction,
+  fetchBotJsonSchemaSuccessAction,
+  fetchPackageJsonSchemaSuccessAction,
+  fetchPluginJsonSchemaSuccessAction,
 } from '../actions/EddiApiActions';
 import * as Edditypes from '../components/utils/EddiTypes';
 import Parser from '../components/utils/Parser';
@@ -638,4 +646,27 @@ export function* addNewPackageToBots(
 
 export function* watchAddNewPackageToBots(): Iterator<{}> {
   yield takeEvery(ADD_NEW_PACKAGE_TO_BOTS, addNewPackageToBots);
+}
+
+export function* fetchJsonSchema(action: IFetchJsonSchemaAction): Iterator<{}> {
+  try {
+    const schema: IEddiSchema = {
+      name: action.eddiType,
+      value: yield call(getSchema, action.eddiType),
+    };
+    switch (action.eddiType) {
+      case BOT:
+        yield put(fetchBotJsonSchemaSuccessAction(action.eddiType, schema));
+      case PACKAGE:
+        yield put(fetchPackageJsonSchemaSuccessAction(action.eddiType, schema));
+      default:
+        yield put(fetchPluginJsonSchemaSuccessAction(action.eddiType, schema));
+    }
+  } catch (err) {
+    yield put(fetchJsonSchemaFailedAction(err));
+  }
+}
+
+export function* watchFetchJsonSchema(): Iterator<{}> {
+  yield takeEvery(FETCH_JSON_SCHEMA, fetchJsonSchema);
 }

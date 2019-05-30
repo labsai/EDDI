@@ -72,11 +72,10 @@ class Package extends React.Component<IPrivateProps, IState> {
                 <button
                   onClick={() =>
                     historyPush(
-                      this.props.packagePayload.version ===
-                      this.props.packagePayload.currentVersion
-                        ? `/packageview/${this.props.packagePayload.id}`
-                        : `/packageview/${this.props.packagePayload.id}`,
-                      [`version=${this.props.packagePayload.version}`],
+                      `/packageview/${this.props.packagePayload.id}`,
+                      packageHasNewVersion
+                        ? [`version=${this.props.packagePayload.version}`]
+                        : [],
                     )
                   }
                   style={styles.botPackageButton}>

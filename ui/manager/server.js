@@ -8,6 +8,9 @@ const envUrl = '/_/env.json';
 
 const app = express();
 
+const cors = require('cors');
+
+app.use(cors());
 app.use(serveStatic(hostPath));
 
 if (env) {

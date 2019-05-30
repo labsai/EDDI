@@ -21,16 +21,17 @@ import CreatePackageModal from './CreatePackageModal';
 import EditPackageModal from './EditPackageModal';
 import UpdatePackageModal from './UpdatePackageModal';
 import { ModalEnum } from '../utils/ModalEnum';
-import EditJsonModal from './EditJsonModal';
+import EditJsonModal from './EditJsonModal/EditJsonModal';
 import ViewJsonModal from './ViewJsonModal/ViewJsonModal';
-import CreateNewConfigModal from './CreateNewConfigModal';
-import CreateNewConfig2Modal from './CreateNewConfig2Modal';
+import CreateNewConfigModal from './EditJsonModal/CreateNewConfigModal';
+import CreateNewConfig2Modal from './EditJsonModal/CreateNewConfig2Modal';
 import UpdatePackagesModal from './UpdateConfigsModal/UpdatePackagesModal';
 import UpdateBotsModal from './UpdateConfigsModal/UpdateBotsModal';
 import ConfirmModal from './ConfirmModal';
 import ErrorMessageModal from './ErrorMessageModal';
 import { CSSProperties } from 'react';
 import AddNewPackageToBotModal from './UpdateConfigsModal/AddNewPackageToBotModal';
+import { getTypeFromResource } from '../utils/ApiFunctions';
 
 const customStyles = {
   content: {
@@ -174,8 +175,10 @@ class ModalComponentFrame extends React.Component<IPrivateProps, IState> {
       case ModalEnum.addPackages:
         return <AddPackagesModal bot={this.props.bot} />;
       case ModalEnum.editJson:
+        const type = getTypeFromResource(this.props.resource);
         return (
           <EditJsonModal
+            type={type}
             resource={this.props.resource}
             data={this.props.data}
           />

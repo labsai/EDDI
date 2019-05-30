@@ -13,6 +13,8 @@ import VersionSelectComponent from '../../Assets/VersionSelectComponent';
 import { PACKAGE } from '../../utils/EddiTypes';
 import BotsUsingPackage from '../../PackageDetailView/UsedByComponent/BotsUsingPackage';
 import PackagesUsingPlugin from '../../PackageDetailView/UsedByComponent/PackagesUsingPlugin';
+import eddiApiActionDispatchers from '../../../actions/EddiApiActionDispatchers';
+import { getTypeFromResource } from '../../utils/ApiFunctions';
 
 interface IPrivateProps extends IPublicProps {}
 
@@ -48,6 +50,9 @@ class ViewJsonContent extends React.Component<IPrivateProps, IState> {
   }
 
   openEditJsonModal = () => {
+    eddiApiActionDispatchers.fetchJsonSchemaAction(
+      getTypeFromResource(this.props.descriptor.resource),
+    );
     ModalActionDispatchers.showEditJsonModal(
       this.props.descriptor.resource,
       this.props.data,

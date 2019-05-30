@@ -12,6 +12,7 @@ const config = {
     app: 'scripts/index.tsx',
     vendor: ['babel-polyfill', 'react', 'react-dom'],
   },
+  node: { fs: 'empty' },
   target: 'web',
   output,
   module,

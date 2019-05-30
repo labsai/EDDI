@@ -1,4 +1,18 @@
 import axios from 'axios';
+import {
+  BEHAVIOR,
+  BEHAVIOR_PATH,
+  BOT,
+  BOT_PATH,
+  HTTPCALLS,
+  HTTPCALLS_PATH,
+  OUTPUT,
+  OUTPUT_PATH,
+  PACKAGE,
+  PACKAGE_PATH,
+  REGULAR_DICTIONARY,
+  REGULAR_DICTIONARY_PATH,
+} from './EddiTypes';
 import * as _ from 'lodash';
 
 let apiUrlPromise: Promise<string>;
@@ -195,6 +209,41 @@ export async function getAuthClientId(): Promise<string> {
       authClientId = authClientId.substring(0, authClientId.length - 1);
     }
     return authClientId;
+  }
+}
+
+export function getTypeFromResource(resource: string): string {
+  if (resource.includes(REGULAR_DICTIONARY_PATH)) {
+    return REGULAR_DICTIONARY;
+  } else if (resource.includes(BEHAVIOR_PATH)) {
+    return BEHAVIOR;
+  } else if (resource.includes(OUTPUT_PATH)) {
+    return OUTPUT;
+  } else if (resource.includes(HTTPCALLS_PATH)) {
+    return HTTPCALLS;
+  } else if (resource.includes(BOT_PATH)) {
+    return BOT;
+  } else if (resource.includes(PACKAGE_PATH)) {
+    return PACKAGE;
+  }
+}
+
+export function getTypePath(type: string): string {
+  switch (type) {
+    case REGULAR_DICTIONARY:
+      return REGULAR_DICTIONARY_PATH;
+    case BEHAVIOR:
+      return BEHAVIOR_PATH;
+    case OUTPUT:
+      return OUTPUT_PATH;
+    case HTTPCALLS:
+      return HTTPCALLS_PATH;
+    case BOT:
+      return BOT_PATH;
+    case PACKAGE:
+      return PACKAGE_PATH;
+    default:
+      return null;
   }
 }
 

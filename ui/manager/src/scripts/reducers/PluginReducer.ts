@@ -12,6 +12,7 @@ import {
   FETCH_PACKAGES_USING_PLUGIN_SUCCESS,
   UPDATE_PLUGIN_SUCCESS,
   CREATE_NEW_PLUGIN_SUCCESS,
+  FETCH_PLUGIN_JSON_SCHEMA_SUCCESS,
 } from '../actions/EddiApiActionTypes';
 import * as update from 'immutability-helper';
 import {
@@ -24,9 +25,11 @@ import {
   IFetchPackagesUsingPluginSuccessAction,
   IUpdatePluginSuccessAction,
   ICreateNewPluginSuccessAction,
+  IFetchJsonSchemaSuccessAction,
 } from '../actions/EddiApiActions';
 import {
   IDefaultPluginTypes,
+  IEddiSchema,
   IPlugin,
 } from '../components/utils/AxiosFunctions';
 import * as _ from 'lodash';
@@ -48,6 +51,7 @@ export interface IPluginState {
   isLoadingAllPluginData: boolean;
   defaultPluginTypes: IDefaultPluginTypes[];
   plugins: IPlugin[];
+  schemas: IEddiSchema[];
 
   allDictionariesLoaded: boolean;
   allBehaviorsLoaded: boolean;
@@ -68,6 +72,7 @@ export const initialState: IPluginState = {
   isLoadingAllPluginData: false,
   defaultPluginTypes: [],
   plugins: [],
+  schemas: [],
 
   allDictionariesLoaded: false,
   allBehaviorsLoaded: false,
@@ -312,6 +317,23 @@ const PluginReducer: IPluginReducer = (
         },
       });
 
+    case FETCH_PLUGIN_JSON_SCHEMA_SUCCESS:
+      return update(state, {
+        schemas: {
+          $apply: (schemas: IEddiSchema[]) => {
+            if (!_.isEmpty((action as IFetchJsonSchemaSuccessAction).schema)) {
+              return _.uniqBy(
+                schemas.concat(
+                  (action as IFetchJsonSchemaSuccessAction).schema,
+                ),
+                schema => schema.name,
+              );
+            } else {
+              return schemas;
+            }
+          },
+        },
+      });
     default:
       return state;
   }
