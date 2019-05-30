@@ -12,19 +12,27 @@ import PackageViewPage from './pages/PackageViewPage';
 import RegularDictionaryPage from './pages/ExtensionsPage';
 import * as Keycloak from 'keycloak-js';
 import * as kcHelper from './utils/keycloakFunctions';
-import { history, historyPush } from '../history';
+import { historyPush } from '../history';
 import WhiteButton from './Assets/Buttons/WhiteButton';
 import { CSSProperties } from 'react';
-import * as _ from 'lodash';
-import {
-  getAPIUrl,
-  getAuthClientId,
-  getAuthMethod,
-  getAuthRealm,
-  getAuthUrl,
-  setApiUrlQuery,
-} from './utils/ApiFunctions';
+import { setApiUrlQuery } from './utils/ApiFunctions';
+import { library } from '@fortawesome/fontawesome-svg-core';
 import Parser from './utils/Parser';
+import {
+  faCheck,
+  faCheckCircle,
+  faCompress,
+  faExpand,
+  faRedo,
+  faUndo,
+} from '@fortawesome/free-solid-svg-icons';
+
+library.add(faUndo);
+library.add(faRedo);
+library.add(faCheck);
+library.add(faExpand);
+library.add(faCompress);
+library.add(faCheckCircle);
 
 const styles: CSSProperties = {
   logoutButton: {

@@ -1,42 +1,27 @@
 import * as React from 'react';
 import { Component, compose, pure, setDisplayName } from 'recompose';
 import { CSSProperties } from 'react';
-import EditorButton from './EditorButton';
 import * as Radium from 'radium';
 import { LIGHT_GREY_COLOR } from '../../../../../styles/DefaultStylingProperties';
-
-const styles: CSSProperties = {
-  button: {},
-  icon: {
-    position: 'relative',
-    fontSize: '24px',
-    color: LIGHT_GREY_COLOR,
-    transform: 'rotate(90deg)',
-    top: '-5px',
-  },
-  expanded: {
-    transform: 'rotate(-90deg)',
-    top: '-5px',
-  },
-};
+import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
+import styles from './EditorButton.styles';
 
 interface IProps {
-  text: string;
   expanded: boolean;
-  customStyles: {};
+  customStyles: CSSProperties;
   onClick(): void;
 }
 
 const ExpandButton: React.StatelessComponent<IProps> = (props: IProps) => (
-  <EditorButton
-    text={props.text}
+  <div
     onClick={props.onClick}
-    styles={
-      props.expanded ? { icon: { ...styles.icon, ...styles.expanded } } : styles
-    }
-    customStyles={props.customStyles}
-    icon={'\u21F1'}
-  />
+    style={{ ...styles.button, ...props.customStyles }}>
+    <FontAwesomeIcon
+      style={styles.icon}
+      icon={['fas', props.expanded ? 'compress' : 'expand']}
+      color={LIGHT_GREY_COLOR}
+    />
+  </div>
 );
 
 const ComposedExpandButton: Component<IProps> = compose<IProps>(

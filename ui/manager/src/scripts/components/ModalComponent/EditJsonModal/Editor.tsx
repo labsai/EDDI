@@ -25,6 +25,8 @@ import CheckBox from './EditorButtons/CheckBox';
 import ExpandButton from './EditorButtons/ExpandButton';
 import UndoButton from './EditorButtons/UndoButton';
 import RedoButton from './EditorButtons/RedoButton';
+import ValidateButton from './EditorButtons/ValidateButton';
+import { fetchJsonSchemaAction } from '../../../actions/EddiApiActions';
 
 const langTools = ace.acequire('ace/ext/language_tools');
 const snippetManager = ace.acequire('ace/snippets').snippetManager;
@@ -43,6 +45,7 @@ interface IPublicProps {
   errors: IJsonError[];
   onConfirm(): void;
   onChange(value): void;
+  validate(): void;
 }
 
 interface IPrivateProps extends IPublicProps {
@@ -62,7 +65,7 @@ class CreateNewConfig2Modal extends React.Component<IPrivateProps, IState> {
   }
 
   componentDidMount() {
-    eddiApiActionDispatchers.fetchJsonSchemaAction(this.props.type);
+    fetchJsonSchemaAction(this.props.type);
     this.setState({ editor: ace.edit('OutputJson') });
     this.discardChanges();
     this.initEditor();
@@ -102,6 +105,7 @@ class CreateNewConfig2Modal extends React.Component<IPrivateProps, IState> {
         <div style={this.state.expanded ? styles.expand : {}}>
           <div style={styles.editorUI}>
             <div style={styles.editorButtons}>
+              <ValidateButton onClick={() => this.props.validate()} />
               <UndoButton onClick={() => this.state.editor.undo()} />
               <RedoButton onClick={() => this.state.editor.redo()} />
               <CheckBox

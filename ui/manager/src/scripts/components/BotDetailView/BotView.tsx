@@ -14,6 +14,7 @@ import eddiApiActionDispatchers from '../../actions/EddiApiActionDispatchers';
 import Parser from '../utils/Parser';
 import { historyPush } from '../../history';
 import { getAPIUrl } from '../utils/ApiFunctions';
+import { BOT } from '../utils/EddiTypes';
 
 interface IProps {
   bot: IBot;
@@ -42,6 +43,7 @@ class BotView extends React.Component<IProps, IState> {
   };
 
   openEditJsonModal = () => {
+    eddiApiActionDispatchers.fetchJsonSchemaAction(BOT);
     ModalActionDispatchers.showEditJsonModal(
       this.props.bot.resource,
       JSON.stringify(

@@ -7,13 +7,12 @@ import BlueButton from '../../Assets/Buttons/BlueButton';
 import modalActionDispatchers from '../../../actions/ModalActionDispatchers';
 import * as renderIf from 'render-if';
 import { compileJsonSchema, IJsonError } from '../../utils/helpers/JsonHelpers';
-import { DICTIONARY_SCHEMA } from '../../utils/JsonSchemas/JsonSchemas';
 import Editor from './Editor';
 import 'brace';
-import { getTypeFromResource, getTypePath } from '../../utils/ApiFunctions';
 import * as _ from 'lodash';
 import JsonErrors from './JsonErrors';
 import JsonExample from './JsonExample';
+import JsonIsValid from './JsonIsValid';
 import { connect } from 'react-redux';
 import { schemaSelector } from '../../../selectors/SystemSelectors';
 import { JSONSchema4 } from 'json-schema';
@@ -22,6 +21,7 @@ interface IState {
   editorText: string;
   showExample: boolean;
   errors: IJsonError[];
+  isValidJson: boolean;
 }
 
 interface IPrivateProps extends IPublicProps {
@@ -41,10 +41,12 @@ class EditJsonModal extends React.Component<IPrivateProps, IState> {
       editorText: '',
       showExample: false,
       errors: [],
+      isValidJson: false,
     };
   }
 
   componentDidMount() {
+    console.log(this.props);
     this.discardChanges();
   }
 
@@ -55,6 +57,7 @@ class EditJsonModal extends React.Component<IPrivateProps, IState> {
   onChange = value => {
     this.setState({
       editorText: value,
+      isValidJson: false,
     });
   };
 
@@ -91,13 +94,24 @@ class EditJsonModal extends React.Component<IPrivateProps, IState> {
     return true;
   }
 
-  validateJson(): boolean {
-    const errors = compileJsonSchema(this.props.schema, this.state.editorText);
+  validateJson = (props = this.props, state = this.state) => {
+    let errors: IJsonError[] = [];
+    if (!this.isJsonString()) {
+      const jsonParseError: IJsonError = {
+        message: 'Error parsing JSON.',
+        line: 0,
+      };
+      errors.push(jsonParseError);
+    } else {
+      errors = compileJsonSchema(props.schema, state.editorText);
+    }
+    const isValidJson = _.isEmpty(errors);
     this.setState({
       errors,
+      isValidJson,
     });
-    return _.isEmpty(errors);
-  }
+    return isValidJson;
+  };
 
   render() {
     return (
@@ -123,12 +137,15 @@ class EditJsonModal extends React.Component<IPrivateProps, IState> {
         {renderIf(!_.isEmpty(this.state.errors))(() => (
           <JsonErrors errors={this.state.errors} />
         ))}
+        {renderIf(this.state.isValidJson)(() => <JsonIsValid />)}
         <JsonExample type={this.props.type} />
         <Editor
           type={this.props.type}
           data={this.state.editorText}
+          errors={this.state.errors}
           onConfirm={this.updateJson}
           onChange={this.onChange}
+          validate={this.validateJson}
         />
       </div>
     );

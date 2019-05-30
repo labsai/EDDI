@@ -24,6 +24,7 @@ import { historyPush } from '../../history';
 import Parser from '../utils/Parser';
 import { hasExtensions } from '../utils/helpers/PluginParser';
 import PluginHelper from '../utils/helpers/PluginHelper';
+import { PACKAGE } from '../utils/EddiTypes';
 
 export interface IOptions extends IPluginExtensions {
   extensionKey: number;
@@ -94,6 +95,7 @@ class PackageView extends React.Component<IPrivateProps, IState> {
   }
 
   openEditJsonModal = () => {
+    eddiApiActionDispatchers.fetchJsonSchemaAction(PACKAGE);
     ModalActionDispatchers.showEditJsonModal(
       this.props.packagePayload.resource,
       JSON.stringify(
