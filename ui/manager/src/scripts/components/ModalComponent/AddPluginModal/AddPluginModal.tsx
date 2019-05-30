@@ -164,6 +164,7 @@ class AddPluginModal extends React.Component<IPrivateProps, IState> {
   };
 
   createNewPlugin = () => {
+    eddiApiActionDispatchers.fetchJsonSchemaAction(this.props.pluginType);
     ModalActionDispatchers.showCreateNewConfigModal(
       this.props.pluginType,
       null,

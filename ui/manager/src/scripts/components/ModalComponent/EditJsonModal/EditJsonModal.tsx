@@ -35,6 +35,7 @@ interface IPublicProps {
 }
 
 class EditJsonModal extends React.Component<IPrivateProps, IState> {
+  // todo: reduxify this component and editor
   constructor(props) {
     super(props);
     this.state = {
@@ -46,7 +47,6 @@ class EditJsonModal extends React.Component<IPrivateProps, IState> {
   }
 
   componentDidMount() {
-    console.log(this.props);
     this.discardChanges();
   }
 
@@ -68,7 +68,7 @@ class EditJsonModal extends React.Component<IPrivateProps, IState> {
   }
 
   unsavedChanges() {
-    // todo: reduxify editor
+    // todo: reduxify and refactor editor
     return false;
     /*
     return this.state.editorText !== this.props.data;

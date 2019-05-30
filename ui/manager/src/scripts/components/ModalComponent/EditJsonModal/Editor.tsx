@@ -26,7 +26,6 @@ import ExpandButton from './EditorButtons/ExpandButton';
 import UndoButton from './EditorButtons/UndoButton';
 import RedoButton from './EditorButtons/RedoButton';
 import ValidateButton from './EditorButtons/ValidateButton';
-import { fetchJsonSchemaAction } from '../../../actions/EddiApiActions';
 
 const langTools = ace.acequire('ace/ext/language_tools');
 const snippetManager = ace.acequire('ace/snippets').snippetManager;
@@ -65,7 +64,6 @@ class CreateNewConfig2Modal extends React.Component<IPrivateProps, IState> {
   }
 
   componentDidMount() {
-    fetchJsonSchemaAction(this.props.type);
     this.setState({ editor: ace.edit('OutputJson') });
     this.discardChanges();
     this.initEditor();

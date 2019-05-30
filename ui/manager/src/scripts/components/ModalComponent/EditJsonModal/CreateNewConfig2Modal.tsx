@@ -39,6 +39,7 @@ interface IPrivateProps extends IPublicProps {
 }
 
 class CreateNewConfig2Modal extends React.Component<IPrivateProps, IState> {
+  // todo: reduxify this component and editor
   constructor(props) {
     super(props);
     this.state = {
@@ -50,6 +51,7 @@ class CreateNewConfig2Modal extends React.Component<IPrivateProps, IState> {
   }
 
   componentDidMount() {
+    eddiApiActionDispatchers.fetchJsonSchemaAction(this.props.type);
     this.discardChanges();
   }
 
@@ -116,7 +118,7 @@ class CreateNewConfig2Modal extends React.Component<IPrivateProps, IState> {
     }
   };
 
-  validateJson = () => {
+  validateJson = (props = this.props, state = this.state) => {
     let errors: IJsonError[] = [];
     if (!this.isJsonString()) {
       const jsonParseError: IJsonError = {
@@ -125,7 +127,7 @@ class CreateNewConfig2Modal extends React.Component<IPrivateProps, IState> {
       };
       errors.push(jsonParseError);
     } else {
-      errors = compileJsonSchema(this.props.schema, this.state.editorText);
+      errors = compileJsonSchema(props.schema, state.editorText);
     }
     const isValidJson = _.isEmpty(errors);
     this.setState({
