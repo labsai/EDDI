@@ -51,7 +51,7 @@ export interface IJsonError {
 }
 
 function formatKeyPath(path: string): string {
-  const key = path.replace(/\.|\[/g, '/').replace(/]/g, '');
+  const key = path.replace(/\.|\[/g, '/').replace(/]|'/g, '');
   return key;
 }
 
