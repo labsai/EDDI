@@ -51,7 +51,7 @@ export interface IJsonError {
 }
 
 function formatKeyPath(path: string): string {
-  const key = path.replace(/\.|\[/g, '/').replace(']', '');
+  const key = path.replace(/\.|\[/g, '/').replace(/]/g, '');
   return key;
 }
 
@@ -65,6 +65,10 @@ export function compileJsonSchema(schema: {}, jsonText: string): IJsonError[] {
     return [];
   }
   const errors: IJsonError[] = validate.errors.map(err => {
+    console.log(err.message);
+    console.log(err.dataPath);
+    console.log(formatKeyPath(err.dataPath));
+    console.log(json.pointers);
     return {
       message: err.message,
       line: json.pointers[formatKeyPath(err.dataPath)].value.line,
