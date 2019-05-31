@@ -134,7 +134,7 @@ class CreateNewConfig2Modal extends React.Component<IPrivateProps, IState> {
       errors,
       isValidJson,
     });
-    return _.isEmpty(errors);
+    return isValidJson;
   };
 
   render() {
@@ -178,7 +178,7 @@ class CreateNewConfig2Modal extends React.Component<IPrivateProps, IState> {
           errors={this.state.errors}
           onConfirm={this.createNew}
           onChange={this.onChange}
-          validate={() => this.validateJson}
+          validate={this.validateJson}
         />
       </div>
     );
