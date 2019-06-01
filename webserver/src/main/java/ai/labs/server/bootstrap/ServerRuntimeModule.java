@@ -9,9 +9,11 @@ import ai.labs.server.ServerRuntime;
 import ai.labs.server.providers.CorsBasicAuthenticator;
 import ai.labs.user.IUserStore;
 import ai.labs.user.model.User;
+import ai.labs.utilities.RuntimeUtilities;
 import ai.labs.utilities.StringUtilities;
 import com.google.inject.Provider;
 import com.google.inject.Provides;
+import org.apache.commons.lang3.RandomStringUtils;
 import org.eclipse.jetty.security.ConstraintMapping;
 import org.eclipse.jetty.security.ConstraintSecurityHandler;
 import org.eclipse.jetty.security.LoginService;
@@ -118,6 +120,10 @@ public class ServerRuntimeModule extends AbstractBaseModule {
             userStore.searchUser(defaultUsername);
         } catch (IResourceStore.ResourceNotFoundException e) {
             if (userStore.getUsersCount() == 0) {
+                if (RuntimeUtilities.isNullOrEmpty(defaultPassword)) {
+                    defaultPassword = RandomStringUtils.randomAlphanumeric(8);
+                }
+
                 userStore.createUser(
                         new User(defaultUsername, defaultPassword, generateSalt(), "", "EDDI"));
 
