@@ -3,6 +3,7 @@ let eddi = {};
 eddi.environments = ['unrestricted', 'restricted', 'test'];
 
 eddi.deployExampleBots = function () {
+    $('#btnDeployExampleBots').hide();
     $('#no-bots-deployed').html('Deploying Bots...');
     let deploymentStatuses = IRestImportService.importBotExamples();
     eddi.addBotDeployments(eddi.environments[0], deploymentStatuses);

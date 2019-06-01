@@ -34,7 +34,7 @@
 </nav>
 
 <!-- Page Content -->
-<div class="container" style="margin-bottom: 10em;">
+<div class="container">
     <br>
     <h1 class="my-4">E.D.D.I Dashboard</h1>
     <br>
@@ -63,7 +63,8 @@
                     <p id="card-1" class="card-text">
                     <div id="no-bots-deployed">
                         No Bots deployed yet..<br>
-                        <a href="" onclick="eddi.deployExampleBots(); return false;" class="btn btn-primary">
+                        <a id="btnDeployExampleBots" href="" onclick="eddi.deployExampleBots(); return false;"
+                           class="btn btn-primary">
                             Deploy Example Bots</a>
                     </div>
                     </p>
@@ -76,7 +77,7 @@
 <!-- /.container -->
 
 <!-- Footer -->
-<footer class="py-5 bg-white fixed-bottom">
+<footer class="py-5 bg-white">
     <div class="container">
         <p class="copyright text-muted small">
             Developed by
