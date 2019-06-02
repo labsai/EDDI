@@ -2,9 +2,9 @@
 
 High Performance, In-Memory Chatbot Platform. Build multiple Chatbots with NLP, Behavior Rules, API Connector, Templating. 
 
-v4.6.0 - LATEST
+v4.7.0 - LATEST
 
-v4.5.0 - STABLE
+v4.6.0 - STABLE
 
 License: Apache License 2.0
 
