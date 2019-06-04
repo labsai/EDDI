@@ -145,6 +145,7 @@ public class FacebookEndpoint implements IFacebookEndpoint {
         return event -> {
             try {
                 String message = event.getText();
+                log.info("fb message text: {}", message);
                 String senderId = event.getSender().getId();
                 final String conversationId = getConversationId(environment, botId, senderId);
                 say(environment, botId, botVersion, conversationId, senderId, message);
@@ -161,6 +162,7 @@ public class FacebookEndpoint implements IFacebookEndpoint {
             try {
                 String message = event.getQuickReply().getPayload();
                 String senderId = event.getSender().getId();
+                log.info("fb quick message text: {}", message);
                 final String conversationId = getConversationId(environment, botId, senderId);
                 say(environment, botId, botVersion, conversationId, senderId, message);
 
@@ -202,10 +204,10 @@ public class FacebookEndpoint implements IFacebookEndpoint {
         final List<Map<String, String>> quickReplies = getQuickReplies(httpResponse.getContentAsString());
 
         final List<QuickReply> fbQuickReplies = new ArrayList<>();
-        if (quickReplies != null && quickReplies.size() > 0) {
+        if (!quickReplies.isEmpty()) {
             QuickReply.ListBuilder listBuilder = QuickReply.newListBuilder();
             for (Map<String, String> quickReply : quickReplies) {
-                listBuilder.addTextQuickReply(quickReply.get("value"), quickReply.get("expressions")).toList();
+                listBuilder.addTextQuickReply(quickReply.get("value"), quickReply.get("value")).toList();
             }
             fbQuickReplies.addAll(listBuilder.build());
         }
