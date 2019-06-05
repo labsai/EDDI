@@ -145,7 +145,6 @@ nav a, footer a {
     .intro-divider {
         width: 100%;
     }
-
 }
 
 .tech-icons {
@@ -208,6 +207,12 @@ nav a, footer a {
     ul.banner-social-buttons {
         float: left;
         margin-top: 15px;
+    }
+}
+
+@media (max-width: 991px) {
+    .header-lineSpacing {
+        line-height: 1.99;
     }
 }
 
