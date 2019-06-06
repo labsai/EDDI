@@ -90,22 +90,22 @@
         <div class="collapse navbar-collapse" id="bs-example-navbar-collapse-1">
             <ul class="nav navbar-nav navbar-right">
                 <li>
-                    <a href="https://www.notion.so/labsai/EDDI-Documentation-641a65d27d0940d09d7569b7b04b24ff"
-                       onclick="eddi.trackEvent('UserInteraction', 'click', 'Nav-Docs')"
+                    <a id="NavDocs"
+                       href="https://www.notion.so/labsai/EDDI-Documentation-641a65d27d0940d09d7569b7b04b24ff"
                        target="_blank">
                         <i class="fa fa-book fa-fw"></i>&nbsp;Docs
                     </a>
                 </li>
                 <li>
-                    <a href="https://labsai.atlassian.net/secure/Dashboard.jspa"
-                       onclick="eddi.trackEvent('UserInteraction', 'click', 'Nav-Issues')"
+                    <a id="NavIssues"
+                       href="https://labsai.atlassian.net/secure/Dashboard.jspa"
                        target="_blank">
                         <i class="fa fa-pencil fa-fw"></i>&nbsp;Issues
                     </a>
                 </li>
                 <li>
-                    <a href="https://www.labs.ai"
-                       onclick="eddi.trackEvent('UserInteraction', 'click', 'Nav-Support')"
+                    <a id="NavSupport"
+                       href="https://www.labs.ai"
                        target="_blank">
                         <i class="fa fa-envelope fa-fw"></i>&nbsp;Professional Support
                     </a>
@@ -134,30 +134,30 @@
                     </h3>
                     <hr class="intro-divider">
                     <div>
-                        <a href="https://console.cloud.google.com/marketplace/details/labsai-public/eddi-labs-ai-open-source-chatbot-platform"
+                        <a id="IntroGoogleCloud"
+                           href="https://console.cloud.google.com/marketplace/details/labsai-public/eddi-labs-ai-open-source-chatbot-platform"
                            class="btn btn-primary btn-lg"
-                           onclick="eddi.trackEvent('UserInteraction', 'click', 'Intro-Google-Cloud')"
                            target="_blank">
                             <span class="network-name">Try out with one Click on <i class="fa fa-cloud fa-fw"></i> Google Cloud</span></a>
                     </div>
                     <br>
                     <ul class="list-inline intro-social-buttons">
                         <li>
-                            <a href="https://manager.labs.ai/?apiUrl=https%3A%2F%2Fapp.labs.ai"
+                            <a id="IntroDemo"
+                               href="https://manager.labs.ai/?apiUrl=https%3A%2F%2Fapp.labs.ai"
                                class="btn btn-default btn-lg"
-                               onclick="eddi.trackEvent('UserInteraction', 'click', 'Intro-Demo')"
                                target="_blank">
                                 <i class="fa fa-cloud fa-fw"></i> <span class="network-name">Check out Demo</span></a>
                         </li>
                         <li>
-                            <a href="https://hub.docker.com/r/labsai/eddi/" class="btn btn-default btn-lg"
-                               onclick="eddi.trackEvent('UserInteraction', 'click', 'Intro-Docker')"
+                            <a id="IntroDocker"
+                               href="https://hub.docker.com/r/labsai/eddi/" class="btn btn-default btn-lg"
                                target="_blank">
                                 <i class="fa icon-docker fa-fw"></i> <span class="network-name">Docker</span></a>
                         </li>
                         <li>
-                            <a href="https://github.com/labsai/EDDI" class="btn btn-default btn-lg"
-                               onclick="eddi.trackEvent('UserInteraction', 'click', 'Intro-Github')"
+                            <a id="IntroGithub"
+                               href="https://github.com/labsai/EDDI" class="btn btn-default btn-lg"
                                target="_blank">
                                 <i class="fa fa-github fa-fw"></i> <span class="network-name">Github</span></a>
                         </li>
@@ -317,12 +317,13 @@
                 <h4 class="section-heading">Development Partners</h4>
                 <p class="lead" style="text-align: center;">
                     <span title="DIFFER">
-                        <a href="http://www.differ.chat" target="_blank">
+                        <a id="DifferLogo" href="http://www.differ.chat" target="_blank">
                             <img src="img/differ_logo.png" alt="DIFFER" class="partner-logos"/>
                         </a>
                     </span>
                     <span title="DIFFER">
-                        <a href="https://console.cloud.google.com/launcher/details/eddi-labs-ai/eddi?project=eddi-labs-ai-dev"
+                        <a id="GoogleLogo"
+                           href="https://console.cloud.google.com/launcher/details/eddi-labs-ai/eddi?project=eddi-labs-ai-dev"
                            target="_blank">
                             <img src="img/google_cloud_platform_logo.png" alt="Google Cloud" class="partner-logos"/>
                         </a>
@@ -348,28 +349,28 @@
             <div class="col-lg-6">
                 <ul class="list-inline banner-social-buttons">
                     <li>
-                        <a href="https://console.cloud.google.com/marketplace/details/labsai-public/eddi-labs-ai-open-source-chatbot-platform"
+                        <a id="IntroGoogleCloudBottom"
+                           href="https://console.cloud.google.com/marketplace/details/labsai-public/eddi-labs-ai-open-source-chatbot-platform"
                            class="btn btn-primary btn-lg"
-                           onclick="eddi.trackEvent('UserInteraction', 'click', 'Intro-Google-Cloud')"
                            target="_blank">
                             <span class="network-name">Try out with one Click on <i class="fa fa-cloud fa-fw"></i> Google Cloud</span></a>
                     </li>
                     <br><br>
                     <li>
-                        <a href="https://hub.docker.com/r/labsai/eddi/" class="btn btn-default btn-lg"
-                           onclick="eddi.trackEvent('UserInteraction', 'click', 'Banner-Docs')"
+                        <a id="BannerDocs"
+                           href="https://hub.docker.com/r/labsai/eddi/" class="btn btn-default btn-lg"
                            target="_blank">
                             <i class="fa fa-book fa-fw"></i> <span class="network-name">Docs</span></a>
                     </li>
                     <li>
-                        <a href="https://hub.docker.com/r/labsai/eddi/" class="btn btn-default btn-lg"
-                           onclick="eddi.trackEvent('UserInteraction', 'click', 'Banner-Docker')"
+                        <a id="BannerDocker"
+                           href="https://hub.docker.com/r/labsai/eddi/" class="btn btn-default btn-lg"
                            target="_blank">
                             <i class="fa icon-docker fa-fw"></i> <span class="network-name">Docker</span></a>
                     </li>
                     <li>
-                        <a href="https://github.com/labsai/EDDI" class="btn btn-default btn-lg"
-                           onclick="eddi.trackEvent('UserInteraction', 'click', 'Banner-Github')"
+                        <a id="BannerGithub"
+                           href="https://github.com/labsai/EDDI" class="btn btn-default btn-lg"
                            target="_blank">
                             <i class="fa fa-github fa-fw"></i> <span class="network-name">Github</span></a>
                     </li>
@@ -418,29 +419,28 @@
             <div class="col-lg-12">
                 <ul class="list-inline">
                     <li>
-                        <a href="https://www.notion.so/labsai/EDDI-Documentation-641a65d27d0940d09d7569b7b04b24ff"
-                           onclick="eddi.trackEvent('UserInteraction', 'click', 'Footer-Docs')"
+                        <a id="FooterDocs"
+                           href="https://www.notion.so/labsai/EDDI-Documentation-641a65d27d0940d09d7569b7b04b24ff"
                            target="_blank">
                             <i class="fa fa-book fa-fw"></i>&nbsp;Docs
                         </a>
                     </li>
                     <li>
-                        <a href="https://labsai.atlassian.net/secure/Dashboard.jspa"
-                           onclick="eddi.trackEvent('UserInteraction', 'click', 'Footer-Issues')"
+                        <a id="FooterIssues"
+                           href="https://labsai.atlassian.net/secure/Dashboard.jspa"
                            target="_blank">
                             <i class="fa fa-pencil fa-fw"></i>&nbsp;Issues
                         </a>
                     </li>
                     <li>
-                        <a href="https://www.labs.ai"
-                           onclick="eddi.trackEvent('UserInteraction', 'click', 'Footer-Support')"
+                        <a id="FooterSupport"
+                           href="https://www.labs.ai"
                            target="_blank">
                             <i class="fa fa-envelope fa-fw"></i>&nbsp;Professional Support
                         </a>
                     </li>
                     <li>
-                        <a href="https://www.facebook.com/eddilabsai/"
-                           onclick="eddi.trackEvent('UserInteraction', 'click', 'Footer-Facebook')"
+                        <a id="FooterFacebook" href="https://www.facebook.com/eddilabsai/"
                            target="_blank">
                             <i class="fa fa-facebook fa-fw"></i>Facebook
                         </a>
@@ -449,11 +449,9 @@
                 <p class="copyright text-muted small">
                     Developed with
                     <i class="fa fa-heart" aria-hidden="true" title="LOVE"></i>
-                    in <a href="https://www.google.com/maps/place/Vienna,+Austria/"
-                          onclick="eddi.trackEvent('UserInteraction', 'click', 'Map-Vienna')"
+                    in <a id="MapVienna" href="https://www.google.com/maps/place/Vienna,+Austria/"
                           target="_blank">Vienna</a><br>
-                    by <a href="https://www.labs.ai"
-                          onclick="eddi.trackEvent('UserInteraction', 'click', 'by-labsai')"
+                    by <a id="byLabsai" href="https://www.labs.ai"
                           target="_blank">LABS.AI</a><br>
                     <br>&COPY; 2006-2019
                 </p>
