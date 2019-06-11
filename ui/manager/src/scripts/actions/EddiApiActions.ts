@@ -78,11 +78,17 @@ import {
   ADD_NEW_PACKAGE_TO_BOTS,
   ADD_NEW_PACKAGE_TO_BOTS_SUCCESS,
   ADD_NEW_PACKAGE_TO_BOTS_FAILED,
+  FETCH_JSON_SCHEMA,
+  FETCH_JSON_SCHEMA_FAILED,
+  FETCH_BOT_JSON_SCHEMA_SUCCESS,
+  FETCH_PACKAGE_JSON_SCHEMA_SUCCESS,
+  FETCH_PLUGIN_JSON_SCHEMA_SUCCESS,
 } from './EddiApiActionTypes';
 import {
   IBot,
   IBotData,
   IDefaultPluginTypes,
+  IEddiSchema,
   IPackage,
   IPlugin,
   IPluginsResponse,
@@ -1171,5 +1177,69 @@ export function addNewPackageToBotsFailedAction(
   return {
     error,
     type: ADD_NEW_PACKAGE_TO_BOTS_FAILED,
+  };
+}
+
+export interface IFetchJsonSchemaAction extends Action {
+  eddiType: string;
+}
+
+export function fetchJsonSchemaAction(
+  eddiType: string,
+): IFetchJsonSchemaAction {
+  return {
+    eddiType,
+    type: FETCH_JSON_SCHEMA,
+  };
+}
+
+export interface IFetchJsonSchemaFailedAction extends Action {
+  error: Error;
+}
+
+export function fetchJsonSchemaFailedAction(
+  error: Error,
+): IFetchJsonSchemaFailedAction {
+  return {
+    error,
+    type: FETCH_JSON_SCHEMA_FAILED,
+  };
+}
+
+export interface IFetchJsonSchemaSuccessAction extends Action {
+  eddiType: string;
+  schema: IEddiSchema;
+}
+
+export function fetchBotJsonSchemaSuccessAction(
+  eddiType: string,
+  schema: IEddiSchema,
+): IFetchJsonSchemaSuccessAction {
+  return {
+    eddiType,
+    schema,
+    type: FETCH_BOT_JSON_SCHEMA_SUCCESS,
+  };
+}
+
+export function fetchPackageJsonSchemaSuccessAction(
+  eddiType: string,
+  schema: IEddiSchema,
+): IFetchJsonSchemaSuccessAction {
+  return {
+    eddiType,
+    schema,
+    type: FETCH_PACKAGE_JSON_SCHEMA_SUCCESS,
+  };
+}
+
+export function fetchPluginJsonSchemaSuccessAction(
+  eddiType: string,
+  schema: IEddiSchema,
+): IFetchJsonSchemaSuccessAction {
+  return {
+    eddiType,
+    schema,
+    type: FETCH_PLUGIN_JSON_SCHEMA_SUCCESS,
   };
 }

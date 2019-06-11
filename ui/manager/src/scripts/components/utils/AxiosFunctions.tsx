@@ -1,14 +1,9 @@
 import axios from 'axios';
 import * as React from 'react';
-import { parsePluginExtensions } from './helpers/PluginParser';
-import { DEFAULT_LIMIT, getAPIUrl } from './ApiFunctions';
+import { DEFAULT_LIMIT, getAPIUrl, getTypePath } from './ApiFunctions';
 import Parser from './Parser';
 import * as _ from 'lodash';
-import {
-  mapDataToDetailedDescriptors,
-  postJsonHelper,
-  putHelper,
-} from './helpers/JsonHelpers';
+import { postJsonHelper, putHelper } from './helpers/JsonHelpers';
 import {
   BEHAVIOR,
   BEHAVIOR_PATH,
@@ -648,7 +643,7 @@ export interface IResponse {
 
 export async function createNewBot(name: string, description: string) {
   try {
-    const response: IResponse = await postJsonHelper('/botstore/bots', {});
+    const response: IResponse = await postJsonHelper('/botstore/bots', '{}');
     const resource = response.headers.location;
     await patchDescriptor(resource, name, description);
     return Parser.getId(response.headers.location);
@@ -666,7 +661,7 @@ export async function createNewPackage(
   try {
     const response: IResponse = await postJsonHelper(
       '/packagestore/packages/',
-      { packageExtensions: extensions },
+      JSON.stringify({ packageExtensions: extensions }),
     );
     const resource = response.headers.location;
     patchDescriptor(resource, name, description);
@@ -679,9 +674,13 @@ export async function createNewPackage(
 
 export async function addPluginType(resource: string, extensions: object) {
   try {
-    await putHelper(resource, Parser.getApiPath(resource), {
-      packageExtensions: extensions,
-    });
+    await putHelper(
+      resource,
+      Parser.getApiPath(resource),
+      JSON.stringify({
+        packageExtensions: extensions,
+      }),
+    );
     const newPackage: IPackage = await getCurrentPackage(
       Parser.getId(resource),
     );
@@ -843,30 +842,7 @@ export async function postNewConfig(
   description: string,
   data: string,
 ) {
-  let configPath: string;
-  switch (type) {
-    case REGULAR_DICTIONARY:
-      configPath = REGULAR_DICTIONARY_PATH;
-      break;
-    case BEHAVIOR:
-      configPath = BEHAVIOR_PATH;
-      break;
-    case OUTPUT:
-      configPath = OUTPUT_PATH;
-      break;
-    case BOT:
-      configPath = BOT_PATH;
-      break;
-    case PACKAGE:
-      configPath = PACKAGE_PATH;
-      break;
-    case HTTPCALLS:
-      configPath = HTTPCALLS_PATH;
-      break;
-
-    default:
-      console.error(`Could not create new config of type: ${type}`);
-  }
+  const configPath: string = getTypePath(type);
   try {
     const response: IResponse = await postJsonHelper(
       configPath,
@@ -938,4 +914,20 @@ export async function undeployBot(resource: string) {
     )}`,
   );
   return res;
+}
+
+export interface IEddiSchema {
+  name: string;
+  value: object;
+}
+
+export async function getSchema(type: string) {
+  try {
+    const response = await axios.get(
+      `${(await getAPIUrl()) + getTypePath(type)}/jsonSchema`,
+    );
+    return response.data;
+  } catch (err) {
+    console.error(`Failed to get json schema. Error: ${err.message}`);
+  }
 }

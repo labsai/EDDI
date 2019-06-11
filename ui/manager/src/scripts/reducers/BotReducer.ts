@@ -18,6 +18,7 @@ import {
   FETCH_BOT_DEPLOYMENT_STATUS_SUCCESS,
   CREATE_NEW_BOT_SUCCESS,
   ADD_NEW_PACKAGE_TO_BOTS_SUCCESS,
+  FETCH_BOT_JSON_SCHEMA_SUCCESS,
 } from '../actions/EddiApiActionTypes';
 import * as update from 'immutability-helper';
 import {
@@ -35,8 +36,10 @@ import {
   IFetchBotDeploymentStatusSuccessAction,
   ICreateNewBotSuccessAction,
   IAddNewPackageToBotsSuccessAction,
+  IFetchJsonSchemaSuccessAction,
 } from '../actions/EddiApiActions';
 import * as _ from 'lodash';
+import { JSONSchema4 } from 'json-schema';
 export type IBotReducer = Reducer<IBotState>;
 
 export interface IBotState {
@@ -46,6 +49,7 @@ export interface IBotState {
   isLoadingBot: boolean;
   allBotsLoaded: boolean;
   botsLoaded: number;
+  schema: JSONSchema4;
 }
 
 export const initialState: IBotState = {
@@ -55,6 +59,7 @@ export const initialState: IBotState = {
   isLoadingBot: false,
   allBotsLoaded: false,
   botsLoaded: 0,
+  schema: null,
 };
 
 const BotReducer: IBotReducer = (
@@ -390,6 +395,13 @@ const BotReducer: IBotReducer = (
       return update(state, {
         bots: {
           $set: newBotList,
+        },
+      });
+
+    case FETCH_BOT_JSON_SCHEMA_SUCCESS:
+      return update(state, {
+        schema: {
+          $set: (action as IFetchJsonSchemaSuccessAction).schema.value,
         },
       });
 

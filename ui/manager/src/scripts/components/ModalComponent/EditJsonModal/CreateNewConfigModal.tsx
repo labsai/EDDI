@@ -1,9 +1,9 @@
 import * as React from 'react';
-import styles from './ModalComponent.styles';
-import './ModalComponent.styles.scss';
+import styles from '../ModalComponent.styles';
+import '../ModalComponent.styles.scss';
 import { Component, compose, pure, setDisplayName } from 'recompose';
-import ModalActionDispatchers from '../../actions/ModalActionDispatchers';
-import Parser from '../utils/Parser';
+import ModalActionDispatchers from '../../../actions/ModalActionDispatchers';
+import Parser from '../../utils/Parser';
 
 const customStyles = {
   createNewBotButton: {

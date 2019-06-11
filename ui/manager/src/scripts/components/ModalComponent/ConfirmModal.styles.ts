@@ -32,7 +32,7 @@ const styles: CSSProperties = {
     textAlign: 'center',
   },
   buttons: {
-    width: 'fit-content',
+    display: 'table',
     margin: '80px auto auto auto',
   },
   modalHeader: {
@@ -43,9 +43,9 @@ const styles: CSSProperties = {
     marginRight: '30px',
   },
   modalTopHeader: {
+    display: 'table',
     fontSize: '20px',
     height: '32px',
-    width: 'fit-content',
     paddingTop: '30px',
     paddingBottom: '20px',
     marginLeft: 'auto',
