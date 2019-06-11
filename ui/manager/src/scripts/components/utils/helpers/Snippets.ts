@@ -72,7 +72,7 @@ export const behaviorSnippets: ISnippet[] = [
     tabTrigger: 'inputmatcher',
     content: `{
   "type": "inputmatcher",
-  "values": {
+  "configs": {
     "expressions": "\${1:expressions}",
     "occurrence": "\${2:occurrence}"
   }
@@ -84,7 +84,7 @@ export const behaviorSnippets: ISnippet[] = [
     tabTrigger: 'contextmatcher:expressions',
     content: `{
   "type": "contextmatcher",
-  "values": {
+  "configs": {
     "contextType": "expressions",
     "contextKey": "\${1:contextKey}",
     "expressions": "\${2:expressions}"
@@ -97,7 +97,7 @@ export const behaviorSnippets: ISnippet[] = [
     tabTrigger: 'contextmatcher:object',
     content: `{
   "type": "contextmatcher",
-  "values": {
+  "configs": {
     "contextType": "object",
     "contextKey": "\${1:contextKey}",
     "objectKeyPath": "\${2:objectKeyPath}",
@@ -111,7 +111,7 @@ export const behaviorSnippets: ISnippet[] = [
     tabTrigger: 'contextmatcher:string',
     content: `{
   "type": "contextmatcher",
-  "values": {
+  "configs": {
     "contextType": "string",
     "contextKey": "\${1:contextKey}",
     "string": "\${2:string}"
@@ -124,7 +124,7 @@ export const behaviorSnippets: ISnippet[] = [
     tabTrigger: 'contextmatcher',
     content: `{
   "type": "contextmatcher",
-  "values": {
+  "configs": {
     "contextType": "\${1:contextType}",
     "contextKey": "\${2:contextKey}"
   }
@@ -136,7 +136,7 @@ export const behaviorSnippets: ISnippet[] = [
     tabTrigger: 'connector',
     content: `{
   "type": "connector",
-  "values": {
+  "configs": {
     "operator": "\${1:operator}",
   }
 }`,
@@ -147,7 +147,7 @@ export const behaviorSnippets: ISnippet[] = [
     tabTrigger: 'occurrence',
     content: `{
   "type": "occurrence",
-  "values": {
+  "configs": {
   "minTimesOccurred": "\${1:minTimesOccurred}",
   "maxTimesOccurred": "\${2:maxTimesOccurred}",
   "behaviorRuleName": "\${3:behaviorRuleName}"
@@ -160,7 +160,7 @@ export const behaviorSnippets: ISnippet[] = [
     tabTrigger: 'dependency',
     content: `{
   "type": "dependency",
-  "values": {
+  "configs": {
     "reference": "\${1:reference}",
   }
 }`,
@@ -171,7 +171,7 @@ export const behaviorSnippets: ISnippet[] = [
     tabTrigger: 'actionmatcher',
     content: `{
   "type": "actionmatcher",
-  "values": {
+  "configs": {
     "actions": "\${1:actions}",
     "occurrence": "\${2:occurrence}"
   }
@@ -183,7 +183,7 @@ export const behaviorSnippets: ISnippet[] = [
     tabTrigger: 'dynamicvaluematcher',
     content: `{
   "type": "dynamicvaluematcher",
-  "values": {
+  "configs": {
     "valuePath": "\${1:valuePath}",
     "contains": "\${2:contains}",
     "equals": "\${3:equals}"
