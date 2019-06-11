@@ -15,6 +15,7 @@ import ai.labs.models.PropertyInstruction;
 import ai.labs.property.IPropertyDisposer;
 import ai.labs.property.model.PropertyEntry;
 import ai.labs.resources.rest.extensions.model.ExtensionDescriptor;
+import ai.labs.templateengine.ITemplatingEngine;
 import ai.labs.utilities.RuntimeUtilities;
 import ognl.Ognl;
 
@@ -27,6 +28,7 @@ import java.util.stream.Collectors;
 
 import static ai.labs.memory.IConversationMemory.IConversationStepStack;
 import static ai.labs.models.Property.Scope.conversation;
+import static ai.labs.utilities.RuntimeUtilities.isNullOrEmpty;
 import static java.lang.Boolean.parseBoolean;
 
 /**
@@ -52,16 +54,19 @@ public class PropertyDisposerTask implements ILifecycleTask {
     private final IPropertyDisposer propertyDisposer;
     private final IExpressionProvider expressionProvider;
     private final IMemoryItemConverter memoryItemConverter;
+    private final ITemplatingEngine templatingEngine;
     private final IDataFactory dataFactory;
 
     @Inject
     public PropertyDisposerTask(IPropertyDisposer propertyDisposer,
                                 IExpressionProvider expressionProvider,
                                 IMemoryItemConverter memoryItemConverter,
+                                ITemplatingEngine templatingEngine,
                                 IDataFactory dataFactory) {
         this.propertyDisposer = propertyDisposer;
         this.expressionProvider = expressionProvider;
         this.memoryItemConverter = memoryItemConverter;
+        this.templatingEngine = templatingEngine;
         this.dataFactory = dataFactory;
     }
 
@@ -99,7 +104,7 @@ public class PropertyDisposerTask implements ILifecycleTask {
         List<PropertyEntry> properties = propertyDisposer.extractProperties(aggregatedExpressions);
 
         Map<String, Object> templateDataObjects = memoryItemConverter.convert(memory);
-        if (actionsData != null && !RuntimeUtilities.isNullOrEmpty(actionsData.getResult())) {
+        if (actionsData != null && !isNullOrEmpty(actionsData.getResult())) {
             for (String action : actionsData.getResult()) {
                 List<PropertyInstruction> propertyInstructions = new LinkedList<>();
                 setOnActionsList.forEach(setOnAction -> {
@@ -111,7 +116,7 @@ public class PropertyDisposerTask implements ILifecycleTask {
                     }
                 });
 
-                if (!RuntimeUtilities.isNullOrEmpty(propertyInstructions)) {
+                if (!isNullOrEmpty(propertyInstructions)) {
                     try {
                         for (PropertyInstruction property : propertyInstructions) {
                             String name = property.getName();
@@ -121,10 +126,16 @@ public class PropertyDisposerTask implements ILifecycleTask {
                             RuntimeUtilities.checkNotNull(name, "property.name");
 
                             Object templatedObj;
-                            if (!RuntimeUtilities.isNullOrEmpty(fromObjectPath)) {
+                            if (!isNullOrEmpty(fromObjectPath)) {
                                 templatedObj = Ognl.getValue(fromObjectPath, templateDataObjects);
                             } else {
-                                templatedObj = property.getValue();
+                                var value = property.getValue();
+
+                                if (!isNullOrEmpty(value) && value instanceof String) {
+                                    value = templatingEngine.processTemplate((String) value, templateDataObjects);
+                                }
+
+                                templatedObj = value;
                             }
 
                             if (!override && memory.getConversationProperties().containsKey(name)) {
@@ -189,7 +200,7 @@ public class PropertyDisposerTask implements ILifecycleTask {
         if (configuration.containsKey(KEY_SET_ON_ACTIONS)) {
             List<Map<String, Object>> setOnActionsRaw = (List<Map<String, Object>>) configuration.get(KEY_SET_ON_ACTIONS);
 
-            if (!RuntimeUtilities.isNullOrEmpty(setOnActionsRaw)) {
+            if (!isNullOrEmpty(setOnActionsRaw)) {
                 for (Map<String, Object> setOnAction : setOnActionsRaw) {
                     Object actionsObj = setOnAction.get("actions");
                     SetOnActions setOnActions = new SetOnActions();

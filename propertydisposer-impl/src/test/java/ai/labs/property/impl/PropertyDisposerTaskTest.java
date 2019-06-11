@@ -12,6 +12,7 @@ import ai.labs.memory.model.Data;
 import ai.labs.models.Context;
 import ai.labs.property.IPropertyDisposer;
 import ai.labs.property.model.PropertyEntry;
+import ai.labs.templateengine.ITemplatingEngine;
 import org.junit.Before;
 import org.junit.Test;
 import org.mockito.ArgumentMatchers;
@@ -61,8 +62,9 @@ public class PropertyDisposerTaskTest {
             return expressions;
         });
         IMemoryItemConverter memoryItemConverter = mock(IMemoryItemConverter.class);
+        ITemplatingEngine templateEngine = mock(ITemplatingEngine.class);
         propertyDisposerTask = new PropertyDisposerTask(propertyDisposer,
-                expressionProvider, memoryItemConverter, dataFactory);
+                expressionProvider, memoryItemConverter, templateEngine, dataFactory);
     }
 
     @Test

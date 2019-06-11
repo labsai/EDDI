@@ -30,7 +30,6 @@ import ognl.OgnlException;
 import javax.inject.Inject;
 import java.io.IOException;
 import java.net.URI;
-import java.util.HashSet;
 import java.util.LinkedList;
 import java.util.List;
 import java.util.Map;
@@ -101,6 +100,12 @@ public class HttpCallsTask implements ILifecycleTask {
 
             for (HttpCall call : httpCalls) {
                 try {
+                    if (call.getPreRequest() != null && call.getPreRequest().getPropertyInstructions() != null) {
+                        var propertyInstructions = call.getPreRequest().getPropertyInstructions();
+                        executePropertyInstructions(propertyInstructions, 0, memory, templateDataObjects);
+                        templateDataObjects = memoryItemConverter.convert(memory);
+                    }
+
                     IRequest request;
                     if (call.isFireAndForget()) {
                         var preRequest = call.getPreRequest();
@@ -167,8 +172,7 @@ public class HttpCallsTask implements ILifecycleTask {
                     }
                 } catch (IRequest.HttpRequestException |
                         ITemplatingEngine.TemplateEngineException |
-                        IOException |
-                        OgnlException e) {
+                        IOException e) {
                     log.error(e.getLocalizedMessage(), e);
                     throw new LifecycleException(e.getLocalizedMessage(), e);
                 }
@@ -176,43 +180,17 @@ public class HttpCallsTask implements ILifecycleTask {
         }
     }
 
-    private LinkedList<HttpCall> removeDuplicates(List<HttpCall> httpCalls) {
-        return new LinkedList<>(new HashSet<>(httpCalls));
+    private List<HttpCall> removeDuplicates(List<HttpCall> httpCalls) {
+        return httpCalls.stream().distinct().collect(Collectors.toList());
     }
 
     private void runPostResponse(IConversationMemory memory, HttpCall call, Map<String, Object> templateDataObjects, int httpCode)
-            throws IOException, ITemplatingEngine.TemplateEngineException, OgnlException {
+            throws IOException, ITemplatingEngine.TemplateEngineException {
 
         var postResponse = call.getPostResponse();
         if (postResponse != null) {
             var propertyInstructions = postResponse.getPropertyInstructions();
-            if (propertyInstructions != null) {
-                for (PropertyInstruction propertyInstruction : propertyInstructions) {
-                    if (verifyHttpCode(propertyInstruction.getHttpCodeValidator(), httpCode)) {
-
-                        String propertyName = propertyInstruction.getName();
-                        checkNotNull(propertyName, "name");
-
-                        String path = propertyInstruction.getFromObjectPath();
-                        checkNotNull(path, "fromObjectPath");
-
-                        Property.Scope scope = propertyInstruction.getScope();
-                        Object propertyValue;
-                        if (!isNullOrEmpty(path)) {
-                            try {
-                                propertyValue = Ognl.getValue(path, templateDataObjects);
-                            } catch (OgnlException oglnExeption) {
-                                log.error("configured path is not correct or value does not exist!", oglnExeption);
-                                propertyValue = "";
-                            }
-                        } else {
-                            propertyValue = propertyInstruction.getValue();
-                        }
-                        memory.getConversationProperties().put(propertyName,
-                                new Property(propertyName, propertyValue, scope));
-                    }
-                }
-            }
+            executePropertyInstructions(propertyInstructions, httpCode, memory, templateDataObjects);
 
             var qrBuildInstructions = postResponse.getQrBuildInstructions();
             if (qrBuildInstructions != null) {
@@ -238,6 +216,42 @@ public class HttpCallsTask implements ILifecycleTask {
         }
 
 
+    }
+
+    private void executePropertyInstructions(List<PropertyInstruction> propertyInstructions, int httpCode, IConversationMemory memory, Map<String, Object> templateDataObjects) throws ITemplatingEngine.TemplateEngineException {
+        if (propertyInstructions != null) {
+            for (PropertyInstruction propertyInstruction : propertyInstructions) {
+                if (httpCode == 0 || verifyHttpCode(propertyInstruction.getHttpCodeValidator(), httpCode)) {
+
+                    String propertyName = propertyInstruction.getName();
+                    checkNotNull(propertyName, "name");
+
+                    String path = propertyInstruction.getFromObjectPath();
+                    checkNotNull(path, "fromObjectPath");
+
+                    Property.Scope scope = propertyInstruction.getScope();
+                    Object propertyValue;
+                    if (!isNullOrEmpty(path)) {
+                        try {
+                            propertyValue = Ognl.getValue(path, templateDataObjects);
+                        } catch (OgnlException oglnException) {
+                            log.error("configured path is not correct or value does not exist!", oglnException);
+                            propertyValue = "";
+                        }
+                    } else {
+                        Object value = propertyInstruction.getValue();
+
+                        if (!isNullOrEmpty(value) && value instanceof String) {
+                            value = templateValues((String) value, templateDataObjects);
+                        }
+
+                        propertyValue = value;
+                    }
+                    memory.getConversationProperties().put(propertyName,
+                            new Property(propertyName, propertyValue, scope));
+                }
+            }
+        }
     }
 
     private boolean verifyHttpCode(HttpCodeValidator httpCodeValidator, int httpCode) {
