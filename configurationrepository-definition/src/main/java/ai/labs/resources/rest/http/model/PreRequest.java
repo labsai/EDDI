@@ -11,4 +11,5 @@ import java.util.List;
 public class PreRequest {
     private List<PropertyInstruction> propertyInstructions;
     private BuildingInstruction batchRequests;
+    private int delayBeforeExecutingInMillis = 0;
 }

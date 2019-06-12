@@ -30,7 +30,7 @@ public final class SystemRuntime {
 
         void logVersion();
 
-        <T> ScheduledFuture<?> submitScheduledCallable(Callable<T> callable,
+        <T> ScheduledFuture<T> submitScheduledCallable(Callable<T> callable,
                                                        long delay, TimeUnit timeUnit,
                                                        Map<Object, Object> threadBindings);
 

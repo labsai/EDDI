@@ -19,6 +19,7 @@ import ai.labs.resources.rest.extensions.model.ExtensionDescriptor;
 import ai.labs.resources.rest.extensions.model.ExtensionDescriptor.ConfigValue;
 import ai.labs.resources.rest.extensions.model.ExtensionDescriptor.FieldType;
 import ai.labs.resources.rest.http.model.*;
+import ai.labs.runtime.SystemRuntime;
 import ai.labs.runtime.client.configuration.IResourceClientLibrary;
 import ai.labs.runtime.service.ServiceException;
 import ai.labs.serialization.IJsonSerialization;
@@ -30,11 +31,15 @@ import ognl.OgnlException;
 import javax.inject.Inject;
 import java.io.IOException;
 import java.net.URI;
+import java.util.Collections;
 import java.util.LinkedList;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
 
+import static ai.labs.utilities.MatchingUtilities.executeValuePath;
 import static ai.labs.utilities.RuntimeUtilities.checkNotNull;
 import static ai.labs.utilities.RuntimeUtilities.isNullOrEmpty;
 
@@ -53,19 +58,22 @@ public class HttpCallsTask implements ILifecycleTask {
     private final IDataFactory dataFactory;
     private final ITemplatingEngine templatingEngine;
     private final IMemoryItemConverter memoryItemConverter;
+    private final SystemRuntime.IRuntime runtime;
     private String targetServerUri;
     private List<HttpCall> httpCalls;
 
     @Inject
     public HttpCallsTask(IHttpClient httpClient, IJsonSerialization jsonSerialization,
                          IResourceClientLibrary resourceClientLibrary, IDataFactory dataFactory,
-                         ITemplatingEngine templatingEngine, IMemoryItemConverter memoryItemConverter) {
+                         ITemplatingEngine templatingEngine, IMemoryItemConverter memoryItemConverter,
+                         SystemRuntime.IRuntime runtime) {
         this.httpClient = httpClient;
         this.jsonSerialization = jsonSerialization;
         this.resourceClientLibrary = resourceClientLibrary;
         this.dataFactory = dataFactory;
         this.templatingEngine = templatingEngine;
         this.memoryItemConverter = memoryItemConverter;
+        this.runtime = runtime;
     }
 
     @Override
@@ -100,84 +108,153 @@ public class HttpCallsTask implements ILifecycleTask {
 
             for (HttpCall call : httpCalls) {
                 try {
-                    if (call.getPreRequest() != null && call.getPreRequest().getPropertyInstructions() != null) {
-                        var propertyInstructions = call.getPreRequest().getPropertyInstructions();
-                        executePropertyInstructions(propertyInstructions, 0, memory, templateDataObjects);
-                        templateDataObjects = memoryItemConverter.convert(memory);
-                    }
+                    PreRequest preRequest = call.getPreRequest();
+                    templateDataObjects = executePreRequestPropertyInstructions(memory, templateDataObjects, preRequest);
 
-                    IRequest request;
                     if (call.isFireAndForget()) {
-                        var preRequest = call.getPreRequest();
-                        if (preRequest != null && preRequest.getBatchRequests() != null) {
-                            BuildingInstruction batchRequest = preRequest.getBatchRequests();
-
-                            List<Object> batchIterationList = buildListFromJson(
-                                    batchRequest.getIterationObjectName(), batchRequest.getPathToTargetArray(),
-                                    batchRequest.getTemplateFilterExpression(), null, templateDataObjects);
-
-                            for (Object iterationObject : batchIterationList) {
-                                templateDataObjects.put(batchRequest.getIterationObjectName(), iterationObject);
-                                request = buildRequest(call.getRequest(), templateDataObjects);
-                                request.send(r -> {
-                                    //ignore response
-                                });
-                                log.info("Request: " + request.toString());
-                            }
-                        } else {
-                            request = buildRequest(call.getRequest(), templateDataObjects);
-                            request.send(r -> {
-                                //ignore response
-                            });
-                            log.info("Request: " + request.toString());
-                        }
+                        executeFireAndForgetCalls(call, preRequest, templateDataObjects);
                     } else {
-                        request = buildRequest(call.getRequest(), templateDataObjects);
-                        IResponse response = request.send();
-                        log.info("Request: " + request.toString());
+                        IRequest request = buildRequest(call.getRequest(), templateDataObjects);
+                        IResponse response;
+                        boolean retryCall;
+                        int amountOfExecutions = 0;
+                        int delayInMillis = getDelayInMillis(preRequest);
+                        do {
+                            response = executeRequest(request, delayInMillis);
+                            log.info("Request: " + request.toString());
+                            log.info("Response: " + response.toString());
 
-                        if (response.getHttpCode() != 200) {
-                            String message = "HttpCall (%s) didn't return http code 200, instead %s.";
-                            log.warn(String.format(message, call.getName(), response.getHttpCode()));
-                            log.warn("Error Msg:" + response.getHttpCodeMessage());
-                        }
-
-                        if (response.getHttpCode() == 200 && call.isSaveResponse()) {
-                            final String responseBody = response.getContentAsString();
-                            String actualContentType = response.getHttpHeader().get(CONTENT_TYPE);
-                            if (actualContentType != null) {
-                                actualContentType = actualContentType.split(";")[0];
-                            } else {
-                                actualContentType = "<not-present>";
+                            if (response.getHttpCode() != 200) {
+                                String message = "HttpCall (%s) didn't return http code 200, instead %s.";
+                                log.warn(String.format(message, call.getName(), response.getHttpCode()));
+                                log.warn("Error Msg:" + response.getHttpCodeMessage());
                             }
 
-                            if (!CONTENT_TYPE_APPLICATION_JSON.startsWith(actualContentType)) {
-                                String message = "HttpCall (%s) didn't return application/json as content-type, instead was (%s)";
-                                log.warn(String.format(message, call.getName(), actualContentType));
-                                //continue;
+                            if (response.getHttpCode() == 200 && call.isSaveResponse()) {
+                                final String responseBody = response.getContentAsString();
+                                String actualContentType = response.getHttpHeader().get(CONTENT_TYPE);
+                                if (actualContentType != null) {
+                                    actualContentType = actualContentType.split(";")[0];
+                                } else {
+                                    actualContentType = "<not-present>";
+                                }
+
+                                if (!CONTENT_TYPE_APPLICATION_JSON.startsWith(actualContentType)) {
+                                    String message = "HttpCall (%s) didn't return application/json as content-type, instead was (%s)";
+                                    log.warn(String.format(message, call.getName(), actualContentType));
+                                }
+
+                                log.info("responseBody: {}", responseBody);
+                                Object responseObject = jsonSerialization.deserialize(responseBody, Object.class);
+                                String responseObjectName = call.getResponseObjectName();
+                                templateDataObjects.put(responseObjectName, responseObject);
+
+                                String memoryDataName = "httpCalls:" + responseObjectName;
+                                IData<Object> httpResponseData = dataFactory.createData(memoryDataName, responseObject);
+                                currentStep.storeData(httpResponseData);
+                                currentStep.addConversationOutputMap(KEY_HTTP_CALLS, Map.of(responseObjectName, responseObject));
                             }
 
-                            log.info("responseBody: {}", responseBody);
-                            Object responseObject = jsonSerialization.deserialize(responseBody, Object.class);
-                            String responseObjectName = call.getResponseObjectName();
-                            templateDataObjects.put(responseObjectName, responseObject);
-
-                            String memoryDataName = "httpCalls:" + responseObjectName;
-                            IData<Object> httpResponseData = dataFactory.createData(memoryDataName, responseObject);
-                            currentStep.storeData(httpResponseData);
-                            currentStep.addConversationOutputMap(KEY_HTTP_CALLS, Map.of(responseObjectName, responseObject));
-                        }
+                            amountOfExecutions++;
+                            retryCall = retryCall(call.getPostResponse().getRetryHttpCallInstruction(),
+                                    templateDataObjects, amountOfExecutions,
+                                    response.getHttpCode(), response.getContentAsString());
+                        } while (retryCall);
 
                         runPostResponse(memory, call, templateDataObjects, response.getHttpCode());
                     }
-                } catch (IRequest.HttpRequestException |
-                        ITemplatingEngine.TemplateEngineException |
-                        IOException e) {
+                } catch (Exception e) {
                     log.error(e.getLocalizedMessage(), e);
                     throw new LifecycleException(e.getLocalizedMessage(), e);
                 }
             }
         }
+    }
+
+    private Map<String, Object> executePreRequestPropertyInstructions(IConversationMemory memory, Map<String, Object> templateDataObjects, PreRequest preRequest) throws ITemplatingEngine.TemplateEngineException {
+        if (preRequest != null && preRequest.getPropertyInstructions() != null) {
+            var propertyInstructions = preRequest.getPropertyInstructions();
+            executePropertyInstructions(propertyInstructions, 0, memory, templateDataObjects);
+            templateDataObjects = memoryItemConverter.convert(memory);
+        }
+        return templateDataObjects;
+    }
+
+    private void executeFireAndForgetCalls(HttpCall call, PreRequest preRequest, Map<String, Object> templateDataObjects) throws ITemplatingEngine.TemplateEngineException, IOException, IRequest.HttpRequestException {
+        IRequest request;
+        if (preRequest != null && preRequest.getBatchRequests() != null) {
+            BuildingInstruction batchRequest = preRequest.getBatchRequests();
+
+            List<Object> batchIterationList = buildListFromJson(
+                    batchRequest.getIterationObjectName(), batchRequest.getPathToTargetArray(),
+                    batchRequest.getTemplateFilterExpression(), null, templateDataObjects);
+
+            for (Object iterationObject : batchIterationList) {
+                templateDataObjects.put(batchRequest.getIterationObjectName(), iterationObject);
+                request = buildRequest(call.getRequest(), templateDataObjects);
+                request.send(r -> {
+                    //ignore response
+                });
+                log.info("Request: " + request.toString());
+            }
+        } else {
+            request = buildRequest(call.getRequest(), templateDataObjects);
+            request.send(r -> {
+                //ignore response
+            });
+            log.info("Request: " + request.toString());
+        }
+    }
+
+    private static int getDelayInMillis(PreRequest preRequest) {
+        return preRequest == null ? 0 : preRequest.getDelayBeforeExecutingInMillis();
+    }
+
+    private IResponse executeRequest(IRequest request, int delay)
+            throws IRequest.HttpRequestException, ExecutionException, InterruptedException {
+
+        if (delay > 0) {
+            return runtime.submitScheduledCallable(
+                    request::send,
+                    delay, TimeUnit.MILLISECONDS,
+                    Collections.emptyMap()).get();
+        } else {
+            return request.send();
+        }
+    }
+
+    private boolean retryCall(RetryHttpCallInstruction retryHttpCallInstruction,
+                              Map<String, Object> conversationValues,
+                              int amountOfExecutions, int httpCode, String contentAsString) {
+
+        if (isNullOrEmpty(retryHttpCallInstruction)) {
+            return false;
+        }
+
+        int maxRetries = retryHttpCallInstruction.getMaxRetries();
+        if (maxRetries >= 1 && maxRetries >= amountOfExecutions) {
+
+            var retryOnHttpCodes = retryHttpCallInstruction.getRetryOnHttpCodes();
+            if (!isNullOrEmpty(retryOnHttpCodes) && retryOnHttpCodes.contains(httpCode)) {
+                return true;
+            }
+
+            var valuePathMatchers = retryHttpCallInstruction.getValuePathMatchers();
+            if (!isNullOrEmpty(contentAsString) && !isNullOrEmpty(valuePathMatchers)) {
+                for (var valuePathMatcher : valuePathMatchers) {
+                    boolean success = executeValuePath(
+                            conversationValues,
+                            valuePathMatcher.getValuePath(),
+                            valuePathMatcher.getEquals(),
+                            valuePathMatcher.getContains());
+                    if (success) {
+                        return true;
+                    }
+                }
+            }
+        }
+
+        return false;
     }
 
     private List<HttpCall> removeDuplicates(List<HttpCall> httpCalls) {
@@ -218,7 +295,11 @@ public class HttpCallsTask implements ILifecycleTask {
 
     }
 
-    private void executePropertyInstructions(List<PropertyInstruction> propertyInstructions, int httpCode, IConversationMemory memory, Map<String, Object> templateDataObjects) throws ITemplatingEngine.TemplateEngineException {
+    private void executePropertyInstructions(List<PropertyInstruction> propertyInstructions,
+                                             int httpCode, IConversationMemory memory,
+                                             Map<String, Object> templateDataObjects)
+            throws ITemplatingEngine.TemplateEngineException {
+
         if (propertyInstructions != null) {
             for (PropertyInstruction propertyInstruction : propertyInstructions) {
                 if (httpCode == 0 || verifyHttpCode(propertyInstruction.getHttpCodeValidator(), httpCode)) {
