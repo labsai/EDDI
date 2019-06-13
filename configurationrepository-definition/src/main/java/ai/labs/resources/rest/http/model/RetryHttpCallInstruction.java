@@ -13,8 +13,8 @@ import java.util.List;
 @Getter
 @Setter
 public class RetryHttpCallInstruction {
-    private int maxRetries = 3;
-    private int delayBetweenRetriesInMillis = 1000;
+    private Integer maxRetries = 3;
+    private Integer exponentialBackoffDelayInMillis = 1000;
     private List<Integer> retryOnHttpCodes = Arrays.asList(502, 503);
     private List<MatchingInfo> valuePathMatchers;
 

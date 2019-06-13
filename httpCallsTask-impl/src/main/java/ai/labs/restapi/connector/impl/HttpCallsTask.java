@@ -116,13 +116,10 @@ public class HttpCallsTask implements ILifecycleTask {
                     } else {
                         IRequest request = buildRequest(call.getRequest(), templateDataObjects);
                         IResponse response;
-                        boolean retryCall;
+                        boolean retryCall = false;
                         int amountOfExecutions = 0;
-                        int delayInMillis = getDelayInMillis(preRequest);
                         do {
-                            response = executeRequest(request, delayInMillis);
-                            log.info("Request: " + request.toString());
-                            log.info("Response: " + response.toString());
+                            response = executeAndMeasureRequest(call, request, retryCall, amountOfExecutions);
 
                             if (response.getHttpCode() != 200) {
                                 String message = "HttpCall (%s) didn't return http code 200, instead %s.";
@@ -170,6 +167,24 @@ public class HttpCallsTask implements ILifecycleTask {
         }
     }
 
+    private IResponse executeAndMeasureRequest(HttpCall call, IRequest request, boolean retryCall, int amountOfExecutions)
+            throws IRequest.HttpRequestException, ExecutionException, InterruptedException {
+
+        log.info("Request: " + request.toString());
+        int delayInMillis = getDelayInMillis(call, retryCall, amountOfExecutions);
+
+        long executionStart = System.currentTimeMillis();
+        IResponse response = executeRequest(request, delayInMillis);
+        long executionEnd = System.currentTimeMillis();
+        long duration = executionEnd - executionStart;
+
+        log.info("Response: " + response.toString());
+        log.info("Execution time: Duration: {}ms Delay: {}ms Total: {}ms",
+                duration, delayInMillis, duration + delayInMillis);
+
+        return response;
+    }
+
     private Map<String, Object> executePreRequestPropertyInstructions(IConversationMemory memory, Map<String, Object> templateDataObjects, PreRequest preRequest) throws ITemplatingEngine.TemplateEngineException {
         if (preRequest != null && preRequest.getPropertyInstructions() != null) {
             var propertyInstructions = preRequest.getPropertyInstructions();
@@ -205,8 +220,24 @@ public class HttpCallsTask implements ILifecycleTask {
         }
     }
 
-    private static int getDelayInMillis(PreRequest preRequest) {
-        return preRequest == null ? 0 : preRequest.getDelayBeforeExecutingInMillis();
+    private static int getDelayInMillis(HttpCall call, boolean retryCall, int amountOfExecutions) {
+        int delayInMillis = 0;
+
+        if (retryCall) {
+            Integer exponentialBackoffDelay = call.getPostResponse().
+                    getRetryHttpCallInstruction().
+                    getExponentialBackoffDelayInMillis();
+            if (exponentialBackoffDelay != null) {
+                delayInMillis = exponentialBackoffDelay * amountOfExecutions;
+            }
+        }
+
+        if (delayInMillis == 0) {
+            var preRequest = call.getPreRequest();
+            delayInMillis = preRequest == null ? 0 : preRequest.getDelayBeforeExecutingInMillis();
+        }
+
+        return delayInMillis;
     }
 
     private IResponse executeRequest(IRequest request, int delay)
