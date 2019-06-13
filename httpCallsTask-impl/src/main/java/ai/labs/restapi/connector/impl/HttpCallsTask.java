@@ -144,7 +144,6 @@ public class HttpCallsTask implements ILifecycleTask {
                                     log.warn(String.format(message, call.getName(), actualContentType));
                                 }
 
-                                log.info("responseBody: {}", responseBody);
                                 Object responseObject = jsonSerialization.deserialize(responseBody, Object.class);
                                 String responseObjectName = call.getResponseObjectName();
                                 templateDataObjects.put(responseObjectName, responseObject);
@@ -156,7 +155,7 @@ public class HttpCallsTask implements ILifecycleTask {
                             }
 
                             amountOfExecutions++;
-                            retryCall = retryCall(call.getPostResponse().getRetryHttpCallInstruction(),
+                            retryCall = retryCall(call.getPostResponse(),
                                     templateDataObjects, amountOfExecutions,
                                     response.getHttpCode(), response.getContentAsString());
                         } while (retryCall);
@@ -223,10 +222,15 @@ public class HttpCallsTask implements ILifecycleTask {
         }
     }
 
-    private boolean retryCall(RetryHttpCallInstruction retryHttpCallInstruction,
+    private boolean retryCall(PostResponse postResponse,
                               Map<String, Object> conversationValues,
                               int amountOfExecutions, int httpCode, String contentAsString) {
 
+        if (isNullOrEmpty(postResponse)) {
+            return false;
+        }
+
+        var retryHttpCallInstruction = postResponse.getRetryHttpCallInstruction();
         if (isNullOrEmpty(retryHttpCallInstruction)) {
             return false;
         }
@@ -360,9 +364,6 @@ public class HttpCallsTask implements ILifecycleTask {
         String requestBody = templateValues(requestConfig.getBody(), templateDataObjects);
 
         var method = Method.valueOf(requestConfig.getMethod().toUpperCase());
-        log.info("targetUri: {}", targetUri);
-        log.info("method: {}", method);
-        log.info("body: {}", requestBody);
         IRequest request = httpClient.newRequest(targetUri, method).
                 setBodyEntity(requestBody, UTF_8, requestConfig.getContentType());
 
