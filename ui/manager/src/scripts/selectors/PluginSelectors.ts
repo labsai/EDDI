@@ -50,27 +50,27 @@ export function pluginsSelector(
       loadedPlugins = state.pluginState.loadedOutputs;
       break;
     case HTTPCALLS:
-      isAllPluginsLoaded = state.pluginState.allHttpcallsLoaded;
-      loadedPlugins = state.pluginState.loadedHttpcalls;
+      isAllPluginsLoaded = state.pluginState.allHttpCallsLoaded;
+      loadedPlugins = state.pluginState.loadedHttpCalls;
       break;
     default:
       isAllPluginsLoaded = false;
       loadedPlugins = 0;
       break;
   }
+  const pluginName = Parser.getPluginName(props.pluginType, false);
   const plugins = state.pluginState.plugins.filter(
     plug =>
-      plug.resource.includes(
-        Parser.getPluginName(props.pluginType, true).toLowerCase(),
-      ) && plug.version === plug.currentVersion,
+      plug.resource.includes(pluginName) &&
+      plug.version === plug.currentVersion,
   );
   const sortedPlugins = plugins.sort(function(a, b) {
     return b.lastModifiedOn - a.lastModifiedOn;
   });
   return {
-    plugins: sortedPlugins
-      ? sortedPlugins
-      : sortedPlugins.slice(0, loadedPlugins),
+    plugins:
+      (sortedPlugins ? sortedPlugins : sortedPlugins.slice(0, loadedPlugins)) ||
+      [],
     isAllPluginsLoaded,
     loadedPlugins,
     isLoading: state.pluginState.isLoadingPlugins,

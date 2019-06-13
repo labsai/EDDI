@@ -48,7 +48,6 @@ export interface IPluginState {
   isLoading: boolean;
   isLoadingPlugins: boolean;
   isLoadingAllDefaultPluginTypes: boolean;
-  isLoadingAllPluginData: boolean;
   defaultPluginTypes: IDefaultPluginTypes[];
   plugins: IPlugin[];
   schemas: IEddiSchema[];
@@ -56,12 +55,12 @@ export interface IPluginState {
   allDictionariesLoaded: boolean;
   allBehaviorsLoaded: boolean;
   allOutputsLoaded: boolean;
-  allHttpcallsLoaded: boolean;
+  allHttpCallsLoaded: boolean;
 
   loadedDictionaries: number;
   loadedBehaviors: number;
   loadedOutputs: number;
-  loadedHttpcalls: number;
+  loadedHttpCalls: number;
 }
 
 export const initialState: IPluginState = {
@@ -69,7 +68,6 @@ export const initialState: IPluginState = {
   isLoading: false,
   isLoadingPlugins: false,
   isLoadingAllDefaultPluginTypes: false,
-  isLoadingAllPluginData: false,
   defaultPluginTypes: [],
   plugins: [],
   schemas: [],
@@ -77,12 +75,12 @@ export const initialState: IPluginState = {
   allDictionariesLoaded: false,
   allBehaviorsLoaded: false,
   allOutputsLoaded: false,
-  allHttpcallsLoaded: false,
+  allHttpCallsLoaded: false,
 
   loadedDictionaries: 0,
   loadedBehaviors: 0,
   loadedOutputs: 0,
-  loadedHttpcalls: 0,
+  loadedHttpCalls: 0,
 };
 
 const PluginReducer: IPluginReducer = (
@@ -181,14 +179,14 @@ const PluginReducer: IPluginReducer = (
         allOutputsLoaded: {
           $set: pluginType === OUTPUT ? lastPage : state.allOutputsLoaded,
         },
-        loadedHttpcalls: {
+        loadedHttpCalls: {
           $set:
             pluginType === HTTPCALLS
-              ? state.loadedHttpcalls + newPluginsLoaded
-              : state.loadedHttpcalls,
+              ? state.loadedHttpCalls + newPluginsLoaded
+              : state.loadedHttpCalls,
         },
-        allHttpcallsLoaded: {
-          $set: pluginType === HTTPCALLS ? lastPage : state.allHttpcallsLoaded,
+        allHttpCallsLoaded: {
+          $set: pluginType === HTTPCALLS ? lastPage : state.allHttpCallsLoaded,
         },
       });
 
@@ -309,11 +307,11 @@ const PluginReducer: IPluginReducer = (
         loadedOutputs: {
           $set: type === OUTPUT ? state.loadedOutputs + 1 : state.loadedOutputs,
         },
-        loadedHttpcalls: {
+        loadedHttpCalls: {
           $set:
             type === HTTPCALLS
-              ? state.loadedHttpcalls + 1
-              : state.loadedHttpcalls,
+              ? state.loadedHttpCalls + 1
+              : state.loadedHttpCalls,
         },
       });
 

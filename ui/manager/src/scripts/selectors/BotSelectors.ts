@@ -38,9 +38,6 @@ export const botsSelector: (
   };
 });
 
-export interface ILatestBotSelectorProps {
-  botId: string;
-}
 export interface IBotSelectorProps {
   botResource: string;
 }
@@ -49,18 +46,6 @@ export function botSelector(state: IAppState, props: IBotSelectorProps) {
   const bot = state.botState.bots.find(
     bot => bot.resource === props.botResource,
   );
-  return {
-    bot,
-    isLoading: state.botState.isLoadingAllBots || state.botState.isLoadingBot,
-  };
-}
-
-export function latestBotSelector(
-  state: IAppState,
-  props: ILatestBotSelectorProps,
-) {
-  const bots = state.botState.bots.filter(bot => bot.id === props.botId);
-  const bot = _.maxBy(bots, b => b.version);
   return {
     bot,
     isLoading: state.botState.isLoadingAllBots || state.botState.isLoadingBot,

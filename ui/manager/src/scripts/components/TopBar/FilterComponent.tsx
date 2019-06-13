@@ -1,6 +1,7 @@
 import * as React from 'react';
 import * as Radium from 'radium';
 import { CSSProperties } from 'react';
+import { pageEnum } from './NavigationComponent';
 
 const styles: CSSProperties = {
   filter: {
@@ -50,7 +51,21 @@ const ArrowRight = require('../../../public/images/ArrowRight.png');
 const SearchIcon = require('../../../public/images/searchIcon.png');
 
 interface IProps {
+  page: pageEnum;
   filter(text: string): void;
+}
+
+function getSearchName(page: pageEnum) {
+  switch (page) {
+    case pageEnum.regularDictionaries:
+      return 'regular dictionary';
+    case pageEnum.outputSets:
+      return 'output set';
+    case pageEnum.behaviorRules:
+      return 'behavior rule';
+    default:
+      return pageEnum[page];
+  }
 }
 
 const FilterComponent = (props: IProps) => (
@@ -61,7 +76,7 @@ const FilterComponent = (props: IProps) => (
       <img src={SearchIcon} style={styles.searchBoxIcon} />
       <input
         type={'text'}
-        placeholder={'Find bots'}
+        placeholder={`Find ${getSearchName(props.page)}`}
         style={styles.searchBoxInput}
         onChange={f => props.filter(f.target.value)}
       />

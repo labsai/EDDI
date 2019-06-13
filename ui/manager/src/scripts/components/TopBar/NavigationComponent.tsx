@@ -1,10 +1,13 @@
 import * as React from 'react';
 import * as Radium from 'radium';
 import { CSSProperties } from 'react';
+import { historyPush } from '../../history';
+import PluginSelectComponent from './PluginSelectComponent';
 
 const styles: CSSProperties = {
   navBar: {
-    width: '220px',
+    width: 'fit-content',
+    display: 'flex',
   },
   navBarItem: {
     ':hover': {
@@ -24,23 +27,43 @@ const styles: CSSProperties = {
     borderBottomColor: '#E0E5EE',
     color: '#7A849E',
   },
-  packagesNavRoute: {
-    color: '#16325C',
-    fontSize: '18px',
-    textAlign: 'center',
-  },
 };
 
-const NavigationComponent = () => (
+export enum pageEnum {
+  'regularDictionaries',
+  'behaviorRules',
+  'outputSets',
+  'httpCalls',
+  'bot',
+  'package',
+}
+
+interface IProps {
+  page: pageEnum;
+}
+
+const NavigationComponent = (props: IProps) => (
   <div style={styles.navBar}>
-    <div style={styles.navBarItem}>
+    <div
+      onClick={() => historyPush('/')}
+      style={
+        props.page === pageEnum.bot
+          ? styles.navBarItem
+          : [styles.navBarItem, styles.navBarItemDisabled]
+      }>
       <div>{'Bots'}</div>
     </div>
     <div
       key={'packages'}
-      style={[styles.navBarItem, styles.navBarItemDisabled]}>
+      onClick={() => historyPush('/packages')}
+      style={
+        props.page === pageEnum.package
+          ? styles.navBarItem
+          : [styles.navBarItem, styles.navBarItemDisabled]
+      }>
       <div>{'Packages'}</div>
     </div>
+    <PluginSelectComponent page={props.page} />
   </div>
 );
 
