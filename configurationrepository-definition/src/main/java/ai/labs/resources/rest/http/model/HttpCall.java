@@ -9,13 +9,13 @@ import java.util.List;
 @Setter
 public class HttpCall {
     private String name;
-    private boolean fireAndForget;
-    private boolean saveResponse;
-    private String responseObjectName;
     private List<String> actions;
-    private Request request;
-    private PreRequest preRequest;
-    private boolean isBatchCalls;
+    private Boolean saveResponse = false;
+    private String responseObjectName;
+    private Boolean fireAndForget = false;
+    private Boolean isBatchCalls = false;
     private String iterationObjectName;
+    private PreRequest preRequest;
+    private Request request;
     private PostResponse postResponse;
 }
