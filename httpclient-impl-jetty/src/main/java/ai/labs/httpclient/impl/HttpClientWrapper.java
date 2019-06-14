@@ -54,6 +54,7 @@ public class HttpClientWrapper implements IHttpClient {
         private final URI uri;
         private Request request;
         private int maxLength = 2 * 1024 * 1024;
+        private String requestBody;
 
         RequestWrapper(URI uri, Request request) {
             this.uri = uri;
@@ -92,7 +93,8 @@ public class HttpClientWrapper implements IHttpClient {
 
         @Override
         public IRequest setBodyEntity(String content, String encoding, String contentType) {
-            request.content(new StringContentProvider(content, encoding), contentType);
+            this.requestBody = content;
+            request.content(new StringContentProvider(this.requestBody, encoding), contentType);
             return this;
         }
 
@@ -159,6 +161,7 @@ public class HttpClientWrapper implements IHttpClient {
             return "RequestWrapper{" +
                     "uri=" + uri +
                     ", request=" + request.toString() +
+                    ", requestBody=" + requestBody +
                     ", maxLength=" + maxLength +
                     ", queryParams=" + request.getParams() +
                     '}';
