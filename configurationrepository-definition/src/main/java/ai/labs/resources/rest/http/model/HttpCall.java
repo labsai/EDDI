@@ -18,12 +18,4 @@ public class HttpCall {
     private PreRequest preRequest;
     private Request request;
     private PostResponse postResponse;
-
-    public boolean isSaveResponse() {
-        return saveResponse;
-    }
-
-    public boolean isFireAndForget() {
-        return fireAndForget;
-    }
 }

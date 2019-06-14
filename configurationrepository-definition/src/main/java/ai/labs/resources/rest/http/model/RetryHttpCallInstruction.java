@@ -16,7 +16,7 @@ public class RetryHttpCallInstruction {
     private Integer maxRetries = 3;
     private Integer exponentialBackoffDelayInMillis = 1000;
     private List<Integer> retryOnHttpCodes = Arrays.asList(502, 503);
-    private List<MatchingInfo> valuePathMatchers;
+    private List<MatchingInfo> responseValuePathMatchers;
 
     @Getter
     @Setter
@@ -24,5 +24,6 @@ public class RetryHttpCallInstruction {
         private String valuePath;
         private String contains;
         private String equals;
+        private Boolean trueIfNoMatch = false;
     }
 }

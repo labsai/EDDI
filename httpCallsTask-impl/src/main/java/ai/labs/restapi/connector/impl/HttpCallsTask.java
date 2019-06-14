@@ -111,7 +111,7 @@ public class HttpCallsTask implements ILifecycleTask {
                     PreRequest preRequest = call.getPreRequest();
                     templateDataObjects = executePreRequestPropertyInstructions(memory, templateDataObjects, preRequest);
 
-                    if (call.isFireAndForget()) {
+                    if (call.getFireAndForget()) {
                         executeFireAndForgetCalls(call, preRequest, templateDataObjects);
                     } else {
                         IRequest request = buildRequest(call.getRequest(), templateDataObjects);
@@ -127,7 +127,7 @@ public class HttpCallsTask implements ILifecycleTask {
                                 log.warn("Error Msg:" + response.getHttpCodeMessage());
                             }
 
-                            if (response.getHttpCode() == 200 && call.isSaveResponse()) {
+                            if (response.getHttpCode() == 200 && call.getSaveResponse()) {
                                 final String responseBody = response.getContentAsString();
                                 String actualContentType = response.getHttpHeader().get(CONTENT_TYPE);
                                 if (actualContentType != null) {
@@ -274,7 +274,7 @@ public class HttpCallsTask implements ILifecycleTask {
                 return true;
             }
 
-            var valuePathMatchers = retryHttpCallInstruction.getValuePathMatchers();
+            var valuePathMatchers = retryHttpCallInstruction.getResponseValuePathMatchers();
             if (!isNullOrEmpty(contentAsString) && !isNullOrEmpty(valuePathMatchers)) {
                 for (var valuePathMatcher : valuePathMatchers) {
                     boolean success = executeValuePath(
@@ -283,7 +283,7 @@ public class HttpCallsTask implements ILifecycleTask {
                             valuePathMatcher.getEquals(),
                             valuePathMatcher.getContains());
                     if (success) {
-                        return true;
+                        return !valuePathMatcher.getTrueIfNoMatch();
                     }
                 }
             }
