@@ -4,14 +4,13 @@ import ai.labs.behavior.impl.BehaviorRule;
 import ai.labs.memory.IConversationMemory;
 import ai.labs.memory.IMemoryItemConverter;
 import lombok.extern.slf4j.Slf4j;
-import ognl.Ognl;
-import ognl.OgnlException;
 
 import javax.inject.Inject;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
+import static ai.labs.utilities.MatchingUtilities.executeValuePath;
 import static ai.labs.utilities.RuntimeUtilities.isNullOrEmpty;
 
 @Slf4j
@@ -40,7 +39,7 @@ public class DynamicValueMatcher implements IBehaviorCondition {
 
     @Override
     public void setConfigs(Map<String, String> configs) {
-        if (configs != null && !configs.isEmpty()) {
+        if (!isNullOrEmpty(configs)) {
             if (configs.containsKey(valuePathQualifier)) {
                 valuePath = configs.get(valuePathQualifier);
             }
@@ -67,30 +66,17 @@ public class DynamicValueMatcher implements IBehaviorCondition {
 
     @Override
     public ExecutionState execute(IConversationMemory memory, List<BehaviorRule> trace) {
-        boolean success = false;
-        try {
-            if (!isNullOrEmpty(valuePath)) {
-                Object value = Ognl.getValue(valuePath, memoryItemConverter.convert(memory));
-                if (value != null) {
-                    if (!isNullOrEmpty(equals) && equals.equals(value)) {
-                        success = true;
-                    } else if (!isNullOrEmpty(contains)) {
-                        if (value instanceof String && ((String) value).contains(contains)) {
-                            success = true;
-                        } else if (value instanceof List && ((List) value).contains(contains)) {
-                            success = true;
-                        }
-                    } else if (isNullOrEmpty(equals) && isNullOrEmpty(contains)) {
-                        success = true;
-                    }
-                }
-            }
-        } catch (OgnlException ignored) {
+        if (!isNullOrEmpty(valuePath)) {
+            var conversationValues = memoryItemConverter.convert(memory);
+            boolean success = executeValuePath(conversationValues, valuePath, equals, contains);
+            state = success ? ExecutionState.SUCCESS : ExecutionState.FAIL;
+        } else {
+            state = ExecutionState.FAIL;
         }
 
-        state = success ? ExecutionState.SUCCESS : ExecutionState.FAIL;
         return state;
     }
+
 
     @Override
     public ExecutionState getExecutionState() {

@@ -43,6 +43,11 @@
             <version>1.0.34</version>
         </dependency>
         <dependency>
+            <groupId>ognl</groupId>
+            <artifactId>ognl</artifactId>
+            <version>3.1.21</version>
+        </dependency>
+        <dependency>
             <groupId>ai.labs</groupId>
             <artifactId>persistencestore-definition</artifactId>
             <version>${project.version}</version>
