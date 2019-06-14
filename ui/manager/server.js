@@ -23,7 +23,7 @@ if (env) {
     });
 
     // fallback to using the index.html. For example when the user reloads a different page than root,
-    // we want to service the index.html so that the react routing can take over
+    // we want to serve the index.html so that the react routing can take over
     app.get('/*',(req, res) => {
       res.sendFile(path.join(__dirname, hostPath, 'index.html'));
     });
