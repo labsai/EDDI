@@ -67,7 +67,10 @@ class ExtensionsPage extends React.Component<IProps, IState> {
             filter={this.filter}
             type={type}
           />
-          <PluginList pluginType={this.getEddiType(type)} />
+          <PluginList
+            filterText={this.state.filterText}
+            pluginType={this.getEddiType(type)}
+          />
         </div>
       </div>
     );
