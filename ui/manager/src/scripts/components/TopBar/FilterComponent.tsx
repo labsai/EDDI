@@ -56,15 +56,10 @@ interface IProps {
 }
 
 function getSearchName(page: pageEnum) {
-  switch (page) {
-    case pageEnum.regularDictionaries:
-      return 'regular dictionary';
-    case pageEnum.outputSets:
-      return 'output set';
-    case pageEnum.behaviorRules:
-      return 'behavior rule';
-    default:
-      return pageEnum[page];
+  if (page === pageEnum.httpCalls) {
+    return 'HTTP calls';
+  } else {
+    return pageEnum[page];
   }
 }
 

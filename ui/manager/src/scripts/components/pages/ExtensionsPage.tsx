@@ -12,13 +12,10 @@ import {
   REGULAR_DICTIONARY,
 } from '../utils/EddiTypes';
 
+const eddiLogo = require('../../../public/images/eddi-logo.png');
+
 interface IRouteProps {
   location: { search: string };
-}
-
-function getType(search: string) {
-  const queryStrings = Parser.getQueryStrings(search);
-  return queryStrings.type;
 }
 
 interface IState {
@@ -26,8 +23,6 @@ interface IState {
 }
 
 interface IProps extends IRouteProps {}
-
-const eddiLogo = require('../../../public/images/eddi-logo.png');
 
 class ExtensionsPage extends React.Component<IProps, IState> {
   constructor(props) {
@@ -41,15 +36,18 @@ class ExtensionsPage extends React.Component<IProps, IState> {
     this.setState({ filterText: text });
   };
 
-  getEddiType() {
-    const type = getType(this.props.location.search);
-    console.log(type);
+  getTypeFromQueryString() {
+    const type = Parser.getQueryStrings(this.props.location.search).type;
+    return type;
+  }
+
+  getEddiType(type: string) {
     switch (type) {
-      case 'regularDictionaries':
+      case 'dictionary':
         return REGULAR_DICTIONARY;
-      case 'behaviorRules':
+      case 'behavior':
         return BEHAVIOR;
-      case 'outputSets':
+      case 'output':
         return OUTPUT;
       case 'httpCalls':
         return HTTPCALLS;
@@ -59,13 +57,17 @@ class ExtensionsPage extends React.Component<IProps, IState> {
   }
 
   render() {
-    const type = getType(this.props.location.search);
+    const type = this.getTypeFromQueryString();
     return (
       <div>
         <img src={eddiLogo} style={styles.eddiLogo} />
-        <div className="content">
-          <TopBarComponent page={pageEnum[type]} filter={this.filter} />
-          <PluginList pluginType={this.getEddiType()} />
+        <div>
+          <TopBarComponent
+            page={pageEnum[type]}
+            filter={this.filter}
+            type={type}
+          />
+          <PluginList pluginType={this.getEddiType(type)} />
         </div>
       </div>
     );

@@ -8,10 +8,11 @@ import { connect } from 'react-redux';
 import { ClimbingBoxLoader } from 'react-spinners';
 import { getAPIUrl } from '../utils/ApiFunctions';
 import * as InfiniteScrollTypes from 'react-infinite-scroller';
-import PackageContainer from '../BotDetailView/PackageContainer';
+import PluginContainer from './PluginContainer';
 import styles from './Pluginlist.styles';
 import { pluginsSelector } from '../../selectors/PluginSelectors';
 import { IPlugin } from '../utils/AxiosFunctions';
+import Parser from '../utils/Parser';
 const InfiniteScroll = require('react-infinite-scroller') as InfiniteScrollTypes;
 
 interface IPublicProps {
@@ -87,51 +88,52 @@ class PluginList extends React.Component<IPrivateProps, IState> {
 
   render() {
     const pluginList: IPlugin[] = this.filterPlugins();
-    console.log(this.props.isAllPluginsLoaded);
-    console.log(this.props.isLoading);
+    const pluginName = Parser.getFullPluginName(
+      this.props.pluginType,
+      true,
+      true,
+    );
     return (
       <div>
-        {renderIf(false)(() => (
-          <div style={styles.loadingWrapper}>
-            <ClimbingBoxLoader loading />
-          </div>
-        ))}
-        {renderIf(true)(() => (
-          <div>
-            {renderIf(this.props.error)(() => (
-              <p>{'Error: Could not load bots'}</p>
-            ))}
-            {renderIf(!this.props.error && _.isEmpty(this.props.plugins))(
-              () => <p>{`There are no packages yet`}</p>,
-            )}
-            {renderIf(!this.props.error && !_.isEmpty(this.props.plugins))(
-              () => (
-                <div>
-                  {renderIf(_.isEmpty(pluginList))(() => (
-                    <p>{`Found no packages matching: "${
-                      this.props.filterText
-                    }"`}</p>
-                  ))}
-                  <InfiniteScroll
-                    pageStart={0}
-                    loadMore={this.loadMore}
-                    hasMore={
-                      !this.props.isAllPluginsLoaded && !this.props.isLoading
-                    }
-                    loader={
-                      <div className="loader" key={0}>
-                        Loading ...
-                      </div>
-                    }>
-                    {pluginList.map(plugin => (
-                      <div key={plugin.id}>{plugin.resource}</div>
-                    ))}
-                  </InfiniteScroll>
-                </div>
-              ),
-            )}
-          </div>
-        ))}
+        <div style={styles.topHeader}>
+          <div style={styles.title}>{pluginName}</div>
+          <div style={styles.lastModified}>{'Last Modified'}</div>
+        </div>
+        <div>
+          {renderIf(this.props.error)(() => (
+            <p>{`Error: Could not load ${pluginName.toLowerCase()}`}</p>
+          ))}
+          {renderIf(!this.props.error && _.isEmpty(this.props.plugins))(() => (
+            <p>{`There are no ${pluginName.toLowerCase()} yet`}</p>
+          ))}
+          {renderIf(!this.props.error && !_.isEmpty(this.props.plugins))(() => (
+            <div>
+              {renderIf(_.isEmpty(pluginList))(() => (
+                <p>{`Found no ${pluginName.toLowerCase()} matching: "${
+                  this.props.filterText
+                }"`}</p>
+              ))}
+              <InfiniteScroll
+                pageStart={0}
+                loadMore={this.loadMore}
+                hasMore={
+                  !this.props.isAllPluginsLoaded && !this.props.isLoading
+                }
+                loader={
+                  <div className="loader" key={0}>
+                    Loading ...
+                  </div>
+                }>
+                {pluginList.map(plugin => (
+                  <PluginContainer
+                    key={plugin.id}
+                    pluginResource={plugin.resource}
+                  />
+                ))}
+              </InfiniteScroll>
+            </div>
+          ))}
+        </div>
       </div>
     );
   }

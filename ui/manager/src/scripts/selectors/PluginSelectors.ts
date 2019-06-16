@@ -36,6 +36,7 @@ export function pluginsSelector(
 ) {
   let isAllPluginsLoaded;
   let loadedPlugins;
+  let pluginName = Parser.getPluginName(props.pluginType, false);
   switch (props.pluginType) {
     case REGULAR_DICTIONARY:
       isAllPluginsLoaded = state.pluginState.allDictionariesLoaded;
@@ -58,7 +59,6 @@ export function pluginsSelector(
       loadedPlugins = 0;
       break;
   }
-  const pluginName = Parser.getPluginName(props.pluginType, false);
   const plugins = state.pluginState.plugins.filter(
     plug =>
       plug.resource.includes(pluginName) &&

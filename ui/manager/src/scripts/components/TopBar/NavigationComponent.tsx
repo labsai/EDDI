@@ -3,6 +3,7 @@ import * as Radium from 'radium';
 import { CSSProperties } from 'react';
 import { historyPush } from '../../history';
 import PluginSelectComponent from './PluginSelectComponent';
+import { REGULAR_DICTIONARY } from '../utils/EddiTypes';
 
 const styles: CSSProperties = {
   navBar: {
@@ -30,9 +31,9 @@ const styles: CSSProperties = {
 };
 
 export enum pageEnum {
-  'regularDictionaries',
-  'behaviorRules',
-  'outputSets',
+  'dictionary',
+  'behavior',
+  'output',
   'httpCalls',
   'bot',
   'package',

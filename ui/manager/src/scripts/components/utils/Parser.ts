@@ -55,7 +55,7 @@ export default class Parser {
 
   static getPluginName(pluginType: string, isCapitalized: boolean): string {
     if (pluginType === PluginType.REGULAR_DICTIONARY) {
-      return 'Dictionary';
+      return isCapitalized ? 'Dictionary' : 'dictionary';
     } else {
       const pluginTypeName = pluginTypePattern.match(pluginType).uriName;
       if (isCapitalized) {
@@ -71,6 +71,46 @@ export default class Parser {
       extensionPattern.match(extensionType).extensionType
     }`;
     return type;
+  }
+
+  static getFullPluginName(
+    pluginType: string,
+    isCapitalized = false,
+    plural = false,
+  ): string {
+    let pluginName;
+    switch (pluginType) {
+      case PluginType.REGULAR_DICTIONARY:
+        if (plural) {
+          pluginName = 'Regular dictionaries';
+        } else {
+          pluginName = 'Regular dictionary';
+        }
+        break;
+      case PluginType.BEHAVIOR:
+        if (plural) {
+          pluginName = 'Behavior rules';
+        } else {
+          pluginName = 'Behavior rule';
+        }
+        break;
+      case PluginType.OUTPUT:
+        if (plural) {
+          pluginName = 'Output sets';
+        } else {
+          pluginName = 'Output set';
+        }
+        break;
+      case PluginType.HTTPCALLS:
+        return 'HTTP calls';
+      default:
+        break;
+    }
+    if (isCapitalized) {
+      return pluginName;
+    } else {
+      return pluginName.toLowerCase();
+    }
   }
 
   static getVersionString(version: number, capitalized = true): string {

@@ -6,12 +6,19 @@ import { CSSProperties } from 'react';
 import { Link } from 'react-router-dom';
 import { ModalEnum } from '../utils/ModalEnum';
 import BlueButton from '../Assets/Buttons/BlueButton';
+import {
+  BEHAVIOR,
+  HTTPCALLS,
+  OUTPUT,
+  REGULAR_DICTIONARY,
+} from '../utils/EddiTypes';
 
 const styles: CSSProperties = {
   createNewBotButton: {
     height: '36px',
     marginLeft: '32px',
     marginTop: '7px',
+    width: '108px',
   },
   topBarCenter: {
     flex: '1',
@@ -26,6 +33,7 @@ const styles: CSSProperties = {
 
 interface IProps {
   page: pageEnum;
+  type?: string;
   filter(text: string): void;
 }
 
@@ -43,9 +51,18 @@ class TopBarComponent extends React.Component<IProps> {
         ModalActionDispatchers.showModal(ModalEnum.createPackage);
         return;
       default:
+        ModalActionDispatchers.showCreateNewConfigModal(this.props.type);
         return;
     }
   };
+
+  getSearchName(page: pageEnum) {
+    if (page === pageEnum.httpCalls) {
+      return 'HTTP calls';
+    } else {
+      return pageEnum[page];
+    }
+  }
 
   render() {
     return (
@@ -54,7 +71,7 @@ class TopBarComponent extends React.Component<IProps> {
         <div style={styles.topBarCenter} />
         <FilterComponent page={this.props.page} filter={this.props.filter} />
         <BlueButton
-          text={`Create new ${pageEnum[this.props.page]}`}
+          text={`Create new ${this.getSearchName(this.props.page)}`}
           customStyles={styles.createNewBotButton}
           onClick={this.openModal}
           style={styles.createNewBot}

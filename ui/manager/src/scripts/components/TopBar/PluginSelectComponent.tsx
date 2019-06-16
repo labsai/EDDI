@@ -8,60 +8,31 @@ import { CSSProperties } from 'react';
 import Parser from '../utils/Parser';
 import { historyPush } from '../../history';
 import { pageEnum } from './NavigationComponent';
-
-const styles: CSSProperties = {
-  selectContainer: {
-    width: '170px',
-  },
-  control: {
-    display: 'flex',
-    height: '42px',
-    backgroundColor: '#FFF',
-    borderRadius: '0',
-    border: '0',
-    ':hover': {
-      cursor: 'pointer',
-      backgroundColor: '#F7F9FB',
-    },
-  },
-  singleValue: {
-    color: '#7A849E',
-  },
-};
+import styles from './PluginSelectComponent.styles';
 
 const customStyles = {
+  control: (base, state) => ({
+    ...base,
+    ...styles.control,
+  }),
   indicatorsContainer: (base, state) => ({
-    position: 'relative',
-    borderLeft: '6px solid transparent',
-    borderRight: '6px solid transparent',
-    borderTop: '6px solid #16325C',
-    height: '0',
-    marginRight: '10px',
-    width: '0',
+    ...styles.indicatorsContainer,
   }),
   input: (base, state) => ({
     ...base,
-    maxWidth: '60px',
-    overflow: 'hidden',
-    ':active': {
-      outline: '0',
-    },
+    ...styles.input,
   }),
   valueContainer: (base, state) => ({
     ...base,
-    fontSize: '14px',
-    overflow: 'hidden',
-    marginLeft: '1px',
+    ...styles.valueContainer,
   }),
   option: (base, state) => ({
     ...base,
-    color: '#16325C',
-    fontSize: '14px',
-    overflow: 'hidden',
-    textAlign: 'left',
-    ':hover': {
-      backgroundColor: '#F7F9FB',
-    },
+    ...styles.option,
+  }),
+  singleValue: (base, state) => ({
+    ...base,
+    ...styles.singleValue,
   }),
 };
 
@@ -103,9 +74,9 @@ class PluginSelectComponent extends React.Component<IProps, IState> {
 
   isPluginPage(props = this.props): boolean {
     return [
-      pageEnum.regularDictionaries,
-      pageEnum.behaviorRules,
-      pageEnum.outputSets,
+      pageEnum.dictionary,
+      pageEnum.behavior,
+      pageEnum.output,
       pageEnum.httpCalls,
     ].includes(props.page);
   }
@@ -126,22 +97,7 @@ class PluginSelectComponent extends React.Component<IProps, IState> {
   handleSelect = (option: IOption) => {
     if (!_.isEmpty(option)) {
       this.setState({ selectedOption: option });
-      switch (option.value) {
-        case 0:
-          historyPush('/extensions', ['type=regularDictionaries']);
-          return;
-        case 1:
-          historyPush('/extensions', ['type=behaviorRules']);
-          return;
-        case 2:
-          historyPush('/extensions', ['type=outputSets']);
-          return;
-        case 3:
-          historyPush('/extensions', ['type=httpCalls']);
-          return;
-        default:
-          return;
-      }
+      historyPush('/extensions', [`type=${pageEnum[option.value]}`]);
     }
   };
 
@@ -152,26 +108,17 @@ class PluginSelectComponent extends React.Component<IProps, IState> {
         control: (base, state) => ({
           ...base,
           ...styles.control,
-          borderBottom: '3px solid #4A90E2',
+          ...styles.controlSelected,
         }),
         singleValue: (base, state) => ({
           ...base,
           ...styles.singleValue,
-          color: '#16325C',
+          ...styles.singleValueSelected,
         }),
       };
     } else {
       return {
         ...customStyles,
-        control: (base, state) => ({
-          ...base,
-          ...styles.control,
-          borderBottom: '3px solid #E0E5EE',
-        }),
-        singleValue: (base, state) => ({
-          ...base,
-          ...styles.singleValue,
-        }),
       };
     }
   }
