@@ -58,6 +58,7 @@ class ExtensionsPage extends React.Component<IProps, IState> {
 
   render() {
     const type = this.getTypeFromQueryString();
+    const eddiType = this.getEddiType(type);
     return (
       <div>
         <img src={eddiLogo} style={styles.eddiLogo} />
@@ -65,11 +66,11 @@ class ExtensionsPage extends React.Component<IProps, IState> {
           <TopBarComponent
             page={pageEnum[type]}
             filter={this.filter}
-            type={type}
+            type={eddiType}
           />
           <PluginList
             filterText={this.state.filterText}
-            pluginType={this.getEddiType(type)}
+            pluginType={eddiType}
           />
         </div>
       </div>
