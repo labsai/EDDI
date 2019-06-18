@@ -1,5 +1,6 @@
 package ai.labs.utilities;
 
+import ai.labs.persistence.model.ResourceId;
 import lombok.extern.slf4j.Slf4j;
 
 import java.net.URI;
@@ -32,31 +33,4 @@ public class URIUtilities {
 
         return new ResourceId(id, version);
     }
-
-    public static class ResourceId {
-        private String id;
-        private Integer version;
-
-        ResourceId(String id, Integer version) {
-            this.id = id;
-            this.version = version;
-        }
-
-        public String getId() {
-            return id;
-        }
-
-        public void setId(String id) {
-            this.id = id;
-        }
-
-        public Integer getVersion() {
-            return version;
-        }
-
-        public void setVersion(Integer version) {
-            this.version = version;
-        }
-    }
-
 }

@@ -8,6 +8,7 @@ import ai.labs.memory.rest.IRestConversationStore;
 import ai.labs.models.ConversationState;
 import ai.labs.models.ConversationStatus;
 import ai.labs.persistence.IResourceStore;
+import ai.labs.persistence.model.ResourceId;
 import ai.labs.resources.rest.documentdescriptor.IDocumentDescriptorStore;
 import ai.labs.user.IUserStore;
 import ai.labs.user.model.User;
@@ -166,7 +167,7 @@ public class RestConversationStore implements IRestConversationStore {
                     map(conversationDescriptor -> {
                         ConversationStatus conversationStatus = new ConversationStatus();
                         URI resourceUri = conversationDescriptor.getResource();
-                        URIUtilities.ResourceId resourceId = URIUtilities.extractResourceId(resourceUri);
+                        ResourceId resourceId = URIUtilities.extractResourceId(resourceUri);
                         conversationStatus.setConversationId(resourceId.getId());
                         conversationStatus.setBotId(botId);
                         conversationStatus.setBotVersion(botVersion);

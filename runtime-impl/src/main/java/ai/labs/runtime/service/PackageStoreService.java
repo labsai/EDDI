@@ -1,9 +1,9 @@
 package ai.labs.runtime.service;
 
 import ai.labs.models.DocumentDescriptor;
+import ai.labs.resources.rest.config.packages.IRestPackageStore;
+import ai.labs.resources.rest.config.packages.model.PackageConfiguration;
 import ai.labs.resources.rest.documentdescriptor.IRestDocumentDescriptorStore;
-import ai.labs.resources.rest.packages.IRestPackageStore;
-import ai.labs.resources.rest.packages.model.PackageConfiguration;
 
 import javax.inject.Inject;
 

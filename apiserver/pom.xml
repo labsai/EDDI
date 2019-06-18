@@ -147,7 +147,7 @@
         </dependency>
         <dependency>
             <groupId>ai.labs</groupId>
-            <artifactId>propertydisposer-impl</artifactId>
+            <artifactId>propertysetter-impl</artifactId>
             <version>${project.version}</version>
         </dependency>
         <dependency>

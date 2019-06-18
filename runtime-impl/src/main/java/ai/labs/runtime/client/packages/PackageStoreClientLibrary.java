@@ -2,7 +2,7 @@ package ai.labs.runtime.client.packages;
 
 import ai.labs.lifecycle.*;
 import ai.labs.models.DocumentDescriptor;
-import ai.labs.resources.rest.packages.model.PackageConfiguration;
+import ai.labs.resources.rest.config.packages.model.PackageConfiguration;
 import ai.labs.runtime.IExecutablePackage;
 import ai.labs.runtime.service.IPackageStoreService;
 import ai.labs.runtime.service.ServiceException;

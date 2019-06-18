@@ -1,6 +1,6 @@
 package ai.labs.runtime.service;
 
-import ai.labs.resources.rest.bots.model.BotConfiguration;
+import ai.labs.resources.rest.config.bots.model.BotConfiguration;
 
 /**
  * @author ginccc
