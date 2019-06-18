@@ -4,6 +4,8 @@ import {
   BEHAVIOR_PATH,
   BOT,
   BOT_PATH,
+  PROPERTYSETTER,
+  PROPERTYSETTER_PATH,
   HTTPCALLS,
   HTTPCALLS_PATH,
   OUTPUT,
@@ -140,6 +142,7 @@ export async function getAuthRealm(): Promise<string> {
 }
 
 let authUrlPromise: Promise<string>;
+
 export async function getAuthUrl(): Promise<string> {
   if (!authUrlPromise) {
     return (authUrlPromise = axios
@@ -221,6 +224,8 @@ export function getTypeFromResource(resource: string): string {
     return OUTPUT;
   } else if (resource.includes(HTTPCALLS_PATH)) {
     return HTTPCALLS;
+  } else if (resource.includes(PROPERTYSETTER_PATH)) {
+    return PROPERTYSETTER;
   } else if (resource.includes(BOT_PATH)) {
     return BOT;
   } else if (resource.includes(PACKAGE_PATH)) {
@@ -238,6 +243,8 @@ export function getTypePath(type: string): string {
       return OUTPUT_PATH;
     case HTTPCALLS:
       return HTTPCALLS_PATH;
+    case PROPERTYSETTER:
+      return PROPERTYSETTER_PATH;
     case BOT:
       return BOT_PATH;
     case PACKAGE:

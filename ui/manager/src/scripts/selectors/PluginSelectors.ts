@@ -4,6 +4,7 @@ import {
   BEHAVIOR,
   HTTPCALLS,
   OUTPUT,
+  PROPERTYSETTER,
   REGULAR_DICTIONARY,
 } from '../components/utils/EddiTypes';
 
@@ -50,6 +51,10 @@ export function pluginsSelector(
       loadedPlugins = state.pluginState.loadedOutputs;
       break;
     case HTTPCALLS:
+      isAllPluginsLoaded = state.pluginState.allHttpcallsLoaded;
+      loadedPlugins = state.pluginState.loadedHttpcalls;
+      break;
+    case PROPERTYSETTER:
       isAllPluginsLoaded = state.pluginState.allHttpcallsLoaded;
       loadedPlugins = state.pluginState.loadedHttpcalls;
       break;

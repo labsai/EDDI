@@ -17,6 +17,8 @@ import {
   REGULAR_DICTIONARY_PATH,
   HTTPCALLS,
   HTTPCALLS_PATH,
+  PROPERTYSETTER,
+  PROPERTYSETTER_PATH,
 } from './EddiTypes';
 
 export function setDefaultGlobalHeader(key: string, value: string): void {
@@ -751,6 +753,11 @@ export async function getPluginDescriptors(
       case HTTPCALLS:
         res = await axios.get(
           `${await getAPIUrl()}${HTTPCALLS_PATH}/descriptors?index=${index}&limit=${limit}`,
+        );
+        break;
+      case PROPERTYSETTER:
+        res = await axios.get(
+          `${await getAPIUrl()}${PROPERTYSETTER_PATH}/descriptors?index=${index}&limit=${limit}`,
         );
         break;
 
