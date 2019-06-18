@@ -170,7 +170,7 @@ public class HttpCallsTask implements ILifecycleTask {
     private IResponse executeAndMeasureRequest(HttpCall call, IRequest request, boolean retryCall, int amountOfExecutions)
             throws IRequest.HttpRequestException, ExecutionException, InterruptedException {
 
-        log.info(call.getName() + " Request: " + (amountOfExecutions > 0 ? amountOfExecutions + ". retry - " : "") + request.toString());
+        log.info(call.getName() + " Request:  " + (amountOfExecutions > 0 ? amountOfExecutions + ". retry - " : "") + request.toString());
         int delayInMillis = getDelayInMillis(call, retryCall, amountOfExecutions);
 
         long executionStart = System.currentTimeMillis();
@@ -179,7 +179,7 @@ public class HttpCallsTask implements ILifecycleTask {
         long duration = executionEnd - executionStart;
 
         log.info(call.getName() + " Response: " + response.toString());
-        log.info(call.getName() + " Execution time: Duration: {}ms Delay: {}ms Total: {}ms",
+        log.info(call.getName() + " Execution time: Duration: {}ms Delay: {}ms Total: {}ms\n",
                 duration, delayInMillis, duration + delayInMillis);
 
         return response;
@@ -282,8 +282,9 @@ public class HttpCallsTask implements ILifecycleTask {
                             valuePathMatcher.getValuePath(),
                             valuePathMatcher.getEquals(),
                             valuePathMatcher.getContains());
-                    if (success) {
-                        return !valuePathMatcher.getTrueIfNoMatch();
+
+                    if (valuePathMatcher.getTrueIfNoMatch() != success) {
+                        return true;
                     }
                 }
             }
@@ -352,7 +353,7 @@ public class HttpCallsTask implements ILifecycleTask {
                             propertyValue = Ognl.getValue(path, templateDataObjects);
                         } catch (OgnlException oglnException) {
                             log.error("configured path is not correct or value does not exist!", oglnException);
-                            propertyValue = "";
+                            propertyValue = null;
                         }
                     } else {
                         Object value = propertyInstruction.getValue();
