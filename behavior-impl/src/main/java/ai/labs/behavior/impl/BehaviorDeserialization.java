@@ -1,5 +1,6 @@
 package ai.labs.behavior.impl;
 
+import ai.labs.behavior.impl.BehaviorGroup.ExecutionStrategy;
 import ai.labs.behavior.impl.conditions.IBehaviorCondition;
 import ai.labs.resources.rest.behavior.model.BehaviorConfiguration;
 import ai.labs.resources.rest.behavior.model.BehaviorRuleConditionConfiguration;
@@ -43,6 +44,15 @@ public class BehaviorDeserialization implements IBehaviorDeserialization {
                     groupConfiguration -> {
                         BehaviorGroup behaviorGroup = new BehaviorGroup();
                         behaviorGroup.setName(groupConfiguration.getName());
+                        ExecutionStrategy executionStrategy;
+                        String executionStrategyString = groupConfiguration.getExecutionStrategy();
+                        if (isNullOrEmpty(executionStrategyString)) {
+                            executionStrategy = ExecutionStrategy.executeUntilFirstSuccess;
+                        } else {
+                            executionStrategy = ExecutionStrategy.valueOf(executionStrategyString);
+                        }
+
+                        behaviorGroup.setExecutionStrategy(executionStrategy);
 
                         behaviorGroup.getBehaviorRules().addAll(groupConfiguration.getBehaviorRules().stream().map(
                                 behaviorRuleJson -> {

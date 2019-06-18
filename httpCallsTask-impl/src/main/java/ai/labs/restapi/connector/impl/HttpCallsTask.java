@@ -393,7 +393,7 @@ public class HttpCallsTask implements ILifecycleTask {
         if (!path.startsWith(SLASH_CHAR) && !path.isEmpty() && !path.startsWith("http")) {
             path = SLASH_CHAR + path;
         }
-        URI targetUri = URI.create(targetServerUri + templateValues(path, templateDataObjects));
+        URI targetUri = URI.create(templateValues(targetServerUri + path, templateDataObjects));
         String requestBody = templateValues(requestConfig.getBody(), templateDataObjects);
 
         var method = Method.valueOf(requestConfig.getMethod().toUpperCase());
@@ -476,7 +476,7 @@ public class HttpCallsTask implements ILifecycleTask {
             try {
                 HttpCallsConfiguration httpCallsConfig = resourceClientLibrary.getResource(uri, HttpCallsConfiguration.class);
 
-                String targetServerUri = httpCallsConfig.getTargetServer().toString();
+                String targetServerUri = httpCallsConfig.getTargetServerUrl();
                 if (targetServerUri.endsWith(SLASH_CHAR)) {
                     targetServerUri = targetServerUri.substring(0, targetServerUri.length() - 2);
                 }

@@ -36,27 +36,29 @@ class BehaviorRulesEvaluator {
                 }
 
                 if (state == IBehaviorCondition.ExecutionState.SUCCESS) {
-                    boolean alreadyExists = false;
-                    for (BehaviorRule rule : resultSet.getSuccessRules()) {
-                        if (rule.getName().equals(behaviorRule.getName())) {
-                            alreadyExists = true;
+                    resultSet.getSuccessRules().add(behaviorRule);
+
+                    boolean continueLoopingOnSuccess;
+                    switch (behaviorGroup.getExecutionStrategy()) {
+                        case executeAll:
+                            continueLoopingOnSuccess = true;
                             break;
-                        }
+                        default:
+                        case executeUntilFirstSuccess:
+                            continueLoopingOnSuccess = false;
                     }
 
-                    if (!alreadyExists) {
-                        resultSet.getSuccessRules().add(behaviorRule);
+                    if (!continueLoopingOnSuccess) {
+                        break;
                     }
-
-                    //if one rule of this group applied, we do not check further
-                    break;
                 } else if (state == IBehaviorCondition.ExecutionState.ERROR) {
                     String msg = String.format("An Error has occurred while evaluating Behavior Rule: %s",
                             behaviorRule.getName());
                     log.error(msg);
                     throw new BehaviorRuleExecutionException(msg);
-                } else
+                } else {
                     resultSet.getFailRules().add(behaviorRule);
+                }
             }
         }
 

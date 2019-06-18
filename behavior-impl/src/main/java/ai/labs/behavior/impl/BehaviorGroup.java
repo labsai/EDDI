@@ -15,5 +15,11 @@ import java.util.List;
 @Setter
 public class BehaviorGroup {
     private String name;
+    private ExecutionStrategy executionStrategy = ExecutionStrategy.executeUntilFirstSuccess;
     private List<BehaviorRule> behaviorRules = new LinkedList<>();
+
+    public enum ExecutionStrategy {
+        executeAll,
+        executeUntilFirstSuccess
+    }
 }

@@ -1,14 +1,11 @@
 package ai.labs.resources.rest.http.model;
 
 
+import com.fasterxml.jackson.annotation.JsonAlias;
 import lombok.Getter;
-import lombok.NoArgsConstructor;
 import lombok.Setter;
 
-import java.net.URI;
-import java.util.HashMap;
 import java.util.List;
-import java.util.Map;
 
 /**
  * @author ginccc
@@ -17,6 +14,7 @@ import java.util.Map;
 @Getter
 @Setter
 public class HttpCallsConfiguration {
-    private URI targetServer;
+    @JsonAlias("targetServer")
+    private String targetServerUrl;
     private List<HttpCall> httpCalls;
 }

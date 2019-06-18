@@ -16,7 +16,7 @@ public class MatchingUtilities {
         try {
             Object value = Ognl.getValue(valuePath, conversationValues);
             if (value != null) {
-                if (!isNullOrEmpty(equals) && equals.equals(value)) {
+                if (!isNullOrEmpty(equals) && equals.equals(value.toString())) {
                     success = true;
                 } else if (!isNullOrEmpty(contains)) {
                     if (value instanceof String && ((String) value).contains(contains)) {
