@@ -55,8 +55,8 @@ export function pluginsSelector(
       loadedPlugins = state.pluginState.loadedHttpcalls;
       break;
     case PROPERTYSETTER:
-      isAllPluginsLoaded = state.pluginState.allHttpcallsLoaded;
-      loadedPlugins = state.pluginState.loadedHttpcalls;
+      isAllPluginsLoaded = state.pluginState.allPropertysetterLoaded;
+      loadedPlugins = state.pluginState.loadedPropertysetters;
       break;
     default:
       isAllPluginsLoaded = false;
