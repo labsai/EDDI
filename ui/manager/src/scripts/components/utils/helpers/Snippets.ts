@@ -238,9 +238,9 @@ export const outputSnippets: ISnippet[] = [
 export const httpCallsSnippets: ISnippet[] = [
   {
     scope: 'json',
-    name: 'targetServer',
-    tabTrigger: 'targetServer',
-    content: `"targetServer": "\${1:targetServer}"`,
+    name: 'targetServerUri',
+    tabTrigger: 'targetServerUri',
+    content: `"targetServerUri": "\${1:targetServerUri}"`,
   },
   {
     scope: 'json',
@@ -271,6 +271,8 @@ export const httpCallsSnippets: ISnippet[] = [
 }`,
   },
 ];
+
+export const propertySetterSnippets: ISnippet[] = [];
 
 export const packageSnippets: ISnippet[] = [
   {

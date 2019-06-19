@@ -37,6 +37,7 @@ import {
   BEHAVIOR,
   HTTPCALLS,
   OUTPUT,
+  PROPERTYSETTER,
   REGULAR_DICTIONARY,
 } from '../components/utils/EddiTypes';
 import Parser from '../components/utils/Parser';
@@ -57,11 +58,13 @@ export interface IPluginState {
   allBehaviorsLoaded: boolean;
   allOutputsLoaded: boolean;
   allHttpcallsLoaded: boolean;
+  allPropertysetterLoaded: boolean;
 
   loadedDictionaries: number;
   loadedBehaviors: number;
   loadedOutputs: number;
   loadedHttpcalls: number;
+  loadedPropertysetters: number;
 }
 
 export const initialState: IPluginState = {
@@ -78,11 +81,13 @@ export const initialState: IPluginState = {
   allBehaviorsLoaded: false,
   allOutputsLoaded: false,
   allHttpcallsLoaded: false,
+  allPropertysetterLoaded: false,
 
   loadedDictionaries: 0,
   loadedBehaviors: 0,
   loadedOutputs: 0,
   loadedHttpcalls: 0,
+  loadedPropertysetters: 0,
 };
 
 const PluginReducer: IPluginReducer = (
@@ -189,6 +194,18 @@ const PluginReducer: IPluginReducer = (
         },
         allHttpcallsLoaded: {
           $set: pluginType === HTTPCALLS ? lastPage : state.allHttpcallsLoaded,
+        },
+        loadedPropertysetter: {
+          $set:
+            pluginType === PROPERTYSETTER
+              ? state.loadedPropertysetters + newPluginsLoaded
+              : state.loadedPropertysetters,
+        },
+        allPropertysetterLoaded: {
+          $set:
+            pluginType === PROPERTYSETTER
+              ? lastPage
+              : state.allPropertysetterLoaded,
         },
       });
 
@@ -314,6 +331,12 @@ const PluginReducer: IPluginReducer = (
             type === HTTPCALLS
               ? state.loadedHttpcalls + 1
               : state.loadedHttpcalls,
+        },
+        loadedPropertysetter: {
+          $set:
+            type === PROPERTYSETTER
+              ? state.loadedPropertysetters + 1
+              : state.loadedPropertysetters,
         },
       });
 

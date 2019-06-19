@@ -4,6 +4,7 @@ import {
   HTTPCALLS,
   OUTPUT,
   PACKAGE,
+  PROPERTYSETTER,
   REGULAR_DICTIONARY,
 } from './EddiTypes';
 
@@ -91,6 +92,51 @@ export const HTTPCALLS_POST_EXAMPLE: string = `{
     }
   ]
 }`;
+
+export const PROPERTYSETTER_POST_EXAMPLE: string = `{
+        "setOnActions": [
+          {
+            "actions": ["ask_for_admin_code"],
+            "setProperties": [
+              {
+                "name": "name",
+                "value": "[[\${memory.current.input}]]",
+                "scope": "conversation",
+                "override": true
+              }
+            ]
+          },
+          {
+            "actions": ["save_community_name"],
+            "setProperties": [
+              {
+                "name": "firstName",
+                "value": "[[\${properties.importantName != null ? properties.importantName : properties.otherName}]]",
+                "scope": "conversation",
+                "override": true
+              },
+              {
+                "name": "fullName",
+                "value": "[[\${properties.firstName}]]",
+                "scope": "conversation",
+                "override": true
+              }
+            ]
+          },
+          {
+            "actions": ["create_messages"],
+            "setProperties": [
+              {
+                "name": "create_first_messages",
+                "value": true,
+                "scope": "conversation",
+                "override": true
+              }
+            ]
+          }
+        ]
+      }
+`;
 /* tslint:disable */
 export const BOT_POST_EXAMPLE: string = `{
 "packages": [
@@ -147,6 +193,8 @@ export function getPostExample(eddiType: string) {
       return OUTPUT_POST_EXAMPLE;
     case HTTPCALLS:
       return HTTPCALLS_POST_EXAMPLE;
+    case PROPERTYSETTER:
+      return PROPERTYSETTER_POST_EXAMPLE;
     case BOT:
       return BOT_POST_EXAMPLE;
     case PACKAGE:
