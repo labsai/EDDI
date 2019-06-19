@@ -32,6 +32,10 @@ export const module = {
       loader: ExtractTextPlugin.extract({fallback: 'style-loader', use: 'css-loader!sass-loader'}),
     },
     {
+      test: /\.css$/i,
+      use: ['style-loader', 'css-loader'],
+    },
+    {
       test: /\.(png|jpe?g|gif)$/,
       loader: 'react-native-web-image-loader?name=[hash].[ext]',
     },

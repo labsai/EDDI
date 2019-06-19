@@ -21,6 +21,7 @@ const styles: CSSProperties = {
     fontSize: '14px',
     overflow: 'hidden',
     marginLeft: '1px',
+    marginTop: '4px',
   },
   option: {
     color: '#16325C',
@@ -36,7 +37,7 @@ const styles: CSSProperties = {
   },
   control: {
     display: 'flex',
-    height: '42px',
+    height: '39px',
     backgroundColor: '#FFF',
     borderRadius: '0',
     border: '0',

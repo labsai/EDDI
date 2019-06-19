@@ -28,6 +28,7 @@ import {
   CREATE_NEW_PACKAGE,
   ADD_NEW_PACKAGE_TO_BOTS,
   FETCH_JSON_SCHEMA,
+  DUPLICATE,
 } from '../actions/EddiApiActionTypes';
 import {
   getPackage,
@@ -44,7 +45,6 @@ import {
   getBotData,
   patchDescriptor,
   getCurrentPackage,
-  addPluginType,
   getPackageDescriptors,
   getBot,
   getAllDefaultPluginTypes,
@@ -64,6 +64,7 @@ import {
   addPackageToBot,
   IEddiSchema,
   getSchema,
+  duplicate,
 } from '../components/utils/AxiosFunctions';
 import {
   fetchBotFailedAction,
@@ -145,20 +146,18 @@ import {
   fetchBotJsonSchemaSuccessAction,
   fetchPackageJsonSchemaSuccessAction,
   fetchPluginJsonSchemaSuccessAction,
+  IDuplicateAction,
+  duplicateFailedAction,
+  duplicateSuccessAction,
 } from '../actions/EddiApiActions';
 import * as Edditypes from '../components/utils/EddiTypes';
 import Parser from '../components/utils/Parser';
-import { PACKAGE_PATH } from '../components/utils/EddiTypes';
-import { BEHAVIOR_PATH } from '../components/utils/EddiTypes';
-import { OUTPUT } from '../components/utils/EddiTypes';
 import { BOT } from '../components/utils/EddiTypes';
-import { BEHAVIOR } from '../components/utils/EddiTypes';
-import { OUTPUT_PATH } from '../components/utils/EddiTypes';
-import { REGULAR_DICTIONARY_PATH } from '../components/utils/EddiTypes';
-import { REGULAR_DICTIONARY } from '../components/utils/EddiTypes';
-import { BOT_PATH } from '../components/utils/EddiTypes';
 import { PACKAGE } from '../components/utils/EddiTypes';
-import { getAPIUrl } from '../components/utils/ApiFunctions';
+import {
+  getAPIUrl,
+  getTypeFromResource,
+} from '../components/utils/ApiFunctions';
 
 export function* FetchBots(action: IFetchBotsAction) {
   try {
@@ -669,4 +668,25 @@ export function* fetchJsonSchema(action: IFetchJsonSchemaAction): Iterator<{}> {
 
 export function* watchFetchJsonSchema(): Iterator<{}> {
   yield takeEvery(FETCH_JSON_SCHEMA, fetchJsonSchema);
+}
+
+export function* duplicateResource(action: IDuplicateAction): Iterator<{}> {
+  try {
+    const newResource = yield call(duplicate, action.resource, action.deepCopy);
+    const type = getTypeFromResource(newResource);
+    let bot: IBot;
+    let packages: IPackage[];
+    let plugins: IPlugin[];
+    if (type === BOT) {
+      bot = yield call(getBot, newResource);
+    }
+
+    yield put(duplicateSuccessAction(bot, packages, plugins));
+  } catch (err) {
+    yield put(duplicateFailedAction(err));
+  }
+}
+
+export function* watchDuplicateResource(): Iterator<{}> {
+  yield takeEvery(DUPLICATE, duplicateResource);
 }

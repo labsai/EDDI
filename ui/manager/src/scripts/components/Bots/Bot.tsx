@@ -14,6 +14,7 @@ import WhiteButton from '../Assets/Buttons/WhiteButton';
 import { READY } from '../utils/helpers/BotHelper';
 import { ClipLoader } from 'react-spinners';
 import { historyPush } from '../../history';
+import Options from '../Assets/Buttons/Options';
 
 interface IProps {
   bot: IBot;
@@ -93,6 +94,9 @@ class Bot extends React.Component<IProps> {
               deploymentStatus={this.props.bot.deploymentStatus}
               customStyles={styles.deployButton}
             />
+            <div style={styles.optionsMenu}>
+              <Options bot={this.props.bot} apiUrl={this.props.apiUrl} />
+            </div>
           </div>
           <div style={styles.botContent}>
             {renderIf(

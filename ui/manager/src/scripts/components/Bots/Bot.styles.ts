@@ -62,7 +62,7 @@ const styles: CSSProperties = {
   deployButton: {
     height: '35px',
     width: '108px',
-    marginRight: '25px',
+    marginRight: '10px',
     marginTop: '17px',
   },
   chatButton: {
@@ -98,6 +98,11 @@ const styles: CSSProperties = {
     height: '14px',
     marginLeft: '15px',
     marginTop: '26px',
+  },
+  optionsMenu: {
+    marginTop: '20px',
+    marginRight: '25px',
+    height: 'fit-content',
   },
 };
 export default styles;

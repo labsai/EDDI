@@ -1,6 +1,11 @@
 import axios from 'axios';
 import * as React from 'react';
-import { DEFAULT_LIMIT, getAPIUrl, getTypePath } from './ApiFunctions';
+import {
+  DEFAULT_LIMIT,
+  getAPIUrl,
+  getTypeFromResource,
+  getTypePath,
+} from './ApiFunctions';
 import Parser from './Parser';
 import * as _ from 'lodash';
 import { postJsonHelper, putHelper } from './helpers/JsonHelpers';
@@ -930,4 +935,24 @@ export async function getSchema(type: string) {
   } catch (err) {
     console.error(`Failed to get json schema. Error: ${err.message}`);
   }
+}
+
+export async function duplicate(resource: string, deepCopy: boolean) {
+  try {
+    const type = getTypeFromResource(resource);
+    const response: IResponse = await postJsonHelper(
+      `${getTypePath(type)}/${Parser.getIdAndVersion(
+        resource,
+      )}&deepCopy=${deepCopy}`,
+      '{}',
+    );
+    return response.headers.location;
+  } catch (err) {
+    console.error(
+      `Failed to duplicate ${Parser.getExtensionType(resource)}. Error: ${
+        err.message
+      }`,
+    );
+  }
+  return;
 }

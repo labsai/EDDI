@@ -1,0 +1,169 @@
+import * as React from 'react';
+import { Component, compose, pure, setDisplayName } from 'recompose';
+import { CSSProperties } from 'react';
+import { Dropdown } from 'semantic-ui-react';
+import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
+import * as Radium from 'radium';
+import {
+  GREY_BORDER,
+  GREY_COLOR,
+  LIGHT_GREY_COLOR,
+} from '../../../../styles/DefaultStylingProperties';
+import { IBot } from '../../utils/AxiosFunctions';
+import modalActionDispatchers from '../../../actions/ModalActionDispatchers';
+import eddiApiActionDispatchers from '../../../actions/EddiApiActionDispatchers';
+import {
+  ERROR,
+  IN_PROGRESS,
+  NOT_FOUND,
+  READY,
+} from '../../utils/helpers/BotHelper';
+
+const styles: CSSProperties = {
+  optionButton: {
+    ':hover': {
+      backgroundColor: '#E0E5EE',
+    },
+    height: '28px',
+    width: '28px',
+    border: '1px solid transparent',
+    borderRadius: '10px',
+    alignContent: 'center',
+  },
+  dropdown: {},
+  trigger: {
+    marginTop: '1px',
+    marginLeft: '1px',
+    width: '24px',
+    height: '24px',
+  },
+};
+
+interface IProps {
+  bot: IBot;
+  apiUrl: string;
+}
+
+const onClick = ({ event, props }) => console.log(event, props);
+
+const trigger = (
+  <FontAwesomeIcon
+    style={styles.trigger}
+    icon={['fas', 'ellipsis-v']}
+    color={GREY_COLOR}
+  />
+);
+
+class Options extends React.Component<IProps> {
+  render() {
+    const botDeployed = this.props.bot.deploymentStatus === READY;
+    const botUndeployed = this.props.bot.deploymentStatus === NOT_FOUND;
+    return (
+      <div style={styles.optionButton}>
+        <Dropdown style={styles.dropdown} trigger={trigger} icon={null}>
+          <Dropdown.Menu>
+            <Dropdown.Item
+              text={'Open Chat'}
+              icon={'chat'}
+              disabled={!botDeployed}
+              onClick={() =>
+                window
+                  .open(
+                    `${this.props.apiUrl}/chat/unrestricted/${
+                      this.props.bot.id
+                    }`,
+                    '_blank',
+                  )
+                  .focus()
+              }
+            />
+            <Dropdown.Item
+              text={'Rename'}
+              icon={'edit outline'}
+              onClick={() =>
+                modalActionDispatchers.showEditBotModal(this.props.bot)
+              }
+            />
+            <Dropdown.Item
+              text={'Edit JSON'}
+              icon={'edit'}
+              onClick={() =>
+                modalActionDispatchers.showEditJsonModal(
+                  this.props.bot.resource,
+                  JSON.stringify(
+                    {
+                      packages: this.props.bot.packages,
+                      channels: this.props.bot.channels,
+                    },
+                    null,
+                    '\t',
+                  ),
+                )
+              }
+            />
+            <Dropdown.Item
+              text={botDeployed ? 'Undeploy' : 'Deploy'}
+              icon={
+                botDeployed
+                  ? 'arrow alternate circle down outline'
+                  : 'arrow alternate circle up outline'
+              }
+              disabled={!botDeployed && !botUndeployed}
+              onClick={() =>
+                (botUndeployed &&
+                  eddiApiActionDispatchers.deployBotAction(
+                    this.props.bot.resource,
+                  )) ||
+                (botDeployed &&
+                  modalActionDispatchers.showConfirmationModal(
+                    `Are you sure you want to undeploy ${this.props.bot.name}?`,
+                    null,
+                    () =>
+                      eddiApiActionDispatchers.undeployBotAction(
+                        this.props.bot.resource,
+                      ),
+                  ))
+              }
+            />
+            <Dropdown.Item>
+              <Dropdown text={'Duplicate'}>
+                <Dropdown.Menu>
+                  <Dropdown.Item
+                    text={'Normal'}
+                    icon={'copy outline'}
+                    onClick={() =>
+                      eddiApiActionDispatchers.duplicateAction(
+                        this.props.bot.resource,
+                        false,
+                      )
+                    }
+                  />
+                  <Dropdown.Item
+                    text={'Deep copy'}
+                    icon={'copy'}
+                    onClick={() =>
+                      eddiApiActionDispatchers.duplicateAction(
+                        this.props.bot.resource,
+                        true,
+                      )
+                    }
+                  />
+                </Dropdown.Menu>
+              </Dropdown>
+            </Dropdown.Item>
+            <Dropdown.Divider />
+            <Dropdown.Item text={'Delete'} icon={'delete'} />
+          </Dropdown.Menu>
+        </Dropdown>
+      </div>
+    );
+  }
+}
+
+const ComposedOptions: Component<IProps> = compose<IProps>(
+  pure,
+  Radium,
+  setDisplayName('Options'),
+)(Options);
+
+export default ComposedOptions;

@@ -159,6 +159,7 @@
     "render-if": "0.1.1",
     "reselect": "3.0.1",
     "route-parser": "0.0.5",
+    "semantic-ui-react": "^0.81.3",
     "serve-static": "1.13.2"
   }
 }
