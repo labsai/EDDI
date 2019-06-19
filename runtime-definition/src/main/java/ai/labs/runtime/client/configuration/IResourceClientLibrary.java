@@ -13,7 +13,7 @@ public interface IResourceClientLibrary {
 
     <T> T getResource(URI uri, Class<T> clazz) throws ServiceException;
 
-    public Response duplicateResource(URI uri) throws ServiceException;
+    Response duplicateResource(URI uri) throws ServiceException;
 
     class ResourceClientLibraryException extends RuntimeException {
         public ResourceClientLibraryException(String message, Exception e) {

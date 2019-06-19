@@ -1,10 +1,10 @@
 package ai.labs.resources.impl.expression;
 
 import ai.labs.persistence.IResourceStore;
-import ai.labs.resources.rest.expression.IRestExpression;
-import ai.labs.resources.rest.packages.IPackageStore;
-import ai.labs.resources.rest.packages.model.PackageConfiguration;
-import ai.labs.resources.rest.regulardictionary.IRegularDictionaryStore;
+import ai.labs.resources.rest.config.packages.IPackageStore;
+import ai.labs.resources.rest.config.packages.model.PackageConfiguration;
+import ai.labs.resources.rest.config.regulardictionary.IRegularDictionaryStore;
+import ai.labs.resources.rest.config.regulardictionary.IRestExpression;
 import ai.labs.utilities.CollectionUtilities;
 import ai.labs.utilities.RestUtilities;
 import lombok.extern.slf4j.Slf4j;

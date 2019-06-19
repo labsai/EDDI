@@ -2,8 +2,8 @@ package ai.labs.behavior.impl;
 
 import ai.labs.behavior.impl.BehaviorGroup.ExecutionStrategy;
 import ai.labs.behavior.impl.conditions.IBehaviorCondition;
-import ai.labs.resources.rest.behavior.model.BehaviorConfiguration;
-import ai.labs.resources.rest.behavior.model.BehaviorRuleConditionConfiguration;
+import ai.labs.resources.rest.config.behavior.model.BehaviorConfiguration;
+import ai.labs.resources.rest.config.behavior.model.BehaviorRuleConditionConfiguration;
 import ai.labs.serialization.DeserializationException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.extern.slf4j.Slf4j;

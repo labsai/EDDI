@@ -1,7 +1,7 @@
 package ai.labs.runtime.service;
 
 import ai.labs.models.DocumentDescriptor;
-import ai.labs.resources.rest.packages.model.PackageConfiguration;
+import ai.labs.resources.rest.config.packages.model.PackageConfiguration;
 
 /**
  * @author ginccc

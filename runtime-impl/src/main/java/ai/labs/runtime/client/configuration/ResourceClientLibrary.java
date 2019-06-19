@@ -1,14 +1,15 @@
 package ai.labs.runtime.client.configuration;
 
-import ai.labs.resources.rest.behavior.IRestBehaviorStore;
-import ai.labs.resources.rest.http.IRestHttpCallsStore;
-import ai.labs.resources.rest.output.IRestOutputStore;
-import ai.labs.resources.rest.parser.IRestParserStore;
-import ai.labs.resources.rest.regulardictionary.IRestRegularDictionaryStore;
+import ai.labs.persistence.model.ResourceId;
+import ai.labs.resources.rest.config.behavior.IRestBehaviorStore;
+import ai.labs.resources.rest.config.http.IRestHttpCallsStore;
+import ai.labs.resources.rest.config.output.IRestOutputStore;
+import ai.labs.resources.rest.config.parser.IRestParserStore;
+import ai.labs.resources.rest.config.propertysetter.IRestPropertySetterStore;
+import ai.labs.resources.rest.config.regulardictionary.IRestRegularDictionaryStore;
 import ai.labs.runtime.service.ServiceException;
 import ai.labs.utilities.RuntimeUtilities;
 import ai.labs.utilities.URIUtilities;
-import ai.labs.utilities.URIUtilities.ResourceId;
 
 import javax.inject.Inject;
 import javax.ws.rs.core.Response;
@@ -25,6 +26,7 @@ public class ResourceClientLibrary implements IResourceClientLibrary {
     private final IRestBehaviorStore restBehaviorStore;
     private final IRestHttpCallsStore restHttpCallsStore;
     private final IRestOutputStore restOutputStore;
+    private final IRestPropertySetterStore restPropertySetterStore;
     private Map<String, IResourceService> restInterfaces;
 
     @Inject
@@ -32,12 +34,14 @@ public class ResourceClientLibrary implements IResourceClientLibrary {
                                  IRestRegularDictionaryStore restRegularDictionaryStore,
                                  IRestBehaviorStore restBehaviorStore,
                                  IRestHttpCallsStore restHttpCallsStore,
-                                 IRestOutputStore restOutputStore) {
+                                 IRestOutputStore restOutputStore,
+                                 IRestPropertySetterStore restPropertySetterStore) {
         this.restParserStore = restParserStore;
         this.restRegularDictionaryStore = restRegularDictionaryStore;
         this.restBehaviorStore = restBehaviorStore;
         this.restHttpCallsStore = restHttpCallsStore;
         this.restOutputStore = restOutputStore;
+        this.restPropertySetterStore = restPropertySetterStore;
 
         init();
     }
@@ -102,6 +106,18 @@ public class ResourceClientLibrary implements IResourceClientLibrary {
             @Override
             public Response duplicate(String id, Integer version) {
                 return restOutputStore.duplicateOutputSet(id, version);
+            }
+        });
+
+        restInterfaces.put("ai.labs.property", new IResourceService() {
+            @Override
+            public Object read(String id, Integer version) {
+                return restPropertySetterStore.readPropertySetter(id, version);
+            }
+
+            @Override
+            public Response duplicate(String id, Integer version) {
+                return restPropertySetterStore.duplicatePropertySetter(id, version);
             }
         });
     }

@@ -7,9 +7,10 @@ import ai.labs.memory.model.SimpleConversationMemorySnapshot;
 import ai.labs.models.ConversationState;
 import ai.labs.models.Deployment;
 import ai.labs.models.DocumentDescriptor;
-import ai.labs.resources.rest.bots.IBotStore;
-import ai.labs.resources.rest.bots.IRestBotStore;
-import ai.labs.resources.rest.bots.model.BotConfiguration;
+import ai.labs.persistence.IResourceStore;
+import ai.labs.resources.rest.config.bots.IBotStore;
+import ai.labs.resources.rest.config.bots.IRestBotStore;
+import ai.labs.resources.rest.config.bots.model.BotConfiguration;
 import ai.labs.rest.rest.IRestBotEngine;
 import ai.labs.runtime.IBotFactory;
 import ai.labs.runtime.service.ServiceException;
@@ -74,7 +75,7 @@ public class XmppEndpoint implements IXmppEndpoint {
         try {
             List<DocumentDescriptor> documentDescriptors = restBotStore.readBotDescriptors("", 0, 20);
             for (DocumentDescriptor documentDescriptor : documentDescriptors) {
-                URIUtilities.ResourceId resourceId = URIUtilities.extractResourceId(documentDescriptor.getResource());
+                IResourceStore.IResourceId resourceId = URIUtilities.extractResourceId(documentDescriptor.getResource());
                 String botId = resourceId.getId();
                 Integer version = getLatestDeployedBotVersion(botId);
                 BotConfiguration botConfiguration = botStore.read(botId, version);
@@ -203,7 +204,7 @@ public class XmppEndpoint implements IXmppEndpoint {
         try {
             Response response = restBotEngine.startConversation(environment, botId, senderId);
             if (response.getStatus() == 201) {
-                URIUtilities.ResourceId resourceIdConversation =
+                IResourceStore.IResourceId resourceIdConversation =
                         URIUtilities.extractResourceId(response.getLocation());
                 conversationId = resourceIdConversation.getId();
                 conversationIdCache.put(senderId, conversationId);

@@ -6,7 +6,7 @@ import ai.labs.lifecycle.PackageConfigurationException;
 import ai.labs.memory.IConversationMemory;
 import ai.labs.memory.IData;
 import ai.labs.memory.model.Data;
-import ai.labs.resources.rest.behavior.model.BehaviorConfiguration;
+import ai.labs.resources.rest.config.behavior.model.BehaviorConfiguration;
 import ai.labs.resources.rest.extensions.model.ExtensionDescriptor;
 import ai.labs.resources.rest.extensions.model.ExtensionDescriptor.ConfigValue;
 import ai.labs.resources.rest.extensions.model.ExtensionDescriptor.FieldType;

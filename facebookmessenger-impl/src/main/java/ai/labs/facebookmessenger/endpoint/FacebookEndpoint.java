@@ -7,8 +7,9 @@ import ai.labs.httpclient.IHttpClient;
 import ai.labs.httpclient.IRequest;
 import ai.labs.httpclient.IResponse;
 import ai.labs.models.Deployment;
-import ai.labs.resources.rest.bots.IBotStore;
-import ai.labs.resources.rest.bots.model.BotConfiguration;
+import ai.labs.persistence.model.ResourceId;
+import ai.labs.resources.rest.config.bots.IBotStore;
+import ai.labs.resources.rest.config.bots.model.BotConfiguration;
 import ai.labs.rest.rest.IRestBotEngine;
 import ai.labs.rest.restinterfaces.IRestInterfaceFactory;
 import ai.labs.runtime.IBotFactory;
@@ -336,7 +337,7 @@ public class FacebookEndpoint implements IFacebookEndpoint {
             Response response = restInterfaceFactory.get(IRestBotEngine.class).
                     startConversation(environment, botId, senderId);
             if (response.getStatus() == 201) {
-                URIUtilities.ResourceId resourceIdConversation =
+                ResourceId resourceIdConversation =
                         URIUtilities.extractResourceId(response.getLocation());
                 conversationId = resourceIdConversation.getId();
                 conversationIdCache.put(senderId, conversationId);

@@ -1,7 +1,7 @@
 package ai.labs.runtime.service;
 
-import ai.labs.resources.rest.bots.IRestBotStore;
-import ai.labs.resources.rest.bots.model.BotConfiguration;
+import ai.labs.resources.rest.config.bots.IRestBotStore;
+import ai.labs.resources.rest.config.bots.model.BotConfiguration;
 
 import javax.inject.Inject;
 

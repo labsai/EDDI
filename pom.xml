@@ -51,8 +51,8 @@
         <module>behavior-impl</module>
         <module>templateengine-definition</module>
         <module>templateengine-impl-thymeleaf</module>
-        <module>propertydisposer-definition</module>
-        <module>propertydisposer-impl</module>
+        <module>propertysetter-definition</module>
+        <module>propertysetter-impl</module>
         <module>backupservice-defintion</module>
         <module>backupservice-impl</module>
         <module>xmpp-definition</module>
