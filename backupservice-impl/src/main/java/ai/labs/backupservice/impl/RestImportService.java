@@ -14,6 +14,8 @@ import ai.labs.resources.rest.config.output.IRestOutputStore;
 import ai.labs.resources.rest.config.output.model.OutputConfigurationSet;
 import ai.labs.resources.rest.config.packages.IRestPackageStore;
 import ai.labs.resources.rest.config.packages.model.PackageConfiguration;
+import ai.labs.resources.rest.config.propertysetter.IRestPropertySetterStore;
+import ai.labs.resources.rest.config.propertysetter.model.PropertySetterConfiguration;
 import ai.labs.resources.rest.config.regulardictionary.IRestRegularDictionaryStore;
 import ai.labs.resources.rest.config.regulardictionary.model.RegularDictionaryConfiguration;
 import ai.labs.resources.rest.documentdescriptor.IRestDocumentDescriptorStore;
@@ -195,6 +197,15 @@ public class RestImportService extends AbstractBackupService implements IRestImp
                             updateDocumentDescriptor(packagePath, httpCallsUris, newHttpCallsUris);
                             packageFileString = replaceURIs(packageFileString, httpCallsUris, newHttpCallsUris);
 
+                            // ... for property
+                            List<URI> propertyUris = extractResourcesUris(packageFileString, PROPERTY_URI_PATTERN);
+                            List<URI> newPropertyUris = createNewProperties(
+                                    readResources(propertyUris, packagePath,
+                                            PROPERTY_EXT, PropertySetterConfiguration.class));
+
+                            updateDocumentDescriptor(packagePath, propertyUris, newPropertyUris);
+                            packageFileString = replaceURIs(packageFileString, propertyUris, newPropertyUris);
+
                             // ... for output
                             List<URI> outputUris = extractResourcesUris(packageFileString, OUTPUT_URI_PATTERN);
                             List<URI> newOutputUris = createNewOutputs(
@@ -268,6 +279,16 @@ public class RestImportService extends AbstractBackupService implements IRestImp
             Response httpCallsResponse = restHttpCallsStore.createHttpCalls(httpCallsConfiguration);
             checkIfCreatedResponse(httpCallsResponse);
             return httpCallsResponse.getLocation();
+        }).collect(Collectors.toList());
+    }
+
+    private List<URI> createNewProperties(List<PropertySetterConfiguration> propertySetterConfigurations)
+            throws RestInterfaceFactory.RestInterfaceFactoryException {
+        IRestPropertySetterStore restPropertySetterStore = getRestResourceStore(IRestPropertySetterStore.class);
+        return propertySetterConfigurations.stream().map(propertySetterConfiguration -> {
+            Response propertySetter = restPropertySetterStore.createPropertySetter(propertySetterConfiguration);
+            checkIfCreatedResponse(propertySetter);
+            return propertySetter.getLocation();
         }).collect(Collectors.toList());
     }
 

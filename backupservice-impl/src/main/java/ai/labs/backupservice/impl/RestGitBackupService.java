@@ -86,9 +86,9 @@ public class RestGitBackupService implements IRestGitBackupService {
                         .call();
                 if (pullResult.isSuccessful()) {
                     importBot(botId, resourceId.getVersion());
-                    return Response.status(Response.Status.OK).entity("Pulled from: " + pullResult.getFetchedFrom() + ". Was successfull!").build();
+                    return Response.status(Response.Status.OK).entity("Pulled from: " + pullResult.getFetchedFrom() + ". Was successful!").build();
                 } else {
-                    return Response.status(Response.Status.OK).entity("Pull from repository was not successful! Please check your git settings! Maybe the path " + tmpPath.toString() + " is not empty or not a git repository").build();
+                    return Response.status(Response.Status.OK).entity("Pull from repository was not successful! Please check your git settings! Maybe the path " + tmpPath + " is not empty or not a git repository").build();
                 }
             }
 
