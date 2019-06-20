@@ -20,5 +20,7 @@ RUN unzip /apiserver/install/apiserver-$EDDI_VERSION-package.zip -d /apiserver  
     chmod -R 777 /apiserver/ && \
     rm /apiserver/install/apiserver-$EDDI_VERSION-package.zip
 
+HEALTHCHECK --interval=10s --timeout=10s CMD curl --fail http://localhost:7070/health || exit 1
+
 WORKDIR /apiserver/
 ENTRYPOINT /apiserver/start_eddi.sh
