@@ -17,7 +17,7 @@ public class JsonSchemaCreator implements IJsonSchemaCreator {
 
     @Override
     public JsonNode generateSchema(Class<?> clazz) {
-        JsonSchemaConfig config = JsonSchemaConfig.html5EnabledSchema();
+        JsonSchemaConfig config = JsonSchemaConfig.vanillaJsonSchemaDraft4();
         JsonSchemaConfig eddiJsonSchemaConfig = new JsonSchemaConfig(
                 config.autoGenerateTitleForProperties(),
                 config.defaultArrayFormat(),
