@@ -12,7 +12,7 @@ import {
   LIGHT_GREY_COLOR3,
   SMALL_FONT2,
 } from '../../../styles/DefaultStylingProperties';
-import { pageEnum } from '../pages/ExtensionsPage';
+import { pageEnum } from '../pages/pageEnum';
 
 const styles: CSSProperties = {
   navBar: {

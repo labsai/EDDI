@@ -6,7 +6,7 @@ import { CSSProperties } from 'react';
 import { Link } from 'react-router-dom';
 import { ModalEnum } from '../utils/ModalEnum';
 import BlueButton from '../Assets/Buttons/BlueButton';
-import { pageEnum } from '../pages/ExtensionsPage';
+import { pageEnum } from '../pages/pageEnum';
 
 const styles: CSSProperties = {
   createNewBotButton: {

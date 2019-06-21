@@ -11,18 +11,9 @@ import {
   PROPERTYSETTER,
   REGULAR_DICTIONARY,
 } from '../utils/EddiTypes';
+import { pageEnum } from './pageEnum';
 
 const eddiLogo = require('../../../public/images/eddi-logo.png');
-
-export enum pageEnum {
-  'dictionary',
-  'behavior',
-  'output',
-  'httpCalls',
-  'property',
-  'bot',
-  'package',
-}
 
 interface IRouteProps {
   location: { search: string };

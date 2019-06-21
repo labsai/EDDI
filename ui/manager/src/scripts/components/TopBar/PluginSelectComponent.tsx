@@ -8,7 +8,7 @@ import { CSSProperties } from 'react';
 import Parser from '../utils/Parser';
 import { historyPush } from '../../history';
 import styles from './PluginSelectComponent.styles';
-import { pageEnum } from '../pages/ExtensionsPage';
+import { pageEnum } from '../pages/pageEnum';
 
 const customStyles = {
   control: (base, state) => ({
