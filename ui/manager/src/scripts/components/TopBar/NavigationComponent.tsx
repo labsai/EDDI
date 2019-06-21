@@ -12,6 +12,7 @@ import {
   LIGHT_GREY_COLOR3,
   SMALL_FONT2,
 } from '../../../styles/DefaultStylingProperties';
+import { pageEnum } from '../pages/ExtensionsPage';
 
 const styles: CSSProperties = {
   navBar: {
@@ -38,16 +39,6 @@ const styles: CSSProperties = {
     color: GREY_COLOR,
   },
 };
-
-export enum pageEnum {
-  'dictionary',
-  'behavior',
-  'output',
-  'httpCalls',
-  'property',
-  'bot',
-  'package',
-}
 
 interface IProps {
   page: pageEnum;

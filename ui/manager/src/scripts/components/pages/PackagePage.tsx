@@ -2,8 +2,8 @@ import * as React from 'react';
 import TopBarComponent from '../TopBar/TopBarComponent';
 import styles from '../App.style';
 import { Component, compose, pure, setDisplayName } from 'recompose';
-import { pageEnum } from '../TopBar/NavigationComponent';
 import PackageList from '../Packages/PackageList';
+import { pageEnum } from './ExtensionsPage';
 
 interface IProps {}
 interface IState {

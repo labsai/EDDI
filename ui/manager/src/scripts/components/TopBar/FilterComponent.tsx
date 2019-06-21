@@ -1,7 +1,7 @@
 import * as React from 'react';
 import * as Radium from 'radium';
 import { CSSProperties } from 'react';
-import { pageEnum } from './NavigationComponent';
+import { pageEnum } from '../pages/ExtensionsPage';
 
 const styles: CSSProperties = {
   filter: {

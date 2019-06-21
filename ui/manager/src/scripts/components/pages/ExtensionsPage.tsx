@@ -2,7 +2,6 @@ import * as React from 'react';
 import TopBarComponent from '../TopBar/TopBarComponent';
 import styles from '../App.style';
 import { Component, compose, pure, setDisplayName } from 'recompose';
-import { pageEnum } from '../TopBar/NavigationComponent';
 import Parser from '../utils/Parser';
 import PluginList from '../Plugins/PluginList';
 import {
@@ -14,6 +13,16 @@ import {
 } from '../utils/EddiTypes';
 
 const eddiLogo = require('../../../public/images/eddi-logo.png');
+
+export enum pageEnum {
+  'dictionary',
+  'behavior',
+  'output',
+  'httpCalls',
+  'property',
+  'bot',
+  'package',
+}
 
 interface IRouteProps {
   location: { search: string };

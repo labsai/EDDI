@@ -7,8 +7,8 @@ import * as _ from 'lodash';
 import { CSSProperties } from 'react';
 import Parser from '../utils/Parser';
 import { historyPush } from '../../history';
-import { pageEnum } from './NavigationComponent';
 import styles from './PluginSelectComponent.styles';
+import { pageEnum } from '../pages/ExtensionsPage';
 
 const customStyles = {
   control: (base, state) => ({
