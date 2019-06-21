@@ -44,6 +44,7 @@ export enum pageEnum {
   'behavior',
   'output',
   'httpCalls',
+  'property',
   'bot',
   'package',
 }

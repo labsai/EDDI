@@ -9,6 +9,7 @@ import {
   BEHAVIOR,
   HTTPCALLS,
   OUTPUT,
+  PROPERTYSETTER,
   REGULAR_DICTIONARY,
 } from '../utils/EddiTypes';
 
@@ -51,6 +52,8 @@ class ExtensionsPage extends React.Component<IProps, IState> {
         return OUTPUT;
       case 'httpCalls':
         return HTTPCALLS;
+      case 'property':
+        return PROPERTYSETTER;
       default:
         return;
     }

@@ -14,6 +14,7 @@ import {
   BEHAVIOR,
   BOT,
   HTTPCALLS,
+  PROPERTYSETTER,
   OUTPUT,
   PACKAGE,
   REGULAR_DICTIONARY,
@@ -51,7 +52,7 @@ export interface IJsonError {
 }
 
 function formatKeyPath(path: string): string {
-  const key = path.replace(/\.|\[/g, '/').replace(']', '');
+  const key = path.replace(/\.|\[/g, '/').replace(/]|'/g, '');
   return key;
 }
 
@@ -65,6 +66,10 @@ export function compileJsonSchema(schema: {}, jsonText: string): IJsonError[] {
     return [];
   }
   const errors: IJsonError[] = validate.errors.map(err => {
+    console.log(err.message);
+    console.log(err.dataPath);
+    console.log(formatKeyPath(err.dataPath));
+    console.log(json.pointers);
     return {
       message: err.message,
       line: json.pointers[formatKeyPath(err.dataPath)].value.line,
@@ -83,6 +88,8 @@ export function getSnippets(type: string): ISnippet[] {
       return Snippets.outputSnippets;
     case HTTPCALLS:
       return Snippets.httpCallsSnippets;
+    case PROPERTYSETTER:
+      return Snippets.propertySetterSnippets;
     case PACKAGE:
       return Snippets.packageSnippets;
     case BOT:

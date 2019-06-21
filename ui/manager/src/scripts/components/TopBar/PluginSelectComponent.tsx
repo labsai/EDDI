@@ -41,6 +41,7 @@ const pluginResourceOptions = [
   'Behavior rules',
   'Output sets',
   'HTTP calls',
+  'Properties',
 ];
 
 interface IOption {
@@ -78,6 +79,7 @@ class PluginSelectComponent extends React.Component<IProps, IState> {
       pageEnum.behavior,
       pageEnum.output,
       pageEnum.httpCalls,
+      pageEnum.property,
     ].includes(props.page);
   }
 
