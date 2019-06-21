@@ -12,11 +12,13 @@ import VersionSelectComponent from '../Assets/VersionSelectComponent';
 import { Link, browserHistory } from 'react-router-dom';
 import { historyPush } from '../../history';
 import eddiApiActionDispatchers from '../../actions/EddiApiActionDispatchers';
+import { ClipLoader } from 'react-spinners';
+import { BLUE_COLOR } from '../../../styles/DefaultStylingProperties';
 
 interface IPublicProps {
   isPackageInBot: boolean;
   packageResource: string;
-  selectVersion(resource: string, version: number): void;
+  selectVersion(version: number): void;
 }
 
 interface IPrivateProps extends IPublicProps {
@@ -45,7 +47,7 @@ class Package extends React.Component<IPrivateProps> {
   }
 
   selectVersion = (newVersion: number) => {
-    this.props.selectVersion(this.props.packagePayload.resource, newVersion);
+    this.props.selectVersion(newVersion);
   };
 
   getNameStyle() {
@@ -90,7 +92,14 @@ class Package extends React.Component<IPrivateProps> {
           {renderIf(!this.props.error && !_.isEmpty(packagePayload))(() => (
             <div style={styles.pack}>
               <div style={styles.packageHeader}>
-                <div style={this.getNameStyle()}>
+                <div
+                  style={this.getNameStyle()}
+                  onClick={() =>
+                    historyPush(
+                      `/packageview/${this.props.packagePayload.id}`,
+                      [`version=${this.props.packagePayload.version}`],
+                    )
+                  }>
                   {packagePayload.name || packagePayload.id}
                 </div>
                 <VersionSelectComponent
@@ -116,6 +125,9 @@ class Package extends React.Component<IPrivateProps> {
                   {'Edit package'}
                 </button>
               </div>
+              {renderIf(_.isUndefined(packagePayload.packageData))(() => (
+                <ClipLoader color={BLUE_COLOR} />
+              ))}
               <div style={styles.packageContent}>
                 <PluginList packagePayload={packagePayload} />
               </div>
@@ -129,8 +141,8 @@ class Package extends React.Component<IPrivateProps> {
 
 const ComposedPackage: Component<IPublicProps> = compose<IPublicProps>(
   pure,
-  Radium,
   connect(packageSelector),
+  Radium,
   setDisplayName('Package'),
 )(Package);
 

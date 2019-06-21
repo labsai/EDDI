@@ -7,18 +7,6 @@ const styles: CSSProperties = {
   filter: {
     display: 'flex',
   },
-  filterArrow: {
-    height: '12px',
-    marginRight: '41px',
-    marginTop: '19px',
-  },
-  filterTitle: {
-    color: '#16325C',
-    fontWeight: 'bold',
-    textAlign: 'center',
-    width: '60px',
-    marginTop: '15px',
-  },
   searchBox: {
     backgroundColor: '#FFFFFF',
     border: '1px solid #E0E5EE',
@@ -47,7 +35,6 @@ const styles: CSSProperties = {
   },
 };
 
-const ArrowRight = require('../../../public/images/ArrowRight.png');
 const SearchIcon = require('../../../public/images/searchIcon.png');
 
 interface IProps {
@@ -65,8 +52,6 @@ function getSearchName(page: pageEnum) {
 
 const FilterComponent = (props: IProps) => (
   <div style={styles.filter}>
-    <div style={styles.filterTitle}>{'Filters'}</div>
-    <img src={ArrowRight} style={styles.filterArrow} />
     <div style={styles.searchBox}>
       <img src={SearchIcon} style={styles.searchBoxIcon} />
       <input

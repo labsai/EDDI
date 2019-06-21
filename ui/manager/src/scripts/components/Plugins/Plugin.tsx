@@ -11,6 +11,8 @@ import { connect } from 'react-redux';
 import PackagesUsingPlugin from '../PackageDetailView/UsedByComponent/PackagesUsingPlugin';
 import styles from './Plugin.styles';
 import { ClipLoader } from 'react-spinners';
+import modalActionDispatchers from '../../actions/ModalActionDispatchers';
+import * as Radium from 'radium';
 
 interface IPublicProps {
   pluginResource: string;
@@ -34,13 +36,16 @@ const Plugin: React.StatelessComponent<IPrivateProps> = (
       {renderIf(props.plugin)(() => (
         <div>
           {renderIf(props.error)(() => <p>{'Error: Could not load plugin'}</p>)}
-          {renderIf(!props.error && _.isEmpty(props.plugin))(() => (
-            <p>{'This plugin does not exist'}</p>
-          ))}
-          {renderIf(!props.error && !_.isEmpty(props.plugin))(() => (
+          {renderIf(!props.error)(() => (
             <div>
               <div style={styles.topContent}>
-                <div style={styles.pluginName}>
+                <div
+                  style={styles.pluginName}
+                  onClick={() =>
+                    modalActionDispatchers.showViewJsonModal(
+                      props.plugin.resource,
+                    )
+                  }>
                   {props.plugin.name === ''
                     ? props.plugin.id
                     : props.plugin.name}
@@ -75,6 +80,6 @@ const Plugin: React.StatelessComponent<IPrivateProps> = (
 const ComposedPlugin: Component<IPrivateProps> = compose<
   IPrivateProps,
   IPublicProps
->(pure, connect(pluginSelector), setDisplayName('Plugin'))(Plugin);
+>(pure, connect(pluginSelector), Radium, setDisplayName('Plugin'))(Plugin);
 
 export default ComposedPlugin;

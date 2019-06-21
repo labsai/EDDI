@@ -1,4 +1,5 @@
 import { CSSProperties } from 'react';
+import { LIGHT_GREY_COLOR3 } from '../../../styles/DefaultStylingProperties';
 
 const styles: CSSProperties = {
   editPackage: {
@@ -8,7 +9,7 @@ const styles: CSSProperties = {
     cursor: 'pointer',
     fontSize: '13px',
     textAlign: 'right',
-    backgroundColor: '#FFF',
+    backgroundColor: 'transparent',
   },
   editPackageDisabled: {
     color: '#D8DDE6',
@@ -22,6 +23,10 @@ const styles: CSSProperties = {
   },
   packageContent: {},
   packageHeader: {
+    ':hover': {
+      backgroundColor: LIGHT_GREY_COLOR3,
+    },
+    cursor: 'pointer',
     display: 'flex',
     flex: '1',
   },

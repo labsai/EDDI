@@ -1,11 +1,21 @@
 import { CSSProperties } from 'react';
+import {
+  DARK_BLUE_COLOR,
+  GREY_COLOR,
+  LIGHT_BLUE_COLOR,
+  LIGHT_GREY_COLOR,
+  LIGHT_GREY_COLOR2,
+  LIGHT_GREY_COLOR3,
+  SMALL_FONT2,
+  WHITE_COLOR,
+} from '../../../styles/DefaultStylingProperties';
 
 const styles: CSSProperties = {
   indicatorsContainer: {
     position: 'relative',
     borderLeft: '6px solid transparent',
     borderRight: '6px solid transparent',
-    borderTop: '6px solid #16325C',
+    borderTop: '6px solid ' + DARK_BLUE_COLOR,
     height: '0',
     marginRight: '10px',
     width: '0',
@@ -18,17 +28,18 @@ const styles: CSSProperties = {
     },
   },
   valueContainer: {
-    fontSize: '14px',
+    fontSize: SMALL_FONT2,
     overflow: 'hidden',
     marginLeft: '1px',
+    marginTop: '4px',
   },
   option: {
-    color: '#16325C',
-    fontSize: '14px',
+    color: DARK_BLUE_COLOR,
+    fontSize: SMALL_FONT2,
     overflow: 'hidden',
     textAlign: 'left',
     ':hover': {
-      backgroundColor: '#F7F9FB',
+      backgroundColor: LIGHT_GREY_COLOR,
     },
   },
   selectContainer: {
@@ -37,23 +48,24 @@ const styles: CSSProperties = {
   control: {
     display: 'flex',
     height: '42px',
-    backgroundColor: '#FFF',
+    backgroundColor: WHITE_COLOR,
     borderRadius: '0',
     border: '0',
-    borderBottom: '3px solid #E0E5EE',
+    borderBottom: '3px solid ' + LIGHT_GREY_COLOR2,
     ':hover': {
       cursor: 'pointer',
-      backgroundColor: '#F7F9FB',
+      backgroundColor: LIGHT_GREY_COLOR3,
+      borderBottom: '3px solid ' + GREY_COLOR,
     },
   },
   controlSelected: {
-    borderBottom: '3px solid #4A90E2',
+    borderBottom: '3px solid ' + LIGHT_BLUE_COLOR,
   },
   singleValue: {
-    color: '#7A849E',
+    color: GREY_COLOR,
   },
   singleValueSelected: {
-    color: '#16325C',
+    color: DARK_BLUE_COLOR,
   },
 };
 

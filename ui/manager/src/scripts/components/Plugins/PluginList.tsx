@@ -70,7 +70,7 @@ class PluginList extends React.Component<IPrivateProps, IState> {
     }
   }
 
-  loadMore = (props = this.props) => {
+  loadMore(props = this.props) {
     if (this.state.loading || !props.pluginType) {
       return;
     }
@@ -83,8 +83,9 @@ class PluginList extends React.Component<IPrivateProps, IState> {
         5,
         Math.floor(props.loadedPlugins / 5),
       );
+      return;
     }
-  };
+  }
 
   render() {
     const pluginList: IPlugin[] = this.filterPlugins();
@@ -99,41 +100,39 @@ class PluginList extends React.Component<IPrivateProps, IState> {
           <div style={styles.title}>{pluginName}</div>
           <div style={styles.lastModified}>{'Last Modified'}</div>
         </div>
-        <div>
-          {renderIf(this.props.error)(() => (
-            <p>{`Error: Could not load ${pluginName.toLowerCase()}`}</p>
-          ))}
-          {renderIf(!this.props.error && _.isEmpty(this.props.plugins))(() => (
-            <p>{`There are no ${pluginName.toLowerCase()} yet`}</p>
-          ))}
-          {renderIf(!this.props.error && !_.isEmpty(this.props.plugins))(() => (
-            <div>
-              {renderIf(_.isEmpty(pluginList))(() => (
-                <p>{`Found no ${pluginName.toLowerCase()} matching: "${
-                  this.props.filterText
-                }"`}</p>
+        {renderIf(this.props.error)(() => (
+          <p>{`Error: Could not load ${pluginName.toLowerCase()}`}</p>
+        ))}
+        {renderIf(
+          !this.props.isLoading &&
+            !this.props.error &&
+            _.isEmpty(this.props.plugins),
+        )(() => <p>{`There are no ${pluginName.toLowerCase()} yet`}</p>)}
+        {renderIf(!this.props.error && !_.isEmpty(this.props.plugins))(() => (
+          <div style={styles.pluginList}>
+            {renderIf(_.isEmpty(pluginList))(() => (
+              <p>{`Found no ${pluginName.toLowerCase()} matching: "${
+                this.props.filterText
+              }"`}</p>
+            ))}
+            <InfiniteScroll
+              pageStart={0}
+              loadMore={() => this.loadMore()}
+              hasMore={!this.props.isAllPluginsLoaded}
+              loader={
+                <div className="loader" key={0}>
+                  Loading ...
+                </div>
+              }>
+              {pluginList.map(plugin => (
+                <PluginContainer
+                  key={plugin.id}
+                  pluginResource={plugin.resource}
+                />
               ))}
-              <InfiniteScroll
-                pageStart={0}
-                loadMore={this.loadMore}
-                hasMore={
-                  !this.props.isAllPluginsLoaded && !this.props.isLoading
-                }
-                loader={
-                  <div className="loader" key={0}>
-                    Loading ...
-                  </div>
-                }>
-                {pluginList.map(plugin => (
-                  <PluginContainer
-                    key={plugin.id}
-                    pluginResource={plugin.resource}
-                  />
-                ))}
-              </InfiniteScroll>
-            </div>
-          ))}
-        </div>
+            </InfiniteScroll>
+          </div>
+        ))}
       </div>
     );
   }

@@ -28,5 +28,8 @@ const styles: CSSProperties = {
     marginRight: '0',
     marginTop: '14px',
   },
+  pluginList: {
+    paddingBottom: '250px',
+  },
 };
 export default styles;

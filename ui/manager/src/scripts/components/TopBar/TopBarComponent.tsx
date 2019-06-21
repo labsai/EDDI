@@ -18,7 +18,7 @@ const styles: CSSProperties = {
     height: '36px',
     marginLeft: '32px',
     marginTop: '7px',
-    width: '108px',
+    minWidth: '108px',
   },
   topBarCenter: {
     flex: '1',
