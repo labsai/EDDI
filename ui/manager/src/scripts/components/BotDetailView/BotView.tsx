@@ -15,7 +15,7 @@ import Parser from '../utils/Parser';
 import { historyPush } from '../../history';
 import { getAPIUrl } from '../utils/ApiFunctions';
 import { BOT } from '../utils/EddiTypes';
-import Options from '../Assets/Buttons/Options';
+import Options from '../Assets/Buttons/BotOptions';
 
 interface IProps {
   bot: IBot;

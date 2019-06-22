@@ -15,6 +15,7 @@ import BotsUsingPackage from '../../PackageDetailView/UsedByComponent/BotsUsingP
 import PackagesUsingPlugin from '../../PackageDetailView/UsedByComponent/PackagesUsingPlugin';
 import eddiApiActionDispatchers from '../../../actions/EddiApiActionDispatchers';
 import { getTypeFromResource } from '../../utils/ApiFunctions';
+import Options from '../../Assets/Buttons/Options';
 
 interface IPrivateProps extends IPublicProps {}
 
@@ -76,6 +77,12 @@ class ViewJsonContent extends React.Component<IPrivateProps, IState> {
               selectVersion={this.props.selectVersion}
             />
             <div style={styles.centerFlex} />
+            <div style={styles.options}>
+              <Options
+                descriptor={this.props.descriptor}
+                data={this.props.data}
+              />
+            </div>
             <BlueButton
               onClick={this.openEditJsonModal}
               customStyles={styles.button}

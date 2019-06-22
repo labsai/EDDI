@@ -37,6 +37,7 @@ const styles: CSSProperties = {
     height: '36px',
     marginLeft: '50px',
     marginRight: '8px',
+    paddingTop: '6px',
   },
   centerFlex: {
     flex: '1',
@@ -71,6 +72,10 @@ const styles: CSSProperties = {
     marginTop: '15px',
     marginLeft: '50px',
     marginRight: '30px',
+  },
+  options: {
+    marginTop: '3px',
+    marginRight: '5px',
   },
 };
 export default styles;

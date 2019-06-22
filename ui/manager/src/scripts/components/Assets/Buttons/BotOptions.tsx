@@ -5,7 +5,7 @@ import { Dropdown } from 'semantic-ui-react';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import * as Radium from 'radium';
 import { GREY_COLOR } from '../../../../styles/DefaultStylingProperties';
-import { IBot, IDescriptor } from '../../utils/AxiosFunctions';
+import { IBot } from '../../utils/AxiosFunctions';
 import modalActionDispatchers from '../../../actions/ModalActionDispatchers';
 import eddiApiActionDispatchers from '../../../actions/EddiApiActionDispatchers';
 import { NOT_FOUND, READY } from '../../utils/helpers/BotHelper';
@@ -31,8 +31,7 @@ const styles: CSSProperties = {
 };
 
 interface IProps {
-  descriptor: IDescriptor;
-  data: string;
+  bot: IBot;
   apiUrl: string;
 }
 
@@ -44,25 +43,67 @@ const trigger = (
   />
 );
 
-class Options extends React.Component<IProps> {
+class BotOptions extends React.Component<IProps> {
   render() {
-    const { descriptor } = this.props;
+    const { bot } = this.props;
+    const botDeployed = bot.deploymentStatus === READY;
+    const botUndeployed = bot.deploymentStatus === NOT_FOUND;
     return (
       <div style={styles.optionButton}>
         <Dropdown style={styles.dropdown} trigger={trigger} icon={null}>
           <Dropdown.Menu>
             <Dropdown.Item
+              text={'Open Chat'}
+              icon={'chat'}
+              disabled={!botDeployed}
+              onClick={() =>
+                window
+                  .open(
+                    `${this.props.apiUrl}/chat/unrestricted/${bot.id}`,
+                    '_blank',
+                  )
+                  .focus()
+              }
+            />
+            <Dropdown.Item
+              text={botDeployed ? 'Undeploy' : 'Deploy'}
+              icon={
+                botDeployed
+                  ? 'arrow alternate circle down outline'
+                  : 'arrow alternate circle up outline'
+              }
+              disabled={!botDeployed && !botUndeployed}
+              onClick={() =>
+                (botUndeployed &&
+                  eddiApiActionDispatchers.deployBotAction(bot.resource)) ||
+                (botDeployed &&
+                  modalActionDispatchers.showConfirmationModal(
+                    `Are you sure you want to undeploy ${bot.name}?`,
+                    null,
+                    () =>
+                      eddiApiActionDispatchers.undeployBotAction(bot.resource),
+                  ))
+              }
+            />
+            <Dropdown.Item
               text={'Rename'}
               icon={'edit outline'}
-              onClick={() => console.log('RENAME')}
+              onClick={() => modalActionDispatchers.showEditBotModal(bot)}
             />
             <Dropdown.Item
               text={'Edit JSON'}
               icon={'edit'}
               onClick={() =>
                 modalActionDispatchers.showEditJsonModal(
-                  descriptor.resource,
-                  this.props.data,
+                  bot.resource,
+                  JSON.stringify(
+                    {
+                      packages: bot.packages,
+                      channels: bot.channels,
+                    },
+                    null,
+                    '\t',
+                  ),
                 )
               }
             />
@@ -74,7 +115,7 @@ class Options extends React.Component<IProps> {
                     icon={'copy outline'}
                     onClick={() =>
                       eddiApiActionDispatchers.duplicateAction(
-                        descriptor.resource,
+                        bot.resource,
                         false,
                       )
                     }
@@ -84,7 +125,7 @@ class Options extends React.Component<IProps> {
                     icon={'copy'}
                     onClick={() =>
                       eddiApiActionDispatchers.duplicateAction(
-                        descriptor.resource,
+                        bot.resource,
                         true,
                       )
                     }
@@ -101,10 +142,10 @@ class Options extends React.Component<IProps> {
   }
 }
 
-const ComposedOptions: Component<IProps> = compose<IProps>(
+const ComposedBotOptions: Component<IProps> = compose<IProps>(
   pure,
   Radium,
-  setDisplayName('Options'),
-)(Options);
+  setDisplayName('BotOptions'),
+)(BotOptions);
 
-export default ComposedOptions;
+export default ComposedBotOptions;

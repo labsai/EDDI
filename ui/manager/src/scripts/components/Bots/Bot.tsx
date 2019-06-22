@@ -12,7 +12,7 @@ import * as moment from 'moment';
 import DeployButton from '../Assets/Buttons/DeployButton';
 import { ClipLoader } from 'react-spinners';
 import { historyPush } from '../../history';
-import Options from '../Assets/Buttons/Options';
+import Options from '../Assets/Buttons/BotOptions';
 
 interface IProps {
   bot: IBot;
