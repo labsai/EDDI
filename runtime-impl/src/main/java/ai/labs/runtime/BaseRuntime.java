@@ -96,11 +96,16 @@ public class BaseRuntime implements SystemRuntime.IRuntime {
     }
 
     @Override
-    public <T> ScheduledFuture<?> submitScheduledCallable(final Callable<T> callable,
+    public <T> ScheduledFuture<T> submitScheduledCallable(final Callable<T> callable,
                                                           long delay, TimeUnit timeUnit,
                                                           final Map<Object, Object> threadBindings) {
         return executorService.schedule(() -> {
-            submitCallable(callable, threadBindings);
+            try {
+                return BaseRuntime.this.submitCallable(callable, threadBindings).get();
+            } catch (InterruptedException | ExecutionException e) {
+                log.error(e.getLocalizedMessage(), e);
+                throw e;
+            }
         }, delay, timeUnit);
     }
 

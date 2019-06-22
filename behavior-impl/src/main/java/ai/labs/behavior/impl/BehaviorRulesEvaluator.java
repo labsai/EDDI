@@ -1,6 +1,6 @@
 package ai.labs.behavior.impl;
 
-import ai.labs.behavior.impl.extensions.IBehaviorExtension;
+import ai.labs.behavior.impl.conditions.IBehaviorCondition;
 import ai.labs.memory.IConversationMemory;
 import ai.labs.utilities.RuntimeUtilities;
 import lombok.AllArgsConstructor;
@@ -21,42 +21,44 @@ class BehaviorRulesEvaluator {
 
         BehaviorSetResult resultSet = new BehaviorSetResult();
 
-        IBehaviorExtension.ExecutionState state;
+        IBehaviorCondition.ExecutionState state;
         for (BehaviorGroup behaviorGroup : behaviorSet.getBehaviorGroups()) {
             for (BehaviorRule behaviorRule : behaviorGroup.getBehaviorRules()) {
                 throwExceptionIfInterrupted();
-                if (behaviorRule.getExtensions().isEmpty()) {
-                    state = IBehaviorExtension.ExecutionState.SUCCESS;
+                if (behaviorRule.getConditions().isEmpty()) {
+                    state = IBehaviorCondition.ExecutionState.SUCCESS;
                 } else {
                     try {
                         state = behaviorRule.execute(memory, new LinkedList<>());
-                    } catch (BehaviorRule.InfiniteLoopException e) {
+                    } catch (BehaviorRule.InfiniteLoopException | BehaviorRule.RuntimeException e) {
                         throw new BehaviorRuleExecutionException(e.getLocalizedMessage(), e);
                     }
                 }
 
-                if (state == IBehaviorExtension.ExecutionState.SUCCESS) {
-                    boolean alreadyExists = false;
-                    for (BehaviorRule rule : resultSet.getSuccessRules()) {
-                        if (rule.getName().equals(behaviorRule.getName())) {
-                            alreadyExists = true;
+                if (state == IBehaviorCondition.ExecutionState.SUCCESS) {
+                    resultSet.getSuccessRules().add(behaviorRule);
+
+                    boolean continueLoopingOnSuccess;
+                    switch (behaviorGroup.getExecutionStrategy()) {
+                        case executeAll:
+                            continueLoopingOnSuccess = true;
                             break;
-                        }
+                        default:
+                        case executeUntilFirstSuccess:
+                            continueLoopingOnSuccess = false;
                     }
 
-                    if (!alreadyExists) {
-                        resultSet.getSuccessRules().add(behaviorRule);
+                    if (!continueLoopingOnSuccess) {
+                        break;
                     }
-
-                    //if one rule of this group applied, we do not check further
-                    break;
-                } else if (state == IBehaviorExtension.ExecutionState.ERROR) {
+                } else if (state == IBehaviorCondition.ExecutionState.ERROR) {
                     String msg = String.format("An Error has occurred while evaluating Behavior Rule: %s",
                             behaviorRule.getName());
                     log.error(msg);
                     throw new BehaviorRuleExecutionException(msg);
-                } else
+                } else {
                     resultSet.getFailRules().add(behaviorRule);
+                }
             }
         }
 

@@ -1,6 +1,6 @@
 package ai.labs.behavior.impl;
 
-import ai.labs.behavior.impl.extensions.IBehaviorExtension;
+import ai.labs.behavior.impl.conditions.IBehaviorCondition;
 import ai.labs.memory.IConversationMemory;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
@@ -20,28 +20,28 @@ import java.util.List;
 public class BehaviorRule implements Cloneable {
     private String name;
     private List<String> actions = new LinkedList<>();
-    private List<IBehaviorExtension> extensions = new LinkedList<>();
+    private List<IBehaviorCondition> conditions = new LinkedList<>();
 
     public BehaviorRule(String name) {
         this.name = name;
     }
 
-    public IBehaviorExtension.ExecutionState execute(IConversationMemory memory, List<BehaviorRule> trace)
-            throws InfiniteLoopException {
+    public IBehaviorCondition.ExecutionState execute(IConversationMemory memory, List<BehaviorRule> trace)
+            throws InfiniteLoopException, RuntimeException {
         if (trace.contains(this)) {
             // this is an infinite loop, thus throw error
             throw throwInfiniteLoopError(trace);
         } else {
             trace.add(this);
 
-            IBehaviorExtension.ExecutionState state = IBehaviorExtension.ExecutionState.NOT_EXECUTED;
-            for (IBehaviorExtension extension : extensions) {
-                extension.execute(memory, trace);
-                if (extension.getExecutionState() == IBehaviorExtension.ExecutionState.FAIL) {
-                    state = IBehaviorExtension.ExecutionState.FAIL;
+            IBehaviorCondition.ExecutionState state = IBehaviorCondition.ExecutionState.NOT_EXECUTED;
+            for (IBehaviorCondition condition : conditions) {
+                condition.execute(memory, trace);
+                if (condition.getExecutionState() == IBehaviorCondition.ExecutionState.FAIL) {
+                    state = IBehaviorCondition.ExecutionState.FAIL;
                     break;
-                } else if (extension.getExecutionState() == IBehaviorExtension.ExecutionState.ERROR) {
-                    state = IBehaviorExtension.ExecutionState.ERROR;
+                } else if (condition.getExecutionState() == IBehaviorCondition.ExecutionState.ERROR) {
+                    state = IBehaviorCondition.ExecutionState.ERROR;
                     break;
                 }
             }
@@ -50,10 +50,10 @@ public class BehaviorRule implements Cloneable {
             trace.clear();
             trace.addAll(tmp.subList(0, tmp.indexOf(this)));
 
-            if (state != IBehaviorExtension.ExecutionState.NOT_EXECUTED)
+            if (state != IBehaviorCondition.ExecutionState.NOT_EXECUTED)
                 return state;
 
-            return IBehaviorExtension.ExecutionState.SUCCESS;
+            return IBehaviorCondition.ExecutionState.SUCCESS;
         }
     }
 
@@ -82,12 +82,12 @@ public class BehaviorRule implements Cloneable {
     public BehaviorRule clone() throws CloneNotSupportedException {
         BehaviorRule clone = new BehaviorRule(name);
 
-        List<IBehaviorExtension> executablesClone = new LinkedList<>();
-        for (IBehaviorExtension extension : extensions) {
-            IBehaviorExtension exClone = extension.clone();
+        List<IBehaviorCondition> executablesClone = new LinkedList<>();
+        for (IBehaviorCondition condition : conditions) {
+            IBehaviorCondition exClone = condition.clone();
             executablesClone.add(exClone);
         }
-        clone.setExtensions(executablesClone);
+        clone.setConditions(executablesClone);
 
         return clone;
     }
@@ -95,6 +95,12 @@ public class BehaviorRule implements Cloneable {
     @Override
     public String toString() {
         return name;
+    }
+
+    public static class RuntimeException extends Exception {
+        public RuntimeException(String message, Exception e) {
+            super(message, e);
+        }
     }
 
     public class InfiniteLoopException extends Exception {

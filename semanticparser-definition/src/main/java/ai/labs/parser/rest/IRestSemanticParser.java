@@ -12,7 +12,8 @@ import javax.ws.rs.core.MediaType;
  * @author ginccc
  */
 
-@Api(value = "semantic parser")
+@Api(value = "Configurations -> Endpoint Parser Only", authorizations = {@Authorization(value = "eddi_auth")})
+
 @Path("/parser")
 public interface IRestSemanticParser {
 

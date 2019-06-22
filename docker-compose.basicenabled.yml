@@ -1,0 +1,17 @@
+version: '3'
+services:
+  eddi:
+    image: labsai/eddi:latest
+    ports:
+      - "7070:7070"
+      - "7443:7443"
+    links:
+      - mongodb
+    depends_on:
+      - mongodb
+    environment:
+      EDDI_VERSION: 4.7
+      EDDI_ENV: production
+      EDDI_MEMORY_MIN: 128m
+      EDDI_MEMORY_MAX: 128m
+      EDDI_JAVA_ENV_BASIC_AUTH_ENABLED: webServer.securityHandlerType=basic

@@ -15,12 +15,13 @@ import ai.labs.output.bootstrap.OutputGenerationModule;
 import ai.labs.parser.bootstrap.SemanticParserModule;
 import ai.labs.permission.bootstrap.PermissionModule;
 import ai.labs.persistence.bootstrap.PersistenceModule;
-import ai.labs.property.bootstrap.PropertyDisposerModule;
+import ai.labs.property.bootstrap.PropertySetterModule;
 import ai.labs.resources.bootstrap.RepositoryModule;
 import ai.labs.rest.bootstrap.RestInterfaceModule;
 import ai.labs.restapi.connector.bootstrap.HttpCallsModule;
 import ai.labs.runtime.DependencyInjector;
 import ai.labs.runtime.IAutoBotDeployment;
+import ai.labs.runtime.bootstrap.LoggingModule;
 import ai.labs.runtime.bootstrap.RuntimeModule;
 import ai.labs.runtime.bootstrap.SwaggerModule;
 import ai.labs.serialization.bootstrap.SerializationModule;
@@ -33,6 +34,7 @@ import ai.labs.testing.bootstrap.AutomatedtestingModule;
 import ai.labs.utilities.FileUtilities;
 import ai.labs.xmpp.bootstrap.XmppModule;
 import ai.labs.xmpp.endpoint.IXmppEndpoint;
+import com.bugsnag.Bugsnag;
 import com.google.inject.Module;
 import org.jboss.resteasy.plugins.guice.ext.RequestScopeModule;
 
@@ -50,6 +52,8 @@ public class ApiServer {
     private static final String USER_DIR = System.getProperty("user.dir");
 
     public static void main(String[] args) throws Exception {
+        System.out.println("Starting Server...");
+        long serverStartupBegin = System.currentTimeMillis();
         String eddiEnv = System.getProperty(ENVIRONMENT_KEY);
         if (eddiEnv == null || eddiEnv.isEmpty()) {
             System.err.println("Environment Variable must not be null nor empty! (e.g. -DEDDI_ENV=[development/production])");
@@ -64,6 +68,7 @@ public class ApiServer {
                 new RuntimeModule(
                         new FileInputStream(configDir + "threads.properties"),
                         new FileInputStream(configDir + "systemRuntime.properties")),
+                new LoggingModule(),
                 new RequestScopeModule(),
                 new RestInterfaceModule(),
                 new SerializationModule(),
@@ -79,14 +84,17 @@ public class ApiServer {
                 new BehaviorModule(),
                 new OutputGenerationModule(),
                 new TemplateEngineModule(),
-                new PropertyDisposerModule(),
+                new PropertySetterModule(),
                 new AutomatedtestingModule(),
                 new StaticResourcesModule(),
                 new HttpClientModule(),
                 new ConversationCallbackModule(new FileInputStream(configDir + "httpClient.properties")),
                 new CoreModule(),
                 new SwaggerModule(new FileInputStream(configDir + "swagger.properties")),
-                new ServerRuntimeModule(new FileInputStream(configDir + "webServer.properties")),
+                new ServerRuntimeModule(
+                        new FileInputStream(configDir + "webServer.properties"),
+                        new FileInputStream(configDir + "keycloak.properties")
+                ),
                 new FacebookMessengerModule(),
                 new BackupServiceModule(),
                 new HttpCallsModule(),
@@ -97,11 +105,21 @@ public class ApiServer {
         //init modules
         final DependencyInjector injector = DependencyInjector.init(environment, modules);
 
+        injector.getInstance(Bugsnag.class);
+
         //init webserver
         injector.getInstance(IServerRuntime.class).startup(() -> {
             //auto re-deploy bots
             injector.getInstance(IAutoBotDeployment.class).autoDeployBots();
             injector.getInstance(IXmppEndpoint.class).init();
+
+            logServerStartupTime(serverStartupBegin);
         });
+    }
+
+    private static void logServerStartupTime(long serverStartupBegin) {
+        long startupDuration = System.currentTimeMillis() - serverStartupBegin;
+        String startupTimeMessage = String.format("Server Startup successful. (%dms)", startupDuration);
+        System.out.println(startupTimeMessage);
     }
 }

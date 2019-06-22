@@ -6,7 +6,7 @@
     <parent>
         <artifactId>eddi</artifactId>
         <groupId>ai.labs</groupId>
-        <version>4.4</version>
+        <version>4.7</version>
         <relativePath>../pom.xml</relativePath>
     </parent>
     <packaging>jar</packaging>
@@ -38,6 +38,12 @@
             <artifactId>corerest-definition</artifactId>
             <version>${project.version}</version>
         </dependency>
+        <dependency>
+            <groupId>org.eclipse.jgit</groupId>
+            <artifactId>org.eclipse.jgit</artifactId>
+            <version>5.3.1.201904271842-r</version>
+        </dependency>
+
     </dependencies>
 
     <properties>

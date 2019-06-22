@@ -3,7 +3,9 @@ package ai.labs.rest.rest;
 import ai.labs.memory.model.SimpleConversationMemorySnapshot;
 import ai.labs.models.InputData;
 import io.swagger.annotations.Api;
+import io.swagger.annotations.ApiOperation;
 import io.swagger.annotations.ApiParam;
+import io.swagger.annotations.Authorization;
 
 import javax.ws.rs.*;
 import javax.ws.rs.container.AsyncResponse;
@@ -12,13 +14,14 @@ import javax.ws.rs.core.MediaType;
 import javax.ws.rs.core.Response;
 import java.util.List;
 
-@Api(value = "bot engine")
+@Api(value = "Bot Management", authorizations = {@Authorization(value = "eddi_auth")})
 @Path("/managedbots")
 public interface IRestBotManagement {
 
     @GET
     @Path("/{intent}/{userId}")
     @Produces(MediaType.APPLICATION_JSON)
+    @ApiOperation(value = "Read conversation.")
     SimpleConversationMemorySnapshot loadConversationMemory(@PathParam("intent") String intent,
                                                             @PathParam("userId") String userId,
                                                             @ApiParam(name = "returnDetailed", format = "boolean", example = "false")
@@ -31,6 +34,7 @@ public interface IRestBotManagement {
     @Path("/{intent}/{userId}")
     @Consumes(MediaType.APPLICATION_JSON)
     @Produces(MediaType.APPLICATION_JSON)
+    @ApiOperation(value = "Talk to bot with context.")
     void sayWithinContext(@PathParam("intent") String intent,
                           @PathParam("userId") String userId,
                           @QueryParam("returnDetailed") @DefaultValue("false") Boolean returnDetailed,
@@ -41,5 +45,6 @@ public interface IRestBotManagement {
 
     @POST
     @Path("/{intent}/{userId}/endConversation")
+    @ApiOperation(value = "End conversation.")
     Response endCurrentConversation(@PathParam("intent") String intent, @PathParam("userId") String userId);
 }

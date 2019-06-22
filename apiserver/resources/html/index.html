@@ -1,0 +1,93 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>E.D.D.I Dashboard</title>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no">
+    <meta name="description" content="">
+    <meta name="author" content="LABS.AI">
+
+    <link href="/text/css/dashboard.css" rel="stylesheet" type="text/css">
+    <script type="text/javascript" src="/rest-js"></script>
+    <script type="text/javascript" src="/text/js/dashboard.js"></script>
+    <!-- KEYCLOAK-SCRIPT-INSERT-IF-ENABLED -->
+</head>
+<body>
+
+<!-- Navigation -->
+<nav class="navbar fixed-top navbar-expand-lg navbar-dark bg-white fixed-top">
+    <div class="container">
+        <img src="/binary/img/logo_high.png" alt="E.D.D.I Logo" class="eddi-logo"/>
+        <h4>&nbsp;Enhanced Dialog Driven Intelligence</h4>
+        <div class="collapse navbar-collapse" id="navbarResponsive">
+            <ul class="navbar-nav ml-auto">
+                <li class="nav-item">
+                    <a class="nav-link text-black-50" href="http://docs.labs.ai" target="_blank">Documentation</a>
+                </li>
+                <li class="nav-item">
+                    <a class="nav-link text-black-50" href="https://www.labs.ai" target="_blank">Contact</a>
+                </li>
+            </ul>
+        </div>
+    </div>
+</nav>
+
+<!-- Page Content -->
+<div class="container">
+    <br>
+    <h1 class="my-4">E.D.D.I Dashboard</h1>
+    <br>
+    <!-- Marketing Icons Section -->
+    <div class="row">
+        <div class="col-lg-12 mb-12 card-1">
+            <div class="card h-100">
+                <h4 class="card-header">
+                    Deployed Bots
+                    <span style="float:right;"><a href="/view/api" class="btn btn-primary" target="_blank">
+                        View API
+                    </a>
+                        &nbsp;
+                        <a id="botBuilderUrl" href="//manager.labs.ai" class="btn btn-primary" target="_blank">
+                            Go to Bot Manager
+                        </a>
+                        &nbsp;
+                        <a id="logoutBtn" href=""
+                           class="btn btn-primary disabled"
+                           disabled="true">
+                            Logout
+                        </a>
+                    </span>
+                </h4>
+                <div class="card-body">
+                    <p id="card-1" class="card-text">
+                    <div id="no-bots-deployed">
+                        No Bots deployed yet..<br>
+                        <a id="btnDeployExampleBots" href="" onclick="eddi.deployExampleBots(); return false;"
+                           class="btn btn-primary">
+                            Deploy Example Bots</a>
+                    </div>
+                    </p>
+                </div>
+            </div>
+        </div>
+    </div>
+    <!-- /.row -->
+</div>
+<!-- /.container -->
+
+<!-- Footer -->
+<footer class="py-5 bg-white">
+    <div class="container">
+        <p class="copyright text-muted small">
+            Developed by
+            <a href="https://www.labs.ai"
+               target="_blank">LABS.AI</a>
+            <br>
+            &COPY; 2006-2019
+        </p>
+    </div>
+    <!-- /.container -->
+</footer>
+</body>
+</html>

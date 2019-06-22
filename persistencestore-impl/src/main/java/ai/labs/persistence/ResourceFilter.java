@@ -150,7 +150,7 @@ public class ResourceFilter<T> implements IResourceFilter<T> {
         return document;
     }
 
-    private T buildDocument(Document descriptor) throws IResourceStore.ResourceStoreException, IResourceStore.ResourceNotFoundException, IOException {
+    private T buildDocument(Document descriptor) throws IOException {
         descriptor.remove("_id");
         return documentBuilder.build(descriptor, documentType);
     }
@@ -163,9 +163,11 @@ public class ResourceFilter<T> implements IResourceFilter<T> {
         return permissions;
     }
 
-    private Integer getHighestPermittedVersion(Integer latestVersion, Map<IAuthorization.Type, AuthorizedSubjects> permissions) throws IResourceStore.ResourceStoreException, IResourceStore.ResourceNotFoundException {
-        int highestVersion = Integer.MIN_VALUE;
+    private Integer getHighestPermittedVersion(Integer latestVersion,
+                                               Map<IAuthorization.Type, AuthorizedSubjects> permissions) {
+        int highestVersion = 1;
 
+        boolean isOverruledByPermission = false;
         for (IAuthorization.Type type : IAuthorization.Type.values()) {
             AuthorizedSubjects authorizedSubjects = permissions.get(type);
             if (authorizedSubjects == null) {
@@ -180,8 +182,13 @@ public class ResourceFilter<T> implements IResourceFilter<T> {
                 Integer version = authorizedUser.getVersions().get(0);
                 if (highestVersion < version) {
                     highestVersion = version;
+                    isOverruledByPermission = true;
                 }
             }
+        }
+
+        if (!isOverruledByPermission) {
+            highestVersion = latestVersion;
         }
 
         return highestVersion;

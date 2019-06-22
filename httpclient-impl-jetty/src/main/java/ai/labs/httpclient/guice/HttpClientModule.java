@@ -37,7 +37,7 @@ public class HttpClientModule extends AbstractBaseModule {
                                         @Named("httpClient.trustAllCertificates") Boolean trustAllCertificates) {
 
         try {
-            SslContextFactory sslContextFactory = new SslContextFactory();
+            SslContextFactory.Client sslContextFactory = new SslContextFactory.Client();
             sslContextFactory.setTrustAll(trustAllCertificates);
             HttpClient httpClient = new HttpClient(sslContextFactory);
             httpClient.setExecutor(executorService);

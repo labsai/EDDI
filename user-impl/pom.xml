@@ -7,7 +7,7 @@
     <parent>
         <groupId>ai.labs</groupId>
         <artifactId>eddi</artifactId>
-        <version>4.4</version>
+        <version>4.7</version>
         <relativePath>../pom.xml</relativePath>
     </parent>
     <artifactId>user-impl</artifactId>
@@ -17,7 +17,7 @@
         <dependency>
             <groupId>org.mongodb</groupId>
             <artifactId>mongodb-driver</artifactId>
-            <version>3.9.1</version>
+            <version>3.10.2</version>
         </dependency>
         <dependency>
             <groupId>ai.labs</groupId>
@@ -38,6 +38,11 @@
             <groupId>ai.labs</groupId>
             <artifactId>runtime-definition</artifactId>
             <version>${project.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>org.keycloak</groupId>
+            <artifactId>keycloak-core</artifactId>
+            <version>6.0.1</version>
         </dependency>
     </dependencies>
 

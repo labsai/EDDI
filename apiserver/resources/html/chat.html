@@ -10,7 +10,7 @@
     <meta name="description" content="">
     <meta name="keywords" content="">
     <meta http-equiv="Content-Type" content="text/html; charset=UTF-8">
-    <meta name="theme-color" content="#9966ff">
+    <meta name="theme-color" content="#3C5EA6">
     <meta name="apple-touch-fullscreen" content="yes">
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="white">
@@ -25,7 +25,7 @@
     <link rel="apple-touch-icon" sizes="120x120" href="/binary/img/logo_high.png">
     <link rel="apple-touch-icon" sizes="76x76" href="/binary/img/logo_high.png">
     <link rel="apple-touch-icon" sizes="60x60" href="/binary/img/logo_high.png">
-    <link rel="mask-icon" href="/binary/img/logo_high.png" color="#9966ff">
+    <link rel="mask-icon" href="/binary/img/logo_high.png" color="#3C5EA6">
 
     <!-- Open Graph data -->
     <meta property="og:title" content="E.D.D.I | Conversational Interface">
@@ -183,6 +183,20 @@
             </li>
         </ul>
     </div>
+    <!--suppress ES6ConvertVarToLetConst -->
+    <script type="text/javascript">
+        function isIE() {
+            var ua = window.navigator.userAgent;
+            var msie = ua.indexOf('MSIE '); // IE 10 or older
+            var trident = ua.indexOf('Trident/'); //IE 11
+
+            return (msie > -1 || trident > -1);
+        }
+
+        if (isIE()) {
+            alert('Internet Explorer is not supported, please use another browser (e.g. Chrome, Firefox, Safari, Edge).')
+        }
+    </script>
     <noscript>
         <div class="noJS noJSText">
             <i class="fa fa-exclamation-triangle fa-3x"></i>

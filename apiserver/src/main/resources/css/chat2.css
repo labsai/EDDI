@@ -1,8 +1,4 @@
 * {
-    -webkit-user-select: none; /* Chrome, Safari, Android and iOS */
-    -moz-user-select: none; /* Firefox */
-    -ms-user-select: none; /* Internet Explorer */
-    user-select: none; /* Disables text selection */
     margin: 0;
     padding: 0; /* Remove margins and paddings on elements */
     box-sizing: border-box; /* Generate paddings inside elements */
@@ -415,6 +411,12 @@ a:active {
     padding-top: 120%;
 
     transition: width .2s ease-out, padding-top .2s ease-out;
+}
+
+.message ul,
+ .message ol {
+    text-indent: 5px;
+    margin-left: 18px;
 }
 
 @keyframes loading {

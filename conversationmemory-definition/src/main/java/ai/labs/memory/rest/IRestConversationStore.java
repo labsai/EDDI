@@ -7,6 +7,7 @@ import ai.labs.models.ConversationStatus;
 import ai.labs.persistence.IResourceStore;
 import io.swagger.annotations.Api;
 import io.swagger.annotations.ApiParam;
+import io.swagger.annotations.Authorization;
 
 import javax.ws.rs.*;
 import javax.ws.rs.core.MediaType;
@@ -16,7 +17,7 @@ import java.util.List;
 /**
  * @author ginccc
  */
-@Api(value = "configurations")
+@Api(value = "Bot Engine -> Conversations", authorizations = {@Authorization(value = "eddi_auth")})
 @Path("/conversationstore/conversations")
 public interface IRestConversationStore {
     @GET

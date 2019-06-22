@@ -2,12 +2,13 @@ package ai.labs.resources.rest.botmanagement;
 
 import ai.labs.models.BotTriggerConfiguration;
 import io.swagger.annotations.Api;
+import io.swagger.annotations.Authorization;
 
 import javax.ws.rs.*;
 import javax.ws.rs.core.MediaType;
 import javax.ws.rs.core.Response;
 
-@Api(value = "configurations")
+@Api(value = "Configurations -> (5) Bot Management", authorizations = {@Authorization(value = "eddi_auth")})
 @Path("/bottriggerstore/bottriggers")
 public interface IRestBotTriggerStore {
     String resourceURI = "eddi://ai.labs.bottrigger/bottriggerstore/bottriggers/";

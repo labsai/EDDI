@@ -16,6 +16,7 @@ import ai.labs.utilities.RestUtilities;
 import ai.labs.utilities.SecurityUtilities;
 import lombok.extern.slf4j.Slf4j;
 
+import javax.inject.Inject;
 import javax.servlet.http.HttpServletRequest;
 import javax.ws.rs.InternalServerErrorException;
 import javax.ws.rs.POST;
@@ -26,7 +27,6 @@ import javax.ws.rs.container.ResourceInfo;
 import javax.ws.rs.core.Context;
 import javax.ws.rs.core.HttpHeaders;
 import javax.ws.rs.ext.Provider;
-import java.io.IOException;
 import java.net.URI;
 import java.security.Principal;
 
@@ -37,15 +37,18 @@ import java.security.Principal;
 @Provider
 @Slf4j
 public class PermissionResponseInterceptor implements ContainerResponseFilter {
-    public static final String METHOD_NAME_CREATE_USER = "createUser";
+    private static final String METHOD_NAME_CREATE_USER = "createUser";
+    private static final String METHOD_NAME_DUPLICATE_RESOURCE = "duplicate";
     private static final String METHOD_NAME_START_CONVERSATION = "startConversation";
     private static final String METHOD_NAME_CREATE_TESTCASE = "createTestCase";
     private final IUserStore userStore;
     private final IPermissionStore permissionStore;
 
+    @Inject
     @Context
     private HttpServletRequest httpServletRequest;
 
+    @Inject
     @Context
     private ResourceInfo resourceInfo;
     private final DependencyInjector injector;
@@ -57,7 +60,7 @@ public class PermissionResponseInterceptor implements ContainerResponseFilter {
     }
 
     @Override
-    public void filter(ContainerRequestContext request, ContainerResponseContext response) throws IOException {
+    public void filter(ContainerRequestContext request, ContainerResponseContext response) {
         try {
             // it was most likely a CREATE request
             if (resourceInfo.getResourceMethod() != null && resourceInfo.getResourceMethod().isAnnotationPresent(POST.class)) {
@@ -72,23 +75,29 @@ public class PermissionResponseInterceptor implements ContainerResponseFilter {
                     //if the created resource is a user, we treat it differently
                     if (methodName.equals(METHOD_NAME_CREATE_USER)) {
                         permissionStore.createPermissions(respondedResourceId.getId(), PermissionUtilities.createDefaultPermissions(respondedResourceURI));
-                    } else {
+                    } else if (!methodName.startsWith(METHOD_NAME_DUPLICATE_RESOURCE)) {
                         Principal userPrincipal = SecurityUtilities.getPrincipal(ThreadContext.getSubject());
                         URI userURI = UserUtilities.getUserURI(userStore, userPrincipal);
-                        if (methodName.equals(METHOD_NAME_START_CONVERSATION)) {
-                            IResourceStore.IResourceId resourceId = RestUtilities.extractResourceId(URI.create(httpServletRequest.getRequestURI()));
-                            Permissions permissions = permissionStore.readPermissions(resourceId.getId());
-                            PermissionUtilities.addAuthorizedUser(permissions, IAuthorization.Type.WRITE, new AuthorizedUser(userURI, null));
-                            permissionStore.createPermissions(respondedResourceId.getId(), permissions);
-                        } else if (methodName.equals(METHOD_NAME_CREATE_TESTCASE)) {
-                            ITestCaseStore testCaseStore = injector.getInstance(ITestCaseStore.class);
-                            TestCase testCase = testCaseStore.loadTestCase(respondedResourceId.getId());
-                            Permissions permissions = permissionStore.readPermissions(testCase.getBotId());
-                            PermissionUtilities.addAuthorizedUser(permissions, IAuthorization.Type.ADMINISTRATION, new AuthorizedUser(userURI, null));
-                            permissionStore.createPermissions(respondedResourceId.getId(), permissions);
-                        } else {
-                            permissionStore.createPermissions(respondedResourceId.getId(), PermissionUtilities.createDefaultPermissions(userURI));
-                        }
+
+                            if (methodName.equals(METHOD_NAME_START_CONVERSATION)) {
+                                IResourceStore.IResourceId resourceId = RestUtilities.extractResourceId(URI.create(httpServletRequest.getRequestURI()));
+                                Permissions permissions = permissionStore.readPermissions(resourceId.getId());
+                                if (userURI != null) {
+                                    PermissionUtilities.addAuthorizedUser(permissions, IAuthorization.Type.WRITE, new AuthorizedUser(userURI, null));
+                                }
+                                permissionStore.createPermissions(respondedResourceId.getId(), permissions);
+                            } else if (methodName.equals(METHOD_NAME_CREATE_TESTCASE)) {
+                                ITestCaseStore testCaseStore = injector.getInstance(ITestCaseStore.class);
+                                TestCase testCase = testCaseStore.loadTestCase(respondedResourceId.getId());
+                                Permissions permissions = permissionStore.readPermissions(testCase.getBotId());
+                                if (userURI != null) {
+                                    PermissionUtilities.addAuthorizedUser(permissions, IAuthorization.Type.ADMINISTRATION, new AuthorizedUser(userURI, null));
+                                }
+                                permissionStore.createPermissions(respondedResourceId.getId(), permissions);
+                            } else {
+                                permissionStore.createPermissions(respondedResourceId.getId(), PermissionUtilities.createDefaultPermissions(userURI));
+                            }
+
                     }
                 }
             }

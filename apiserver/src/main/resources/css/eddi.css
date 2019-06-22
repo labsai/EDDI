@@ -1,11 +1,19 @@
-#header {
-    background-color: #e6e6e6 !important;
+.eddi-header header {
+    position: absolute;
+    background-color: #ffffff;
+    height: 60px;
+    border: 1px solid #CCC;
+    width: 100%;
+    margin: 0 auto;
+    font-size: 2em;
+    font-weight: bolder;
+    letter-spacing: 5px;
 }
 
-.logo__title {
-    color: #1e99dc !important;
-}
-
-span.response_throbber {
-    background-image: url("/binary/img/throbber.gif") !important;
+.eddi-header header img {
+    border: 0;
+    top: 5px;
+    left: 5px;
+    width: 50px;
+    height: 50px;
 }

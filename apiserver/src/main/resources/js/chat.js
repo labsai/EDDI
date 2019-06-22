@@ -317,14 +317,14 @@ $(function () {
 
             if (eddi.conversationId) {
                 $('#previousConversationId').text(eddi.conversationId);
-                $('#previousConversationLink').attr('href', '/bots/' + eddi.environment + '/' + eddi.botId + '/' + eddi.conversationId);
+                $('#previousConversationLink').attr('href', '/bots/' + eddi.environment + '/' + eddi.botId + '/' + eddi.conversationId + '?returnCurrentStepOnly=false&returnDetailed=true');
                 $('#previousConversationLink').show();
             }
 
             eddi.conversationId = conversationUriArray[conversationUriArray.length - 1];
 
             $('#currentConversationId').text(eddi.conversationId);
-            $('#currentConversationLink').attr('href', '/bots/' + eddi.environment + '/' + eddi.botId + '/' + eddi.conversationId);
+            $('#currentConversationLink').attr('href', '/bots/' + eddi.environment + '/' + eddi.botId + '/' + eddi.conversationId + '?returnCurrentStepOnly=false&returnDetailed=true');
             proceedConversation();
         });
     };

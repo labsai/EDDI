@@ -1,6 +1,7 @@
 package ai.labs.runtime.client.bots;
 
-import ai.labs.resources.rest.bots.model.BotConfiguration;
+import ai.labs.persistence.model.ResourceId;
+import ai.labs.resources.rest.config.bots.model.BotConfiguration;
 import ai.labs.runtime.IBot;
 import ai.labs.runtime.IExecutablePackage;
 import ai.labs.runtime.IPackageFactory;
@@ -31,7 +32,7 @@ public class BotStoreClientLibrary implements IBotStoreClientLibrary {
         final IBot bot = new Bot(botId, version);
         final BotConfiguration botConfiguration = botStoreService.getBotConfiguration(botId, version);
         for (final URI packageURI : botConfiguration.getPackages()) {
-            URIUtilities.ResourceId resourceId = URIUtilities.extractResourceId(packageURI);
+            ResourceId resourceId = URIUtilities.extractResourceId(packageURI);
             IExecutablePackage thePackage = packageFactory.getExecutablePackage(resourceId.getId(), resourceId.getVersion());
             bot.addPackage(thePackage);
         }

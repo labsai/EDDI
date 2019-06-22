@@ -2,12 +2,12 @@ package ai.labs.resources.impl.interceptors;
 
 import ai.labs.memory.descriptor.IConversationDescriptorStore;
 import ai.labs.memory.descriptor.model.ConversationDescriptor;
+import ai.labs.models.DocumentDescriptor;
+import ai.labs.models.ResourceDescriptor;
 import ai.labs.persistence.IDescriptorStore;
 import ai.labs.persistence.IResourceStore;
 import ai.labs.resources.rest.documentdescriptor.IDocumentDescriptorStore;
-import ai.labs.resources.rest.documentdescriptor.model.DocumentDescriptor;
 import ai.labs.resources.rest.method.PATCH;
-import ai.labs.resources.rest.model.ResourceDescriptor;
 import ai.labs.runtime.DependencyInjector;
 import ai.labs.runtime.ThreadContext;
 import ai.labs.testing.descriptor.ITestCaseDescriptorStore;
@@ -17,6 +17,7 @@ import ai.labs.user.impl.utilities.UserUtilities;
 import ai.labs.utilities.RestUtilities;
 import ai.labs.utilities.SecurityUtilities;
 import lombok.extern.slf4j.Slf4j;
+import org.jboss.resteasy.plugins.guice.RequestScoped;
 
 import javax.inject.Inject;
 import javax.ws.rs.*;
@@ -27,7 +28,6 @@ import javax.ws.rs.container.ResourceInfo;
 import javax.ws.rs.core.Context;
 import javax.ws.rs.core.HttpHeaders;
 import javax.ws.rs.ext.Provider;
-import java.io.IOException;
 import java.lang.reflect.Method;
 import java.net.URI;
 import java.security.Principal;
@@ -38,6 +38,7 @@ import java.util.Date;
  */
 @Provider
 @Slf4j
+@RequestScoped
 public class DocumentDescriptorInterceptor implements ContainerResponseFilter {
     private static final String METHOD_NAME_UPDATE_DESCRIPTOR = "updateDescriptor";
     private static final String METHOD_NAME_UPDATE_PERMISSIONS = "updatePermissions";
@@ -59,11 +60,16 @@ public class DocumentDescriptorInterceptor implements ContainerResponseFilter {
     }
 
     @Override
-    public void filter(ContainerRequestContext contextRequest, ContainerResponseContext contextResponse) throws IOException {
+    public void filter(ContainerRequestContext contextRequest, ContainerResponseContext contextResponse) {
         try {
             int httpStatus = contextResponse.getStatus();
+
+            if (httpStatus < 200 || httpStatus >= 300 || resourceInfo == null) {
+                return;
+            }
+
             Method resourceMethod = resourceInfo.getResourceMethod();
-            if (resourceMethod != null && (isPUT(resourceMethod) || isPATCH(resourceMethod) || isPOST(resourceMethod) || isDELETE(resourceMethod)) && httpStatus >= 200 && httpStatus < 300) {
+            if (resourceMethod != null && (isPUT(resourceMethod) || isPATCH(resourceMethod) || isPOST(resourceMethod) || isDELETE(resourceMethod))) {
                 String resourceLocationUri = contextResponse.getHeaderString(HttpHeaders.LOCATION);
                 if (resourceLocationUri != null) {
                     if (resourceLocationUri.contains("://")) {
@@ -80,7 +86,12 @@ public class DocumentDescriptorInterceptor implements ContainerResponseFilter {
                                 } else if (resourceLocationUri.startsWith("eddi://ai.labs.conversation")) {
                                     conversationDescriptorStore.createDescriptor(resourceId.getId(), resourceId.getVersion(), createConversationDescriptor(createdResourceURI, userURI));
                                 } else if (isResourceIdValid(resourceId)) {
-                                    documentDescriptorStore.createDescriptor(resourceId.getId(), resourceId.getVersion(), createDocumentDescriptor(createdResourceURI, userURI));
+                                    try {
+                                        documentDescriptorStore.readDescriptor(resourceId.getId(), resourceId.getVersion());
+                                    } catch (IResourceStore.ResourceNotFoundException e) {
+                                        documentDescriptorStore.createDescriptor(resourceId.getId(), resourceId.getVersion(),
+                                                createDocumentDescriptor(createdResourceURI, userURI));
+                                    }
                                 }
                             }
 

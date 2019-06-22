@@ -38,6 +38,7 @@ public abstract class AbstractBaseModule extends AbstractModule {
                     }
                 });
                 Names.bindProperties(binder(), properties);
+                systemProperties.putAll(properties);
             }
         } catch (IOException e) {
             System.out.println(Arrays.toString(e.getStackTrace()));

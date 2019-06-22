@@ -1,9 +1,6 @@
 package ai.labs.backupservice;
 
-import io.swagger.annotations.Api;
-import io.swagger.annotations.ApiParam;
-import io.swagger.annotations.ApiResponse;
-import io.swagger.annotations.ResponseHeader;
+import io.swagger.annotations.*;
 
 import javax.ws.rs.*;
 import javax.ws.rs.core.Response;
@@ -13,7 +10,7 @@ import java.net.URI;
 /**
  * @author ginccc
  */
-@Api(value = "backup")
+@Api(value = "Backup", authorizations = {@Authorization(value = "eddi_auth")})
 @Path("/backup/export")
 public interface IRestExportService {
     @GET

@@ -33,13 +33,15 @@ public final class PermissionUtilities {
         Permissions permissions = new Permissions();
 
         AuthorizedSubjects authorizedSubjects = new AuthorizedSubjects();
-        authorizedSubjects.getUsers().add(new AuthorizedUser(user, null));
+        if (user != null) {
+            authorizedSubjects.getUsers().add(new AuthorizedUser(user, null));
+        }
         permissions.getPermissions().put(IAuthorization.Type.ADMINISTRATION, authorizedSubjects);
 
         return permissions;
     }
 
-    public static void filterAuthorizedSubjectsByUser(URI user, List<AuthorizedUser> authorizedUsers) throws IResourceStore.ResourceStoreException, IResourceStore.ResourceNotFoundException {
+    public static void filterAuthorizedSubjectsByUser(URI user, List<AuthorizedUser> authorizedUsers) {
         for (int i = 0; i < authorizedUsers.size(); i++) {
             AuthorizedUser authorizedUser = authorizedUsers.get(i);
             if (authorizedUser.getUser() != null && !authorizedUser.getUser().equals(user)) {
@@ -52,8 +54,9 @@ public final class PermissionUtilities {
         optimizeAuthorizedUsers(authorizedUsers);
     }
 
-    public static List<AuthorizedUser> mergeAuthorizedSubjects(IGroupStore groupStore, AuthorizedSubjects authorizedSubjects) throws IResourceStore.ResourceStoreException, IResourceStore.ResourceNotFoundException {
-        List<AuthorizedUser> authorizedUsers = new LinkedList<AuthorizedUser>(authorizedSubjects.getUsers());
+    public static List<AuthorizedUser> mergeAuthorizedSubjects(IGroupStore groupStore, AuthorizedSubjects authorizedSubjects)
+            throws IResourceStore.ResourceStoreException, IResourceStore.ResourceNotFoundException {
+        List<AuthorizedUser> authorizedUsers = new LinkedList<>(authorizedSubjects.getUsers());
 
         List<AuthorizedGroup> groups = authorizedSubjects.getGroups();
         for (AuthorizedGroup authorizedGroup : groups) {
@@ -71,12 +74,13 @@ public final class PermissionUtilities {
         return authorizedUsers;
     }
 
-    public static void keepOwnPermissionsOnly(IUserStore userstore, IGroupStore groupStore, Permissions permissions) throws IResourceStore.ResourceStoreException, IResourceStore.ResourceNotFoundException {
+    public static void keepOwnPermissionsOnly(IUserStore userStore, IGroupStore groupStore, Permissions permissions)
+            throws IResourceStore.ResourceStoreException, IResourceStore.ResourceNotFoundException {
         Subject subject = ThreadContext.getSubject();
         if (subject != null) {
 
             String username = SecurityUtilities.getPrincipal(subject).getName();
-            URI currentUser = URI.create(IRestUserStore.resourceURI + userstore.searchUser(username));
+            URI currentUser = URI.create(IRestUserStore.resourceURI + userStore.searchUser(username));
             AuthorizedSubjects authorizedSubjects;
             for (IAuthorization.Type type : IAuthorization.Type.values()) {
                 authorizedSubjects = permissions.getPermissions().get(type);
@@ -106,8 +110,8 @@ public final class PermissionUtilities {
         return false;
     }
 
-    private static List<AuthorizedUser> optimizeAuthorizedUsers(List<AuthorizedUser> authorizedUsers) {
-        List<AuthorizedUser> ret = new LinkedList<AuthorizedUser>();
+    private static void optimizeAuthorizedUsers(List<AuthorizedUser> authorizedUsers) {
+        List<AuthorizedUser> ret = new LinkedList<>();
 
         for (AuthorizedUser authorizedUser : authorizedUsers) {
             int index = ret.indexOf(authorizedUser);
@@ -126,7 +130,6 @@ public final class PermissionUtilities {
             }
         }
 
-        return ret;
     }
 
     private static List<Integer> mergeVersions(List<Integer> base, List<Integer> toBeAdded) {
@@ -136,7 +139,7 @@ public final class PermissionUtilities {
             }
         }
 
-        Collections.sort(base, Collections.reverseOrder());
+        base.sort(Collections.reverseOrder());
 
         return base;
     }

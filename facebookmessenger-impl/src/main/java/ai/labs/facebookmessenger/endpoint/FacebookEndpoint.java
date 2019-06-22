@@ -7,8 +7,9 @@ import ai.labs.httpclient.IHttpClient;
 import ai.labs.httpclient.IRequest;
 import ai.labs.httpclient.IResponse;
 import ai.labs.models.Deployment;
-import ai.labs.resources.rest.bots.IBotStore;
-import ai.labs.resources.rest.bots.model.BotConfiguration;
+import ai.labs.persistence.model.ResourceId;
+import ai.labs.resources.rest.config.bots.IBotStore;
+import ai.labs.resources.rest.config.bots.model.BotConfiguration;
 import ai.labs.rest.rest.IRestBotEngine;
 import ai.labs.rest.restinterfaces.IRestInterfaceFactory;
 import ai.labs.runtime.IBotFactory;
@@ -145,6 +146,7 @@ public class FacebookEndpoint implements IFacebookEndpoint {
         return event -> {
             try {
                 String message = event.getText();
+                log.info("fb message text: {}", message);
                 String senderId = event.getSender().getId();
                 final String conversationId = getConversationId(environment, botId, senderId);
                 say(environment, botId, botVersion, conversationId, senderId, message);
@@ -161,6 +163,7 @@ public class FacebookEndpoint implements IFacebookEndpoint {
             try {
                 String message = event.getQuickReply().getPayload();
                 String senderId = event.getSender().getId();
+                log.info("fb quick message text: {}", message);
                 final String conversationId = getConversationId(environment, botId, senderId);
                 say(environment, botId, botVersion, conversationId, senderId, message);
 
@@ -202,10 +205,10 @@ public class FacebookEndpoint implements IFacebookEndpoint {
         final List<Map<String, String>> quickReplies = getQuickReplies(httpResponse.getContentAsString());
 
         final List<QuickReply> fbQuickReplies = new ArrayList<>();
-        if (quickReplies != null && quickReplies.size() > 0) {
+        if (!quickReplies.isEmpty()) {
             QuickReply.ListBuilder listBuilder = QuickReply.newListBuilder();
             for (Map<String, String> quickReply : quickReplies) {
-                listBuilder.addTextQuickReply(quickReply.get("value"), quickReply.get("expressions")).toList();
+                listBuilder.addTextQuickReply(quickReply.get("value"), quickReply.get("value")).toList();
             }
             fbQuickReplies.addAll(listBuilder.build());
         }
@@ -331,10 +334,10 @@ public class FacebookEndpoint implements IFacebookEndpoint {
             throws RestInterfaceFactoryException {
         String conversationId;
         try {
-            Response response = restInterfaceFactory.get(IRestBotEngine.class, apiServerURI).
+            Response response = restInterfaceFactory.get(IRestBotEngine.class).
                     startConversation(environment, botId, senderId);
             if (response.getStatus() == 201) {
-                URIUtilities.ResourceId resourceIdConversation =
+                ResourceId resourceIdConversation =
                         URIUtilities.extractResourceId(response.getLocation());
                 conversationId = resourceIdConversation.getId();
                 conversationIdCache.put(senderId, conversationId);

@@ -7,7 +7,7 @@
     <parent>
         <groupId>ai.labs</groupId>
         <artifactId>eddi</artifactId>
-        <version>4.4</version>
+        <version>4.7</version>
         <relativePath>../pom.xml</relativePath>
     </parent>
     <artifactId>configurationrepository-definition</artifactId>
@@ -17,7 +17,7 @@
         <dependency>
             <groupId>org.jboss.resteasy</groupId>
             <artifactId>resteasy-jackson2-provider</artifactId>
-            <version>3.6.3.Final</version>
+            <version>3.7.0.Final</version>
             <scope>provided</scope>
             <exclusions>
                 <exclusion>
@@ -33,6 +33,11 @@
                     <artifactId>jackson-annotations</artifactId>
                 </exclusion>
             </exclusions>
+        </dependency>
+        <dependency>
+            <groupId>com.kjetland</groupId>
+            <artifactId>mbknor-jackson-jsonschema_2.12</artifactId>
+            <version>1.0.34</version>
         </dependency>
         <dependency>
             <groupId>ai.labs</groupId>

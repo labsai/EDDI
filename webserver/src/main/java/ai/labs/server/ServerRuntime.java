@@ -6,6 +6,7 @@ import ai.labs.utilities.FileUtilities;
 import lombok.AllArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.eclipse.jetty.alpn.server.ALPNServerConnectionFactory;
+import org.eclipse.jetty.http.HttpURI;
 import org.eclipse.jetty.http2.HTTP2Cipher;
 import org.eclipse.jetty.http2.server.HTTP2ServerConnectionFactory;
 import org.eclipse.jetty.security.LoginService;
@@ -25,12 +26,16 @@ import org.jboss.resteasy.plugins.guice.GuiceResteasyBootstrapServletContextList
 import org.jboss.resteasy.plugins.providers.RegisterBuiltin;
 import org.jboss.resteasy.plugins.server.servlet.HttpServletDispatcher;
 import org.jboss.resteasy.spi.ResteasyProviderFactory;
+import org.keycloak.adapters.KeycloakDeploymentBuilder;
+import org.keycloak.adapters.servlet.KeycloakOIDCFilter;
+import org.keycloak.representations.adapters.config.AdapterConfig;
 import ro.isdc.wro.http.WroFilter;
 
 import javax.inject.Named;
 import javax.inject.Singleton;
 import javax.servlet.*;
 import javax.servlet.http.HttpServletRequest;
+import javax.servlet.http.HttpServletRequestWrapper;
 import javax.servlet.http.HttpServletResponse;
 import java.io.IOException;
 import java.net.MalformedURLException;
@@ -39,12 +44,14 @@ import java.net.URL;
 import java.util.*;
 import java.util.concurrent.ThreadPoolExecutor;
 
+
 /**
  * @author ginccc
  */
 @Singleton
 @Slf4j
 public class ServerRuntime implements IServerRuntime {
+    private static final String BASIC_AUTH_SECURITY_HANDLER_TYPE = "basic";
 
     public static class Options {
         public Class<?> applicationConfiguration;
@@ -60,6 +67,7 @@ public class ServerRuntime implements IServerRuntime {
         public long responseDelayInMillis;
         public long idleTime;
         public int outputBufferSize;
+        public String securityHandlerType;
     }
 
     private static final String ANY_PATH = "/*";
@@ -70,6 +78,8 @@ public class ServerRuntime implements IServerRuntime {
     private final HttpServletDispatcher httpServletDispatcher;
     private final SecurityHandler securityHandler;
     private final ThreadPoolExecutor threadPoolExecutor;
+    private final MongoLoginService mongoLoginService;
+    private final AdapterConfig keycloakAdapterConfig;
     private final String environment;
     private final String resourceDir;
 
@@ -79,6 +89,8 @@ public class ServerRuntime implements IServerRuntime {
                          HttpServletDispatcher httpServletDispatcher,
                          SecurityHandler securityHandler,
                          ThreadPoolExecutor threadPoolExecutor,
+                         MongoLoginService mongoLoginService,
+                         AdapterConfig keycloakAdapterConfig,
                          @Named("system.environment") String environment,
                          @Named("systemRuntime.resourceDir") String resourceDir) {
         this.options = options;
@@ -87,6 +99,8 @@ public class ServerRuntime implements IServerRuntime {
         this.httpServletDispatcher = httpServletDispatcher;
         this.securityHandler = securityHandler;
         this.threadPoolExecutor = threadPoolExecutor;
+        this.mongoLoginService = mongoLoginService;
+        this.keycloakAdapterConfig = keycloakAdapterConfig;
         this.environment = environment;
         this.resourceDir = resourceDir;
         RegisterBuiltin.register(ResteasyProviderFactory.getInstance());
@@ -105,12 +119,15 @@ public class ServerRuntime implements IServerRuntime {
 
                     startupJetty(contextParameter,
                             Arrays.asList(resteasyContextListener, swaggerContextListener),
-                            Collections.singletonList(new FilterMappingHolder(new WroFilter(), "/text/*")),
+                            Arrays.asList(new FilterMappingHolder(
+                                            new KeycloakOIDCFilter(
+                                                    facade -> KeycloakDeploymentBuilder.build(keycloakAdapterConfig)), "/keycloak/*"),
+                                    new FilterMappingHolder(new WroFilter(), "/text/*")),
                             Arrays.asList(new HttpServletHolder(httpServletDispatcher, "/*"),
                                     new HttpServletHolder(new JSAPIServlet(), "/rest-js")),
-                            FileUtilities.buildPath(System.getProperty("user.dir"), resourceDir),
-                            completeListener);
+                            FileUtilities.buildPath(System.getProperty("user.dir"), resourceDir));
                     log.info("Jetty has successfully started.");
+                    completeListener.onComplete();
                 } catch (Exception e) {
                     log.error(e.getLocalizedMessage(), e);
                 }
@@ -122,8 +139,7 @@ public class ServerRuntime implements IServerRuntime {
                               List<EventListener> eventListeners,
                               final List<FilterMappingHolder> filters,
                               final List<HttpServletHolder> servlets,
-                              final String resourcePath,
-                              final IStartupCompleteListener completeListener) throws Exception {
+                              final String resourcePath) throws Exception {
 
         Log.setLog(new Slf4jLog());
 
@@ -140,7 +156,7 @@ public class ServerRuntime implements IServerRuntime {
         alpn.setDefaultProtocol("h2");
 
         // SSL Connection Factory
-        SslContextFactory sslContextFactory = new SslContextFactory();
+        SslContextFactory.Server sslContextFactory = new SslContextFactory.Server();
         sslContextFactory.setKeyStorePath(options.keyStorePath);
         sslContextFactory.setKeyStorePassword(options.keyStorePassword);
         sslContextFactory.setKeyManagerPassword(options.keyStorePassword);
@@ -195,10 +211,15 @@ public class ServerRuntime implements IServerRuntime {
 
         servletHandler.addFilter(new FilterHolder(createRedirectFilter(options.defaultPath)), ANY_PATH, getAllDispatcherTypes());
 
+        if (BASIC_AUTH_SECURITY_HANDLER_TYPE.equals(options.securityHandlerType)) {
+            if (securityHandler != null) {
+                securityHandler.setLoginService(mongoLoginService);
+                log.info("Basic Authentication has been enabled...");
+            }
+        }
         servletHandler.addFilter(new FilterHolder(createInitThreadBoundValuesFilter()), ANY_PATH, getAllDispatcherTypes());
 
         if (options.useCrossSiteScripting) {
-            //TODO check for production
             //add header param in order to enable cross-site-scripting
             servletHandler.addFilter(new FilterHolder(createCrossSiteScriptFilter()), ANY_PATH, getAllDispatcherTypes());
             log.info("CrossSiteScriptFilter has been enabled...");
@@ -207,10 +228,9 @@ public class ServerRuntime implements IServerRuntime {
         server.setHandler(handlers);
 
         // Start the server
+        server.setStopAtShutdown(true);
         server.start();
-        completeListener.onComplete();
-        server.join();
-
+        //server.join();
     }
 
     private Filter createRedirectFilter(final String defaultPath) {
@@ -277,9 +297,20 @@ public class ServerRuntime implements IServerRuntime {
 
             @Override
             public void doFilter(ServletRequest servletRequest, ServletResponse servletResponse, FilterChain filterChain) throws IOException, ServletException {
-                HttpServletRequest httpservletRequest = (HttpServletRequest) servletRequest;
-                URL requestURL = URI.create(httpservletRequest.getRequestURL().toString()).toURL();
-                String currentResourceURI = ((Request) httpservletRequest).getHttpURI().getPathQuery();
+                HttpURI httpURI;
+                String requestUrl;
+                if (servletRequest instanceof Request) {
+                    httpURI = ((Request) servletRequest).getHttpURI();
+                    requestUrl = ((Request) servletRequest).getRequestURL().toString();
+                } else {
+                    HttpServletRequest httpservletRequest = (HttpServletRequest) servletRequest;
+                    requestUrl = httpservletRequest.getRequestURL().toString();
+                    Request request = Request.getBaseRequest(((HttpServletRequestWrapper) httpservletRequest).getRequest());
+                    httpURI = request.getHttpURI();
+                }
+
+                URL requestURL = URI.create(requestUrl).toURL();
+                String currentResourceURI = httpURI.getPathQuery();
                 ThreadContext.put("currentResourceURI", currentResourceURI);
                 ThreadContext.put("currentURLProtocol", requestURL.getProtocol());
                 ThreadContext.put("currentURLHost", requestURL.getHost());
@@ -310,9 +341,9 @@ public class ServerRuntime implements IServerRuntime {
                     throws IOException, ServletException {
                 HttpServletResponse httpResponse = (HttpServletResponse) response;
                 httpResponse.setHeader("Access-Control-Allow-Origin", "*");
-                httpResponse.setHeader("Access-Control-Allow-Headers", "authorization, Content-Type");
-                httpResponse.setHeader("Access-Control-Allow-Methods", "GET, PUT, POST, DELETE, PATCH, OPTIONS");
-                httpResponse.setHeader("Access-Control-Expose-Headers", "location");
+                httpResponse.setHeader("Access-Control-Allow-Headers", "Authorization,X-Requested-With,Content-Type,Accept,Origin,Cache-Control");
+                httpResponse.setHeader("Access-Control-Allow-Methods", "HEAD,GET,PUT,POST,DELETE,PATCH,OPTIONS");
+                httpResponse.setHeader("Access-Control-Expose-Headers", "Location");
                 filterChain.doFilter(request, response);
             }
 

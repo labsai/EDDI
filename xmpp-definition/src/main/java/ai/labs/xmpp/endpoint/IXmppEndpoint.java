@@ -4,5 +4,5 @@ import org.jivesoftware.smack.chat2.IncomingChatMessageListener;
 
 public interface IXmppEndpoint extends IncomingChatMessageListener {
 
-    public void init();
+    void init();
 }

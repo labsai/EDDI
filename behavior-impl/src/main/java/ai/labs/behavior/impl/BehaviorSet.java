@@ -15,17 +15,4 @@ import java.util.List;
 @Setter
 public class BehaviorSet {
     private List<BehaviorGroup> behaviorGroups = new LinkedList<>();
-
-    public List<BehaviorRule> getBehaviorRule(String behaviorRule) {
-        List<BehaviorRule> ret = new LinkedList<>();
-        for (BehaviorGroup behaviorGroup : behaviorGroups) {
-            for (BehaviorRule status : behaviorGroup.getBehaviorRules()) {
-                if (status.getName().equals(behaviorRule)) {
-                    ret.add(status);
-                }
-            }
-        }
-
-        return ret;
-    }
 }

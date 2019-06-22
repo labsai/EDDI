@@ -8,6 +8,7 @@ import org.jboss.resteasy.client.jaxrs.ResteasyWebTarget;
 import org.jboss.resteasy.client.jaxrs.engines.jetty.JettyClientEngine;
 
 import javax.inject.Inject;
+import javax.inject.Named;
 import javax.inject.Singleton;
 import javax.ws.rs.client.ClientRequestFilter;
 import java.util.HashMap;
@@ -20,35 +21,46 @@ import java.util.Map;
 public class RestInterfaceFactory implements IRestInterfaceFactory {
     private final Map<String, ResteasyClient> clients = new HashMap<>();
     private final HttpClient httpClient;
+    private final String apiServerURI;
+    private final String securityHandlerType;
 
     @Inject
-    public RestInterfaceFactory(HttpClient httpClient) {
+    public RestInterfaceFactory(HttpClient httpClient,
+                                @Named("system.apiServerURI") String apiServerURI,
+                                @Named("webServer.securityHandlerType") String securityHandlerType) {
         this.httpClient = httpClient;
+        this.apiServerURI = apiServerURI;
+        this.securityHandlerType = securityHandlerType;
     }
 
     @Override
-    public <T> T get(Class<T> clazz, String targetServerUri) {
-        Object context = ThreadContext.get("security.token");
-        String securityToken = context != null ? context.toString(): null;
-        return get(clazz, targetServerUri, securityToken);
-    }
+    public <T> T get(Class<T> clazz) {
+        ResteasyClient client = getResteasyClient(apiServerURI);
+        ResteasyWebTarget target = client.target(apiServerURI);
 
-    @Override
-    public <T> T get(Class<T> clazz, String targetServerUri, String securityToken) {
-        ResteasyClient client = getResteasyClient(targetServerUri);
-        ResteasyWebTarget target = client.target(targetServerUri);
-
-        if (securityToken != null) {
-            target.register((ClientRequestFilter) requestContext ->
-                    requestContext.getHeaders().add("Authorization", "Bearer " + securityToken));
-        }
+        target.register((ClientRequestFilter) requestContext -> {
+            String authorizationString = null;
+            if ("basic".equals(securityHandlerType)) {
+                Object context = ThreadContext.get("currentuser:credentials");
+                authorizationString = context != null ? context.toString() : null;
+            } else if ("keycloak".equals(securityHandlerType)) {
+                Object context = ThreadContext.get("security.token");
+                String securityToken = context != null ? context.toString() : null;
+                if (securityToken != null) {
+                    authorizationString = "Bearer " + securityToken;
+                }
+            }
+            if (authorizationString != null) {
+                requestContext.getHeaders().add("Authorization", authorizationString);
+            }
+        });
 
         return target.proxy(clazz);
     }
 
     private ResteasyClient getResteasyClient(String targetServerUri) {
         ResteasyClient client = clients.get(targetServerUri);
-        if(client == null) {
+        if (client == null) {
 
             JettyClientEngine engine = new JettyClientEngine(httpClient);
             ResteasyClientBuilder clientBuilder = new ResteasyClientBuilder();

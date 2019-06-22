@@ -7,6 +7,8 @@ import ai.labs.models.ConversationState;
 import ai.labs.models.Deployment;
 import ai.labs.models.InputData;
 import io.swagger.annotations.Api;
+import io.swagger.annotations.ApiOperation;
+import io.swagger.annotations.Authorization;
 import org.jboss.resteasy.annotations.cache.NoCache;
 
 import javax.ws.rs.*;
@@ -20,7 +22,7 @@ import java.util.Map;
 /**
  * @author ginccc
  */
-@Api(value = "bot engine")
+@Api(value = "Bot Engine", authorizations = {@Authorization(value = "eddi_auth")})
 @Path("/bots")
 public interface IRestBotEngine {
 
@@ -33,6 +35,7 @@ public interface IRestBotEngine {
      */
     @POST
     @Path("/{environment}/{botId}")
+    @ApiOperation(value = "Start conversation.")
     Response startConversation(@PathParam("environment") Deployment.Environment environment,
                                @PathParam("botId") String botId,
                                @QueryParam("userId") String userId);
@@ -48,12 +51,14 @@ public interface IRestBotEngine {
     @POST
     @Path("/{environment}/{botId}")
     @Consumes(MediaType.APPLICATION_JSON)
+    @ApiOperation(value = "Start conversation with context.")
     Response startConversationWithContext(@PathParam("environment") Deployment.Environment environment,
                                           @PathParam("botId") String botId,
                                           @QueryParam("userId") String userId, Map<String, Context> context);
 
     @POST
     @Path("/{conversationId}/endConversation")
+    @ApiOperation(value = "End conversation.")
     Response endConversation(@PathParam("conversationId") String conversationId);
 
 
@@ -61,6 +66,7 @@ public interface IRestBotEngine {
     @NoCache
     @Path("/{environment}/{botId}/{conversationId}")
     @Produces(MediaType.APPLICATION_JSON)
+    @ApiOperation(value = "Read conversation.")
     SimpleConversationMemorySnapshot readConversation(@PathParam("environment") Deployment.Environment environment,
                                                       @PathParam("botId") String botId,
                                                       @PathParam("conversationId") String conversationId,
@@ -70,6 +76,7 @@ public interface IRestBotEngine {
 
     @GET
     @Path("/{environment}/conversationstatus/{conversationId}")
+    @ApiOperation(value = "Get conversation state.")
     ConversationState getConversationState(@PathParam("environment") Deployment.Environment environment,
                                            @PathParam("conversationId") String conversationId);
 
@@ -87,6 +94,7 @@ public interface IRestBotEngine {
     @Path("/{environment}/{botId}/{conversationId}")
     @Consumes(MediaType.TEXT_PLAIN)
     @Produces(MediaType.APPLICATION_JSON)
+    @ApiOperation(value = "Talk to bot.")
     void say(@PathParam("environment") Deployment.Environment environment,
              @PathParam("botId") String botId,
              @PathParam("conversationId") String conversationId,
@@ -111,6 +119,7 @@ public interface IRestBotEngine {
     @Path("/{environment}/{botId}/{conversationId}")
     @Consumes(MediaType.APPLICATION_JSON)
     @Produces(MediaType.APPLICATION_JSON)
+    @ApiOperation(value = "Talk to bot with context.")
     void sayWithinContext(@PathParam("environment") Deployment.Environment environment,
                           @PathParam("botId") String botId,
                           @PathParam("conversationId") String conversationId,
@@ -123,12 +132,14 @@ public interface IRestBotEngine {
     @GET
     @Path("/{environment}/{botId}/undo/{conversationId}")
     @Produces(MediaType.TEXT_PLAIN)
+    @ApiOperation(value = "Is UNDO available?")
     Boolean isUndoAvailable(@PathParam("environment") Deployment.Environment environment,
                             @PathParam("botId") String botId,
                             @PathParam("conversationId") String conversationId);
 
     @POST
     @Path("/{environment}/{botId}/undo/{conversationId}")
+    @ApiOperation(value = "UNDO last conversation step.")
     Response undo(@PathParam("environment") Deployment.Environment environment,
                   @PathParam("botId") String botId,
                   @PathParam("conversationId") String conversationId);
@@ -136,12 +147,14 @@ public interface IRestBotEngine {
     @GET
     @Path("/{environment}/{botId}/redo/{conversationId}")
     @Produces(MediaType.TEXT_PLAIN)
+    @ApiOperation(value = "Is REDO available?")
     Boolean isRedoAvailable(@PathParam("environment") Deployment.Environment environment,
                             @PathParam("botId") String botId,
                             @PathParam("conversationId") String conversationId);
 
     @POST
     @Path("/{environment}/{botId}/redo/{conversationId}")
+    @ApiOperation(value = "REDO last conversation step.")
     Response redo(@PathParam("environment") Deployment.Environment environment,
                   @PathParam("botId") String botId,
                   @PathParam("conversationId") String conversationId);

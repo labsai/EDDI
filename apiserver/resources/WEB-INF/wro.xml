@@ -2,7 +2,6 @@
 <groups xmlns="http://www.isdc.ro/wro">
 
     <group name="screen">
-        <css>classpath:css/typography.css</css>
         <css>classpath:css/reset.css</css>
         <css>classpath:css/screen.css</css>
         <css>classpath:css/eddi.css</css>
@@ -14,27 +13,18 @@
         <css>classpath:css/eddi.css</css>
     </group>
 
-    <group name="all">
-        <js>classpath:js/object-assign-pollyfill.js</js>
-        <group-ref>jquery</group-ref>
-        <js>classpath:js/jquery.slideto.min.js</js>
-        <js>classpath:js/jquery.wiggle.min.js</js>
-        <js>classpath:js/jquery.ba-bbq.min.js</js>
-        <js>classpath:js/handlebars-4.0.5.js</js>
+    <group name="swagger">
+        <group-ref>jquery3</group-ref>
+        <js>classpath:js/handlebars-4.0.13.js</js>
         <js>classpath:js/lodash.min.js</js>
         <js>classpath:js/backbone-min.js</js>
         <js>classpath:js/swagger-ui.min.js</js>
-        <js>classpath:js/highlight.9.1.0.pack.js</js>
-        <js>classpath:js/highlight.9.1.0.pack_extended.js</js>
-        <js>classpath:js/jsoneditor.min.js</js>
-        <js>classpath:js/marked.js</js>
-        <js>classpath:js/swagger-oauth.js</js>
+        <css>classpath:css/swagger-ui.css</css>
     </group>
 
-    <group name="chat">
-        <group-ref>jquery</group-ref>
-        <js>classpath:js/chat.js</js>
-        <css>classpath:css/chat.css</css>
+    <group name="swagger-standalone">
+        <js>classpath:js/swagger-ui-bundle.js</js>
+        <js>classpath:js/swagger-ui-standalone-preset.js</js>
     </group>
 
     <group name="chat2">
@@ -45,13 +35,18 @@
         <css>classpath:css/chat.css</css>
     </group>
 
-    <group name="jquery">
-        <js>classpath:js/jquery-1.8.0.min.js</js>
-        <js>classpath:js/jquery.urldecoder.edited.js</js>
-    </group>
-
     <group name="jquery3">
         <js>classpath:js/jquery-3.3.1.min.js</js>
         <js>classpath:js/jquery.urldecoder.edited.js</js>
+    </group>
+
+    <group name="dashboard">
+        <group-ref>jquery3</group-ref>
+        <js>classpath:js/bootstrap.min.js</js>
+        <js>classpath:js/bootstrap.bundle.min.js</js>
+        <js>classpath:js/moment.min.js</js>
+        <js>classpath:js/dashboard.js</js>
+        <css>classpath:css/bootstrap.min.css</css>
+        <css>classpath:css/dashboard.css</css>
     </group>
 </groups>

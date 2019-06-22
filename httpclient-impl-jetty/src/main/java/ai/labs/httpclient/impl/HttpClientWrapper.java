@@ -4,6 +4,8 @@ import ai.labs.httpclient.ICompleteListener;
 import ai.labs.httpclient.IHttpClient;
 import ai.labs.httpclient.IRequest;
 import ai.labs.httpclient.IResponse;
+import lombok.Getter;
+import lombok.Setter;
 import lombok.extern.slf4j.Slf4j;
 import org.eclipse.jetty.client.HttpClient;
 import org.eclipse.jetty.client.api.*;
@@ -48,10 +50,11 @@ public class HttpClientWrapper implements IHttpClient {
         return new RequestWrapper(uri, request);
     }
 
-    public class RequestWrapper implements IRequest {
+    private class RequestWrapper implements IRequest {
         private final URI uri;
         private Request request;
         private int maxLength = 2 * 1024 * 1024;
+        private String requestBody;
 
         RequestWrapper(URI uri, Request request) {
             this.uri = uri;
@@ -90,7 +93,8 @@ public class HttpClientWrapper implements IHttpClient {
 
         @Override
         public IRequest setBodyEntity(String content, String encoding, String contentType) {
-            request.content(new StringContentProvider(content, encoding), contentType);
+            this.requestBody = content;
+            request.content(new StringContentProvider(this.requestBody, encoding), contentType);
             return this;
         }
 
@@ -114,27 +118,13 @@ public class HttpClientWrapper implements IHttpClient {
             request.send(listener);
             try {
                 final ContentResponse response = listener.get();
-                return new IResponse() {
-                    @Override
-                    public String getContentAsString() {
-                        return listener.getContentAsString();
-                    }
+                var responseWrapper = new ResponseWrapper();
+                responseWrapper.setContentAsString(listener.getContentAsString());
+                responseWrapper.setHttpCode(response.getStatus());
+                responseWrapper.setHttpCodeMessage(response.getReason());
+                responseWrapper.setHttpHeader(convertHeaderToMap(response.getHeaders()));
 
-                    @Override
-                    public int getHttpCode() {
-                        return response.getStatus();
-                    }
-
-                    @Override
-                    public String getHttpCodeMessage() {
-                        return response.getReason();
-                    }
-
-                    @Override
-                    public Map<String, String> getHttpHeader() {
-                        return convertHeaderToMap(response.getHeaders());
-                    }
-                };
+                return responseWrapper;
             } catch (InterruptedException | ExecutionException e) {
                 listener.cancel(true);
                 throw new HttpRequestException(e.getLocalizedMessage(), e);
@@ -150,27 +140,13 @@ public class HttpClientWrapper implements IHttpClient {
                     final String content = getContentAsString();
 
                     try {
-                        completeListener.onComplete(new IResponse() {
-                            @Override
-                            public String getContentAsString() {
-                                return content;
-                            }
+                        var responseWrapper = new ResponseWrapper();
+                        responseWrapper.setContentAsString(content);
+                        responseWrapper.setHttpCode(response.getStatus());
+                        responseWrapper.setHttpCodeMessage(response.getReason());
+                        responseWrapper.setHttpHeader(convertHeaderToMap(response.getHeaders()));
 
-                            @Override
-                            public int getHttpCode() {
-                                return response.getStatus();
-                            }
-
-                            @Override
-                            public String getHttpCodeMessage() {
-                                return response.getReason();
-                            }
-
-                            @Override
-                            public Map<String, String> getHttpHeader() {
-                                return convertHeaderToMap(response.getHeaders());
-                            }
-                        });
+                        completeListener.onComplete(responseWrapper);
                     } catch (IResponse.HttpResponseException e) {
                         log.error(e.getLocalizedMessage(), e);
                     }
@@ -185,7 +161,28 @@ public class HttpClientWrapper implements IHttpClient {
             return "RequestWrapper{" +
                     "uri=" + uri +
                     ", request=" + request.toString() +
+                    ", requestBody=" + requestBody +
                     ", maxLength=" + maxLength +
+                    ", queryParams=" + request.getParams() +
+                    '}';
+        }
+    }
+
+    @Setter
+    @Getter
+    private class ResponseWrapper implements IResponse {
+        private String contentAsString;
+        private int httpCode;
+        private String httpCodeMessage;
+        private Map<String, String> httpHeader;
+
+        @Override
+        public String toString() {
+            return "ResponseWrapper{" +
+                    "httpCode=" + httpCode +
+                    ", httpCodeMessage=" + httpCodeMessage +
+                    ", responseBody=" + contentAsString +
+                    ", httpHeader=" + httpHeader.toString() +
                     '}';
         }
     }

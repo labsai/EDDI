@@ -49,8 +49,8 @@ public class BotFactory implements IBotFactory {
         Map<BotId, IBot> bots = getBotEnvironment(environment);
         List<BotId> botVersions = bots.keySet().stream().filter(id -> id.getId().equals(botId)).
                 sorted(Collections.reverseOrder((botId1, botId2) ->
-                botId1.getVersion() < botId2.getVersion() ?
-                        -1 : botId1.getVersion().equals(botId2.getVersion()) ? 0 : 1)).
+                        botId1.getVersion() < botId2.getVersion() ?
+                                -1 : botId1.getVersion().equals(botId2.getVersion()) ? 0 : 1)).
                 collect(Collectors.toCollection(LinkedList::new));
 
         IBot latestBot = null;
@@ -66,6 +66,27 @@ public class BotFactory implements IBotFactory {
         }
 
         return latestBot;
+    }
+
+    @Override
+    public List<IBot> getAllLatestBots(Deployment.Environment environment) {
+        Map<String, IBot> ret = new LinkedHashMap<>();
+
+        for (BotId botIdObj : getBotEnvironment(environment).keySet()) {
+            IBot nextBot = getLatestBot(environment, botIdObj.getId());
+            String botId = botIdObj.getId();
+            IBot currentBot = ret.get(botId);
+            if (ret.containsKey(botId)) {
+                if (currentBot.getBotVersion() < nextBot.getBotVersion()) {
+                    ret.put(botId, nextBot);
+                }
+            } else {
+                ret.put(botIdObj.getId(), nextBot);
+            }
+
+        }
+
+        return new LinkedList<>(ret.values());
     }
 
     @Override

@@ -1,7 +1,7 @@
 package ai.labs.user.impl.mongo;
 
 import ai.labs.persistence.IResourceStore;
-import ai.labs.serialization.IJsonSerialization;
+import ai.labs.serialization.IDocumentBuilder;
 import ai.labs.user.IUserStore;
 import ai.labs.user.model.User;
 import ai.labs.utilities.SecurityUtilities;
@@ -22,16 +22,16 @@ import java.io.IOException;
 public class UserStore implements IUserStore {
     private static final String COLLECTION_USERS = "users";
     private final MongoCollection<Document> collection;
-    private IJsonSerialization jsonSerialization;
+    private final IDocumentBuilder documentBuilder;
 
     @Inject
-    public UserStore(MongoDatabase database, IJsonSerialization jsonSerialization) {
+    public UserStore(MongoDatabase database, IDocumentBuilder documentBuilder) {
         collection = database.getCollection(COLLECTION_USERS);
-        this.jsonSerialization = jsonSerialization;
+        this.documentBuilder = documentBuilder;
     }
 
     @Override
-    public String searchUser(String username) throws IResourceStore.ResourceStoreException, IResourceStore.ResourceNotFoundException {
+    public String searchUser(String username) throws IResourceStore.ResourceNotFoundException {
         Document userDocument = collection.find(new Document("username", username)).first();
 
         if (userDocument == null) {
@@ -55,18 +55,15 @@ public class UserStore implements IUserStore {
         userDocument.remove("_id");
 
         return convert(userDocument);
-
     }
 
     private User convert(Document userDocument) throws IResourceStore.ResourceStoreException {
         try {
-            return jsonSerialization.deserialize(userDocument.toString(), User.class);
+            return documentBuilder.build(userDocument, User.class);
         } catch (IOException e) {
-            log.debug(e.getLocalizedMessage(), e);
             throw new IResourceStore.ResourceStoreException(e.getLocalizedMessage(), e);
         }
     }
-
 
     @Override
     public void updateUser(String userId, User user) throws IResourceStore.ResourceStoreException {
@@ -93,9 +90,8 @@ public class UserStore implements IUserStore {
 
     private String serialize(User user) throws IResourceStore.ResourceStoreException {
         try {
-            return jsonSerialization.serialize(user);
+            return documentBuilder.toString(user);
         } catch (IOException e) {
-            log.debug(e.getLocalizedMessage(), e);
             throw new IResourceStore.ResourceStoreException("Cannot serialize User entity into json.", e);
         }
     }
@@ -103,5 +99,10 @@ public class UserStore implements IUserStore {
     @Override
     public void deleteUser(String userId) {
         collection.deleteOne(new BasicDBObject("_id", new ObjectId(userId)));
+    }
+
+    @Override
+    public int getUsersCount() {
+        return (int) collection.countDocuments();
     }
 }

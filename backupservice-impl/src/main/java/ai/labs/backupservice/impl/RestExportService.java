@@ -2,18 +2,19 @@ package ai.labs.backupservice.impl;
 
 import ai.labs.backupservice.IRestExportService;
 import ai.labs.backupservice.IZipArchive;
+import ai.labs.models.DocumentDescriptor;
 import ai.labs.persistence.IResourceStore;
 import ai.labs.persistence.IResourceStore.IResourceId;
-import ai.labs.resources.rest.behavior.IBehaviorStore;
-import ai.labs.resources.rest.bots.IBotStore;
-import ai.labs.resources.rest.bots.model.BotConfiguration;
+import ai.labs.resources.rest.config.behavior.IBehaviorStore;
+import ai.labs.resources.rest.config.bots.IBotStore;
+import ai.labs.resources.rest.config.bots.model.BotConfiguration;
+import ai.labs.resources.rest.config.http.IHttpCallsStore;
+import ai.labs.resources.rest.config.output.IOutputStore;
+import ai.labs.resources.rest.config.packages.IPackageStore;
+import ai.labs.resources.rest.config.packages.model.PackageConfiguration;
+import ai.labs.resources.rest.config.propertysetter.IPropertySetterStore;
+import ai.labs.resources.rest.config.regulardictionary.IRegularDictionaryStore;
 import ai.labs.resources.rest.documentdescriptor.IDocumentDescriptorStore;
-import ai.labs.resources.rest.documentdescriptor.model.DocumentDescriptor;
-import ai.labs.resources.rest.http.IHttpCallsStore;
-import ai.labs.resources.rest.output.IOutputStore;
-import ai.labs.resources.rest.packages.IPackageStore;
-import ai.labs.resources.rest.packages.model.PackageConfiguration;
-import ai.labs.resources.rest.regulardictionary.IRegularDictionaryStore;
 import ai.labs.serialization.IJsonSerialization;
 import ai.labs.utilities.FileUtilities;
 import ai.labs.utilities.RestUtilities;
@@ -48,6 +49,7 @@ public class RestExportService extends AbstractBackupService implements IRestExp
     private final IRegularDictionaryStore regularDictionaryStore;
     private final IBehaviorStore behaviorStore;
     private final IHttpCallsStore httpCallsStore;
+    private final IPropertySetterStore propertySetterStore;
     private final IOutputStore outputStore;
     private final IJsonSerialization jsonSerialization;
     private final IZipArchive zipArchive;
@@ -60,6 +62,7 @@ public class RestExportService extends AbstractBackupService implements IRestExp
                              IRegularDictionaryStore regularDictionaryStore,
                              IBehaviorStore behaviorStore,
                              IHttpCallsStore httpCallsStore,
+                             IPropertySetterStore propertySetterStore,
                              IOutputStore outputStore,
                              IJsonSerialization jsonSerialization,
                              IZipArchive zipArchive) {
@@ -69,6 +72,7 @@ public class RestExportService extends AbstractBackupService implements IRestExp
         this.regularDictionaryStore = regularDictionaryStore;
         this.behaviorStore = behaviorStore;
         this.httpCallsStore = httpCallsStore;
+        this.propertySetterStore = propertySetterStore;
         this.outputStore = outputStore;
         this.jsonSerialization = jsonSerialization;
         this.zipArchive = zipArchive;
@@ -109,6 +113,9 @@ public class RestExportService extends AbstractBackupService implements IRestExp
 
                 writeConfigs(packagePath, convertConfigsToString(readConfigs(httpCallsStore,
                         extractResourcesUris(packageConfigurationString, HTTPCALLS_URI_PATTERN))), HTTPCALLS_EXT);
+
+                writeConfigs(packagePath, convertConfigsToString(readConfigs(propertySetterStore,
+                        extractResourcesUris(packageConfigurationString, PROPERTY_URI_PATTERN))), PROPERTY_EXT);
 
                 writeConfigs(packagePath, convertConfigsToString(readConfigs(outputStore,
                         extractResourcesUris(packageConfigurationString, OUTPUT_URI_PATTERN))), OUTPUT_EXT);
@@ -168,7 +175,7 @@ public class RestExportService extends AbstractBackupService implements IRestExp
 
     private Path writeDirAndDocument(String documentId, Integer documentVersion,
                                      String configurationString, Path tmpPath, String fileExtension)
-            throws IOException, IResourceStore.ResourceStoreException, IResourceStore.ResourceNotFoundException {
+            throws IOException {
 
         Path dir = Files.createDirectories(Paths.get(tmpPath.toString(), documentId, String.valueOf(documentVersion)));
 
