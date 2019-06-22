@@ -1,18 +1,19 @@
 import * as React from 'react';
 import ModalActionDispatchers from '../../actions/ModalActionDispatchers';
 import FilterComponent from './FilterComponent';
-import NavigationComponent, { pageEnum } from './NavigationComponent';
+import NavigationComponent from './NavigationComponent';
 import { CSSProperties } from 'react';
 import { Link } from 'react-router-dom';
 import { ModalEnum } from '../utils/ModalEnum';
 import BlueButton from '../Assets/Buttons/BlueButton';
+import { pageEnum } from '../pages/pageEnum';
 
 const styles: CSSProperties = {
   createNewBotButton: {
     height: '36px',
     marginLeft: '32px',
     marginTop: '7px',
-    width: '108px',
+    minWidth: '108px',
   },
   topBarCenter: {
     flex: '1',

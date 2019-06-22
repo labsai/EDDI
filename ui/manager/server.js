@@ -1,6 +1,7 @@
 const express = require('express');
 const serveStatic = require('serve-static');
 const argv = require('minimist')(process.argv.slice(2));
+const path = require('path');
 
 const {port, path: hostPath, env} = argv;
 
@@ -19,6 +20,12 @@ if (env) {
     JSON.parse(env);
     app.use(envUrl, (req, res) => {
       res.json(JSON.parse(env));
+    });
+
+    // fallback to using the index.html. For example when the user reloads a different page than root,
+    // we want to serve the index.html so that the react routing can take over
+    app.get('/*',(req, res) => {
+      res.sendFile(path.join(__dirname, hostPath, 'index.html'));
     });
   } catch (err) {
     console.error(`Failed to parse ${env} as JSON`, err);

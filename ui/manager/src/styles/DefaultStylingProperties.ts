@@ -12,6 +12,8 @@ export const LIGHT_BLUE_COLOR: string = '#4A90E2';
 export const GREY_COLOR: string = '#7A849E';
 export const DARK_GREY_COLOR: string = '#54698D';
 export const LIGHT_GREY_COLOR: string = '#D8DDE6';
+export const LIGHT_GREY_COLOR2: string = '#E0E5EE';
+export const LIGHT_GREY_COLOR3: string = '#F7F9FB';
 
 // --------------- BORDERS ----------------------------
 export const RED_BORDER: string = '1px solid ' + RED_COLOR;

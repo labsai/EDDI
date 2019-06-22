@@ -4,20 +4,11 @@ import { CSSProperties } from 'react';
 import { Dropdown } from 'semantic-ui-react';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import * as Radium from 'radium';
-import {
-  GREY_BORDER,
-  GREY_COLOR,
-  LIGHT_GREY_COLOR,
-} from '../../../../styles/DefaultStylingProperties';
+import { GREY_COLOR } from '../../../../styles/DefaultStylingProperties';
 import { IBot } from '../../utils/AxiosFunctions';
 import modalActionDispatchers from '../../../actions/ModalActionDispatchers';
 import eddiApiActionDispatchers from '../../../actions/EddiApiActionDispatchers';
-import {
-  ERROR,
-  IN_PROGRESS,
-  NOT_FOUND,
-  READY,
-} from '../../utils/helpers/BotHelper';
+import { NOT_FOUND, READY } from '../../utils/helpers/BotHelper';
 
 const styles: CSSProperties = {
   optionButton: {
@@ -44,8 +35,6 @@ interface IProps {
   apiUrl: string;
 }
 
-const onClick = ({ event, props }) => console.log(event, props);
-
 const trigger = (
   <FontAwesomeIcon
     style={styles.trigger}
@@ -56,11 +45,16 @@ const trigger = (
 
 class Options extends React.Component<IProps> {
   render() {
-    const botDeployed = this.props.bot.deploymentStatus === READY;
-    const botUndeployed = this.props.bot.deploymentStatus === NOT_FOUND;
+    const { bot } = this.props;
+    const botDeployed = bot.deploymentStatus === READY;
+    const botUndeployed = bot.deploymentStatus === NOT_FOUND;
     return (
       <div style={styles.optionButton}>
-        <Dropdown style={styles.dropdown} trigger={trigger} icon={null}>
+        <Dropdown
+          style={styles.dropdown}
+          trigger={trigger}
+          direction={'left'}
+          icon={null}>
           <Dropdown.Menu>
             <Dropdown.Item
               text={'Open Chat'}
@@ -69,9 +63,7 @@ class Options extends React.Component<IProps> {
               onClick={() =>
                 window
                   .open(
-                    `${this.props.apiUrl}/chat/unrestricted/${
-                      this.props.bot.id
-                    }`,
+                    `${this.props.apiUrl}/chat/unrestricted/${bot.id}`,
                     '_blank',
                   )
                   .focus()
@@ -80,20 +72,18 @@ class Options extends React.Component<IProps> {
             <Dropdown.Item
               text={'Rename'}
               icon={'edit outline'}
-              onClick={() =>
-                modalActionDispatchers.showEditBotModal(this.props.bot)
-              }
+              onClick={() => modalActionDispatchers.showEditBotModal(bot)}
             />
             <Dropdown.Item
               text={'Edit JSON'}
               icon={'edit'}
               onClick={() =>
                 modalActionDispatchers.showEditJsonModal(
-                  this.props.bot.resource,
+                  bot.resource,
                   JSON.stringify(
                     {
-                      packages: this.props.bot.packages,
-                      channels: this.props.bot.channels,
+                      packages: bot.packages,
+                      channels: bot.channels,
                     },
                     null,
                     '\t',
@@ -111,17 +101,13 @@ class Options extends React.Component<IProps> {
               disabled={!botDeployed && !botUndeployed}
               onClick={() =>
                 (botUndeployed &&
-                  eddiApiActionDispatchers.deployBotAction(
-                    this.props.bot.resource,
-                  )) ||
+                  eddiApiActionDispatchers.deployBotAction(bot.resource)) ||
                 (botDeployed &&
                   modalActionDispatchers.showConfirmationModal(
-                    `Are you sure you want to undeploy ${this.props.bot.name}?`,
+                    `Are you sure you want to undeploy ${bot.name}?`,
                     null,
                     () =>
-                      eddiApiActionDispatchers.undeployBotAction(
-                        this.props.bot.resource,
-                      ),
+                      eddiApiActionDispatchers.undeployBotAction(bot.resource),
                   ))
               }
             />
@@ -133,7 +119,7 @@ class Options extends React.Component<IProps> {
                     icon={'copy outline'}
                     onClick={() =>
                       eddiApiActionDispatchers.duplicateAction(
-                        this.props.bot.resource,
+                        bot.resource,
                         false,
                       )
                     }
@@ -143,7 +129,7 @@ class Options extends React.Component<IProps> {
                     icon={'copy'}
                     onClick={() =>
                       eddiApiActionDispatchers.duplicateAction(
-                        this.props.bot.resource,
+                        bot.resource,
                         true,
                       )
                     }
@@ -152,7 +138,7 @@ class Options extends React.Component<IProps> {
               </Dropdown>
             </Dropdown.Item>
             <Dropdown.Divider />
-            <Dropdown.Item text={'Delete'} icon={'delete'} />
+            <Dropdown.Item text={'Delete'} disabled={true} icon={'delete'} />
           </Dropdown.Menu>
         </Dropdown>
       </div>

@@ -8,7 +8,7 @@ export function historyPush(path: string, queryParams?: string[]) {
   const apiUrlQuery = getApiUrlQuery();
   let queryParameterList = [];
   if (!_.isEmpty(apiUrlQuery)) {
-    queryParameterList.push('?apiUrl=' + encodeURIComponent(apiUrlQuery));
+    queryParameterList.push('apiUrl=' + encodeURIComponent(apiUrlQuery));
   }
   if (!_.isEmpty(queryParams)) {
     queryParameterList = queryParameterList.concat(queryParams);

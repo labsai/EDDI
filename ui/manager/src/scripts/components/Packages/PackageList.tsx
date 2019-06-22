@@ -4,9 +4,8 @@ import * as _ from 'lodash';
 import * as Radium from 'radium';
 import { Component, compose, pure, setDisplayName } from 'recompose';
 import eddiApiActionDispatchers from '../../actions/EddiApiActionDispatchers';
-import { IBot, IPackage } from '../utils/AxiosFunctions';
+import { IPackage } from '../utils/AxiosFunctions';
 import { connect } from 'react-redux';
-import { botsSelector } from '../../selectors/BotSelectors';
 import { ClimbingBoxLoader } from 'react-spinners';
 import { getAPIUrl } from '../utils/ApiFunctions';
 import * as InfiniteScrollTypes from 'react-infinite-scroller';
@@ -71,12 +70,16 @@ class PackageList extends React.Component<IPrivateProps, IState> {
       return;
     }
     this.setState({ loading: true });
-    if (this.props.packages.length < 5 && !this.props.allPackagesLoaded) {
-      eddiApiActionDispatchers.fetchPackagesAction(5, 0);
+    const loadNumber = 5;
+    if (
+      this.props.packages.length < loadNumber &&
+      !this.props.allPackagesLoaded
+    ) {
+      eddiApiActionDispatchers.fetchPackagesAction(loadNumber, 0);
     } else {
       eddiApiActionDispatchers.fetchPackagesAction(
-        5,
-        Math.floor(this.props.packagesLoaded / 5),
+        loadNumber,
+        Math.floor(this.props.packagesLoaded / loadNumber),
       );
     }
   };
@@ -85,48 +88,43 @@ class PackageList extends React.Component<IPrivateProps, IState> {
     const packageList = this.filterPackages();
     return (
       <div>
-        {renderIf(this.props.isLoading)(() => (
-          <div style={styles.loadingWrapper}>
-            <ClimbingBoxLoader loading />
-          </div>
+        {renderIf(this.props.isLoading && _.isEmpty(this.props.packages))(
+          () => (
+            <div style={styles.loadingWrapper}>
+              <ClimbingBoxLoader loading />
+            </div>
+          ),
+        )}
+        {renderIf(this.props.error)(() => (
+          <p>{'Error: Could not load bots'}</p>
         ))}
-        {renderIf(true)(() => (
-          <div>
-            {renderIf(this.props.error)(() => (
-              <p>{'Error: Could not load bots'}</p>
+        {renderIf(
+          !this.props.isLoading &&
+            !this.props.error &&
+            _.isEmpty(this.props.packages),
+        )(() => <p>{`There are no packages yet`}</p>)}
+        {renderIf(!this.props.error && !_.isEmpty(this.props.packages))(() => (
+          <div style={styles.packageList}>
+            {renderIf(_.isEmpty(packageList))(() => (
+              <p>{`Found no packages matching: "${this.props.filterText}"`}</p>
             ))}
-            {renderIf(!this.props.error && _.isEmpty(this.props.packages))(
-              () => <p>{`There are no packages yet`}</p>,
-            )}
-            {renderIf(!this.props.error && !_.isEmpty(this.props.packages))(
-              () => (
-                <div>
-                  {renderIf(_.isEmpty(packageList))(() => (
-                    <p>{`Found no packages matching: "${
-                      this.props.filterText
-                    }"`}</p>
-                  ))}
-                  <InfiniteScroll
-                    pageStart={0}
-                    loadMore={this.loadMore}
-                    hasMore={
-                      !this.props.allPackagesLoaded && !this.props.isLoading
-                    }
-                    loader={
-                      <div className="loader" key={0}>
-                        Loading ...
-                      </div>
-                    }>
-                    {packageList.map(pkg => (
-                      <PackageContainer
-                        key={pkg.id}
-                        packageResource={pkg.resource}
-                      />
-                    ))}
-                  </InfiniteScroll>
+            <InfiniteScroll
+              pageStart={0}
+              loadMore={this.loadMore}
+              hasMore={!this.props.allPackagesLoaded && !this.props.isLoading}
+              loader={
+                <div className="loader" key={0}>
+                  Loading ...
                 </div>
-              ),
-            )}
+              }>
+              {packageList.map(pkg => (
+                <PackageContainer
+                  key={pkg.id}
+                  packageResource={pkg.resource}
+                  style={styles.pkg}
+                />
+              ))}
+            </InfiniteScroll>
           </div>
         ))}
       </div>

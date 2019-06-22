@@ -19,7 +19,7 @@
     "code-coverage-report": "npm run code-coverage && nyc report --reporter=text-lcov",
     "check-circular-dependencies": "npm run compile-ts && madge --circular compiled/",
     "lint": "tslint -c tslint.json \"src/{**,}/*.ts*\" \"tests/{**,}/*.ts*\"",
-    "test": "mocha \"compiled/tests/unit/**/*.js\" \"compiled/src/**/*.spec.js\" --require ./tests/unit/setup.js",
+    "test": "mocha \"compiled/tests/unit/**/*.js\" \"compiled/src/**/*.spec.js\"",
     "build": "npm run clean && webpack",
     "serve-build": "node server.js --path ./dist",
     "serve-local": "NODE_ENV=local npm run build && node server.js --path ./dist",

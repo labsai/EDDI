@@ -10,9 +10,7 @@ import { run as runSagaMiddleware } from '../sagas';
 import * as renderIf from 'render-if';
 import { connect } from 'react-redux';
 import PackageViewPage from './pages/PackageViewPage';
-import RegularDictionaryPage, {
-  default as ExtensionsPage,
-} from './pages/ExtensionsPage';
+import ExtensionsPage from './pages/ExtensionsPage';
 import * as Keycloak from 'keycloak-js';
 import * as kcHelper from './utils/keycloakFunctions';
 import { historyPush } from '../history';
@@ -132,14 +130,9 @@ class App extends React.Component<IPrivateProps, IState> {
                 ))}
                 <Route path="/" exact component={Dashboard} />
                 <Route path="/packages" exact component={PackagePage} />
-                <Route path="/extensions" component={ExtensionsPage} />
+                <Route path="/resources" component={ExtensionsPage} />
                 <Route path="/botview/:id" component={BotViewPage} />
                 <Route path="/packageview/:id" component={PackageViewPage} />
-                <Route
-                  path="/resources/:type"
-                  exact
-                  component={RegularDictionaryPage}
-                />
               </div>
             ))}
             <ModalComponentFrame />

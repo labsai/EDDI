@@ -2,15 +2,16 @@ import * as React from 'react';
 import TopBarComponent from '../TopBar/TopBarComponent';
 import styles from '../App.style';
 import { Component, compose, pure, setDisplayName } from 'recompose';
-import { pageEnum } from '../TopBar/NavigationComponent';
 import Parser from '../utils/Parser';
 import PluginList from '../Plugins/PluginList';
 import {
   BEHAVIOR,
   HTTPCALLS,
   OUTPUT,
+  PROPERTYSETTER,
   REGULAR_DICTIONARY,
 } from '../utils/EddiTypes';
+import { pageEnum } from './pageEnum';
 
 const eddiLogo = require('../../../public/images/eddi-logo.png');
 
@@ -51,6 +52,8 @@ class ExtensionsPage extends React.Component<IProps, IState> {
         return OUTPUT;
       case 'httpCalls':
         return HTTPCALLS;
+      case 'property':
+        return PROPERTYSETTER;
       default:
         return;
     }

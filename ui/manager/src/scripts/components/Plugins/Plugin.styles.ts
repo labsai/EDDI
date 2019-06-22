@@ -4,7 +4,8 @@ import {
   GREY_COLOR,
   LARGE_FONT,
   LIGHT_GREY_COLOR,
-  MEDIUM_FONT,
+  LIGHT_GREY_COLOR2,
+  LIGHT_GREY_COLOR3,
 } from '../../../styles/DefaultStylingProperties';
 
 const styles: CSSProperties = {
@@ -27,12 +28,17 @@ const styles: CSSProperties = {
   },
   content: {
     marginTop: '30px',
-    borderBottom: '2px solid ' + LIGHT_GREY_COLOR,
-    paddingBottom: '5px',
+    borderBottom: `2px solid ${LIGHT_GREY_COLOR}`,
   },
   topContent: {
+    ':hover': {
+      backgroundColor: LIGHT_GREY_COLOR3,
+    },
+    cursor: 'pointer',
     display: 'flex',
     height: '36px',
+    paddingTop: '5px',
+    paddingBottom: '5px',
   },
   bottomContent: {
     marginTop: '5px',
@@ -59,7 +65,6 @@ const styles: CSSProperties = {
   },
   versionSelect: {
     position: 'relative',
-    marginTop: '-1px',
     marginRight: '10px',
   },
 };

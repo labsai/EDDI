@@ -7,8 +7,8 @@ import * as _ from 'lodash';
 import { CSSProperties } from 'react';
 import Parser from '../utils/Parser';
 import { historyPush } from '../../history';
-import { pageEnum } from './NavigationComponent';
 import styles from './PluginSelectComponent.styles';
+import { pageEnum } from '../pages/pageEnum';
 
 const customStyles = {
   control: (base, state) => ({
@@ -41,6 +41,7 @@ const pluginResourceOptions = [
   'Behavior rules',
   'Output sets',
   'HTTP calls',
+  'Properties',
 ];
 
 interface IOption {
@@ -78,6 +79,7 @@ class PluginSelectComponent extends React.Component<IProps, IState> {
       pageEnum.behavior,
       pageEnum.output,
       pageEnum.httpCalls,
+      pageEnum.property,
     ].includes(props.page);
   }
 
@@ -97,7 +99,7 @@ class PluginSelectComponent extends React.Component<IProps, IState> {
   handleSelect = (option: IOption) => {
     if (!_.isEmpty(option)) {
       this.setState({ selectedOption: option });
-      historyPush('/extensions', [`type=${pageEnum[option.value]}`]);
+      historyPush('/resources', [`type=${pageEnum[option.value]}`]);
     }
   };
 

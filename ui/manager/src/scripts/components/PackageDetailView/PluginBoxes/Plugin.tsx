@@ -196,6 +196,13 @@ class Plugin extends React.Component<IPrivateProps> {
                 true,
               )}
             </div>
+            {renderIf(!this.props.editDisabled)(() => (
+              <div
+                onClick={this.openAddPluginsModal}
+                style={styles.addResourceButton}>
+                {this.getButtonName(this.props.pluginType.type)}
+              </div>
+            ))}
           </div>
           <div style={styles.pluginDate}>{this.props.pluginType.type}</div>
           <div style={styles.pluginDate}>
@@ -213,13 +220,6 @@ class Plugin extends React.Component<IPrivateProps> {
             text={`Update to ${pluginCurrentVersion}`}
             customStyles={styles.updateAvailableButton}
           />
-        ))}
-        {renderIf(!this.props.editDisabled)(() => (
-          <div
-            onClick={this.openAddPluginsModal}
-            style={styles.addResourceButton}>
-            {this.getButtonName(this.props.pluginType.type)}
-          </div>
         ))}
       </div>
     );

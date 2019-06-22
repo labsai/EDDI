@@ -71,10 +71,10 @@ const styles: CSSProperties = {
     marginTop: '5px',
   },
   addResourceButton: {
-    position: 'relative',
-    marginRight: '8px',
+    whiteSpace: 'nowrap',
+    marginRight: '5px',
     marginLeft: 'auto',
-    top: '-70px',
+    marginTop: '3px',
     fontSize: '12px',
     textDecoration: 'underline',
     textAlign: 'right',
@@ -101,6 +101,7 @@ const styles: CSSProperties = {
     lineHeight: '21px',
     marginLeft: '2px',
     textAlign: 'left',
+    marginRight: '5px',
   },
   pluginDate: {
     color: '#54698d',

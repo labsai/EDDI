@@ -3,7 +3,7 @@ import Botlist from '../Bots/Botlist';
 import TopBarComponent from '../TopBar/TopBarComponent';
 import styles from '../App.style';
 import { Component, compose, pure, setDisplayName } from 'recompose';
-import { pageEnum } from '../TopBar/NavigationComponent';
+import { pageEnum } from './pageEnum';
 
 interface IProps {}
 interface IState {

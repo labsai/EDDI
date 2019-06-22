@@ -15,6 +15,7 @@ const styles: CSSProperties = {
     fontSize: '28px',
     marginRight: '20px',
     textAlign: 'left',
+    paddingTop: '6px',
     maxWidth: '400px',
     overflow: 'hidden',
     textOverflow: 'ellipsis',
