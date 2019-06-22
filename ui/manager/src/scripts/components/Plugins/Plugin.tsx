@@ -39,19 +39,21 @@ const Plugin: React.StatelessComponent<IPrivateProps> = (
           {renderIf(props.error)(() => <p>{'Error: Could not load plugin'}</p>)}
           {renderIf(!props.error)(() => (
             <div>
-              <div style={styles.topContent}>
-                <div
-                  style={styles.pluginName}
-                  onClick={() =>
-                    modalActionDispatchers.showViewJsonModal(
-                      props.plugin.resource,
-                    )
-                  }>
+              <div
+                style={styles.topContent}
+                onClick={() =>
+                  modalActionDispatchers.showViewJsonModal(
+                    props.plugin.resource,
+                  )
+                }>
+                <div style={styles.pluginName}>
                   {props.plugin.name === ''
                     ? props.plugin.id
                     : props.plugin.name}
                 </div>
-                <div style={styles.versionSelect}>
+                <div
+                  style={styles.versionSelect}
+                  onClick={e => e.stopPropagation()}>
                   <VersionSelectComponent
                     currentVersion={props.plugin.currentVersion}
                     selectedVersion={props.plugin.version}

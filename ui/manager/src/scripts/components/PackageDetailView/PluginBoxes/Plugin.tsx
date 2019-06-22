@@ -49,7 +49,8 @@ class Plugin extends React.Component<IPrivateProps> {
     this.props.deletePlugin(this.props.pluginType.extensionKey);
   };
 
-  openAddPluginsModal = () => {
+  openAddPluginsModal = e => {
+    e.stopPropagation();
     let extensionList: string[] = [];
     let pluginType;
     if (this.props.pluginType.type === PluginType.PARSER) {
@@ -202,10 +203,7 @@ class Plugin extends React.Component<IPrivateProps> {
               <div
                 style={styles.addResourceButton}
                 key={'addResource'}
-                onClick={e => {
-                  e.stopPropagation();
-                  this.openAddPluginsModal();
-                }}>
+                onClick={this.openAddPluginsModal}>
                 {this.getButtonName(this.props.pluginType.type)}
               </div>
             ))}

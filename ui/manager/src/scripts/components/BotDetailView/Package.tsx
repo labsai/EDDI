@@ -91,22 +91,23 @@ class Package extends React.Component<IPrivateProps> {
           ))}
           {renderIf(!this.props.error && !_.isEmpty(packagePayload))(() => (
             <div style={styles.pack}>
-              <div style={styles.packageHeader}>
-                <div
-                  style={this.getNameStyle()}
-                  onClick={() =>
-                    historyPush(
-                      `/packageview/${this.props.packagePayload.id}`,
-                      [`version=${this.props.packagePayload.version}`],
-                    )
-                  }>
+              <div
+                style={styles.packageHeader}
+                onClick={() =>
+                  historyPush(`/packageview/${this.props.packagePayload.id}`, [
+                    `version=${this.props.packagePayload.version}`,
+                  ])
+                }>
+                <div style={this.getNameStyle()}>
                   {packagePayload.name || packagePayload.id}
                 </div>
-                <VersionSelectComponent
-                  selectedVersion={packagePayload.version}
-                  currentVersion={packagePayload.currentVersion}
-                  selectVersion={this.selectVersion}
-                />
+                <div onClick={e => e.stopPropagation()}>
+                  <VersionSelectComponent
+                    selectedVersion={packagePayload.version}
+                    currentVersion={packagePayload.currentVersion}
+                    selectVersion={this.selectVersion}
+                  />
+                </div>
                 {renderIf(!_.isEmpty(packagePayload.updatablePlugins))(() => (
                   <div style={styles.warning}>
                     <img src={warningIcon} style={styles.warningIcon} />

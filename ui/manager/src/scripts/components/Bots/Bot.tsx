@@ -40,10 +40,10 @@ class Bot extends React.Component<IProps> {
     return (
       <div>
         <div style={styles.botBox}>
-          <div style={styles.botHeader}>
-            <div
-              style={styles.link}
-              onClick={() => historyPush(`/botview/${this.props.bot.id}`)}>
+          <div
+            style={styles.botHeader}
+            onClick={() => historyPush(`/botview/${this.props.bot.id}`)}>
+            <div style={styles.link}>
               <div style={styles.botHeaderName}>
                 {this.props.bot.name || this.props.bot.id}
               </div>
@@ -71,13 +71,15 @@ class Bot extends React.Component<IProps> {
                 </span>
               </div>
             </div>
-            <DeployButton
-              name={this.props.bot.name}
-              botResource={this.props.bot.resource}
-              deploymentStatus={this.props.bot.deploymentStatus}
-              customStyles={styles.deployButton}
-            />
-            <div style={styles.optionsMenu}>
+            <div onClick={e => e.stopPropagation()}>
+              <DeployButton
+                botName={this.props.bot.name}
+                botResource={this.props.bot.resource}
+                deploymentStatus={this.props.bot.deploymentStatus}
+                customStyles={styles.deployButton}
+              />
+            </div>
+            <div style={styles.optionsMenu} onClick={e => e.stopPropagation()}>
               <Options bot={this.props.bot} apiUrl={this.props.apiUrl} />
             </div>
           </div>
