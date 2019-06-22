@@ -18,6 +18,7 @@ import {
   DICTIONARY,
   REGULAR_DICTIONARY,
 } from '../../utils/EddiTypes';
+import * as Radium from 'radium';
 
 const customStyles: CSSProperties = {
   extensionList: {
@@ -229,7 +230,7 @@ class PluginWithExtensions extends React.Component<IPrivateProps> {
             {renderIf(!this.props.editDisabled)(() => (
               <a
                 onClick={this.openAddPluginsModal}
-                style={styles.addExtensionButton}>
+                style={styles.addResourceButton}>
                 {'Add dictionary'}
               </a>
             ))}
@@ -284,6 +285,7 @@ class PluginWithExtensions extends React.Component<IPrivateProps> {
 const ComposedPluginWithExtensions: Component<IProps, IProps> = compose<IProps>(
   pure,
   setDisplayName('PluginWithExtensions'),
+  Radium,
 )(PluginWithExtensions);
 
 export default ComposedPluginWithExtensions;

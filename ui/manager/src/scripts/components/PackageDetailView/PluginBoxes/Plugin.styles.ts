@@ -1,4 +1,8 @@
 import { CSSProperties } from 'react';
+import {
+  BLUE_COLOR,
+  GREY_COLOR,
+} from '../../../../styles/DefaultStylingProperties';
 
 const styles: CSSProperties = {
   pluginCenter: {
@@ -26,18 +30,22 @@ const styles: CSSProperties = {
     backgroundColor: '#f4f6f9',
     border: '1px solid #d8dde6',
     borderRadius: '4px',
-    cursor: 'pointer',
     outline: 'none',
     padding: '0px',
     width: '100%',
     height: '80px',
     marginTop: '-5px',
   },
+  clickablePluginBox: {
+    ':hover': {
+      border: `1px solid ${BLUE_COLOR}`,
+    },
+    cursor: 'pointer',
+  },
   pluginBoxWithExtensions: {
     backgroundColor: '#f4f6f9',
     border: '1px solid #d8dde6',
     borderRadius: '4px',
-    cursor: 'pointer',
     outline: 'none',
     padding: '0px',
     width: '100%',
@@ -71,6 +79,10 @@ const styles: CSSProperties = {
     marginTop: '5px',
   },
   addResourceButton: {
+    ':hover': {
+      color: GREY_COLOR,
+    },
+    cursor: 'pointer',
     whiteSpace: 'nowrap',
     marginRight: '5px',
     marginLeft: 'auto',

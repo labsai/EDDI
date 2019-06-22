@@ -66,6 +66,26 @@ class Options extends React.Component<IProps> {
               }
             />
             <Dropdown.Item
+              text={botDeployed ? 'Undeploy' : 'Deploy'}
+              icon={
+                botDeployed
+                  ? 'arrow alternate circle down outline'
+                  : 'arrow alternate circle up outline'
+              }
+              disabled={!botDeployed && !botUndeployed}
+              onClick={() =>
+                (botUndeployed &&
+                  eddiApiActionDispatchers.deployBotAction(bot.resource)) ||
+                (botDeployed &&
+                  modalActionDispatchers.showConfirmationModal(
+                    `Are you sure you want to undeploy ${bot.name}?`,
+                    null,
+                    () =>
+                      eddiApiActionDispatchers.undeployBotAction(bot.resource),
+                  ))
+              }
+            />
+            <Dropdown.Item
               text={'Rename'}
               icon={'edit outline'}
               onClick={() => modalActionDispatchers.showEditBotModal(bot)}
@@ -85,26 +105,6 @@ class Options extends React.Component<IProps> {
                     '\t',
                   ),
                 )
-              }
-            />
-            <Dropdown.Item
-              text={botDeployed ? 'Undeploy' : 'Deploy'}
-              icon={
-                botDeployed
-                  ? 'arrow alternate circle down outline'
-                  : 'arrow alternate circle up outline'
-              }
-              disabled={!botDeployed && !botUndeployed}
-              onClick={() =>
-                (botUndeployed &&
-                  eddiApiActionDispatchers.deployBotAction(bot.resource)) ||
-                (botDeployed &&
-                  modalActionDispatchers.showConfirmationModal(
-                    `Are you sure you want to undeploy ${bot.name}?`,
-                    null,
-                    () =>
-                      eddiApiActionDispatchers.undeployBotAction(bot.resource),
-                  ))
               }
             />
             <Dropdown.Item>
