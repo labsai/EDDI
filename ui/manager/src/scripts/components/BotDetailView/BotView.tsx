@@ -15,6 +15,7 @@ import Parser from '../utils/Parser';
 import { historyPush } from '../../history';
 import { getAPIUrl } from '../utils/ApiFunctions';
 import { BOT } from '../utils/EddiTypes';
+import Options from '../Assets/Buttons/Options';
 
 interface IProps {
   bot: IBot;
@@ -79,7 +80,7 @@ class BotView extends React.Component<IProps, IState> {
                 selectVersion={this.selectVersion}
               />
               <WhiteButton
-                text={'Edit Bot'}
+                text={'Rename'}
                 onClick={this.openEditBotModal}
                 customStyles={styles.button}
                 disabled={
@@ -103,21 +104,9 @@ class BotView extends React.Component<IProps, IState> {
                 </div>
               ))}
               <div style={styles.botHeaderSpacing} />
-              <WhiteButton
-                text={'Open Chat'}
-                customStyles={styles.chatButton}
-                disabled={this.props.bot.deploymentStatus !== READY}
-                onClick={() =>
-                  window
-                    .open(
-                      `${this.state.apiUrl}/chat/unrestricted/${
-                        this.props.bot.id
-                      }`,
-                      '_blank',
-                    )
-                    .focus()
-                }
-              />
+              <div style={styles.options}>
+                <Options bot={this.props.bot} apiUrl={this.state.apiUrl} />
+              </div>
               <DeployButton
                 name={this.props.bot.name}
                 botResource={this.props.bot.resource}

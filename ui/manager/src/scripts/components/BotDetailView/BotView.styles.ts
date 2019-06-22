@@ -40,13 +40,12 @@ const styles: CSSProperties = {
     fontSize: '12px',
     textAlign: 'center',
   },
-  chatButton: {
-    height: '39px',
-    marginLeft: '10px',
-  },
   deployButton: {
     height: '39px',
     marginLeft: '10px',
+  },
+  options: {
+    marginTop: '5px',
   },
 };
 export default styles;

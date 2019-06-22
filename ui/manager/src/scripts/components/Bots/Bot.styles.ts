@@ -63,13 +63,7 @@ const styles: CSSProperties = {
     height: '35px',
     width: '108px',
     marginRight: '10px',
-    marginTop: '17px',
-  },
-  chatButton: {
-    height: '35px',
-    width: '108px',
     marginLeft: '15px',
-    marginRight: '10px',
     marginTop: '17px',
   },
   updateAvailable: {

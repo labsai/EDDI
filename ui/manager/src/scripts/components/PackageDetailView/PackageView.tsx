@@ -223,7 +223,7 @@ class PackageView extends React.Component<IPrivateProps, IState> {
           />
           <WhiteButton
             onClick={this.openEditPackageModal}
-            text={'Edit Package'}
+            text={'Rename'}
             customStyles={styles.editPackageButton}
             disabled={!isCurrentVersion}
           />
