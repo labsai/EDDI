@@ -99,7 +99,7 @@ class PluginSelectComponent extends React.Component<IProps, IState> {
   handleSelect = (option: IOption) => {
     if (!_.isEmpty(option)) {
       this.setState({ selectedOption: option });
-      historyPush('/extensions', [`type=${pageEnum[option.value]}`]);
+      historyPush('/resources', [`type=${pageEnum[option.value]}`]);
     }
   };
 

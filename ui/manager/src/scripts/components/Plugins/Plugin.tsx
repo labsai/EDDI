@@ -13,6 +13,7 @@ import styles from './Plugin.styles';
 import { ClipLoader } from 'react-spinners';
 import modalActionDispatchers from '../../actions/ModalActionDispatchers';
 import * as Radium from 'radium';
+import { BLUE_COLOR } from '../../../styles/DefaultStylingProperties';
 
 interface IPublicProps {
   pluginResource: string;
@@ -31,7 +32,7 @@ const Plugin: React.StatelessComponent<IPrivateProps> = (
   return (
     <div style={styles.content}>
       {renderIf(!props.error && _.isEmpty(props.plugin))(() => (
-        <ClipLoader color={'#0070D2'} />
+        <ClipLoader color={BLUE_COLOR} />
       ))}
       {renderIf(props.plugin)(() => (
         <div>

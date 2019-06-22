@@ -13,7 +13,7 @@ const styles: CSSProperties = {
     paddingBottom: '250px',
   },
   pkg: {
-    borderBottom: '2px solid ' + LIGHT_GREY_COLOR,
+    borderBottom: `2px solid ${LIGHT_GREY_COLOR}`,
     paddingBottom: '5px',
   },
 };

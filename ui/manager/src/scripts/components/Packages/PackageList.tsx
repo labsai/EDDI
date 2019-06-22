@@ -70,12 +70,16 @@ class PackageList extends React.Component<IPrivateProps, IState> {
       return;
     }
     this.setState({ loading: true });
-    if (this.props.packages.length < 5 && !this.props.allPackagesLoaded) {
-      eddiApiActionDispatchers.fetchPackagesAction(5, 0);
+    const loadNumber = 5;
+    if (
+      this.props.packages.length < loadNumber &&
+      !this.props.allPackagesLoaded
+    ) {
+      eddiApiActionDispatchers.fetchPackagesAction(loadNumber, 0);
     } else {
       eddiApiActionDispatchers.fetchPackagesAction(
-        5,
-        Math.floor(this.props.packagesLoaded / 5),
+        loadNumber,
+        Math.floor(this.props.packagesLoaded / loadNumber),
       );
     }
   };

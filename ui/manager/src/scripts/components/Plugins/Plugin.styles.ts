@@ -28,7 +28,7 @@ const styles: CSSProperties = {
   },
   content: {
     marginTop: '30px',
-    borderBottom: '2px solid ' + LIGHT_GREY_COLOR,
+    borderBottom: `2px solid ${LIGHT_GREY_COLOR}`,
   },
   topContent: {
     ':hover': {
@@ -65,7 +65,6 @@ const styles: CSSProperties = {
   },
   versionSelect: {
     position: 'relative',
-    marginTop: '-1px',
     marginRight: '10px',
   },
 };

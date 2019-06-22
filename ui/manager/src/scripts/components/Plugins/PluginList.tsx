@@ -141,7 +141,7 @@ class PluginList extends React.Component<IPrivateProps, IState> {
 const ComposedPluginList: Component<IPublicProps> = compose<
   IPublicProps,
   IPrivateProps
->(pure, Radium, connect(pluginsSelector), setDisplayName('PluginList'))(
+>(pure, connect(pluginsSelector), Radium, setDisplayName('PluginList'))(
   PluginList,
 );
 
