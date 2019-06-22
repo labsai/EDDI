@@ -14,6 +14,7 @@ const styles: CSSProperties = {
     color: '#16325C',
     fontSize: '28px',
     marginRight: '20px',
+    paddingTop: '6px',
     textAlign: 'left',
     maxWidth: '350px',
     overflow: 'hidden',

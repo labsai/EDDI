@@ -158,6 +158,8 @@ import {
   getAPIUrl,
   getTypeFromResource,
 } from '../components/utils/ApiFunctions';
+import { parsePlugins } from '../components/utils/helpers/PluginParser';
+import * as _ from 'lodash';
 
 export function* FetchBots(action: IFetchBotsAction) {
   try {
@@ -675,10 +677,33 @@ export function* duplicateResource(action: IDuplicateAction): Iterator<{}> {
     const newResource = yield call(duplicate, action.resource, action.deepCopy);
     const type = getTypeFromResource(newResource);
     let bot: IBot;
-    let packages: IPackage[];
-    let plugins: IPlugin[];
+    let packages: IPackage[] = [];
+    let plugins: IPlugin[] = [];
     if (type === BOT) {
       bot = yield call(getBot, newResource);
+    } else if (type === PACKAGE) {
+      packages = [yield call(getPackage, newResource)];
+    } else {
+      plugins = [yield call(getPlugin, newResource)];
+    }
+
+    if (action.deepCopy === true) {
+      if (!!bot) {
+        for (let packageResource of bot.packages) {
+          packages.push(yield call(getPackage, packageResource));
+        }
+      }
+      if (!_.isEmpty(packages)) {
+        const pluginResources: string[] = [];
+        for (let pkg of packages) {
+          pluginResources.concat(
+            parsePlugins(pkg.packageData.packageExtensions),
+          );
+        }
+        for (let pluginResource of _.uniq(pluginResources)) {
+          plugins.push(yield call(getPlugin, pluginResource));
+        }
+      }
     }
 
     yield put(duplicateSuccessAction(bot, packages, plugins));

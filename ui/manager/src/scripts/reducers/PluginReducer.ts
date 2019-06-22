@@ -13,6 +13,7 @@ import {
   UPDATE_PLUGIN_SUCCESS,
   CREATE_NEW_PLUGIN_SUCCESS,
   FETCH_PLUGIN_JSON_SCHEMA_SUCCESS,
+  DUPLICATE_SUCCESS,
 } from '../actions/EddiApiActionTypes';
 import * as update from 'immutability-helper';
 import {
@@ -26,10 +27,12 @@ import {
   IUpdatePluginSuccessAction,
   ICreateNewPluginSuccessAction,
   IFetchJsonSchemaSuccessAction,
+  IDuplicateSuccessAction,
 } from '../actions/EddiApiActions';
 import {
   IDefaultPluginTypes,
   IEddiSchema,
+  IPackage,
   IPlugin,
 } from '../components/utils/AxiosFunctions';
 import * as _ from 'lodash';
@@ -41,6 +44,7 @@ import {
   REGULAR_DICTIONARY,
 } from '../components/utils/EddiTypes';
 import Parser from '../components/utils/Parser';
+import PluginHelper from '../components/utils/helpers/PluginHelper';
 
 export type IPluginReducer = Reducer<IPluginState>;
 
@@ -355,6 +359,59 @@ const PluginReducer: IPluginReducer = (
           },
         },
       });
+
+    case DUPLICATE_SUCCESS: {
+      return update(state, {
+        plugins: {
+          $apply: (plugins: IPlugin[]) => {
+            return _.uniqBy(
+              plugins.concat((action as IDuplicateSuccessAction).plugins),
+              plugin => plugin.resource,
+            );
+          },
+        },
+        loadedDictionaries: {
+          $set:
+            state.loadedDictionaries +
+            PluginHelper.countResources(
+              REGULAR_DICTIONARY,
+              (action as IDuplicateSuccessAction).plugins,
+            ),
+        },
+        loadedBehaviors: {
+          $set:
+            state.loadedBehaviors +
+            PluginHelper.countResources(
+              BEHAVIOR,
+              (action as IDuplicateSuccessAction).plugins,
+            ),
+        },
+        loadedOutputs: {
+          $set:
+            state.loadedOutputs +
+            PluginHelper.countResources(
+              OUTPUT,
+              (action as IDuplicateSuccessAction).plugins,
+            ),
+        },
+        loadedHttpCalls: {
+          $set:
+            state.loadedHttpCalls +
+            PluginHelper.countResources(
+              HTTPCALLS,
+              (action as IDuplicateSuccessAction).plugins,
+            ),
+        },
+        loadedPropertysetters: {
+          $set:
+            state.loadedPropertysetters +
+            PluginHelper.countResources(
+              PROPERTYSETTER,
+              (action as IDuplicateSuccessAction).plugins,
+            ),
+        },
+      });
+    }
     default:
       return state;
   }

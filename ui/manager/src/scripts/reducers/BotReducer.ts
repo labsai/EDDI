@@ -408,7 +408,6 @@ const BotReducer: IBotReducer = (
       });
 
     case DUPLICATE_SUCCESS: {
-      console.log('DUPLICATED BOT!!');
       return update(state, {
         bots: {
           $apply: (bots: IBot[]) => {

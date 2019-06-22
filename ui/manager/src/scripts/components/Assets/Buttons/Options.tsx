@@ -50,11 +50,7 @@ class Options extends React.Component<IProps> {
     const botUndeployed = bot.deploymentStatus === NOT_FOUND;
     return (
       <div style={styles.optionButton}>
-        <Dropdown
-          style={styles.dropdown}
-          trigger={trigger}
-          direction={'left'}
-          icon={null}>
+        <Dropdown style={styles.dropdown} trigger={trigger} icon={null}>
           <Dropdown.Menu>
             <Dropdown.Item
               text={'Open Chat'}
