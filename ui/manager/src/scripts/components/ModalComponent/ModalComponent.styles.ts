@@ -1,4 +1,5 @@
 import { CSSProperties } from 'react';
+import { DARK_BLUE_COLOR } from '../../../styles/DefaultStylingProperties';
 
 const styles: CSSProperties = {
   close: {
@@ -104,8 +105,6 @@ const styles: CSSProperties = {
   },
   modalTopHeader: {
     display: 'flex',
-    flex: '1',
-    height: '32px',
     marginLeft: '50px',
     marginRight: '40px',
     paddingTop: '50px',
@@ -134,9 +133,10 @@ const styles: CSSProperties = {
     marginLeft: '15px',
   },
   botHeaderText: {
+    marginTop: '6px',
+    color: DARK_BLUE_COLOR,
     height: '35px',
-    width: '350px',
-    fontSize: '24px',
+    fontSize: '28px',
   },
   createPackageHeaderText: {
     position: 'absolute',

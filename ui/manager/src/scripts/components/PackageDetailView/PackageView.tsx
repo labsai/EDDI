@@ -25,6 +25,8 @@ import Parser from '../utils/Parser';
 import { hasExtensions } from '../utils/helpers/PluginParser';
 import PluginHelper from '../utils/helpers/PluginHelper';
 import { PACKAGE } from '../utils/EddiTypes';
+import { getAPIUrl } from '../utils/ApiFunctions';
+import Options from '../Assets/Buttons/Options';
 
 export interface IOptions extends IPluginExtensions {
   extensionKey: number;
@@ -59,7 +61,7 @@ class PackageView extends React.Component<IPrivateProps, IState> {
     };
   }
 
-  componentDidMount() {
+  async componentDidMount() {
     eddiApiActionDispatchers.fetchPackageDataAction(
       this.props.packagePayload.resource,
     );
@@ -83,7 +85,9 @@ class PackageView extends React.Component<IPrivateProps, IState> {
   }
 
   openEditPackageModal = () => {
-    ModalActionDispatchers.showEditPackageModal(this.props.packagePayload);
+    ModalActionDispatchers.showEditDescriptorModalAction(
+      this.props.packagePayload,
+    );
   };
 
   replacer(key, value) {
@@ -249,6 +253,9 @@ class PackageView extends React.Component<IPrivateProps, IState> {
               {'Discard changes'}
             </button>
           ))}
+          <div style={styles.options}>
+            <Options descriptor={this.props.packagePayload} />
+          </div>
           <BlueButton
             text={'Save'}
             disabled={!this.unsavedChanges()}

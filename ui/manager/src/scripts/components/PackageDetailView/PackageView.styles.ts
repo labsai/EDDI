@@ -85,5 +85,9 @@ const styles: CSSProperties = {
     fontSize: '12px',
     marginTop: '20px',
   },
+  options: {
+    marginTop: '3px',
+    marginRight: '5px',
+  },
 };
 export default styles;

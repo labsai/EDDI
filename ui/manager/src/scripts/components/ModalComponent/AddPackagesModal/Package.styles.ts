@@ -6,7 +6,7 @@ const styles: CSSProperties = {
     fontSize: '24px',
     marginLeft: '18px',
     marginRight: '10px',
-    marginTop: '2px',
+    marginTop: '6px',
     textOverflow: 'ellipsis',
     whiteSpace: 'nowrap',
     overflow: 'hidden',

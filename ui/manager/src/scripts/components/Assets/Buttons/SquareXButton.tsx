@@ -28,15 +28,15 @@ const styles: CSSProperties = {
     position: 'relative',
     border: LIGHT_GREY_BORDER,
     borderRadius: '4px',
-    height: '23px',
-    width: '23px',
+    height: '24px',
+    width: '24px',
   },
   text: {
-    width: '100%',
-    position: 'absolute',
+    fontSize: '30px',
     textAlign: 'center',
-    paddingTop: '100%',
-    transform: 'translateY(-50%)',
+    marginLeft: 'auto',
+    marginRight: 'auto',
+    marginTop: '1px',
   },
 };
 

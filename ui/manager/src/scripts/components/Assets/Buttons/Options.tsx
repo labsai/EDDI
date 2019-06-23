@@ -5,10 +5,9 @@ import { Dropdown } from 'semantic-ui-react';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import * as Radium from 'radium';
 import { GREY_COLOR } from '../../../../styles/DefaultStylingProperties';
-import { IBot, IDescriptor } from '../../utils/AxiosFunctions';
+import { IDetailedDescriptor } from '../../utils/AxiosFunctions';
 import modalActionDispatchers from '../../../actions/ModalActionDispatchers';
 import eddiApiActionDispatchers from '../../../actions/EddiApiActionDispatchers';
-import { NOT_FOUND, READY } from '../../utils/helpers/BotHelper';
 
 const styles: CSSProperties = {
   optionButton: {
@@ -31,9 +30,8 @@ const styles: CSSProperties = {
 };
 
 interface IProps {
-  descriptor: IDescriptor;
+  descriptor: IDetailedDescriptor;
   data: string;
-  apiUrl: string;
 }
 
 const trigger = (
@@ -47,6 +45,7 @@ const trigger = (
 class Options extends React.Component<IProps> {
   render() {
     const { descriptor } = this.props;
+    const isCurrentVersion = descriptor.version === descriptor.currentVersion;
     return (
       <div style={styles.optionButton}>
         <Dropdown style={styles.dropdown} trigger={trigger} icon={null}>
@@ -54,11 +53,15 @@ class Options extends React.Component<IProps> {
             <Dropdown.Item
               text={'Rename'}
               icon={'edit outline'}
-              onClick={() => console.log('RENAME')}
+              disabled={!isCurrentVersion}
+              onClick={() =>
+                modalActionDispatchers.showEditDescriptorModalAction(descriptor)
+              }
             />
             <Dropdown.Item
               text={'Edit JSON'}
               icon={'edit'}
+              disabled={!isCurrentVersion}
               onClick={() =>
                 modalActionDispatchers.showEditJsonModal(
                   descriptor.resource,

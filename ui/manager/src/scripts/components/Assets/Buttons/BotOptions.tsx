@@ -48,6 +48,7 @@ class BotOptions extends React.Component<IProps> {
     const { bot } = this.props;
     const botDeployed = bot.deploymentStatus === READY;
     const botUndeployed = bot.deploymentStatus === NOT_FOUND;
+    const isCurrentVersion = bot.version === bot.currentVersion;
     return (
       <div style={styles.optionButton}>
         <Dropdown style={styles.dropdown} trigger={trigger} icon={null}>
@@ -88,11 +89,13 @@ class BotOptions extends React.Component<IProps> {
             <Dropdown.Item
               text={'Rename'}
               icon={'edit outline'}
+              disabled={!isCurrentVersion}
               onClick={() => modalActionDispatchers.showEditBotModal(bot)}
             />
             <Dropdown.Item
               text={'Edit JSON'}
               icon={'edit'}
+              disabled={!isCurrentVersion}
               onClick={() =>
                 modalActionDispatchers.showEditJsonModal(
                   bot.resource,

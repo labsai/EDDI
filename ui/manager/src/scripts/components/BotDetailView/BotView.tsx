@@ -9,7 +9,6 @@ import { IBot } from '../utils/AxiosFunctions';
 import VersionSelectComponent from '../Assets/VersionSelectComponent';
 import WhiteButton from '../Assets/Buttons/WhiteButton';
 import DeployButton from '../Assets/Buttons/DeployButton';
-import { READY } from '../utils/helpers/BotHelper';
 import eddiApiActionDispatchers from '../../actions/EddiApiActionDispatchers';
 import Parser from '../utils/Parser';
 import { historyPush } from '../../history';
@@ -40,7 +39,7 @@ class BotView extends React.Component<IProps, IState> {
   }
 
   openEditBotModal = () => {
-    ModalActionDispatchers.showEditBotModal(this.props.bot);
+    ModalActionDispatchers.showEditDescriptorModalAction(this.props.bot);
   };
 
   openEditJsonModal = () => {
@@ -108,7 +107,7 @@ class BotView extends React.Component<IProps, IState> {
                 <Options bot={this.props.bot} apiUrl={this.state.apiUrl} />
               </div>
               <DeployButton
-                name={this.props.bot.name}
+                botName={this.props.bot.name}
                 botResource={this.props.bot.resource}
                 deploymentStatus={this.props.bot.deploymentStatus}
                 customStyles={styles.deployButton}

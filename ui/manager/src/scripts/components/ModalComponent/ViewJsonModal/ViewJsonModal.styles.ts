@@ -38,6 +38,9 @@ const styles: CSSProperties = {
     marginLeft: '50px',
     marginRight: '8px',
     paddingTop: '6px',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+    overflow: 'hidden',
   },
   centerFlex: {
     flex: '1',
