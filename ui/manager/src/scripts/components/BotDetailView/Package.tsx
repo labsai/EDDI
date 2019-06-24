@@ -14,6 +14,7 @@ import { historyPush } from '../../history';
 import eddiApiActionDispatchers from '../../actions/EddiApiActionDispatchers';
 import { ClipLoader } from 'react-spinners';
 import { BLUE_COLOR } from '../../../styles/DefaultStylingProperties';
+import Options from '../Assets/Buttons/Options';
 
 interface IPublicProps {
   isPackageInBot: boolean;
@@ -101,7 +102,7 @@ class Package extends React.Component<IPrivateProps> {
                 <div style={this.getNameStyle()}>
                   {packagePayload.name || packagePayload.id}
                 </div>
-                <div onClick={e => e.stopPropagation()}>
+                <div onClick={e => e.stopPropagation()} style={styles.version}>
                   <VersionSelectComponent
                     selectedVersion={packagePayload.version}
                     currentVersion={packagePayload.currentVersion}
@@ -117,6 +118,9 @@ class Package extends React.Component<IPrivateProps> {
                   </div>
                 ))}
                 <div style={styles.centerFlex} />
+                <div style={styles.options}>
+                  <Options descriptor={this.props.packagePayload} />
+                </div>
                 <button
                   disabled={!isCurrentVersion}
                   style={this.getEditPackageStyle()}

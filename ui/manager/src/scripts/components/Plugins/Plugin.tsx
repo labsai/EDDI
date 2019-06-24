@@ -14,6 +14,7 @@ import { ClipLoader } from 'react-spinners';
 import modalActionDispatchers from '../../actions/ModalActionDispatchers';
 import * as Radium from 'radium';
 import { BLUE_COLOR } from '../../../styles/DefaultStylingProperties';
+import Options from '../Assets/Buttons/Options';
 
 interface IPublicProps {
   pluginResource: string;
@@ -61,6 +62,9 @@ const Plugin: React.StatelessComponent<IPrivateProps> = (
                   />
                 </div>
                 <div style={styles.centerFlex} />
+                <div style={styles.options}>
+                  <Options descriptor={props.plugin} />
+                </div>
                 <div style={styles.modifiedDate}>
                   {moment(props.plugin.lastModifiedOn).format('DD.MM.YYYY')}
                 </div>

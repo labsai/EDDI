@@ -50,7 +50,7 @@ class Plugin extends React.Component<IPrivateProps> {
   };
 
   openAddPluginsModal = e => {
-    e.stopPropagation();
+    e.stop;
     let extensionList: string[] = [];
     let pluginType;
     if (this.props.pluginType.type === PluginType.PARSER) {

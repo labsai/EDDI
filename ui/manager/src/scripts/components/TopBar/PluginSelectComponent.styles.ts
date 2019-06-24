@@ -31,7 +31,7 @@ const styles: CSSProperties = {
     fontSize: SMALL_FONT2,
     overflow: 'hidden',
     marginLeft: '1px',
-    marginTop: '4px',
+    marginTop: '6px',
   },
   option: {
     color: DARK_BLUE_COLOR,

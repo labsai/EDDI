@@ -25,7 +25,7 @@ const styles: CSSProperties = {
   modifiedDate: {
     color: GREY_COLOR,
     fontSize: '13px',
-    marginTop: '2px',
+    marginTop: '10px',
   },
   content: {
     marginTop: '30px',
@@ -66,6 +66,10 @@ const styles: CSSProperties = {
   versionSelect: {
     position: 'relative',
     marginRight: '10px',
+  },
+  options: {
+    marginTop: '5px',
+    marginRight: '5px',
   },
 };
 export default styles;
