@@ -71,6 +71,9 @@ class Bot extends React.Component<IProps> {
                 </span>
               </div>
             </div>
+            <div style={styles.optionsMenu} onClick={e => e.stopPropagation()}>
+              <Options bot={this.props.bot} apiUrl={this.props.apiUrl} />
+            </div>
             <div onClick={e => e.stopPropagation()}>
               <DeployButton
                 botName={this.props.bot.name}
@@ -78,9 +81,6 @@ class Bot extends React.Component<IProps> {
                 deploymentStatus={this.props.bot.deploymentStatus}
                 customStyles={styles.deployButton}
               />
-            </div>
-            <div style={styles.optionsMenu} onClick={e => e.stopPropagation()}>
-              <Options bot={this.props.bot} apiUrl={this.props.apiUrl} />
             </div>
           </div>
           <div style={styles.botContent}>

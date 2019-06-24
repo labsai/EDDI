@@ -72,8 +72,7 @@ const styles: CSSProperties = {
   deployButton: {
     height: '35px',
     width: '108px',
-    marginRight: '10px',
-    marginLeft: '15px',
+    marginRight: '25px',
     marginTop: '17px',
   },
   updateAvailable: {
@@ -106,7 +105,7 @@ const styles: CSSProperties = {
   },
   optionsMenu: {
     marginTop: '20px',
-    marginRight: '25px',
+    marginRight: '10px',
     height: 'fit-content',
   },
 };
