@@ -3,7 +3,10 @@ import {
   BLUE_COLOR,
   DARK_BLUE_COLOR,
   DARK_GREY_COLOR,
+  LARGE_FONT3,
   RED_COLOR,
+  SMALL_FONT,
+  SMALL_FONT2,
 } from '../../../styles/DefaultStylingProperties';
 
 const styles: CSSProperties = {
@@ -18,7 +21,7 @@ const styles: CSSProperties = {
   },
   packageName: {
     color: DARK_BLUE_COLOR,
-    fontSize: '28px',
+    fontSize: LARGE_FONT3,
     marginRight: '20px',
     textAlign: 'left',
     paddingTop: '6px',
@@ -28,7 +31,7 @@ const styles: CSSProperties = {
   },
   pluginAddTitle: {
     marginBottom: '20px',
-    fontSize: '11px',
+    fontSize: SMALL_FONT,
   },
   pluginDropdown: {
     paddingBottom: '320px',
@@ -38,7 +41,7 @@ const styles: CSSProperties = {
   },
   unpublishedChangesText: {
     color: RED_COLOR,
-    fontSize: '12px',
+    fontSize: SMALL_FONT,
     marginLeft: '5px',
   },
   warningIcon: {
@@ -63,7 +66,7 @@ const styles: CSSProperties = {
     outline: 'none',
     color: BLUE_COLOR,
     cursor: 'pointer',
-    fontSize: '13px',
+    fontSize: SMALL_FONT2,
     whiteSpace: 'nowrap',
     textAlign: 'right',
     backgroundColor: '#FFF',
@@ -71,7 +74,7 @@ const styles: CSSProperties = {
   },
   usedInBotsTitle: {
     color: DARK_GREY_COLOR,
-    fontSize: '12px',
+    fontSize: SMALL_FONT,
     marginTop: '20px',
   },
   options: {

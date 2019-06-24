@@ -7,8 +7,10 @@ import {
   LIGHT_BLUE_COLOR,
   LIGHT_GREY_BORDER,
   LIGHT_GREY_COLOR3,
+  MEDIUM_FONT,
   RED_BORDER,
   RED_COLOR,
+  SMALL_FONT,
 } from '../../../../styles/DefaultStylingProperties';
 
 const styles: CSSProperties = {
@@ -80,7 +82,7 @@ const styles: CSSProperties = {
     flex: '1',
   },
   addExtensionButton: {
-    fontSize: '12px',
+    fontSize: SMALL_FONT,
     textDecoration: 'underline',
     color: BLUE_COLOR,
     marginTop: '5px',
@@ -94,7 +96,7 @@ const styles: CSSProperties = {
     marginRight: '5px',
     marginLeft: 'auto',
     marginTop: '3px',
-    fontSize: '12px',
+    fontSize: SMALL_FONT,
     textDecoration: 'underline',
     textAlign: 'right',
     color: BLUE_COLOR,
@@ -108,7 +110,7 @@ const styles: CSSProperties = {
   },
   pluginName: {
     color: LIGHT_BLUE_COLOR,
-    fontSize: '16px',
+    fontSize: MEDIUM_FONT,
     overflow: 'hidden',
     textAlign: 'left',
     textOverflow: 'ellipsis',
@@ -116,7 +118,7 @@ const styles: CSSProperties = {
   },
   pluginVersion: {
     color: GREY_COLOR2,
-    fontSize: '12px',
+    fontSize: SMALL_FONT,
     lineHeight: '21px',
     marginLeft: '2px',
     textAlign: 'left',
@@ -124,7 +126,7 @@ const styles: CSSProperties = {
   },
   pluginDate: {
     color: DARK_GREY_COLOR,
-    fontSize: '12px',
+    fontSize: SMALL_FONT,
     marginLeft: '5px',
     marginTop: '5px',
     textAlign: 'left',
@@ -138,7 +140,7 @@ const styles: CSSProperties = {
     borderRadius: '4px',
     color: BLUE_COLOR,
     display: 'block',
-    fontSize: '12px',
+    fontSize: SMALL_FONT,
     height: '34px',
     lineHeight: '30px',
     marginLeft: 'auto',
