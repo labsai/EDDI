@@ -34,6 +34,7 @@ export const SMALL_FONT: string = '12px';
 export const SMALL_FONT2: string = '14px';
 export const MEDIUM_FONT: string = '16px';
 export const MEDIUM_FONT2: string = '18px';
+export const MEDIUM_FONT3: string = '20px';
 export const LARGE_FONT: string = '24px';
 export const LARGE_FONT2: string = '25px';
 export const LARGE_FONT3: string = '28px';

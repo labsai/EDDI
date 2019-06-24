@@ -4,7 +4,10 @@ import {
   DARK_GREY_COLOR,
   LIGHT_GREY_COLOR2,
   LIGHT_GREY_COLOR3,
+  MEDIUM_FONT,
+  MEDIUM_FONT3,
   RED_COLOR,
+  SMALL_FONT,
 } from '../../../styles/DefaultStylingProperties';
 
 const styles: CSSProperties = {
@@ -30,7 +33,7 @@ const styles: CSSProperties = {
   },
   botHeaderName: {
     color: DARK_GREY_COLOR,
-    fontSize: '20px',
+    fontSize: MEDIUM_FONT3,
     height: '25px',
     marginLeft: '25px',
     marginTop: '20px',
@@ -50,7 +53,7 @@ const styles: CSSProperties = {
   lastModified: {
     color: DARK_GREY_COLOR,
     float: 'right',
-    fontSize: '12px',
+    fontSize: SMALL_FONT,
     height: '20px',
     marginTop: '24px',
     position: 'relative',
@@ -75,7 +78,7 @@ const styles: CSSProperties = {
   },
   updateAvailable: {
     color: RED_COLOR,
-    fontSize: '12px',
+    fontSize: SMALL_FONT,
     height: '20px',
     marginLeft: '5px',
     marginTop: '27px',
@@ -84,7 +87,7 @@ const styles: CSSProperties = {
     backgroundColor: LIGHT_GREY_COLOR2,
     borderRadius: '100px',
     color: DARK_BLUE_COLOR,
-    fontSize: '16px',
+    fontSize: MEDIUM_FONT,
     height: '21px',
     marginLeft: '15px',
     marginTop: '20px',

@@ -2,7 +2,9 @@ import { CSSProperties } from 'react';
 import {
   BLUE_COLOR,
   DARK_BLUE_COLOR,
+  LARGE_FONT3,
   RED_COLOR,
+  SMALL_FONT,
 } from '../../../styles/DefaultStylingProperties';
 
 const styles: CSSProperties = {
@@ -17,7 +19,7 @@ const styles: CSSProperties = {
   },
   botName: {
     color: DARK_BLUE_COLOR,
-    fontSize: '28px',
+    fontSize: LARGE_FONT3,
     marginRight: '20px',
     paddingTop: '6px',
     textAlign: 'left',
@@ -30,7 +32,7 @@ const styles: CSSProperties = {
   },
   unpublishedChangesText: {
     color: RED_COLOR,
-    fontSize: '12px',
+    fontSize: SMALL_FONT,
     marginLeft: '5px',
   },
   warningIcon: {
@@ -42,7 +44,7 @@ const styles: CSSProperties = {
     height: '38px',
     marginLeft: '10px',
     color: BLUE_COLOR,
-    fontSize: '12px',
+    fontSize: SMALL_FONT,
     textAlign: 'center',
   },
   deployButton: {
