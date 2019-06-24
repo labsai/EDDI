@@ -4,30 +4,14 @@ import { CSSProperties } from 'react';
 import { Dropdown } from 'semantic-ui-react';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import * as Radium from 'radium';
-import { GREY_COLOR } from '../../../../styles/DefaultStylingProperties';
+import {
+  GREY_COLOR,
+  LIGHT_GREY_COLOR2,
+} from '../../../../styles/DefaultStylingProperties';
 import { IDetailedDescriptor } from '../../utils/AxiosFunctions';
 import modalActionDispatchers from '../../../actions/ModalActionDispatchers';
 import eddiApiActionDispatchers from '../../../actions/EddiApiActionDispatchers';
-
-const styles: CSSProperties = {
-  optionButton: {
-    ':hover': {
-      backgroundColor: '#E0E5EE',
-    },
-    height: '28px',
-    width: '28px',
-    border: '1px solid transparent',
-    borderRadius: '10px',
-    alignContent: 'center',
-  },
-  dropdown: {},
-  trigger: {
-    marginTop: '1px',
-    marginLeft: '1px',
-    width: '24px',
-    height: '24px',
-  },
-};
+import styles from './Options.styles';
 
 interface IProps {
   descriptor: IDetailedDescriptor;
@@ -48,7 +32,7 @@ class Options extends React.Component<IProps> {
     const isCurrentVersion = descriptor.version === descriptor.currentVersion;
     return (
       <div style={styles.optionButton}>
-        <Dropdown style={styles.dropdown} trigger={trigger} icon={null}>
+        <Dropdown trigger={trigger} icon={null}>
           <Dropdown.Menu>
             <Dropdown.Item
               text={'Rename'}

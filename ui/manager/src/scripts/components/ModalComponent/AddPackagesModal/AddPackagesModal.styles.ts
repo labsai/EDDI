@@ -1,17 +1,24 @@
 import { CSSProperties } from 'react';
+import {
+  DARK_BLUE_COLOR,
+  DARK_GREY_COLOR,
+  LARGE_FONT3,
+  LIGHT_GREY_COLOR3,
+  SMALL_FONT,
+} from '../../../../styles/DefaultStylingProperties';
 
 const styles: CSSProperties = {
   header: {
     height: '156px',
-    backgroundColor: '#F7F9FB',
+    backgroundColor: LIGHT_GREY_COLOR3,
   },
   topHeader: {
     paddingTop: '55px',
     display: 'flex',
   },
   title: {
-    color: '#16325C',
-    fontSize: '28px',
+    color: DARK_BLUE_COLOR,
+    fontSize: LARGE_FONT3,
     height: '36px',
     marginLeft: '50px',
   },
@@ -36,8 +43,8 @@ const styles: CSSProperties = {
   },
   lastModified: {
     marginRight: '50px',
-    color: '#54698D',
-    fontSize: '12px',
+    color: DARK_GREY_COLOR,
+    fontSize: SMALL_FONT,
   },
   packageList: {
     marginLeft: '50px',
@@ -50,12 +57,6 @@ const styles: CSSProperties = {
   },
   closeContainerCenter: {
     flexGrow: '1',
-  },
-  close: {
-    color: '#FFF',
-    cursor: 'pointer',
-    fontSize: '40px',
-    height: '40px',
   },
   loadingWrapper: {
     alignItems: 'center',

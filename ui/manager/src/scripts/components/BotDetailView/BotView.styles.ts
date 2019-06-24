@@ -1,4 +1,9 @@
 import { CSSProperties } from 'react';
+import {
+  BLUE_COLOR,
+  DARK_BLUE_COLOR,
+  RED_COLOR,
+} from '../../../styles/DefaultStylingProperties';
 
 const styles: CSSProperties = {
   botHeader: {
@@ -11,7 +16,7 @@ const styles: CSSProperties = {
     flexGrow: '1',
   },
   botName: {
-    color: '#16325C',
+    color: DARK_BLUE_COLOR,
     fontSize: '28px',
     marginRight: '20px',
     paddingTop: '6px',
@@ -24,7 +29,7 @@ const styles: CSSProperties = {
     display: 'flex',
   },
   unpublishedChangesText: {
-    color: '#FF5976',
+    color: RED_COLOR,
     fontSize: '12px',
     marginLeft: '5px',
   },
@@ -36,7 +41,7 @@ const styles: CSSProperties = {
   button: {
     height: '38px',
     marginLeft: '10px',
-    color: '#0070D2',
+    color: BLUE_COLOR,
     fontSize: '12px',
     textAlign: 'center',
   },

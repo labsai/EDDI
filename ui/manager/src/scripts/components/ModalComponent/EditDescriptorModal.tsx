@@ -5,18 +5,12 @@ import { Component, compose, pure, setDisplayName } from 'recompose';
 import { IDescriptor } from '../utils/AxiosFunctions';
 import eddiApiActionDispatchers from '../../actions/EddiApiActionDispatchers';
 import ModalActionDispatchers from '../../actions/ModalActionDispatchers';
+import { BLUE_COLOR } from '../../../styles/DefaultStylingProperties';
+import BlueButton from '../Assets/Buttons/BlueButton';
 
 const customStyles = {
-  editDescriptorButton: {
-    border: '0px',
-    borderRadius: '4px',
-    color: '#FFFFFF',
-    cursor: 'pointer',
-    fontSize: '12px',
-    height: '36px',
+  button: {
     marginLeft: 'auto',
-    textAlign: 'center',
-    minWidth: '100px',
   },
 };
 
@@ -38,24 +32,6 @@ class EditDescriptorModal extends React.Component<IProps, IState> {
     };
   }
 
-  getButtonStyle() {
-    if (
-      this.state.name === this.props.descriptor.name &&
-      this.state.description === this.props.descriptor.description
-    ) {
-      return {
-        ...customStyles.editDescriptorButton,
-        backgroundColor: '#c4c9d2',
-      };
-    } else {
-      return {
-        ...customStyles.editDescriptorButton,
-        backgroundColor: '#0070D2',
-        cursor: 'pointer',
-      };
-    }
-  }
-
   render() {
     return (
       <div>
@@ -64,8 +40,9 @@ class EditDescriptorModal extends React.Component<IProps, IState> {
             <div style={styles.botHeaderText}>
               {'Edit name and description'}
             </div>
-            <button
-              style={this.getButtonStyle()}
+            <BlueButton
+              text={'Save'}
+              customStyles={customStyles.button}
               disabled={
                 this.state.name === this.props.descriptor.name &&
                 this.state.description === this.props.descriptor.description
@@ -77,9 +54,8 @@ class EditDescriptorModal extends React.Component<IProps, IState> {
                   this.state.description,
                 );
                 ModalActionDispatchers.closeModal();
-              }}>
-              {'Save'}
-            </button>
+              }}
+            />
           </div>
         </div>
         <div style={styles.content}>

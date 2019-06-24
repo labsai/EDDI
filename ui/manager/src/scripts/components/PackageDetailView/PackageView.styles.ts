@@ -1,4 +1,10 @@
 import { CSSProperties } from 'react';
+import {
+  BLUE_COLOR,
+  DARK_BLUE_COLOR,
+  DARK_GREY_COLOR,
+  RED_COLOR,
+} from '../../../styles/DefaultStylingProperties';
 
 const styles: CSSProperties = {
   packageHeader: {
@@ -11,7 +17,7 @@ const styles: CSSProperties = {
     flexGrow: '1',
   },
   packageName: {
-    color: '#16325C',
+    color: DARK_BLUE_COLOR,
     fontSize: '28px',
     marginRight: '20px',
     textAlign: 'left',
@@ -27,28 +33,11 @@ const styles: CSSProperties = {
   pluginDropdown: {
     paddingBottom: '320px',
   },
-  publishButton: {
-    ':hover': {
-      backgroundColor: '#F4F6F9',
-    },
-    ':active': {
-      backgroundColor: '#FFFFFF',
-    },
-    ':focus': {
-      outline: 'none',
-    },
-    border: '1px solid #D8DDE6',
-    borderRadius: '4px',
-    color: '#FFFFFF',
-    height: '35px',
-    textAlign: 'center',
-    width: '100px',
-  },
   unpublishedChanges: {
     display: 'flex',
   },
   unpublishedChangesText: {
-    color: '#FF5976',
+    color: RED_COLOR,
     fontSize: '12px',
     marginLeft: '5px',
   },
@@ -72,7 +61,7 @@ const styles: CSSProperties = {
   discardChanges: {
     border: 'none',
     outline: 'none',
-    color: '#1589EE',
+    color: BLUE_COLOR,
     cursor: 'pointer',
     fontSize: '13px',
     whiteSpace: 'nowrap',
@@ -81,7 +70,7 @@ const styles: CSSProperties = {
     marginRight: '5px',
   },
   usedInBotsTitle: {
-    color: '#54698D',
+    color: DARK_GREY_COLOR,
     fontSize: '12px',
     marginTop: '20px',
   },

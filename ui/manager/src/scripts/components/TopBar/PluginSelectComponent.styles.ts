@@ -18,6 +18,7 @@ const styles: CSSProperties = {
     borderTop: `6px solid ${DARK_BLUE_COLOR}`,
     height: '0',
     marginRight: '10px',
+    marginTop: '6px',
     width: '0',
   },
   input: {

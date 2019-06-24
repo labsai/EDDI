@@ -4,31 +4,15 @@ import { CSSProperties } from 'react';
 import { Dropdown } from 'semantic-ui-react';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import * as Radium from 'radium';
-import { GREY_COLOR } from '../../../../styles/DefaultStylingProperties';
+import {
+  GREY_COLOR,
+  LIGHT_GREY_COLOR2,
+} from '../../../../styles/DefaultStylingProperties';
 import { IBot } from '../../utils/AxiosFunctions';
 import modalActionDispatchers from '../../../actions/ModalActionDispatchers';
 import eddiApiActionDispatchers from '../../../actions/EddiApiActionDispatchers';
 import { NOT_FOUND, READY } from '../../utils/helpers/BotHelper';
-
-const styles: CSSProperties = {
-  optionButton: {
-    ':hover': {
-      backgroundColor: '#E0E5EE',
-    },
-    height: '28px',
-    width: '28px',
-    border: '1px solid transparent',
-    borderRadius: '10px',
-    alignContent: 'center',
-  },
-  dropdown: {},
-  trigger: {
-    marginTop: '1px',
-    marginLeft: '1px',
-    width: '24px',
-    height: '24px',
-  },
-};
+import styles from './Options.styles';
 
 interface IProps {
   bot: IBot;
@@ -51,7 +35,7 @@ class BotOptions extends React.Component<IProps> {
     const isCurrentVersion = bot.version === bot.currentVersion;
     return (
       <div style={styles.optionButton}>
-        <Dropdown style={styles.dropdown} trigger={trigger} icon={null}>
+        <Dropdown trigger={trigger} icon={null}>
           <Dropdown.Menu>
             <Dropdown.Item
               text={'Open Chat'}

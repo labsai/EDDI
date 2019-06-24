@@ -1,8 +1,15 @@
 import { CSSProperties } from 'react';
+import {
+  DARK_BLUE_COLOR,
+  DARK_GREY_COLOR,
+  LIGHT_GREY_COLOR2,
+  LIGHT_GREY_COLOR3,
+  RED_COLOR,
+} from '../../../styles/DefaultStylingProperties';
 
 const styles: CSSProperties = {
   botBox: {
-    border: '1px solid #E0E5EE',
+    border: `1px solid ${LIGHT_GREY_COLOR2}`,
     borderRadius: '4px',
     marginBottom: '15px',
   },
@@ -12,7 +19,7 @@ const styles: CSSProperties = {
     paddingBottom: '10px',
   },
   botHeader: {
-    backgroundColor: '#F7F9FB',
+    backgroundColor: LIGHT_GREY_COLOR3,
     borderRadius: '4px 4px 0 0',
     display: 'flex',
     height: '65px',
@@ -22,7 +29,7 @@ const styles: CSSProperties = {
     flex: '1',
   },
   botHeaderName: {
-    color: '#54698D',
+    color: DARK_GREY_COLOR,
     fontSize: '20px',
     height: '25px',
     marginLeft: '25px',
@@ -41,7 +48,7 @@ const styles: CSSProperties = {
     maxWidth: '300px',
   },
   lastModified: {
-    color: '#54698D',
+    color: DARK_GREY_COLOR,
     float: 'right',
     fontSize: '12px',
     height: '20px',
@@ -67,16 +74,16 @@ const styles: CSSProperties = {
     marginTop: '17px',
   },
   updateAvailable: {
-    color: '#FF5976',
+    color: RED_COLOR,
     fontSize: '12px',
     height: '20px',
     marginLeft: '5px',
     marginTop: '27px',
   },
   versionName: {
-    backgroundColor: '#E0E5EE',
+    backgroundColor: LIGHT_GREY_COLOR2,
     borderRadius: '100px',
-    color: '#16325C',
+    color: DARK_BLUE_COLOR,
     fontSize: '16px',
     height: '21px',
     marginLeft: '15px',
