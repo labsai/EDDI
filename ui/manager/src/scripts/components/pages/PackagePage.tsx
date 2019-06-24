@@ -1,8 +1,8 @@
 import * as React from 'react';
-import Botlist from '../Bots/Botlist';
 import TopBarComponent from '../TopBar/TopBarComponent';
 import styles from '../App.style';
 import { Component, compose, pure, setDisplayName } from 'recompose';
+import PackageList from '../Packages/PackageList';
 import { pageEnum } from './pageEnum';
 
 interface IProps {}
@@ -12,7 +12,7 @@ interface IState {
 
 const eddiLogo = require('../../../public/images/eddi-logo.png');
 
-class Dashboard extends React.Component<IProps, IState> {
+class PackagePage extends React.Component<IProps, IState> {
   constructor(props) {
     super(props);
     this.state = {
@@ -29,17 +29,17 @@ class Dashboard extends React.Component<IProps, IState> {
       <div>
         <img src={eddiLogo} style={styles.eddiLogo} />
         <div className="content">
-          <TopBarComponent page={pageEnum.bot} filter={this.filter} />
-          <Botlist filterText={this.state.filterText} />
+          <TopBarComponent page={pageEnum.package} filter={this.filter} />
+          <PackageList filterText={this.state.filterText} />
         </div>
       </div>
     );
   }
 }
 
-const ComposedDashboard: Component<IPublicProps> = compose<
+const ComposedPackagePage: Component<IPublicProps> = compose<
   IPublicProps,
   IPrivateProps
->(pure, setDisplayName('Dashboard'))(Dashboard);
+>(pure, setDisplayName('PackagePage'))(PackagePage);
 
-export default ComposedDashboard;
+export default ComposedPackagePage;

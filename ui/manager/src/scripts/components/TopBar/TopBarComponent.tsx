@@ -6,12 +6,14 @@ import { CSSProperties } from 'react';
 import { Link } from 'react-router-dom';
 import { ModalEnum } from '../utils/ModalEnum';
 import BlueButton from '../Assets/Buttons/BlueButton';
+import { pageEnum } from '../pages/pageEnum';
 
 const styles: CSSProperties = {
   createNewBotButton: {
     height: '36px',
     marginLeft: '32px',
     marginTop: '7px',
+    minWidth: '108px',
   },
   topBarCenter: {
     flex: '1',
@@ -25,6 +27,8 @@ const styles: CSSProperties = {
 };
 
 interface IProps {
+  page: pageEnum;
+  type?: string;
   filter(text: string): void;
 }
 
@@ -34,22 +38,39 @@ class TopBarComponent extends React.Component<IProps> {
   }
 
   openModal = () => {
-    ModalActionDispatchers.showModal(ModalEnum.createBot);
+    switch (this.props.page) {
+      case pageEnum.bot:
+        ModalActionDispatchers.showModal(ModalEnum.createBot);
+        return;
+      case pageEnum.package:
+        ModalActionDispatchers.showModal(ModalEnum.createPackage);
+        return;
+      default:
+        ModalActionDispatchers.showCreateNewConfigModal(this.props.type);
+        return;
+    }
   };
+
+  getSearchName(page: pageEnum) {
+    if (page === pageEnum.httpCalls) {
+      return 'HTTP calls';
+    } else {
+      return pageEnum[page];
+    }
+  }
 
   render() {
     return (
       <div style={styles.topBarComponent}>
-        <NavigationComponent />
+        <NavigationComponent page={this.props.page} />
         <div style={styles.topBarCenter} />
-        <FilterComponent filter={this.props.filter} />
+        <FilterComponent page={this.props.page} filter={this.props.filter} />
         <BlueButton
-          text={'Create new bot'}
+          text={`Create new ${this.getSearchName(this.props.page)}`}
           customStyles={styles.createNewBotButton}
           onClick={this.openModal}
-          style={styles.createNewBot}>
-          {'Create new bot'}
-        </BlueButton>
+          style={styles.createNewBot}
+        />
       </div>
     );
   }

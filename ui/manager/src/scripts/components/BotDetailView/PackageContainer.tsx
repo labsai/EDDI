@@ -33,9 +33,9 @@ class PackageContainer extends React.Component<IProps, IState> {
     });
   }
 
-  selectVersion = (resource: string, newVersion: number) => {
+  selectVersion = (newVersion: number) => {
     const selectedPackageResource = Parser.replaceResourceVersion(
-      resource,
+      this.props.packageResource,
       newVersion,
     );
     this.setState({

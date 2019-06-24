@@ -99,7 +99,9 @@ class CreateNewConfig2Modal extends React.Component<IPrivateProps, IState> {
         this.props.description,
         this.state.editorText,
       );
-      this.props.onConfirm();
+      this.props.onConfirm
+        ? this.props.onConfirm()
+        : modalActionDispatchers.closeModal();
     }
   };
 
