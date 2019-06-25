@@ -1,24 +1,16 @@
 import * as React from 'react';
-import * as Modal from 'react-modal';
 import styles from './ModalComponent.styles';
 import './ModalComponent.styles.scss';
 import { Component, compose, pure, setDisplayName } from 'recompose';
 import { IDescriptor } from '../utils/AxiosFunctions';
 import eddiApiActionDispatchers from '../../actions/EddiApiActionDispatchers';
 import ModalActionDispatchers from '../../actions/ModalActionDispatchers';
+import { BLUE_COLOR } from '../../../styles/DefaultStylingProperties';
+import BlueButton from '../Assets/Buttons/BlueButton';
 
 const customStyles = {
-  editBotButton: {
-    border: '0px',
-    borderRadius: '4px',
-    color: '#FFFFFF',
-    cursor: 'pointer',
-    fontSize: '12px',
-    height: '36px',
-    marginLeft: '60%',
-    marginTop: '8px',
-    textAlign: 'center',
-    minWidth: '100px',
+  button: {
+    marginLeft: 'auto',
   },
 };
 
@@ -31,7 +23,7 @@ interface IProps {
   descriptor: IDescriptor;
 }
 
-class DescriptorModal extends React.Component<IProps, IState> {
+class EditDescriptorModal extends React.Component<IProps, IState> {
   constructor(props) {
     super(props);
     this.state = {
@@ -40,29 +32,17 @@ class DescriptorModal extends React.Component<IProps, IState> {
     };
   }
 
-  getButtonStyle() {
-    if (
-      this.state.name === this.props.descriptor.name &&
-      this.state.description === this.props.descriptor.description
-    ) {
-      return { ...customStyles.editBotButton, backgroundColor: '#c4c9d2' };
-    } else {
-      return {
-        ...customStyles.editBotButton,
-        backgroundColor: '#0070D2',
-        cursor: 'pointer',
-      };
-    }
-  }
-
   render() {
     return (
       <div>
         <div style={styles.modalHeader}>
           <div style={styles.modalTopHeader}>
-            <h2 style={styles.botHeaderText}>{'Edit bot'}</h2>
-            <button
-              style={this.getButtonStyle()}
+            <div style={styles.botHeaderText}>
+              {'Edit name and description'}
+            </div>
+            <BlueButton
+              text={'Save'}
+              customStyles={customStyles.button}
               disabled={
                 this.state.name === this.props.descriptor.name &&
                 this.state.description === this.props.descriptor.description
@@ -74,9 +54,8 @@ class DescriptorModal extends React.Component<IProps, IState> {
                   this.state.description,
                 );
                 ModalActionDispatchers.closeModal();
-              }}>
-              {'Edit bot'}
-            </button>
+              }}
+            />
           </div>
         </div>
         <div style={styles.content}>
@@ -115,9 +94,9 @@ class DescriptorModal extends React.Component<IProps, IState> {
     );
   }
 }
-const ComposedDescriptorModal: Component<IProps> = compose<IProps>(
+const ComposedEditDescriptorModal: Component<IProps> = compose<IProps>(
   pure,
-  setDisplayName('DescriptorModal'),
-)(DescriptorModal);
+  setDisplayName('EditDescriptorModal'),
+)(EditDescriptorModal);
 
-export default ComposedDescriptorModal;
+export default ComposedEditDescriptorModal;

@@ -83,6 +83,9 @@ import {
   FETCH_BOT_JSON_SCHEMA_SUCCESS,
   FETCH_PACKAGE_JSON_SCHEMA_SUCCESS,
   FETCH_PLUGIN_JSON_SCHEMA_SUCCESS,
+  DUPLICATE,
+  DUPLICATE_SUCCESS,
+  DUPLICATE_FAILED,
 } from './EddiApiActionTypes';
 import {
   IBot,
@@ -1241,5 +1244,51 @@ export function fetchPluginJsonSchemaSuccessAction(
     eddiType,
     schema,
     type: FETCH_PLUGIN_JSON_SCHEMA_SUCCESS,
+  };
+}
+
+export interface IDuplicateAction extends Action {
+  resource: string;
+  deepCopy: boolean;
+}
+
+export function duplicateAction(
+  resource: string,
+  deepCopy: boolean,
+): IDuplicateAction {
+  return {
+    resource,
+    deepCopy,
+    type: DUPLICATE,
+  };
+}
+
+export interface IDuplicateSuccessAction extends Action {
+  bot: IBot;
+  packages: IPackage[];
+  plugins: IPlugin[];
+}
+
+export function duplicateSuccessAction(
+  bot: IBot,
+  packages: IPackage[],
+  plugins: IPlugin[],
+): IDuplicateSuccessAction {
+  return {
+    bot,
+    packages,
+    plugins,
+    type: DUPLICATE_SUCCESS,
+  };
+}
+
+export interface IDuplicateFailedAction extends Action {
+  error: Error;
+}
+
+export function duplicateFailedAction(error: Error): IDuplicateFailedAction {
+  return {
+    error,
+    type: DUPLICATE_FAILED,
   };
 }

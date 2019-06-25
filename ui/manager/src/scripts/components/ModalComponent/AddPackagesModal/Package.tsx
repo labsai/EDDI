@@ -50,6 +50,9 @@ class Package extends React.Component<IPrivateProps> {
   };
 
   selectVersion = (newVersion: number) => {
+    if (this.props.selected) {
+      this.handleClick();
+    }
     this.props.selectVersion(this.props.packagePayload.resource, newVersion);
   };
 

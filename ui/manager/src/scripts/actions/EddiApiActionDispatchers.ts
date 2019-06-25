@@ -90,6 +90,12 @@ import {
   fetchJsonSchemaAction,
   fetchPackageJsonSchemaSuccessAction,
   fetchPluginJsonSchemaSuccessAction,
+  IDuplicateAction,
+  duplicateAction,
+  IDuplicateSuccessAction,
+  IDuplicateFailedAction,
+  duplicateSuccessAction,
+  duplicateFailedAction,
 } from './EddiApiActions';
 
 export interface IEddiApiActionDispatchers extends ActionCreatorsMapObject {
@@ -178,6 +184,9 @@ export interface IEddiApiActionDispatchers extends ActionCreatorsMapObject {
     eddiType,
     schema,
   ) => IFetchJsonSchemaSuccessAction;
+  duplicateAction: (resource, deepCopy) => IDuplicateAction;
+  duplicateSuccessAction: (bot, packages, plugins) => IDuplicateSuccessAction;
+  duplicateFailedAction: (error) => IDuplicateFailedAction;
 }
 
 const actions: IEddiApiActionDispatchers = {
@@ -230,6 +239,9 @@ const actions: IEddiApiActionDispatchers = {
   fetchBotJsonSchemaSuccessAction,
   fetchPackageJsonSchemaSuccessAction,
   fetchPluginJsonSchemaSuccessAction,
+  duplicateAction,
+  duplicateSuccessAction,
+  duplicateFailedAction,
 };
 
 const eddiApiActionDispatchers: IEddiApiActionDispatchers = bindActionCreators<

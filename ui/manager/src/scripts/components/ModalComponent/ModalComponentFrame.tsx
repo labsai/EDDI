@@ -14,11 +14,10 @@ import './ModalComponent.styles.scss';
 import { Link, browserHistory } from 'react-router-dom';
 import { Component, compose, pure, setDisplayName } from 'recompose';
 import CreateBotModal from './CreateBotModal';
-import EditBotModal from './EditBotModal';
+import EditDescriptorModal from './EditDescriptorModal';
 import AddPackagesModal from './AddPackagesModal/AddPackagesModal';
 import AddPluginModal from './AddPluginModal/AddPluginModal';
 import CreatePackageModal from './CreatePackageModal';
-import EditPackageModal from './EditPackageModal';
 import UpdatePackageModal from './UpdatePackageModal';
 import { ModalEnum } from '../utils/ModalEnum';
 import EditJsonModal from './EditJsonModal/EditJsonModal';
@@ -151,18 +150,15 @@ class ModalComponentFrame extends React.Component<IPrivateProps, IState> {
     switch (mode) {
       case ModalEnum.createBot:
         return <CreateBotModal />;
-      case ModalEnum.editBot:
-        return <EditBotModal bot={this.props.bot} />;
+      case ModalEnum.editDescriptor:
+        return <EditDescriptorModal descriptor={this.props.descriptor} />;
       case ModalEnum.createPackage:
-        // todo check this functionality, setMode has been removed
         return (
           <CreatePackageModal
             setName={this.setPackageName}
             setDescription={this.setPackageDescription}
           />
         );
-      case ModalEnum.editPackage:
-        return <EditPackageModal packagePayload={this.props.packagePayload} />;
       case ModalEnum.viewJson:
         return <ViewJsonModal resource={this.props.resource} />;
       case ModalEnum.updatePackage:

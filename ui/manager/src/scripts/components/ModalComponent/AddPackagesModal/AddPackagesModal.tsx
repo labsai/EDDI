@@ -13,7 +13,6 @@ import styles from './AddPackagesModal.styles';
 import ModalActionDispatchers from '../../../actions/ModalActionDispatchers';
 import * as renderIf from 'render-if';
 import BlueButton from '../../Assets/Buttons/BlueButton';
-import WhiteButton from '../../Assets/Buttons/WhiteButton';
 import { ClimbingBoxLoader } from 'react-spinners';
 import { DEFAULT_LIMIT } from '../../utils/ApiFunctions';
 

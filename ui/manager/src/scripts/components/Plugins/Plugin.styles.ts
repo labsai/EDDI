@@ -13,7 +13,8 @@ const styles: CSSProperties = {
     color: DARK_BLUE_COLOR,
     fontSize: LARGE_FONT,
     marginRight: '10px',
-    marginTop: '2px',
+    paddingTop: '6px',
+    paddingBottom: '6px',
     textOverflow: 'ellipsis',
     whiteSpace: 'nowrap',
     overflow: 'hidden',
@@ -24,7 +25,7 @@ const styles: CSSProperties = {
   modifiedDate: {
     color: GREY_COLOR,
     fontSize: '13px',
-    marginTop: '2px',
+    marginTop: '10px',
   },
   content: {
     marginTop: '30px',
@@ -36,7 +37,6 @@ const styles: CSSProperties = {
     },
     cursor: 'pointer',
     display: 'flex',
-    height: '36px',
     paddingTop: '5px',
     paddingBottom: '5px',
   },
@@ -66,6 +66,10 @@ const styles: CSSProperties = {
   versionSelect: {
     position: 'relative',
     marginRight: '10px',
+  },
+  options: {
+    marginTop: '5px',
+    marginRight: '5px',
   },
 };
 export default styles;

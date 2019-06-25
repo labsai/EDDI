@@ -1,6 +1,7 @@
 import { Action } from 'redux';
 import {
   IBot,
+  IDescriptor,
   IDetailedDescriptor,
   IPackage,
 } from '../components/utils/AxiosFunctions';
@@ -12,8 +13,7 @@ import {
   SHOW_EDIT_JSON_MODAL,
   SHOW_ADD_PACKAGES_MODAL,
   SHOW_ADD_PLUGINS_MODAL,
-  SHOW_EDIT_BOT_MODAL,
-  SHOW_EDIT_PACKAGE_MODAL,
+  SHOW_EDIT_DESCRIPTOR_MODAL,
   SHOW_CREATE_NEW_CONFIG_MODAL,
   SHOW_CREATE_NEW_CONFIG_2_MODAL,
   SHOW_UPDATE_PACKAGES_MODAL,
@@ -127,27 +127,16 @@ export function showAddPluginsModal(
   };
 }
 
-export interface IShowEditBotModalAction extends Action {
-  bot: IBot;
+export interface IShowEditDescriptorModalAction extends Action {
+  descriptor: IDescriptor;
 }
 
-export function showEditBotModal(bot: IBot): IShowEditBotModalAction {
+export function showEditDescriptorModalAction(
+  descriptor: IDescriptor,
+): IShowEditDescriptorModalAction {
   return {
-    bot,
-    type: SHOW_EDIT_BOT_MODAL,
-  };
-}
-
-export interface IShowEditPackageModalAction extends Action {
-  packagePayload: IPackage;
-}
-
-export function showEditPackageModal(
-  packagePayload: IPackage,
-): IShowEditPackageModalAction {
-  return {
-    packagePayload,
-    type: SHOW_EDIT_PACKAGE_MODAL,
+    descriptor,
+    type: SHOW_EDIT_DESCRIPTOR_MODAL,
   };
 }
 

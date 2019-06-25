@@ -1,5 +1,5 @@
 import { Reducer, Action } from 'redux';
-import { IPackage } from '../components/utils/AxiosFunctions';
+import { IBot, IPackage } from '../components/utils/AxiosFunctions';
 import {
   FETCH_PACKAGEDATA,
   FETCH_PACKAGEDATA_FAILED,
@@ -22,6 +22,7 @@ import {
   CREATE_NEW_PACKAGE_SUCCESS,
   ADD_NEW_PACKAGE_TO_BOTS_SUCCESS,
   FETCH_PACKAGE_JSON_SCHEMA_SUCCESS,
+  DUPLICATE_SUCCESS,
 } from '../actions/EddiApiActionTypes';
 import * as update from 'immutability-helper';
 import {
@@ -41,6 +42,7 @@ import {
   ICreateNewPackageSuccessAction,
   IAddNewPackageToBotsSuccessAction,
   IFetchJsonSchemaSuccessAction,
+  IDuplicateSuccessAction,
 } from '../actions/EddiApiActions';
 import * as _ from 'lodash';
 
@@ -467,6 +469,24 @@ const PackageReducer: IPackageReducer = (
           $set: (action as IFetchJsonSchemaSuccessAction).schema.value,
         },
       });
+
+    case DUPLICATE_SUCCESS: {
+      return update(state, {
+        packages: {
+          $apply: (packages: IPackage[]) => {
+            return _.uniqBy(
+              packages.concat((action as IDuplicateSuccessAction).packages),
+              pkg => pkg.resource,
+            );
+          },
+        },
+        packagesLoaded: {
+          $set:
+            state.packagesLoaded +
+            (action as IDuplicateSuccessAction).packages.length,
+        },
+      });
+    }
 
     default:
       return state;

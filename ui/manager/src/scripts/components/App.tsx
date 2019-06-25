@@ -26,6 +26,7 @@ import {
   faExpand,
   faRedo,
   faUndo,
+  faEllipsisV,
 } from '@fortawesome/free-solid-svg-icons';
 
 library.add(faUndo);
@@ -34,6 +35,7 @@ library.add(faCheck);
 library.add(faExpand);
 library.add(faCompress);
 library.add(faCheckCircle);
+library.add(faEllipsisV);
 
 const styles: CSSProperties = {
   logoutButton: {

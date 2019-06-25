@@ -35,7 +35,7 @@ const styles: CSSProperties = {
     fontSize: '20px',
     marginRight: '20px',
     textAlign: 'left',
-    marginTop: '5px',
+    marginTop: '6px',
   },
   warningIcon: {
     height: '14px',
@@ -51,6 +51,10 @@ const styles: CSSProperties = {
   },
   warning: {
     display: 'flex',
+  },
+  options: {
+    marginTop: '5px',
+    marginRight: '10px',
   },
 };
 export default styles;

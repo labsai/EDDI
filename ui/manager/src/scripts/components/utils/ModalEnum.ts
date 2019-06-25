@@ -1,8 +1,7 @@
 export enum ModalEnum {
   'createBot',
-  'editBot',
+  'editDescriptor',
   'createPackage',
-  'editPackage',
   'updatePackage',
   'addPackages',
   'editJson',

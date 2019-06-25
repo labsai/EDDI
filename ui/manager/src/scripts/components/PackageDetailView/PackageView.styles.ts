@@ -1,4 +1,13 @@
 import { CSSProperties } from 'react';
+import {
+  BLUE_COLOR,
+  DARK_BLUE_COLOR,
+  DARK_GREY_COLOR,
+  LARGE_FONT3,
+  RED_COLOR,
+  SMALL_FONT,
+  SMALL_FONT2,
+} from '../../../styles/DefaultStylingProperties';
 
 const styles: CSSProperties = {
   packageHeader: {
@@ -11,44 +20,28 @@ const styles: CSSProperties = {
     flexGrow: '1',
   },
   packageName: {
-    color: '#16325C',
-    fontSize: '28px',
+    color: DARK_BLUE_COLOR,
+    fontSize: LARGE_FONT3,
     marginRight: '20px',
     textAlign: 'left',
+    paddingTop: '6px',
     maxWidth: '400px',
     overflow: 'hidden',
     textOverflow: 'ellipsis',
   },
   pluginAddTitle: {
     marginBottom: '20px',
-    fontSize: '11px',
+    fontSize: SMALL_FONT,
   },
   pluginDropdown: {
     paddingBottom: '320px',
-  },
-  publishButton: {
-    ':hover': {
-      backgroundColor: '#F4F6F9',
-    },
-    ':active': {
-      backgroundColor: '#FFFFFF',
-    },
-    ':focus': {
-      outline: 'none',
-    },
-    border: '1px solid #D8DDE6',
-    borderRadius: '4px',
-    color: '#FFFFFF',
-    height: '35px',
-    textAlign: 'center',
-    width: '100px',
   },
   unpublishedChanges: {
     display: 'flex',
   },
   unpublishedChangesText: {
-    color: '#FF5976',
-    fontSize: '12px',
+    color: RED_COLOR,
+    fontSize: SMALL_FONT,
     marginLeft: '5px',
   },
   warningIcon: {
@@ -71,18 +64,22 @@ const styles: CSSProperties = {
   discardChanges: {
     border: 'none',
     outline: 'none',
-    color: '#1589EE',
+    color: BLUE_COLOR,
     cursor: 'pointer',
-    fontSize: '13px',
+    fontSize: SMALL_FONT2,
     whiteSpace: 'nowrap',
     textAlign: 'right',
     backgroundColor: '#FFF',
     marginRight: '5px',
   },
   usedInBotsTitle: {
-    color: '#54698D',
-    fontSize: '12px',
+    color: DARK_GREY_COLOR,
+    fontSize: SMALL_FONT,
     marginTop: '20px',
+  },
+  options: {
+    marginTop: '3px',
+    marginRight: '5px',
   },
 };
 export default styles;

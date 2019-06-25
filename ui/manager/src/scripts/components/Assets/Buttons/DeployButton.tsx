@@ -12,40 +12,51 @@ import {
 import modalActionDispatchers from '../../../actions/ModalActionDispatchers';
 import eddiApiActionDispatchers from '../../../actions/EddiApiActionDispatchers';
 import { getDeploymentStatus } from '../../utils/AxiosFunctions';
+import {
+  DARK_GREEN_COLOR,
+  DARK_RED_COLOR,
+  GREEN_BORDER,
+  GREEN_COLOR,
+  LIGHT_GREY_BORDER,
+  RED_BORDER,
+  RED_COLOR,
+  YELLOW_BORDER,
+  YELLOW_COLOR,
+} from '../../../../styles/DefaultStylingProperties';
 
 const undeployStyle: CSSProperties = {
   button: {
     color: 'white',
-    backgroundColor: '#FF5976',
-    border: '1px solid #FF5976',
+    backgroundColor: RED_COLOR,
+    border: RED_BORDER,
     ':hover': {
-      backgroundColor: 'red',
+      backgroundColor: DARK_RED_COLOR,
     },
   },
 };
 const deployStyle: CSSProperties = {
   button: {
     color: 'white',
-    backgroundColor: '#4BCA81',
-    border: '1px solid #4BCA81',
+    backgroundColor: GREEN_COLOR,
+    border: GREEN_BORDER,
     ':hover': {
-      backgroundColor: 'green',
+      backgroundColor: DARK_GREEN_COLOR,
     },
   },
 };
 const inProgressStyle: CSSProperties = {
   disabled: {
     color: 'white',
-    backgroundColor: '#FADA5E',
-    border: '1px solid #FADA5E',
+    backgroundColor: YELLOW_COLOR,
+    border: YELLOW_BORDER,
     cursor: 'default',
   },
 };
 const errorStyle: CSSProperties = {
   disabled: {
-    color: 'red',
+    color: DARK_RED_COLOR,
     backgroundColor: 'white',
-    border: '1px solid #D8DDE6',
+    border: LIGHT_GREY_BORDER,
     cursor: 'default',
   },
 };

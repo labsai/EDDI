@@ -1,4 +1,11 @@
 import { CSSProperties } from 'react';
+import {
+  BLUE_COLOR,
+  DARK_BLUE_COLOR,
+  LARGE_FONT3,
+  RED_COLOR,
+  SMALL_FONT,
+} from '../../../styles/DefaultStylingProperties';
 
 const styles: CSSProperties = {
   botHeader: {
@@ -11,9 +18,10 @@ const styles: CSSProperties = {
     flexGrow: '1',
   },
   botName: {
-    color: '#16325C',
-    fontSize: '28px',
+    color: DARK_BLUE_COLOR,
+    fontSize: LARGE_FONT3,
     marginRight: '20px',
+    paddingTop: '6px',
     textAlign: 'left',
     maxWidth: '350px',
     overflow: 'hidden',
@@ -23,8 +31,8 @@ const styles: CSSProperties = {
     display: 'flex',
   },
   unpublishedChangesText: {
-    color: '#FF5976',
-    fontSize: '12px',
+    color: RED_COLOR,
+    fontSize: SMALL_FONT,
     marginLeft: '5px',
   },
   warningIcon: {
@@ -35,17 +43,16 @@ const styles: CSSProperties = {
   button: {
     height: '38px',
     marginLeft: '10px',
-    color: '#0070D2',
-    fontSize: '12px',
+    color: BLUE_COLOR,
+    fontSize: SMALL_FONT,
     textAlign: 'center',
-  },
-  chatButton: {
-    height: '39px',
-    marginLeft: '10px',
   },
   deployButton: {
     height: '39px',
     marginLeft: '10px',
+  },
+  options: {
+    marginTop: '5px',
   },
 };
 export default styles;

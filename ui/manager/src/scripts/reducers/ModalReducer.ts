@@ -6,9 +6,8 @@ import {
   IShowConfirmationModal,
   IShowCreateNewConfig2Modal,
   IShowCreateNewConfigModal,
-  IShowEditBotModalAction,
+  IShowEditDescriptorModalAction,
   IShowEditJsonModalAction,
-  IShowEditPackageModalAction,
   IShowModalAction,
   IShowViewJsonModalAction,
 } from '../actions/ModalActions';
@@ -19,9 +18,8 @@ import {
   SHOW_CONFIRMATION_MODAL,
   SHOW_CREATE_NEW_CONFIG_2_MODAL,
   SHOW_CREATE_NEW_CONFIG_MODAL,
-  SHOW_EDIT_BOT_MODAL,
+  SHOW_EDIT_DESCRIPTOR_MODAL,
   SHOW_EDIT_JSON_MODAL,
-  SHOW_EDIT_PACKAGE_MODAL,
   SHOW_MODAL,
   SHOW_UPDATE_PACKAGES_MODAL,
   SHOW_VIEW_JSON_MODAL,
@@ -193,31 +191,17 @@ const ModalReducer: IModalReducer = (
         },
       });
 
-    case SHOW_EDIT_BOT_MODAL:
-      modalAction = action as IShowEditBotModalAction;
+    case SHOW_EDIT_DESCRIPTOR_MODAL:
+      modalAction = action as IShowEditDescriptorModalAction;
       return update(state, {
         mode: {
-          $set: ModalEnum.editBot,
+          $set: ModalEnum.editDescriptor,
         },
         isModalOpen: {
           $set: true,
         },
-        bot: {
-          $set: modalAction.bot,
-        },
-      });
-
-    case SHOW_EDIT_PACKAGE_MODAL:
-      modalAction = action as IShowEditPackageModalAction;
-      return update(state, {
-        mode: {
-          $set: ModalEnum.editPackage,
-        },
-        isModalOpen: {
-          $set: true,
-        },
-        packagePayload: {
-          $set: modalAction.packagePayload,
+        descriptor: {
+          $set: modalAction.descriptor,
         },
       });
 

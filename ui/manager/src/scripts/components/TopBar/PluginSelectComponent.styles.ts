@@ -15,9 +15,10 @@ const styles: CSSProperties = {
     position: 'relative',
     borderLeft: '6px solid transparent',
     borderRight: '6px solid transparent',
-    borderTop: '6px solid ' + DARK_BLUE_COLOR,
+    borderTop: `6px solid ${DARK_BLUE_COLOR}`,
     height: '0',
     marginRight: '10px',
+    marginTop: '6px',
     width: '0',
   },
   input: {
@@ -31,7 +32,7 @@ const styles: CSSProperties = {
     fontSize: SMALL_FONT2,
     overflow: 'hidden',
     marginLeft: '1px',
-    marginTop: '4px',
+    marginTop: '6px',
   },
   option: {
     color: DARK_BLUE_COLOR,
@@ -47,19 +48,19 @@ const styles: CSSProperties = {
   },
   control: {
     display: 'flex',
-    height: '42px',
+    height: '39px',
     backgroundColor: WHITE_COLOR,
     borderRadius: '0',
     border: '0',
-    borderBottom: '3px solid ' + LIGHT_GREY_COLOR2,
+    borderBottom: `3px solid ${LIGHT_GREY_COLOR2}`,
     ':hover': {
       cursor: 'pointer',
       backgroundColor: LIGHT_GREY_COLOR3,
-      borderBottom: '3px solid ' + GREY_COLOR,
+      borderBottom: `3px solid ${GREY_COLOR}`,
     },
   },
   controlSelected: {
-    borderBottom: '3px solid ' + LIGHT_BLUE_COLOR,
+    borderBottom: `3px solid ${LIGHT_BLUE_COLOR}`,
   },
   singleValue: {
     color: GREY_COLOR,

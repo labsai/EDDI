@@ -19,6 +19,7 @@ import {
   CREATE_NEW_BOT_SUCCESS,
   ADD_NEW_PACKAGE_TO_BOTS_SUCCESS,
   FETCH_BOT_JSON_SCHEMA_SUCCESS,
+  DUPLICATE_SUCCESS,
 } from '../actions/EddiApiActionTypes';
 import * as update from 'immutability-helper';
 import {
@@ -37,6 +38,7 @@ import {
   ICreateNewBotSuccessAction,
   IAddNewPackageToBotsSuccessAction,
   IFetchJsonSchemaSuccessAction,
+  IDuplicateSuccessAction,
 } from '../actions/EddiApiActions';
 import * as _ from 'lodash';
 import { JSONSchema4 } from 'json-schema';
@@ -404,6 +406,29 @@ const BotReducer: IBotReducer = (
           $set: (action as IFetchJsonSchemaSuccessAction).schema.value,
         },
       });
+
+    case DUPLICATE_SUCCESS: {
+      return update(state, {
+        bots: {
+          $apply: (bots: IBot[]) => {
+            const alreadyExists: boolean = !!bots.find(bot => {
+              return (
+                bot.resource ===
+                (action as IDuplicateSuccessAction).bot.resource
+              );
+            });
+            if (alreadyExists) {
+              return bots;
+            } else {
+              return bots.concat((action as IDuplicateSuccessAction).bot);
+            }
+          },
+        },
+        botsLoaded: {
+          $set: state.botsLoaded + 1,
+        },
+      });
+    }
 
     default:
       return state;

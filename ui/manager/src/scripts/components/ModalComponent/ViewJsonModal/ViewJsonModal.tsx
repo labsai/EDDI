@@ -1,5 +1,4 @@
 import * as React from 'react';
-import * as Modal from 'react-modal';
 import '../ModalComponent.styles.scss';
 import { Component, compose, pure, setDisplayName } from 'recompose';
 import * as renderIf from 'render-if';

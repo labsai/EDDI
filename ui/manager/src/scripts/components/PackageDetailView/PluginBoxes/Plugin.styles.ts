@@ -1,4 +1,17 @@
 import { CSSProperties } from 'react';
+import {
+  BLUE_COLOR,
+  DARK_GREY_COLOR,
+  GREY_COLOR,
+  GREY_COLOR2,
+  LIGHT_BLUE_COLOR,
+  LIGHT_GREY_BORDER,
+  LIGHT_GREY_COLOR3,
+  MEDIUM_FONT,
+  RED_BORDER,
+  RED_COLOR,
+  SMALL_FONT,
+} from '../../../../styles/DefaultStylingProperties';
 
 const styles: CSSProperties = {
   pluginCenter: {
@@ -17,27 +30,31 @@ const styles: CSSProperties = {
     display: 'inline-block',
   },
   updateAvailableBorderColor: {
-    border: '1px solid #FF5976',
+    border: RED_BORDER,
   },
   updateAvailableTextColor: {
-    color: '#FF5976',
+    color: RED_COLOR,
   },
   pluginBox: {
-    backgroundColor: '#f4f6f9',
-    border: '1px solid #d8dde6',
+    backgroundColor: LIGHT_GREY_COLOR3,
+    border: LIGHT_GREY_BORDER,
     borderRadius: '4px',
-    cursor: 'pointer',
     outline: 'none',
     padding: '0px',
     width: '100%',
     height: '80px',
     marginTop: '-5px',
   },
-  pluginBoxWithExtensions: {
-    backgroundColor: '#f4f6f9',
-    border: '1px solid #d8dde6',
-    borderRadius: '4px',
+  clickablePluginBox: {
+    ':hover': {
+      border: `1px solid ${BLUE_COLOR}`,
+    },
     cursor: 'pointer',
+  },
+  pluginBoxWithExtensions: {
+    backgroundColor: LIGHT_GREY_COLOR3,
+    border: LIGHT_GREY_BORDER,
+    borderRadius: '4px',
     outline: 'none',
     padding: '0px',
     width: '100%',
@@ -45,7 +62,7 @@ const styles: CSSProperties = {
   },
   extensionBox: {
     backgroundColor: '#FFF',
-    border: '1px solid #d8dde6',
+    border: LIGHT_GREY_BORDER,
     borderRadius: '4px',
     cursor: 'pointer',
     outline: 'none',
@@ -65,20 +82,24 @@ const styles: CSSProperties = {
     flex: '1',
   },
   addExtensionButton: {
-    fontSize: '12px',
+    fontSize: SMALL_FONT,
     textDecoration: 'underline',
-    color: '#0070D2',
+    color: BLUE_COLOR,
     marginTop: '5px',
   },
   addResourceButton: {
-    position: 'relative',
-    marginRight: '8px',
+    ':hover': {
+      color: GREY_COLOR,
+    },
+    cursor: 'pointer',
+    whiteSpace: 'nowrap',
+    marginRight: '5px',
     marginLeft: 'auto',
-    top: '-70px',
-    fontSize: '12px',
+    marginTop: '3px',
+    fontSize: SMALL_FONT,
     textDecoration: 'underline',
     textAlign: 'right',
-    color: '#0070D2',
+    color: BLUE_COLOR,
     width: 'fit-content',
   },
   pluginHeader: {
@@ -88,23 +109,24 @@ const styles: CSSProperties = {
     marginRight: '5px',
   },
   pluginName: {
-    color: '#4a90e2',
-    fontSize: '16px',
+    color: LIGHT_BLUE_COLOR,
+    fontSize: MEDIUM_FONT,
     overflow: 'hidden',
     textAlign: 'left',
     textOverflow: 'ellipsis',
     whiteSpace: 'nowrap',
   },
   pluginVersion: {
-    color: '#a8b7c7',
-    fontSize: '12px',
+    color: GREY_COLOR2,
+    fontSize: SMALL_FONT,
     lineHeight: '21px',
     marginLeft: '2px',
     textAlign: 'left',
+    marginRight: '5px',
   },
   pluginDate: {
-    color: '#54698d',
-    fontSize: '12px',
+    color: DARK_GREY_COLOR,
+    fontSize: SMALL_FONT,
     marginLeft: '5px',
     marginTop: '5px',
     textAlign: 'left',
@@ -114,11 +136,11 @@ const styles: CSSProperties = {
       boxShadow: '0 0 3px #0070d2',
     },
     backgroundColor: '#ffffff',
-    border: '1px solid #d8dde6',
+    border: LIGHT_GREY_BORDER,
     borderRadius: '4px',
-    color: '#0070d2',
+    color: BLUE_COLOR,
     display: 'block',
-    fontSize: '12px',
+    fontSize: SMALL_FONT,
     height: '34px',
     lineHeight: '30px',
     marginLeft: 'auto',
@@ -136,11 +158,11 @@ const styles: CSSProperties = {
   },
 
   hasNewVersionBorder: {
-    border: '1px solid #ff5976',
+    border: RED_BORDER,
   },
 
   hasNewVersion: {
-    color: '#ff5976',
+    color: RED_COLOR,
   },
 
   closeButton: {

@@ -12,6 +12,7 @@ import WhiteButton from '../../Assets/Buttons/WhiteButton';
 import SquareXButton from '../../Assets/Buttons/SquareXButton';
 import PluginHelper from '../../utils/helpers/PluginHelper';
 import ModalActionDispatchers from '../../../actions/ModalActionDispatchers';
+import * as Radium from 'radium';
 
 interface IPublicProps {
   pluginType: IPluginExtensions;
@@ -80,9 +81,9 @@ class Extension extends React.Component<IPrivateProps> {
   getBoxStyling() {
     if (this.props.plugin.version === this.props.plugin.currentVersion) {
       if (!_.isEmpty(this.props.plugin)) {
-        return { ...styles.extensionBox };
+        return { ...styles.extensionBox, ...styles.clickablePluginBox };
       } else {
-        return { ...styles.extensionBox, cursor: 'default' };
+        return styles.extensionBox;
       }
     } else {
       return {
@@ -153,6 +154,7 @@ const ComposedExtension: Component<IProps, IProps> = compose<IProps>(
   pure,
   connect(pluginSelector),
   setDisplayName('Extension'),
+  Radium,
 )(Extension);
 
 export default ComposedExtension;

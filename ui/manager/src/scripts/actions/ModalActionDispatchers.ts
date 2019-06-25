@@ -4,7 +4,6 @@ import {
   IDescriptor,
   IDetailedDescriptor,
   IPackage,
-  IPlugin,
 } from '../components/utils/AxiosFunctions';
 import { ModalEnum } from '../components/utils/ModalEnum';
 import { store } from '../store/store';
@@ -21,10 +20,8 @@ import {
   showAddPackagesModal,
   IShowAddPluginsModalAction,
   showAddPluginsModal,
-  IShowEditBotModalAction,
-  showEditBotModal,
-  IShowEditPackageModalAction,
-  showEditPackageModal,
+  IShowEditDescriptorModalAction,
+  showEditDescriptorModalAction,
   IShowCreateNewConfigModal,
   showCreateNewConfigModal,
   IShowCreateNewConfig2Modal,
@@ -61,10 +58,9 @@ export interface IModalActionDispatchers extends ActionCreatorsMapObject {
     oldPlugins: string[],
     addPlugin: (plugins: string[]) => void,
   ) => IShowAddPluginsModalAction;
-  showEditBotModal: (bot: IBot) => IShowEditBotModalAction;
-  showEditPackageModal: (
-    packagePayload: IPackage,
-  ) => IShowEditPackageModalAction;
+  showEditDescriptorModalAction: (
+    descriptor: IDescriptor,
+  ) => IShowEditDescriptorModalAction;
   showCreateNewConfigModal: (
     pluginType: string,
     name?: string,
@@ -99,14 +95,13 @@ const actions: IModalActionDispatchers = {
   showEditJsonModal,
   showAddPackagesModal,
   showAddPluginsModal,
-  showEditBotModal,
-  showEditPackageModal,
   showCreateNewConfigModal,
   showCreateNewConfig2Modal,
   showUpdatePackagesModal,
   showUpdateBotsModal,
   showConfirmationModal,
   showErrorMessageModal,
+  showEditDescriptorModalAction,
 };
 
 const modalActionDispatchers: IModalActionDispatchers = bindActionCreators<

@@ -15,6 +15,8 @@ import SquareXButton from '../../Assets/Buttons/SquareXButton';
 import * as PluginType from '../../utils/EddiTypes';
 import PluginHelper from '../../utils/helpers/PluginHelper';
 import { REGULAR_DICTIONARY } from '../../utils/EddiTypes';
+import * as Radium from 'radium';
+import { BLUE_COLOR } from '../../../../styles/DefaultStylingProperties';
 
 interface IPublicProps {
   pluginType: IOptions;
@@ -47,7 +49,8 @@ class Plugin extends React.Component<IPrivateProps> {
     this.props.deletePlugin(this.props.pluginType.extensionKey);
   };
 
-  openAddPluginsModal = () => {
+  openAddPluginsModal = e => {
+    e.stopPropagation();
     let extensionList: string[] = [];
     let pluginType;
     if (this.props.pluginType.type === PluginType.PARSER) {
@@ -124,9 +127,9 @@ class Plugin extends React.Component<IPrivateProps> {
   getBoxStyling() {
     if (this.props.plugin.version === this.props.plugin.currentVersion) {
       if (!_.isEmpty(this.props.plugin)) {
-        return { ...styles.pluginBox };
+        return { ...styles.pluginBox, ...styles.clickablePluginBox };
       } else {
-        return { ...styles.pluginBox, cursor: 'default' };
+        return { ...styles.pluginBox };
       }
     } else {
       return {
@@ -182,7 +185,7 @@ class Plugin extends React.Component<IPrivateProps> {
         ))}
         <button style={this.getBoxStyling()} onClick={this.openViewJsonModal}>
           <div style={styles.pluginHeader}>
-            <div style={this.getNameStyling()}>
+            <div key={'pluginBox'} style={this.getNameStyling()}>
               {PluginHelper.getName(
                 this.props.pluginType.type,
                 this.props.plugin,
@@ -196,6 +199,14 @@ class Plugin extends React.Component<IPrivateProps> {
                 true,
               )}
             </div>
+            {renderIf(!this.props.editDisabled)(() => (
+              <div
+                style={styles.addResourceButton}
+                key={'addResource'}
+                onClick={this.openAddPluginsModal}>
+                {this.getButtonName(this.props.pluginType.type)}
+              </div>
+            ))}
           </div>
           <div style={styles.pluginDate}>{this.props.pluginType.type}</div>
           <div style={styles.pluginDate}>
@@ -214,13 +225,6 @@ class Plugin extends React.Component<IPrivateProps> {
             customStyles={styles.updateAvailableButton}
           />
         ))}
-        {renderIf(!this.props.editDisabled)(() => (
-          <div
-            onClick={this.openAddPluginsModal}
-            style={styles.addResourceButton}>
-            {this.getButtonName(this.props.pluginType.type)}
-          </div>
-        ))}
       </div>
     );
   }
@@ -228,6 +232,6 @@ class Plugin extends React.Component<IPrivateProps> {
 
 const ComposedPlugin: Component<IPublicProps, IPrivateProps> = compose<
   IPublicProps
->(pure, connect(pluginSelector), setDisplayName('Plugin'))(Plugin);
+>(pure, connect(pluginSelector), Radium, setDisplayName('Plugin'))(Plugin);
 
 export default ComposedPlugin;

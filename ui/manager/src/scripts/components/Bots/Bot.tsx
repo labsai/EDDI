@@ -10,10 +10,9 @@ import eddiApiActionDispatchers from '../../actions/EddiApiActionDispatchers';
 import * as _ from 'lodash';
 import * as moment from 'moment';
 import DeployButton from '../Assets/Buttons/DeployButton';
-import WhiteButton from '../Assets/Buttons/WhiteButton';
-import { READY } from '../utils/helpers/BotHelper';
 import { ClipLoader } from 'react-spinners';
 import { historyPush } from '../../history';
+import Options from '../Assets/Buttons/BotOptions';
 
 interface IProps {
   bot: IBot;
@@ -41,10 +40,10 @@ class Bot extends React.Component<IProps> {
     return (
       <div>
         <div style={styles.botBox}>
-          <div style={styles.botHeader}>
-            <div
-              style={styles.link}
-              onClick={() => historyPush(`/botview/${this.props.bot.id}`)}>
+          <div
+            style={styles.botHeader}
+            onClick={() => historyPush(`/botview/${this.props.bot.id}`)}>
+            <div style={styles.link}>
               <div style={styles.botHeaderName}>
                 {this.props.bot.name || this.props.bot.id}
               </div>
@@ -72,27 +71,17 @@ class Bot extends React.Component<IProps> {
                 </span>
               </div>
             </div>
-            <WhiteButton
-              text={'Open Chat'}
-              customStyles={styles.chatButton}
-              disabled={this.props.bot.deploymentStatus !== READY}
-              onClick={() =>
-                window
-                  .open(
-                    `${this.props.apiUrl}/chat/unrestricted/${
-                      this.props.bot.id
-                    }`,
-                    '_blank',
-                  )
-                  .focus()
-              }
-            />
-            <DeployButton
-              name={this.props.bot.name}
-              botResource={this.props.bot.resource}
-              deploymentStatus={this.props.bot.deploymentStatus}
-              customStyles={styles.deployButton}
-            />
+            <div style={styles.optionsMenu} onClick={e => e.stopPropagation()}>
+              <Options bot={this.props.bot} apiUrl={this.props.apiUrl} />
+            </div>
+            <div onClick={e => e.stopPropagation()}>
+              <DeployButton
+                botName={this.props.bot.name}
+                botResource={this.props.bot.resource}
+                deploymentStatus={this.props.bot.deploymentStatus}
+                customStyles={styles.deployButton}
+              />
+            </div>
           </div>
           <div style={styles.botContent}>
             {renderIf(

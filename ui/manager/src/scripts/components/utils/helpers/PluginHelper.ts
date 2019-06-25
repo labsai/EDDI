@@ -53,4 +53,14 @@ export default class PluginHelper {
     }
     return null;
   }
+
+  static countResources(type: string, plugins: IPlugin[]) {
+    let i = 0;
+    for (let plugin of plugins) {
+      if (plugin.resource.includes(type)) {
+        i++;
+      }
+    }
+    return i;
+  }
 }

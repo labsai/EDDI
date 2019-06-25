@@ -30,6 +30,7 @@ import {
   watchCreateNewPackage,
   watchAddNewPackageToBots,
   watchFetchJsonSchema,
+  watchDuplicateResource,
 } from './EddiApiSaga';
 
 function* root() {
@@ -61,6 +62,7 @@ function* root() {
   yield fork(watchCreateNewPackage);
   yield fork(watchAddNewPackageToBots);
   yield fork(watchFetchJsonSchema);
+  yield fork(watchDuplicateResource);
 }
 
 export const run: () => Task = () => sagaMiddleware.run(root);

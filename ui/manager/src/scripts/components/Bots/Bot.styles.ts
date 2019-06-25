@@ -1,8 +1,18 @@
 import { CSSProperties } from 'react';
+import {
+  DARK_BLUE_COLOR,
+  DARK_GREY_COLOR,
+  LIGHT_GREY_COLOR2,
+  LIGHT_GREY_COLOR3,
+  MEDIUM_FONT,
+  MEDIUM_FONT3,
+  RED_COLOR,
+  SMALL_FONT,
+} from '../../../styles/DefaultStylingProperties';
 
 const styles: CSSProperties = {
   botBox: {
-    border: '1px solid #E0E5EE',
+    border: `1px solid ${LIGHT_GREY_COLOR2}`,
     borderRadius: '4px',
     marginBottom: '15px',
   },
@@ -12,7 +22,7 @@ const styles: CSSProperties = {
     paddingBottom: '10px',
   },
   botHeader: {
-    backgroundColor: '#F7F9FB',
+    backgroundColor: LIGHT_GREY_COLOR3,
     borderRadius: '4px 4px 0 0',
     display: 'flex',
     height: '65px',
@@ -22,8 +32,8 @@ const styles: CSSProperties = {
     flex: '1',
   },
   botHeaderName: {
-    color: '#54698D',
-    fontSize: '20px',
+    color: DARK_GREY_COLOR,
+    fontSize: MEDIUM_FONT3,
     height: '25px',
     marginLeft: '25px',
     marginTop: '20px',
@@ -41,9 +51,9 @@ const styles: CSSProperties = {
     maxWidth: '300px',
   },
   lastModified: {
-    color: '#54698D',
+    color: DARK_GREY_COLOR,
     float: 'right',
-    fontSize: '12px',
+    fontSize: SMALL_FONT,
     height: '20px',
     marginTop: '24px',
     position: 'relative',
@@ -65,31 +75,25 @@ const styles: CSSProperties = {
     marginRight: '25px',
     marginTop: '17px',
   },
-  chatButton: {
-    height: '35px',
-    width: '108px',
-    marginLeft: '15px',
-    marginRight: '10px',
-    marginTop: '17px',
-  },
   updateAvailable: {
-    color: '#FF5976',
-    fontSize: '12px',
+    color: RED_COLOR,
+    fontSize: SMALL_FONT,
     height: '20px',
     marginLeft: '5px',
     marginTop: '27px',
   },
   versionName: {
-    backgroundColor: '#E0E5EE',
+    backgroundColor: LIGHT_GREY_COLOR2,
     borderRadius: '100px',
-    color: '#16325C',
-    fontSize: '16px',
-    height: '20px',
+    color: DARK_BLUE_COLOR,
+    fontSize: MEDIUM_FONT,
+    height: '21px',
     marginLeft: '15px',
-    marginTop: '22px',
+    marginTop: '20px',
     padding: '2px 10px',
     textAlign: 'center',
     width: '40px',
+    lineHeight: '16px',
   },
   warning: {
     display: 'flex',
@@ -98,6 +102,11 @@ const styles: CSSProperties = {
     height: '14px',
     marginLeft: '15px',
     marginTop: '26px',
+  },
+  optionsMenu: {
+    marginTop: '20px',
+    marginRight: '10px',
+    height: 'fit-content',
   },
 };
 export default styles;

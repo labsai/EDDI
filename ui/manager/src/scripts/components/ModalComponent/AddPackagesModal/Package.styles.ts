@@ -1,12 +1,23 @@
 import { CSSProperties } from 'react';
+import {
+  DARK_BLUE_COLOR,
+  GREEN_COLOR,
+  GREY_COLOR,
+  LARGE_FONT,
+  LIGHT_GREY_COLOR,
+  LIGHT_GREY_COLOR2,
+  MEDIUM_FONT,
+  MEDIUM_FONT2,
+  SMALL_FONT2,
+} from '../../../../styles/DefaultStylingProperties';
 
 const styles: CSSProperties = {
   packageName: {
-    color: '#7A849E',
-    fontSize: '24px',
+    color: GREY_COLOR,
+    fontSize: LARGE_FONT,
     marginLeft: '18px',
     marginRight: '10px',
-    marginTop: '2px',
+    marginTop: '6px',
     textOverflow: 'ellipsis',
     whiteSpace: 'nowrap',
     overflow: 'hidden',
@@ -15,8 +26,8 @@ const styles: CSSProperties = {
     flex: '1',
   },
   modifiedDate: {
-    color: '#7A849E',
-    fontSize: '13px',
+    color: GREY_COLOR,
+    fontSize: SMALL_FONT2,
     marginTop: '2px',
   },
   content: {
@@ -32,16 +43,16 @@ const styles: CSSProperties = {
     width: '36px',
     minHeight: '36px',
     minWidth: '36px',
-    backgroundColor: '#D8DDE6',
+    backgroundColor: LIGHT_GREY_COLOR,
     border: '0px',
     borderRadius: '4px',
     color: '#FFFFFF',
-    fontSize: '18px',
+    fontSize: MEDIUM_FONT2,
     textAlign: 'center',
     cursor: 'pointer',
   },
   buttonChecked: {
-    backgroundColor: '#4BCA81',
+    backgroundColor: GREEN_COLOR,
   },
   bottomContent: {
     marginTop: '5px',
@@ -58,27 +69,26 @@ const styles: CSSProperties = {
   },
   descriptionContainer: {
     display: 'flex',
-    color: '#7A849E',
+    color: GREY_COLOR,
     fontSize: '13px',
     maxWidth: '600px',
   },
   descriptionButton: {
-    fontSize: '13px',
-    color: '#16325C',
+    fontSize: SMALL_FONT2,
+    color: DARK_BLUE_COLOR,
     whiteSpace: 'nowrap',
   },
   versionSelect: {
     position: 'relative',
-    marginTop: '-1px',
     marginRight: '10px',
   },
   versionName: {
-    backgroundColor: '#E0E5EE',
+    backgroundColor: LIGHT_GREY_COLOR2,
     borderRadius: '100px',
-    color: '#16325C',
-    fontSize: '16px',
+    color: DARK_BLUE_COLOR,
+    fontSize: MEDIUM_FONT,
     height: '20px',
-    marginTop: '5px',
+    marginTop: '6px',
     padding: '2px 10px',
     textAlign: 'center',
     width: '40px',
