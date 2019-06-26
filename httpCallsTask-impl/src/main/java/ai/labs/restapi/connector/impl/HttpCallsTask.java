@@ -194,29 +194,42 @@ public class HttpCallsTask implements ILifecycleTask {
         return templateDataObjects;
     }
 
-    private void executeFireAndForgetCalls(HttpCall call, PreRequest preRequest, Map<String, Object> templateDataObjects) throws ITemplatingEngine.TemplateEngineException, IOException, IRequest.HttpRequestException {
-        IRequest request;
+    private void executeFireAndForgetCalls(HttpCall call, PreRequest preRequest, Map<String, Object> templateDataObjects) throws ITemplatingEngine.TemplateEngineException, IRequest.HttpRequestException {
         if (preRequest != null && preRequest.getBatchRequests() != null) {
-            BuildingInstruction batchRequest = preRequest.getBatchRequests();
-
-            List<Object> batchIterationList = buildListFromJson(
-                    batchRequest.getIterationObjectName(), batchRequest.getPathToTargetArray(),
-                    batchRequest.getTemplateFilterExpression(), null, templateDataObjects);
-
-            for (Object iterationObject : batchIterationList) {
-                templateDataObjects.put(batchRequest.getIterationObjectName(), iterationObject);
-                request = buildRequest(call.getRequest(), templateDataObjects);
-                request.send(r -> {
-                    //ignore response
-                });
-                log.info("Request: " + request.toString());
+            BatchRequestBuildingInstruction batchRequest = preRequest.getBatchRequests();
+            if (batchRequest.getExecuteCallsSequentially() == null) {
+                batchRequest.setExecuteCallsSequentially(true);
             }
+
+            runtime.submitCallable(() -> {
+                List<Object> batchIterationList = buildListFromJson(
+                        batchRequest.getIterationObjectName(), batchRequest.getPathToTargetArray(),
+                        batchRequest.getTemplateFilterExpression(), null, templateDataObjects);
+
+                IRequest request;
+                for (Object iterationObject : batchIterationList) {
+                    templateDataObjects.put(batchRequest.getIterationObjectName(), iterationObject);
+                    request = buildRequest(call.getRequest(), templateDataObjects);
+                    if (batchRequest.getExecuteCallsSequentially()) {
+                        request.send();
+                        log.info("Batch Request: " + request.toString());
+                    } else {
+                        request.send(r -> {
+                            //ignore response
+                        });
+                        log.info("Batch Request (f'n'f): " + request.toString());
+                    }
+                }
+                return null;
+            }, null);
+
+
         } else {
-            request = buildRequest(call.getRequest(), templateDataObjects);
+            IRequest request = buildRequest(call.getRequest(), templateDataObjects);
             request.send(r -> {
                 //ignore response
             });
-            log.info("Request: " + request.toString());
+            log.info("Request (f'n'f): " + request.toString());
         }
     }
 
