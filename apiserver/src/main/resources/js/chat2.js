@@ -60,7 +60,7 @@ function displayQuickReplies(quickReplies) {
 }
 
 function endConversation() {
-    new ConversationEnd('CONVERSATION ENDED').draw();
+    new ConversationEnd().draw();
     eddi.createConversation(eddi.environment, eddi.botId);
 }
 

@@ -187,8 +187,8 @@ class QuickReply {
 }
 
 class ConversationEnd {
-    constructor(infoMessage) {
-        this.infoMessage = infoMessage;
+    constructor() {
+        this.infoMessage = 'CONVERSATION ENDED';
     }
 
     get draw() {
