@@ -1,5 +1,6 @@
 package ai.labs.runtime.internal;
 
+import ai.labs.lifecycle.ConversationStopException;
 import ai.labs.lifecycle.IConversation;
 import ai.labs.lifecycle.ILifecycleManager;
 import ai.labs.lifecycle.LifecycleException;
@@ -23,12 +24,10 @@ import static ai.labs.memory.IConversationMemory.IWritableConversationStep;
  * @author ginccc
  */
 public class Conversation implements IConversation {
-    private static final String CONVERSATION_END = "CONVERSATION_END";
     private static final String KEY_USER_INFO = "userInfo";
     private static final String KEY_INPUT = "input";
     private static final String KEY_CONTEXT = "context";
     private static final String KEY_ACTIONS = "actions";
-    private static final String CONVERSATION_START = "CONVERSATION_START";
     private final List<IExecutablePackage> executablePackages;
     private final IConversationMemory conversationMemory;
     private final IPropertiesHandler propertiesHandler;
@@ -66,7 +65,11 @@ public class Conversation implements IConversation {
         addConversationStartAction(conversationMemory.getCurrentStep());
         loadLongTermProperties(conversationMemory);
 
-        executePackages(new LinkedList<>(createContextData(context)));
+        try {
+            executePackages(new LinkedList<>(createContextData(context)));
+        } catch (ConversationStopException e) {
+            throw new LifecycleException(e.getLocalizedMessage(), e);
+        }
     }
 
     private void setConversationState(ConversationState conversationState) {
@@ -115,32 +118,12 @@ public class Conversation implements IConversation {
         try {
             setConversationState(ConversationState.IN_PROGRESS);
 
-            ((ConversationMemory) conversationMemory).startNextStep();
-            var contextData = createContextData(contexts);
-            addContextToConversationOutput(conversationMemory.getCurrentStep(), contextData);
-            var lifecycleData = new LinkedList<IData>(contextData);
+            startNextStep();
 
-            //store user input in memory
-            IData initialData;
-            IWritableConversationStep currentStep = conversationMemory.getCurrentStep();
-            if (!"".equals(message.trim())) {
-                initialData = new Data<>(KEY_INPUT + ":initial", message);
-                initialData.setPublic(true);
-                lifecycleData.add(initialData);
-                currentStep.addConversationOutputString(KEY_INPUT, message);
-            }
+            var lifecycleData = prepareLifecycleData(message, contexts);
+            executeConversationStep(lifecycleData);
 
-            //execute input processing
-            executePackages(lifecycleData);
-
-            IData<List<String>> actionData = currentStep.getLatestData(KEY_ACTIONS);
-            if (actionData != null) {
-                List<String> result = actionData.getResult();
-                if (result != null && result.contains(CONVERSATION_END)) {
-                    endConversation();
-                }
-            }
-
+            checkActionsForConversationEnd();
             removeOldInvalidProperties();
             storePropertiesPermanently();
 
@@ -161,12 +144,53 @@ public class Conversation implements IConversation {
         }
     }
 
+    private void startNextStep() {
+        ((ConversationMemory) conversationMemory).startNextStep();
+    }
+
+    private List<IData> prepareLifecycleData(String message, Map<String, Context> contexts) {
+        List<IData<Context>> contextData = createContextData(contexts);
+        List<IData> lifecycleData = new LinkedList<>(contextData);
+        addContextToConversationOutput(conversationMemory.getCurrentStep(), contextData);
+        storeUserInputInMemory(message, lifecycleData);
+        return lifecycleData;
+    }
+
     private void addContextToConversationOutput(IWritableConversationStep currentStep,
                                                 List<IData<Context>> contextData) {
 
         if (!contextData.isEmpty()) {
             var context = ConversationMemoryUtilities.prepareContext(contextData);
             currentStep.addConversationOutputMap(KEY_CONTEXT, context);
+        }
+    }
+
+    private void storeUserInputInMemory(String message, List<IData> lifecycleData) {
+        IData initialData;
+        IWritableConversationStep currentStep = conversationMemory.getCurrentStep();
+        if (!"".equals(message.trim())) {
+            initialData = new Data<>(KEY_INPUT + ":initial", message);
+            initialData.setPublic(true);
+            lifecycleData.add(initialData);
+            currentStep.addConversationOutputString(KEY_INPUT, message);
+        }
+    }
+
+    private void executeConversationStep(List<IData> lifecycleData) throws LifecycleException {
+        try {
+            executePackages(lifecycleData);
+        } catch (ConversationStopException unused) {
+            endConversation();
+        }
+    }
+
+    private void checkActionsForConversationEnd() {
+        IData<List<String>> actionData = conversationMemory.getCurrentStep().getLatestData(KEY_ACTIONS);
+        if (actionData != null) {
+            List<String> result = actionData.getResult();
+            if (result != null && result.contains(CONVERSATION_END)) {
+                endConversation();
+            }
         }
     }
 
@@ -211,7 +235,7 @@ public class Conversation implements IConversation {
         return contextData;
     }
 
-    private void executePackages(List<IData> data) throws LifecycleException {
+    private void executePackages(List<IData> data) throws LifecycleException, ConversationStopException {
         for (IExecutablePackage executablePackage : executablePackages) {
             data.stream().filter(Objects::nonNull).
                     forEach(datum -> conversationMemory.getCurrentStep().storeData(datum));
