@@ -25,14 +25,14 @@ public class LifecycleManager implements ILifecycleManager {
 
             try {
                 task.executeTask(conversationMemory);
-                checkIfConversationStop(conversationMemory);
+                checkIfStopConversationAction(conversationMemory);
             } catch (LifecycleException e) {
                 throw new LifecycleException("Error while executing lifecycle!", e);
             }
         }
     }
 
-    private void checkIfConversationStop(IConversationMemory conversationMemory) throws ConversationStopException {
+    private void checkIfStopConversationAction(IConversationMemory conversationMemory) throws ConversationStopException {
         IData<List<String>> actionData = conversationMemory.getCurrentStep().getLatestData(KEY_ACTIONS);
         if (actionData != null) {
             var result = actionData.getResult();

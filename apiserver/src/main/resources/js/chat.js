@@ -187,15 +187,11 @@ class QuickReply {
 }
 
 class ConversationEnd {
-    constructor() {
-        this.infoMessage = 'CONVERSATION ENDED';
-    }
-
     get draw() {
         return function () {
             this.element = $('<div style="margin: 1em;">');
             this.element.addClass('line');
-            const $message = $('<div style="color:darkgray;">*** ' + this.infoMessage + ' ***</div>');
+            const $message = $('<div style="color:darkgray;">*** CONVERSATION ENDED ***</div>');
             this.element.append($message);
             $message.html(this.text);
             $('#chat-container').append(this.element);
