@@ -198,7 +198,7 @@ public class HttpCallsTask implements ILifecycleTask {
         if (preRequest != null && preRequest.getBatchRequests() != null) {
             BatchRequestBuildingInstruction batchRequest = preRequest.getBatchRequests();
             if (batchRequest.getExecuteCallsSequentially() == null) {
-                batchRequest.setExecuteCallsSequentially(true);
+                batchRequest.setExecuteCallsSequentially(false);
             }
 
             runtime.submitCallable(() -> {
