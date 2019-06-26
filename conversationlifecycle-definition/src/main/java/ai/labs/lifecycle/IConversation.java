@@ -9,6 +9,10 @@ import java.util.Map;
  * @author ginccc
  */
 public interface IConversation {
+    String CONVERSATION_START = "CONVERSATION_START";
+    String CONVERSATION_END = "CONVERSATION_END";
+    String STOP_CONVERSATION = "STOP_CONVERSATION";
+
     IConversationMemory getConversationMemory();
 
     void init(Map<String, Context> context) throws LifecycleException;

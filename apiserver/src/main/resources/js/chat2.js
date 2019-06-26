@@ -59,6 +59,11 @@ function displayQuickReplies(quickReplies) {
     return true;
 }
 
+function endConversation() {
+    new ConversationEnd().draw();
+    eddi.createConversation(eddi.environment, eddi.botId);
+}
+
 // Recursive function that goes through the set of messages it is given
 function createMessage(outputArray, quickRepliesArray, hasConversationEnded, i) {
     // i is optional - i is the current message in the array the system is displaying
@@ -138,13 +143,16 @@ function createMessage(outputArray, quickRepliesArray, hasConversationEnded, i) 
                 }
 
                 if (hasConversationEnded) {
-                    new ConversationEnd('CONVERSATION ENDED').draw();
-                    eddi.createConversation(eddi.environment, eddi.botId);
+                    endConversation();
                 }
             }
         }, delay);
     } else {
-        createAnswerField();
+        if (hasConversationEnded) {
+            endConversation();
+        } else {
+            createAnswerField();
+        }
     }
 }
 

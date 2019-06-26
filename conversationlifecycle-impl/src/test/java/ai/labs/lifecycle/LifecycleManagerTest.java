@@ -1,10 +1,13 @@
 package ai.labs.lifecycle;
 
 import ai.labs.memory.IConversationMemory;
+import ai.labs.memory.IConversationMemory.IWritableConversationStep;
 import org.junit.Assert;
 import org.junit.Before;
 import org.junit.Test;
 import org.mockito.Mockito;
+
+import static org.mockito.Mockito.mock;
 
 /**
  * @author ginccc
@@ -14,16 +17,17 @@ public class LifecycleManagerTest {
     private IConversationMemory memory;
 
     @Before
-    public void setUp() throws Exception {
+    public void setUp() {
         lifecycleManager = new LifecycleManager();
-        memory = Mockito.mock(IConversationMemory.class);
+        memory = mock(IConversationMemory.class);
+        IWritableConversationStep currentConversationStep = mock(IWritableConversationStep.class);
+        Mockito.when(memory.getCurrentStep()).thenAnswer(invocation -> currentConversationStep);
     }
 
     @Test
     public void testExecuteLifecycle() throws Exception {
         //setup
-
-        ILifecycleTask lifecycleTask = Mockito.mock(ILifecycleTask.class);
+        ILifecycleTask lifecycleTask = mock(ILifecycleTask.class);
         lifecycleManager.addLifecycleTask(lifecycleTask);
 
         //test
@@ -34,7 +38,7 @@ public class LifecycleManagerTest {
     }
 
     @Test
-    public void testValidationWhenMemoryIsNull() throws Exception {
+    public void testValidationWhenMemoryIsNull() {
         //test
         try {
             lifecycleManager.executeLifecycle(null);
@@ -47,7 +51,7 @@ public class LifecycleManagerTest {
     }
 
     @Test
-    public void testValidationWhenLifecycleIsNull() throws Exception {
+    public void testValidationWhenLifecycleIsNull() {
         //test
         try {
             lifecycleManager.addLifecycleTask(null);
