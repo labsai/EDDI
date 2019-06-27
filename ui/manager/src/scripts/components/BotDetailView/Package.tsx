@@ -119,7 +119,14 @@ class Package extends React.Component<IPrivateProps> {
                 ))}
                 <div style={styles.centerFlex} />
                 <div style={styles.options}>
-                  <Options descriptor={this.props.packagePayload} />
+                  <Options
+                    descriptor={packagePayload}
+                    data={JSON.stringify(
+                      packagePayload.packageData,
+                      null,
+                      '\t',
+                    )}
+                  />
                 </div>
                 <button
                   disabled={!isCurrentVersion}

@@ -12,6 +12,10 @@ import { IDetailedDescriptor } from '../../utils/AxiosFunctions';
 import modalActionDispatchers from '../../../actions/ModalActionDispatchers';
 import eddiApiActionDispatchers from '../../../actions/EddiApiActionDispatchers';
 import styles from './Options.styles';
+import * as _ from 'lodash';
+import * as renderIf from 'render-if';
+import { getTypeFromResource } from '../../utils/ApiFunctions';
+import { PACKAGE } from '../../utils/EddiTypes';
 
 interface IProps {
   descriptor: IDetailedDescriptor;
@@ -30,6 +34,7 @@ class Options extends React.Component<IProps> {
   render() {
     const { descriptor } = this.props;
     const isCurrentVersion = descriptor.version === descriptor.currentVersion;
+    const isPackage = getTypeFromResource(descriptor.resource) === PACKAGE;
     return (
       <div style={styles.optionButton}>
         <Dropdown trigger={trigger} icon={null}>
@@ -53,32 +58,46 @@ class Options extends React.Component<IProps> {
                 )
               }
             />
-            <Dropdown.Item>
-              <Dropdown text={'Duplicate'}>
-                <Dropdown.Menu>
-                  <Dropdown.Item
-                    text={'Normal'}
-                    icon={'copy outline'}
-                    onClick={() =>
-                      eddiApiActionDispatchers.duplicateAction(
-                        descriptor.resource,
-                        false,
-                      )
-                    }
-                  />
-                  <Dropdown.Item
-                    text={'Deep copy'}
-                    icon={'copy'}
-                    onClick={() =>
-                      eddiApiActionDispatchers.duplicateAction(
-                        descriptor.resource,
-                        true,
-                      )
-                    }
-                  />
-                </Dropdown.Menu>
-              </Dropdown>
-            </Dropdown.Item>
+            {renderIf(isPackage)(() => (
+              <Dropdown.Item>
+                <Dropdown text={'Duplicate'}>
+                  <Dropdown.Menu>
+                    <Dropdown.Item
+                      text={'Normal'}
+                      icon={'copy outline'}
+                      onClick={() =>
+                        eddiApiActionDispatchers.duplicateAction(
+                          descriptor.resource,
+                          false,
+                        )
+                      }
+                    />
+                    <Dropdown.Item
+                      text={'Deep copy'}
+                      icon={'copy'}
+                      onClick={() =>
+                        eddiApiActionDispatchers.duplicateAction(
+                          descriptor.resource,
+                          true,
+                        )
+                      }
+                    />
+                  </Dropdown.Menu>
+                </Dropdown>
+              </Dropdown.Item>
+            ))}
+            {renderIf(!isPackage)(() => (
+              <Dropdown.Item
+                text={'Duplicate'}
+                icon={'copy outline'}
+                onClick={() =>
+                  eddiApiActionDispatchers.duplicateAction(
+                    descriptor.resource,
+                    false,
+                  )
+                }
+              />
+            ))}
             <Dropdown.Divider />
             <Dropdown.Item text={'Delete'} disabled={true} icon={'delete'} />
           </Dropdown.Menu>

@@ -70,12 +70,13 @@ class BotList extends React.Component<IPrivateProps, IState> {
       return;
     }
     this.setState({ loading: true });
-    if (this.props.bots.length < 5 && !this.props.allBotsLoaded) {
-      eddiApiActionDispatchers.fetchBotsAction(5, 0);
+    const limit = 5;
+    if (this.props.bots.length < limit && !this.props.allBotsLoaded) {
+      eddiApiActionDispatchers.fetchBotsAction(limit, 0);
     } else {
       eddiApiActionDispatchers.fetchBotsAction(
-        5,
-        Math.floor(this.props.botsLoaded / 5),
+        limit,
+        Math.floor(this.props.botsLoaded / limit),
       );
     }
   };
@@ -84,7 +85,7 @@ class BotList extends React.Component<IPrivateProps, IState> {
     const botList = this.filterBots();
     return (
       <div>
-        {renderIf(false)(() => (
+        {renderIf(this.props.isLoading && _.isEmpty(this.props.bots))(() => (
           <div style={styles.loadingWrapper}>
             <ClimbingBoxLoader loading />
           </div>
@@ -94,9 +95,11 @@ class BotList extends React.Component<IPrivateProps, IState> {
             {renderIf(this.props.error)(() => (
               <p>{'Error: Could not load bots'}</p>
             ))}
-            {renderIf(!this.props.error && _.isEmpty(this.props.bots))(() => (
-              <p>{`There are no bots yet`}</p>
-            ))}
+            {renderIf(
+              !this.props.error &&
+                !this.props.isLoading &&
+                _.isEmpty(this.props.bots),
+            )(() => <p>{`There are no bots yet`}</p>)}
             {renderIf(!this.props.error && !_.isEmpty(this.props.bots))(() => (
               <div>
                 {renderIf(_.isEmpty(botList))(() => (

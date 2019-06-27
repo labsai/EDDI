@@ -1,13 +1,9 @@
 import * as React from 'react';
 import { Component, compose, pure, setDisplayName } from 'recompose';
-import { CSSProperties } from 'react';
 import { Dropdown } from 'semantic-ui-react';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import * as Radium from 'radium';
-import {
-  GREY_COLOR,
-  LIGHT_GREY_COLOR2,
-} from '../../../../styles/DefaultStylingProperties';
+import { GREY_COLOR } from '../../../../styles/DefaultStylingProperties';
 import { IBot } from '../../utils/AxiosFunctions';
 import modalActionDispatchers from '../../../actions/ModalActionDispatchers';
 import eddiApiActionDispatchers from '../../../actions/EddiApiActionDispatchers';
@@ -74,7 +70,9 @@ class BotOptions extends React.Component<IProps> {
               text={'Rename'}
               icon={'edit outline'}
               disabled={!isCurrentVersion}
-              onClick={() => modalActionDispatchers.showEditBotModal(bot)}
+              onClick={() =>
+                modalActionDispatchers.showEditDescriptorModalAction(bot)
+              }
             />
             <Dropdown.Item
               text={'Edit JSON'}
