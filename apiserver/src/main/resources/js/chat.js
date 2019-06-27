@@ -306,7 +306,6 @@ $(function () {
             const conversationUriArray = xhr.getResponseHeader('Location').split('/');
 
             if (!eddi.isFirstMessage) {
-                new ConversationEnd('NEW CONVERSATION STARTED').draw();
                 smoothScrolling();
                 eddi.isFirstMessage = false;
             }
@@ -350,15 +349,26 @@ $(function () {
         let botId = null;
         let conversationId = null;
         let botVersion = null;
+        let skipDelay = null;
 
         environment = typeof parts[2] !== 'undefined' ? decodeURIComponent(parts[2]) : environment;
         botId = typeof parts[3] !== 'undefined' ? decodeURIComponent(parts[3]) : botId;
         conversationId = typeof parts[4] !== 'undefined' ? decodeURIComponent(parts[4]) : conversationId;
-        if (query.params && query.params.version) {
-            botVersion = query.params.version;
+
+        if (query.params) {
+            if (query.params.version) {
+                botVersion = query.params.version;
+            }
+
+            if (query.params.skipDelay) {
+                skipDelay = query.params.skipDelay;
+            }
         }
 
-        return {conversationId: conversationId, environment: environment, botId: botId, botVersion: botVersion};
+        return {
+            conversationId: conversationId, environment: environment,
+            botId: botId, botVersion: botVersion, skipDelay: skipDelay
+        };
     };
 
     const proceedConversation = function () {
@@ -432,6 +442,12 @@ $(function () {
         //extract conversationId
         if (extractedParams.conversationId !== null) {
             eddi.conversationId = extractedParams.conversationId;
+        }
+
+        //extract conversationId
+        if (extractedParams.skipDelay !== null) {
+            eddi.skipDelay = extractedParams.skipDelay;
+            $('#skipDelay').prop('checked', eddi.skipDelay);
         }
 
         //extract conversationId
