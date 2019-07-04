@@ -15,3 +15,4 @@ services:
       EDDI_MEMORY_MIN: 128m
       EDDI_MEMORY_MAX: 128m
       EDDI_JAVA_ENV_BASIC_AUTH_ENABLED: webServer.securityHandlerType=basic
+      #EDDI_JAVA_ENV_BASIC_AUTH_DEFAULT_PASSWORD: webServer.basicAuth.defaultPassword=
