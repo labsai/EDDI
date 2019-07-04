@@ -8,6 +8,7 @@ import ai.labs.utilities.SecurityUtilities;
 import com.mongodb.BasicDBObject;
 import com.mongodb.client.MongoCollection;
 import com.mongodb.client.MongoDatabase;
+import com.mongodb.client.model.UpdateOptions;
 import lombok.extern.slf4j.Slf4j;
 import org.bson.Document;
 import org.bson.types.ObjectId;
@@ -70,9 +71,8 @@ public class UserStore implements IUserStore {
         String jsonUser = serialize(user);
         Document document = Document.parse(jsonUser);
 
-        document.put("_id", new ObjectId(userId));
-
-        collection.insertOne(document);
+        collection.updateOne(new Document("_id", new ObjectId(userId)),
+                new Document("$set", document), new UpdateOptions().upsert(true));
     }
 
     @Override
