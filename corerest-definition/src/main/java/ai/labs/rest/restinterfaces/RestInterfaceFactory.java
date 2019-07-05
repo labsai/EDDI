@@ -6,6 +6,7 @@ import org.jboss.resteasy.client.jaxrs.ResteasyClient;
 import org.jboss.resteasy.client.jaxrs.ResteasyClientBuilder;
 import org.jboss.resteasy.client.jaxrs.ResteasyWebTarget;
 import org.jboss.resteasy.client.jaxrs.engines.jetty.JettyClientEngine;
+import org.jboss.resteasy.client.jaxrs.internal.ResteasyClientBuilderImpl;
 
 import javax.inject.Inject;
 import javax.inject.Named;
@@ -63,7 +64,7 @@ public class RestInterfaceFactory implements IRestInterfaceFactory {
         if (client == null) {
 
             JettyClientEngine engine = new JettyClientEngine(httpClient);
-            ResteasyClientBuilder clientBuilder = new ResteasyClientBuilder();
+            ResteasyClientBuilder clientBuilder = new ResteasyClientBuilderImpl();
             clientBuilder.httpEngine(engine);
 
             client = clientBuilder.build();

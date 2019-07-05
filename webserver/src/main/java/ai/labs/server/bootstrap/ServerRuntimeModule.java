@@ -5,7 +5,7 @@ import ai.labs.runtime.SwaggerServletContextListener;
 import ai.labs.runtime.bootstrap.AbstractBaseModule;
 import ai.labs.server.IServerRuntime;
 import ai.labs.server.MongoLoginService;
-import ai.labs.server.ServerRuntime;
+import ai.labs.server.UndertowServerRuntime;
 import ai.labs.server.providers.CorsBasicAuthenticator;
 import ai.labs.user.IUserStore;
 import ai.labs.user.model.User;
@@ -19,7 +19,6 @@ import org.eclipse.jetty.security.ConstraintSecurityHandler;
 import org.eclipse.jetty.security.LoginService;
 import org.eclipse.jetty.security.SecurityHandler;
 import org.eclipse.jetty.util.security.Constraint;
-import org.jboss.resteasy.plugins.guice.GuiceResteasyBootstrapServletContextListener;
 import org.jboss.resteasy.plugins.server.servlet.HttpServletDispatcher;
 import org.keycloak.adapters.jetty.KeycloakJettyAuthenticator;
 import org.keycloak.representations.adapters.config.AdapterConfig;
@@ -69,7 +68,6 @@ public class ServerRuntimeModule extends AbstractBaseModule {
                                                @Named("webServer.securityHandlerType") String securityHandlerType,
                                                Provider<BasicSecurityHandler> basicSecurityHandlerProvider,
                                                Provider<KeycloakSecurityHandler> keycloakSecurityHandlerProvider,
-                                               GuiceResteasyBootstrapServletContextListener contextListener,
                                                SwaggerServletContextListener swaggerContextListener,
                                                ThreadPoolExecutor threadPoolExecutor,
                                                HttpServletDispatcher httpServletDispatcher,
@@ -77,7 +75,7 @@ public class ServerRuntimeModule extends AbstractBaseModule {
                                                AdapterConfig keycloakAdapterConfig)
             throws ClassNotFoundException {
 
-        ServerRuntime.Options options = new ServerRuntime.Options();
+        UndertowServerRuntime.Options options = new UndertowServerRuntime();
         options.applicationConfiguration = Class.forName(applicationConfigurationClass);
         options.loginService = mongoLoginService;
         options.host = host;
@@ -102,7 +100,7 @@ public class ServerRuntimeModule extends AbstractBaseModule {
             securityHandler = keycloakSecurityHandlerProvider.get();
         }
 
-        return new ServerRuntime(options, contextListener, swaggerContextListener, httpServletDispatcher,
+        return new UndertowServerRuntime(options, contextListener, swaggerContextListener, httpServletDispatcher,
                 securityHandler, threadPoolExecutor, mongoLoginService, keycloakAdapterConfig, environment, resourceDir);
     }
 
