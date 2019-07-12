@@ -1,7 +1,7 @@
 package ai.labs.lifecycle;
 
-import ai.labs.resources.rest.extensions.model.ExtensionDescriptor;
 import ai.labs.memory.IConversationMemory;
+import ai.labs.models.ExtensionDescriptor;
 
 import java.util.Collections;
 import java.util.List;

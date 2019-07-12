@@ -4,6 +4,7 @@ import ai.labs.memory.model.ConversationOutput;
 import ai.labs.models.Context;
 import lombok.extern.slf4j.Slf4j;
 
+import javax.enterprise.context.ApplicationScoped;
 import java.util.*;
 
 import static ai.labs.memory.ConversationMemoryUtilities.prepareContext;
@@ -11,6 +12,7 @@ import static ai.labs.memory.IConversationMemory.IConversationStep;
 import static ai.labs.memory.IConversationMemory.IWritableConversationStep;
 
 @Slf4j
+@ApplicationScoped
 public class MemoryItemConverter implements IMemoryItemConverter {
     private static final String KEY_MEMORY = "memory";
     private static final String KEY_CONTEXT = "context";

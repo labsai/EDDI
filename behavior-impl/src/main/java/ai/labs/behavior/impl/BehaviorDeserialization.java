@@ -1,5 +1,6 @@
 package ai.labs.behavior.impl;
 
+import ai.labs.behavior.bootstrap.BehaviorConditions;
 import ai.labs.behavior.impl.BehaviorGroup.ExecutionStrategy;
 import ai.labs.behavior.impl.conditions.IBehaviorCondition;
 import ai.labs.resources.rest.config.behavior.model.BehaviorConfiguration;
@@ -8,6 +9,7 @@ import ai.labs.serialization.DeserializationException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.extern.slf4j.Slf4j;
 
+import javax.enterprise.context.ApplicationScoped;
 import javax.inject.Inject;
 import javax.inject.Provider;
 import java.io.IOException;
@@ -23,13 +25,14 @@ import static ai.labs.utilities.RuntimeUtilities.isNullOrEmpty;
  * @author ginccc
  */
 @Slf4j
+@ApplicationScoped
 public class BehaviorDeserialization implements IBehaviorDeserialization {
     private final ObjectMapper objectMapper;
     private final Map<String, Provider<IBehaviorCondition>> conditionProvider;
 
     @Inject
     public BehaviorDeserialization(ObjectMapper objectMapper,
-                                   Map<String, Provider<IBehaviorCondition>> conditionProvider) {
+                                   @BehaviorConditions Map<String, Provider<IBehaviorCondition>> conditionProvider) {
         this.objectMapper = objectMapper;
         this.conditionProvider = conditionProvider;
     }

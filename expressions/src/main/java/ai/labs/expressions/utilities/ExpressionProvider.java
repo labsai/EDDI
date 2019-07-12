@@ -6,14 +6,14 @@ import ai.labs.expressions.value.Value;
 import ai.labs.utilities.RuntimeUtilities;
 import lombok.extern.slf4j.Slf4j;
 
+import javax.enterprise.context.ApplicationScoped;
 import javax.inject.Inject;
-import javax.inject.Singleton;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 import java.util.stream.Collectors;
 
-@Singleton
+@ApplicationScoped
 @Slf4j
 public class ExpressionProvider implements IExpressionProvider {
     private final IExpressionFactory expressionFactory;

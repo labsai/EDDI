@@ -1,11 +1,11 @@
 package ai.labs.parser.internal.matches;
 
 import ai.labs.expressions.Expression;
-import ai.labs.parser.model.FoundWord;
 import ai.labs.parser.extensions.dictionaries.IDictionary;
+import ai.labs.parser.model.FoundWord;
 import ai.labs.parser.model.Word;
-import org.junit.Assert;
-import org.junit.Test;
+import org.junit.jupiter.api.Assertions;
+import org.junit.jupiter.api.Test;
 
 import java.util.Collections;
 import java.util.Iterator;
@@ -16,7 +16,7 @@ import java.util.List;
  */
 public class MatchMatrixTest {
     @Test
-    public void testCreatePossibleSolutions() {
+    void testCreatePossibleSolutions() {
         //setup
         MatchMatrix matchMatrix = new MatchMatrix();
         MatchingResult matchingResult = new MatchingResult();
@@ -29,8 +29,8 @@ public class MatchMatrixTest {
         Iterator<Suggestion> possibleSolutions = matchMatrix.iterator();
 
         //assert
-        Assert.assertTrue(possibleSolutions.hasNext());
-        Assert.assertArrayEquals(new IDictionary.IFoundWord[]{new FoundWord(word, false, 1.0)}, possibleSolutions.next().build().toArray());
-        Assert.assertFalse(possibleSolutions.hasNext());
+        Assertions.assertTrue(possibleSolutions.hasNext());
+        Assertions.assertArrayEquals(new IDictionary.IFoundWord[]{new FoundWord(word, false, 1.0)}, possibleSolutions.next().build().toArray());
+        Assertions.assertFalse(possibleSolutions.hasNext());
     }
 }

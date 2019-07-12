@@ -3,9 +3,9 @@ package ai.labs.resources.impl;
 import ai.labs.persistence.IResourceStorage;
 import ai.labs.persistence.IResourceStore;
 import ai.labs.persistence.mongo.HistorizedResourceStore;
-import org.junit.Assert;
-import org.junit.Before;
-import org.junit.Test;
+import org.junit.jupiter.api.Assertions;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
 
 import java.io.IOException;
 import java.util.HashMap;
@@ -144,14 +144,14 @@ public class HistorizedResourceStoreTest {
 
     }
 
-    @Before
+    @BeforeEach
     public void setUp() {
         mockResourceStorage = new TestResourceStorage();
         testResourceStore = new HistorizedResourceStore<>(mockResourceStorage);
     }
 
     @Test
-    public void testCreate() throws IResourceStore.ResourceStoreException {
+    void testCreate() throws IResourceStore.ResourceStoreException {
         // setup
         DataClass dataClass = new DataClass();
 
@@ -159,13 +159,13 @@ public class HistorizedResourceStoreTest {
         IResourceStore.IResourceId id = testResourceStore.create(dataClass);
 
         // assert
-        Assert.assertNotNull(id.getId());
-        Assert.assertEquals(Integer.valueOf(1), id.getVersion());
-        Assert.assertEquals(1, mockResourceStorage.getResources().size());
+        Assertions.assertNotNull(id.getId());
+        Assertions.assertEquals(Integer.valueOf(1), id.getVersion());
+        Assertions.assertEquals(1, mockResourceStorage.getResources().size());
     }
 
     @Test
-    public void testUpdate() throws IResourceStore.ResourceStoreException, IResourceStore.ResourceNotFoundException, IResourceStore.ResourceModifiedException {
+    void testUpdate() throws IResourceStore.ResourceStoreException, IResourceStore.ResourceNotFoundException, IResourceStore.ResourceModifiedException {
         // setup
         DataClass dataClass = new DataClass();
         IResourceStore.IResourceId id = testResourceStore.create(dataClass);
@@ -174,23 +174,23 @@ public class HistorizedResourceStoreTest {
         Integer newVersion = testResourceStore.update(id.getId(), id.getVersion(), dataClass);
 
         // assert
-        Assert.assertEquals(Integer.valueOf(2), newVersion);
-        Assert.assertEquals(1, mockResourceStorage.getResources().size());
+        Assertions.assertEquals(Integer.valueOf(2), newVersion);
+        Assertions.assertEquals(1, mockResourceStorage.getResources().size());
 
         IResourceStorage.IResource resource = mockResourceStorage.getResources().get(id.getId());
-        Assert.assertEquals(id.getId(), resource.getId());
-        Assert.assertEquals(Integer.valueOf(2), resource.getVersion());
+        Assertions.assertEquals(id.getId(), resource.getId());
+        Assertions.assertEquals(Integer.valueOf(2), resource.getVersion());
 
         Map<Integer, IResourceStorage.IHistoryResource> history = mockResourceStorage.getHistory().get(id.getId());
-        Assert.assertEquals(1, history.size());
+        Assertions.assertEquals(1, history.size());
     }
 
     @Test
-    public void testReadNotFound() throws IResourceStore.ResourceStoreException {
+    void testReadNotFound() throws IResourceStore.ResourceStoreException {
         // test
         try {
             testResourceStore.read("unknownId", 1);
-            Assert.fail();
+            Assertions.fail();
         } catch (IResourceStore.ResourceNotFoundException e) {
             // OK
         }
@@ -198,7 +198,7 @@ public class HistorizedResourceStoreTest {
     }
 
     @Test
-    public void testDelete() throws IResourceStore.ResourceStoreException, IResourceStore.ResourceNotFoundException, IResourceStore.ResourceModifiedException {
+    void testDelete() throws IResourceStore.ResourceStoreException, IResourceStore.ResourceNotFoundException, IResourceStore.ResourceModifiedException {
         // setup
         DataClass dataClass = new DataClass();
         IResourceStore.IResourceId id = testResourceStore.create(dataClass);
@@ -207,12 +207,12 @@ public class HistorizedResourceStoreTest {
         testResourceStore.delete(id.getId(), id.getVersion());
 
         // assert
-        Assert.assertEquals(0, mockResourceStorage.getResources().size());
-        Assert.assertEquals(1, mockResourceStorage.getHistory(id.getId()).size());
+        Assertions.assertEquals(0, mockResourceStorage.getResources().size());
+        Assertions.assertEquals(1, mockResourceStorage.getHistory(id.getId()).size());
     }
 
     @Test
-    public void testRead() throws IResourceStore.ResourceStoreException, IResourceStore.ResourceNotFoundException {
+    void testRead() throws IResourceStore.ResourceStoreException, IResourceStore.ResourceNotFoundException {
         // setup
         DataClass data = new DataClass();
         data.setData("value");
@@ -222,14 +222,14 @@ public class HistorizedResourceStoreTest {
         DataClass read = testResourceStore.read(id.getId(), id.getVersion());
 
         // assert
-        Assert.assertNotNull(read);
-        Assert.assertNotSame(data, read);
-        Assert.assertEquals("value", read.getData());
+        Assertions.assertNotNull(read);
+        Assertions.assertNotSame(data, read);
+        Assertions.assertEquals("value", read.getData());
 
     }
 
     @Test
-    public void testReadFromHistory() throws IResourceStore.ResourceStoreException, IResourceStore.ResourceNotFoundException, IResourceStore.ResourceModifiedException {
+    void testReadFromHistory() throws IResourceStore.ResourceStoreException, IResourceStore.ResourceNotFoundException, IResourceStore.ResourceModifiedException {
         // setup
         DataClass data = new DataClass();
         data.setData("value");
@@ -241,9 +241,9 @@ public class HistorizedResourceStoreTest {
         DataClass read = testResourceStore.read(id.getId(), id.getVersion());
 
         // assert
-        Assert.assertNotNull(read);
-        Assert.assertNotSame(data, read);
-        Assert.assertEquals("value", read.getData());
+        Assertions.assertNotNull(read);
+        Assertions.assertNotSame(data, read);
+        Assertions.assertEquals("value", read.getData());
     }
 
     private class TestHistoryResource extends TestResource implements IResourceStorage.IHistoryResource {

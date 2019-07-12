@@ -6,9 +6,9 @@ import ai.labs.memory.ConversationMemory;
 import ai.labs.memory.IConversationMemory;
 import ai.labs.memory.IConversationMemory.IConversationStep;
 import ai.labs.memory.model.Data;
-import org.junit.Assert;
-import org.junit.Before;
-import org.junit.Test;
+import org.junit.jupiter.api.Assertions;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
 
 import java.util.*;
 
@@ -25,7 +25,7 @@ public class ActionMatcherTest extends BaseMatcherTest {
     private List<String> expectedActions;
     private List<String> inputActions;
 
-    @Before
+    @BeforeEach
     public void setUp() throws Exception {
         expectedActions = Arrays.asList("someAction", "someOtherAction");
         inputActions = Arrays.asList("someAction", "someOtherAction", "someNotNeededAction");
@@ -33,7 +33,7 @@ public class ActionMatcherTest extends BaseMatcherTest {
     }
 
     @Test
-    public void setValues_actions() throws Exception {
+    void setValues_actions() throws Exception {
         //setup
         Map<String, String> values = new HashMap<>();
         values.put(KEY_ACTIONS, actionsValue);
@@ -42,11 +42,11 @@ public class ActionMatcherTest extends BaseMatcherTest {
         matcher.setConfigs(values);
 
         //assert
-        Assert.assertEquals(expectedActions, ((ActionMatcher) matcher).getActions());
+        Assertions.assertEquals(expectedActions, ((ActionMatcher) matcher).getActions());
     }
 
     @Test
-    public void execute_occurrence_currentStep() throws Exception {
+    void execute_occurrence_currentStep() throws Exception {
         //setup
         Map<String, String> values = new HashMap<>();
         values.put(KEY_ACTIONS, actionsValue);
@@ -62,14 +62,14 @@ public class ActionMatcherTest extends BaseMatcherTest {
         ExecutionState actualExecutionState = matcher.execute(memory, new LinkedList<>());
 
         //assert
-        Assert.assertEquals(ExecutionState.SUCCESS, matcher.getExecutionState());
-        Assert.assertEquals(ExecutionState.SUCCESS, actualExecutionState);
+        Assertions.assertEquals(ExecutionState.SUCCESS, matcher.getExecutionState());
+        Assertions.assertEquals(ExecutionState.SUCCESS, actualExecutionState);
         verify(memory).getCurrentStep();
         verify(currentConversationStep).getLatestData(KEY_ACTIONS);
     }
 
     @Test
-    public void execute_occurrence_lastStep() throws Exception {
+    void execute_occurrence_lastStep() throws Exception {
         //setup
         Map<String, String> values = new HashMap<>();
         values.put(KEY_ACTIONS, actionsValue);
@@ -86,14 +86,14 @@ public class ActionMatcherTest extends BaseMatcherTest {
         ExecutionState actualExecutionState = matcher.execute(memory, new LinkedList<>());
 
         //assert
-        Assert.assertEquals(ExecutionState.SUCCESS, matcher.getExecutionState());
-        Assert.assertEquals(ExecutionState.SUCCESS, actualExecutionState);
+        Assertions.assertEquals(ExecutionState.SUCCESS, matcher.getExecutionState());
+        Assertions.assertEquals(ExecutionState.SUCCESS, actualExecutionState);
         verify(memory).getPreviousSteps();
         verify(previousConversationStep).getLatestData(KEY_ACTIONS);
     }
 
     @Test
-    public void execute_occurrence_anyStep() throws Exception {
+    void execute_occurrence_anyStep() throws Exception {
         //setup
         Map<String, String> values = new HashMap<>();
         values.put(KEY_ACTIONS, actionsValue);
@@ -114,15 +114,15 @@ public class ActionMatcherTest extends BaseMatcherTest {
         ExecutionState actualExecutionState = matcher.execute(memory, new LinkedList<>());
 
         //assert
-        Assert.assertEquals(ExecutionState.SUCCESS, matcher.getExecutionState());
-        Assert.assertEquals(ExecutionState.SUCCESS, actualExecutionState);
+        Assertions.assertEquals(ExecutionState.SUCCESS, matcher.getExecutionState());
+        Assertions.assertEquals(ExecutionState.SUCCESS, actualExecutionState);
         verify(memory).getAllSteps();
         verify(previousConversationStep1).getLatestData(KEY_ACTIONS);
         verify(previousConversationStep2).getLatestData(KEY_ACTIONS);
     }
 
     @Test
-    public void execute_occurrence_never() throws Exception {
+    void execute_occurrence_never() throws Exception {
         //setup
         Map<String, String> values = new HashMap<>();
         String expectedActionValue = "nonMatchingAction";
@@ -145,8 +145,8 @@ public class ActionMatcherTest extends BaseMatcherTest {
         ExecutionState actualExecutionState = matcher.execute(memory, new LinkedList<>());
 
         //assert
-        Assert.assertEquals(ExecutionState.SUCCESS, matcher.getExecutionState());
-        Assert.assertEquals(ExecutionState.SUCCESS, actualExecutionState);
+        Assertions.assertEquals(ExecutionState.SUCCESS, matcher.getExecutionState());
+        Assertions.assertEquals(ExecutionState.SUCCESS, actualExecutionState);
         verify(memory).getAllSteps();
         verify(previousConversationStep1).getLatestData(KEY_ACTIONS);
         verify(previousConversationStep2).getLatestData(KEY_ACTIONS);

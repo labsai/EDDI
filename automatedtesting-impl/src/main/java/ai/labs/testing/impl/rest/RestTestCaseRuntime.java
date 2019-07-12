@@ -1,14 +1,14 @@
 package ai.labs.testing.impl.rest;
 
 import ai.labs.memory.IConversationMemoryStore;
-import ai.labs.rest.restinterfaces.IRestInterfaceFactory;
+import ai.labs.resources.rest.restinterfaces.IRestInterfaceFactory;
 import ai.labs.testing.ITestCaseStore;
 import ai.labs.testing.impl.TestCaseRuntime;
 import ai.labs.testing.model.TestCaseState;
 import ai.labs.testing.rest.IRestTestCaseRuntime;
 import lombok.extern.slf4j.Slf4j;
-import org.jboss.resteasy.plugins.guice.RequestScoped;
 
+import javax.enterprise.context.RequestScoped;
 import javax.inject.Inject;
 import javax.ws.rs.InternalServerErrorException;
 import javax.ws.rs.core.Response;

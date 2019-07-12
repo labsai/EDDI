@@ -1,12 +1,12 @@
 package ai.labs.parser.extensions.normalizers;
 
-import org.junit.Assert;
-import org.junit.Test;
+import org.junit.jupiter.api.Assertions;
+import org.junit.jupiter.api.Test;
 
 public class ContractedWordNormalizerTest {
 
     @Test
-    public void normalize() {
+    void normalize() {
         //setup
         final String testString = "don't doesn't didn't can't couldn't won't shouldn't it's";
         final String expected = "do not does not did not cannot could not would not should not it is";
@@ -17,6 +17,6 @@ public class ContractedWordNormalizerTest {
         String actual = normalizer.normalize(testString);
 
         //assert
-        Assert.assertEquals(expected, actual);
+        Assertions.assertEquals(expected, actual);
     }
 }

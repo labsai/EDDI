@@ -21,7 +21,7 @@
         </dependency>
         <dependency>
             <groupId>ai.labs</groupId>
-            <artifactId>runtime-impl</artifactId>
+            <artifactId>sharedutilities</artifactId>
             <version>${project.version}</version>
         </dependency>
     </dependencies>

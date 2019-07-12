@@ -12,7 +12,7 @@ import java.util.*;
 public class Expression implements Cloneable {
     protected String domain;
     protected String expressionName;
-    protected List<Expression> subExpressions = new LinkedList<Expression>();
+    protected List<Expression> subExpressions = new LinkedList<>();
 
     protected Expression() {
     }
@@ -40,10 +40,10 @@ public class Expression implements Cloneable {
         if (dot == -1 || CharacterUtilities.isNumber(expressionName, false))
             this.expressionName = expressionName;
         else if (dot == 0)
-            this.expressionName = expressionName.substring(1, expressionName.length());
+            this.expressionName = expressionName.substring(1);
         else {
             this.domain = expressionName.substring(0, dot);
-            this.expressionName = expressionName.substring(dot + 1, expressionName.length());
+            this.expressionName = expressionName.substring(dot + 1);
         }
     }
 

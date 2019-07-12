@@ -15,7 +15,17 @@
     <dependencies>
         <dependency>
             <groupId>ai.labs</groupId>
+            <artifactId>configurationrepository-definition</artifactId>
+            <version>${project.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>ai.labs</groupId>
             <artifactId>httpclient-definition</artifactId>
+            <version>${project.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>ai.labs</groupId>
+            <artifactId>webserver</artifactId>
             <version>${project.version}</version>
         </dependency>
         <dependency>
@@ -24,15 +34,15 @@
             <version>9.4.17.v20190418</version>
         </dependency>
         <dependency>
+            <groupId>org.jboss.resteasy</groupId>
+            <artifactId>resteasy-client-jetty</artifactId>
+            <version>4.1.0.Final</version>
+        </dependency>
+        <dependency>
             <groupId>com.sun.xml.security</groupId>
             <artifactId>xml-security-impl</artifactId>
             <version>1.0</version>
             <scope>provided</scope>
-        </dependency>
-        <dependency>
-            <groupId>ai.labs</groupId>
-            <artifactId>runtime-definition</artifactId>
-            <version>${project.version}</version>
         </dependency>
     </dependencies>
 

@@ -3,8 +3,7 @@ package ai.labs.resources.rest.config.regulardictionary;
 import ai.labs.models.DocumentDescriptor;
 import ai.labs.resources.rest.IRestVersionInfo;
 import ai.labs.resources.rest.config.regulardictionary.model.RegularDictionaryConfiguration;
-import ai.labs.resources.rest.method.PATCH;
-import ai.labs.resources.rest.patch.PatchInstruction;
+import ai.labs.runtime.rest.patch.PatchInstruction;
 import io.swagger.annotations.*;
 
 import javax.ws.rs.*;

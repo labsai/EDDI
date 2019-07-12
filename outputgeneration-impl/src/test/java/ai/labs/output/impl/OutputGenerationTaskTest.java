@@ -10,9 +10,9 @@ import ai.labs.output.model.OutputValue;
 import ai.labs.output.model.QuickReply;
 import ai.labs.resources.rest.config.output.model.OutputConfiguration;
 import ai.labs.resources.rest.config.output.model.OutputConfigurationSet;
-import ai.labs.runtime.client.configuration.IResourceClientLibrary;
-import org.junit.Before;
-import org.junit.Test;
+import ai.labs.resources.rest.restinterfaces.IResourceClientLibrary;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
 
 import java.net.URI;
 import java.util.*;
@@ -22,7 +22,7 @@ import static org.mockito.Mockito.*;
 /**
  * @author ginccc
  */
-public class OutputGenerationTaskTest {
+class OutputGenerationTaskTest {
     private static final String ACTION_1 = "action1";
     private static final String ACTION_2 = "action2";
     private static final String ACTION = "actions";
@@ -38,14 +38,14 @@ public class OutputGenerationTaskTest {
     private static final String SOME_OTHER_EXPRESSION = "someOther(Expression)";
     private static final String OUTPUT_TEXT = "output:text:";
     private static final String QUICK_REPLIES = "quickReplies:";
-    public static final String OUTPUT_TYPE_TEXT = "text";
+    private static final String OUTPUT_TYPE_TEXT = "text";
     private OutputGenerationTask outputGenerationTask;
     private IResourceClientLibrary resourceClientLibrary;
     private IOutputGeneration outputGeneration;
     private IDataFactory dataFactory;
 
-    @Before
-    public void setUp() {
+    @BeforeEach
+    void setUp() {
         resourceClientLibrary = mock(IResourceClientLibrary.class);
         dataFactory = mock(IDataFactory.class);
         outputGeneration = mock(IOutputGeneration.class);
@@ -53,7 +53,7 @@ public class OutputGenerationTaskTest {
     }
 
     @Test
-    public void executeTask() {
+    void executeTask() {
         //setup
         when(outputGeneration.getOutputs(anyList())).thenAnswer(invocation -> {
             Map<String, List<OutputEntry>> ret = new LinkedHashMap<>();
@@ -92,7 +92,7 @@ public class OutputGenerationTaskTest {
     }
 
     @Test
-    public void configure() throws Exception {
+    void configure() throws Exception {
         //setup
         final HashMap<String, Object> configuration = new HashMap<>();
         final String uri = "eddi://ai.labs.output/outputstore/outputsets/00000000000000000?version=1";

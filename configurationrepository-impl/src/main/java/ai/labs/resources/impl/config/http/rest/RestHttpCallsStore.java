@@ -7,11 +7,11 @@ import ai.labs.resources.rest.config.http.IHttpCallsStore;
 import ai.labs.resources.rest.config.http.IRestHttpCallsStore;
 import ai.labs.resources.rest.config.http.model.HttpCallsConfiguration;
 import ai.labs.resources.rest.documentdescriptor.IDocumentDescriptorStore;
-import ai.labs.rest.restinterfaces.IRestInterfaceFactory;
-import ai.labs.rest.restinterfaces.RestInterfaceFactory;
+import ai.labs.resources.rest.restinterfaces.IRestInterfaceFactory;
 import ai.labs.schema.IJsonSchemaCreator;
 import lombok.extern.slf4j.Slf4j;
 
+import javax.enterprise.context.ApplicationScoped;
 import javax.inject.Inject;
 import javax.ws.rs.core.Response;
 import java.util.List;
@@ -20,6 +20,7 @@ import java.util.List;
  * @author ginccc
  */
 @Slf4j
+@ApplicationScoped
 public class RestHttpCallsStore extends RestVersionInfo<HttpCallsConfiguration> implements IRestHttpCallsStore {
     private final IHttpCallsStore httpCallsStore;
     private final IJsonSchemaCreator jsonSchemaCreator;
@@ -39,7 +40,7 @@ public class RestHttpCallsStore extends RestVersionInfo<HttpCallsConfiguration> 
     private void initRestClient(IRestInterfaceFactory restInterfaceFactory) {
         try {
             restHttpCallsStore = restInterfaceFactory.get(IRestHttpCallsStore.class);
-        } catch (RestInterfaceFactory.RestInterfaceFactoryException e) {
+        } catch (IRestInterfaceFactory.RestInterfaceFactoryException e) {
             restHttpCallsStore = null;
             log.error(e.getLocalizedMessage(), e);
         }

@@ -8,8 +8,8 @@ import ai.labs.memory.ConversationMemory;
 import ai.labs.memory.IConversationMemory;
 import ai.labs.memory.model.ConversationProperties;
 import ai.labs.memory.model.Data;
-import org.junit.Before;
-import org.junit.Test;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
 
 import java.net.URI;
 import java.util.Collections;
@@ -24,12 +24,12 @@ import static org.mockito.Mockito.*;
 /**
  * @author ginccc
  */
-public class ConversationCallbackTaskTest {
+class ConversationCallbackTaskTest {
     private IConversationCallback conversationCallback;
     private IConversationMemory memory;
 
-    @Before
-    public void setup() {
+    @BeforeEach
+    void setup() {
         conversationCallback = mock(IConversationCallback.class);
         when(conversationCallback.doExternalCall(any(URI.class), any(ConversationDataRequest.class), anyLong())).
                 thenAnswer(invocation -> {
@@ -49,7 +49,7 @@ public class ConversationCallbackTaskTest {
     }
 
     @Test
-    public void executeTask_executingCallback() throws PackageConfigurationException {
+    void executeTask_executingCallback() throws PackageConfigurationException {
         //setup
         ConversationCallbackTask conversationCallbackTask = createConfiguration("action_1");
 
@@ -61,7 +61,7 @@ public class ConversationCallbackTaskTest {
     }
 
     @Test
-    public void executeTask_executingCallback_NoActionDefined() throws PackageConfigurationException {
+    void executeTask_executingCallback_NoActionDefined() throws PackageConfigurationException {
         //setup
         ConversationCallbackTask conversationCallbackTask = createConfiguration("");
 
@@ -73,7 +73,7 @@ public class ConversationCallbackTaskTest {
     }
 
     @Test
-    public void executeTask_NotExecutingCallback() throws PackageConfigurationException {
+    void executeTask_NotExecutingCallback() throws PackageConfigurationException {
         //setup
         ConversationCallbackTask conversationCallbackTask = createConfiguration("action_2");
 

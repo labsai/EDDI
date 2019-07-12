@@ -12,6 +12,7 @@ import com.mongodb.client.model.Indexes;
 import lombok.extern.slf4j.Slf4j;
 import org.bson.Document;
 
+import javax.enterprise.context.ApplicationScoped;
 import javax.inject.Inject;
 import java.io.IOException;
 
@@ -22,6 +23,7 @@ import static ai.labs.persistence.IResourceStore.ResourceStoreException;
  * @author ginccc
  */
 @Slf4j
+@ApplicationScoped
 public class UserConversationStore implements IUserConversationStore {
     private static final String COLLECTION_USER_CONVERSATIONS = "userconversations";
     private static final String INTENT_FIELD = "intent";

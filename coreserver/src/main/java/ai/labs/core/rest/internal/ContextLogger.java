@@ -3,9 +3,11 @@ package ai.labs.core.rest.internal;
 import ai.labs.models.Deployment;
 import org.slf4j.MDC;
 
+import javax.enterprise.context.ApplicationScoped;
 import java.util.HashMap;
 import java.util.Map;
 
+@ApplicationScoped
 public class ContextLogger implements IContextLogger {
 
     @Override

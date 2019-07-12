@@ -5,6 +5,7 @@ import org.thymeleaf.TemplateEngine;
 import org.thymeleaf.context.Context;
 import org.thymeleaf.exceptions.TemplateInputException;
 
+import javax.enterprise.context.ApplicationScoped;
 import javax.inject.Inject;
 import java.util.Arrays;
 import java.util.List;
@@ -14,6 +15,7 @@ import java.util.Map;
 /**
  * @author ginccc
  */
+@ApplicationScoped
 public class TemplatingEngine implements ITemplatingEngine {
     private static final List<String> templatingControlChars = Arrays.asList("${", "*{", "#{", "@{", "~{", "th:");
     private final TextTemplateEngine textTemplateEngine;

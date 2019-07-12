@@ -3,9 +3,9 @@ package ai.labs.behavior.impl.conditions;
 import ai.labs.memory.IConversationMemory;
 import ai.labs.memory.IMemoryItemConverter;
 import ai.labs.memory.model.ConversationOutput;
-import org.junit.Assert;
-import org.junit.Before;
-import org.junit.Test;
+import org.junit.jupiter.api.Assertions;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
 
 import java.util.HashMap;
 import java.util.LinkedHashMap;
@@ -25,7 +25,7 @@ public class DynamicValueMatcherTest {
     private IConversationMemory.IWritableConversationStep currentStep;
     private IMemoryItemConverter memoryItemConverter;
 
-    @Before
+    @BeforeEach
     public void setUp() {
         memoryItemConverter = mock(IMemoryItemConverter.class);
         conversationMemory = mock(IConversationMemory.class);
@@ -44,7 +44,7 @@ public class DynamicValueMatcherTest {
     }
 
     @Test
-    public void dynamicValue_NothingDefined() {
+    void dynamicValue_NothingDefined() {
         //setup
         initOutput();
         DynamicValueMatcher dynamicValueMatcher = new DynamicValueMatcher(memoryItemConverter);
@@ -54,11 +54,11 @@ public class DynamicValueMatcherTest {
         dynamicValueMatcher.execute(conversationMemory, new LinkedList<>());
 
         //assert
-        Assert.assertEquals(ExecutionState.FAIL, dynamicValueMatcher.getExecutionState());
+        Assertions.assertEquals(ExecutionState.FAIL, dynamicValueMatcher.getExecutionState());
     }
 
     @Test
-    public void dynamicValue_ValuePathOnly() {
+    void dynamicValue_ValuePathOnly() {
         //setup
         initOutput();
         DynamicValueMatcher dynamicValueMatcher = new DynamicValueMatcher(memoryItemConverter);
@@ -68,11 +68,11 @@ public class DynamicValueMatcherTest {
         dynamicValueMatcher.execute(conversationMemory, new LinkedList<>());
 
         //assert
-        Assert.assertEquals(ExecutionState.SUCCESS, dynamicValueMatcher.getExecutionState());
+        Assertions.assertEquals(ExecutionState.SUCCESS, dynamicValueMatcher.getExecutionState());
     }
 
     @Test
-    public void dynamicValue_NothingEquals() {
+    void dynamicValue_NothingEquals() {
         //setup
         initOutput();
         DynamicValueMatcher dynamicValueMatcher = new DynamicValueMatcher(memoryItemConverter);
@@ -82,11 +82,11 @@ public class DynamicValueMatcherTest {
         dynamicValueMatcher.execute(conversationMemory, new LinkedList<>());
 
         //assert
-        Assert.assertEquals(ExecutionState.SUCCESS, dynamicValueMatcher.getExecutionState());
+        Assertions.assertEquals(ExecutionState.SUCCESS, dynamicValueMatcher.getExecutionState());
     }
 
     @Test
-    public void dynamicValue_NothingContains() {
+    void dynamicValue_NothingContains() {
         //setup
         initOutput();
         DynamicValueMatcher dynamicValueMatcher = new DynamicValueMatcher(memoryItemConverter);
@@ -96,11 +96,11 @@ public class DynamicValueMatcherTest {
         dynamicValueMatcher.execute(conversationMemory, new LinkedList<>());
 
         //assert
-        Assert.assertEquals(ExecutionState.SUCCESS, dynamicValueMatcher.getExecutionState());
+        Assertions.assertEquals(ExecutionState.SUCCESS, dynamicValueMatcher.getExecutionState());
     }
 
     @Test
-    public void dynamicValue_propertyIsNull() {
+    void dynamicValue_propertyIsNull() {
         //setup
         initOutput("name", "Tom");
         DynamicValueMatcher dynamicValueMatcher = new DynamicValueMatcher(memoryItemConverter);
@@ -110,7 +110,7 @@ public class DynamicValueMatcherTest {
         dynamicValueMatcher.execute(conversationMemory, new LinkedList<>());
 
         //assert
-        Assert.assertEquals(ExecutionState.FAIL, dynamicValueMatcher.getExecutionState());
+        Assertions.assertEquals(ExecutionState.FAIL, dynamicValueMatcher.getExecutionState());
     }
 
     private Map<String, String> createValues(boolean isValuePath, boolean isEquals, boolean isContains) {

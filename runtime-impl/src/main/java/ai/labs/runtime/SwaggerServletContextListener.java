@@ -1,32 +1,18 @@
 package ai.labs.runtime;
 
-import com.google.inject.Injector;
-import com.google.inject.Key;
-import com.google.inject.name.Names;
 import io.swagger.config.ScannerFactory;
 import io.swagger.jaxrs.config.BeanConfig;
-import io.swagger.models.Swagger;
-import io.swagger.models.auth.BasicAuthDefinition;
-import io.swagger.models.auth.OAuth2Definition;
-import org.jboss.resteasy.util.GetRestful;
 
-import javax.inject.Inject;
+import javax.enterprise.context.ApplicationScoped;
 import javax.servlet.ServletContext;
 import javax.servlet.ServletContextEvent;
 import javax.servlet.ServletContextListener;
-import java.util.stream.Collectors;
 
 /**
  * @author ginccc
  */
+@ApplicationScoped
 public class SwaggerServletContextListener implements ServletContextListener {
-    private final Injector injector;
-
-    @Inject
-    SwaggerServletContextListener(Injector injector) {
-        this.injector = injector;
-    }
-
     @Override
     public void contextInitialized(ServletContextEvent event) {
         BeanConfig beanConfig = getBeanConfig();
@@ -41,7 +27,7 @@ public class SwaggerServletContextListener implements ServletContextListener {
     }
 
     private BeanConfig getBeanConfig() {
-        BeanConfig beanConfig = new BeanConfig();
+    /*    BeanConfig beanConfig = new BeanConfig();
         beanConfig.setHost(getConfig("swagger.host"));
         beanConfig.setSchemes(getConfig("swagger.schemes").split(","));
         beanConfig.setTitle(getConfig("swagger.title"));
@@ -69,22 +55,7 @@ public class SwaggerServletContextListener implements ServletContextListener {
             swagger.securityDefinition("eddi_auth", oAuth2Definition);
         }
 
-        return beanConfig;
-    }
-
-    private String getConfig(String key) {
-        return injector.getInstance(Key.get(String.class, Names.named(key)));
-    }
-
-    /**
-     * Returns a comma separated list of resource packages.
-     */
-    private String resourcePackages() {
-        return injector.getBindings().keySet().stream()
-                .map(key -> key.getTypeLiteral().getRawType())
-                .filter(GetRestful::isRootResource)
-                .map(clazz -> clazz.getPackage().getName())
-                .distinct()
-                .collect(Collectors.joining(","));
+        return beanConfig;*/
+        return null;
     }
 }

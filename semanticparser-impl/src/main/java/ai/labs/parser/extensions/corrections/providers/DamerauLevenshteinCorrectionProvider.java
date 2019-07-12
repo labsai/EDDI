@@ -6,8 +6,8 @@ import ai.labs.parser.extensions.corrections.ICorrection;
 import java.util.HashMap;
 import java.util.Map;
 
-import static ai.labs.resources.rest.extensions.model.ExtensionDescriptor.ConfigValue;
-import static ai.labs.resources.rest.extensions.model.ExtensionDescriptor.FieldType.INT;
+import static ai.labs.models.ExtensionDescriptor.ConfigValue;
+import static ai.labs.models.ExtensionDescriptor.FieldType.INT;
 
 /**
  * @author ginccc

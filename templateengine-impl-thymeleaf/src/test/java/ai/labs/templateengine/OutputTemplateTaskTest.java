@@ -11,8 +11,8 @@ import lombok.AllArgsConstructor;
 import lombok.EqualsAndHashCode;
 import lombok.Getter;
 import lombok.Setter;
-import org.junit.Before;
-import org.junit.Test;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
 
 import java.util.Date;
 import java.util.HashMap;
@@ -25,7 +25,7 @@ import static org.mockito.Mockito.*;
 /**
  * @author ginccc
  */
-public class OutputTemplateTaskTest {
+class OutputTemplateTaskTest {
     private static final String KEY_QUICK_REPLY_SOME_ACTION = "quickReplies:someAction";
     private static final String KEY_QUICK_REPLY_SOME_ACTION_PRE_TEMPLATED = "quickReplies:someAction:preTemplated";
     private static final String KEY_QUICK_REPLY_SOME_ACTION_POST_TEMPLATED = "quickReplies:someAction:postTemplated";
@@ -39,8 +39,8 @@ public class OutputTemplateTaskTest {
     private final String expectedOutputString = "This is some output with context such as someContextValue";
     private ITemplatingEngine templatingEngine;
 
-    @Before
-    public void setUp() {
+    @BeforeEach
+    void setUp() {
         templatingEngine = mock(ITemplatingEngine.class);
         dataFactory = mock(IDataFactory.class);
         conversationMemory = mock(IConversationMemory.class);
@@ -53,7 +53,7 @@ public class OutputTemplateTaskTest {
     }
 
     @Test
-    public void executeTaskWithContextString() throws Exception {
+    void executeTaskWithContextString() throws Exception {
         //setup
         when(currentStep.getAllData(eq("context"))).then(invocation -> {
             LinkedList<IData<Context>> ret = new LinkedList<>();
@@ -71,7 +71,7 @@ public class OutputTemplateTaskTest {
     }
 
     @Test
-    public void executeTaskWithContextObject() throws Exception {
+    void executeTaskWithContextObject() throws Exception {
         //setup
         final TestContextObject testContextObject = new TestContextObject("someContext", "someContextValue");
         when(currentStep.getAllData(eq("context"))).then(invocation -> {

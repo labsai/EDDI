@@ -3543,7 +3543,7 @@
                 var _this2 = this;
 
                 var autoMethod = this._scrollElement === this._scrollElement.window ? OffsetMethod.OFFSET : OffsetMethod.POSITION;
-                var offsetMethod = this._config.method === 'auto' ? autoMethod : this._config.method;
+                var offsetMethod = ai.labs.runtime.rest.method === 'auto' ? autoMethod : ai.labs.runtime.rest.method;
                 var offsetBase = offsetMethod === OffsetMethod.POSITION ? this._getScrollTop() : 0;
                 this._offsets = [];
                 this._targets = [];

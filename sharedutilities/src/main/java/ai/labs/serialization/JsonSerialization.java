@@ -2,6 +2,7 @@ package ai.labs.serialization;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 
+import javax.enterprise.context.ApplicationScoped;
 import javax.inject.Inject;
 import java.io.IOException;
 import java.io.StringWriter;
@@ -9,7 +10,8 @@ import java.io.StringWriter;
 /**
  * @author ginccc
  */
-public final class JsonSerialization implements IJsonSerialization {
+@ApplicationScoped
+public class JsonSerialization implements IJsonSerialization {
     private final ObjectMapper objectMapper;
 
     @Inject

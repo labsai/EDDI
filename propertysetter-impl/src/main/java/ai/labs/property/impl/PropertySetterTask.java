@@ -1,5 +1,6 @@
 package ai.labs.property.impl;
 
+import ai.labs.exception.ServiceException;
 import ai.labs.expressions.Expression;
 import ai.labs.expressions.utilities.IExpressionProvider;
 import ai.labs.lifecycle.ILifecycleTask;
@@ -9,17 +10,12 @@ import ai.labs.memory.IConversationMemory;
 import ai.labs.memory.IData;
 import ai.labs.memory.IDataFactory;
 import ai.labs.memory.IMemoryItemConverter;
-import ai.labs.models.Context;
-import ai.labs.models.Property;
+import ai.labs.models.*;
 import ai.labs.models.Property.Scope;
-import ai.labs.models.PropertyInstruction;
-import ai.labs.models.SetOnActions;
 import ai.labs.property.IPropertySetter;
 import ai.labs.property.model.PropertyEntry;
 import ai.labs.resources.rest.config.propertysetter.model.PropertySetterConfiguration;
-import ai.labs.resources.rest.extensions.model.ExtensionDescriptor;
-import ai.labs.runtime.client.configuration.IResourceClientLibrary;
-import ai.labs.runtime.service.ServiceException;
+import ai.labs.resources.rest.restinterfaces.IResourceClientLibrary;
 import ai.labs.templateengine.ITemplatingEngine;
 import ai.labs.utilities.RuntimeUtilities;
 import ognl.Ognl;

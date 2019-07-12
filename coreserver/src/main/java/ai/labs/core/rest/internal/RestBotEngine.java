@@ -2,6 +2,7 @@ package ai.labs.core.rest.internal;
 
 import ai.labs.caching.ICache;
 import ai.labs.caching.ICacheFactory;
+import ai.labs.exception.ServiceException;
 import ai.labs.lifecycle.IConversation;
 import ai.labs.lifecycle.LifecycleException;
 import ai.labs.memory.IConversationMemory;
@@ -13,23 +14,23 @@ import ai.labs.models.Context;
 import ai.labs.models.ConversationState;
 import ai.labs.models.Deployment.Environment;
 import ai.labs.models.InputData;
+import ai.labs.models.Properties;
 import ai.labs.resources.rest.properties.IPropertiesStore;
-import ai.labs.resources.rest.properties.model.Properties;
-import ai.labs.rest.rest.IRestBotEngine;
+import ai.labs.rest.IRestBotEngine;
 import ai.labs.runtime.IBot;
 import ai.labs.runtime.IBotFactory;
 import ai.labs.runtime.IConversationCoordinator;
 import ai.labs.runtime.SystemRuntime;
 import ai.labs.runtime.SystemRuntime.IRuntime.IFinishedExecution;
-import ai.labs.runtime.service.ServiceException;
 import ai.labs.utilities.RestUtilities;
 import ai.labs.utilities.RuntimeUtilities;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.lang3.RandomStringUtils;
+import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.jboss.resteasy.spi.NoLogWebApplicationException;
 
+import javax.enterprise.context.RequestScoped;
 import javax.inject.Inject;
-import javax.inject.Named;
 import javax.ws.rs.InternalServerErrorException;
 import javax.ws.rs.NotFoundException;
 import javax.ws.rs.container.AsyncResponse;
@@ -48,6 +49,7 @@ import static ai.labs.persistence.IResourceStore.ResourceStoreException;
  * @author ginccc
  */
 @Slf4j
+@RequestScoped
 public class RestBotEngine implements IRestBotEngine {
     private static final String resourceURI = "eddi://ai.labs.conversation/conversationstore/conversations/";
     private static final String CACHE_NAME_CONVERSATION_STATE = "conversationState";
@@ -69,7 +71,7 @@ public class RestBotEngine implements IRestBotEngine {
                          ICacheFactory cacheFactory,
                          SystemRuntime.IRuntime runtime,
                          IContextLogger contextLogger,
-                         @Named("system.botTimeoutInSeconds") int botTimeout) {
+                         @ConfigProperty(name = "system.botTimeoutInSeconds") int botTimeout) {
         this.botFactory = botFactory;
         this.conversationMemoryStore = conversationMemoryStore;
         this.propertiesStore = propertiesStore;

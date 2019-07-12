@@ -8,11 +8,13 @@ import ai.labs.serialization.IDocumentBuilder;
 import ai.labs.utilities.RuntimeUtilities;
 import com.mongodb.client.MongoDatabase;
 
+import javax.enterprise.context.ApplicationScoped;
 import javax.inject.Inject;
 
 /**
  * @author ginccc
  */
+@ApplicationScoped
 public class ParserStore implements IParserStore {
     private HistorizedResourceStore<ParserConfiguration> parserResourceStore;
 

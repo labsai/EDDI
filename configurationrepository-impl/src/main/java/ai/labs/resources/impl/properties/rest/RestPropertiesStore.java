@@ -1,11 +1,12 @@
 package ai.labs.resources.impl.properties.rest;
 
+import ai.labs.models.Properties;
 import ai.labs.persistence.IResourceStore;
 import ai.labs.resources.rest.properties.IPropertiesStore;
 import ai.labs.resources.rest.properties.IRestPropertiesStore;
-import ai.labs.resources.rest.properties.model.Properties;
 import lombok.extern.slf4j.Slf4j;
 
+import javax.enterprise.context.ApplicationScoped;
 import javax.inject.Inject;
 import javax.ws.rs.InternalServerErrorException;
 import javax.ws.rs.core.Response;
@@ -14,6 +15,7 @@ import javax.ws.rs.core.Response;
  * @author ginccc
  */
 @Slf4j
+@ApplicationScoped
 public class RestPropertiesStore implements IRestPropertiesStore {
     private final IPropertiesStore propertiesStore;
 

@@ -4,9 +4,9 @@ import ai.labs.expressions.Expression;
 import ai.labs.expressions.utilities.IExpressionProvider;
 import ai.labs.expressions.value.Value;
 import ai.labs.property.model.PropertyEntry;
-import org.junit.Assert;
-import org.junit.Before;
-import org.junit.Test;
+import org.junit.jupiter.api.Assertions;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
 
 import java.util.Arrays;
 import java.util.Collections;
@@ -20,13 +20,13 @@ import static org.mockito.Mockito.*;
 public class PropertySetterTest {
     private IExpressionProvider expressionProvider;
 
-    @Before
+    @BeforeEach
     public void setUp() {
         expressionProvider = mock(IExpressionProvider.class);
     }
 
     @Test
-    public void extractProperties() {
+    void extractProperties() {
         //setup
         String testStringExpressions = "property(someMeaning(someValue)),noProperty(someMeaning(someValue))";
         when(expressionProvider.parseExpressions(eq(testStringExpressions))).thenAnswer(invocation ->
@@ -45,11 +45,11 @@ public class PropertySetterTest {
 
         //assert
         verify(expressionProvider, times(1)).parseExpressions(testStringExpressions);
-        Assert.assertEquals(Collections.singletonList(expectedPropertyEntry), propertyEntries);
+        Assertions.assertEquals(Collections.singletonList(expectedPropertyEntry), propertyEntries);
     }
 
     @Test
-    public void extractMoreComplexProperties() {
+    void extractMoreComplexProperties() {
         //setup
         String testStringExpressions = "property(someMeaning(someSubMeaning(someValue)))," +
                 "property(someMeaning(someValue, someOtherValue))";
@@ -72,6 +72,6 @@ public class PropertySetterTest {
 
         //assert
         verify(expressionProvider, times(1)).parseExpressions(testStringExpressions);
-        Assert.assertEquals(expectedPropertyEntries, propertyEntries);
+        Assertions.assertEquals(expectedPropertyEntries, propertyEntries);
     }
 }

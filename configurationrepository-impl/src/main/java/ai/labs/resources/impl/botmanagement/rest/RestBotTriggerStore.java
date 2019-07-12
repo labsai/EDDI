@@ -8,6 +8,7 @@ import ai.labs.resources.rest.botmanagement.IBotTriggerStore;
 import ai.labs.resources.rest.botmanagement.IRestBotTriggerStore;
 import lombok.extern.slf4j.Slf4j;
 
+import javax.enterprise.context.ApplicationScoped;
 import javax.inject.Inject;
 import javax.ws.rs.InternalServerErrorException;
 import javax.ws.rs.NotFoundException;
@@ -18,6 +19,7 @@ import javax.ws.rs.core.Response;
  * @author ginccc
  */
 @Slf4j
+@ApplicationScoped
 public class RestBotTriggerStore implements IRestBotTriggerStore {
     private static final String CACHE_NAME = "botTriggers";
     private final IBotTriggerStore botTriggerStore;

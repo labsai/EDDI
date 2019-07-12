@@ -10,6 +10,7 @@ import ai.labs.permission.model.AuthorizedUser;
 import ai.labs.permission.utilities.PermissionUtilities;
 import ai.labs.persistence.IResourceStore;
 
+import javax.enterprise.context.ApplicationScoped;
 import javax.inject.Inject;
 import java.net.URI;
 import java.util.LinkedList;
@@ -18,6 +19,7 @@ import java.util.List;
 /**
  * @author ginccc
  */
+@ApplicationScoped
 public class AuthorizationManager implements IAuthorizationManager {
     private final IGroupStore groupStore;
     private final IPermissionStore permissionStore;

@@ -5,8 +5,8 @@ import ai.labs.memory.IConversationMemory;
 import ai.labs.memory.IData;
 import ai.labs.memory.IDataFactory;
 import ai.labs.memory.IMemoryItemConverter;
+import ai.labs.models.ExtensionDescriptor;
 import ai.labs.output.model.QuickReply;
-import ai.labs.resources.rest.extensions.model.ExtensionDescriptor;
 import ai.labs.templateengine.ITemplatingEngine.TemplateMode;
 import lombok.extern.slf4j.Slf4j;
 

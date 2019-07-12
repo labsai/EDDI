@@ -19,6 +19,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.bson.Document;
 import org.bson.types.ObjectId;
 
+import javax.enterprise.context.ApplicationScoped;
 import javax.inject.Inject;
 import java.io.IOException;
 import java.net.URI;
@@ -29,6 +30,7 @@ import java.util.List;
  * @author ginccc
  */
 @Slf4j
+@ApplicationScoped
 public class PermissionStore implements IPermissionStore {
     private static final String COLLECTION_PERMISSIONS = "permissions";
     private final MongoCollection<Document> collection;

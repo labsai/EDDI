@@ -5,9 +5,10 @@ import ai.labs.models.SimpleDocumentDescriptor;
 import ai.labs.persistence.IResourceStore;
 import ai.labs.resources.rest.documentdescriptor.IDocumentDescriptorStore;
 import ai.labs.resources.rest.documentdescriptor.IRestDocumentDescriptorStore;
-import ai.labs.resources.rest.patch.PatchInstruction;
+import ai.labs.runtime.rest.patch.PatchInstruction;
 import lombok.extern.slf4j.Slf4j;
 
+import javax.enterprise.context.ApplicationScoped;
 import javax.inject.Inject;
 import javax.ws.rs.InternalServerErrorException;
 import javax.ws.rs.NotFoundException;
@@ -17,6 +18,7 @@ import java.util.List;
  * @author ginccc
  */
 @Slf4j
+@ApplicationScoped
 public class RestDocumentDescriptorStore implements IRestDocumentDescriptorStore {
     private final IDocumentDescriptorStore documentDescriptorStore;
 

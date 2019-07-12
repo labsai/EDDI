@@ -6,6 +6,7 @@ import ai.labs.resources.rest.deployment.IRestDeploymentStore;
 import ai.labs.resources.rest.deployment.model.DeploymentInfo;
 import lombok.extern.slf4j.Slf4j;
 
+import javax.enterprise.context.ApplicationScoped;
 import javax.inject.Inject;
 import javax.ws.rs.InternalServerErrorException;
 import java.util.List;
@@ -14,6 +15,7 @@ import java.util.List;
  * @author ginccc
  */
 @Slf4j
+@ApplicationScoped
 public class RestDeploymentStore implements IRestDeploymentStore {
     private final IDeploymentStore deploymentStore;
 

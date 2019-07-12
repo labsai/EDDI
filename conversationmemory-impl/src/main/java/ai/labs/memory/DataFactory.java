@@ -2,11 +2,13 @@ package ai.labs.memory;
 
 import ai.labs.memory.model.Data;
 
+import javax.enterprise.context.ApplicationScoped;
 import java.util.List;
 
 /**
  * @author ginccc
  */
+@ApplicationScoped
 public class DataFactory implements IDataFactory {
     @Override
     public <T> IData<T> createData(String key, T value) {

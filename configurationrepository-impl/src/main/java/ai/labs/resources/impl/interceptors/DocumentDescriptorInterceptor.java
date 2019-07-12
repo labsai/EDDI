@@ -1,5 +1,6 @@
 package ai.labs.resources.impl.interceptors;
 
+import ai.labs.injection.DependencyInjector;
 import ai.labs.memory.descriptor.IConversationDescriptorStore;
 import ai.labs.memory.descriptor.model.ConversationDescriptor;
 import ai.labs.models.DocumentDescriptor;
@@ -7,9 +8,8 @@ import ai.labs.models.ResourceDescriptor;
 import ai.labs.persistence.IDescriptorStore;
 import ai.labs.persistence.IResourceStore;
 import ai.labs.resources.rest.documentdescriptor.IDocumentDescriptorStore;
-import ai.labs.resources.rest.method.PATCH;
-import ai.labs.runtime.DependencyInjector;
 import ai.labs.runtime.ThreadContext;
+import ai.labs.runtime.rest.method.PATCH;
 import ai.labs.testing.descriptor.ITestCaseDescriptorStore;
 import ai.labs.testing.descriptor.model.TestCaseDescriptor;
 import ai.labs.user.IUserStore;
@@ -17,9 +17,8 @@ import ai.labs.user.impl.utilities.UserUtilities;
 import ai.labs.utilities.RestUtilities;
 import ai.labs.utilities.SecurityUtilities;
 import lombok.extern.slf4j.Slf4j;
-import org.jboss.resteasy.plugins.guice.RequestScoped;
 
-import javax.inject.Inject;
+import javax.enterprise.context.ApplicationScoped;
 import javax.ws.rs.*;
 import javax.ws.rs.container.ContainerRequestContext;
 import javax.ws.rs.container.ContainerResponseContext;
@@ -38,7 +37,7 @@ import java.util.Date;
  */
 @Provider
 @Slf4j
-@RequestScoped
+@ApplicationScoped
 public class DocumentDescriptorInterceptor implements ContainerResponseFilter {
     private static final String METHOD_NAME_UPDATE_DESCRIPTOR = "updateDescriptor";
     private static final String METHOD_NAME_UPDATE_PERMISSIONS = "updatePermissions";
@@ -47,7 +46,6 @@ public class DocumentDescriptorInterceptor implements ContainerResponseFilter {
     private final IUserStore userStore;
     private final ITestCaseDescriptorStore testCaseDescriptorStore;
 
-    @Inject
     @Context
     private ResourceInfo resourceInfo;
 

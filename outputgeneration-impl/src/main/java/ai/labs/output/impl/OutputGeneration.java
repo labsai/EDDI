@@ -5,11 +5,13 @@ import ai.labs.output.IOutputGeneration;
 import ai.labs.output.model.OutputEntry;
 import lombok.Getter;
 
+import javax.enterprise.context.RequestScoped;
 import java.util.*;
 
 /**
  * @author ginccc
  */
+@RequestScoped
 public class OutputGeneration implements IOutputGeneration {
     @Getter
     private Map<String, List<OutputEntry>> outputMapper = new LinkedHashMap<>();

@@ -5,6 +5,7 @@ import ai.labs.staticresources.rest.IResourceFileManager;
 import ai.labs.staticresources.rest.IRestBinaryResource;
 import org.jboss.resteasy.spi.NoLogWebApplicationException;
 
+import javax.enterprise.context.RequestScoped;
 import javax.inject.Inject;
 import javax.ws.rs.NotFoundException;
 import javax.ws.rs.core.Response;
@@ -13,6 +14,7 @@ import java.io.InputStream;
 /**
  * @author ginccc
  */
+@RequestScoped
 public class RestBinaryResource implements IRestBinaryResource {
     private final IResourceFileManager resourceFileManager;
     private final IContentTypeProvider contentTypeProvider;

@@ -1,6 +1,6 @@
 package ai.labs.runtime;
 
-import ai.labs.runtime.service.ServiceException;
+import ai.labs.exception.ServiceException;
 
 /**
  * @author ginccc

@@ -1,37 +1,32 @@
 package ai.labs.memory;
 
 import ai.labs.memory.model.Data;
-import org.junit.After;
-import org.junit.Assert;
-import org.junit.Before;
-import org.junit.Test;
+import org.junit.jupiter.api.Assertions;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
 
 import java.util.LinkedList;
 
 /**
  * @author ginccc
  */
-public class ConversationMemoryTest {
+class ConversationMemoryTest {
     private ConversationMemory memory;
 
-    @Before
-    public void setUp() {
+    @BeforeEach
+    void setUp() {
         memory = new ConversationMemory("", 0);
     }
 
-    @After
-    public void tearDown() {
-    }
-
     @Test
-    public void testInitialization() {
+    void testInitialization() {
         //assert
-        Assert.assertNotNull(memory.getCurrentStep());
-        Assert.assertEquals(0, memory.getPreviousSteps().size());
+        Assertions.assertNotNull(memory.getCurrentStep());
+        Assertions.assertEquals(0, memory.getPreviousSteps().size());
     }
 
     @Test
-    public void testQueryOrder() {
+    void testQueryOrder() {
         // setup
         IConversationMemory.IWritableConversationStep step1 = memory.getCurrentStep();
         IConversationMemory.IConversationStep step2 = memory.startNextStep();
@@ -41,14 +36,14 @@ public class ConversationMemoryTest {
         IConversationMemory.IConversationStepStack steps = memory.getAllSteps();
 
         // test
-        Assert.assertSame(step3, steps.get(0));
-        Assert.assertSame(step2, steps.get(1));
-        Assert.assertSame(step1, steps.get(2));
+        Assertions.assertSame(step3, steps.get(0));
+        Assertions.assertSame(step2, steps.get(1));
+        Assertions.assertSame(step1, steps.get(2));
     }
 
     //todo
     /*@Test
-     public void testQueryOrderFromZeroAge() throws Exception
+    void testQueryOrderFromZeroAge() throws Exception
      {
          // setup
          IConversationMemory.IWritableConversationStep step1 = memory.getCurrentStep();
@@ -59,13 +54,13 @@ public class ConversationMemoryTest {
          IConversationMemory.IConversationStepStack steps = memory.getAllStepsFromAge(0);
 
          // test
-         Assert.assertSame(step3, steps.get(0));
-         Assert.assertSame(step2, steps.get(1));
-         Assert.assertSame(step1, steps.get(2));
+         Assertions.assertSame(step3, steps.get(0));
+         Assertions.assertSame(step2, steps.get(1));
+         Assertions.assertSame(step1, steps.get(2));
      }
 
      @Test
-     public void testQueryOrderFromAge() throws Exception
+    void testQueryOrderFromAge() throws Exception
      {
          // setup
          IConversationMemory.IWritableConversationStep step1 = memory.getCurrentStep();
@@ -76,12 +71,12 @@ public class ConversationMemoryTest {
          IConversationMemory.IConversationStepStack steps = memory.getAllStepsFromAge(1);
 
          // test
-         Assert.assertSame(step2, steps.get(0));
-         Assert.assertSame(step1, steps.get(1));
+         Assertions.assertSame(step2, steps.get(0));
+         Assertions.assertSame(step1, steps.get(1));
      } */
 
     @Test
-    public void testStartNextStep() {
+    void testStartNextStep() {
         //setup
         IConversationMemory.IWritableConversationStep entry = memory.getCurrentStep();
 
@@ -92,13 +87,13 @@ public class ConversationMemoryTest {
         memory.startNextStep();
 
         //assert
-        Assert.assertEquals(2, memory.size());
-        Assert.assertEquals(1, memory.getPreviousSteps().size());
-        Assert.assertSame(entry, memory.getPreviousSteps().get(0));
+        Assertions.assertEquals(2, memory.size());
+        Assertions.assertEquals(1, memory.getPreviousSteps().size());
+        Assertions.assertSame(entry, memory.getPreviousSteps().get(0));
     }
 
     @Test
-    public void testUndo() {
+    void testUndo() {
         //setup
         IConversationMemory.IWritableConversationStep entry = memory.getCurrentStep();
         final Data data = new Data<>("testkey", new LinkedList());
@@ -109,12 +104,12 @@ public class ConversationMemoryTest {
         memory.undoLastStep();
 
         // assert
-        Assert.assertEquals(1, memory.size());
-        Assert.assertTrue(memory.isRedoAvailable());
+        Assertions.assertEquals(1, memory.size());
+        Assertions.assertTrue(memory.isRedoAvailable());
     }
 
     @Test
-    public void testRedo() {
+    void testRedo() {
         //setup
         memory.startNextStep();
 
@@ -128,9 +123,9 @@ public class ConversationMemoryTest {
         memory.redoLastStep();
 
         // assert
-        Assert.assertEquals(2, memory.size());
-        Assert.assertNotNull(memory.getCurrentStep().getData("testkey"));
-        Assert.assertFalse(memory.isRedoAvailable());
+        Assertions.assertEquals(2, memory.size());
+        Assertions.assertNotNull(memory.getCurrentStep().getData("testkey"));
+        Assertions.assertFalse(memory.isRedoAvailable());
 
     }
 
@@ -146,7 +141,7 @@ public class ConversationMemoryTest {
 //		lifecycleMemory2.storeData(new Data("testkey", new LinkedList()));
 //
 //		//assert
-//		Assert.assertEquals(lifecycleMemory1, lifecycleMemory2);
+//		Assertions.assertEquals(lifecycleMemory1, lifecycleMemory2);
 //	}
 //
 //	@Test
@@ -162,7 +157,7 @@ public class ConversationMemoryTest {
 //		final IMemory.IConversationHistory conversationMemory2 = memory.getConversationMemory();
 //
 //		//assert
-//		Assert.assertEquals(conversationMemory1, conversationMemory2);
+//		Assertions.assertEquals(conversationMemory1, conversationMemory2);
 //	}
 //
 //	@Test
@@ -177,8 +172,8 @@ public class ConversationMemoryTest {
 //		memory.clearLifecycleMemory();
 //
 //		//assert
-//		Assert.assertFalse(lifecycleMemory.equals(memory.getLifecycleMemory()));
-//		Assert.assertTrue(memory.getLifecycleMemory().size() == 0);
+//		Assertions.assertFalse(lifecycleMemory.equals(memory.getLifecycleMemory()));
+//		Assertions.assertTrue(memory.getLifecycleMemory().size() == 0);
 //	}
 //
 //	@Test
@@ -192,8 +187,8 @@ public class ConversationMemoryTest {
 //		memory.clearConversationMemory();
 //
 //		//assert
-//		Assert.assertTrue(memory.getConversationMemory().size() == 1);
-//		Assert.assertFalse(conversationHistory.equals(memory.getConversationMemory()));
+//		Assertions.assertTrue(memory.getConversationMemory().size() == 1);
+//		Assertions.assertFalse(conversationHistory.equals(memory.getConversationMemory()));
 //	}
 //
 //
@@ -212,8 +207,8 @@ public class ConversationMemoryTest {
 //		((Memory)memory).extractLifecycleFromConversation();
 //
 //		//assert
-//		Assert.assertTrue(conversationHistory.size() == 1);
-//		Assert.assertTrue(lifecycleMemory.equals(memory.getLifecycleMemory()));
+//		Assertions.assertTrue(conversationHistory.size() == 1);
+//		Assertions.assertTrue(lifecycleMemory.equals(memory.getLifecycleMemory()));
 //	}
 //
 //	@Test
@@ -224,8 +219,8 @@ public class ConversationMemoryTest {
 //        IMemory.ILifecycleStore latestLifecycleStore = conversationHistory.getLifecycleStore(0);
 //
 //        //assert
-//        Assert.assertTrue(conversationHistory.size() == 1);
-//        Assert.assertEquals(memory.getLifecycleMemory(), latestLifecycleStore);
+//        Assertions.assertTrue(conversationHistory.size() == 1);
+//        Assertions.assertEquals(memory.getLifecycleMemory(), latestLifecycleStore);
 //    }
 //
 //    @Test
@@ -240,9 +235,9 @@ public class ConversationMemoryTest {
 //        IMemory.ILifecycleStore secondToLatestLifecycleStore = conversationHistory.getLifecycleStore(1);
 //
 //        //assert
-//        Assert.assertTrue(conversationHistory.size() == 2);
-//        Assert.assertNotNull(secondToLatestLifecycleStore);
-//        Assert.assertTrue(memory.getLifecycleMemory().equals(secondToLatestLifecycleStore));
+//        Assertions.assertTrue(conversationHistory.size() == 2);
+//        Assertions.assertNotNull(secondToLatestLifecycleStore);
+//        Assertions.assertTrue(memory.getLifecycleMemory().equals(secondToLatestLifecycleStore));
 //    }
 //
 //    @Test
@@ -258,8 +253,8 @@ public class ConversationMemoryTest {
 //
 //		//assert
 //		final IData data1 = conversationHistory.getResult("testkey", 0);
-//		Assert.assertNotNull(data1);
-//		Assert.assertEquals(data, data1);
+//		Assertions.assertNotNull(data1);
+//		Assertions.assertEquals(data, data1);
 //    }
 //
 //	 @Test
@@ -277,7 +272,7 @@ public class ConversationMemoryTest {
 //
 //		//assert
 //		final IData data1 = conversationHistory.getResult("testkey", 0);
-//		Assert.assertNull(data1);
+//		Assertions.assertNull(data1);
 //    }
 //
 //	@Test
@@ -294,8 +289,8 @@ public class ConversationMemoryTest {
 //
 //		//assert
 //		final IData lastestData = conversationHistory.getLatestData("testkey");
-//		Assert.assertNotNull(lastestData);
-//		Assert.assertEquals(data, lastestData);
+//		Assertions.assertNotNull(lastestData);
+//		Assertions.assertEquals(data, lastestData);
 //	}
 //
 //    @Test
@@ -315,9 +310,9 @@ public class ConversationMemoryTest {
 //
 //		//assert
 //		final List<IData> allLatestData = conversationHistory.getAllLatestData("testkey.*", 1);
-//		Assert.assertNotNull(allLatestData);
-//		Assert.assertTrue(allLatestData.size() == 2);
-//		Assert.assertEquals(data1, allLatestData.get(0));
-//		Assert.assertEquals(data2, allLatestData.get(1));
+//		Assertions.assertNotNull(allLatestData);
+//		Assertions.assertTrue(allLatestData.size() == 2);
+//		Assertions.assertEquals(data1, allLatestData.get(0));
+//		Assertions.assertEquals(data2, allLatestData.get(1));
 //    }
 }

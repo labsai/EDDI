@@ -7,12 +7,12 @@ import ai.labs.resources.rest.config.output.IOutputStore;
 import ai.labs.resources.rest.config.output.IRestOutputStore;
 import ai.labs.resources.rest.config.output.model.OutputConfigurationSet;
 import ai.labs.resources.rest.documentdescriptor.IDocumentDescriptorStore;
-import ai.labs.resources.rest.patch.PatchInstruction;
-import ai.labs.rest.restinterfaces.IRestInterfaceFactory;
-import ai.labs.rest.restinterfaces.RestInterfaceFactory;
+import ai.labs.resources.rest.restinterfaces.IRestInterfaceFactory;
+import ai.labs.runtime.rest.patch.PatchInstruction;
 import ai.labs.schema.IJsonSchemaCreator;
 import lombok.extern.slf4j.Slf4j;
 
+import javax.enterprise.context.ApplicationScoped;
 import javax.inject.Inject;
 import javax.ws.rs.InternalServerErrorException;
 import javax.ws.rs.NotFoundException;
@@ -23,6 +23,7 @@ import java.util.List;
  * @author ginccc
  */
 @Slf4j
+@ApplicationScoped
 public class RestOutputStore extends RestVersionInfo<OutputConfigurationSet> implements IRestOutputStore {
     private final IOutputStore outputStore;
     private final IJsonSchemaCreator jsonSchemaCreator;
@@ -42,7 +43,7 @@ public class RestOutputStore extends RestVersionInfo<OutputConfigurationSet> imp
     private void initRestClient(IRestInterfaceFactory restInterfaceFactory) {
         try {
             restOutputStore = restInterfaceFactory.get(IRestOutputStore.class);
-        } catch (RestInterfaceFactory.RestInterfaceFactoryException e) {
+        } catch (IRestInterfaceFactory.RestInterfaceFactoryException e) {
             restOutputStore = null;
             log.error(e.getLocalizedMessage(), e);
         }

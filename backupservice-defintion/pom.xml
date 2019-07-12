@@ -23,6 +23,7 @@
             <groupId>org.jboss.resteasy</groupId>
             <artifactId>resteasy-multipart-provider</artifactId>
             <version>4.1.0.Final</version>
+            <scope>provided</scope>
         </dependency>
     </dependencies>
 

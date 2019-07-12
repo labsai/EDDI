@@ -8,9 +8,9 @@ import ai.labs.models.Deployment;
 import ai.labs.persistence.IResourceStore;
 import ai.labs.resources.rest.botmanagement.IBotTriggerStore;
 import ai.labs.resources.rest.botmanagement.IRestBotTriggerStore;
-import org.junit.Assert;
-import org.junit.Before;
-import org.junit.Test;
+import org.junit.jupiter.api.Assertions;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
 import org.mockito.Mockito;
 
 import javax.ws.rs.WebApplicationException;
@@ -28,7 +28,7 @@ public class RestBotTriggerStoreTest {
     //setup
     private String intent = "ask-a-question";
 
-    @Before
+    @BeforeEach
     @SuppressWarnings("unchecked")
     public void setup() {
         botTriggerStore = mock(IBotTriggerStore.class);
@@ -40,7 +40,7 @@ public class RestBotTriggerStoreTest {
 
 
     @Test
-    public void readBotTrigger_CacheHit() throws IResourceStore.ResourceNotFoundException, IResourceStore.ResourceStoreException {
+    void readBotTrigger_CacheHit() throws IResourceStore.ResourceNotFoundException, IResourceStore.ResourceStoreException {
         //setup
         final BotTriggerConfiguration expected = createExpectedBotTriggerConfiguration();
         when(botTriggersCache.get(eq(intent))).thenAnswer(invocation -> expected);
@@ -49,14 +49,14 @@ public class RestBotTriggerStoreTest {
         BotTriggerConfiguration actual = restBotTriggerStore.readBotTrigger(intent);
 
         //assert
-        Assert.assertEquals(expected, actual);
+        Assertions.assertEquals(expected, actual);
         Mockito.verify(botTriggersCache, Mockito.times(1)).get(eq(intent));
         Mockito.verify(botTriggersCache, Mockito.never()).put(eq(intent), any());
         Mockito.verify(botTriggerStore, Mockito.never()).readBotTrigger(eq(intent));
     }
 
     @Test
-    public void readBotTrigger_CacheMiss() throws IResourceStore.ResourceNotFoundException, IResourceStore.ResourceStoreException {
+    void readBotTrigger_CacheMiss() throws IResourceStore.ResourceNotFoundException, IResourceStore.ResourceStoreException {
         //setup
         final BotTriggerConfiguration expected = createExpectedBotTriggerConfiguration();
         when(botTriggersCache.get(eq(intent))).thenAnswer(invocation -> null);
@@ -66,14 +66,14 @@ public class RestBotTriggerStoreTest {
         BotTriggerConfiguration actual = restBotTriggerStore.readBotTrigger(intent);
 
         //assert
-        Assert.assertEquals(expected, actual);
+        Assertions.assertEquals(expected, actual);
         Mockito.verify(botTriggersCache, Mockito.times(1)).get(eq(intent));
         Mockito.verify(botTriggersCache, Mockito.times(1)).put(eq(intent), eq(expected));
         Mockito.verify(botTriggerStore, Mockito.times(1)).readBotTrigger(eq(intent));
     }
 
     @Test
-    public void updateBotTrigger() throws IResourceStore.ResourceNotFoundException, IResourceStore.ResourceStoreException {
+    void updateBotTrigger() throws IResourceStore.ResourceNotFoundException, IResourceStore.ResourceStoreException {
         //setup
         BotTriggerConfiguration expected = createExpectedBotTriggerConfiguration();
 
@@ -81,13 +81,13 @@ public class RestBotTriggerStoreTest {
         Response response = restBotTriggerStore.updateBotTrigger(intent, expected);
 
         //assert
-        Assert.assertEquals(200, response.getStatus());
+        Assertions.assertEquals(200, response.getStatus());
         Mockito.verify(botTriggerStore, times(1)).updateBotTrigger(eq(intent), eq(expected));
         Mockito.verify(botTriggersCache, times(1)).put(eq(intent), eq(expected));
     }
 
     @Test
-    public void createBotTrigger() throws IResourceStore.ResourceStoreException, IResourceStore.ResourceAlreadyExistsException {
+    void createBotTrigger() throws IResourceStore.ResourceStoreException, IResourceStore.ResourceAlreadyExistsException {
         //setup
         BotTriggerConfiguration expected = createExpectedBotTriggerConfiguration();
 
@@ -95,13 +95,13 @@ public class RestBotTriggerStoreTest {
         Response response = restBotTriggerStore.createBotTrigger(expected);
 
         //assert
-        Assert.assertEquals(200, response.getStatus());
+        Assertions.assertEquals(200, response.getStatus());
         Mockito.verify(botTriggerStore, times(1)).createBotTrigger(eq(expected));
         Mockito.verify(botTriggersCache, times(1)).put(eq(intent), eq(expected));
     }
 
     @Test
-    public void createBotTrigger_conflict() throws IResourceStore.ResourceStoreException, IResourceStore.ResourceAlreadyExistsException {
+    void createBotTrigger_conflict() throws IResourceStore.ResourceStoreException, IResourceStore.ResourceAlreadyExistsException {
         //setup
         BotTriggerConfiguration expected = createExpectedBotTriggerConfiguration();
 
@@ -115,23 +115,23 @@ public class RestBotTriggerStoreTest {
         try {
             restBotTriggerStore.createBotTrigger(expected);
         } catch (WebApplicationException e) {
-            Assert.assertEquals(409, e.getResponse().getStatus());
+            Assertions.assertEquals(409, e.getResponse().getStatus());
             exceptionThrown = true;
         }
 
         //assert
-        Assert.assertTrue(exceptionThrown);
+        Assertions.assertTrue(exceptionThrown);
         Mockito.verify(botTriggerStore, times(1)).createBotTrigger(eq(expected));
         Mockito.verify(botTriggersCache, never()).put(eq(intent), eq(expected));
     }
 
     @Test
-    public void deleteBotTrigger() throws IResourceStore.ResourceStoreException {
+    void deleteBotTrigger() throws IResourceStore.ResourceStoreException {
         //test
         Response response = restBotTriggerStore.deleteBotTrigger(intent);
 
         //assert
-        Assert.assertEquals(200, response.getStatus());
+        Assertions.assertEquals(200, response.getStatus());
         Mockito.verify(botTriggerStore, times(1)).deleteBotTrigger(eq(intent));
         Mockito.verify(botTriggersCache, times(1)).remove(eq(intent));
     }

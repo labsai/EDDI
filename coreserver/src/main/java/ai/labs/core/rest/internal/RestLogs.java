@@ -1,14 +1,16 @@
 package ai.labs.core.rest.internal;
 
 import ai.labs.models.DatabaseLog;
-import ai.labs.rest.rest.IRestLogs;
+import ai.labs.rest.IRestLogs;
 import ai.labs.runtime.IDatabaseLogs;
 
+import javax.enterprise.context.RequestScoped;
 import javax.inject.Inject;
 import java.util.List;
 
 import static ai.labs.models.Deployment.Environment;
 
+@RequestScoped
 public class RestLogs implements IRestLogs {
     private final IDatabaseLogs databaseLogs;
 

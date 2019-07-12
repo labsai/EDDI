@@ -9,9 +9,9 @@ import ai.labs.memory.ConversationMemory;
 import ai.labs.memory.IConversationMemory;
 import ai.labs.memory.IConversationMemory.IConversationStep;
 import ai.labs.memory.model.Data;
-import org.junit.Assert;
-import org.junit.Before;
-import org.junit.Test;
+import org.junit.jupiter.api.Assertions;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
 
 import java.util.*;
 
@@ -29,7 +29,7 @@ public class InputMatcherTest extends BaseMatcherTest {
     private List<Expression> expectedExpressions;
     private IExpressionProvider expressionProvider;
 
-    @Before
+    @BeforeEach
     public void setUp() throws Exception {
         expressionProvider = mock(IExpressionProvider.class);
         expectedExpressions = Arrays.asList(
@@ -40,7 +40,7 @@ public class InputMatcherTest extends BaseMatcherTest {
     }
 
     @Test
-    public void setValues_expressions() throws Exception {
+    void setValues_expressions() throws Exception {
         //setup
         Map<String, String> values = new HashMap<>();
         values.put(KEY_EXPRESSIONS, expressionsValue);
@@ -49,11 +49,11 @@ public class InputMatcherTest extends BaseMatcherTest {
         matcher.setConfigs(values);
 
         //assert
-        Assert.assertEquals(expectedExpressions, ((InputMatcher) matcher).getExpressions());
+        Assertions.assertEquals(expectedExpressions, ((InputMatcher) matcher).getExpressions());
     }
 
     @Test
-    public void execute_occurrence_currentStep() throws Exception {
+    void execute_occurrence_currentStep() throws Exception {
         //setup
         Map<String, String> values = new HashMap<>();
         values.put(KEY_EXPRESSIONS, expressionsValue);
@@ -74,14 +74,14 @@ public class InputMatcherTest extends BaseMatcherTest {
         ExecutionState actualExecutionState = matcher.execute(memory, new LinkedList<>());
 
         //assert
-        Assert.assertEquals(ExecutionState.SUCCESS, matcher.getExecutionState());
-        Assert.assertEquals(ExecutionState.SUCCESS, actualExecutionState);
+        Assertions.assertEquals(ExecutionState.SUCCESS, matcher.getExecutionState());
+        Assertions.assertEquals(ExecutionState.SUCCESS, actualExecutionState);
         verify(memory).getCurrentStep();
         verify(currentConversationStep).getLatestData(KEY_EXPRESSIONS);
     }
 
     @Test
-    public void execute_occurrence_lastStep() throws Exception {
+    void execute_occurrence_lastStep() throws Exception {
         //setup
         Map<String, String> values = new HashMap<>();
         values.put(KEY_EXPRESSIONS, expressionsValue);
@@ -103,14 +103,14 @@ public class InputMatcherTest extends BaseMatcherTest {
         ExecutionState actualExecutionState = matcher.execute(memory, new LinkedList<>());
 
         //assert
-        Assert.assertEquals(ExecutionState.SUCCESS, matcher.getExecutionState());
-        Assert.assertEquals(ExecutionState.SUCCESS, actualExecutionState);
+        Assertions.assertEquals(ExecutionState.SUCCESS, matcher.getExecutionState());
+        Assertions.assertEquals(ExecutionState.SUCCESS, actualExecutionState);
         verify(memory).getPreviousSteps();
         verify(previousConversationStep).getLatestData(KEY_EXPRESSIONS);
     }
 
     @Test
-    public void execute_occurrence_anyStep() throws Exception {
+    void execute_occurrence_anyStep() throws Exception {
         //setup
         Map<String, String> values = new HashMap<>();
         values.put(KEY_EXPRESSIONS, expressionsValue);
@@ -136,15 +136,15 @@ public class InputMatcherTest extends BaseMatcherTest {
         ExecutionState actualExecutionState = matcher.execute(memory, new LinkedList<>());
 
         //assert
-        Assert.assertEquals(ExecutionState.SUCCESS, matcher.getExecutionState());
-        Assert.assertEquals(ExecutionState.SUCCESS, actualExecutionState);
+        Assertions.assertEquals(ExecutionState.SUCCESS, matcher.getExecutionState());
+        Assertions.assertEquals(ExecutionState.SUCCESS, actualExecutionState);
         verify(memory).getAllSteps();
         verify(previousConversationStep1).getLatestData(KEY_EXPRESSIONS);
         verify(previousConversationStep2).getLatestData(KEY_EXPRESSIONS);
     }
 
     @Test
-    public void execute_occurrence_never() throws Exception {
+    void execute_occurrence_never() throws Exception {
         //setup
         Map<String, String> values = new HashMap<>();
         String expectedExpressionValue = "nonMatchingExpression(nonMatchingValue)";
@@ -180,8 +180,8 @@ public class InputMatcherTest extends BaseMatcherTest {
         ExecutionState actualExecutionState = matcher.execute(memory, new LinkedList<>());
 
         //assert
-        Assert.assertEquals(ExecutionState.SUCCESS, matcher.getExecutionState());
-        Assert.assertEquals(ExecutionState.SUCCESS, actualExecutionState);
+        Assertions.assertEquals(ExecutionState.SUCCESS, matcher.getExecutionState());
+        Assertions.assertEquals(ExecutionState.SUCCESS, actualExecutionState);
         verify(memory).getAllSteps();
         verify(previousConversationStep1).getLatestData(KEY_EXPRESSIONS);
         verify(previousConversationStep2).getLatestData(KEY_EXPRESSIONS);

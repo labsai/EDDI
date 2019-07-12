@@ -14,12 +14,6 @@
     <packaging>jar</packaging>
 
     <dependencies>
-        <dependency>
-            <groupId>com.github.messenger4j</groupId>
-            <artifactId>messenger4j</artifactId>
-            <version>0.8.0</version>
-        </dependency>
-
         <!-- apache-commons-codec -->
         <dependency>
             <groupId>commons-codec</groupId>

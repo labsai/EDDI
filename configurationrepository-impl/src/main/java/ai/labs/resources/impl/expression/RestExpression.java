@@ -1,8 +1,8 @@
 package ai.labs.resources.impl.expression;
 
+import ai.labs.models.PackageConfiguration;
 import ai.labs.persistence.IResourceStore;
 import ai.labs.resources.rest.config.packages.IPackageStore;
-import ai.labs.resources.rest.config.packages.model.PackageConfiguration;
 import ai.labs.resources.rest.config.regulardictionary.IRegularDictionaryStore;
 import ai.labs.resources.rest.config.regulardictionary.IRestExpression;
 import ai.labs.utilities.CollectionUtilities;
@@ -10,6 +10,7 @@ import ai.labs.utilities.RestUtilities;
 import lombok.extern.slf4j.Slf4j;
 import org.jboss.resteasy.spi.NoLogWebApplicationException;
 
+import javax.enterprise.context.ApplicationScoped;
 import javax.inject.Inject;
 import javax.ws.rs.InternalServerErrorException;
 import javax.ws.rs.core.Response;
@@ -22,6 +23,7 @@ import java.util.Map;
  * @author ginccc
  */
 @Slf4j
+@ApplicationScoped
 public class RestExpression implements IRestExpression {
     private final IPackageStore packageStore;
     private final IRegularDictionaryStore regularDictionaryStore;

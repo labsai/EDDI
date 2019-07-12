@@ -1,15 +1,15 @@
 package ai.labs.parser.extensions.dictionaries.providers;
 
+import ai.labs.exception.ServiceException;
 import ai.labs.expressions.Expression;
 import ai.labs.expressions.utilities.IExpressionProvider;
 import ai.labs.lifecycle.IllegalExtensionConfigurationException;
+import ai.labs.models.ExtensionDescriptor.ConfigValue;
+import ai.labs.models.ExtensionDescriptor.FieldType;
 import ai.labs.parser.extensions.dictionaries.IDictionary;
 import ai.labs.parser.extensions.dictionaries.RegularDictionary;
 import ai.labs.resources.rest.config.regulardictionary.model.RegularDictionaryConfiguration;
-import ai.labs.resources.rest.extensions.model.ExtensionDescriptor.ConfigValue;
-import ai.labs.resources.rest.extensions.model.ExtensionDescriptor.FieldType;
-import ai.labs.runtime.client.configuration.IResourceClientLibrary;
-import ai.labs.runtime.service.ServiceException;
+import ai.labs.resources.rest.restinterfaces.IResourceClientLibrary;
 import ai.labs.utilities.RuntimeUtilities;
 import lombok.extern.slf4j.Slf4j;
 

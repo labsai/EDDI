@@ -13,6 +13,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.bson.Document;
 import org.bson.types.ObjectId;
 
+import javax.enterprise.context.ApplicationScoped;
 import javax.inject.Inject;
 import java.io.IOException;
 
@@ -20,6 +21,7 @@ import java.io.IOException;
  * @author ginccc
  */
 @Slf4j
+@ApplicationScoped
 public class UserStore implements IUserStore {
     private static final String COLLECTION_USERS = "users";
     private final MongoCollection<Document> collection;

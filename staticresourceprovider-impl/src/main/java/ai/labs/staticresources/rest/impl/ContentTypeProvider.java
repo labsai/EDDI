@@ -2,13 +2,14 @@ package ai.labs.staticresources.rest.impl;
 
 import ai.labs.staticresources.rest.IContentTypeProvider;
 
+import javax.enterprise.context.ApplicationScoped;
 import java.util.HashMap;
 import java.util.Map;
 
 /**
  * @author ginccc
  */
-
+@ApplicationScoped
 public class ContentTypeProvider implements IContentTypeProvider {
     private static final String DEFAULT_MIME_TYPE = "application/octet-stream";
     private final Map<String, String> mimeTypes;

@@ -2,16 +2,16 @@ package ai.labs.backupservice.impl;
 
 import ai.labs.backupservice.IRestExportService;
 import ai.labs.backupservice.IZipArchive;
+import ai.labs.models.BotConfiguration;
 import ai.labs.models.DocumentDescriptor;
+import ai.labs.models.PackageConfiguration;
 import ai.labs.persistence.IResourceStore;
 import ai.labs.persistence.IResourceStore.IResourceId;
 import ai.labs.resources.rest.config.behavior.IBehaviorStore;
 import ai.labs.resources.rest.config.bots.IBotStore;
-import ai.labs.resources.rest.config.bots.model.BotConfiguration;
 import ai.labs.resources.rest.config.http.IHttpCallsStore;
 import ai.labs.resources.rest.config.output.IOutputStore;
 import ai.labs.resources.rest.config.packages.IPackageStore;
-import ai.labs.resources.rest.config.packages.model.PackageConfiguration;
 import ai.labs.resources.rest.config.propertysetter.IPropertySetterStore;
 import ai.labs.resources.rest.config.regulardictionary.IRegularDictionaryStore;
 import ai.labs.resources.rest.documentdescriptor.IDocumentDescriptorStore;
@@ -22,6 +22,7 @@ import ai.labs.utilities.RuntimeUtilities;
 import lombok.extern.slf4j.Slf4j;
 import org.jboss.resteasy.spi.NoLogWebApplicationException;
 
+import javax.enterprise.context.RequestScoped;
 import javax.inject.Inject;
 import javax.ws.rs.InternalServerErrorException;
 import javax.ws.rs.core.Response;
@@ -42,6 +43,7 @@ import java.util.stream.Collectors;
  * @author ginccc
  */
 @Slf4j
+@RequestScoped
 public class RestExportService extends AbstractBackupService implements IRestExportService {
     private final IDocumentDescriptorStore documentDescriptorStore;
     private final IBotStore botStore;

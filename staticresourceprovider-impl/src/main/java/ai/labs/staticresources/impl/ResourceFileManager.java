@@ -3,9 +3,10 @@ package ai.labs.staticresources.impl;
 import ai.labs.staticresources.rest.IResourceFileManager;
 import ai.labs.utilities.FileUtilities;
 import lombok.extern.slf4j.Slf4j;
+import org.eclipse.microprofile.config.inject.ConfigProperty;
 
+import javax.enterprise.context.ApplicationScoped;
 import javax.inject.Inject;
-import javax.inject.Named;
 import java.io.IOException;
 import java.io.InputStream;
 import java.nio.file.Files;
@@ -16,11 +17,12 @@ import java.nio.file.Paths;
  * @author ginccc
  */
 @Slf4j
+@ApplicationScoped
 public class ResourceFileManager implements IResourceFileManager {
     private final String resourceDir;
 
     @Inject
-    public ResourceFileManager(@Named("systemRuntime.resourceDir") String resourceDir) {
+    public ResourceFileManager(@ConfigProperty(name = "systemRuntime.resourceDir") String resourceDir) {
         this.resourceDir = resourceDir;
     }
 

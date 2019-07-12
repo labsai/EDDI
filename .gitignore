@@ -4,4 +4,6 @@
 
 # ignore intellij files
 .idea/
+*.ipr
 *.iml
+*.iws

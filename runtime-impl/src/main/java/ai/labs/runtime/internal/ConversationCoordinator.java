@@ -3,8 +3,8 @@ package ai.labs.runtime.internal;
 import ai.labs.runtime.IConversationCoordinator;
 import lombok.extern.slf4j.Slf4j;
 
+import javax.enterprise.context.ApplicationScoped;
 import javax.inject.Inject;
-import javax.inject.Singleton;
 import java.util.Collections;
 import java.util.Map;
 import java.util.concurrent.BlockingQueue;
@@ -14,7 +14,7 @@ import java.util.concurrent.LinkedTransferQueue;
 
 import static ai.labs.runtime.SystemRuntime.IRuntime;
 
-@Singleton
+@ApplicationScoped
 @Slf4j
 public class ConversationCoordinator implements IConversationCoordinator {
     private final Map<String, BlockingQueue<Callable<Void>>> conversationQueues = new ConcurrentHashMap<>();

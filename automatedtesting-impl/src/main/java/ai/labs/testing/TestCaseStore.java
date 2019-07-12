@@ -11,6 +11,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.bson.Document;
 import org.bson.types.ObjectId;
 
+import javax.enterprise.context.ApplicationScoped;
 import javax.inject.Inject;
 import java.io.IOException;
 import java.util.Date;
@@ -19,6 +20,7 @@ import java.util.Date;
  * @author ginccc
  */
 @Slf4j
+@ApplicationScoped
 public class TestCaseStore implements ITestCaseStore, IResourceStore<TestCase> {
     private static final String TESTCASE_COLLECTION = "testcases";
     private static final String TESTCASE_STATE_FIELD = "testCaseState";

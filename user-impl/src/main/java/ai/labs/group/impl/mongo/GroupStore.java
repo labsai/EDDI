@@ -11,6 +11,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.bson.Document;
 import org.bson.types.ObjectId;
 
+import javax.enterprise.context.ApplicationScoped;
 import javax.inject.Inject;
 import java.io.IOException;
 
@@ -18,6 +19,7 @@ import java.io.IOException;
  * @author ginccc
  */
 @Slf4j
+@ApplicationScoped
 public class GroupStore implements IGroupStore {
     private static final String COLLECTION_GROUPS = "groups";
     private final MongoCollection<Document> collection;

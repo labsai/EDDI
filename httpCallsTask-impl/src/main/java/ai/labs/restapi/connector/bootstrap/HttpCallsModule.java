@@ -1,16 +1,21 @@
 package ai.labs.restapi.connector.bootstrap;
 
-import ai.labs.restapi.connector.impl.HttpCallsTask;
 import ai.labs.lifecycle.ILifecycleTask;
-import ai.labs.runtime.bootstrap.AbstractBaseModule;
-import com.google.inject.multibindings.MapBinder;
+import ai.labs.restapi.connector.impl.HttpCallsTask;
 
-public class HttpCallsModule extends AbstractBaseModule {
+import javax.annotation.PostConstruct;
+import javax.enterprise.inject.Instance;
+import javax.inject.Inject;
+import javax.inject.Provider;
+import java.util.Map;
 
-    @Override
-    protected void configure() {
-        MapBinder<String, ILifecycleTask> lifecycleTaskPlugins
-                = MapBinder.newMapBinder(binder(), String.class, ILifecycleTask.class);
-        lifecycleTaskPlugins.addBinding("ai.labs.httpcalls").to(HttpCallsTask.class);
+public class HttpCallsModule {
+
+    @PostConstruct
+    @Inject
+    protected void configure(Map<String, Provider<ILifecycleTask>> lifecycleTaskProviders,
+                             Instance<ILifecycleTask> instance) {
+
+        lifecycleTaskProviders.put("ai.labs.httpcalls", () -> instance.select(HttpCallsTask.class).get());
     }
 }

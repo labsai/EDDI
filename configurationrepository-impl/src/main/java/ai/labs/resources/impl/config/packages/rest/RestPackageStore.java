@@ -1,22 +1,22 @@
 package ai.labs.resources.impl.config.packages.rest;
 
+import ai.labs.exception.ServiceException;
 import ai.labs.models.DocumentDescriptor;
+import ai.labs.models.PackageConfiguration;
+import ai.labs.models.PackageConfiguration.PackageExtension;
 import ai.labs.persistence.IResourceStore;
 import ai.labs.resources.impl.resources.rest.RestVersionInfo;
 import ai.labs.resources.rest.config.packages.IPackageStore;
 import ai.labs.resources.rest.config.packages.IRestPackageStore;
-import ai.labs.resources.rest.config.packages.model.PackageConfiguration;
-import ai.labs.resources.rest.config.packages.model.PackageConfiguration.PackageExtension;
 import ai.labs.resources.rest.documentdescriptor.IDocumentDescriptorStore;
-import ai.labs.rest.restinterfaces.IRestInterfaceFactory;
-import ai.labs.rest.restinterfaces.RestInterfaceFactory;
-import ai.labs.runtime.client.configuration.ResourceClientLibrary;
-import ai.labs.runtime.service.ServiceException;
+import ai.labs.resources.rest.restinterfaces.IResourceClientLibrary;
+import ai.labs.resources.rest.restinterfaces.IRestInterfaceFactory;
 import ai.labs.schema.IJsonSchemaCreator;
 import ai.labs.utilities.RestUtilities;
 import ai.labs.utilities.URIUtilities;
 import lombok.extern.slf4j.Slf4j;
 
+import javax.enterprise.context.ApplicationScoped;
 import javax.inject.Inject;
 import javax.ws.rs.InternalServerErrorException;
 import javax.ws.rs.core.MediaType;
@@ -30,18 +30,19 @@ import static ai.labs.utilities.RuntimeUtilities.isNullOrEmpty;
 import static javax.ws.rs.core.Response.Status.BAD_REQUEST;
 
 @Slf4j
+@ApplicationScoped
 public class RestPackageStore extends RestVersionInfo<PackageConfiguration> implements IRestPackageStore {
     private static final String KEY_CONFIG = "config";
     private static final String KEY_URI = "uri";
     private final IPackageStore packageStore;
-    private final ResourceClientLibrary resourceClientLibrary;
+    private final IResourceClientLibrary resourceClientLibrary;
     private final IJsonSchemaCreator jsonSchemaCreator;
     private IRestPackageStore restPackageStore;
 
     @Inject
     public RestPackageStore(IPackageStore packageStore,
                             IRestInterfaceFactory restInterfaceFactory,
-                            ResourceClientLibrary resourceClientLibrary,
+                            IResourceClientLibrary resourceClientLibrary,
                             IDocumentDescriptorStore documentDescriptorStore,
                             IJsonSchemaCreator jsonSchemaCreator) {
         super(resourceURI, packageStore, documentDescriptorStore);
@@ -54,7 +55,7 @@ public class RestPackageStore extends RestVersionInfo<PackageConfiguration> impl
     private void initRestClient(IRestInterfaceFactory restInterfaceFactory) {
         try {
             restPackageStore = restInterfaceFactory.get(IRestPackageStore.class);
-        } catch (RestInterfaceFactory.RestInterfaceFactoryException e) {
+        } catch (IRestInterfaceFactory.RestInterfaceFactoryException e) {
             restPackageStore = null;
             log.error(e.getLocalizedMessage(), e);
         }

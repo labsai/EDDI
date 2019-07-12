@@ -4,11 +4,12 @@ import ai.labs.memory.model.SimpleConversationMemorySnapshot;
 import ai.labs.models.*;
 import ai.labs.resources.rest.botmanagement.IRestBotTriggerStore;
 import ai.labs.resources.rest.botmanagement.IRestUserConversationStore;
-import ai.labs.rest.rest.IRestBotEngine;
-import ai.labs.rest.rest.IRestBotManagement;
+import ai.labs.rest.IRestBotEngine;
+import ai.labs.rest.IRestBotManagement;
 import ai.labs.utilities.RestUtilities;
 import lombok.extern.slf4j.Slf4j;
 
+import javax.enterprise.context.RequestScoped;
 import javax.inject.Inject;
 import javax.ws.rs.InternalServerErrorException;
 import javax.ws.rs.NotFoundException;
@@ -23,6 +24,7 @@ import java.util.Random;
 import static ai.labs.persistence.IResourceStore.IResourceId;
 
 @Slf4j
+@RequestScoped
 public class RestBotManagement implements IRestBotManagement {
     private final IRestBotEngine restBotEngine;
     private final IRestUserConversationStore restUserConversationStore;

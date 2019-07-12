@@ -2,8 +2,7 @@ package ai.labs.resources.rest.documentdescriptor;
 
 import ai.labs.models.DocumentDescriptor;
 import ai.labs.models.SimpleDocumentDescriptor;
-import ai.labs.resources.rest.method.PATCH;
-import ai.labs.resources.rest.patch.PatchInstruction;
+import ai.labs.runtime.rest.patch.PatchInstruction;
 import io.swagger.annotations.Api;
 import io.swagger.annotations.ApiOperation;
 import io.swagger.annotations.ApiParam;

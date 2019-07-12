@@ -4,9 +4,9 @@ import ai.labs.backupservice.IRestExportService;
 import ai.labs.backupservice.IRestGitBackupService;
 import ai.labs.backupservice.IRestImportService;
 import ai.labs.backupservice.IZipArchive;
+import ai.labs.models.BotConfiguration;
 import ai.labs.persistence.IResourceStore;
 import ai.labs.resources.rest.config.bots.IBotStore;
-import ai.labs.resources.rest.config.bots.model.BotConfiguration;
 import ai.labs.utilities.FileUtilities;
 import lombok.extern.slf4j.Slf4j;
 import org.eclipse.jgit.api.Git;
@@ -17,6 +17,7 @@ import org.eclipse.jgit.revwalk.RevCommit;
 import org.eclipse.jgit.transport.PushResult;
 import org.eclipse.jgit.transport.UsernamePasswordCredentialsProvider;
 
+import javax.enterprise.context.RequestScoped;
 import javax.inject.Inject;
 import javax.ws.rs.InternalServerErrorException;
 import javax.ws.rs.core.Response;
@@ -31,6 +32,7 @@ import java.nio.file.Paths;
  * @author rpi
  */
 @Slf4j
+@RequestScoped
 public class RestGitBackupService implements IRestGitBackupService {
     private final IBotStore botStore;
     private final String tmpPath = System.getProperty("user.dir") + "/tmp/";

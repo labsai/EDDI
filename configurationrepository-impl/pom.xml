@@ -16,7 +16,12 @@
     <dependencies>
         <dependency>
             <groupId>ai.labs</groupId>
-            <artifactId>corerest-definition</artifactId>
+            <artifactId>basemodels</artifactId>
+            <version>${project.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>ai.labs</groupId>
+            <artifactId>configurationrepository-definition</artifactId>
             <version>${project.version}</version>
         </dependency>
         <dependency>
@@ -52,6 +57,36 @@
         <dependency>
             <groupId>ai.labs</groupId>
             <artifactId>caching-definition</artifactId>
+            <version>${project.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>ai.labs</groupId>
+            <artifactId>corerest-definition</artifactId>
+            <version>${project.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>ai.labs</groupId>
+            <artifactId>conversationlifecycle-impl</artifactId>
+            <version>${project.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>ai.labs</groupId>
+            <artifactId>conversationmemory-definition</artifactId>
+            <version>${project.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>ai.labs</groupId>
+            <artifactId>conversationmemory-impl</artifactId>
+            <version>${project.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>ai.labs</groupId>
+            <artifactId>httpclient-impl-jetty</artifactId>
+            <version>${project.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>ai.labs</groupId>
+            <artifactId>caching-impl-infinispan</artifactId>
             <version>${project.version}</version>
         </dependency>
     </dependencies>

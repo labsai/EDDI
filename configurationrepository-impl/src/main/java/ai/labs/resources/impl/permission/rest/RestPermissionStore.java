@@ -6,6 +6,7 @@ import ai.labs.permission.rest.IRestPermissionStore;
 import ai.labs.persistence.IResourceStore;
 import org.jboss.resteasy.spi.NoLogWebApplicationException;
 
+import javax.enterprise.context.ApplicationScoped;
 import javax.inject.Inject;
 import javax.ws.rs.InternalServerErrorException;
 import javax.ws.rs.core.Response;
@@ -14,6 +15,7 @@ import javax.ws.rs.core.Response;
 /**
  * @author ginccc
  */
+@ApplicationScoped
 public class RestPermissionStore implements IRestPermissionStore {
     private final String resourceURI = "eddi://ai.labs.permission/permissionstore/permissions/";
     private final IPermissionStore permissionStore;

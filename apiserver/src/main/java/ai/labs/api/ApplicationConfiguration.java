@@ -5,7 +5,6 @@ import ai.labs.permission.interceptor.PermissionResponseInterceptor;
 import ai.labs.resources.impl.interceptors.DocumentDescriptorInterceptor;
 import ai.labs.server.JacksonConfig;
 import ai.labs.server.exception.IllegalArgumentExceptionMapper;
-import ai.labs.server.providers.KeycloakAuthorizationHeaderFilter;
 import ai.labs.server.providers.URIMessageBodyProvider;
 import ai.labs.staticresources.impl.interceptor.ContentTypeInterceptor;
 
@@ -30,7 +29,6 @@ public class ApplicationConfiguration extends Application {
         tmp.add(IllegalArgumentExceptionMapper.class);
         tmp.add(JacksonConfig.class);
         tmp.add(URIMessageBodyProvider.class);
-        tmp.add(KeycloakAuthorizationHeaderFilter.class);
 
         CLASSES = Collections.unmodifiableSet(tmp);
     }

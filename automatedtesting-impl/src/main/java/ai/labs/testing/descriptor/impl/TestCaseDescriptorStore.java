@@ -9,11 +9,13 @@ import ai.labs.testing.descriptor.model.TestCaseDescriptor;
 import ai.labs.user.IUserStore;
 import com.mongodb.client.MongoDatabase;
 
+import javax.enterprise.context.ApplicationScoped;
 import javax.inject.Inject;
 
 /**
  * @author ginccc
  */
+@ApplicationScoped
 public class TestCaseDescriptorStore extends DescriptorStore<TestCaseDescriptor> implements ITestCaseDescriptorStore {
     @Inject
     public TestCaseDescriptorStore(MongoDatabase database, IDocumentBuilder documentBuilder,

@@ -7,9 +7,9 @@ import ai.labs.models.UserConversation;
 import ai.labs.persistence.IResourceStore;
 import ai.labs.resources.rest.botmanagement.IRestUserConversationStore;
 import ai.labs.resources.rest.botmanagement.IUserConversationStore;
-import org.junit.Assert;
-import org.junit.Before;
-import org.junit.Test;
+import org.junit.jupiter.api.Assertions;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
 import org.mockito.Mockito;
 
 import javax.ws.rs.NotFoundException;
@@ -28,7 +28,7 @@ public class RestUserConversationStoreTest {
     private IUserConversationStore userConversationStore;
     private String conversationId = "67890";
 
-    @Before
+    @BeforeEach
     @SuppressWarnings("unchecked")
     public void setup() {
         userConversationStore = mock(IUserConversationStore.class);
@@ -39,7 +39,7 @@ public class RestUserConversationStoreTest {
     }
 
     @Test
-    public void readUserConversation_CacheHit() throws IResourceStore.ResourceStoreException {
+    void readUserConversation_CacheHit() throws IResourceStore.ResourceStoreException {
         //setup
         final String conversationId = "67890";
         final String cacheKey = calculateCacheKey(intent, userId);
@@ -52,14 +52,14 @@ public class RestUserConversationStoreTest {
         UserConversation actual = restUserConversationStore.readUserConversation(intent, userId);
 
         //assert
-        Assert.assertEquals(expected, actual);
+        Assertions.assertEquals(expected, actual);
         Mockito.verify(userConversationCache, times(1)).get(eq(cacheKey));
         Mockito.verify(userConversationStore, never()).readUserConversation(eq(intent), eq(userId));
         Mockito.verify(userConversationCache, never()).put(eq(cacheKey), any(UserConversation.class));
     }
 
     @Test
-    public void readUserConversation_CacheMiss() throws IResourceStore.ResourceStoreException {
+    void readUserConversation_CacheMiss() throws IResourceStore.ResourceStoreException {
         //setup
         final String cacheKey = calculateCacheKey(intent, userId);
         UserConversation expected = new UserConversation(
@@ -73,14 +73,14 @@ public class RestUserConversationStoreTest {
         UserConversation actual = restUserConversationStore.readUserConversation(intent, userId);
 
         //assert
-        Assert.assertEquals(expected, actual);
+        Assertions.assertEquals(expected, actual);
         Mockito.verify(userConversationCache, times(1)).get(eq(cacheKey));
         Mockito.verify(userConversationStore, times(1)).readUserConversation(eq(intent), eq(userId));
         Mockito.verify(userConversationCache, times(1)).put(eq(cacheKey), eq(expected));
     }
 
     @Test
-    public void readUserConversation_Null() throws IResourceStore.ResourceStoreException {
+    void readUserConversation_Null() throws IResourceStore.ResourceStoreException {
         //setup
         final String cacheKey = calculateCacheKey(intent, userId);
         when(userConversationStore.readUserConversation(eq(intent), eq(userId))).
@@ -94,19 +94,19 @@ public class RestUserConversationStoreTest {
             actual = restUserConversationStore.readUserConversation(intent, userId);
         } catch (Exception e) {
             if (!(e instanceof NotFoundException)) {
-                Assert.fail();
+                Assertions.fail();
             }
         }
 
         //assert
-        Assert.assertNull(actual);
+        Assertions.assertNull(actual);
         Mockito.verify(userConversationCache, times(1)).get(eq(cacheKey));
         Mockito.verify(userConversationStore, times(1)).readUserConversation(eq(intent), eq(userId));
         Mockito.verify(userConversationCache, never()).put(eq(cacheKey), any());
     }
 
     @Test
-    public void createUserConversation() throws IResourceStore.ResourceStoreException, IResourceStore.ResourceAlreadyExistsException {
+    void createUserConversation() throws IResourceStore.ResourceStoreException, IResourceStore.ResourceAlreadyExistsException {
         //setup
         UserConversation expected = new UserConversation(intent, userId,
                 Deployment.Environment.unrestricted, botId, conversationId);
@@ -115,18 +115,18 @@ public class RestUserConversationStoreTest {
         Response response = restUserConversationStore.createUserConversation(intent, userId, expected);
 
         //assert
-        Assert.assertEquals(200, response.getStatus());
+        Assertions.assertEquals(200, response.getStatus());
         Mockito.verify(userConversationStore, times(1)).createUserConversation(eq(expected));
         Mockito.verify(userConversationCache, times(1)).put(eq(calculateCacheKey(intent, userId)), eq(expected));
     }
 
     @Test
-    public void deleteUserConversation() throws IResourceStore.ResourceStoreException {
+    void deleteUserConversation() throws IResourceStore.ResourceStoreException {
         //test
         Response response = restUserConversationStore.deleteUserConversation(intent, userId);
 
         //assert
-        Assert.assertEquals(200, response.getStatus());
+        Assertions.assertEquals(200, response.getStatus());
         Mockito.verify(userConversationStore, times(1)).deleteUserConversation(eq(intent), eq(userId));
         Mockito.verify(userConversationCache, times(1)).remove(eq(calculateCacheKey(intent, userId)));
     }

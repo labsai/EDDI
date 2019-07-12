@@ -1,12 +1,12 @@
 package ai.labs.permission.interceptor;
 
+import ai.labs.injection.DependencyInjector;
 import ai.labs.permission.IAuthorization;
 import ai.labs.permission.IPermissionStore;
 import ai.labs.permission.model.AuthorizedUser;
 import ai.labs.permission.model.Permissions;
 import ai.labs.permission.utilities.PermissionUtilities;
 import ai.labs.persistence.IResourceStore;
-import ai.labs.runtime.DependencyInjector;
 import ai.labs.runtime.ThreadContext;
 import ai.labs.testing.ITestCaseStore;
 import ai.labs.testing.model.TestCase;
@@ -16,10 +16,12 @@ import ai.labs.utilities.RestUtilities;
 import ai.labs.utilities.SecurityUtilities;
 import lombok.extern.slf4j.Slf4j;
 
-import javax.inject.Inject;
+import javax.annotation.Priority;
+import javax.enterprise.context.RequestScoped;
 import javax.servlet.http.HttpServletRequest;
 import javax.ws.rs.InternalServerErrorException;
 import javax.ws.rs.POST;
+import javax.ws.rs.Priorities;
 import javax.ws.rs.container.ContainerRequestContext;
 import javax.ws.rs.container.ContainerResponseContext;
 import javax.ws.rs.container.ContainerResponseFilter;
@@ -36,6 +38,8 @@ import java.security.Principal;
  */
 @Provider
 @Slf4j
+@RequestScoped
+@Priority(Priorities.AUTHENTICATION)
 public class PermissionResponseInterceptor implements ContainerResponseFilter {
     private static final String METHOD_NAME_CREATE_USER = "createUser";
     private static final String METHOD_NAME_DUPLICATE_RESOURCE = "duplicate";
@@ -44,13 +48,11 @@ public class PermissionResponseInterceptor implements ContainerResponseFilter {
     private final IUserStore userStore;
     private final IPermissionStore permissionStore;
 
-    @Inject
     @Context
-    private HttpServletRequest httpServletRequest;
+    HttpServletRequest httpServletRequest;
 
-    @Inject
     @Context
-    private ResourceInfo resourceInfo;
+    ResourceInfo resourceInfo;
     private final DependencyInjector injector;
 
     public PermissionResponseInterceptor() {

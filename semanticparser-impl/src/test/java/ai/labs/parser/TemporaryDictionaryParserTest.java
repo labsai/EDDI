@@ -7,9 +7,9 @@ import ai.labs.parser.internal.matches.RawSolution;
 import ai.labs.parser.model.Phrase;
 import ai.labs.parser.model.Word;
 import ai.labs.parser.rest.model.Solution;
-import org.junit.Assert;
-import org.junit.Before;
-import org.junit.Test;
+import org.junit.jupiter.api.Assertions;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
 
 import java.util.Collections;
 import java.util.List;
@@ -22,7 +22,7 @@ public class TemporaryDictionaryParserTest {
     private ExpressionProvider expressionProvider;
     private InputParser inputParser;
 
-    @Before
+    @BeforeEach
     public void setup() {
         expressionProvider = new ExpressionProvider(new ExpressionFactory());
 
@@ -34,7 +34,7 @@ public class TemporaryDictionaryParserTest {
     }
 
     @Test
-    public void testRecognitionOfTemporaryDictionaryWord() throws InterruptedException {
+    void testRecognitionOfTemporaryDictionaryWord() throws InterruptedException {
         //setup
         TestDictionary temporaryTestDictionary = new TestDictionary();
         temporaryTestDictionary.addWord(new Word("tmp1", expressionProvider.parseExpressions("tmpExp1"), "tmpExp1", 0, false));
@@ -47,11 +47,11 @@ public class TemporaryDictionaryParserTest {
 
         //assert
         List<Solution> actual = DictionaryUtilities.extractExpressions(rawSolutions, true, true);
-        Assert.assertEquals(expected, actual);
+        Assertions.assertEquals(expected, actual);
     }
 
     @Test
-    public void testRecognitionOfTemporaryDictionaryPhrase() throws InterruptedException {
+    void testRecognitionOfTemporaryDictionaryPhrase() throws InterruptedException {
         //setup
         TestDictionary temporaryTestDictionary = new TestDictionary();
         temporaryTestDictionary.addPhrase(new Phrase("test tmp phrase", expressionProvider.parseExpressions
@@ -64,11 +64,11 @@ public class TemporaryDictionaryParserTest {
 
         //assert
         List<Solution> actual = DictionaryUtilities.extractExpressions(rawSolutions, true, true);
-        Assert.assertEquals(expected, actual);
+        Assertions.assertEquals(expected, actual);
     }
 
     @Test
-    public void testPreferTmpDictionaryWordOverPredefinedDictionaryWords() throws InterruptedException {
+    void testPreferTmpDictionaryWordOverPredefinedDictionaryWords() throws InterruptedException {
         //setup
         TestDictionary temporaryTestDictionary = new TestDictionary();
         temporaryTestDictionary.addWord(new Word("test1", expressionProvider.parseExpressions("tmpExp1"), "tmpExp1",
@@ -81,7 +81,7 @@ public class TemporaryDictionaryParserTest {
 
         //assert
         List<Solution> actual = DictionaryUtilities.extractExpressions(rawSolutions, true, true);
-        Assert.assertEquals(2, actual.size());
-        Assert.assertEquals(expected.get(0), actual.get(0));
+        Assertions.assertEquals(2, actual.size());
+        Assertions.assertEquals(expected.get(0), actual.get(0));
     }
 }

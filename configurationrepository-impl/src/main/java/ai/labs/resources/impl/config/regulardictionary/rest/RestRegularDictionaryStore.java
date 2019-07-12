@@ -7,12 +7,12 @@ import ai.labs.resources.rest.config.regulardictionary.IRegularDictionaryStore;
 import ai.labs.resources.rest.config.regulardictionary.IRestRegularDictionaryStore;
 import ai.labs.resources.rest.config.regulardictionary.model.RegularDictionaryConfiguration;
 import ai.labs.resources.rest.documentdescriptor.IDocumentDescriptorStore;
-import ai.labs.resources.rest.patch.PatchInstruction;
-import ai.labs.rest.restinterfaces.IRestInterfaceFactory;
-import ai.labs.rest.restinterfaces.RestInterfaceFactory;
+import ai.labs.resources.rest.restinterfaces.IRestInterfaceFactory;
+import ai.labs.runtime.rest.patch.PatchInstruction;
 import ai.labs.schema.IJsonSchemaCreator;
 import lombok.extern.slf4j.Slf4j;
 
+import javax.enterprise.context.ApplicationScoped;
 import javax.inject.Inject;
 import javax.ws.rs.InternalServerErrorException;
 import javax.ws.rs.NotFoundException;
@@ -23,6 +23,7 @@ import java.util.List;
  * @author ginccc
  */
 @Slf4j
+@ApplicationScoped
 public class RestRegularDictionaryStore extends RestVersionInfo<RegularDictionaryConfiguration> implements IRestRegularDictionaryStore {
     private final IRegularDictionaryStore regularDictionaryStore;
     private final IJsonSchemaCreator jsonSchemaCreator;
@@ -42,7 +43,7 @@ public class RestRegularDictionaryStore extends RestVersionInfo<RegularDictionar
     private void initRestClient(IRestInterfaceFactory restInterfaceFactory) {
         try {
             restRegularDictionaryStore = restInterfaceFactory.get(IRestRegularDictionaryStore.class);
-        } catch (RestInterfaceFactory.RestInterfaceFactoryException e) {
+        } catch (IRestInterfaceFactory.RestInterfaceFactoryException e) {
             restRegularDictionaryStore = null;
             log.error(e.getLocalizedMessage(), e);
         }

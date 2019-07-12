@@ -16,6 +16,7 @@ import org.eclipse.jetty.client.util.StringContentProvider;
 import org.eclipse.jetty.http.HttpField;
 import org.eclipse.jetty.http.HttpFields;
 
+import javax.enterprise.context.RequestScoped;
 import javax.inject.Inject;
 import java.net.CookieStore;
 import java.net.URI;
@@ -26,6 +27,7 @@ import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
 
 @Slf4j
+@RequestScoped
 public class HttpClientWrapper implements IHttpClient {
     private final HttpClient httpClient;
 

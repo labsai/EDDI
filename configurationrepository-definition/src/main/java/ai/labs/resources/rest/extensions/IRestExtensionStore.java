@@ -1,6 +1,6 @@
 package ai.labs.resources.rest.extensions;
 
-import ai.labs.resources.rest.extensions.model.ExtensionDescriptor;
+import ai.labs.models.ExtensionDescriptor;
 import io.swagger.annotations.Api;
 import io.swagger.annotations.ApiOperation;
 import io.swagger.annotations.Authorization;

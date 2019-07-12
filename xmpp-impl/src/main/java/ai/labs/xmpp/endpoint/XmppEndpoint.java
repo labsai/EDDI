@@ -40,7 +40,7 @@ import java.util.concurrent.TimeUnit;
 import static ai.labs.models.Deployment.Environment.unrestricted;
 import static ai.labs.persistence.IResourceStore.ResourceNotFoundException;
 import static ai.labs.persistence.IResourceStore.ResourceStoreException;
-import static ai.labs.rest.restinterfaces.RestInterfaceFactory.RestInterfaceFactoryException;
+import static ai.labs.resources.rest.restinterfaces.IRestInterfaceFactory.RestInterfaceFactoryException;
 
 @Slf4j
 public class XmppEndpoint implements IXmppEndpoint {

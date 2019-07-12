@@ -1,5 +1,6 @@
 package ai.labs.resources.impl.config.output.rest.keys;
 
+import ai.labs.models.PackageConfiguration;
 import ai.labs.persistence.IResourceStore;
 import ai.labs.resources.rest.config.behavior.IBehaviorStore;
 import ai.labs.resources.rest.config.behavior.model.BehaviorConfiguration;
@@ -8,12 +9,12 @@ import ai.labs.resources.rest.config.behavior.model.BehaviorRuleConfiguration;
 import ai.labs.resources.rest.config.output.IOutputStore;
 import ai.labs.resources.rest.config.output.keys.IRestOutputKeys;
 import ai.labs.resources.rest.config.packages.IPackageStore;
-import ai.labs.resources.rest.config.packages.model.PackageConfiguration;
 import ai.labs.utilities.CollectionUtilities;
 import ai.labs.utilities.RestUtilities;
 import lombok.extern.slf4j.Slf4j;
 import org.jboss.resteasy.spi.NoLogWebApplicationException;
 
+import javax.enterprise.context.ApplicationScoped;
 import javax.inject.Inject;
 import javax.ws.rs.InternalServerErrorException;
 import javax.ws.rs.core.Response;
@@ -24,6 +25,7 @@ import java.util.*;
  * @author ginccc
  */
 @Slf4j
+@ApplicationScoped
 public class RestOutputKeys implements IRestOutputKeys {
     private final IPackageStore packageStore;
     private final IBehaviorStore behaviorStore;

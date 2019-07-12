@@ -1,9 +1,9 @@
 package ai.labs.parser.extensions.normalizers;
 
 import ai.labs.parser.extensions.normalizers.providers.PunctuationNormalizerProvider;
-import org.junit.Assert;
-import org.junit.Before;
-import org.junit.Test;
+import org.junit.jupiter.api.Assertions;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
 
 public class PunctuationNormalizerTest {
 
@@ -12,7 +12,7 @@ public class PunctuationNormalizerTest {
             "This is!just an:example,of a string,that needs? to be fixed.by inserting:a whitespace;" +
                     "after punctuation marks! ";
 
-    @Before
+    @BeforeEach
     public void setUp() {
         normalizer = new PunctuationNormalizer(
                 new PunctuationNormalizerProvider().
@@ -21,7 +21,7 @@ public class PunctuationNormalizerTest {
     }
 
     @Test
-    public void normalizeInsertWhitespaces() {
+    void normalizeInsertWhitespaces() {
         //setup
         final String expected = "This is ! just an : example , of a string , that needs ? to be fixed . by inserting : a whitespace ; after punctuation marks !";
         normalizer.setRemovePunctuation(false);
@@ -30,11 +30,11 @@ public class PunctuationNormalizerTest {
         String actual = normalizer.normalize(testString);
 
         //assert
-        Assert.assertEquals(expected, actual);
+        Assertions.assertEquals(expected, actual);
     }
 
     @Test
-    public void normalizeRemovePunctuation() {
+    void normalizeRemovePunctuation() {
         //setup
         final String expected = "This is just an example of a string that needs to be fixed by inserting a whitespace after punctuation marks";
         normalizer.setRemovePunctuation(true);
@@ -43,6 +43,6 @@ public class PunctuationNormalizerTest {
         String actual = normalizer.normalize(testString);
 
         //assert
-        Assert.assertEquals(expected, actual);
+        Assertions.assertEquals(expected, actual);
     }
 }

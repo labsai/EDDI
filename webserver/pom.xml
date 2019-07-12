@@ -40,19 +40,6 @@
             <version>${project.version}</version>
         </dependency>
 
-        <!-- Undertow -->
-        <dependency>
-            <groupId>io.quarkus</groupId>
-            <artifactId>quarkus-undertow</artifactId>
-            <version>0.18.0</version>
-        </dependency>
-        <dependency>
-            <groupId>org.jboss.resteasy</groupId>
-            <artifactId>resteasy-undertow</artifactId>
-            <version>4.1.0.Final</version>
-        </dependency>
-
-
         <dependency>
             <groupId>ro.isdc.wro4j</groupId>
             <artifactId>wro4j-core</artifactId>
@@ -63,11 +50,6 @@
                     <artifactId>commons-io</artifactId>
                 </exclusion>
             </exclusions>
-        </dependency>
-        <dependency>
-            <groupId>io.quarkus</groupId>
-            <artifactId>quarkus-keycloak</artifactId>
-            <version>0.18.0</version>
         </dependency>
     </dependencies>
 

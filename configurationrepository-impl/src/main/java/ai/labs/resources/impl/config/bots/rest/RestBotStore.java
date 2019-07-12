@@ -1,5 +1,6 @@
 package ai.labs.resources.impl.config.bots.rest;
 
+import ai.labs.models.BotConfiguration;
 import ai.labs.models.DocumentDescriptor;
 import ai.labs.persistence.IResourceStore;
 import ai.labs.persistence.model.ResourceId;
@@ -7,16 +8,15 @@ import ai.labs.resources.impl.config.packages.rest.RestPackageStore;
 import ai.labs.resources.impl.resources.rest.RestVersionInfo;
 import ai.labs.resources.rest.config.bots.IBotStore;
 import ai.labs.resources.rest.config.bots.IRestBotStore;
-import ai.labs.resources.rest.config.bots.model.BotConfiguration;
 import ai.labs.resources.rest.config.packages.IRestPackageStore;
 import ai.labs.resources.rest.documentdescriptor.IDocumentDescriptorStore;
-import ai.labs.rest.restinterfaces.IRestInterfaceFactory;
-import ai.labs.rest.restinterfaces.RestInterfaceFactory;
+import ai.labs.resources.rest.restinterfaces.IRestInterfaceFactory;
 import ai.labs.schema.IJsonSchemaCreator;
 import ai.labs.utilities.RestUtilities;
 import ai.labs.utilities.URIUtilities;
 import lombok.extern.slf4j.Slf4j;
 
+import javax.enterprise.context.ApplicationScoped;
 import javax.inject.Inject;
 import javax.ws.rs.InternalServerErrorException;
 import javax.ws.rs.core.MediaType;
@@ -31,6 +31,7 @@ import static javax.ws.rs.core.Response.Status.BAD_REQUEST;
  * @author ginccc
  */
 @Slf4j
+@ApplicationScoped
 public class RestBotStore extends RestVersionInfo<BotConfiguration> implements IRestBotStore {
     private static final String PACKAGE_URI = IRestPackageStore.resourceURI;
     private final IBotStore botStore;
@@ -54,7 +55,7 @@ public class RestBotStore extends RestVersionInfo<BotConfiguration> implements I
     private void initRestClient(IRestInterfaceFactory restInterfaceFactory) {
         try {
             restBotStore = restInterfaceFactory.get(IRestBotStore.class);
-        } catch (RestInterfaceFactory.RestInterfaceFactoryException e) {
+        } catch (IRestInterfaceFactory.RestInterfaceFactoryException e) {
             restBotStore = null;
             log.error(e.getLocalizedMessage(), e);
         }

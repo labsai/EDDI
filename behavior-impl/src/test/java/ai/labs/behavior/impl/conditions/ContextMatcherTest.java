@@ -7,9 +7,9 @@ import ai.labs.memory.IData;
 import ai.labs.models.Context;
 import ai.labs.serialization.IJsonSerialization;
 import lombok.EqualsAndHashCode;
-import org.junit.Assert;
-import org.junit.Before;
-import org.junit.Test;
+import org.junit.jupiter.api.Assertions;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
 
 import java.util.*;
 
@@ -26,7 +26,7 @@ public class ContextMatcherTest {
     private IConversationMemory conversationMemory;
     private IConversationMemory.IWritableConversationStep currentStep;
 
-    @Before
+    @BeforeEach
     public void setUp() {
         expressionProvider = mock(IExpressionProvider.class);
         jsonSerialization = mock(IJsonSerialization.class);
@@ -37,7 +37,7 @@ public class ContextMatcherTest {
     }
 
     @Test
-    public void getValuesWithExpressions() {
+    void getValuesWithExpressions() {
         //setup
         final HashMap<String, String> expected = setupValuesWithExpressions();
 
@@ -45,7 +45,7 @@ public class ContextMatcherTest {
         Map<String, String> actual = contextMatcher.getConfigs();
 
         //assert
-        Assert.assertEquals(expected, actual);
+        Assertions.assertEquals(expected, actual);
     }
 
     private HashMap<String, String> setupValuesWithExpressions() {
@@ -65,7 +65,7 @@ public class ContextMatcherTest {
     }
 
     @Test
-    public void getValuesWithObject() {
+    void getValuesWithObject() {
         //setup
         final HashMap<String, String> expected = setupValuesWithObject(true);
 
@@ -73,7 +73,7 @@ public class ContextMatcherTest {
         Map<String, String> actual = contextMatcher.getConfigs();
 
         //assert
-        Assert.assertEquals(expected, actual);
+        Assertions.assertEquals(expected, actual);
     }
 
     private HashMap<String, String> setupValuesWithObject(boolean includeObjectValue) {
@@ -91,7 +91,7 @@ public class ContextMatcherTest {
     }
 
     @Test
-    public void getValuesWithString() {
+    void getValuesWithString() {
         //setup
         final HashMap<String, String> expected = setupValuesWithString();
 
@@ -99,7 +99,7 @@ public class ContextMatcherTest {
         Map<String, String> actual = contextMatcher.getConfigs();
 
         //assert
-        Assert.assertEquals(expected, actual);
+        Assertions.assertEquals(expected, actual);
     }
 
     private HashMap<String, String> setupValuesWithString() {
@@ -112,7 +112,7 @@ public class ContextMatcherTest {
     }
 
     @Test
-    public void executeWithExpressionForSuccess() {
+    void executeWithExpressionForSuccess() {
         //setup
         final HashMap<String, String> values = setupValuesWithExpressions();
         when(currentStep.getAllData(eq("context"))).then(invocation -> {
@@ -129,12 +129,12 @@ public class ContextMatcherTest {
         //assert
         verify(currentStep).getAllData("context");
         verify(expressionProvider, times(2)).parseExpressions(values.get("expressions"));
-        Assert.assertEquals(IBehaviorCondition.ExecutionState.SUCCESS, actualExecutionState);
+        Assertions.assertEquals(IBehaviorCondition.ExecutionState.SUCCESS, actualExecutionState);
 
     }
 
     @Test
-    public void executeWithExpressionForFail() {
+    void executeWithExpressionForFail() {
         //setup
         final HashMap<String, String> values = setupValuesWithExpressions();
         final String otherExpressions = "someOtherExpressions(than_expected)";
@@ -153,11 +153,11 @@ public class ContextMatcherTest {
         verify(currentStep).getAllData("context");
         verify(expressionProvider).parseExpressions(values.get("expressions"));
         verify(expressionProvider).parseExpressions(otherExpressions);
-        Assert.assertEquals(IBehaviorCondition.ExecutionState.FAIL, actualExecutionState);
+        Assertions.assertEquals(IBehaviorCondition.ExecutionState.FAIL, actualExecutionState);
     }
 
     @Test
-    public void executeWithObjectKeyAndValueForSuccess() throws Exception {
+    void executeWithObjectKeyAndValueForSuccess() throws Exception {
         //setup
         setupValuesWithObject(true);
         final String contextJson = "{\"userInfo\":{\"name\":{\"firstName\":\"John\",\"lastName\":\"Silver\"}}}";
@@ -181,11 +181,11 @@ public class ContextMatcherTest {
         verify(currentStep).getAllData("context");
         verify(jsonSerialization).serialize(objectValue);
         verify(jsonSerialization).deserialize(contextJson, Object.class);
-        Assert.assertEquals(IBehaviorCondition.ExecutionState.SUCCESS, actualExecutionState);
+        Assertions.assertEquals(IBehaviorCondition.ExecutionState.SUCCESS, actualExecutionState);
     }
 
     @Test
-    public void executeWithObjectKeyAndValueForFail() throws Exception {
+    void executeWithObjectKeyAndValueForFail() throws Exception {
         //setup
         setupValuesWithObject(true);
         final String contextJson = "{\"userInfo\":{\"name\":{\"firstName\":\"Albert\",\"lastName\":\"Silver\"}}}";
@@ -209,11 +209,11 @@ public class ContextMatcherTest {
         verify(currentStep).getAllData("context");
         verify(jsonSerialization).serialize(objectValue);
         verify(jsonSerialization).deserialize(contextJson, Object.class);
-        Assert.assertEquals(IBehaviorCondition.ExecutionState.FAIL, actualExecutionState);
+        Assertions.assertEquals(IBehaviorCondition.ExecutionState.FAIL, actualExecutionState);
     }
 
     @Test
-    public void executeWithObjectKeyOnlyForSuccess() throws Exception {
+    void executeWithObjectKeyOnlyForSuccess() throws Exception {
         //setup
         setupValuesWithObject(false);
         final String contextJson = "{\"userInfo\":{\"name\":{\"firstName\":\"John\",\"lastName\":\"Silver\"}}}";
@@ -238,11 +238,11 @@ public class ContextMatcherTest {
         verify(currentStep).getAllData("context");
         verify(jsonSerialization).serialize(objectValue);
         verify(jsonSerialization).deserialize(contextJson, Object.class);
-        Assert.assertEquals(IBehaviorCondition.ExecutionState.SUCCESS, actualExecutionState);
+        Assertions.assertEquals(IBehaviorCondition.ExecutionState.SUCCESS, actualExecutionState);
     }
 
     @Test
-    public void executeWithObjectKeyOnlyForFail() throws Exception {
+    void executeWithObjectKeyOnlyForFail() throws Exception {
         //setup
         setupValuesWithObject(false);
         final String contextJson = "{\"userInfo\":\"somethingElse\"}";
@@ -267,11 +267,11 @@ public class ContextMatcherTest {
         verify(currentStep).getAllData("context");
         verify(jsonSerialization).serialize(objectValue);
         verify(jsonSerialization).deserialize(contextJson, Object.class);
-        Assert.assertEquals(IBehaviorCondition.ExecutionState.FAIL, actualExecutionState);
+        Assertions.assertEquals(IBehaviorCondition.ExecutionState.FAIL, actualExecutionState);
     }
 
     @Test
-    public void executeWithStringForSuccess() {
+    void executeWithStringForSuccess() {
         //setup
         setupValuesWithString();
         when(currentStep.getAllData(eq("context"))).then(invocation -> {
@@ -285,11 +285,11 @@ public class ContextMatcherTest {
         IBehaviorCondition.ExecutionState actualExecutionState = contextMatcher.execute(conversationMemory, new LinkedList<>());
 
         //assert
-        Assert.assertEquals(IBehaviorCondition.ExecutionState.SUCCESS, actualExecutionState);
+        Assertions.assertEquals(IBehaviorCondition.ExecutionState.SUCCESS, actualExecutionState);
     }
 
     @Test
-    public void executeWithStringForFail() {
+    void executeWithStringForFail() {
         //setup
         setupValuesWithString();
         when(currentStep.getAllData(eq("context"))).then(invocation -> {
@@ -303,7 +303,7 @@ public class ContextMatcherTest {
         IBehaviorCondition.ExecutionState actualExecutionState = contextMatcher.execute(conversationMemory, new LinkedList<>());
 
         //assert
-        Assert.assertEquals(IBehaviorCondition.ExecutionState.FAIL, actualExecutionState);
+        Assertions.assertEquals(IBehaviorCondition.ExecutionState.FAIL, actualExecutionState);
     }
 
     @EqualsAndHashCode

@@ -14,6 +14,7 @@ import org.bson.Document;
 import org.bson.conversions.Bson;
 import org.bson.types.ObjectId;
 
+import javax.enterprise.context.ApplicationScoped;
 import javax.inject.Inject;
 import java.io.IOException;
 
@@ -22,6 +23,7 @@ import static ai.labs.models.ConversationState.ENDED;
 /**
  * @author ginccc
  */
+@ApplicationScoped
 public class ConversationMemoryStore implements IConversationMemoryStore, IResourceStore<ConversationMemorySnapshot> {
     private static final String CONVERSATION_COLLECTION = "conversationmemories";
     private static final String CONVERSATION_STATE_FIELD = "conversationState";

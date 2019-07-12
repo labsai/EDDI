@@ -2,6 +2,7 @@ package ai.labs.serialization;
 
 import lombok.extern.slf4j.Slf4j;
 
+import javax.enterprise.context.ApplicationScoped;
 import javax.inject.Inject;
 import java.io.IOException;
 import java.util.Map;
@@ -10,6 +11,7 @@ import java.util.Map;
  * @author ginccc
  */
 @Slf4j
+@ApplicationScoped
 public class DocumentBuilder implements IDocumentBuilder {
     private IJsonSerialization jsonSerialization;
 

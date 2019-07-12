@@ -7,9 +7,9 @@ import ai.labs.expressions.utilities.IExpressionProvider;
 import ai.labs.parser.extensions.dictionaries.IDictionary;
 import ai.labs.parser.model.Phrase;
 import ai.labs.parser.model.Word;
-import org.junit.Assert;
-import org.junit.Before;
-import org.junit.Test;
+import org.junit.jupiter.api.Assertions;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
 
 import java.util.Arrays;
 import java.util.Collections;
@@ -21,13 +21,13 @@ import java.util.List;
 public class DamerauLevenshteinCorrectionTest {
     private IExpressionProvider expressionUtilities;
 
-    @Before
+    @BeforeEach
     public void setup() {
         expressionUtilities = new ExpressionProvider(new ExpressionFactory());
     }
 
     @Test
-    public void testLookupTermDistanceOfOne() throws Exception {
+    void testLookupTermDistanceOfOne() throws Exception {
         //setup
         TestDictionary testDictionary = new TestDictionary();
         DamerauLevenshteinCorrection levenshteinCorrection = new DamerauLevenshteinCorrection(); // max distance of 2
@@ -37,11 +37,11 @@ public class DamerauLevenshteinCorrectionTest {
         List<IDictionary.IFoundWord> foundWords = levenshteinCorrection.correctWord("helo");
 
         //assert
-        Assert.assertEquals(1, foundWords.size());
+        Assertions.assertEquals(1, foundWords.size());
     }
 
     @Test
-    public void testLookupTermDistanceOfTwo() throws Exception {
+    void testLookupTermDistanceOfTwo() throws Exception {
         //setup
         TestDictionary testDictionary = new TestDictionary();
         DamerauLevenshteinCorrection levenshteinCorrection = new DamerauLevenshteinCorrection(); // max distance of 2
@@ -51,11 +51,11 @@ public class DamerauLevenshteinCorrectionTest {
         List<IDictionary.IFoundWord> foundWords = levenshteinCorrection.correctWord("heo");
 
         //assert
-        Assert.assertEquals(1, foundWords.size());
+        Assertions.assertEquals(1, foundWords.size());
     }
 
     @Test
-    public void testLookupTermDistanceOfThree() throws Exception {
+    void testLookupTermDistanceOfThree() throws Exception {
         //setup
         TestDictionary testDictionary = new TestDictionary();
         DamerauLevenshteinCorrection levenshteinCorrection = new DamerauLevenshteinCorrection(); // max distance of 2
@@ -65,7 +65,7 @@ public class DamerauLevenshteinCorrectionTest {
         List<IDictionary.IFoundWord> foundWords = levenshteinCorrection.correctWord("he");
 
         //assert
-        Assert.assertEquals(0, foundWords.size());
+        Assertions.assertEquals(0, foundWords.size());
     }
 
     private class TestDictionary implements IDictionary {

@@ -1,17 +1,17 @@
 package ai.labs.behavior.impl;
 
+import ai.labs.exception.ServiceException;
 import ai.labs.lifecycle.ILifecycleTask;
 import ai.labs.lifecycle.LifecycleException;
 import ai.labs.lifecycle.PackageConfigurationException;
 import ai.labs.memory.IConversationMemory;
 import ai.labs.memory.IData;
 import ai.labs.memory.model.Data;
+import ai.labs.models.ExtensionDescriptor;
+import ai.labs.models.ExtensionDescriptor.ConfigValue;
+import ai.labs.models.ExtensionDescriptor.FieldType;
 import ai.labs.resources.rest.config.behavior.model.BehaviorConfiguration;
-import ai.labs.resources.rest.extensions.model.ExtensionDescriptor;
-import ai.labs.resources.rest.extensions.model.ExtensionDescriptor.ConfigValue;
-import ai.labs.resources.rest.extensions.model.ExtensionDescriptor.FieldType;
-import ai.labs.runtime.client.configuration.IResourceClientLibrary;
-import ai.labs.runtime.service.ServiceException;
+import ai.labs.resources.rest.restinterfaces.IResourceClientLibrary;
 import ai.labs.serialization.DeserializationException;
 import ai.labs.serialization.IJsonSerialization;
 import lombok.extern.slf4j.Slf4j;

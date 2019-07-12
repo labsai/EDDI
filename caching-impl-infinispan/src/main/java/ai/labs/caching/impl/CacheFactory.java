@@ -7,23 +7,15 @@ import org.infinispan.Cache;
 import org.infinispan.manager.DefaultCacheManager;
 import org.infinispan.manager.EmbeddedCacheManager;
 
-import javax.inject.Inject;
-import java.io.IOException;
-import java.io.InputStream;
+import javax.enterprise.context.ApplicationScoped;
 
 @Slf4j
+@ApplicationScoped
 public class CacheFactory implements ICacheFactory {
     private final EmbeddedCacheManager cacheManager;
 
-    @Inject
-    public CacheFactory(InputStream configurationFile) {
-        try {
-            this.cacheManager = new DefaultCacheManager(configurationFile);
-        } catch (IOException e) {
-            final String message = "Unable to initialize CacheFactory!";
-            log.error(e.getLocalizedMessage(), e);
-            throw new RuntimeException(message, e);
-        }
+    public CacheFactory() {
+        this.cacheManager = new DefaultCacheManager();
     }
 
     @Override

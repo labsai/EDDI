@@ -9,11 +9,13 @@ import ai.labs.serialization.IDocumentBuilder;
 import ai.labs.user.IUserStore;
 import com.mongodb.client.MongoDatabase;
 
+import javax.enterprise.context.ApplicationScoped;
 import javax.inject.Inject;
 
 /**
  * @author ginccc
  */
+@ApplicationScoped
 public class DocumentDescriptorStore extends DescriptorStore<DocumentDescriptor> implements IDocumentDescriptorStore {
 
     @Inject

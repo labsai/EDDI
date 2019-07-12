@@ -1,8 +1,8 @@
 package ai.labs.resources.rest.config.bots;
 
+import ai.labs.models.BotConfiguration;
 import ai.labs.models.DocumentDescriptor;
 import ai.labs.resources.rest.IRestVersionInfo;
-import ai.labs.resources.rest.config.bots.model.BotConfiguration;
 import io.swagger.annotations.*;
 
 import javax.ws.rs.*;

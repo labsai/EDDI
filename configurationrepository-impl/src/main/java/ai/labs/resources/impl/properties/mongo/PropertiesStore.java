@@ -1,7 +1,7 @@
 package ai.labs.resources.impl.properties.mongo;
 
+import ai.labs.models.Properties;
 import ai.labs.resources.rest.properties.IPropertiesStore;
-import ai.labs.resources.rest.properties.model.Properties;
 import ai.labs.utilities.RuntimeUtilities;
 import com.mongodb.client.MongoCollection;
 import com.mongodb.client.MongoDatabase;
@@ -10,12 +10,14 @@ import com.mongodb.client.model.Indexes;
 import lombok.extern.slf4j.Slf4j;
 import org.bson.Document;
 
+import javax.enterprise.context.ApplicationScoped;
 import javax.inject.Inject;
 
 /**
  * @author ginccc
  */
 @Slf4j
+@ApplicationScoped
 public class PropertiesStore implements IPropertiesStore {
     private static final String COLLECTION_PROPERTIES = "properties";
     private static final String USER_ID = "userId";

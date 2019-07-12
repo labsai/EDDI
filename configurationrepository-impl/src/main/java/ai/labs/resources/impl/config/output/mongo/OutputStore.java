@@ -10,6 +10,7 @@ import ai.labs.serialization.IDocumentBuilder;
 import ai.labs.utilities.RuntimeUtilities;
 import com.mongodb.client.MongoDatabase;
 
+import javax.enterprise.context.ApplicationScoped;
 import javax.inject.Inject;
 import java.util.Collections;
 import java.util.Comparator;
@@ -19,6 +20,7 @@ import java.util.List;
 /**
  * @author ginccc
  */
+@ApplicationScoped
 public class OutputStore implements IOutputStore {
     private HistorizedResourceStore<OutputConfigurationSet> outputResourceStore;
     private static final OutputComparator OUTPUT_COMPARATOR = new OutputComparator();

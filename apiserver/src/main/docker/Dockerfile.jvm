@@ -1,0 +1,24 @@
+####
+# This Dockerfile is used in order to build a container that runs the Quarkus application in JVM mode
+#
+# Before building the docker image run:
+#
+# mvn package
+#
+# Then, build the image with:
+#
+# docker build -f src/main/docker/Dockerfile.jvm -t quarkus/getting-started-jvm .
+#
+# Then run the container using:
+#
+# docker run -i --rm -p 7070:7070 quarkus/getting-started-jvm
+#
+###
+FROM labsai/base-image
+#FROM fabric8/java-alpine-openjdk8-jre
+ENV JAVA_OPTIONS="-Dquarkus.http.host=0.0.0.0 -Dquarkus.http.port=7070 -Djava.util.logging.manager=org.jboss.logmanager.LogManager"
+ENV AB_ENABLED=jmx_exporter
+COPY target/lib/* /deployments/lib/
+COPY target/*-runner.jar /deployments/app.jar
+HEALTHCHECK --interval=10s --timeout=10s CMD curl --fail http://localhost:7070/health || exit 1
+ENTRYPOINT [ "/deployments/run-java.sh" ]

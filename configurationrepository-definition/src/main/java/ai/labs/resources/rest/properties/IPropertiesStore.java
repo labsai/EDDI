@@ -1,7 +1,7 @@
 package ai.labs.resources.rest.properties;
 
+import ai.labs.models.Properties;
 import ai.labs.persistence.IResourceStore;
-import ai.labs.resources.rest.properties.model.Properties;
 
 /**
  * @author ginccc

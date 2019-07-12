@@ -1,8 +1,8 @@
 package ai.labs.resources.rest.config.packages;
 
 import ai.labs.models.DocumentDescriptor;
+import ai.labs.models.PackageConfiguration;
 import ai.labs.resources.rest.IRestVersionInfo;
-import ai.labs.resources.rest.config.packages.model.PackageConfiguration;
 import io.swagger.annotations.*;
 
 import javax.ws.rs.*;

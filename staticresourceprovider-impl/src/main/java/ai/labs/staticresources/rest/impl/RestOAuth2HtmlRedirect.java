@@ -4,9 +4,11 @@ import ai.labs.staticresources.rest.IResourceFileManager;
 import ai.labs.staticresources.rest.IRestOAuth2HtmlRedirect;
 import org.jboss.resteasy.spi.NoLogWebApplicationException;
 
+import javax.enterprise.context.RequestScoped;
 import javax.inject.Inject;
 import javax.ws.rs.core.Response;
 
+@RequestScoped
 public class RestOAuth2HtmlRedirect implements IRestOAuth2HtmlRedirect {
     private final IResourceFileManager resourceFileManager;
 

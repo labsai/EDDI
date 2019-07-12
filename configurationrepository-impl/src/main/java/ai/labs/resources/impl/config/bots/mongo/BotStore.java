@@ -1,5 +1,6 @@
 package ai.labs.resources.impl.config.bots.mongo;
 
+import ai.labs.models.BotConfiguration;
 import ai.labs.models.DocumentDescriptor;
 import ai.labs.persistence.IResourceStore;
 import ai.labs.persistence.mongo.HistorizedResourceStore;
@@ -7,7 +8,6 @@ import ai.labs.persistence.mongo.MongoResourceStorage;
 import ai.labs.resources.impl.descriptor.mongo.DocumentDescriptorStore;
 import ai.labs.resources.impl.utilities.ResourceUtilities;
 import ai.labs.resources.rest.config.bots.IBotStore;
-import ai.labs.resources.rest.config.bots.model.BotConfiguration;
 import ai.labs.resources.rest.documentdescriptor.IDocumentDescriptorStore;
 import ai.labs.serialization.IDocumentBuilder;
 import ai.labs.utilities.RuntimeUtilities;
@@ -16,6 +16,7 @@ import com.mongodb.client.MongoDatabase;
 import lombok.extern.slf4j.Slf4j;
 import org.bson.Document;
 
+import javax.enterprise.context.ApplicationScoped;
 import javax.inject.Inject;
 import java.util.Collections;
 import java.util.LinkedList;
@@ -25,6 +26,7 @@ import java.util.List;
  * @author ginccc
  */
 @Slf4j
+@ApplicationScoped
 public class BotStore implements IBotStore {
     private final IDocumentDescriptorStore documentDescriptorStore;
     private final BotHistorizedResourceStore botResourceStore;

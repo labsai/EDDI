@@ -1,83 +1,66 @@
 package ai.labs.persistence.bootstrap;
 
-import ai.labs.runtime.bootstrap.AbstractBaseModule;
 import ai.labs.utilities.RuntimeUtilities;
-import com.google.inject.Provides;
 import com.mongodb.*;
 import com.mongodb.client.MongoDatabase;
+import org.eclipse.microprofile.config.inject.ConfigProperty;
 
-import javax.inject.Named;
-import javax.inject.Singleton;
-import java.io.InputStream;
-import java.net.UnknownHostException;
+import javax.enterprise.context.ApplicationScoped;
+import javax.enterprise.inject.Produces;
 import java.util.LinkedList;
 import java.util.List;
 
 /**
  * @author ginccc
  */
-public class PersistenceModule extends AbstractBaseModule {
-    private final InputStream configFile;
+@ApplicationScoped
+public class PersistenceModule {
+    @Produces
+    @ApplicationScoped
+    public MongoDatabase provideMongoDB(@ConfigProperty(name = "mongodb.hosts") String hosts,
+                                        @ConfigProperty(name = "mongodb.port") Integer port,
+                                        @ConfigProperty(name = "mongodb.database") String database,
+                                        @ConfigProperty(name = "mongodb.source") String source,
+                                        @ConfigProperty(name = "mongodb.username") String username,
+                                        @ConfigProperty(name = "mongodb.password") String password,
+                                        @ConfigProperty(name = "mongodb.connectionsPerHost") Integer connectionsPerHost,
+                                        @ConfigProperty(name = "mongodb.connectTimeout") Integer connectTimeout,
+                                        @ConfigProperty(name = "mongodb.heartbeatConnectTimeout") Integer heartbeatConnectTimeout,
+                                        @ConfigProperty(name = "mongodb.heartbeatFrequency") Integer heartbeatFrequency,
+                                        @ConfigProperty(name = "mongodb.heartbeatSocketTimeout") Integer heartbeatSocketTimeout,
+                                        @ConfigProperty(name = "mongodb.localThreshold") Integer localThreshold,
+                                        @ConfigProperty(name = "mongodb.maxConnectionIdleTime") Integer maxConnectionIdleTime,
+                                        @ConfigProperty(name = "mongodb.maxConnectionLifeTime") Integer maxConnectionLifeTime,
+                                        @ConfigProperty(name = "mongodb.maxWaitTime") Integer maxWaitTime,
+                                        @ConfigProperty(name = "mongodb.minConnectionsPerHost") Integer minConnectionsPerHost,
+                                        @ConfigProperty(name = "mongodb.minHeartbeatFrequency") Integer minHeartbeatFrequency,
+                                        @ConfigProperty(name = "mongodb.requiredReplicaSetName") String requiredReplicaSetName,
+                                        @ConfigProperty(name = "mongodb.serverSelectionTimeout") Integer serverSelectionTimeout,
+                                        @ConfigProperty(name = "mongodb.socketTimeout") Integer socketTimeout,
+                                        @ConfigProperty(name = "mongodb.sslEnabled") Boolean sslEnabled,
+                                        @ConfigProperty(name = "mongodb.threadsAllowedToBlockForConnectionMultiplier") Integer threadsAllowedToBlockForConnectionMultiplier) {
 
-    public PersistenceModule(InputStream configFile) {
-        this.configFile = configFile;
-    }
+        List<ServerAddress> seeds = hostsToServerAddress(hosts, port);
 
-    @Override
-    protected void configure() {
-        registerConfigFiles(this.configFile);
-    }
-
-    @Provides
-    @Singleton
-    public MongoDatabase provideMongoDB(@Named("mongodb.hosts") String hosts,
-                                        @Named("mongodb.port") Integer port,
-                                        @Named("mongodb.database") String database,
-                                        @Named("mongodb.source") String source,
-                                        @Named("mongodb.username") String username,
-                                        @Named("mongodb.password") String password,
-                                        @Named("mongodb.connectionsPerHost") Integer connectionsPerHost,
-                                        @Named("mongodb.connectTimeout") Integer connectTimeout,
-                                        @Named("mongodb.heartbeatConnectTimeout") Integer heartbeatConnectTimeout,
-                                        @Named("mongodb.heartbeatFrequency") Integer heartbeatFrequency,
-                                        @Named("mongodb.heartbeatSocketTimeout") Integer heartbeatSocketTimeout,
-                                        @Named("mongodb.localThreshold") Integer localThreshold,
-                                        @Named("mongodb.maxConnectionIdleTime") Integer maxConnectionIdleTime,
-                                        @Named("mongodb.maxConnectionLifeTime") Integer maxConnectionLifeTime,
-                                        @Named("mongodb.maxWaitTime") Integer maxWaitTime,
-                                        @Named("mongodb.minConnectionsPerHost") Integer minConnectionsPerHost,
-                                        @Named("mongodb.minHeartbeatFrequency") Integer minHeartbeatFrequency,
-                                        @Named("mongodb.requiredReplicaSetName") String requiredReplicaSetName,
-                                        @Named("mongodb.serverSelectionTimeout") Integer serverSelectionTimeout,
-                                        @Named("mongodb.socketTimeout") Integer socketTimeout,
-                                        @Named("mongodb.sslEnabled") Boolean sslEnabled,
-                                        @Named("mongodb.threadsAllowedToBlockForConnectionMultiplier") Integer threadsAllowedToBlockForConnectionMultiplier) {
-        try {
-
-            List<ServerAddress> seeds = hostsToServerAddress(hosts, port);
-
-            MongoClient mongoClient;
-            MongoClientOptions mongoClientOptions = buildMongoClientOptions(
-                    WriteConcern.MAJORITY, ReadPreference.nearest(),
-                    connectionsPerHost, connectTimeout, heartbeatConnectTimeout,
-                    heartbeatFrequency, heartbeatSocketTimeout, localThreshold,
-                    maxConnectionIdleTime, maxConnectionLifeTime, maxWaitTime,
-                    minConnectionsPerHost, minHeartbeatFrequency, requiredReplicaSetName,
-                    serverSelectionTimeout, socketTimeout,
-                    sslEnabled, threadsAllowedToBlockForConnectionMultiplier);
-            if ("".equals(username) || "".equals(password)) {
-                mongoClient = new MongoClient(seeds, mongoClientOptions);
-            } else {
-                MongoCredential credential = MongoCredential.createCredential(username, source, password.toCharArray());
-                mongoClient = new MongoClient(seeds, credential, mongoClientOptions);
-            }
-
-            registerMongoClientShutdownHook(mongoClient);
-
-            return mongoClient.getDatabase(database);
-        } catch (UnknownHostException e) {
-            throw new RuntimeException(e.getLocalizedMessage(), e);
+        MongoClient mongoClient;
+        MongoClientOptions mongoClientOptions = buildMongoClientOptions(
+                WriteConcern.MAJORITY, ReadPreference.nearest(),
+                connectionsPerHost, connectTimeout, heartbeatConnectTimeout,
+                heartbeatFrequency, heartbeatSocketTimeout, localThreshold,
+                maxConnectionIdleTime, maxConnectionLifeTime, maxWaitTime,
+                minConnectionsPerHost, minHeartbeatFrequency, requiredReplicaSetName,
+                serverSelectionTimeout, socketTimeout,
+                sslEnabled, threadsAllowedToBlockForConnectionMultiplier);
+        if ("".equals(username) || "".equals(password)) {
+            mongoClient = new MongoClient(seeds, mongoClientOptions);
+        } else {
+            MongoCredential credential = MongoCredential.createCredential(username, source, password.toCharArray());
+            mongoClient = new MongoClient(seeds, credential, mongoClientOptions);
         }
+
+        registerMongoClientShutdownHook(mongoClient);
+
+        return mongoClient.getDatabase(database);
     }
 
     private MongoClientOptions buildMongoClientOptions(WriteConcern writeConcern, ReadPreference readPreference,
@@ -120,7 +103,7 @@ public class PersistenceModule extends AbstractBaseModule {
         return builder.build();
     }
 
-    private static List<ServerAddress> hostsToServerAddress(String hosts, Integer port) throws UnknownHostException {
+    private static List<ServerAddress> hostsToServerAddress(String hosts, Integer port) {
         List<ServerAddress> ret = new LinkedList<>();
 
         for (String host : hosts.split(",")) {

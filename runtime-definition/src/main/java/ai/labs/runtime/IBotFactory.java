@@ -1,7 +1,7 @@
 package ai.labs.runtime;
 
+import ai.labs.exception.ServiceException;
 import ai.labs.models.Deployment;
-import ai.labs.runtime.service.ServiceException;
 
 import java.util.List;
 
@@ -16,7 +16,7 @@ public interface IBotFactory {
     IBot getBot(Deployment.Environment environment, String botId, Integer version) throws ServiceException;
 
     void deployBot(Deployment.Environment environment, String botId, Integer version, DeploymentProcess deploymentProcess)
-            throws ServiceException, IllegalAccessException;
+            throws IllegalAccessException, ServiceException;
 
     void undeployBot(Deployment.Environment environment, String botId, Integer version)
             throws ServiceException, IllegalAccessException;

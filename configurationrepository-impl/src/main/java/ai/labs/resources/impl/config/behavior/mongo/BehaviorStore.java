@@ -10,6 +10,7 @@ import ai.labs.serialization.IDocumentBuilder;
 import ai.labs.utilities.RuntimeUtilities;
 import com.mongodb.client.MongoDatabase;
 
+import javax.enterprise.context.ApplicationScoped;
 import javax.inject.Inject;
 import java.util.Collections;
 import java.util.LinkedList;
@@ -18,6 +19,7 @@ import java.util.List;
 /**
  * @author ginccc
  */
+@ApplicationScoped
 public class BehaviorStore implements IBehaviorStore {
 
     private final HistorizedResourceStore<BehaviorConfiguration> behaviorResourceStore;

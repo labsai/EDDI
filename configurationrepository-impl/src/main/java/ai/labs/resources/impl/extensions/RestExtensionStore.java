@@ -1,10 +1,12 @@
 package ai.labs.resources.impl.extensions;
 
 import ai.labs.lifecycle.ILifecycleTask;
+import ai.labs.lifecycle.bootstrap.LifecycleExtensions;
+import ai.labs.models.ExtensionDescriptor;
 import ai.labs.resources.rest.extensions.IRestExtensionStore;
-import ai.labs.resources.rest.extensions.model.ExtensionDescriptor;
 import lombok.extern.slf4j.Slf4j;
 
+import javax.enterprise.context.ApplicationScoped;
 import javax.inject.Inject;
 import javax.inject.Provider;
 import java.util.List;
@@ -15,11 +17,12 @@ import java.util.stream.Collectors;
  * @author ginccc
  */
 @Slf4j
+@ApplicationScoped
 public class RestExtensionStore implements IRestExtensionStore {
     private final Map<String, Provider<ILifecycleTask>> lifecycleExtensionsProvider;
 
     @Inject
-    public RestExtensionStore(Map<String, Provider<ILifecycleTask>> lifecycleExtensionsProvider) {
+    public RestExtensionStore(@LifecycleExtensions Map<String, Provider<ILifecycleTask>> lifecycleExtensionsProvider) {
         this.lifecycleExtensionsProvider = lifecycleExtensionsProvider;
     }
 

@@ -9,6 +9,7 @@ import ai.labs.serialization.IDocumentBuilder;
 import ai.labs.utilities.RuntimeUtilities;
 import com.mongodb.client.MongoDatabase;
 
+import javax.enterprise.context.ApplicationScoped;
 import javax.inject.Inject;
 import java.util.Comparator;
 import java.util.LinkedList;
@@ -17,6 +18,7 @@ import java.util.List;
 /**
  * @author ginccc
  */
+@ApplicationScoped
 public class RegularDictionaryStore implements IRegularDictionaryStore {
     private HistorizedResourceStore<RegularDictionaryConfiguration> regularDictionaryResourceStore;
 

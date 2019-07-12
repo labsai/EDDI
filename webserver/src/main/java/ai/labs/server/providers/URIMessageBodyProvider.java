@@ -34,7 +34,7 @@ public class URIMessageBodyProvider implements MessageBodyReader<URI>, MessageBo
 
     @Override
     public long getSize(URI uri, Class<?> type, Type genericType, Annotation[] annotations, MediaType mediaType) {
-        return 0;
+        return uri.toString().getBytes().length;
     }
 
     @Override

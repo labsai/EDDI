@@ -12,6 +12,7 @@ import com.mongodb.client.model.Indexes;
 import lombok.extern.slf4j.Slf4j;
 import org.bson.Document;
 
+import javax.enterprise.context.ApplicationScoped;
 import javax.inject.Inject;
 import java.io.IOException;
 
@@ -21,6 +22,7 @@ import static ai.labs.persistence.IResourceStore.*;
  * @author ginccc
  */
 @Slf4j
+@ApplicationScoped
 public class BotTriggerStore implements IBotTriggerStore {
     private static final String COLLECTION_BOT_TRIGGERS = "bottriggers";
     private static final String INTENT_FIELD = "intent";

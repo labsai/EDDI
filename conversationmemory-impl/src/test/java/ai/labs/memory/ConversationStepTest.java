@@ -2,9 +2,9 @@ package ai.labs.memory;
 
 import ai.labs.memory.model.ConversationOutput;
 import ai.labs.memory.model.Data;
-import org.junit.Assert;
-import org.junit.Before;
-import org.junit.Test;
+import org.junit.jupiter.api.Assertions;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
 
 import java.util.LinkedList;
 import java.util.List;
@@ -13,42 +13,42 @@ import java.util.Set;
 /**
  * @author ginccc
  */
-public class ConversationStepTest {
+class ConversationStepTest {
     private IConversationMemory.IWritableConversationStep conversationStep;
 
-    @Before
-    public void setUp() {
+    @BeforeEach
+    void setUp() {
         conversationStep = new ConversationStep(new ConversationOutput());
     }
 
     @Test
-    public void testPlain() {
+    void testPlain() {
         //assert
-        Assert.assertNull(conversationStep.getData("whatever"));
+        Assertions.assertNull(conversationStep.getData("whatever"));
         final List<IData<Void>> allData = conversationStep.getAllData("void");
-        Assert.assertNotNull(allData);
-        Assert.assertEquals(0, allData.size());
-        Assert.assertNotNull(conversationStep.getAllElements());
-        Assert.assertEquals(0, conversationStep.getAllElements().size());
-        Assert.assertNotNull(conversationStep.getAllKeys());
-        Assert.assertEquals(0, conversationStep.getAllKeys().size());
-        Assert.assertTrue(conversationStep.isEmpty());
-        Assert.assertEquals(0, conversationStep.size());
+        Assertions.assertNotNull(allData);
+        Assertions.assertEquals(0, allData.size());
+        Assertions.assertNotNull(conversationStep.getAllElements());
+        Assertions.assertEquals(0, conversationStep.getAllElements().size());
+        Assertions.assertNotNull(conversationStep.getAllKeys());
+        Assertions.assertEquals(0, conversationStep.getAllKeys().size());
+        Assertions.assertTrue(conversationStep.isEmpty());
+        Assertions.assertEquals(0, conversationStep.size());
     }
 
     @Test
-    public void testGetData() {
+    void testGetData() {
         //setup
         final Data data = new Data<List>("testKey", new LinkedList());
         conversationStep.storeData(data);
 
         //assert
-        Assert.assertNotNull(conversationStep.getData("testKey"));
-        Assert.assertEquals(data, conversationStep.getData("testKey"));
+        Assertions.assertNotNull(conversationStep.getData("testKey"));
+        Assertions.assertEquals(data, conversationStep.getData("testKey"));
     }
 
     @Test
-    public void testGetAllData() {
+    void testGetAllData() {
         //setup
         final Data data1 = new Data<List>("testKey1", new LinkedList());
         final Data data2 = new Data<List>("testKey2", new LinkedList());
@@ -59,14 +59,14 @@ public class ConversationStepTest {
         final List<IData<List>> allData = conversationStep.getAllData("testKey");
 
         //assert
-        Assert.assertNotNull(allData);
-        Assert.assertEquals(2, allData.size());
-        Assert.assertEquals(data1, allData.get(0));
-        Assert.assertEquals(data2, allData.get(1));
+        Assertions.assertNotNull(allData);
+        Assertions.assertEquals(2, allData.size());
+        Assertions.assertEquals(data1, allData.get(0));
+        Assertions.assertEquals(data2, allData.get(1));
     }
 
     @Test
-    public void testGetAllKeys() {
+    void testGetAllKeys() {
         //setup
         final Data data1 = new Data<List>("testKey1", new LinkedList());
         final Data data2 = new Data<List>("testKey2", new LinkedList());
@@ -77,14 +77,14 @@ public class ConversationStepTest {
         final Set<String> allKeys = conversationStep.getAllKeys();
 
         //assert
-        Assert.assertNotNull(allKeys);
-        Assert.assertEquals("testKey1", allKeys.toArray()[0]);
-        Assert.assertEquals("testKey2", allKeys.toArray()[1]);
+        Assertions.assertNotNull(allKeys);
+        Assertions.assertEquals("testKey1", allKeys.toArray()[0]);
+        Assertions.assertEquals("testKey2", allKeys.toArray()[1]);
 
     }
 
     @Test
-    public void testGetAllElements() {
+    void testGetAllElements() {
         //setup
         final Data data1 = new Data<>("testKey1", "testData1");
         final Data data2 = new Data<>("testKey2", "testData2");
@@ -95,33 +95,33 @@ public class ConversationStepTest {
         final List<IData> allData = conversationStep.getAllElements();
 
         //assert
-        Assert.assertNotNull(allData);
-        Assert.assertEquals("testData1", allData.toArray(new IData[2])[0].getResult());
-        Assert.assertEquals("testData2", allData.toArray(new IData[2])[1].getResult());
+        Assertions.assertNotNull(allData);
+        Assertions.assertEquals("testData1", allData.toArray(new IData[2])[0].getResult());
+        Assertions.assertEquals("testData2", allData.toArray(new IData[2])[1].getResult());
     }
 
     @Test
-    public void testSize() {
+    void testSize() {
         //setup
         final Data data1 = new Data<List>("testKey1", new LinkedList());
         conversationStep.storeData(data1);
 
         //assert
-        Assert.assertEquals(1, conversationStep.size());
+        Assertions.assertEquals(1, conversationStep.size());
     }
 
     @Test
-    public void testIsEmpty() {
+    void testIsEmpty() {
         //setup
         final Data data1 = new Data<List>("testKey1", new LinkedList());
         conversationStep.storeData(data1);
 
         //assert
-        Assert.assertFalse(conversationStep.isEmpty());
+        Assertions.assertFalse(conversationStep.isEmpty());
     }
 
     @Test
-    public void testEquals() {
+    void testEquals() {
         //setup
         final Data data = new Data<List>("testKey", new LinkedList());
         this.conversationStep.storeData(data);
@@ -129,6 +129,6 @@ public class ConversationStepTest {
         conversationStep.storeData(data);
 
         //assert
-        Assert.assertEquals(this.conversationStep, conversationStep);
+        Assertions.assertEquals(this.conversationStep, conversationStep);
     }
 }

@@ -4,9 +4,9 @@ import ai.labs.output.IOutputFilter;
 import ai.labs.output.model.OutputEntry;
 import ai.labs.output.model.OutputValue;
 import ai.labs.output.model.QuickReply;
-import org.junit.Assert;
-import org.junit.Before;
-import org.junit.Test;
+import org.junit.jupiter.api.Assertions;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
 
 import java.util.Arrays;
 import java.util.LinkedList;
@@ -23,13 +23,13 @@ public class OutputGenerationTest {
     public static final String OUTPUT_TYPE_TEXT = "text";
     private OutputGeneration outputGeneration;
 
-    @Before
+    @BeforeEach
     public void setUp() {
         outputGeneration = new OutputGeneration();
     }
 
     @Test
-    public void addOutputEntry() {
+    void addOutputEntry() {
         //setup
         List<OutputEntry> outputEntries = setupOutputEntries();
 
@@ -37,13 +37,13 @@ public class OutputGenerationTest {
         outputEntries.forEach(outputEntry -> outputGeneration.addOutputEntry(outputEntry));
 
         //assert
-        Assert.assertEquals(3, outputGeneration.getOutputMapper().keySet().size());
-        Assert.assertEquals(2, outputGeneration.getOutputMapper().get(ACTION_3).get(0).getOccurred());
-        Assert.assertEquals(4, outputGeneration.getOutputMapper().get(ACTION_3).get(1).getOccurred());
+        Assertions.assertEquals(3, outputGeneration.getOutputMapper().keySet().size());
+        Assertions.assertEquals(2, outputGeneration.getOutputMapper().get(ACTION_3).get(0).getOccurred());
+        Assertions.assertEquals(4, outputGeneration.getOutputMapper().get(ACTION_3).get(1).getOccurred());
     }
 
     @Test
-    public void getOutputs() {
+    void getOutputs() {
         //setup
         List<OutputEntry> outputEntries = setupOutputEntries();
         outputEntries.forEach(outputEntry -> outputGeneration.addOutputEntry(outputEntry));
@@ -54,12 +54,12 @@ public class OutputGenerationTest {
         Map<String, List<OutputEntry>> outputs = outputGeneration.getOutputs(outputFilter);
 
         //assert
-        Assert.assertEquals(1, outputs.keySet().size());
-        Assert.assertEquals(2, outputs.get(ACTION_3).get(0).getOccurred());
+        Assertions.assertEquals(1, outputs.keySet().size());
+        Assertions.assertEquals(2, outputs.get(ACTION_3).get(0).getOccurred());
     }
 
     @Test
-    public void extractOutputEntryOfSameOccurrence_Occurred_0() {
+    void extractOutputEntryOfSameOccurrence_Occurred_0() {
         //setup
         List<OutputEntry> outputEntries = setupOutputEntries();
 
@@ -67,11 +67,11 @@ public class OutputGenerationTest {
         List<OutputEntry> actual = outputGeneration.extractOutputEntryOfSameOccurrence(outputEntries, 0);
 
         //assert
-        Assert.assertEquals(ACTION_1, actual.get(0).getAction());
+        Assertions.assertEquals(ACTION_1, actual.get(0).getAction());
     }
 
     @Test
-    public void extractOutputEntryOfSameOccurrence_Occurred_1() {
+    void extractOutputEntryOfSameOccurrence_Occurred_1() {
         //setup
         List<OutputEntry> outputEntries = setupOutputEntries();
 
@@ -79,11 +79,11 @@ public class OutputGenerationTest {
         List<OutputEntry> actual = outputGeneration.extractOutputEntryOfSameOccurrence(outputEntries, 1);
 
         //assert
-        Assert.assertEquals(ACTION_2, actual.get(0).getAction());
+        Assertions.assertEquals(ACTION_2, actual.get(0).getAction());
     }
 
     @Test
-    public void extractOutputEntryOfSameOccurrence_Occurred_2() {
+    void extractOutputEntryOfSameOccurrence_Occurred_2() {
         //setup
         List<OutputEntry> outputEntries = setupOutputEntries();
 
@@ -91,11 +91,11 @@ public class OutputGenerationTest {
         List<OutputEntry> actual = outputGeneration.extractOutputEntryOfSameOccurrence(outputEntries, 2);
 
         //assert
-        Assert.assertEquals(ACTION_3, actual.get(0).getAction());
+        Assertions.assertEquals(ACTION_3, actual.get(0).getAction());
     }
 
     @Test
-    public void extractOutputEntryOfSameOccurrence_Occurred_3() {
+    void extractOutputEntryOfSameOccurrence_Occurred_3() {
         //setup
         List<OutputEntry> outputEntries = setupOutputEntries();
 
@@ -103,7 +103,7 @@ public class OutputGenerationTest {
         List<OutputEntry> actual = outputGeneration.extractOutputEntryOfSameOccurrence(outputEntries, 3);
 
         //assert
-        Assert.assertEquals(ACTION_3, actual.get(0).getAction());
+        Assertions.assertEquals(ACTION_3, actual.get(0).getAction());
     }
 
     private List<OutputEntry> setupOutputEntries() {

@@ -2,6 +2,7 @@ package ai.labs.backupservice.impl;
 
 import ai.labs.backupservice.IZipArchive;
 
+import javax.enterprise.context.ApplicationScoped;
 import java.io.*;
 import java.util.LinkedList;
 import java.util.List;
@@ -13,6 +14,7 @@ import java.util.zip.ZipOutputStream;
  * @author ginccc
  */
 @SuppressWarnings("ResultOfMethodCallIgnored")
+@ApplicationScoped
 public class ZipArchive implements IZipArchive {
     private static final int BUFFER_SIZE = 4096;
 

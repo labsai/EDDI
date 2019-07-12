@@ -1,7 +1,7 @@
 package ai.labs.parser.extensions;
 
 import ai.labs.lifecycle.IllegalExtensionConfigurationException;
-import ai.labs.resources.rest.extensions.model.ExtensionDescriptor;
+import ai.labs.models.ExtensionDescriptor;
 
 import java.util.Collections;
 import java.util.Map;

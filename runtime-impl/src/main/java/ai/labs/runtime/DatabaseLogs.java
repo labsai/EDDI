@@ -7,10 +7,12 @@ import com.mongodb.client.MongoCollection;
 import com.mongodb.client.MongoDatabase;
 import org.bson.Document;
 
+import javax.enterprise.context.ApplicationScoped;
 import javax.inject.Inject;
 import java.util.ArrayList;
 import java.util.List;
 
+@ApplicationScoped
 public class DatabaseLogs implements IDatabaseLogs {
     private static final String COLLECTION_NAME = "logs";
     private static final String CONTEXT_MAP_BOT_ID = "contextMap.botId";

@@ -9,6 +9,7 @@ import ai.labs.utilities.SecurityUtilities;
 import lombok.extern.slf4j.Slf4j;
 import org.jboss.resteasy.spi.NoLogWebApplicationException;
 
+import javax.enterprise.context.RequestScoped;
 import javax.inject.Inject;
 import javax.ws.rs.InternalServerErrorException;
 import javax.ws.rs.core.Response;
@@ -18,6 +19,7 @@ import java.net.URI;
  * @author ginccc
  */
 @Slf4j
+@RequestScoped
 public class RestUserStore implements IRestUserStore {
     private final IUserStore userStore;
 

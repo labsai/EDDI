@@ -1,16 +1,17 @@
 package ai.labs.backupservice.impl;
 
-import org.junit.Assert;
-import org.junit.Test;
+
+import org.junit.jupiter.api.Assertions;
+import org.junit.jupiter.api.Test;
 
 import java.util.regex.Pattern;
 
 /**
  * @author ginccc
  */
-public class CallbackMatcherTest {
+class CallbackMatcherTest {
     @Test
-    public void testReplaceMatchesOneOccurrence() throws Exception {
+    void testReplaceMatchesOneOccurrence() throws Exception {
         //setup
         CallbackMatcher callbackMatcher = new CallbackMatcher(Pattern.compile("testRegex"));
 
@@ -18,11 +19,11 @@ public class CallbackMatcherTest {
         String result = callbackMatcher.replaceMatches("This is the test: testRegex!", matchResult -> "works");
 
         //assert
-        Assert.assertEquals("This is the test: works!", result);
+        Assertions.assertEquals("This is the test: works!", result);
     }
 
     @Test
-    public void testReplaceMatchesTwoOccurrence() throws Exception {
+    void testReplaceMatchesTwoOccurrence() throws Exception {
         //setup
         CallbackMatcher callbackMatcher = new CallbackMatcher(Pattern.compile("testRegex"));
 
@@ -30,6 +31,6 @@ public class CallbackMatcherTest {
         String result = callbackMatcher.replaceMatches("This is the test: testRegex + testRegex!", matchResult -> "works");
 
         //assert
-        Assert.assertEquals("This is the test: works + works!", result);
+        Assertions.assertEquals("This is the test: works + works!", result);
     }
 }

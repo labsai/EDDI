@@ -21,11 +21,6 @@
         </dependency>
         <dependency>
             <groupId>ai.labs</groupId>
-            <artifactId>corerest-definition</artifactId>
-            <version>${project.version}</version>
-        </dependency>
-        <dependency>
-            <groupId>ai.labs</groupId>
             <artifactId>coreutilities</artifactId>
             <version>${project.version}</version>
         </dependency>
@@ -44,12 +39,6 @@
             <artifactId>conversationlifecycle-impl</artifactId>
             <version>${project.version}</version>
         </dependency>
-        <dependency>
-            <groupId>com.google.inject.extensions</groupId>
-            <artifactId>guice-servlet</artifactId>
-            <version>4.2.1</version>
-        </dependency>
-
 
         <!-- swagger START -->
         <dependency>

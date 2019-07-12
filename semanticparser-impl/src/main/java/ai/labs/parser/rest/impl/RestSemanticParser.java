@@ -2,6 +2,7 @@ package ai.labs.parser.rest.impl;
 
 import ai.labs.caching.ICache;
 import ai.labs.caching.ICacheFactory;
+import ai.labs.exception.ServiceException;
 import ai.labs.lifecycle.ILifecycleTask;
 import ai.labs.parser.IInputParser;
 import ai.labs.parser.InputParserTask;
@@ -10,11 +11,11 @@ import ai.labs.parser.rest.IRestSemanticParser;
 import ai.labs.parser.rest.model.Solution;
 import ai.labs.resources.rest.config.parser.IRestParserStore;
 import ai.labs.resources.rest.config.parser.model.ParserConfiguration;
+import ai.labs.resources.rest.restinterfaces.IResourceClientLibrary;
 import ai.labs.runtime.SystemRuntime;
-import ai.labs.runtime.client.configuration.IResourceClientLibrary;
-import ai.labs.runtime.service.ServiceException;
 import lombok.extern.slf4j.Slf4j;
 
+import javax.enterprise.context.RequestScoped;
 import javax.inject.Inject;
 import javax.inject.Provider;
 import javax.ws.rs.BadRequestException;
@@ -33,6 +34,7 @@ import static ai.labs.parser.DictionaryUtilities.extractExpressions;
  * @author ginccc
  */
 @Slf4j
+@RequestScoped
 public class RestSemanticParser implements IRestSemanticParser {
     private final SystemRuntime.IRuntime runtime;
     private final IResourceClientLibrary resourceClientLibrary;

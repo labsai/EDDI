@@ -1,11 +1,14 @@
 package ai.labs.output.impl;
 
+import ai.labs.exception.ServiceException;
 import ai.labs.lifecycle.ILifecycleTask;
 import ai.labs.lifecycle.PackageConfigurationException;
 import ai.labs.memory.IConversationMemory;
 import ai.labs.memory.IData;
 import ai.labs.memory.IDataFactory;
 import ai.labs.models.Context;
+import ai.labs.models.ExtensionDescriptor;
+import ai.labs.models.ExtensionDescriptor.ConfigValue;
 import ai.labs.output.IOutputFilter;
 import ai.labs.output.IOutputGeneration;
 import ai.labs.output.model.OutputEntry;
@@ -13,10 +16,7 @@ import ai.labs.output.model.OutputValue;
 import ai.labs.output.model.QuickReply;
 import ai.labs.resources.rest.config.output.model.OutputConfiguration;
 import ai.labs.resources.rest.config.output.model.OutputConfigurationSet;
-import ai.labs.resources.rest.extensions.model.ExtensionDescriptor;
-import ai.labs.resources.rest.extensions.model.ExtensionDescriptor.ConfigValue;
-import ai.labs.runtime.client.configuration.IResourceClientLibrary;
-import ai.labs.runtime.service.ServiceException;
+import ai.labs.resources.rest.restinterfaces.IResourceClientLibrary;
 import ai.labs.utilities.StringUtilities;
 
 import javax.inject.Inject;

@@ -1,6 +1,6 @@
 package ai.labs.parser.extensions.normalizers.providers;
 
-import ai.labs.resources.rest.extensions.model.ExtensionDescriptor.ConfigValue;
+import ai.labs.models.ExtensionDescriptor.ConfigValue;
 import ai.labs.parser.extensions.normalizers.INormalizer;
 import ai.labs.parser.extensions.normalizers.PunctuationNormalizer;
 
@@ -8,8 +8,8 @@ import java.util.HashMap;
 import java.util.Map;
 import java.util.regex.Pattern;
 
-import static ai.labs.resources.rest.extensions.model.ExtensionDescriptor.FieldType.BOOLEAN;
-import static ai.labs.resources.rest.extensions.model.ExtensionDescriptor.FieldType.STRING;
+import static ai.labs.models.ExtensionDescriptor.FieldType.BOOLEAN;
+import static ai.labs.models.ExtensionDescriptor.FieldType.STRING;
 
 public class PunctuationNormalizerProvider implements INormalizerProvider {
     public static final String ID = "ai.labs.parser.normalizers.punctuation";

@@ -1,6 +1,6 @@
 package ai.labs.resources.rest.config.packages;
 
-import ai.labs.resources.rest.config.packages.model.PackageConfiguration;
+import ai.labs.models.PackageConfiguration;
 import io.swagger.annotations.Api;
 import io.swagger.annotations.Authorization;
 

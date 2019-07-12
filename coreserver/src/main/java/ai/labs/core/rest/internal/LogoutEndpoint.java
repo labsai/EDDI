@@ -1,11 +1,11 @@
 package ai.labs.core.rest.internal;
 
-import ai.labs.rest.rest.ILogoutEndpoint;
+import ai.labs.rest.ILogoutEndpoint;
 import lombok.extern.slf4j.Slf4j;
-import org.jboss.resteasy.plugins.guice.RequestScoped;
+import org.eclipse.microprofile.config.inject.ConfigProperty;
 
+import javax.enterprise.context.RequestScoped;
 import javax.inject.Inject;
-import javax.inject.Named;
 import javax.servlet.ServletException;
 import javax.servlet.http.HttpServletRequest;
 import javax.servlet.http.HttpServletResponse;
@@ -21,17 +21,15 @@ public class LogoutEndpoint implements ILogoutEndpoint {
 
     private final String securityHandleType;
     @Inject
-    @RequestScoped
     @Context
     private HttpServletRequest request;
 
     @Inject
-    @RequestScoped
     @Context
     private HttpServletResponse response;
 
     @Inject
-    public LogoutEndpoint(@Named("webServer.securityHandlerType") String securityHandleType) {
+    public LogoutEndpoint(@ConfigProperty(name = "webServer.securityHandlerType") String securityHandleType) {
         this.securityHandleType = securityHandleType;
     }
 

@@ -1,5 +1,6 @@
 package ai.labs.restapi.connector.impl;
 
+import ai.labs.exception.ServiceException;
 import ai.labs.httpclient.IHttpClient;
 import ai.labs.httpclient.IHttpClient.Method;
 import ai.labs.httpclient.IRequest;
@@ -11,17 +12,12 @@ import ai.labs.memory.IConversationMemory;
 import ai.labs.memory.IData;
 import ai.labs.memory.IDataFactory;
 import ai.labs.memory.IMemoryItemConverter;
-import ai.labs.models.Context;
-import ai.labs.models.HttpCodeValidator;
-import ai.labs.models.Property;
-import ai.labs.models.PropertyInstruction;
+import ai.labs.models.*;
+import ai.labs.models.ExtensionDescriptor.ConfigValue;
+import ai.labs.models.ExtensionDescriptor.FieldType;
 import ai.labs.resources.rest.config.http.model.*;
-import ai.labs.resources.rest.extensions.model.ExtensionDescriptor;
-import ai.labs.resources.rest.extensions.model.ExtensionDescriptor.ConfigValue;
-import ai.labs.resources.rest.extensions.model.ExtensionDescriptor.FieldType;
+import ai.labs.resources.rest.restinterfaces.IResourceClientLibrary;
 import ai.labs.runtime.SystemRuntime;
-import ai.labs.runtime.client.configuration.IResourceClientLibrary;
-import ai.labs.runtime.service.ServiceException;
 import ai.labs.serialization.IJsonSerialization;
 import ai.labs.templateengine.ITemplatingEngine;
 import lombok.extern.slf4j.Slf4j;

@@ -6,7 +6,7 @@ import ai.labs.expressions.value.Value;
 import ai.labs.utilities.CharacterUtilities;
 import lombok.extern.slf4j.Slf4j;
 
-import javax.inject.Singleton;
+import javax.enterprise.context.ApplicationScoped;
 import java.util.Hashtable;
 import java.util.LinkedList;
 import java.util.List;
@@ -14,7 +14,7 @@ import java.util.List;
 /**
  * @author ginccc
  */
-@Singleton
+@ApplicationScoped
 @Slf4j
 public class ExpressionFactory implements IExpressionFactory {
     private Hashtable<String, Expression> expressions = new Hashtable<>();

@@ -1,8 +1,7 @@
 package ai.labs.behavior.impl.conditions;
 
-import org.junit.Assert;
-import org.junit.Ignore;
-import org.junit.Test;
+import org.junit.jupiter.api.Assertions;
+import org.junit.jupiter.api.Test;
 
 import java.util.HashMap;
 import java.util.Map;
@@ -10,13 +9,12 @@ import java.util.Map;
 /**
  * @author ginccc
  */
-@Ignore
 class BaseMatcherTest {
     static final String KEY_OCCURRENCE = "occurrence";
     BaseMatcher matcher;
 
     @Test
-    public void setValues_currentStep() throws Exception {
+    void setValues_currentStep() {
         //setup
         Map<String, String> values = new HashMap<>();
         BaseMatcher.ConversationStepOccurrence expectedOccurrence = BaseMatcher.ConversationStepOccurrence.currentStep;
@@ -26,11 +24,11 @@ class BaseMatcherTest {
         matcher.setConfigs(values);
 
         //assert
-        Assert.assertEquals(expectedOccurrence, matcher.getOccurrence());
+        Assertions.assertEquals(expectedOccurrence, matcher.getOccurrence());
     }
 
     @Test
-    public void setValues_lastStep() throws Exception {
+    void setValues_lastStep() {
         //setup
         Map<String, String> values = new HashMap<>();
         BaseMatcher.ConversationStepOccurrence expectedOccurrence = BaseMatcher.ConversationStepOccurrence.lastStep;
@@ -40,11 +38,11 @@ class BaseMatcherTest {
         matcher.setConfigs(values);
 
         //assert
-        Assert.assertEquals(expectedOccurrence, matcher.getOccurrence());
+        Assertions.assertEquals(expectedOccurrence, matcher.getOccurrence());
     }
 
     @Test
-    public void setValues_anyStep() throws Exception {
+    void setValues_anyStep() {
         //setup
         Map<String, String> values = new HashMap<>();
         BaseMatcher.ConversationStepOccurrence expectedOccurrence = BaseMatcher.ConversationStepOccurrence.anyStep;
@@ -54,11 +52,11 @@ class BaseMatcherTest {
         matcher.setConfigs(values);
 
         //assert
-        Assert.assertEquals(expectedOccurrence, matcher.getOccurrence());
+        Assertions.assertEquals(expectedOccurrence, matcher.getOccurrence());
     }
 
     @Test
-    public void setValues_never() throws Exception {
+    void setValues_never() {
         //setup
         Map<String, String> values = new HashMap<>();
         BaseMatcher.ConversationStepOccurrence expectedOccurrence = BaseMatcher.ConversationStepOccurrence.never;
@@ -68,6 +66,6 @@ class BaseMatcherTest {
         matcher.setConfigs(values);
 
         //assert
-        Assert.assertEquals(expectedOccurrence, matcher.getOccurrence());
+        Assertions.assertEquals(expectedOccurrence, matcher.getOccurrence());
     }
 }

@@ -5,6 +5,7 @@ import ai.labs.expressions.value.Value;
 import ai.labs.property.IPropertySetter;
 import ai.labs.property.model.PropertyEntry;
 
+import javax.enterprise.context.ApplicationScoped;
 import java.util.LinkedList;
 import java.util.List;
 import java.util.stream.Collectors;
@@ -12,6 +13,7 @@ import java.util.stream.Collectors;
 /**
  * @author ginccc
  */
+@ApplicationScoped
 public class PropertySetter implements IPropertySetter {
     private static final String PROPERTY_EXPRESSION = "property";
 

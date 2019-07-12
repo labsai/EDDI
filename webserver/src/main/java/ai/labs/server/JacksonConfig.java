@@ -16,7 +16,7 @@
 
 package ai.labs.server;
 
-import ai.labs.runtime.DependencyInjector;
+import ai.labs.injection.DependencyInjector;
 import com.fasterxml.jackson.databind.ObjectMapper;
 
 import javax.ws.rs.Produces;

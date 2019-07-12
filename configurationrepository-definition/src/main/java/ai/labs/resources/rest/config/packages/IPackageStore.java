@@ -1,8 +1,8 @@
 package ai.labs.resources.rest.config.packages;
 
 import ai.labs.models.DocumentDescriptor;
+import ai.labs.models.PackageConfiguration;
 import ai.labs.persistence.IResourceStore;
-import ai.labs.resources.rest.config.packages.model.PackageConfiguration;
 
 import java.util.List;
 

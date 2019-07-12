@@ -19,6 +19,8 @@
         <module>configurationrepository-definition</module>
         <module>conversationmemory-definition</module>
         <module>automatedtesting-definition</module>
+        <module>httpclient-definition</module>
+        <module>httpclient-impl-jetty</module>
         <module>corerest-definition</module>
         <module>staticresourceprovider-definition</module>
         <module>user-impl</module>
@@ -41,8 +43,6 @@
         <module>caching-impl-infinispan</module>
         <module>conversationcallback-definition</module>
         <module>conversationcallback-impl</module>
-        <module>httpclient-definition</module>
-        <module>httpclient-impl-jetty</module>
         <module>facebookmessenger-definition</module>
         <module>facebookmessenger-impl</module>
         <module>outputgeneration-definition</module>
@@ -59,28 +59,49 @@
         <module>xmpp-impl</module>
         <module>httpCallsTask-definition</module>
         <module>httpCallsTask-impl</module>
-        <module>normalizer-definition</module>
-        <module>normalizer-impl</module>
         <module>basemodels</module>
     </modules>
+
+    <properties>
+        <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+        <quarkus.version>0.19.1</quarkus.version>
+        <surefire-plugin.version>2.22.2</surefire-plugin.version>
+        <compile-plugin.version>3.8.1</compile-plugin.version>
+    </properties>
 
     <build>
         <plugins>
             <plugin>
+                <groupId>org.jboss.jandex</groupId>
+                <artifactId>jandex-maven-plugin</artifactId>
+                <version>1.0.6</version>
+                <executions>
+                    <execution>
+                        <id>make-index</id>
+                        <goals>
+                            <goal>jandex</goal>
+                        </goals>
+                    </execution>
+                </executions>
+            </plugin>
+            <plugin>
                 <groupId>org.apache.maven.plugins</groupId>
                 <artifactId>maven-compiler-plugin</artifactId>
-                <version>3.8.1</version>
+                <version>${compile-plugin.version}</version>
                 <configuration>
-                    <source>12</source>
-                    <target>12</target>
-                    <release>12</release>
+                    <source>11</source>
+                    <target>11</target>
+                    <release>11</release>
                 </configuration>
             </plugin>
             <plugin>
                 <groupId>org.apache.maven.plugins</groupId>
                 <artifactId>maven-surefire-plugin</artifactId>
-                <version>2.22.2</version>
+                <version>${surefire-plugin.version}</version>
                 <configuration>
+                    <systemProperties>
+                        <java.util.logging.manager>org.jboss.logmanager.LogManager</java.util.logging.manager>
+                    </systemProperties>
                     <argLine>
                         --illegal-access=permit
                     </argLine>
@@ -98,39 +119,63 @@
                     </execution>
                 </executions>
             </plugin>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-failsafe-plugin</artifactId>
+                <version>${surefire-plugin.version}</version>
+                <executions>
+                    <execution>
+                        <goals>
+                            <goal>integration-test</goal>
+                            <goal>verify</goal>
+                        </goals>
+                        <configuration>
+                            <systemProperties>
+                                <native.image.path>${project.build.directory}/${project.build.finalName}-runner
+                                </native.image.path>
+                            </systemProperties>
+                        </configuration>
+                    </execution>
+                </executions>
+            </plugin>
         </plugins>
     </build>
 
     <dependencies>
+        <!-- quarkus start -->
+        <dependency>
+            <groupId>io.quarkus</groupId>
+            <artifactId>quarkus-arc</artifactId>
+            <version>${quarkus.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>io.quarkus</groupId>
+            <artifactId>quarkus-undertow</artifactId>
+            <version>${quarkus.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>io.quarkus</groupId>
+            <artifactId>quarkus-resteasy</artifactId>
+            <version>${quarkus.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>io.quarkus</groupId>
+            <artifactId>quarkus-keycloak</artifactId>
+            <version>${quarkus.version}</version>
+        </dependency>
+
+        <dependency>
+            <groupId>io.quarkus</groupId>
+            <artifactId>quarkus-junit5</artifactId>
+            <version>${quarkus.version}</version>
+            <scope>test</scope>
+        </dependency>
+        <!-- quarkus end -->
+
         <dependency>
             <groupId>org.slf4j</groupId>
             <artifactId>slf4j-api</artifactId>
             <version>1.7.26</version>
-        </dependency>
-        <dependency>
-            <groupId>org.apache.logging.log4j</groupId>
-            <artifactId>log4j-slf4j-impl</artifactId>
-            <version>2.9.1</version>
-        </dependency>
-        <dependency>
-            <groupId>org.apache.logging.log4j</groupId>
-            <artifactId>log4j-api</artifactId>
-            <version>2.9.1</version>
-        </dependency>
-        <dependency>
-            <groupId>org.apache.logging.log4j</groupId>
-            <artifactId>log4j-core</artifactId>
-            <version>2.9.1</version>
-        </dependency>
-        <dependency>
-            <groupId>org.apache.logging.log4j</groupId>
-            <artifactId>log4j-web</artifactId>
-            <version>2.9.1</version>
-        </dependency>
-        <dependency>
-            <groupId>org.apache.logging.log4j</groupId>
-            <artifactId>log4j-nosql</artifactId>
-            <version>2.9.1</version>
         </dependency>
         <dependency>
             <groupId>org.mongodb</groupId>
@@ -147,23 +192,6 @@
             <groupId>javax.servlet</groupId>
             <artifactId>javax.servlet-api</artifactId>
             <version>3.1.0</version>
-        </dependency>
-
-        <dependency>
-            <groupId>com.google.inject</groupId>
-            <artifactId>guice</artifactId>
-            <version>4.2.2</version>
-        </dependency>
-        <dependency>
-            <groupId>com.google.inject.extensions</groupId>
-            <artifactId>guice-multibindings</artifactId>
-            <version>4.2.2</version>
-        </dependency>
-
-        <dependency>
-            <groupId>io.quarkus</groupId>
-            <artifactId>quarkus-resteasy</artifactId>
-            <version>0.18.0</version>
         </dependency>
 
         <!-- swagger START -->
@@ -187,13 +215,13 @@
             <version>1.18.8</version>
         </dependency>
 
-        <!-- testing START -->
         <dependency>
-            <groupId>junit</groupId>
-            <artifactId>junit</artifactId>
-            <version>4.12</version>
-            <scope>test</scope>
+            <groupId>javax.enterprise</groupId>
+            <artifactId>cdi-api</artifactId>
+            <scope>provided</scope>
         </dependency>
+
+        <!-- testing START -->
         <dependency>
             <groupId>org.mockito</groupId>
             <artifactId>mockito-core</artifactId>
@@ -201,16 +229,68 @@
             <scope>test</scope>
         </dependency>
         <!-- testing END -->
-
-        <dependency>
-            <groupId>io.quarkus</groupId>
-            <artifactId>quarkus-arc</artifactId>
-            <scope>provided</scope>
-        </dependency>
     </dependencies>
 
-    <properties>
-        <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
-        <quarkus.version>0.18.0</quarkus.version>
-    </properties>
+    <dependencyManagement>
+        <dependencies>
+            <dependency>
+                <groupId>io.quarkus</groupId>
+                <artifactId>quarkus-bom</artifactId>
+                <version>${quarkus.version}</version>
+                <type>pom</type>
+                <scope>import</scope>
+            </dependency>
+        </dependencies>
+    </dependencyManagement>
+
+    <!-- <repositories>
+         <repository>
+             &lt;!&ndash;
+             The username and password are retrieved by looking for the Repository
+             Id in the $HOME/.m2/settings.xml file.
+             &ndash;&gt;
+             &lt;!&ndash; id Must Match the Unique Identifier in settings.xml &ndash;&gt;
+             <id>io.cloudrepo</id>
+             <url>https://labsai.mycloudrepo.io/repositories/eddi</url>
+             <releases/>
+         </repository>
+     </repositories>
+
+     <distributionManagement>
+         <repository>
+             <id>io.cloudrepo</id> &lt;!&ndash; Must Match the Unique Identifier in settings.xml &ndash;&gt;
+             <name>eddi</name>
+             <url>https://labsai.mycloudrepo.io/repositories/eddi</url>
+         </repository>
+     </distributionManagement>-->
+
+    <profiles>
+        <profile>
+            <id>native</id>
+            <activation>
+                <property>
+                    <name>native</name>
+                </property>
+            </activation>
+            <build>
+                <plugins>
+                    <plugin>
+                        <groupId>io.quarkus</groupId>
+                        <artifactId>quarkus-maven-plugin</artifactId>
+                        <version>${quarkus.version}</version>
+                        <executions>
+                            <execution>
+                                <goals>
+                                    <goal>native-image</goal>
+                                </goals>
+                                <configuration>
+                                    <enableHttpUrlHandler>true</enableHttpUrlHandler>
+                                </configuration>
+                            </execution>
+                        </executions>
+                    </plugin>
+                </plugins>
+            </build>
+        </profile>
+    </profiles>
 </project>

@@ -1,21 +1,22 @@
 package ai.labs.persistence;
 
-import org.junit.Assert;
-import org.junit.Before;
-import org.junit.Test;
+import org.junit.jupiter.api.Assertions;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
 
+import java.util.Comparator;
 import java.util.LinkedList;
 import java.util.List;
 
 /**
  * @author ginccc
  */
-public class ResultManipulatorTest {
+class ResultManipulatorTest {
 
     private ResultManipulator<TestEntity> resultManipulator;
 
-    @Before
-    public void setup() {
+    @BeforeEach
+    void setup() {
         List<TestEntity> testEntities = new LinkedList<>();
         testEntities.add(new TestEntity("something4"));
         testEntities.add(new TestEntity("something2"));
@@ -28,37 +29,37 @@ public class ResultManipulatorTest {
     }
 
     @Test
-    public void testConstructor1() {
+    void testConstructor1() {
         try {
             new ResultManipulator<>(null, TestEntity.class);
-            Assert.fail();
+            Assertions.fail();
         } catch (Exception e) {
-            Assert.assertEquals(IllegalArgumentException.class, e.getClass());
+            Assertions.assertEquals(IllegalArgumentException.class, e.getClass());
         }
     }
 
     @Test
-    public void testConstructor2() {
+    void testConstructor2() {
         try {
             new ResultManipulator<>(new LinkedList<>(), null);
-            Assert.fail();
+            Assertions.fail();
         } catch (Exception e) {
-            Assert.assertEquals(IllegalArgumentException.class, e.getClass());
+            Assertions.assertEquals(IllegalArgumentException.class, e.getClass());
         }
     }
 
     @Test
-    public void testFilter() {
+    void testFilter() {
         try {
             resultManipulator.filterEntities(null);
-            Assert.fail();
+            Assertions.fail();
         } catch (Exception e) {
-            Assert.assertEquals(IllegalArgumentException.class, e.getClass());
+            Assertions.assertEquals(IllegalArgumentException.class, e.getClass());
         }
     }
 
     @Test
-    public void testFilter1() throws ResultManipulator.FilterEntriesException {
+    void testFilter1() throws ResultManipulator.FilterEntriesException {
         //setup
         String filter = "what";
 
@@ -69,11 +70,11 @@ public class ResultManipulatorTest {
         resultManipulator.filterEntities(filter);
 
         //assert
-        Assert.assertArrayEquals(testEntities, resultManipulator.getManipulatedList().toArray());
+        Assertions.assertArrayEquals(testEntities, resultManipulator.getManipulatedList().toArray());
     }
 
     @Test
-    public void testFilter2() throws ResultManipulator.FilterEntriesException {
+    void testFilter2() throws ResultManipulator.FilterEntriesException {
         //setup
         String filter = "\"something2\"";
 
@@ -84,11 +85,11 @@ public class ResultManipulatorTest {
         resultManipulator.filterEntities(filter);
 
         //assert
-        Assert.assertArrayEquals(testEntities, resultManipulator.getManipulatedList().toArray());
+        Assertions.assertArrayEquals(testEntities, resultManipulator.getManipulatedList().toArray());
     }
 
     @Test
-    public void testFilter3() throws ResultManipulator.FilterEntriesException {
+    void testFilter3() throws ResultManipulator.FilterEntriesException {
         //setup
         String filter = "";
 
@@ -105,11 +106,11 @@ public class ResultManipulatorTest {
         resultManipulator.filterEntities(filter);
 
         //assert
-        Assert.assertArrayEquals(testEntities, resultManipulator.getManipulatedList().toArray());
+        Assertions.assertArrayEquals(testEntities, resultManipulator.getManipulatedList().toArray());
     }
 
     @Test
-    public void testFilter4() throws ResultManipulator.FilterEntriesException {
+    void testFilter4() throws ResultManipulator.FilterEntriesException {
         //setup
         String filter = "somethingwichisnotinthelist";
 
@@ -120,33 +121,33 @@ public class ResultManipulatorTest {
         resultManipulator.filterEntities(filter);
 
         //assert
-        Assert.assertArrayEquals(testEntities, resultManipulator.getManipulatedList().toArray());
+        Assertions.assertArrayEquals(testEntities, resultManipulator.getManipulatedList().toArray());
     }
 
     @Test
-    public void testSort() {
+    void testSort() {
         try {
             resultManipulator.sortEntities(null, "");
-            Assert.fail();
+            Assertions.fail();
         } catch (Exception e) {
-            Assert.assertEquals(IllegalArgumentException.class, e.getClass());
+            Assertions.assertEquals(IllegalArgumentException.class, e.getClass());
         }
     }
 
     @Test
-    public void testSort2() {
+    void testSort2() {
         try {
             resultManipulator.sortEntities((o1, o2) -> {
                 return 0;  //not implemented,
             }, null);
-            Assert.fail();
+            Assertions.fail();
         } catch (Exception e) {
-            Assert.assertEquals(IllegalArgumentException.class, e.getClass());
+            Assertions.assertEquals(IllegalArgumentException.class, e.getClass());
         }
     }
 
     @Test
-    public void testSort3() {
+    void testSort3() {
         //setup expected
         TestEntity[] testEntities = new TestEntity[]{
                 new TestEntity("something1"),
@@ -157,14 +158,14 @@ public class ResultManipulatorTest {
                 new TestEntity("whatever2")};
 
         //test
-        resultManipulator.sortEntities((o1, o2) -> o1.getTest().compareTo(o2.getTest()), ResultManipulator.ASCENDING);
+        resultManipulator.sortEntities(Comparator.comparing(TestEntity::getTest), ResultManipulator.ASCENDING);
 
         //assert
-        Assert.assertArrayEquals(testEntities, resultManipulator.getManipulatedList().toArray());
+        Assertions.assertArrayEquals(testEntities, resultManipulator.getManipulatedList().toArray());
     }
 
     @Test
-    public void testSort4() {
+    void testSort4() {
         //setup expected
         TestEntity[] testEntities = new TestEntity[]{
                 new TestEntity("whatever2"),
@@ -176,14 +177,14 @@ public class ResultManipulatorTest {
         };
 
         //test
-        resultManipulator.sortEntities((o1, o2) -> o1.getTest().compareTo(o2.getTest()), ResultManipulator.DESCENDING);
+        resultManipulator.sortEntities(Comparator.comparing(TestEntity::getTest), ResultManipulator.DESCENDING);
 
         //assert
-        Assert.assertArrayEquals(testEntities, resultManipulator.getManipulatedList().toArray());
+        Assertions.assertArrayEquals(testEntities, resultManipulator.getManipulatedList().toArray());
     }
 
     @Test
-    public void testLimit1() {
+    void testLimit1() {
         //setup
         int index = 0;
         int limit = 5;
@@ -201,11 +202,11 @@ public class ResultManipulatorTest {
         this.resultManipulator.limitEntities(index, limit);
 
         //assert
-        Assert.assertArrayEquals(testEntities, resultManipulator.getManipulatedList().toArray());
+        Assertions.assertArrayEquals(testEntities, resultManipulator.getManipulatedList().toArray());
     }
 
     @Test
-    public void testLimit2() {
+    void testLimit2() {
         //setup
         int index = 2;
         int limit = 2;
@@ -219,12 +220,12 @@ public class ResultManipulatorTest {
         this.resultManipulator.limitEntities(index, limit);
 
         //assert
-        Assert.assertEquals(testEntities.length, resultManipulator.getManipulatedList().size());
-        Assert.assertArrayEquals(testEntities, resultManipulator.getManipulatedList().toArray());
+        Assertions.assertEquals(testEntities.length, resultManipulator.getManipulatedList().size());
+        Assertions.assertArrayEquals(testEntities, resultManipulator.getManipulatedList().toArray());
     }
 
     @Test
-    public void testLimit3() {
+    void testLimit3() {
         //setup
         int index = 10;
         int limit = 3;
@@ -236,11 +237,11 @@ public class ResultManipulatorTest {
         this.resultManipulator.limitEntities(index, limit);
 
         //assert
-        Assert.assertArrayEquals(testEntities, resultManipulator.getManipulatedList().toArray());
+        Assertions.assertArrayEquals(testEntities, resultManipulator.getManipulatedList().toArray());
     }
 
     @Test
-    public void testLimit4() {
+    void testLimit4() {
         //setup
         int index = 0;
         int limit = 0;
@@ -258,11 +259,11 @@ public class ResultManipulatorTest {
         this.resultManipulator.limitEntities(index, limit);
 
         //assert
-        Assert.assertArrayEquals(testEntities, resultManipulator.getManipulatedList().toArray());
+        Assertions.assertArrayEquals(testEntities, resultManipulator.getManipulatedList().toArray());
     }
 
     @Test
-    public void testLimit5() {
+    void testLimit5() {
         //setup
         int index = -1;
         int limit = 0;
@@ -270,14 +271,14 @@ public class ResultManipulatorTest {
         //test
         try {
             this.resultManipulator.limitEntities(index, limit);
-            Assert.fail();
+            Assertions.fail();
         } catch (Exception e) {
-            Assert.assertEquals(IllegalArgumentException.class, e.getClass());
+            Assertions.assertEquals(IllegalArgumentException.class, e.getClass());
         }
     }
 
     @Test
-    public void testLimit6() {
+    void testLimit6() {
         //setup
         int index = 0;
         int limit = -1;
@@ -285,9 +286,9 @@ public class ResultManipulatorTest {
         //test
         try {
             this.resultManipulator.limitEntities(index, limit);
-            Assert.fail();
+            Assertions.fail();
         } catch (Exception e) {
-            Assert.assertEquals(IllegalArgumentException.class, e.getClass());
+            Assertions.assertEquals(IllegalArgumentException.class, e.getClass());
         }
     }
 

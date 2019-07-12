@@ -1,25 +1,27 @@
 package ai.labs.permission.interceptor;
 
 import ai.labs.group.IGroupStore;
+import ai.labs.injection.DependencyInjector;
 import ai.labs.permission.IAuthorization;
 import ai.labs.permission.IAuthorizationManager;
 import ai.labs.permission.IPermissionStore;
 import ai.labs.permission.impl.AuthorizationManager;
 import ai.labs.permission.utilities.PermissionUtilities;
 import ai.labs.persistence.IResourceStore;
-import ai.labs.runtime.DependencyInjector;
 import ai.labs.user.IUserStore;
 import ai.labs.user.impl.rest.RestUserStore;
 import ai.labs.user.impl.utilities.UserUtilities;
 import ai.labs.user.model.User;
 import ai.labs.utilities.RestUtilities;
 import ai.labs.utilities.RuntimeUtilities;
-import com.google.inject.Key;
-import com.google.inject.name.Names;
+import org.eclipse.microprofile.config.inject.ConfigProperty;
 
+import javax.annotation.Priority;
+import javax.enterprise.context.RequestScoped;
 import javax.inject.Inject;
 import javax.ws.rs.InternalServerErrorException;
 import javax.ws.rs.NotFoundException;
+import javax.ws.rs.Priorities;
 import javax.ws.rs.WebApplicationException;
 import javax.ws.rs.container.ContainerRequestContext;
 import javax.ws.rs.container.ContainerRequestFilter;
@@ -34,6 +36,8 @@ import java.security.Principal;
  * @author ginccc
  */
 @Provider
+@RequestScoped
+@Priority(Priorities.AUTHENTICATION)
 public class PermissionRequestInterceptor implements ContainerRequestFilter {
     private static final String POST = "POST";
     private static final String GET = "GET";
@@ -46,19 +50,20 @@ public class PermissionRequestInterceptor implements ContainerRequestFilter {
     private final IUserStore userStore;
     private final boolean skipPermissionCheck;
 
-    @Inject
     @Context
-    private SecurityContext securityContext;
+    SecurityContext securityContext;
     private final IPermissionStore permissionStore;
 
-    public PermissionRequestInterceptor() {
+    @Inject
+    public PermissionRequestInterceptor(@ConfigProperty(name = "system.pathOfPermissionStore") String pathOfPermissionStore,
+                                        @ConfigProperty(name = "system.skipPermissionCheck") String skipPermissionCheck) {
         DependencyInjector injector = DependencyInjector.getInstance();
         this.userStore = injector.getInstance(IUserStore.class);
         permissionStore = injector.getInstance(IPermissionStore.class);
         authorizationManager = new AuthorizationManager(injector.getInstance(IGroupStore.class),
                 permissionStore);
-        this.pathPermissionStore = injector.getInstance(Key.get(String.class, Names.named("system.pathOfPermissionStore")));
-        this.skipPermissionCheck = Boolean.parseBoolean(injector.getInstance(Key.get(String.class, Names.named("system.skipPermissionCheck"))));
+        this.pathPermissionStore = pathOfPermissionStore;
+        this.skipPermissionCheck = Boolean.parseBoolean(skipPermissionCheck);
     }
 
     @Override

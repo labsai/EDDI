@@ -2,9 +2,9 @@ package ai.labs.lifecycle;
 
 import ai.labs.memory.IConversationMemory;
 import ai.labs.memory.IConversationMemory.IWritableConversationStep;
-import org.junit.Assert;
-import org.junit.Before;
-import org.junit.Test;
+import org.junit.jupiter.api.Assertions;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
 import org.mockito.Mockito;
 
 import static org.mockito.Mockito.mock;
@@ -16,7 +16,7 @@ public class LifecycleManagerTest {
     private ILifecycleManager lifecycleManager;
     private IConversationMemory memory;
 
-    @Before
+    @BeforeEach
     public void setUp() {
         lifecycleManager = new LifecycleManager();
         memory = mock(IConversationMemory.class);
@@ -25,7 +25,7 @@ public class LifecycleManagerTest {
     }
 
     @Test
-    public void testExecuteLifecycle() throws Exception {
+    void testExecuteLifecycle() throws Exception {
         //setup
         ILifecycleTask lifecycleTask = mock(ILifecycleTask.class);
         lifecycleManager.addLifecycleTask(lifecycleTask);
@@ -38,27 +38,27 @@ public class LifecycleManagerTest {
     }
 
     @Test
-    public void testValidationWhenMemoryIsNull() {
+    void testValidationWhenMemoryIsNull() {
         //test
         try {
             lifecycleManager.executeLifecycle(null);
-            Assert.fail();
+            Assertions.fail();
         } catch (Exception e) {
             if (!e.getClass().equals(IllegalArgumentException.class)) {
-                Assert.fail();
+                Assertions.fail();
             }
         }
     }
 
     @Test
-    public void testValidationWhenLifecycleIsNull() {
+    void testValidationWhenLifecycleIsNull() {
         //test
         try {
             lifecycleManager.addLifecycleTask(null);
-            Assert.fail();
+            Assertions.fail();
         } catch (Exception e) {
             if (!e.getClass().equals(IllegalArgumentException.class)) {
-                Assert.fail();
+                Assertions.fail();
             }
         }
     }

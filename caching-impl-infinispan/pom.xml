@@ -20,12 +20,7 @@
         <dependency>
             <groupId>org.infinispan</groupId>
             <artifactId>infinispan-core</artifactId>
-            <version>9.4.11.Final</version>
-        </dependency>
-        <dependency>
-            <groupId>ai.labs</groupId>
-            <artifactId>runtime-definition</artifactId>
-            <version>${project.version}</version>
+            <scope>provided</scope>
         </dependency>
     </dependencies>
 

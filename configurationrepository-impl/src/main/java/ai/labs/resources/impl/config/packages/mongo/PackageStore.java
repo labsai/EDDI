@@ -1,11 +1,11 @@
 package ai.labs.resources.impl.config.packages.mongo;
 
 import ai.labs.models.DocumentDescriptor;
+import ai.labs.models.PackageConfiguration;
 import ai.labs.persistence.mongo.HistorizedResourceStore;
 import ai.labs.persistence.mongo.MongoResourceStorage;
 import ai.labs.resources.impl.utilities.ResourceUtilities;
 import ai.labs.resources.rest.config.packages.IPackageStore;
-import ai.labs.resources.rest.config.packages.model.PackageConfiguration;
 import ai.labs.resources.rest.documentdescriptor.IDocumentDescriptorStore;
 import ai.labs.serialization.IDocumentBuilder;
 import ai.labs.utilities.RuntimeUtilities;
@@ -13,6 +13,7 @@ import ai.labs.utilities.URIUtilities;
 import com.mongodb.client.MongoDatabase;
 import org.bson.Document;
 
+import javax.enterprise.context.ApplicationScoped;
 import javax.inject.Inject;
 import java.util.LinkedList;
 import java.util.List;
@@ -20,6 +21,7 @@ import java.util.List;
 /**
  * @author ginccc
  */
+@ApplicationScoped
 public class PackageStore implements IPackageStore {
     private final IDocumentDescriptorStore documentDescriptorStore;
     private final PackageHistorizedResourceStore packageResourceStore;

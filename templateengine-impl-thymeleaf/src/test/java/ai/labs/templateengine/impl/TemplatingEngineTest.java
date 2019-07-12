@@ -5,9 +5,9 @@ import ai.labs.templateengine.bootstrap.TemplateEngineModule;
 import lombok.AllArgsConstructor;
 import lombok.Getter;
 import lombok.Setter;
-import org.junit.Assert;
-import org.junit.Before;
-import org.junit.Test;
+import org.junit.jupiter.api.Assertions;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
 
 import java.util.HashMap;
 
@@ -17,7 +17,7 @@ import java.util.HashMap;
 public class TemplatingEngineTest {
     private ITemplatingEngine templatingEngine;
 
-    @Before
+    @BeforeEach
     public void setup() {
         TemplateEngineModule engineModule = new TemplateEngineModule();
         templatingEngine = new TemplatingEngine(
@@ -25,7 +25,7 @@ public class TemplatingEngineTest {
     }
 
     @Test
-    public void processTemplateWithStringContext() throws Exception {
+    void processTemplateWithStringContext() throws Exception {
         //setup
         String template = "Some kind of string having a [[${value}]]";
         HashMap<String, Object> dynamicAttributesMap = new HashMap<>();
@@ -35,11 +35,11 @@ public class TemplatingEngineTest {
         String result = templatingEngine.processTemplate(template, dynamicAttributesMap);
 
         //assert
-        Assert.assertEquals("Some kind of string having a testValue", result);
+        Assertions.assertEquals("Some kind of string having a testValue", result);
     }
 
     @Test
-    public void processTemplateWithObjectContext() throws Exception {
+    void processTemplateWithObjectContext() throws Exception {
         //setup
         String template = "Some kind of string having a [[${obj.value}]]";
         HashMap<String, Object> dynamicAttributesMap = new HashMap<>();
@@ -49,7 +49,7 @@ public class TemplatingEngineTest {
         String result = templatingEngine.processTemplate(template, dynamicAttributesMap);
 
         //assert
-        Assert.assertEquals("Some kind of string having a testValue", result);
+        Assertions.assertEquals("Some kind of string having a testValue", result);
     }
 
     @Getter

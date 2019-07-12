@@ -1,6 +1,6 @@
 package ai.labs.resources.rest.properties;
 
-import ai.labs.resources.rest.properties.model.Properties;
+import ai.labs.models.Properties;
 import io.swagger.annotations.Api;
 import io.swagger.annotations.ApiOperation;
 import io.swagger.annotations.Authorization;

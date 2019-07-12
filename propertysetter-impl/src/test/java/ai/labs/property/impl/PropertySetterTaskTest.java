@@ -12,10 +12,10 @@ import ai.labs.memory.model.Data;
 import ai.labs.models.Context;
 import ai.labs.property.IPropertySetter;
 import ai.labs.property.model.PropertyEntry;
-import ai.labs.runtime.client.configuration.IResourceClientLibrary;
+import ai.labs.resources.rest.restinterfaces.IResourceClientLibrary;
 import ai.labs.templateengine.ITemplatingEngine;
-import org.junit.Before;
-import org.junit.Test;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentMatchers;
 
 import java.util.Arrays;
@@ -28,7 +28,7 @@ import static org.mockito.Mockito.*;
 /**
  * @author ginccc
  */
-public class PropertySetterTaskTest {
+class PropertySetterTaskTest {
     private static final String KEY_EXPRESSIONS_PARSED = "expressions:parsed";
     private static final String KEY_ACTIONS = "actions";
     private static final String KEY_CONTEXT = "context";
@@ -41,8 +41,8 @@ public class PropertySetterTaskTest {
     private IDataFactory dataFactory;
     private List<Expression> expressions;
 
-    @Before
-    public void setUp() {
+    @BeforeEach
+    void setUp() {
         propertySetter = mock(IPropertySetter.class);
         dataFactory = mock(IDataFactory.class);
         conversationMemory = mock(IConversationMemory.class);
@@ -70,7 +70,7 @@ public class PropertySetterTaskTest {
     }
 
     @Test
-    public void executeTask() throws LifecycleException {
+    void executeTask() throws LifecycleException {
         //setup
         final String userInput = "Some Input From the User";
         List<PropertyEntry> propertyEntries = new LinkedList<>();

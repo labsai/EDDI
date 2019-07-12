@@ -8,7 +8,11 @@ import ai.labs.lifecycle.UnrecognizedExtensionException;
 import ai.labs.memory.IConversationMemory;
 import ai.labs.memory.IData;
 import ai.labs.memory.model.Data;
+import ai.labs.models.ExtensionDescriptor;
 import ai.labs.output.model.QuickReply;
+import ai.labs.parser.bootstrap.ParserCorrectionExtensions;
+import ai.labs.parser.bootstrap.ParserDictionaryExtensions;
+import ai.labs.parser.bootstrap.ParserNormalizerExtensions;
 import ai.labs.parser.extensions.corrections.ICorrection;
 import ai.labs.parser.extensions.corrections.providers.ICorrectionProvider;
 import ai.labs.parser.extensions.dictionaries.IDictionary;
@@ -18,7 +22,6 @@ import ai.labs.parser.extensions.normalizers.providers.INormalizerProvider;
 import ai.labs.parser.internal.InputParser;
 import ai.labs.parser.internal.matches.RawSolution;
 import ai.labs.parser.rest.model.Solution;
-import ai.labs.resources.rest.extensions.model.ExtensionDescriptor;
 import ai.labs.utilities.RuntimeUtilities;
 import ai.labs.utilities.StringUtilities;
 import lombok.extern.slf4j.Slf4j;
@@ -29,10 +32,10 @@ import java.net.URI;
 import java.util.*;
 import java.util.stream.Collectors;
 
+import static ai.labs.models.ExtensionDescriptor.ConfigValue;
+import static ai.labs.models.ExtensionDescriptor.FieldType.BOOLEAN;
 import static ai.labs.parser.DictionaryUtilities.convertQuickReplies;
 import static ai.labs.parser.DictionaryUtilities.extractExpressions;
-import static ai.labs.resources.rest.extensions.model.ExtensionDescriptor.ConfigValue;
-import static ai.labs.resources.rest.extensions.model.ExtensionDescriptor.FieldType.BOOLEAN;
 
 /**
  * @author ginccc
@@ -70,9 +73,9 @@ public class InputParserTask implements ILifecycleTask {
 
     @Inject
     public InputParserTask(IExpressionProvider expressionProvider,
-                           Map<String, Provider<INormalizerProvider>> normalizerProviders,
-                           Map<String, Provider<IDictionaryProvider>> dictionaryProviders,
-                           Map<String, Provider<ICorrectionProvider>> correctionProviders) {
+                           @ParserNormalizerExtensions Map<String, Provider<INormalizerProvider>> normalizerProviders,
+                           @ParserDictionaryExtensions Map<String, Provider<IDictionaryProvider>> dictionaryProviders,
+                           @ParserCorrectionExtensions Map<String, Provider<ICorrectionProvider>> correctionProviders) {
         this.expressionProvider = expressionProvider;
         this.normalizerProviders = normalizerProviders;
         this.dictionaryProviders = dictionaryProviders;

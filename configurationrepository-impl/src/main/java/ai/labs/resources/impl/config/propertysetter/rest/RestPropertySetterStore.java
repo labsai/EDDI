@@ -7,11 +7,11 @@ import ai.labs.resources.rest.config.propertysetter.IPropertySetterStore;
 import ai.labs.resources.rest.config.propertysetter.IRestPropertySetterStore;
 import ai.labs.resources.rest.config.propertysetter.model.PropertySetterConfiguration;
 import ai.labs.resources.rest.documentdescriptor.IDocumentDescriptorStore;
-import ai.labs.rest.restinterfaces.IRestInterfaceFactory;
-import ai.labs.rest.restinterfaces.RestInterfaceFactory;
+import ai.labs.resources.rest.restinterfaces.IRestInterfaceFactory;
 import ai.labs.schema.IJsonSchemaCreator;
 import lombok.extern.slf4j.Slf4j;
 
+import javax.enterprise.context.ApplicationScoped;
 import javax.inject.Inject;
 import javax.ws.rs.core.Response;
 import java.util.List;
@@ -20,6 +20,7 @@ import java.util.List;
  * @author ginccc
  */
 @Slf4j
+@ApplicationScoped
 public class RestPropertySetterStore extends RestVersionInfo<PropertySetterConfiguration> implements IRestPropertySetterStore {
     private final IPropertySetterStore propertySetterStore;
     private final IJsonSchemaCreator jsonSchemaCreator;
@@ -39,7 +40,7 @@ public class RestPropertySetterStore extends RestVersionInfo<PropertySetterConfi
     private void initRestClient(IRestInterfaceFactory restInterfaceFactory) {
         try {
             restPropertySetterStore = restInterfaceFactory.get(IRestPropertySetterStore.class);
-        } catch (RestInterfaceFactory.RestInterfaceFactoryException e) {
+        } catch (IRestInterfaceFactory.RestInterfaceFactoryException e) {
             restPropertySetterStore = null;
             log.error(e.getLocalizedMessage(), e);
         }

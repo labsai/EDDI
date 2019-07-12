@@ -7,10 +7,10 @@ import ai.labs.callback.model.ConversationDataResponseHolder;
 import ai.labs.httpclient.IHttpClient;
 import ai.labs.httpclient.IRequest;
 import ai.labs.httpclient.IResponse;
-import ai.labs.memory.model.ConversationMemorySnapshot;
 import ai.labs.serialization.IJsonSerialization;
 import lombok.extern.slf4j.Slf4j;
 
+import javax.enterprise.context.ApplicationScoped;
 import javax.inject.Inject;
 import javax.ws.rs.core.MediaType;
 import java.io.IOException;
@@ -21,6 +21,7 @@ import java.util.concurrent.TimeUnit;
  * @author rpi
  */
 @Slf4j
+@ApplicationScoped
 public class ConversationCallback implements IConversationCallback {
     private static final String AI_LABS_USER_AGENT = "Jetty 9.3/HTTP CLIENT - AI.LABS.EDDI";
     private static final String ENCODING = "UTF-8";

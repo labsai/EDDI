@@ -1,44 +1,56 @@
 package ai.labs.behavior.bootstrap;
 
-import ai.labs.behavior.impl.BehaviorDeserialization;
 import ai.labs.behavior.impl.BehaviorRulesEvaluationTask;
-import ai.labs.behavior.impl.IBehaviorDeserialization;
 import ai.labs.behavior.impl.conditions.*;
 import ai.labs.lifecycle.ILifecycleTask;
-import ai.labs.runtime.bootstrap.AbstractBaseModule;
-import com.google.inject.Scopes;
-import com.google.inject.multibindings.MapBinder;
+
+import javax.annotation.PostConstruct;
+import javax.enterprise.context.ApplicationScoped;
+import javax.enterprise.inject.Instance;
+import javax.enterprise.inject.Produces;
+import javax.inject.Inject;
+import javax.inject.Provider;
+import java.util.LinkedHashMap;
+import java.util.Map;
 
 /**
  * @author ginccc
  */
-public class BehaviorModule extends AbstractBaseModule {
-    @Override
-    protected void configure() {
-        bind(IBehaviorDeserialization.class).to(BehaviorDeserialization.class).in(Scopes.SINGLETON);
-        MapBinder<String, ILifecycleTask> lifecycleTaskPlugins
-                = MapBinder.newMapBinder(binder(), String.class, ILifecycleTask.class);
-        lifecycleTaskPlugins.addBinding("ai.labs.behavior").to(BehaviorRulesEvaluationTask.class);
+@ApplicationScoped
+public class BehaviorModule {
+    @PostConstruct
+    @Inject
+    protected void configure(Map<String, Provider<ILifecycleTask>> lifecycleTaskProviders,
+                             Instance<ILifecycleTask> instance) {
 
-        MapBinder<String, IBehaviorCondition> behaviorConditionPlugins
-                = MapBinder.newMapBinder(binder(), String.class, IBehaviorCondition.class);
-        behaviorConditionPlugins.addBinding("ai.labs.behavior.conditions.inputmatcher").
-                to(InputMatcher.class);
-        behaviorConditionPlugins.addBinding("ai.labs.behavior.conditions.actionmatcher").
-                to(ActionMatcher.class);
-        behaviorConditionPlugins.addBinding("ai.labs.behavior.conditions.contextmatcher").
-                to(ContextMatcher.class);
-        behaviorConditionPlugins.addBinding("ai.labs.behavior.conditions.dynamicvaluematcher").
-                to(DynamicValueMatcher.class);
-        behaviorConditionPlugins.addBinding("ai.labs.behavior.conditions.connector").
-                to(Connector.class);
-        behaviorConditionPlugins.addBinding("ai.labs.behavior.conditions.dependency").
-                to(Dependency.class);
-        behaviorConditionPlugins.addBinding("ai.labs.behavior.conditions.negation").
-                to(Negation.class);
-        behaviorConditionPlugins.addBinding("ai.labs.behavior.conditions.occurrence").
-                to(Occurrence.class);
-        behaviorConditionPlugins.addBinding("ai.labs.behavior.conditions.sizematcher").
-                to(SizeMatcher.class);
+        lifecycleTaskProviders.put("ai.labs.behavior", () -> instance.select(BehaviorRulesEvaluationTask.class).get());
+    }
+
+    @BehaviorConditions
+    @Produces
+    @ApplicationScoped
+    Map<String, Provider<IBehaviorCondition>> produceBehaviorConditionProvider(Instance<IBehaviorCondition> instance) {
+        Map<String, Provider<IBehaviorCondition>> map = new LinkedHashMap<>();
+
+        map.put("ai.labs.behavior.conditions.inputmatcher", () ->
+                instance.select(InputMatcher.class).get());
+        map.put("ai.labs.behavior.conditions.actionmatcher", () ->
+                instance.select(ActionMatcher.class).get());
+        map.put("ai.labs.behavior.conditions.contextmatcher", () ->
+                instance.select(ContextMatcher.class).get());
+        map.put("ai.labs.behavior.conditions.dynamicvaluematcher", () ->
+                instance.select(DynamicValueMatcher.class).get());
+        map.put("ai.labs.behavior.conditions.connector", () ->
+                instance.select(Connector.class).get());
+        map.put("ai.labs.behavior.conditions.dependency", () ->
+                instance.select(Dependency.class).get());
+        map.put("ai.labs.behavior.conditions.negation", () ->
+                instance.select(Negation.class).get());
+        map.put("ai.labs.behavior.conditions.occurrence", () ->
+                instance.select(Occurrence.class).get());
+        map.put("ai.labs.behavior.conditions.sizematcher", () ->
+                instance.select(SizeMatcher.class).get());
+
+        return map;
     }
 }
