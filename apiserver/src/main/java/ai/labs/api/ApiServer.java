@@ -5,9 +5,14 @@ import ai.labs.behavior.bootstrap.BehaviorModule;
 import ai.labs.bootstrap.UserModule;
 import ai.labs.caching.bootstrap.CachingModule;
 import ai.labs.callback.bootstrap.ConversationCallbackModule;
+import ai.labs.channels.differ.IDifferEndpoint;
+import ai.labs.channels.differ.bootstrap.AMQPModule;
+import ai.labs.channels.differ.bootstrap.DifferModule;
+import ai.labs.channels.facebookmessenger.bootstrap.FacebookMessengerModule;
+import ai.labs.channels.xmpp.IXmppEndpoint;
+import ai.labs.channels.xmpp.bootstrap.XmppModule;
 import ai.labs.core.bootstrap.CoreModule;
 import ai.labs.expressions.bootstrap.ExpressionModule;
-import ai.labs.facebookmessenger.bootstrap.FacebookMessengerModule;
 import ai.labs.httpclient.guice.HttpClientModule;
 import ai.labs.memory.bootstrap.ConversationMemoryModule;
 import ai.labs.output.bootstrap.OutputGenerationModule;
@@ -30,8 +35,6 @@ import ai.labs.staticresources.bootstrap.StaticResourcesModule;
 import ai.labs.templateengine.bootstrap.TemplateEngineModule;
 import ai.labs.testing.bootstrap.AutomatedtestingModule;
 import ai.labs.utilities.FileUtilities;
-import ai.labs.xmpp.bootstrap.XmppModule;
-import ai.labs.xmpp.endpoint.IXmppEndpoint;
 import com.bugsnag.Bugsnag;
 import com.google.inject.Module;
 import org.jboss.resteasy.plugins.guice.ext.RequestScopeModule;
@@ -92,10 +95,12 @@ public class ApiServer {
                         new FileInputStream(configDir + "webServer.properties"),
                         new FileInputStream(configDir + "keycloak.properties")
                 ),
-                new FacebookMessengerModule(),
                 new BackupServiceModule(),
                 new HttpCallsModule(),
-                new XmppModule()
+                new FacebookMessengerModule(),
+                new XmppModule(),
+                new AMQPModule(),
+                new DifferModule()
         };
 
         //init modules
@@ -108,6 +113,8 @@ public class ApiServer {
             //auto re-deploy bots
             injector.getInstance(IAutoBotDeployment.class).autoDeployBots();
             injector.getInstance(IXmppEndpoint.class).init();
+            injector.getInstance(IDifferEndpoint.class).init();
+            ;
 
             logServerStartupTime(serverStartupBegin);
         });

@@ -127,16 +127,6 @@
         </dependency>
         <dependency>
             <groupId>ai.labs</groupId>
-            <artifactId>facebookmessenger-impl</artifactId>
-            <version>${project.version}</version>
-        </dependency>
-        <dependency>
-            <groupId>ai.labs</groupId>
-            <artifactId>xmpp-impl</artifactId>
-            <version>${project.version}</version>
-        </dependency>
-        <dependency>
-            <groupId>ai.labs</groupId>
             <artifactId>behavior-impl</artifactId>
             <version>${project.version}</version>
         </dependency>
@@ -157,12 +147,12 @@
         </dependency>
         <dependency>
             <groupId>ai.labs</groupId>
-            <artifactId>normalizer-impl</artifactId>
+            <artifactId>backupservice-impl</artifactId>
             <version>${project.version}</version>
         </dependency>
         <dependency>
             <groupId>ai.labs</groupId>
-            <artifactId>backupservice-impl</artifactId>
+            <artifactId>channels-impl</artifactId>
             <version>${project.version}</version>
         </dependency>
     </dependencies>

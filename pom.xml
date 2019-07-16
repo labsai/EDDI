@@ -43,8 +43,8 @@
         <module>conversationcallback-impl</module>
         <module>httpclient-definition</module>
         <module>httpclient-impl-jetty</module>
-        <module>facebookmessenger-definition</module>
-        <module>facebookmessenger-impl</module>
+        <module>channels-definition</module>
+        <module>channels-impl</module>
         <module>outputgeneration-definition</module>
         <module>outputgeneration-impl</module>
         <module>behavior-definition</module>
@@ -55,8 +55,6 @@
         <module>propertysetter-impl</module>
         <module>backupservice-defintion</module>
         <module>backupservice-impl</module>
-        <module>xmpp-definition</module>
-        <module>xmpp-impl</module>
         <module>httpCallsTask-definition</module>
         <module>httpCallsTask-impl</module>
         <module>basemodels</module>
