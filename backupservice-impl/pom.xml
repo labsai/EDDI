@@ -25,6 +25,11 @@
         </dependency>
         <dependency>
             <groupId>ai.labs</groupId>
+            <artifactId>configurationrepository-impl</artifactId>
+            <version>${project.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>ai.labs</groupId>
             <artifactId>sharedutilities</artifactId>
             <version>${project.version}</version>
         </dependency>
@@ -36,6 +41,11 @@
         <dependency>
             <groupId>ai.labs</groupId>
             <artifactId>corerest-definition</artifactId>
+            <version>${project.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>ai.labs</groupId>
+            <artifactId>coreserver</artifactId>
             <version>${project.version}</version>
         </dependency>
         <dependency>

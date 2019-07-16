@@ -17,8 +17,8 @@ import org.eclipse.jgit.revwalk.RevCommit;
 import org.eclipse.jgit.transport.PushResult;
 import org.eclipse.jgit.transport.UsernamePasswordCredentialsProvider;
 
-import javax.enterprise.context.RequestScoped;
 import javax.inject.Inject;
+import javax.inject.Singleton;
 import javax.ws.rs.InternalServerErrorException;
 import javax.ws.rs.core.Response;
 import java.io.FileInputStream;
@@ -32,7 +32,7 @@ import java.nio.file.Paths;
  * @author rpi
  */
 @Slf4j
-@RequestScoped
+@Singleton
 public class RestGitBackupService implements IRestGitBackupService {
     private final IBotStore botStore;
     private final String tmpPath = System.getProperty("user.dir") + "/tmp/";

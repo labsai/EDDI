@@ -2,19 +2,19 @@ package ai.labs.facebookmessenger.endpoint;
 
 import ai.labs.caching.ICache;
 import ai.labs.caching.ICacheFactory;
+import ai.labs.exception.ServiceException;
 import ai.labs.facebookmessenger.IFacebookEndpoint;
 import ai.labs.httpclient.IHttpClient;
 import ai.labs.httpclient.IRequest;
 import ai.labs.httpclient.IResponse;
+import ai.labs.models.BotConfiguration;
 import ai.labs.models.Deployment;
 import ai.labs.persistence.model.ResourceId;
 import ai.labs.resources.rest.config.bots.IBotStore;
-import ai.labs.resources.rest.config.bots.model.BotConfiguration;
-import ai.labs.rest.rest.IRestBotEngine;
 import ai.labs.resources.rest.restinterfaces.IRestInterfaceFactory;
+import ai.labs.rest.IRestBotEngine;
 import ai.labs.runtime.IBotFactory;
 import ai.labs.runtime.SystemRuntime;
-import ai.labs.runtime.service.ServiceException;
 import ai.labs.utilities.RestUtilities;
 import ai.labs.utilities.URIUtilities;
 import com.fasterxml.jackson.databind.JsonNode;
@@ -34,10 +34,10 @@ import lombok.EqualsAndHashCode;
 import lombok.Getter;
 import lombok.Setter;
 import lombok.extern.slf4j.Slf4j;
-import org.jboss.resteasy.plugins.guice.RequestScoped;
+import org.eclipse.microprofile.config.inject.ConfigProperty;
 
 import javax.inject.Inject;
-import javax.inject.Named;
+import javax.inject.Singleton;
 import javax.ws.rs.InternalServerErrorException;
 import javax.ws.rs.core.MediaType;
 import javax.ws.rs.core.Response;
@@ -57,7 +57,7 @@ import static ai.labs.persistence.IResourceStore.ResourceStoreException;
 import static ai.labs.resources.rest.restinterfaces.IRestInterfaceFactory.RestInterfaceFactoryException;
 import static java.util.concurrent.TimeUnit.MILLISECONDS;
 
-@RequestScoped
+@Singleton
 @Slf4j
 public class FacebookEndpoint implements IFacebookEndpoint {
     private static final String RESOURCE_URI_CHANNEL_CONNECTOR = "eddi://ai.labs.channel.facebook";
@@ -81,7 +81,7 @@ public class FacebookEndpoint implements IFacebookEndpoint {
                             IBotFactory botFactory,
                             IHttpClient httpClient,
                             IRestInterfaceFactory restInterfaceFactory,
-                            @Named("system.apiServerURI") String apiServerURI,
+                            @ConfigProperty(name = "system.apiServerURI") String apiServerURI,
                             ICacheFactory cacheFactory) {
         this.runtime = runtime;
         this.botStore = botStore;

@@ -4,6 +4,7 @@ import ai.labs.caching.ICache;
 import ai.labs.caching.ICacheFactory;
 import ai.labs.exception.ServiceException;
 import ai.labs.lifecycle.ILifecycleTask;
+import ai.labs.lifecycle.bootstrap.LifecycleExtensions;
 import ai.labs.parser.IInputParser;
 import ai.labs.parser.InputParserTask;
 import ai.labs.parser.internal.matches.RawSolution;
@@ -45,7 +46,7 @@ public class RestSemanticParser implements IRestSemanticParser {
     public RestSemanticParser(SystemRuntime.IRuntime runtime,
                               IResourceClientLibrary resourceClientLibrary,
                               ICacheFactory cacheFactory,
-                              Map<String, Provider<ILifecycleTask>> lifecycleTasks) {
+                              @LifecycleExtensions Map<String, Provider<ILifecycleTask>> lifecycleTasks) {
         this.runtime = runtime;
         this.resourceClientLibrary = resourceClientLibrary;
         cache = cacheFactory.getCache("ai.labs.parser");

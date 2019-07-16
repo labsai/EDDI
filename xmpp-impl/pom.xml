@@ -25,6 +25,11 @@
         </dependency>
         <dependency>
             <groupId>ai.labs</groupId>
+            <artifactId>configurationrepository-impl</artifactId>
+            <version>${project.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>ai.labs</groupId>
             <artifactId>httpclient-definition</artifactId>
             <version>${project.version}</version>
         </dependency>
@@ -45,7 +50,17 @@
         </dependency>
         <dependency>
             <groupId>ai.labs</groupId>
+            <artifactId>caching-impl-infinispan</artifactId>
+            <version>${project.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>ai.labs</groupId>
             <artifactId>coreutilities</artifactId>
+            <version>${project.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>ai.labs</groupId>
+            <artifactId>coreserver</artifactId>
             <version>${project.version}</version>
         </dependency>
         <dependency>

@@ -22,8 +22,8 @@ import ai.labs.utilities.RuntimeUtilities;
 import lombok.extern.slf4j.Slf4j;
 import org.jboss.resteasy.spi.NoLogWebApplicationException;
 
-import javax.enterprise.context.RequestScoped;
 import javax.inject.Inject;
+import javax.inject.Singleton;
 import javax.ws.rs.InternalServerErrorException;
 import javax.ws.rs.core.Response;
 import java.io.*;
@@ -43,7 +43,7 @@ import java.util.stream.Collectors;
  * @author ginccc
  */
 @Slf4j
-@RequestScoped
+@Singleton
 public class RestExportService extends AbstractBackupService implements IRestExportService {
     private final IDocumentDescriptorStore documentDescriptorStore;
     private final IBotStore botStore;

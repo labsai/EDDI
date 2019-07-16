@@ -9,13 +9,13 @@ import ai.labs.serialization.IDocumentBuilder;
 import ai.labs.user.IUserStore;
 import com.mongodb.client.MongoDatabase;
 
-import javax.enterprise.context.ApplicationScoped;
 import javax.inject.Inject;
+import javax.inject.Singleton;
 
 /**
  * @author ginccc
  */
-@ApplicationScoped
+@Singleton
 public class ConversationDescriptorStore extends DescriptorStore<ConversationDescriptor> implements IConversationDescriptorStore {
 
     @Inject

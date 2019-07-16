@@ -16,8 +16,8 @@ import ai.labs.utilities.RestUtilities;
 import ai.labs.utilities.URIUtilities;
 import lombok.extern.slf4j.Slf4j;
 
-import javax.enterprise.context.ApplicationScoped;
 import javax.inject.Inject;
+import javax.inject.Singleton;
 import javax.ws.rs.InternalServerErrorException;
 import javax.ws.rs.core.MediaType;
 import javax.ws.rs.core.Response;
@@ -30,7 +30,7 @@ import static ai.labs.utilities.RuntimeUtilities.isNullOrEmpty;
 import static javax.ws.rs.core.Response.Status.BAD_REQUEST;
 
 @Slf4j
-@ApplicationScoped
+@Singleton
 public class RestPackageStore extends RestVersionInfo<PackageConfiguration> implements IRestPackageStore {
     private static final String KEY_CONFIG = "config";
     private static final String KEY_URI = "uri";

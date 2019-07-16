@@ -3,6 +3,7 @@ package ai.labs.behavior.bootstrap;
 import ai.labs.behavior.impl.BehaviorRulesEvaluationTask;
 import ai.labs.behavior.impl.conditions.*;
 import ai.labs.lifecycle.ILifecycleTask;
+import ai.labs.lifecycle.bootstrap.LifecycleExtensions;
 
 import javax.annotation.PostConstruct;
 import javax.enterprise.context.ApplicationScoped;
@@ -20,7 +21,7 @@ import java.util.Map;
 public class BehaviorModule {
     @PostConstruct
     @Inject
-    protected void configure(Map<String, Provider<ILifecycleTask>> lifecycleTaskProviders,
+    protected void configure(@LifecycleExtensions Map<String, Provider<ILifecycleTask>> lifecycleTaskProviders,
                              Instance<ILifecycleTask> instance) {
 
         lifecycleTaskProviders.put("ai.labs.behavior", () -> instance.select(BehaviorRulesEvaluationTask.class).get());

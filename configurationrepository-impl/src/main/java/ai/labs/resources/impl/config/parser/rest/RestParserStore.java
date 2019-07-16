@@ -10,8 +10,8 @@ import ai.labs.resources.rest.documentdescriptor.IDocumentDescriptorStore;
 import ai.labs.resources.rest.restinterfaces.IRestInterfaceFactory;
 import lombok.extern.slf4j.Slf4j;
 
-import javax.enterprise.context.ApplicationScoped;
 import javax.inject.Inject;
+import javax.inject.Singleton;
 import javax.ws.rs.core.Response;
 import java.util.List;
 
@@ -19,7 +19,7 @@ import java.util.List;
  * @author ginccc
  */
 @Slf4j
-@ApplicationScoped
+@Singleton
 public class RestParserStore extends RestVersionInfo<ParserConfiguration> implements IRestParserStore {
     private final IParserStore parserStore;
     private IRestParserStore restParserStore;

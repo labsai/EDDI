@@ -11,8 +11,8 @@ import ai.labs.resources.rest.restinterfaces.IRestInterfaceFactory;
 import ai.labs.schema.IJsonSchemaCreator;
 import lombok.extern.slf4j.Slf4j;
 
-import javax.enterprise.context.ApplicationScoped;
 import javax.inject.Inject;
+import javax.inject.Singleton;
 import javax.ws.rs.core.Response;
 import java.util.List;
 
@@ -20,7 +20,7 @@ import java.util.List;
  * @author ginccc
  */
 @Slf4j
-@ApplicationScoped
+@Singleton
 public class RestPropertySetterStore extends RestVersionInfo<PropertySetterConfiguration> implements IRestPropertySetterStore {
     private final IPropertySetterStore propertySetterStore;
     private final IJsonSchemaCreator jsonSchemaCreator;

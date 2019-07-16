@@ -1,6 +1,7 @@
 package ai.labs.output.bootstrap;
 
 import ai.labs.lifecycle.ILifecycleTask;
+import ai.labs.lifecycle.bootstrap.LifecycleExtensions;
 import ai.labs.output.impl.OutputGenerationTask;
 
 import javax.annotation.PostConstruct;
@@ -15,7 +16,7 @@ import java.util.Map;
 public class OutputGenerationModule {
     @PostConstruct
     @Inject
-    protected void configure(Map<String, Provider<ILifecycleTask>> lifecycleTaskProviders,
+    protected void configure(@LifecycleExtensions Map<String, Provider<ILifecycleTask>> lifecycleTaskProviders,
                              Instance<ILifecycleTask> instance) {
 
         lifecycleTaskProviders.put("ai.labs.output", () -> instance.select(OutputGenerationTask.class).get());

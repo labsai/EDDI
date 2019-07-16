@@ -22,11 +22,11 @@ public class LogoutEndpoint implements ILogoutEndpoint {
     private final String securityHandleType;
     @Inject
     @Context
-    private HttpServletRequest request;
+    HttpServletRequest request;
 
     @Inject
     @Context
-    private HttpServletResponse response;
+    HttpServletResponse response;
 
     @Inject
     public LogoutEndpoint(@ConfigProperty(name = "webServer.securityHandlerType") String securityHandleType) {

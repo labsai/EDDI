@@ -25,12 +25,22 @@
         </dependency>
         <dependency>
             <groupId>ai.labs</groupId>
+            <artifactId>configurationrepository-impl</artifactId>
+            <version>${project.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>ai.labs</groupId>
             <artifactId>httpclient-definition</artifactId>
             <version>${project.version}</version>
         </dependency>
         <dependency>
             <groupId>ai.labs</groupId>
             <artifactId>sharedutilities</artifactId>
+            <version>${project.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>ai.labs</groupId>
+            <artifactId>httpclient-impl-jetty</artifactId>
             <version>${project.version}</version>
         </dependency>
         <dependency>

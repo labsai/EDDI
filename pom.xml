@@ -47,7 +47,6 @@
         <module>facebookmessenger-impl</module>
         <module>outputgeneration-definition</module>
         <module>outputgeneration-impl</module>
-        <module>behavior-definition</module>
         <module>behavior-impl</module>
         <module>templateengine-definition</module>
         <module>templateengine-impl-thymeleaf</module>
@@ -57,7 +56,6 @@
         <module>backupservice-impl</module>
         <module>xmpp-definition</module>
         <module>xmpp-impl</module>
-        <module>httpCallsTask-definition</module>
         <module>httpCallsTask-impl</module>
         <module>basemodels</module>
     </modules>

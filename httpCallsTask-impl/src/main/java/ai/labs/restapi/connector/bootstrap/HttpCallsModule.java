@@ -1,6 +1,7 @@
 package ai.labs.restapi.connector.bootstrap;
 
 import ai.labs.lifecycle.ILifecycleTask;
+import ai.labs.lifecycle.bootstrap.LifecycleExtensions;
 import ai.labs.restapi.connector.impl.HttpCallsTask;
 
 import javax.annotation.PostConstruct;
@@ -13,7 +14,7 @@ public class HttpCallsModule {
 
     @PostConstruct
     @Inject
-    protected void configure(Map<String, Provider<ILifecycleTask>> lifecycleTaskProviders,
+    protected void configure(@LifecycleExtensions Map<String, Provider<ILifecycleTask>> lifecycleTaskProviders,
                              Instance<ILifecycleTask> instance) {
 
         lifecycleTaskProviders.put("ai.labs.httpcalls", () -> instance.select(HttpCallsTask.class).get());

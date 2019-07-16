@@ -1,6 +1,7 @@
 package ai.labs.templateengine.bootstrap;
 
 import ai.labs.lifecycle.ILifecycleTask;
+import ai.labs.lifecycle.bootstrap.LifecycleExtensions;
 import ai.labs.templateengine.OutputTemplateTask;
 import ai.labs.templateengine.impl.HtmlTemplateEngine;
 import ai.labs.templateengine.impl.TextTemplateEngine;
@@ -22,7 +23,7 @@ import java.util.Map;
 public class TemplateEngineModule {
     @PostConstruct
     @Inject
-    protected void configure(Map<String, Provider<ILifecycleTask>> lifecycleTaskProviders,
+    protected void configure(@LifecycleExtensions Map<String, Provider<ILifecycleTask>> lifecycleTaskProviders,
                              Instance<ILifecycleTask> instance) {
 
         lifecycleTaskProviders.put("ai.labs.templating", () -> instance.select(OutputTemplateTask.class).get());

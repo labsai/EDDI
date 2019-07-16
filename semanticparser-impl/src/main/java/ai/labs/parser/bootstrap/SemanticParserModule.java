@@ -1,6 +1,7 @@
 package ai.labs.parser.bootstrap;
 
 import ai.labs.lifecycle.ILifecycleTask;
+import ai.labs.lifecycle.bootstrap.LifecycleExtensions;
 import ai.labs.parser.InputParserTask;
 import ai.labs.parser.extensions.corrections.providers.*;
 import ai.labs.parser.extensions.dictionaries.providers.*;
@@ -22,7 +23,7 @@ import java.util.Map;
 public class SemanticParserModule {
     @PostConstruct
     @Inject
-    protected void configure(Map<String, Provider<ILifecycleTask>> lifecycleTaskProviders,
+    protected void configure(@LifecycleExtensions Map<String, Provider<ILifecycleTask>> lifecycleTaskProviders,
                              Instance<ILifecycleTask> instance) {
 
         lifecycleTaskProviders.put(InputParserTask.ID, () -> instance.select(InputParserTask.class).get());

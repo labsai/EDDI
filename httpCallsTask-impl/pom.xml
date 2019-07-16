@@ -15,11 +15,6 @@
     <dependencies>
         <dependency>
             <groupId>ai.labs</groupId>
-            <artifactId>httpCallsTask-definition</artifactId>
-            <version>${project.version}</version>
-        </dependency>
-        <dependency>
-            <groupId>ai.labs</groupId>
             <artifactId>conversationlifecycle-definition</artifactId>
             <version>${project.version}</version>
         </dependency>
@@ -46,6 +41,11 @@
         <dependency>
             <groupId>ai.labs</groupId>
             <artifactId>configurationrepository-definition</artifactId>
+            <version>${project.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>ai.labs</groupId>
+            <artifactId>conversationlifecycle-impl</artifactId>
             <version>${project.version}</version>
         </dependency>
         <dependency>

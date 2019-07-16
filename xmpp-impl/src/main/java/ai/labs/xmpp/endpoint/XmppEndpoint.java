@@ -2,18 +2,18 @@ package ai.labs.xmpp.endpoint;
 
 import ai.labs.caching.ICache;
 import ai.labs.caching.ICacheFactory;
+import ai.labs.exception.ServiceException;
 import ai.labs.memory.model.ConversationOutput;
 import ai.labs.memory.model.SimpleConversationMemorySnapshot;
+import ai.labs.models.BotConfiguration;
 import ai.labs.models.ConversationState;
 import ai.labs.models.Deployment;
 import ai.labs.models.DocumentDescriptor;
 import ai.labs.persistence.IResourceStore;
 import ai.labs.resources.rest.config.bots.IBotStore;
 import ai.labs.resources.rest.config.bots.IRestBotStore;
-import ai.labs.resources.rest.config.bots.model.BotConfiguration;
-import ai.labs.rest.rest.IRestBotEngine;
+import ai.labs.rest.IRestBotEngine;
 import ai.labs.runtime.IBotFactory;
-import ai.labs.runtime.service.ServiceException;
 import ai.labs.utilities.URIUtilities;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -29,6 +29,7 @@ import org.jivesoftware.smack.tcp.XMPPTCPConnectionConfiguration;
 import org.jxmpp.jid.EntityBareJid;
 
 import javax.inject.Inject;
+import javax.inject.Singleton;
 import javax.ws.rs.container.AsyncResponse;
 import javax.ws.rs.container.TimeoutHandler;
 import javax.ws.rs.core.Response;
@@ -43,6 +44,7 @@ import static ai.labs.persistence.IResourceStore.ResourceStoreException;
 import static ai.labs.resources.rest.restinterfaces.IRestInterfaceFactory.RestInterfaceFactoryException;
 
 @Slf4j
+@Singleton
 public class XmppEndpoint implements IXmppEndpoint {
     private static final String RESOURCE_URI_CHANNEL_CONNECTOR = "eddi://ai.labs.channel.xmpp";
 
