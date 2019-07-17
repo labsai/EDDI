@@ -1,6 +1,8 @@
 package ai.labs.channels.differ.model;
 
+import lombok.AllArgsConstructor;
 import lombok.Getter;
+import lombok.NoArgsConstructor;
 import lombok.Setter;
 
 import java.util.Date;
@@ -47,6 +49,8 @@ public class Event {
 
     @Getter
     @Setter
+    @NoArgsConstructor
+    @AllArgsConstructor
     public static class Part {
         private String id;
         private String body;
