@@ -1,6 +1,5 @@
 package ai.labs.channels.differ;
 
-import ai.labs.channels.differ.model.Command;
 import ai.labs.channels.differ.model.CommandInfo;
 import ai.labs.channels.differ.model.MessageCreateCommand;
 import ai.labs.serialization.IJsonSerialization;
@@ -13,9 +12,8 @@ import lombok.extern.slf4j.Slf4j;
 import javax.inject.Inject;
 import javax.inject.Singleton;
 import java.io.IOException;
+import java.util.Date;
 import java.util.concurrent.TimeoutException;
-
-import static ai.labs.channels.differ.utilities.DifferUtilities.getCurrentTime;
 
 @Slf4j
 @Singleton
@@ -74,13 +72,22 @@ public class DifferPublisher implements IDifferPublisher {
     public void negativeDeliveryAck(Delivery delivery) {
         try {
             channel.basicNack(delivery.getEnvelope().getDeliveryTag(), false, false);
+            publishEventToFailedQueue(delivery);
+
+        } catch (IOException e) {
+            log.error("Could not publish message.created event on eddi.failed queue! \n"
+                    + e.getLocalizedMessage(), e);
+        }
+    }
+
+    private void publishEventToFailedQueue(Delivery delivery) {
+        try {
             channel.basicPublish(
                     MESSAGE_CREATED_EXCHANGE,
                     MESSAGE_CREATED_EDDI_FAILED_ROUTING_KEY, null, delivery.getBody()
             );
 
             channel.waitForConfirmsOrDie(TIMEOUT_CONFIRMS_IN_MILLIS);
-
         } catch (IOException | InterruptedException | TimeoutException e) {
             log.error("Could not publish message.created event on eddi.failed queue! \n"
                     + e.getLocalizedMessage(), e);
@@ -91,13 +98,16 @@ public class DifferPublisher implements IDifferPublisher {
     public boolean publishCommandAndWaitForConfirm(CommandInfo commandInfo)
             throws IOException {
 
-        Command command = commandInfo.getCommand();
+        var command = commandInfo.getCommand();
         if (command instanceof MessageCreateCommand) {
-            ((MessageCreateCommand) command).getPayload().setSentAt(getCurrentTime());
+            ((MessageCreateCommand) command).getPayload().setSentAt(new Date(System.currentTimeMillis() + 1));
         }
         String eventBody = jsonSerialization.serialize(command);
         channel.basicPublish(
-                commandInfo.getExchange(), commandInfo.getRoutingKey(), null, eventBody.getBytes());
+                commandInfo.getExchange(),
+                commandInfo.getRoutingKey(),
+                null, eventBody.getBytes());
+
         try {
             channel.waitForConfirmsOrDie(TIMEOUT_CONFIRMS_IN_MILLIS);
             return true;

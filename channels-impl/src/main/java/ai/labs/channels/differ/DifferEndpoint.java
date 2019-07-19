@@ -21,11 +21,14 @@ import javax.ws.rs.core.Response;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.util.*;
+import java.util.concurrent.ExecutionException;
+import java.util.stream.Collectors;
 
 import static ai.labs.channels.differ.utilities.DifferUtilities.generateUUID;
 import static ai.labs.channels.differ.utilities.DifferUtilities.getCurrentTime;
 import static ai.labs.lifecycle.IConversation.CONVERSATION_END;
 import static ai.labs.utilities.RuntimeUtilities.*;
+import static java.util.concurrent.TimeUnit.MILLISECONDS;
 
 
 @Slf4j
@@ -42,6 +45,8 @@ public class DifferEndpoint implements IDifferEndpoint {
     private final Map<String, DifferEventDefinition> availableBotUserIds = new HashMap<>();
     private final ICache<String, ConversationInfo> conversationInfoCache;
     private final ICache<String, CommandInfo> ackAwaitingCommandsCache;
+    private static final String logStatementIgnoredEvent = " [x] received but ignored amqp event, " +
+            "since non of the participants in this conversation is a bot. ('{}')";
 
     @Inject
     public DifferEndpoint(IRestBotManagement restBotManagement,
@@ -69,6 +74,8 @@ public class DifferEndpoint implements IDifferEndpoint {
                         conversationId,
                         Arrays.asList("379db2b2-ea74-4812-8d36-d6a988bdc311", "cfc4347d-a585-4ddf-8767-6210f3876b91"),
                         List.of("379db2b2-ea74-4812-8d36-d6a988bdc311")));
+
+        log.info("Differ integration started");
     }
 
     private DeliverCallback createConversationCreatedCallback() {
@@ -96,7 +103,7 @@ public class DifferEndpoint implements IDifferEndpoint {
                 if (botUserParticipantIds.isEmpty()) {
                     //No bot involved in this conversation
                     //todo change to debug
-                    log.info(" [x] received but ignored amqp event, since non of the participants is a bot. ('{}')", receivedMessage);
+                    logIgnoredEvent(logStatementIgnoredEvent, receivedMessage);
                     differPublisher.positiveDeliveryAck(deliveryTag);
                     return;
                 }
@@ -112,6 +119,10 @@ public class DifferEndpoint implements IDifferEndpoint {
         };
     }
 
+    private void logIgnoredEvent(String logStatement, String logObject) {
+        log.info(logStatement, logObject);
+    }
+
     private DeliverCallback createMessageCreatedCallback() {
         return (consumerTag, delivery) -> {
             final long deliveryTag = delivery.getEnvelope().getDeliveryTag();
@@ -120,7 +131,7 @@ public class DifferEndpoint implements IDifferEndpoint {
             try {
                 Event receivedEvent = jsonSerialization.deserialize(receivedMessage, Event.class);
 
-                executeConfirmationSeekingCommands(receivedEvent.getEventId());
+                executeConfirmationSeekingCommands(receivedEvent.getPayload().getMessage().getId());
 
                 Event.Payload payload = receivedEvent.getPayload();
                 String senderId = payload.getMessage().getSenderId();
@@ -134,6 +145,16 @@ public class DifferEndpoint implements IDifferEndpoint {
                 var conversationInfo = getConversationInfo(conversationId);
 
                 if (!isNullOrEmpty(conversationInfo)) {
+                    if (isGroupChat(conversationInfo.getAllParticipantIds())) {
+                        List<String> mentions = receivedEvent.getPayload().getMessage().getMentions();
+                        if (isNullOrEmpty(mentions)) {
+                            //this message belongs to a conversation we are a part of, but since this
+                            //is a group chat, we only process messages that contain a mentions of a bot user
+                            differPublisher.positiveDeliveryAck(deliveryTag);
+                            return;
+                        }
+                    }
+
                     log.info(" [x] Received and accepted amqp event: '" + receivedMessage + "'");
 
                     var botIntent = getChannelEventDefinition(conversationInfo.getBotParticipantIds()).getBotIntent();
@@ -142,18 +163,19 @@ public class DifferEndpoint implements IDifferEndpoint {
                     {
                         if (!isGroupChat(conversationInfo.getAllParticipantIds())) {
                             String userInput = payload.getMessage().getParts().get(0).getBody();
-                            processUserMessage(delivery, botUserId, conversationId, userInput, payload, botIntent, Collections.emptyMap());
+                            processUserMessage(delivery, botUserId, conversationId,
+                                    userInput, payload, botIntent, Collections.emptyMap());
                         } else {
                             //todo change to debug
-                            log.info(" [x] Ignoring message (id={}) because it is from a group chat", receivedEvent.getEventId());
+                            logIgnoredEvent(" [x] Ignoring message (id={}) " +
+                                    "because it is from a group chat", receivedEvent.getEventId());
                             differPublisher.positiveDeliveryAck(deliveryTag);
                         }
                     });
                 } else {
                     //todo change to debug
                     //No bot involved in this conversation
-                    log.info(" [x] received but ignored amqp event, " +
-                            "since non of the participants in this conversation is a bot. ('{}')", receivedMessage);
+                    logIgnoredEvent(logStatementIgnoredEvent, receivedMessage);
                     differPublisher.positiveDeliveryAck(deliveryTag);
                 }
             } catch (Exception e) {
@@ -185,8 +207,8 @@ public class DifferEndpoint implements IDifferEndpoint {
     private ConversationInfo getConversationInfo(String conversationId) {
         return conversationInfoCache.get(conversationId);
     }
-
     //todo
+
     private DifferEventDefinition getChannelEventDefinition(List<String> botUserId) {
         DifferEventDefinition differEventDefinition = new DifferEventDefinition();
         differEventDefinition.setBotIntent("test");
@@ -275,33 +297,51 @@ public class DifferEndpoint implements IDifferEndpoint {
                 var firstCommandInfo = commandInfos.get(0);
 
                 Command firstCommand = firstCommandInfo.getCommand();
-                String referenceCommandId = firstCommand.getCommandId();
+                String referenceCommandId = getReferenceId(firstCommand);
                 for (int i = 1; i < commandInfos.size(); i++) {
                     var commandInfo = commandInfos.get(i);
                     storeCommandToBeExecuteOnEventReceived(referenceCommandId, commandInfo);
-                    referenceCommandId = commandInfo.getCommand().getCommandId();
+                    referenceCommandId = getReferenceId(commandInfo.getCommand());
                 }
 
-                return differPublisher.publishCommandAndWaitForConfirm(firstCommandInfo);
+                return runtime.submitScheduledCallable(() ->
+                                differPublisher.publishCommandAndWaitForConfirm(firstCommandInfo),
+                        firstCommandInfo.getSendingDelay(), MILLISECONDS, null).get();
             }
 
             return true;
-        } catch (IOException e) {
+        } catch (ExecutionException | InterruptedException e) {
             log.error(e.getLocalizedMessage(), e);
             return false;
         }
     }
 
-    private void executeConfirmationSeekingCommands(String eventId) {
-        if (eventId != null) {
-            var commandInfo = ackAwaitingCommandsCache.get(eventId);
+    private String getReferenceId(Command command) {
+        if (command instanceof ConversationCreateCommand) {
+            return ((ConversationCreateCommand) command).getPayload().getId();
+        } else if (command instanceof ActionsCreateCommand) {
+            var actions = ((ActionsCreateCommand) command).getPayload().getActions();
+            List<String> actionIds = actions.stream().map(ActionsCreateCommand.Payload.Action::getId).collect(Collectors.toList());
+            return String.join("-", actionIds);
+        } else {
+            return ((MessageCreateCommand) command).getPayload().getId();
+        }
+    }
+
+    private void storeCommandToBeExecuteOnEventReceived(String eventId, CommandInfo commandInfo) {
+        ackAwaitingCommandsCache.put(eventId, commandInfo);
+    }
+
+    private void executeConfirmationSeekingCommands(String messageId) {
+        if (messageId != null) {
+            var commandInfo = ackAwaitingCommandsCache.get(messageId);
             if (commandInfo != null) {
-                runtime.submitCallable(() -> {
+                runtime.submitScheduledCallable(() -> {
                     try {
                         var success = differPublisher.publishCommandAndWaitForConfirm(commandInfo);
 
                         if (success) {
-                            ackAwaitingCommandsCache.remove(eventId);
+                            ackAwaitingCommandsCache.remove(messageId);
                         } else {
                             log.error("Unable to send command to broker: exchange: {} routingKey: {} command: {}",
                                     commandInfo.getCommand(), commandInfo.getRoutingKey(),
@@ -312,13 +352,9 @@ public class DifferEndpoint implements IDifferEndpoint {
                     }
 
                     return null;
-                }, null);
+                }, commandInfo.getSendingDelay(), MILLISECONDS, null);
             }
         }
-    }
-
-    private void storeCommandToBeExecuteOnEventReceived(String eventId, CommandInfo commandInfo) {
-        ackAwaitingCommandsCache.put(eventId, commandInfo);
     }
 
     @Override
@@ -334,6 +370,17 @@ public class DifferEndpoint implements IDifferEndpoint {
             log.error(e.getLocalizedMessage(), e);
             throw new InternalServerErrorException();
         }
+    }
+
+    @Override
+    public void endBotConversation(String intent, String botUserId, String differConversationId) {
+        restBotManagement.endCurrentConversation(intent, differConversationId);
+
+        var memorySnapshot = restBotManagement.
+                loadConversationMemory(intent, differConversationId,
+                        false, true, Collections.emptyList());
+
+        sendBotOutputToConversation(memorySnapshot, botUserId, differConversationId);
     }
 
     private void triggerConversationCreateCommand(CreateConversation createConversation) throws IOException {
@@ -353,6 +400,6 @@ public class DifferEndpoint implements IDifferEndpoint {
     private void publishConversationCreateCommand(ConversationCreateCommand conversationCreateCommand) throws IOException {
         differPublisher.publishCommandAndWaitForConfirm(new CommandInfo(
                 CONVERSATION_CREATE_EXCHANGE,
-                CONVERSATION_CREATE_ROUTING_KEY, conversationCreateCommand));
+                CONVERSATION_CREATE_ROUTING_KEY, conversationCreateCommand, 0));
     }
 }

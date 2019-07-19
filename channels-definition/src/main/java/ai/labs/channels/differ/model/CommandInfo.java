@@ -15,4 +15,5 @@ public class CommandInfo implements Serializable {
     private String exchange;
     private String routingKey;
     private Command command;
+    private long sendingDelay;
 }

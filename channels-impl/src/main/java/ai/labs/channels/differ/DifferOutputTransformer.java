@@ -2,7 +2,8 @@ package ai.labs.channels.differ;
 
 import ai.labs.channels.differ.model.*;
 import ai.labs.memory.model.SimpleConversationMemorySnapshot;
-import ai.labs.resources.rest.config.output.model.OutputConfiguration;
+import ai.labs.output.model.QuickReply;
+import lombok.extern.slf4j.Slf4j;
 
 import javax.ws.rs.core.MediaType;
 import java.util.Collections;
@@ -11,15 +12,15 @@ import java.util.List;
 import java.util.Map;
 import java.util.stream.Collectors;
 
-import static ai.labs.channels.differ.utilities.DifferUtilities.generateUUID;
-import static ai.labs.channels.differ.utilities.DifferUtilities.getCurrentTime;
+import static ai.labs.channels.differ.utilities.DifferUtilities.*;
+import static ai.labs.utilities.RuntimeUtilities.isNullOrEmpty;
 
+@Slf4j
 public class DifferOutputTransformer implements IDifferOutputTransformer {
     private static final String CONVERSATION_EXCHANGE = "conversation";
-    private static final String ACTION_CREATE_EXCHANGE = "message-actions.created";
     private static final String MESSAGE_CREATE = "message.create";
     private static final String MESSAGE_CREATE_ROUTING_KEY = "message.create";
-    private static final String ACTION_EXCHANGE = "message-actions";
+    private static final String ACTION_CREATE_EXCHANGE = "message-actions";
     private static final String ACTION_CREATE_ROUTING_KEY = "message-actions.createMany";
     private static final String INPUT_TYPE_TEXT = "text";
 
@@ -29,15 +30,25 @@ public class DifferOutputTransformer implements IDifferOutputTransformer {
 
         List<CommandInfo> commandInfos = getOutputParts(memorySnapshot).stream().map(
                 outputPart -> {
-                    var eventPart = new Event.Part(generateUUID(), outputPart, MediaType.TEXT_PLAIN, INPUT_TYPE_TEXT);
+                    var eventPart = new Event.Part(generateUUID(), outputPart, MediaType.TEXT_PLAIN, "text");
                     return new CommandInfo(CONVERSATION_EXCHANGE, MESSAGE_CREATE_ROUTING_KEY,
-                            createMessageCreateCommand(conversationId, botUserId, List.of(eventPart)));
+                            createMessageCreateCommand(conversationId, botUserId, List.of(eventPart)),
+                            calculateTypingDelay(outputPart));
                 }).collect(Collectors.toList());
 
         var quickReplies = getQuickReplies(memorySnapshot);
         if (!quickReplies.isEmpty()) {
-            var actionCreateCommand = createActionCreateCommand(conversationId, botUserId, quickReplies);
-            commandInfos.add(new CommandInfo(ACTION_CREATE_EXCHANGE, ACTION_CREATE_ROUTING_KEY, actionCreateCommand));
+            if (commandInfos.isEmpty()) {
+                log.error("Skipped Creating Actions (Quick Replies), since there was no message to attach it to. " +
+                        "(conversationId={},botUserId={})", conversationId, botUserId);
+                return commandInfos;
+            }
+
+            var lastCommandInfo = (MessageCreateCommand) commandInfos.get(commandInfos.size() - 1).getCommand();
+            var messageId = lastCommandInfo.getPayload().getId();
+            var actionCreateCommand = createActionCreateCommand(conversationId, messageId, botUserId, quickReplies);
+            commandInfos.add(new CommandInfo(
+                    ACTION_CREATE_EXCHANGE, ACTION_CREATE_ROUTING_KEY, actionCreateCommand, 0));
         }
 
         return commandInfos;
@@ -77,38 +88,42 @@ public class DifferOutputTransformer implements IDifferOutputTransformer {
                 new MessageCreateCommand.Payload(generateUUID(), conversationId, botUserId, INPUT_TYPE_TEXT, parts));
     }
 
-    private static List<OutputConfiguration.QuickReply> getQuickReplies(SimpleConversationMemorySnapshot memorySnapshot) {
-        var quickReplyActions = new LinkedList<OutputConfiguration.QuickReply>();
+    private static List<QuickReply> getQuickReplies(SimpleConversationMemorySnapshot memorySnapshot) {
+        var quickReplyActions = new LinkedList<QuickReply>();
         memorySnapshot.getConversationOutputs().stream().
-                filter(conversationOutput -> conversationOutput.get("quickReplies") != null).
+                filter(conversationOutput -> !isNullOrEmpty(conversationOutput.get("quickReplies"))).
                 map(conversationOutput -> {
-                    List<Map> quickReplies = (List<Map>) conversationOutput.get("quickReplies");
-                    return quickReplies.stream().map(map -> {
-                        Object isDefault = map.get("isDefault");
-                        return new OutputConfiguration.QuickReply(
-                                map.get("value").toString(),
-                                map.get("expressions").toString(),
-                                isDefault != null ? Boolean.valueOf(isDefault.toString()) : false);
-                    }).collect(Collectors.toList());
-                }).
-                forEach(quickReplyActions::addAll);
+                    List quickRepliesObj = (List) conversationOutput.get("quickReplies");
+                    if (quickRepliesObj.get(0) instanceof QuickReply) {
+                        return quickRepliesObj;
+                    } else {
+                        return ((List<Map>) quickRepliesObj).stream().map(map -> {
+                            Object isDefault = map.get("isDefault");
+                            return new QuickReply(
+                                    map.get("value").toString(),
+                                    map.get("expressions").toString(),
+                                    isDefault != null ? Boolean.valueOf(isDefault.toString()) : false);
+                        }).collect(Collectors.toList());
+                    }
+                }).forEach(quickReplyActions::addAll);
+
         return quickReplyActions;
     }
 
     private static ActionsCreateCommand createActionCreateCommand(
-            String conversationId, String botUserId, List<OutputConfiguration.QuickReply> quickReplies) {
+            String conversationId, String messageId, String botUserId, List<QuickReply> quickReplies) {
 
-        return new ActionsCreateCommand(new Command.AuthContext(botUserId), generateUUID(), ACTION_EXCHANGE, getCurrentTime(),
-                new ActionsCreateCommand.Payload(convertQuickRepliesToActions(conversationId, quickReplies)));
+        return new ActionsCreateCommand(new Command.AuthContext(botUserId), generateUUID(), ACTION_CREATE_ROUTING_KEY, getCurrentTime(),
+                new ActionsCreateCommand.Payload(convertQuickRepliesToActions(conversationId, messageId, quickReplies)));
     }
 
     private static List<ActionsCreateCommand.Payload.Action> convertQuickRepliesToActions(
-            String conversationId, List<OutputConfiguration.QuickReply> quickReplies) {
+            String conversationId, String messageId, List<QuickReply> quickReplies) {
 
         return quickReplies.stream().map(quickReply -> {
-                    Boolean isDefault = quickReply.getIsDefault();
-                    return new ActionsCreateCommand.Payload.Action(generateUUID(), conversationId, generateUUID(),
-                            isDefault != null ? isDefault : false, quickReply.getValue());
+                    Boolean isDefault = quickReply.isDefault();
+                    return new ActionsCreateCommand.Payload.Action(
+                            generateUUID(), conversationId, messageId, isDefault, quickReply.getValue());
                 }
         ).collect(Collectors.toList());
     }

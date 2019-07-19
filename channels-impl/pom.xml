@@ -83,6 +83,11 @@
             <artifactId>coreutilities</artifactId>
             <version>${project.version}</version>
         </dependency>
+        <dependency>
+            <groupId>ai.labs</groupId>
+            <artifactId>outputgeneration-definition</artifactId>
+            <version>${project.version}</version>
+        </dependency>
     </dependencies>
 
     <properties>
