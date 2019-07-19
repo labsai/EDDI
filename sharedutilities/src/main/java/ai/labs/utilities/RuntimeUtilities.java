@@ -15,6 +15,14 @@ public class RuntimeUtilities {
         }
     }
 
+    public static void checkNotEmpty(Object object, String name) {
+        if (isNullOrEmpty(object)) {
+            String message = "Argument must not be null nor empty (%s)";
+            message = String.format(message, name);
+            throw new IllegalArgumentException(message);
+        }
+    }
+
     public static void checkCollectionNoNullElements(Collection collection, String name) {
         checkNotNull(collection, name);
 

@@ -23,6 +23,11 @@
             <version>9.4.11.Final</version>
         </dependency>
         <dependency>
+            <groupId>org.infinispan</groupId>
+            <artifactId>infinispan-cachestore-mongodb</artifactId>
+            <version>9.4.0.Final</version>
+        </dependency>
+        <dependency>
             <groupId>ai.labs</groupId>
             <artifactId>runtime-definition</artifactId>
             <version>${project.version}</version>

@@ -13,7 +13,7 @@ import java.util.Map;
 @Setter
 public class DifferEventDefinition {
     @NotEmpty
-    private List<String> differBotUserId = new LinkedList<>();
+    private List<String> differBotUserIds = new LinkedList<>();
     @NotEmpty
     private String botIntent;
     private Map<String, Context> botContext;

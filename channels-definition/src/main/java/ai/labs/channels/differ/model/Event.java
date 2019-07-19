@@ -5,31 +5,32 @@ import lombok.Getter;
 import lombok.NoArgsConstructor;
 import lombok.Setter;
 
+import java.io.Serializable;
 import java.util.Date;
 import java.util.List;
 
 @Getter
 @Setter
-public class Event {
+public class Event implements Serializable {
     private String eventId;
     private String eventName;
     private Payload payload;
-    private Message message;
-    private Object error;
     private Date createdAt;
     private String version;
 
     @Getter
     @Setter
-    public static class Payload {
+    public static class Payload implements Serializable {
         private String communityId;
         private Conversation conversation;
         private List<String> participantIds;
+        private Message message;
+        private Object error;
     }
 
     @Getter
     @Setter
-    public static class Conversation {
+    public static class Conversation implements Serializable {
         private String id;
         private List<String> participantIds;
         private String type;
@@ -37,7 +38,7 @@ public class Event {
 
     @Getter
     @Setter
-    public static class Message {
+    public static class Message implements Serializable {
         private String id;
         private String conversationId;
         private String inputType;
@@ -51,7 +52,7 @@ public class Event {
     @Setter
     @NoArgsConstructor
     @AllArgsConstructor
-    public static class Part {
+    public static class Part implements Serializable {
         private String id;
         private String body;
         private String mimeType;

@@ -12,6 +12,21 @@
 
     <artifactId>channels-definition</artifactId>
 
+    <dependencies>
+        <dependency>
+            <groupId>ai.labs</groupId>
+            <artifactId>conversationmemory-definition</artifactId>
+            <version>${project.version}</version>
+        </dependency>
+        <!-- rabbitmq start -->
+        <dependency>
+            <groupId>com.rabbitmq</groupId>
+            <artifactId>amqp-client</artifactId>
+            <version>5.7.2</version>
+        </dependency>
+        <!-- rabbitmq end -->
+    </dependencies>
+
     <properties>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
     </properties>
