@@ -70,19 +70,6 @@
     <build>
         <plugins>
             <plugin>
-                <groupId>org.jboss.jandex</groupId>
-                <artifactId>jandex-maven-plugin</artifactId>
-                <version>1.0.6</version>
-                <executions>
-                    <execution>
-                        <id>make-index</id>
-                        <goals>
-                            <goal>jandex</goal>
-                        </goals>
-                    </execution>
-                </executions>
-            </plugin>
-            <plugin>
                 <groupId>org.apache.maven.plugins</groupId>
                 <artifactId>maven-compiler-plugin</artifactId>
                 <version>${compile-plugin.version}</version>
@@ -104,37 +91,6 @@
                         --illegal-access=permit
                     </argLine>
                 </configuration>
-            </plugin>
-            <plugin>
-                <groupId>io.quarkus</groupId>
-                <artifactId>quarkus-maven-plugin</artifactId>
-                <version>${quarkus.version}</version>
-                <executions>
-                    <execution>
-                        <goals>
-                            <goal>build</goal>
-                        </goals>
-                    </execution>
-                </executions>
-            </plugin>
-            <plugin>
-                <groupId>org.apache.maven.plugins</groupId>
-                <artifactId>maven-failsafe-plugin</artifactId>
-                <version>${surefire-plugin.version}</version>
-                <executions>
-                    <execution>
-                        <goals>
-                            <goal>integration-test</goal>
-                            <goal>verify</goal>
-                        </goals>
-                        <configuration>
-                            <systemProperties>
-                                <native.image.path>${project.build.directory}/${project.build.finalName}-runner
-                                </native.image.path>
-                            </systemProperties>
-                        </configuration>
-                    </execution>
-                </executions>
             </plugin>
         </plugins>
     </build>
@@ -240,27 +196,6 @@
             </dependency>
         </dependencies>
     </dependencyManagement>
-
-    <!-- <repositories>
-         <repository>
-             &lt;!&ndash;
-             The username and password are retrieved by looking for the Repository
-             Id in the $HOME/.m2/settings.xml file.
-             &ndash;&gt;
-             &lt;!&ndash; id Must Match the Unique Identifier in settings.xml &ndash;&gt;
-             <id>io.cloudrepo</id>
-             <url>https://labsai.mycloudrepo.io/repositories/eddi</url>
-             <releases/>
-         </repository>
-     </repositories>
-
-     <distributionManagement>
-         <repository>
-             <id>io.cloudrepo</id> &lt;!&ndash; Must Match the Unique Identifier in settings.xml &ndash;&gt;
-             <name>eddi</name>
-             <url>https://labsai.mycloudrepo.io/repositories/eddi</url>
-         </repository>
-     </distributionManagement>-->
 
     <profiles>
         <profile>

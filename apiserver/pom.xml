@@ -8,6 +8,7 @@
         <version>4.7</version>
         <relativePath>../pom.xml</relativePath>
     </parent>
+    <packaging>jar</packaging>
     <modelVersion>4.0.0</modelVersion>
 
     <artifactId>apiserver</artifactId>
@@ -153,20 +154,46 @@
     <build>
         <plugins>
             <plugin>
-                <groupId>org.apache.maven.plugins</groupId>
-                <artifactId>maven-assembly-plugin</artifactId>
-                <version>3.1.0</version>
-                <configuration>
-                    <descriptors>
-                        <descriptor>src/assembly/assembly.xml</descriptor>
-                    </descriptors>
-                </configuration>
+                <groupId>org.jboss.jandex</groupId>
+                <artifactId>jandex-maven-plugin</artifactId>
+                <version>1.0.6</version>
                 <executions>
                     <execution>
-                        <phase>package</phase>
+                        <id>make-index</id>
                         <goals>
-                            <goal>single</goal>
+                            <goal>jandex</goal>
                         </goals>
+                    </execution>
+                </executions>
+            </plugin>
+            <plugin>
+                <groupId>io.quarkus</groupId>
+                <artifactId>quarkus-maven-plugin</artifactId>
+                <version>${quarkus.version}</version>
+                <executions>
+                    <execution>
+                        <goals>
+                            <goal>build</goal>
+                        </goals>
+                    </execution>
+                </executions>
+            </plugin>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-failsafe-plugin</artifactId>
+                <version>${surefire-plugin.version}</version>
+                <executions>
+                    <execution>
+                        <goals>
+                            <goal>integration-test</goal>
+                            <goal>verify</goal>
+                        </goals>
+                        <configuration>
+                            <systemProperties>
+                                <native.image.path>${project.build.directory}/${project.build.finalName}-runner
+                                </native.image.path>
+                            </systemProperties>
+                        </configuration>
                     </execution>
                 </executions>
             </plugin>
