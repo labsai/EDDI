@@ -20,5 +20,6 @@ ENV JAVA_OPTIONS="-Dquarkus.http.host=0.0.0.0 -Dquarkus.http.port=7070 -Djava.ut
 ENV AB_ENABLED=jmx_exporter
 COPY target/lib/* /deployments/lib/
 COPY target/*-runner.jar /deployments/app.jar
+COPY src/main/docker/run-java.sh /deployments/run-java.sh
 HEALTHCHECK --interval=10s --timeout=10s CMD curl --fail http://localhost:7070/health || exit 1
 ENTRYPOINT [ "/deployments/run-java.sh" ]
