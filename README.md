@@ -2,7 +2,7 @@
 
 High Performance, In-Memory Chatbot Platform. Build multiple Chatbots with NLP, Behavior Rules, API Connector, Templating. 
 
-v4.7.0 - LATEST
+v5.0-SNAPSHOT - LATEST
 
 v4.6.0 - STABLE
 
