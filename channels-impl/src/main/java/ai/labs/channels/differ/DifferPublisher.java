@@ -15,6 +15,8 @@ import java.io.IOException;
 import java.util.Date;
 import java.util.concurrent.TimeoutException;
 
+import static ai.labs.channels.differ.utilities.DifferUtilities.calculateSentAt;
+
 @Slf4j
 @Singleton
 public class DifferPublisher implements IDifferPublisher {
@@ -89,8 +91,8 @@ public class DifferPublisher implements IDifferPublisher {
 
             channel.waitForConfirmsOrDie(TIMEOUT_CONFIRMS_IN_MILLIS);
         } catch (IOException | InterruptedException | TimeoutException e) {
-            log.error("Could not publish message.created event on eddi.failed queue! \n"
-                    + e.getLocalizedMessage(), e);
+            log.error("Could not publish message.created event on eddi.failed queue! {}", new String(delivery.getBody()));
+            log.error(e.getLocalizedMessage(), e);
         }
     }
 
@@ -99,9 +101,16 @@ public class DifferPublisher implements IDifferPublisher {
             throws IOException {
 
         var command = commandInfo.getCommand();
+        long calculateSentAt = calculateSentAt(commandInfo.getMinSentAt());
+        int sequenceNumber = commandInfo.getSequenceNumber();
+        Date sentAt = new Date(calculateSentAt + sequenceNumber);
+        command.setCreatedAt(sentAt);
         if (command instanceof MessageCreateCommand) {
-            ((MessageCreateCommand) command).getPayload().setSentAt(new Date(System.currentTimeMillis() + 1));
+            ((MessageCreateCommand) command).getPayload().setSentAt(sentAt);
         }
+        log.debug("sendAt: {} = calculateSentAt: {} + sequenceNumber: {}, ",
+                sentAt.getTime(), calculateSentAt, sequenceNumber);
+
         String eventBody = jsonSerialization.serialize(command);
         channel.basicPublish(
                 commandInfo.getExchange(),
@@ -110,6 +119,7 @@ public class DifferPublisher implements IDifferPublisher {
 
         try {
             channel.waitForConfirmsOrDie(TIMEOUT_CONFIRMS_IN_MILLIS);
+            log.info("Published command: {}", eventBody);
             return true;
         } catch (InterruptedException | TimeoutException e) {
             log.error(e.getLocalizedMessage(), e);

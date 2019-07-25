@@ -11,7 +11,7 @@ import java.util.Map;
 
 @Getter
 @Setter
-public class DifferEventDefinition {
+public class DifferBotMapping {
     @NotEmpty
     private List<String> differBotUserIds = new LinkedList<>();
     @NotEmpty

@@ -20,12 +20,17 @@ public class DifferUtilities {
      */
     public static long calculateTypingDelay(String text) {
         var delay = text.split(" ").length * DELAY_PER_WORD;
-        delay = (delay < DELAY_PER_WORD * 3) ? delay + 400 : delay;
+        delay = (delay < DELAY_PER_WORD * 3) ? 300 : delay;
 
         if (delay > 1000) {
             delay = 1000;
         }
 
         return delay;
+    }
+
+    public static long calculateSentAt(long receivedEventCreatedAt) {
+        long currentSystemTime = System.currentTimeMillis();
+        return receivedEventCreatedAt > currentSystemTime ? receivedEventCreatedAt + 1 : currentSystemTime;
     }
 }

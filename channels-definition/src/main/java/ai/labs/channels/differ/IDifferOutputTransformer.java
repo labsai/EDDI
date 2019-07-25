@@ -1,11 +1,11 @@
 package ai.labs.channels.differ;
 
 import ai.labs.channels.differ.model.CommandInfo;
-import ai.labs.memory.model.SimpleConversationMemorySnapshot;
+import ai.labs.memory.model.ConversationOutput;
 
 import java.util.List;
 
 public interface IDifferOutputTransformer {
     List<CommandInfo> convertBotOutputToMessageCreateCommands(
-            SimpleConversationMemorySnapshot memorySnapshot, String botUserId, String conversationId);
+            List<ConversationOutput> conversationOutputs, String botUserId, String conversationId, long timeOfLastMessageReceived);
 }

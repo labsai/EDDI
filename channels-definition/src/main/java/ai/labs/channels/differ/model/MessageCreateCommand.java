@@ -13,8 +13,8 @@ import java.util.List;
 public class MessageCreateCommand extends Command {
     private Payload payload;
 
-    public MessageCreateCommand(AuthContext authContext, String commandId, String commandName, Date createdAt, Payload payload) {
-        super(authContext, commandId, commandName, createdAt);
+    public MessageCreateCommand(AuthContext authContext, String commandId, String commandName, Payload payload) {
+        super(authContext, commandId, commandName);
         this.payload = payload;
     }
 

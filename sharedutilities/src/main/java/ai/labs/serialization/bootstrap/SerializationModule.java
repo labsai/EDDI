@@ -15,6 +15,8 @@ import com.google.inject.Provides;
 import com.google.inject.Scopes;
 import com.google.inject.Singleton;
 
+import javax.inject.Named;
+
 /**
  * @author ginccc
  */
@@ -28,10 +30,10 @@ public class SerializationModule extends AbstractModule {
 
     @Provides
     @Singleton
-    public ObjectMapper provideObjectMapper() {
+    public ObjectMapper provideObjectMapper(@Named("json.prettyPrint") boolean prettyPrint) {
         ObjectMapper objectMapper = new ObjectMapper();
         objectMapper.setSerializationInclusion(JsonInclude.Include.NON_NULL);
-        objectMapper.configure(SerializationFeature.INDENT_OUTPUT, true);
+        objectMapper.configure(SerializationFeature.INDENT_OUTPUT, prettyPrint);
         objectMapper.configure(SerializationFeature.FAIL_ON_EMPTY_BEANS, false);
         objectMapper.configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false);
         return objectMapper;

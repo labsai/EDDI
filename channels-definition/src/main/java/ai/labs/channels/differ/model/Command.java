@@ -18,6 +18,12 @@ public abstract class Command implements Serializable {
     protected String commandName;
     protected Date createdAt;
 
+    public Command(AuthContext authContext, String commandId, String commandName) {
+        this.authContext = authContext;
+        this.commandId = commandId;
+        this.commandName = commandName;
+    }
+
     @Getter
     @Setter
     @NoArgsConstructor

@@ -1,6 +1,7 @@
 package ai.labs.serialization;
 
 import lombok.extern.slf4j.Slf4j;
+import org.bson.Document;
 
 import javax.inject.Inject;
 import java.io.IOException;
@@ -26,5 +27,10 @@ public class DocumentBuilder implements IDocumentBuilder {
     @Override
     public String toString(Object document) throws IOException {
         return jsonSerialization.serialize(document);
+    }
+
+    @Override
+    public Document toDocument(Object obj) throws IOException {
+        return jsonSerialization.deserialize(toString(obj), Document.class);
     }
 }
