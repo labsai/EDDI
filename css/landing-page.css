@@ -240,6 +240,10 @@ nav a, footer a {
     ul.banner-social-buttons > li:last-child {
         margin-bottom: 0;
     }
+
+    .aws {
+        margin-top: 1.0em;
+    }
 }
 
 footer {
