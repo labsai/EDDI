@@ -7,14 +7,11 @@ import lombok.extern.slf4j.Slf4j;
 
 import javax.ws.rs.core.MediaType;
 import java.util.Collections;
-import java.util.LinkedList;
 import java.util.List;
-import java.util.Map;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 
 import static ai.labs.channels.differ.utilities.DifferUtilities.*;
-import static ai.labs.utilities.RuntimeUtilities.isNullOrEmpty;
 
 @Slf4j
 public class DifferOutputTransformer implements IDifferOutputTransformer {
@@ -24,8 +21,6 @@ public class DifferOutputTransformer implements IDifferOutputTransformer {
     private static final String ACTION_CREATE_EXCHANGE = "message-actions";
     private static final String ACTION_CREATE_ROUTING_KEY = "message-actions.createMany";
     private static final String INPUT_TYPE_TEXT = "text";
-    private static final String KEY_OUTPUT = "output";
-    private static final String KEY_TYPE = "type";
 
     @Override
     public List<CommandInfo> convertBotOutputToMessageCreateCommands(
@@ -63,51 +58,10 @@ public class DifferOutputTransformer implements IDifferOutputTransformer {
         return commandInfos;
     }
 
-    private static List<String> getOutputParts(List<ConversationOutput> conversationOutputs) {
-        List<Object> outputBubbles = conversationOutputs.stream().
-                filter(conversationOutput -> conversationOutput.get(KEY_OUTPUT) != null).
-                flatMap(conversationOutput -> ((List<Object>) conversationOutput.get(KEY_OUTPUT)).stream()).
-                collect(Collectors.toList());
-
-        return outputBubbles.stream().map(output -> {
-            if (output instanceof Map) {
-                Map<String, Object> outputMap = (Map<String, Object>) output;
-                String type = outputMap.get(KEY_TYPE).toString();
-                if (INPUT_TYPE_TEXT.equals(type)) {
-                    return outputMap.get(INPUT_TYPE_TEXT).toString();
-                }
-            }
-
-            return output.toString();
-        }).collect(Collectors.toList());
-    }
-
     private static MessageCreateCommand createMessageCreateCommand(String conversationId, String botUserId, List<Event.Part> parts) {
         return new MessageCreateCommand(
                 new Command.AuthContext(botUserId), generateUUID(), MESSAGE_CREATE,
                 new MessageCreateCommand.Payload(generateUUID(), conversationId, botUserId, INPUT_TYPE_TEXT, parts));
-    }
-
-    private static List<QuickReply> getQuickReplies(List<ConversationOutput> conversationOutputs) {
-        var quickReplyActions = new LinkedList<QuickReply>();
-        conversationOutputs.stream().
-                filter(conversationOutput -> !isNullOrEmpty(conversationOutput.get("quickReplies"))).
-                map(conversationOutput -> {
-                    List quickRepliesObj = (List) conversationOutput.get("quickReplies");
-                    if (quickRepliesObj.get(0) instanceof QuickReply) {
-                        return quickRepliesObj;
-                    } else {
-                        return ((List<Map>) quickRepliesObj).stream().map(map -> {
-                            Object isDefault = map.get("isDefault");
-                            return new QuickReply(
-                                    map.get("value").toString(),
-                                    map.get("expressions").toString(),
-                                    isDefault != null && Boolean.parseBoolean(isDefault.toString()));
-                        }).collect(Collectors.toList());
-                    }
-                }).forEach(quickReplyActions::addAll);
-
-        return quickReplyActions;
     }
 
     private static ActionsCreateCommand createActionCreateCommand(

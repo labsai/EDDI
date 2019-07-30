@@ -2,6 +2,7 @@ package ai.labs.channels.differ;
 
 import ai.labs.caching.ICache;
 import ai.labs.caching.ICacheFactory;
+import ai.labs.channels.config.model.ChannelDefinition;
 import ai.labs.channels.differ.model.*;
 import ai.labs.channels.differ.storage.IDifferBotMappingStore;
 import ai.labs.channels.differ.storage.IDifferConversationStore;
@@ -79,7 +80,7 @@ public class DifferEndpoint implements IDifferEndpoint {
     }
 
     @Override
-    public void init() {
+    public void init(ChannelDefinition channelDefinition) {
 
         try {
             differConversationStore.getAllDifferConversationIds().

@@ -5,6 +5,8 @@ import ai.labs.behavior.bootstrap.BehaviorModule;
 import ai.labs.bootstrap.UserModule;
 import ai.labs.caching.bootstrap.CachingModule;
 import ai.labs.callback.bootstrap.ConversationCallbackModule;
+import ai.labs.channels.config.IChannelDefinitionStore;
+import ai.labs.channels.config.bootstrap.ChannelModule;
 import ai.labs.channels.differ.IDifferEndpoint;
 import ai.labs.channels.differ.bootstrap.AMQPModule;
 import ai.labs.channels.differ.bootstrap.DifferModule;
@@ -36,10 +38,16 @@ import ai.labs.templateengine.bootstrap.TemplateEngineModule;
 import ai.labs.testing.bootstrap.AutomatedtestingModule;
 import ai.labs.utilities.FileUtilities;
 import com.bugsnag.Bugsnag;
+import com.google.inject.Key;
 import com.google.inject.Module;
+import com.google.inject.name.Names;
 import org.jboss.resteasy.plugins.guice.ext.RequestScopeModule;
 
 import java.io.FileInputStream;
+
+import static ai.labs.channels.differ.IDifferEndpoint.RESOURCE_URI_DIFFER_CHANNEL_CONNECTOR;
+import static ai.labs.channels.xmpp.IXmppEndpoint.RESOURCE_URI_XMPP_CHANNEL_CONNECTOR;
+import static ai.labs.utilities.RuntimeUtilities.isNullOrEmpty;
 
 /**
  * the central REST API server component
@@ -100,21 +108,42 @@ public class ApiServer {
                 new FacebookMessengerModule(),
                 new XmppModule(),
                 new AMQPModule(),
-                new DifferModule()
+                new DifferModule(),
+                new ChannelModule()
         };
 
         //init modules
         final DependencyInjector injector = DependencyInjector.init(environment, modules);
 
-        injector.getInstance(Bugsnag.class);
+        //init bugtracking if bugsnag api key is set
+        String bugsnagApiKey = injector.getInstance(Key.get(String.class, Names.named("bugsnagApiKey")));
+        if (!isNullOrEmpty(bugsnagApiKey)) {
+            new Bugsnag(bugsnagApiKey);
+        }
 
         //init webserver
         injector.getInstance(IServerRuntime.class).startup(() -> {
             //auto re-deploy bots
             injector.getInstance(IAutoBotDeployment.class).autoDeployBots();
-            injector.getInstance(IXmppEndpoint.class).init();
-            injector.getInstance(IDifferEndpoint.class).init();
-            ;
+
+
+            //load channel definitions
+            var channelDefinitionStore = injector.getInstance(IChannelDefinitionStore.class);
+            var channelDefinitions = channelDefinitionStore.readAllChannelDefinitions();
+            channelDefinitions.
+                    forEach(channelDefinition -> {
+                        String channelType = channelDefinition.getType().toString();
+
+                        switch (channelType) {
+                            case RESOURCE_URI_XMPP_CHANNEL_CONNECTOR:
+                                injector.getInstance(IXmppEndpoint.class).init(channelDefinition);
+                                break;
+
+                            case RESOURCE_URI_DIFFER_CHANNEL_CONNECTOR:
+                                injector.getInstance(IDifferEndpoint.class).init(channelDefinition);
+                                break;
+                        }
+                    });
 
             logServerStartupTime(serverStartupBegin);
         });

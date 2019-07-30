@@ -1,6 +1,9 @@
 package ai.labs.channels.xmpp;
 
-public interface IXmppEndpoint {
+import ai.labs.channels.config.model.ChannelDefinition;
 
-    void init();
+public interface IXmppEndpoint {
+    String RESOURCE_URI_XMPP_CHANNEL_CONNECTOR = "eddi://ai.labs.channel.xmpp";
+
+    void init(ChannelDefinition channelDefinition);
 }

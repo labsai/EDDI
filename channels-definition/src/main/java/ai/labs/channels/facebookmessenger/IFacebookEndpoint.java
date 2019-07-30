@@ -10,6 +10,8 @@ import javax.ws.rs.core.Response;
 @Path("/channels/facebook")
 @Api(value = "Bot Engine -> Channels", authorizations = {@Authorization(value = "eddi_auth")})
 public interface IFacebookEndpoint {
+    String RESOURCE_URI_FACEBOOK_CHANNEL_CONNECTOR = "eddi://ai.labs.channel.facebook";
+
     @POST
     @Path("{botId}")
     @Consumes(MediaType.APPLICATION_JSON)

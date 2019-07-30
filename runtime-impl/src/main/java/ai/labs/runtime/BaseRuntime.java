@@ -1,19 +1,17 @@
 package ai.labs.runtime;
 
 import ai.labs.utilities.FileUtilities;
-import org.apache.logging.log4j.core.config.Configurator;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
+import lombok.extern.slf4j.Slf4j;
 
 import javax.inject.Inject;
 import javax.inject.Named;
-import java.io.File;
 import java.util.Map;
 import java.util.concurrent.*;
 
 /**
  * @author ginccc
  */
+@Slf4j
 public class BaseRuntime implements SystemRuntime.IRuntime {
     private final String projectVersion;
     private final String CONFIG_DIR;
@@ -23,8 +21,6 @@ public class BaseRuntime implements SystemRuntime.IRuntime {
     private final String projectName;
 
     private boolean isInit = false;
-
-    private Logger log;
 
     @Inject
     public BaseRuntime(ScheduledThreadPoolExecutor executorService,
@@ -39,7 +35,6 @@ public class BaseRuntime implements SystemRuntime.IRuntime {
 
     public void init() {
         if (!isInit) {
-            initLogging();
             if (projectName == null || projectName.isEmpty()) {
                 log.error("ProjectName should be defined in systemRuntime.properties as 'systemRuntime.projectName'");
             } else {
@@ -64,12 +59,6 @@ public class BaseRuntime implements SystemRuntime.IRuntime {
         log.info(projectName + " v" + getVersion());
     }
 
-    private void initLogging() {
-        System.setProperty("systemRuntime.logDir", getLogDir());
-        Configurator.initialize("Logging", null, new File(getConfigDir() + lowerCaseFirstLetter(projectName) + ".log4j.xml").toURI());
-        log = LoggerFactory.getLogger(BaseRuntime.class);
-    }
-
     @Override
     public String getVersion() {
         return projectVersion;
@@ -86,7 +75,7 @@ public class BaseRuntime implements SystemRuntime.IRuntime {
     }
 
     private static String lowerCaseFirstLetter(String value) {
-        char chars[] = value.toCharArray();
+        char[] chars = value.toCharArray();
         chars[0] = Character.toLowerCase(chars[0]);
         return new String(chars);
     }
