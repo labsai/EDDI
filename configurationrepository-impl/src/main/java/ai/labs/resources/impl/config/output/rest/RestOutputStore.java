@@ -84,15 +84,6 @@ public class RestOutputStore extends RestVersionInfo<OutputConfigurationSet> imp
 
     @Override
     public Response updateOutputSet(String id, Integer version, OutputConfigurationSet outputConfigurationSet) {
-        outputConfigurationSet.getOutputSet().sort((o1, o2) -> {
-            int comparisonOfKeys = o1.getAction().compareTo(o2.getAction());
-            if (comparisonOfKeys == 0) {
-                return Integer.compare(o1.getTimesOccurred(), o2.getTimesOccurred());
-            } else {
-                return comparisonOfKeys;
-            }
-        });
-
         return update(id, version, outputConfigurationSet);
     }
 
