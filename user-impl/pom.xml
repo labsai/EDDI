@@ -44,11 +44,11 @@
             <artifactId>runtime-definition</artifactId>
             <version>${project.version}</version>
         </dependency>
-        <dependency>
+        <!--<dependency> TODO
             <groupId>org.keycloak</groupId>
             <artifactId>keycloak-core</artifactId>
             <version>6.0.1</version>
-        </dependency>
+        </dependency>-->
     </dependencies>
 
     <properties>

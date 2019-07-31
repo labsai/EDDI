@@ -1,7 +1,7 @@
 version: '3'
 services:
   eddi:
-    image: labsai/eddi:latest
+    image: labsai/eddi:5.0-SNAPSHOT
     ports:
       - "7070:7070"
       - "7443:7443"

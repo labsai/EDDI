@@ -62,7 +62,7 @@
 
     <properties>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
-        <quarkus.version>0.19.1</quarkus.version>
+        <quarkus.version>0.20.0</quarkus.version>
         <surefire-plugin.version>2.22.2</surefire-plugin.version>
         <compile-plugin.version>3.8.1</compile-plugin.version>
     </properties>
@@ -114,7 +114,7 @@
         </dependency>
         <dependency>
             <groupId>io.quarkus</groupId>
-            <artifactId>quarkus-keycloak</artifactId>
+            <artifactId>quarkus-jackson</artifactId>
             <version>${quarkus.version}</version>
         </dependency>
 

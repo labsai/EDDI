@@ -4,8 +4,6 @@ import ai.labs.persistence.IResourceStore;
 import ai.labs.user.IUserStore;
 import ai.labs.user.rest.IRestUserStore;
 import ai.labs.utilities.RuntimeUtilities;
-import org.keycloak.KeycloakPrincipal;
-import org.keycloak.KeycloakSecurityContext;
 
 import java.net.URI;
 import java.security.Principal;
@@ -32,10 +30,11 @@ public final class UserUtilities {
 
     private static String getUserName(Principal principal) {
         String username = null;
-        if (principal instanceof KeycloakPrincipal) {
+        //todo
+        /*if (principal instanceof KeycloakPrincipal) {
             KeycloakSecurityContext securityContext = ((KeycloakPrincipal) principal).getKeycloakSecurityContext();
             username = securityContext.getToken().getPreferredUsername();
-        }
+        }*/
 
         return username;
     }

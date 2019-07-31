@@ -55,14 +55,18 @@ technical spec:
 
 ## Prerequirements
 
-- Java 12
+- Java 11
 - Maven 3
 
 
 ## Build project with maven
 Go to the root directory and execute
 
-    mvn clean install
+    ./mvnw clean package
+    
+For development:
+
+    ./mvnw quarkus:dev -pl apiserver
 
 
 ## Start Servers
