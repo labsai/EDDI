@@ -71,9 +71,8 @@ public class BehaviorRulesEvaluationTask implements ILifecycleTask {
             addResultsToConversationMemory(memory, KEY_BEHAVIOR_RULES_DROPPED_SUCCESS, results.getDroppedSuccessRules());
             addResultsToConversationMemory(memory, KEY_BEHAVIOR_RULES_FAIL, results.getFailRules());
 
-            if (!results.getSuccessRules().isEmpty()) {
-                addActionsToConversationMemory(memory, results.getSuccessRules());
-            }
+            addActionsToConversationMemory(memory, results.getSuccessRules());
+
         } catch (BehaviorRulesEvaluator.BehaviorRuleExecutionException e) {
             String msg = "Error while evaluating behavior rules!";
             log.error(msg, e);
@@ -84,19 +83,24 @@ public class BehaviorRulesEvaluationTask implements ILifecycleTask {
     }
 
     private void addResultsToConversationMemory(IConversationMemory memory, String key, List<BehaviorRule> rules) {
-        List<String> allCurrentBehaviorRuleNames = rules.stream().map(BehaviorRule::getName).collect(Collectors.toList());
-        saveResults(memory, allCurrentBehaviorRuleNames, key);
+        if (!rules.isEmpty()) {
+            var allCurrentBehaviorRuleNames = rules.stream().map(BehaviorRule::getName).collect(Collectors.toList());
+            saveResults(memory, allCurrentBehaviorRuleNames, key, false, false);
+        }
     }
 
     private void addActionsToConversationMemory(IConversationMemory memory, List<BehaviorRule> successRules) {
-        List<String> allCurrentActions = new LinkedList<>();
-        successRules.forEach(successRule -> successRule.getActions().stream().
-                filter(action -> !allCurrentActions.contains(action)).forEach(allCurrentActions::add));
+        if (!successRules.isEmpty()) {
+            List<String> allCurrentActions = new LinkedList<>();
+            successRules.forEach(successRule -> successRule.getActions().stream().
+                    filter(action -> !allCurrentActions.contains(action)).forEach(allCurrentActions::add));
 
-        saveResults(memory, allCurrentActions, KEY_ACTIONS);
+            saveResults(memory, allCurrentActions, KEY_ACTIONS, true, true);
+        }
     }
 
-    private void saveResults(IConversationMemory memory, List<String> allCurrent, String key) {
+    private void saveResults(IConversationMemory memory, List<String> allCurrent, String key,
+                             boolean addResultsToConversationMemory, boolean makePublic) {
         var currentStep = memory.getCurrentStep();
 
         List<String> results = new LinkedList<>();
@@ -111,10 +115,12 @@ public class BehaviorRulesEvaluationTask implements ILifecycleTask {
                 filter(result -> !results.contains(result)).collect(Collectors.toList()));
 
         Data resultsData = new Data<>(key, results);
-        resultsData.setPublic(true);
+        resultsData.setPublic(makePublic);
         currentStep.storeData(resultsData);
-        currentStep.resetConversationOutput(key);
-        currentStep.addConversationOutputList(key, results);
+        if (addResultsToConversationMemory) {
+            currentStep.resetConversationOutput(key);
+            currentStep.addConversationOutputList(key, results);
+        }
     }
 
     private List<String> convert(List<BehaviorRule> behaviorRules) {
