@@ -123,10 +123,6 @@ public class BehaviorRulesEvaluationTask implements ILifecycleTask {
         }
     }
 
-    private List<String> convert(List<BehaviorRule> behaviorRules) {
-        return behaviorRules.stream().map(BehaviorRule::getName).collect(Collectors.toCollection(LinkedList::new));
-    }
-
     @Override
     public void configure(Map<String, Object> configuration) throws PackageConfigurationException {
         Object uriObj = configuration.get(BEHAVIOR_CONFIG_URI);
