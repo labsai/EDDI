@@ -31,6 +31,9 @@ import java.util.stream.Collectors;
 public class BehaviorRulesEvaluationTask implements ILifecycleTask {
     public static final String ID = "ai.labs.behavior";
     private static final String KEY_ACTIONS = "actions";
+    private static final String KEY_BEHAVIOR_RULES_SUCCESS = "behavior_rules:success";
+    private static final String KEY_BEHAVIOR_RULES_DROPPED_SUCCESS = "behavior_rules:droppedSuccess";
+    private static final String KEY_BEHAVIOR_RULES_FAIL = "behavior_rules:fail";
     private static final String BEHAVIOR_CONFIG_URI = "uri";
     private static final String BEHAVIOR_CONFIG_APPEND_ACTIONS = "appendActions";
     private final IResourceClientLibrary resourceClientLibrary;
@@ -64,13 +67,12 @@ public class BehaviorRulesEvaluationTask implements ILifecycleTask {
         BehaviorSetResult results;
         try {
             results = evaluator.evaluate(memory);
-            storeResultIfNotEmpty(memory, "behavior_rules:success", results.getSuccessRules());
-            storeResultIfNotEmpty(memory, "behavior_rules:droppedSuccess", results.getDroppedSuccessRules());
-            storeResultIfNotEmpty(memory, "behavior_rules:fail", results.getFailRules());
+            addResultsToConversationMemory(memory, KEY_BEHAVIOR_RULES_SUCCESS, results.getSuccessRules());
+            addResultsToConversationMemory(memory, KEY_BEHAVIOR_RULES_DROPPED_SUCCESS, results.getDroppedSuccessRules());
+            addResultsToConversationMemory(memory, KEY_BEHAVIOR_RULES_FAIL, results.getFailRules());
 
-            if (!results.getSuccessRules().isEmpty()) {
-                addActionsToConversationMemory(memory, results.getSuccessRules());
-            }
+            addActionsToConversationMemory(memory, results.getSuccessRules());
+
         } catch (BehaviorRulesEvaluator.BehaviorRuleExecutionException e) {
             String msg = "Error while evaluating behavior rules!";
             log.error(msg, e);
@@ -80,34 +82,44 @@ public class BehaviorRulesEvaluationTask implements ILifecycleTask {
         }
     }
 
-    private void addActionsToConversationMemory(IConversationMemory memory, List<BehaviorRule> successRules) {
-        List<String> allCurrentActions = new LinkedList<>();
-        successRules.forEach(successRule -> successRule.getActions().stream().
-                filter(action -> !allCurrentActions.contains(action)).forEach(allCurrentActions::add));
+    private void addResultsToConversationMemory(IConversationMemory memory, String key, List<BehaviorRule> rules) {
+        if (!rules.isEmpty()) {
+            var allCurrentBehaviorRuleNames = rules.stream().map(BehaviorRule::getName).collect(Collectors.toList());
+            saveResults(memory, allCurrentBehaviorRuleNames, key, false, false);
+        }
+    }
 
+    private void addActionsToConversationMemory(IConversationMemory memory, List<BehaviorRule> successRules) {
+        if (!successRules.isEmpty()) {
+            List<String> allCurrentActions = new LinkedList<>();
+            successRules.forEach(successRule -> successRule.getActions().stream().
+                    filter(action -> !allCurrentActions.contains(action)).forEach(allCurrentActions::add));
+
+            saveResults(memory, allCurrentActions, KEY_ACTIONS, true, true);
+        }
+    }
+
+    private void saveResults(IConversationMemory memory, List<String> allCurrent, String key,
+                             boolean addResultsToConversationMemory, boolean makePublic) {
         var currentStep = memory.getCurrentStep();
 
-        List<String> actions = new LinkedList<>();
-        if (appendActions || allCurrentActions.isEmpty()) {
-            IData<List<String>> latestActions = currentStep.getLatestData(KEY_ACTIONS);
-            if (latestActions != null && latestActions.getResult() != null) {
-                actions.addAll(latestActions.getResult());
+        List<String> results = new LinkedList<>();
+        if (appendActions || allCurrent.isEmpty()) {
+            IData<List<String>> latestResults = currentStep.getLatestData(key);
+            if (latestResults != null && latestResults.getResult() != null) {
+                results.addAll(latestResults.getResult());
             }
         }
 
-        actions.addAll(allCurrentActions.stream().
-                filter(action -> !actions.contains(action)).collect(Collectors.toList()));
+        results.addAll(allCurrent.stream().
+                filter(result -> !results.contains(result)).collect(Collectors.toList()));
 
-        Data actionsData = new Data<>(KEY_ACTIONS, actions);
-        actionsData.setPublic(true);
-        currentStep.storeData(actionsData);
-        currentStep.resetConversationOutput(KEY_ACTIONS);
-        currentStep.addConversationOutputList(KEY_ACTIONS, actions);
-    }
-
-    private void storeResultIfNotEmpty(IConversationMemory memory, String key, List<BehaviorRule> result) {
-        if (!result.isEmpty()) {
-            memory.getCurrentStep().storeData(new Data<>(key, convert(result)));
+        Data resultsData = new Data<>(key, results);
+        resultsData.setPublic(makePublic);
+        currentStep.storeData(resultsData);
+        if (addResultsToConversationMemory) {
+            currentStep.resetConversationOutput(key);
+            currentStep.addConversationOutputList(key, results);
         }
     }
 
