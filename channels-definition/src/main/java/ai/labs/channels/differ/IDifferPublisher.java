@@ -13,6 +13,5 @@ public interface IDifferPublisher {
 
     void negativeDeliveryAck(Delivery delivery);
 
-    boolean publishCommandAndWaitForConfirm(CommandInfo commandInfo)
-            throws IOException;
+    boolean publishCommandAndWaitForConfirm(CommandInfo commandInfo) throws IOException;
 }

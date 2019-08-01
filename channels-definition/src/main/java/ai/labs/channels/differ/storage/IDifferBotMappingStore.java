@@ -11,5 +11,11 @@ public interface IDifferBotMappingStore {
     void createDifferBotMapping(DifferBotMapping differBotMapping)
             throws IResourceStore.ResourceAlreadyExistsException, IResourceStore.ResourceStoreException;
 
-    void deleteDifferBotMapping(String botUserId) throws IResourceStore.ResourceStoreException;
+    void addBotUserIdToDifferBotMapping(String botIntent, String botUserId) throws IResourceStore.ResourceStoreException;
+
+    void deleteBotUserIdFromDifferBotMappings(String botUserId) throws IResourceStore.ResourceStoreException;
+
+    void deleteDifferBotMapping(String botIntent) throws IResourceStore.ResourceStoreException;
+
+    DifferBotMapping readDifferBotMapping(String botIntent) throws IResourceStore.ResourceStoreException, IResourceStore.ResourceNotFoundException;
 }

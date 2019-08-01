@@ -98,7 +98,7 @@ public class DifferEndpoint implements IDifferEndpoint {
         log.info("Differ integration started");
     }
 
-    private DeliverCallback createConversationCreatedCallback() {
+    DeliverCallback createConversationCreatedCallback() {
         return (consumerTag, delivery) -> {
             final long deliveryTag = delivery.getEnvelope().getDeliveryTag();
             String receivedMessage = new String(delivery.getBody(), StandardCharsets.UTF_8);
@@ -141,7 +141,7 @@ public class DifferEndpoint implements IDifferEndpoint {
         };
     }
 
-    private DeliverCallback createMessageCreatedCallback() {
+    DeliverCallback createMessageCreatedCallback() {
         return (consumerTag, delivery) -> {
             final long deliveryTag = delivery.getEnvelope().getDeliveryTag();
             String receivedMessage = new String(delivery.getBody(), StandardCharsets.UTF_8);

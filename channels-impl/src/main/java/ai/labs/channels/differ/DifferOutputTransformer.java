@@ -20,7 +20,7 @@ public class DifferOutputTransformer implements IDifferOutputTransformer {
     private static final String MESSAGE_CREATE_ROUTING_KEY = "message.create";
     private static final String ACTION_CREATE_EXCHANGE = "message-actions";
     private static final String ACTION_CREATE_ROUTING_KEY = "message-actions.createMany";
-    private static final String INPUT_TYPE_TEXT = "text";
+    static final String INPUT_TYPE_TEXT = "text";
 
     @Override
     public List<CommandInfo> convertBotOutputToMessageCreateCommands(

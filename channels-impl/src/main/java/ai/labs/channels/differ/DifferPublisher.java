@@ -20,13 +20,13 @@ import static ai.labs.channels.differ.utilities.DifferUtilities.calculateSentAt;
 @Slf4j
 @Singleton
 public class DifferPublisher implements IDifferPublisher {
-    private static final String MESSAGE_CREATED_EXCHANGE = "message.created";
+    static final String MESSAGE_CREATED_EXCHANGE = "message.created";
     private static final String MESSAGE_CREATED_QUEUE_NAME = "message.created.eddi";
     private static final String CONVERSATION_CREATED_EXCHANGE = "conversation.created";
     private static final String CONVERSATION_CREATED_QUEUE_NAME = "conversation.created.eddi";
 
-    private static final String MESSAGE_CREATED_EDDI_FAILED_ROUTING_KEY = "message.created.eddi.failed";
-    private static final int TIMEOUT_CONFIRMS_IN_MILLIS = 60000;
+    static final String MESSAGE_CREATED_EDDI_FAILED_ROUTING_KEY = "message.created.eddi.failed";
+    static final long TIMEOUT_CONFIRMS_IN_MILLIS = 60000;
 
     private final Channel channel;
     private final IJsonSerialization jsonSerialization;
@@ -119,7 +119,7 @@ public class DifferPublisher implements IDifferPublisher {
 
         try {
             channel.waitForConfirmsOrDie(TIMEOUT_CONFIRMS_IN_MILLIS);
-            log.info("Published command: {}", eventBody);
+            log.debug("Published command: {}", eventBody);
             return true;
         } catch (InterruptedException | TimeoutException e) {
             log.error(e.getLocalizedMessage(), e);

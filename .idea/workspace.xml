@@ -2,469 +2,20 @@
 <project version="4">
   <component name="ChangeListManager">
     <list default="true" id="c4b507be-1d9d-4bb5-ad86-b90d9c344248" name="Default" comment="further implemented differ integration">
-      <change afterPath="$PROJECT_DIR$/channels-definition/src/main/java/ai/labs/channels/differ/IDifferEndpoint.java" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/channels-definition/src/main/java/ai/labs/channels/xmpp/IXmppEndpoint.java" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/channels-impl/pom.xml" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/channels-impl/src/main/java/ai/labs/channels/differ/DifferEndpoint.java" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/channels-impl/src/main/java/ai/labs/channels/differ/bootstrap/AMQPModule.java" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/channels-impl/src/main/java/ai/labs/channels/differ/bootstrap/DifferModule.java" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/channels-impl/src/main/java/ai/labs/channels/differ/model/DifferChannelDefinition.java" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/channels-impl/src/main/java/ai/labs/channels/differ/model/DifferEventDefinition.java" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/channels-impl/src/main/java/ai/labs/channels/differ/model/Event.java" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/channels-impl/src/main/java/ai/labs/channels/xmpp/bootstrap/XmppModule.java" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/apiserver/config/development/systemRuntime.properties" beforeDir="false" afterPath="$PROJECT_DIR$/apiserver/config/development/systemRuntime.properties" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/apiserver/pom.xml" beforeDir="false" afterPath="$PROJECT_DIR$/apiserver/pom.xml" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/apiserver/src/main/java/ai/labs/api/ApiServer.java" beforeDir="false" afterPath="$PROJECT_DIR$/apiserver/src/main/java/ai/labs/api/ApiServer.java" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/pom.xml" beforeDir="false" afterPath="$PROJECT_DIR$/pom.xml" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/channels-definition/src/main/java/ai/labs/channels/differ/storage/IRestDifferBotMappingStore.java" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/channels-impl/src/main/java/ai/labs/channels/differ/storage/botidentitities/RestDifferBotMappingStore.java" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/channels-impl/src/test/java/ai/labs/channels/differ/DifferEndpointTest.java" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/channels-impl/src/test/java/ai/labs/channels/differ/DifferOutputTransformerTest.java" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/channels-impl/src/test/java/ai/labs/channels/differ/DifferPublisherTest.java" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/channels-definition/src/main/java/ai/labs/channels/differ/IDifferPublisher.java" beforeDir="false" afterPath="$PROJECT_DIR$/channels-definition/src/main/java/ai/labs/channels/differ/IDifferPublisher.java" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/channels-definition/src/main/java/ai/labs/channels/differ/storage/IDifferBotMappingStore.java" beforeDir="false" afterPath="$PROJECT_DIR$/channels-definition/src/main/java/ai/labs/channels/differ/storage/IDifferBotMappingStore.java" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/channels-impl/src/main/java/ai/labs/channels/differ/DifferEndpoint.java" beforeDir="false" afterPath="$PROJECT_DIR$/channels-impl/src/main/java/ai/labs/channels/differ/DifferEndpoint.java" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/channels-impl/src/main/java/ai/labs/channels/differ/DifferOutputTransformer.java" beforeDir="false" afterPath="$PROJECT_DIR$/channels-impl/src/main/java/ai/labs/channels/differ/DifferOutputTransformer.java" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/channels-impl/src/main/java/ai/labs/channels/differ/DifferPublisher.java" beforeDir="false" afterPath="$PROJECT_DIR$/channels-impl/src/main/java/ai/labs/channels/differ/DifferPublisher.java" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/channels-impl/src/main/java/ai/labs/channels/differ/bootstrap/DifferModule.java" beforeDir="false" afterPath="$PROJECT_DIR$/channels-impl/src/main/java/ai/labs/channels/differ/bootstrap/DifferModule.java" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/channels-impl/src/main/java/ai/labs/channels/differ/storage/botidentitities/DifferBotMappingStore.java" beforeDir="false" afterPath="$PROJECT_DIR$/channels-impl/src/main/java/ai/labs/channels/differ/storage/botidentitities/DifferBotMappingStore.java" afterDir="false" />
     </list>
-    <ignored path="$PROJECT_DIR$/permissions-impl/target/" />
-    <ignored path="$PROJECT_DIR$/target/" />
-    <ignored path="$PROJECT_DIR$/automatedtesting-impl/target/" />
-    <ignored path="$PROJECT_DIR$/persistencestore-impl/target/" />
-    <ignored path="$PROJECT_DIR$/user-definition/target/" />
-    <ignored path="$PROJECT_DIR$/persistencestore-definition/target/" />
-    <ignored path="$PROJECT_DIR$/propertydisposer-definition/target/" />
-    <ignored path="$PROJECT_DIR$/facebookmessenger-impl/target/" />
-    <ignored path="$PROJECT_DIR$/conversationcallback-impl/target/" />
-    <ignored path="$PROJECT_DIR$/runtime-impl/target/" />
-    <ignored path="$PROJECT_DIR$/httpclient-definition/target/" />
-    <ignored path="$PROJECT_DIR$/conversationlifecycle-impl/target/" />
-    <ignored path="$PROJECT_DIR$/configurationrepository-definition/target/" />
-    <ignored path="$PROJECT_DIR$/automatedtesting-definition/target/" />
-    <ignored path="$PROJECT_DIR$/conversationmemory-definition/target/" />
-    <ignored path="$PROJECT_DIR$/caching-impl-infinispan/target/" />
-    <ignored path="$PROJECT_DIR$/outputgeneration-definition/target/" />
-    <ignored path="$PROJECT_DIR$/facebookmessenger-definition/target/" />
-    <ignored path="$PROJECT_DIR$/runtime-definition/target/" />
-    <ignored path="$PROJECT_DIR$/conversationlifecycle-definition/target/" />
-    <ignored path="$PROJECT_DIR$/backupservice-defintion/target/" />
-    <ignored path="$PROJECT_DIR$/coreutilities/target/" />
-    <ignored path="$PROJECT_DIR$/client/target/" />
-    <ignored path="$PROJECT_DIR$/backupservice-impl/target/" />
-    <ignored path="$PROJECT_DIR$/corerest-definition/target/" />
-    <ignored path="$PROJECT_DIR$/coreserver/target/" />
-    <ignored path="$PROJECT_DIR$/apiserver/target/" />
-    <ignored path="$PROJECT_DIR$/conversationcallback-definition/target/" />
-    <ignored path="$PROJECT_DIR$/templateengine-definition/target/" />
-    <ignored path="$PROJECT_DIR$/configurationrepository-impl/target/" />
-    <ignored path="$PROJECT_DIR$/propertydisposer-impl/target/" />
-    <ignored path="$PROJECT_DIR$/caching-definition/target/" />
-    <ignored path="$PROJECT_DIR$/permissions-definition/target/" />
-    <ignored path="$PROJECT_DIR$/behavior-definition/target/" />
-    <ignored path="$PROJECT_DIR$/conversationmemory-impl/target/" />
-    <ignored path="$PROJECT_DIR$/outputgeneration-impl/target/" />
-    <ignored path="$PROJECT_DIR$/templateengine-impl-thymeleaf/target/" />
-    <ignored path="$PROJECT_DIR$/semanticparser-impl/target/" />
-    <ignored path="$PROJECT_DIR$/staticresourceprovider-definition/target/" />
-    <ignored path="$PROJECT_DIR$/semanticparser-definition/target/" />
-    <ignored path="$PROJECT_DIR$/staticresourceprovider-impl/target/" />
-    <ignored path="$PROJECT_DIR$/sharedutilities/target/" />
-    <ignored path="$PROJECT_DIR$/webserver/target/" />
-    <ignored path="$PROJECT_DIR$/httpclient-impl-jetty/target/" />
-    <ignored path="$PROJECT_DIR$/behavior-impl/target/" />
-    <ignored path="$PROJECT_DIR$/user-impl/target/" />
-    <ignored path="$PROJECT_DIR$/expressions/target/" />
-    <ignored path="$PROJECT_DIR$/.idea/httpRequests/" />
-    <ignored path="$PROJECT_DIR$/normalizer-impl/target/" />
-    <ignored path="$PROJECT_DIR$/normalizer-definition/target/" />
-    <ignored path="$PROJECT_DIR$/httpCallsTask-definition/target/" />
-    <ignored path="$PROJECT_DIR$/httpCallsTask-impl/target/" />
-    <ignored path="$PROJECT_DIR$/xmpp-impl/target/" />
-    <ignored path="$PROJECT_DIR$/xmpp-definition/target/" />
-    <ignored path="$PROJECT_DIR$/botmarklet/target/" />
-    <ignored path="$PROJECT_DIR$/basemodules/target/" />
-    <ignored path="$PROJECT_DIR$/basemodels/target/" />
-    <ignored path="$PROJECT_DIR$/email-plugin-impl/target/" />
-    <ignored path="$PROJECT_DIR$/email-plugin-definition/target/" />
-    <ignored path="$PROJECT_DIR$/core-definition/target/" />
-    <ignored path="$PROJECT_DIR$/propertysetter-definition/target/" />
-    <ignored path="$PROJECT_DIR$/propertysetter-impl/target/" />
-    <ignored path="$PROJECT_DIR$/channels-definition/target/" />
-    <ignored path="$PROJECT_DIR$/channels-impl/target/" />
-    <ignored path="apiserver/tmp/5cfa31f430a94c6b86f1ab61/133/5cfa31d130a94c6b86f1ab47/3/5cfa31d130a94c6b86f1ab44.descriptor.json" />
-    <ignored path="apiserver/tmp/5cfa31f430a94c6b86f1ab61/133/5cfa31d130a94c6b86f1ab47/3/5cfa31d130a94c6b86f1ab44.regulardictionary.json" />
-    <ignored path="apiserver/tmp/5cfa31f430a94c6b86f1ab61/133/5cfa31d130a94c6b86f1ab47/3/5cfa31d130a94c6b86f1ab45.behavior.json" />
-    <ignored path="apiserver/tmp/5cfa31f430a94c6b86f1ab61/133/5cfa31d130a94c6b86f1ab47/3/5cfa31d130a94c6b86f1ab45.descriptor.json" />
-    <ignored path="apiserver/tmp/5cfa31f430a94c6b86f1ab61/133/5cfa31d130a94c6b86f1ab47/3/5cfa31d130a94c6b86f1ab46.descriptor.json" />
-    <ignored path="apiserver/tmp/5cfa31f430a94c6b86f1ab61/133/5cfa31d130a94c6b86f1ab47/3/5cfa31d130a94c6b86f1ab46.output.json" />
-    <ignored path="apiserver/tmp/5cfa31f430a94c6b86f1ab61/133/5cfa31d130a94c6b86f1ab47/3/5cfa31d130a94c6b86f1ab47.descriptor.json" />
-    <ignored path="apiserver/tmp/5cfa31f430a94c6b86f1ab61/133/5cfa31d130a94c6b86f1ab47/3/5cfa31d130a94c6b86f1ab47.package.json" />
-    <ignored path="apiserver/tmp/5cfa31f430a94c6b86f1ab61/133/5cfa322b30a94c6b86f1ab62/138/5cfa322b30a94c6b86f1ab62.descriptor.json" />
-    <ignored path="apiserver/tmp/5cfa31f430a94c6b86f1ab61/133/5cfa322b30a94c6b86f1ab62/138/5cfa322b30a94c6b86f1ab62.package.json" />
-    <ignored path="apiserver/tmp/5cfa31f430a94c6b86f1ab61/133/5cfa322b30a94c6b86f1ab62/138/5cfa353330a94c6b86f1ab65.behavior.json" />
-    <ignored path="apiserver/tmp/5cfa31f430a94c6b86f1ab61/133/5cfa322b30a94c6b86f1ab62/138/5cfa353330a94c6b86f1ab65.descriptor.json" />
-    <ignored path="apiserver/tmp/5cfa31f430a94c6b86f1ab61/133/5cfa322b30a94c6b86f1ab62/138/5cfa383830a94c6b86f1ab66.descriptor.json" />
-    <ignored path="apiserver/tmp/5cfa31f430a94c6b86f1ab61/133/5cfa322b30a94c6b86f1ab62/138/5cfa383830a94c6b86f1ab66.httpcalls.json" />
-    <ignored path="apiserver/tmp/5cfa31f430a94c6b86f1ab61/133/5cfa322b30a94c6b86f1ab62/138/5cfa388c30a94c6b86f1ab67.descriptor.json" />
-    <ignored path="apiserver/tmp/5cfa31f430a94c6b86f1ab61/133/5cfa322b30a94c6b86f1ab62/138/5cfa388c30a94c6b86f1ab67.output.json" />
-    <ignored path="apiserver/tmp/5cfa31f430a94c6b86f1ab61/133/5cfa322b30a94c6b86f1ab62/138/5cff6512fa2cea01b6a73e4e.descriptor.json" />
-    <ignored path="apiserver/tmp/5cfa31f430a94c6b86f1ab61/133/5cfa322b30a94c6b86f1ab62/138/5cff6512fa2cea01b6a73e4e.httpcalls.json" />
-    <ignored path="apiserver/tmp/5cfa31f430a94c6b86f1ab61/133/5cfa322b30a94c6b86f1ab62/138/5cff6539fa2cea01b6a73e4f.descriptor.json" />
-    <ignored path="apiserver/tmp/5cfa31f430a94c6b86f1ab61/133/5cfa322b30a94c6b86f1ab62/138/5cff6539fa2cea01b6a73e4f.httpcalls.json" />
-    <ignored path="apiserver/tmp/5cfa31f430a94c6b86f1ab61/133/5cfa322b30a94c6b86f1ab62/138/5d091df094f39b38e8f717e6.descriptor.json" />
-    <ignored path="apiserver/tmp/5cfa31f430a94c6b86f1ab61/133/5cfa322b30a94c6b86f1ab62/138/5d091df094f39b38e8f717e6.property.json" />
-    <ignored path="apiserver/tmp/5cfa31f430a94c6b86f1ab61/133/5cfa322b30a94c6b86f1ab62/138/5d091e7094f39b38e8f717e7.descriptor.json" />
-    <ignored path="apiserver/tmp/5cfa31f430a94c6b86f1ab61/133/5cfa322b30a94c6b86f1ab62/138/5d091e7094f39b38e8f717e7.property.json" />
-    <ignored path="apiserver/tmp/5cfa31f430a94c6b86f1ab61/133/5cfa322b30a94c6b86f1ab62/138/5d0b56db28eb81188c5d66aa.descriptor.json" />
-    <ignored path="apiserver/tmp/5cfa31f430a94c6b86f1ab61/133/5cfa322b30a94c6b86f1ab62/138/5d0b56db28eb81188c5d66aa.httpcalls.json" />
-    <ignored path="apiserver/tmp/5cfa31f430a94c6b86f1ab61/133/5cfa32bf30a94c6b86f1ab63/3/5cfa31d130a94c6b86f1ab48.behavior.json" />
-    <ignored path="apiserver/tmp/5cfa31f430a94c6b86f1ab61/133/5cfa32bf30a94c6b86f1ab63/3/5cfa31d130a94c6b86f1ab48.descriptor.json" />
-    <ignored path="apiserver/tmp/5cfa31f430a94c6b86f1ab61/133/5cfa32bf30a94c6b86f1ab63/3/5cfa32bf30a94c6b86f1ab63.descriptor.json" />
-    <ignored path="apiserver/tmp/5cfa31f430a94c6b86f1ab61/133/5cfa32bf30a94c6b86f1ab63/3/5cfa32bf30a94c6b86f1ab63.package.json" />
-    <ignored path="apiserver/tmp/5cfa31f430a94c6b86f1ab61/133/5cfa32bf30a94c6b86f1ab63/3/5cfa337e30a94c6b86f1ab64.descriptor.json" />
-    <ignored path="apiserver/tmp/5cfa31f430a94c6b86f1ab61/133/5cfa32bf30a94c6b86f1ab63/3/5cfa337e30a94c6b86f1ab64.output.json" />
-    <ignored path="apiserver/tmp/5cfa31f430a94c6b86f1ab61/133/5cfa31f430a94c6b86f1ab61.bot.json" />
-    <ignored path="apiserver/tmp/5cfa31f430a94c6b86f1ab61/133/5cfa31f430a94c6b86f1ab61.descriptor.json" />
-    <ignored path="apiserver/tmp/5cfa31f430a94c6b86f1ab61/66/5cfa31d130a94c6b86f1ab47/3/5cfa31d130a94c6b86f1ab44.descriptor.json" />
-    <ignored path="apiserver/tmp/5cfa31f430a94c6b86f1ab61/66/5cfa31d130a94c6b86f1ab47/3/5cfa31d130a94c6b86f1ab44.regulardictionary.json" />
-    <ignored path="apiserver/tmp/5cfa31f430a94c6b86f1ab61/66/5cfa31d130a94c6b86f1ab47/3/5cfa31d130a94c6b86f1ab45.behavior.json" />
-    <ignored path="apiserver/tmp/5cfa31f430a94c6b86f1ab61/66/5cfa31d130a94c6b86f1ab47/3/5cfa31d130a94c6b86f1ab45.descriptor.json" />
-    <ignored path="apiserver/tmp/5cfa31f430a94c6b86f1ab61/66/5cfa31d130a94c6b86f1ab47/3/5cfa31d130a94c6b86f1ab46.descriptor.json" />
-    <ignored path="apiserver/tmp/5cfa31f430a94c6b86f1ab61/66/5cfa31d130a94c6b86f1ab47/3/5cfa31d130a94c6b86f1ab46.output.json" />
-    <ignored path="apiserver/tmp/5cfa31f430a94c6b86f1ab61/66/5cfa31d130a94c6b86f1ab47/3/5cfa31d130a94c6b86f1ab47.descriptor.json" />
-    <ignored path="apiserver/tmp/5cfa31f430a94c6b86f1ab61/66/5cfa31d130a94c6b86f1ab47/3/5cfa31d130a94c6b86f1ab47.package.json" />
-    <ignored path="apiserver/tmp/5cfa31f430a94c6b86f1ab61/66/5cfa322b30a94c6b86f1ab62/62/5cfa322b30a94c6b86f1ab62.descriptor.json" />
-    <ignored path="apiserver/tmp/5cfa31f430a94c6b86f1ab61/66/5cfa322b30a94c6b86f1ab62/62/5cfa322b30a94c6b86f1ab62.package.json" />
-    <ignored path="apiserver/tmp/5cfa31f430a94c6b86f1ab61/66/5cfa322b30a94c6b86f1ab62/62/5cfa353330a94c6b86f1ab65.behavior.json" />
-    <ignored path="apiserver/tmp/5cfa31f430a94c6b86f1ab61/66/5cfa322b30a94c6b86f1ab62/62/5cfa353330a94c6b86f1ab65.descriptor.json" />
-    <ignored path="apiserver/tmp/5cfa31f430a94c6b86f1ab61/66/5cfa322b30a94c6b86f1ab62/62/5cfa383830a94c6b86f1ab66.descriptor.json" />
-    <ignored path="apiserver/tmp/5cfa31f430a94c6b86f1ab61/66/5cfa322b30a94c6b86f1ab62/62/5cfa383830a94c6b86f1ab66.httpcalls.json" />
-    <ignored path="apiserver/tmp/5cfa31f430a94c6b86f1ab61/66/5cfa322b30a94c6b86f1ab62/62/5cfa388c30a94c6b86f1ab67.descriptor.json" />
-    <ignored path="apiserver/tmp/5cfa31f430a94c6b86f1ab61/66/5cfa322b30a94c6b86f1ab62/62/5cfa388c30a94c6b86f1ab67.output.json" />
-    <ignored path="apiserver/tmp/5cfa31f430a94c6b86f1ab61/66/5cfa322b30a94c6b86f1ab62/62/5cff6512fa2cea01b6a73e4e.descriptor.json" />
-    <ignored path="apiserver/tmp/5cfa31f430a94c6b86f1ab61/66/5cfa322b30a94c6b86f1ab62/62/5cff6512fa2cea01b6a73e4e.httpcalls.json" />
-    <ignored path="apiserver/tmp/5cfa31f430a94c6b86f1ab61/66/5cfa322b30a94c6b86f1ab62/62/5cff6539fa2cea01b6a73e4f.descriptor.json" />
-    <ignored path="apiserver/tmp/5cfa31f430a94c6b86f1ab61/66/5cfa322b30a94c6b86f1ab62/62/5cff6539fa2cea01b6a73e4f.httpcalls.json" />
-    <ignored path="apiserver/tmp/5cfa31f430a94c6b86f1ab61/66/5cfa32bf30a94c6b86f1ab63/3/5cfa31d130a94c6b86f1ab48.behavior.json" />
-    <ignored path="apiserver/tmp/5cfa31f430a94c6b86f1ab61/66/5cfa32bf30a94c6b86f1ab63/3/5cfa31d130a94c6b86f1ab48.descriptor.json" />
-    <ignored path="apiserver/tmp/5cfa31f430a94c6b86f1ab61/66/5cfa32bf30a94c6b86f1ab63/3/5cfa32bf30a94c6b86f1ab63.descriptor.json" />
-    <ignored path="apiserver/tmp/5cfa31f430a94c6b86f1ab61/66/5cfa32bf30a94c6b86f1ab63/3/5cfa32bf30a94c6b86f1ab63.package.json" />
-    <ignored path="apiserver/tmp/5cfa31f430a94c6b86f1ab61/66/5cfa32bf30a94c6b86f1ab63/3/5cfa337e30a94c6b86f1ab64.descriptor.json" />
-    <ignored path="apiserver/tmp/5cfa31f430a94c6b86f1ab61/66/5cfa32bf30a94c6b86f1ab63/3/5cfa337e30a94c6b86f1ab64.output.json" />
-    <ignored path="apiserver/tmp/5cfa31f430a94c6b86f1ab61/66/5cfa31f430a94c6b86f1ab61.bot.json" />
-    <ignored path="apiserver/tmp/5cfa31f430a94c6b86f1ab61/66/5cfa31f430a94c6b86f1ab61.descriptor.json" />
-    <ignored path="apiserver/tmp/5cfa31f430a94c6b86f1ab61/98/5cfa31d130a94c6b86f1ab47/3/5cfa31d130a94c6b86f1ab44.descriptor.json" />
-    <ignored path="apiserver/tmp/5cfa31f430a94c6b86f1ab61/98/5cfa31d130a94c6b86f1ab47/3/5cfa31d130a94c6b86f1ab44.regulardictionary.json" />
-    <ignored path="apiserver/tmp/5cfa31f430a94c6b86f1ab61/98/5cfa31d130a94c6b86f1ab47/3/5cfa31d130a94c6b86f1ab45.behavior.json" />
-    <ignored path="apiserver/tmp/5cfa31f430a94c6b86f1ab61/98/5cfa31d130a94c6b86f1ab47/3/5cfa31d130a94c6b86f1ab45.descriptor.json" />
-    <ignored path="apiserver/tmp/5cfa31f430a94c6b86f1ab61/98/5cfa31d130a94c6b86f1ab47/3/5cfa31d130a94c6b86f1ab46.descriptor.json" />
-    <ignored path="apiserver/tmp/5cfa31f430a94c6b86f1ab61/98/5cfa31d130a94c6b86f1ab47/3/5cfa31d130a94c6b86f1ab46.output.json" />
-    <ignored path="apiserver/tmp/5cfa31f430a94c6b86f1ab61/98/5cfa31d130a94c6b86f1ab47/3/5cfa31d130a94c6b86f1ab47.descriptor.json" />
-    <ignored path="apiserver/tmp/5cfa31f430a94c6b86f1ab61/98/5cfa31d130a94c6b86f1ab47/3/5cfa31d130a94c6b86f1ab47.package.json" />
-    <ignored path="apiserver/tmp/5cfa31f430a94c6b86f1ab61/98/5cfa322b30a94c6b86f1ab62/94/5cfa322b30a94c6b86f1ab62.descriptor.json" />
-    <ignored path="apiserver/tmp/5cfa31f430a94c6b86f1ab61/98/5cfa322b30a94c6b86f1ab62/94/5cfa322b30a94c6b86f1ab62.package.json" />
-    <ignored path="apiserver/tmp/5cfa31f430a94c6b86f1ab61/98/5cfa322b30a94c6b86f1ab62/94/5cfa353330a94c6b86f1ab65.behavior.json" />
-    <ignored path="apiserver/tmp/5cfa31f430a94c6b86f1ab61/98/5cfa322b30a94c6b86f1ab62/94/5cfa353330a94c6b86f1ab65.descriptor.json" />
-    <ignored path="apiserver/tmp/5cfa31f430a94c6b86f1ab61/98/5cfa322b30a94c6b86f1ab62/94/5cfa383830a94c6b86f1ab66.descriptor.json" />
-    <ignored path="apiserver/tmp/5cfa31f430a94c6b86f1ab61/98/5cfa322b30a94c6b86f1ab62/94/5cfa383830a94c6b86f1ab66.httpcalls.json" />
-    <ignored path="apiserver/tmp/5cfa31f430a94c6b86f1ab61/98/5cfa322b30a94c6b86f1ab62/94/5cfa388c30a94c6b86f1ab67.descriptor.json" />
-    <ignored path="apiserver/tmp/5cfa31f430a94c6b86f1ab61/98/5cfa322b30a94c6b86f1ab62/94/5cfa388c30a94c6b86f1ab67.output.json" />
-    <ignored path="apiserver/tmp/5cfa31f430a94c6b86f1ab61/98/5cfa322b30a94c6b86f1ab62/94/5cff6512fa2cea01b6a73e4e.descriptor.json" />
-    <ignored path="apiserver/tmp/5cfa31f430a94c6b86f1ab61/98/5cfa322b30a94c6b86f1ab62/94/5cff6512fa2cea01b6a73e4e.httpcalls.json" />
-    <ignored path="apiserver/tmp/5cfa31f430a94c6b86f1ab61/98/5cfa322b30a94c6b86f1ab62/94/5cff6539fa2cea01b6a73e4f.descriptor.json" />
-    <ignored path="apiserver/tmp/5cfa31f430a94c6b86f1ab61/98/5cfa322b30a94c6b86f1ab62/94/5cff6539fa2cea01b6a73e4f.httpcalls.json" />
-    <ignored path="apiserver/tmp/5cfa31f430a94c6b86f1ab61/98/5cfa32bf30a94c6b86f1ab63/3/5cfa31d130a94c6b86f1ab48.behavior.json" />
-    <ignored path="apiserver/tmp/5cfa31f430a94c6b86f1ab61/98/5cfa32bf30a94c6b86f1ab63/3/5cfa31d130a94c6b86f1ab48.descriptor.json" />
-    <ignored path="apiserver/tmp/5cfa31f430a94c6b86f1ab61/98/5cfa32bf30a94c6b86f1ab63/3/5cfa32bf30a94c6b86f1ab63.descriptor.json" />
-    <ignored path="apiserver/tmp/5cfa31f430a94c6b86f1ab61/98/5cfa32bf30a94c6b86f1ab63/3/5cfa32bf30a94c6b86f1ab63.package.json" />
-    <ignored path="apiserver/tmp/5cfa31f430a94c6b86f1ab61/98/5cfa32bf30a94c6b86f1ab63/3/5cfa337e30a94c6b86f1ab64.descriptor.json" />
-    <ignored path="apiserver/tmp/5cfa31f430a94c6b86f1ab61/98/5cfa32bf30a94c6b86f1ab63/3/5cfa337e30a94c6b86f1ab64.output.json" />
-    <ignored path="apiserver/tmp/5cfa31f430a94c6b86f1ab61/98/5cfa31f430a94c6b86f1ab61.bot.json" />
-    <ignored path="apiserver/tmp/5cfa31f430a94c6b86f1ab61/98/5cfa31f430a94c6b86f1ab61.descriptor.json" />
-    <ignored path="apiserver/tmp/5d08f029fbf4d2676e1eb160/15/5cfa31d130a94c6b86f1ab47/3/5cfa31d130a94c6b86f1ab44.descriptor.json" />
-    <ignored path="apiserver/tmp/5d08f029fbf4d2676e1eb160/15/5cfa31d130a94c6b86f1ab47/3/5cfa31d130a94c6b86f1ab44.regulardictionary.json" />
-    <ignored path="apiserver/tmp/5d08f029fbf4d2676e1eb160/15/5cfa31d130a94c6b86f1ab47/3/5cfa31d130a94c6b86f1ab45.behavior.json" />
-    <ignored path="apiserver/tmp/5d08f029fbf4d2676e1eb160/15/5cfa31d130a94c6b86f1ab47/3/5cfa31d130a94c6b86f1ab45.descriptor.json" />
-    <ignored path="apiserver/tmp/5d08f029fbf4d2676e1eb160/15/5cfa31d130a94c6b86f1ab47/3/5cfa31d130a94c6b86f1ab46.descriptor.json" />
-    <ignored path="apiserver/tmp/5d08f029fbf4d2676e1eb160/15/5cfa31d130a94c6b86f1ab47/3/5cfa31d130a94c6b86f1ab46.output.json" />
-    <ignored path="apiserver/tmp/5d08f029fbf4d2676e1eb160/15/5cfa31d130a94c6b86f1ab47/3/5cfa31d130a94c6b86f1ab47.descriptor.json" />
-    <ignored path="apiserver/tmp/5d08f029fbf4d2676e1eb160/15/5cfa31d130a94c6b86f1ab47/3/5cfa31d130a94c6b86f1ab47.package.json" />
-    <ignored path="apiserver/tmp/5d08f029fbf4d2676e1eb160/15/5cfa32bf30a94c6b86f1ab63/3/5cfa31d130a94c6b86f1ab48.behavior.json" />
-    <ignored path="apiserver/tmp/5d08f029fbf4d2676e1eb160/15/5cfa32bf30a94c6b86f1ab63/3/5cfa31d130a94c6b86f1ab48.descriptor.json" />
-    <ignored path="apiserver/tmp/5d08f029fbf4d2676e1eb160/15/5cfa32bf30a94c6b86f1ab63/3/5cfa32bf30a94c6b86f1ab63.descriptor.json" />
-    <ignored path="apiserver/tmp/5d08f029fbf4d2676e1eb160/15/5cfa32bf30a94c6b86f1ab63/3/5cfa32bf30a94c6b86f1ab63.package.json" />
-    <ignored path="apiserver/tmp/5d08f029fbf4d2676e1eb160/15/5cfa32bf30a94c6b86f1ab63/3/5cfa337e30a94c6b86f1ab64.descriptor.json" />
-    <ignored path="apiserver/tmp/5d08f029fbf4d2676e1eb160/15/5cfa32bf30a94c6b86f1ab63/3/5cfa337e30a94c6b86f1ab64.output.json" />
-    <ignored path="apiserver/tmp/5d08f029fbf4d2676e1eb160/15/5d08f00afbf4d2676e1eb15f/15/5cfa353330a94c6b86f1ab65.behavior.json" />
-    <ignored path="apiserver/tmp/5d08f029fbf4d2676e1eb160/15/5d08f00afbf4d2676e1eb15f/15/5cfa353330a94c6b86f1ab65.descriptor.json" />
-    <ignored path="apiserver/tmp/5d08f029fbf4d2676e1eb160/15/5d08f00afbf4d2676e1eb15f/15/5cfa383830a94c6b86f1ab66.descriptor.json" />
-    <ignored path="apiserver/tmp/5d08f029fbf4d2676e1eb160/15/5d08f00afbf4d2676e1eb15f/15/5cfa383830a94c6b86f1ab66.httpcalls.json" />
-    <ignored path="apiserver/tmp/5d08f029fbf4d2676e1eb160/15/5d08f00afbf4d2676e1eb15f/15/5cfa388c30a94c6b86f1ab67.descriptor.json" />
-    <ignored path="apiserver/tmp/5d08f029fbf4d2676e1eb160/15/5d08f00afbf4d2676e1eb15f/15/5cfa388c30a94c6b86f1ab67.output.json" />
-    <ignored path="apiserver/tmp/5d08f029fbf4d2676e1eb160/15/5d08f00afbf4d2676e1eb15f/15/5cff6512fa2cea01b6a73e4e.descriptor.json" />
-    <ignored path="apiserver/tmp/5d08f029fbf4d2676e1eb160/15/5d08f00afbf4d2676e1eb15f/15/5cff6512fa2cea01b6a73e4e.httpcalls.json" />
-    <ignored path="apiserver/tmp/5d08f029fbf4d2676e1eb160/15/5d08f00afbf4d2676e1eb15f/15/5cff6539fa2cea01b6a73e4f.descriptor.json" />
-    <ignored path="apiserver/tmp/5d08f029fbf4d2676e1eb160/15/5d08f00afbf4d2676e1eb15f/15/5cff6539fa2cea01b6a73e4f.httpcalls.json" />
-    <ignored path="apiserver/tmp/5d08f029fbf4d2676e1eb160/15/5d08f00afbf4d2676e1eb15f/15/5d08f00afbf4d2676e1eb15f.descriptor.json" />
-    <ignored path="apiserver/tmp/5d08f029fbf4d2676e1eb160/15/5d08f00afbf4d2676e1eb15f/15/5d08f00afbf4d2676e1eb15f.package.json" />
-    <ignored path="apiserver/tmp/5d08f029fbf4d2676e1eb160/15/5d08f00afbf4d2676e1eb15f/15/5d091d0194f39b38e8f717e5.descriptor.json" />
-    <ignored path="apiserver/tmp/5d08f029fbf4d2676e1eb160/15/5d08f00afbf4d2676e1eb15f/15/5d091d0194f39b38e8f717e5.property.json" />
-    <ignored path="apiserver/tmp/5d08f029fbf4d2676e1eb160/15/5d08f00afbf4d2676e1eb15f/15/5d091e7094f39b38e8f717e7.descriptor.json" />
-    <ignored path="apiserver/tmp/5d08f029fbf4d2676e1eb160/15/5d08f00afbf4d2676e1eb15f/15/5d091e7094f39b38e8f717e7.property.json" />
-    <ignored path="apiserver/tmp/5d08f029fbf4d2676e1eb160/15/5d08f00afbf4d2676e1eb15f/15/5d0b56db28eb81188c5d66aa.descriptor.json" />
-    <ignored path="apiserver/tmp/5d08f029fbf4d2676e1eb160/15/5d08f00afbf4d2676e1eb15f/15/5d0b56db28eb81188c5d66aa.httpcalls.json" />
-    <ignored path="apiserver/tmp/5d08f029fbf4d2676e1eb160/15/5d08f029fbf4d2676e1eb160.bot.json" />
-    <ignored path="apiserver/tmp/5d08f029fbf4d2676e1eb160/15/5d08f029fbf4d2676e1eb160.descriptor.json" />
-    <ignored path="apiserver/tmp/5d08f029fbf4d2676e1eb160/27/5cfa31d130a94c6b86f1ab47/3/5cfa31d130a94c6b86f1ab44.descriptor.json" />
-    <ignored path="apiserver/tmp/5d08f029fbf4d2676e1eb160/27/5cfa31d130a94c6b86f1ab47/3/5cfa31d130a94c6b86f1ab44.regulardictionary.json" />
-    <ignored path="apiserver/tmp/5d08f029fbf4d2676e1eb160/27/5cfa31d130a94c6b86f1ab47/3/5cfa31d130a94c6b86f1ab45.behavior.json" />
-    <ignored path="apiserver/tmp/5d08f029fbf4d2676e1eb160/27/5cfa31d130a94c6b86f1ab47/3/5cfa31d130a94c6b86f1ab45.descriptor.json" />
-    <ignored path="apiserver/tmp/5d08f029fbf4d2676e1eb160/27/5cfa31d130a94c6b86f1ab47/3/5cfa31d130a94c6b86f1ab46.descriptor.json" />
-    <ignored path="apiserver/tmp/5d08f029fbf4d2676e1eb160/27/5cfa31d130a94c6b86f1ab47/3/5cfa31d130a94c6b86f1ab46.output.json" />
-    <ignored path="apiserver/tmp/5d08f029fbf4d2676e1eb160/27/5cfa31d130a94c6b86f1ab47/3/5cfa31d130a94c6b86f1ab47.descriptor.json" />
-    <ignored path="apiserver/tmp/5d08f029fbf4d2676e1eb160/27/5cfa31d130a94c6b86f1ab47/3/5cfa31d130a94c6b86f1ab47.package.json" />
-    <ignored path="apiserver/tmp/5d08f029fbf4d2676e1eb160/27/5cfa32bf30a94c6b86f1ab63/11/5cfa31d130a94c6b86f1ab48.behavior.json" />
-    <ignored path="apiserver/tmp/5d08f029fbf4d2676e1eb160/27/5cfa32bf30a94c6b86f1ab63/11/5cfa31d130a94c6b86f1ab48.descriptor.json" />
-    <ignored path="apiserver/tmp/5d08f029fbf4d2676e1eb160/27/5cfa32bf30a94c6b86f1ab63/11/5cfa32bf30a94c6b86f1ab63.descriptor.json" />
-    <ignored path="apiserver/tmp/5d08f029fbf4d2676e1eb160/27/5cfa32bf30a94c6b86f1ab63/11/5cfa32bf30a94c6b86f1ab63.package.json" />
-    <ignored path="apiserver/tmp/5d08f029fbf4d2676e1eb160/27/5cfa32bf30a94c6b86f1ab63/11/5cfa337e30a94c6b86f1ab64.descriptor.json" />
-    <ignored path="apiserver/tmp/5d08f029fbf4d2676e1eb160/27/5cfa32bf30a94c6b86f1ab63/11/5cfa337e30a94c6b86f1ab64.output.json" />
-    <ignored path="apiserver/tmp/5d08f029fbf4d2676e1eb160/27/5cfa32bf30a94c6b86f1ab63/11/5d0cef267674d00ba7c2444e.descriptor.json" />
-    <ignored path="apiserver/tmp/5d08f029fbf4d2676e1eb160/27/5cfa32bf30a94c6b86f1ab63/11/5d0cef267674d00ba7c2444e.regulardictionary.json" />
-    <ignored path="apiserver/tmp/5d08f029fbf4d2676e1eb160/27/5d08f00afbf4d2676e1eb15f/18/5cfa353330a94c6b86f1ab65.behavior.json" />
-    <ignored path="apiserver/tmp/5d08f029fbf4d2676e1eb160/27/5d08f00afbf4d2676e1eb15f/18/5cfa353330a94c6b86f1ab65.descriptor.json" />
-    <ignored path="apiserver/tmp/5d08f029fbf4d2676e1eb160/27/5d08f00afbf4d2676e1eb15f/18/5cfa383830a94c6b86f1ab66.descriptor.json" />
-    <ignored path="apiserver/tmp/5d08f029fbf4d2676e1eb160/27/5d08f00afbf4d2676e1eb15f/18/5cfa383830a94c6b86f1ab66.httpcalls.json" />
-    <ignored path="apiserver/tmp/5d08f029fbf4d2676e1eb160/27/5d08f00afbf4d2676e1eb15f/18/5cfa388c30a94c6b86f1ab67.descriptor.json" />
-    <ignored path="apiserver/tmp/5d08f029fbf4d2676e1eb160/27/5d08f00afbf4d2676e1eb15f/18/5cfa388c30a94c6b86f1ab67.output.json" />
-    <ignored path="apiserver/tmp/5d08f029fbf4d2676e1eb160/27/5d08f00afbf4d2676e1eb15f/18/5cff6512fa2cea01b6a73e4e.descriptor.json" />
-    <ignored path="apiserver/tmp/5d08f029fbf4d2676e1eb160/27/5d08f00afbf4d2676e1eb15f/18/5cff6512fa2cea01b6a73e4e.httpcalls.json" />
-    <ignored path="apiserver/tmp/5d08f029fbf4d2676e1eb160/27/5d08f00afbf4d2676e1eb15f/18/5cff6539fa2cea01b6a73e4f.descriptor.json" />
-    <ignored path="apiserver/tmp/5d08f029fbf4d2676e1eb160/27/5d08f00afbf4d2676e1eb15f/18/5cff6539fa2cea01b6a73e4f.httpcalls.json" />
-    <ignored path="apiserver/tmp/5d08f029fbf4d2676e1eb160/27/5d08f00afbf4d2676e1eb15f/18/5d08f00afbf4d2676e1eb15f.descriptor.json" />
-    <ignored path="apiserver/tmp/5d08f029fbf4d2676e1eb160/27/5d08f00afbf4d2676e1eb15f/18/5d08f00afbf4d2676e1eb15f.package.json" />
-    <ignored path="apiserver/tmp/5d08f029fbf4d2676e1eb160/27/5d08f00afbf4d2676e1eb15f/18/5d091d0194f39b38e8f717e5.descriptor.json" />
-    <ignored path="apiserver/tmp/5d08f029fbf4d2676e1eb160/27/5d08f00afbf4d2676e1eb15f/18/5d091d0194f39b38e8f717e5.property.json" />
-    <ignored path="apiserver/tmp/5d08f029fbf4d2676e1eb160/27/5d08f00afbf4d2676e1eb15f/18/5d091e7094f39b38e8f717e7.descriptor.json" />
-    <ignored path="apiserver/tmp/5d08f029fbf4d2676e1eb160/27/5d08f00afbf4d2676e1eb15f/18/5d091e7094f39b38e8f717e7.property.json" />
-    <ignored path="apiserver/tmp/5d08f029fbf4d2676e1eb160/27/5d08f00afbf4d2676e1eb15f/18/5d0b56db28eb81188c5d66aa.descriptor.json" />
-    <ignored path="apiserver/tmp/5d08f029fbf4d2676e1eb160/27/5d08f00afbf4d2676e1eb15f/18/5d0b56db28eb81188c5d66aa.httpcalls.json" />
-    <ignored path="apiserver/tmp/5d08f029fbf4d2676e1eb160/27/5d08f029fbf4d2676e1eb160.bot.json" />
-    <ignored path="apiserver/tmp/5d08f029fbf4d2676e1eb160/27/5d08f029fbf4d2676e1eb160.descriptor.json" />
-    <ignored path="apiserver/tmp/5d08f029fbf4d2676e1eb160/28/5cfa31d130a94c6b86f1ab47/3/5cfa31d130a94c6b86f1ab44.descriptor.json" />
-    <ignored path="apiserver/tmp/5d08f029fbf4d2676e1eb160/28/5cfa31d130a94c6b86f1ab47/3/5cfa31d130a94c6b86f1ab44.regulardictionary.json" />
-    <ignored path="apiserver/tmp/5d08f029fbf4d2676e1eb160/28/5cfa31d130a94c6b86f1ab47/3/5cfa31d130a94c6b86f1ab45.behavior.json" />
-    <ignored path="apiserver/tmp/5d08f029fbf4d2676e1eb160/28/5cfa31d130a94c6b86f1ab47/3/5cfa31d130a94c6b86f1ab45.descriptor.json" />
-    <ignored path="apiserver/tmp/5d08f029fbf4d2676e1eb160/28/5cfa31d130a94c6b86f1ab47/3/5cfa31d130a94c6b86f1ab46.descriptor.json" />
-    <ignored path="apiserver/tmp/5d08f029fbf4d2676e1eb160/28/5cfa31d130a94c6b86f1ab47/3/5cfa31d130a94c6b86f1ab46.output.json" />
-    <ignored path="apiserver/tmp/5d08f029fbf4d2676e1eb160/28/5cfa31d130a94c6b86f1ab47/3/5cfa31d130a94c6b86f1ab47.descriptor.json" />
-    <ignored path="apiserver/tmp/5d08f029fbf4d2676e1eb160/28/5cfa31d130a94c6b86f1ab47/3/5cfa31d130a94c6b86f1ab47.package.json" />
-    <ignored path="apiserver/tmp/5d08f029fbf4d2676e1eb160/28/5cfa32bf30a94c6b86f1ab63/11/5cfa31d130a94c6b86f1ab48.behavior.json" />
-    <ignored path="apiserver/tmp/5d08f029fbf4d2676e1eb160/28/5cfa32bf30a94c6b86f1ab63/11/5cfa31d130a94c6b86f1ab48.descriptor.json" />
-    <ignored path="apiserver/tmp/5d08f029fbf4d2676e1eb160/28/5cfa32bf30a94c6b86f1ab63/11/5cfa32bf30a94c6b86f1ab63.descriptor.json" />
-    <ignored path="apiserver/tmp/5d08f029fbf4d2676e1eb160/28/5cfa32bf30a94c6b86f1ab63/11/5cfa32bf30a94c6b86f1ab63.package.json" />
-    <ignored path="apiserver/tmp/5d08f029fbf4d2676e1eb160/28/5cfa32bf30a94c6b86f1ab63/11/5cfa337e30a94c6b86f1ab64.descriptor.json" />
-    <ignored path="apiserver/tmp/5d08f029fbf4d2676e1eb160/28/5cfa32bf30a94c6b86f1ab63/11/5cfa337e30a94c6b86f1ab64.output.json" />
-    <ignored path="apiserver/tmp/5d08f029fbf4d2676e1eb160/28/5cfa32bf30a94c6b86f1ab63/11/5d0cef267674d00ba7c2444e.descriptor.json" />
-    <ignored path="apiserver/tmp/5d08f029fbf4d2676e1eb160/28/5cfa32bf30a94c6b86f1ab63/11/5d0cef267674d00ba7c2444e.regulardictionary.json" />
-    <ignored path="apiserver/tmp/5d08f029fbf4d2676e1eb160/28/5d08f00afbf4d2676e1eb15f/19/5cfa353330a94c6b86f1ab65.behavior.json" />
-    <ignored path="apiserver/tmp/5d08f029fbf4d2676e1eb160/28/5d08f00afbf4d2676e1eb15f/19/5cfa353330a94c6b86f1ab65.descriptor.json" />
-    <ignored path="apiserver/tmp/5d08f029fbf4d2676e1eb160/28/5d08f00afbf4d2676e1eb15f/19/5cfa383830a94c6b86f1ab66.descriptor.json" />
-    <ignored path="apiserver/tmp/5d08f029fbf4d2676e1eb160/28/5d08f00afbf4d2676e1eb15f/19/5cfa383830a94c6b86f1ab66.httpcalls.json" />
-    <ignored path="apiserver/tmp/5d08f029fbf4d2676e1eb160/28/5d08f00afbf4d2676e1eb15f/19/5cfa388c30a94c6b86f1ab67.descriptor.json" />
-    <ignored path="apiserver/tmp/5d08f029fbf4d2676e1eb160/28/5d08f00afbf4d2676e1eb15f/19/5cfa388c30a94c6b86f1ab67.output.json" />
-    <ignored path="apiserver/tmp/5d08f029fbf4d2676e1eb160/28/5d08f00afbf4d2676e1eb15f/19/5cff6512fa2cea01b6a73e4e.descriptor.json" />
-    <ignored path="apiserver/tmp/5d08f029fbf4d2676e1eb160/28/5d08f00afbf4d2676e1eb15f/19/5cff6512fa2cea01b6a73e4e.httpcalls.json" />
-    <ignored path="apiserver/tmp/5d08f029fbf4d2676e1eb160/28/5d08f00afbf4d2676e1eb15f/19/5cff6539fa2cea01b6a73e4f.descriptor.json" />
-    <ignored path="apiserver/tmp/5d08f029fbf4d2676e1eb160/28/5d08f00afbf4d2676e1eb15f/19/5cff6539fa2cea01b6a73e4f.httpcalls.json" />
-    <ignored path="apiserver/tmp/5d08f029fbf4d2676e1eb160/28/5d08f00afbf4d2676e1eb15f/19/5d08f00afbf4d2676e1eb15f.descriptor.json" />
-    <ignored path="apiserver/tmp/5d08f029fbf4d2676e1eb160/28/5d08f00afbf4d2676e1eb15f/19/5d08f00afbf4d2676e1eb15f.package.json" />
-    <ignored path="apiserver/tmp/5d08f029fbf4d2676e1eb160/28/5d08f00afbf4d2676e1eb15f/19/5d091d0194f39b38e8f717e5.descriptor.json" />
-    <ignored path="apiserver/tmp/5d08f029fbf4d2676e1eb160/28/5d08f00afbf4d2676e1eb15f/19/5d091d0194f39b38e8f717e5.property.json" />
-    <ignored path="apiserver/tmp/5d08f029fbf4d2676e1eb160/28/5d08f00afbf4d2676e1eb15f/19/5d091e7094f39b38e8f717e7.descriptor.json" />
-    <ignored path="apiserver/tmp/5d08f029fbf4d2676e1eb160/28/5d08f00afbf4d2676e1eb15f/19/5d091e7094f39b38e8f717e7.property.json" />
-    <ignored path="apiserver/tmp/5d08f029fbf4d2676e1eb160/28/5d08f00afbf4d2676e1eb15f/19/5d0b56db28eb81188c5d66aa.descriptor.json" />
-    <ignored path="apiserver/tmp/5d08f029fbf4d2676e1eb160/28/5d08f00afbf4d2676e1eb15f/19/5d0b56db28eb81188c5d66aa.httpcalls.json" />
-    <ignored path="apiserver/tmp/5d08f029fbf4d2676e1eb160/28/5d08f00afbf4d2676e1eb15f/19/5d14ca8b129e44721b112250.behavior.json" />
-    <ignored path="apiserver/tmp/5d08f029fbf4d2676e1eb160/28/5d08f00afbf4d2676e1eb15f/19/5d14ca8b129e44721b112250.descriptor.json" />
-    <ignored path="apiserver/tmp/5d08f029fbf4d2676e1eb160/28/5d08f029fbf4d2676e1eb160.bot.json" />
-    <ignored path="apiserver/tmp/5d08f029fbf4d2676e1eb160/28/5d08f029fbf4d2676e1eb160.descriptor.json" />
-    <ignored path="apiserver/tmp/import/178a5aac-ca7b-4433-b23e-62b1037b4169/5af59eca9bcb0f31b4b3b938/1/5af59e769bcb0f31b4b3b934.descriptor.json" />
-    <ignored path="apiserver/tmp/import/178a5aac-ca7b-4433-b23e-62b1037b4169/5af59eca9bcb0f31b4b3b938/1/5af59e769bcb0f31b4b3b934.regulardictionary.json" />
-    <ignored path="apiserver/tmp/import/178a5aac-ca7b-4433-b23e-62b1037b4169/5af59eca9bcb0f31b4b3b938/1/5af59e929bcb0f31b4b3b935.behavior.json" />
-    <ignored path="apiserver/tmp/import/178a5aac-ca7b-4433-b23e-62b1037b4169/5af59eca9bcb0f31b4b3b938/1/5af59e929bcb0f31b4b3b935.descriptor.json" />
-    <ignored path="apiserver/tmp/import/178a5aac-ca7b-4433-b23e-62b1037b4169/5af59eca9bcb0f31b4b3b938/1/5af59eac9bcb0f31b4b3b936.descriptor.json" />
-    <ignored path="apiserver/tmp/import/178a5aac-ca7b-4433-b23e-62b1037b4169/5af59eca9bcb0f31b4b3b938/1/5af59eac9bcb0f31b4b3b936.httpcalls.json" />
-    <ignored path="apiserver/tmp/import/178a5aac-ca7b-4433-b23e-62b1037b4169/5af59eca9bcb0f31b4b3b938/1/5af59ebd9bcb0f31b4b3b937.descriptor.json" />
-    <ignored path="apiserver/tmp/import/178a5aac-ca7b-4433-b23e-62b1037b4169/5af59eca9bcb0f31b4b3b938/1/5af59ebd9bcb0f31b4b3b937.output.json" />
-    <ignored path="apiserver/tmp/import/178a5aac-ca7b-4433-b23e-62b1037b4169/5af59eca9bcb0f31b4b3b938/1/5af59eca9bcb0f31b4b3b938.descriptor.json" />
-    <ignored path="apiserver/tmp/import/178a5aac-ca7b-4433-b23e-62b1037b4169/5af59eca9bcb0f31b4b3b938/1/5af59eca9bcb0f31b4b3b938.package.json" />
-    <ignored path="apiserver/tmp/import/178a5aac-ca7b-4433-b23e-62b1037b4169/5af59ee49bcb0f31b4b3b939.bot.json" />
-    <ignored path="apiserver/tmp/import/178a5aac-ca7b-4433-b23e-62b1037b4169/5af59ee49bcb0f31b4b3b939.descriptor.json" />
-    <ignored path="apiserver/tmp/import/2c75f3e0-0815-42a5-acd1-4a74b5251432/5af59eca9bcb0f31b4b3b938/1/5af59e769bcb0f31b4b3b934.descriptor.json" />
-    <ignored path="apiserver/tmp/import/2c75f3e0-0815-42a5-acd1-4a74b5251432/5af59eca9bcb0f31b4b3b938/1/5af59e769bcb0f31b4b3b934.regulardictionary.json" />
-    <ignored path="apiserver/tmp/import/2c75f3e0-0815-42a5-acd1-4a74b5251432/5af59eca9bcb0f31b4b3b938/1/5af59e929bcb0f31b4b3b935.behavior.json" />
-    <ignored path="apiserver/tmp/import/2c75f3e0-0815-42a5-acd1-4a74b5251432/5af59eca9bcb0f31b4b3b938/1/5af59e929bcb0f31b4b3b935.descriptor.json" />
-    <ignored path="apiserver/tmp/import/2c75f3e0-0815-42a5-acd1-4a74b5251432/5af59eca9bcb0f31b4b3b938/1/5af59eac9bcb0f31b4b3b936.descriptor.json" />
-    <ignored path="apiserver/tmp/import/2c75f3e0-0815-42a5-acd1-4a74b5251432/5af59eca9bcb0f31b4b3b938/1/5af59eac9bcb0f31b4b3b936.httpcalls.json" />
-    <ignored path="apiserver/tmp/import/2c75f3e0-0815-42a5-acd1-4a74b5251432/5af59eca9bcb0f31b4b3b938/1/5af59ebd9bcb0f31b4b3b937.descriptor.json" />
-    <ignored path="apiserver/tmp/import/2c75f3e0-0815-42a5-acd1-4a74b5251432/5af59eca9bcb0f31b4b3b938/1/5af59ebd9bcb0f31b4b3b937.output.json" />
-    <ignored path="apiserver/tmp/import/2c75f3e0-0815-42a5-acd1-4a74b5251432/5af59eca9bcb0f31b4b3b938/1/5af59eca9bcb0f31b4b3b938.descriptor.json" />
-    <ignored path="apiserver/tmp/import/2c75f3e0-0815-42a5-acd1-4a74b5251432/5af59eca9bcb0f31b4b3b938/1/5af59eca9bcb0f31b4b3b938.package.json" />
-    <ignored path="apiserver/tmp/import/2c75f3e0-0815-42a5-acd1-4a74b5251432/5af59ee49bcb0f31b4b3b939.bot.json" />
-    <ignored path="apiserver/tmp/import/2c75f3e0-0815-42a5-acd1-4a74b5251432/5af59ee49bcb0f31b4b3b939.descriptor.json" />
-    <ignored path="apiserver/tmp/import/342b0ed5-8e48-4632-89b0-fce8c5274456/5af59eca9bcb0f31b4b3b938/1/5af59e769bcb0f31b4b3b934.descriptor.json" />
-    <ignored path="apiserver/tmp/import/342b0ed5-8e48-4632-89b0-fce8c5274456/5af59eca9bcb0f31b4b3b938/1/5af59e769bcb0f31b4b3b934.regulardictionary.json" />
-    <ignored path="apiserver/tmp/import/342b0ed5-8e48-4632-89b0-fce8c5274456/5af59eca9bcb0f31b4b3b938/1/5af59e929bcb0f31b4b3b935.behavior.json" />
-    <ignored path="apiserver/tmp/import/342b0ed5-8e48-4632-89b0-fce8c5274456/5af59eca9bcb0f31b4b3b938/1/5af59e929bcb0f31b4b3b935.descriptor.json" />
-    <ignored path="apiserver/tmp/import/342b0ed5-8e48-4632-89b0-fce8c5274456/5af59eca9bcb0f31b4b3b938/1/5af59eac9bcb0f31b4b3b936.descriptor.json" />
-    <ignored path="apiserver/tmp/import/342b0ed5-8e48-4632-89b0-fce8c5274456/5af59eca9bcb0f31b4b3b938/1/5af59eac9bcb0f31b4b3b936.httpcalls.json" />
-    <ignored path="apiserver/tmp/import/342b0ed5-8e48-4632-89b0-fce8c5274456/5af59eca9bcb0f31b4b3b938/1/5af59ebd9bcb0f31b4b3b937.descriptor.json" />
-    <ignored path="apiserver/tmp/import/342b0ed5-8e48-4632-89b0-fce8c5274456/5af59eca9bcb0f31b4b3b938/1/5af59ebd9bcb0f31b4b3b937.output.json" />
-    <ignored path="apiserver/tmp/import/342b0ed5-8e48-4632-89b0-fce8c5274456/5af59eca9bcb0f31b4b3b938/1/5af59eca9bcb0f31b4b3b938.descriptor.json" />
-    <ignored path="apiserver/tmp/import/342b0ed5-8e48-4632-89b0-fce8c5274456/5af59eca9bcb0f31b4b3b938/1/5af59eca9bcb0f31b4b3b938.package.json" />
-    <ignored path="apiserver/tmp/import/342b0ed5-8e48-4632-89b0-fce8c5274456/5af59ee49bcb0f31b4b3b939.bot.json" />
-    <ignored path="apiserver/tmp/import/342b0ed5-8e48-4632-89b0-fce8c5274456/5af59ee49bcb0f31b4b3b939.descriptor.json" />
-    <ignored path="apiserver/tmp/import/4940d0f7-225c-4ae2-87d0-d2f55ae81175/5af59eca9bcb0f31b4b3b938/1/5af59e769bcb0f31b4b3b934.descriptor.json" />
-    <ignored path="apiserver/tmp/import/4940d0f7-225c-4ae2-87d0-d2f55ae81175/5af59eca9bcb0f31b4b3b938/1/5af59e769bcb0f31b4b3b934.regulardictionary.json" />
-    <ignored path="apiserver/tmp/import/4940d0f7-225c-4ae2-87d0-d2f55ae81175/5af59eca9bcb0f31b4b3b938/1/5af59e929bcb0f31b4b3b935.behavior.json" />
-    <ignored path="apiserver/tmp/import/4940d0f7-225c-4ae2-87d0-d2f55ae81175/5af59eca9bcb0f31b4b3b938/1/5af59e929bcb0f31b4b3b935.descriptor.json" />
-    <ignored path="apiserver/tmp/import/4940d0f7-225c-4ae2-87d0-d2f55ae81175/5af59eca9bcb0f31b4b3b938/1/5af59eac9bcb0f31b4b3b936.descriptor.json" />
-    <ignored path="apiserver/tmp/import/4940d0f7-225c-4ae2-87d0-d2f55ae81175/5af59eca9bcb0f31b4b3b938/1/5af59eac9bcb0f31b4b3b936.httpcalls.json" />
-    <ignored path="apiserver/tmp/import/4940d0f7-225c-4ae2-87d0-d2f55ae81175/5af59eca9bcb0f31b4b3b938/1/5af59ebd9bcb0f31b4b3b937.descriptor.json" />
-    <ignored path="apiserver/tmp/import/4940d0f7-225c-4ae2-87d0-d2f55ae81175/5af59eca9bcb0f31b4b3b938/1/5af59ebd9bcb0f31b4b3b937.output.json" />
-    <ignored path="apiserver/tmp/import/4940d0f7-225c-4ae2-87d0-d2f55ae81175/5af59eca9bcb0f31b4b3b938/1/5af59eca9bcb0f31b4b3b938.descriptor.json" />
-    <ignored path="apiserver/tmp/import/4940d0f7-225c-4ae2-87d0-d2f55ae81175/5af59eca9bcb0f31b4b3b938/1/5af59eca9bcb0f31b4b3b938.package.json" />
-    <ignored path="apiserver/tmp/import/4940d0f7-225c-4ae2-87d0-d2f55ae81175/5af59ee49bcb0f31b4b3b939.bot.json" />
-    <ignored path="apiserver/tmp/import/4940d0f7-225c-4ae2-87d0-d2f55ae81175/5af59ee49bcb0f31b4b3b939.descriptor.json" />
-    <ignored path="apiserver/tmp/import/52ea8084-22e9-4651-91fc-9e8740aae04a/5af59eca9bcb0f31b4b3b938/1/5af59e769bcb0f31b4b3b934.descriptor.json" />
-    <ignored path="apiserver/tmp/import/52ea8084-22e9-4651-91fc-9e8740aae04a/5af59eca9bcb0f31b4b3b938/1/5af59e769bcb0f31b4b3b934.regulardictionary.json" />
-    <ignored path="apiserver/tmp/import/52ea8084-22e9-4651-91fc-9e8740aae04a/5af59eca9bcb0f31b4b3b938/1/5af59e929bcb0f31b4b3b935.behavior.json" />
-    <ignored path="apiserver/tmp/import/52ea8084-22e9-4651-91fc-9e8740aae04a/5af59eca9bcb0f31b4b3b938/1/5af59e929bcb0f31b4b3b935.descriptor.json" />
-    <ignored path="apiserver/tmp/import/52ea8084-22e9-4651-91fc-9e8740aae04a/5af59eca9bcb0f31b4b3b938/1/5af59eac9bcb0f31b4b3b936.descriptor.json" />
-    <ignored path="apiserver/tmp/import/52ea8084-22e9-4651-91fc-9e8740aae04a/5af59eca9bcb0f31b4b3b938/1/5af59eac9bcb0f31b4b3b936.httpcalls.json" />
-    <ignored path="apiserver/tmp/import/52ea8084-22e9-4651-91fc-9e8740aae04a/5af59eca9bcb0f31b4b3b938/1/5af59ebd9bcb0f31b4b3b937.descriptor.json" />
-    <ignored path="apiserver/tmp/import/52ea8084-22e9-4651-91fc-9e8740aae04a/5af59eca9bcb0f31b4b3b938/1/5af59ebd9bcb0f31b4b3b937.output.json" />
-    <ignored path="apiserver/tmp/import/52ea8084-22e9-4651-91fc-9e8740aae04a/5af59eca9bcb0f31b4b3b938/1/5af59eca9bcb0f31b4b3b938.descriptor.json" />
-    <ignored path="apiserver/tmp/import/52ea8084-22e9-4651-91fc-9e8740aae04a/5af59eca9bcb0f31b4b3b938/1/5af59eca9bcb0f31b4b3b938.package.json" />
-    <ignored path="apiserver/tmp/import/52ea8084-22e9-4651-91fc-9e8740aae04a/5af59ee49bcb0f31b4b3b939.bot.json" />
-    <ignored path="apiserver/tmp/import/52ea8084-22e9-4651-91fc-9e8740aae04a/5af59ee49bcb0f31b4b3b939.descriptor.json" />
-    <ignored path="apiserver/tmp/import/55f4087c-508f-424f-b3ea-cbbc99ed9f2a/5af59eca9bcb0f31b4b3b938/1/5af59e769bcb0f31b4b3b934.descriptor.json" />
-    <ignored path="apiserver/tmp/import/55f4087c-508f-424f-b3ea-cbbc99ed9f2a/5af59eca9bcb0f31b4b3b938/1/5af59e769bcb0f31b4b3b934.regulardictionary.json" />
-    <ignored path="apiserver/tmp/import/55f4087c-508f-424f-b3ea-cbbc99ed9f2a/5af59eca9bcb0f31b4b3b938/1/5af59e929bcb0f31b4b3b935.behavior.json" />
-    <ignored path="apiserver/tmp/import/55f4087c-508f-424f-b3ea-cbbc99ed9f2a/5af59eca9bcb0f31b4b3b938/1/5af59e929bcb0f31b4b3b935.descriptor.json" />
-    <ignored path="apiserver/tmp/import/55f4087c-508f-424f-b3ea-cbbc99ed9f2a/5af59eca9bcb0f31b4b3b938/1/5af59eac9bcb0f31b4b3b936.descriptor.json" />
-    <ignored path="apiserver/tmp/import/55f4087c-508f-424f-b3ea-cbbc99ed9f2a/5af59eca9bcb0f31b4b3b938/1/5af59eac9bcb0f31b4b3b936.httpcalls.json" />
-    <ignored path="apiserver/tmp/import/55f4087c-508f-424f-b3ea-cbbc99ed9f2a/5af59eca9bcb0f31b4b3b938/1/5af59ebd9bcb0f31b4b3b937.descriptor.json" />
-    <ignored path="apiserver/tmp/import/55f4087c-508f-424f-b3ea-cbbc99ed9f2a/5af59eca9bcb0f31b4b3b938/1/5af59ebd9bcb0f31b4b3b937.output.json" />
-    <ignored path="apiserver/tmp/import/55f4087c-508f-424f-b3ea-cbbc99ed9f2a/5af59eca9bcb0f31b4b3b938/1/5af59eca9bcb0f31b4b3b938.descriptor.json" />
-    <ignored path="apiserver/tmp/import/55f4087c-508f-424f-b3ea-cbbc99ed9f2a/5af59eca9bcb0f31b4b3b938/1/5af59eca9bcb0f31b4b3b938.package.json" />
-    <ignored path="apiserver/tmp/import/55f4087c-508f-424f-b3ea-cbbc99ed9f2a/5af59ee49bcb0f31b4b3b939.bot.json" />
-    <ignored path="apiserver/tmp/import/55f4087c-508f-424f-b3ea-cbbc99ed9f2a/5af59ee49bcb0f31b4b3b939.descriptor.json" />
-    <ignored path="apiserver/tmp/import/670383a6-be82-4920-b4ab-db09c8329bb2/5af59eca9bcb0f31b4b3b938/1/5af59e769bcb0f31b4b3b934.descriptor.json" />
-    <ignored path="apiserver/tmp/import/670383a6-be82-4920-b4ab-db09c8329bb2/5af59eca9bcb0f31b4b3b938/1/5af59e769bcb0f31b4b3b934.regulardictionary.json" />
-    <ignored path="apiserver/tmp/import/670383a6-be82-4920-b4ab-db09c8329bb2/5af59eca9bcb0f31b4b3b938/1/5af59e929bcb0f31b4b3b935.behavior.json" />
-    <ignored path="apiserver/tmp/import/670383a6-be82-4920-b4ab-db09c8329bb2/5af59eca9bcb0f31b4b3b938/1/5af59e929bcb0f31b4b3b935.descriptor.json" />
-    <ignored path="apiserver/tmp/import/670383a6-be82-4920-b4ab-db09c8329bb2/5af59eca9bcb0f31b4b3b938/1/5af59eac9bcb0f31b4b3b936.descriptor.json" />
-    <ignored path="apiserver/tmp/import/670383a6-be82-4920-b4ab-db09c8329bb2/5af59eca9bcb0f31b4b3b938/1/5af59eac9bcb0f31b4b3b936.httpcalls.json" />
-    <ignored path="apiserver/tmp/import/670383a6-be82-4920-b4ab-db09c8329bb2/5af59eca9bcb0f31b4b3b938/1/5af59ebd9bcb0f31b4b3b937.descriptor.json" />
-    <ignored path="apiserver/tmp/import/670383a6-be82-4920-b4ab-db09c8329bb2/5af59eca9bcb0f31b4b3b938/1/5af59ebd9bcb0f31b4b3b937.output.json" />
-    <ignored path="apiserver/tmp/import/670383a6-be82-4920-b4ab-db09c8329bb2/5af59eca9bcb0f31b4b3b938/1/5af59eca9bcb0f31b4b3b938.descriptor.json" />
-    <ignored path="apiserver/tmp/import/670383a6-be82-4920-b4ab-db09c8329bb2/5af59eca9bcb0f31b4b3b938/1/5af59eca9bcb0f31b4b3b938.package.json" />
-    <ignored path="apiserver/tmp/import/670383a6-be82-4920-b4ab-db09c8329bb2/5af59ee49bcb0f31b4b3b939.bot.json" />
-    <ignored path="apiserver/tmp/import/670383a6-be82-4920-b4ab-db09c8329bb2/5af59ee49bcb0f31b4b3b939.descriptor.json" />
-    <ignored path="apiserver/tmp/import/827825b1-40ae-4a55-8156-9224d03f782f/5af59eca9bcb0f31b4b3b938/1/5af59e769bcb0f31b4b3b934.descriptor.json" />
-    <ignored path="apiserver/tmp/import/827825b1-40ae-4a55-8156-9224d03f782f/5af59eca9bcb0f31b4b3b938/1/5af59e769bcb0f31b4b3b934.regulardictionary.json" />
-    <ignored path="apiserver/tmp/import/827825b1-40ae-4a55-8156-9224d03f782f/5af59eca9bcb0f31b4b3b938/1/5af59e929bcb0f31b4b3b935.behavior.json" />
-    <ignored path="apiserver/tmp/import/827825b1-40ae-4a55-8156-9224d03f782f/5af59eca9bcb0f31b4b3b938/1/5af59e929bcb0f31b4b3b935.descriptor.json" />
-    <ignored path="apiserver/tmp/import/827825b1-40ae-4a55-8156-9224d03f782f/5af59eca9bcb0f31b4b3b938/1/5af59eac9bcb0f31b4b3b936.descriptor.json" />
-    <ignored path="apiserver/tmp/import/827825b1-40ae-4a55-8156-9224d03f782f/5af59eca9bcb0f31b4b3b938/1/5af59eac9bcb0f31b4b3b936.httpcalls.json" />
-    <ignored path="apiserver/tmp/import/827825b1-40ae-4a55-8156-9224d03f782f/5af59eca9bcb0f31b4b3b938/1/5af59ebd9bcb0f31b4b3b937.descriptor.json" />
-    <ignored path="apiserver/tmp/import/827825b1-40ae-4a55-8156-9224d03f782f/5af59eca9bcb0f31b4b3b938/1/5af59ebd9bcb0f31b4b3b937.output.json" />
-    <ignored path="apiserver/tmp/import/827825b1-40ae-4a55-8156-9224d03f782f/5af59eca9bcb0f31b4b3b938/1/5af59eca9bcb0f31b4b3b938.descriptor.json" />
-    <ignored path="apiserver/tmp/import/827825b1-40ae-4a55-8156-9224d03f782f/5af59eca9bcb0f31b4b3b938/1/5af59eca9bcb0f31b4b3b938.package.json" />
-    <ignored path="apiserver/tmp/import/827825b1-40ae-4a55-8156-9224d03f782f/5af59ee49bcb0f31b4b3b939.bot.json" />
-    <ignored path="apiserver/tmp/import/827825b1-40ae-4a55-8156-9224d03f782f/5af59ee49bcb0f31b4b3b939.descriptor.json" />
-    <ignored path="apiserver/tmp/import/85c42a72-d8b2-44ac-956c-7c882e1f3010/5af59eca9bcb0f31b4b3b938/1/5af59e769bcb0f31b4b3b934.descriptor.json" />
-    <ignored path="apiserver/tmp/import/85c42a72-d8b2-44ac-956c-7c882e1f3010/5af59eca9bcb0f31b4b3b938/1/5af59e769bcb0f31b4b3b934.regulardictionary.json" />
-    <ignored path="apiserver/tmp/import/85c42a72-d8b2-44ac-956c-7c882e1f3010/5af59eca9bcb0f31b4b3b938/1/5af59e929bcb0f31b4b3b935.behavior.json" />
-    <ignored path="apiserver/tmp/import/85c42a72-d8b2-44ac-956c-7c882e1f3010/5af59eca9bcb0f31b4b3b938/1/5af59e929bcb0f31b4b3b935.descriptor.json" />
-    <ignored path="apiserver/tmp/import/85c42a72-d8b2-44ac-956c-7c882e1f3010/5af59eca9bcb0f31b4b3b938/1/5af59eac9bcb0f31b4b3b936.descriptor.json" />
-    <ignored path="apiserver/tmp/import/85c42a72-d8b2-44ac-956c-7c882e1f3010/5af59eca9bcb0f31b4b3b938/1/5af59eac9bcb0f31b4b3b936.httpcalls.json" />
-    <ignored path="apiserver/tmp/import/85c42a72-d8b2-44ac-956c-7c882e1f3010/5af59eca9bcb0f31b4b3b938/1/5af59ebd9bcb0f31b4b3b937.descriptor.json" />
-    <ignored path="apiserver/tmp/import/85c42a72-d8b2-44ac-956c-7c882e1f3010/5af59eca9bcb0f31b4b3b938/1/5af59ebd9bcb0f31b4b3b937.output.json" />
-    <ignored path="apiserver/tmp/import/85c42a72-d8b2-44ac-956c-7c882e1f3010/5af59eca9bcb0f31b4b3b938/1/5af59eca9bcb0f31b4b3b938.descriptor.json" />
-    <ignored path="apiserver/tmp/import/85c42a72-d8b2-44ac-956c-7c882e1f3010/5af59eca9bcb0f31b4b3b938/1/5af59eca9bcb0f31b4b3b938.package.json" />
-    <ignored path="apiserver/tmp/import/85c42a72-d8b2-44ac-956c-7c882e1f3010/5af59ee49bcb0f31b4b3b939.bot.json" />
-    <ignored path="apiserver/tmp/import/85c42a72-d8b2-44ac-956c-7c882e1f3010/5af59ee49bcb0f31b4b3b939.descriptor.json" />
-    <ignored path="apiserver/tmp/import/988dca00-bf73-4410-ac7c-b6d8f616ff93/5af59eca9bcb0f31b4b3b938/1/5af59e769bcb0f31b4b3b934.descriptor.json" />
-    <ignored path="apiserver/tmp/import/988dca00-bf73-4410-ac7c-b6d8f616ff93/5af59eca9bcb0f31b4b3b938/1/5af59e769bcb0f31b4b3b934.regulardictionary.json" />
-    <ignored path="apiserver/tmp/import/988dca00-bf73-4410-ac7c-b6d8f616ff93/5af59eca9bcb0f31b4b3b938/1/5af59e929bcb0f31b4b3b935.behavior.json" />
-    <ignored path="apiserver/tmp/import/988dca00-bf73-4410-ac7c-b6d8f616ff93/5af59eca9bcb0f31b4b3b938/1/5af59e929bcb0f31b4b3b935.descriptor.json" />
-    <ignored path="apiserver/tmp/import/988dca00-bf73-4410-ac7c-b6d8f616ff93/5af59eca9bcb0f31b4b3b938/1/5af59eac9bcb0f31b4b3b936.descriptor.json" />
-    <ignored path="apiserver/tmp/import/988dca00-bf73-4410-ac7c-b6d8f616ff93/5af59eca9bcb0f31b4b3b938/1/5af59eac9bcb0f31b4b3b936.httpcalls.json" />
-    <ignored path="apiserver/tmp/import/988dca00-bf73-4410-ac7c-b6d8f616ff93/5af59eca9bcb0f31b4b3b938/1/5af59ebd9bcb0f31b4b3b937.descriptor.json" />
-    <ignored path="apiserver/tmp/import/988dca00-bf73-4410-ac7c-b6d8f616ff93/5af59eca9bcb0f31b4b3b938/1/5af59ebd9bcb0f31b4b3b937.output.json" />
-    <ignored path="apiserver/tmp/import/988dca00-bf73-4410-ac7c-b6d8f616ff93/5af59eca9bcb0f31b4b3b938/1/5af59eca9bcb0f31b4b3b938.descriptor.json" />
-    <ignored path="apiserver/tmp/import/988dca00-bf73-4410-ac7c-b6d8f616ff93/5af59eca9bcb0f31b4b3b938/1/5af59eca9bcb0f31b4b3b938.package.json" />
-    <ignored path="apiserver/tmp/import/988dca00-bf73-4410-ac7c-b6d8f616ff93/5af59ee49bcb0f31b4b3b939.bot.json" />
-    <ignored path="apiserver/tmp/import/988dca00-bf73-4410-ac7c-b6d8f616ff93/5af59ee49bcb0f31b4b3b939.descriptor.json" />
-    <ignored path="apiserver/tmp/import/abea8f14-f332-4b85-af14-0bb40f856c93/5af59eca9bcb0f31b4b3b938/1/5af59e769bcb0f31b4b3b934.descriptor.json" />
-    <ignored path="apiserver/tmp/import/abea8f14-f332-4b85-af14-0bb40f856c93/5af59eca9bcb0f31b4b3b938/1/5af59e769bcb0f31b4b3b934.regulardictionary.json" />
-    <ignored path="apiserver/tmp/import/abea8f14-f332-4b85-af14-0bb40f856c93/5af59eca9bcb0f31b4b3b938/1/5af59e929bcb0f31b4b3b935.behavior.json" />
-    <ignored path="apiserver/tmp/import/abea8f14-f332-4b85-af14-0bb40f856c93/5af59eca9bcb0f31b4b3b938/1/5af59e929bcb0f31b4b3b935.descriptor.json" />
-    <ignored path="apiserver/tmp/import/abea8f14-f332-4b85-af14-0bb40f856c93/5af59eca9bcb0f31b4b3b938/1/5af59eac9bcb0f31b4b3b936.descriptor.json" />
-    <ignored path="apiserver/tmp/import/abea8f14-f332-4b85-af14-0bb40f856c93/5af59eca9bcb0f31b4b3b938/1/5af59eac9bcb0f31b4b3b936.httpcalls.json" />
-    <ignored path="apiserver/tmp/import/abea8f14-f332-4b85-af14-0bb40f856c93/5af59eca9bcb0f31b4b3b938/1/5af59ebd9bcb0f31b4b3b937.descriptor.json" />
-    <ignored path="apiserver/tmp/import/abea8f14-f332-4b85-af14-0bb40f856c93/5af59eca9bcb0f31b4b3b938/1/5af59ebd9bcb0f31b4b3b937.output.json" />
-    <ignored path="apiserver/tmp/import/abea8f14-f332-4b85-af14-0bb40f856c93/5af59eca9bcb0f31b4b3b938/1/5af59eca9bcb0f31b4b3b938.descriptor.json" />
-    <ignored path="apiserver/tmp/import/abea8f14-f332-4b85-af14-0bb40f856c93/5af59eca9bcb0f31b4b3b938/1/5af59eca9bcb0f31b4b3b938.package.json" />
-    <ignored path="apiserver/tmp/import/abea8f14-f332-4b85-af14-0bb40f856c93/5af59ee49bcb0f31b4b3b939.bot.json" />
-    <ignored path="apiserver/tmp/import/abea8f14-f332-4b85-af14-0bb40f856c93/5af59ee49bcb0f31b4b3b939.descriptor.json" />
-    <ignored path="apiserver/tmp/import/c08808aa-48b6-49de-9dff-5130118a98ce/5af59eca9bcb0f31b4b3b938/1/5af59e769bcb0f31b4b3b934.descriptor.json" />
-    <ignored path="apiserver/tmp/import/c08808aa-48b6-49de-9dff-5130118a98ce/5af59eca9bcb0f31b4b3b938/1/5af59e769bcb0f31b4b3b934.regulardictionary.json" />
-    <ignored path="apiserver/tmp/import/c08808aa-48b6-49de-9dff-5130118a98ce/5af59eca9bcb0f31b4b3b938/1/5af59e929bcb0f31b4b3b935.behavior.json" />
-    <ignored path="apiserver/tmp/import/c08808aa-48b6-49de-9dff-5130118a98ce/5af59eca9bcb0f31b4b3b938/1/5af59e929bcb0f31b4b3b935.descriptor.json" />
-    <ignored path="apiserver/tmp/import/c08808aa-48b6-49de-9dff-5130118a98ce/5af59eca9bcb0f31b4b3b938/1/5af59eac9bcb0f31b4b3b936.descriptor.json" />
-    <ignored path="apiserver/tmp/import/c08808aa-48b6-49de-9dff-5130118a98ce/5af59eca9bcb0f31b4b3b938/1/5af59eac9bcb0f31b4b3b936.httpcalls.json" />
-    <ignored path="apiserver/tmp/import/c08808aa-48b6-49de-9dff-5130118a98ce/5af59eca9bcb0f31b4b3b938/1/5af59ebd9bcb0f31b4b3b937.descriptor.json" />
-    <ignored path="apiserver/tmp/import/c08808aa-48b6-49de-9dff-5130118a98ce/5af59eca9bcb0f31b4b3b938/1/5af59ebd9bcb0f31b4b3b937.output.json" />
-    <ignored path="apiserver/tmp/import/c08808aa-48b6-49de-9dff-5130118a98ce/5af59eca9bcb0f31b4b3b938/1/5af59eca9bcb0f31b4b3b938.descriptor.json" />
-    <ignored path="apiserver/tmp/import/c08808aa-48b6-49de-9dff-5130118a98ce/5af59eca9bcb0f31b4b3b938/1/5af59eca9bcb0f31b4b3b938.package.json" />
-    <ignored path="apiserver/tmp/import/c08808aa-48b6-49de-9dff-5130118a98ce/5af59ee49bcb0f31b4b3b939.bot.json" />
-    <ignored path="apiserver/tmp/import/c08808aa-48b6-49de-9dff-5130118a98ce/5af59ee49bcb0f31b4b3b939.descriptor.json" />
-    <ignored path="apiserver/tmp/import/c3c6e396-9260-4f41-9216-2297a2a8805e/5af59eca9bcb0f31b4b3b938/1/5af59e769bcb0f31b4b3b934.descriptor.json" />
-    <ignored path="apiserver/tmp/import/c3c6e396-9260-4f41-9216-2297a2a8805e/5af59eca9bcb0f31b4b3b938/1/5af59e769bcb0f31b4b3b934.regulardictionary.json" />
-    <ignored path="apiserver/tmp/import/c3c6e396-9260-4f41-9216-2297a2a8805e/5af59eca9bcb0f31b4b3b938/1/5af59e929bcb0f31b4b3b935.behavior.json" />
-    <ignored path="apiserver/tmp/import/c3c6e396-9260-4f41-9216-2297a2a8805e/5af59eca9bcb0f31b4b3b938/1/5af59e929bcb0f31b4b3b935.descriptor.json" />
-    <ignored path="apiserver/tmp/import/c3c6e396-9260-4f41-9216-2297a2a8805e/5af59eca9bcb0f31b4b3b938/1/5af59eac9bcb0f31b4b3b936.descriptor.json" />
-    <ignored path="apiserver/tmp/import/c3c6e396-9260-4f41-9216-2297a2a8805e/5af59eca9bcb0f31b4b3b938/1/5af59eac9bcb0f31b4b3b936.httpcalls.json" />
-    <ignored path="apiserver/tmp/import/c3c6e396-9260-4f41-9216-2297a2a8805e/5af59eca9bcb0f31b4b3b938/1/5af59ebd9bcb0f31b4b3b937.descriptor.json" />
-    <ignored path="apiserver/tmp/import/c3c6e396-9260-4f41-9216-2297a2a8805e/5af59eca9bcb0f31b4b3b938/1/5af59ebd9bcb0f31b4b3b937.output.json" />
-    <ignored path="apiserver/tmp/import/c3c6e396-9260-4f41-9216-2297a2a8805e/5af59eca9bcb0f31b4b3b938/1/5af59eca9bcb0f31b4b3b938.descriptor.json" />
-    <ignored path="apiserver/tmp/import/c3c6e396-9260-4f41-9216-2297a2a8805e/5af59eca9bcb0f31b4b3b938/1/5af59eca9bcb0f31b4b3b938.package.json" />
-    <ignored path="apiserver/tmp/import/c3c6e396-9260-4f41-9216-2297a2a8805e/5af59ee49bcb0f31b4b3b939.bot.json" />
-    <ignored path="apiserver/tmp/import/c3c6e396-9260-4f41-9216-2297a2a8805e/5af59ee49bcb0f31b4b3b939.descriptor.json" />
-    <ignored path="apiserver/tmp/import/d3614c1f-7692-46ad-9f3b-6cdbd4a236b8/5af59eca9bcb0f31b4b3b938/1/5af59e769bcb0f31b4b3b934.descriptor.json" />
-    <ignored path="apiserver/tmp/import/d3614c1f-7692-46ad-9f3b-6cdbd4a236b8/5af59eca9bcb0f31b4b3b938/1/5af59e769bcb0f31b4b3b934.regulardictionary.json" />
-    <ignored path="apiserver/tmp/import/d3614c1f-7692-46ad-9f3b-6cdbd4a236b8/5af59eca9bcb0f31b4b3b938/1/5af59e929bcb0f31b4b3b935.behavior.json" />
-    <ignored path="apiserver/tmp/import/d3614c1f-7692-46ad-9f3b-6cdbd4a236b8/5af59eca9bcb0f31b4b3b938/1/5af59e929bcb0f31b4b3b935.descriptor.json" />
-    <ignored path="apiserver/tmp/import/d3614c1f-7692-46ad-9f3b-6cdbd4a236b8/5af59eca9bcb0f31b4b3b938/1/5af59eac9bcb0f31b4b3b936.descriptor.json" />
-    <ignored path="apiserver/tmp/import/d3614c1f-7692-46ad-9f3b-6cdbd4a236b8/5af59eca9bcb0f31b4b3b938/1/5af59eac9bcb0f31b4b3b936.httpcalls.json" />
-    <ignored path="apiserver/tmp/import/d3614c1f-7692-46ad-9f3b-6cdbd4a236b8/5af59eca9bcb0f31b4b3b938/1/5af59ebd9bcb0f31b4b3b937.descriptor.json" />
-    <ignored path="apiserver/tmp/import/d3614c1f-7692-46ad-9f3b-6cdbd4a236b8/5af59eca9bcb0f31b4b3b938/1/5af59ebd9bcb0f31b4b3b937.output.json" />
-    <ignored path="apiserver/tmp/import/d3614c1f-7692-46ad-9f3b-6cdbd4a236b8/5af59eca9bcb0f31b4b3b938/1/5af59eca9bcb0f31b4b3b938.descriptor.json" />
-    <ignored path="apiserver/tmp/import/d3614c1f-7692-46ad-9f3b-6cdbd4a236b8/5af59eca9bcb0f31b4b3b938/1/5af59eca9bcb0f31b4b3b938.package.json" />
-    <ignored path="apiserver/tmp/import/d3614c1f-7692-46ad-9f3b-6cdbd4a236b8/5af59ee49bcb0f31b4b3b939.bot.json" />
-    <ignored path="apiserver/tmp/import/d3614c1f-7692-46ad-9f3b-6cdbd4a236b8/5af59ee49bcb0f31b4b3b939.descriptor.json" />
-    <ignored path="apiserver/tmp/import/ea590b10-8b24-48e7-b470-4452e867992c/5af59eca9bcb0f31b4b3b938/1/5af59e769bcb0f31b4b3b934.descriptor.json" />
-    <ignored path="apiserver/tmp/import/ea590b10-8b24-48e7-b470-4452e867992c/5af59eca9bcb0f31b4b3b938/1/5af59e769bcb0f31b4b3b934.regulardictionary.json" />
-    <ignored path="apiserver/tmp/import/ea590b10-8b24-48e7-b470-4452e867992c/5af59eca9bcb0f31b4b3b938/1/5af59e929bcb0f31b4b3b935.behavior.json" />
-    <ignored path="apiserver/tmp/import/ea590b10-8b24-48e7-b470-4452e867992c/5af59eca9bcb0f31b4b3b938/1/5af59e929bcb0f31b4b3b935.descriptor.json" />
-    <ignored path="apiserver/tmp/import/ea590b10-8b24-48e7-b470-4452e867992c/5af59eca9bcb0f31b4b3b938/1/5af59eac9bcb0f31b4b3b936.descriptor.json" />
-    <ignored path="apiserver/tmp/import/ea590b10-8b24-48e7-b470-4452e867992c/5af59eca9bcb0f31b4b3b938/1/5af59eac9bcb0f31b4b3b936.httpcalls.json" />
-    <ignored path="apiserver/tmp/import/ea590b10-8b24-48e7-b470-4452e867992c/5af59eca9bcb0f31b4b3b938/1/5af59ebd9bcb0f31b4b3b937.descriptor.json" />
-    <ignored path="apiserver/tmp/import/ea590b10-8b24-48e7-b470-4452e867992c/5af59eca9bcb0f31b4b3b938/1/5af59ebd9bcb0f31b4b3b937.output.json" />
-    <ignored path="apiserver/tmp/import/ea590b10-8b24-48e7-b470-4452e867992c/5af59eca9bcb0f31b4b3b938/1/5af59eca9bcb0f31b4b3b938.descriptor.json" />
-    <ignored path="apiserver/tmp/import/ea590b10-8b24-48e7-b470-4452e867992c/5af59eca9bcb0f31b4b3b938/1/5af59eca9bcb0f31b4b3b938.package.json" />
-    <ignored path="apiserver/tmp/import/ea590b10-8b24-48e7-b470-4452e867992c/5af59ee49bcb0f31b4b3b939.bot.json" />
-    <ignored path="apiserver/tmp/import/ea590b10-8b24-48e7-b470-4452e867992c/5af59ee49bcb0f31b4b3b939.descriptor.json" />
-    <ignored path="apiserver/tmp/Admin+Bot+Development-5cfa31f430a94c6b86f1ab61-133.zip" />
-    <ignored path="apiserver/tmp/Admin+Bot+Production-5d08f029fbf4d2676e1eb160-15.zip" />
-    <ignored path="apiserver/tmp/Admin+Bot+Production-5d08f029fbf4d2676e1eb160-27.zip" />
-    <ignored path="apiserver/tmp/Admin+Bot+Production-5d08f029fbf4d2676e1eb160-28.zip" />
-    <ignored path="apiserver/tmp/Differ+Bot-5cfa31f430a94c6b86f1ab61-66.zip" />
-    <ignored path="apiserver/tmp/Differ+Bot-5cfa31f430a94c6b86f1ab61-98.zip" />
     <option name="EXCLUDED_CONVERTED_TO_IGNORED" value="true" />
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
@@ -479,206 +30,27 @@
   <component name="CodeInsightWorkspaceSettings">
     <option name="optimizeImportsOnTheFly" value="true" />
   </component>
+  <component name="CodeStyleSettingsInfer">
+    <option name="done" value="true" />
+  </component>
   <component name="CoverageDataManager">
     <SUITE FILE_PATH="coverage/eddi$run.coverage" NAME="run Coverage Results" MODIFIED="1516557667839" SOURCE_PROVIDER="com.intellij.coverage.DefaultCoverageFileProvider" RUNNER="idea" COVERAGE_BY_TEST_ENABLED="false" COVERAGE_TRACING_ENABLED="false" />
   </component>
   <component name="DefaultGradleProjectSettings">
     <option name="isMigrated" value="true" />
   </component>
-  <component name="FileEditorManager">
-    <leaf SIDE_TABS_SIZE_LIMIT_KEY="300">
-      <file pinned="false" current-in-tab="false">
-        <entry file="file://$PROJECT_DIR$/apiserver/pom.xml">
-          <provider selected="true" editor-type-id="text-editor">
-            <state relative-caret-position="238">
-              <caret line="154" column="37" selection-start-line="154" selection-start-column="37" selection-end-line="154" selection-end-column="37" />
-            </state>
-          </provider>
-        </entry>
-      </file>
-      <file pinned="false" current-in-tab="false">
-        <entry file="file://$PROJECT_DIR$/channels-impl/src/main/java/ai/labs/channels/facebookmessenger/FacebookEndpoint.java">
-          <provider selected="true" editor-type-id="text-editor">
-            <state relative-caret-position="135">
-              <caret line="84" column="37" selection-start-line="84" selection-start-column="37" selection-end-line="84" selection-end-column="37" />
-              <folding>
-                <element signature="imports" expanded="true" />
-              </folding>
-            </state>
-          </provider>
-        </entry>
-      </file>
-      <file pinned="false" current-in-tab="true">
-        <entry file="file://$PROJECT_DIR$/channels-impl/src/main/java/ai/labs/channels/differ/DifferEndpoint.java">
-          <provider selected="true" editor-type-id="text-editor">
-            <state relative-caret-position="374">
-              <caret line="71" selection-start-line="71" selection-end-line="71" />
-            </state>
-          </provider>
-        </entry>
-      </file>
-      <file pinned="false" current-in-tab="false">
-        <entry file="file://$APPLICATION_CONFIG_DIR$/scratches/scratch_26.json">
-          <provider selected="true" editor-type-id="text-editor">
-            <state relative-caret-position="68">
-              <caret line="4" column="13" selection-start-line="4" selection-start-column="13" selection-end-line="4" selection-end-column="13" />
-            </state>
-          </provider>
-        </entry>
-      </file>
-      <file pinned="false" current-in-tab="false">
-        <entry file="file://$PROJECT_DIR$/start_eddi.sh">
-          <provider selected="true" editor-type-id="text-editor" />
-        </entry>
-      </file>
-      <file pinned="false" current-in-tab="false">
-        <entry file="file://$PROJECT_DIR$/channels-impl/src/main/java/ai/labs/channels/differ/model/DifferEventDefinition.java">
-          <provider selected="true" editor-type-id="text-editor">
-            <state relative-caret-position="221">
-              <caret line="13" column="13" selection-start-line="13" selection-start-column="13" selection-end-line="13" selection-end-column="13" />
-              <folding>
-                <element signature="imports" expanded="true" />
-              </folding>
-            </state>
-          </provider>
-        </entry>
-      </file>
-      <file pinned="false" current-in-tab="false">
-        <entry file="file://$PROJECT_DIR$/channels-impl/src/main/java/ai/labs/channels/differ/model/DifferChannelDefinition.java">
-          <provider selected="true" editor-type-id="text-editor">
-            <state relative-caret-position="102">
-              <caret line="10" column="13" selection-start-line="10" selection-start-column="13" selection-end-line="10" selection-end-column="13" />
-            </state>
-          </provider>
-        </entry>
-      </file>
-      <file pinned="false" current-in-tab="false">
-        <entry file="file://$PROJECT_DIR$/apiserver/src/main/java/ai/labs/api/ApiServer.java">
-          <provider selected="true" editor-type-id="text-editor">
-            <state relative-caret-position="254">
-              <caret line="101" column="33" selection-start-line="101" selection-start-column="33" selection-end-line="101" selection-end-column="33" />
-              <folding>
-                <element signature="imports" expanded="true" />
-              </folding>
-            </state>
-          </provider>
-        </entry>
-      </file>
-      <file pinned="false" current-in-tab="false">
-        <entry file="file://$PROJECT_DIR$/.idea/workspace.xml">
-          <provider selected="true" editor-type-id="text-editor">
-            <state relative-caret-position="306">
-              <caret line="18" selection-start-line="18" selection-end-line="18" />
-            </state>
-          </provider>
-        </entry>
-      </file>
-      <file pinned="false" current-in-tab="false">
-        <entry file="file://$PROJECT_DIR$/channels-impl/src/main/java/ai/labs/channels/differ/model/Event.java">
-          <provider selected="true" editor-type-id="text-editor">
-            <state relative-caret-position="187">
-              <caret line="24" column="44" selection-start-line="24" selection-start-column="44" selection-end-line="24" selection-end-column="44" />
-            </state>
-          </provider>
-        </entry>
-      </file>
-    </leaf>
-  </component>
   <component name="FileTemplateManagerImpl">
     <option name="RECENT_TEMPLATES">
       <list>
-        <option value="JUnit4 Test Class" />
         <option value="CSS File" />
         <option value="HTML File" />
         <option value="JavaScript File" />
-        <option value="Interface" />
         <option value="AnnotationType" />
+        <option value="Interface" />
         <option value="Class" />
+        <option value="JUnit4 Test Class" />
       </list>
     </option>
-  </component>
-  <component name="FindInProjectRecents">
-    <findStrings>
-      <find>@Context</find>
-      <find>resourceClientLibrary</find>
-      <find>IResourceClientLibrary</find>
-      <find>public @interfac</find>
-      <find>@Target({METHOD, PARAMETER})</find>
-      <find>PackageFactory</find>
-      <find>Map&lt;String, Provider&lt;ILifecycleTask&gt;&gt;</find>
-      <find>@Confi</find>
-      <find>@Appl</find>
-      <find>super(</find>
-      <find>new LinkedHa</find>
-      <find>protected void configure(</find>
-      <find>normalizer</find>
-      <find>@Dependent</find>
-      <find>@Inject</find>
-      <find>import javax.inject.Inject;</find>
-      <find>import javax.enterprise.context.Dependent;</find>
-      <find>import javax.inject.Singleton;</find>
-      <find>IBotStore</find>
-      <find>ai.labs.resources.rest.bots.IBotStore</find>
-      <find>xmpp</find>
-      <find>httpc</find>
-      <find>Ognl.</find>
-      <find>Ognl.getValue</find>
-      <find>channe</find>
-      <find>channel</find>
-      <find>runtim</find>
-      <find>base</find>
-      <find>channels-impl</find>
-      <find>facebook</find>
-    </findStrings>
-    <replaceStrings>
-      <replace>6.0.1.Final</replace>
-      <replace>6.0.1</replace>
-      <replace>9.4.18.v20190429</replace>
-      <replace>&lt;version&gt;4.0.0.Final&lt;/version&gt;</replace>
-      <replace>&lt;version&gt;2.9.9&lt;/version&gt;</replace>
-      <replace>core-definition</replace>
-      <replace>botId</replace>
-      <replace>KEYCLOAK-SCRIPT-INSERT-IF-ENABLED</replace>
-      <replace>&lt;version&gt;3.7.0.Final&lt;/version&gt;</replace>
-      <replace>4.7</replace>
-      <replace>propertysetter</replace>
-      <replace>PropertySetter</replace>
-      <replace>propertySetter</replace>
-      <replace>propertySetterConfiguration</replace>
-      <replace>&lt;version&gt;4.1.0.Final&lt;/version&gt;</replace>
-      <replace>Produces</replace>
-      <replace>Assertions</replace>
-      <replace>@BeforeAll</replace>
-      <replace>Assertions.</replace>
-      <replace>@ApplicationScoped</replace>
-      <replace>quarkus.keycloak</replace>
-      <replace>@BeforeEach</replace>
-      <replace>import org.junit.jupiter.api.BeforeEach;</replace>
-      <replace>import org.eclipse.microprofile.config.inject.ConfigProperty;</replace>
-      <replace />
-      <replace>IRestInterfaceFactory.RestInterfaceFactoryException</replace>
-      <replace>@ConfigProperty(name =</replace>
-      <replace>@Singleton</replace>
-      <replace>import javax.inject.Inject;</replace>
-      <replace>import javax.inject.Singleton;</replace>
-    </replaceStrings>
-    <dirStrings>
-      <dir>C:\dev\git\EDDI\apiserver\resources</dir>
-      <dir>C:\dev\git\EDDI\behavior-impl\src\main\java\ai\labs\behavior\impl</dir>
-      <dir>C:\dev\git\EDDI\apiserver\src\main\resources</dir>
-      <dir>C:\dev\git\EDDI\behavior-impl</dir>
-      <dir>C:\dev\git\EDDI\apiserver\src\main\resources\css</dir>
-      <dir>C:\dev\git\EDDI</dir>
-      <dir>C:\dev\git\EDDI\apiserver\resources\html</dir>
-      <dir>C:\dev\git\EDDI\.circleci</dir>
-      <dir>C:\dev\git\EDDI\behavior-impl\src\main\java\ai\labs\behavior\impl\conditions</dir>
-      <dir>C:\dev\git\EDDI\behavior-impl\src\main\java\ai\labs\behavior</dir>
-      <dir>C:\dev\git\EDDI\configurationrepository-definition\src\main\java\ai\labs\resources\rest\http\model</dir>
-      <dir>C:\dev\git\EDDI\backupservice-impl\src\main\java\ai\labs\backupservice\impl</dir>
-      <dir>C:\dev\git\EDDI\permissions-impl\src\main\java\ai\labs\permission</dir>
-      <dir>C:\dev\git\EDDI\configurationrepository-impl</dir>
-      <dir>C:\dev\git\EDDI\apiserver</dir>
-    </dirStrings>
   </component>
   <component name="Git.Settings">
     <option name="PREVIOUS_COMMIT_AUTHORS">
@@ -698,63 +70,6 @@
     <option name="RECENT_COMMON_BRANCH" value="master" />
     <option name="RESET_MODE" value="KEEP" />
   </component>
-  <component name="IdeDocumentHistory">
-    <option name="CHANGED_PATHS">
-      <list>
-        <option value="$PROJECT_DIR$/xmpp-impl/pom.xml" />
-        <option value="$PROJECT_DIR$/behavior-impl/src/test/java/ai/labs/behavior/impl/conditions/BaseMatcherTest.java" />
-        <option value="$PROJECT_DIR$/behavior-impl/pom.xml" />
-        <option value="$PROJECT_DIR$/behavior-impl/src/main/java/ai/labs/behavior/bootstrap/BehaviorModule.java" />
-        <option value="$PROJECT_DIR$/conversationcallback-impl/src/main/java/ai/labs/callback/bootstrap/ConversationCallbackModule.java" />
-        <option value="$PROJECT_DIR$/outputgeneration-impl/pom.xml" />
-        <option value="$PROJECT_DIR$/propertysetter-impl/pom.xml" />
-        <option value="$PROJECT_DIR$/httpCallsTask-impl/src/main/java/ai/labs/restapi/connector/bootstrap/HttpCallsModule.java" />
-        <option value="$PROJECT_DIR$/outputgeneration-impl/src/main/java/ai/labs/output/bootstrap/OutputGenerationModule.java" />
-        <option value="$PROJECT_DIR$/propertysetter-impl/src/main/java/ai/labs/property/bootstrap/PropertySetterModule.java" />
-        <option value="$PROJECT_DIR$/templateengine-impl-thymeleaf/pom.xml" />
-        <option value="$PROJECT_DIR$/templateengine-impl-thymeleaf/src/main/java/ai/labs/templateengine/bootstrap/TemplateEngineModule.java" />
-        <option value="$PROJECT_DIR$/coreserver/src/main/java/ai/labs/core/rest/internal/LogoutEndpoint.java" />
-        <option value="$PROJECT_DIR$/backupservice-impl/src/main/java/ai/labs/backupservice/impl/RestExportService.java" />
-        <option value="$PROJECT_DIR$/backupservice-impl/src/main/java/ai/labs/backupservice/impl/RestGitBackupService.java" />
-        <option value="$PROJECT_DIR$/backupservice-impl/pom.xml" />
-        <option value="$PROJECT_DIR$/httpCallsTask-impl/pom.xml" />
-        <option value="$PROJECT_DIR$/target/classes/application.properties" />
-        <option value="$PROJECT_DIR$/apiserver/target/classes/application.properties" />
-        <option value="$PROJECT_DIR$/backupservice-impl/src/main/java/ai/labs/backupservice/impl/RestImportService.java" />
-        <option value="$PROJECT_DIR$/apiserver/src/main/resources/application.properties" />
-        <option value="$PROJECT_DIR$/persistencestore-definition/target/classes/application.properties" />
-        <option value="$PROJECT_DIR$/persistencestore-definition/src/main/resources/application.properties" />
-        <option value="$PROJECT_DIR$/src/main/resources/application.properties" />
-        <option value="$PROJECT_DIR$/apiserver/src/main/docker/Dockerfile.native" />
-        <option value="$PROJECT_DIR$/channels-impl/src/main/java/ai/labs/channels/amqp/bootstrap/AMQPModule.java" />
-        <option value="$PROJECT_DIR$/channels-impl/src/main/java/ai/labs/channels/amqp/AMQPChannel.java" />
-        <option value="$PROJECT_DIR$/channels-impl/src/main/java/ai/labs/channels/differ/AMQPChannel.java" />
-        <option value="$PROJECT_DIR$/channels-impl/src/main/java/ai/labs/channels/differ/model/ChannelEventDefinition.java" />
-        <option value="$PROJECT_DIR$/channels-impl/src/main/java/ai/labs/channels/differ/model/AMQPChannelDefinition.java" />
-        <option value="$PROJECT_DIR$/channels-impl/src/main/java/ai/labs/channels/differ/model/DifferChannelDefinition.java" />
-        <option value="$PROJECT_DIR$/channels-impl/src/main/java/ai/labs/channels/differ/model/DifferEventDefinition.java" />
-        <option value="$PROJECT_DIR$/channels-definition/src/main/java/ai/labs/channels/differ/IDifferEndpoint.java" />
-        <option value="$PROJECT_DIR$/channels-impl/src/main/java/ai/labs/channels/differ/bootstrap/DifferModule.java" />
-        <option value="$PROJECT_DIR$/channels-impl/src/main/java/ai/labs/channels/differ/bootstrap/AMQPModule.java" />
-        <option value="$PROJECT_DIR$/channels-impl/src/main/java/ai/labs/channels/facebookmessenger/bootstrap/FacebookMessengerModule.java" />
-        <option value="$PROJECT_DIR$/channels-impl/src/main/java/ai/labs/channels/xmpp/bootstrap/XmppModule.java" />
-        <option value="$PROJECT_DIR$/httpCallsTask-definition/pom.xml" />
-        <option value="$APPLICATION_CONFIG_DIR$/scratches/scratch_25.json" />
-        <option value="$PROJECT_DIR$/channels-impl/src/main/java/ai/labs/channels/facebookmessenger/FacebookEndpoint.java" />
-        <option value="$PROJECT_DIR$/channels-impl/src/main/java/ai/labs/channels/xmpp/XmppEndpoint.java" />
-        <option value="$PROJECT_DIR$/channels-definition/pom.xml" />
-        <option value="$PROJECT_DIR$/channels-impl/pom.xml" />
-        <option value="$PROJECT_DIR$/apiserver/config/development/systemRuntime.properties" />
-        <option value="$PROJECT_DIR$/pom.xml" />
-        <option value="$PROJECT_DIR$/apiserver/src/main/java/ai/labs/api/ApiServer.java" />
-        <option value="$APPLICATION_CONFIG_DIR$/scratches/scratch_26.json" />
-        <option value="$PROJECT_DIR$/channels-impl/src/main/java/ai/labs/channels/differ/model/Event.java" />
-        <option value="$PROJECT_DIR$/.idea/workspace.xml" />
-        <option value="$PROJECT_DIR$/apiserver/pom.xml" />
-        <option value="$PROJECT_DIR$/channels-impl/src/main/java/ai/labs/channels/differ/DifferEndpoint.java" />
-      </list>
-    </option>
-  </component>
   <component name="MavenImportPreferences">
     <option name="generalSettings">
       <MavenGeneralSettings>
@@ -773,27 +88,10 @@
       </MavenImportingSettings>
     </option>
   </component>
-  <component name="MavenProjectNavigator">
-    <treeState>
-      <expand>
-        <path>
-          <item name="" type="16c1761:MavenProjectsStructure$RootNode" />
-          <item name="eddi" type="9519ce18:MavenProjectsStructure$ProjectNode" />
-        </path>
-        <path>
-          <item name="" type="16c1761:MavenProjectsStructure$RootNode" />
-          <item name="eddi" type="9519ce18:MavenProjectsStructure$ProjectNode" />
-          <item name="Lifecycle" type="58874e2:MavenProjectsStructure$LifecycleNode" />
-        </path>
-      </expand>
-      <select />
-    </treeState>
+  <component name="ProjectCodeStyleSettingsMigration">
+    <option name="version" value="1" />
   </component>
-  <component name="ProjectFrameBounds" extendedState="6">
-    <option name="x" value="284" />
-    <option name="width" value="1158" />
-    <option name="height" value="1100" />
-  </component>
+  <component name="ProjectId" id="1OmAsZtGpFzQhxdnmf69aEESQaV" />
   <component name="ProjectInspectionProfilesVisibleTreeState">
     <entry key="Project Default">
       <profile-state>
@@ -828,320 +126,6 @@
   <component name="ProjectLevelVcsManager" settingsEditedManually="true">
     <OptionsSetting value="false" id="Update" />
   </component>
-  <component name="ProjectView">
-    <navigator proportions="" version="1">
-      <autoscrollFromSource ProjectPane="true" />
-      <foldersAlwaysOnTop value="true" />
-    </navigator>
-    <panes>
-      <pane id="PackagesPane" />
-      <pane id="ProjectPane">
-        <subPane>
-          <expand>
-            <path>
-              <item name="eddi" type="b2602c69:ProjectViewProjectNode" />
-              <item name="EDDI" type="462c0819:PsiDirectoryNode" />
-            </path>
-            <path>
-              <item name="eddi" type="b2602c69:ProjectViewProjectNode" />
-              <item name="EDDI" type="462c0819:PsiDirectoryNode" />
-              <item name=".idea" type="462c0819:PsiDirectoryNode" />
-            </path>
-            <path>
-              <item name="eddi" type="b2602c69:ProjectViewProjectNode" />
-              <item name="EDDI" type="462c0819:PsiDirectoryNode" />
-              <item name="apiserver" type="462c0819:PsiDirectoryNode" />
-            </path>
-            <path>
-              <item name="eddi" type="b2602c69:ProjectViewProjectNode" />
-              <item name="EDDI" type="462c0819:PsiDirectoryNode" />
-              <item name="apiserver" type="462c0819:PsiDirectoryNode" />
-              <item name="config" type="462c0819:PsiDirectoryNode" />
-            </path>
-            <path>
-              <item name="eddi" type="b2602c69:ProjectViewProjectNode" />
-              <item name="EDDI" type="462c0819:PsiDirectoryNode" />
-              <item name="apiserver" type="462c0819:PsiDirectoryNode" />
-              <item name="config" type="462c0819:PsiDirectoryNode" />
-              <item name="development" type="462c0819:PsiDirectoryNode" />
-            </path>
-            <path>
-              <item name="eddi" type="b2602c69:ProjectViewProjectNode" />
-              <item name="EDDI" type="462c0819:PsiDirectoryNode" />
-              <item name="apiserver" type="462c0819:PsiDirectoryNode" />
-              <item name="resources" type="462c0819:PsiDirectoryNode" />
-            </path>
-            <path>
-              <item name="eddi" type="b2602c69:ProjectViewProjectNode" />
-              <item name="EDDI" type="462c0819:PsiDirectoryNode" />
-              <item name="apiserver" type="462c0819:PsiDirectoryNode" />
-              <item name="src" type="462c0819:PsiDirectoryNode" />
-            </path>
-            <path>
-              <item name="eddi" type="b2602c69:ProjectViewProjectNode" />
-              <item name="EDDI" type="462c0819:PsiDirectoryNode" />
-              <item name="apiserver" type="462c0819:PsiDirectoryNode" />
-              <item name="src" type="462c0819:PsiDirectoryNode" />
-              <item name="assembly" type="462c0819:PsiDirectoryNode" />
-            </path>
-            <path>
-              <item name="eddi" type="b2602c69:ProjectViewProjectNode" />
-              <item name="EDDI" type="462c0819:PsiDirectoryNode" />
-              <item name="apiserver" type="462c0819:PsiDirectoryNode" />
-              <item name="src" type="462c0819:PsiDirectoryNode" />
-              <item name="main" type="462c0819:PsiDirectoryNode" />
-            </path>
-            <path>
-              <item name="eddi" type="b2602c69:ProjectViewProjectNode" />
-              <item name="EDDI" type="462c0819:PsiDirectoryNode" />
-              <item name="apiserver" type="462c0819:PsiDirectoryNode" />
-              <item name="src" type="462c0819:PsiDirectoryNode" />
-              <item name="main" type="462c0819:PsiDirectoryNode" />
-              <item name="java" type="462c0819:PsiDirectoryNode" />
-            </path>
-            <path>
-              <item name="eddi" type="b2602c69:ProjectViewProjectNode" />
-              <item name="EDDI" type="462c0819:PsiDirectoryNode" />
-              <item name="apiserver" type="462c0819:PsiDirectoryNode" />
-              <item name="src" type="462c0819:PsiDirectoryNode" />
-              <item name="main" type="462c0819:PsiDirectoryNode" />
-              <item name="java" type="462c0819:PsiDirectoryNode" />
-              <item name="api" type="462c0819:PsiDirectoryNode" />
-            </path>
-            <path>
-              <item name="eddi" type="b2602c69:ProjectViewProjectNode" />
-              <item name="EDDI" type="462c0819:PsiDirectoryNode" />
-              <item name="channels-definition" type="462c0819:PsiDirectoryNode" />
-            </path>
-            <path>
-              <item name="eddi" type="b2602c69:ProjectViewProjectNode" />
-              <item name="EDDI" type="462c0819:PsiDirectoryNode" />
-              <item name="channels-definition" type="462c0819:PsiDirectoryNode" />
-              <item name="src" type="462c0819:PsiDirectoryNode" />
-            </path>
-            <path>
-              <item name="eddi" type="b2602c69:ProjectViewProjectNode" />
-              <item name="EDDI" type="462c0819:PsiDirectoryNode" />
-              <item name="channels-definition" type="462c0819:PsiDirectoryNode" />
-              <item name="src" type="462c0819:PsiDirectoryNode" />
-              <item name="main" type="462c0819:PsiDirectoryNode" />
-            </path>
-            <path>
-              <item name="eddi" type="b2602c69:ProjectViewProjectNode" />
-              <item name="EDDI" type="462c0819:PsiDirectoryNode" />
-              <item name="channels-definition" type="462c0819:PsiDirectoryNode" />
-              <item name="src" type="462c0819:PsiDirectoryNode" />
-              <item name="main" type="462c0819:PsiDirectoryNode" />
-              <item name="java" type="462c0819:PsiDirectoryNode" />
-            </path>
-            <path>
-              <item name="eddi" type="b2602c69:ProjectViewProjectNode" />
-              <item name="EDDI" type="462c0819:PsiDirectoryNode" />
-              <item name="channels-definition" type="462c0819:PsiDirectoryNode" />
-              <item name="src" type="462c0819:PsiDirectoryNode" />
-              <item name="main" type="462c0819:PsiDirectoryNode" />
-              <item name="java" type="462c0819:PsiDirectoryNode" />
-              <item name="channels" type="462c0819:PsiDirectoryNode" />
-            </path>
-            <path>
-              <item name="eddi" type="b2602c69:ProjectViewProjectNode" />
-              <item name="EDDI" type="462c0819:PsiDirectoryNode" />
-              <item name="channels-definition" type="462c0819:PsiDirectoryNode" />
-              <item name="src" type="462c0819:PsiDirectoryNode" />
-              <item name="main" type="462c0819:PsiDirectoryNode" />
-              <item name="java" type="462c0819:PsiDirectoryNode" />
-              <item name="channels" type="462c0819:PsiDirectoryNode" />
-              <item name="differ" type="462c0819:PsiDirectoryNode" />
-            </path>
-            <path>
-              <item name="eddi" type="b2602c69:ProjectViewProjectNode" />
-              <item name="EDDI" type="462c0819:PsiDirectoryNode" />
-              <item name="channels-definition" type="462c0819:PsiDirectoryNode" />
-              <item name="src" type="462c0819:PsiDirectoryNode" />
-              <item name="main" type="462c0819:PsiDirectoryNode" />
-              <item name="java" type="462c0819:PsiDirectoryNode" />
-              <item name="channels" type="462c0819:PsiDirectoryNode" />
-              <item name="facebookmessenger" type="462c0819:PsiDirectoryNode" />
-            </path>
-            <path>
-              <item name="eddi" type="b2602c69:ProjectViewProjectNode" />
-              <item name="EDDI" type="462c0819:PsiDirectoryNode" />
-              <item name="channels-definition" type="462c0819:PsiDirectoryNode" />
-              <item name="src" type="462c0819:PsiDirectoryNode" />
-              <item name="main" type="462c0819:PsiDirectoryNode" />
-              <item name="java" type="462c0819:PsiDirectoryNode" />
-              <item name="channels" type="462c0819:PsiDirectoryNode" />
-              <item name="xmpp" type="462c0819:PsiDirectoryNode" />
-            </path>
-            <path>
-              <item name="eddi" type="b2602c69:ProjectViewProjectNode" />
-              <item name="EDDI" type="462c0819:PsiDirectoryNode" />
-              <item name="channels-impl" type="462c0819:PsiDirectoryNode" />
-            </path>
-            <path>
-              <item name="eddi" type="b2602c69:ProjectViewProjectNode" />
-              <item name="EDDI" type="462c0819:PsiDirectoryNode" />
-              <item name="channels-impl" type="462c0819:PsiDirectoryNode" />
-              <item name="src" type="462c0819:PsiDirectoryNode" />
-            </path>
-            <path>
-              <item name="eddi" type="b2602c69:ProjectViewProjectNode" />
-              <item name="EDDI" type="462c0819:PsiDirectoryNode" />
-              <item name="channels-impl" type="462c0819:PsiDirectoryNode" />
-              <item name="src" type="462c0819:PsiDirectoryNode" />
-              <item name="main" type="462c0819:PsiDirectoryNode" />
-            </path>
-            <path>
-              <item name="eddi" type="b2602c69:ProjectViewProjectNode" />
-              <item name="EDDI" type="462c0819:PsiDirectoryNode" />
-              <item name="channels-impl" type="462c0819:PsiDirectoryNode" />
-              <item name="src" type="462c0819:PsiDirectoryNode" />
-              <item name="main" type="462c0819:PsiDirectoryNode" />
-              <item name="java" type="462c0819:PsiDirectoryNode" />
-            </path>
-            <path>
-              <item name="eddi" type="b2602c69:ProjectViewProjectNode" />
-              <item name="EDDI" type="462c0819:PsiDirectoryNode" />
-              <item name="channels-impl" type="462c0819:PsiDirectoryNode" />
-              <item name="src" type="462c0819:PsiDirectoryNode" />
-              <item name="main" type="462c0819:PsiDirectoryNode" />
-              <item name="java" type="462c0819:PsiDirectoryNode" />
-              <item name="channels" type="462c0819:PsiDirectoryNode" />
-            </path>
-            <path>
-              <item name="eddi" type="b2602c69:ProjectViewProjectNode" />
-              <item name="EDDI" type="462c0819:PsiDirectoryNode" />
-              <item name="channels-impl" type="462c0819:PsiDirectoryNode" />
-              <item name="src" type="462c0819:PsiDirectoryNode" />
-              <item name="main" type="462c0819:PsiDirectoryNode" />
-              <item name="java" type="462c0819:PsiDirectoryNode" />
-              <item name="channels" type="462c0819:PsiDirectoryNode" />
-              <item name="differ" type="462c0819:PsiDirectoryNode" />
-            </path>
-            <path>
-              <item name="eddi" type="b2602c69:ProjectViewProjectNode" />
-              <item name="EDDI" type="462c0819:PsiDirectoryNode" />
-              <item name="channels-impl" type="462c0819:PsiDirectoryNode" />
-              <item name="src" type="462c0819:PsiDirectoryNode" />
-              <item name="main" type="462c0819:PsiDirectoryNode" />
-              <item name="java" type="462c0819:PsiDirectoryNode" />
-              <item name="channels" type="462c0819:PsiDirectoryNode" />
-              <item name="differ" type="462c0819:PsiDirectoryNode" />
-              <item name="bootstrap" type="462c0819:PsiDirectoryNode" />
-            </path>
-            <path>
-              <item name="eddi" type="b2602c69:ProjectViewProjectNode" />
-              <item name="EDDI" type="462c0819:PsiDirectoryNode" />
-              <item name="channels-impl" type="462c0819:PsiDirectoryNode" />
-              <item name="src" type="462c0819:PsiDirectoryNode" />
-              <item name="main" type="462c0819:PsiDirectoryNode" />
-              <item name="java" type="462c0819:PsiDirectoryNode" />
-              <item name="channels" type="462c0819:PsiDirectoryNode" />
-              <item name="differ" type="462c0819:PsiDirectoryNode" />
-              <item name="model" type="462c0819:PsiDirectoryNode" />
-            </path>
-            <path>
-              <item name="eddi" type="b2602c69:ProjectViewProjectNode" />
-              <item name="EDDI" type="462c0819:PsiDirectoryNode" />
-              <item name="channels-impl" type="462c0819:PsiDirectoryNode" />
-              <item name="src" type="462c0819:PsiDirectoryNode" />
-              <item name="main" type="462c0819:PsiDirectoryNode" />
-              <item name="java" type="462c0819:PsiDirectoryNode" />
-              <item name="channels" type="462c0819:PsiDirectoryNode" />
-              <item name="facebookmessenger" type="462c0819:PsiDirectoryNode" />
-            </path>
-            <path>
-              <item name="eddi" type="b2602c69:ProjectViewProjectNode" />
-              <item name="EDDI" type="462c0819:PsiDirectoryNode" />
-              <item name="channels-impl" type="462c0819:PsiDirectoryNode" />
-              <item name="src" type="462c0819:PsiDirectoryNode" />
-              <item name="main" type="462c0819:PsiDirectoryNode" />
-              <item name="java" type="462c0819:PsiDirectoryNode" />
-              <item name="channels" type="462c0819:PsiDirectoryNode" />
-              <item name="xmpp" type="462c0819:PsiDirectoryNode" />
-            </path>
-            <path>
-              <item name="eddi" type="b2602c69:ProjectViewProjectNode" />
-              <item name="EDDI" type="462c0819:PsiDirectoryNode" />
-              <item name="channels-impl" type="462c0819:PsiDirectoryNode" />
-              <item name="src" type="462c0819:PsiDirectoryNode" />
-              <item name="main" type="462c0819:PsiDirectoryNode" />
-              <item name="java" type="462c0819:PsiDirectoryNode" />
-              <item name="channels" type="462c0819:PsiDirectoryNode" />
-              <item name="xmpp" type="462c0819:PsiDirectoryNode" />
-              <item name="bootstrap" type="462c0819:PsiDirectoryNode" />
-            </path>
-            <path>
-              <item name="eddi" type="b2602c69:ProjectViewProjectNode" />
-              <item name="EDDI" type="462c0819:PsiDirectoryNode" />
-              <item name="channels-impl" type="462c0819:PsiDirectoryNode" />
-              <item name="target" type="462c0819:PsiDirectoryNode" />
-            </path>
-            <path>
-              <item name="eddi" type="b2602c69:ProjectViewProjectNode" />
-              <item name="EDDI" type="462c0819:PsiDirectoryNode" />
-              <item name="channels-impl" type="462c0819:PsiDirectoryNode" />
-              <item name="target" type="462c0819:PsiDirectoryNode" />
-              <item name="channels-impl-4.7.jar" type="f0208c43:PsiZipFileNode" />
-            </path>
-            <path>
-              <item name="eddi" type="b2602c69:ProjectViewProjectNode" />
-              <item name="EDDI" type="462c0819:PsiDirectoryNode" />
-              <item name="channels-impl" type="462c0819:PsiDirectoryNode" />
-              <item name="target" type="462c0819:PsiDirectoryNode" />
-              <item name="channels-impl-4.7.jar" type="f0208c43:PsiZipFileNode" />
-              <item name="ai" type="55aa87d4:PsiGenericDirectoryNode" />
-            </path>
-            <path>
-              <item name="eddi" type="b2602c69:ProjectViewProjectNode" />
-              <item name="EDDI" type="462c0819:PsiDirectoryNode" />
-              <item name="channels-impl" type="462c0819:PsiDirectoryNode" />
-              <item name="target" type="462c0819:PsiDirectoryNode" />
-              <item name="channels-impl-4.7.jar" type="f0208c43:PsiZipFileNode" />
-              <item name="ai" type="55aa87d4:PsiGenericDirectoryNode" />
-              <item name="labs" type="55aa87d4:PsiGenericDirectoryNode" />
-            </path>
-            <path>
-              <item name="eddi" type="b2602c69:ProjectViewProjectNode" />
-              <item name="EDDI" type="462c0819:PsiDirectoryNode" />
-              <item name="channels-impl" type="462c0819:PsiDirectoryNode" />
-              <item name="target" type="462c0819:PsiDirectoryNode" />
-              <item name="channels-impl-4.7.jar" type="f0208c43:PsiZipFileNode" />
-              <item name="ai" type="55aa87d4:PsiGenericDirectoryNode" />
-              <item name="labs" type="55aa87d4:PsiGenericDirectoryNode" />
-              <item name="channels" type="55aa87d4:PsiGenericDirectoryNode" />
-            </path>
-            <path>
-              <item name="eddi" type="b2602c69:ProjectViewProjectNode" />
-              <item name="EDDI" type="462c0819:PsiDirectoryNode" />
-              <item name="channels-impl" type="462c0819:PsiDirectoryNode" />
-              <item name="target" type="462c0819:PsiDirectoryNode" />
-              <item name="channels-impl-4.7.jar" type="f0208c43:PsiZipFileNode" />
-              <item name="ai" type="55aa87d4:PsiGenericDirectoryNode" />
-              <item name="labs" type="55aa87d4:PsiGenericDirectoryNode" />
-              <item name="channels" type="55aa87d4:PsiGenericDirectoryNode" />
-              <item name="facebookmessenger" type="55aa87d4:PsiGenericDirectoryNode" />
-            </path>
-            <path>
-              <item name="eddi" type="b2602c69:ProjectViewProjectNode" />
-              <item name="External Libraries" type="cb654da1:ExternalLibrariesNode" />
-            </path>
-            <path>
-              <item name="eddi" type="b2602c69:ProjectViewProjectNode" />
-              <item name="Scratches and Consoles" type="1a2a3e82:ScratchProjectViewPane$MyProjectNode" />
-            </path>
-            <path>
-              <item name="eddi" type="b2602c69:ProjectViewProjectNode" />
-              <item name="Scratches and Consoles" type="1a2a3e82:ScratchProjectViewPane$MyProjectNode" />
-              <item name="Scratches" type="d62648e6:ScratchProjectViewPane$MyRootNode" />
-            </path>
-          </expand>
-          <select />
-        </subPane>
-      </pane>
-      <pane id="Scope" />
-    </panes>
-  </component>
   <component name="PropertiesComponent">
     <property name="DefaultHtmlFileTemplate" value="HTML File" />
     <property name="Git.Branch.Popup.ShowAllRemotes" value="true" />
@@ -1165,14 +149,8 @@
     <property name="vcs.patch.to.clipboard" value="true" />
   </component>
   <component name="RecentsManager">
-    <key name="CreateClassDialog.RecentsKey">
-      <recent name="ai.labs.resources.rest.config.http.model" />
-      <recent name="ai.labs.resources.rest.config.propertysetter.model" />
-      <recent name="ai.labs.resources.rest.http.model" />
-      <recent name="ai.labs.resources.rest" />
-      <recent name="ai.labs.models" />
-    </key>
     <key name="CreateTestDialog.RecentsKey">
+      <recent name="ai.labs.channels.differ" />
       <recent name="ai.labs.resources.impl.botmanagement.rest" />
       <recent name="ai.labs.expressions.utilities" />
       <recent name="ai.labs.parser.normalizers" />
@@ -1184,6 +162,13 @@
       <recent name="ai.labs.resources.impl" />
       <recent name="ai.labs.parser.extensions.normalizers" />
       <recent name="ai.labs.parser.normalizers" />
+    </key>
+    <key name="MoveFile.RECENT_KEYS">
+      <recent name="C:\dev\git\EDDI\src\main\resources" />
+      <recent name="C:\dev\git\EDDI\apiserver\src\main\resources" />
+      <recent name="C:\dev\git\EDDI\apiserver\src\main" />
+      <recent name="C:\dev\git\EDDI" />
+      <recent name="C:\dev\git\EDDI\apiserver\resources" />
     </key>
     <key name="CopyFile.RECENT_KEYS">
       <recent name="C:\dev\git\EDDI\channels-impl\src\main\java\ai\labs" />
@@ -1199,12 +184,12 @@
       <recent name="ai.labs.parser.bootstrap" />
       <recent name="ai.labs.channels.xmpp" />
     </key>
-    <key name="MoveFile.RECENT_KEYS">
-      <recent name="C:\dev\git\EDDI\src\main\resources" />
-      <recent name="C:\dev\git\EDDI\apiserver\src\main\resources" />
-      <recent name="C:\dev\git\EDDI\apiserver\src\main" />
-      <recent name="C:\dev\git\EDDI" />
-      <recent name="C:\dev\git\EDDI\apiserver\resources" />
+    <key name="CreateClassDialog.RecentsKey">
+      <recent name="ai.labs.resources.rest.config.http.model" />
+      <recent name="ai.labs.resources.rest.config.propertysetter.model" />
+      <recent name="ai.labs.resources.rest.http.model" />
+      <recent name="ai.labs.resources.rest" />
+      <recent name="ai.labs.models" />
     </key>
   </component>
   <component name="RestClientSettings">
@@ -1393,7 +378,7 @@
       </list>
     </option>
   </component>
-  <component name="RunManager" selected="Application.run">
+  <component name="RunManager" selected="JUnit.DifferOutputTransformerTest.convertBotOutputToMessageCreateCommands">
     <configuration name="&lt;template&gt;" type="#org.jetbrains.idea.devkit.run.PluginConfigurationType" default="true" selected="false">
       <option name="VM_PARAMETERS" value="-Xmx512m -Xms256m -XX:MaxPermSize=250m -ea" />
     </configuration>
@@ -1418,37 +403,17 @@
         <option name="Make" enabled="true" />
       </method>
     </configuration>
-    <configuration name="All in propertydisposer-impl" type="JUnit" factoryName="JUnit" temporary="true" nameIsGenerated="true">
-      <module name="propertydisposer-impl" />
-      <option name="PACKAGE_NAME" value="" />
-      <option name="TEST_OBJECT" value="package" />
-      <option name="VM_PARAMETERS" />
-      <option name="WORKING_DIRECTORY" value="%MODULE_WORKING_DIR%" />
-      <method v="2">
-        <option name="Make" enabled="true" />
-      </method>
-    </configuration>
-    <configuration name="All in semanticparser-impl" type="JUnit" factoryName="JUnit" temporary="true" nameIsGenerated="true">
-      <module name="semanticparser-impl" />
-      <option name="PACKAGE_NAME" value="" />
-      <option name="TEST_OBJECT" value="package" />
-      <option name="VM_PARAMETERS" />
-      <option name="WORKING_DIRECTORY" value="%MODULE_WORKING_DIR%" />
-      <method v="2">
-        <option name="Make" enabled="true" />
-      </method>
-    </configuration>
-    <configuration name="DynamicValueMatcherTest.dynamicValue_propertyNotFound" type="JUnit" factoryName="JUnit" temporary="true" nameIsGenerated="true">
-      <module name="behavior-impl" />
+    <configuration name="DifferOutputTransformerTest.convertBotOutputToMessageCreateCommands" type="JUnit" factoryName="JUnit" temporary="true" nameIsGenerated="true">
+      <module name="channels-impl" />
       <extension name="coverage">
         <pattern>
-          <option name="PATTERN" value="ai.labs.behavior.impl.extensions.*" />
+          <option name="PATTERN" value="ai.labs.channels.differ.*" />
           <option name="ENABLED" value="true" />
         </pattern>
       </extension>
-      <option name="PACKAGE_NAME" value="ai.labs.behavior.impl.extensions" />
-      <option name="MAIN_CLASS_NAME" value="ai.labs.behavior.impl.extensions.DynamicValueMatcherTest" />
-      <option name="METHOD_NAME" value="dynamicValue_propertyNotFound" />
+      <option name="PACKAGE_NAME" value="ai.labs.channels.differ" />
+      <option name="MAIN_CLASS_NAME" value="ai.labs.channels.differ.DifferOutputTransformerTest" />
+      <option name="METHOD_NAME" value="convertBotOutputToMessageCreateCommands" />
       <option name="TEST_OBJECT" value="method" />
       <option name="VM_PARAMETERS" />
       <option name="WORKING_DIRECTORY" value="%MODULE_WORKING_DIR%" />
@@ -1456,17 +421,70 @@
         <option name="Make" enabled="true" />
       </method>
     </configuration>
-    <configuration name="InputParserTest.testResultset" type="JUnit" factoryName="JUnit" temporary="true" nameIsGenerated="true">
-      <module name="semanticparser-impl" />
+    <configuration name="DifferPublisherTest" type="JUnit" factoryName="JUnit" temporary="true" nameIsGenerated="true">
+      <module name="channels-impl" />
       <extension name="coverage">
         <pattern>
-          <option name="PATTERN" value="ai.labs.parser.*" />
+          <option name="PATTERN" value="ai.labs.channels.differ.*" />
           <option name="ENABLED" value="true" />
         </pattern>
       </extension>
-      <option name="PACKAGE_NAME" value="ai.labs.parser" />
-      <option name="MAIN_CLASS_NAME" value="ai.labs.parser.InputParserTest" />
-      <option name="METHOD_NAME" value="testResultset" />
+      <option name="PACKAGE_NAME" value="ai.labs.channels.differ" />
+      <option name="MAIN_CLASS_NAME" value="ai.labs.channels.differ.DifferPublisherTest" />
+      <option name="TEST_OBJECT" value="class" />
+      <option name="VM_PARAMETERS" />
+      <option name="WORKING_DIRECTORY" value="%MODULE_WORKING_DIR%" />
+      <method v="2">
+        <option name="Make" enabled="true" />
+      </method>
+    </configuration>
+    <configuration name="DifferPublisherTest.negativeDeliveryAck" type="JUnit" factoryName="JUnit" temporary="true" nameIsGenerated="true">
+      <module name="channels-impl" />
+      <extension name="coverage">
+        <pattern>
+          <option name="PATTERN" value="ai.labs.channels.differ.*" />
+          <option name="ENABLED" value="true" />
+        </pattern>
+      </extension>
+      <option name="PACKAGE_NAME" value="ai.labs.channels.differ" />
+      <option name="MAIN_CLASS_NAME" value="ai.labs.channels.differ.DifferPublisherTest" />
+      <option name="METHOD_NAME" value="negativeDeliveryAck" />
+      <option name="TEST_OBJECT" value="method" />
+      <option name="VM_PARAMETERS" />
+      <option name="WORKING_DIRECTORY" value="%MODULE_WORKING_DIR%" />
+      <method v="2">
+        <option name="Make" enabled="true" />
+      </method>
+    </configuration>
+    <configuration name="DifferPublisherTest.positiveDeliveryAck" type="JUnit" factoryName="JUnit" temporary="true" nameIsGenerated="true">
+      <module name="channels-impl" />
+      <extension name="coverage">
+        <pattern>
+          <option name="PATTERN" value="ai.labs.channels.differ.*" />
+          <option name="ENABLED" value="true" />
+        </pattern>
+      </extension>
+      <option name="PACKAGE_NAME" value="ai.labs.channels.differ" />
+      <option name="MAIN_CLASS_NAME" value="ai.labs.channels.differ.DifferPublisherTest" />
+      <option name="METHOD_NAME" value="positiveDeliveryAck" />
+      <option name="TEST_OBJECT" value="method" />
+      <option name="VM_PARAMETERS" />
+      <option name="WORKING_DIRECTORY" value="%MODULE_WORKING_DIR%" />
+      <method v="2">
+        <option name="Make" enabled="true" />
+      </method>
+    </configuration>
+    <configuration name="DifferPublisherTest.publishCommandAndWaitForConfirm" type="JUnit" factoryName="JUnit" temporary="true" nameIsGenerated="true">
+      <module name="channels-impl" />
+      <extension name="coverage">
+        <pattern>
+          <option name="PATTERN" value="ai.labs.channels.differ.*" />
+          <option name="ENABLED" value="true" />
+        </pattern>
+      </extension>
+      <option name="PACKAGE_NAME" value="ai.labs.channels.differ" />
+      <option name="MAIN_CLASS_NAME" value="ai.labs.channels.differ.DifferPublisherTest" />
+      <option name="METHOD_NAME" value="publishCommandAndWaitForConfirm" />
       <option name="TEST_OBJECT" value="method" />
       <option name="VM_PARAMETERS" />
       <option name="WORKING_DIRECTORY" value="%MODULE_WORKING_DIR%" />
@@ -1492,29 +510,21 @@
         <option name="Make" enabled="true" />
       </method>
     </configuration>
-    <configuration name="Dockerfile" type="docker-deploy" factoryName="dockerfile" temporary="true" server-name="Docker">
-      <deployment type="dockerfile">
-        <settings>
-          <option name="sourceFilePath" value="Dockerfile" />
-        </settings>
-      </deployment>
-      <method v="2" />
-    </configuration>
     <list>
       <item itemvalue="Application.run" />
-      <item itemvalue="Docker.Dockerfile" />
-      <item itemvalue="JUnit.All in semanticparser-impl" />
-      <item itemvalue="JUnit.DynamicValueMatcherTest.dynamicValue_propertyNotFound" />
-      <item itemvalue="JUnit.InputParserTest.testResultset" />
-      <item itemvalue="JUnit.All in propertydisposer-impl" />
+      <item itemvalue="JUnit.DifferPublisherTest.positiveDeliveryAck" />
+      <item itemvalue="JUnit.DifferPublisherTest.negativeDeliveryAck" />
+      <item itemvalue="JUnit.DifferPublisherTest.publishCommandAndWaitForConfirm" />
+      <item itemvalue="JUnit.DifferPublisherTest" />
+      <item itemvalue="JUnit.DifferOutputTransformerTest.convertBotOutputToMessageCreateCommands" />
     </list>
     <recent_temporary>
       <list>
-        <item itemvalue="Docker.Dockerfile" />
-        <item itemvalue="JUnit.All in propertydisposer-impl" />
-        <item itemvalue="JUnit.InputParserTest.testResultset" />
-        <item itemvalue="JUnit.DynamicValueMatcherTest.dynamicValue_propertyNotFound" />
-        <item itemvalue="JUnit.All in semanticparser-impl" />
+        <item itemvalue="JUnit.DifferOutputTransformerTest.convertBotOutputToMessageCreateCommands" />
+        <item itemvalue="JUnit.DifferPublisherTest" />
+        <item itemvalue="JUnit.DifferPublisherTest.publishCommandAndWaitForConfirm" />
+        <item itemvalue="JUnit.DifferPublisherTest.negativeDeliveryAck" />
+        <item itemvalue="JUnit.DifferPublisherTest.positiveDeliveryAck" />
       </list>
     </recent_temporary>
   </component>
@@ -1769,13 +779,11 @@
       <workItem from="1563290463592" duration="1718000" />
       <workItem from="1563292210937" duration="4080000" />
       <workItem from="1563296328042" duration="1870000" />
-    </task>
-    <task id="LOCAL-00182" summary="initial start of rabbitmq rpc integration">
-      <created>1558705586360</created>
-      <option name="number" value="00182" />
-      <option name="presentableId" value="LOCAL-00182" />
-      <option name="project" value="LOCAL" />
-      <updated>1558705586361</updated>
+      <workItem from="1564572611573" duration="2150000" />
+      <workItem from="1564574987413" duration="11285000" />
+      <workItem from="1564603538009" duration="1675000" />
+      <workItem from="1564643972352" duration="661000" />
+      <workItem from="1564644698871" duration="11607000" />
     </task>
     <task id="LOCAL-00183" summary="disabled auth for rest call to fetch css &amp; js">
       <created>1558705798103</created>
@@ -2113,43 +1121,15 @@
       <option name="project" value="LOCAL" />
       <updated>1563286403101</updated>
     </task>
-    <option name="localTasksCounter" value="231" />
+    <task id="LOCAL-00231" summary="small bug fix, first conversationOutput disappearing after second conversationOutput">
+      <created>1564602551241</created>
+      <option name="number" value="00231" />
+      <option name="presentableId" value="LOCAL-00231" />
+      <option name="project" value="LOCAL" />
+      <updated>1564602551242</updated>
+    </task>
+    <option name="localTasksCounter" value="232" />
     <servers />
-  </component>
-  <component name="TestHistory">
-    <history-entry file="LifecycleManagerTest_testValidationWhenMemoryIsNull - 2019.06.26 at 14h 51m 20s.xml">
-      <configuration name="LifecycleManagerTest.testValidationWhenMemoryIsNull" configurationId="JUnit" />
-    </history-entry>
-    <history-entry file="LifecycleManagerTest_testValidationWhenLifecycleIsNull - 2019.06.26 at 14h 51m 25s.xml">
-      <configuration name="LifecycleManagerTest.testValidationWhenLifecycleIsNull" configurationId="JUnit" />
-    </history-entry>
-    <history-entry file="LifecycleManagerTest_testValidationWhenLifecycleIsNull - 2019.06.26 at 14h 51m 30s.xml">
-      <configuration name="LifecycleManagerTest.testValidationWhenLifecycleIsNull" configurationId="JUnit" />
-    </history-entry>
-    <history-entry file="All_in_conversationlifecycle-impl - 2019.06.26 at 14h 53m 27s.xml">
-      <configuration name="All in conversationlifecycle-impl" configurationId="JUnit" />
-    </history-entry>
-    <history-entry file="LifecycleManagerTest - 2019.06.26 at 14h 55m 31s.xml">
-      <configuration name="LifecycleManagerTest" configurationId="JUnit" />
-    </history-entry>
-    <history-entry file="All_in_persistencestore-impl - 2019.07.12 at 09h 36m 22s.xml">
-      <configuration name="All in persistencestore-impl" configurationId="JUnit" />
-    </history-entry>
-    <history-entry file="All_in_persistencestore-impl - 2019.07.12 at 09h 37m 11s.xml">
-      <configuration name="All in persistencestore-impl" configurationId="JUnit" />
-    </history-entry>
-    <history-entry file="All_in_behavior-impl - 2019.07.15 at 12h 13m 39s.xml">
-      <configuration name="All in behavior-impl" configurationId="JUnit" />
-    </history-entry>
-    <history-entry file="All_in_behavior-impl_(1) - 2019.07.15 at 12h 16m 38s.xml">
-      <configuration name="All in behavior-impl (1)" configurationId="JUnit" />
-    </history-entry>
-    <history-entry file="All_in_behavior-impl_(1) - 2019.07.15 at 12h 17m 08s.xml">
-      <configuration name="All in behavior-impl (1)" configurationId="JUnit" />
-    </history-entry>
-  </component>
-  <component name="TimeTrackingManager">
-    <option name="totallyTimeSpent" value="1417680000" />
   </component>
   <component name="TodoView">
     <todo-panel id="selected-file">
@@ -2159,43 +1139,6 @@
       <are-packages-shown value="true" />
       <is-autoscroll-to-source value="true" />
     </todo-panel>
-  </component>
-  <component name="ToolWindowManager">
-    <frame x="-6" y="-6" width="1933" height="1053" extended-state="6" />
-    <editor active="true" />
-    <layout>
-      <window_info content_ui="combo" id="Project" order="0" sideWeight="0.47987118" visible="true" weight="0.2496" />
-      <window_info id="Structure" order="1" sideWeight="0.52012885" side_tool="true" weight="0.23946667" />
-      <window_info id="Image Layers" order="2" />
-      <window_info id="Designer" order="3" />
-      <window_info id="Capture Tool" order="4" />
-      <window_info id="Favorites" order="5" side_tool="true" />
-      <window_info anchor="bottom" id="Find" order="0" weight="0.32222223" />
-      <window_info anchor="bottom" id="Run" order="1" sideWeight="0.49866667" weight="0.4911111" />
-      <window_info active="true" anchor="bottom" id="Debug" order="2" sideWeight="0.49813333" visible="true" weight="0.44" />
-      <window_info anchor="bottom" id="Messages" order="3" weight="0.32666665" />
-      <window_info anchor="bottom" id="Message" order="4" />
-      <window_info anchor="bottom" id="Cvs" order="5" weight="0.25" />
-      <window_info anchor="bottom" id="TODO" order="6" weight="0.32777777" />
-      <window_info anchor="bottom" id="Inspection" order="7" weight="0.4" />
-      <window_info anchor="bottom" id="Event Log" order="8" sideWeight="0.50133336" side_tool="true" weight="0.4911111" />
-      <window_info anchor="bottom" id="REST Client" order="9" weight="0.5658363" />
-      <window_info anchor="bottom" id="Version Control" order="10" sideWeight="0.49964765" weight="0.41222224" />
-      <window_info anchor="bottom" id="Terminal" order="11" sideWeight="0.49866667" weight="0.52444446" />
-      <window_info anchor="bottom" id="Statistic" order="12" weight="0.2888889" />
-      <window_info anchor="bottom" id="Docker" order="13" weight="0.38111112" />
-      <window_info anchor="bottom" id="Duplicate detector" order="14" weight="0.32820514" />
-      <window_info anchor="right" id="Commander" order="0" weight="0.4" />
-      <window_info anchor="right" id="Ant Build" order="1" weight="0.25" />
-      <window_info anchor="right" content_ui="combo" id="Hierarchy" order="2" weight="0.24947146" />
-      <window_info anchor="right" id="Palette&#9;" order="3" />
-      <window_info anchor="right" id="Maven Projects" order="4" sideWeight="0.4896074" weight="0.2832981" />
-      <window_info anchor="right" id="Coverage" order="5" sideWeight="0.5152838" side_tool="true" weight="0.21866667" />
-      <window_info anchor="right" id="Capture Analysis" order="6" />
-      <window_info anchor="right" id="Theme Preview" order="7" />
-      <window_info anchor="right" id="Maven" order="8" sideWeight="0.48019803" visible="true" weight="0.2048" />
-      <window_info anchor="right" x="556" y="115" width="544" height="597" id="Documentation" order="9" sideWeight="0.519802" side_tool="true" visible="true" weight="0.28053334" />
-    </layout>
   </component>
   <component name="TypeScriptGeneratedFilesManager">
     <option name="version" value="1" />
@@ -2213,15 +1156,26 @@
   <component name="Vcs.Log.Tabs.Properties">
     <option name="TAB_STATES">
       <map>
+        <entry key="1">
+          <value>
+            <State>
+              <option name="FILTERS">
+                <map>
+                  <entry key="range">
+                    <value>
+                      <list>
+                        <option value="HEAD..master" />
+                      </list>
+                    </value>
+                  </entry>
+                </map>
+              </option>
+            </State>
+          </value>
+        </entry>
         <entry key="MAIN">
           <value>
             <State>
-              <option name="RECENTLY_FILTERED_USER_GROUPS">
-                <collection />
-              </option>
-              <option name="RECENTLY_FILTERED_BRANCH_GROUPS">
-                <collection />
-              </option>
               <option name="FILTERS">
                 <map>
                   <entry key="branch">
@@ -2233,18 +1187,16 @@
                   </entry>
                 </map>
               </option>
-              <option name="COLUMN_ORDER">
-                <list>
-                  <option value="0" />
-                  <option value="1" />
-                  <option value="2" />
-                  <option value="3" />
-                </list>
-              </option>
+              <option name="COLUMN_ORDER" />
             </State>
           </value>
         </entry>
       </map>
+    </option>
+    <option name="OPEN_TABS">
+      <set>
+        <option value="1" />
+      </set>
     </option>
     <option name="RECENT_FILTERS">
       <map>
@@ -2277,7 +1229,6 @@
     <ignored-roots>
       <path value="$PROJECT_DIR$/apiserver/tmp/5cf504ddc8894e77ee0ac73a" />
     </ignored-roots>
-    <MESSAGE value="added execution strategy, allowing now to make all rules being executed instead of only first succeeded. (default is still stop after first rule succeeded);&#10;renamed targetServer to targetServerUri, which can be templated now;&#10;allow matching of dynamic param even if value is not a string" />
     <MESSAGE value="added support for propertysetter being an external resource file; some refactorings along the line" />
     <MESSAGE value="disabled warning because of unwanted log statement; Better schema generation for html5 gui generators" />
     <MESSAGE value="reverted back to vanilla json schema, as &quot;html5&quot; option doesn't produce spec valid types" />
@@ -2302,7 +1253,8 @@
     <MESSAGE value="fixed dependency issue to make it build, runtime still off" />
     <MESSAGE value="mvn wrapper files" />
     <MESSAGE value="further implemented differ integration" />
-    <option name="LAST_COMMIT_MESSAGE" value="further implemented differ integration" />
+    <MESSAGE value="small bug fix, first conversationOutput disappearing after second conversationOutput" />
+    <option name="LAST_COMMIT_MESSAGE" value="small bug fix, first conversationOutput disappearing after second conversationOutput" />
     <option name="OPTIMIZE_IMPORTS_BEFORE_PROJECT_COMMIT" value="true" />
     <option name="REFORMAT_BEFORE_PROJECT_COMMIT" value="true" />
   </component>
@@ -2310,87 +1262,73 @@
     <breakpoint-manager>
       <breakpoints>
         <line-breakpoint type="java-line">
-          <url>jar://$PROJECT_DIR$/../../.m2/io/swagger/swagger-jaxrs/1.5.13/swagger-jaxrs-1.5.13-sources.jar!/io/swagger/jaxrs/Reader.java</url>
+          <url>jar://$MAVEN_REPOSITORY$/io/swagger/swagger-jaxrs/1.5.13/swagger-jaxrs-1.5.13-sources.jar!/io/swagger/jaxrs/Reader.java</url>
           <line>471</line>
-          <properties />
           <option name="timeStamp" value="1" />
         </line-breakpoint>
         <line-breakpoint type="java-line">
-          <url>jar://$PROJECT_DIR$/../../.m2/io/swagger/swagger-core/1.5.13/swagger-core-1.5.13-sources.jar!/io/swagger/util/ReflectionUtils.java</url>
+          <url>jar://$MAVEN_REPOSITORY$/io/swagger/swagger-core/1.5.13/swagger-core-1.5.13-sources.jar!/io/swagger/util/ReflectionUtils.java</url>
           <line>48</line>
-          <properties />
           <option name="timeStamp" value="2" />
         </line-breakpoint>
         <line-breakpoint type="java-line">
           <url>file://$PROJECT_DIR$/semanticparser-impl/src/test/java/ai/labs/parser/InputParserTest.java</url>
           <line>173</line>
-          <properties />
           <option name="timeStamp" value="18" />
         </line-breakpoint>
         <line-breakpoint type="java-line">
           <url>file://$PROJECT_DIR$/semanticparser-impl/src/test/java/ai/labs/parser/InputParserTest.java</url>
           <line>169</line>
-          <properties />
           <option name="timeStamp" value="19" />
         </line-breakpoint>
         <line-breakpoint type="java-line">
-          <url>jar://$PROJECT_DIR$/../../.m2/org/jboss/resteasy/resteasy-jaxrs/3.6.3.Final/resteasy-jaxrs-3.6.3.Final-sources.jar!/org/jboss/resteasy/core/registry/SegmentNode.java</url>
+          <url>jar://$MAVEN_REPOSITORY$/org/jboss/resteasy/resteasy-jaxrs/3.6.3.Final/resteasy-jaxrs-3.6.3.Final-sources.jar!/org/jboss/resteasy/core/registry/SegmentNode.java</url>
           <line>487</line>
-          <properties />
           <option name="timeStamp" value="31" />
         </line-breakpoint>
         <line-breakpoint type="java-line">
-          <url>jar://$PROJECT_DIR$/../../.m2/org/keycloak/keycloak-servlet-filter-adapter/4.8.3.Final/keycloak-servlet-filter-adapter-4.8.3.Final-sources.jar!/org/keycloak/adapters/servlet/KeycloakOIDCFilter.java</url>
+          <url>jar://$MAVEN_REPOSITORY$/org/keycloak/keycloak-servlet-filter-adapter/4.8.3.Final/keycloak-servlet-filter-adapter-4.8.3.Final-sources.jar!/org/keycloak/adapters/servlet/KeycloakOIDCFilter.java</url>
           <line>172</line>
-          <properties />
           <option name="timeStamp" value="42" />
         </line-breakpoint>
         <line-breakpoint type="java-line">
-          <url>jar://$PROJECT_DIR$/../../.m2/org/keycloak/keycloak-servlet-filter-adapter/4.8.3.Final/keycloak-servlet-filter-adapter-4.8.3.Final-sources.jar!/org/keycloak/adapters/servlet/KeycloakOIDCFilter.java</url>
+          <url>jar://$MAVEN_REPOSITORY$/org/keycloak/keycloak-servlet-filter-adapter/4.8.3.Final/keycloak-servlet-filter-adapter-4.8.3.Final-sources.jar!/org/keycloak/adapters/servlet/KeycloakOIDCFilter.java</url>
           <line>165</line>
-          <properties />
           <option name="timeStamp" value="43" />
         </line-breakpoint>
         <line-breakpoint type="java-line">
-          <url>jar://$PROJECT_DIR$/../../.m2/org/keycloak/keycloak-adapter-core/4.8.3.Final/keycloak-adapter-core-4.8.3.Final-sources.jar!/org/keycloak/adapters/RefreshableKeycloakSecurityContext.java</url>
+          <url>jar://$MAVEN_REPOSITORY$/org/keycloak/keycloak-adapter-core/4.8.3.Final/keycloak-adapter-core-4.8.3.Final-sources.jar!/org/keycloak/adapters/RefreshableKeycloakSecurityContext.java</url>
           <line>118</line>
-          <properties />
           <option name="timeStamp" value="48" />
         </line-breakpoint>
         <line-breakpoint type="java-line">
-          <url>jar://$PROJECT_DIR$/../../.m2/org/eclipse/jetty/jetty-security/9.4.18.v20190429/jetty-security-9.4.18.v20190429-sources.jar!/org/eclipse/jetty/security/authentication/BasicAuthenticator.java</url>
+          <url>jar://$MAVEN_REPOSITORY$/org/eclipse/jetty/jetty-security/9.4.18.v20190429/jetty-security-9.4.18.v20190429-sources.jar!/org/eclipse/jetty/security/authentication/BasicAuthenticator.java</url>
           <line>104</line>
-          <properties />
           <option name="timeStamp" value="52" />
         </line-breakpoint>
         <line-breakpoint type="java-line">
-          <url>jar://$PROJECT_DIR$/../../.m2/org/eclipse/jetty/jetty-servlets/9.4.18.v20190429/jetty-servlets-9.4.18.v20190429-sources.jar!/org/eclipse/jetty/servlets/CrossOriginFilter.java</url>
+          <url>jar://$MAVEN_REPOSITORY$/org/eclipse/jetty/jetty-servlets/9.4.18.v20190429/jetty-servlets-9.4.18.v20190429-sources.jar!/org/eclipse/jetty/servlets/CrossOriginFilter.java</url>
           <line>210</line>
-          <properties />
           <option name="timeStamp" value="54" />
         </line-breakpoint>
         <line-breakpoint type="java-line">
-          <url>jar://$PROJECT_DIR$/../../.m2/org/eclipse/jetty/jetty-servlets/9.4.18.v20190429/jetty-servlets-9.4.18.v20190429-sources.jar!/org/eclipse/jetty/servlets/CrossOriginFilter.java</url>
+          <url>jar://$MAVEN_REPOSITORY$/org/eclipse/jetty/jetty-servlets/9.4.18.v20190429/jetty-servlets-9.4.18.v20190429-sources.jar!/org/eclipse/jetty/servlets/CrossOriginFilter.java</url>
           <line>405</line>
-          <properties />
           <option name="timeStamp" value="56" />
         </line-breakpoint>
         <line-breakpoint type="java-line">
-          <url>jar://$PROJECT_DIR$/../../.m2/org/eclipse/jetty/jetty-servlets/9.4.18.v20190429/jetty-servlets-9.4.18.v20190429-sources.jar!/org/eclipse/jetty/servlets/CrossOriginFilter.java</url>
+          <url>jar://$MAVEN_REPOSITORY$/org/eclipse/jetty/jetty-servlets/9.4.18.v20190429/jetty-servlets-9.4.18.v20190429-sources.jar!/org/eclipse/jetty/servlets/CrossOriginFilter.java</url>
           <line>376</line>
-          <properties />
           <option name="timeStamp" value="57" />
         </line-breakpoint>
         <line-breakpoint type="java-line">
-          <url>jar://$PROJECT_DIR$/../../.m2/org/eclipse/jetty/jetty-servlets/9.4.18.v20190429/jetty-servlets-9.4.18.v20190429-sources.jar!/org/eclipse/jetty/servlets/CrossOriginFilter.java</url>
+          <url>jar://$MAVEN_REPOSITORY$/org/eclipse/jetty/jetty-servlets/9.4.18.v20190429/jetty-servlets-9.4.18.v20190429-sources.jar!/org/eclipse/jetty/servlets/CrossOriginFilter.java</url>
           <line>271</line>
-          <properties />
           <option name="timeStamp" value="58" />
         </line-breakpoint>
         <line-breakpoint enabled="true" type="java-line">
           <url>file://$PROJECT_DIR$/channels-impl/src/main/java/ai/labs/channels/differ/DifferEndpoint.java</url>
           <line>65</line>
-          <properties />
           <option name="timeStamp" value="63" />
         </line-breakpoint>
       </breakpoints>
@@ -2407,538 +1345,6 @@
     <SUITE FILE_PATH="coverage/eddi$LifecycleManagerTest_testValidationWhenLifecycleIsNull.ic" NAME="LifecycleManagerTest.testValidationWhenLifecycleIsNull Coverage Results" MODIFIED="1561553487855" SOURCE_PROVIDER="com.intellij.coverage.DefaultCoverageFileProvider" RUNNER="idea" COVERAGE_BY_TEST_ENABLED="false" COVERAGE_TRACING_ENABLED="false">
       <FILTER>ai.labs.lifecycle.*</FILTER>
     </SUITE>
-  </component>
-  <component name="debuggerHistoryManager">
-    <expressions id="evaluateCodeFragment">
-      <expression>
-        <expression-string>receivedEvent.getEventName()</expression-string>
-        <language-id>JAVA</language-id>
-        <evaluation-mode>CODE_FRAGMENT</evaluation-mode>
-      </expression>
-      <expression>
-        <expression-string>conversation.getType().equals(&quot;directMessage&quot;)</expression-string>
-        <language-id>JAVA</language-id>
-        <evaluation-mode>CODE_FRAGMENT</evaluation-mode>
-      </expression>
-      <expression>
-        <expression-string>Ognl.getValue(&quot;createdAt&quot;,, receivedMessage);</expression-string>
-        <language-id>JAVA</language-id>
-        <custom-info>ognl.Ognl</custom-info>
-        <evaluation-mode>CODE_FRAGMENT</evaluation-mode>
-      </expression>
-      <expression>
-        <expression-string>Ognl.getValue(&quot;createdAt&quot;,null, receivedMessage);</expression-string>
-        <language-id>JAVA</language-id>
-        <custom-info>ognl.Ognl</custom-info>
-        <evaluation-mode>CODE_FRAGMENT</evaluation-mode>
-      </expression>
-      <expression>
-        <expression-string>Ognl.getValue(&quot;createdAt&quot;, receivedMessage);</expression-string>
-        <language-id>JAVA</language-id>
-        <custom-info>ognl.Ognl</custom-info>
-        <evaluation-mode>CODE_FRAGMENT</evaluation-mode>
-      </expression>
-      <expression>
-        <expression-string>Ognl.getValue(&quot;&quot;, receivedMessage);</expression-string>
-        <language-id>JAVA</language-id>
-        <custom-info>ognl.Ognl</custom-info>
-        <evaluation-mode>CODE_FRAGMENT</evaluation-mode>
-      </expression>
-      <expression>
-        <expression-string>Ognl.getValue(&quot;payload&quot;, receivedMessage);</expression-string>
-        <language-id>JAVA</language-id>
-        <custom-info>ognl.Ognl</custom-info>
-        <evaluation-mode>CODE_FRAGMENT</evaluation-mode>
-      </expression>
-      <expression>
-        <expression-string>Ognl.getValue(&quot;payload.participantIds&quot;, receivedMessage);</expression-string>
-        <language-id>JAVA</language-id>
-        <custom-info>ognl.Ognl</custom-info>
-        <evaluation-mode>CODE_FRAGMENT</evaluation-mode>
-      </expression>
-      <expression>
-        <expression-string>document.remove(&quot;username&quot;)</expression-string>
-        <language-id>JAVA</language-id>
-        <evaluation-mode>CODE_FRAGMENT</evaluation-mode>
-      </expression>
-    </expressions>
-    <expressions id="breakpointCondition">
-      <expression>
-        <expression-string>valuePathMatcher.getValuePath().contains(&quot;errors&quot;) &amp;&amp; contentAsString.contains(&quot;errors&quot;)</expression-string>
-        <language-id>JAVA</language-id>
-        <evaluation-mode>EXPRESSION</evaluation-mode>
-      </expression>
-      <expression>
-        <expression-string>valuePathMatcher.getValuePath().equals(&quot;topics.data.community.topics[1].id&quot;)</expression-string>
-        <language-id>JAVA</language-id>
-        <evaluation-mode>EXPRESSION</evaluation-mode>
-      </expression>
-      <expression>
-        <expression-string>condition.getId().equals(&quot;negation&quot;)</expression-string>
-        <language-id>JAVA</language-id>
-        <evaluation-mode>EXPRESSION</evaluation-mode>
-      </expression>
-      <expression>
-        <expression-string>name.equals(&quot;Ask for Topic&quot;)</expression-string>
-        <language-id>JAVA</language-id>
-        <evaluation-mode>EXPRESSION</evaluation-mode>
-      </expression>
-      <expression>
-        <expression-string>values.containsKey(&quot;Ask_Client_Details&quot;)</expression-string>
-        <language-id>JAVA</language-id>
-        <evaluation-mode>EXPRESSION</evaluation-mode>
-      </expression>
-      <expression>
-        <expression-string>values.get(&quot;Ask_Client_Details&quot;)</expression-string>
-        <language-id>JAVA</language-id>
-        <evaluation-mode>EXPRESSION</evaluation-mode>
-      </expression>
-      <expression>
-        <expression-string>values.get(&quot;&quot;)</expression-string>
-        <language-id>JAVA</language-id>
-        <evaluation-mode>EXPRESSION</evaluation-mode>
-      </expression>
-      <expression>
-        <expression-string>((LinkedHashMap) extensions).size() == 3</expression-string>
-        <language-id>JAVA</language-id>
-        <evaluation-mode>EXPRESSION</evaluation-mode>
-      </expression>
-      <expression>
-        <expression-string>((Phrase) phrase).getValue().startsWith(&quot;can i complete&quot;)</expression-string>
-        <language-id>JAVA</language-id>
-        <custom-info>ai.labs.parser.model.Phrase</custom-info>
-        <evaluation-mode>EXPRESSION</evaluation-mode>
-      </expression>
-    </expressions>
-    <expressions id="watch">
-      <expression>
-        <expression-string>receivedEvent.getPayload()</expression-string>
-        <language-id>JAVA</language-id>
-        <evaluation-mode>EXPRESSION</evaluation-mode>
-      </expression>
-      <expression>
-        <expression-string>valuePathMatcher.getTrueIfNoMatch()</expression-string>
-        <language-id>JAVA</language-id>
-        <evaluation-mode>EXPRESSION</evaluation-mode>
-      </expression>
-      <expression>
-        <expression-string>valuePathMatcher.getValuePath()</expression-string>
-        <language-id>JAVA</language-id>
-        <evaluation-mode>EXPRESSION</evaluation-mode>
-      </expression>
-      <expression>
-        <expression-string>response.getContentAsString()</expression-string>
-        <language-id>JAVA</language-id>
-        <evaluation-mode>EXPRESSION</evaluation-mode>
-      </expression>
-      <expression>
-        <expression-string>response.getHttpCode()</expression-string>
-        <language-id>JAVA</language-id>
-        <evaluation-mode>EXPRESSION</evaluation-mode>
-      </expression>
-      <expression>
-        <expression-string>contextRequest.getRequest()</expression-string>
-        <language-id>JAVA</language-id>
-        <evaluation-mode>EXPRESSION</evaluation-mode>
-      </expression>
-      <expression>
-        <expression-string>resultList</expression-string>
-        <language-id>JAVA</language-id>
-        <evaluation-mode>EXPRESSION</evaluation-mode>
-      </expression>
-      <expression>
-        <expression-string>parsedSolutions</expression-string>
-        <language-id>JAVA</language-id>
-        <evaluation-mode>EXPRESSION</evaluation-mode>
-      </expression>
-      <expression>
-        <expression-string>extensions</expression-string>
-        <language-id>JAVA</language-id>
-        <evaluation-mode>EXPRESSION</evaluation-mode>
-      </expression>
-    </expressions>
-    <expressions id="evaluateExpression">
-      <expression>
-        <expression-string>randomValue</expression-string>
-        <language-id>JAVA</language-id>
-        <evaluation-mode>EXPRESSION</evaluation-mode>
-      </expression>
-      <expression>
-        <expression-string>getSimpleConversationMemorySnapshot(conversationMemorySnapshot,
-                    returnDetailed,
-                    returnCurrentStepOnly,
-                    returningFields)</expression-string>
-        <language-id>JAVA</language-id>
-        <evaluation-mode>EXPRESSION</evaluation-mode>
-      </expression>
-      <expression>
-        <expression-string>returningFields.isEmpty() || returningFields.contains(&quot;conversationSteps&quot;)</expression-string>
-        <language-id>JAVA</language-id>
-        <evaluation-mode>EXPRESSION</evaluation-mode>
-      </expression>
-      <expression>
-        <expression-string>returnConversationMemory</expression-string>
-        <language-id>JAVA</language-id>
-        <evaluation-mode>EXPRESSION</evaluation-mode>
-      </expression>
-      <expression>
-        <expression-string>e</expression-string>
-        <language-id>JAVA</language-id>
-        <evaluation-mode>EXPRESSION</evaluation-mode>
-      </expression>
-      <expression>
-        <expression-string>exResponse</expression-string>
-        <language-id>JAVA</language-id>
-        <evaluation-mode>EXPRESSION</evaluation-mode>
-      </expression>
-      <expression>
-        <expression-string>response</expression-string>
-        <language-id>JAVA</language-id>
-        <evaluation-mode>EXPRESSION</evaluation-mode>
-      </expression>
-      <expression>
-        <expression-string>response.getStatusInfo().getReasonPhrase()</expression-string>
-        <language-id>JAVA</language-id>
-        <evaluation-mode>EXPRESSION</evaluation-mode>
-      </expression>
-      <expression>
-        <expression-string>e.getLocalizedMessage()</expression-string>
-        <language-id>JAVA</language-id>
-        <evaluation-mode>EXPRESSION</evaluation-mode>
-      </expression>
-    </expressions>
-  </component>
-  <component name="editorHistoryManager">
-    <entry file="file://$PROJECT_DIR$/apiserver/config/development/eddi.log4j.xml">
-      <provider selected="true" editor-type-id="text-editor" />
-    </entry>
-    <entry file="file://$PROJECT_DIR$/coreserver/src/main/java/ai/labs/core/rest/internal/IContextLogger.java">
-      <provider selected="true" editor-type-id="text-editor">
-        <state relative-caret-position="68">
-          <caret line="6" column="17" selection-start-line="6" selection-start-column="17" selection-end-line="6" selection-end-column="17" />
-        </state>
-      </provider>
-    </entry>
-    <entry file="file://$PROJECT_DIR$/webserver/src/main/java/ai/labs/server/ServerRuntime.java">
-      <provider selected="true" editor-type-id="text-editor">
-        <state relative-caret-position="170">
-          <caret line="52" column="13" selection-start-line="52" selection-start-column="13" selection-end-line="52" selection-end-column="13" />
-        </state>
-      </provider>
-    </entry>
-    <entry file="file://$PROJECT_DIR$/runtime-impl/src/main/java/ai/labs/runtime/BaseRuntime.java">
-      <provider selected="true" editor-type-id="text-editor">
-        <state relative-caret-position="119">
-          <caret line="16" column="13" selection-start-line="16" selection-start-column="13" selection-end-line="16" selection-end-column="13" />
-        </state>
-      </provider>
-    </entry>
-    <entry file="file://$PROJECT_DIR$/runtime-impl/src/main/java/ai/labs/runtime/bootstrap/RuntimeModule.java">
-      <provider selected="true" editor-type-id="text-editor">
-        <state relative-caret-position="119">
-          <caret line="35" column="13" selection-start-line="35" selection-start-column="13" selection-end-line="35" selection-end-column="13" />
-        </state>
-      </provider>
-    </entry>
-    <entry file="file://$PROJECT_DIR$/configurationrepository-definition/src/main/java/ai/labs/resources/rest/config/bots/IBotStore.java">
-      <provider selected="true" editor-type-id="text-editor">
-        <state relative-caret-position="238">
-          <caret line="18" selection-start-line="18" selection-end-line="18" />
-        </state>
-      </provider>
-    </entry>
-    <entry file="file://$PROJECT_DIR$/further_implemented_differ_integration.patch" />
-    <entry file="file://$PROJECT_DIR$/backupservice-impl/src/main/java/ai/labs/backupservice/impl/RestImportService.java">
-      <provider selected="true" editor-type-id="text-editor">
-        <state relative-caret-position="-5976">
-          <caret line="31" column="27" lean-forward="true" selection-start-line="31" selection-start-column="27" selection-end-line="31" selection-end-column="27" />
-        </state>
-      </provider>
-    </entry>
-    <entry file="file://$PROJECT_DIR$/channels-definition/src/main/java/ai/labs/channels/differ/IDifferEndpoint.java">
-      <provider selected="true" editor-type-id="text-editor">
-        <state relative-caret-position="34">
-          <caret line="2" column="16" selection-start-line="2" selection-start-column="16" selection-end-line="2" selection-end-column="16" />
-        </state>
-      </provider>
-    </entry>
-    <entry file="file://$PROJECT_DIR$/corerest-definition/src/main/java/ai/labs/rest/rest/IRestBotManagement.java">
-      <provider selected="true" editor-type-id="text-editor">
-        <state relative-caret-position="102">
-          <caret line="18" column="17" selection-start-line="18" selection-start-column="17" selection-end-line="18" selection-end-column="17" />
-        </state>
-      </provider>
-    </entry>
-    <entry file="file://$PROJECT_DIR$/coreserver/src/main/java/ai/labs/core/rest/internal/RestBotManagement.java">
-      <provider selected="true" editor-type-id="text-editor">
-        <state relative-caret-position="340">
-          <caret line="40" column="44" selection-start-line="40" selection-start-column="44" selection-end-line="40" selection-end-column="44" />
-        </state>
-      </provider>
-    </entry>
-    <entry file="jar://$PROJECT_DIR$/../../.m2/ai/labs/xmpp-impl/4.7/xmpp-impl-4.7.jar!/ai/labs/xmpp/bootstrap/XmppModule.class">
-      <provider selected="true" editor-type-id="text-editor">
-        <state relative-caret-position="119">
-          <caret line="12" column="11" selection-start-line="12" selection-start-column="11" selection-end-line="12" selection-end-column="11" />
-        </state>
-      </provider>
-    </entry>
-    <entry file="file://$PROJECT_DIR$/httpCallsTask-impl/src/main/java/ai/labs/restapi/connector/bootstrap/HttpCallsModule.java">
-      <provider selected="true" editor-type-id="text-editor">
-        <state relative-caret-position="68">
-          <caret line="7" column="13" selection-start-line="7" selection-start-column="13" selection-end-line="7" selection-end-column="13" />
-        </state>
-      </provider>
-    </entry>
-    <entry file="file://$PROJECT_DIR$/backupservice-impl/src/main/java/ai/labs/backupservice/bootstrap/BackupServiceModule.java">
-      <provider selected="true" editor-type-id="text-editor">
-        <state relative-caret-position="119">
-          <caret line="16" column="13" selection-start-line="16" selection-start-column="13" selection-end-line="16" selection-end-column="13" />
-        </state>
-      </provider>
-    </entry>
-    <entry file="file://$PROJECT_DIR$/channels-impl/src/main/java/ai/labs/channels/facebookmessenger/bootstrap/FacebookMessengerModule.java">
-      <provider selected="true" editor-type-id="text-editor">
-        <state relative-caret-position="170">
-          <caret line="13" column="84" selection-start-line="13" selection-start-column="84" selection-end-line="13" selection-end-column="84" />
-          <folding>
-            <element signature="e#367#368#0" expanded="true" />
-            <element signature="e#439#440#0" expanded="true" />
-          </folding>
-        </state>
-      </provider>
-    </entry>
-    <entry file="file://$PROJECT_DIR$/httpclient-definition/pom.xml">
-      <provider selected="true" editor-type-id="text-editor" />
-    </entry>
-    <entry file="file://$PROJECT_DIR$/outputgeneration-impl/pom.xml">
-      <provider selected="true" editor-type-id="text-editor">
-        <state relative-caret-position="187">
-          <caret line="11" column="4" selection-start-line="11" selection-start-column="4" selection-end-line="11" selection-end-column="30" />
-        </state>
-      </provider>
-    </entry>
-    <entry file="file://$PROJECT_DIR$/httpCallsTask-definition/pom.xml">
-      <provider selected="true" editor-type-id="text-editor">
-        <state relative-caret-position="153">
-          <caret line="9" column="30" selection-start-line="9" selection-start-column="30" selection-end-line="9" selection-end-column="30" />
-        </state>
-      </provider>
-    </entry>
-    <entry file="file://$PROJECT_DIR$/apiserver/config/development/threads.properties">
-      <provider selected="true" editor-type-id="text-editor" />
-    </entry>
-    <entry file="file://$APPLICATION_CONFIG_DIR$/scratches/scratch_25.json">
-      <provider selected="true" editor-type-id="text-editor">
-        <state relative-caret-position="68">
-          <caret line="4" column="13" selection-start-line="4" selection-start-column="13" selection-end-line="4" selection-end-column="13" />
-        </state>
-      </provider>
-    </entry>
-    <entry file="file://$PROJECT_DIR$/.idea/libraries/Maven__ai_labs_httpCallsTask_definition_4_7.xml" />
-    <entry file="file://$PROJECT_DIR$/.idea/vcs.xml">
-      <provider selected="true" editor-type-id="text-editor" />
-    </entry>
-    <entry file="file://$PROJECT_DIR$/channels-impl/channels-impl.iml">
-      <provider selected="true" editor-type-id="text-editor" />
-    </entry>
-    <entry file="jar://$PROJECT_DIR$/../../.m2/com/google/inject/guice/4.2.2/guice-4.2.2-sources.jar!/com/google/inject/internal/ProviderMethod.java">
-      <provider selected="true" editor-type-id="text-editor">
-        <state relative-caret-position="388">
-          <caret line="285" selection-start-line="285" selection-end-line="285" />
-        </state>
-      </provider>
-    </entry>
-    <entry file="file://$PROJECT_DIR$/runtime-definition/src/main/java/ai/labs/runtime/bootstrap/AbstractBaseModule.java">
-      <provider selected="true" editor-type-id="text-editor">
-        <state relative-caret-position="136">
-          <caret line="14" column="22" selection-start-line="14" selection-start-column="22" selection-end-line="14" selection-end-column="22" />
-        </state>
-      </provider>
-    </entry>
-    <entry file="file://$PROJECT_DIR$/.idea/encodings.xml">
-      <provider selected="true" editor-type-id="text-editor">
-        <state relative-caret-position="-68" />
-      </provider>
-    </entry>
-    <entry file="file://$PROJECT_DIR$/.idea/modules.xml">
-      <provider selected="true" editor-type-id="text-editor">
-        <state relative-caret-position="396">
-          <caret line="27" column="90" lean-forward="true" selection-start-line="27" selection-start-column="90" selection-end-line="27" selection-end-column="90" />
-        </state>
-      </provider>
-    </entry>
-    <entry file="file://$PROJECT_DIR$/channels-impl/src/main/java/ai/labs/channels/differ/bootstrap/DifferModule.java">
-      <provider selected="true" editor-type-id="text-editor">
-        <state relative-caret-position="170">
-          <caret line="10" selection-start-line="10" selection-end-line="10" />
-          <folding>
-            <element signature="imports" expanded="true" />
-            <element signature="e#415#416#0" expanded="true" />
-          </folding>
-        </state>
-      </provider>
-    </entry>
-    <entry file="file://$PROJECT_DIR$/caching-impl-infinispan/pom.xml">
-      <provider selected="true" editor-type-id="text-editor">
-        <state relative-caret-position="561">
-          <caret line="33" column="17" selection-start-line="31" selection-start-column="3" selection-end-line="33" selection-end-column="17" />
-        </state>
-      </provider>
-    </entry>
-    <entry file="file://$PROJECT_DIR$/channels-definition/src/main/java/ai/labs/channels/xmpp/IXmppEndpoint.java">
-      <provider selected="true" editor-type-id="text-editor" />
-    </entry>
-    <entry file="file://$PROJECT_DIR$/channels-definition/pom.xml">
-      <provider selected="true" editor-type-id="text-editor">
-        <state relative-caret-position="272">
-          <caret line="16" column="17" selection-start-line="16" selection-start-column="17" selection-end-line="16" selection-end-column="17" />
-        </state>
-      </provider>
-    </entry>
-    <entry file="file://$PROJECT_DIR$/channels-impl/pom.xml">
-      <provider selected="true" editor-type-id="text-editor">
-        <state relative-caret-position="833">
-          <caret line="49" column="25" selection-start-line="49" selection-start-column="25" selection-end-line="49" selection-end-column="25" />
-        </state>
-      </provider>
-    </entry>
-    <entry file="file://$PROJECT_DIR$/channels-definition/src/main/java/ai/labs/channels/facebookmessenger/IFacebookEndpoint.java">
-      <provider selected="true" editor-type-id="text-editor">
-        <state relative-caret-position="102">
-          <caret line="11" column="17" selection-start-line="11" selection-start-column="17" selection-end-line="11" selection-end-column="17" />
-        </state>
-      </provider>
-    </entry>
-    <entry file="file://$PROJECT_DIR$/channels-impl/src/main/java/ai/labs/channels/xmpp/bootstrap/XmppModule.java">
-      <provider selected="true" editor-type-id="text-editor">
-        <state relative-caret-position="187">
-          <caret line="15" column="17" selection-start-line="15" selection-start-column="17" selection-end-line="15" selection-end-column="17" />
-        </state>
-      </provider>
-    </entry>
-    <entry file="file://$PROJECT_DIR$/channels-impl/src/main/java/ai/labs/channels/differ/bootstrap/AMQPModule.java">
-      <provider selected="true" editor-type-id="text-editor">
-        <state relative-caret-position="408">
-          <caret line="33" selection-start-line="33" selection-end-line="33" />
-        </state>
-      </provider>
-    </entry>
-    <entry file="file://$PROJECT_DIR$/apiserver/config/development/systemRuntime.properties">
-      <provider selected="true" editor-type-id="text-editor">
-        <state relative-caret-position="221">
-          <caret line="13" column="30" selection-start-line="13" selection-start-column="30" selection-end-line="13" selection-end-column="30" />
-        </state>
-      </provider>
-    </entry>
-    <entry file="file://$PROJECT_DIR$/pom.xml">
-      <provider selected="true" editor-type-id="text-editor">
-        <state relative-caret-position="309">
-          <caret line="44" column="46" selection-start-line="44" selection-start-column="46" selection-end-line="44" selection-end-column="46" />
-        </state>
-      </provider>
-    </entry>
-    <entry file="file://$PROJECT_DIR$/channels-impl/src/main/java/ai/labs/channels/xmpp/XmppEndpoint.java">
-      <provider selected="true" editor-type-id="text-editor">
-        <state relative-caret-position="34">
-          <caret line="2" column="22" selection-start-line="2" selection-start-column="22" selection-end-line="2" selection-end-column="22" />
-        </state>
-      </provider>
-    </entry>
-    <entry file="file://$PROJECT_DIR$/apiserver/ApiServerStartup.sh">
-      <provider selected="true" editor-type-id="text-editor" />
-    </entry>
-    <entry file="jar://$PROJECT_DIR$/channels-impl/target/channels-impl-4.7.jar!/ai/labs/channels/facebookmessenger/FacebookEndpoint.class">
-      <provider selected="true" editor-type-id="text-editor">
-        <state>
-          <folding>
-            <element signature="e#0#21890#0" expanded="true" />
-          </folding>
-        </state>
-      </provider>
-    </entry>
-    <entry file="file://$PROJECT_DIR$/channels-impl/src/main/java/ai/labs/channels/facebookmessenger/FacebookEndpoint.java">
-      <provider selected="true" editor-type-id="text-editor">
-        <state relative-caret-position="135">
-          <caret line="84" column="37" selection-start-line="84" selection-start-column="37" selection-end-line="84" selection-end-column="37" />
-          <folding>
-            <element signature="imports" expanded="true" />
-          </folding>
-        </state>
-      </provider>
-    </entry>
-    <entry file="file://$PROJECT_DIR$/start_eddi.sh">
-      <provider selected="true" editor-type-id="text-editor" />
-    </entry>
-    <entry file="file://$PROJECT_DIR$/channels-impl/src/main/java/ai/labs/channels/differ/model/DifferChannelDefinition.java">
-      <provider selected="true" editor-type-id="text-editor">
-        <state relative-caret-position="102">
-          <caret line="10" column="13" selection-start-line="10" selection-start-column="13" selection-end-line="10" selection-end-column="13" />
-        </state>
-      </provider>
-    </entry>
-    <entry file="file://$PROJECT_DIR$/channels-impl/src/main/java/ai/labs/channels/differ/model/Event.java">
-      <provider selected="true" editor-type-id="text-editor">
-        <state relative-caret-position="187">
-          <caret line="24" column="44" selection-start-line="24" selection-start-column="44" selection-end-line="24" selection-end-column="44" />
-        </state>
-      </provider>
-    </entry>
-    <entry file="file://$APPLICATION_CONFIG_DIR$/scratches/scratch_26.json">
-      <provider selected="true" editor-type-id="text-editor">
-        <state relative-caret-position="68">
-          <caret line="4" column="13" selection-start-line="4" selection-start-column="13" selection-end-line="4" selection-end-column="13" />
-        </state>
-      </provider>
-    </entry>
-    <entry file="jar://$PROJECT_DIR$/../../.m2/com/rabbitmq/amqp-client/5.7.2/amqp-client-5.7.2-sources.jar!/com/rabbitmq/client/impl/recovery/AutorecoveringChannel.java">
-      <provider selected="true" editor-type-id="text-editor">
-        <state relative-caret-position="159">
-          <caret line="577" selection-start-line="577" selection-end-line="577" />
-        </state>
-      </provider>
-    </entry>
-    <entry file="file://$PROJECT_DIR$/channels-impl/src/main/java/ai/labs/channels/differ/model/DifferEventDefinition.java">
-      <provider selected="true" editor-type-id="text-editor">
-        <state relative-caret-position="221">
-          <caret line="13" column="13" selection-start-line="13" selection-start-column="13" selection-end-line="13" selection-end-column="13" />
-          <folding>
-            <element signature="imports" expanded="true" />
-          </folding>
-        </state>
-      </provider>
-    </entry>
-    <entry file="file://$PROJECT_DIR$/.idea/workspace.xml">
-      <provider selected="true" editor-type-id="text-editor">
-        <state relative-caret-position="306">
-          <caret line="18" selection-start-line="18" selection-end-line="18" />
-        </state>
-      </provider>
-    </entry>
-    <entry file="file://$PROJECT_DIR$/apiserver/src/main/java/ai/labs/api/ApiServer.java">
-      <provider selected="true" editor-type-id="text-editor">
-        <state relative-caret-position="254">
-          <caret line="101" column="33" selection-start-line="101" selection-start-column="33" selection-end-line="101" selection-end-column="33" />
-          <folding>
-            <element signature="imports" expanded="true" />
-          </folding>
-        </state>
-      </provider>
-    </entry>
-    <entry file="file://$PROJECT_DIR$/apiserver/pom.xml">
-      <provider selected="true" editor-type-id="text-editor">
-        <state relative-caret-position="238">
-          <caret line="154" column="37" selection-start-line="154" selection-start-column="37" selection-end-line="154" selection-end-column="37" />
-        </state>
-      </provider>
-    </entry>
-    <entry file="file://$PROJECT_DIR$/channels-impl/src/main/java/ai/labs/channels/differ/DifferEndpoint.java">
-      <provider selected="true" editor-type-id="text-editor">
-        <state relative-caret-position="374">
-          <caret line="71" selection-start-line="71" selection-end-line="71" />
-        </state>
-      </provider>
-    </entry>
   </component>
   <component name="masterDetails">
     <states>
