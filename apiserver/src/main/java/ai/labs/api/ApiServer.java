@@ -6,12 +6,11 @@ import ai.labs.bootstrap.UserModule;
 import ai.labs.caching.bootstrap.CachingModule;
 import ai.labs.callback.bootstrap.ConversationCallbackModule;
 import ai.labs.channels.config.IChannelDefinitionStore;
+import ai.labs.channels.config.IChannelManager;
 import ai.labs.channels.config.bootstrap.ChannelModule;
-import ai.labs.channels.differ.IDifferEndpoint;
 import ai.labs.channels.differ.bootstrap.AMQPModule;
 import ai.labs.channels.differ.bootstrap.DifferModule;
 import ai.labs.channels.facebookmessenger.bootstrap.FacebookMessengerModule;
-import ai.labs.channels.xmpp.IXmppEndpoint;
 import ai.labs.channels.xmpp.bootstrap.XmppModule;
 import ai.labs.core.bootstrap.CoreModule;
 import ai.labs.expressions.bootstrap.ExpressionModule;
@@ -41,9 +40,6 @@ import com.google.inject.Module;
 import org.jboss.resteasy.plugins.guice.ext.RequestScopeModule;
 
 import java.io.FileInputStream;
-
-import static ai.labs.channels.differ.IDifferEndpoint.RESOURCE_URI_DIFFER_CHANNEL_CONNECTOR;
-import static ai.labs.channels.xmpp.IXmppEndpoint.RESOURCE_URI_XMPP_CHANNEL_CONNECTOR;
 
 /**
  * the central REST API server component
@@ -116,27 +112,10 @@ public class ApiServer {
             //auto re-deploy bots
             injector.getInstance(IAutoBotDeployment.class).autoDeployBots();
 
-
             //load channel definitions
-            var channelDefinitionStore = injector.getInstance(IChannelDefinitionStore.class);
-            var channelDefinitions = channelDefinitionStore.readAllChannelDefinitions();
-            channelDefinitions.
-                    forEach(channelDefinition -> {
-                        String channelType = channelDefinition.getType().toString();
-                        if (!channelDefinition.isActive()) {
-                            return;
-                        }
-
-                        switch (channelType) {
-                            case RESOURCE_URI_XMPP_CHANNEL_CONNECTOR:
-                                injector.getInstance(IXmppEndpoint.class).init(channelDefinition);
-                                break;
-
-                            case RESOURCE_URI_DIFFER_CHANNEL_CONNECTOR:
-                                injector.getInstance(IDifferEndpoint.class).init(channelDefinition);
-                                break;
-                        }
-                    });
+            var channelDefinitions = injector.getInstance(IChannelDefinitionStore.class).readAllChannelDefinitions();
+            var channelManager = injector.getInstance(IChannelManager.class);
+            channelDefinitions.forEach(channelManager::initChannel);
 
             logServerStartupTime(serverStartupBegin);
         });

@@ -1,20 +1,15 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <project version="4">
   <component name="ChangeListManager">
-    <list default="true" id="c4b507be-1d9d-4bb5-ad86-b90d9c344248" name="Default" comment="further implemented differ integration">
-      <change afterPath="$PROJECT_DIR$/channels-definition/src/main/java/ai/labs/channels/differ/storage/IRestDifferBotMappingStore.java" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/channels-impl/src/main/java/ai/labs/channels/differ/storage/botidentitities/RestDifferBotMappingStore.java" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/channels-impl/src/test/java/ai/labs/channels/differ/DifferEndpointTest.java" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/channels-impl/src/test/java/ai/labs/channels/differ/DifferOutputTransformerTest.java" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/channels-impl/src/test/java/ai/labs/channels/differ/DifferPublisherTest.java" afterDir="false" />
+    <list default="true" id="c4b507be-1d9d-4bb5-ad86-b90d9c344248" name="Default" comment="added REST interface for botmapping; added unit tests for publisher and output transformer">
+      <change afterPath="$PROJECT_DIR$/channels-definition/src/main/java/ai/labs/channels/config/IChannelManager.java" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/channels-impl/src/main/java/ai/labs/channels/config/ChannelManager.java" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/channels-definition/src/main/java/ai/labs/channels/differ/IDifferPublisher.java" beforeDir="false" afterPath="$PROJECT_DIR$/channels-definition/src/main/java/ai/labs/channels/differ/IDifferPublisher.java" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/channels-definition/src/main/java/ai/labs/channels/differ/storage/IDifferBotMappingStore.java" beforeDir="false" afterPath="$PROJECT_DIR$/channels-definition/src/main/java/ai/labs/channels/differ/storage/IDifferBotMappingStore.java" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/apiserver/config/development/systemRuntime.properties" beforeDir="false" afterPath="$PROJECT_DIR$/apiserver/config/development/systemRuntime.properties" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/apiserver/src/main/java/ai/labs/api/ApiServer.java" beforeDir="false" afterPath="$PROJECT_DIR$/apiserver/src/main/java/ai/labs/api/ApiServer.java" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/channels-impl/src/main/java/ai/labs/channels/config/RestChannelDefinitionStore.java" beforeDir="false" afterPath="$PROJECT_DIR$/channels-impl/src/main/java/ai/labs/channels/config/RestChannelDefinitionStore.java" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/channels-impl/src/main/java/ai/labs/channels/config/bootstrap/ChannelModule.java" beforeDir="false" afterPath="$PROJECT_DIR$/channels-impl/src/main/java/ai/labs/channels/config/bootstrap/ChannelModule.java" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/channels-impl/src/main/java/ai/labs/channels/differ/DifferEndpoint.java" beforeDir="false" afterPath="$PROJECT_DIR$/channels-impl/src/main/java/ai/labs/channels/differ/DifferEndpoint.java" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/channels-impl/src/main/java/ai/labs/channels/differ/DifferOutputTransformer.java" beforeDir="false" afterPath="$PROJECT_DIR$/channels-impl/src/main/java/ai/labs/channels/differ/DifferOutputTransformer.java" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/channels-impl/src/main/java/ai/labs/channels/differ/DifferPublisher.java" beforeDir="false" afterPath="$PROJECT_DIR$/channels-impl/src/main/java/ai/labs/channels/differ/DifferPublisher.java" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/channels-impl/src/main/java/ai/labs/channels/differ/bootstrap/DifferModule.java" beforeDir="false" afterPath="$PROJECT_DIR$/channels-impl/src/main/java/ai/labs/channels/differ/bootstrap/DifferModule.java" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/channels-impl/src/main/java/ai/labs/channels/differ/storage/botidentitities/DifferBotMappingStore.java" beforeDir="false" afterPath="$PROJECT_DIR$/channels-impl/src/main/java/ai/labs/channels/differ/storage/botidentitities/DifferBotMappingStore.java" afterDir="false" />
     </list>
     <option name="EXCLUDED_CONVERTED_TO_IGNORED" value="true" />
     <option name="SHOW_DIALOG" value="false" />
@@ -47,8 +42,8 @@
         <option value="JavaScript File" />
         <option value="AnnotationType" />
         <option value="Interface" />
-        <option value="Class" />
         <option value="JUnit4 Test Class" />
+        <option value="Class" />
       </list>
     </option>
   </component>
@@ -178,11 +173,11 @@
       <recent name="C:\dev\git\EDDI\persistencestore-definition\target\classes" />
     </key>
     <key name="CopyClassDialog.RECENTS_KEY">
+      <recent name="ai.labs.runtime" />
       <recent name="ai.labs.resources.impl.client.bots" />
       <recent name="ai.labs.lifecycle.bootstrap" />
       <recent name="ai.labs.behavior.bootstrap" />
       <recent name="ai.labs.parser.bootstrap" />
-      <recent name="ai.labs.channels.xmpp" />
     </key>
     <key name="CreateClassDialog.RecentsKey">
       <recent name="ai.labs.resources.rest.config.http.model" />
@@ -378,12 +373,26 @@
       </list>
     </option>
   </component>
-  <component name="RunManager" selected="JUnit.DifferOutputTransformerTest.convertBotOutputToMessageCreateCommands">
+  <component name="RunManager" selected="Application.run">
     <configuration name="&lt;template&gt;" type="#org.jetbrains.idea.devkit.run.PluginConfigurationType" default="true" selected="false">
       <option name="VM_PARAMETERS" value="-Xmx512m -Xms256m -XX:MaxPermSize=250m -ea" />
     </configuration>
     <configuration default="true" type="Applet">
       <option name="POLICY_FILE" value="$APPLICATION_HOME_DIR$/bin/appletviewer.policy" />
+      <method v="2">
+        <option name="Make" enabled="true" />
+      </method>
+    </configuration>
+    <configuration name="LoggingConfigurator" type="Application" factoryName="Application" temporary="true" nameIsGenerated="true">
+      <option name="MAIN_CLASS_NAME" value="ai.labs.api.LoggingConfigurator" />
+      <module name="apiserver" />
+      <option name="WORKING_DIRECTORY" value="$PROJECT_DIR$" />
+      <extension name="coverage">
+        <pattern>
+          <option name="PATTERN" value="ai.labs.api.*" />
+          <option name="ENABLED" value="true" />
+        </pattern>
+      </extension>
       <method v="2">
         <option name="Make" enabled="true" />
       </method>
@@ -456,24 +465,6 @@
         <option name="Make" enabled="true" />
       </method>
     </configuration>
-    <configuration name="DifferPublisherTest.positiveDeliveryAck" type="JUnit" factoryName="JUnit" temporary="true" nameIsGenerated="true">
-      <module name="channels-impl" />
-      <extension name="coverage">
-        <pattern>
-          <option name="PATTERN" value="ai.labs.channels.differ.*" />
-          <option name="ENABLED" value="true" />
-        </pattern>
-      </extension>
-      <option name="PACKAGE_NAME" value="ai.labs.channels.differ" />
-      <option name="MAIN_CLASS_NAME" value="ai.labs.channels.differ.DifferPublisherTest" />
-      <option name="METHOD_NAME" value="positiveDeliveryAck" />
-      <option name="TEST_OBJECT" value="method" />
-      <option name="VM_PARAMETERS" />
-      <option name="WORKING_DIRECTORY" value="%MODULE_WORKING_DIR%" />
-      <method v="2">
-        <option name="Make" enabled="true" />
-      </method>
-    </configuration>
     <configuration name="DifferPublisherTest.publishCommandAndWaitForConfirm" type="JUnit" factoryName="JUnit" temporary="true" nameIsGenerated="true">
       <module name="channels-impl" />
       <extension name="coverage">
@@ -512,19 +503,19 @@
     </configuration>
     <list>
       <item itemvalue="Application.run" />
-      <item itemvalue="JUnit.DifferPublisherTest.positiveDeliveryAck" />
       <item itemvalue="JUnit.DifferPublisherTest.negativeDeliveryAck" />
       <item itemvalue="JUnit.DifferPublisherTest.publishCommandAndWaitForConfirm" />
       <item itemvalue="JUnit.DifferPublisherTest" />
       <item itemvalue="JUnit.DifferOutputTransformerTest.convertBotOutputToMessageCreateCommands" />
+      <item itemvalue="Application.LoggingConfigurator" />
     </list>
     <recent_temporary>
       <list>
+        <item itemvalue="Application.LoggingConfigurator" />
         <item itemvalue="JUnit.DifferOutputTransformerTest.convertBotOutputToMessageCreateCommands" />
         <item itemvalue="JUnit.DifferPublisherTest" />
         <item itemvalue="JUnit.DifferPublisherTest.publishCommandAndWaitForConfirm" />
         <item itemvalue="JUnit.DifferPublisherTest.negativeDeliveryAck" />
-        <item itemvalue="JUnit.DifferPublisherTest.positiveDeliveryAck" />
       </list>
     </recent_temporary>
   </component>
@@ -783,21 +774,7 @@
       <workItem from="1564574987413" duration="11285000" />
       <workItem from="1564603538009" duration="1675000" />
       <workItem from="1564643972352" duration="661000" />
-      <workItem from="1564644698871" duration="11607000" />
-    </task>
-    <task id="LOCAL-00183" summary="disabled auth for rest call to fetch css &amp; js">
-      <created>1558705798103</created>
-      <option name="number" value="00183" />
-      <option name="presentableId" value="LOCAL-00183" />
-      <option name="project" value="LOCAL" />
-      <updated>1558705798104</updated>
-    </task>
-    <task id="LOCAL-00184" summary="adapted public access paths; unrestricted chat ui needs to go through authentication as well">
-      <created>1558706966713</created>
-      <option name="number" value="00184" />
-      <option name="presentableId" value="LOCAL-00184" />
-      <option name="project" value="LOCAL" />
-      <updated>1558706966713</updated>
+      <workItem from="1564644698871" duration="20709000" />
     </task>
     <task id="LOCAL-00185" summary="fixed problem with deploying example bots; small styling improvement for smaller screens">
       <created>1558712322112</created>
@@ -1128,7 +1105,21 @@
       <option name="project" value="LOCAL" />
       <updated>1564602551242</updated>
     </task>
-    <option name="localTasksCounter" value="232" />
+    <task id="LOCAL-00232" summary="added REST interface for botmapping; added unit tests for publisher and output transformer">
+      <created>1564659477885</created>
+      <option name="number" value="00232" />
+      <option name="presentableId" value="LOCAL-00232" />
+      <option name="project" value="LOCAL" />
+      <updated>1564659477885</updated>
+    </task>
+    <task id="LOCAL-00233" summary="implemented support for bugsnag; small enhancements">
+      <created>1564686035597</created>
+      <option name="number" value="00233" />
+      <option name="presentableId" value="LOCAL-00233" />
+      <option name="project" value="LOCAL" />
+      <updated>1564686035597</updated>
+    </task>
+    <option name="localTasksCounter" value="234" />
     <servers />
   </component>
   <component name="TodoView">
@@ -1229,8 +1220,6 @@
     <ignored-roots>
       <path value="$PROJECT_DIR$/apiserver/tmp/5cf504ddc8894e77ee0ac73a" />
     </ignored-roots>
-    <MESSAGE value="added support for propertysetter being an external resource file; some refactorings along the line" />
-    <MESSAGE value="disabled warning because of unwanted log statement; Better schema generation for html5 gui generators" />
     <MESSAGE value="reverted back to vanilla json schema, as &quot;html5&quot; option doesn't produce spec valid types" />
     <MESSAGE value="fixed missing propertysetter file in import&amp;export" />
     <MESSAGE value="added docker healthcheck" />
@@ -1254,7 +1243,9 @@
     <MESSAGE value="mvn wrapper files" />
     <MESSAGE value="further implemented differ integration" />
     <MESSAGE value="small bug fix, first conversationOutput disappearing after second conversationOutput" />
-    <option name="LAST_COMMIT_MESSAGE" value="small bug fix, first conversationOutput disappearing after second conversationOutput" />
+    <MESSAGE value="added REST interface for botmapping; added unit tests for publisher and output transformer" />
+    <MESSAGE value="implemented support for bugsnag; small enhancements" />
+    <option name="LAST_COMMIT_MESSAGE" value="implemented support for bugsnag; small enhancements" />
     <option name="OPTIMIZE_IMPORTS_BEFORE_PROJECT_COMMIT" value="true" />
     <option name="REFORMAT_BEFORE_PROJECT_COMMIT" value="true" />
   </component>
@@ -1325,11 +1316,6 @@
           <url>jar://$MAVEN_REPOSITORY$/org/eclipse/jetty/jetty-servlets/9.4.18.v20190429/jetty-servlets-9.4.18.v20190429-sources.jar!/org/eclipse/jetty/servlets/CrossOriginFilter.java</url>
           <line>271</line>
           <option name="timeStamp" value="58" />
-        </line-breakpoint>
-        <line-breakpoint enabled="true" type="java-line">
-          <url>file://$PROJECT_DIR$/channels-impl/src/main/java/ai/labs/channels/differ/DifferEndpoint.java</url>
-          <line>65</line>
-          <option name="timeStamp" value="63" />
         </line-breakpoint>
       </breakpoints>
     </breakpoint-manager>

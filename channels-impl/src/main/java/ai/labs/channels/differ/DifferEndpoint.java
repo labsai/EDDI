@@ -56,6 +56,8 @@ public class DifferEndpoint implements IDifferEndpoint {
     private static final String logStatementIgnoredEvent = " [x] received but ignored amqp event, " +
             "since non of the participants in this conversation is a bot. ('{}')";
 
+    private boolean isInit = false;
+
     @Inject
     public DifferEndpoint(IRestBotManagement restBotManagement,
                           SystemRuntime.IRuntime runtime,
@@ -81,6 +83,11 @@ public class DifferEndpoint implements IDifferEndpoint {
 
     @Override
     public void init(ChannelDefinition channelDefinition) {
+
+        if (isInit) {
+            log.warn("DifferEndpoint tried to initialized, but has already been started");
+            return;
+        }
 
         try {
             differConversationStore.getAllDifferConversationIds().

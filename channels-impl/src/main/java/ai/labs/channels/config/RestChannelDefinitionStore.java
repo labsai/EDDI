@@ -14,11 +14,14 @@ import java.util.List;
 @Slf4j
 public class RestChannelDefinitionStore implements IRestChannelDefinitionStore {
     private final IChannelDefinitionStore channelDefinitionStore;
+    private final IChannelManager channelManager;
 
     @Inject
-    public RestChannelDefinitionStore(IChannelDefinitionStore channelDefinitionStore) {
+    public RestChannelDefinitionStore(IChannelDefinitionStore channelDefinitionStore,
+                                      IChannelManager channelManager) {
 
         this.channelDefinitionStore = channelDefinitionStore;
+        this.channelManager = channelManager;
     }
 
     @Override
@@ -47,6 +50,9 @@ public class RestChannelDefinitionStore implements IRestChannelDefinitionStore {
     public Response createChannelDefinition(ChannelDefinition channelDefinition) {
         try {
             channelDefinitionStore.createChannelDefinition(channelDefinition);
+            if (channelDefinition.isActive()) {
+                channelManager.initChannel(channelDefinition);
+            }
             return Response.ok().build();
         } catch (IResourceStore.ResourceAlreadyExistsException e) {
             throw new BadRequestException(e.getLocalizedMessage(), e);
