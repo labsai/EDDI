@@ -12,5 +12,6 @@ import java.util.Map;
 public class ChannelDefinition {
     private String name;
     private URI type;
+    private boolean active = true;
     private Map<String, Object> config = new HashMap<>();
 }

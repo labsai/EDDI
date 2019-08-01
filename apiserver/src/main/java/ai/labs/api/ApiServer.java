@@ -37,21 +37,17 @@ import ai.labs.staticresources.bootstrap.StaticResourcesModule;
 import ai.labs.templateengine.bootstrap.TemplateEngineModule;
 import ai.labs.testing.bootstrap.AutomatedtestingModule;
 import ai.labs.utilities.FileUtilities;
-import com.bugsnag.Bugsnag;
-import com.google.inject.Key;
 import com.google.inject.Module;
-import com.google.inject.name.Names;
 import org.jboss.resteasy.plugins.guice.ext.RequestScopeModule;
 
 import java.io.FileInputStream;
 
 import static ai.labs.channels.differ.IDifferEndpoint.RESOURCE_URI_DIFFER_CHANNEL_CONNECTOR;
 import static ai.labs.channels.xmpp.IXmppEndpoint.RESOURCE_URI_XMPP_CHANNEL_CONNECTOR;
-import static ai.labs.utilities.RuntimeUtilities.isNullOrEmpty;
 
 /**
  * the central REST API server component
- * run with params: -DEDDI_ENV=(development|production) -Xbootclasspath/p:[ABS_PATH_TO]\alpn-boot-8.1.11.v20170118.jar
+ * run with params: -DEDDI_ENV=(development|production)
  * requires Mongo DB
  *
  * @author ginccc
@@ -74,10 +70,10 @@ public class ApiServer {
         //bootstrapping modules
         DependencyInjector.Environment environment = DependencyInjector.Environment.valueOf(eddiEnv.toUpperCase());
         Module[] modules = {
+                new LoggingModule(),
                 new RuntimeModule(
                         new FileInputStream(configDir + "threads.properties"),
                         new FileInputStream(configDir + "systemRuntime.properties")),
-                new LoggingModule(),
                 new RequestScopeModule(),
                 new RestInterfaceModule(),
                 new SerializationModule(),
@@ -115,12 +111,6 @@ public class ApiServer {
         //init modules
         final DependencyInjector injector = DependencyInjector.init(environment, modules);
 
-        //init bugtracking if bugsnag api key is set
-        String bugsnagApiKey = injector.getInstance(Key.get(String.class, Names.named("bugsnagApiKey")));
-        if (!isNullOrEmpty(bugsnagApiKey)) {
-            new Bugsnag(bugsnagApiKey);
-        }
-
         //init webserver
         injector.getInstance(IServerRuntime.class).startup(() -> {
             //auto re-deploy bots
@@ -133,6 +123,9 @@ public class ApiServer {
             channelDefinitions.
                     forEach(channelDefinition -> {
                         String channelType = channelDefinition.getType().toString();
+                        if (!channelDefinition.isActive()) {
+                            return;
+                        }
 
                         switch (channelType) {
                             case RESOURCE_URI_XMPP_CHANNEL_CONNECTOR:
