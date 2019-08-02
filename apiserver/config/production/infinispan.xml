@@ -24,11 +24,10 @@
             <persistence>
                 <mongodbStore>
                     <connection
-                            uri="mongodb://mongodb:27017/eddi?w=0&amp;connectTimeoutMS=2000"
+                            uri="mongodb://${mongodb.hosts}:${mongodb.port}/${mongodb.database}?w=0&amp;connectTimeoutMS=2000"
                             collection="infinispan_cachestore_ackAwaitingCommands"/>
                 </mongodbStore>
             </persistence>
         </local-cache>
     </cache-container>
 </infinispan>
-
