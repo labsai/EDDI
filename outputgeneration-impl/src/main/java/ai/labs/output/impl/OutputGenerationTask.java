@@ -166,10 +166,19 @@ public class OutputGenerationTask implements ILifecycleTask {
         URI uri = URI.create(uriObj.toString());
 
         try {
-            OutputConfigurationSet outputConfigurationSet =
-                    resourceClientLibrary.getResource(uri, OutputConfigurationSet.class);
+            var outputConfigurationSet = resourceClientLibrary.getResource(uri, OutputConfigurationSet.class);
 
-            outputConfigurationSet.getOutputSet().forEach(outputConfig -> outputGeneration.addOutputEntry(
+            var outputSet = outputConfigurationSet.getOutputSet();
+            outputSet.sort((o1, o2) -> {
+                int comparisonOfKeys = o1.getAction().compareTo(o2.getAction());
+                if (comparisonOfKeys == 0) {
+                    return Integer.compare(o1.getTimesOccurred(), o2.getTimesOccurred());
+                } else {
+                    return comparisonOfKeys;
+                }
+            });
+
+            outputSet.forEach(outputConfig -> outputGeneration.addOutputEntry(
                     new OutputEntry(outputConfig.getAction(),
                             outputConfig.getTimesOccurred(),
                             convertOutputTypesConfig(outputConfig.getOutputs()),

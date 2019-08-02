@@ -76,7 +76,7 @@ public abstract class BaseMatcher implements IBehaviorCondition {
                             ". Needs to have one of the following configs: %s, actual value: '%s'.\n" +
                             "'currentStep' has been set as default now.";
                     errorMessage = String.format(errorMessage, Arrays.toString(values()), conversationOccurrence);
-                    log.error(errorMessage, new IllegalArgumentException(errorMessage));
+                    log.warn(errorMessage, new IllegalArgumentException(errorMessage));
             }
         }
     }
