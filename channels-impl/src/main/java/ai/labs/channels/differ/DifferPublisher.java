@@ -1,7 +1,7 @@
 package ai.labs.channels.differ;
 
 import ai.labs.channels.differ.model.CommandInfo;
-import ai.labs.channels.differ.model.MessageCreateCommand;
+import ai.labs.channels.differ.model.CreateMessageCommand;
 import ai.labs.serialization.IJsonSerialization;
 import com.rabbitmq.client.CancelCallback;
 import com.rabbitmq.client.Channel;
@@ -21,11 +21,11 @@ import static ai.labs.channels.differ.utilities.DifferUtilities.calculateSentAt;
 @Singleton
 public class DifferPublisher implements IDifferPublisher {
     static final String MESSAGE_CREATED_EXCHANGE = "message.created";
-    private static final String MESSAGE_CREATED_QUEUE_NAME = "message.created.eddi";
+    private static final String MESSAGE_CREATED_QUEUE_NAME = MESSAGE_CREATED_EXCHANGE + ".eddi";
     private static final String CONVERSATION_CREATED_EXCHANGE = "conversation.created";
-    private static final String CONVERSATION_CREATED_QUEUE_NAME = "conversation.created.eddi";
+    private static final String CONVERSATION_CREATED_QUEUE_NAME = CONVERSATION_CREATED_EXCHANGE + ".eddi";
 
-    static final String MESSAGE_CREATED_EDDI_FAILED_ROUTING_KEY = "message.created.eddi.failed";
+    static final String MESSAGE_CREATED_EDDI_FAILED_ROUTING_KEY = MESSAGE_CREATED_EXCHANGE + ".eddi.failed";
     static final long TIMEOUT_CONFIRMS_IN_MILLIS = 60000;
 
     private final Channel channel;
@@ -105,8 +105,8 @@ public class DifferPublisher implements IDifferPublisher {
         int sequenceNumber = commandInfo.getSequenceNumber();
         Date sentAt = new Date(calculateSentAt + sequenceNumber);
         command.setCreatedAt(sentAt);
-        if (command instanceof MessageCreateCommand) {
-            ((MessageCreateCommand) command).getPayload().setSentAt(sentAt);
+        if (command instanceof CreateMessageCommand) {
+            ((CreateMessageCommand) command).getPayload().setSentAt(sentAt);
         }
         log.debug("sendAt: {} = calculateSentAt: {} + sequenceNumber: {}, ",
                 sentAt.getTime(), calculateSentAt, sequenceNumber);

@@ -39,8 +39,8 @@ import static java.util.concurrent.TimeUnit.MILLISECONDS;
 @Slf4j
 @Singleton
 public class DifferEndpoint implements IDifferEndpoint {
-    private static final String CONVERSATION_CREATE_EXCHANGE = "conversation";
-    private static final String CONVERSATION_CREATE_ROUTING_KEY = "conversation.create";
+    private static final String CREATE_CONVERSATION_EXCHANGE = "conversation";
+    private static final String CREATE_CONVERSATION_ROUTING_KEY = CREATE_CONVERSATION_EXCHANGE + ".create";
 
     private final IRestBotManagement restBotManagement;
     private final SystemRuntime.IRuntime runtime;
@@ -350,14 +350,14 @@ public class DifferEndpoint implements IDifferEndpoint {
     }
 
     private String getReferenceId(Command command) {
-        if (command instanceof ConversationCreateCommand) {
-            return ((ConversationCreateCommand) command).getPayload().getId();
-        } else if (command instanceof ActionsCreateCommand) {
-            var actions = ((ActionsCreateCommand) command).getPayload().getActions();
-            var actionIds = actions.stream().map(ActionsCreateCommand.Payload.Action::getId).collect(Collectors.toList());
+        if (command instanceof CreateConversationCommand) {
+            return ((CreateConversationCommand) command).getPayload().getId();
+        } else if (command instanceof CreateActionsCommand) {
+            var actions = ((CreateActionsCommand) command).getPayload().getActions();
+            var actionIds = actions.stream().map(CreateActionsCommand.Payload.Action::getId).collect(Collectors.toList());
             return String.join("-", actionIds);
         } else {
-            return ((MessageCreateCommand) command).getPayload().getId();
+            return ((CreateMessageCommand) command).getPayload().getId();
         }
     }
 
@@ -399,7 +399,7 @@ public class DifferEndpoint implements IDifferEndpoint {
         checkNotEmpty(createConversation.getParticipantIds(), "createConversation.participantIds");
 
         try {
-            triggerConversationCreateCommand(createConversation);
+            triggerCreateConversationCommand(createConversation);
         } catch (IOException e) {
             log.error(e.getLocalizedMessage(), e);
             throw new InternalServerErrorException();
@@ -417,23 +417,23 @@ public class DifferEndpoint implements IDifferEndpoint {
         sendBotOutputToConversation(memorySnapshot.getConversationOutputs(), 0, botUserId, differConversationId);
     }
 
-    private void triggerConversationCreateCommand(CreateConversation createConversation) throws IOException {
-        var command = new ConversationCreateCommand(
+    private void triggerCreateConversationCommand(CreateConversation createConversation) throws IOException {
+        var command = new CreateConversationCommand(
                 new Command.AuthContext(createConversation.getBotUserIdCreator()),
-                generateUUID(), CONVERSATION_CREATE_ROUTING_KEY, getCurrentTime());
+                generateUUID(), CREATE_CONVERSATION_ROUTING_KEY, getCurrentTime());
 
         command.setPayload(
-                new ConversationCreateCommand.Payload(
+                new CreateConversationCommand.Payload(
                         generateUUID(),
                         createConversation.getConversationName(),
                         createConversation.getParticipantIds()));
 
-        publishConversationCreateCommand(command);
+        publishCreateConversationCommand(command);
     }
 
-    private void publishConversationCreateCommand(ConversationCreateCommand conversationCreateCommand) throws IOException {
+    private void publishCreateConversationCommand(CreateConversationCommand createConversationCommand) throws IOException {
         differPublisher.publishCommandAndWaitForConfirm(new CommandInfo(
-                CONVERSATION_CREATE_EXCHANGE,
-                CONVERSATION_CREATE_ROUTING_KEY, conversationCreateCommand, 0, 0, 0));
+                CREATE_CONVERSATION_EXCHANGE,
+                CREATE_CONVERSATION_ROUTING_KEY, createConversationCommand, 0, 0, 0));
     }
 }

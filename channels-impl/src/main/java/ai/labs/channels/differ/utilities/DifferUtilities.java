@@ -28,13 +28,8 @@ public class DifferUtilities {
      */
     public static long calculateTypingDelay(String text) {
         var delay = text.split(" ").length * DELAY_PER_WORD;
-        delay = (delay < DELAY_PER_WORD * 3) ? 300 : delay;
 
-        if (delay > 1000) {
-            delay = 1000;
-        }
-
-        return delay;
+        return Math.min(Math.max(300, delay), 1000);
     }
 
     public static long calculateSentAt(long receivedEventCreatedAt) {
