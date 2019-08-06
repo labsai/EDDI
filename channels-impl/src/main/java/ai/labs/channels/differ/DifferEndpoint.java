@@ -53,7 +53,7 @@ public class DifferEndpoint implements IDifferEndpoint {
     private final ICache<String, CommandInfo> ackAwaitingCommandsCache;
     private final IDifferConversationStore differConversationStore;
     private static final String logStatementIgnoredEvent = " [x] received but ignored amqp event, " +
-            "since non of the participants in this conversation is a bot. ('{}')";
+            "since none of the participants in this conversation is a bot. ('{}')";
 
     private boolean isInit = false;
 
@@ -99,12 +99,12 @@ public class DifferEndpoint implements IDifferEndpoint {
             return;
         }
 
-        differPublisher.init(createConversationCreatedCallback(), createMessageCreatedCallback());
+        differPublisher.init(conversationCreatedCallback(), messageCreatedCallback());
 
         log.info("Differ integration started");
     }
 
-    private DeliverCallback createConversationCreatedCallback() {
+    private DeliverCallback conversationCreatedCallback() {
         return (consumerTag, delivery) -> {
             final long deliveryTag = delivery.getEnvelope().getDeliveryTag();
             String receivedMessage = new String(delivery.getBody(), StandardCharsets.UTF_8);
@@ -147,7 +147,7 @@ public class DifferEndpoint implements IDifferEndpoint {
         };
     }
 
-    private DeliverCallback createMessageCreatedCallback() {
+    private DeliverCallback messageCreatedCallback() {
         return (consumerTag, delivery) -> {
             final long deliveryTag = delivery.getEnvelope().getDeliveryTag();
             String receivedMessage = new String(delivery.getBody(), StandardCharsets.UTF_8);
