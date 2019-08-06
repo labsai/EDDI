@@ -3,7 +3,16 @@ package ai.labs.channels.differ;
 import ai.labs.caching.ICache;
 import ai.labs.caching.ICacheFactory;
 import ai.labs.channels.config.model.ChannelDefinition;
-import ai.labs.channels.differ.model.*;
+import ai.labs.channels.differ.model.CommandInfo;
+import ai.labs.channels.differ.model.CreateConversation;
+import ai.labs.channels.differ.model.DifferConversationInfo;
+import ai.labs.channels.differ.model.commands.Command;
+import ai.labs.channels.differ.model.commands.CreateActionsCommand;
+import ai.labs.channels.differ.model.commands.CreateConversationCommand;
+import ai.labs.channels.differ.model.commands.CreateMessageCommand;
+import ai.labs.channels.differ.model.events.ConversationCreatedEvent;
+import ai.labs.channels.differ.model.events.Event;
+import ai.labs.channels.differ.model.events.MessageCreatedEvent;
 import ai.labs.channels.differ.storage.IDifferBotMappingStore;
 import ai.labs.channels.differ.storage.IDifferConversationStore;
 import ai.labs.memory.model.ConversationOutput;
@@ -110,15 +119,15 @@ public class DifferEndpoint implements IDifferEndpoint {
             String receivedMessage = new String(delivery.getBody(), StandardCharsets.UTF_8);
 
             try {
-                Event receivedEvent = jsonSerialization.deserialize(receivedMessage, Event.class);
+                var conversationCreatedEvent = jsonSerialization.deserialize(receivedMessage, ConversationCreatedEvent.class);
 
-                if (receivedEvent.getPayload().getError() != null) {
+                if (conversationCreatedEvent.getPayload().getError() != null) {
                     log.error("ConversationCreated event contained error '{}'", receivedMessage);
                     differPublisher.positiveDeliveryAck(deliveryTag);
                     return;
                 }
 
-                var payload = receivedEvent.getPayload();
+                var payload = conversationCreatedEvent.getPayload();
                 var conversationId = payload.getConversation().getId();
                 var participantIds = payload.getParticipantIds();
                 // in case there are multiple bots part of the conversation, we need to send this data to all of them
@@ -138,7 +147,7 @@ public class DifferEndpoint implements IDifferEndpoint {
                 conversationInfoCache.put(conversationId, conversationInfo);
 
                 botUserParticipantIds.forEach(botUserId ->
-                        startConversationWithUser(delivery, botUserId, conversationId, receivedEvent, conversationInfo));
+                        startConversationWithUser(delivery, botUserId, conversationId, conversationCreatedEvent, conversationInfo));
             } catch (Exception e) {
                 log.error("Error processing delivery {} of conversation.created.eddi with body {}", deliveryTag, receivedMessage);
                 log.error(e.getLocalizedMessage(), e);
@@ -153,8 +162,8 @@ public class DifferEndpoint implements IDifferEndpoint {
             String receivedMessage = new String(delivery.getBody(), StandardCharsets.UTF_8);
 
             try {
-                var receivedEvent = jsonSerialization.deserialize(receivedMessage, Event.class);
-                final var conversationId = receivedEvent.getPayload().getConversation().getId();
+                var messageCreatedEvent = jsonSerialization.deserialize(receivedMessage, MessageCreatedEvent.class);
+                final var conversationId = messageCreatedEvent.getPayload().getConversation().getId();
                 if (!availableConversationIds.containsKey(conversationId)) {
                     debugLogIgnoredEvent("Ignored message because " +
                             "conversationId is not part of any known conversations " +
@@ -165,11 +174,11 @@ public class DifferEndpoint implements IDifferEndpoint {
 
                 //we have confirmed that we are part of this conversation
                 // next step: see if there are any bot messages waiting for this message to arrive to be send out
-                var messageSentAtTime = receivedEvent.getCreatedAt().getTime();
-                var messageId = receivedEvent.getPayload().getMessage().getId();
+                var messageSentAtTime = messageCreatedEvent.getCreatedAt().getTime();
+                var messageId = messageCreatedEvent.getPayload().getMessage().getId();
                 executeConfirmationSeekingCommands(messageId, messageSentAtTime);
 
-                Event.Payload payload = receivedEvent.getPayload();
+                var payload = messageCreatedEvent.getPayload();
                 String senderId = payload.getMessage().getSenderId();
                 if (availableBotUserIds.containsKey(senderId)) {
                     //this message has been created by a bot user, likely us, therefore skip processing
@@ -180,7 +189,7 @@ public class DifferEndpoint implements IDifferEndpoint {
 
                 var conversationInfo = getConversationInfo(conversationId);
                 if (isGroupChat(conversationInfo.getAllParticipantIds())) {
-                    List<String> mentions = receivedEvent.getPayload().getMessage().getMentions();
+                    List<String> mentions = messageCreatedEvent.getPayload().getMessage().getMentions();
                     if (mentions == null || mentions.stream().noneMatch(availableBotUserIds::containsKey)) {
                         //this message belongs to a conversation we are a part of, but since this
                         //is a group chat, we only process messages that contain a mentions of a bot user
@@ -198,7 +207,7 @@ public class DifferEndpoint implements IDifferEndpoint {
                 String userInput = payload.getMessage().getParts().get(0).getBody();
                 conversationInfo.getBotParticipantIds().forEach(botUserId ->
                         processUserMessage(delivery, botUserId, conversationId,
-                                userInput, receivedEvent, getBotIntent(botUserId), Collections.emptyMap()));
+                                userInput, messageCreatedEvent, getBotIntent(botUserId), Collections.emptyMap()));
 
             } catch (Exception e) {
                 log.error("Error processing delivery {} of message.created.eddi with body {}", deliveryTag, receivedMessage);
@@ -236,7 +245,7 @@ public class DifferEndpoint implements IDifferEndpoint {
     }
 
     private void startConversationWithUser(Delivery delivery, String botUserId, String conversationId,
-                                           Event event, DifferConversationInfo differConversationInfo) {
+                                           ConversationCreatedEvent conversationCreatedEvent, DifferConversationInfo differConversationInfo) {
 
         Map<String, Context> context = new LinkedHashMap<>();
         context.put("newConversationStarted", new Context(Context.ContextType.string, "true"));
@@ -244,7 +253,7 @@ public class DifferEndpoint implements IDifferEndpoint {
                 new Context(Context.ContextType.string,
                         String.valueOf(isGroupChat(differConversationInfo.getAllParticipantIds()))));
 
-        processUserMessage(delivery, botUserId, conversationId, "", event, getBotIntent(botUserId), context);
+        processUserMessage(delivery, botUserId, conversationId, "", conversationCreatedEvent, getBotIntent(botUserId), context);
     }
 
     private String getBotIntent(String botUserId) {

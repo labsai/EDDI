@@ -1,4 +1,4 @@
-package ai.labs.channels.differ.model;
+package ai.labs.channels.differ.model.commands;
 
 import lombok.AllArgsConstructor;
 import lombok.Getter;

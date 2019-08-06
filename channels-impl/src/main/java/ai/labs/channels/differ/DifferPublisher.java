@@ -1,7 +1,7 @@
 package ai.labs.channels.differ;
 
 import ai.labs.channels.differ.model.CommandInfo;
-import ai.labs.channels.differ.model.CreateMessageCommand;
+import ai.labs.channels.differ.model.commands.CreateMessageCommand;
 import ai.labs.serialization.IJsonSerialization;
 import com.rabbitmq.client.CancelCallback;
 import com.rabbitmq.client.Channel;

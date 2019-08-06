@@ -1,9 +1,9 @@
 package ai.labs.channels.differ;
 
-import ai.labs.channels.differ.model.Command;
 import ai.labs.channels.differ.model.CommandInfo;
-import ai.labs.channels.differ.model.CreateMessageCommand;
-import ai.labs.channels.differ.model.Event;
+import ai.labs.channels.differ.model.commands.Command;
+import ai.labs.channels.differ.model.commands.CreateMessageCommand;
+import ai.labs.channels.differ.model.events.Event;
 import ai.labs.serialization.IJsonSerialization;
 import ai.labs.serialization.JsonSerialization;
 import ai.labs.serialization.bootstrap.SerializationModule;
