@@ -29,7 +29,6 @@ import java.util.*;
 import java.util.concurrent.ExecutionException;
 import java.util.stream.Collectors;
 
-import static ai.labs.channels.differ.utilities.DifferUtilities.generateUUID;
 import static ai.labs.channels.differ.utilities.DifferUtilities.getCurrentTime;
 import static ai.labs.lifecycle.IConversation.CONVERSATION_END;
 import static ai.labs.utilities.RuntimeUtilities.*;
@@ -105,7 +104,7 @@ public class DifferEndpoint implements IDifferEndpoint {
         log.info("Differ integration started");
     }
 
-    DeliverCallback createConversationCreatedCallback() {
+    private DeliverCallback createConversationCreatedCallback() {
         return (consumerTag, delivery) -> {
             final long deliveryTag = delivery.getEnvelope().getDeliveryTag();
             String receivedMessage = new String(delivery.getBody(), StandardCharsets.UTF_8);
@@ -148,7 +147,7 @@ public class DifferEndpoint implements IDifferEndpoint {
         };
     }
 
-    DeliverCallback createMessageCreatedCallback() {
+    private DeliverCallback createMessageCreatedCallback() {
         return (consumerTag, delivery) -> {
             final long deliveryTag = delivery.getEnvelope().getDeliveryTag();
             String receivedMessage = new String(delivery.getBody(), StandardCharsets.UTF_8);
@@ -419,12 +418,10 @@ public class DifferEndpoint implements IDifferEndpoint {
 
     private void triggerCreateConversationCommand(CreateConversation createConversation) throws IOException {
         var command = new CreateConversationCommand(
-                new Command.AuthContext(createConversation.getBotUserIdCreator()),
-                generateUUID(), CREATE_CONVERSATION_ROUTING_KEY, getCurrentTime());
+                new Command.AuthContext(createConversation.getBotUserIdCreator()), CREATE_CONVERSATION_ROUTING_KEY, getCurrentTime());
 
         command.setPayload(
                 new CreateConversationCommand.Payload(
-                        generateUUID(),
                         createConversation.getConversationName(),
                         createConversation.getParticipantIds()));
 

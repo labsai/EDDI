@@ -7,14 +7,15 @@ import lombok.Setter;
 import java.io.Serializable;
 import java.util.Date;
 import java.util.List;
+import java.util.UUID;
 
 @Getter
 @Setter
-public class ActionsCreateCommand extends Command {
+public class CreateActionsCommand extends Command {
     private Payload payload;
 
-    public ActionsCreateCommand(AuthContext authContext, String commandId, String commandName, Date createdAt, Payload payload) {
-        super(authContext, commandId, commandName, createdAt);
+    public CreateActionsCommand(AuthContext authContext, String commandName, Date createdAt, Payload payload) {
+        super(authContext, commandName, createdAt);
         this.payload = payload;
     }
 
@@ -33,6 +34,14 @@ public class ActionsCreateCommand extends Command {
             private String messageId;
             private Boolean primary;
             private String text;
+
+            public Action(String conversationId, String messageId, Boolean primary, String text) {
+                this.id = String.valueOf(UUID.randomUUID());
+                this.conversationId = conversationId;
+                this.messageId = messageId;
+                this.primary = primary;
+                this.text = text;
+            }
         }
     }
 

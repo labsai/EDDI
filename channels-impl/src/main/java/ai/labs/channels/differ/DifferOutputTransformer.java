@@ -32,7 +32,7 @@ public class DifferOutputTransformer implements IDifferOutputTransformer {
                 .mapToObj(sequenceNumber -> {
                     var outputPart = outputParts.get(sequenceNumber);
 
-                    var eventPart = new Event.Part(generateUUID(), outputPart, MediaType.TEXT_PLAIN, "text");
+                    var eventPart = new Event.Part(outputPart, MediaType.TEXT_PLAIN, "text");
                     return new CommandInfo(CONVERSATION_EXCHANGE, MESSAGE_CREATE_ROUTING_KEY,
                             createCreateMessageCommand(conversationId, botUserId, List.of(eventPart)),
                             calculateTypingDelay(outputPart), timeOfLastMessageReceived, sequenceNumber + 1);
@@ -60,14 +60,14 @@ public class DifferOutputTransformer implements IDifferOutputTransformer {
 
     private static CreateMessageCommand createCreateMessageCommand(String conversationId, String botUserId, List<Event.Part> parts) {
         return new CreateMessageCommand(
-                new Command.AuthContext(botUserId), generateUUID(), MESSAGE_CREATE,
-                new CreateMessageCommand.Payload(generateUUID(), conversationId, botUserId, INPUT_TYPE_TEXT, parts));
+                new Command.AuthContext(botUserId), MESSAGE_CREATE,
+                new CreateMessageCommand.Payload(conversationId, botUserId, INPUT_TYPE_TEXT, parts));
     }
 
     private static CreateActionsCommand createCreateActionCommand(
             String conversationId, String messageId, String botUserId, List<QuickReply> quickReplies) {
 
-        return new CreateActionsCommand(new Command.AuthContext(botUserId), generateUUID(), ACTION_CREATE_ROUTING_KEY, getCurrentTime(),
+        return new CreateActionsCommand(new Command.AuthContext(botUserId), ACTION_CREATE_ROUTING_KEY, getCurrentTime(),
                 new CreateActionsCommand.Payload(convertQuickRepliesToActions(conversationId, messageId, quickReplies)));
     }
 
@@ -76,8 +76,7 @@ public class DifferOutputTransformer implements IDifferOutputTransformer {
 
         return quickReplies.stream().map(quickReply -> {
                     Boolean isDefault = quickReply.isDefault();
-            return new CreateActionsCommand.Payload.Action(
-                            generateUUID(), conversationId, messageId, isDefault, quickReply.getValue());
+            return new CreateActionsCommand.Payload.Action(conversationId, messageId, isDefault, quickReply.getValue());
                 }
         ).collect(Collectors.toList());
     }

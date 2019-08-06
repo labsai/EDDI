@@ -8,6 +8,7 @@ import lombok.Setter;
 import java.io.Serializable;
 import java.util.Date;
 import java.util.List;
+import java.util.UUID;
 
 @Getter
 @Setter
@@ -57,5 +58,12 @@ public class Event implements Serializable {
         private String body;
         private String mimeType;
         private String type;
+
+        public Part(String body, String mimeType, String type) {
+            this.id = String.valueOf(UUID.randomUUID());
+            this.body = body;
+            this.mimeType = mimeType;
+            this.type = type;
+        }
     }
 }

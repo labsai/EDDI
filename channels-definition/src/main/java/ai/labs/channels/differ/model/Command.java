@@ -7,6 +7,7 @@ import lombok.Setter;
 
 import java.io.Serializable;
 import java.util.Date;
+import java.util.UUID;
 
 @NoArgsConstructor
 @AllArgsConstructor
@@ -18,10 +19,15 @@ public abstract class Command implements Serializable {
     protected String commandName;
     protected Date createdAt;
 
-    public Command(AuthContext authContext, String commandId, String commandName) {
+    Command(AuthContext authContext, String commandName) {
         this.authContext = authContext;
-        this.commandId = commandId;
+        this.commandId = String.valueOf(UUID.randomUUID());
         this.commandName = commandName;
+    }
+
+    Command(AuthContext authContext, String commandName, Date createdAt) {
+        this(authContext, commandName);
+        this.createdAt = createdAt;
     }
 
     @Getter

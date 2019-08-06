@@ -1,8 +1,8 @@
 package ai.labs.channels.differ;
 
-import ai.labs.channels.differ.model.ActionsCreateCommand;
 import ai.labs.channels.differ.model.CommandInfo;
-import ai.labs.channels.differ.model.MessageCreateCommand;
+import ai.labs.channels.differ.model.CreateActionsCommand;
+import ai.labs.channels.differ.model.CreateMessageCommand;
 import ai.labs.memory.model.ConversationOutput;
 import ai.labs.output.model.QuickReply;
 import org.junit.Before;
@@ -47,9 +47,9 @@ public class DifferOutputTransformerTest {
 
         //assert
         assertEquals(3, commandInfos.size());
-        var command_1 = (MessageCreateCommand) commandInfos.get(0).getCommand();
-        var command_2 = (MessageCreateCommand) commandInfos.get(1).getCommand();
-        var command_3 = (ActionsCreateCommand) commandInfos.get(2).getCommand();
+        var command_1 = (CreateMessageCommand) commandInfos.get(0).getCommand();
+        var command_2 = (CreateMessageCommand) commandInfos.get(1).getCommand();
+        var command_3 = (CreateActionsCommand) commandInfos.get(2).getCommand();
 
         assertEquals(botUserId, command_1.getAuthContext().getUserId());
         assertEquals(conversationId, command_1.getPayload().getConversationId());

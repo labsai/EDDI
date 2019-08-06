@@ -7,14 +7,15 @@ import lombok.Setter;
 import java.io.Serializable;
 import java.util.Date;
 import java.util.List;
+import java.util.UUID;
 
 @Getter
 @Setter
-public class ConversationCreateCommand extends Command {
+public class CreateConversationCommand extends Command {
     private Payload payload;
 
-    public ConversationCreateCommand(AuthContext authContext, String commandId, String commandName, Date createdAt) {
-        super(authContext, commandId, commandName, createdAt);
+    public CreateConversationCommand(AuthContext authContext, String commandName, Date createdAt) {
+        super(authContext, commandName, createdAt);
     }
 
     @Getter
@@ -24,5 +25,11 @@ public class ConversationCreateCommand extends Command {
         private String id;
         private String name;
         private List<String> participantIds;
+
+        public Payload(String name, List<String> participantIds) {
+            this.id = String.valueOf(UUID.randomUUID());
+            this.name = name;
+            this.participantIds = participantIds;
+        }
     }
 }

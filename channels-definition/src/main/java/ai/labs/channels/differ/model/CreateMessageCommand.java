@@ -7,14 +7,15 @@ import lombok.Setter;
 import java.io.Serializable;
 import java.util.Date;
 import java.util.List;
+import java.util.UUID;
 
 @Getter
 @Setter
-public class MessageCreateCommand extends Command {
+public class CreateMessageCommand extends Command {
     private Payload payload;
 
-    public MessageCreateCommand(AuthContext authContext, String commandId, String commandName, Payload payload) {
-        super(authContext, commandId, commandName);
+    public CreateMessageCommand(AuthContext authContext, String commandName, Payload payload) {
+        super(authContext, commandName);
         this.payload = payload;
     }
 
@@ -29,8 +30,8 @@ public class MessageCreateCommand extends Command {
         private String inputType;
         private List<Event.Part> parts;
 
-        public Payload(String id, String conversationId, String senderId, String inputType, List<Event.Part> parts) {
-            this.id = id;
+        public Payload(String conversationId, String senderId, String inputType, List<Event.Part> parts) {
+            this.id = String.valueOf(UUID.randomUUID());
             this.conversationId = conversationId;
             this.senderId = senderId;
             this.inputType = inputType;

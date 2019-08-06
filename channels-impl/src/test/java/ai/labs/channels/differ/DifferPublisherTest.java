@@ -2,11 +2,12 @@ package ai.labs.channels.differ;
 
 import ai.labs.channels.differ.model.Command;
 import ai.labs.channels.differ.model.CommandInfo;
+import ai.labs.channels.differ.model.CreateMessageCommand;
 import ai.labs.channels.differ.model.Event;
-import ai.labs.channels.differ.model.MessageCreateCommand;
 import ai.labs.serialization.IJsonSerialization;
 import ai.labs.serialization.JsonSerialization;
 import ai.labs.serialization.bootstrap.SerializationModule;
+import com.fasterxml.jackson.core.JsonFactory;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.rabbitmq.client.AMQP;
 import com.rabbitmq.client.Channel;
@@ -32,7 +33,7 @@ public class DifferPublisherTest {
     private IJsonSerialization jsonSerialization;
 
     @Before
-    public void setUp() throws Exception {
+    public void setUp() {
         channel = mock(Channel.class);
         jsonSerialization = createDummyJsonSerializer();
 
@@ -82,11 +83,11 @@ public class DifferPublisherTest {
         CommandInfo commandInfo = new CommandInfo();
         commandInfo.setExchange("testExchange");
         commandInfo.setRoutingKey("testRoutingKey");
-        var part = new Event.Part("id", "Some Message", "text/plain", INPUT_TYPE_TEXT);
-        var messageCreateCommandPayload = new MessageCreateCommand.Payload("id", "conversationId",
-                "senderId", INPUT_TYPE_TEXT, Collections.singletonList(part));
-        var command = new MessageCreateCommand(new Command.AuthContext("someUserId"),
-                "commandId", "commandName", messageCreateCommandPayload);
+        var part = new Event.Part("Some Message", "text/plain", INPUT_TYPE_TEXT);
+        var createMessageCommandPayload = new CreateMessageCommand.Payload(
+                "conversationId", "senderId", INPUT_TYPE_TEXT, Collections.singletonList(part));
+        var command = new CreateMessageCommand(
+                new Command.AuthContext("someUserId"), "commandName", createMessageCommandPayload);
         commandInfo.setCommand(command);
         commandInfo.setMinSentAt(System.currentTimeMillis());
 
