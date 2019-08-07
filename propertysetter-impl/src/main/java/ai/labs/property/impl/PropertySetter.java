@@ -1,6 +1,7 @@
 package ai.labs.property.impl;
 
 import ai.labs.expressions.Expression;
+import ai.labs.expressions.Expressions;
 import ai.labs.expressions.value.Value;
 import ai.labs.property.IPropertySetter;
 import ai.labs.property.model.PropertyEntry;
@@ -16,7 +17,7 @@ public class PropertySetter implements IPropertySetter {
     private static final String PROPERTY_EXPRESSION = "property";
 
     @Override
-    public List<PropertyEntry> extractProperties(List<Expression> expressions) {
+    public List<PropertyEntry> extractProperties(Expressions expressions) {
         return expressions.stream().
                 filter(expression ->
                         PROPERTY_EXPRESSION.equals(expression.getExpressionName()) &&

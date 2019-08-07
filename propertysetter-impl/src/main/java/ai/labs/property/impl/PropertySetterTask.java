@@ -1,6 +1,6 @@
 package ai.labs.property.impl;
 
-import ai.labs.expressions.Expression;
+import ai.labs.expressions.Expressions;
 import ai.labs.expressions.utilities.IExpressionProvider;
 import ai.labs.lifecycle.ILifecycleTask;
 import ai.labs.lifecycle.LifecycleException;
@@ -101,7 +101,7 @@ public class PropertySetterTask implements ILifecycleTask {
             return;
         }
 
-        List<Expression> aggregatedExpressions = new LinkedList<>();
+        Expressions aggregatedExpressions = new Expressions();
 
         if (contextDataList != null) {
             aggregatedExpressions.addAll(extractContextProperties(contextDataList));
@@ -134,6 +134,7 @@ public class PropertySetterTask implements ILifecycleTask {
                             Scope scope = property.getScope();
                             boolean override = property.getOverride();
                             RuntimeUtilities.checkNotNull(name, "property.name");
+                            name = templatingEngine.processTemplate(name, templateDataObjects);
 
                             Object templatedObj;
                             if (!isNullOrEmpty(fromObjectPath)) {
@@ -184,8 +185,8 @@ public class PropertySetterTask implements ILifecycleTask {
         }
     }
 
-    private List<Expression> extractContextProperties(List<IData<Context>> contextDataList) {
-        List<Expression> ret = new LinkedList<>();
+    private Expressions extractContextProperties(List<IData<Context>> contextDataList) {
+        Expressions ret = new Expressions();
         contextDataList.forEach(contextData -> {
             String contextKey = contextData.getKey();
             Context context = contextData.getResult();
