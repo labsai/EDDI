@@ -1,6 +1,7 @@
 package ai.labs.property.impl;
 
 import ai.labs.expressions.Expression;
+import ai.labs.expressions.Expressions;
 import ai.labs.expressions.utilities.IExpressionProvider;
 import ai.labs.expressions.value.Value;
 import ai.labs.lifecycle.LifecycleException;
@@ -23,6 +24,7 @@ import java.util.Collections;
 import java.util.LinkedList;
 import java.util.List;
 
+import static org.mockito.AdditionalMatchers.not;
 import static org.mockito.Mockito.*;
 
 /**
@@ -39,7 +41,7 @@ public class PropertySetterTaskTest {
     private IConversationMemory.IConversationStep previousStep;
     private IPropertySetter propertySetter;
     private IDataFactory dataFactory;
-    private List<Expression> expressions;
+    private Expressions expressions;
 
     @Before
     public void setUp() {
@@ -53,8 +55,9 @@ public class PropertySetterTaskTest {
         when(conversationMemory.getCurrentStep()).thenAnswer(invocation -> currentStep);
         when(conversationMemory.getPreviousSteps()).thenAnswer(invocation -> previousConversationSteps);
         IExpressionProvider expressionProvider = mock(IExpressionProvider.class);
-        when(expressionProvider.parseExpressions(eq("property(someMeaning(someValue))"))).thenAnswer(invocation -> {
-            expressions = new LinkedList<>();
+        String exp = "property(someMeaning(someValue))";
+        when(expressionProvider.parseExpressions(eq(exp))).thenAnswer(invocation -> {
+            expressions = new Expressions();
             expressions.add(
                     new Expression("property",
                             new Expression("someMeaning",
@@ -62,6 +65,7 @@ public class PropertySetterTaskTest {
 
             return expressions;
         });
+        when(expressionProvider.parseExpressions(not(eq(exp)))).thenAnswer(invocation -> new Expressions());
         IMemoryItemConverter memoryItemConverter = mock(IMemoryItemConverter.class);
         ITemplatingEngine templateEngine = mock(ITemplatingEngine.class);
         IResourceClientLibrary resourceClientLibrary = mock(IResourceClientLibrary.class);

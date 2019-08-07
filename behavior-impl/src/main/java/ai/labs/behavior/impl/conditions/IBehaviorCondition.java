@@ -46,7 +46,5 @@ public interface IBehaviorCondition extends Cloneable {
     ExecutionState execute(IConversationMemory memory, List<BehaviorRule> trace)
             throws BehaviorRule.InfiniteLoopException, BehaviorRule.RuntimeException;
 
-    ExecutionState getExecutionState();
-
     IBehaviorCondition clone() throws CloneNotSupportedException;
 }

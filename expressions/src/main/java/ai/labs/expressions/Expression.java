@@ -3,7 +3,8 @@ package ai.labs.expressions;
 import ai.labs.utilities.CharacterUtilities;
 import lombok.extern.slf4j.Slf4j;
 
-import java.util.*;
+import java.util.Arrays;
+import java.util.Collections;
 
 /**
  * @author ginccc
@@ -12,7 +13,7 @@ import java.util.*;
 public class Expression implements Cloneable {
     protected String domain;
     protected String expressionName;
-    protected List<Expression> subExpressions = new LinkedList<Expression>();
+    protected Expressions subExpressions = new Expressions();
 
     protected Expression() {
     }
@@ -26,7 +27,7 @@ public class Expression implements Cloneable {
         Collections.addAll(this.subExpressions, subExpressions);
     }
 
-    public Expression(String expressionName, List<Expression> subExpressions) {
+    public Expression(String expressionName, Expressions subExpressions) {
         this(expressionName);
         this.subExpressions = subExpressions;
     }
@@ -40,10 +41,10 @@ public class Expression implements Cloneable {
         if (dot == -1 || CharacterUtilities.isNumber(expressionName, false))
             this.expressionName = expressionName;
         else if (dot == 0)
-            this.expressionName = expressionName.substring(1, expressionName.length());
+            this.expressionName = expressionName.substring(1);
         else {
             this.domain = expressionName.substring(0, dot);
-            this.expressionName = expressionName.substring(dot + 1, expressionName.length());
+            this.expressionName = expressionName.substring(dot + 1);
         }
     }
 
@@ -51,16 +52,12 @@ public class Expression implements Cloneable {
         return subExpressions.toArray(new Expression[subExpressions.size()]);
     }
 
-    public List<Expression> getSubExpressionsAsList() {
-        return Collections.unmodifiableList(subExpressions);
-    }
-
     public void setSubExpressions(Expression... subExpressions) {
-        this.subExpressions = new LinkedList<>();
+        this.subExpressions = new Expressions();
         Collections.addAll(this.subExpressions, subExpressions);
     }
 
-    public void setSubExpressions(List<Expression> subExpressions) {
+    public void setSubExpressions(Expressions subExpressions) {
         this.subExpressions = subExpressions;
     }
 
@@ -74,7 +71,7 @@ public class Expression implements Cloneable {
     }
 
     public void addSubExpressions(Expression... subExpressions) {
-        List<Expression> subExpsList = new LinkedList<Expression>();
+        Expressions subExpsList = new Expressions();
         Collections.addAll(subExpsList, subExpressions);
         this.subExpressions.addAll(subExpsList);
     }
@@ -85,12 +82,12 @@ public class Expression implements Cloneable {
             return;
         }
 
-        List<Expression> subExpsList = new LinkedList<Expression>();
+        Expressions subExpsList = new Expressions();
         Collections.addAll(subExpsList, subExpressions);
         this.subExpressions.addAll(index, subExpsList);
     }
 
-    public void addSubExpressions(List<Expression> subExpressions) {
+    public void addSubExpressions(Expressions subExpressions) {
         this.subExpressions.addAll(subExpressions);
     }
 
@@ -145,8 +142,8 @@ public class Expression implements Cloneable {
      * @param expressionNames
      * @return list of expressions matching of of the expression names of the param
      */
-    public List<Expression> getAllExpressionsWithNames(String... expressionNames) {
-        List<Expression> result = new ArrayList<Expression>();
+    public Expressions getAllExpressionsWithNames(String... expressionNames) {
+        Expressions result = new Expressions();
         for (String expressionName : expressionNames) {
             if (getExpressionName().equals(expressionName)) {
                 result.add(this);
@@ -174,7 +171,7 @@ public class Expression implements Cloneable {
     @Override
     public Object clone() throws CloneNotSupportedException {
         Expression ret = (Expression) super.clone();
-        LinkedList<Expression> tmp = new LinkedList<Expression>();
+        Expressions tmp = new Expressions();
 
         for (Expression exp : subExpressions) {
             Expression subExpClone = (Expression) exp.clone();

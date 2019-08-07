@@ -1,6 +1,7 @@
 package ai.labs.expressions.utilities;
 
 import ai.labs.expressions.Expression;
+import ai.labs.expressions.Expressions;
 import ai.labs.expressions.IExpressionFactory;
 import ai.labs.expressions.value.Value;
 import ai.labs.utilities.RuntimeUtilities;
@@ -39,9 +40,9 @@ public class ExpressionProvider implements IExpressionProvider {
     }
 
     @Override
-    public List<Expression> parseExpressions(String expressions) {
+    public Expressions parseExpressions(String expressions) {
         if (RuntimeUtilities.isNullOrEmpty(expressions)) {
-            return new ArrayList<>();
+            return new Expressions();
         }
 
         List<String> listStringExpressions = new ArrayList<>();
@@ -82,13 +83,13 @@ public class ExpressionProvider implements IExpressionProvider {
         }
 
         if (lastPos < expressions.length()) {
-            expressionPart = expressions.substring(lastPos, expressions.length());
+            expressionPart = expressions.substring(lastPos);
             if (!expressionPart.isEmpty()) {
                 listStringExpressions.add(expressionPart);
             }
         }
 
-        return listStringExpressions.stream().map(this::parseExpression).collect(Collectors.toList());
+        return listStringExpressions.stream().map(this::parseExpression).collect(Collectors.toCollection(Expressions::new));
 
     }
 
@@ -103,10 +104,10 @@ public class ExpressionProvider implements IExpressionProvider {
             exp = new Expression(tmp.trim());
             try {
                 String subExpressions = expression.substring(indexOfOpening + 1, indexOfClosing);
-                List<Expression> expressions = parseExpressions(subExpressions);
+                Expressions expressions = parseExpressions(subExpressions);
                 exp.setSubExpressions(expressions);
             } catch (Exception e) {
-                log.error("Error while parsing Expression: %s, indexOfOpening: %s, indexOfClosing: %s, message: %s",
+                log.error("Error while parsing Expression: {}, indexOfOpening: {}, indexOfClosing: {}, message: {}",
                         expression, indexOfOpening, indexOfClosing, e.getLocalizedMessage());
             }
         } else {

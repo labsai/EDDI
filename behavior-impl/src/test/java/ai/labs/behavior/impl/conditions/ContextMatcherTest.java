@@ -1,6 +1,7 @@
 package ai.labs.behavior.impl.conditions;
 
 import ai.labs.expressions.Expression;
+import ai.labs.expressions.Expressions;
 import ai.labs.expressions.utilities.IExpressionProvider;
 import ai.labs.memory.IConversationMemory;
 import ai.labs.memory.IData;
@@ -55,7 +56,7 @@ public class ContextMatcherTest {
         final String expressions = "expression(test),anotherExpression(test1)";
         expected.put("expressions", expressions);
         when(expressionProvider.parseExpressions(eq(expressions))).thenAnswer(invocation -> {
-            List<Expression> ret = new LinkedList<>();
+            Expressions ret = new Expressions();
             ret.add(new Expression("expression", new Expression("test")));
             ret.add(new Expression("anotherExpression", new Expression("test1")));
             return ret;
@@ -144,6 +145,7 @@ public class ContextMatcherTest {
                     new Context(Context.ContextType.expressions, otherExpressions)));
             return ret;
         });
+        when(expressionProvider.parseExpressions(anyString())).thenAnswer(invocation -> new Expressions());
 
         //test
         IBehaviorCondition.ExecutionState actualExecutionState =

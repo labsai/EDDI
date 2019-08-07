@@ -1,9 +1,7 @@
 package ai.labs.parser.model;
 
-import ai.labs.expressions.Expression;
+import ai.labs.expressions.Expressions;
 import ai.labs.parser.extensions.dictionaries.IDictionary;
-
-import java.util.List;
 
 /**
  * @author ginccc
@@ -13,7 +11,7 @@ public class FoundDictionaryEntry extends DictionaryEntry {
     // 0.0 > and <= 1.0
     protected double matchingAccuracy;
 
-    public FoundDictionaryEntry(String unknownValue, List<Expression> expressions, boolean corrected, double matchingAccuracy) {
+    public FoundDictionaryEntry(String unknownValue, Expressions expressions, boolean corrected, double matchingAccuracy) {
         super(unknownValue, expressions);
     }
 

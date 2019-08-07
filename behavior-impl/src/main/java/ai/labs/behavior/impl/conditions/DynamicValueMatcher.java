@@ -23,7 +23,6 @@ public class DynamicValueMatcher implements IBehaviorCondition {
         this.memoryItemConverter = memoryItemConverter;
     }
 
-    private ExecutionState state = ExecutionState.NOT_EXECUTED;
     private String valuePath;
     private String contains;
     private String equals;
@@ -66,6 +65,7 @@ public class DynamicValueMatcher implements IBehaviorCondition {
 
     @Override
     public ExecutionState execute(IConversationMemory memory, List<BehaviorRule> trace) {
+        ExecutionState state;
         if (!isNullOrEmpty(valuePath)) {
             var conversationValues = memoryItemConverter.convert(memory);
             boolean success = executeValuePath(conversationValues, valuePath, equals, contains);
@@ -74,12 +74,6 @@ public class DynamicValueMatcher implements IBehaviorCondition {
             state = ExecutionState.FAIL;
         }
 
-        return state;
-    }
-
-
-    @Override
-    public ExecutionState getExecutionState() {
         return state;
     }
 

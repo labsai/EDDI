@@ -28,8 +28,6 @@ public class Connector implements IBehaviorCondition {
     @Getter
     private List<IBehaviorCondition> conditions = new LinkedList<>();
 
-    private ExecutionState state = ExecutionState.NOT_EXECUTED;
-
     private Connector(Operator operator) {
         this.operator = operator;
     }
@@ -62,16 +60,15 @@ public class Connector implements IBehaviorCondition {
 
     public ExecutionState execute(IConversationMemory memory, List<BehaviorRule> trace)
             throws BehaviorRule.InfiniteLoopException, BehaviorRule.RuntimeException {
+
+        ExecutionState state;
         if (operator == Operator.OR) {
             state = ExecutionState.FAIL;
 
             for (IBehaviorCondition condition : conditions) {
-                condition.execute(memory, trace);
-                if (condition.getExecutionState() == ExecutionState.SUCCESS) {
-                    state = ExecutionState.SUCCESS;
-                    break;
-                } else if (condition.getExecutionState() == ExecutionState.ERROR) {
-                    state = ExecutionState.ERROR;
+                var executionState = condition.execute(memory, trace);
+                if (executionState == ExecutionState.SUCCESS || executionState == ExecutionState.ERROR) {
+                    state = executionState;
                     break;
                 }
             }
@@ -80,12 +77,9 @@ public class Connector implements IBehaviorCondition {
             state = ExecutionState.SUCCESS;
 
             for (IBehaviorCondition condition : conditions) {
-                condition.execute(memory, trace);
-                if (condition.getExecutionState() == ExecutionState.FAIL) {
-                    state = ExecutionState.FAIL;
-                    break;
-                } else if (condition.getExecutionState() == ExecutionState.ERROR) {
-                    state = ExecutionState.ERROR;
+                var executionState = condition.execute(memory, trace);
+                if (executionState == ExecutionState.FAIL || executionState == ExecutionState.ERROR) {
+                    state = executionState;
                     break;
                 }
             }
@@ -96,11 +90,6 @@ public class Connector implements IBehaviorCondition {
 
     public boolean isEmpty() {
         return conditions.isEmpty();
-    }
-
-    @Override
-    public ExecutionState getExecutionState() {
-        return state;
     }
 
     @Override

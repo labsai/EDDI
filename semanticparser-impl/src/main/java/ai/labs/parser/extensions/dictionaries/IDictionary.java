@@ -1,6 +1,6 @@
 package ai.labs.parser.extensions.dictionaries;
 
-import ai.labs.expressions.Expression;
+import ai.labs.expressions.Expressions;
 import ai.labs.lifecycle.IllegalExtensionConfigurationException;
 
 import java.util.Collections;
@@ -32,7 +32,7 @@ public interface IDictionary {
     interface IDictionaryEntry extends Comparable<IDictionary.IDictionaryEntry> {
         String getValue();
 
-        List<Expression> getExpressions();
+        Expressions getExpressions();
 
         String getIdentifier();
 

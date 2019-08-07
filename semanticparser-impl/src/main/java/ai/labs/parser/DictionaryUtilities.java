@@ -1,13 +1,12 @@
 package ai.labs.parser;
 
-import ai.labs.expressions.Expression;
+import ai.labs.expressions.Expressions;
 import ai.labs.expressions.utilities.IExpressionProvider;
 import ai.labs.output.model.QuickReply;
 import ai.labs.parser.extensions.dictionaries.IDictionary;
 import ai.labs.parser.extensions.dictionaries.RegularDictionary;
 import ai.labs.parser.internal.matches.RawSolution;
 import ai.labs.parser.rest.model.Solution;
-import ai.labs.utilities.StringUtilities;
 
 import java.util.ArrayList;
 import java.util.LinkedList;
@@ -18,9 +17,9 @@ import java.util.stream.Collectors;
  * @author ginccc
  */
 public class DictionaryUtilities {
-    private static List<Expression> convertDictionaryEntriesToExpressions(List<IDictionary.IFoundWord>
-                                                                                  dictionaryEntries) {
-        List<Expression> expressions = new LinkedList<>();
+    private static Expressions convertDictionaryEntriesToExpressions(List<IDictionary.IFoundWord>
+                                                                             dictionaryEntries) {
+        Expressions expressions = new Expressions();
 
         for (IDictionary.IDictionaryEntry dictionaryEntry : dictionaryEntries) {
             expressions.addAll(dictionaryEntry.getExpressions());
@@ -34,13 +33,15 @@ public class DictionaryUtilities {
                                                     boolean includeUnknown) {
         List<Solution> solutionExpressions = new ArrayList<>();
 
+        Expressions expressions, filteredExpressions;
         for (RawSolution rawSolution : rawSolutions) {
-            List<Expression> expressions = convertDictionaryEntriesToExpressions(rawSolution.getDictionaryEntries());
-            expressions = expressions.stream().
+            expressions = convertDictionaryEntriesToExpressions(rawSolution.getDictionaryEntries());
+            filteredExpressions = new Expressions();
+            filteredExpressions.addAll(expressions.stream().
                     filter(expression -> includeUnused || !expression.getExpressionName().equals("unused")).
                     filter(expression -> includeUnknown || !expression.getExpressionName().equals("unknown")).
-                    collect(Collectors.toList());
-            solutionExpressions.add(new Solution(StringUtilities.joinStrings(", ", expressions)));
+                    collect(Collectors.toList()));
+            solutionExpressions.add(new Solution(filteredExpressions));
         }
 
         return solutionExpressions;
@@ -52,7 +53,7 @@ public class DictionaryUtilities {
         RegularDictionary dictionary = new RegularDictionary();
         quickReplies.forEach(quickReply -> {
             String quickReplyValue = quickReply.getValue();
-            List<Expression> expressions = expressionProvider.parseExpressions(quickReply.getExpressions());
+            Expressions expressions = expressionProvider.parseExpressions(quickReply.getExpressions());
             if (quickReplyValue.contains(" ")) {
                 dictionary.addPhrase(quickReplyValue, expressions);
             } else {

@@ -1,9 +1,10 @@
 package ai.labs.parser;
 
 import ai.labs.expressions.Expression;
+import ai.labs.expressions.Expressions;
+import ai.labs.parser.extensions.dictionaries.IDictionary;
 import ai.labs.parser.internal.matches.RawSolution;
 import ai.labs.parser.model.FoundWord;
-import ai.labs.parser.extensions.dictionaries.IDictionary;
 import ai.labs.parser.model.Word;
 import ai.labs.parser.rest.model.Solution;
 import org.junit.Assert;
@@ -21,7 +22,7 @@ public class DictionaryUtilitiesTest {
 
     @Before
     public void setup() {
-        List<Expression> expressions = createExpressions("someExp", "someValue1");
+        Expressions expressions = createExpressions("someExp", "someValue1");
         expressions.addAll(createExpressions("unused", "someValue2"));
         expressions.addAll(createExpressions("unknown", "someValue3"));
         rawSolutions = createRawSolutions(expressions);
@@ -36,7 +37,7 @@ public class DictionaryUtilitiesTest {
         List<Solution> actual = DictionaryUtilities.extractExpressions(rawSolutions, true, true);
 
         //assert
-        Assert.assertEquals(expected, actual.get(0).getExpressions());
+        Assert.assertEquals(expected, actual.get(0).getExpressions().toString());
     }
 
     @Test
@@ -48,7 +49,7 @@ public class DictionaryUtilitiesTest {
         List<Solution> actual = DictionaryUtilities.extractExpressions(rawSolutions, false, true);
 
         //assert
-        Assert.assertEquals(expected, actual.get(0).getExpressions());
+        Assert.assertEquals(expected, actual.get(0).getExpressions().toString());
     }
 
     @Test
@@ -60,10 +61,10 @@ public class DictionaryUtilitiesTest {
         List<Solution> actual = DictionaryUtilities.extractExpressions(rawSolutions, true, false);
 
         //assert
-        Assert.assertEquals(expected, actual.get(0).getExpressions());
+        Assert.assertEquals(expected, actual.get(0).getExpressions().toString());
     }
 
-    private LinkedList<RawSolution> createRawSolutions(List<Expression> expressions) {
+    private LinkedList<RawSolution> createRawSolutions(Expressions expressions) {
         LinkedList<RawSolution> rawSolutions = new LinkedList<>();
         RawSolution rawSolution = new RawSolution(RawSolution.Match.FULLY);
         List<IDictionary.IFoundWord> dictionaryEntries = new LinkedList<>();
@@ -73,8 +74,8 @@ public class DictionaryUtilitiesTest {
         return rawSolutions;
     }
 
-    private List<Expression> createExpressions(String expressionName, String expressionValue) {
-        List<Expression> ret = new LinkedList<>();
+    private Expressions createExpressions(String expressionName, String expressionValue) {
+        Expressions ret = new Expressions();
         ret.add(new Expression(expressionName, new Expression(expressionValue)));
         return ret;
     }

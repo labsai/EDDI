@@ -1,6 +1,6 @@
 package ai.labs.parser.extensions.dictionaries;
 
-import ai.labs.expressions.Expression;
+import ai.labs.expressions.Expressions;
 import ai.labs.parser.model.FoundWord;
 import ai.labs.parser.model.Phrase;
 import ai.labs.parser.model.Word;
@@ -58,11 +58,11 @@ public class RegularDictionary implements IDictionary {
         return lookupIfKnown;
     }
 
-    public void addWord(final String value, final List<Expression> expressions, int rating) {
+    public void addWord(final String value, final Expressions expressions, int rating) {
         words.put(value, new Word(value, expressions, ID, rating, false));
     }
 
-    public void addPhrase(String value, List<Expression> expressions) {
+    public void addPhrase(String value, Expressions expressions) {
         phrases.add(new Phrase(value, expressions, ID));
     }
 }

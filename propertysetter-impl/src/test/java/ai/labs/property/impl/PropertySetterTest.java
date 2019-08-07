@@ -1,6 +1,7 @@
 package ai.labs.property.impl;
 
 import ai.labs.expressions.Expression;
+import ai.labs.expressions.Expressions;
 import ai.labs.expressions.utilities.IExpressionProvider;
 import ai.labs.expressions.value.Value;
 import ai.labs.property.model.PropertyEntry;
@@ -30,7 +31,7 @@ public class PropertySetterTest {
         //setup
         String testStringExpressions = "property(someMeaning(someValue)),noProperty(someMeaning(someValue))";
         when(expressionProvider.parseExpressions(eq(testStringExpressions))).thenAnswer(invocation ->
-                Arrays.asList(new Expression("property",
+                new Expressions(new Expression("property",
                                 new Expression("someMeaning",
                                         new Value("someValue"))),
                         new Expression("noProperty",
@@ -54,7 +55,7 @@ public class PropertySetterTest {
         String testStringExpressions = "property(someMeaning(someSubMeaning(someValue)))," +
                 "property(someMeaning(someValue, someOtherValue))";
         when(expressionProvider.parseExpressions(eq(testStringExpressions))).thenAnswer(invocation ->
-                Arrays.asList(new Expression("property",
+                new Expressions(new Expression("property",
                                 new Expression("someMeaning",
                                         new Expression("someSubMeaning",
                                                 new Value("someValue")))),

@@ -16,7 +16,6 @@ import java.util.Map;
  */
 
 public class SizeMatcher implements IBehaviorCondition {
-    private ExecutionState state = ExecutionState.NOT_EXECUTED;
     private static final String ID = "sizematcher";
     private static final String valuePathQualifier = "valuePath";
     private final String minQualifier = "min";
@@ -99,22 +98,11 @@ public class SizeMatcher implements IBehaviorCondition {
                 isEqual = size == equal;
             }
 
-            if (isMin && isMax && isEqual) {
-                state = ExecutionState.SUCCESS;
-            } else {
-                state = ExecutionState.FAIL;
-            }
-
-            return state;
+            return isMin && isMax && isEqual ? ExecutionState.SUCCESS : ExecutionState.FAIL;
 
         } catch (OgnlException e) {
             throw new BehaviorRule.RuntimeException(e.getLocalizedMessage(), e);
         }
-    }
-
-    @Override
-    public ExecutionState getExecutionState() {
-        return state;
     }
 
     public IBehaviorCondition clone() {

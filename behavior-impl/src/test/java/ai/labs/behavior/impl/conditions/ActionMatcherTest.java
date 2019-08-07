@@ -26,14 +26,14 @@ public class ActionMatcherTest extends BaseMatcherTest {
     private List<String> inputActions;
 
     @Before
-    public void setUp() throws Exception {
+    public void setUp() {
         expectedActions = Arrays.asList("someAction", "someOtherAction");
         inputActions = Arrays.asList("someAction", "someOtherAction", "someNotNeededAction");
         matcher = new ActionMatcher();
     }
 
     @Test
-    public void setValues_actions() throws Exception {
+    public void setValues_actions() {
         //setup
         Map<String, String> values = new HashMap<>();
         values.put(KEY_ACTIONS, actionsValue);
@@ -62,7 +62,6 @@ public class ActionMatcherTest extends BaseMatcherTest {
         ExecutionState actualExecutionState = matcher.execute(memory, new LinkedList<>());
 
         //assert
-        Assert.assertEquals(ExecutionState.SUCCESS, matcher.getExecutionState());
         Assert.assertEquals(ExecutionState.SUCCESS, actualExecutionState);
         verify(memory).getCurrentStep();
         verify(currentConversationStep).getLatestData(KEY_ACTIONS);
@@ -86,7 +85,6 @@ public class ActionMatcherTest extends BaseMatcherTest {
         ExecutionState actualExecutionState = matcher.execute(memory, new LinkedList<>());
 
         //assert
-        Assert.assertEquals(ExecutionState.SUCCESS, matcher.getExecutionState());
         Assert.assertEquals(ExecutionState.SUCCESS, actualExecutionState);
         verify(memory).getPreviousSteps();
         verify(previousConversationStep).getLatestData(KEY_ACTIONS);
@@ -114,7 +112,6 @@ public class ActionMatcherTest extends BaseMatcherTest {
         ExecutionState actualExecutionState = matcher.execute(memory, new LinkedList<>());
 
         //assert
-        Assert.assertEquals(ExecutionState.SUCCESS, matcher.getExecutionState());
         Assert.assertEquals(ExecutionState.SUCCESS, actualExecutionState);
         verify(memory).getAllSteps();
         verify(previousConversationStep1).getLatestData(KEY_ACTIONS);
@@ -145,7 +142,6 @@ public class ActionMatcherTest extends BaseMatcherTest {
         ExecutionState actualExecutionState = matcher.execute(memory, new LinkedList<>());
 
         //assert
-        Assert.assertEquals(ExecutionState.SUCCESS, matcher.getExecutionState());
         Assert.assertEquals(ExecutionState.SUCCESS, actualExecutionState);
         verify(memory).getAllSteps();
         verify(previousConversationStep1).getLatestData(KEY_ACTIONS);

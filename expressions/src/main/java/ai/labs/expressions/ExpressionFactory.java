@@ -8,8 +8,6 @@ import lombok.extern.slf4j.Slf4j;
 
 import javax.inject.Singleton;
 import java.util.Hashtable;
-import java.util.LinkedList;
-import java.util.List;
 
 /**
  * @author ginccc
@@ -32,7 +30,7 @@ public class ExpressionFactory implements IExpressionFactory {
 
     @Override
     public Expression[] getExpression(Expression... expressions) {
-        List<Expression> l = new LinkedList<Expression>();
+        Expressions l = new Expressions();
         for (Expression exp : expressions)
             l.add(getExpression(exp));
 

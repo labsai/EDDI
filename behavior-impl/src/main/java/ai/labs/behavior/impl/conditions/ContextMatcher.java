@@ -1,7 +1,7 @@
 package ai.labs.behavior.impl.conditions;
 
 import ai.labs.behavior.impl.BehaviorRule;
-import ai.labs.expressions.Expression;
+import ai.labs.expressions.Expressions;
 import ai.labs.expressions.utilities.IExpressionProvider;
 import ai.labs.memory.IConversationMemory;
 import ai.labs.memory.IData;
@@ -39,10 +39,9 @@ public class ContextMatcher implements IBehaviorCondition {
 
     private String contextKey;
     private String contextType;
-    private List<Expression> expressions;
+    private Expressions expressions;
     private ObjectValue object;
     private String string;
-    private ExecutionState state = ExecutionState.NOT_EXECUTED;
     private final String contextKeyQualifier = "contextKey";
     private final String contextTypeQualifier = "contextType";
     private final String expressionsQualifier = ContextType.expressions.toString();
@@ -110,13 +109,14 @@ public class ContextMatcher implements IBehaviorCondition {
     public ExecutionState execute(IConversationMemory memory, List<BehaviorRule> trace) {
         List<IData<Context>> contextData = memory.getCurrentStep().getAllData(CONTEXT);
 
+        ExecutionState state;
         boolean success = false;
         for (IData<Context> contextDatum : contextData) {
             Context context = contextDatum.getResult();
             if (contextDatum.getKey().equals(CONTEXT + ":" + contextKey)) {
                 switch (context.getType()) {
                     case expressions:
-                        List<Expression> contextExpressions = expressionProvider.
+                        Expressions contextExpressions = expressionProvider.
                                 parseExpressions(context.getValue().toString());
                         success = Collections.indexOfSubList(contextExpressions, expressions) != -1;
                         break;
@@ -154,12 +154,6 @@ public class ContextMatcher implements IBehaviorCondition {
         } catch (PathNotFoundException e) {
             return null;
         }
-    }
-
-
-    @Override
-    public ExecutionState getExecutionState() {
-        return state;
     }
 
     @Override
