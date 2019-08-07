@@ -9,6 +9,7 @@ import ai.labs.memory.IConversationMemory;
 import ai.labs.memory.IData;
 import ai.labs.memory.IDataFactory;
 import ai.labs.memory.IMemoryItemConverter;
+import ai.labs.memory.model.ConversationProperties;
 import ai.labs.memory.model.Data;
 import ai.labs.models.Context;
 import ai.labs.models.Property;
@@ -110,6 +111,7 @@ public class PropertySetterTaskTest {
                     ret.setPublic(true);
                     return ret;
                 });
+        when(conversationMemory.getConversationProperties()).thenAnswer(invocation -> new ConversationProperties(conversationMemory));
 
         //test
         propertySetterTask.executeTask(conversationMemory);
@@ -120,5 +122,6 @@ public class PropertySetterTaskTest {
         verify(currentStep, times(1)).getLatestData(KEY_INPUT_INITIAL);
         verify(currentStep, times(1)).getAllData(KEY_CONTEXT);
         verify(currentStep, times(1)).storeData(ArgumentMatchers.eq(expectedPropertyData));
+        verify(conversationMemory, times(1)).getConversationProperties();
     }
 }
