@@ -33,6 +33,7 @@ public class SerializationModule extends AbstractModule {
     @Singleton
     public ObjectMapper provideObjectMapper(@Named("json.prettyPrint") boolean prettyPrint, JsonFactory jsonFactory) {
         ObjectMapper objectMapper = new ObjectMapper(jsonFactory);
+
         objectMapper.setSerializationInclusion(JsonInclude.Include.NON_NULL);
         objectMapper.configure(SerializationFeature.INDENT_OUTPUT, prettyPrint);
         objectMapper.configure(SerializationFeature.FAIL_ON_EMPTY_BEANS, false);

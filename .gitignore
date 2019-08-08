@@ -3,5 +3,5 @@
 /**/web/
 
 # ignore intellij files
-.idea/
 *.iml
+/.idea/

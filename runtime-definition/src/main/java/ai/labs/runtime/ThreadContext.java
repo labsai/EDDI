@@ -42,10 +42,10 @@ import java.util.Map;
 */
 @Slf4j
 public abstract class ThreadContext {
-    public static final String SECURITY_MANAGER_KEY = ThreadContext.class.getName() + "_SECURITY_MANAGER_KEY";
-    public static final String SUBJECT_KEY = ThreadContext.class.getName() + "_SUBJECT_KEY";
+    private static final String SECURITY_MANAGER_KEY = ThreadContext.class.getName() + "_SECURITY_MANAGER_KEY";
+    private static final String SUBJECT_KEY = ThreadContext.class.getName() + "_SUBJECT_KEY";
 
-    private static final ThreadLocal<Map<Object, Object>> resources = new InheritableThreadLocalMap<Map<Object, Object>>();
+    private static final ThreadLocal<Map<Object, Object>> resources = new InheritableThreadLocalMap<>();
 
     /**
      * Default no-argument constructor.
@@ -60,7 +60,7 @@ public abstract class ThreadContext {
      * @return the map of bound resources
      */
     public static Map<Object, Object> getResources() {
-        return resources != null ? new HashMap<Object, Object>(resources.get()) : null;
+        return resources != null ? new HashMap<>(resources.get()) : null;
     }
 
     /**

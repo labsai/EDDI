@@ -5,9 +5,15 @@ import ai.labs.behavior.bootstrap.BehaviorModule;
 import ai.labs.bootstrap.UserModule;
 import ai.labs.caching.bootstrap.CachingModule;
 import ai.labs.callback.bootstrap.ConversationCallbackModule;
+import ai.labs.channels.config.IChannelDefinitionStore;
+import ai.labs.channels.config.IChannelManager;
+import ai.labs.channels.config.bootstrap.ChannelModule;
+import ai.labs.channels.differ.bootstrap.AMQPModule;
+import ai.labs.channels.differ.bootstrap.DifferModule;
+import ai.labs.channels.facebookmessenger.bootstrap.FacebookMessengerModule;
+import ai.labs.channels.xmpp.bootstrap.XmppModule;
 import ai.labs.core.bootstrap.CoreModule;
 import ai.labs.expressions.bootstrap.ExpressionModule;
-import ai.labs.facebookmessenger.bootstrap.FacebookMessengerModule;
 import ai.labs.httpclient.guice.HttpClientModule;
 import ai.labs.memory.bootstrap.ConversationMemoryModule;
 import ai.labs.output.bootstrap.OutputGenerationModule;
@@ -30,9 +36,6 @@ import ai.labs.staticresources.bootstrap.StaticResourcesModule;
 import ai.labs.templateengine.bootstrap.TemplateEngineModule;
 import ai.labs.testing.bootstrap.AutomatedtestingModule;
 import ai.labs.utilities.FileUtilities;
-import ai.labs.xmpp.bootstrap.XmppModule;
-import ai.labs.xmpp.endpoint.IXmppEndpoint;
-import com.bugsnag.Bugsnag;
 import com.google.inject.Module;
 import org.jboss.resteasy.plugins.guice.ext.RequestScopeModule;
 
@@ -40,7 +43,7 @@ import java.io.FileInputStream;
 
 /**
  * the central REST API server component
- * run with params: -DEDDI_ENV=(development|production) -Xbootclasspath/p:[ABS_PATH_TO]\alpn-boot-8.1.11.v20170118.jar
+ * run with params: -DEDDI_ENV=(development|production)
  * requires Mongo DB
  *
  * @author ginccc
@@ -63,10 +66,10 @@ public class ApiServer {
         //bootstrapping modules
         DependencyInjector.Environment environment = DependencyInjector.Environment.valueOf(eddiEnv.toUpperCase());
         Module[] modules = {
+                new LoggingModule(),
                 new RuntimeModule(
                         new FileInputStream(configDir + "threads.properties"),
                         new FileInputStream(configDir + "systemRuntime.properties")),
-                new LoggingModule(),
                 new RequestScopeModule(),
                 new RestInterfaceModule(),
                 new SerializationModule(),
@@ -92,22 +95,27 @@ public class ApiServer {
                         new FileInputStream(configDir + "webServer.properties"),
                         new FileInputStream(configDir + "keycloak.properties")
                 ),
-                new FacebookMessengerModule(),
                 new BackupServiceModule(),
                 new HttpCallsModule(),
-                new XmppModule()
+                new FacebookMessengerModule(),
+                new XmppModule(),
+                new AMQPModule(),
+                new DifferModule(),
+                new ChannelModule()
         };
 
         //init modules
         final DependencyInjector injector = DependencyInjector.init(environment, modules);
 
-        injector.getInstance(Bugsnag.class);
-
         //init webserver
         injector.getInstance(IServerRuntime.class).startup(() -> {
             //auto re-deploy bots
             injector.getInstance(IAutoBotDeployment.class).autoDeployBots();
-            injector.getInstance(IXmppEndpoint.class).init();
+
+            //load channel definitions
+            var channelDefinitions = injector.getInstance(IChannelDefinitionStore.class).readAllChannelDefinitions();
+            var channelManager = injector.getInstance(IChannelManager.class);
+            channelDefinitions.forEach(channelManager::initChannel);
 
             logServerStartupTime(serverStartupBegin);
         });

@@ -43,8 +43,8 @@
         <module>conversationcallback-impl</module>
         <module>httpclient-definition</module>
         <module>httpclient-impl-jetty</module>
-        <module>facebookmessenger-definition</module>
-        <module>facebookmessenger-impl</module>
+        <module>channels-definition</module>
+        <module>channels-impl</module>
         <module>outputgeneration-definition</module>
         <module>outputgeneration-impl</module>
         <module>behavior-definition</module>
@@ -55,8 +55,6 @@
         <module>propertysetter-impl</module>
         <module>backupservice-defintion</module>
         <module>backupservice-impl</module>
-        <module>xmpp-definition</module>
-        <module>xmpp-impl</module>
         <module>httpCallsTask-definition</module>
         <module>httpCallsTask-impl</module>
         <module>basemodels</module>
@@ -94,29 +92,9 @@
             <version>1.7.26</version>
         </dependency>
         <dependency>
-            <groupId>org.apache.logging.log4j</groupId>
-            <artifactId>log4j-slf4j-impl</artifactId>
-            <version>2.9.1</version>
-        </dependency>
-        <dependency>
-            <groupId>org.apache.logging.log4j</groupId>
-            <artifactId>log4j-api</artifactId>
-            <version>2.9.1</version>
-        </dependency>
-        <dependency>
-            <groupId>org.apache.logging.log4j</groupId>
-            <artifactId>log4j-core</artifactId>
-            <version>2.9.1</version>
-        </dependency>
-        <dependency>
-            <groupId>org.apache.logging.log4j</groupId>
-            <artifactId>log4j-web</artifactId>
-            <version>2.9.1</version>
-        </dependency>
-        <dependency>
-            <groupId>org.apache.logging.log4j</groupId>
-            <artifactId>log4j-nosql</artifactId>
-            <version>2.9.1</version>
+            <groupId>ch.qos.logback</groupId>
+            <artifactId>logback-classic</artifactId>
+            <version>1.2.3</version>
         </dependency>
         <dependency>
             <groupId>org.mongodb</groupId>

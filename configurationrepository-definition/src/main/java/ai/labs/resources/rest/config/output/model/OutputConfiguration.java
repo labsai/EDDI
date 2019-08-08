@@ -1,6 +1,8 @@
 package ai.labs.resources.rest.config.output.model;
 
+import lombok.AllArgsConstructor;
 import lombok.Getter;
+import lombok.NoArgsConstructor;
 import lombok.Setter;
 
 import java.util.LinkedList;
@@ -44,8 +46,11 @@ public class OutputConfiguration {
 
     @Getter
     @Setter
+    @NoArgsConstructor
+    @AllArgsConstructor
     public static class QuickReply {
         private String value;
         private String expressions;
+        private Boolean isDefault;
     }
 }

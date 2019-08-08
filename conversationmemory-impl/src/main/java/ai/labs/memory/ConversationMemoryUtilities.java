@@ -84,22 +84,24 @@ public class ConversationMemoryUtilities {
         conversationMemory.setConversationState(snapshot.getConversationState());
         conversationMemory.getConversationProperties().putAll(snapshot.getConversationProperties());
 
-        List<IConversationMemory.IConversationStep> redoSteps = iterateRedoCache(snapshot.getRedoCache());
-        for (IConversationMemory.IConversationStep redoStep : redoSteps) {
+        var redoSteps = iterateRedoCache(snapshot.getRedoCache());
+        for (var redoStep : redoSteps) {
             conversationMemory.getRedoCache().add(redoStep);
         }
 
-        List<ConversationMemorySnapshot.ConversationStepSnapshot> conversationSteps = snapshot.getConversationSteps();
-        for (int i = 0; i < conversationSteps.size(); i++) {
-            ConversationOutput conversationOutput = snapshot.getConversationOutputs().get(i);
-            ConversationMemorySnapshot.ConversationStepSnapshot conversationStepSnapshot = conversationSteps.get(i);
-
+        var conversationSteps = snapshot.getConversationSteps();
+        var conversationOutputs = snapshot.getConversationOutputs();
+        for (int i = 0; i < conversationOutputs.size(); i++) {
+            var conversationOutput = conversationOutputs.get(i);
             if (i > 0) {
                 conversationMemory.startNextStep(conversationOutput);
+            } else {
+                conversationMemory.getConversationOutputs().get(i).putAll(conversationOutput);
             }
 
-            for (ConversationMemorySnapshot.PackageRunSnapshot packageRunSnapshot : conversationStepSnapshot.getPackages()) {
-                for (ConversationMemorySnapshot.ResultSnapshot resultSnapshot : packageRunSnapshot.getLifecycleTasks()) {
+            var conversationStepSnapshot = conversationSteps.get(i);
+            for (var packageRunSnapshot : conversationStepSnapshot.getPackages()) {
+                for (var resultSnapshot : packageRunSnapshot.getLifecycleTasks()) {
                     Data data = new Data(resultSnapshot.getKey(), resultSnapshot.getResult(), resultSnapshot.getPossibleResults(), resultSnapshot.getTimestamp(), resultSnapshot.isPublic());
                     conversationMemory.getCurrentStep().storeData(data);
                 }

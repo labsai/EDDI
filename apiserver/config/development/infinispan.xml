@@ -19,6 +19,15 @@
         <local-cache name="userConversations" configuration="user-conversations-config"/>
         <local-cache name="botTriggers" configuration="base-template-config"/>
         <local-cache name="conversationState" configuration="base-template-config"/>
+        <local-cache name="differ.conversation.participantIds" configuration="base-template-config"/>
+        <local-cache name="differ.ackAwaitingCommands">
+            <persistence>
+                <mongodbStore>
+                    <connection
+                            uri="mongodb://${mongodb.hosts}:${mongodb.port}/${mongodb.database}?w=0&amp;connectTimeoutMS=2000"
+                            collection="infinispan_cachestore_ackAwaitingCommands"/>
+                </mongodbStore>
+            </persistence>
+        </local-cache>
     </cache-container>
 </infinispan>
-
