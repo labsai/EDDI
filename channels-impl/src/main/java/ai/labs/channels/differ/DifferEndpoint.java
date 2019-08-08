@@ -38,7 +38,7 @@ import java.util.*;
 import java.util.concurrent.ExecutionException;
 import java.util.stream.Collectors;
 
-import static ai.labs.channels.differ.model.commands.CreateConversationCommand.CREATE_CONVERSATION_EXCHANGE;
+import static ai.labs.channels.differ.model.commands.CreateConversationCommand.CONVERSATION_EXCHANGE;
 import static ai.labs.channels.differ.model.commands.CreateConversationCommand.CREATE_CONVERSATION_ROUTING_KEY;
 import static ai.labs.channels.differ.utilities.DifferUtilities.getCurrentTime;
 import static ai.labs.lifecycle.IConversation.CONVERSATION_END;
@@ -438,7 +438,7 @@ public class DifferEndpoint implements IDifferEndpoint {
 
     private void publishCreateConversationCommand(CreateConversationCommand createConversationCommand) throws IOException {
         differPublisher.publishCommandAndWaitForConfirm(new CommandInfo(
-                CREATE_CONVERSATION_EXCHANGE, CREATE_CONVERSATION_ROUTING_KEY,
+                CONVERSATION_EXCHANGE, CREATE_CONVERSATION_ROUTING_KEY,
                 createConversationCommand, 0, 0, 0));
     }
 }

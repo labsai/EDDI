@@ -41,7 +41,7 @@ public class DifferPublisherTest {
     }
 
     private IJsonSerialization createDummyJsonSerializer() {
-        ObjectMapper objectMapper = new SerializationModule().provideObjectMapper(false);
+        ObjectMapper objectMapper = new SerializationModule().provideObjectMapper(false, new JsonFactory());
         return new JsonSerialization(objectMapper);
     }
 
@@ -87,7 +87,7 @@ public class DifferPublisherTest {
         var createMessageCommandPayload = new CreateMessageCommand.Payload(
                 "conversationId", "senderId", INPUT_TYPE_TEXT, Collections.singletonList(part));
         var command = new CreateMessageCommand(
-                new Command.AuthContext("someUserId"), "commandName", createMessageCommandPayload);
+                new Command.AuthContext("someUserId"), createMessageCommandPayload);
         commandInfo.setCommand(command);
         commandInfo.setMinSentAt(System.currentTimeMillis());
 

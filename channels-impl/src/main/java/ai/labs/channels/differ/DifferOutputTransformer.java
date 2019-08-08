@@ -3,7 +3,6 @@ package ai.labs.channels.differ;
 import ai.labs.channels.differ.model.CommandInfo;
 import ai.labs.channels.differ.model.commands.Command;
 import ai.labs.channels.differ.model.commands.CreateActionsCommand;
-import ai.labs.channels.differ.model.commands.CreateConversationCommand;
 import ai.labs.channels.differ.model.commands.CreateMessageCommand;
 import ai.labs.channels.differ.model.events.Event;
 import ai.labs.memory.model.ConversationOutput;
@@ -16,6 +15,11 @@ import java.util.List;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 
+import static ai.labs.channels.differ.model.commands.CreateActionsCommand.CREATE_ACTIONS_EXCHANGE;
+import static ai.labs.channels.differ.model.commands.CreateActionsCommand.CREATE_ACTIONS_ROUTING_KEY;
+import static ai.labs.channels.differ.model.commands.CreateConversationCommand.CONVERSATION_EXCHANGE;
+import static ai.labs.channels.differ.model.commands.CreateMessageCommand.CREATE_MESSAGE_ROUTING_KEY;
+import static ai.labs.channels.differ.model.commands.CreateMessageCommand.Payload;
 import static ai.labs.channels.differ.utilities.DifferUtilities.*;
 
 @Slf4j
@@ -33,7 +37,7 @@ public class DifferOutputTransformer implements IDifferOutputTransformer {
                     var outputPart = outputParts.get(sequenceNumber);
 
                     var eventPart = new Event.Part(outputPart, MediaType.TEXT_PLAIN, "text");
-                    return new CommandInfo(CreateConversationCommand.CONVERSATION_EXCHANGE, CreateMessageCommand.CREATE_MESSAGE_ROUTING_KEY,
+                    return new CommandInfo(CONVERSATION_EXCHANGE, CREATE_MESSAGE_ROUTING_KEY,
                             createCreateMessageCommand(conversationId, botUserId, List.of(eventPart)),
                             calculateTypingDelay(outputPart), timeOfLastMessageReceived, sequenceNumber + 1);
                 })
@@ -50,8 +54,7 @@ public class DifferOutputTransformer implements IDifferOutputTransformer {
             var lastCommandInfo = (CreateMessageCommand) commandInfos.get(commandInfos.size() - 1).getCommand();
             var messageId = lastCommandInfo.getPayload().getId();
             var createActionCommand = createCreateActionCommand(conversationId, messageId, botUserId, quickReplies);
-            commandInfos.add(new CommandInfo(
-                    CreateActionsCommand.ACTION_CREATE_EXCHANGE, CreateActionsCommand.CREATE_ACTIONS_ROUTING_KEY,
+            commandInfos.add(new CommandInfo(CREATE_ACTIONS_EXCHANGE, CREATE_ACTIONS_ROUTING_KEY,
                     createActionCommand, 0, timeOfLastMessageReceived, commandInfos.size() + 1));
         }
 
@@ -60,7 +63,7 @@ public class DifferOutputTransformer implements IDifferOutputTransformer {
 
     private static CreateMessageCommand createCreateMessageCommand(String conversationId, String botUserId, List<Event.Part> parts) {
         return new CreateMessageCommand(new Command.AuthContext(botUserId),
-                new CreateMessageCommand.Payload(conversationId, botUserId, INPUT_TYPE_TEXT, parts));
+                new Payload(conversationId, botUserId, INPUT_TYPE_TEXT, parts));
     }
 
     private static CreateActionsCommand createCreateActionCommand(
