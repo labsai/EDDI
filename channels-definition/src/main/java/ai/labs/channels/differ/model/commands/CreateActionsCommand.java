@@ -12,10 +12,12 @@ import java.util.UUID;
 @Getter
 @Setter
 public class CreateActionsCommand extends Command {
+    public static final String ACTION_CREATE_EXCHANGE = "message-actions";
+    public static final String CREATE_ACTIONS_ROUTING_KEY = ACTION_CREATE_EXCHANGE + ".createMany";
     private Payload payload;
 
-    public CreateActionsCommand(AuthContext authContext, String commandName, Date createdAt, Payload payload) {
-        super(authContext, commandName, createdAt);
+    public CreateActionsCommand(AuthContext authContext, Date createdAt, Payload payload) {
+        super(authContext, CREATE_ACTIONS_ROUTING_KEY, createdAt);
         this.payload = payload;
     }
 

@@ -13,10 +13,11 @@ import java.util.UUID;
 @Getter
 @Setter
 public class CreateMessageCommand extends Command {
+    public static final String CREATE_MESSAGE_ROUTING_KEY = "message.create";
     private Payload payload;
 
-    public CreateMessageCommand(AuthContext authContext, String commandName, Payload payload) {
-        super(authContext, commandName);
+    public CreateMessageCommand(AuthContext authContext, Payload payload) {
+        super(authContext, CREATE_MESSAGE_ROUTING_KEY);
         this.payload = payload;
     }
 

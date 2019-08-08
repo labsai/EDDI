@@ -38,6 +38,8 @@ import java.util.*;
 import java.util.concurrent.ExecutionException;
 import java.util.stream.Collectors;
 
+import static ai.labs.channels.differ.model.commands.CreateConversationCommand.CREATE_CONVERSATION_EXCHANGE;
+import static ai.labs.channels.differ.model.commands.CreateConversationCommand.CREATE_CONVERSATION_ROUTING_KEY;
 import static ai.labs.channels.differ.utilities.DifferUtilities.getCurrentTime;
 import static ai.labs.lifecycle.IConversation.CONVERSATION_END;
 import static ai.labs.utilities.RuntimeUtilities.*;
@@ -47,9 +49,6 @@ import static java.util.concurrent.TimeUnit.MILLISECONDS;
 @Slf4j
 @Singleton
 public class DifferEndpoint implements IDifferEndpoint {
-    private static final String CREATE_CONVERSATION_EXCHANGE = "conversation";
-    private static final String CREATE_CONVERSATION_ROUTING_KEY = CREATE_CONVERSATION_EXCHANGE + ".create";
-
     private final IRestBotManagement restBotManagement;
     private final SystemRuntime.IRuntime runtime;
     private final IJsonSerialization jsonSerialization;
@@ -427,7 +426,7 @@ public class DifferEndpoint implements IDifferEndpoint {
 
     private void triggerCreateConversationCommand(CreateConversation createConversation) throws IOException {
         var command = new CreateConversationCommand(
-                new Command.AuthContext(createConversation.getBotUserIdCreator()), CREATE_CONVERSATION_ROUTING_KEY, getCurrentTime());
+                new Command.AuthContext(createConversation.getBotUserIdCreator()), getCurrentTime());
 
         command.setPayload(
                 new CreateConversationCommand.Payload(
@@ -439,7 +438,7 @@ public class DifferEndpoint implements IDifferEndpoint {
 
     private void publishCreateConversationCommand(CreateConversationCommand createConversationCommand) throws IOException {
         differPublisher.publishCommandAndWaitForConfirm(new CommandInfo(
-                CREATE_CONVERSATION_EXCHANGE,
-                CREATE_CONVERSATION_ROUTING_KEY, createConversationCommand, 0, 0, 0));
+                CREATE_CONVERSATION_EXCHANGE, CREATE_CONVERSATION_ROUTING_KEY,
+                createConversationCommand, 0, 0, 0));
     }
 }

@@ -12,10 +12,12 @@ import java.util.UUID;
 @Getter
 @Setter
 public class CreateConversationCommand extends Command {
+    public static final String CREATE_CONVERSATION_EXCHANGE = "conversation";
+    public static final String CREATE_CONVERSATION_ROUTING_KEY = CREATE_CONVERSATION_EXCHANGE + ".create";
     private Payload payload;
 
-    public CreateConversationCommand(AuthContext authContext, String commandName, Date createdAt) {
-        super(authContext, commandName, createdAt);
+    public CreateConversationCommand(AuthContext authContext, Date createdAt) {
+        super(authContext, CREATE_CONVERSATION_ROUTING_KEY, createdAt);
     }
 
     @Getter
