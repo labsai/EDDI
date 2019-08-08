@@ -1,7 +1,7 @@
 package ai.labs.behavior.impl.conditions;
 
 import ai.labs.behavior.impl.BehaviorRule;
-import ai.labs.expressions.Expression;
+import ai.labs.expressions.Expressions;
 import ai.labs.expressions.utilities.IExpressionProvider;
 import ai.labs.memory.IConversationMemory;
 import ai.labs.memory.IData;
@@ -15,8 +15,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
-import static ai.labs.behavior.impl.conditions.IBehaviorCondition.ExecutionState.FAIL;
-import static ai.labs.behavior.impl.conditions.IBehaviorCondition.ExecutionState.SUCCESS;
+import static ai.labs.behavior.impl.conditions.IBehaviorCondition.ExecutionState.*;
 import static ai.labs.memory.IConversationMemory.IConversationStepStack;
 
 /**
@@ -28,7 +27,7 @@ public class InputMatcher extends BaseMatcher implements IBehaviorCondition {
 
     @Getter
     @Setter
-    private List<Expression> expressions = Collections.emptyList();
+    private Expressions expressions = new Expressions();
     private final String expressionsQualifier = KEY_EXPRESSIONS;
 
     private IExpressionProvider expressionProvider;
@@ -66,6 +65,7 @@ public class InputMatcher extends BaseMatcher implements IBehaviorCondition {
     @Override
     public ExecutionState execute(IConversationMemory memory, List<BehaviorRule> trace) {
         IData<String> data;
+        ExecutionState state = NOT_EXECUTED;
         switch (occurrence) {
             case currentStep:
                 data = memory.getCurrentStep().getLatestData(KEY_EXPRESSIONS);
@@ -92,7 +92,7 @@ public class InputMatcher extends BaseMatcher implements IBehaviorCondition {
     }
 
     private ExecutionState evaluateInputExpressions(IData<String> data) {
-        List<Expression> inputExpressions = Collections.emptyList();
+        Expressions inputExpressions = new Expressions();
         if (data != null && data.getResult() != null) {
             inputExpressions = expressionProvider.parseExpressions(data.getResult());
         }
@@ -105,7 +105,7 @@ public class InputMatcher extends BaseMatcher implements IBehaviorCondition {
         }
     }
 
-    private boolean isInputEmpty(List<Expression> inputExpressions) {
+    private boolean isInputEmpty(Expressions inputExpressions) {
         return expressions.size() == 1 &&
                 expressions.get(0).getExpressionName().equals(KEY_EMPTY) &&
                 inputExpressions.size() == 0;

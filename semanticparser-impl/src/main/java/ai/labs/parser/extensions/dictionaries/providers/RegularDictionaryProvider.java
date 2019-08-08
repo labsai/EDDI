@@ -1,6 +1,6 @@
 package ai.labs.parser.extensions.dictionaries.providers;
 
-import ai.labs.expressions.Expression;
+import ai.labs.expressions.Expressions;
 import ai.labs.expressions.utilities.IExpressionProvider;
 import ai.labs.lifecycle.IllegalExtensionConfigurationException;
 import ai.labs.parser.extensions.dictionaries.IDictionary;
@@ -15,9 +15,7 @@ import lombok.extern.slf4j.Slf4j;
 
 import javax.inject.Inject;
 import java.net.URI;
-import java.util.Collections;
 import java.util.HashMap;
-import java.util.List;
 import java.util.Map;
 
 /**
@@ -106,9 +104,9 @@ public class RegularDictionaryProvider implements IDictionaryProvider {
         });
     }
 
-    private List<Expression> createDefaultExpressionIfNull(String value, String exp) {
+    private Expressions createDefaultExpressionIfNull(String value, String exp) {
         if (RuntimeUtilities.isNullOrEmpty(exp)) {
-            return Collections.singletonList(expressionProvider.createExpression("unused", value));
+            return new Expressions(expressionProvider.createExpression("unused", value));
         }
 
         return expressionProvider.parseExpressions(exp);

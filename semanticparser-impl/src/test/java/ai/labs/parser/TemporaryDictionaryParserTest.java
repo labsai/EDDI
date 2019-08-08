@@ -39,7 +39,7 @@ public class TemporaryDictionaryParserTest {
         TestDictionary temporaryTestDictionary = new TestDictionary();
         temporaryTestDictionary.addWord(new Word("tmp1", expressionProvider.parseExpressions("tmpExp1"), "tmpExp1", 0, false));
         temporaryTestDictionary.addWord(new Word("tmp2", expressionProvider.parseExpressions("tmpExp2"), "tmpExp2", 0, false));
-        List<Solution> expected = Collections.singletonList(new Solution("expression1, expression2, tmpExp1, tmpExp2"));
+        List<Solution> expected = Collections.singletonList(new Solution(expressionProvider.parseExpressions("expression1, expression2, tmpExp1, tmpExp2")));
 
         //test
         List<RawSolution> rawSolutions = inputParser.parse("test1 test2 tmp1 tmp2",
@@ -56,7 +56,7 @@ public class TemporaryDictionaryParserTest {
         TestDictionary temporaryTestDictionary = new TestDictionary();
         temporaryTestDictionary.addPhrase(new Phrase("test tmp phrase", expressionProvider.parseExpressions
                 ("tmpExp1"), "tmpExp1"));
-        List<Solution> expected = Collections.singletonList(new Solution("expression1, expression2, tmpExp1"));
+        List<Solution> expected = Collections.singletonList(new Solution(expressionProvider.parseExpressions("expression1, expression2, tmpExp1")));
 
         //test
         List<RawSolution> rawSolutions = inputParser.parse("test1 test2 test tmp phrase",
@@ -73,7 +73,7 @@ public class TemporaryDictionaryParserTest {
         TestDictionary temporaryTestDictionary = new TestDictionary();
         temporaryTestDictionary.addWord(new Word("test1", expressionProvider.parseExpressions("tmpExp1"), "tmpExp1",
                 0, false));
-        List<Solution> expected = Collections.singletonList(new Solution("tmpExp1"));
+        List<Solution> expected = Collections.singletonList(new Solution(expressionProvider.parseExpressions("tmpExp1")));
 
         //test
         List<RawSolution> rawSolutions = inputParser.parse("test1",

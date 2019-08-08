@@ -1,6 +1,7 @@
 package ai.labs.parser.extensions.dictionaries;
 
 import ai.labs.expressions.Expression;
+import ai.labs.expressions.Expressions;
 import ai.labs.expressions.utilities.IExpressionProvider;
 import ai.labs.parser.model.FoundWord;
 import ai.labs.parser.model.Word;
@@ -24,7 +25,7 @@ public class IntegerDictionary implements IDictionary {
     public List<IFoundWord> lookupTerm(final String value) {
         if (CharacterUtilities.isStringInteger(value)) {
             Expression integerExp = expressionProvider.createExpression("integer", value);
-            IWord word = new Word(value, Collections.singletonList(integerExp), ID);
+            IWord word = new Word(value, new Expressions(integerExp), ID);
 
             return Collections.singletonList(new FoundWord(word, false, 1.0));
         }

@@ -22,7 +22,6 @@ public class Dependency implements IBehaviorCondition {
 
     private String reference;
 
-    private ExecutionState state = ExecutionState.NOT_EXECUTED;
     private final String referenceQualifier = "reference";
     private BehaviorSet behaviorSet;
 
@@ -68,28 +67,20 @@ public class Dependency implements IBehaviorCondition {
             log.error(e.getLocalizedMessage(), e);
         }
 
+        ExecutionState state = ExecutionState.NOT_EXECUTED;
         for (BehaviorRule behaviorRule : filteredBehaviorRules) {
-            ExecutionState state = behaviorRule.execute(memory, trace);
-            if (state == ExecutionState.ERROR) {
-                this.state = ExecutionState.ERROR;
-                break;
-            } else if (state == ExecutionState.SUCCESS) {
-                this.state = ExecutionState.SUCCESS;
+            state = behaviorRule.execute(memory, trace);
+            if (state == ExecutionState.ERROR || state == ExecutionState.SUCCESS) {
                 break;
             } else {
-                this.state = ExecutionState.FAIL;
+                state = ExecutionState.FAIL;
             }
         }
 
-        if (this.state == ExecutionState.NOT_EXECUTED) {
-            this.state = ExecutionState.FAIL;
+        if (state == ExecutionState.NOT_EXECUTED) {
+            state = ExecutionState.FAIL;
         }
 
-        return this.state;
-    }
-
-    @Override
-    public ExecutionState getExecutionState() {
         return state;
     }
 

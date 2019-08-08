@@ -1,6 +1,7 @@
 package ai.labs.parser.extensions.dictionaries;
 
 import ai.labs.expressions.Expression;
+import ai.labs.expressions.Expressions;
 import ai.labs.expressions.utilities.IExpressionProvider;
 import ai.labs.parser.model.FoundWord;
 import ai.labs.parser.model.Word;
@@ -31,7 +32,7 @@ public class EmailDictionary implements IDictionary {
     public List<IFoundWord> lookupTerm(String value) {
         if (isEmailAddress(value)) {
             Expression emailExp = expressionProvider.createExpression("email", value);
-            IWord emailExpression = new Word(value, Collections.singletonList(emailExp), ID);
+            IWord emailExpression = new Word(value, new Expressions(emailExp), ID);
             return Collections.singletonList(new FoundWord(emailExpression, false, 1.0));
         }
 

@@ -1,7 +1,7 @@
 package ai.labs.property;
 
-import ai.labs.expressions.Expression;
-import ai.labs.property.model.PropertyEntry;
+import ai.labs.expressions.Expressions;
+import ai.labs.models.Property;
 
 import java.util.List;
 
@@ -9,5 +9,5 @@ import java.util.List;
  * @author ginccc
  */
 public interface IPropertySetter {
-    List<PropertyEntry> extractProperties(List<Expression> expressions);
+    List<Property> extractProperties(Expressions expressions);
 }

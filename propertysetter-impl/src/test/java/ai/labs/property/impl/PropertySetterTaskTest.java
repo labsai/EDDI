@@ -1,6 +1,7 @@
 package ai.labs.property.impl;
 
 import ai.labs.expressions.Expression;
+import ai.labs.expressions.Expressions;
 import ai.labs.expressions.utilities.IExpressionProvider;
 import ai.labs.expressions.value.Value;
 import ai.labs.lifecycle.LifecycleException;
@@ -8,10 +9,11 @@ import ai.labs.memory.IConversationMemory;
 import ai.labs.memory.IData;
 import ai.labs.memory.IDataFactory;
 import ai.labs.memory.IMemoryItemConverter;
+import ai.labs.memory.model.ConversationProperties;
 import ai.labs.memory.model.Data;
 import ai.labs.models.Context;
+import ai.labs.models.Property;
 import ai.labs.property.IPropertySetter;
-import ai.labs.property.model.PropertyEntry;
 import ai.labs.runtime.client.configuration.IResourceClientLibrary;
 import ai.labs.templateengine.ITemplatingEngine;
 import org.junit.Before;
@@ -23,6 +25,8 @@ import java.util.Collections;
 import java.util.LinkedList;
 import java.util.List;
 
+import static ai.labs.models.Property.Scope.conversation;
+import static org.mockito.AdditionalMatchers.not;
 import static org.mockito.Mockito.*;
 
 /**
@@ -39,7 +43,7 @@ public class PropertySetterTaskTest {
     private IConversationMemory.IConversationStep previousStep;
     private IPropertySetter propertySetter;
     private IDataFactory dataFactory;
-    private List<Expression> expressions;
+    private Expressions expressions;
 
     @Before
     public void setUp() {
@@ -53,8 +57,9 @@ public class PropertySetterTaskTest {
         when(conversationMemory.getCurrentStep()).thenAnswer(invocation -> currentStep);
         when(conversationMemory.getPreviousSteps()).thenAnswer(invocation -> previousConversationSteps);
         IExpressionProvider expressionProvider = mock(IExpressionProvider.class);
-        when(expressionProvider.parseExpressions(eq("property(someMeaning(someValue))"))).thenAnswer(invocation -> {
-            expressions = new LinkedList<>();
+        String exp = "property(someMeaning(someValue))";
+        when(expressionProvider.parseExpressions(eq(exp))).thenAnswer(invocation -> {
+            expressions = new Expressions();
             expressions.add(
                     new Expression("property",
                             new Expression("someMeaning",
@@ -62,6 +67,7 @@ public class PropertySetterTaskTest {
 
             return expressions;
         });
+        when(expressionProvider.parseExpressions(not(eq(exp)))).thenAnswer(invocation -> new Expressions());
         IMemoryItemConverter memoryItemConverter = mock(IMemoryItemConverter.class);
         ITemplatingEngine templateEngine = mock(ITemplatingEngine.class);
         IResourceClientLibrary resourceClientLibrary = mock(IResourceClientLibrary.class);
@@ -73,19 +79,19 @@ public class PropertySetterTaskTest {
     public void executeTask() throws LifecycleException {
         //setup
         final String userInput = "Some Input From the User";
-        List<PropertyEntry> propertyEntries = new LinkedList<>();
-        propertyEntries.add(new PropertyEntry(Collections.singletonList("someMeaning"), "someValue"));
+        List<Property> propertyEntries = new LinkedList<>();
+        propertyEntries.add(new Property("someMeaning", "someValue", conversation));
 
-        propertyEntries.add(new PropertyEntry(Collections.singletonList("user_input"), userInput));
-        propertyEntries.add(new PropertyEntry(Collections.singletonList("someContextMeaning"), "someContextValue"));
-        IData<List<PropertyEntry>> expectedPropertyData = new Data<>("properties:extracted", propertyEntries);
+        propertyEntries.add(new Property("user_input", userInput, conversation));
+        propertyEntries.add(new Property("someContextMeaning", "someContextValue", conversation));
+        IData<List<Property>> expectedPropertyData = new Data<>("properties:extracted", propertyEntries);
 
         final String propertyExpression = "property(someMeaning(someValue))";
         when(currentStep.getLatestData(eq(KEY_EXPRESSIONS_PARSED))).thenAnswer(invocation ->
                 new Data<>(KEY_EXPRESSIONS_PARSED, propertyExpression));
         when(propertySetter.extractProperties(eq(expressions))).thenAnswer(invocation -> {
-            List<PropertyEntry> ret = new LinkedList<>();
-            ret.add(new PropertyEntry(Collections.singletonList("someMeaning"), "someValue"));
+            List<Property> ret = new LinkedList<>();
+            ret.add(new Property("someMeaning", "someValue", conversation));
             return ret;
         });
         when(conversationMemory.getPreviousSteps().size()).thenAnswer(invocation -> 1);
@@ -101,10 +107,11 @@ public class PropertySetterTaskTest {
         });
         when(dataFactory.createData(eq("properties:extracted"), any(List.class), eq(true))).
                 thenAnswer(invocation -> {
-                    Data<List<PropertyEntry>> ret = new Data<>("properties:extracted", propertyEntries);
+                    Data<List<Property>> ret = new Data<>("properties:extracted", propertyEntries);
                     ret.setPublic(true);
                     return ret;
                 });
+        when(conversationMemory.getConversationProperties()).thenAnswer(invocation -> new ConversationProperties(conversationMemory));
 
         //test
         propertySetterTask.executeTask(conversationMemory);
@@ -115,5 +122,6 @@ public class PropertySetterTaskTest {
         verify(currentStep, times(1)).getLatestData(KEY_INPUT_INITIAL);
         verify(currentStep, times(1)).getAllData(KEY_CONTEXT);
         verify(currentStep, times(1)).storeData(ArgumentMatchers.eq(expectedPropertyData));
+        verify(conversationMemory, times(1)).getConversationProperties();
     }
 }

@@ -1,13 +1,16 @@
 package ai.labs.property.impl;
 
 import ai.labs.expressions.Expression;
+import ai.labs.expressions.Expressions;
 import ai.labs.expressions.value.Value;
+import ai.labs.models.Property;
 import ai.labs.property.IPropertySetter;
-import ai.labs.property.model.PropertyEntry;
 
 import java.util.LinkedList;
 import java.util.List;
 import java.util.stream.Collectors;
+
+import static ai.labs.models.Property.Scope.conversation;
 
 /**
  * @author ginccc
@@ -16,7 +19,7 @@ public class PropertySetter implements IPropertySetter {
     private static final String PROPERTY_EXPRESSION = "property";
 
     @Override
-    public List<PropertyEntry> extractProperties(List<Expression> expressions) {
+    public List<Property> extractProperties(Expressions expressions) {
         return expressions.stream().
                 filter(expression ->
                         PROPERTY_EXPRESSION.equals(expression.getExpressionName()) &&
@@ -25,7 +28,7 @@ public class PropertySetter implements IPropertySetter {
                     List<String> meanings = new LinkedList<>();
                     Value value = new Value();
                     extractMeanings(meanings, value, expression.getSubExpressions()[0]);
-                    return new PropertyEntry(meanings, value.getExpressionName());
+                    return new Property(String.join(".", meanings), value.getExpressionName(), conversation);
                 }).collect(Collectors.toCollection(LinkedList::new));
     }
 

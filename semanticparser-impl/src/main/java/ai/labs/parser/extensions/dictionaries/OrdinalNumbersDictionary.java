@@ -1,6 +1,7 @@
 package ai.labs.parser.extensions.dictionaries;
 
 import ai.labs.expressions.Expression;
+import ai.labs.expressions.Expressions;
 import ai.labs.expressions.utilities.IExpressionProvider;
 import ai.labs.parser.model.FoundWord;
 import ai.labs.parser.model.Word;
@@ -26,7 +27,7 @@ public class OrdinalNumbersDictionary implements IDictionary {
         final String ordinalNumber = LanguageUtilities.isOrdinalNumber(value.toLowerCase());
         if (!RuntimeUtilities.isNullOrEmpty(ordinalNumber)) {
             Expression ordinalNumberExp = expressionProvider.createExpression("ordinal_number", ordinalNumber);
-            IWord word = new Word(ordinalNumber, Collections.singletonList(ordinalNumberExp), ID);
+            IWord word = new Word(ordinalNumber, new Expressions(ordinalNumberExp), ID);
             return Collections.singletonList(new FoundWord(word, false, 1.0));
         }
 

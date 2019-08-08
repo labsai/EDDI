@@ -7,6 +7,7 @@ import ai.labs.serialization.IDocumentBuilder;
 import ai.labs.serialization.IJsonSerialization;
 import ai.labs.serialization.JsonSerialization;
 import com.fasterxml.jackson.annotation.JsonInclude;
+import com.fasterxml.jackson.core.JsonFactory;
 import com.fasterxml.jackson.databind.DeserializationFeature;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.SerializationFeature;
@@ -30,12 +31,21 @@ public class SerializationModule extends AbstractModule {
 
     @Provides
     @Singleton
-    public ObjectMapper provideObjectMapper(@Named("json.prettyPrint") boolean prettyPrint) {
-        ObjectMapper objectMapper = new ObjectMapper();
+    public ObjectMapper provideObjectMapper(@Named("json.prettyPrint") boolean prettyPrint, JsonFactory jsonFactory) {
+        ObjectMapper objectMapper = new ObjectMapper(jsonFactory);
+
         objectMapper.setSerializationInclusion(JsonInclude.Include.NON_NULL);
         objectMapper.configure(SerializationFeature.INDENT_OUTPUT, prettyPrint);
         objectMapper.configure(SerializationFeature.FAIL_ON_EMPTY_BEANS, false);
         objectMapper.configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false);
         return objectMapper;
+    }
+
+    @Provides
+    @Singleton
+    public JsonFactory provideJsonFactory() {
+        JsonFactory jsonFactory = new JsonFactory();
+        jsonFactory.disable(JsonFactory.Feature.CANONICALIZE_FIELD_NAMES);
+        return jsonFactory;
     }
 }

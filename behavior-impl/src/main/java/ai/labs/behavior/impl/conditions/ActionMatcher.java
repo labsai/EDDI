@@ -14,8 +14,7 @@ import java.util.Map;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
-import static ai.labs.behavior.impl.conditions.IBehaviorCondition.ExecutionState.FAIL;
-import static ai.labs.behavior.impl.conditions.IBehaviorCondition.ExecutionState.SUCCESS;
+import static ai.labs.behavior.impl.conditions.IBehaviorCondition.ExecutionState.*;
 
 /**
  * @author ginccc
@@ -57,6 +56,7 @@ public class ActionMatcher extends BaseMatcher implements IBehaviorCondition {
     @Override
     public ExecutionState execute(IConversationMemory memory, List<BehaviorRule> trace) {
         IData<List<String>> data;
+        ExecutionState state = NOT_EXECUTED;
         switch (occurrence) {
             case currentStep:
                 data = memory.getCurrentStep().getLatestData(KEY_ACTIONS);

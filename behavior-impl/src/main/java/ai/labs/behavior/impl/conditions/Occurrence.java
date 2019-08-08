@@ -29,9 +29,6 @@ public class Occurrence implements IBehaviorCondition {
     @Setter
     private int minTimesOccurred = -1;
 
-    private ExecutionState state = ExecutionState.NOT_EXECUTED;
-
-
     private int countTimesOccurred(List<List<String>> allBehaviorRulesHistorical) {
         int occurrences = 0;
         for (List<String> history : allBehaviorRulesHistorical) {
@@ -112,18 +109,7 @@ public class Occurrence implements IBehaviorCondition {
             success = false;
         }
 
-        if (success) {
-            state = ExecutionState.SUCCESS;
-        } else {
-            state = ExecutionState.FAIL;
-        }
-
-        return state;
-    }
-
-    @Override
-    public ExecutionState getExecutionState() {
-        return state;
+        return success ? ExecutionState.SUCCESS : ExecutionState.FAIL;
     }
 
     @Override

@@ -355,6 +355,7 @@ public class HttpCallsTask implements ILifecycleTask {
 
                     String propertyName = propertyInstruction.getName();
                     checkNotNull(propertyName, "name");
+                    propertyName = templateValues(propertyName, templateDataObjects);
 
                     String path = propertyInstruction.getFromObjectPath();
                     checkNotNull(path, "fromObjectPath");

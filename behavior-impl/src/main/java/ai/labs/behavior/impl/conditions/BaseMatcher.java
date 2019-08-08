@@ -12,7 +12,6 @@ import java.util.List;
 import java.util.Map;
 
 import static ai.labs.behavior.impl.conditions.BaseMatcher.ConversationStepOccurrence.*;
-import static ai.labs.behavior.impl.conditions.IBehaviorCondition.ExecutionState.NOT_EXECUTED;
 import static ai.labs.behavior.impl.conditions.IBehaviorCondition.ExecutionState.SUCCESS;
 
 /**
@@ -28,18 +27,13 @@ public abstract class BaseMatcher implements IBehaviorCondition {
     protected ConversationStepOccurrence occurrence = currentStep;
 
     private final String conversationOccurrenceQualifier = KEY_OCCURRENCE;
-    protected ExecutionState state = NOT_EXECUTED;
+
 
     enum ConversationStepOccurrence {
         currentStep,
         lastStep,
         anyStep,
         never
-    }
-
-    @Override
-    public ExecutionState getExecutionState() {
-        return state;
     }
 
     @Override

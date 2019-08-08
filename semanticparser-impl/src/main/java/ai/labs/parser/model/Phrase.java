@@ -1,10 +1,10 @@
 package ai.labs.parser.model;
 
 import ai.labs.expressions.Expression;
+import ai.labs.expressions.Expressions;
 import ai.labs.parser.extensions.dictionaries.IDictionary;
 
 import java.util.Arrays;
-import java.util.Collections;
 import java.util.LinkedList;
 import java.util.List;
 
@@ -13,7 +13,7 @@ import java.util.List;
  */
 public class Phrase extends DictionaryEntry implements IDictionary.IPhrase {
 
-    public Phrase(String value, List<Expression> expressions, String identifier) {
+    public Phrase(String value, Expressions expressions, String identifier) {
         super(value, expressions, identifier, 0);
     }
 
@@ -23,14 +23,14 @@ public class Phrase extends DictionaryEntry implements IDictionary.IPhrase {
         List<IDictionary.IWord> words = new LinkedList<>();
         Arrays.stream(splitPhrase).forEach(word -> {
             Expression unusedExp = new Expression("unused", new Expression(word));
-            words.add(new Word(word, Collections.singletonList(unusedExp), null, 0, true));
+            words.add(new Word(word, new Expressions(unusedExp), null, 0, true));
         });
 
         return words;
     }
 
     @Override
-    public List<Expression> getExpressions() {
+    public Expressions getExpressions() {
         return expressions;
     }
 

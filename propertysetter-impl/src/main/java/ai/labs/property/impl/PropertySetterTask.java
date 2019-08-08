@@ -1,6 +1,6 @@
 package ai.labs.property.impl;
 
-import ai.labs.expressions.Expression;
+import ai.labs.expressions.Expressions;
 import ai.labs.expressions.utilities.IExpressionProvider;
 import ai.labs.lifecycle.ILifecycleTask;
 import ai.labs.lifecycle.LifecycleException;
@@ -15,7 +15,6 @@ import ai.labs.models.Property.Scope;
 import ai.labs.models.PropertyInstruction;
 import ai.labs.models.SetOnActions;
 import ai.labs.property.IPropertySetter;
-import ai.labs.property.model.PropertyEntry;
 import ai.labs.resources.rest.config.propertysetter.model.PropertySetterConfiguration;
 import ai.labs.resources.rest.extensions.model.ExtensionDescriptor;
 import ai.labs.runtime.client.configuration.IResourceClientLibrary;
@@ -101,7 +100,7 @@ public class PropertySetterTask implements ILifecycleTask {
             return;
         }
 
-        List<Expression> aggregatedExpressions = new LinkedList<>();
+        Expressions aggregatedExpressions = new Expressions();
 
         if (contextDataList != null) {
             aggregatedExpressions.addAll(extractContextProperties(contextDataList));
@@ -111,7 +110,7 @@ public class PropertySetterTask implements ILifecycleTask {
             aggregatedExpressions.addAll(expressionProvider.parseExpressions(expressionsData.getResult()));
         }
 
-        List<PropertyEntry> properties = propertySetter.extractProperties(aggregatedExpressions);
+        List<Property> properties = propertySetter.extractProperties(aggregatedExpressions);
 
         Map<String, Object> templateDataObjects = memoryItemConverter.convert(memory);
         if (actionsData != null && !isNullOrEmpty(actionsData.getResult())) {
@@ -134,6 +133,7 @@ public class PropertySetterTask implements ILifecycleTask {
                             Scope scope = property.getScope();
                             boolean override = property.getOverride();
                             RuntimeUtilities.checkNotNull(name, "property.name");
+                            name = templatingEngine.processTemplate(name, templateDataObjects);
 
                             Object templatedObj;
                             if (!isNullOrEmpty(fromObjectPath)) {
@@ -172,8 +172,7 @@ public class PropertySetterTask implements ILifecycleTask {
                     IData<String> initialInputData = currentStep.getLatestData(INPUT_INITIAL_IDENTIFIER);
                     String initialInput = initialInputData.getResult();
                     if (!initialInput.isEmpty()) {
-                        properties.add(new PropertyEntry(
-                                Collections.singletonList(EXPRESSION_MEANING_USER_INPUT), initialInput));
+                        properties.add(new Property(EXPRESSION_MEANING_USER_INPUT, initialInput, conversation));
                     }
                 }
             }
@@ -181,11 +180,12 @@ public class PropertySetterTask implements ILifecycleTask {
 
         if (!properties.isEmpty()) {
             currentStep.storeData(dataFactory.createData(PROPERTIES_EXTRACTED_IDENTIFIER, properties, true));
+            properties.forEach(property -> memory.getConversationProperties().put(property.getName(), property));
         }
     }
 
-    private List<Expression> extractContextProperties(List<IData<Context>> contextDataList) {
-        List<Expression> ret = new LinkedList<>();
+    private Expressions extractContextProperties(List<IData<Context>> contextDataList) {
+        Expressions ret = new Expressions();
         contextDataList.forEach(contextData -> {
             String contextKey = contextData.getKey();
             Context context = contextData.getResult();

@@ -8,6 +8,8 @@ import lombok.Setter;
 import java.util.Collections;
 import java.util.List;
 
+import static ai.labs.behavior.impl.conditions.IBehaviorCondition.ExecutionState.NOT_EXECUTED;
+
 /**
  * @author ginccc
  */
@@ -16,7 +18,6 @@ public class Negation implements IBehaviorCondition {
     private static final String ID = "negation";
     @Setter
     private IBehaviorCondition condition;
-    private ExecutionState state = ExecutionState.NOT_EXECUTED;
 
     @Override
     public String getId() {
@@ -31,6 +32,7 @@ public class Negation implements IBehaviorCondition {
     @Override
     public ExecutionState execute(IConversationMemory memory, List<BehaviorRule> trace)
             throws BehaviorRule.InfiniteLoopException, BehaviorRule.RuntimeException {
+        ExecutionState state = NOT_EXECUTED;
         if (condition != null) {
             ExecutionState stateOfExecutable = condition.execute(memory, trace);
 
@@ -38,14 +40,8 @@ public class Negation implements IBehaviorCondition {
                 state = ExecutionState.FAIL;
             else if (stateOfExecutable == ExecutionState.FAIL)
                 state = ExecutionState.SUCCESS;
-        } else
-            state = ExecutionState.NOT_EXECUTED;
+        }
 
-        return state;
-    }
-
-    @Override
-    public ExecutionState getExecutionState() {
         return state;
     }
 

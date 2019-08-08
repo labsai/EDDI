@@ -1,6 +1,7 @@
 package ai.labs.parser.extensions.dictionaries;
 
 import ai.labs.expressions.Expression;
+import ai.labs.expressions.Expressions;
 import ai.labs.expressions.utilities.IExpressionProvider;
 import ai.labs.parser.model.FoundWord;
 import ai.labs.parser.model.Word;
@@ -36,7 +37,7 @@ public class PunctuationDictionary implements IDictionary {
     public List<IFoundWord> lookupTerm(final String value) {
         if (punctuations.containsKey(value)) {
             Expression punctuationExpression = createPunctuationExpression(value);
-            List<Expression> expressions = Collections.singletonList(punctuationExpression);
+            Expressions expressions = new Expressions(punctuationExpression);
             IDictionary.IWord word = new Word(value, expressions, ID);
 
             return Collections.singletonList(new FoundWord(word, false, 1.0));

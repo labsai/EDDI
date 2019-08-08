@@ -1,9 +1,7 @@
 package ai.labs.parser.model;
 
-import ai.labs.expressions.Expression;
+import ai.labs.expressions.Expressions;
 import ai.labs.parser.extensions.dictionaries.IDictionary;
-
-import java.util.List;
 
 /**
  * @author ginccc
@@ -11,11 +9,11 @@ import java.util.List;
 public class Word extends DictionaryEntry implements IDictionary.IWord {
     private boolean isPartOfPhrase;
 
-    public Word(String value, List<Expression> expressions, String identifier) {
+    public Word(String value, Expressions expressions, String identifier) {
         this(value, expressions, identifier, 0, false);
     }
 
-    public Word(String value, List<Expression> expression, String identifier, int frequency, boolean partOfPhrase) {
+    public Word(String value, Expressions expression, String identifier, int frequency, boolean partOfPhrase) {
         super(value, expression, identifier, frequency);
         isPartOfPhrase = partOfPhrase;
 

@@ -1,9 +1,7 @@
 package ai.labs.parser.model;
 
-import ai.labs.expressions.Expression;
+import ai.labs.expressions.Expressions;
 import ai.labs.parser.extensions.dictionaries.IDictionary;
-
-import java.util.List;
 
 /**
  * @author ginccc
@@ -12,7 +10,7 @@ public class DictionaryEntry implements IDictionary.IDictionaryEntry {
 
     protected String value;
 
-    protected List<Expression> expressions;
+    protected Expressions expressions;
     private String identifier;
     private int rating;
 
@@ -21,11 +19,11 @@ public class DictionaryEntry implements IDictionary.IDictionaryEntry {
 
     int frequency;
 
-    DictionaryEntry(String value, List<Expression> expressions) {
+    DictionaryEntry(String value, Expressions expressions) {
         this(value, expressions, "", 0);
     }
 
-    DictionaryEntry(String value, List<Expression> expressions, String identifier, int rating) {
+    DictionaryEntry(String value, Expressions expressions, String identifier, int rating) {
         this.value = value;
         this.expressions = expressions;
         this.identifier = identifier;
@@ -40,7 +38,7 @@ public class DictionaryEntry implements IDictionary.IDictionaryEntry {
         this.value = value;
     }
 
-    public List<Expression> getExpressions() {
+    public Expressions getExpressions() {
         return expressions;
     }
 

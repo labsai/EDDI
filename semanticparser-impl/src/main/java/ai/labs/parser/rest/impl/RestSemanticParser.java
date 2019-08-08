@@ -2,6 +2,7 @@ package ai.labs.parser.rest.impl;
 
 import ai.labs.caching.ICache;
 import ai.labs.caching.ICacheFactory;
+import ai.labs.expressions.Expressions;
 import ai.labs.lifecycle.ILifecycleTask;
 import ai.labs.parser.IInputParser;
 import ai.labs.parser.InputParserTask;
@@ -13,6 +14,9 @@ import ai.labs.resources.rest.config.parser.model.ParserConfiguration;
 import ai.labs.runtime.SystemRuntime;
 import ai.labs.runtime.client.configuration.IResourceClientLibrary;
 import ai.labs.runtime.service.ServiceException;
+import lombok.Getter;
+import lombok.NoArgsConstructor;
+import lombok.Setter;
 import lombok.extern.slf4j.Slf4j;
 
 import javax.inject.Inject;
@@ -26,6 +30,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.concurrent.Callable;
 import java.util.concurrent.TimeUnit;
+import java.util.stream.Collectors;
 
 import static ai.labs.parser.DictionaryUtilities.extractExpressions;
 
@@ -62,7 +67,9 @@ public class RestSemanticParser implements IRestSemanticParser {
                 IInputParser inputParser = (IInputParser) inputParserTask.getComponent();
                 List<RawSolution> rawSolutions = inputParser.parse(sentence);
                 List<Solution> solutionExpressions = extractExpressions(rawSolutions, true, true);
-                asyncResponse.resume(solutionExpressions);
+                asyncResponse.resume(solutionExpressions.stream().
+                        map(solution -> new ResponseSolution(solution.getExpressions())).
+                        collect(Collectors.toList()));
             } catch (IllegalArgumentException e) {
                 asyncResponse.resume(new BadRequestException(e.getLocalizedMessage()));
             } catch (Exception e) {
@@ -94,5 +101,16 @@ public class RestSemanticParser implements IRestSemanticParser {
 
     private ParserConfiguration fetchParserConfiguration(URI resourceUri) throws ServiceException {
         return resourceClientLibrary.getResource(resourceUri, ParserConfiguration.class);
+    }
+
+    @Getter
+    @Setter
+    @NoArgsConstructor
+    public static class ResponseSolution {
+        private String expressions;
+
+        public ResponseSolution(Expressions exps) {
+            expressions = exps.toString();
+        }
     }
 }

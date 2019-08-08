@@ -1,5 +1,6 @@
 package ai.labs.parser.rest.model;
 
+import ai.labs.expressions.Expressions;
 import lombok.*;
 
 /**
@@ -12,5 +13,5 @@ import lombok.*;
 @EqualsAndHashCode
 @ToString
 public class Solution {
-    private String expressions;
+    private Expressions expressions;
 }

@@ -51,10 +51,10 @@ public class DynamicValueMatcherTest {
         dynamicValueMatcher.setConfigs(createValues(false, false, false));
 
         //test
-        dynamicValueMatcher.execute(conversationMemory, new LinkedList<>());
+        ExecutionState executionState = dynamicValueMatcher.execute(conversationMemory, new LinkedList<>());
 
         //assert
-        Assert.assertEquals(ExecutionState.FAIL, dynamicValueMatcher.getExecutionState());
+        Assert.assertEquals(ExecutionState.FAIL, executionState);
     }
 
     @Test
@@ -65,10 +65,10 @@ public class DynamicValueMatcherTest {
         dynamicValueMatcher.setConfigs(createValues(true, false, false));
 
         //test
-        dynamicValueMatcher.execute(conversationMemory, new LinkedList<>());
+        ExecutionState executionState = dynamicValueMatcher.execute(conversationMemory, new LinkedList<>());
 
         //assert
-        Assert.assertEquals(ExecutionState.SUCCESS, dynamicValueMatcher.getExecutionState());
+        Assert.assertEquals(ExecutionState.SUCCESS, executionState);
     }
 
     @Test
@@ -79,10 +79,10 @@ public class DynamicValueMatcherTest {
         dynamicValueMatcher.setConfigs(createValues(true, true, false));
 
         //test
-        dynamicValueMatcher.execute(conversationMemory, new LinkedList<>());
+        ExecutionState executionState = dynamicValueMatcher.execute(conversationMemory, new LinkedList<>());
 
         //assert
-        Assert.assertEquals(ExecutionState.SUCCESS, dynamicValueMatcher.getExecutionState());
+        Assert.assertEquals(ExecutionState.SUCCESS, executionState);
     }
 
     @Test
@@ -93,10 +93,10 @@ public class DynamicValueMatcherTest {
         dynamicValueMatcher.setConfigs(createValues(true, false, true));
 
         //test
-        dynamicValueMatcher.execute(conversationMemory, new LinkedList<>());
+        ExecutionState executionState = dynamicValueMatcher.execute(conversationMemory, new LinkedList<>());
 
         //assert
-        Assert.assertEquals(ExecutionState.SUCCESS, dynamicValueMatcher.getExecutionState());
+        Assert.assertEquals(ExecutionState.SUCCESS, executionState);
     }
 
     @Test
@@ -107,10 +107,10 @@ public class DynamicValueMatcherTest {
         dynamicValueMatcher.setConfigs(createValues(true, false, false));
 
         //test
-        dynamicValueMatcher.execute(conversationMemory, new LinkedList<>());
+        ExecutionState executionState = dynamicValueMatcher.execute(conversationMemory, new LinkedList<>());
 
         //assert
-        Assert.assertEquals(ExecutionState.FAIL, dynamicValueMatcher.getExecutionState());
+        Assert.assertEquals(ExecutionState.FAIL, executionState);
     }
 
     private Map<String, String> createValues(boolean isValuePath, boolean isEquals, boolean isContains) {

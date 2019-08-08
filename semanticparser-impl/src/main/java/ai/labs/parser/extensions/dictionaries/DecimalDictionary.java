@@ -1,6 +1,7 @@
 package ai.labs.parser.extensions.dictionaries;
 
 import ai.labs.expressions.Expression;
+import ai.labs.expressions.Expressions;
 import ai.labs.expressions.utilities.IExpressionProvider;
 import ai.labs.parser.model.FoundWord;
 import ai.labs.parser.model.Word;
@@ -29,7 +30,7 @@ public class DecimalDictionary implements IDictionary {
             }
 
             Expression decimalExp = expressionProvider.createExpression("decimal", value);
-            IWord word = new Word(value, Collections.singletonList(decimalExp), ID);
+            IWord word = new Word(value, new Expressions(decimalExp), ID);
 
             return Collections.singletonList(new FoundWord(word, false, 1.0));
         }

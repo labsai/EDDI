@@ -93,8 +93,8 @@ public class BehaviorDeserialization implements IBehaviorDeserialization {
                         }
                         var conditions = conditionConfiguration.getConditions();
                         if (!isNullOrEmpty(conditions)) {
-                            var convert = convert(conditions, behaviorSet);
-                            List<IBehaviorCondition> conditionsClone = deepCopy(convert);
+                            var behaviorConditions = convert(conditions, behaviorSet);
+                            List<IBehaviorCondition> conditionsClone = deepCopy(behaviorConditions);
                             condition.setConditions(conditionsClone);
                         }
                         condition.setContainingBehaviorRuleSet(behaviorSet);

@@ -1,6 +1,7 @@
 package ai.labs.parser.extensions.dictionaries;
 
 import ai.labs.expressions.Expression;
+import ai.labs.expressions.Expressions;
 import ai.labs.expressions.utilities.IExpressionProvider;
 import ai.labs.parser.model.FoundWord;
 import ai.labs.parser.model.Word;
@@ -28,7 +29,7 @@ public class TimeExpressionDictionary implements IDictionary {
         if (timeAsDate != null) {
             final String timeString = timeAsDate.toString();
             Expression timeExp = expressionProvider.createExpression("time", timeAsDate.getTime());
-            IWord timeExpression = new Word(timeString, Collections.singletonList(timeExp), ID);
+            IWord timeExpression = new Word(timeString, new Expressions(timeExp), ID);
             return Collections.singletonList(new FoundWord(timeExpression, false, 1.0));
         }
 

@@ -1,6 +1,7 @@
 package ai.labs.behavior.impl;
 
 import ai.labs.behavior.impl.conditions.IBehaviorCondition;
+import ai.labs.behavior.impl.conditions.IBehaviorCondition.ExecutionState;
 import ai.labs.memory.IConversationMemory;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
@@ -26,7 +27,7 @@ public class BehaviorRule implements Cloneable {
         this.name = name;
     }
 
-    public IBehaviorCondition.ExecutionState execute(IConversationMemory memory, List<BehaviorRule> trace)
+    public ExecutionState execute(IConversationMemory memory, List<BehaviorRule> trace)
             throws InfiniteLoopException, RuntimeException {
         if (trace.contains(this)) {
             // this is an infinite loop, thus throw error
@@ -34,14 +35,11 @@ public class BehaviorRule implements Cloneable {
         } else {
             trace.add(this);
 
-            IBehaviorCondition.ExecutionState state = IBehaviorCondition.ExecutionState.NOT_EXECUTED;
+            ExecutionState state = ExecutionState.NOT_EXECUTED;
             for (IBehaviorCondition condition : conditions) {
-                condition.execute(memory, trace);
-                if (condition.getExecutionState() == IBehaviorCondition.ExecutionState.FAIL) {
-                    state = IBehaviorCondition.ExecutionState.FAIL;
-                    break;
-                } else if (condition.getExecutionState() == IBehaviorCondition.ExecutionState.ERROR) {
-                    state = IBehaviorCondition.ExecutionState.ERROR;
+                var executionState = condition.execute(memory, trace);
+                if (executionState == ExecutionState.FAIL || executionState == ExecutionState.ERROR) {
+                    state = executionState;
                     break;
                 }
             }
@@ -50,10 +48,11 @@ public class BehaviorRule implements Cloneable {
             trace.clear();
             trace.addAll(tmp.subList(0, tmp.indexOf(this)));
 
-            if (state != IBehaviorCondition.ExecutionState.NOT_EXECUTED)
+            if (state != ExecutionState.NOT_EXECUTED) {
                 return state;
+            }
 
-            return IBehaviorCondition.ExecutionState.SUCCESS;
+            return ExecutionState.SUCCESS;
         }
     }
 

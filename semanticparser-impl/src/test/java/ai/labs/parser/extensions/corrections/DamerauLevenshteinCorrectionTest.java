@@ -1,7 +1,7 @@
 package ai.labs.parser.extensions.corrections;
 
-import ai.labs.expressions.Expression;
 import ai.labs.expressions.ExpressionFactory;
+import ai.labs.expressions.Expressions;
 import ai.labs.expressions.utilities.ExpressionProvider;
 import ai.labs.expressions.utilities.IExpressionProvider;
 import ai.labs.parser.extensions.dictionaries.IDictionary;
@@ -27,7 +27,7 @@ public class DamerauLevenshteinCorrectionTest {
     }
 
     @Test
-    public void testLookupTermDistanceOfOne() throws Exception {
+    public void testLookupTermDistanceOfOne() {
         //setup
         TestDictionary testDictionary = new TestDictionary();
         DamerauLevenshteinCorrection levenshteinCorrection = new DamerauLevenshteinCorrection(); // max distance of 2
@@ -41,7 +41,7 @@ public class DamerauLevenshteinCorrectionTest {
     }
 
     @Test
-    public void testLookupTermDistanceOfTwo() throws Exception {
+    public void testLookupTermDistanceOfTwo() {
         //setup
         TestDictionary testDictionary = new TestDictionary();
         DamerauLevenshteinCorrection levenshteinCorrection = new DamerauLevenshteinCorrection(); // max distance of 2
@@ -55,7 +55,7 @@ public class DamerauLevenshteinCorrectionTest {
     }
 
     @Test
-    public void testLookupTermDistanceOfThree() throws Exception {
+    public void testLookupTermDistanceOfThree() {
         //setup
         TestDictionary testDictionary = new TestDictionary();
         DamerauLevenshteinCorrection levenshteinCorrection = new DamerauLevenshteinCorrection(); // max distance of 2
@@ -73,8 +73,8 @@ public class DamerauLevenshteinCorrectionTest {
         public List<IWord> getWords() {
             return Arrays.asList(new IWord[]
                     {
-                            new Word("hello", Arrays.asList(new Expression[0]), "", 0, false),
-                            new Word("world", Arrays.asList(new Expression[0]), "", 0, false)
+                            new Word("hello", new Expressions(), "", 0, false),
+                            new Word("world", new Expressions(), "", 0, false)
                     });
         }
 
