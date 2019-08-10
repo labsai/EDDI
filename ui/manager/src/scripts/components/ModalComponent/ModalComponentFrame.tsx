@@ -31,6 +31,7 @@ import ErrorMessageModal from './ErrorMessageModal';
 import { CSSProperties } from 'react';
 import AddNewPackageToBotModal from './UpdateConfigsModal/AddNewPackageToBotModal';
 import { getTypeFromResource } from '../utils/ApiFunctions';
+import ConversationsModal from './ConversationsModal/ConversationsModal';
 
 const customStyles = {
   content: {
@@ -231,6 +232,13 @@ class ModalComponentFrame extends React.Component<IPrivateProps, IState> {
       case ModalEnum.addNewPackageToBot:
         return (
           <AddNewPackageToBotModal packagePayload={this.props.packagePayload} />
+        );
+      case ModalEnum.conversations:
+        return (
+          <ConversationsModal
+            botId={this.props.bot.id}
+            botVersion={this.props.bot.version}
+          />
         );
       default:
         return null;

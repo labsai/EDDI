@@ -86,10 +86,14 @@ import {
   DUPLICATE,
   DUPLICATE_SUCCESS,
   DUPLICATE_FAILED,
+  FETCH_CONVERSATIONS,
+  FETCH_CONVERSATIONS_SUCCESS,
+  FETCH_CONVERSATIONS_FAILED,
 } from './EddiApiActionTypes';
 import {
   IBot,
   IBotData,
+  IConversation,
   IDefaultPluginTypes,
   IEddiSchema,
   IPackage,
@@ -1290,5 +1294,48 @@ export function duplicateFailedAction(error: Error): IDuplicateFailedAction {
   return {
     error,
     type: DUPLICATE_FAILED,
+  };
+}
+
+export interface IFetchConversationsAction extends Action {
+  resource: string;
+}
+
+export function fetchConversationsAction(
+  resource: string,
+): IFetchConversationsAction {
+  console.log('FETCHING CONVERSATIONS actions');
+  return {
+    resource,
+    type: FETCH_CONVERSATIONS,
+  };
+}
+
+export interface IFetchConversationsSuccessAction extends Action {
+  resource: string;
+  conversations: IConversation[];
+}
+
+export function fetchConversationsSuccessAction(
+  resource: string,
+  conversations: IConversation[],
+): IFetchConversationsSuccessAction {
+  return {
+    resource,
+    conversations,
+    type: FETCH_CONVERSATIONS_SUCCESS,
+  };
+}
+
+export interface IFetchConversationsFailedAction extends Action {
+  error: Error;
+}
+
+export function fetchConversationsFailedAction(
+  error: Error,
+): IFetchConversationsFailedAction {
+  return {
+    error,
+    type: FETCH_CONVERSATIONS_FAILED,
   };
 }

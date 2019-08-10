@@ -29,6 +29,7 @@ import {
   ADD_NEW_PACKAGE_TO_BOTS,
   FETCH_JSON_SCHEMA,
   DUPLICATE,
+  FETCH_CONVERSATIONS,
 } from '../actions/EddiApiActionTypes';
 import {
   getPackage,
@@ -59,12 +60,14 @@ import {
   updateBots as axiosUpdateBots,
   deployBot as axiosDeployBot,
   undeployBot as axiosUndeployBot,
+  getConversations,
   getDeploymentStatus,
   getBotDescriptors,
   addPackageToBot,
   IEddiSchema,
   getSchema,
   duplicate,
+  IConversation,
 } from '../components/utils/AxiosFunctions';
 import {
   fetchBotFailedAction,
@@ -149,6 +152,9 @@ import {
   IDuplicateAction,
   duplicateFailedAction,
   duplicateSuccessAction,
+  IFetchConversationsAction,
+  fetchConversationsFailedAction,
+  fetchConversationsSuccessAction,
 } from '../actions/EddiApiActions';
 import * as Edditypes from '../components/utils/EddiTypes';
 import Parser from '../components/utils/Parser';
@@ -714,4 +720,23 @@ export function* duplicateResource(action: IDuplicateAction): Iterator<{}> {
 
 export function* watchDuplicateResource(): Iterator<{}> {
   yield takeEvery(DUPLICATE, duplicateResource);
+}
+
+export function* fetchConversations(
+  action: IFetchConversationsAction,
+): Iterator<{}> {
+  console.log('FETCHING CONVERSATIONS');
+  try {
+    const conversations: IConversation[] = yield call(
+      getConversations,
+      action.resource,
+    );
+    yield put(fetchConversationsSuccessAction(action.resource, conversations));
+  } catch (err) {
+    yield put(fetchConversationsFailedAction(err));
+  }
+}
+
+export function* watchFetchConversations(): Iterator<{}> {
+  yield takeEvery(FETCH_CONVERSATIONS, fetchConversations);
 }

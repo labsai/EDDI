@@ -20,6 +20,7 @@ import {
   SHOW_UPDATE_BOTS_MODAL,
   SHOW_CONFIRMATION_MODAL,
   SHOW_ERROR_MESSAGE_MODAL,
+  SHOW_CONVERSATIONS_MODAL,
 } from './ModalActionTypes';
 
 export interface IShowModalAction extends Action {
@@ -248,5 +249,16 @@ export function showErrorMessageModal(
     title,
     message,
     type: SHOW_ERROR_MESSAGE_MODAL,
+  };
+}
+
+export interface IShowConversationsModal extends Action {
+  bot: IBot;
+}
+
+export function showConversationsModal(bot: IBot): IShowConversationsModal {
+  return {
+    bot,
+    type: SHOW_CONVERSATIONS_MODAL,
   };
 }

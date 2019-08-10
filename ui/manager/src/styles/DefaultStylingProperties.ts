@@ -10,6 +10,7 @@ export const YELLOW_COLOR: string = '#FADA5E';
 export const BLUE_COLOR: string = '#0070D2';
 export const DARK_BLUE_COLOR: string = '#16325C';
 export const LIGHT_BLUE_COLOR: string = '#4A90E2';
+export const LIGHT_BLUE_COLOR2: string = '#d6e9ff';
 
 export const GREY_COLOR: string = '#7A849E';
 export const GREY_COLOR2: string = '#A8B7C7';

@@ -1,6 +1,12 @@
 import { CSSProperties } from 'react';
 
 const styles: CSSProperties = {
+  conversation: {
+    display: 'flex',
+  },
+  conversationRight: {
+    marginLeft: 'auto',
+  },
   header: {
     minHeight: '146px',
     backgroundColor: '#F7F9FB',

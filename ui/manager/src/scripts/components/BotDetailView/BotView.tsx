@@ -57,6 +57,12 @@ class BotView extends React.Component<IProps, IState> {
     );
   };
 
+  openViewConversationsModal = () => {
+    console.log('FETCHING CONVERSATIONS botview');
+    eddiApiActionDispatchers.fetchConversationsAction(this.props.bot.resource);
+    ModalActionDispatchers.showConversationsModal(this.props.bot);
+  };
+
   selectVersion = (newVersion: number) => {
     eddiApiActionDispatchers.fetchBotAction(
       Parser.replaceResourceVersion(this.props.bot.resource, newVersion),
@@ -92,6 +98,11 @@ class BotView extends React.Component<IProps, IState> {
                 disabled={
                   this.props.bot.version !== this.props.bot.currentVersion
                 }
+                customStyles={styles.button}
+              />
+              <WhiteButton
+                text={'View Conversations'}
+                onClick={this.openViewConversationsModal}
                 customStyles={styles.button}
               />
               {renderIf(foundUnpublishedChanges)(() => (

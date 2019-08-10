@@ -28,6 +28,7 @@ import {
   faUndo,
   faEllipsisV,
 } from '@fortawesome/free-solid-svg-icons';
+import BotConversationViewPage from './pages/BotConversationViewPage';
 
 library.add(faUndo);
 library.add(faRedo);
@@ -132,6 +133,10 @@ class App extends React.Component<IPrivateProps, IState> {
                 <Route path="/packages" exact component={PackagePage} />
                 <Route path="/resources" component={ExtensionsPage} />
                 <Route path="/botview/:id" component={BotViewPage} />
+                <Route
+                  path="/botconversationview"
+                  component={BotConversationViewPage}
+                />
                 <Route path="/packageview/:id" component={PackageViewPage} />
               </div>
             ))}

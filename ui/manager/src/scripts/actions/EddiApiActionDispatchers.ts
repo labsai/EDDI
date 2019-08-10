@@ -96,6 +96,12 @@ import {
   IDuplicateFailedAction,
   duplicateSuccessAction,
   duplicateFailedAction,
+  IFetchConversationsAction,
+  IFetchConversationsSuccessAction,
+  IFetchConversationsFailedAction,
+  fetchConversationsFailedAction,
+  fetchConversationsAction,
+  fetchConversationsSuccessAction,
 } from './EddiApiActions';
 
 export interface IEddiApiActionDispatchers extends ActionCreatorsMapObject {
@@ -187,6 +193,12 @@ export interface IEddiApiActionDispatchers extends ActionCreatorsMapObject {
   duplicateAction: (resource, deepCopy) => IDuplicateAction;
   duplicateSuccessAction: (bot, packages, plugins) => IDuplicateSuccessAction;
   duplicateFailedAction: (error) => IDuplicateFailedAction;
+  fetchConversationsAction: (resource) => IFetchConversationsAction;
+  fetchConversationsSuccessAction: (
+    resource,
+    conversations,
+  ) => IFetchConversationsSuccessAction;
+  fetchConversationsFailedAction: (error) => IFetchConversationsFailedAction;
 }
 
 const actions: IEddiApiActionDispatchers = {
@@ -242,6 +254,9 @@ const actions: IEddiApiActionDispatchers = {
   duplicateAction,
   duplicateSuccessAction,
   duplicateFailedAction,
+  fetchConversationsAction,
+  fetchConversationsSuccessAction,
+  fetchConversationsFailedAction,
 };
 
 const eddiApiActionDispatchers: IEddiApiActionDispatchers = bindActionCreators<

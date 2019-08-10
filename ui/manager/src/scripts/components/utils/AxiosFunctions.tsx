@@ -74,6 +74,7 @@ export interface IBot extends IDetailedDescriptor {
   channels?: string[];
   hasAvailableUpdates?: boolean;
   deploymentStatus?: string;
+  conversations?: IConversation[];
 }
 
 export interface IDescriptorResponse {
@@ -962,4 +963,76 @@ export async function duplicate(resource: string, deepCopy: boolean) {
     );
   }
   return;
+}
+
+export interface IConversation {
+  botName: string;
+  conversationState: string;
+  conversationStepSize: number;
+  createdOn: number;
+  deleted: boolean;
+  environment: string;
+  lastModifiedOn: number;
+  resource: string;
+  viewState: string;
+}
+
+export interface IConversationOutput {
+  input: string;
+  expressions: string[];
+  intents: string[];
+  actions: string[];
+  httpCalls: object[];
+  properties: object[];
+  output: string;
+}
+
+export interface IConversationStep {
+  key: string;
+  value: string | string[] | object[];
+  timestamp: number;
+}
+
+export interface IConversationStepValue {
+  key: string;
+  value: {};
+}
+
+export interface IConversationStepText {
+  key: string;
+  value: string;
+}
+
+export interface IConversationStepQuickReply {
+  key: string;
+  value: { value: string; expressions: string; default: boolean }[];
+}
+
+export interface IConversationStepAction extends IConversationStepValue {
+  key: string;
+  value: string[];
+}
+
+export async function getConversations(resource: string) {
+  try {
+    const res: IResponse = await axios.get(
+      `${await getAPIUrl()}/conversationstore/conversations?botId=${Parser.getId(
+        resource,
+      )}&botVersion=${Parser.getVersion(resource)}`,
+    );
+    console.log(res.data);
+    return res.data;
+  } catch (err) {
+    console.error(`Failed to get bot conversations. Error: ${err.message}`);
+  }
+}
+
+export async function getConversation(conversationId: string) {
+  try {
+    const res: IResponse = await axios.get(
+      `${await getAPIUrl()}/conversationstore/conversations/${conversationId}`,
+    );
+  } catch (err) {
+    console.error(`Failed to get conversation. Error: ${err.message}`);
+  }
 }
