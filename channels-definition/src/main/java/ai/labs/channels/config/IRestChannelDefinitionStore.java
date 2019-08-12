@@ -9,10 +9,9 @@ import javax.ws.rs.core.MediaType;
 import javax.ws.rs.core.Response;
 import java.util.List;
 
-@Api(value = "Configurations -> (5) Bot Management -> Channels", authorizations = {@Authorization(value = "eddi_auth")})
+@Api(value = "Configurations -> (6) Channels", authorizations = {@Authorization(value = "eddi_auth")})
 @Path("/channelstore/channels")
 public interface IRestChannelDefinitionStore {
-
     String resourceURI = "eddi://ai.labs.channel/channelstore/channels/";
 
     @GET

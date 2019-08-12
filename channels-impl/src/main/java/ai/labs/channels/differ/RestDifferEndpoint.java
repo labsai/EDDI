@@ -48,7 +48,7 @@ import static java.util.concurrent.TimeUnit.MILLISECONDS;
 
 @Slf4j
 @Singleton
-public class DifferEndpoint implements IDifferEndpoint {
+public class RestDifferEndpoint implements IRestDifferEndpoint {
     private final IRestBotManagement restBotManagement;
     private final SystemRuntime.IRuntime runtime;
     private final IJsonSerialization jsonSerialization;
@@ -66,14 +66,14 @@ public class DifferEndpoint implements IDifferEndpoint {
     private boolean isInit = false;
 
     @Inject
-    public DifferEndpoint(IRestBotManagement restBotManagement,
-                          SystemRuntime.IRuntime runtime,
-                          ICacheFactory cacheFactory,
-                          IJsonSerialization jsonSerialization,
-                          IDifferOutputTransformer differOutputTransformer,
-                          IDifferPublisher differPublisher,
-                          IDifferConversationStore differConversationStore,
-                          IDifferBotMappingStore botMappingStore) {
+    public RestDifferEndpoint(IRestBotManagement restBotManagement,
+                              SystemRuntime.IRuntime runtime,
+                              ICacheFactory cacheFactory,
+                              IJsonSerialization jsonSerialization,
+                              IDifferOutputTransformer differOutputTransformer,
+                              IDifferPublisher differPublisher,
+                              IDifferConversationStore differConversationStore,
+                              IDifferBotMappingStore botMappingStore) {
         this.restBotManagement = restBotManagement;
         this.runtime = runtime;
         this.jsonSerialization = jsonSerialization;

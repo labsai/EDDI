@@ -1,12 +1,15 @@
 package ai.labs.channels.differ.storage;
 
 import ai.labs.channels.differ.model.DifferBotMapping;
+import io.swagger.annotations.Api;
+import io.swagger.annotations.Authorization;
 
 import javax.ws.rs.*;
 import javax.ws.rs.core.MediaType;
 import java.util.List;
 
-@Path("/differ/botMappings")
+@Path("/channels/differ/botMappings")
+@Api(value = "Configurations -> (6) Channels --> Differ", authorizations = {@Authorization(value = "eddi_auth")})
 public interface IRestDifferBotMappingStore {
     @GET
     @Produces(MediaType.APPLICATION_JSON)
