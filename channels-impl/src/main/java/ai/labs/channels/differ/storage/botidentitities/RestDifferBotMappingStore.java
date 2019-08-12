@@ -15,6 +15,8 @@ import javax.ws.rs.InternalServerErrorException;
 import javax.ws.rs.core.Response;
 import java.util.List;
 
+import static javax.ws.rs.core.Response.Status.CREATED;
+
 @Slf4j
 public class RestDifferBotMappingStore implements IRestDifferBotMappingStore {
     private final IDifferBotMappingStore differBotMappingStore;
@@ -51,12 +53,13 @@ public class RestDifferBotMappingStore implements IRestDifferBotMappingStore {
     }
 
     @Override
-    public void createDifferBotMapping(DifferBotMapping differBotMapping) {
+    public Response createDifferBotMapping(DifferBotMapping differBotMapping) {
         try {
             differBotMappingStore.createDifferBotMapping(differBotMapping);
             differBotMapping.getDifferBotUserIds().forEach(differBotUserId -> {
                 availableBotUserIds.put(differBotUserId, differBotMapping.getBotIntent());
             });
+            return Response.status(CREATED).build();
         } catch (IResourceStore.ResourceAlreadyExistsException e) {
             throw new BadRequestException(e.getLocalizedMessage());
         } catch (IResourceStore.ResourceStoreException e) {

@@ -2,6 +2,7 @@ package ai.labs.channels.config;
 
 import ai.labs.channels.config.model.ChannelDefinition;
 import io.swagger.annotations.Api;
+import io.swagger.annotations.ApiResponse;
 import io.swagger.annotations.Authorization;
 
 import javax.ws.rs.*;
@@ -16,18 +17,22 @@ public interface IRestChannelDefinitionStore {
 
     @GET
     @Produces(MediaType.APPLICATION_JSON)
+    @ApiResponse(code = 200, message = "Read All ChannelDefinition.", response = ChannelDefinition.class, responseContainer = "List")
     List<ChannelDefinition> readAllChannelDefinitions();
 
     @GET
     @Path("/{name}")
     @Produces(MediaType.APPLICATION_JSON)
+    @ApiResponse(code = 200, message = "Read ChannelDefinition by name.", response = ChannelDefinition.class)
     ChannelDefinition readChannelDefinition(@PathParam("name") String name);
 
     @POST
     @Consumes(MediaType.APPLICATION_JSON)
+    @ApiResponse(code = 200, message = "Create ChannelDefinition.")
     Response createChannelDefinition(ChannelDefinition channelDefinition);
 
     @DELETE
     @Path("/{name}")
+    @ApiResponse(code = 200, message = "Remove ChannelDefinition.")
     Response deleteChannelDefinition(@PathParam("name") String name);
 }

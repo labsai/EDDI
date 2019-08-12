@@ -399,7 +399,7 @@ public class RestDifferEndpoint implements IRestDifferEndpoint {
     }
 
     @Override
-    public void triggerConversationCreated(CreateConversation createConversation) {
+    public Response triggerConversationCreated(CreateConversation createConversation) {
         checkNotNull(createConversation, "createConversation");
         checkNotEmpty(createConversation.getBotUserIdCreator(), "createConversation.botUserIdCreator");
         checkNotEmpty(createConversation.getConversationName(), "createConversation.conversationName");
@@ -407,6 +407,7 @@ public class RestDifferEndpoint implements IRestDifferEndpoint {
 
         try {
             triggerCreateConversationCommand(createConversation);
+            return Response.ok().build();
         } catch (IOException e) {
             log.error(e.getLocalizedMessage(), e);
             throw new InternalServerErrorException();
@@ -414,7 +415,7 @@ public class RestDifferEndpoint implements IRestDifferEndpoint {
     }
 
     @Override
-    public void endBotConversation(String intent, String botUserId, String differConversationId) {
+    public Response endBotConversation(String intent, String botUserId, String differConversationId) {
         restBotManagement.endCurrentConversation(intent, differConversationId);
 
         var memorySnapshot = restBotManagement.
@@ -422,6 +423,8 @@ public class RestDifferEndpoint implements IRestDifferEndpoint {
                         false, true, Collections.emptyList());
 
         sendBotOutputToConversation(memorySnapshot.getConversationOutputs(), 0, botUserId, differConversationId);
+
+        return Response.ok().build();
     }
 
     private void triggerCreateConversationCommand(CreateConversation createConversation) throws IOException {
