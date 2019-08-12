@@ -181,6 +181,12 @@
         </dependency>
         <!-- swagger END -->
 
+        <dependency>
+            <groupId>io.micrometer</groupId>
+            <artifactId>micrometer-registry-prometheus</artifactId>
+            <version>1.2.0</version>
+        </dependency>
+
         <!-- boiler plate code generation -->
         <dependency>
             <groupId>org.projectlombok</groupId>

@@ -3,6 +3,10 @@ package ai.labs.server;
 import ai.labs.runtime.SwaggerServletContextListener;
 import ai.labs.runtime.ThreadContext;
 import ai.labs.utilities.FileUtilities;
+import io.micrometer.core.instrument.Tags;
+import io.micrometer.core.instrument.binder.jetty.JettyServerThreadPoolMetrics;
+import io.micrometer.core.instrument.binder.jetty.JettyStatisticsMetrics;
+import io.micrometer.prometheus.PrometheusMeterRegistry;
 import lombok.AllArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.eclipse.jetty.alpn.server.ALPNServerConnectionFactory;
@@ -13,6 +17,7 @@ import org.eclipse.jetty.security.LoginService;
 import org.eclipse.jetty.security.SecurityHandler;
 import org.eclipse.jetty.server.*;
 import org.eclipse.jetty.server.handler.HandlerList;
+import org.eclipse.jetty.server.handler.StatisticsHandler;
 import org.eclipse.jetty.servlet.FilterHolder;
 import org.eclipse.jetty.servlet.ServletContextHandler;
 import org.eclipse.jetty.servlet.ServletHolder;
@@ -80,6 +85,7 @@ public class ServerRuntime implements IServerRuntime {
     private final ThreadPoolExecutor threadPoolExecutor;
     private final MongoLoginService mongoLoginService;
     private final AdapterConfig keycloakAdapterConfig;
+    private final PrometheusMeterRegistry meterRegistry;
     private final String environment;
     private final String resourceDir;
 
@@ -91,6 +97,7 @@ public class ServerRuntime implements IServerRuntime {
                          ThreadPoolExecutor threadPoolExecutor,
                          MongoLoginService mongoLoginService,
                          AdapterConfig keycloakAdapterConfig,
+                         PrometheusMeterRegistry meterRegistry,
                          @Named("system.environment") String environment,
                          @Named("systemRuntime.resourceDir") String resourceDir) {
         this.options = options;
@@ -101,6 +108,7 @@ public class ServerRuntime implements IServerRuntime {
         this.threadPoolExecutor = threadPoolExecutor;
         this.mongoLoginService = mongoLoginService;
         this.keycloakAdapterConfig = keycloakAdapterConfig;
+        this.meterRegistry = meterRegistry;
         this.environment = environment;
         this.resourceDir = resourceDir;
         RegisterBuiltin.register(ResteasyProviderFactory.getInstance());
@@ -166,7 +174,8 @@ public class ServerRuntime implements IServerRuntime {
 
         HttpConnectionFactory http1 = new HttpConnectionFactory(config);
 
-        Server server = new Server(createThreadPool());
+        ThreadPool threadPool = createThreadPool();
+        Server server = new Server(threadPool);
 
         ServerConnector httpsConnector = new ServerConnector(server, ssl, alpn, http2, http1);
         httpsConnector.setPort(options.httpsPort);
@@ -224,6 +233,14 @@ public class ServerRuntime implements IServerRuntime {
             servletHandler.addFilter(new FilterHolder(createCrossSiteScriptFilter()), ANY_PATH, getAllDispatcherTypes());
             log.info("CrossSiteScriptFilter has been enabled...");
         }
+
+        StatisticsHandler statisticsHandler = new StatisticsHandler();
+        handlers.addHandler(statisticsHandler);
+        Tags tags = Tags.of("eddi.jetty", "jetty-server");
+
+        //monitoring stats
+        new JettyStatisticsMetrics(statisticsHandler, tags).bindTo(meterRegistry);
+        new JettyServerThreadPoolMetrics(threadPool, tags).bindTo(meterRegistry);
 
         server.setHandler(handlers);
 

@@ -13,6 +13,7 @@ import ai.labs.utilities.RuntimeUtilities;
 import ai.labs.utilities.StringUtilities;
 import com.google.inject.Provider;
 import com.google.inject.Provides;
+import io.micrometer.prometheus.PrometheusMeterRegistry;
 import org.apache.commons.lang3.RandomStringUtils;
 import org.eclipse.jetty.security.ConstraintMapping;
 import org.eclipse.jetty.security.ConstraintSecurityHandler;
@@ -74,7 +75,8 @@ public class ServerRuntimeModule extends AbstractBaseModule {
                                                ThreadPoolExecutor threadPoolExecutor,
                                                HttpServletDispatcher httpServletDispatcher,
                                                MongoLoginService mongoLoginService,
-                                               AdapterConfig keycloakAdapterConfig)
+                                               AdapterConfig keycloakAdapterConfig,
+                                               PrometheusMeterRegistry meterRegistry)
             throws ClassNotFoundException {
 
         ServerRuntime.Options options = new ServerRuntime.Options();
@@ -103,7 +105,7 @@ public class ServerRuntimeModule extends AbstractBaseModule {
         }
 
         return new ServerRuntime(options, contextListener, swaggerContextListener, httpServletDispatcher,
-                securityHandler, threadPoolExecutor, mongoLoginService, keycloakAdapterConfig, environment, resourceDir);
+                securityHandler, threadPoolExecutor, mongoLoginService, keycloakAdapterConfig, meterRegistry, environment, resourceDir);
     }
 
     @Provides
