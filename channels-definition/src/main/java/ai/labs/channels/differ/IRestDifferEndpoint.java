@@ -3,6 +3,7 @@ package ai.labs.channels.differ;
 import ai.labs.channels.config.model.ChannelDefinition;
 import ai.labs.channels.differ.model.CreateConversation;
 import io.swagger.annotations.Api;
+import io.swagger.annotations.ApiOperation;
 import io.swagger.annotations.ApiResponse;
 import io.swagger.annotations.Authorization;
 
@@ -24,11 +25,13 @@ public interface IRestDifferEndpoint {
     @Consumes(MediaType.APPLICATION_JSON)
     @Path("/createConversation")
     @ApiResponse(code = 200, message = "Create Conversation in Differ with bot.")
+    @ApiOperation(value = "Create Conversation in Differ with bot.")
     Response triggerConversationCreated(CreateConversation createConversation);
 
     @POST
     @Path("/endBotConversation")
     @ApiResponse(code = 200, message = "End Bot Conversation in Differ Conversation.")
+    @ApiOperation(value = "End Bot Conversation in Differ Conversation.")
     Response endBotConversation(@QueryParam("intent") String intent,
                             @QueryParam("botUserId") String botUserId,
                             @QueryParam("differConversationId") String differConversationId);
