@@ -2,7 +2,6 @@ package ai.labs.channels.differ.bootstrap;
 
 import ai.labs.runtime.bootstrap.AbstractBaseModule;
 import com.google.inject.Provides;
-import com.google.inject.Singleton;
 import com.rabbitmq.client.AMQP;
 import com.rabbitmq.client.Channel;
 import com.rabbitmq.client.Connection;
@@ -20,7 +19,6 @@ public class AMQPModule extends AbstractBaseModule {
     }
 
     @Provides
-    @Singleton
     private ConnectionFactory provideConnectionFactory(@Named("amqp.host") String host,
                                                        @Named("amqp.port") Integer port) {
         var connectionFactory = new ConnectionFactory();
@@ -30,7 +28,6 @@ public class AMQPModule extends AbstractBaseModule {
     }
 
     @Provides
-    @Singleton
     private Channel provideChannel(ConnectionFactory connectionFactory) throws IOException, TimeoutException {
         Connection connection = connectionFactory.newConnection();
         registerRabbitMQShutdownHook(connection);

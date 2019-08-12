@@ -17,6 +17,7 @@ import org.junit.Before;
 import org.junit.Test;
 import org.mockito.Mockito;
 
+import javax.inject.Provider;
 import java.io.IOException;
 import java.util.Collections;
 import java.util.concurrent.TimeoutException;
@@ -25,19 +26,23 @@ import static ai.labs.channels.differ.DifferOutputTransformer.INPUT_TYPE_TEXT;
 import static ai.labs.channels.differ.DifferPublisher.*;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.when;
 
 public class DifferPublisherTest {
 
     private IDifferPublisher differPublisher;
-    private Channel channel;
     private IJsonSerialization jsonSerialization;
+    private Channel channel;
 
     @Before
     public void setUp() {
+        Provider<Channel> channelProvider = mock(Provider.class);
         channel = mock(Channel.class);
         jsonSerialization = createDummyJsonSerializer();
+        when(channelProvider.get()).thenAnswer(invocation -> channel);
 
-        differPublisher = new DifferPublisher(channel, jsonSerialization);
+        differPublisher = new DifferPublisher(channelProvider, jsonSerialization);
+        differPublisher.init(null, null);
     }
 
     private IJsonSerialization createDummyJsonSerializer() {

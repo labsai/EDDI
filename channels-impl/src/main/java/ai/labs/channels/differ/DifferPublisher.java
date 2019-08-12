@@ -10,6 +10,7 @@ import com.rabbitmq.client.Delivery;
 import lombok.extern.slf4j.Slf4j;
 
 import javax.inject.Inject;
+import javax.inject.Provider;
 import javax.inject.Singleton;
 import java.io.IOException;
 import java.util.Date;
@@ -28,21 +29,23 @@ public class DifferPublisher implements IDifferPublisher {
     static final String MESSAGE_CREATED_EDDI_FAILED_ROUTING_KEY = MESSAGE_CREATED_EXCHANGE + ".eddi.failed";
     static final long TIMEOUT_CONFIRMS_IN_MILLIS = 60000;
 
-    private final Channel channel;
+    private final Provider<Channel> channelProvider;
     private final IJsonSerialization jsonSerialization;
 
     private final CancelCallback cancelCallback = consumerTag -> {
     };
+    private Channel channel;
 
     @Inject
-    public DifferPublisher(Channel channel, IJsonSerialization jsonSerialization) {
-        this.channel = channel;
+    public DifferPublisher(Provider<Channel> channelProvider, IJsonSerialization jsonSerialization) {
+        this.channelProvider = channelProvider;
         this.jsonSerialization = jsonSerialization;
     }
 
     @Override
     public void init(DeliverCallback conversationCreatedCallback, DeliverCallback messageCreatedCallback) {
         try {
+            channel = channelProvider.get();
             channel.queueDeclare(CONVERSATION_CREATED_QUEUE_NAME, true, false, false, null);
             channel.queueBind(CONVERSATION_CREATED_QUEUE_NAME, CONVERSATION_CREATED_EXCHANGE, "");
             channel.basicConsume(CONVERSATION_CREATED_QUEUE_NAME, false, conversationCreatedCallback, cancelCallback);
