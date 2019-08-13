@@ -51,8 +51,8 @@ function displayQuickReplies(quickReplies) {
     }
 
     let quickReply;
-    for (let i = 0; i < quickReplies.length; i++) {
-        quickReply = new QuickReply(quickReplies[i].value);
+    for (let i = 0, delay = 5000; i < quickReplies.length; i++, delay += 1000) {
+        quickReply = new QuickReply(quickReplies[i].value, delay);
         quickReply.draw();
     }
 
@@ -65,7 +65,7 @@ function endConversation() {
 }
 
 // Recursive function that goes through the set of messages it is given
-function createMessage(outputArray, quickRepliesArray, hasConversationEnded, i) {
+function createMessage(outputArray, quickRepliesArray, hasConversationEnded, disableInput, i) {
     // i is optional - i is the current message in the array the system is displaying
     i = typeof i !== 'undefined' ? i : 0;
 
@@ -123,7 +123,7 @@ function createMessage(outputArray, quickRepliesArray, hasConversationEnded, i) 
                 msg.draw();
             }
 
-            if (inputField != null) {
+            if (!disableInput && inputField != null) {
                 createAnswerField(inputField);
             }
 
@@ -133,10 +133,10 @@ function createMessage(outputArray, quickRepliesArray, hasConversationEnded, i) 
 
             smoothScrolling();
             if (i + 1 < outputArray.length) {
-                createMessage(outputArray, quickRepliesArray, hasConversationEnded, ++i);
+                createMessage(outputArray, quickRepliesArray, hasConversationEnded, disableInput, ++i);
             } else {
                 if (!hasConversationEnded && !displayQuickReplies(quickRepliesArray)) {
-                    if (inputField == null && button == null) {
+                    if (!disableInput && inputField == null && button == null) {
                         createAnswerField();
                         smoothScrolling();
                     }
@@ -151,7 +151,9 @@ function createMessage(outputArray, quickRepliesArray, hasConversationEnded, i) 
         if (hasConversationEnded) {
             endConversation();
         } else {
-            createAnswerField();
+            if (!disableInput) {
+                createAnswerField();
+            }
         }
     }
 }

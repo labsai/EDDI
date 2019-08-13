@@ -29,6 +29,7 @@
 
     <group name="chat2">
         <group-ref>jquery3</group-ref>
+        <group-ref>jquery-ui</group-ref>
         <js>classpath:js/chat2.js</js>
         <js>classpath:js/chat.js</js>
         <css>classpath:css/chat2.css</css>
@@ -38,6 +39,11 @@
     <group name="jquery3">
         <js>classpath:js/jquery-3.3.1.min.js</js>
         <js>classpath:js/jquery.urldecoder.edited.js</js>
+    </group>
+
+    <group name="jquery-ui">
+        <js>classpath:js/jquery-ui.min.js</js>
+        <css>classpath:css/jquery-ui.min.css</css>
     </group>
 
     <group name="dashboard">

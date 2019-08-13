@@ -158,8 +158,9 @@ class Button {
 
 
 class QuickReply {
-    constructor(text) {
+    constructor(text, shakeDelay) {
         this.text = text;
+        this.shakeDelay = shakeDelay;
     }
 
     get draw() {
@@ -179,7 +180,12 @@ class QuickReply {
             $quickReply.addClass('quick_reply');
             $('#chat-container').append($quickReply);
             $quickReply.fadeIn({queue: false, duration: 1500});
+            let shakeDelay = this.shakeDelay;
             return setTimeout(function () {
+                setTimeout(function () {
+                    $quickReply.effect('shake', {times: 2}, 300);
+                }, shakeDelay);
+
                 return $quickReply.addClass('appeared');
             }, 0);
         };
@@ -275,9 +281,10 @@ $(function () {
         /** @namespace conversationMemory.conversationOutputs */
         /** @namespace conversationOutput.quickReplies */
         let conversationOutput = conversationMemory.conversationOutputs[0];
+        let actions = conversationOutput.actions ? conversationOutput.actions : [];
         let outputArray = conversationOutput.output ? conversationOutput.output : [];
         let quickReplyArray = conversationOutput.quickReplies ? conversationOutput.quickReplies : [];
-        createMessage(outputArray, quickReplyArray, conversationState === 'ENDED');
+        createMessage(outputArray, quickReplyArray, conversationState === 'ENDED', actions.includes("DISABLE_INPUT"));
     };
 
     const deployBot = function (environment, botId, botVersion) {
