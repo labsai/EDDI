@@ -103,9 +103,8 @@ function createMessage(outputArray, quickRepliesArray, hasConversationEnded, dis
 
         // delay override - Make first responses quick
         let delay;
-        if (eddi.skipDelay || message == null || (i === 0 && eddi.isFirstMessage)) {
+        if (eddi.skipDelay || message == null) {
             delay = 50;
-            eddi.isFirstMessage = false;
         } else {
             delay = calculateDelay(message);
         }
