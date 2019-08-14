@@ -1,9 +1,7 @@
 package ai.labs.channels.differ.model.commands;
 
 import ai.labs.channels.differ.model.events.Event;
-import lombok.Getter;
-import lombok.NoArgsConstructor;
-import lombok.Setter;
+import lombok.*;
 
 import java.io.Serializable;
 import java.util.Date;
@@ -12,6 +10,8 @@ import java.util.UUID;
 
 @Getter
 @Setter
+@ToString
+@EqualsAndHashCode
 public class CreateMessageCommand extends Command {
     public static final String CREATE_MESSAGE_ROUTING_KEY = "message.create";
     private Payload payload;

@@ -1,8 +1,10 @@
 package ai.labs.channels.differ.model.events;
 
 import ai.labs.channels.differ.model.events.ConversationCreatedEvent.Conversation;
+import lombok.EqualsAndHashCode;
 import lombok.Getter;
 import lombok.Setter;
+import lombok.ToString;
 
 import java.io.Serializable;
 import java.util.Date;
@@ -10,6 +12,8 @@ import java.util.List;
 
 @Getter
 @Setter
+@ToString
+@EqualsAndHashCode
 public class MessageCreatedEvent extends Event implements Serializable {
     private MessageCreatedPayload payload;
 

@@ -68,6 +68,7 @@ public class DifferPublisher implements IDifferPublisher {
     public void positiveDeliveryAck(long deliveryTag) {
         try {
             channel.basicAck(deliveryTag, false);
+            log.debug("Send positive Ack (deliveryTag={})", deliveryTag);
         } catch (IOException e) {
             log.error(e.getLocalizedMessage(), e);
         }
@@ -77,6 +78,7 @@ public class DifferPublisher implements IDifferPublisher {
     public void negativeDeliveryAck(Delivery delivery) {
         try {
             channel.basicNack(delivery.getEnvelope().getDeliveryTag(), false, false);
+            log.debug("Send negative Ack (deliveryTag={})", delivery.getEnvelope().getDeliveryTag());
             publishEventToFailedQueue(delivery);
 
         } catch (IOException e) {
@@ -93,6 +95,7 @@ public class DifferPublisher implements IDifferPublisher {
             );
 
             channel.waitForConfirmsOrDie(TIMEOUT_CONFIRMS_IN_MILLIS);
+            log.debug("Published event to FAILED MESSAGE queue \"{}\". {}", MESSAGE_CREATED_EDDI_FAILED_ROUTING_KEY, delivery);
         } catch (IOException | InterruptedException | TimeoutException e) {
             log.error("Could not publish message.created event on eddi.failed queue! {}", new String(delivery.getBody()));
             log.error(e.getLocalizedMessage(), e);

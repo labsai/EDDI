@@ -1,10 +1,7 @@
 package ai.labs.channels.differ.model;
 
 import ai.labs.channels.differ.model.commands.Command;
-import lombok.AllArgsConstructor;
-import lombok.Getter;
-import lombok.NoArgsConstructor;
-import lombok.Setter;
+import lombok.*;
 
 import java.io.Serializable;
 
@@ -12,6 +9,8 @@ import java.io.Serializable;
 @Setter
 @NoArgsConstructor
 @AllArgsConstructor
+@ToString
+@EqualsAndHashCode
 public class CommandInfo implements Serializable {
     private String exchange;
     private String routingKey;

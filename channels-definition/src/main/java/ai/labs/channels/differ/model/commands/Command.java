@@ -1,9 +1,6 @@
 package ai.labs.channels.differ.model.commands;
 
-import lombok.AllArgsConstructor;
-import lombok.Getter;
-import lombok.NoArgsConstructor;
-import lombok.Setter;
+import lombok.*;
 
 import java.io.Serializable;
 import java.util.Date;
@@ -13,6 +10,8 @@ import java.util.UUID;
 @AllArgsConstructor
 @Getter
 @Setter
+@ToString
+@EqualsAndHashCode
 public abstract class Command implements Serializable {
     protected AuthContext authContext;
     protected String commandId;

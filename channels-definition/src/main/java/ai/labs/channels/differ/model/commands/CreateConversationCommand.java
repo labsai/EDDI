@@ -1,8 +1,6 @@
 package ai.labs.channels.differ.model.commands;
 
-import lombok.AllArgsConstructor;
-import lombok.Getter;
-import lombok.Setter;
+import lombok.*;
 
 import java.io.Serializable;
 import java.util.Date;
@@ -11,6 +9,8 @@ import java.util.UUID;
 
 @Getter
 @Setter
+@ToString
+@EqualsAndHashCode
 public class CreateConversationCommand extends Command {
     public static final String CONVERSATION_EXCHANGE = "conversation";
     public static final String CREATE_CONVERSATION_ROUTING_KEY = CONVERSATION_EXCHANGE + ".create";

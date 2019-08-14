@@ -135,7 +135,7 @@ public class RestDifferEndpoint implements IRestDifferEndpoint {
 
                 if (botUserParticipantIds.isEmpty()) {
                     //No bot involved in this conversation
-                    debugLogIgnoredEvent(logStatementIgnoredEvent, receivedMessage);
+                    log.debug(logStatementIgnoredEvent, receivedMessage);
                     differPublisher.positiveDeliveryAck(deliveryTag);
                     return;
                 }
@@ -143,6 +143,7 @@ public class RestDifferEndpoint implements IRestDifferEndpoint {
                 log.info(" [x] Received and accepted amqp event: {}", receivedMessage);
 
                 var conversationInfo = createDifferConversation(conversationId, participantIds, botUserParticipantIds);
+                log.debug("Differ Conversation created. {}", conversationInfo);
 
                 botUserParticipantIds.forEach(botUserId ->
                         startConversationWithUser(delivery, botUserId, conversationId, conversationCreatedEvent, conversationInfo));
@@ -175,7 +176,7 @@ public class RestDifferEndpoint implements IRestDifferEndpoint {
                 var messageCreatedEvent = jsonSerialization.deserialize(receivedMessage, MessageCreatedEvent.class);
                 final var conversationId = messageCreatedEvent.getPayload().getConversation().getId();
                 if (!availableConversationIds.containsKey(conversationId)) {
-                    debugLogIgnoredEvent("Ignored message because " +
+                    log.debug("Ignored message because " +
                             "conversationId is not part of any known conversations " +
                             "(conversationId={}).", conversationId);
                     differPublisher.positiveDeliveryAck(deliveryTag);
@@ -193,18 +194,24 @@ public class RestDifferEndpoint implements IRestDifferEndpoint {
                 if (availableBotUserIds.containsKey(senderId)) {
                     //this message has been created by a bot user, likely us, therefore skip processing
                     differPublisher.positiveDeliveryAck(deliveryTag);
-                    debugLogIgnoredEvent("Ignored message because created by us: {}", receivedMessage);
+                    log.debug("Ignored message because created by us: {}", receivedMessage);
                     return;
                 }
 
                 var conversationInfo = getConversationInfo(conversationId);
+                if (conversationInfo == null) {
+                    log.warn("ConversationId {} is unknown in the system, yet it contains a know botUserId {}. " +
+                            "Likely to eddi instances interfere each other here. " +
+                            "This message.created event will be ignored due to lack of information.", conversationId, senderId);
+                    return;
+                }
                 if (isGroupChat(conversationInfo.getAllParticipantIds())) {
                     List<String> mentions = messageCreatedEvent.getPayload().getMessage().getMentions();
                     if (mentions == null || mentions.stream().noneMatch(availableBotUserIds::containsKey)) {
                         //this message belongs to a conversation we are a part of, but since this
                         //is a group chat, we only process messages that contain a mentions of a bot user
                         differPublisher.positiveDeliveryAck(deliveryTag);
-                        debugLogIgnoredEvent("Ignored message because it is a group chat: {}", receivedMessage);
+                        log.debug("Ignored message because it is a group chat: {}", receivedMessage);
                         return;
                     }
 
@@ -238,10 +245,6 @@ public class RestDifferEndpoint implements IRestDifferEndpoint {
         }
 
         return conversationInfo;
-    }
-
-    private void debugLogIgnoredEvent(String logStatement, String logObject) {
-        log.debug(logStatement, logObject);
     }
 
     private static boolean isGroupChat(List<String> participantIds) {
@@ -288,6 +291,7 @@ public class RestDifferEndpoint implements IRestDifferEndpoint {
         var inputData = new InputData();
         inputData.setInput(userInput);
         inputData.setContext(contextMap);
+        log.debug("Executing bot management with params intent {}, conversationId {}, input {}", botIntent, conversationId, userInput);
         restBotManagement.sayWithinContext(botIntent, conversationId,
                 false, true, Collections.emptyList(),
                 inputData, new MockAsyncResponse() {
@@ -302,6 +306,7 @@ public class RestDifferEndpoint implements IRestDifferEndpoint {
                         long timeOfLastMessageReceived = event.getCreatedAt().getTime();
                         var memorySnapshot = (SimpleConversationMemorySnapshot) response;
                         List<ConversationOutput> conversationOutputs = memorySnapshot.getConversationOutputs();
+                        log.debug("Conversation Output to be send (botUserId={}, conversationId={})", botUserId, conversationId);
 
                         List actions = (List) memorySnapshot.getConversationOutputs().get(0).get("actions");
                         if (actions != null && actions.contains(CONVERSATION_END)) {
@@ -314,6 +319,7 @@ public class RestDifferEndpoint implements IRestDifferEndpoint {
                         boolean success = sendBotOutputToConversation(
                                 conversationOutputs, timeOfLastMessageReceived, botUserId, conversationId);
 
+                        log.debug("sendBotOutputToConversation operation was " + (success ? "" : "not ") + "successful.");
                         if (success) {
                             differPublisher.positiveDeliveryAck(delivery.getEnvelope().getDeliveryTag());
                         } else {
@@ -358,6 +364,8 @@ public class RestDifferEndpoint implements IRestDifferEndpoint {
                 return runtime.submitScheduledCallable(() ->
                                 differPublisher.publishCommandAndWaitForConfirm(firstCommandInfo),
                         0, MILLISECONDS, null).get();
+            } else {
+                log.debug("Size of commandsInfos was 0 when calling publishCommand. Therefore no commands have been published.");
             }
 
             return true;
