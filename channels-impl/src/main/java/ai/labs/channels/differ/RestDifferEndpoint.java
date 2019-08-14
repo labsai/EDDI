@@ -110,6 +110,7 @@ public class RestDifferEndpoint implements IRestDifferEndpoint {
 
         differPublisher.init(conversationCreatedCallback(), messageCreatedCallback());
 
+        isInit = true;
         log.info("Differ integration started");
     }
 
@@ -117,6 +118,7 @@ public class RestDifferEndpoint implements IRestDifferEndpoint {
         return (consumerTag, delivery) -> {
             final long deliveryTag = delivery.getEnvelope().getDeliveryTag();
             String receivedMessage = new String(delivery.getBody(), StandardCharsets.UTF_8);
+            log.trace("Received Raw Conversation Created Message: {}", receivedMessage);
 
             try {
                 var conversationCreatedEvent = jsonSerialization.deserialize(receivedMessage, ConversationCreatedEvent.class);
@@ -171,6 +173,7 @@ public class RestDifferEndpoint implements IRestDifferEndpoint {
         return (consumerTag, delivery) -> {
             final long deliveryTag = delivery.getEnvelope().getDeliveryTag();
             String receivedMessage = new String(delivery.getBody(), StandardCharsets.UTF_8);
+            log.trace("Received Raw Message Created Message: {}", receivedMessage);
 
             try {
                 var messageCreatedEvent = jsonSerialization.deserialize(receivedMessage, MessageCreatedEvent.class);
@@ -186,8 +189,13 @@ public class RestDifferEndpoint implements IRestDifferEndpoint {
                 //we have confirmed that we are part of this conversation
                 // next step: see if there are any bot messages waiting for this message to arrive to be send out
                 var messageSentAtTime = messageCreatedEvent.getCreatedAt().getTime();
-                var messageId = messageCreatedEvent.getPayload().getMessage().getId();
-                executeConfirmationSeekingCommands(messageId, messageSentAtTime);
+                var message = messageCreatedEvent.getPayload().getMessage();
+                if (message == null) {
+                    log.error("Received a conversation.created event in the message.created queue. {}", receivedMessage);
+                    differPublisher.negativeDeliveryAck(delivery);
+                    return;
+                }
+                executeConfirmationSeekingCommands(message.getId(), messageSentAtTime);
 
                 var payload = messageCreatedEvent.getPayload();
                 String senderId = payload.getMessage().getSenderId();
@@ -206,7 +214,7 @@ public class RestDifferEndpoint implements IRestDifferEndpoint {
                     return;
                 }
                 if (isGroupChat(conversationInfo.getAllParticipantIds())) {
-                    List<String> mentions = messageCreatedEvent.getPayload().getMessage().getMentions();
+                    List<String> mentions = message.getMentions();
                     if (mentions == null || mentions.stream().noneMatch(availableBotUserIds::containsKey)) {
                         //this message belongs to a conversation we are a part of, but since this
                         //is a group chat, we only process messages that contain a mentions of a bot user
@@ -261,10 +269,16 @@ public class RestDifferEndpoint implements IRestDifferEndpoint {
                                            ConversationCreatedEvent conversationCreatedEvent, DifferConversationInfo differConversationInfo) {
 
         Map<String, Context> context = new LinkedHashMap<>();
-        context.put("newConversationStarted", new Context(Context.ContextType.string, "true"));
+        context.put("botUserId", new Context(Context.ContextType.string, botUserId));
+        List<String> allParticipantIds = differConversationInfo.getAllParticipantIds();
+        List<String> botParticipantIds = differConversationInfo.getBotParticipantIds();
+        List<String> nonBotUsers = allParticipantIds.stream().filter(o -> !botParticipantIds.contains(o)).collect(Collectors.toList());
+        Map<String, List<String>> userIds = Map.of("userIds", nonBotUsers);
+        context.put("conversationPartners", new Context(Context.ContextType.object, userIds));
+        context.put("isNewConversation", new Context(Context.ContextType.string, "true"));
         context.put("isGroupConversation",
                 new Context(Context.ContextType.string,
-                        String.valueOf(isGroupChat(differConversationInfo.getAllParticipantIds()))));
+                        String.valueOf(isGroupChat(allParticipantIds))));
 
         processUserMessage(delivery, botUserId, conversationId, "", conversationCreatedEvent, getBotIntent(botUserId), context);
     }
