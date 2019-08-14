@@ -19,7 +19,8 @@ import ai.labs.memory.model.ConversationOutput;
 import ai.labs.memory.model.SimpleConversationMemorySnapshot;
 import ai.labs.models.Context;
 import ai.labs.models.InputData;
-import ai.labs.persistence.IResourceStore;
+import ai.labs.persistence.IResourceStore.ResourceAlreadyExistsException;
+import ai.labs.persistence.IResourceStore.ResourceStoreException;
 import ai.labs.rest.MockAsyncResponse;
 import ai.labs.rest.rest.IRestBotManagement;
 import ai.labs.runtime.SystemRuntime;
@@ -102,7 +103,7 @@ public class RestDifferEndpoint implements IRestDifferEndpoint {
             botMappingStore.readAllDifferBotMappings().
                     forEach(botMapping -> botMapping.getDifferBotUserIds().
                             forEach(botUserId -> availableBotUserIds.put(botUserId, botMapping.getBotIntent())));
-        } catch (IResourceStore.ResourceStoreException e) {
+        } catch (ResourceStoreException e) {
             log.error(e.getLocalizedMessage(), e);
             return;
         }
@@ -141,9 +142,7 @@ public class RestDifferEndpoint implements IRestDifferEndpoint {
 
                 log.info(" [x] Received and accepted amqp event: {}", receivedMessage);
 
-                var conversationInfo = new DifferConversationInfo(conversationId, participantIds, botUserParticipantIds);
-                differConversationStore.createDifferConversation(conversationInfo);
-                conversationInfoCache.put(conversationId, conversationInfo);
+                var conversationInfo = createDifferConversation(conversationId, participantIds, botUserParticipantIds);
 
                 botUserParticipantIds.forEach(botUserId ->
                         startConversationWithUser(delivery, botUserId, conversationId, conversationCreatedEvent, conversationInfo));
@@ -153,6 +152,18 @@ public class RestDifferEndpoint implements IRestDifferEndpoint {
                 differPublisher.negativeDeliveryAck(delivery);
             }
         };
+    }
+
+    private DifferConversationInfo createDifferConversation(String conversationId,
+                                                            List<String> participantIds,
+                                                            List<String> botUserParticipantIds)
+            throws ResourceAlreadyExistsException, ResourceStoreException {
+
+        var conversationInfo = new DifferConversationInfo(conversationId, participantIds, botUserParticipantIds);
+        differConversationStore.createDifferConversation(conversationInfo);
+        conversationInfoCache.put(conversationId, conversationInfo);
+        availableConversationIds.put(conversationId, true);
+        return conversationInfo;
     }
 
     private DeliverCallback messageCreatedCallback() {
@@ -217,7 +228,7 @@ public class RestDifferEndpoint implements IRestDifferEndpoint {
     }
 
     private DifferConversationInfo getConversationInfo(String conversationId)
-            throws IResourceStore.ResourceStoreException {
+            throws ResourceStoreException {
 
         DifferConversationInfo conversationInfo;
         if ((conversationInfo = conversationInfoCache.get(conversationId)) == null) {
