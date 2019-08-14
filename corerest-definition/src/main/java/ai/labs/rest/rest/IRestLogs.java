@@ -13,6 +13,11 @@ import java.util.List;
 @Api(value = "Bot Engine -> Logs", authorizations = {@Authorization(value = "eddi_auth")})
 @Path("logs")
 public interface IRestLogs {
+
+    @POST
+    void setLogLevel(@QueryParam("packageName") String packageName, @QueryParam("logLevel") String logLevel);
+
+
     @GET
     @Produces(MediaType.APPLICATION_JSON)
     @ApiOperation(value = "Get error logs.")
