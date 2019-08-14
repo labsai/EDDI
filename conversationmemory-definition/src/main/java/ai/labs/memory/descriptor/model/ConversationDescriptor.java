@@ -6,6 +6,8 @@ import ai.labs.models.ResourceDescriptor;
 import lombok.Getter;
 import lombok.Setter;
 
+import java.net.URI;
+
 /**
  * @author ginccc
  */
@@ -18,6 +20,7 @@ public class ConversationDescriptor extends ResourceDescriptor {
     }
 
     private String botName;
+    private URI botResource;
     private ViewState viewState;
     private int conversationStepSize;
     private String createdByUserName;

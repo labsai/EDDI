@@ -1,11 +1,13 @@
 package ai.labs.resources.impl.interceptors;
 
+import ai.labs.memory.IConversationMemoryStore;
 import ai.labs.memory.descriptor.IConversationDescriptorStore;
 import ai.labs.memory.descriptor.model.ConversationDescriptor;
 import ai.labs.models.DocumentDescriptor;
 import ai.labs.models.ResourceDescriptor;
 import ai.labs.persistence.IDescriptorStore;
 import ai.labs.persistence.IResourceStore;
+import ai.labs.resources.rest.config.bots.IRestBotStore;
 import ai.labs.resources.rest.documentdescriptor.IDocumentDescriptorStore;
 import ai.labs.resources.rest.method.PATCH;
 import ai.labs.runtime.DependencyInjector;
@@ -45,6 +47,7 @@ public class DocumentDescriptorInterceptor implements ContainerResponseFilter {
     private final IDocumentDescriptorStore documentDescriptorStore;
     private final IConversationDescriptorStore conversationDescriptorStore;
     private final IUserStore userStore;
+    private final IConversationMemoryStore conversationMemoryStore;
     private final ITestCaseDescriptorStore testCaseDescriptorStore;
 
     @Inject
@@ -56,6 +59,7 @@ public class DocumentDescriptorInterceptor implements ContainerResponseFilter {
         this.userStore = injector.getInstance(IUserStore.class);
         this.documentDescriptorStore = injector.getInstance(IDocumentDescriptorStore.class);
         this.conversationDescriptorStore = injector.getInstance(IConversationDescriptorStore.class);
+        this.conversationMemoryStore = injector.getInstance(IConversationMemoryStore.class);
         this.testCaseDescriptorStore = injector.getInstance(ITestCaseDescriptorStore.class);
     }
 
@@ -84,7 +88,12 @@ public class DocumentDescriptorInterceptor implements ContainerResponseFilter {
                                 if (resourceLocationUri.startsWith("eddi://ai.labs.testcases")) {
                                     testCaseDescriptorStore.createDescriptor(resourceId.getId(), resourceId.getVersion(), createTestCaseDescriptor(createdResourceURI, userURI));
                                 } else if (resourceLocationUri.startsWith("eddi://ai.labs.conversation")) {
-                                    conversationDescriptorStore.createDescriptor(resourceId.getId(), resourceId.getVersion(), createConversationDescriptor(createdResourceURI, userURI));
+                                    var memorySnapshot = conversationMemoryStore.loadConversationMemorySnapshot(resourceId.getId());
+                                    var botId = memorySnapshot.getBotId();
+                                    var botVersion = memorySnapshot.getBotVersion();
+                                    var botResourceURI = URI.create(IRestBotStore.resourceURI + botId + IRestBotStore.versionQueryParam + botVersion);
+                                    conversationDescriptorStore.createDescriptor(resourceId.getId(), resourceId.getVersion(),
+                                            createConversationDescriptor(createdResourceURI, botResourceURI, userURI));
                                 } else if (isResourceIdValid(resourceId)) {
                                     try {
                                         documentDescriptorStore.readDescriptor(resourceId.getId(), resourceId.getVersion());
@@ -174,9 +183,10 @@ public class DocumentDescriptorInterceptor implements ContainerResponseFilter {
         return descriptor;
     }
 
-    private static ConversationDescriptor createConversationDescriptor(URI resource, URI user) {
+    private static ConversationDescriptor createConversationDescriptor(URI resource, URI botResourceURI, URI user) {
         ConversationDescriptor conversationDescriptor = new ConversationDescriptor();
         conversationDescriptor.setResource(resource);
+        conversationDescriptor.setBotResource(botResourceURI);
         Date createdOn = new Date(System.currentTimeMillis());
         conversationDescriptor.setCreatedOn(createdOn);
         conversationDescriptor.setLastModifiedOn(createdOn);

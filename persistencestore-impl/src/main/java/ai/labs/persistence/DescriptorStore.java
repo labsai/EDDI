@@ -10,6 +10,8 @@ import ai.labs.utilities.RuntimeUtilities;
 import ai.labs.utilities.StringUtilities;
 import com.mongodb.client.MongoCollection;
 import com.mongodb.client.MongoDatabase;
+import com.mongodb.client.model.IndexOptions;
+import com.mongodb.client.model.Indexes;
 import org.bson.Document;
 
 import java.util.LinkedList;
@@ -19,11 +21,11 @@ import java.util.List;
  * @author ginccc
  */
 public class DescriptorStore<T> implements IDescriptorStore<T> {
-    private static final String COLLECTION_DESCRIPTORS = "descriptors";
+    protected static final String COLLECTION_DESCRIPTORS = "descriptors";
     private static final String FIELD_RESOURCE = "resource";
     private static final String FIELD_NAME = "name";
     private static final String FIELD_DESCRIPTION = "description";
-    private static final String FIELD_LAST_MODIFIED = "lastModifiedOn";
+    protected static final String FIELD_LAST_MODIFIED = "lastModifiedOn";
     private static final String FIELD_DELETED = "deleted";
 
     private static final String collectionName = "descriptors";
@@ -42,6 +44,8 @@ public class DescriptorStore<T> implements IDescriptorStore<T> {
         this.descriptorResourceStore = new ModifiableHistorizedResourceStore<>(resourceStorage);
         this.resourceFilter = new ResourceFilter<>(descriptorCollection, descriptorResourceStore,
                 permissionStore, userStore, groupStore, documentBuilder, documentType);
+
+        descriptorCollection.createIndex(Indexes.ascending(FIELD_RESOURCE), new IndexOptions().unique(true));
     }
 
     @Override

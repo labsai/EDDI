@@ -7,6 +7,7 @@ import ai.labs.lifecycle.LifecycleException;
 import ai.labs.memory.IConversationMemory;
 import ai.labs.memory.IConversationMemoryStore;
 import ai.labs.memory.IPropertiesHandler;
+import ai.labs.memory.descriptor.IConversationDescriptorStore;
 import ai.labs.memory.model.ConversationMemorySnapshot;
 import ai.labs.memory.model.SimpleConversationMemorySnapshot;
 import ai.labs.models.Context;
@@ -54,6 +55,7 @@ public class RestBotEngine implements IRestBotEngine {
     private static final String USER_ID = "userId";
     private final IBotFactory botFactory;
     private final IConversationMemoryStore conversationMemoryStore;
+    private final IConversationDescriptorStore conversationDescriptorStore;
     private final IPropertiesStore propertiesStore;
     private final IConversationCoordinator conversationCoordinator;
     private final SystemRuntime.IRuntime runtime;
@@ -64,6 +66,7 @@ public class RestBotEngine implements IRestBotEngine {
     @Inject
     public RestBotEngine(IBotFactory botFactory,
                          IConversationMemoryStore conversationMemoryStore,
+                         IConversationDescriptorStore conversationDescriptorStore,
                          IPropertiesStore propertiesStore,
                          IConversationCoordinator conversationCoordinator,
                          ICacheFactory cacheFactory,
@@ -72,6 +75,7 @@ public class RestBotEngine implements IRestBotEngine {
                          @Named("system.botTimeoutInSeconds") int botTimeout) {
         this.botFactory = botFactory;
         this.conversationMemoryStore = conversationMemoryStore;
+        this.conversationDescriptorStore = conversationDescriptorStore;
         this.propertiesStore = propertiesStore;
         this.conversationCoordinator = conversationCoordinator;
         this.conversationStateCache = cacheFactory.getCache(CACHE_NAME_CONVERSATION_STATE);
@@ -239,7 +243,8 @@ public class RestBotEngine implements IRestBotEngine {
             final IConversationMemory conversationMemory = loadConversationMemory(conversationId);
             checkConversationMemoryNotNull(conversationMemory, conversationId);
             var loggingContext = contextLogger.createLoggingContext(environment, botId, conversationId, conversationMemory.getUserId());
-            loggingContext.put("botVersion", conversationMemory.getBotVersion().toString());
+            Integer botVersion = conversationMemory.getBotVersion();
+            loggingContext.put("botVersion", botVersion.toString());
             contextLogger.setLoggingContext(loggingContext);
             if (!botId.equals(conversationMemory.getBotId())) {
                 String message = "Supplied botId (%s) is incompatible with conversationId (%s)";
@@ -249,10 +254,10 @@ public class RestBotEngine implements IRestBotEngine {
                 return;
             }
 
-            IBot bot = botFactory.getBot(environment, conversationMemory.getBotId(), conversationMemory.getBotVersion());
+            IBot bot = botFactory.getBot(environment, conversationMemory.getBotId(), botVersion);
             if (bot == null) {
                 String msg = "Bot not deployed (environment=%s, conversationId=%s, version=%s)";
-                msg = String.format(msg, environment, conversationMemory.getBotId(), conversationMemory.getBotVersion());
+                msg = String.format(msg, environment, conversationMemory.getBotId(), botVersion);
                 response.resume(new NotFoundException(msg));
                 return;
             }
@@ -267,6 +272,7 @@ public class RestBotEngine implements IRestBotEngine {
                                         returningFields);
                         memorySnapshot.setEnvironment(environment);
                         cacheConversationState(conversationId, memorySnapshot.getConversationState());
+                        conversationDescriptorStore.updateTimeStamp(conversationId);
                         response.resume(memorySnapshot);
                     });
 
