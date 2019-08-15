@@ -99,10 +99,12 @@ public class OutputTemplateTaskTest {
         expectedPreQuickReplies.add(new QuickReply(
                 "Quick Reply Value [[${context}]]",
                 "quickReply(expression)", false));
+
         List<QuickReply> expectedPostQuickReplies = new LinkedList<>();
         expectedPostQuickReplies.add(new QuickReply(
                 "Quick Reply Value someContextValue",
                 "quickReply(expression)", false));
+
         when(currentStep.getAllData(eq("quickReplies"))).then(invocation -> {
             LinkedList<IData<List<QuickReply>>> ret = new LinkedList<>();
             ret.add(new MockData<>(KEY_QUICK_REPLY_SOME_ACTION, expectedPreQuickReplies));
@@ -123,10 +125,24 @@ public class OutputTemplateTaskTest {
 
         when(templatingEngine.processTemplate(eq(templateString), anyMap(), eq(TEXT))).
                 then(invocation -> expectedOutputString);
-        when(templatingEngine.processTemplate(eq(expectedPreQuickReplies.get(0).getValue()), anyMap(), eq(TEXT))).
-                then(invocation -> expectedPostQuickReplies.get(0).getValue());
-        when(templatingEngine.processTemplate(eq(expectedPreQuickReplies.get(0).getExpressions()), anyMap(), eq(TEXT))).
-                then(invocation -> expectedPostQuickReplies.get(0).getExpressions());
+
+        var expectedPreQuickReply = expectedPreQuickReplies.get(0);
+        var expectedPostQuickReply = expectedPostQuickReplies.get(0);
+
+        String expectedPreQuickReplyValue = expectedPreQuickReply.getValue();
+        String expectedPostQuickReplyValue = expectedPostQuickReply.getValue();
+        String expectedPostQuickReplyExpressions = expectedPostQuickReply.getExpressions();
+
+        when(templatingEngine.processTemplate(eq(expectedPreQuickReplyValue), anyMap())).
+                then(invocation -> expectedPostQuickReplyValue);
+        when(templatingEngine.processTemplate(eq(expectedPreQuickReply.getExpressions()), anyMap())).
+                then(invocation -> expectedPostQuickReplyExpressions);
+
+        when(templatingEngine.processTemplate(eq(expectedPostQuickReplyValue), anyMap())).
+                then(invocation -> expectedPostQuickReplyValue);
+        when(templatingEngine.processTemplate(eq(expectedPostQuickReplyExpressions), anyMap())).
+                then(invocation -> expectedPostQuickReplyExpressions);
+
         return expectedPostQuickReplies;
     }
 

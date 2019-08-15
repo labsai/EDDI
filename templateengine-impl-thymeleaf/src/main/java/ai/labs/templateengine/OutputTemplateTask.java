@@ -121,9 +121,8 @@ public class OutputTemplateTask implements ILifecycleTask {
                                         List<IData<List<QuickReply>>> quickReplyDataList,
                                         Map<String, Object> contextMap) {
         quickReplyDataList.forEach(quickReplyData -> {
-            List<QuickReply> quickReplies = copyQuickReplies(quickReplyData.getResult());
-
-            quickReplies.forEach(quickReply -> {
+            var preTemplating = quickReplyData.getResult();
+            var postTemplating = copyQuickReplies(preTemplating).stream().map(quickReply -> {
                 try {
                     String preTemplatedValue = quickReply.getValue();
                     String postTemplatedValue = templatingEngine.processTemplate(preTemplatedValue, contextMap);
@@ -132,13 +131,15 @@ public class OutputTemplateTask implements ILifecycleTask {
                     String preTemplatedExpressions = quickReply.getExpressions();
                     String postTemplatedExpressions = templatingEngine.processTemplate(preTemplatedExpressions, contextMap);
                     quickReply.setExpressions(postTemplatedExpressions);
+                    return quickReply;
                 } catch (ITemplatingEngine.TemplateEngineException e) {
                     log.error(e.getLocalizedMessage(), e);
+                    return null;
                 }
-            });
+            }).collect(Collectors.toList());
 
-            templateData(memory, quickReplyData, quickReplyData.getKey(), quickReplyData.getResult(), quickReplies);
-            memory.getCurrentStep().addConversationOutputList(KEY_QUICK_REPLIES, quickReplies);
+            templateData(memory, quickReplyData, quickReplyData.getKey(), preTemplating, postTemplating);
+            memory.getCurrentStep().addConversationOutputList(KEY_QUICK_REPLIES, postTemplating);
         });
     }
 
