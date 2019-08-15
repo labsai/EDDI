@@ -121,8 +121,7 @@ public class OutputTemplateTask implements ILifecycleTask {
                                         List<IData<List<QuickReply>>> quickReplyDataList,
                                         Map<String, Object> contextMap) {
         quickReplyDataList.forEach(quickReplyData -> {
-            List<QuickReply> quickReplies = quickReplyData.getResult();
-            List<QuickReply> preTemplatedQuickReplies = copyQuickReplies(quickReplies);
+            List<QuickReply> quickReplies = copyQuickReplies(quickReplyData.getResult());
 
             quickReplies.forEach(quickReply -> {
                 try {
@@ -138,7 +137,7 @@ public class OutputTemplateTask implements ILifecycleTask {
                 }
             });
 
-            templateData(memory, quickReplyData, quickReplyData.getKey(), preTemplatedQuickReplies, quickReplies);
+            templateData(memory, quickReplyData, quickReplyData.getKey(), quickReplyData.getResult(), quickReplies);
             memory.getCurrentStep().addConversationOutputList(KEY_QUICK_REPLIES, quickReplies);
         });
     }

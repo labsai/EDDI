@@ -8,6 +8,7 @@ import ai.labs.lifecycle.IllegalExtensionConfigurationException;
 import ai.labs.lifecycle.UnrecognizedExtensionException;
 import ai.labs.memory.IConversationMemory;
 import ai.labs.memory.IData;
+import ai.labs.memory.model.ConversationOutput;
 import ai.labs.memory.model.Data;
 import ai.labs.output.model.QuickReply;
 import ai.labs.parser.extensions.corrections.ICorrection;
@@ -119,33 +120,28 @@ public class InputParserTask implements ILifecycleTask {
     }
 
     private List<IDictionary> prepareTemporaryDictionaries(IConversationMemory memory) {
-        IConversationMemory.IConversationStepStack previousSteps = memory.getPreviousSteps();
-        List<IDictionary> temporaryDictionaries = Collections.emptyList();
-        if (previousSteps.size() > 0) {
-            List<IData<List<Map<String, String>>>> data = previousSteps.get(0).getAllData("quickReplies");
-            if (data != null) {
-                List<QuickReply> quickReplies = extractQuickReplies(data);
-                temporaryDictionaries = convertQuickReplies(quickReplies, expressionProvider);
-            }
+        List<ConversationOutput> conversationOutputs = memory.getConversationOutputs();
+        if (conversationOutputs.isEmpty() || conversationOutputs.size() < 2) {
+            return Collections.emptyList();
         }
+
+        ConversationOutput conversationOutput = conversationOutputs.get(conversationOutputs.size() - 2);
+        List<IDictionary> temporaryDictionaries = Collections.emptyList();
+        List<Map<String, Object>> quickRepliesOutput = (List<Map<String, Object>>) conversationOutput.get("quickReplies");
+        if (quickRepliesOutput != null) {
+            List<QuickReply> quickReplies = extractQuickReplies(quickRepliesOutput);
+            temporaryDictionaries = convertQuickReplies(quickReplies, expressionProvider);
+        }
+
         return temporaryDictionaries;
     }
 
-    private List<QuickReply> extractQuickReplies(List<IData<List<Map<String, String>>>> quickReplyDataList) {
-        List<QuickReply> ret = new LinkedList<>();
-        quickReplyDataList.stream().
+    private List<QuickReply> extractQuickReplies(List<Map<String, Object>> quickReplyOutputList) {
+        return quickReplyOutputList.stream().
                 filter(Objects::nonNull).
-                filter(IData::isPublic).
-                forEach((quickReplyData) -> {
-                    List<Map<String, String>> resultList = quickReplyData.getResult();
-                    ret.addAll(resultList.stream().
-                            map((resultMap) -> new QuickReply(resultMap.get("value"),
-                                    resultMap.get("expressions"), Boolean.parseBoolean(resultMap.get("isDefault")))).
-                            collect(Collectors.toList()));
-
-                });
-
-        return ret;
+                map((quickReplyData) -> new QuickReply(quickReplyData.get("value").toString(),
+                        quickReplyData.get("expressions").toString(), (Boolean) quickReplyData.get("default"))).
+                collect(Collectors.toList());
     }
 
     private void storeNormalizedResultInMemory(IConversationMemory.IWritableConversationStep currentStep, String normalizedInput) {
