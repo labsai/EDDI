@@ -44,6 +44,7 @@ import java.util.stream.Collectors;
 import static ai.labs.memory.ConversationMemoryUtilities.*;
 import static ai.labs.persistence.IResourceStore.ResourceNotFoundException;
 import static ai.labs.persistence.IResourceStore.ResourceStoreException;
+import static ai.labs.utilities.RuntimeUtilities.isNullOrEmpty;
 
 /**
  * @author ginccc
@@ -130,7 +131,7 @@ public class RestBotEngine implements IRestBotEngine {
     }
 
     private String computeAnonymousUserIdIfEmpty(String userId) {
-        return RuntimeUtilities.isNullOrEmpty(userId) ?
+        return isNullOrEmpty(userId) ?
                 "anonymous-" + RandomStringUtils.randomAlphanumeric(10) : userId;
     }
 
@@ -139,7 +140,7 @@ public class RestBotEngine implements IRestBotEngine {
             @Override
             public Properties loadProperties() throws ResourceStoreException {
                 Properties properties = null;
-                if (!RuntimeUtilities.isNullOrEmpty(userId)) {
+                if (!isNullOrEmpty(userId)) {
                     properties = propertiesStore.readProperties(userId);
                 }
 
@@ -563,7 +564,7 @@ public class RestBotEngine implements IRestBotEngine {
 
         var memorySnapshot = convertSimpleConversationMemory(conversationMemorySnapshot, returnDetailed);
         if (returnCurrentStepOnly) {
-            if (returningFields.isEmpty() || returningFields.contains("conversationSteps")) {
+            if (isNullOrEmpty(returningFields) || returningFields.contains("conversationSteps")) {
                 var conversationSteps = memorySnapshot.getConversationSteps();
                 var conversationStep = conversationSteps.get(conversationSteps.size() - 1);
                 conversationSteps.clear();
@@ -572,7 +573,7 @@ public class RestBotEngine implements IRestBotEngine {
                 memorySnapshot.setConversationSteps(null);
             }
 
-            if (returningFields.isEmpty() || returningFields.contains("conversationOutputs")) {
+            if (isNullOrEmpty(returningFields) || returningFields.contains("conversationOutputs")) {
                 var conversationOutputs = memorySnapshot.getConversationOutputs();
                 var conversationOutput = conversationOutputs.get(conversationOutputs.size() - 1);
                 conversationOutputs.clear();
