@@ -7,6 +7,8 @@ import ai.labs.server.IServerRuntime;
 import ai.labs.server.MongoLoginService;
 import ai.labs.server.ServerRuntime;
 import ai.labs.server.providers.CorsBasicAuthenticator;
+import ai.labs.server.test.ITestLoad;
+import ai.labs.server.test.TestLoad;
 import ai.labs.user.IUserStore;
 import ai.labs.user.model.User;
 import ai.labs.utilities.RuntimeUtilities;
@@ -49,6 +51,7 @@ public class ServerRuntimeModule extends AbstractBaseModule {
     protected void configure() {
         registerConfigFiles(configFiles);
         bind(LoginService.class).to(MongoLoginService.class);
+        bind(ITestLoad.class).to(TestLoad.class);
     }
 
     @Provides

@@ -32,6 +32,7 @@ import ai.labs.runtime.bootstrap.SwaggerModule;
 import ai.labs.serialization.bootstrap.SerializationModule;
 import ai.labs.server.IServerRuntime;
 import ai.labs.server.bootstrap.ServerRuntimeModule;
+import ai.labs.server.test.ITestLoad;
 import ai.labs.staticresources.bootstrap.StaticResourcesModule;
 import ai.labs.templateengine.bootstrap.TemplateEngineModule;
 import ai.labs.testing.bootstrap.AutomatedtestingModule;
@@ -116,6 +117,9 @@ public class ApiServer {
             var channelDefinitions = injector.getInstance(IChannelDefinitionStore.class).readAllChannelDefinitions();
             var channelManager = injector.getInstance(IChannelManager.class);
             channelDefinitions.forEach(channelManager::initChannel);
+
+            ITestLoad testLoad = injector.getInstance(ITestLoad.class);
+            testLoad.runLoadTest();
 
             logServerStartupTime(serverStartupBegin);
         });
