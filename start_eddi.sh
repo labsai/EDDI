@@ -24,4 +24,12 @@ fi
 
 echo "memory params: ${memory_string}"
 
-java -server ${memory_string} -classpath '.:lib/*' -DEDDI_ENV=$EDDI_ENV ${argument_string} --add-opens java.base/java.lang=ALL-UNNAMED ai.labs.api.ApiServer
+java -server ${memory_string} \
+-classpath '.:lib/*' \
+-DEDDI_ENV=$EDDI_ENV ${argument_string} \
+--add-opens java.base/java.lang=ALL-UNNAMED \
+-Dcom.sun.management.jmxremote \
+-Dcom.sun.management.jmxremote.port=9001 \
+-Dcom.sun.management.jmxremote.ssl=false \
+-Dcom.sun.management.jmxremote.authenticate=false \
+ai.labs.api.ApiServer
