@@ -1,6 +1,5 @@
 package ai.labs.parser.model;
 
-import ai.labs.expressions.Expressions;
 import ai.labs.parser.extensions.dictionaries.IDictionary;
 
 import java.util.Objects;
@@ -8,18 +7,14 @@ import java.util.Objects;
 /**
  * @author ginccc
  */
-public class FoundWord extends FoundDictionaryEntry implements IDictionary.IFoundWord {
+public class FoundRegEx extends FoundWord implements IDictionary.IFoundRegEx {
     private final IDictionary.IWord word;
+    private final IDictionary.IRegEx regEx;
 
-    public FoundWord(IDictionary.IWord word, boolean corrected, double matchingAccuracy) {
-        super(word, corrected, matchingAccuracy);
+    public FoundRegEx(IDictionary.IWord word, IDictionary.IRegEx regEx) {
+        super(word, false, 1.0);
         this.word = word;
-        isWord = true;
-    }
-
-    public FoundWord(String unknownValue, Expressions unknownExp) {
-        super(unknownValue, unknownExp, false, 0.0);
-        word = null;
+        this.regEx = regEx;
         isWord = true;
     }
 
@@ -34,10 +29,9 @@ public class FoundWord extends FoundDictionaryEntry implements IDictionary.IFoun
         if (o == null || getClass() != o.getClass()) return false;
         if (!super.equals(o)) return false;
 
-        FoundWord foundWord = (FoundWord) o;
+        FoundRegEx foundWord = (FoundRegEx) o;
 
         return Objects.equals(value, foundWord.value);
-
     }
 
     @Override
@@ -53,5 +47,10 @@ public class FoundWord extends FoundDictionaryEntry implements IDictionary.IFoun
     @Override
     public boolean isPhrase() {
         return word.isPhrase();
+    }
+
+    @Override
+    public IDictionary.IRegEx getMatchingRegEx() {
+        return regEx;
     }
 }

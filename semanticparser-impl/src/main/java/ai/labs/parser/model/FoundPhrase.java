@@ -2,6 +2,8 @@ package ai.labs.parser.model;
 
 import ai.labs.parser.extensions.dictionaries.IDictionary;
 
+import java.util.Objects;
+
 /**
  * @author ginccc
  */
@@ -27,7 +29,7 @@ public class FoundPhrase extends FoundDictionaryEntry implements IDictionary.IFo
 
         FoundPhrase that = (FoundPhrase) o;
 
-        return value != null ? value.equals(that.value) : that.value == null;
+        return Objects.equals(value, that.value);
 
     }
 

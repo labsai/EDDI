@@ -87,9 +87,19 @@ public class RegularDictionaryProvider implements IDictionaryProvider {
             String word = wordConfig.getWord();
             if (word != null) {
                 regularDictionary.addWord(word.trim(),
-                        createDefaultExpressionIfNull(word, wordConfig.getExp()), wordConfig.getFrequency());
+                        createDefaultExpressionIfNull(word, wordConfig.getExpressions()), wordConfig.getFrequency());
             } else {
                 log.warn("Value of 'word' in dictionary was null. Skipped it.");
+            }
+        });
+
+        regularDictionaryConfiguration.getRegExs().forEach(regExConfig -> {
+            String regEx = regExConfig.getRegEx();
+            if (regEx != null) {
+                regularDictionary.addRegex(regExConfig.getRegEx(),
+                        createDefaultExpressionIfNull(regExConfig.getRegEx(), regExConfig.getExpressions()));
+            } else {
+                log.warn("Value of 'regEx' in dictionary was null. Skipped it.");
             }
         });
 
@@ -97,7 +107,7 @@ public class RegularDictionaryProvider implements IDictionaryProvider {
             String phrase = phraseConfig.getPhrase();
             if (phrase != null) {
                 regularDictionary.addPhrase(phrase.trim(),
-                        createDefaultExpressionIfNull(phrase, phraseConfig.getExp()));
+                        createDefaultExpressionIfNull(phrase, phraseConfig.getExpressions()));
             } else {
                 log.warn("Value of 'phrase' in dictionary was null. Skipped it.");
             }

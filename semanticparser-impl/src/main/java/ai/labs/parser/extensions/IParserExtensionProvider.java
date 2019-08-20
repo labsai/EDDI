@@ -17,7 +17,7 @@ public interface IParserExtensionProvider<T> {
 
     default boolean extractLookupIfKnownParam(Map<String, Object> config) {
         Object lookupIfKnownObj = config.get(KEY_LOOKUP_IF_KNOWN);
-        return lookupIfKnownObj == null ? false : Boolean.valueOf((String) lookupIfKnownObj);
+        return lookupIfKnownObj != null && Boolean.parseBoolean((String) lookupIfKnownObj);
     }
 
     default void setConfig(Map<String, Object> config) throws IllegalExtensionConfigurationException {
