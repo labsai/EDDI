@@ -8,7 +8,6 @@ import ai.labs.memory.IConversationMemory;
 import ai.labs.memory.IConversationMemoryStore;
 import ai.labs.memory.IPropertiesHandler;
 import ai.labs.memory.descriptor.IConversationDescriptorStore;
-import ai.labs.memory.model.ConversationMemorySnapshot;
 import ai.labs.memory.model.SimpleConversationMemorySnapshot;
 import ai.labs.models.Context;
 import ai.labs.models.ConversationState;
@@ -184,7 +183,8 @@ public class RestBotEngine implements IRestBotEngine {
                 message = String.format(message, conversationId, botId, botId, conversationMemorySnapshot.getBotId());
                 throw new IllegalAccessException(message);
             }
-            return getSimpleConversationMemorySnapshot(conversationMemorySnapshot,
+            return convertSimpleConversationMemorySnapshot(
+                    conversationMemorySnapshot,
                     returnDetailed,
                     returnCurrentStepOnly,
                     returningFields);
@@ -267,7 +267,7 @@ public class RestBotEngine implements IRestBotEngine {
                     createPropertiesHandler(conversationMemory.getUserId()),
                     returnConversationMemory -> {
                         SimpleConversationMemorySnapshot memorySnapshot =
-                                getSimpleConversationMemorySnapshot(returnConversationMemory,
+                                convertSimpleConversationMemorySnapshot(returnConversationMemory,
                                         returnDetailed,
                                         returnCurrentStepOnly,
                                         returningFields);
@@ -542,51 +542,6 @@ public class RestBotEngine implements IRestBotEngine {
         var memorySnapshot = convertConversationMemory(conversationMemory);
         memorySnapshot.setEnvironment(environment);
         return conversationMemoryStore.storeConversationMemorySnapshot(memorySnapshot);
-    }
-
-    private SimpleConversationMemorySnapshot getSimpleConversationMemorySnapshot(
-            IConversationMemory returnConversationMemory,
-            Boolean returnDetailed,
-            Boolean returnCurrentStepOnly,
-            List<String> returningFields) {
-
-        return getSimpleConversationMemorySnapshot(
-                convertConversationMemory(returnConversationMemory),
-                returnDetailed,
-                returnCurrentStepOnly, returningFields);
-    }
-
-    private SimpleConversationMemorySnapshot getSimpleConversationMemorySnapshot(
-            ConversationMemorySnapshot conversationMemorySnapshot,
-            Boolean returnDetailed,
-            Boolean returnCurrentStepOnly,
-            List<String> returningFields) {
-
-        var memorySnapshot = convertSimpleConversationMemory(conversationMemorySnapshot, returnDetailed);
-        if (returnCurrentStepOnly) {
-            if (isNullOrEmpty(returningFields) || returningFields.contains("conversationSteps")) {
-                var conversationSteps = memorySnapshot.getConversationSteps();
-                if (!conversationSteps.isEmpty()) {
-                    var conversationStep = conversationSteps.get(conversationSteps.size() - 1);
-                    conversationSteps.clear();
-                    conversationSteps.add(conversationStep);
-                }
-            } else {
-                memorySnapshot.setConversationSteps(null);
-            }
-
-            if (isNullOrEmpty(returningFields) || returningFields.contains("conversationOutputs")) {
-                var conversationOutputs = memorySnapshot.getConversationOutputs();
-                if (!conversationOutputs.isEmpty()) {
-                    var conversationOutput = conversationOutputs.get(conversationOutputs.size() - 1);
-                    conversationOutputs.clear();
-                    conversationOutputs.add(conversationOutput);
-                }
-            } else {
-                memorySnapshot.setConversationOutputs(null);
-            }
-        }
-        return memorySnapshot;
     }
 
     private static void checkConversationMemoryNotNull(IConversationMemory conversationMemory, String conversationId)

@@ -41,5 +41,6 @@ public class SimpleConversationMemorySnapshot {
     public static class ConversationStepData {
         private String key;
         private Object value;
+        private Date timestamp;
     }
 }

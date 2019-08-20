@@ -2,6 +2,7 @@ package ai.labs.memory.rest;
 
 import ai.labs.memory.descriptor.model.ConversationDescriptor;
 import ai.labs.memory.model.ConversationMemorySnapshot;
+import ai.labs.memory.model.SimpleConversationMemorySnapshot;
 import ai.labs.models.ConversationState;
 import ai.labs.models.ConversationStatus;
 import ai.labs.persistence.IResourceStore;
@@ -30,9 +31,19 @@ public interface IRestConversationStore {
                                                              @QueryParam("viewState") ConversationDescriptor.ViewState viewState);
 
     @GET
+    @Path("/simple/{conversationId}")
+    @Produces(MediaType.APPLICATION_JSON)
+    SimpleConversationMemorySnapshot readSimpleConversationLog(@PathParam("conversationId") String conversationId,
+                                                               @QueryParam("returnDetailed") @DefaultValue("false") Boolean returnDetailed,
+                                                               @QueryParam("returnCurrentStepOnly") @DefaultValue("true") Boolean returnCurrentStepOnly,
+                                                               @QueryParam("returningFields") List<String> returningFields)
+            throws IResourceStore.ResourceStoreException, IResourceStore.ResourceNotFoundException;
+
+    @GET
     @Path("/{conversationId}")
     @Produces(MediaType.APPLICATION_JSON)
-    ConversationMemorySnapshot readConversationLog(@PathParam("conversationId") String conversationId) throws IResourceStore.ResourceStoreException, IResourceStore.ResourceNotFoundException;
+    ConversationMemorySnapshot readRawConversationLog(@PathParam("conversationId") String conversationId)
+            throws IResourceStore.ResourceStoreException, IResourceStore.ResourceNotFoundException;
 
     @DELETE
     @Path("/{conversationId}")
