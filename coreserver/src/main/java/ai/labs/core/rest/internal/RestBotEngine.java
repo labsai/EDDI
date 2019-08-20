@@ -566,18 +566,22 @@ public class RestBotEngine implements IRestBotEngine {
         if (returnCurrentStepOnly) {
             if (isNullOrEmpty(returningFields) || returningFields.contains("conversationSteps")) {
                 var conversationSteps = memorySnapshot.getConversationSteps();
-                var conversationStep = conversationSteps.get(conversationSteps.size() - 1);
-                conversationSteps.clear();
-                conversationSteps.add(conversationStep);
+                if (!conversationSteps.isEmpty()) {
+                    var conversationStep = conversationSteps.get(conversationSteps.size() - 1);
+                    conversationSteps.clear();
+                    conversationSteps.add(conversationStep);
+                }
             } else {
                 memorySnapshot.setConversationSteps(null);
             }
 
             if (isNullOrEmpty(returningFields) || returningFields.contains("conversationOutputs")) {
                 var conversationOutputs = memorySnapshot.getConversationOutputs();
-                var conversationOutput = conversationOutputs.get(conversationOutputs.size() - 1);
-                conversationOutputs.clear();
-                conversationOutputs.add(conversationOutput);
+                if (!conversationOutputs.isEmpty()) {
+                    var conversationOutput = conversationOutputs.get(conversationOutputs.size() - 1);
+                    conversationOutputs.clear();
+                    conversationOutputs.add(conversationOutput);
+                }
             } else {
                 memorySnapshot.setConversationOutputs(null);
             }

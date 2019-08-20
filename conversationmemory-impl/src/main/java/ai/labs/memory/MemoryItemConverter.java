@@ -9,6 +9,7 @@ import java.util.*;
 import static ai.labs.memory.ConversationMemoryUtilities.prepareContext;
 import static ai.labs.memory.IConversationMemory.IConversationStep;
 import static ai.labs.memory.IConversationMemory.IWritableConversationStep;
+import static ai.labs.utilities.RuntimeUtilities.isNullOrEmpty;
 
 @Slf4j
 public class MemoryItemConverter implements IMemoryItemConverter {
@@ -27,7 +28,10 @@ public class MemoryItemConverter implements IMemoryItemConverter {
         List<IData<Context>> contextDataList = memory.getCurrentStep().getAllData(KEY_CONTEXT);
         var contextMap = prepareContext(contextDataList);
         var memoryMap = convertMemoryItems(memory);
-        ret.put(KEY_USER_INFO, Map.of(KEY_USER_ID, memory.getUserId()));
+        var userId = memory.getUserId();
+        if (!isNullOrEmpty(userId)) {
+            ret.put(KEY_USER_INFO, Map.of(KEY_USER_ID, userId));
+        }
 
         var conversationProperties = memory.getConversationProperties();
 
