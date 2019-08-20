@@ -88,7 +88,7 @@ public class RegularDictionaryStore implements IRegularDictionaryStore {
                 break;
             }
             for (RegularDictionaryConfiguration.WordConfiguration word : words) {
-                String exp = word.getExp();
+                String exp = word.getExpressions();
                 if (!RuntimeUtilities.isNullOrEmpty(exp) && exp.contains(filter) && !retExpressions.contains(exp)) {
                     retExpressions.add(exp);
                     if (retExpressions.size() >= 20) {
@@ -99,7 +99,7 @@ public class RegularDictionaryStore implements IRegularDictionaryStore {
 
             List<RegularDictionaryConfiguration.PhraseConfiguration> phrases = regularDictionary.getPhrases();
             for (RegularDictionaryConfiguration.PhraseConfiguration phrase : phrases) {
-                String exp = phrase.getExp();
+                String exp = phrase.getExpressions();
                 if (!RuntimeUtilities.isNullOrEmpty(exp) && exp.contains(filter) && !retExpressions.contains(exp)) {
                     retExpressions.add(exp);
                     if (retExpressions.size() >= 20) {

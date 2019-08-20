@@ -49,6 +49,10 @@ public interface IDictionary {
         int getFrequency();
     }
 
+    interface IRegEx extends IWord {
+        boolean match(String lookup);
+    }
+
     interface IPhrase extends IWord {
         List<IWord> getWords();
     }
@@ -62,5 +66,9 @@ public interface IDictionary {
 
     interface IFoundPhrase extends IFoundWord {
         IPhrase getFoundPhrase();
+    }
+
+    interface IFoundRegEx extends IFoundWord {
+        IRegEx getMatchingRegEx();
     }
 }

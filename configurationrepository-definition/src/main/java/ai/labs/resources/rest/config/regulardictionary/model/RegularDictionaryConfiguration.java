@@ -1,5 +1,6 @@
 package ai.labs.resources.rest.config.regulardictionary.model;
 
+import com.fasterxml.jackson.annotation.JsonAlias;
 import com.kjetland.jackson.jsonSchema.annotations.JsonSchemaDefault;
 import com.kjetland.jackson.jsonSchema.annotations.JsonSchemaDescription;
 import com.kjetland.jackson.jsonSchema.annotations.JsonSchemaInject;
@@ -7,7 +8,6 @@ import com.kjetland.jackson.jsonSchema.annotations.JsonSchemaString;
 import lombok.Getter;
 import lombok.Setter;
 
-import javax.annotation.Nullable;
 import javax.validation.constraints.NotNull;
 import java.util.ArrayList;
 import java.util.List;
@@ -20,10 +20,12 @@ import java.util.List;
 @Setter
 public class RegularDictionaryConfiguration {
     private List<WordConfiguration> words;
+    private List<RegExConfiguration> regExs;
     private List<PhraseConfiguration> phrases;
 
     public RegularDictionaryConfiguration() {
         this.words = new ArrayList<>();
+        this.regExs = new ArrayList<>();
         this.phrases = new ArrayList<>();
     }
 
@@ -42,8 +44,8 @@ public class RegularDictionaryConfiguration {
                         "(e.g. greeting(hello) or property(car(BMW(X5))) )")
         @JsonSchemaDefault(value = "unused")
         @JsonSchemaInject(strings = {@JsonSchemaString(path = "patternProperties/^[^ ]{2,}(\\\\([^ ]{2,}\\\\))$/type", value = "string")})
-        private String exp;
-        @Nullable
+        @JsonAlias({"exp", "exps"})
+        private String expressions;
         private int frequency;
 
         @Override
@@ -69,6 +71,44 @@ public class RegularDictionaryConfiguration {
 
     @Getter
     @Setter
+    @JsonSchemaDescription(value = "A RegEx definition of the dictionary.")
+    public static class RegExConfiguration implements Comparable<RegExConfiguration> {
+        @JsonSchemaDescription(value =
+                "A regular expression (regEx) e.g. \"(\\\\w)(\\\\s+)([\\\\.,])\"")
+
+        @NotNull
+        private String regEx;
+        @JsonSchemaDescription(value =
+                "Prolog like expressions describing the meaning of this word " +
+                        "(e.g. greeting(hello) or property(car(BMW(X5))) )")
+        @JsonSchemaDefault(value = "unused")
+        @JsonSchemaInject(strings = {@JsonSchemaString(path = "patternProperties/^[^ ]{2,}(\\\\([^ ]{2,}\\\\))$/type", value = "string")})
+        @JsonAlias({"exp", "exps"})
+        private String expressions;
+
+        @Override
+        public boolean equals(Object o) {
+            if (this == o) return true;
+            if (o == null || getClass() != o.getClass()) return false;
+
+            RegExConfiguration that = (RegExConfiguration) o;
+
+            return regEx.equals(that.regEx);
+        }
+
+        @Override
+        public int hashCode() {
+            return regEx.hashCode();
+        }
+
+        @Override
+        public int compareTo(RegExConfiguration o) {
+            return regEx.compareTo(o.getRegEx());
+        }
+    }
+
+    @Getter
+    @Setter
     @JsonSchemaDescription(value = "A phrase definition of the dictionary.")
     public static class PhraseConfiguration {
         @JsonSchemaDescription(value =
@@ -81,7 +121,8 @@ public class RegularDictionaryConfiguration {
                 "A prolog like expressions describing the meaning of this word " +
                         "(e.g. greeting(good_morning) )")
         @JsonSchemaDefault(value = "unused")
-        protected String exp;
+        @JsonAlias({"exp", "exps"})
+        protected String expressions;
 
         @Override
         public boolean equals(Object o) {
