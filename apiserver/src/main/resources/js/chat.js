@@ -225,12 +225,20 @@ $(function () {
 
     eddi.submitUserMessage = function (userMessage, context) {
         let requestBody = null;
+
+        if (typeof context === 'undefined') {
+            context = {};
+        }
+
+        context.url = {'type': 'object', 'value': $.url.parse(window.location.href)};
+
         let contextValue = $('#contextValue').val().trim();
         if (contextValue !== null && contextValue !== '') {
             let contextObj = JSON.parse(contextValue);
             if (typeof context !== 'undefined') {
                 Object.assign(contextObj, context);
             }
+
             requestBody = {
                 input: userMessage,
                 context: contextObj

@@ -162,6 +162,15 @@ a:active {
     background-color: rgba(213, 232, 255, 0.35);
 }
 
+.botIcon {
+    height: 90px;
+    width: 90px;
+    border-radius: 10%;
+    padding: 10px;
+    display: inline-block;
+    margin: 0;
+}
+
 #menu {
     height: 100%;
     width: 90px;
@@ -512,6 +521,14 @@ a:active {
         background-color: rgba(213, 232, 255, 0.35);
     }
 
+    .botIcon {
+        height: 45px;
+        width: 45px;
+        border-radius: 10%;
+        padding: 10px;
+        display: inline-block;
+        margin: 0;
+    }
 
     .noJS {
         position: fixed;

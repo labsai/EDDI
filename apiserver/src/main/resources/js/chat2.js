@@ -87,6 +87,11 @@ function createMessage(outputArray, quickRepliesArray, hasConversationEnded, dis
                     message = '<img src="' + messageObject.uri + '" width="100%" alt="image send by the bot" />';
                     preLoadImage(messageObject.uri);
                     break;
+                case 'botIcon':
+                    message = '<img src="' + messageObject.uri + '" class="botIcon" alt="icon of bot" />';
+                    message += '<script>$("#eddiLogo").fadeOut(10);</script>';
+                    preLoadImage(messageObject.uri);
+                    break;
                 case 'textInput':
                     inputField = messageObject;
                     break;
