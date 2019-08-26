@@ -16,6 +16,7 @@ import org.eclipse.jetty.http2.server.HTTP2ServerConnectionFactory;
 import org.eclipse.jetty.security.LoginService;
 import org.eclipse.jetty.security.SecurityHandler;
 import org.eclipse.jetty.server.*;
+import org.eclipse.jetty.server.handler.AbstractHandler;
 import org.eclipse.jetty.server.handler.HandlerList;
 import org.eclipse.jetty.server.handler.StatisticsHandler;
 import org.eclipse.jetty.servlet.FilterHolder;
@@ -190,6 +191,18 @@ public class ServerRuntime implements IServerRuntime {
         // Set a handler
         final HandlerList handlers = new HandlerList();
 
+        if (options.useCrossSiteScripting) {
+            handlers.addHandler(new AbstractHandler() {
+                @Override
+                public void handle(String s, Request request,
+                                   HttpServletRequest httpServletRequest,
+                                   HttpServletResponse httpServletResponse) {
+                    addCorsHeader(httpServletResponse);
+                }
+            });
+            log.info("CrossSiteScriptFilter has been enabled...");
+        }
+
         ServletContextHandler servletHandler = new ServletContextHandler(ServletContextHandler.SESSIONS);
         servletHandler.setResourceBase(resourcePath);
 
@@ -228,17 +241,11 @@ public class ServerRuntime implements IServerRuntime {
         }
         servletHandler.addFilter(new FilterHolder(createInitThreadBoundValuesFilter()), ANY_PATH, getAllDispatcherTypes());
 
-        if (options.useCrossSiteScripting) {
-            //add header param in order to enable cross-site-scripting
-            servletHandler.addFilter(new FilterHolder(createCrossSiteScriptFilter()), ANY_PATH, getAllDispatcherTypes());
-            log.info("CrossSiteScriptFilter has been enabled...");
-        }
-
         StatisticsHandler statisticsHandler = new StatisticsHandler();
         handlers.addHandler(statisticsHandler);
-        Tags tags = Tags.of("eddi.jetty", "jetty-server");
 
         //monitoring stats
+        var tags = Tags.of("eddi.jetty", "jetty-server");
         new JettyStatisticsMetrics(statisticsHandler, tags).bindTo(meterRegistry);
         new JettyServerThreadPoolMetrics(threadPool, tags).bindTo(meterRegistry);
 
@@ -345,30 +352,11 @@ public class ServerRuntime implements IServerRuntime {
         };
     }
 
-    private Filter createCrossSiteScriptFilter() {
-        return new Filter() {
-
-            @Override
-            public void init(FilterConfig filterConfig) {
-                // not implemented
-            }
-
-            @Override
-            public void doFilter(ServletRequest request, ServletResponse response, FilterChain filterChain)
-                    throws IOException, ServletException {
-                HttpServletResponse httpResponse = (HttpServletResponse) response;
-                httpResponse.setHeader("Access-Control-Allow-Origin", "*");
-                httpResponse.setHeader("Access-Control-Allow-Headers", "Authorization,X-Requested-With,Content-Type,Accept,Origin,Cache-Control");
-                httpResponse.setHeader("Access-Control-Allow-Methods", "HEAD,GET,PUT,POST,DELETE,PATCH,OPTIONS");
-                httpResponse.setHeader("Access-Control-Expose-Headers", "Location");
-                filterChain.doFilter(request, response);
-            }
-
-            @Override
-            public void destroy() {
-                // not implemented
-            }
-        };
+    private static void addCorsHeader(HttpServletResponse httpResponse) {
+        httpResponse.setHeader("Access-Control-Allow-Origin", "*");
+        httpResponse.setHeader("Access-Control-Allow-Headers", "Authorization,X-Requested-With,Content-Type,Accept,Origin,Cache-Control");
+        httpResponse.setHeader("Access-Control-Allow-Methods", "HEAD,GET,PUT,POST,DELETE,PATCH,OPTIONS");
+        httpResponse.setHeader("Access-Control-Expose-Headers", "Location");
     }
 
     private static EnumSet<DispatcherType> getAllDispatcherTypes() {
