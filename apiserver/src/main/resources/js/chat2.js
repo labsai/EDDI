@@ -69,6 +69,7 @@ function createMessage(outputArray, quickRepliesArray, hasConversationEnded, dis
     // i is optional - i is the current message in the array the system is displaying
     i = typeof i !== 'undefined' ? i : 0;
 
+    let delay = -1;
     if (outputArray.length > 0) {
         // If this message is not the first, use the previous to calculate a delay, otherwise use a number
         let messageObject = outputArray[i];
@@ -104,14 +105,19 @@ function createMessage(outputArray, quickRepliesArray, hasConversationEnded, dis
                 default:
                     console.log('output type is not recognized ' + messageObject.type);
             }
+
+            if (messageObject.delay) {
+                delay = messageObject.delay;
+            }
         }
 
         // delay override - Make first responses quick
-        let delay;
-        if (eddi.skipDelay || message == null) {
-            delay = 50;
-        } else {
-            delay = calculateDelay(message);
+        if (delay === -1) {
+            if (eddi.skipDelay || message == null) {
+                delay = 50;
+            } else {
+                delay = calculateDelay(message);
+            }
         }
 
         let typingIndicator = new Message('<img src="/binary/img/typing-indicator.svg" />');
