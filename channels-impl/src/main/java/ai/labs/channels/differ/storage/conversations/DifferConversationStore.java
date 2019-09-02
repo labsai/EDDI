@@ -2,9 +2,6 @@ package ai.labs.channels.differ.storage.conversations;
 
 import ai.labs.channels.differ.model.DifferConversationInfo;
 import ai.labs.channels.differ.storage.IDifferConversationStore;
-import ai.labs.persistence.IResourceStore;
-import ai.labs.serialization.IDocumentBuilder;
-import ai.labs.serialization.IJsonSerialization;
 import com.mongodb.client.MongoCollection;
 import com.mongodb.client.MongoDatabase;
 import com.mongodb.client.model.IndexOptions;
@@ -14,10 +11,10 @@ import lombok.extern.slf4j.Slf4j;
 import org.bson.Document;
 
 import javax.inject.Inject;
-import java.io.IOException;
 import java.util.LinkedList;
 import java.util.List;
 
+import static ai.labs.persistence.IResourceStore.ResourceAlreadyExistsException;
 import static ai.labs.utilities.RuntimeUtilities.checkNotEmpty;
 import static ai.labs.utilities.RuntimeUtilities.checkNotNull;
 
@@ -28,19 +25,13 @@ import static ai.labs.utilities.RuntimeUtilities.checkNotNull;
 public class DifferConversationStore implements IDifferConversationStore {
     private static final String COLLECTION_DIFFER_CONVERSATIONS = "differconversations";
     private static final String CONVERSATION_ID_FIELD = "conversationId";
-    private final MongoCollection<Document> collection;
-    private final IDocumentBuilder documentBuilder;
-    private final IJsonSerialization jsonSerialization;
+    private final MongoCollection<DifferConversationInfo> collection;
     private DifferConversationResourceStore userConversationStore;
 
     @Inject
-    public DifferConversationStore(MongoDatabase database,
-                                   IJsonSerialization jsonSerialization,
-                                   IDocumentBuilder documentBuilder) {
-        this.jsonSerialization = jsonSerialization;
+    public DifferConversationStore(MongoDatabase database) {
         checkNotNull(database, "database");
-        this.collection = database.getCollection(COLLECTION_DIFFER_CONVERSATIONS);
-        this.documentBuilder = documentBuilder;
+        this.collection = database.getCollection(COLLECTION_DIFFER_CONVERSATIONS, DifferConversationInfo.class);
         this.userConversationStore = new DifferConversationResourceStore();
         collection.createIndex(Indexes.ascending(CONVERSATION_ID_FIELD), new IndexOptions().unique(true));
     }
@@ -51,15 +42,14 @@ public class DifferConversationStore implements IDifferConversationStore {
     }
 
     @Override
-    public DifferConversationInfo readDifferConversation(String conversationId) throws IResourceStore.ResourceStoreException {
+    public DifferConversationInfo readDifferConversation(String conversationId) {
         checkNotNull(conversationId, CONVERSATION_ID_FIELD);
 
         return userConversationStore.readDifferConversation(conversationId);
     }
 
     @Override
-    public void createDifferConversation(DifferConversationInfo differConversationInfo)
-            throws IResourceStore.ResourceAlreadyExistsException, IResourceStore.ResourceStoreException {
+    public void createDifferConversation(DifferConversationInfo differConversationInfo) throws ResourceAlreadyExistsException {
         checkNotNull(differConversationInfo, "differConversationInfo");
         checkNotNull(differConversationInfo.getConversationId(), "differConversationInfo.conversationId");
         checkNotEmpty(differConversationInfo.getAllParticipantIds(), "differConversationInfo.allParticipantIds");
@@ -76,33 +66,21 @@ public class DifferConversationStore implements IDifferConversationStore {
     }
 
     private class DifferConversationResourceStore {
-        DifferConversationInfo readDifferConversation(String conversationId)
-                throws IResourceStore.ResourceStoreException {
-
-            Document filter = new Document();
-            filter.put(CONVERSATION_ID_FIELD, conversationId);
-
-            try {
-                Document document = collection.find(filter).first();
-                return document != null ? documentBuilder.build(document, DifferConversationInfo.class) : null;
-            } catch (IOException e) {
-                throw new IResourceStore.ResourceStoreException(e.getLocalizedMessage(), e);
-            }
+        DifferConversationInfo readDifferConversation(String conversationId) {
+            return collection.find(new Document(CONVERSATION_ID_FIELD, conversationId)).first();
         }
 
-        void createDifferConversation(DifferConversationInfo differConversationInfo)
-                throws IResourceStore.ResourceStoreException, IResourceStore.ResourceAlreadyExistsException {
-
+        void createDifferConversation(DifferConversationInfo differConversationInfo) throws ResourceAlreadyExistsException {
             Document filter = new Document();
             filter.put(CONVERSATION_ID_FIELD, differConversationInfo.getConversationId());
 
             if (collection.find(filter).first() != null) {
                 String message = "DifferConversationInfo with conversationId=%s does already exist";
                 message = String.format(message, differConversationInfo.getConversationId());
-                throw new IResourceStore.ResourceAlreadyExistsException(message);
+                throw new ResourceAlreadyExistsException(message);
             }
 
-            collection.insertOne(createDocument(differConversationInfo));
+            collection.insertOne(differConversationInfo);
         }
 
         void deleteDifferConversation(String conversationId) {
@@ -114,21 +92,11 @@ public class DifferConversationStore implements IDifferConversationStore {
 
             var includeConversationIdField = Projections.include(CONVERSATION_ID_FIELD);
             var documents = collection.find().projection(includeConversationIdField);
-            for (Document document : documents) {
-                ret.add(document.get(CONVERSATION_ID_FIELD).toString());
+            for (var conversationInfo : documents) {
+                ret.add(conversationInfo.getConversationId());
             }
 
             return ret;
-        }
-
-        private Document createDocument(DifferConversationInfo differConversationInfo)
-                throws IResourceStore.ResourceStoreException {
-            try {
-                return jsonSerialization.deserialize(
-                        jsonSerialization.serialize(differConversationInfo), Document.class);
-            } catch (IOException e) {
-                throw new IResourceStore.ResourceStoreException(e.getLocalizedMessage(), e);
-            }
         }
     }
 }

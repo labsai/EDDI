@@ -5,6 +5,8 @@ import ai.labs.utilities.RuntimeUtilities;
 import com.google.inject.Provides;
 import com.mongodb.*;
 import com.mongodb.client.MongoDatabase;
+import org.bson.codecs.configuration.CodecRegistry;
+import org.bson.codecs.pojo.PojoCodecProvider;
 
 import javax.inject.Named;
 import javax.inject.Singleton;
@@ -12,6 +14,9 @@ import java.io.InputStream;
 import java.net.UnknownHostException;
 import java.util.LinkedList;
 import java.util.List;
+
+import static org.bson.codecs.configuration.CodecRegistries.fromProviders;
+import static org.bson.codecs.configuration.CodecRegistries.fromRegistries;
 
 /**
  * @author ginccc
@@ -91,6 +96,9 @@ public class PersistenceModule extends AbstractBaseModule {
                                                        Boolean sslEnabled,
                                                        Integer threadsAllowedToBlockForConnectionMultiplier) {
         MongoClientOptions.Builder builder = MongoClientOptions.builder();
+        CodecRegistry pojoCodecRegistry = fromRegistries(MongoClient.getDefaultCodecRegistry(),
+                fromProviders(PojoCodecProvider.builder().automatic(true).build()));
+        builder.codecRegistry(pojoCodecRegistry);
         builder.writeConcern(writeConcern);
         builder.readPreference(readPreference);
         builder.connectionsPerHost(connectionsPerHost);

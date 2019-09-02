@@ -23,19 +23,20 @@ public class DifferBotMappingStore implements IDifferBotMappingStore {
     private static final String COLLECTION_DIFFER_BOT_MAPPINGS = "differbotmappings";
     private static final String BOT_USER_ID_FIELD = "botUserId";
     private static final String BOT_INTENT_FIELD = "botIntent";
-    private final MongoCollection<Document> collection;
+    private final MongoCollection<Document> collectionDocument;
+    private final MongoCollection<DifferBotMapping> collectionObject;
     private final IDocumentBuilder documentBuilder;
     private DifferBotMappingResourceStore differBotMappingResourceStore;
 
     @Inject
-    public DifferBotMappingStore(MongoDatabase database,
-                                 IDocumentBuilder documentBuilder) {
+    public DifferBotMappingStore(MongoDatabase database, IDocumentBuilder documentBuilder) {
         checkNotNull(database, "database");
-        this.collection = database.getCollection(COLLECTION_DIFFER_BOT_MAPPINGS);
+        this.collectionDocument = database.getCollection(COLLECTION_DIFFER_BOT_MAPPINGS, Document.class);
+        this.collectionObject = database.getCollection(COLLECTION_DIFFER_BOT_MAPPINGS, DifferBotMapping.class);
         this.documentBuilder = documentBuilder;
         this.differBotMappingResourceStore = new DifferBotMappingResourceStore();
-        collection.createIndex(Indexes.ascending(BOT_USER_ID_FIELD));
-        collection.createIndex(Indexes.ascending(BOT_INTENT_FIELD));
+        collectionObject.createIndex(Indexes.ascending(BOT_USER_ID_FIELD));
+        collectionObject.createIndex(Indexes.ascending(BOT_INTENT_FIELD));
     }
 
     @Override
@@ -90,8 +91,7 @@ public class DifferBotMappingStore implements IDifferBotMappingStore {
     }
 
     @Override
-    public DifferBotMapping readDifferBotMapping(String botIntent)
-            throws IResourceStore.ResourceStoreException, IResourceStore.ResourceNotFoundException {
+    public DifferBotMapping readDifferBotMapping(String botIntent) throws IResourceStore.ResourceNotFoundException {
         checkNotNull(botIntent, BOT_INTENT_FIELD);
 
         return differBotMappingResourceStore.readDifferBotMapping(botIntent);
@@ -101,59 +101,41 @@ public class DifferBotMappingStore implements IDifferBotMappingStore {
         static final String ID_FIELD = "_id";
         static final String DIFFER_BOT_USER_IDS_FIELD = "differBotUserIds";
 
-        void createDifferBotMapping(DifferBotMapping differBotMapping)
-                throws IResourceStore.ResourceStoreException, IResourceStore.ResourceAlreadyExistsException {
-
-            try {
-                Document alreadyExistingMapping = findMappingByBotUserIds(differBotMapping.getDifferBotUserIds());
-                if (alreadyExistingMapping != null) {
-                    String message = "Some botUserId is already defined in the following DifferBotMapping: {}";
-                    message = String.format(message, alreadyExistingMapping);
-                    throw new IResourceStore.ResourceAlreadyExistsException(message);
-                }
-
-                collection.insertOne(documentBuilder.toDocument(differBotMapping));
-            } catch (IOException e) {
-                throw new IResourceStore.ResourceStoreException(e.getLocalizedMessage(), e);
+        void createDifferBotMapping(DifferBotMapping differBotMapping) throws IResourceStore.ResourceAlreadyExistsException {
+            Document alreadyExistingMapping = findMappingByBotUserIds(differBotMapping.getDifferBotUserIds());
+            if (alreadyExistingMapping != null) {
+                String message = "Some botUserId is already defined in the following DifferBotMapping: {}";
+                message = String.format(message, alreadyExistingMapping);
+                throw new IResourceStore.ResourceAlreadyExistsException(message);
             }
+
+            collectionObject.insertOne(differBotMapping);
         }
 
-        DifferBotMapping readDifferBotMapping(String botIntent)
-                throws IResourceStore.ResourceStoreException, IResourceStore.ResourceNotFoundException {
+        DifferBotMapping readDifferBotMapping(String botIntent) throws IResourceStore.ResourceNotFoundException {
 
-            try {
-                Document document = collection.find(new Document(BOT_INTENT_FIELD, botIntent)).first();
-                if (document == null) {
-                    String message = "No DifferBotMapping found with botIntent %s.";
-                    message = String.format(message, botIntent);
-                    throw new IResourceStore.ResourceNotFoundException(message);
-                }
-
-                return documentBuilder.build(document, DifferBotMapping.class);
-            } catch (IOException e) {
-                throw new IResourceStore.ResourceStoreException(e.getLocalizedMessage(), e);
+            DifferBotMapping differBotMapping = collectionObject.find(new Document(BOT_INTENT_FIELD, botIntent)).first();
+            if (differBotMapping == null) {
+                String message = "No DifferBotMapping found with botIntent %s.";
+                message = String.format(message, botIntent);
+                throw new IResourceStore.ResourceNotFoundException(message);
             }
+
+            return differBotMapping;
         }
 
-        List<DifferBotMapping> readAllDifferBotMappings() throws IResourceStore.ResourceStoreException {
+        List<DifferBotMapping> readAllDifferBotMappings() {
+            List<DifferBotMapping> ret = new LinkedList<>();
 
-            try {
-                List<DifferBotMapping> ret = new LinkedList<>();
-
-                var documents = collection.find();
-                for (Document document : documents) {
-                    ret.add(documentBuilder.build(document, DifferBotMapping.class));
-                }
-
-                return ret;
-            } catch (IOException e) {
-                throw new IResourceStore.ResourceStoreException(e.getLocalizedMessage(), e);
+            var differBotMappings = collectionObject.find();
+            for (var differBotMapping : differBotMappings) {
+                ret.add(differBotMapping);
             }
+
+            return ret;
         }
 
-        void addBotUserIdToDifferBotMapping(String intent, String botUserId)
-                throws IResourceStore.ResourceStoreException {
-
+        void addBotUserIdToDifferBotMapping(String intent, String botUserId) throws IResourceStore.ResourceStoreException {
             try {
                 var botMappingDocument = findMappingByIntent(intent);
                 if (botMappingDocument == null) {
@@ -171,7 +153,7 @@ public class DifferBotMappingStore implements IDifferBotMappingStore {
                 String id = botMappingDocument.get("_id").toString();
                 DifferBotMapping differBotMapping = documentBuilder.build(botMappingDocument, DifferBotMapping.class);
                 differBotMapping.getDifferBotUserIds().add(botUserId);
-                collection.updateOne(new Document(ID_FIELD, new ObjectId(id)), documentBuilder.toDocument(differBotMapping));
+                collectionObject.replaceOne(new Document(ID_FIELD, new ObjectId(id)), differBotMapping);
 
             } catch (IOException e) {
                 throw new IResourceStore.ResourceStoreException(e.getLocalizedMessage(), e);
@@ -179,7 +161,7 @@ public class DifferBotMappingStore implements IDifferBotMappingStore {
         }
 
         private Document findMappingByIntent(String botIntent) {
-            return collection.find(new Document("botIntent", botIntent)).first();
+            return collectionDocument.find(new Document("botIntent", botIntent)).first();
         }
 
         void deleteBotUserIdFromDifferBotMappings(String botUserId)
@@ -191,9 +173,7 @@ public class DifferBotMappingStore implements IDifferBotMappingStore {
                     String id = botMappingDocument.get("_id").toString();
                     DifferBotMapping differBotMapping = documentBuilder.build(botMappingDocument, DifferBotMapping.class);
                     differBotMapping.getDifferBotUserIds().remove(botUserId);
-                    collection.updateOne(
-                            new Document(ID_FIELD, new ObjectId(id)),
-                            documentBuilder.toDocument(differBotMapping));
+                    collectionObject.replaceOne(new Document(ID_FIELD, new ObjectId(id)), differBotMapping);
                 } catch (IOException e) {
                     throw new IResourceStore.ResourceStoreException(e.getLocalizedMessage(), e);
                 }
@@ -204,13 +184,13 @@ public class DifferBotMappingStore implements IDifferBotMappingStore {
         }
 
         Document findMappingByBotUserIds(List<String> differBotUserIds) {
-            return collection.find(
+            return collectionDocument.find(
                     new Document(DIFFER_BOT_USER_IDS_FIELD,
                             new Document("$in", differBotUserIds))).first();
         }
 
         private void deleteDifferBotMapping(String botIntent) {
-            collection.deleteOne(new Document("botIntent", botIntent));
+            collectionObject.deleteOne(new Document("botIntent", botIntent));
         }
     }
 }
