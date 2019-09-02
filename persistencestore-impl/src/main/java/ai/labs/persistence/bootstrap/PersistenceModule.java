@@ -104,8 +104,8 @@ public class PersistenceModule extends AbstractBaseModule {
                                                        Integer threadsAllowedToBlockForConnectionMultiplier) {
         MongoClientOptions.Builder builder = MongoClientOptions.builder();
         CodecRegistry codecRegistry = fromRegistries(
-                fromCodecs(new URIStringCodec()),
                 MongoClient.getDefaultCodecRegistry(),
+                fromCodecs(new URIStringCodec()),
                 fromProviders(PojoCodecProvider.builder().automatic(true).build()));
         builder.codecRegistry(codecRegistry);
         builder.writeConcern(writeConcern);
