@@ -5,18 +5,25 @@ import ai.labs.utilities.RuntimeUtilities;
 import com.google.inject.Provides;
 import com.mongodb.*;
 import com.mongodb.client.MongoDatabase;
+import org.bson.BsonInvalidOperationException;
+import org.bson.BsonReader;
+import org.bson.BsonWriter;
+import org.bson.codecs.Codec;
+import org.bson.codecs.DecoderContext;
+import org.bson.codecs.EncoderContext;
 import org.bson.codecs.configuration.CodecRegistry;
 import org.bson.codecs.pojo.PojoCodecProvider;
 
 import javax.inject.Named;
 import javax.inject.Singleton;
 import java.io.InputStream;
+import java.net.URI;
+import java.net.URISyntaxException;
 import java.net.UnknownHostException;
 import java.util.LinkedList;
 import java.util.List;
 
-import static org.bson.codecs.configuration.CodecRegistries.fromProviders;
-import static org.bson.codecs.configuration.CodecRegistries.fromRegistries;
+import static org.bson.codecs.configuration.CodecRegistries.*;
 
 /**
  * @author ginccc
@@ -96,9 +103,11 @@ public class PersistenceModule extends AbstractBaseModule {
                                                        Boolean sslEnabled,
                                                        Integer threadsAllowedToBlockForConnectionMultiplier) {
         MongoClientOptions.Builder builder = MongoClientOptions.builder();
-        CodecRegistry pojoCodecRegistry = fromRegistries(MongoClient.getDefaultCodecRegistry(),
+        CodecRegistry codecRegistry = fromRegistries(
+                fromCodecs(new URIStringCodec()),
+                MongoClient.getDefaultCodecRegistry(),
                 fromProviders(PojoCodecProvider.builder().automatic(true).build()));
-        builder.codecRegistry(pojoCodecRegistry);
+        builder.codecRegistry(codecRegistry);
         builder.writeConcern(writeConcern);
         builder.readPreference(readPreference);
         builder.connectionsPerHost(connectionsPerHost);
@@ -150,5 +159,31 @@ public class PersistenceModule extends AbstractBaseModule {
                 }
             }
         });
+    }
+
+    public static class URIStringCodec implements Codec<URI> {
+
+        @Override
+        public Class<URI> getEncoderClass() {
+            return URI.class;
+        }
+
+        @Override
+        public void encode(BsonWriter writer, URI value, EncoderContext encoderContext) {
+            writer.writeString(value.toString());
+        }
+
+        @Override
+        public URI decode(BsonReader reader, DecoderContext decoderContext) {
+            String uriString = reader.readString();
+            try {
+                return new URI(uriString);
+            } catch (URISyntaxException e) {
+                throw new BsonInvalidOperationException(
+                        String.format("Cannot create URI from string '%s'", uriString));
+
+            }
+        }
+
     }
 }

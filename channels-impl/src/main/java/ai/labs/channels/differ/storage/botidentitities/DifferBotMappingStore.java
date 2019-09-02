@@ -40,7 +40,7 @@ public class DifferBotMappingStore implements IDifferBotMappingStore {
     }
 
     @Override
-    public List<DifferBotMapping> readAllDifferBotMappings() throws IResourceStore.ResourceStoreException {
+    public List<DifferBotMapping> readAllDifferBotMappings() {
         return differBotMappingResourceStore.readAllDifferBotMappings();
     }
 
