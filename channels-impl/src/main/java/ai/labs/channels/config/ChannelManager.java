@@ -9,15 +9,14 @@ import static ai.labs.channels.differ.IRestDifferEndpoint.RESOURCE_URI_DIFFER_CH
 import static ai.labs.channels.xmpp.IXmppEndpoint.RESOURCE_URI_XMPP_CHANNEL_CONNECTOR;
 
 public class ChannelManager implements IChannelManager {
-
-    private final DependencyInjector injector;
-
-    public ChannelManager() {
-        this.injector = DependencyInjector.getInstance();
-    }
+    private DependencyInjector injector;
 
     @Override
     public void initChannel(ChannelDefinition channelDefinition) {
+        if (injector == null) {
+            injector = DependencyInjector.getInstance();
+        }
+
         String channelType = channelDefinition.getType().toString();
         if (!channelDefinition.isActive()) {
             return;

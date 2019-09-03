@@ -30,6 +30,8 @@ import javax.ws.rs.ext.Provider;
 import java.net.URI;
 import java.security.Principal;
 
+import static ai.labs.utilities.RuntimeUtilities.isNullOrEmpty;
+
 
 /**
  * @author ginccc
@@ -69,6 +71,10 @@ public class PermissionResponseInterceptor implements ContainerResponseFilter {
                 // the resource was created successfully
                 if (httpStatus == 201) {
                     String respondedResourceURIString = response.getHeaderString(HttpHeaders.LOCATION);
+                    if (isNullOrEmpty(respondedResourceURIString)) {
+                        log.info("No permission created for 201 response of method {}", methodName);
+                        return;
+                    }
                     URI respondedResourceURI = URI.create(respondedResourceURIString);
                     IResourceStore.IResourceId respondedResourceId = RestUtilities.extractResourceId(respondedResourceURI);
 
@@ -79,24 +85,24 @@ public class PermissionResponseInterceptor implements ContainerResponseFilter {
                         Principal userPrincipal = SecurityUtilities.getPrincipal(ThreadContext.getSubject());
                         URI userURI = UserUtilities.getUserURI(userStore, userPrincipal);
 
-                            if (methodName.equals(METHOD_NAME_START_CONVERSATION)) {
-                                IResourceStore.IResourceId resourceId = RestUtilities.extractResourceId(URI.create(httpServletRequest.getRequestURI()));
-                                Permissions permissions = permissionStore.readPermissions(resourceId.getId());
-                                if (userURI != null) {
-                                    PermissionUtilities.addAuthorizedUser(permissions, IAuthorization.Type.WRITE, new AuthorizedUser(userURI, null));
-                                }
-                                permissionStore.createPermissions(respondedResourceId.getId(), permissions);
-                            } else if (methodName.equals(METHOD_NAME_CREATE_TESTCASE)) {
-                                ITestCaseStore testCaseStore = injector.getInstance(ITestCaseStore.class);
-                                TestCase testCase = testCaseStore.loadTestCase(respondedResourceId.getId());
-                                Permissions permissions = permissionStore.readPermissions(testCase.getBotId());
-                                if (userURI != null) {
-                                    PermissionUtilities.addAuthorizedUser(permissions, IAuthorization.Type.ADMINISTRATION, new AuthorizedUser(userURI, null));
-                                }
-                                permissionStore.createPermissions(respondedResourceId.getId(), permissions);
-                            } else {
-                                permissionStore.createPermissions(respondedResourceId.getId(), PermissionUtilities.createDefaultPermissions(userURI));
+                        if (methodName.equals(METHOD_NAME_START_CONVERSATION)) {
+                            IResourceStore.IResourceId resourceId = RestUtilities.extractResourceId(URI.create(httpServletRequest.getRequestURI()));
+                            Permissions permissions = permissionStore.readPermissions(resourceId.getId());
+                            if (userURI != null) {
+                                PermissionUtilities.addAuthorizedUser(permissions, IAuthorization.Type.WRITE, new AuthorizedUser(userURI, null));
                             }
+                            permissionStore.createPermissions(respondedResourceId.getId(), permissions);
+                        } else if (methodName.equals(METHOD_NAME_CREATE_TESTCASE)) {
+                            ITestCaseStore testCaseStore = injector.getInstance(ITestCaseStore.class);
+                            TestCase testCase = testCaseStore.loadTestCase(respondedResourceId.getId());
+                            Permissions permissions = permissionStore.readPermissions(testCase.getBotId());
+                            if (userURI != null) {
+                                PermissionUtilities.addAuthorizedUser(permissions, IAuthorization.Type.ADMINISTRATION, new AuthorizedUser(userURI, null));
+                            }
+                            permissionStore.createPermissions(respondedResourceId.getId(), permissions);
+                        } else {
+                            permissionStore.createPermissions(respondedResourceId.getId(), PermissionUtilities.createDefaultPermissions(userURI));
+                        }
 
                     }
                 }
