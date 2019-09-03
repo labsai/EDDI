@@ -27,8 +27,12 @@ import {
   faRedo,
   faUndo,
   faEllipsisV,
+  faPlus,
+  faMinus,
+  faComments,
 } from '@fortawesome/free-solid-svg-icons';
 import BotConversationViewPage from './pages/BotConversationViewPage';
+import ConversationsPage from './pages/ConversationsPage';
 
 library.add(faUndo);
 library.add(faRedo);
@@ -37,6 +41,9 @@ library.add(faExpand);
 library.add(faCompress);
 library.add(faCheckCircle);
 library.add(faEllipsisV);
+library.add(faPlus);
+library.add(faMinus);
+library.add(faComments);
 
 const styles: CSSProperties = {
   logoutButton: {
@@ -129,15 +136,20 @@ class App extends React.Component<IPrivateProps, IState> {
                     onClick={this.logout}
                   />
                 ))}
-                <Route path="/" exact component={Dashboard} />
-                <Route path="/packages" exact component={PackagePage} />
-                <Route path="/resources" component={ExtensionsPage} />
-                <Route path="/botview/:id" component={BotViewPage} />
+                <Route path={'/'} exact component={Dashboard} />
+                <Route path={'/packages'} exact component={PackagePage} />
                 <Route
-                  path="/botconversationview"
+                  path={'/conversations'}
+                  exact
+                  component={ConversationsPage}
+                />
+                <Route path={'/resources'} component={ExtensionsPage} />
+                <Route path={'/botview/:id'} component={BotViewPage} />
+                <Route
+                  path={'/conversationview/:id'}
                   component={BotConversationViewPage}
                 />
-                <Route path="/packageview/:id" component={PackageViewPage} />
+                <Route path={'/packageview/:id'} component={PackageViewPage} />
               </div>
             ))}
             <ModalComponentFrame />

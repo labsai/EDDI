@@ -6,18 +6,10 @@ interface IRouteProps {
   match: { params: { id: string } };
   location: { search: string };
 }
-function getVersion(search: string) {
-  const queryStrings = Parser.getQueryStrings(search);
-  return queryStrings.version;
-}
 interface IProps extends IRouteProps {}
-
 const BotConversationViewPage = (props: IProps) => (
   <div>
-    <BotConversationView
-      botId={props.match.params.id}
-      botVersion={getVersion(props.location.search)}
-    />
+    <BotConversationView conversationId={props.match.params.id} />
   </div>
 );
 

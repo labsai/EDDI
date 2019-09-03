@@ -10,58 +10,41 @@ import { IBot } from '../../utils/AxiosFunctions';
 import ModalActionDispatchers, {
   default as modalActionDispatchers,
 } from '../../../actions/ModalActionDispatchers';
-import { IDetailedDescriptor } from '../../utils/AxiosFunctions';
 import BlueButton from '../../Assets/Buttons/BlueButton';
 import VersionSelectComponent from '../../Assets/VersionSelectComponent';
 import Parser from '../../utils/Parser';
 import Options from '../../Assets/Buttons/Options';
-import EnvironmentSelectComponent from './EnvironmentSelectComponent';
-import { connect } from 'react-redux';
 import * as Radium from 'radium';
-import { specificBotSelector } from '../../../selectors/BotSelectors';
 import { historyPush } from '../../../history';
+import ConversationList from './ConversationList';
 
-interface IPrivateProps extends IPublicProps {
-  botId: string;
-  botVersion: string;
-}
-
-interface IPublicProps {
+interface IProps {
   bot: IBot;
-  error: Error;
-  isLoading: boolean;
 }
 
 interface IState {
   selectedResource: string;
-  selectedEnvironment: string;
 }
 
-class ConversationsModal extends React.Component<IPrivateProps> {
+class ConversationsModal extends React.Component<IProps, IState> {
   constructor(props) {
     super(props);
     this.state = {
-      selectedResource: this.props.bot,
-      selectedEnvironment: 'unrestricted',
+      selectedResource: this.props.bot.resource,
     };
   }
 
-  onComponentDidMount() {
-    this.setState({ selectedResource: this.props.bot });
-  }
-
-  selectVersion(version: number) {
-    Parser.replaceResourceVersion(this.props.bot.resource, version);
-  }
-
-  selectConversation = (resource: string) => {
-    historyPush(`/botconversationview/${Parser.getId(resource)}`);
-    modalActionDispatchers.closeModal();
+  selectVersion = (version: number) => {
+    this.setState({
+      selectedResource: Parser.replaceResourceVersion(
+        this.props.bot.resource,
+        version,
+      ),
+    });
   };
 
   render() {
-    const bot = this.props.bot;
-    console.log(this.props.bot.conversations);
+    const { bot } = this.props;
     return (
       <div>
         <div style={styles.header}>
@@ -96,32 +79,7 @@ class ConversationsModal extends React.Component<IPrivateProps> {
             </div>
           </div>
         </div>
-        <div style={styles.data}>
-          {renderIf(!_.isEmpty(bot.conversations))(() => (
-            <div>
-              {bot.conversations.map(conversation => (
-                <div
-                  style={styles.conversation}
-                  key={conversation.resource}
-                  onClick={() =>
-                    this.selectConversation(conversation.resource)
-                  }>
-                  <div>{`ID: ${Parser.getId(conversation.resource)} `}</div>
-                  <div>{`Environment: ${conversation.environment} `}</div>
-                  <div>{`ConversationSteps: ${
-                    conversation.conversationStepSize
-                  } `}</div>
-                  <div
-                    style={
-                      styles.conversationRight
-                    }>{`Last Message received: ${moment(
-                    conversation.lastModifiedOn,
-                  ).fromNow()}`}</div>
-                </div>
-              ))}
-            </div>
-          ))}
-        </div>
+        <ConversationList botResource={this.state.selectedResource} />
       </div>
     );
   }
@@ -129,8 +87,6 @@ class ConversationsModal extends React.Component<IPrivateProps> {
 
 const ComposedConversationsModal: Component<IProps> = compose<IProps>(
   pure,
-  Radium,
-  connect(specificBotSelector),
   setDisplayName('ConversationsModal'),
 )(ConversationsModal);
 

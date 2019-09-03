@@ -45,7 +45,7 @@ const styles: CSSProperties = {
     display: 'table',
     height: '15px',
     width: '15px',
-    marginTop: '3px',
+    marginTop: '2px',
     marginLeft: 'auto',
     marginRight: 'auto',
   },

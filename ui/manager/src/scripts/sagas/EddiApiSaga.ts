@@ -30,6 +30,8 @@ import {
   FETCH_JSON_SCHEMA,
   DUPLICATE,
   FETCH_CONVERSATIONS,
+  FETCH_CONVERSATION,
+  END_CONVERSATION,
 } from '../actions/EddiApiActionTypes';
 import {
   getPackage,
@@ -68,6 +70,9 @@ import {
   getSchema,
   duplicate,
   IConversation,
+  IConversationData,
+  getConversation,
+  endConversation as axiosEndConversation,
 } from '../components/utils/AxiosFunctions';
 import {
   fetchBotFailedAction,
@@ -155,6 +160,12 @@ import {
   IFetchConversationsAction,
   fetchConversationsFailedAction,
   fetchConversationsSuccessAction,
+  IFetchConversationAction,
+  fetchConversationFailedAction,
+  fetchConversationSuccessAction,
+  IEndConversationAction,
+  endConversationSuccessAction,
+  endConversationFailedAction,
 } from '../actions/EddiApiActions';
 import * as Edditypes from '../components/utils/EddiTypes';
 import Parser from '../components/utils/Parser';
@@ -725,13 +736,23 @@ export function* watchDuplicateResource(): Iterator<{}> {
 export function* fetchConversations(
   action: IFetchConversationsAction,
 ): Iterator<{}> {
-  console.log('FETCHING CONVERSATIONS');
+  console.log('Action started!');
   try {
     const conversations: IConversation[] = yield call(
       getConversations,
+      action.limit,
+      action.index,
       action.resource,
     );
-    yield put(fetchConversationsSuccessAction(action.resource, conversations));
+    console.log('Action done!');
+    yield put(
+      fetchConversationsSuccessAction(
+        action.limit,
+        action.index,
+        action.resource,
+        conversations,
+      ),
+    );
   } catch (err) {
     yield put(fetchConversationsFailedAction(err));
   }
@@ -739,4 +760,39 @@ export function* fetchConversations(
 
 export function* watchFetchConversations(): Iterator<{}> {
   yield takeEvery(FETCH_CONVERSATIONS, fetchConversations);
+}
+
+export function* fetchConversation(
+  action: IFetchConversationAction,
+): Iterator<{}> {
+  try {
+    const conversation: IConversationData = yield call(
+      getConversation,
+      action.environment,
+      action.botId,
+      action.conversationId,
+    );
+    yield put(
+      fetchConversationSuccessAction(action.conversationId, conversation),
+    );
+  } catch (err) {
+    yield put(fetchConversationFailedAction(err));
+  }
+}
+
+export function* watchFetchConversation(): Iterator<{}> {
+  yield takeEvery(FETCH_CONVERSATION, fetchConversation);
+}
+
+export function* endConversation(action: IEndConversationAction): Iterator<{}> {
+  try {
+    yield call(axiosEndConversation, action.conversationId);
+    yield put(endConversationSuccessAction(action.conversationId));
+  } catch (err) {
+    yield put(endConversationFailedAction(err));
+  }
+}
+
+export function* watchEndConversation(): Iterator<{}> {
+  yield takeEvery(END_CONVERSATION, endConversation);
 }

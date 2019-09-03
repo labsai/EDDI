@@ -432,32 +432,6 @@ const BotReducer: IBotReducer = (
       });
     }
 
-    case FETCH_CONVERSATIONS_SUCCESS: {
-      console.log('FETCHED CONVERSATIONS!!');
-      console.log((action as IFetchConversationsSuccessAction).conversations);
-      return update(state, {
-        bots: {
-          $apply: (bots: IBot[]) => {
-            return bots.map(bot => {
-              if (
-                bot.resource ===
-                (action as IFetchConversationsSuccessAction).resource
-              ) {
-                return update(bot, {
-                  conversations: {
-                    $set: (action as IFetchConversationsSuccessAction)
-                      .conversations,
-                  },
-                });
-              } else {
-                return bot;
-              }
-            });
-          },
-        },
-      });
-    }
-
     default:
       return state;
   }

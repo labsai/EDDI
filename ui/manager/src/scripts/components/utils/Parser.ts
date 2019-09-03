@@ -4,7 +4,7 @@ import { IDescriptorResponse, IDetailedDescriptor } from './AxiosFunctions';
 import * as _ from 'lodash';
 
 const pattern = new urlParser(
-  '(eddi://):resourceType/:path1/:path2/:id?version=:version',
+  '(eddi://):resourceType/:path1/:path2/:id(?version=:version)',
 );
 
 const pluginTypePattern = new urlParser(

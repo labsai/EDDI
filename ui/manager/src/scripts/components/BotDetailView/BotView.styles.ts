@@ -25,6 +25,7 @@ const styles: CSSProperties = {
     textAlign: 'left',
     maxWidth: '350px',
     overflow: 'hidden',
+    whiteSpace: 'nowrap',
     textOverflow: 'ellipsis',
   },
   unpublishedChanges: {

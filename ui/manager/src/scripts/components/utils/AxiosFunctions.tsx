@@ -74,7 +74,6 @@ export interface IBot extends IDetailedDescriptor {
   channels?: string[];
   hasAvailableUpdates?: boolean;
   deploymentStatus?: string;
-  conversations?: IConversation[];
 }
 
 export interface IDescriptorResponse {
@@ -966,73 +965,134 @@ export async function duplicate(resource: string, deepCopy: boolean) {
 }
 
 export interface IConversation {
+  resource: string;
   botName: string;
+  botResource: string;
   conversationState: string;
   conversationStepSize: number;
   createdOn: number;
-  deleted: boolean;
   environment: string;
   lastModifiedOn: number;
-  resource: string;
   viewState: string;
+  deleted: boolean;
+  data?: IConversationData;
+}
+
+export interface IConversationData {
+  botId: string;
+  botVersion: number;
+  userId: string;
+  environment: string;
+  conversationState: string;
+  conversationOutputs: IConversationOutput[];
+  conversationProperties: IConversationProperties;
+  conversationSteps: IConversationSteps[];
 }
 
 export interface IConversationOutput {
-  input: string;
-  expressions: string[];
-  intents: string[];
-  actions: string[];
-  httpCalls: object[];
-  properties: object[];
-  output: string;
+  input?: string;
+  expressions?: string;
+  intents?: string[];
+  actions?: string[];
+  quickReplies?: IQuickReply[];
+  output?: string[];
+}
+
+export interface IConversationSteps {
+  conversationStep: IConversationStep[];
+  timestamp: number;
 }
 
 export interface IConversationStep {
   key: string;
-  value: string | string[] | object[];
   timestamp: number;
 }
 
-export interface IConversationStepValue {
-  key: string;
-  value: {};
-}
-
-export interface IConversationStepText {
-  key: string;
+export interface IInput extends IConversationStep {
   value: string;
 }
 
-export interface IConversationStepQuickReply {
-  key: string;
-  value: { value: string; expressions: string; default: boolean }[];
+export interface IOutput extends IConversationStep {
+  value: string;
 }
 
-export interface IConversationStepAction extends IConversationStepValue {
-  key: string;
+export interface IQuickReplies extends IConversationStep {
+  value: IQuickReply[];
+}
+
+export interface IAction extends IConversationStep {
   value: string[];
 }
 
-export async function getConversations(resource: string) {
+export interface IQuickReply {
+  value: string;
+  expressions: string;
+  default: boolean;
+}
+
+export interface IConversationProperties {
+  [prop: string]: IConversationProperty;
+}
+
+export interface IConversationProperty {
+  name: string;
+  value: string;
+  scope: string;
+}
+
+export async function getConversations(
+  limit: number,
+  index: number,
+  resource = '',
+) {
+  console.log(
+    `${await getAPIUrl()}/conversationstore/conversations?limit=${limit}&index=${index}${
+      _.isEmpty(resource)
+        ? ''
+        : `&botId=${Parser.getId(resource)}&botVersion=${Parser.getVersion(
+            resource,
+          )}`
+    }`,
+  );
   try {
     const res: IResponse = await axios.get(
-      `${await getAPIUrl()}/conversationstore/conversations?botId=${Parser.getId(
-        resource,
-      )}&botVersion=${Parser.getVersion(resource)}`,
+      `${await getAPIUrl()}/conversationstore/conversations?limit=${limit}&index=${index}${
+        _.isEmpty(resource)
+          ? ''
+          : `&botId=${Parser.getId(resource)}&botVersion=${Parser.getVersion(
+              resource,
+            )}`
+      }`,
     );
-    console.log(res.data);
     return res.data;
   } catch (err) {
     console.error(`Failed to get bot conversations. Error: ${err.message}`);
   }
 }
 
-export async function getConversation(conversationId: string) {
+export async function getConversation(
+  environment: string,
+  botId: string,
+  conversationId: string,
+) {
   try {
     const res: IResponse = await axios.get(
-      `${await getAPIUrl()}/conversationstore/conversations/${conversationId}`,
+      `${await getAPIUrl()}/bots/${environment}/${botId}/${conversationId}?returnDetailed=true&returnCurrentStepOnly=false`,
     );
+    return res.data;
   } catch (err) {
     console.error(`Failed to get conversation. Error: ${err.message}`);
+  }
+}
+
+export async function endConversation(conversationId: string) {
+  console.log(`${await getAPIUrl()}/bots/${conversationId}/endConversation`);
+  try {
+    const response: IResponse = await axios.post(
+      `${await getAPIUrl()}/bots/${conversationId}/endConversation`,
+    );
+    console.log(response);
+  } catch (err) {
+    console.error(`Failed to end conversation. Error: ${err.message}`);
   }
 }

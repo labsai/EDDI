@@ -88,7 +88,7 @@ export interface IModalActionDispatchers extends ActionCreatorsMapObject {
     title: string,
     message: string,
   ) => IShowErrorMessageModal;
-  showConversationsModal: (bot: IBot) => IShowConversationsModal;
+  showConversationsModal: (bot) => IShowConversationsModal;
 }
 
 const actions: IModalActionDispatchers = {

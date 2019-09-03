@@ -47,6 +47,18 @@ class BotOptions extends React.Component<IProps> {
               }
             />
             <Dropdown.Item
+              text={'View Conversations'}
+              icon={'comments outline'}
+              onClick={() => {
+                eddiApiActionDispatchers.fetchConversationsAction(
+                  20,
+                  0,
+                  this.props.bot.resource,
+                );
+                modalActionDispatchers.showConversationsModal(this.props.bot);
+              }}
+            />
+            <Dropdown.Item
               text={botDeployed ? 'Undeploy' : 'Deploy'}
               icon={
                 botDeployed
