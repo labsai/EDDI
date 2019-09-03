@@ -46,7 +46,6 @@ class ConversationList extends React.Component<IPrivateProps, IState> {
       this.setState({ loading: false });
     }
     if (this.props.botResource !== nextProps.botResource) {
-      console.log('fetching triggered!');
       eddiApiActionDispatchers.fetchConversationsAction(
         DEFAULT_LIMIT,
         0,

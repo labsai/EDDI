@@ -66,13 +66,6 @@ const ConversationReducer: IConversationReducer = (
       });
 
     case FETCH_CONVERSATIONS_SUCCESS:
-      console.log(
-        'limt: ' + (action as IFetchConversationsSuccessAction).limit,
-      );
-      console.log(
-        'index: ' + (action as IFetchConversationsSuccessAction).index,
-      );
-      console.log((action as IFetchConversationsSuccessAction).conversations);
       const lastIndex =
         (action as IFetchConversationsSuccessAction).limit >
         (action as IFetchConversationsSuccessAction).conversations.length;

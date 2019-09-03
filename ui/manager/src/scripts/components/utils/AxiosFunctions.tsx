@@ -1045,15 +1045,6 @@ export async function getConversations(
   index: number,
   resource = '',
 ) {
-  console.log(
-    `${await getAPIUrl()}/conversationstore/conversations?limit=${limit}&index=${index}${
-      _.isEmpty(resource)
-        ? ''
-        : `&botId=${Parser.getId(resource)}&botVersion=${Parser.getVersion(
-            resource,
-          )}`
-    }`,
-  );
   try {
     const res: IResponse = await axios.get(
       `${await getAPIUrl()}/conversationstore/conversations?limit=${limit}&index=${index}${
@@ -1086,12 +1077,11 @@ export async function getConversation(
 }
 
 export async function endConversation(conversationId: string) {
-  console.log(`${await getAPIUrl()}/bots/${conversationId}/endConversation`);
   try {
     const response: IResponse = await axios.post(
       `${await getAPIUrl()}/bots/${conversationId}/endConversation`,
     );
-    console.log(response);
+    return response.headers;
   } catch (err) {
     console.error(`Failed to end conversation. Error: ${err.message}`);
   }

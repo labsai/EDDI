@@ -126,7 +126,6 @@ class ConversationStep extends React.Component<IProps, IState> {
     let actionTask = lifecycleTasks.find(lifecycleTask =>
       lifecycleTask.key.includes('actions'),
     );
-    console.log(actionTask);
     if (!actionTask) {
       return;
     }

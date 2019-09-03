@@ -736,7 +736,6 @@ export function* watchDuplicateResource(): Iterator<{}> {
 export function* fetchConversations(
   action: IFetchConversationsAction,
 ): Iterator<{}> {
-  console.log('Action started!');
   try {
     const conversations: IConversation[] = yield call(
       getConversations,
@@ -744,7 +743,6 @@ export function* fetchConversations(
       action.index,
       action.resource,
     );
-    console.log('Action done!');
     yield put(
       fetchConversationsSuccessAction(
         action.limit,
