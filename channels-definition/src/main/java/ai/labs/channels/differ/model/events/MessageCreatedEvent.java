@@ -1,14 +1,12 @@
 package ai.labs.channels.differ.model.events;
 
 import ai.labs.channels.differ.model.events.ConversationCreatedEvent.Conversation;
-import lombok.EqualsAndHashCode;
-import lombok.Getter;
-import lombok.Setter;
-import lombok.ToString;
+import lombok.*;
 
 import java.io.Serializable;
 import java.util.Date;
 import java.util.List;
+import java.util.UUID;
 
 @Getter
 @Setter
@@ -32,9 +30,25 @@ public class MessageCreatedEvent extends Event implements Serializable {
         private String id;
         private String conversationId;
         private String inputType;
-        private List<String> mentions;
+        private List<Mention> mentions;
         private List<Event.Part> parts;
         private String senderId;
         private Date sentAt;
+    }
+
+    @Getter
+    @Setter
+    @NoArgsConstructor
+    @AllArgsConstructor
+    public static class Mention implements Serializable {
+        private String id;
+        private String tag;
+        private String userId;
+
+        public Mention(String tag, String userId) {
+            this.id = String.valueOf(UUID.randomUUID());
+            this.tag = tag;
+            this.userId = userId;
+        }
     }
 }
