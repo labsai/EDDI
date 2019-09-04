@@ -95,9 +95,12 @@ class Package extends React.Component<IPrivateProps> {
               <div
                 style={styles.packageHeader}
                 onClick={() =>
-                  historyPush(`/packageview/${this.props.packagePayload.id}`, [
-                    `version=${this.props.packagePayload.version}`,
-                  ])
+                  historyPush(
+                    `/packageview/${this.props.packagePayload.id}`,
+                    isCurrentVersion
+                      ? null
+                      : [`version=${this.props.packagePayload.version}`],
+                  )
                 }>
                 <div style={this.getNameStyle()}>
                   {packagePayload.name || packagePayload.id}

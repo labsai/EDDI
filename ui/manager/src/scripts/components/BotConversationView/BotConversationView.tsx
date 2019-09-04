@@ -14,7 +14,11 @@ import HomeButtonComponent from '../HomeButton/HomeButtonComponent';
 import { historyPush } from '../../history';
 import ConversationProperties from './ConversationTab/ConversationProperties';
 import WhiteButton from '../Assets/Buttons/WhiteButton';
-import { CONVERSATION_ENDED } from '../utils/helpers/ConversationHelper';
+import {
+  CONVERSATION_ENDED,
+  CONVERSATION_READY,
+} from '../utils/helpers/ConversationHelper';
+import modalActionDispatchers from '../../actions/ModalActionDispatchers';
 
 interface IPrivateProps {
   conversationId: string;
@@ -63,7 +67,14 @@ class BotConversationView extends React.Component<IPublicProps, IState> {
   }
 
   endConversation = () => {
-    eddiApiActionDispatchers.endConversationAction(this.props.conversationId);
+    modalActionDispatchers.showConfirmationModal(
+      `Are you sure you want to end this conversation?`,
+      null,
+      () =>
+        eddiApiActionDispatchers.endConversationAction(
+          this.props.conversationId,
+        ),
+    );
   };
 
   render() {
@@ -86,7 +97,7 @@ class BotConversationView extends React.Component<IPublicProps, IState> {
             <div style={styles.botVersion}>{`V${Parser.getVersion(
               conversation.botResource,
             )}`}</div>
-            {renderIf(conversation.conversationState === CONVERSATION_ENDED)(
+            {renderIf(conversation.conversationState === CONVERSATION_READY)(
               () => (
                 <WhiteButton
                   text={'End Conversation'}

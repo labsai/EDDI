@@ -6,6 +6,8 @@ export const DARK_RED_COLOR: string = '#ff2448';
 export const GREEN_COLOR: string = '#4BCA81';
 export const DARK_GREEN_COLOR: string = '#32ae68';
 export const YELLOW_COLOR: string = '#FADA5E';
+export const DARK_YELLOW_COLOR: string = '#FFDC00';
+export const ORANGE_COLOR: string = '#FF851B';
 
 export const BLUE_COLOR: string = '#0070D2';
 export const DARK_BLUE_COLOR: string = '#16325C';

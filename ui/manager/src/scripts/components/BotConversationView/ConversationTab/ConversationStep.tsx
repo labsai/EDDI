@@ -19,7 +19,13 @@ import { conversationSelector } from '../../../selectors/ConversationSelectors';
 import * as renderIf from 'render-if';
 import ReactJson from 'react-json-view';
 import * as Radium from 'radium';
-import { LIGHT_GREY_COLOR } from '../../../../styles/DefaultStylingProperties';
+import {
+  DARK_YELLOW_COLOR,
+  LIGHT_GREY_COLOR,
+  ORANGE_COLOR,
+  RED_COLOR,
+  YELLOW_COLOR,
+} from '../../../../styles/DefaultStylingProperties';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 
 interface IProps {
@@ -32,7 +38,7 @@ interface IState {
   input: string;
   output: string[];
   quickReplies: string[];
-  timeSpan: string;
+  timeSpan: number;
   expanded: boolean;
   conversationOutputExpanded: boolean;
   conversationStepExpanded: boolean;
@@ -116,9 +122,26 @@ class ConversationStep extends React.Component<IProps, IState> {
     const timeSpan =
       lifecycleTasks[lifecycleTasks.length - 1].timestamp -
       lifecycleTasks[firstLifecycleTaskIndex].timestamp;
+    return timeSpan;
+  }
+
+  convertTimespan(timeSpan: number) {
     return timeSpan > 999
       ? `${(timeSpan / 1000).toFixed(2)}s`
       : `${timeSpan}ms`;
+  }
+
+  getTimeColor(timeSpan: number) {
+    if (timeSpan > 1999) {
+      return { ...styles.timeSpan, color: RED_COLOR };
+    }
+    if (timeSpan > 999) {
+      return { ...styles.timeSpan, color: ORANGE_COLOR };
+    }
+    if (timeSpan > 499) {
+      return { ...styles.timeSpan, color: DARK_YELLOW_COLOR };
+    }
+    return styles.timeSpan;
   }
 
   getAction() {
@@ -192,7 +215,10 @@ class ConversationStep extends React.Component<IProps, IState> {
               <div style={styles.timeArrow}>
                 <div style={styles.arrowLeft} />
               </div>
-              <div style={styles.timeSpan}>{`${this.state.timeSpan}`}</div>
+              <div
+                style={this.getTimeColor(
+                  this.state.timeSpan,
+                )}>{`${this.convertTimespan(this.state.timeSpan)}`}</div>
             </div>
           </div>
           {renderIf(this.state.expanded)(() => (
