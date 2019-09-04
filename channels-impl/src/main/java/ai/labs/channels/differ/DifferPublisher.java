@@ -22,11 +22,12 @@ import static ai.labs.channels.differ.utilities.DifferUtilities.calculateSentAt;
 @Singleton
 public class DifferPublisher implements IDifferPublisher {
     static final String MESSAGE_CREATED_EXCHANGE = "message.created";
+    private static final String FAILED_MESSAGE_EXCHANGE = "eddi";
     private static final String MESSAGE_CREATED_QUEUE_NAME = MESSAGE_CREATED_EXCHANGE + ".eddi";
     private static final String CONVERSATION_CREATED_EXCHANGE = "conversation.created";
     private static final String CONVERSATION_CREATED_QUEUE_NAME = CONVERSATION_CREATED_EXCHANGE + ".eddi";
 
-    static final String MESSAGE_CREATED_EDDI_FAILED_ROUTING_KEY = MESSAGE_CREATED_EXCHANGE + ".eddi.failed";
+    static final String MESSAGE_CREATED_EDDI_FAILED_ROUTING_KEY = MESSAGE_CREATED_EXCHANGE + ".eddi.failed-events";
     static final long TIMEOUT_CONFIRMS_IN_MILLIS = 60000;
 
     private final Provider<Channel> channelProvider;
@@ -90,8 +91,8 @@ public class DifferPublisher implements IDifferPublisher {
     private void publishEventToFailedQueue(Delivery delivery) {
         try {
             channel.basicPublish(
-                    MESSAGE_CREATED_EXCHANGE,
-                    MESSAGE_CREATED_EDDI_FAILED_ROUTING_KEY, null, delivery.getBody()
+                    FAILED_MESSAGE_EXCHANGE,
+                    "", null, delivery.getBody()
             );
 
             channel.waitForConfirmsOrDie(TIMEOUT_CONFIRMS_IN_MILLIS);
