@@ -214,8 +214,10 @@ public class RestDifferEndpoint implements IRestDifferEndpoint {
                     return;
                 }
                 if (isGroupChat(conversationInfo.getAllParticipantIds())) {
-                    List<String> mentions = message.getMentions();
-                    if (mentions == null || mentions.stream().noneMatch(availableBotUserIds::containsKey)) {
+                    List<MessageCreatedEvent.Mention> mentions = message.getMentions();
+                    if (mentions == null ||
+                            mentions.stream().noneMatch(
+                                    mention -> availableBotUserIds.containsKey(mention.getUserId()))) {
                         //this message belongs to a conversation we are a part of, but since this
                         //is a group chat, we only process messages that contain a mentions of a bot user
                         differPublisher.positiveDeliveryAck(deliveryTag);
