@@ -22,7 +22,7 @@ import static ai.labs.channels.differ.utilities.DifferUtilities.calculateSentAt;
 @Singleton
 public class DifferPublisher implements IDifferPublisher {
     static final String MESSAGE_CREATED_EXCHANGE = "message.created";
-    private static final String FAILED_MESSAGE_EXCHANGE = "eddi";
+    static final String FAILED_MESSAGE_EXCHANGE = "eddi";
     private static final String MESSAGE_CREATED_QUEUE_NAME = MESSAGE_CREATED_EXCHANGE + ".eddi";
     private static final String CONVERSATION_CREATED_EXCHANGE = "conversation.created";
     private static final String CONVERSATION_CREATED_QUEUE_NAME = CONVERSATION_CREATED_EXCHANGE + ".eddi";
@@ -92,7 +92,7 @@ public class DifferPublisher implements IDifferPublisher {
         try {
             channel.basicPublish(
                     FAILED_MESSAGE_EXCHANGE,
-                    "", null, delivery.getBody()
+                    MESSAGE_CREATED_EDDI_FAILED_ROUTING_KEY, null, delivery.getBody()
             );
 
             channel.waitForConfirmsOrDie(TIMEOUT_CONFIRMS_IN_MILLIS);
