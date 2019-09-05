@@ -13,9 +13,11 @@ import org.eclipse.jgit.api.Git;
 import org.eclipse.jgit.api.PullResult;
 import org.eclipse.jgit.api.errors.GitAPIException;
 import org.eclipse.jgit.api.errors.InvalidRemoteException;
+import org.eclipse.jgit.lib.RepositoryCache;
 import org.eclipse.jgit.revwalk.RevCommit;
 import org.eclipse.jgit.transport.PushResult;
 import org.eclipse.jgit.transport.UsernamePasswordCredentialsProvider;
+import org.eclipse.jgit.util.FS;
 
 import javax.inject.Inject;
 import javax.ws.rs.InternalServerErrorException;
@@ -110,16 +112,20 @@ public class RestGitBackupService implements IRestGitBackupService {
             Path gitPath = Paths.get(tmpPath + botId);
             if (gitBackupSettings != null && gitBackupSettings.getRepositoryUrl() != null) {
                 exportService.exportBot(botId, resourceId.getVersion());
-                Git.open(gitPath.toFile())
-                        .add()
-                        .addFilepattern(".")
-                        .call();
-                RevCommit commit = Git.open(gitPath.toFile())
-                        .commit()
-                        .setMessage(commitMessage)
-                        .setCommitter(gitBackupSettings.getCommitterName(), gitBackupSettings.getCommitterEmail())
-                        .call();
-                return Response.status(Response.Status.OK).entity(commit.getFullMessage()).build();
+                if (RepositoryCache.FileKey.isGitRepository(gitPath.toFile(), FS.DETECTED)) {
+                    Git.open(gitPath.toFile())
+                            .add()
+                            .addFilepattern(".")
+                            .call();
+                    RevCommit commit = Git.open(gitPath.toFile())
+                            .commit()
+                            .setMessage(commitMessage)
+                            .setCommitter(gitBackupSettings.getCommitterName(), gitBackupSettings.getCommitterEmail())
+                            .call();
+                    return Response.status(Response.Status.OK).entity(commit.getFullMessage()).build();
+                } else {
+                    return Response.status(Response.Status.BAD_REQUEST).entity("Git repo not initializse, please call gitInit first").build();
+                }
             } else {
                 return Response.status(Response.Status.NOT_FOUND).entity("No git settings in bot configuration, please add git settings!").build();
             }
