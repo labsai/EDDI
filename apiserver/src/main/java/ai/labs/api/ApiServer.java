@@ -95,7 +95,7 @@ public class ApiServer {
                         new FileInputStream(configDir + "webServer.properties"),
                         new FileInputStream(configDir + "keycloak.properties")
                 ),
-                new BackupServiceModule(),
+                new BackupServiceModule(new FileInputStream(configDir + "git.properties")),
                 new HttpCallsModule(),
                 new FacebookMessengerModule(),
                 new XmppModule(),

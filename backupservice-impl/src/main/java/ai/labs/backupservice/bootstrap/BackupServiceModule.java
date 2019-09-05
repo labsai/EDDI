@@ -11,12 +11,20 @@ import ai.labs.backupservice.impl.ZipArchive;
 import ai.labs.runtime.bootstrap.AbstractBaseModule;
 import com.google.inject.Scopes;
 
+import java.io.InputStream;
+
 /**
  * @author ginccc
  */
 public class BackupServiceModule extends AbstractBaseModule {
+
+    public BackupServiceModule(InputStream configFile) {
+        super(configFile);
+    }
+
     @Override
     protected void configure() {
+        registerConfigFiles(configFiles);
         bind(IRestExportService.class).to(RestExportService.class);
         bind(IRestImportService.class).to(RestImportService.class);
         bind(IRestGitBackupService.class).to(RestGitBackupService.class);
