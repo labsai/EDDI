@@ -8,6 +8,7 @@ import ai.labs.persistence.IResourceStore;
 import ai.labs.resources.rest.config.bots.IBotStore;
 import ai.labs.resources.rest.config.bots.model.BotConfiguration;
 import ai.labs.utilities.FileUtilities;
+import com.google.inject.name.Named;
 import lombok.extern.slf4j.Slf4j;
 import org.eclipse.jgit.api.Git;
 import org.eclipse.jgit.api.PullResult;
@@ -39,16 +40,22 @@ public class RestGitBackupService implements IRestGitBackupService {
     private final IZipArchive zipArchive;
     private final IRestImportService importService;
     private final IRestExportService exportService;
+    private final String gitUsername;
+    private final String gitPassword;
 
     @Inject
     public RestGitBackupService(IBotStore botStore,
                                 IZipArchive zipArchive,
                                 IRestImportService importService,
-                                IRestExportService exportService) {
+                                IRestExportService exportService,
+                                @Named("git.username") String gitUsername,
+                                @Named("git.password") String gitPassword) {
         this.botStore = botStore;
         this.zipArchive = zipArchive;
         this.importService = importService;
         this.exportService = exportService;
+        this.gitUsername = gitUsername;
+        this.gitPassword = gitPassword;
     }
 
     @Override
@@ -62,7 +69,7 @@ public class RestGitBackupService implements IRestGitBackupService {
             Git.cloneRepository()
                     .setBranch(gitBackupSettings.getBranch())
                     .setURI(gitBackupSettings.getRepositoryUrl().toString())
-                    .setCredentialsProvider(new UsernamePasswordCredentialsProvider(gitBackupSettings.getUsername(), gitBackupSettings.getPassword()))
+                    .setCredentialsProvider(new UsernamePasswordCredentialsProvider(gitUsername, gitPassword))
                     .setDirectory(gitPath.toFile())
                     .call();
 
@@ -84,7 +91,7 @@ public class RestGitBackupService implements IRestGitBackupService {
             if (gitBackupSettings != null && gitBackupSettings.getRepositoryUrl() != null) {
                 PullResult pullResult = Git.open(gitPath.toFile())
                         .pull()
-                        .setCredentialsProvider(new UsernamePasswordCredentialsProvider(gitBackupSettings.getUsername(), gitBackupSettings.getPassword()))
+                        .setCredentialsProvider(new UsernamePasswordCredentialsProvider(gitUsername, gitPassword))
                         .call();
                 if (pullResult.isSuccessful()) {
                     importBot(botId, resourceId.getVersion());
@@ -149,7 +156,7 @@ public class RestGitBackupService implements IRestGitBackupService {
             if (gitBackupSettings != null && gitBackupSettings.getRepositoryUrl() != null) {
                 Iterable<PushResult> pushResults = Git.open(gitPath.toFile())
                         .push()
-                        .setCredentialsProvider(new UsernamePasswordCredentialsProvider(gitBackupSettings.getUsername(), gitBackupSettings.getPassword()))
+                        .setCredentialsProvider(new UsernamePasswordCredentialsProvider(gitUsername, gitPassword))
                         .call();
                 StringBuilder pushResultMessage = new StringBuilder();
                 for (PushResult pushResult : pushResults) {
