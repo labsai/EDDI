@@ -36,8 +36,13 @@ public class RestInterfaceFactory implements IRestInterfaceFactory {
 
     @Override
     public <T> T get(Class<T> clazz) {
-        ResteasyClient client = getResteasyClient(apiServerURI);
-        ResteasyWebTarget target = client.target(apiServerURI);
+        return get(clazz, apiServerURI);
+    }
+
+    @Override
+    public <T> T get(Class<T> clazz, String targetServerUri) {
+        ResteasyClient client = getResteasyClient(targetServerUri);
+        ResteasyWebTarget target = client.target(targetServerUri);
 
         target.register((ClientRequestFilter) requestContext -> {
             String authorizationString = null;

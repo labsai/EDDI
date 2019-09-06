@@ -40,6 +40,7 @@ import com.google.inject.Module;
 import org.jboss.resteasy.plugins.guice.ext.RequestScopeModule;
 
 import java.io.FileInputStream;
+import java.util.Date;
 
 /**
  * the central REST API server component
@@ -101,7 +102,8 @@ public class ApiServer {
                 new XmppModule(),
                 new AMQPModule(),
                 new DifferModule(),
-                new ChannelModule()
+                new ChannelModule(),
+                new CSVTestModule()
         };
 
         //init modules
@@ -116,6 +118,9 @@ public class ApiServer {
             var channelDefinitions = injector.getInstance(IChannelDefinitionStore.class).readAllChannelDefinitions();
             var channelManager = injector.getInstance(IChannelManager.class);
             channelDefinitions.forEach(channelManager::initChannel);
+
+            ICSVExport export = injector.getInstance(ICSVExport.class);
+            export.export("http://ait.labs.ai", new Date());
 
             logServerStartupTime(serverStartupBegin);
         });
