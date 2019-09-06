@@ -25,6 +25,7 @@ public interface IRestConversationStore {
     @Produces(MediaType.APPLICATION_JSON)
     List<ConversationDescriptor> readConversationDescriptors(@QueryParam("index") @DefaultValue("0") Integer index,
                                                              @QueryParam("limit") @DefaultValue("20") Integer limit,
+                                                             @QueryParam("conversationId") String conversationId,
                                                              @QueryParam("botId") String botId,
                                                              @QueryParam("botVersion") Integer botVersion,
                                                              @QueryParam("conversationState") ConversationState conversationState,
