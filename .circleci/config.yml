@@ -40,7 +40,7 @@ jobs:
             docker login -u $DOCKER_USER -p $DOCKER_PASS
 
             docker build --build-arg EDDI_VERSION=4.7 --build-arg EDDI_ENV=production -t labsai/eddi:4.7.0-ait-b$CIRCLE_BUILD_NUM .
-            docker push labsai/eddi:4.7.0-b$CIRCLE_BUILD_NUM
+            docker push labsai/eddi:4.7.0-ait-b$CIRCLE_BUILD_NUM
 
             # docker build --build-arg EDDI_VERSION=4.7 --build-arg EDDI_ENV=production -t labsai/eddi:latest .
             # docker push labsai/eddi:latest
