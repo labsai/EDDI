@@ -9,89 +9,128 @@ import ai.labs.memory.rest.IRestConversationStore;
 import ai.labs.persistence.IResourceStore;
 import ai.labs.rest.restinterfaces.IRestInterfaceFactory;
 import ai.labs.rest.restinterfaces.RestInterfaceFactory;
-import ai.labs.serialization.IJsonSerialization;
 import ai.labs.utilities.URIUtilities;
+import lombok.AllArgsConstructor;
+import lombok.Getter;
+import lombok.NoArgsConstructor;
+import lombok.Setter;
 import lombok.extern.slf4j.Slf4j;
 
 import javax.inject.Inject;
+import javax.ws.rs.core.Response;
+import java.text.DateFormat;
+import java.text.SimpleDateFormat;
 import java.util.Date;
 import java.util.LinkedHashMap;
 import java.util.List;
-import java.util.Map;
 
 @Slf4j
 public class CSVExport implements ICSVExport {
-
     private final IRestInterfaceFactory restInterfaceFactory;
     private final IExpressionProvider expressionProvider;
-    private final IJsonSerialization jsonSerialization;
+    private DateFormat dateFormat = new SimpleDateFormat("yyyy-MM-dd' 'HH:mm:ss");
 
     @Inject
-    public CSVExport(IRestInterfaceFactory restInterfaceFactory, IExpressionProvider expressionProvider, IJsonSerialization jsonSerialization) {
+    public CSVExport(IRestInterfaceFactory restInterfaceFactory, IExpressionProvider expressionProvider) {
         this.restInterfaceFactory = restInterfaceFactory;
         this.expressionProvider = expressionProvider;
-        this.jsonSerialization = jsonSerialization;
     }
 
     @Override
-    public void export(String apiServerUri, Date date) throws RestInterfaceFactory.RestInterfaceFactoryException, IResourceStore.ResourceStoreException, IResourceStore.ResourceNotFoundException {
+    public Response export(String botId, Integer index, Integer limit, String apiServerUri, Date lastModifiedSince, Boolean addAnswerTimestamp) throws RestInterfaceFactory.RestInterfaceFactoryException, IResourceStore.ResourceStoreException, IResourceStore.ResourceNotFoundException {
         IRestConversationStore restConversationStore = restInterfaceFactory.get(IRestConversationStore.class, apiServerUri);
-        String tic = null, psID = null;
+        StringBuilder ret = new StringBuilder();
 
-        String gamificationBotId = "5d414f4dd9bc8649b4e1c7b6";
+        StringBuilder retHeader = new StringBuilder();
+        StringBuilder retValues = new StringBuilder();
 
-        for (int i = 0; i < 1000; i++) {
-            log.info("i: " + i);
-            List<ConversationDescriptor> conversationDescriptors = restConversationStore.readConversationDescriptors(i, 20, "", null, null, null);
-            if (conversationDescriptors.isEmpty()) {
-                break;
+        List<ConversationDescriptor> conversationDescriptors = restConversationStore.
+                readConversationDescriptors(index, limit, botId, null, null, null, lastModifiedSince);
+
+        for (ConversationDescriptor conversationDescriptor : conversationDescriptors) {
+            String tic = null;
+            String psID = null;
+            boolean firstIteration = retHeader.length() == 0;
+            String conversationId = URIUtilities.extractResourceId(conversationDescriptor.getResource()).getId();
+
+            Date timestampStartConversation = conversationDescriptor.getCreatedOn();
+            var memorySnapshot = ConversationMemoryUtilities.convertSimpleConversationMemory(restConversationStore.readRawConversationLog(conversationId), true);
+            LinkedHashMap<String, Values> csvMap = new LinkedHashMap<>();
+            for (var conversationStep : memorySnapshot.getConversationSteps()) {
+                for (var conversationStepData : conversationStep.getConversationStep()) {
+                    String key = conversationStepData.getKey();
+                    String value = conversationStepData.getValue().toString();
+                    Date timestamp = conversationStepData.getTimestamp();
+                    if (key.equals("context:url") && value.contains("tic=") && value.contains("psID=")) {
+                        tic = value.substring(value.indexOf("?") + 5, value.indexOf("&", value.indexOf("?")));
+                        psID = value.substring(value.indexOf("psID=", value.indexOf("?")) + 5, value.indexOf(",", value.indexOf("?")));
+                    }
+
+                    if (key.equals("expressions:parsed") && value.startsWith("property")) {
+                        Expressions expressions = expressionProvider.parseExpressions(value);
+                        Expression property = expressions.get(0);
+                        Expression categoryExp = property.getSubExpressions()[0];
+                        String questionId = categoryExp.getExpressionName();
+                        questionId = questionId.replace("_", "[").concat("]");
+                        String answer = categoryExp.getSubExpressions()[0].getExpressionName();
+                        var values = new Values(answer, timestamp);
+                        csvMap.put(questionId, values);
+                    }
+                }
             }
-            for (ConversationDescriptor conversationDescriptor : conversationDescriptors) {
-                String conversationId = URIUtilities.extractResourceId(conversationDescriptor.getResource()).getId();
 
-                var memorySnapshot = ConversationMemoryUtilities.convertSimpleConversationMemory(restConversationStore.readRawConversationLog(conversationId), true);
-                Map<String, String> csvMap = new LinkedHashMap<>();
-                for (var conversationStep : memorySnapshot.getConversationSteps()) {
-                    for (var conversationStepData : conversationStep.getConversationStep()) {
-                        String key = conversationStepData.getKey();
-                        String value = conversationStepData.getValue().toString();
-                        Date timestamp = conversationStepData.getTimestamp();
-                        if (key.equals("context:url") && value.contains("tic=") && value.contains("psID=")) {
-                            tic = value.substring(value.indexOf("?") + 5, value.indexOf("&", value.indexOf("?")));
-                            psID = value.substring(value.indexOf("psID=", value.indexOf("?")) + 5, value.indexOf(",", value.indexOf("?")));
-                            System.out.println("tic=" + tic + " psID=" + psID);
-                        }
+            if (!csvMap.isEmpty()) {
+                if (firstIteration) {
+                    wrapInQuotes(retHeader, "timestamp");
+                    wrapInQuotes(retHeader, "tic");
+                    wrapInQuotes(retHeader, "psID");
+                }
 
-                        if (key.equals("expressions:parsed") && value.startsWith("property")) {
-                            Expressions expressions = expressionProvider.parseExpressions(value);
-                            Expression property = expressions.get(0);
-                            Expression categoryExp = property.getSubExpressions()[0];
-                            String category = categoryExp.getExpressionName();
-                            category = category.replace("_", "[");
-                            csvMap.put(category + "]", categoryExp.getSubExpressions()[0].getExpressionName());
+                if (timestampStartConversation != null) {
+                    wrapInQuotes(retValues, dateFormat.format(timestampStartConversation));
+                    wrapInQuotes(retValues, tic == null ? "null" : tic);
+                    wrapInQuotes(retValues, psID == null ? "null" : psID);
+                }
+                for (String key : csvMap.keySet()) {
+                    if (firstIteration || retHeader.indexOf(key) == -1) {
+                        wrapInQuotes(retHeader, key);
+                        if (addAnswerTimestamp) {
+                            wrapInQuotes(retHeader, key + "-timestamp");
                         }
+                    }
+                    Values values = csvMap.get(key);
+                    wrapInQuotes(retValues, values.getAnswer());
+                    if (addAnswerTimestamp) {
+                        wrapInQuotes(retValues, dateFormat.format(values.getTimestamp()));
                     }
                 }
 
-                StringBuilder header = new StringBuilder();
-                StringBuilder values = new StringBuilder();
-                for (String key : csvMap.keySet()) {
-                    header.append("\"").append(key).append("\",");
-                    values.append("\"").append(csvMap.get(key)).append("\",");
-                }
-
-                if (header.length() > 0) {
-                    System.out.println(header.substring(0, header.length() - 1));
-                    System.out.println(values.substring(0, values.length() - 1));
-                }
-
-                //"""datestamp"",""tic"",""PU[PU1]"",""PU[PU2]"",""PU[PU3]"",""PU[PU4]"",""PU[A1]"",""PU[A2]"",""PU[A3]"",""ATI[ATI1]"",""ATI[ATI2]"",""ATI[ATI3]"",""ATI[ATI4]"",""ATI[ATI5]"",""ATI[ATI6]"",""ATI[ATI7]"",""ATI[ATI8]"",""ATI[ATI9]"",""THANKS2"",""UMFRAGE"",""UHUP[HED1]"",""UHUP[HED2]"",""UHUP[UTIL]"",""UHUP[PRAC]"",""USEQ[USEQ]"",""CHATBOT"",""CHUP[HED1]"",""CHUP[HED2]"",""CHUP[UTIL]"",""CHUP[PRAC]"",""CSEQ[CSEQ]"",""TEMPO[TEMPO]"",""IMPROVE"",""RANK"",""DEVICE"",""CBFREQ[SQ001]"",""UFREQ[SQ001]"",""Alter"",""Gender"",""Gender[other]"",""BB"",""THANKS"""
-                //System.out.print(String.format("\"\"\"2019-08-21 18:12:11\"\",\"\"%s\"\",", tic));
-                //System.out.println("\"\"A4\"\",\"\"A4\"\",\"\"A4\"\",\"\"A4\"\",\"\"A4\"\",\"\"A4\"\",\"\"A4\"\",\"\"A4\"\",\"\"A4\"\",\"\"A4\"\",\"\"A4\"\",\"\"A4\"\",\"\"A4\"\",\"\"A4\"\",\"\"A4\"\",\"\"A4\"\",\"\"\"\",\"\"\"\",\"\"A4\"\",\"\"A4\"\",\"\"A4\"\",\"\"A4\"\",\"\"A4\"\",\"\"\"\",\"\"A4\"\",\"\"A4\"\",\"\"A4\"\",\"\"A4\"\",\"\"A4\"\",\"\"A3\"\",\"\"\"\",\"\"A1\"\",\"\"A1\"\",\"\"A3\"\",\"\"A3\"\",\"\"1900\"\",\"\"\"\",\"\"\"\",\"\"-\"\",\"\"\"\"\"");
+                retValues.deleteCharAt(retValues.length() - 1);
+                retValues.append("\n");
             }
-
         }
 
+        if (retHeader.length() > 0) {
+            ret.append(retHeader.substring(0, retHeader.length() - 1));
+            ret.append("\n").append(retValues.substring(0, retValues.length() - 1));
+        }
+
+        return Response.ok(ret.toString()).type("text/csv").build();
+    }
+
+    private void wrapInQuotes(StringBuilder stringBuilder, Object obj) {
+        if (!obj.toString().isEmpty()) {
+            stringBuilder.append("\"").append(obj).append("\",");
+        }
+    }
+
+    @NoArgsConstructor
+    @AllArgsConstructor
+    @Getter
+    @Setter
+    public static class Values {
+        private String answer;
+        private Date timestamp;
     }
 }
 

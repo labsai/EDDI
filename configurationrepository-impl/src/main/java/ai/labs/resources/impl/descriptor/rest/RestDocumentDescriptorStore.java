@@ -28,7 +28,7 @@ public class RestDocumentDescriptorStore implements IRestDocumentDescriptorStore
     @Override
     public List<DocumentDescriptor> readDescriptors(String type, String filter, Integer index, Integer limit) {
         try {
-            return documentDescriptorStore.readDescriptors(type, filter, index, limit, false);
+            return documentDescriptorStore.readDescriptors(type, filter, index, limit, false, null, null);
         } catch (IResourceStore.ResourceStoreException e) {
             log.error(e.getLocalizedMessage(), e);
             throw new InternalServerErrorException(e.getLocalizedMessage(), e);

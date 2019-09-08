@@ -51,7 +51,7 @@ public class RestTestCaseStore implements IRestTestCaseStore {
             List<TestCaseDescriptor> retConversationDescriptors = new LinkedList<>();
             List<TestCaseDescriptor> testCaseDescriptors;
             do {
-                testCaseDescriptors = testCaseDescriptorStore.readDescriptors("ai.labs.testcases", null, index, limit, false);
+                testCaseDescriptors = testCaseDescriptorStore.readDescriptors("ai.labs.testcases", null, index, limit, false, null, null);
                 for (TestCaseDescriptor testCaseDescriptor : testCaseDescriptors) {
                     TestCase testCase = readTestCase(RestUtilities.extractResourceId(testCaseDescriptor.getResource()).getId());
                     if (!RuntimeUtilities.isNullOrEmpty(botId)) {

@@ -6,7 +6,10 @@ import java.util.List;
  * @author ginccc
  */
 public interface IDescriptorStore<T> {
-    List<T> readDescriptors(String type, String filter, Integer index, Integer limit, boolean includeDeleted) throws IResourceStore.ResourceStoreException, IResourceStore.ResourceNotFoundException;
+    List<T> readDescriptors(String type, String filter, Integer index, Integer limit, boolean includeDeleted,
+                            List<IResourceFilter.QueryFilter> queryFiltersRequired,
+                            List<IResourceFilter.QueryFilter> queryFiltersOptional)
+            throws IResourceStore.ResourceStoreException, IResourceStore.ResourceNotFoundException;
 
     T readDescriptor(String resourceId, Integer version) throws IResourceStore.ResourceStoreException, IResourceStore.ResourceNotFoundException;
 

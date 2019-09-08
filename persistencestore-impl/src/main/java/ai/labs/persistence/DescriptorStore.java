@@ -2,6 +2,8 @@ package ai.labs.persistence;
 
 import ai.labs.group.IGroupStore;
 import ai.labs.permission.IPermissionStore;
+import ai.labs.persistence.IResourceFilter.QueryFilter;
+import ai.labs.persistence.IResourceFilter.QueryFilters;
 import ai.labs.persistence.mongo.ModifiableHistorizedResourceStore;
 import ai.labs.persistence.mongo.MongoResourceStorage;
 import ai.labs.serialization.IDocumentBuilder;
@@ -49,23 +51,29 @@ public class DescriptorStore<T> implements IDescriptorStore<T> {
     }
 
     @Override
-    public List<T> readDescriptors(String type, String filter, Integer index, Integer limit, boolean includeDeleted)
+    public List<T> readDescriptors(String type, String filter, Integer index, Integer limit, boolean includeDeleted,
+                                   List<QueryFilter> queryFiltersRequired,
+                                   List<QueryFilter> queryFiltersOptional)
             throws IResourceStore.ResourceStoreException, IResourceStore.ResourceNotFoundException {
-        List<IResourceFilter.QueryFilter> queryFiltersRequired = new LinkedList<>();
+        if (queryFiltersRequired == null) {
+            queryFiltersRequired = new LinkedList<>();
+        }
         String filterURI = "eddi://" + type + ".*";
-        queryFiltersRequired.add(new IResourceFilter.QueryFilter(FIELD_RESOURCE, filterURI));
-        queryFiltersRequired.add(new IResourceFilter.QueryFilter(FIELD_DELETED, includeDeleted));
-        IResourceFilter.QueryFilters required = new IResourceFilter.QueryFilters(queryFiltersRequired);
+        queryFiltersRequired.add(new QueryFilter(FIELD_RESOURCE, filterURI));
+        queryFiltersRequired.add(new QueryFilter(FIELD_DELETED, includeDeleted));
+        QueryFilters required = new QueryFilters(queryFiltersRequired);
 
-        List<IResourceFilter.QueryFilter> queryFiltersOptional = new LinkedList<>();
+        if (queryFiltersOptional == null) {
+            queryFiltersOptional = new LinkedList<>();
+        }
         if (filter != null) {
             filter = StringUtilities.convertToSearchString(filter);
-            queryFiltersOptional.add(new IResourceFilter.QueryFilter(FIELD_NAME, filter));
-            queryFiltersOptional.add(new IResourceFilter.QueryFilter(FIELD_DESCRIPTION, filter));
+            queryFiltersOptional.add(new QueryFilter(FIELD_NAME, filter));
+            queryFiltersOptional.add(new QueryFilter(FIELD_DESCRIPTION, filter));
         }
-        IResourceFilter.QueryFilters optional = new IResourceFilter.QueryFilters(IResourceFilter.QueryFilters.ConnectingType.OR, queryFiltersOptional);
+        QueryFilters optional = new QueryFilters(QueryFilters.ConnectingType.OR, queryFiltersOptional);
 
-        return resourceFilter.readResources(new IResourceFilter.QueryFilters[]{required, optional}, index, limit, FIELD_LAST_MODIFIED);
+        return resourceFilter.readResources(new QueryFilters[]{required, optional}, index, limit, FIELD_LAST_MODIFIED);
     }
 
     @Override

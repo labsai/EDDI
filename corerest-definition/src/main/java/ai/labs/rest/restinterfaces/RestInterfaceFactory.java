@@ -1,6 +1,7 @@
 package ai.labs.rest.restinterfaces;
 
 import ai.labs.runtime.ThreadContext;
+import ai.labs.utilities.RuntimeUtilities;
 import org.eclipse.jetty.client.HttpClient;
 import org.jboss.resteasy.client.jaxrs.ResteasyClient;
 import org.jboss.resteasy.client.jaxrs.ResteasyClientBuilder;
@@ -41,6 +42,10 @@ public class RestInterfaceFactory implements IRestInterfaceFactory {
 
     @Override
     public <T> T get(Class<T> clazz, String targetServerUri) {
+        if (RuntimeUtilities.isNullOrEmpty(targetServerUri)) {
+            targetServerUri = apiServerURI;
+        }
+
         ResteasyClient client = getResteasyClient(targetServerUri);
         ResteasyWebTarget target = client.target(targetServerUri);
 

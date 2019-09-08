@@ -8,6 +8,7 @@ import ai.labs.memory.model.SimpleConversationMemorySnapshot;
 import ai.labs.memory.rest.IRestConversationStore;
 import ai.labs.models.ConversationState;
 import ai.labs.models.ConversationStatus;
+import ai.labs.persistence.IResourceFilter.QueryFilter;
 import ai.labs.persistence.IResourceStore;
 import ai.labs.persistence.model.ResourceId;
 import ai.labs.resources.rest.documentdescriptor.IDocumentDescriptorStore;
@@ -17,6 +18,7 @@ import ai.labs.utilities.RestUtilities;
 import ai.labs.utilities.RuntimeUtilities;
 import ai.labs.utilities.URIUtilities;
 import lombok.extern.slf4j.Slf4j;
+import org.bson.Document;
 import org.jboss.resteasy.spi.NoLogWebApplicationException;
 
 import javax.inject.Inject;
@@ -24,11 +26,13 @@ import javax.ws.rs.InternalServerErrorException;
 import javax.ws.rs.NotFoundException;
 import javax.ws.rs.core.Response;
 import java.net.URI;
+import java.util.Date;
 import java.util.LinkedList;
 import java.util.List;
 import java.util.stream.Collectors;
 
 import static ai.labs.memory.ConversationMemoryUtilities.convertSimpleConversationMemory;
+import static ai.labs.memory.descriptor.model.ConversationDescriptor.ViewState;
 import static ai.labs.utilities.RuntimeUtilities.checkNotNull;
 
 /**
@@ -53,13 +57,23 @@ public class RestConversationStore implements IRestConversationStore {
     }
 
     @Override
-    public List<ConversationDescriptor> readConversationDescriptors(Integer index, Integer limit, String botId, Integer botVersion, ConversationState conversationState, ConversationDescriptor.ViewState viewState) {
+    public List<ConversationDescriptor> readConversationDescriptors(Integer index, Integer limit,
+                                                                    String botId, Integer botVersion,
+                                                                    ConversationState conversationState, ViewState viewState,
+                                                                    Date lastModifiedSince) {
         try {
             List<ConversationDescriptor> conversationDescriptors;
             List<ConversationDescriptor> retConversationDescriptors = new LinkedList<>();
             do {
+                List<QueryFilter> queryFiltersRequired = new LinkedList<>();
+                List<QueryFilter> queryFiltersOptional = new LinkedList<>();
+                if (lastModifiedSince != null && lastModifiedSince.getTime() != 0) {
+                    queryFiltersRequired.add(new QueryFilter("lastModifiedOn", new Document("$gt", lastModifiedSince)));
+                }
+
                 conversationDescriptors = conversationDescriptorStore.
-                        readDescriptors("ai.labs.conversation", null, index, limit, false);
+                        readDescriptors("ai.labs.conversation", null, index, limit, false,
+                                queryFiltersRequired, queryFiltersOptional);
 
                 ConversationMemorySnapshot memorySnapshot;
                 for (ConversationDescriptor conversationDescriptor : conversationDescriptors) {
@@ -182,7 +196,7 @@ public class RestConversationStore implements IRestConversationStore {
         List<ConversationStatus> conversationStatuses = new LinkedList<>();
         do {
             conversationDescriptors = readConversationDescriptors(index, limit, botId, botVersion,
-                    null, null);
+                    null, null, null);
 
             conversationStatuses.addAll(conversationDescriptors.stream().
                     filter(conversationDescriptor ->

@@ -13,6 +13,7 @@ import io.swagger.annotations.Authorization;
 import javax.ws.rs.*;
 import javax.ws.rs.core.MediaType;
 import javax.ws.rs.core.Response;
+import java.util.Date;
 import java.util.List;
 
 /**
@@ -23,18 +24,17 @@ import java.util.List;
 public interface IRestConversationStore {
     @GET
     @Produces(MediaType.APPLICATION_JSON)
-    @Consumes(MediaType.WILDCARD)
     List<ConversationDescriptor> readConversationDescriptors(@QueryParam("index") @DefaultValue("0") Integer index,
                                                              @QueryParam("limit") @DefaultValue("20") Integer limit,
                                                              @QueryParam("botId") String botId,
                                                              @QueryParam("botVersion") Integer botVersion,
                                                              @QueryParam("conversationState") ConversationState conversationState,
-                                                             @QueryParam("viewState") ConversationDescriptor.ViewState viewState);
+                                                             @QueryParam("viewState") ConversationDescriptor.ViewState viewState,
+                                                             @QueryParam("lastModifiedSince") Date lastModifiedSince);
 
     @GET
     @Path("/simple/{conversationId}")
     @Produces(MediaType.APPLICATION_JSON)
-    @Consumes(MediaType.WILDCARD)
     SimpleConversationMemorySnapshot readSimpleConversationLog(@PathParam("conversationId") String conversationId,
                                                                @QueryParam("returnDetailed") @DefaultValue("false") Boolean returnDetailed,
                                                                @QueryParam("returnCurrentStepOnly") @DefaultValue("true") Boolean returnCurrentStepOnly,
@@ -49,7 +49,6 @@ public interface IRestConversationStore {
 
     @DELETE
     @Path("/{conversationId}")
-    @Consumes(MediaType.WILDCARD)
     void deleteConversationLog(@PathParam("conversationId") String conversationId,
                                @QueryParam("deletePermanently") @DefaultValue("false") Boolean deletePermanently)
             throws IResourceStore.ResourceStoreException, IResourceStore.ResourceNotFoundException;
@@ -57,7 +56,6 @@ public interface IRestConversationStore {
     @GET
     @Path("/active/{botId}")
     @Produces(MediaType.APPLICATION_JSON)
-    @Consumes(MediaType.WILDCARD)
     List<ConversationStatus> getActiveConversations(@PathParam("botId") String botId,
                                                     @ApiParam(name = "botVersion", required = true, format = "integer", example = "1")
                                                     @QueryParam("botVersion") Integer botVersion,
@@ -68,7 +66,7 @@ public interface IRestConversationStore {
 
     @POST
     @Path("end")
-    @Consumes(MediaType.WILDCARD)
+    @Consumes(MediaType.APPLICATION_JSON)
     Response endActiveConversations(List<ConversationStatus> conversationStatuses);
 }
 

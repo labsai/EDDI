@@ -33,7 +33,7 @@ public abstract class RestVersionInfo<T> implements IRestVersionInfo {
 
     protected List<DocumentDescriptor> readDescriptors(String type, String filter, Integer index, Integer limit) {
         try {
-            return documentDescriptorStore.readDescriptors(type, filter, index, limit, false);
+            return documentDescriptorStore.readDescriptors(type, filter, index, limit, false, null, null);
         } catch (IResourceStore.ResourceNotFoundException e) {
             throw new WebApplicationException(Response.Status.NOT_FOUND);
         } catch (Exception e) {

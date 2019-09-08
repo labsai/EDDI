@@ -115,11 +115,14 @@ public class ResourceFilter<T> implements IResourceFilter<T> {
         for (QueryFilters queryFilters : allQueryFilters) {
             List<DBObject> dbObjects = new LinkedList<>();
             for (QueryFilter queryFilter : queryFilters.getQueryFilters()) {
-                if (queryFilter.getFilter() instanceof String) {
-                    Pattern resourcePattern = getPatternForRegex((String) queryFilter.getFilter());
+                Object filter = queryFilter.getFilter();
+                if (filter instanceof String) {
+                    Pattern resourcePattern = getPatternForRegex((String) filter);
                     dbObjects.add(new QueryBuilder().put(queryFilter.getField()).regex(resourcePattern).get());
+                } else if (filter instanceof Document) {
+                    dbObjects.add((DBObject) filter);
                 } else {
-                    dbObjects.add(new QueryBuilder().put(queryFilter.getField()).is(queryFilter.getFilter()).get());
+                    dbObjects.add(new QueryBuilder().put(queryFilter.getField()).is(filter).get());
                 }
             }
 
