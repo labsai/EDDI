@@ -7,8 +7,6 @@ import ai.labs.memory.ConversationMemoryUtilities;
 import ai.labs.memory.descriptor.model.ConversationDescriptor;
 import ai.labs.memory.rest.IRestConversationStore;
 import ai.labs.persistence.IResourceStore;
-import ai.labs.rest.restinterfaces.IRestInterfaceFactory;
-import ai.labs.rest.restinterfaces.RestInterfaceFactory;
 import ai.labs.utilities.URIUtilities;
 import lombok.AllArgsConstructor;
 import lombok.Getter;
@@ -24,22 +22,22 @@ import java.util.*;
 
 @Slf4j
 public class CSVExport implements ICSVExport {
-    private final IRestInterfaceFactory restInterfaceFactory;
     private final IExpressionProvider expressionProvider;
+    private final IRestConversationStore restConversationStore;
     private DateFormat dateFormat = new SimpleDateFormat("yyyy-MM-dd' 'HH:mm:ss");
 
     @Inject
-    public CSVExport(IRestInterfaceFactory restInterfaceFactory, IExpressionProvider expressionProvider) {
-        this.restInterfaceFactory = restInterfaceFactory;
+    public CSVExport(IExpressionProvider expressionProvider, IRestConversationStore restConversationStore) {
         this.expressionProvider = expressionProvider;
+        this.restConversationStore = restConversationStore;
     }
 
     @Override
-    public Response export(String botId, Integer index, Integer limit, String apiServerUri, String lastModifiedSince, Boolean addAnswerTimestamp) throws RestInterfaceFactory.RestInterfaceFactoryException, IResourceStore.ResourceStoreException, IResourceStore.ResourceNotFoundException {
+    public Response export(String botId, Integer index, Integer limit, String lastModifiedSince, Boolean addAnswerTimestamp) throws IResourceStore.ResourceStoreException, IResourceStore.ResourceNotFoundException {
         if (botId.endsWith(".csv")) {
             botId = botId.substring(0, botId.indexOf(".csv"));
         }
-        IRestConversationStore restConversationStore = restInterfaceFactory.get(IRestConversationStore.class, apiServerUri);
+
         StringBuilder ret = new StringBuilder();
 
         StringBuilder retHeader = new StringBuilder();
