@@ -13,7 +13,6 @@ import io.swagger.annotations.Authorization;
 import javax.ws.rs.*;
 import javax.ws.rs.core.MediaType;
 import javax.ws.rs.core.Response;
-import java.util.Date;
 import java.util.List;
 
 /**
@@ -30,7 +29,7 @@ public interface IRestConversationStore {
                                                              @QueryParam("botVersion") Integer botVersion,
                                                              @QueryParam("conversationState") ConversationState conversationState,
                                                              @QueryParam("viewState") ConversationDescriptor.ViewState viewState,
-                                                             @QueryParam("lastModifiedSince") Date lastModifiedSince);
+                                                             @QueryParam("lastModifiedSince") String lastModifiedSince);
 
     @GET
     @Path("/simple/{conversationId}")

@@ -24,8 +24,12 @@ import org.jboss.resteasy.spi.NoLogWebApplicationException;
 import javax.inject.Inject;
 import javax.ws.rs.InternalServerErrorException;
 import javax.ws.rs.NotFoundException;
+import javax.ws.rs.WebApplicationException;
 import javax.ws.rs.core.Response;
 import java.net.URI;
+import java.text.DateFormat;
+import java.text.ParseException;
+import java.text.SimpleDateFormat;
 import java.util.Date;
 import java.util.LinkedList;
 import java.util.List;
@@ -34,6 +38,7 @@ import java.util.stream.Collectors;
 import static ai.labs.memory.ConversationMemoryUtilities.convertSimpleConversationMemory;
 import static ai.labs.memory.descriptor.model.ConversationDescriptor.ViewState;
 import static ai.labs.utilities.RuntimeUtilities.checkNotNull;
+import static ai.labs.utilities.RuntimeUtilities.isNullOrEmpty;
 
 /**
  * @author ginccc
@@ -44,6 +49,7 @@ public class RestConversationStore implements IRestConversationStore {
     private final IDocumentDescriptorStore documentDescriptorStore;
     private final IConversationDescriptorStore conversationDescriptorStore;
     private final IConversationMemoryStore conversationMemoryStore;
+    private final static DateFormat dateFormat = new SimpleDateFormat("yyyy-MM-dd' 'HH:mm:ss");
 
     @Inject
     public RestConversationStore(IUserStore userStore,
@@ -60,15 +66,17 @@ public class RestConversationStore implements IRestConversationStore {
     public List<ConversationDescriptor> readConversationDescriptors(Integer index, Integer limit,
                                                                     String botId, Integer botVersion,
                                                                     ConversationState conversationState, ViewState viewState,
-                                                                    Date lastModifiedSince) {
+                                                                    String lastModifiedSince) {
         try {
             List<ConversationDescriptor> conversationDescriptors;
             List<ConversationDescriptor> retConversationDescriptors = new LinkedList<>();
             do {
                 List<QueryFilter> queryFiltersRequired = new LinkedList<>();
                 List<QueryFilter> queryFiltersOptional = new LinkedList<>();
-                if (lastModifiedSince != null && lastModifiedSince.getTime() != 0) {
-                    queryFiltersRequired.add(new QueryFilter("lastModifiedOn", new Document("$gt", lastModifiedSince)));
+                if (!isNullOrEmpty(lastModifiedSince)) {
+                    queryFiltersRequired.add(
+                            new QueryFilter("lastModifiedOn",
+                                    new Document(new Document("lastModifiedOn", new Document("$gt", getDate(lastModifiedSince))))));
                 }
 
                 conversationDescriptors = conversationDescriptorStore.
@@ -134,6 +142,17 @@ public class RestConversationStore implements IRestConversationStore {
             throw new InternalServerErrorException(e.getMessage(), e);
         } catch (IResourceStore.ResourceNotFoundException e) {
             throw new NoLogWebApplicationException(e);
+        }
+    }
+
+    private Date getDate(String lastModifiedSince) {
+        try {
+            return dateFormat.parse(lastModifiedSince);
+        } catch (ParseException e) {
+            throw new WebApplicationException(Response.status(Response.Status.BAD_REQUEST)
+                    .entity("Couldn't parse date string: " + e.getMessage())
+
+                    .build());
         }
     }
 

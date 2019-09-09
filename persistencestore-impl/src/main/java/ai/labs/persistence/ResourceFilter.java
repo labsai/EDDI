@@ -11,6 +11,7 @@ import ai.labs.runtime.ThreadContext;
 import ai.labs.serialization.IDocumentBuilder;
 import ai.labs.user.IUserStore;
 import ai.labs.utilities.RuntimeUtilities;
+import com.mongodb.BasicDBObject;
 import com.mongodb.DBObject;
 import com.mongodb.QueryBuilder;
 import com.mongodb.client.FindIterable;
@@ -120,7 +121,7 @@ public class ResourceFilter<T> implements IResourceFilter<T> {
                     Pattern resourcePattern = getPatternForRegex((String) filter);
                     dbObjects.add(new QueryBuilder().put(queryFilter.getField()).regex(resourcePattern).get());
                 } else if (filter instanceof Document) {
-                    dbObjects.add((DBObject) filter);
+                    dbObjects.add(new BasicDBObject((Document) filter));
                 } else {
                     dbObjects.add(new QueryBuilder().put(queryFilter.getField()).is(filter).get());
                 }

@@ -37,7 +37,7 @@ public class CSVExport implements ICSVExport {
     }
 
     @Override
-    public Response export(String botId, Integer index, Integer limit, String apiServerUri, Date lastModifiedSince, Boolean addAnswerTimestamp) throws RestInterfaceFactory.RestInterfaceFactoryException, IResourceStore.ResourceStoreException, IResourceStore.ResourceNotFoundException {
+    public Response export(String botId, Integer index, Integer limit, String apiServerUri, String lastModifiedSince, Boolean addAnswerTimestamp) throws RestInterfaceFactory.RestInterfaceFactoryException, IResourceStore.ResourceStoreException, IResourceStore.ResourceNotFoundException {
         IRestConversationStore restConversationStore = restInterfaceFactory.get(IRestConversationStore.class, apiServerUri);
         StringBuilder ret = new StringBuilder();
 
