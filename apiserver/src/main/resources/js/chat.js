@@ -396,26 +396,30 @@ $(function () {
 
     const checkBotDeployment = function () {
         //check if bot is deployed
-        $.get('/administration/' + eddi.environment + '/deploymentstatus/' + eddi.botId + '?version=' + eddi.botVersion)
-            .done(function (data) {
-                if (data === 'NOT_FOUND') {
-                    if (confirm('Bot is not deployed at the moment.. Deploy latest version NOW?')) {
-                        deployBot(eddi.environment, eddi.botId, eddi.botVersion);
+        if (eddi.environment !== 'unrestricted') {
+            $.get('/administration/' + eddi.environment + '/deploymentstatus/' + eddi.botId + '?version=' + eddi.botVersion)
+                .done(function (data) {
+                    if (data === 'NOT_FOUND') {
+                        if (confirm('Bot is not deployed at the moment.. Deploy latest version NOW?')) {
+                            deployBot(eddi.environment, eddi.botId, eddi.botVersion);
+                        }
                     }
-                }
 
-                if (data === 'ERROR') {
-                    alert('Bot encountered an server error :-(');
-                }
+                    if (data === 'ERROR') {
+                        alert('Bot encountered an server error :-(');
+                    }
 
-                if (data === 'IN_PROGRESS') {
-                    alert('Bot is still warming up...');
-                }
+                    if (data === 'IN_PROGRESS') {
+                        alert('Bot is still warming up...');
+                    }
 
-                if (data === 'READY') {
-                    proceedConversation();
-                }
-            });
+                    if (data === 'READY') {
+                        proceedConversation();
+                    }
+                });
+        } else {
+            proceedConversation();
+        }
     };
 
     eddi.insertContextExample = function () {
@@ -470,10 +474,14 @@ $(function () {
             eddi.botVersion = extractedParams.botVersion;
             checkBotDeployment();
         } else {
-            $.get('/botstore/bots/' + eddi.botId + '/currentversion', function (data) {
-                eddi.botVersion = data;
-                checkBotDeployment();
-            });
+            if (eddi.environment !== "unrestricted") {
+                $.get('/botstore/bots/' + eddi.botId + '/currentversion', function (data) {
+                    eddi.botVersion = data;
+                    checkBotDeployment();
+                });
+            } else {
+                proceedConversation();
+            }
         }
     });
 });
