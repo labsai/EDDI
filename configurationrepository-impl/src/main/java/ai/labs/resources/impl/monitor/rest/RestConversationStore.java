@@ -76,7 +76,7 @@ public class RestConversationStore implements IRestConversationStore {
                 if (!isNullOrEmpty(lastModifiedSince)) {
                     queryFiltersRequired.add(
                             new QueryFilter("lastModifiedOn",
-                                    new Document(new Document("lastModifiedOn", new Document("$gt", getDate(lastModifiedSince))))));
+                                    new Document("$gt", getDate(lastModifiedSince).getTime())));
                 }
 
                 conversationDescriptors = conversationDescriptorStore.

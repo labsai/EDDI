@@ -81,7 +81,7 @@ public class CSVExport implements ICSVExport {
 
             if (!csvMap.isEmpty()) {
                 if (firstIteration) {
-                    wrapInQuotes(retHeader, "timestamp");
+                    wrapInQuotes(retHeader, "datestamp");
                     wrapInQuotes(retHeader, "tic");
                     wrapInQuotes(retHeader, "psID");
                 }
@@ -95,7 +95,7 @@ public class CSVExport implements ICSVExport {
                     if (firstIteration || retHeader.indexOf(key) == -1) {
                         wrapInQuotes(retHeader, key);
                         if (addAnswerTimestamp) {
-                            wrapInQuotes(retHeader, key + "-timestamp");
+                            wrapInQuotes(retHeader, key + "-datestamp");
                         }
                     }
                     Values values = csvMap.get(key);

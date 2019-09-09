@@ -121,7 +121,7 @@ public class ResourceFilter<T> implements IResourceFilter<T> {
                     Pattern resourcePattern = getPatternForRegex((String) filter);
                     dbObjects.add(new QueryBuilder().put(queryFilter.getField()).regex(resourcePattern).get());
                 } else if (filter instanceof Document) {
-                    dbObjects.add(new BasicDBObject((Document) filter));
+                    dbObjects.add(new BasicDBObject(queryFilter.getField(), new BasicDBObject((Document) filter)));
                 } else {
                     dbObjects.add(new QueryBuilder().put(queryFilter.getField()).is(filter).get());
                 }
