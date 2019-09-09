@@ -10,7 +10,7 @@ import javax.ws.rs.core.Response;
 public interface ICSVExport {
     @GET
     @Path("{botId}")
-    Response export(@PathParam("{botId}") String botId,
+    Response export(@PathParam("botId") String botId,
                     @QueryParam("index") @DefaultValue("0") Integer index,
                     @QueryParam("limit") @DefaultValue("20") Integer limit,
                     @QueryParam("apiServerUri") String apiServerUri,
