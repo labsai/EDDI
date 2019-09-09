@@ -20,9 +20,7 @@ import javax.inject.Inject;
 import javax.ws.rs.core.Response;
 import java.text.DateFormat;
 import java.text.SimpleDateFormat;
-import java.util.Date;
-import java.util.LinkedHashMap;
-import java.util.List;
+import java.util.*;
 
 @Slf4j
 public class CSVExport implements ICSVExport {
@@ -50,6 +48,8 @@ public class CSVExport implements ICSVExport {
         List<ConversationDescriptor> conversationDescriptors = restConversationStore.
                 readConversationDescriptors(index, limit, botId, null, null, null, lastModifiedSince);
 
+
+        List<String> csvAvailableHeaderKeys = new LinkedList<>();
         for (ConversationDescriptor conversationDescriptor : conversationDescriptors) {
             String tic = null;
             String psID = null;
@@ -94,17 +94,22 @@ public class CSVExport implements ICSVExport {
                     wrapInQuotes(retValues, tic == null ? "null" : tic);
                     wrapInQuotes(retValues, psID == null ? "null" : psID);
                 }
-                for (String key : csvMap.keySet()) {
+                addNewHeaderKeys(csvAvailableHeaderKeys, csvMap.keySet());
+                for (String key : csvAvailableHeaderKeys) {
                     if (firstIteration || retHeader.indexOf(key) == -1) {
                         wrapInQuotes(retHeader, key);
                         if (addAnswerTimestamp) {
                             wrapInQuotes(retHeader, key + "-datestamp");
                         }
                     }
-                    Values values = csvMap.get(key);
-                    wrapInQuotes(retValues, values.getAnswer());
-                    if (addAnswerTimestamp) {
-                        wrapInQuotes(retValues, dateFormat.format(values.getTimestamp()));
+                    if (csvMap.containsKey(key)) {
+                        Values values = csvMap.get(key);
+                        wrapInQuotes(retValues, values.getAnswer());
+                        if (addAnswerTimestamp) {
+                            wrapInQuotes(retValues, dateFormat.format(values.getTimestamp()));
+                        }
+                    } else {
+                        wrapInQuotes(retValues, "");
                     }
                 }
 
@@ -121,10 +126,14 @@ public class CSVExport implements ICSVExport {
         return Response.ok(ret.toString()).type("text/csv").build();
     }
 
+    private void addNewHeaderKeys(List<String> csvAvailableHeaderKeys, Set<String> keySet) {
+        keySet.stream().
+                filter(key -> !csvAvailableHeaderKeys.contains(key)).
+                forEach(csvAvailableHeaderKeys::add);
+    }
+
     private void wrapInQuotes(StringBuilder stringBuilder, Object obj) {
-        if (!obj.toString().isEmpty()) {
-            stringBuilder.append("\"").append(obj).append("\",");
-        }
+        stringBuilder.append("\"").append(obj).append("\",");
     }
 
     @NoArgsConstructor
