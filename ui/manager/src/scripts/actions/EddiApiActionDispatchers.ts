@@ -208,12 +208,14 @@ export interface IEddiApiActionDispatchers extends ActionCreatorsMapObject {
   fetchConversationsAction: (
     limit,
     index,
-    resource,
+    conversationId,
+    botResource,
   ) => IFetchConversationsAction;
   fetchConversationsSuccessAction: (
     limit,
     index,
-    resource,
+    conversationId,
+    botResource,
     conversations,
   ) => IFetchConversationsSuccessAction;
   fetchConversationsFailedAction: (error) => IFetchConversationsFailedAction;

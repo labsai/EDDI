@@ -53,6 +53,7 @@ class BotOptions extends React.Component<IProps> {
                 eddiApiActionDispatchers.fetchConversationsAction(
                   20,
                   0,
+                  null,
                   this.props.bot.resource,
                 );
                 modalActionDispatchers.showConversationsModal(this.props.bot);

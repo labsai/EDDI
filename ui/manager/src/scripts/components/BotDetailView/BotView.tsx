@@ -61,6 +61,7 @@ class BotView extends React.Component<IProps, IState> {
     eddiApiActionDispatchers.fetchConversationsAction(
       20,
       0,
+      null,
       this.props.bot.resource,
     );
     modalActionDispatchers.showConversationsModal(this.props.bot);

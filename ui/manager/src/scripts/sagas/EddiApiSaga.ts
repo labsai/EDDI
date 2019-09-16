@@ -741,13 +741,15 @@ export function* fetchConversations(
       getConversations,
       action.limit,
       action.index,
-      action.resource,
+      action.conversationId,
+      action.botResource,
     );
     yield put(
       fetchConversationsSuccessAction(
         action.limit,
         action.index,
-        action.resource,
+        action.conversationId,
+        action.botResource,
         conversations,
       ),
     );

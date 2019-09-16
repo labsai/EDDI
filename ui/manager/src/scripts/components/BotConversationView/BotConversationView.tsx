@@ -19,6 +19,8 @@ import {
   CONVERSATION_READY,
 } from '../utils/helpers/ConversationHelper';
 import modalActionDispatchers from '../../actions/ModalActionDispatchers';
+import { ClipLoader } from 'react-spinners';
+import { BLUE_COLOR } from '../../../styles/DefaultStylingProperties';
 
 interface IPrivateProps {
   conversationId: string;
@@ -49,6 +51,13 @@ class BotConversationView extends React.Component<IPublicProps, IState> {
   componentDidMount() {
     if (this.props.conversation) {
       this.fetchConversation();
+    } else {
+      eddiApiActionDispatchers.fetchConversationsAction(
+        1,
+        0,
+        this.props.conversationId,
+        null,
+      );
     }
   }
 
@@ -82,114 +91,133 @@ class BotConversationView extends React.Component<IPublicProps, IState> {
     return (
       <div style={styles.content}>
         <HomeButtonComponent extraPath={'conversations'} />
-        <div style={styles.header}>
-          <div style={styles.topHeader}>
-            <div
-              style={styles.botName}
-              onClick={() =>
-                historyPush(
-                  `/botview/${Parser.getId(conversation.botResource)}`,
-                  [`version=${Parser.getVersion(conversation.botResource)}`],
-                )
-              }>
-              {conversation.botName}
-            </div>
-            <div style={styles.botVersion}>{`V${Parser.getVersion(
-              conversation.botResource,
-            )}`}</div>
-            {renderIf(conversation.conversationState === CONVERSATION_READY)(
-              () => (
+        {renderIf(this.props.isLoading && !conversation)(() => (
+          <div style={styles.loadingWrapper}>
+            <ClipLoader color={BLUE_COLOR} />
+          </div>
+        ))}
+        {renderIf(conversation)(() => (
+          <div>
+            <div style={styles.header}>
+              <div style={styles.topHeader}>
+                <div
+                  style={styles.botName}
+                  onClick={() =>
+                    historyPush(
+                      `/botview/${Parser.getId(conversation.botResource)}`,
+                      [
+                        `version=${Parser.getVersion(
+                          conversation.botResource,
+                        )}`,
+                      ],
+                    )
+                  }>
+                  {conversation.botName}
+                </div>
+                <div style={styles.botVersion}>{`V${Parser.getVersion(
+                  conversation.botResource,
+                )}`}</div>
                 <WhiteButton
                   text={'End Conversation'}
                   customStyles={styles.endConversationButton}
+                  disabled={
+                    conversation.conversationState !== CONVERSATION_READY
+                  }
                   onClick={this.endConversation}
                 />
-              ),
-            )}
-          </div>
-          <div style={styles.bottomHeader}>
-            <div style={styles.descriptor}>
-              <div style={styles.title}>{'Environment'}</div>
-              <div style={styles.descriptorContent}>
-                {conversation.environment}
               </div>
-            </div>
-            <div style={styles.descriptor}>
-              <div style={styles.title}>{'Conversation state'}</div>
-              <div style={styles.descriptorContent}>
-                {conversation.conversationState}
-              </div>
-            </div>
-            <div style={styles.descriptor}>
-              <div style={styles.title}>{'Last message'}</div>
-              <div style={styles.descriptorContent}>
-                {moment(conversation.lastModifiedOn).fromNow()}
-              </div>
-            </div>
-            <div style={styles.descriptor}>
-              <div style={styles.title}>{'Created on'}</div>
-              <div style={styles.descriptorContent}>
-                {moment(conversation.createdOn).format('DD.MM.YYYY')}
-              </div>
-            </div>
-            <div style={styles.descriptor}>
-              <div style={styles.title}>{'User id'}</div>
-              {renderIf(conversation.data)(() => (
-                <div style={styles.descriptorContent}>
-                  {conversation.data.userId}
+              <div style={styles.bottomHeader}>
+                <div style={styles.descriptor}>
+                  <div style={styles.title}>{'Environment'}</div>
+                  <div style={styles.descriptorContent}>
+                    {conversation.environment}
+                  </div>
                 </div>
-              ))}
-            </div>
-          </div>
-        </div>
-        <div style={styles.tabs}>
-          <div
-            style={
-              this.state.selectedTab === TabEnum.conversationSteps
-                ? styles.tab
-                : { ...styles.tab, ...styles.tabDisabled }
-            }
-            onClick={() =>
-              this.setState({ selectedTab: TabEnum.conversationSteps })
-            }>
-            {'Conversation'}
-          </div>
-          <div
-            style={
-              this.state.selectedTab === TabEnum.json
-                ? styles.tab
-                : { ...styles.tab, ...styles.tabDisabled }
-            }
-            onClick={() => this.setState({ selectedTab: TabEnum.json })}>
-            {'Raw JSON'}
-          </div>
-        </div>
-        {renderIf(conversation.data)(() => (
-          <div>
-            {renderIf(this.state.selectedTab === TabEnum.conversationSteps)(
-              () => (
-                <div>
-                  <ConversationProperties
-                    conversationProperties={
-                      conversation.data.conversationProperties
-                    }
-                  />
-                  <ConversationSteps
-                    conversationSteps={conversation.data.conversationSteps}
-                    conversationOutputs={conversation.data.conversationOutputs}
-                  />
+                <div style={styles.descriptor}>
+                  <div style={styles.title}>{'Conversation state'}</div>
+                  <div style={styles.descriptorContent}>
+                    {conversation.conversationState}
+                  </div>
                 </div>
-              ),
-            )}
-            {renderIf(this.state.selectedTab === TabEnum.json)(() => (
-              <ReactJson
-                style={styles.rjv}
-                src={conversation.data}
-                theme={'monokai'}
-                collapsed={2}
-                displayDataTypes={false}
-                enableClipboard={false}
-              />
+                <div style={styles.descriptor}>
+                  <div style={styles.title}>{'Last message'}</div>
+                  <div style={styles.descriptorContent}>
+                    {moment(conversation.lastModifiedOn).fromNow()}
+                  </div>
+                </div>
+                <div style={styles.descriptor}>
+                  <div style={styles.title}>{'Created on'}</div>
+                  <div style={styles.descriptorContent}>
+                    {moment(conversation.createdOn).format('DD.MM.YYYY')}
+                  </div>
+                </div>
+                <div style={styles.descriptor}>
+                  <div style={styles.title}>{'User id'}</div>
+                  {renderIf(conversation.data)(() => (
+                    <div style={styles.descriptorContent}>
+                      {conversation.data.userId}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </div>
+            <div style={styles.tabs}>
+              <div
+                style={
+                  this.state.selectedTab === TabEnum.conversationSteps
+                    ? styles.tab
+                    : { ...styles.tab, ...styles.tabDisabled }
+                }
+                onClick={() =>
+                  this.setState({ selectedTab: TabEnum.conversationSteps })
+                }>
+                {'Conversation'}
+              </div>
+              <div
+                style={
+                  this.state.selectedTab === TabEnum.json
+                    ? styles.tab
+                    : { ...styles.tab, ...styles.tabDisabled }
+                }
+                onClick={() => this.setState({ selectedTab: TabEnum.json })}>
+                {'Raw JSON'}
+              </div>
+            </div>
+            {renderIf(!conversation.data)(() => (
+              <div style={styles.loadingWrapper}>
+                <ClipLoader color={BLUE_COLOR} />
+              </div>
+            ))}
+            {renderIf(conversation.data)(() => (
+              <div>
+                {renderIf(this.state.selectedTab === TabEnum.conversationSteps)(
+                  () => (
+                    <div>
+                      <ConversationProperties
+                        conversationProperties={
+                          conversation.data.conversationProperties
+                        }
+                      />
+                      <ConversationSteps
+                        conversationSteps={conversation.data.conversationSteps}
+                        conversationOutputs={
+                          conversation.data.conversationOutputs
+                        }
+                      />
+                    </div>
+                  ),
+                )}
+                {renderIf(this.state.selectedTab === TabEnum.json)(() => (
+                  <ReactJson
+                    style={styles.rjv}
+                    src={conversation.data}
+                    theme={'monokai'}
+                    collapsed={2}
+                    displayDataTypes={false}
+                    enableClipboard={false}
+                  />
+                ))}
+              </div>
             ))}
           </div>
         ))}

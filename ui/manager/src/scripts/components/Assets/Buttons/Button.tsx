@@ -27,6 +27,7 @@ function getButtonStyling(props: IProps) {
       ...props.styles.button,
       ...props.customStyles,
       ...props.styles.disabled,
+      ...props.customStyles.disabled,
     };
   } else {
     return {
@@ -41,7 +42,7 @@ interface IProps {
   text: string;
   disabled: boolean;
   styles: { button; disabled; active };
-  customStyles: {};
+  customStyles: CSSProperties;
   onClick(): void;
 }
 

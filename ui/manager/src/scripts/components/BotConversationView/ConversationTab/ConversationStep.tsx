@@ -1,13 +1,8 @@
 import * as React from 'react';
 import { Component, compose, pure, setDisplayName } from 'recompose';
-import { connect } from 'react-redux';
 import styles from './ConversationStep.styles';
-import * as test from '../test.json';
-import eddiApiActionDispatchers from '../../../actions/EddiApiActionDispatchers';
-import { CONVERSATION, CONVERSATION_PATH } from '../../utils/EddiTypes';
 import {
   IAction,
-  IConversation,
   IConversationOutput,
   IConversationStep,
   IConversationSteps,
@@ -15,7 +10,6 @@ import {
   IOutput,
   IQuickReplies,
 } from '../../utils/AxiosFunctions';
-import { conversationSelector } from '../../../selectors/ConversationSelectors';
 import * as renderIf from 'render-if';
 import ReactJson from 'react-json-view';
 import * as Radium from 'radium';
@@ -24,9 +18,10 @@ import {
   LIGHT_GREY_COLOR,
   ORANGE_COLOR,
   RED_COLOR,
-  YELLOW_COLOR,
 } from '../../../../styles/DefaultStylingProperties';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
+import { isNumber } from 'util';
+import ConversationHelper from '../../utils/helpers/ConversationHelper';
 
 interface IProps {
   conversationStep: IConversationSteps;
@@ -60,75 +55,14 @@ class ConversationStep extends React.Component<IProps, IState> {
   }
 
   componentDidMount() {
-    const action = this.getAction();
-    const input = this.getInput();
-    const output = this.getOutput();
-    const quickReplies = this.getQuickReplies();
-    const timeSpan = this.getTimespan();
+    const conversationStep: IConversationStep[] = this.props.conversationStep
+      .conversationStep;
+    const action = ConversationHelper.getAction(conversationStep);
+    const input = ConversationHelper.getInput(conversationStep);
+    const output = ConversationHelper.getOutput(conversationStep);
+    const quickReplies = ConversationHelper.getQuickReplies(conversationStep);
+    const timeSpan = ConversationHelper.getTimespan(conversationStep);
     this.setState({ action, input, output, quickReplies, timeSpan });
-  }
-
-  getInput() {
-    const lifecycleTasks = this.props.conversationStep.conversationStep;
-    const inputTask = lifecycleTasks.find(lifecycleTask =>
-      lifecycleTask.key.includes('input'),
-    );
-    if (inputTask) {
-      return (inputTask as IInput).value;
-    }
-  }
-
-  getOutput() {
-    const lifecycleTasks = this.props.conversationStep.conversationStep;
-    let i = lifecycleTasks.findIndex(lifecycleTask =>
-      lifecycleTask.key.includes('output'),
-    );
-    const outputs = [];
-    if (i < 0) {
-      return;
-    }
-    outputs.push((lifecycleTasks[i] as IOutput).value);
-    if (!parseInt(lifecycleTasks[0].key.split(/[:]+/).pop(), 10)) {
-      return outputs;
-    }
-    i++;
-    while (parseInt(lifecycleTasks[i].key.split(/[:]+/).pop(), 10)) {
-      outputs.push((lifecycleTasks[i] as IOutput).value);
-      i++;
-    }
-    return outputs;
-  }
-
-  getQuickReplies() {
-    const lifecycleTasks = this.props.conversationStep.conversationStep;
-    const quickRepliesTask = lifecycleTasks.find(lifecycleTask =>
-      lifecycleTask.key.includes('quickReplies'),
-    );
-    if (quickRepliesTask) {
-      return (quickRepliesTask as IQuickReplies).value.map(
-        quickReply => quickReply.value,
-      );
-    }
-  }
-
-  getTimespan() {
-    const lifecycleTasks = this.props.conversationStep.conversationStep;
-    let firstLifecycleTaskIndex = lifecycleTasks.findIndex(
-      lifecycleTask => !lifecycleTask.key.includes('properties'),
-    );
-    if (lifecycleTasks.length - firstLifecycleTaskIndex < 2) {
-      return;
-    }
-    const timeSpan =
-      lifecycleTasks[lifecycleTasks.length - 1].timestamp -
-      lifecycleTasks[firstLifecycleTaskIndex].timestamp;
-    return timeSpan;
-  }
-
-  convertTimespan(timeSpan: number) {
-    return timeSpan > 999
-      ? `${(timeSpan / 1000).toFixed(2)}s`
-      : `${timeSpan}ms`;
   }
 
   getTimeColor(timeSpan: number) {
@@ -142,17 +76,6 @@ class ConversationStep extends React.Component<IProps, IState> {
       return { ...styles.timeSpan, color: DARK_YELLOW_COLOR };
     }
     return styles.timeSpan;
-  }
-
-  getAction() {
-    const lifecycleTasks = this.props.conversationStep.conversationStep;
-    let actionTask = lifecycleTasks.find(lifecycleTask =>
-      lifecycleTask.key.includes('actions'),
-    );
-    if (!actionTask) {
-      return;
-    }
-    return (actionTask as IAction).value;
   }
 
   expand() {
@@ -218,7 +141,9 @@ class ConversationStep extends React.Component<IProps, IState> {
               <div
                 style={this.getTimeColor(
                   this.state.timeSpan,
-                )}>{`${this.convertTimespan(this.state.timeSpan)}`}</div>
+                )}>{`${ConversationHelper.convertTimespan(
+                this.state.timeSpan,
+              )}`}</div>
             </div>
           </div>
           {renderIf(this.state.expanded)(() => (

@@ -1043,15 +1043,18 @@ export interface IConversationProperty {
 export async function getConversations(
   limit: number,
   index: number,
-  resource = '',
+  conversationId = '',
+  botResource = '',
 ) {
   try {
     const res: IResponse = await axios.get(
       `${await getAPIUrl()}/conversationstore/conversations?limit=${limit}&index=${index}${
-        _.isEmpty(resource)
+        _.isEmpty(conversationId) ? '' : `&conversationId=${conversationId}`
+      }${
+        _.isEmpty(botResource)
           ? ''
-          : `&botId=${Parser.getId(resource)}&botVersion=${Parser.getVersion(
-              resource,
+          : `&botId=${Parser.getId(botResource)}&botVersion=${Parser.getVersion(
+              botResource,
             )}`
       }`,
     );

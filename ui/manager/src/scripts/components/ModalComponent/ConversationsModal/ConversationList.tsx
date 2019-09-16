@@ -49,6 +49,7 @@ class ConversationList extends React.Component<IPrivateProps, IState> {
       eddiApiActionDispatchers.fetchConversationsAction(
         DEFAULT_LIMIT,
         0,
+        null,
         nextProps.botResource,
       );
       this.setState({ loading: true });
@@ -59,7 +60,6 @@ class ConversationList extends React.Component<IPrivateProps, IState> {
     const fetchIndex = Math.floor(
       this.props.conversationsLoaded / DEFAULT_LIMIT,
     );
-    console.log('Fetchindex: ' + fetchIndex);
     if (this.state.loading || _.isEmpty(this.props.conversations)) {
       return;
     }
@@ -67,6 +67,7 @@ class ConversationList extends React.Component<IPrivateProps, IState> {
     eddiApiActionDispatchers.fetchConversationsAction(
       DEFAULT_LIMIT,
       fetchIndex,
+      null,
       this.props.botResource,
     );
   };

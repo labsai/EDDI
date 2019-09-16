@@ -7,6 +7,8 @@ import {
   LARGE_FONT3,
   LIGHT_BLUE_COLOR,
   LIGHT_BLUE_COLOR2,
+  LIGHT_GREY_BORDER,
+  LIGHT_GREY_COLOR,
   LIGHT_GREY_COLOR2,
   LIGHT_GREY_COLOR3,
   MEDIUM_FONT,
@@ -92,6 +94,16 @@ const styles: CSSProperties = {
     border: `1px solid ${RED_COLOR}`,
     width: '150px',
     marginLeft: 'auto',
+    disabled: {
+      border: LIGHT_GREY_BORDER,
+    },
+  },
+  loadingWrapper: {
+    alignItems: 'center',
+    display: 'flex',
+    flex: 1,
+    height: '500px',
+    justifyContent: 'center',
   },
 };
 export default styles;

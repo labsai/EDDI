@@ -76,11 +76,12 @@ class ConversationList extends React.Component<IPrivateProps, IState> {
       this.props.conversations.length < limit &&
       !this.props.allConversationsLoaded
     ) {
-      eddiApiActionDispatchers.fetchConversationsAction(limit, 0, null);
+      eddiApiActionDispatchers.fetchConversationsAction(limit, 0, null, null);
     } else {
       eddiApiActionDispatchers.fetchConversationsAction(
         limit,
         Math.floor(this.props.conversationsLoaded / limit),
+        null,
         null,
       );
     }

@@ -1307,18 +1307,21 @@ export function duplicateFailedAction(error: Error): IDuplicateFailedAction {
 export interface IFetchConversationsAction extends Action {
   limit: number;
   index: number;
-  resource: string;
+  conversationId: string;
+  botResource: string;
 }
 
 export function fetchConversationsAction(
   limit: number,
   index: number,
-  resource: string,
+  conversationId: string,
+  botResource: string,
 ): IFetchConversationsAction {
   return {
     limit,
     index,
-    resource,
+    conversationId,
+    botResource,
     type: FETCH_CONVERSATIONS,
   };
 }
@@ -1326,20 +1329,23 @@ export function fetchConversationsAction(
 export interface IFetchConversationsSuccessAction extends Action {
   limit: number;
   index: number;
-  resource: string;
+  conversationId: string;
+  botResource: string;
   conversations: IConversation[];
 }
 
 export function fetchConversationsSuccessAction(
   limit: number,
   index: number,
-  resource: string,
+  conversationId: string,
+  botResource: string,
   conversations: IConversation[],
 ): IFetchConversationsSuccessAction {
   return {
     limit,
     index,
-    resource,
+    conversationId,
+    botResource,
     conversations,
     type: FETCH_CONVERSATIONS_SUCCESS,
   };
