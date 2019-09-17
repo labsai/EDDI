@@ -1,22 +1,16 @@
 import { CSSProperties } from 'react';
 import {
-  BLUE_COLOR,
+  BLUE_COLOR2,
   DARK_BLUE_COLOR,
   GREY_COLOR,
-  LARGE_FONT,
   LARGE_FONT3,
-  LIGHT_BLUE_COLOR,
   LIGHT_BLUE_COLOR2,
   LIGHT_GREY_BORDER,
-  LIGHT_GREY_COLOR,
   LIGHT_GREY_COLOR2,
   LIGHT_GREY_COLOR3,
-  MEDIUM_FONT,
   MEDIUM_FONT2,
   RED_COLOR,
-  SMALL_FONT,
   SMALL_FONT2,
-  WHITE_COLOR,
 } from '../../../styles/DefaultStylingProperties';
 
 const styles: CSSProperties = {
@@ -32,7 +26,7 @@ const styles: CSSProperties = {
       backgroundColor: LIGHT_GREY_COLOR3,
       borderBottom: `3px solid ${GREY_COLOR}`,
     },
-    borderBottom: '3px solid #4A90E2',
+    borderBottom: `3px solid ${BLUE_COLOR2}`,
     color: DARK_BLUE_COLOR,
     cursor: 'pointer',
     display: 'inline-block',

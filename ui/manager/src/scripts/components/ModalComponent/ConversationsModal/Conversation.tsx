@@ -14,46 +14,38 @@ interface IProps {
   conversation: IConversation;
 }
 
-class Conversation extends React.Component<IProps> {
-  render() {
-    return (
-      <div
-        style={styles.conversation}
-        onClick={() =>
-          historyPush(
-            `/conversationview/${Parser.getId(
-              this.props.conversation.resource,
-            )}`,
-          )
-        }>
-        <div style={styles.conversationName}>
-          {this.props.conversation.botName}
-        </div>
-        <div style={styles.conversationVersion}>{`V${Parser.getVersion(
-          this.props.conversation.botResource,
-        )}`}</div>
-        <div style={styles.centerFlex} />
-        <div style={styles.conversationStepSizeContainer}>
-          <div style={styles.conversationStepSize}>
-            {this.props.conversation.conversationStepSize}
-          </div>
-        </div>
-        <div style={styles.environment}>
-          {this.props.conversation.environment}
-        </div>
-        <div style={styles.conversationState}>
-          {this.props.conversation.conversationState}
-        </div>
-        <div style={styles.lastModifiedOn}>
-          {moment(this.props.conversation.lastModifiedOn).fromNow()}
-        </div>
-        <div style={styles.createdOn}>
-          {moment(this.props.conversation.createdOn).format('DD.MM.YYYY')}
+const Conversation: React.StatelessComponent<IProps> = (props: IProps) => {
+  return (
+    <div
+      style={styles.conversation}
+      onClick={() =>
+        historyPush(
+          `/conversationview/${Parser.getId(props.conversation.resource)}`,
+        )
+      }>
+      <div style={styles.conversationName}>{props.conversation.botName}</div>
+      <div style={styles.conversationVersion}>{`V${Parser.getVersion(
+        props.conversation.botResource,
+      )}`}</div>
+      <div style={styles.centerFlex} />
+      <div style={styles.conversationStepSizeContainer}>
+        <div style={styles.conversationStepSize}>
+          {props.conversation.conversationStepSize}
         </div>
       </div>
-    );
-  }
-}
+      <div style={styles.environment}>{props.conversation.environment}</div>
+      <div style={styles.conversationState}>
+        {props.conversation.conversationState}
+      </div>
+      <div style={styles.lastModifiedOn}>
+        {moment(props.conversation.lastModifiedOn).fromNow()}
+      </div>
+      <div style={styles.createdOn}>
+        {moment(props.conversation.createdOn).format('DD.MM.YYYY')}
+      </div>
+    </div>
+  );
+};
 
 const ComposedConversation: Component<IProps> = compose<IProps>(
   pure,

@@ -5,6 +5,7 @@ import {
   DARK_BLUE_COLOR,
   GREY_BORDER,
   GREY_COLOR,
+  GREY_COLOR3,
   LARGE_FONT3,
   LIGHT_BLUE_COLOR,
   LIGHT_BLUE_COLOR2,
@@ -18,10 +19,6 @@ import {
 } from '../../../../styles/DefaultStylingProperties';
 
 const styles: CSSProperties = {
-  title: {
-    textAlign: 'center',
-    border: '1px solid red',
-  },
   content: {
     ':hover': {
       backgroundColor: LIGHT_GREY_COLOR2,
@@ -46,7 +43,7 @@ const styles: CSSProperties = {
     display: 'flex',
   },
   quickReply: {
-    backgroundColor: '#7194c9',
+    backgroundColor: GREY_COLOR3,
     borderRadius: '18px',
     color: WHITE_COLOR,
     width: 'fit-content',

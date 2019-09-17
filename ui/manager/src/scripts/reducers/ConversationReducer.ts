@@ -5,6 +5,7 @@ import * as update from 'immutability-helper';
 import {
   END_CONVERSATION_SUCCESS,
   FETCH_CONVERSATION,
+  FETCH_CONVERSATION_FAILED,
   FETCH_CONVERSATION_SUCCESS,
   FETCH_CONVERSATIONS,
   FETCH_CONVERSATIONS_FAILED,
@@ -14,6 +15,7 @@ import {
   IEndConversationSuccessAction,
   IFetchBotDataSuccessAction,
   IFetchBotsSuccessAction,
+  IFetchConversationFailedAction,
   IFetchConversationsFailedAction,
   IFetchConversationsSuccessAction,
   IFetchConversationSuccessAction,
@@ -115,13 +117,13 @@ const ConversationReducer: IConversationReducer = (
         },
       });
 
-    case FETCH_CONVERSATIONS_FAILED:
+    case FETCH_CONVERSATION_FAILED:
       return update(state, {
         isLoadingConversation: {
           $set: false,
         },
         error: {
-          $set: (action as IFetchConversationsFailedAction).error,
+          $set: (action as IFetchConversationFailedAction).error,
         },
       });
 
