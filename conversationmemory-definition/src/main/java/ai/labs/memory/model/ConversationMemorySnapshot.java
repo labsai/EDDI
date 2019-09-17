@@ -4,6 +4,9 @@ package ai.labs.memory.model;
 import ai.labs.models.ConversationState;
 import ai.labs.models.Deployment;
 import ai.labs.models.Property;
+import ai.labs.persistence.serialization.Id;
+import com.fasterxml.jackson.annotation.JsonIgnore;
+import com.fasterxml.jackson.annotation.JsonProperty;
 import lombok.*;
 
 import java.util.*;
@@ -33,7 +36,6 @@ public class ConversationMemorySnapshot {
         ConversationMemorySnapshot that = (ConversationMemorySnapshot) o;
 
         return Objects.equals(conversationSteps, that.conversationSteps);
-
     }
 
     @Override
@@ -43,6 +45,28 @@ public class ConversationMemorySnapshot {
 
     public Map<String, Property> getConversationProperties() {
         return conversationProperties;
+    }
+
+    @JsonProperty("_id")
+    @Id
+    public String getId() {
+        return conversationId;
+    }
+
+    @JsonProperty("_id")
+    @Id
+    public void setId(String conversationId) {
+        this.conversationId = conversationId;
+    }
+
+    @JsonIgnore
+    public String getConversationId() {
+        return conversationId;
+    }
+
+    @JsonIgnore
+    public void setConversationId(String conversationId) {
+        this.conversationId = conversationId;
     }
 
     @Getter
