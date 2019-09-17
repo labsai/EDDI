@@ -80,7 +80,7 @@ const styles: CSSProperties = {
     padding: '2px 5px',
     border: DARK_BLUE_BORDER,
     lineHeight: '16px',
-    width: 'fit-content',
+    display: 'table',
     marginLeft: 'auto',
     marginRight: 'auto',
   },
