@@ -26,35 +26,20 @@ interface IProps {
   conversationOutputs: IConversationOutput[];
 }
 
-interface IState {
-  expanded: boolean;
-}
-
-class ConversationSteps extends React.Component<IProps, IState> {
+class ConversationSteps extends React.Component<IProps> {
   constructor(props) {
     super(props);
-    this.state = {
-      expanded: true,
-    };
-  }
-
-  expand() {
-    this.setState({ expanded: !this.state.expanded });
   }
 
   render() {
     return (
       <div>
-        {renderIf(this.state.expanded)(() => (
-          <div>
-            {this.props.conversationSteps.map((conversationStep, i) => (
-              <ConversationStep
-                key={i}
-                conversationStep={conversationStep}
-                conversationOutput={this.props.conversationOutputs[i]}
-              />
-            ))}
-          </div>
+        {this.props.conversationSteps.map((conversationStep, i) => (
+          <ConversationStep
+            key={i}
+            conversationStep={conversationStep}
+            conversationOutput={this.props.conversationOutputs[i]}
+          />
         ))}
       </div>
     );

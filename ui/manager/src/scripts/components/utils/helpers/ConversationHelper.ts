@@ -1,12 +1,10 @@
 import {
   IAction,
   IConversationStep,
-  IConversationSteps,
   IInput,
   IOutput,
   IQuickReplies,
 } from '../AxiosFunctions';
-import { isNumber } from 'util';
 
 export const CONVERSATION_READY = 'READY';
 export const CONVERSATION_ENDED = 'ENDED';
@@ -38,7 +36,7 @@ export default class ConversationHelper {
     }
     output.push((conversationStep[i] as IOutput).value);
 
-    if (!isNumber(parseInt(conversationStep[i].key.split(/[:]+/).pop(), 10))) {
+    if (isNaN(parseInt(conversationStep[i].key.split(/[:]+/).pop(), 10))) {
       return output;
     } else {
       i++;
