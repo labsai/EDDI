@@ -6,4 +6,5 @@ export enum pageEnum {
   'property',
   'bot',
   'package',
+  'conversation',
 }

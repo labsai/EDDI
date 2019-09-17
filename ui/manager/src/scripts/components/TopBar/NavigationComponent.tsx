@@ -47,6 +47,7 @@ interface IProps {
 const NavigationComponent = (props: IProps) => (
   <div style={styles.navBar}>
     <div
+      key={'bots'}
       onClick={() => historyPush('/')}
       style={
         props.page === pageEnum.bot
@@ -64,6 +65,16 @@ const NavigationComponent = (props: IProps) => (
           : [styles.navBarItem, styles.navBarItemDisabled]
       }>
       <div>{'Packages'}</div>
+    </div>
+    <div
+      key={'conversations'}
+      onClick={() => historyPush('/conversations')}
+      style={
+        props.page === pageEnum.conversation
+          ? styles.navBarItem
+          : [styles.navBarItem, styles.navBarItemDisabled]
+      }>
+      {'Conversations'}
     </div>
     <PluginSelectComponent page={props.page} />
   </div>

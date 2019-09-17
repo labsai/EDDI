@@ -11,9 +11,18 @@ import {
   IPluginState,
   default as PluginReducer,
 } from './PluginReducer';
+import {
+  default as ConversationReducer,
+  IConversationReducer,
+  IConversationState,
+} from './ConversationReducer';
 
 interface IBotNameSpace<T> {
   botState: T;
+}
+
+interface IConversationNameSpace<T> {
+  conversationState: T;
 }
 
 interface ISystemNameSpace<T> {
@@ -34,6 +43,7 @@ interface IModalNameSpace<T> {
 
 export interface IAppState
   extends IBotNameSpace<IBotState>,
+    IConversationNameSpace<IConversationState>,
     ISystemNameSpace<ISystemState>,
     IPackageNameSpace<IPackageState>,
     IPluginNameSpace<IPluginState>,
@@ -42,6 +52,7 @@ export interface IAppState
 interface IReducers
   extends ReducersMapObject,
     IBotNameSpace<IBotReducer>,
+    IConversationNameSpace<IConversationReducer>,
     ISystemNameSpace<ISystemReducer>,
     IPackageNameSpace<IPackageReducer>,
     IPluginNameSpace<IPluginReducer>,
@@ -49,6 +60,7 @@ interface IReducers
 
 const reducers: IReducers = {
   botState: BotReducer,
+  conversationState: ConversationReducer,
   packageState: PackageReducer,
   pluginState: PluginReducer,
   systemState: SystemReducer,

@@ -86,10 +86,21 @@ import {
   DUPLICATE,
   DUPLICATE_SUCCESS,
   DUPLICATE_FAILED,
+  FETCH_CONVERSATIONS,
+  FETCH_CONVERSATIONS_SUCCESS,
+  FETCH_CONVERSATIONS_FAILED,
+  FETCH_CONVERSATION,
+  FETCH_CONVERSATION_SUCCESS,
+  FETCH_CONVERSATION_FAILED,
+  END_CONVERSATION,
+  END_CONVERSATION_SUCCESS,
+  END_CONVERSATION_FAILED,
 } from './EddiApiActionTypes';
 import {
   IBot,
   IBotData,
+  IConversation,
+  IConversationData,
   IDefaultPluginTypes,
   IEddiSchema,
   IPackage,
@@ -1290,5 +1301,152 @@ export function duplicateFailedAction(error: Error): IDuplicateFailedAction {
   return {
     error,
     type: DUPLICATE_FAILED,
+  };
+}
+
+export interface IFetchConversationsAction extends Action {
+  limit: number;
+  index: number;
+  conversationId: string;
+  botResource: string;
+}
+
+export function fetchConversationsAction(
+  limit: number,
+  index: number,
+  conversationId: string,
+  botResource: string,
+): IFetchConversationsAction {
+  return {
+    limit,
+    index,
+    conversationId,
+    botResource,
+    type: FETCH_CONVERSATIONS,
+  };
+}
+
+export interface IFetchConversationsSuccessAction extends Action {
+  limit: number;
+  index: number;
+  conversationId: string;
+  botResource: string;
+  conversations: IConversation[];
+}
+
+export function fetchConversationsSuccessAction(
+  limit: number,
+  index: number,
+  conversationId: string,
+  botResource: string,
+  conversations: IConversation[],
+): IFetchConversationsSuccessAction {
+  return {
+    limit,
+    index,
+    conversationId,
+    botResource,
+    conversations,
+    type: FETCH_CONVERSATIONS_SUCCESS,
+  };
+}
+
+export interface IFetchConversationsFailedAction extends Action {
+  error: Error;
+}
+
+export function fetchConversationsFailedAction(
+  error: Error,
+): IFetchConversationsFailedAction {
+  return {
+    error,
+    type: FETCH_CONVERSATIONS_FAILED,
+  };
+}
+
+export interface IFetchConversationAction extends Action {
+  environment: string;
+  botId: string;
+  conversationId: string;
+}
+
+export function fetchConversationAction(
+  environment: string,
+  botId: string,
+  conversationId: string,
+): IFetchConversationAction {
+  return {
+    environment,
+    botId,
+    conversationId,
+    type: FETCH_CONVERSATION,
+  };
+}
+
+export interface IFetchConversationSuccessAction extends Action {
+  conversationId: string;
+  conversation: IConversationData;
+}
+
+export function fetchConversationSuccessAction(
+  conversationId: string,
+  conversation: IConversationData,
+): IFetchConversationSuccessAction {
+  return {
+    conversationId,
+    conversation,
+    type: FETCH_CONVERSATION_SUCCESS,
+  };
+}
+
+export interface IFetchConversationFailedAction extends Action {
+  error: Error;
+}
+
+export function fetchConversationFailedAction(
+  error: Error,
+): IFetchConversationFailedAction {
+  return {
+    error,
+    type: FETCH_CONVERSATION_FAILED,
+  };
+}
+
+export interface IEndConversationAction extends Action {
+  conversationId: string;
+}
+
+export function endConversationAction(
+  conversationId: string,
+): IEndConversationAction {
+  return {
+    conversationId,
+    type: END_CONVERSATION,
+  };
+}
+
+export interface IEndConversationSuccessAction extends Action {
+  conversationId: string;
+}
+
+export function endConversationSuccessAction(
+  conversationId,
+): IEndConversationSuccessAction {
+  return {
+    conversationId,
+    type: END_CONVERSATION_SUCCESS,
+  };
+}
+
+export interface IEndConversationFailedAction extends Action {
+  error: Error;
+}
+
+export function endConversationFailedAction(
+  error: Error,
+): IEndConversationFailedAction {
+  return {
+    error,
+    type: END_CONVERSATION_FAILED,
   };
 }

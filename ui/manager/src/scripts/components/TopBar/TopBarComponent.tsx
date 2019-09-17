@@ -7,6 +7,7 @@ import { Link } from 'react-router-dom';
 import { ModalEnum } from '../utils/ModalEnum';
 import BlueButton from '../Assets/Buttons/BlueButton';
 import { pageEnum } from '../pages/pageEnum';
+import * as renderIf from 'render-if';
 
 const styles: CSSProperties = {
   createNewBotButton: {
@@ -33,10 +34,6 @@ interface IProps {
 }
 
 class TopBarComponent extends React.Component<IProps> {
-  constructor(props) {
-    super(props);
-  }
-
   openModal = () => {
     switch (this.props.page) {
       case pageEnum.bot:
@@ -65,12 +62,14 @@ class TopBarComponent extends React.Component<IProps> {
         <NavigationComponent page={this.props.page} />
         <div style={styles.topBarCenter} />
         <FilterComponent page={this.props.page} filter={this.props.filter} />
-        <BlueButton
-          text={`Create new ${this.getSearchName(this.props.page)}`}
-          customStyles={styles.createNewBotButton}
-          onClick={this.openModal}
-          style={styles.createNewBot}
-        />
+        {renderIf(this.props.page !== pageEnum.conversation)(() => (
+          <BlueButton
+            text={`Create new ${this.getSearchName(this.props.page)}`}
+            customStyles={styles.createNewBotButton}
+            onClick={this.openModal}
+            style={styles.createNewBot}
+          />
+        ))}
       </div>
     );
   }

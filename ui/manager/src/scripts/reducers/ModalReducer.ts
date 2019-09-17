@@ -4,6 +4,7 @@ import {
   IShowAddPackagesModalAction,
   IShowAddPluginsModalAction,
   IShowConfirmationModal,
+  IShowConversationsModal,
   IShowCreateNewConfig2Modal,
   IShowCreateNewConfigModal,
   IShowEditDescriptorModalAction,
@@ -16,6 +17,7 @@ import {
   SHOW_ADD_PACKAGES_MODAL,
   SHOW_ADD_PLUGINS_MODAL,
   SHOW_CONFIRMATION_MODAL,
+  SHOW_CONVERSATIONS_MODAL,
   SHOW_CREATE_NEW_CONFIG_2_MODAL,
   SHOW_CREATE_NEW_CONFIG_MODAL,
   SHOW_EDIT_DESCRIPTOR_MODAL,
@@ -419,6 +421,20 @@ const ModalReducer: IModalReducer = (
           $set: (action as ICreateNewPackageSuccessAction).pkg,
         },
       });
+
+    case SHOW_CONVERSATIONS_MODAL: {
+      return update(state, {
+        mode: {
+          $set: ModalEnum.conversations,
+        },
+        isModalOpen: {
+          $set: true,
+        },
+        bot: {
+          $set: (action as IShowConversationsModal).bot,
+        },
+      });
+    }
 
     case CLOSE_MODAL:
       return update(state, {

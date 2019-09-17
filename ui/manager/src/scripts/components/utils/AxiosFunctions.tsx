@@ -963,3 +963,129 @@ export async function duplicate(resource: string, deepCopy: boolean) {
   }
   return;
 }
+
+export interface IConversation {
+  resource: string;
+  botName: string;
+  botResource: string;
+  conversationState: string;
+  conversationStepSize: number;
+  createdOn: number;
+  environment: string;
+  lastModifiedOn: number;
+  viewState: string;
+  deleted: boolean;
+  data?: IConversationData;
+}
+
+export interface IConversationData {
+  botId: string;
+  botVersion: number;
+  userId: string;
+  environment: string;
+  conversationState: string;
+  conversationOutputs: IConversationOutput[];
+  conversationProperties: IConversationProperties;
+  conversationSteps: IConversationSteps[];
+}
+
+export interface IConversationOutput {
+  input?: string;
+  expressions?: string;
+  intents?: string[];
+  actions?: string[];
+  quickReplies?: IQuickReply[];
+  output?: string[];
+}
+
+export interface IConversationSteps {
+  conversationStep: IConversationStep[];
+  timestamp: number;
+}
+
+export interface IConversationStep {
+  key: string;
+  timestamp: number;
+}
+
+export interface IInput extends IConversationStep {
+  value: string;
+}
+
+export interface IOutput extends IConversationStep {
+  value: string;
+}
+
+export interface IQuickReplies extends IConversationStep {
+  value: IQuickReply[];
+}
+
+export interface IAction extends IConversationStep {
+  value: string[];
+}
+
+export interface IQuickReply {
+  value: string;
+  expressions: string;
+  default: boolean;
+}
+
+export interface IConversationProperties {
+  [prop: string]: IConversationProperty;
+}
+
+export interface IConversationProperty {
+  name: string;
+  value: string;
+  scope: string;
+}
+
+export async function getConversations(
+  limit: number,
+  index: number,
+  conversationId = '',
+  botResource = '',
+) {
+  try {
+    const res: IResponse = await axios.get(
+      `${await getAPIUrl()}/conversationstore/conversations?limit=${limit}&index=${index}${
+        _.isEmpty(conversationId) ? '' : `&conversationId=${conversationId}`
+      }${
+        _.isEmpty(botResource)
+          ? ''
+          : `&botId=${Parser.getId(botResource)}&botVersion=${Parser.getVersion(
+              botResource,
+            )}`
+      }`,
+    );
+    return res.data;
+  } catch (err) {
+    console.error(`Failed to get bot conversations. Error: ${err.message}`);
+  }
+}
+
+export async function getConversation(
+  environment: string,
+  botId: string,
+  conversationId: string,
+) {
+  try {
+    const res: IResponse = await axios.get(
+      `${await getAPIUrl()}/bots/${environment}/${botId}/${conversationId}?returnDetailed=true&returnCurrentStepOnly=false`,
+    );
+    return res.data;
+  } catch (err) {
+    console.error(`Failed to get conversation. Error: ${err.message}`);
+  }
+}
+
+export async function endConversation(conversationId: string) {
+  try {
+    const response: IResponse = await axios.post(
+      `${await getAPIUrl()}/bots/${conversationId}/endConversation`,
+    );
+    return response.headers;
+  } catch (err) {
+    console.error(`Failed to end conversation. Error: ${err.message}`);
+  }
+}

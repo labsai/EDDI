@@ -20,6 +20,7 @@ import {
   ADD_NEW_PACKAGE_TO_BOTS_SUCCESS,
   FETCH_BOT_JSON_SCHEMA_SUCCESS,
   DUPLICATE_SUCCESS,
+  FETCH_CONVERSATIONS_SUCCESS,
 } from '../actions/EddiApiActionTypes';
 import * as update from 'immutability-helper';
 import {
@@ -39,6 +40,7 @@ import {
   IAddNewPackageToBotsSuccessAction,
   IFetchJsonSchemaSuccessAction,
   IDuplicateSuccessAction,
+  IFetchConversationsSuccessAction,
 } from '../actions/EddiApiActions';
 import * as _ from 'lodash';
 import { JSONSchema4 } from 'json-schema';

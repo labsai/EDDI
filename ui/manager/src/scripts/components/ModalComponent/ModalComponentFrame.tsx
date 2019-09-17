@@ -31,6 +31,7 @@ import ErrorMessageModal from './ErrorMessageModal';
 import { CSSProperties } from 'react';
 import AddNewPackageToBotModal from './UpdateConfigsModal/AddNewPackageToBotModal';
 import { getTypeFromResource } from '../utils/ApiFunctions';
+import ConversationsModal from './ConversationsModal/ConversationsModal';
 
 const customStyles = {
   content: {
@@ -232,6 +233,8 @@ class ModalComponentFrame extends React.Component<IPrivateProps, IState> {
         return (
           <AddNewPackageToBotModal packagePayload={this.props.packagePayload} />
         );
+      case ModalEnum.conversations:
+        return <ConversationsModal bot={this.props.bot} />;
       default:
         return null;
     }
@@ -240,23 +243,6 @@ class ModalComponentFrame extends React.Component<IPrivateProps, IState> {
   closeModal = () => {
     ModalActionDispatchers.closeModal();
   };
-
-  render2() {
-    return (
-      <Modal
-        isOpen={this.props.isModalOpen}
-        style={customStyles}
-        ariaHideApp={false}
-        onRequestClose={this.closeModal}
-        shouldCloseOnOverlayClick={false}
-        bodyOpenClassName={'modal-body-open'}>
-        <span onClick={this.closeModal} style={styles.close} className="close">
-          &times;
-        </span>
-        {this.renderContent(this.props.mode)}
-      </Modal>
-    );
-  }
 
   render() {
     if (this.props.isModalOpen) {

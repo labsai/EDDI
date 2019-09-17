@@ -29,6 +29,9 @@ import {
   ADD_NEW_PACKAGE_TO_BOTS,
   FETCH_JSON_SCHEMA,
   DUPLICATE,
+  FETCH_CONVERSATIONS,
+  FETCH_CONVERSATION,
+  END_CONVERSATION,
 } from '../actions/EddiApiActionTypes';
 import {
   getPackage,
@@ -59,12 +62,17 @@ import {
   updateBots as axiosUpdateBots,
   deployBot as axiosDeployBot,
   undeployBot as axiosUndeployBot,
+  getConversations,
   getDeploymentStatus,
   getBotDescriptors,
   addPackageToBot,
   IEddiSchema,
   getSchema,
   duplicate,
+  IConversation,
+  IConversationData,
+  getConversation,
+  endConversation as axiosEndConversation,
 } from '../components/utils/AxiosFunctions';
 import {
   fetchBotFailedAction,
@@ -149,6 +157,15 @@ import {
   IDuplicateAction,
   duplicateFailedAction,
   duplicateSuccessAction,
+  IFetchConversationsAction,
+  fetchConversationsFailedAction,
+  fetchConversationsSuccessAction,
+  IFetchConversationAction,
+  fetchConversationFailedAction,
+  fetchConversationSuccessAction,
+  IEndConversationAction,
+  endConversationSuccessAction,
+  endConversationFailedAction,
 } from '../actions/EddiApiActions';
 import * as Edditypes from '../components/utils/EddiTypes';
 import Parser from '../components/utils/Parser';
@@ -714,4 +731,68 @@ export function* duplicateResource(action: IDuplicateAction): Iterator<{}> {
 
 export function* watchDuplicateResource(): Iterator<{}> {
   yield takeEvery(DUPLICATE, duplicateResource);
+}
+
+export function* fetchConversations(
+  action: IFetchConversationsAction,
+): Iterator<{}> {
+  try {
+    const conversations: IConversation[] = yield call(
+      getConversations,
+      action.limit,
+      action.index,
+      action.conversationId,
+      action.botResource,
+    );
+    yield put(
+      fetchConversationsSuccessAction(
+        action.limit,
+        action.index,
+        action.conversationId,
+        action.botResource,
+        conversations,
+      ),
+    );
+  } catch (err) {
+    yield put(fetchConversationsFailedAction(err));
+  }
+}
+
+export function* watchFetchConversations(): Iterator<{}> {
+  yield takeEvery(FETCH_CONVERSATIONS, fetchConversations);
+}
+
+export function* fetchConversation(
+  action: IFetchConversationAction,
+): Iterator<{}> {
+  try {
+    const conversation: IConversationData = yield call(
+      getConversation,
+      action.environment,
+      action.botId,
+      action.conversationId,
+    );
+    yield put(
+      fetchConversationSuccessAction(action.conversationId, conversation),
+    );
+  } catch (err) {
+    yield put(fetchConversationFailedAction(err));
+  }
+}
+
+export function* watchFetchConversation(): Iterator<{}> {
+  yield takeEvery(FETCH_CONVERSATION, fetchConversation);
+}
+
+export function* endConversation(action: IEndConversationAction): Iterator<{}> {
+  try {
+    yield call(axiosEndConversation, action.conversationId);
+    yield put(endConversationSuccessAction(action.conversationId));
+  } catch (err) {
+    yield put(endConversationFailedAction(err));
+  }
+}
+
+export function* watchEndConversation(): Iterator<{}> {
+  yield takeEvery(END_CONVERSATION, endConversation);
 }

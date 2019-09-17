@@ -96,6 +96,24 @@ import {
   IDuplicateFailedAction,
   duplicateSuccessAction,
   duplicateFailedAction,
+  IFetchConversationsAction,
+  IFetchConversationsSuccessAction,
+  IFetchConversationsFailedAction,
+  fetchConversationsFailedAction,
+  fetchConversationsAction,
+  fetchConversationsSuccessAction,
+  IFetchConversationAction,
+  IFetchConversationSuccessAction,
+  IFetchConversationFailedAction,
+  fetchConversationAction,
+  fetchConversationSuccessAction,
+  fetchConversationFailedAction,
+  IEndConversationAction,
+  IEndConversationSuccessAction,
+  IEndConversationFailedAction,
+  endConversationAction,
+  endConversationSuccessAction,
+  endConversationFailedAction,
 } from './EddiApiActions';
 
 export interface IEddiApiActionDispatchers extends ActionCreatorsMapObject {
@@ -187,6 +205,35 @@ export interface IEddiApiActionDispatchers extends ActionCreatorsMapObject {
   duplicateAction: (resource, deepCopy) => IDuplicateAction;
   duplicateSuccessAction: (bot, packages, plugins) => IDuplicateSuccessAction;
   duplicateFailedAction: (error) => IDuplicateFailedAction;
+  fetchConversationsAction: (
+    limit,
+    index,
+    conversationId,
+    botResource,
+  ) => IFetchConversationsAction;
+  fetchConversationsSuccessAction: (
+    limit,
+    index,
+    conversationId,
+    botResource,
+    conversations,
+  ) => IFetchConversationsSuccessAction;
+  fetchConversationsFailedAction: (error) => IFetchConversationsFailedAction;
+  fetchConversationAction: (
+    environment,
+    botId,
+    conversationId,
+  ) => IFetchConversationAction;
+  fetchConversationSuccessAction: (
+    conversationId,
+    conversation,
+  ) => IFetchConversationSuccessAction;
+  fetchConversationFailedAction: (error) => IFetchConversationFailedAction;
+  endConversationAction: (conversationId) => IEndConversationAction;
+  endConversationSuccessAction: (
+    conversationId,
+  ) => IEndConversationSuccessAction;
+  endConversationFailedAction: (conversationId) => IEndConversationFailedAction;
 }
 
 const actions: IEddiApiActionDispatchers = {
@@ -242,6 +289,15 @@ const actions: IEddiApiActionDispatchers = {
   duplicateAction,
   duplicateSuccessAction,
   duplicateFailedAction,
+  fetchConversationsAction,
+  fetchConversationsSuccessAction,
+  fetchConversationsFailedAction,
+  fetchConversationAction,
+  fetchConversationSuccessAction,
+  fetchConversationFailedAction,
+  endConversationAction,
+  endConversationSuccessAction,
+  endConversationFailedAction,
 };
 
 const eddiApiActionDispatchers: IEddiApiActionDispatchers = bindActionCreators<

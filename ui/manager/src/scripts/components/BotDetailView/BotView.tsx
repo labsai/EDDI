@@ -1,5 +1,5 @@
 import * as React from 'react';
-import ModalActionDispatchers from '../../actions/ModalActionDispatchers';
+import modalActionDispatchers from '../../actions/ModalActionDispatchers';
 import BotDescriptor from './BotDescriptor';
 import PackageList from './PackageList';
 import * as renderIf from 'render-if';
@@ -39,12 +39,12 @@ class BotView extends React.Component<IProps, IState> {
   }
 
   openEditBotModal = () => {
-    ModalActionDispatchers.showEditDescriptorModalAction(this.props.bot);
+    modalActionDispatchers.showEditDescriptorModalAction(this.props.bot);
   };
 
   openEditJsonModal = () => {
     eddiApiActionDispatchers.fetchJsonSchemaAction(BOT);
-    ModalActionDispatchers.showEditJsonModal(
+    modalActionDispatchers.showEditJsonModal(
       this.props.bot.resource,
       JSON.stringify(
         {
@@ -55,6 +55,16 @@ class BotView extends React.Component<IProps, IState> {
         '\t',
       ),
     );
+  };
+
+  openViewConversationsModal = () => {
+    eddiApiActionDispatchers.fetchConversationsAction(
+      20,
+      0,
+      null,
+      this.props.bot.resource,
+    );
+    modalActionDispatchers.showConversationsModal(this.props.bot);
   };
 
   selectVersion = (newVersion: number) => {
