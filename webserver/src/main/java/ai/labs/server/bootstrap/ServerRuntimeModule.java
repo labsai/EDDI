@@ -211,7 +211,7 @@ public class ServerRuntimeModule extends AbstractBaseModule {
         mapping = new ConstraintMapping();
         mapping.setMethod(HTTP_METHOD_OPTIONS);
         mapping.setConstraint(constraint);
-        mapping.setPathSpec("/");
+        mapping.setPathSpec("/*");
         securityHandler.addConstraintMapping(mapping);
     }
 
