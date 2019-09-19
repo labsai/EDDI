@@ -197,7 +197,7 @@ public class ServerRuntime implements IServerRuntime {
                 public void handle(String s, Request request,
                                    HttpServletRequest httpServletRequest,
                                    HttpServletResponse httpServletResponse) {
-                    addCorsHeader(httpServletRequest, httpServletResponse);
+                    addCorsHeader(httpServletResponse);
                 }
             });
             log.info("CrossSiteScriptFilter has been enabled...");
@@ -352,8 +352,8 @@ public class ServerRuntime implements IServerRuntime {
         };
     }
 
-    private static void addCorsHeader(HttpServletRequest httpServletRequest, HttpServletResponse httpResponse) {
-        httpResponse.setHeader("Access-Control-Allow-Origin", httpServletRequest.getRequestURL().toString());
+    private static void addCorsHeader(HttpServletResponse httpResponse) {
+        httpResponse.setHeader("Access-Control-Allow-Origin", "*");
         httpResponse.setHeader("Access-Control-Allow-Credentials", "true");
         httpResponse.setHeader("Access-Control-Allow-Headers", "Authorization,X-Requested-With,Content-Type,Accept,Origin,Cache-Control");
         httpResponse.setHeader("Access-Control-Allow-Methods", "HEAD,GET,PUT,POST,DELETE,PATCH,OPTIONS");
