@@ -177,6 +177,7 @@ export async function getBotDescriptors(
   index: number,
 ): Promise<IBot[]> {
   try {
+    setDefaultGlobalHeader('Authorization', 'Basic ' + btoa('eddi:labsai'));
     const res: IDescriptorResponse = await axios.get(
       `${await getAPIUrl()}/botstore/bots/descriptors?index=${index}&limit=${limit}`,
     );
