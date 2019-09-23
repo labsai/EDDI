@@ -21,14 +21,24 @@ const styles: CSSProperties = {
 };
 function getButtonStyling(props: IProps) {
   if (props.disabled) {
-    return {
-      ...styles.button,
-      ...styles.disabled,
-      ...props.styles.button,
-      ...props.customStyles,
-      ...props.styles.disabled,
-      ...props.customStyles.disabled,
-    };
+    if (props.customStyles) {
+      return {
+        ...styles.button,
+        ...styles.disabled,
+        ...props.styles.button,
+        ...props.customStyles,
+        ...props.styles.disabled,
+        ...props.customStyles.disabled,
+      };
+    } else {
+      return {
+        ...styles.button,
+        ...styles.disabled,
+        ...props.styles.button,
+        ...props.customStyles,
+        ...props.styles.disabled,
+      };
+    }
   } else {
     return {
       ...styles.button,
