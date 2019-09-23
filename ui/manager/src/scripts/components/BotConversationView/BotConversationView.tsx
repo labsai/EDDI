@@ -68,11 +68,7 @@ class BotConversationView extends React.Component<IPublicProps, IState> {
   }
 
   fetchConversation(props = this.props) {
-    eddiApiActionDispatchers.fetchConversationAction(
-      props.conversation.environment,
-      Parser.getId(props.conversation.botResource),
-      props.conversationId,
-    );
+    eddiApiActionDispatchers.fetchConversationAction(props.conversationId);
   }
 
   endConversation = () => {

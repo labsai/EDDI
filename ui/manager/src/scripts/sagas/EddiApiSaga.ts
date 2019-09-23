@@ -768,8 +768,6 @@ export function* fetchConversation(
   try {
     const conversation: IConversationData = yield call(
       getConversation,
-      action.environment,
-      action.botId,
       action.conversationId,
     );
     yield put(

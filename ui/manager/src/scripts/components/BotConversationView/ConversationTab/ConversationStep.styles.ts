@@ -123,6 +123,7 @@ const styles: CSSProperties = {
   },
   actions: {
     textAlign: 'center',
+    paddingLeft: '65px',
   },
   actionTitle: {
     textDecoration: 'underline',
