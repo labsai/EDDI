@@ -25,6 +25,7 @@ import {
   PROPERTYSETTER,
   PROPERTYSETTER_PATH,
 } from './EddiTypes';
+import { setAuthorizationHeader } from './keycloakFunctions';
 
 export function setDefaultGlobalHeader(key: string, value: string): void {
   axios.defaults.headers.common[key] = value;
@@ -172,12 +173,50 @@ export async function getBotPackages(resource: string): Promise<string[]> {
   }
 }
 
+export async function isAuthenticationRequired() {
+  try {
+    const res = await axios.get(`${await getAPIUrl()}`);
+    return false;
+  } catch (err) {
+    if (err.response.status === 401) {
+      console.log(err.response.status);
+      return true;
+    } else {
+      console.error(
+        `Failed to check if authentication is required. Error: ${err.message}`,
+      );
+      throw err;
+    }
+  }
+}
+
+export async function basicAuthSignIn(username: string, password: string) {
+  try {
+    const response = await axios.get(
+      `${await getAPIUrl()}/botstore/bots/descriptors`,
+      {
+        auth: {
+          username: username,
+          password: password,
+        },
+      },
+    );
+    setDefaultGlobalHeader(
+      'Authorization',
+      `Basic ${btoa(`${username}:${password}`)}`,
+    );
+  } catch (err) {
+    console.error(
+      `Failed to sign in with username and password. Error: ${err.measure()}`,
+    );
+  }
+}
+
 export async function getBotDescriptors(
   limit: number,
   index: number,
 ): Promise<IBot[]> {
   try {
-    setDefaultGlobalHeader('Authorization', 'Basic ' + btoa('eddi:labsai'));
     const res: IDescriptorResponse = await axios.get(
       `${await getAPIUrl()}/botstore/bots/descriptors?index=${index}&limit=${limit}`,
     );
@@ -201,6 +240,8 @@ export async function getBotDescriptors(
       };
     });
   } catch (err) {
+    console.log(err.response.status);
+    console.log(err);
     console.error(err);
     throw err;
   }

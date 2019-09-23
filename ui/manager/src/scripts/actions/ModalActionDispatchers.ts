@@ -36,6 +36,8 @@ import {
   showErrorMessageModal,
   IShowConversationsModal,
   showConversationsModal,
+  showBasicAuthModal,
+  IShowBasicAuthModal,
 } from './ModalActions';
 
 export interface IModalActionDispatchers extends ActionCreatorsMapObject {
@@ -89,6 +91,7 @@ export interface IModalActionDispatchers extends ActionCreatorsMapObject {
     message: string,
   ) => IShowErrorMessageModal;
   showConversationsModal: (bot) => IShowConversationsModal;
+  showBasicAuthModal: () => IShowBasicAuthModal;
 }
 
 const actions: IModalActionDispatchers = {
@@ -106,6 +109,7 @@ const actions: IModalActionDispatchers = {
   showErrorMessageModal,
   showEditDescriptorModalAction,
   showConversationsModal,
+  showBasicAuthModal,
 };
 
 const modalActionDispatchers: IModalActionDispatchers = bindActionCreators<

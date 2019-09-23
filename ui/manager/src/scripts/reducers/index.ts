@@ -16,6 +16,11 @@ import {
   IConversationReducer,
   IConversationState,
 } from './ConversationReducer';
+import {
+  default as AuthenticationReducer,
+  IAuthenticationReducer,
+  IAuthenticationState,
+} from './AuthenticationReducer';
 
 interface IBotNameSpace<T> {
   botState: T;
@@ -41,13 +46,18 @@ interface IModalNameSpace<T> {
   modalState: T;
 }
 
+interface IAuthenticationNameSpace<T> {
+  authenticationState: T;
+}
+
 export interface IAppState
   extends IBotNameSpace<IBotState>,
     IConversationNameSpace<IConversationState>,
     ISystemNameSpace<ISystemState>,
     IPackageNameSpace<IPackageState>,
     IPluginNameSpace<IPluginState>,
-    IModalNameSpace<IModalState> {}
+    IModalNameSpace<IModalState>,
+    IAuthenticationNameSpace<IAuthenticationState> {}
 
 interface IReducers
   extends ReducersMapObject,
@@ -56,7 +66,8 @@ interface IReducers
     ISystemNameSpace<ISystemReducer>,
     IPackageNameSpace<IPackageReducer>,
     IPluginNameSpace<IPluginReducer>,
-    IModalNameSpace<IModalReducer> {}
+    IModalNameSpace<IModalReducer>,
+    IAuthenticationNameSpace<IAuthenticationReducer> {}
 
 const reducers: IReducers = {
   botState: BotReducer,
@@ -65,6 +76,7 @@ const reducers: IReducers = {
   pluginState: PluginReducer,
   systemState: SystemReducer,
   modalState: ModalReducer,
+  authenticationState: AuthenticationReducer,
 };
 
 export default combineReducers(reducers);

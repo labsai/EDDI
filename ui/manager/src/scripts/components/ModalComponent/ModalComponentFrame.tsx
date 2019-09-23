@@ -32,30 +32,7 @@ import { CSSProperties } from 'react';
 import AddNewPackageToBotModal from './UpdateConfigsModal/AddNewPackageToBotModal';
 import { getTypeFromResource } from '../utils/ApiFunctions';
 import ConversationsModal from './ConversationsModal/ConversationsModal';
-
-const customStyles = {
-  content: {
-    background: '#fff',
-    border: '1px solid #ccc',
-    borderRadius: '4px',
-    left: '0px',
-    top: '0px',
-    margin: '100px auto 100px',
-    maxWidth: '960px',
-    minWidth: '600px',
-    outline: '0px',
-    padding: '0px',
-    position: 'relative',
-    minHeight: '300px',
-    maxHeight: 'auto',
-    overflow: 'visible',
-  },
-  overlay: {
-    backgroundColor: 'rgba(159, 170, 181, 0.90)',
-    overflow: 'auto',
-    paddingBottom: '300px',
-  },
-};
+import BasicAuthModal from './BasicAuthModal/BasicAuthModal';
 
 const randomStyles: CSSProperties = {
   content: {
@@ -235,6 +212,8 @@ class ModalComponentFrame extends React.Component<IPrivateProps, IState> {
         );
       case ModalEnum.conversations:
         return <ConversationsModal bot={this.props.bot} />;
+      case ModalEnum.basicAuth:
+        return <BasicAuthModal />;
       default:
         return null;
     }
