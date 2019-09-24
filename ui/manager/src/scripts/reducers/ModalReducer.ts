@@ -57,7 +57,9 @@ import {
   BASIC_AUTH_SIGN_IN,
   BASIC_AUTH_SIGN_IN_FAILED,
   BASIC_AUTH_SIGN_IN_SUCCESS,
+  CHECK_AUTHENTICATION_SUCCESS,
 } from '../actions/AuthenticationActionTypes';
+import { ICheckAuthenticationSuccessAction } from '../actions/AuthenticationActions';
 
 export type IModalReducer = Reducer<IModalState>;
 
@@ -451,6 +453,21 @@ const ModalReducer: IModalReducer = (
           $set: true,
         },
       });
+    }
+
+    case CHECK_AUTHENTICATION_SUCCESS: {
+      if ((action as ICheckAuthenticationSuccessAction).isKeycloakEnabled) {
+        return update(state, {
+          mode: {
+            $set: ModalEnum.basicAuth,
+          },
+          isModalOpen: {
+            $set: true,
+          },
+        });
+      } else {
+        return state;
+      }
     }
 
     case BASIC_AUTH_SIGN_IN_SUCCESS: {

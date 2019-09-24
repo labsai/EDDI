@@ -3,6 +3,9 @@ import {
   BASIC_AUTH_SIGN_IN,
   BASIC_AUTH_SIGN_IN_FAILED,
   BASIC_AUTH_SIGN_IN_SUCCESS,
+  CHECK_AUTHENTICATION,
+  CHECK_AUTHENTICATION_FAILED,
+  CHECK_AUTHENTICATION_SUCCESS,
   KEYCLOAK_REFRESH_TOKEN,
   KEYCLOAK_REFRESH_TOKEN_FAILED,
   KEYCLOAK_REFRESH_TOKEN_SUCCESS,
@@ -150,5 +153,42 @@ export function signOutFailedAction(error: Error): ISignOutFailedAction {
   return {
     error,
     type: SIGN_OUT_FAILED,
+  };
+}
+
+export interface ICheckAuthenticationAction extends Action {}
+
+export function checkAuthenticationAction(): ICheckAuthenticationAction {
+  return {
+    type: CHECK_AUTHENTICATION,
+  };
+}
+
+export interface ICheckAuthenticationSuccessAction extends Action {
+  isKeycloakEnabled: boolean;
+  isBasicAuthEnabled: boolean;
+}
+
+export function checkAuthenticationSuccessAction(
+  isKeycloakEnabled: boolean,
+  isBasicAuthEnabled: boolean,
+): ICheckAuthenticationSuccessAction {
+  return {
+    isKeycloakEnabled,
+    isBasicAuthEnabled,
+    type: CHECK_AUTHENTICATION_SUCCESS,
+  };
+}
+
+export interface ICheckAuthenticationFailedAction extends Action {
+  error: Error;
+}
+
+export function checkAuthenticationFailedAction(
+  error: Error,
+): ICheckAuthenticationFailedAction {
+  return {
+    error,
+    type: CHECK_AUTHENTICATION_FAILED,
   };
 }

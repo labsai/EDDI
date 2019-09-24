@@ -57,6 +57,6 @@ export function logout(keycloak: Keycloak.KeycloakInstance): void {
   keycloak.logout();
 }
 
-export async function keycloakEnabled() {
+export async function isKeycloakEnabled() {
   return (await getAuthMethod()) === 'keycloak';
 }

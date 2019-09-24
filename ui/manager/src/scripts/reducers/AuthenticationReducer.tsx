@@ -6,8 +6,12 @@ import {
   BASIC_AUTH_SIGN_IN,
   BASIC_AUTH_SIGN_IN_FAILED,
   BASIC_AUTH_SIGN_IN_SUCCESS,
+  CHECK_AUTHENTICATION_SUCCESS,
 } from '../actions/AuthenticationActionTypes';
-import { IBasicAuthSignInFailedAction } from '../actions/AuthenticationActions';
+import {
+  IBasicAuthSignInFailedAction,
+  ICheckAuthenticationSuccessAction,
+} from '../actions/AuthenticationActions';
 
 export interface IAuthenticationState {
   isAuthenticated: boolean;
@@ -49,6 +53,19 @@ const AuthenticationReducer: IAuthenticationReducer = (
           $set: (action as IBasicAuthSignInFailedAction).error,
         },
       });
+
+    case CHECK_AUTHENTICATION_SUCCESS:
+      if (
+        !(action as ICheckAuthenticationSuccessAction).isKeycloakEnabled &&
+        !(action as ICheckAuthenticationSuccessAction).isKeycloakEnabled
+      ) {
+        return update(state, {
+          authenticated: {
+            $set: true,
+          },
+        });
+      }
+
     default:
       return state;
   }

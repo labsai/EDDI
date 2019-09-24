@@ -173,7 +173,7 @@ export async function getBotPackages(resource: string): Promise<string[]> {
   }
 }
 
-export async function isAuthenticationRequired() {
+export async function isBasicAuthRequired() {
   try {
     const res = await axios.get(`${await getAPIUrl()}`);
     return false;

@@ -36,6 +36,7 @@ import ConversationsPage from './pages/ConversationsPage';
 import modalActionDispatchers from '../actions/ModalActionDispatchers';
 import { authenticationSelector } from '../selectors/AuthenticationSelectors';
 import { Component, compose, pure, setDisplayName } from 'recompose';
+import authenticationActionDispatchers from '../actions/AuthenticationActionDispatchers';
 
 library.add(faUndo);
 library.add(faRedo);
@@ -85,14 +86,14 @@ class App extends React.Component<IPrivateProps, IState> {
   }
 
   async componentDidMount() {
-    modalActionDispatchers.showBasicAuthModal();
     await runSagaMiddleware();
     const queryStrings = Parser.getQueryStrings(this.props.location.search);
     if (queryStrings.apiUrl) {
       setApiUrlQuery(decodeURIComponent(queryStrings.apiUrl));
     }
     SystemActionDispatchers.appReady();
-    if (await kcHelper.keycloakEnabled()) {
+    authenticationActionDispatchers.checkAuthenticationAction();
+    if (await kcHelper.isKeycloakEnabled()) {
       await this.initKeycloak();
     } else {
       this.setState({ isAuthenticated: true });
@@ -132,36 +133,31 @@ class App extends React.Component<IPrivateProps, IState> {
             {renderIf(!this.state.isAuthenticated)(() => (
               <div>{'You need to login to see this page'}</div>
             ))}
-            {renderIf(this.state.isAuthenticated && this.props.isAuthenticated)(
-              () => (
-                <div>
-                  {renderIf(!!this.state.keycloak)(() => (
-                    <WhiteButton
-                      text={'Logout'}
-                      customStyles={styles.logoutButton}
-                      onClick={this.logout}
-                    />
-                  ))}
-                  <Route path={'/'} exact component={Dashboard} />
-                  <Route path={'/packages'} exact component={PackagePage} />
-                  <Route
-                    path={'/conversations'}
-                    exact
-                    component={ConversationsPage}
+            {renderIf(this.state.isAuthenticated)(() => (
+              <div>
+                {renderIf(!!this.state.keycloak)(() => (
+                  <WhiteButton
+                    text={'Logout'}
+                    customStyles={styles.logoutButton}
+                    onClick={this.logout}
                   />
-                  <Route path={'/resources'} component={ExtensionsPage} />
-                  <Route path={'/botview/:id'} component={BotViewPage} />
-                  <Route
-                    path={'/conversationview/:id'}
-                    component={BotConversationViewPage}
-                  />
-                  <Route
-                    path={'/packageview/:id'}
-                    component={PackageViewPage}
-                  />
-                </div>
-              ),
-            )}
+                ))}
+                <Route path={'/'} exact component={Dashboard} />
+                <Route path={'/packages'} exact component={PackagePage} />
+                <Route
+                  path={'/conversations'}
+                  exact
+                  component={ConversationsPage}
+                />
+                <Route path={'/resources'} component={ExtensionsPage} />
+                <Route path={'/botview/:id'} component={BotViewPage} />
+                <Route
+                  path={'/conversationview/:id'}
+                  component={BotConversationViewPage}
+                />
+                <Route path={'/packageview/:id'} component={PackageViewPage} />
+              </div>
+            ))}
             <ModalComponentFrame />
           </div>
         ))}

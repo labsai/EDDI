@@ -1,9 +1,15 @@
 import { call, put, takeEvery } from 'redux-saga/effects';
-import { basicAuthSignIn } from '../components/utils/AxiosFunctions';
+import {
+  basicAuthSignIn,
+  isBasicAuthRequired,
+} from '../components/utils/AxiosFunctions';
 import {
   basicAuthSignInFailedAction,
   basicAuthSignInSuccessAction,
+  checkAuthenticationFailedAction,
+  checkAuthenticationSuccessAction,
   IBasicAuthSignInAction,
+  ICheckAuthenticationAction,
   IKeycloakRefreshTokenAction,
   IKeycloakSignInAction,
   keycloakRefreshTokenFailedAction,
@@ -19,6 +25,7 @@ import {
 import {
   createKeycloakInstance,
   initKeycloak,
+  isKeycloakEnabled,
   updateToken,
 } from '../components/utils/keycloakFunctions';
 
@@ -60,4 +67,16 @@ export function* KeycloakRefreshToken(action: IKeycloakRefreshTokenAction) {
 
 export function* watchKeycloakRefreshToken(): Iterator<{}> {
   yield takeEvery(KEYCLOAK_REFRESH_TOKEN, KeycloakRefreshToken);
+}
+
+export function* checkAuthentication(
+  action: ICheckAuthenticationAction,
+): Iterator<{}> {
+  try {
+    const kcEnabled: boolean = yield call(isKeycloakEnabled);
+    const basicAuthEnabled: boolean = yield call(isBasicAuthRequired);
+    yield put(checkAuthenticationSuccessAction(kcEnabled, basicAuthEnabled));
+  } catch (err) {
+    yield put(checkAuthenticationFailedAction(err));
+  }
 }
