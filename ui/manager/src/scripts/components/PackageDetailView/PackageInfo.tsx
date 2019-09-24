@@ -39,7 +39,7 @@ class PackageInfo extends React.Component<IPrivateProps> {
   render() {
     return (
       <div>
-        <HomeButtonComponent extraPath={'packages'} />
+        <HomeButtonComponent />
         {renderIf(this.props.isLoading)(() => (
           <div style={styles.loadingWrapper}>
             <ClimbingBoxLoader loading />
