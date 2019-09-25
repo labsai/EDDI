@@ -12,13 +12,18 @@ export const CONVERSATION_IN_PROGRESS = 'IN_PROGRESS';
 export const CONVERSATION_ERROR = 'ERROR';
 export const CONVERSATION_EXECUTION_INTERRUPTED = 'EXECUTION_INTERRUPTED';
 
+export interface IConversationStepOutput {
+  type: string;
+  value: string;
+}
+
 export default class ConversationHelper {
   static getAction(conversationStep: IConversationStep[]) {
     let action = conversationStep.find(step => step.key.includes('actions'));
     if (!action) {
       return;
     }
-    return (action as IAction).value;
+    return (action as IAction).value.join(', ');
   }
 
   static getInput(conversationStep: IConversationStep[]): string {
@@ -28,20 +33,46 @@ export default class ConversationHelper {
     }
   }
 
-  static getOutput(conversationStep: IConversationStep[]): string[] {
+  static parseConversationStepOutput(output: IOutput): IConversationStepOutput {
+    let type: string;
+    let value: string;
+    if (typeof output.value === 'object') {
+      type = output.value.type;
+      if (type === 'image' || type === 'botIcon') {
+        value = output.value.uri;
+      } else {
+        value = output.value.text;
+      }
+    } else {
+      type = 'text';
+      value = output.value;
+    }
+    return {
+      type,
+      value,
+    };
+  }
+
+  static getOutput(
+    conversationStep: IConversationStep[],
+  ): IConversationStepOutput[] {
     let i = conversationStep.findIndex(step => step.key.includes('output'));
-    const output: string[] = [];
+    const output: IConversationStepOutput[] = [];
     if (i < 0) {
       return;
     }
-    output.push((conversationStep[i] as IOutput).value);
+    output.push(
+      this.parseConversationStepOutput(conversationStep[i] as IOutput),
+    );
 
     if (isNaN(parseInt(conversationStep[i].key.split(/[:]+/).pop(), 10))) {
       return output;
     } else {
       i++;
       while (parseInt(conversationStep[i].key.split(/[:]+/).pop(), 10)) {
-        output.push((conversationStep[i] as IOutput).value);
+        output.push(
+          this.parseConversationStepOutput(conversationStep[i] as IOutput),
+        );
         i++;
       }
       return output;

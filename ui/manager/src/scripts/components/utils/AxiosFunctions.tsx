@@ -1012,8 +1012,15 @@ export interface IInput extends IConversationStep {
   value: string;
 }
 
+export interface IOutputValue {
+  type: string;
+  delay: number;
+  uri?: string;
+  text?: string;
+}
+
 export interface IOutput extends IConversationStep {
-  value: string;
+  value: string | IOutputValue;
 }
 
 export interface IQuickReplies extends IConversationStep {
