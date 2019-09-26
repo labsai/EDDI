@@ -6,20 +6,32 @@ import {
   BASIC_AUTH_SIGN_IN,
   BASIC_AUTH_SIGN_IN_FAILED,
   BASIC_AUTH_SIGN_IN_SUCCESS,
+  CHECK_AUTHENTICATION,
   CHECK_AUTHENTICATION_SUCCESS,
+  KEYCLOAK_SIGN_IN,
+  KEYCLOAK_SIGN_IN_SUCCESS,
 } from '../actions/AuthenticationActionTypes';
 import {
   IBasicAuthSignInFailedAction,
   ICheckAuthenticationSuccessAction,
+  IKeycloakSignInSuccessAction,
 } from '../actions/AuthenticationActions';
 
+export enum AuthenticationEnum {
+  'none',
+  'keycloak',
+  'basicAuth',
+}
+
 export interface IAuthenticationState {
+  authenticationMethod: AuthenticationEnum;
   isAuthenticated: boolean;
   keycloak: Keycloak.KeycloakInstance;
   error: Error;
 }
 
 export const initialState: IAuthenticationState = {
+  authenticationMethod: AuthenticationEnum.none,
   isAuthenticated: false,
   keycloak: null,
   error: null,
@@ -40,6 +52,7 @@ const AuthenticationReducer: IAuthenticationReducer = (
           $set: null,
         },
       });
+
     case BASIC_AUTH_SIGN_IN_SUCCESS:
       return update(state, {
         isAuthenticated: {
@@ -54,17 +67,39 @@ const AuthenticationReducer: IAuthenticationReducer = (
         },
       });
 
+    case KEYCLOAK_SIGN_IN:
+      console.log(action);
+      return update(state, {
+        error: {
+          $set: null,
+        },
+      });
+
+    case KEYCLOAK_SIGN_IN_SUCCESS:
+      return update(state, {
+        isAuthenticated: {
+          $set: (action as IKeycloakSignInSuccessAction).keycloak.authenticated,
+        },
+      });
+
+    case CHECK_AUTHENTICATION:
+      console.log('checking auth');
+
     case CHECK_AUTHENTICATION_SUCCESS:
-      if (
-        !(action as ICheckAuthenticationSuccessAction).isKeycloakEnabled &&
-        !(action as ICheckAuthenticationSuccessAction).isKeycloakEnabled
-      ) {
-        return update(state, {
-          authenticated: {
-            $set: true,
-          },
-        });
-      }
+      return update(state, {
+        authenticationMethod: {
+          $set: (action as ICheckAuthenticationSuccessAction)
+            .authenticationMethod,
+        },
+        keycloak: {
+          $set: (action as ICheckAuthenticationSuccessAction).keycloak,
+        },
+        authenticated: {
+          $set:
+            (action as ICheckAuthenticationSuccessAction)
+              .authenticationMethod === AuthenticationEnum.none,
+        },
+      });
 
     default:
       return state;

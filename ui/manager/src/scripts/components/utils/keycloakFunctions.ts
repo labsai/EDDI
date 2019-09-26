@@ -6,6 +6,7 @@ import {
   getAuthRealm,
   getAuthUrl,
 } from './ApiFunctions';
+import authenticationActionDispatchers from '../../actions/AuthenticationActionDispatchers';
 
 export async function createKeycloakInstance(): Promise<
   Keycloak.KeycloakInstance
@@ -27,10 +28,15 @@ export async function initKeycloak(
   onAuthentication: () => void,
 ) {
   try {
-    await keycloak.init({ onLoad: 'login-required' }).success(() => {
-      onAuthentication();
-      setAuthorizationHeader(keycloak);
-    });
+    await keycloak
+      .init({ onLoad: 'login-required' })
+      .success(() => {
+        console.log(keycloak);
+        onAuthentication();
+      })
+      .error(() => {
+        console.log('WTF');
+      });
   } catch (err) {
     console.error(`Failed to initialize keycloak. Error: ${err.message}`);
   }

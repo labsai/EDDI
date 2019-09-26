@@ -37,6 +37,7 @@ import modalActionDispatchers from '../actions/ModalActionDispatchers';
 import { authenticationSelector } from '../selectors/AuthenticationSelectors';
 import { Component, compose, pure, setDisplayName } from 'recompose';
 import authenticationActionDispatchers from '../actions/AuthenticationActionDispatchers';
+import { AuthenticationEnum } from '../reducers/AuthenticationReducer';
 
 library.add(faUndo);
 library.add(faRedo);
@@ -64,6 +65,8 @@ interface IRouteProps {
 
 interface IPrivateProps extends IRouteProps {
   isAppReady: boolean;
+  keycloak: Keycloak.KeycloakInstance;
+  authenticationMethod: AuthenticationEnum;
   isAuthenticated: boolean;
 }
 
@@ -93,12 +96,21 @@ class App extends React.Component<IPrivateProps, IState> {
     }
     SystemActionDispatchers.appReady();
     authenticationActionDispatchers.checkAuthenticationAction();
-    if (await kcHelper.isKeycloakEnabled()) {
-      await this.initKeycloak();
-    } else {
-      this.setState({ isAuthenticated: true });
+  }
+
+  async componentH(nextProps) {
+    if (
+      nextProps.authenticationMethod === AuthenticationEnum.keycloak &&
+      !nextProps.authenticated
+    ) {
+      await kcHelper.initKeycloak(this.props.keycloak, this.testFunction);
     }
   }
+
+  testFunction = () => {
+    console.log(this.props.keycloak.authenticated);
+    authenticationActionDispatchers.keycloakSignInAction(this.props.keycloak);
+  };
 
   async initKeycloak() {
     const k = await kcHelper.createKeycloakInstance();
@@ -126,6 +138,8 @@ class App extends React.Component<IPrivateProps, IState> {
   };
 
   render() {
+    console.log(this.props.keycloak);
+    console.log(this.props.isAuthenticated);
     return (
       <div className="ui container">
         {renderIf(this.props.isAppReady)(() => (

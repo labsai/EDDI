@@ -32,7 +32,7 @@ export interface IAuthenticationActionDispatchers
   basicAuthSignInAction: (username, password) => IBasicAuthSignInAction;
   basicAuthSignInSuccessAction: () => IBasicAuthSignInSuccessAction;
   basicAuthSignInFailedAction: (error) => IBasicAuthSignInFailedAction;
-  keycloakSignInAction: () => IKeycloakSignInAction;
+  keycloakSignInAction: (keycloak) => IKeycloakSignInAction;
   keycloakSignInSuccessAction: (keycloak) => IKeycloakSignInSuccessAction;
   keycloakSignInFailedAction: (error) => IKeycloakSignInFailedAction;
   keycloakRefreshTokenAction: (keycloak) => IKeycloakRefreshTokenAction;

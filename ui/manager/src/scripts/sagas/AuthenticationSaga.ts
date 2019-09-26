@@ -19,6 +19,7 @@ import {
 } from '../actions/AuthenticationActions';
 import {
   BASIC_AUTH_SIGN_IN,
+  CHECK_AUTHENTICATION,
   KEYCLOAK_REFRESH_TOKEN,
   KEYCLOAK_SIGN_IN,
 } from '../actions/AuthenticationActionTypes';
@@ -28,6 +29,7 @@ import {
   isKeycloakEnabled,
   updateToken,
 } from '../components/utils/keycloakFunctions';
+import { AuthenticationEnum } from '../reducers/AuthenticationReducer';
 
 export function* BasicAuthSignIn(action: IBasicAuthSignInAction) {
   try {
@@ -44,9 +46,12 @@ export function* watchBasicAuthSignIn(): Iterator<{}> {
 
 export function* KeycloakSignIn(action: IKeycloakSignInAction) {
   try {
-    const keycloak = yield call(createKeycloakInstance);
-    yield call(initKeycloak, keycloak, null);
-    yield put(keycloakSignInSuccessAction(keycloak));
+    console.log(action.keycloak);
+    if (action.keycloak) {
+      yield put(keycloakSignInSuccessAction(action.keycloak));
+    } else {
+      throw new Error('Failed to sign in with keycloak.');
+    }
   } catch (err) {
     yield put(keycloakSignInFailedAction(err));
   }
@@ -73,10 +78,25 @@ export function* checkAuthentication(
   action: ICheckAuthenticationAction,
 ): Iterator<{}> {
   try {
-    const kcEnabled: boolean = yield call(isKeycloakEnabled);
-    const basicAuthEnabled: boolean = yield call(isBasicAuthRequired);
-    yield put(checkAuthenticationSuccessAction(kcEnabled, basicAuthEnabled));
+    if (yield call(isKeycloakEnabled)) {
+      const keycloak = yield call(createKeycloakInstance);
+      yield put(
+        checkAuthenticationSuccessAction(AuthenticationEnum.keycloak, keycloak),
+      );
+    } else if (yield call(isBasicAuthRequired)) {
+      yield put(
+        checkAuthenticationSuccessAction(AuthenticationEnum.basicAuth, null),
+      );
+    } else {
+      yield put(
+        checkAuthenticationSuccessAction(AuthenticationEnum.none, null),
+      );
+    }
   } catch (err) {
     yield put(checkAuthenticationFailedAction(err));
   }
+}
+
+export function* watchCheckAuthentication(): Iterator<{}> {
+  yield takeEvery(CHECK_AUTHENTICATION, checkAuthentication);
 }
