@@ -43,7 +43,7 @@
         <dependency>
             <groupId>org.jboss.resteasy</groupId>
             <artifactId>resteasy-jsapi</artifactId>
-            <version>4.2.0.Final</version>
+            <version>4.3.1.Final</version>
         </dependency>
         <!-- Jetty -->
         <dependency>
@@ -121,18 +121,18 @@
         <dependency>
             <groupId>org.keycloak</groupId>
             <artifactId>keycloak-core</artifactId>
-            <version>6.0.1</version>
+            <version>7.0.0</version>
         </dependency>
         <dependency>
             <groupId>org.keycloak</groupId>
             <artifactId>keycloak-jetty94-adapter</artifactId>
-            <version>6.0.1</version>
+            <version>7.0.0</version>
         </dependency>
 
         <dependency>
             <groupId>org.keycloak</groupId>
             <artifactId>keycloak-servlet-filter-adapter</artifactId>
-            <version>6.0.1</version>
+            <version>7.0.0</version>
         </dependency>
     </dependencies>
 
