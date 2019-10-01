@@ -11,6 +11,7 @@ import {
   SMALL_FONT2,
 } from '../../../../styles/DefaultStylingProperties';
 import * as Radium from 'radium';
+import TruncateTextComponent from '../../Assets/TruncateTextComponent';
 
 const styles: CSSProperties = {
   title: {
@@ -34,10 +35,13 @@ const styles: CSSProperties = {
   propertyValues: {
     display: 'flex',
   },
-  propertyValue: {
-    width: '200px',
+  propertyName: {
+    minWidth: '200px',
     color: DARK_BLUE_COLOR,
     paddingBottom: '2px',
+  },
+  propertyValue: {
+    border: '1px solid red',
   },
 };
 
@@ -55,24 +59,33 @@ class ConversationProperties extends React.Component<IProps> {
         </div>
         <div style={styles.propertyTitle}>
           <div style={styles.property}>{'Name'}</div>
-          <div style={styles.property}>{'Value'}</div>
           <div style={styles.property}>{'Scope'}</div>
+          <div style={styles.property}>{'Value'}</div>
         </div>
         <div>
           {keys.map((property, i) => (
             <div style={styles.propertyValues} key={i}>
-              <div style={styles.propertyValue}>
+              <div style={styles.propertyName}>
                 {this.props.conversationProperties[property].name}
               </div>
-              <div style={styles.propertyValue}>
-                {typeof this.props.conversationProperties[property].value ===
-                'object'
-                  ? '{Object}'
-                  : this.props.conversationProperties[property].value}
-              </div>
-              <div style={styles.propertyValue}>
+              <div style={styles.propertyName}>
                 {this.props.conversationProperties[property].scope}
               </div>
+              <TruncateTextComponent
+                style={styles.propertyValue}
+                text={
+                  typeof this.props.conversationProperties[property].value ===
+                  'string'
+                    ? JSON.stringify(
+                        this.props.conversationProperties,
+                        null,
+                        '\t',
+                      )
+                    : this.props.conversationProperties[property].value +
+                      'lorem ipsum dalar dis doofus mabodis katonis lupus fungus is da frontos bontos ka le mongos'
+                }
+                length={40}
+              />
             </div>
           ))}
         </div>

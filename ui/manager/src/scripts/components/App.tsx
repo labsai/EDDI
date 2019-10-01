@@ -30,6 +30,7 @@ import {
   faPlus,
   faMinus,
   faComments,
+  faSync,
 } from '@fortawesome/free-solid-svg-icons';
 import BotConversationViewPage from './pages/BotConversationViewPage';
 import ConversationsPage from './pages/ConversationsPage';
@@ -47,6 +48,7 @@ library.add(faEllipsisV);
 library.add(faPlus);
 library.add(faMinus);
 library.add(faComments);
+library.add(faSync);
 
 const styles: CSSProperties = {
   logoutButton: {

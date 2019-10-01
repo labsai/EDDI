@@ -86,7 +86,7 @@ class BotConversationView extends React.Component<IPublicProps, IState> {
     const { conversation } = this.props;
     return (
       <div style={styles.content}>
-        <HomeButtonComponent />
+        <HomeButtonComponent extraPath={'conversations'} />
         {renderIf(this.props.isLoading && !conversation)(() => (
           <div style={styles.loadingWrapper}>
             <ClipLoader color={BLUE_COLOR} />
@@ -195,6 +195,7 @@ class BotConversationView extends React.Component<IPublicProps, IState> {
                         }
                       />
                       <ConversationSteps
+                        conversationId={this.props.conversationId}
                         conversationSteps={conversation.data.conversationSteps}
                         conversationOutputs={
                           conversation.data.conversationOutputs

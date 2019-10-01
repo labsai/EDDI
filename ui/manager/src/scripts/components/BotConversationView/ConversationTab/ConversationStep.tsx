@@ -21,17 +21,20 @@ import {
 } from '../../../../styles/DefaultStylingProperties';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import { isNumber } from 'util';
-import ConversationHelper from '../../utils/helpers/ConversationHelper';
+import ConversationHelper, {
+  IConversationStepOutput,
+} from '../../utils/helpers/ConversationHelper';
 
 interface IProps {
+  showAction: boolean;
   conversationStep: IConversationSteps;
   conversationOutput: IConversationOutput;
 }
 
 interface IState {
-  action: string[];
+  action: string;
   input: string;
-  output: string[];
+  output: IConversationStepOutput[];
   quickReplies: string[];
   timeSpan: number;
   expanded: boolean;
@@ -94,20 +97,31 @@ class ConversationStep extends React.Component<IProps, IState> {
     });
   }
 
+  getOutputRender(output: IConversationStepOutput, key: number) {
+    if (output.type === 'image' || output.type === 'botIcon') {
+      return <img src={output.value} alt={output.type} key={key} />;
+    } else {
+      return (
+        <div style={styles.output} key={key}>
+          {output.value}
+        </div>
+      );
+    }
+  }
+
   render() {
     return (
       <div style={styles.container}>
         <div style={styles.content} onClick={() => this.expand()}>
           <div style={styles.container}>
             <div style={styles.chatStep}>
-              {renderIf(!this.state.input && this.state.action)(() => (
+              {renderIf(
+                (!this.state.input && this.state.action) ||
+                  this.props.showAction,
+              )(() => (
                 <div style={styles.actions}>
                   <div style={styles.actionTitle}>{'Actions:'}</div>
-                  {this.state.action.map((action, i) => (
-                    <div key={i} style={styles.action}>
-                      {action}
-                    </div>
-                  ))}
+                  <div style={styles.action}>{this.state.action}</div>
                 </div>
               ))}
               {renderIf(this.state.input)(() => (
@@ -115,11 +129,9 @@ class ConversationStep extends React.Component<IProps, IState> {
               ))}
               {renderIf(this.state.output)(() => (
                 <div>
-                  {this.state.output.map((output, i) => (
-                    <div key={i} style={styles.output}>
-                      {output}
-                    </div>
-                  ))}
+                  {this.state.output.map((output, i) =>
+                    this.getOutputRender(output, i),
+                  )}
                 </div>
               ))}
               {renderIf(this.state.quickReplies)(() => (

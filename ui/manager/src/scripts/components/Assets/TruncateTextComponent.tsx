@@ -13,6 +13,7 @@ const styles: CSSProperties = {
     display: 'flex',
     color: '#7A849E',
     fontSize: '13px',
+    whiteSpace: 'pre-wrap',
   },
   textButton: {
     fontSize: '13px',

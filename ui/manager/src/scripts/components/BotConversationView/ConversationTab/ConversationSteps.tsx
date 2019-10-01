@@ -1,42 +1,123 @@
 import * as React from 'react';
 import { Component, compose, pure, setDisplayName } from 'recompose';
 import * as renderIf from 'render-if';
-import ReactJson from 'react-json-view';
 import ConversationStep from './ConversationStep';
 import {
   IConversationOutput,
   IConversationSteps,
 } from '../../utils/AxiosFunctions';
-import { CSSProperties } from 'react';
+import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
+import styles from './ConversationSteps.styles';
+import * as Radium from 'radium';
 import {
   BLUE_COLOR,
-  DARK_BLUE_COLOR,
-  LIGHT_BLUE_COLOR2,
+  GREY_COLOR,
   LIGHT_GREY_COLOR,
-  MEDIUM_FONT,
-  MEDIUM_FONT2,
-  MEDIUM_FONT3,
   WHITE_COLOR,
 } from '../../../../styles/DefaultStylingProperties';
-import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
-import * as Radium from 'radium';
+import eddiApiActionDispatchers from '../../../actions/EddiApiActionDispatchers';
 
 interface IProps {
+  conversationId: string;
   conversationSteps: IConversationSteps[];
   conversationOutputs: IConversationOutput[];
 }
 
-class ConversationSteps extends React.Component<IProps> {
+interface IState {
+  showAllActions: boolean;
+  autoRefresh: boolean;
+  autoRefreshInterval: number;
+}
+
+class ConversationSteps extends React.Component<IProps, IState> {
   constructor(props) {
     super(props);
+    this.state = {
+      showAllActions: false,
+      autoRefresh: false,
+      autoRefreshInterval: null,
+    };
+  }
+
+  toggleShowAllActions() {
+    this.setState({ showAllActions: !this.state.showAllActions });
+  }
+
+  toggleAutoRefresh() {
+    if (!this.state.autoRefresh) {
+      this.setState({
+        autoRefresh: true,
+        autoRefreshInterval: window.setInterval(
+          () =>
+            eddiApiActionDispatchers.fetchConversationAction(
+              this.props.conversationId,
+            ),
+          1000,
+        ),
+      });
+    } else {
+      window.clearInterval(this.state.autoRefreshInterval);
+      this.setState({
+        autoRefresh: false,
+        autoRefreshInterval: null,
+      });
+    }
   }
 
   render() {
     return (
       <div>
+        <div style={styles.toolbar}>
+          <div style={styles.conversationSettings}>
+            <div style={styles.toggleBox}>
+              <div
+                style={styles.button}
+                onClick={() => this.toggleShowAllActions()}
+                key={'showAllActions'}>
+                {renderIf(this.state.showAllActions)(() => (
+                  <FontAwesomeIcon
+                    style={styles.icon}
+                    icon={['fas', 'check']}
+                    color={GREY_COLOR}
+                  />
+                ))}
+              </div>
+              <div style={styles.toggleText}>{'Show all actions'}</div>
+            </div>
+            <div style={styles.toggleBox}>
+              <div
+                style={styles.button}
+                onClick={() => this.toggleAutoRefresh()}
+                key={'autoRefresh'}>
+                {renderIf(this.state.autoRefresh)(() => (
+                  <FontAwesomeIcon
+                    style={styles.icon}
+                    icon={['fas', 'check']}
+                    color={GREY_COLOR}
+                  />
+                ))}
+              </div>
+              <div style={styles.toggleText}>{'Auto refresh'}</div>
+            </div>
+            <div
+              style={styles.refresh}
+              onClick={() =>
+                eddiApiActionDispatchers.fetchConversationAction(
+                  this.props.conversationId,
+                )
+              }>
+              <FontAwesomeIcon
+                style={styles.icon}
+                icon={['fas', 'sync']}
+                color={WHITE_COLOR}
+              />
+            </div>
+          </div>
+        </div>
         {this.props.conversationSteps.map((conversationStep, i) => (
           <ConversationStep
             key={i}
+            showAction={this.state.showAllActions}
             conversationStep={conversationStep}
             conversationOutput={this.props.conversationOutputs[i]}
           />
