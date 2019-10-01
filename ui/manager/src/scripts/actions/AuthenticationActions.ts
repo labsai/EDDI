@@ -18,7 +18,6 @@ import {
   SIGN_OUT_SUCCESS,
 } from './AuthenticationActionTypes';
 import * as Keycloak from 'keycloak-js';
-import { AuthenticationEnum } from '../reducers/AuthenticationReducer';
 
 export interface IBasicAuthSignInAction extends Action {
   username: string;
@@ -171,17 +170,20 @@ export function checkAuthenticationAction(): ICheckAuthenticationAction {
 }
 
 export interface ICheckAuthenticationSuccessAction extends Action {
-  authenticationMethod: AuthenticationEnum;
+  isKeycloakEnabled: boolean;
+  isBasicAuthEnabled: boolean;
   keycloak: Keycloak.KeycloakInstance;
 }
 
 export function checkAuthenticationSuccessAction(
-  authenticationMethod: AuthenticationEnum,
+  isKeycloakEnabled: boolean,
+  isBasicAuthEnabled: boolean,
   keycloak: Keycloak.KeycloakInstance,
 ): ICheckAuthenticationSuccessAction {
   return {
     keycloak,
-    authenticationMethod,
+    isKeycloakEnabled,
+    isBasicAuthEnabled,
     type: CHECK_AUTHENTICATION_SUCCESS,
   };
 }

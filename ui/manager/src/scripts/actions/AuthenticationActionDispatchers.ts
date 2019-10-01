@@ -19,12 +19,18 @@ import {
   IKeycloakSignInAction,
   IKeycloakSignInFailedAction,
   IKeycloakSignInSuccessAction,
+  ISignOutAction,
+  ISignOutFailedAction,
+  ISignOutSuccessAction,
   keycloakRefreshTokenAction,
   keycloakRefreshTokenFailedAction,
   keycloakRefreshTokenSuccessAction,
   keycloakSignInAction,
   keycloakSignInFailedAction,
   keycloakSignInSuccessAction,
+  signOutAction,
+  signOutFailedAction,
+  signOutSuccessAction,
 } from './AuthenticationActions';
 
 export interface IAuthenticationActionDispatchers
@@ -44,8 +50,12 @@ export interface IAuthenticationActionDispatchers
   checkAuthenticationSuccessAction: (
     isKeycloakEnabled,
     isBasicAuthEnabled,
+    keycloak,
   ) => ICheckAuthenticationSuccessAction;
   checkAuthenticationFailedAction: (error) => ICheckAuthenticationFailedAction;
+  signOutAction: (keycloak) => ISignOutAction;
+  signOutSuccessAction: () => ISignOutSuccessAction;
+  signOutFailedAction: (error) => ISignOutFailedAction;
 }
 
 const actions: IAuthenticationActionDispatchers = {
@@ -61,6 +71,9 @@ const actions: IAuthenticationActionDispatchers = {
   checkAuthenticationAction,
   checkAuthenticationFailedAction,
   checkAuthenticationSuccessAction,
+  signOutAction,
+  signOutFailedAction,
+  signOutSuccessAction,
 };
 
 const authenticationActionDispatchers: IAuthenticationActionDispatchers = bindActionCreators<

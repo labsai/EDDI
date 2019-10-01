@@ -31,6 +31,10 @@ export function setDefaultGlobalHeader(key: string, value: string): void {
   axios.defaults.headers.common[key] = value;
 }
 
+export function deleteGlobalHeader(key: string) {
+  delete axios.defaults.headers.common[key];
+}
+
 export interface IDescriptor {
   createdBy?: string;
   createdOn: number;
@@ -175,17 +179,18 @@ export async function getBotPackages(resource: string): Promise<string[]> {
 
 export async function isBasicAuthRequired() {
   try {
-    const res = await axios.get(`${await getAPIUrl()}`);
+    const res = await axios.get(
+      `${await getAPIUrl()}/botstore/bots/descriptors`,
+    );
     return false;
   } catch (err) {
-    if (err.response.status === 401) {
-      console.log(err.response.status);
+    if (err.response && err.response.status === 401) {
       return true;
     } else {
       console.error(
-        `Failed to check if authentication is required. Error: ${err.message}`,
+        `Failed to check if basic auth is required. Error: ${err.message}`,
       );
-      throw err;
+      return false;
     }
   }
 }
@@ -207,7 +212,7 @@ export async function basicAuthSignIn(username: string, password: string) {
     );
   } catch (err) {
     console.error(
-      `Failed to sign in with username and password. Error: ${err.measure()}`,
+      `Failed to sign in with username and password. Error: ${err.message}`,
     );
   }
 }
@@ -240,8 +245,6 @@ export async function getBotDescriptors(
       };
     });
   } catch (err) {
-    console.log(err.response.status);
-    console.log(err);
     console.error(err);
     throw err;
   }

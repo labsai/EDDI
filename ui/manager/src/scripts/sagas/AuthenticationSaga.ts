@@ -1,6 +1,7 @@
 import { call, put, takeEvery } from 'redux-saga/effects';
 import {
   basicAuthSignIn,
+  deleteGlobalHeader,
   isBasicAuthRequired,
 } from '../components/utils/AxiosFunctions';
 import {
@@ -12,24 +13,28 @@ import {
   ICheckAuthenticationAction,
   IKeycloakRefreshTokenAction,
   IKeycloakSignInAction,
+  ISignOutAction,
   keycloakRefreshTokenFailedAction,
   keycloakRefreshTokenSuccessAction,
   keycloakSignInFailedAction,
   keycloakSignInSuccessAction,
+  signOutFailedAction,
+  signOutSuccessAction,
 } from '../actions/AuthenticationActions';
 import {
   BASIC_AUTH_SIGN_IN,
   CHECK_AUTHENTICATION,
   KEYCLOAK_REFRESH_TOKEN,
   KEYCLOAK_SIGN_IN,
+  SIGN_OUT,
 } from '../actions/AuthenticationActionTypes';
 import {
   createKeycloakInstance,
-  initKeycloak,
   isKeycloakEnabled,
+  logout,
+  setAuthorizationHeader,
   updateToken,
 } from '../components/utils/keycloakFunctions';
-import { AuthenticationEnum } from '../reducers/AuthenticationReducer';
 
 export function* BasicAuthSignIn(action: IBasicAuthSignInAction) {
   try {
@@ -46,8 +51,8 @@ export function* watchBasicAuthSignIn(): Iterator<{}> {
 
 export function* KeycloakSignIn(action: IKeycloakSignInAction) {
   try {
-    console.log(action.keycloak);
     if (action.keycloak) {
+      yield call(setAuthorizationHeader, action.keycloak);
       yield put(keycloakSignInSuccessAction(action.keycloak));
     } else {
       throw new Error('Failed to sign in with keycloak.');
@@ -59,6 +64,22 @@ export function* KeycloakSignIn(action: IKeycloakSignInAction) {
 
 export function* watchKeycloakSignIn(): Iterator<{}> {
   yield takeEvery(KEYCLOAK_SIGN_IN, KeycloakSignIn);
+}
+
+export function* SignOut(action: ISignOutAction) {
+  try {
+    if (action.keycloak) {
+      yield call(logout, action.keycloak);
+    }
+    yield call(deleteGlobalHeader, 'Authorization');
+    yield put(signOutSuccessAction());
+  } catch (err) {
+    yield put(signOutFailedAction(err));
+  }
+}
+
+export function* watchSignOut(): Iterator<{}> {
+  yield takeEvery(SIGN_OUT, SignOut);
 }
 
 export function* KeycloakRefreshToken(action: IKeycloakRefreshTokenAction) {
@@ -78,20 +99,18 @@ export function* checkAuthentication(
   action: ICheckAuthenticationAction,
 ): Iterator<{}> {
   try {
-    if (yield call(isKeycloakEnabled)) {
-      const keycloak = yield call(createKeycloakInstance);
-      yield put(
-        checkAuthenticationSuccessAction(AuthenticationEnum.keycloak, keycloak),
-      );
-    } else if (yield call(isBasicAuthRequired)) {
-      yield put(
-        checkAuthenticationSuccessAction(AuthenticationEnum.basicAuth, null),
-      );
-    } else {
-      yield put(
-        checkAuthenticationSuccessAction(AuthenticationEnum.none, null),
-      );
-    }
+    const basicAuthEnabled = yield call(isBasicAuthRequired);
+    const keycloakEnabled = yield call(isKeycloakEnabled);
+    const keycloak = keycloakEnabled
+      ? yield call(createKeycloakInstance)
+      : null;
+    yield put(
+      checkAuthenticationSuccessAction(
+        keycloakEnabled,
+        basicAuthEnabled,
+        keycloak,
+      ),
+    );
   } catch (err) {
     yield put(checkAuthenticationFailedAction(err));
   }

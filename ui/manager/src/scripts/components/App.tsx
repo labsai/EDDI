@@ -33,11 +33,9 @@ import {
 } from '@fortawesome/free-solid-svg-icons';
 import BotConversationViewPage from './pages/BotConversationViewPage';
 import ConversationsPage from './pages/ConversationsPage';
-import modalActionDispatchers from '../actions/ModalActionDispatchers';
 import { authenticationSelector } from '../selectors/AuthenticationSelectors';
 import { Component, compose, pure, setDisplayName } from 'recompose';
 import authenticationActionDispatchers from '../actions/AuthenticationActionDispatchers';
-import { AuthenticationEnum } from '../reducers/AuthenticationReducer';
 
 library.add(faUndo);
 library.add(faRedo);
@@ -66,12 +64,8 @@ interface IRouteProps {
 interface IPrivateProps extends IRouteProps {
   isAppReady: boolean;
   keycloak: Keycloak.KeycloakInstance;
-  authenticationMethod: AuthenticationEnum;
-  isAuthenticated: boolean;
-}
-
-interface IState {
-  keycloak: Keycloak.KeycloakInstance;
+  isKeycloakEnabled: boolean;
+  isBasicAuthEnabled: boolean;
   isAuthenticated: boolean;
 }
 
@@ -79,15 +73,7 @@ const sleep = milliseconds => {
   return new Promise(resolve => setTimeout(resolve, milliseconds));
 };
 
-class App extends React.Component<IPrivateProps, IState> {
-  constructor(props) {
-    super(props);
-    this.state = {
-      keycloak: null,
-      isAuthenticated: false,
-    };
-  }
-
+class App extends React.Component<IPrivateProps> {
   async componentDidMount() {
     await runSagaMiddleware();
     const queryStrings = Parser.getQueryStrings(this.props.location.search);
@@ -98,58 +84,42 @@ class App extends React.Component<IPrivateProps, IState> {
     authenticationActionDispatchers.checkAuthenticationAction();
   }
 
-  async componentH(nextProps) {
+  async componentWillReceiveProps(nextProps) {
+    if (nextProps.isKeycloakEnabled && !nextProps.authenticated) {
+      if (!nextProps.keycloak.authenticated) {
+        await kcHelper.initKeycloak(nextProps.keycloak);
+      }
+    }
     if (
-      nextProps.authenticationMethod === AuthenticationEnum.keycloak &&
-      !nextProps.authenticated
+      nextProps.isKeycloakEnabled &&
+      nextProps.keycloak.authenticated &&
+      !this.props.keycloak.authenticated
     ) {
-      await kcHelper.initKeycloak(this.props.keycloak, this.testFunction);
+      this.refreshToken(nextProps);
     }
   }
 
-  testFunction = () => {
-    console.log(this.props.keycloak.authenticated);
-    authenticationActionDispatchers.keycloakSignInAction(this.props.keycloak);
-  };
-
-  async initKeycloak() {
-    const k = await kcHelper.createKeycloakInstance();
-    this.setState({
-      keycloak: k,
-    });
-    await kcHelper.initKeycloak(k, this.authenticate);
-  }
-
-  authenticate = () => {
-    this.setState({
-      isAuthenticated: true,
-    });
-    this.refreshToken();
-  };
-
-  async refreshToken() {
-    kcHelper.updateToken(this.state.keycloak);
+  async refreshToken(props = this.props) {
+    authenticationActionDispatchers.keycloakRefreshTokenAction(props.keycloak);
     await sleep(240000).then(() => this.refreshToken());
   }
 
   logout = () => {
     historyPush('/');
-    kcHelper.logout(this.state.keycloak);
+    authenticationActionDispatchers.signOutAction(this.props.keycloak);
   };
 
   render() {
-    console.log(this.props.keycloak);
-    console.log(this.props.isAuthenticated);
     return (
       <div className="ui container">
         {renderIf(this.props.isAppReady)(() => (
           <div>
-            {renderIf(!this.state.isAuthenticated)(() => (
+            {renderIf(!this.props.isAuthenticated)(() => (
               <div>{'You need to login to see this page'}</div>
             ))}
-            {renderIf(this.state.isAuthenticated)(() => (
+            {renderIf(this.props.isAuthenticated)(() => (
               <div>
-                {renderIf(!!this.state.keycloak)(() => (
+                {renderIf(!!this.props.keycloak)(() => (
                   <WhiteButton
                     text={'Logout'}
                     customStyles={styles.logoutButton}

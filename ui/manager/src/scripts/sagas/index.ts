@@ -40,6 +40,7 @@ import {
   watchCheckAuthentication,
   watchKeycloakRefreshToken,
   watchKeycloakSignIn,
+  watchSignOut,
 } from './AuthenticationSaga';
 
 function* root() {
@@ -79,6 +80,7 @@ function* root() {
   yield fork(watchKeycloakSignIn);
   yield fork(watchKeycloakRefreshToken);
   yield fork(watchCheckAuthentication);
+  yield fork(watchSignOut);
 }
 
 export const run: () => Task = () => sagaMiddleware.run(root);

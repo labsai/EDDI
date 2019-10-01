@@ -10,6 +10,7 @@ import {
   CHECK_AUTHENTICATION_SUCCESS,
   KEYCLOAK_SIGN_IN,
   KEYCLOAK_SIGN_IN_SUCCESS,
+  SIGN_OUT_SUCCESS,
 } from '../actions/AuthenticationActionTypes';
 import {
   IBasicAuthSignInFailedAction,
@@ -17,22 +18,20 @@ import {
   IKeycloakSignInSuccessAction,
 } from '../actions/AuthenticationActions';
 
-export enum AuthenticationEnum {
-  'none',
-  'keycloak',
-  'basicAuth',
-}
-
 export interface IAuthenticationState {
-  authenticationMethod: AuthenticationEnum;
-  isAuthenticated: boolean;
+  isKeycloakEnabled: boolean;
+  isBasicAuthEnabled: boolean;
+  keycloakAuthenticated: boolean;
+  basicAuthAuthenticated: boolean;
   keycloak: Keycloak.KeycloakInstance;
   error: Error;
 }
 
 export const initialState: IAuthenticationState = {
-  authenticationMethod: AuthenticationEnum.none,
-  isAuthenticated: false,
+  isKeycloakEnabled: false,
+  isBasicAuthEnabled: false,
+  keycloakAuthenticated: false,
+  basicAuthAuthenticated: false,
   keycloak: null,
   error: null,
 };
@@ -55,7 +54,7 @@ const AuthenticationReducer: IAuthenticationReducer = (
 
     case BASIC_AUTH_SIGN_IN_SUCCESS:
       return update(state, {
-        isAuthenticated: {
+        basicAuthAuthenticated: {
           $set: true,
         },
       });
@@ -68,7 +67,6 @@ const AuthenticationReducer: IAuthenticationReducer = (
       });
 
     case KEYCLOAK_SIGN_IN:
-      console.log(action);
       return update(state, {
         error: {
           $set: null,
@@ -77,27 +75,42 @@ const AuthenticationReducer: IAuthenticationReducer = (
 
     case KEYCLOAK_SIGN_IN_SUCCESS:
       return update(state, {
-        isAuthenticated: {
+        keycloakAuthenticated: {
           $set: (action as IKeycloakSignInSuccessAction).keycloak.authenticated,
         },
       });
 
-    case CHECK_AUTHENTICATION:
-      console.log('checking auth');
-
     case CHECK_AUTHENTICATION_SUCCESS:
       return update(state, {
-        authenticationMethod: {
+        isKeycloakEnabled: {
+          $set: (action as ICheckAuthenticationSuccessAction).isKeycloakEnabled,
+        },
+        isBasicAuthEnabled: {
           $set: (action as ICheckAuthenticationSuccessAction)
-            .authenticationMethod,
+            .isBasicAuthEnabled,
         },
         keycloak: {
           $set: (action as ICheckAuthenticationSuccessAction).keycloak,
         },
-        authenticated: {
-          $set:
-            (action as ICheckAuthenticationSuccessAction)
-              .authenticationMethod === AuthenticationEnum.none,
+        keycloakAuthenticated: {
+          $set: !(action as ICheckAuthenticationSuccessAction)
+            .isKeycloakEnabled,
+        },
+        basicAuthAuthenticated: {
+          $set: !(action as ICheckAuthenticationSuccessAction)
+            .isBasicAuthEnabled,
+        },
+      });
+
+    case SIGN_OUT_SUCCESS:
+      return update(state, {
+        keycloakAuthenticated: {
+          $set: !(action as ICheckAuthenticationSuccessAction)
+            .isKeycloakEnabled,
+        },
+        basicAuthAuthenticated: {
+          $set: !(action as ICheckAuthenticationSuccessAction)
+            .isBasicAuthEnabled,
         },
       });
 

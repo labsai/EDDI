@@ -23,20 +23,11 @@ export async function createKeycloakInstance(): Promise<
   }
 }
 
-export async function initKeycloak(
-  keycloak: Keycloak.KeycloakInstance,
-  onAuthentication: () => void,
-) {
+export async function initKeycloak(keycloak: Keycloak.KeycloakInstance) {
   try {
-    await keycloak
-      .init({ onLoad: 'login-required' })
-      .success(() => {
-        console.log(keycloak);
-        onAuthentication();
-      })
-      .error(() => {
-        console.log('WTF');
-      });
+    await keycloak.init({ onLoad: 'login-required' }).success(() => {
+      authenticationActionDispatchers.keycloakSignInAction(keycloak);
+    });
   } catch (err) {
     console.error(`Failed to initialize keycloak. Error: ${err.message}`);
   }

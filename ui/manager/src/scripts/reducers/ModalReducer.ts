@@ -60,7 +60,6 @@ import {
   CHECK_AUTHENTICATION_SUCCESS,
 } from '../actions/AuthenticationActionTypes';
 import { ICheckAuthenticationSuccessAction } from '../actions/AuthenticationActions';
-import { AuthenticationEnum } from './AuthenticationReducer';
 
 export type IModalReducer = Reducer<IModalState>;
 
@@ -457,10 +456,7 @@ const ModalReducer: IModalReducer = (
     }
 
     case CHECK_AUTHENTICATION_SUCCESS: {
-      if (
-        (action as ICheckAuthenticationSuccessAction).authenticationMethod ===
-        AuthenticationEnum.basicAuth
-      ) {
+      if ((action as ICheckAuthenticationSuccessAction).isBasicAuthEnabled) {
         return update(state, {
           mode: {
             $set: ModalEnum.basicAuth,
