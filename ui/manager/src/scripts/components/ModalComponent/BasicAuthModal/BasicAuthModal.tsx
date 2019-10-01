@@ -11,6 +11,7 @@ import { connect } from 'react-redux';
 import { authenticationSelector } from '../../../selectors/AuthenticationSelectors';
 import authenticationActionDispatchers from '../../../actions/AuthenticationActionDispatchers';
 import * as _ from 'lodash';
+import { getAPIUrl } from '../../utils/ApiFunctions';
 
 const warningIcon = require('../../../../public/images/WarningIcon@3x.png');
 
@@ -22,6 +23,7 @@ interface IPrivateProps extends IPublicProps {
 interface IPublicProps {}
 
 interface IState {
+  apiUrl: string;
   name: string;
   password: string;
 }
@@ -29,9 +31,15 @@ class BasicAuthModal extends React.Component<IPrivateProps, IState> {
   constructor(props) {
     super(props);
     this.state = {
+      apiUrl: '',
       name: '',
       password: '',
     };
+  }
+
+  async componentDidMount() {
+    const apiUrl = await getAPIUrl();
+    this.setState({ apiUrl });
   }
 
   signIn = () => {
@@ -46,7 +54,7 @@ class BasicAuthModal extends React.Component<IPrivateProps, IState> {
       <div>
         <div style={styles.modalHeader}>
           <div style={styles.modalTopHeader}>
-            {'EDDI is requesting authentication'}
+            {`${this.state.apiUrl} is requesting authentication`}
           </div>
         </div>
         <div style={styles.content}>
