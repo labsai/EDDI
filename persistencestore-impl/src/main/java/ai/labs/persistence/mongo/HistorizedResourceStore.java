@@ -5,11 +5,16 @@ import ai.labs.persistence.IResourceStore;
 import ai.labs.utilities.RuntimeUtilities;
 
 import java.io.IOException;
+import java.lang.annotation.ElementType;
+import java.lang.annotation.Retention;
+import java.lang.annotation.RetentionPolicy;
+import java.lang.annotation.Target;
 
 /**
  * @author ginccc
  */
 public class HistorizedResourceStore<T> implements IResourceStore<T> {
+
     static IResourceStore.ResourceNotFoundException createResourceNotFoundException(String id, Integer version) {
         String message = "Resource not found. (id=%s, version=%s)";
         message = String.format(message, id, version);
@@ -29,6 +34,7 @@ public class HistorizedResourceStore<T> implements IResourceStore<T> {
     }
 
     @Override
+    @ConfigurationUpdate
     public Integer update(String id, Integer version, T content) throws IResourceStore.ResourceStoreException, IResourceStore.ResourceModifiedException, IResourceStore.ResourceNotFoundException {
         RuntimeUtilities.checkNotNull(id, "id");
         RuntimeUtilities.checkNotNull(version, "version");
