@@ -21,6 +21,7 @@ import {
   SHOW_CONFIRMATION_MODAL,
   SHOW_ERROR_MESSAGE_MODAL,
   SHOW_CONVERSATIONS_MODAL,
+  SHOW_BASIC_AUTH_MODAL,
 } from './ModalActionTypes';
 
 export interface IShowModalAction extends Action {
@@ -260,5 +261,13 @@ export function showConversationsModal(bot: IBot): IShowConversationsModal {
   return {
     bot,
     type: SHOW_CONVERSATIONS_MODAL,
+  };
+}
+
+export interface IShowBasicAuthModal extends Action {}
+
+export function showBasicAuthModal(): IShowBasicAuthModal {
+  return {
+    type: SHOW_BASIC_AUTH_MODAL,
   };
 }

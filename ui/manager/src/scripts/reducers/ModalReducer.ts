@@ -16,6 +16,7 @@ import {
   CLOSE_MODAL,
   SHOW_ADD_PACKAGES_MODAL,
   SHOW_ADD_PLUGINS_MODAL,
+  SHOW_BASIC_AUTH_MODAL,
   SHOW_CONFIRMATION_MODAL,
   SHOW_CONVERSATIONS_MODAL,
   SHOW_CREATE_NEW_CONFIG_2_MODAL,
@@ -52,6 +53,13 @@ import {
   IUpdatePackageSuccessAction,
   IUpdatePluginSuccessAction,
 } from '../actions/EddiApiActions';
+import {
+  BASIC_AUTH_SIGN_IN,
+  BASIC_AUTH_SIGN_IN_FAILED,
+  BASIC_AUTH_SIGN_IN_SUCCESS,
+  CHECK_AUTHENTICATION_SUCCESS,
+} from '../actions/AuthenticationActionTypes';
+import { ICheckAuthenticationSuccessAction } from '../actions/AuthenticationActions';
 
 export type IModalReducer = Reducer<IModalState>;
 
@@ -432,6 +440,43 @@ const ModalReducer: IModalReducer = (
         },
         bot: {
           $set: (action as IShowConversationsModal).bot,
+        },
+      });
+    }
+
+    case SHOW_BASIC_AUTH_MODAL: {
+      return update(state, {
+        mode: {
+          $set: ModalEnum.basicAuth,
+        },
+        isModalOpen: {
+          $set: true,
+        },
+      });
+    }
+
+    case CHECK_AUTHENTICATION_SUCCESS: {
+      if ((action as ICheckAuthenticationSuccessAction).isBasicAuthEnabled) {
+        return update(state, {
+          mode: {
+            $set: ModalEnum.basicAuth,
+          },
+          isModalOpen: {
+            $set: true,
+          },
+        });
+      } else {
+        return state;
+      }
+    }
+
+    case BASIC_AUTH_SIGN_IN_SUCCESS: {
+      return update(state, {
+        mode: {
+          $set: null,
+        },
+        isModalOpen: {
+          $set: false,
         },
       });
     }

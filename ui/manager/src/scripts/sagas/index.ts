@@ -35,6 +35,13 @@ import {
   watchFetchConversation,
   watchEndConversation,
 } from './EddiApiSaga';
+import {
+  watchBasicAuthSignIn,
+  watchCheckAuthentication,
+  watchKeycloakRefreshToken,
+  watchKeycloakSignIn,
+  watchSignOut,
+} from './AuthenticationSaga';
 
 function* root() {
   yield fork(watchFetchBot);
@@ -69,6 +76,11 @@ function* root() {
   yield fork(watchFetchConversations);
   yield fork(watchFetchConversation);
   yield fork(watchEndConversation);
+  yield fork(watchBasicAuthSignIn);
+  yield fork(watchKeycloakSignIn);
+  yield fork(watchKeycloakRefreshToken);
+  yield fork(watchCheckAuthentication);
+  yield fork(watchSignOut);
 }
 
 export const run: () => Task = () => sagaMiddleware.run(root);

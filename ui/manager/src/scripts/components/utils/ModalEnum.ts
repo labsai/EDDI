@@ -15,4 +15,5 @@ export enum ModalEnum {
   'error',
   'addNewPackageToBot',
   'conversations',
+  'basicAuth',
 }

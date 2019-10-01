@@ -25,9 +25,14 @@ import {
   PROPERTYSETTER,
   PROPERTYSETTER_PATH,
 } from './EddiTypes';
+import { setAuthorizationHeader } from './keycloakFunctions';
 
 export function setDefaultGlobalHeader(key: string, value: string): void {
   axios.defaults.headers.common[key] = value;
+}
+
+export function deleteGlobalHeader(key: string) {
+  delete axios.defaults.headers.common[key];
 }
 
 export interface IDescriptor {
@@ -169,6 +174,46 @@ export async function getBotPackages(resource: string): Promise<string[]> {
   } catch (err) {
     console.error(`Failed to get packages in bot. Error: ${err.message}`);
     throw err;
+  }
+}
+
+export async function isBasicAuthRequired() {
+  try {
+    const res = await axios.get(
+      `${await getAPIUrl()}/botstore/bots/descriptors`,
+    );
+    return false;
+  } catch (err) {
+    if (err.response && err.response.status === 401) {
+      return true;
+    } else {
+      console.error(
+        `Failed to check if basic auth is required. Error: ${err.message}`,
+      );
+      return false;
+    }
+  }
+}
+
+export async function basicAuthSignIn(username: string, password: string) {
+  try {
+    const response = await axios.get(
+      `${await getAPIUrl()}/botstore/bots/descriptors`,
+      {
+        auth: {
+          username: username,
+          password: password,
+        },
+      },
+    );
+    setDefaultGlobalHeader(
+      'Authorization',
+      `Basic ${btoa(`${username}:${password}`)}`,
+    );
+  } catch (err) {
+    console.error(
+      `Failed to sign in with username and password. Error: ${err.message}`,
+    );
   }
 }
 

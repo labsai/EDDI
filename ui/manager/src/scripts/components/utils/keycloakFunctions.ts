@@ -6,6 +6,7 @@ import {
   getAuthRealm,
   getAuthUrl,
 } from './ApiFunctions';
+import authenticationActionDispatchers from '../../actions/AuthenticationActionDispatchers';
 
 export async function createKeycloakInstance(): Promise<
   Keycloak.KeycloakInstance
@@ -22,14 +23,10 @@ export async function createKeycloakInstance(): Promise<
   }
 }
 
-export async function initKeycloak(
-  keycloak: Keycloak.KeycloakInstance,
-  onAuthentication: () => void,
-) {
+export async function initKeycloak(keycloak: Keycloak.KeycloakInstance) {
   try {
     await keycloak.init({ onLoad: 'login-required' }).success(() => {
-      onAuthentication();
-      setAuthorizationHeader(keycloak);
+      authenticationActionDispatchers.keycloakSignInAction(keycloak);
     });
   } catch (err) {
     console.error(`Failed to initialize keycloak. Error: ${err.message}`);
@@ -57,6 +54,6 @@ export function logout(keycloak: Keycloak.KeycloakInstance): void {
   keycloak.logout();
 }
 
-export async function keycloakEnabled() {
+export async function isKeycloakEnabled() {
   return (await getAuthMethod()) === 'keycloak';
 }
