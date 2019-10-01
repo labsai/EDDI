@@ -26,6 +26,7 @@ import ConversationHelper, {
 } from '../../utils/helpers/ConversationHelper';
 
 interface IProps {
+  showAction: boolean;
   conversationStep: IConversationSteps;
   conversationOutput: IConversationOutput;
 }
@@ -114,7 +115,10 @@ class ConversationStep extends React.Component<IProps, IState> {
         <div style={styles.content} onClick={() => this.expand()}>
           <div style={styles.container}>
             <div style={styles.chatStep}>
-              {renderIf(!this.state.input && this.state.action)(() => (
+              {renderIf(
+                (!this.state.input && this.state.action) ||
+                  this.props.showAction,
+              )(() => (
                 <div style={styles.actions}>
                   <div style={styles.actionTitle}>{'Actions:'}</div>
                   <div style={styles.action}>{this.state.action}</div>

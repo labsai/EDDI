@@ -127,6 +127,7 @@ const styles: CSSProperties = {
     flex: '1',
   },
   actions: {
+    fontSize: SMALL_FONT2,
     textAlign: 'center',
     paddingLeft: '65px',
   },

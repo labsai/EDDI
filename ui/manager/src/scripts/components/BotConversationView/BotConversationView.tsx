@@ -195,6 +195,7 @@ class BotConversationView extends React.Component<IPublicProps, IState> {
                         }
                       />
                       <ConversationSteps
+                        conversationId={this.props.conversationId}
                         conversationSteps={conversation.data.conversationSteps}
                         conversationOutputs={
                           conversation.data.conversationOutputs
