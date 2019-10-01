@@ -1109,14 +1109,10 @@ export async function getConversations(
   }
 }
 
-export async function getConversation(
-  environment: string,
-  botId: string,
-  conversationId: string,
-) {
+export async function getConversation(conversationId: string) {
   try {
     const res: IResponse = await axios.get(
-      `${await getAPIUrl()}/bots/${environment}/${botId}/${conversationId}?returnDetailed=true&returnCurrentStepOnly=false`,
+      `${await getAPIUrl()}/conversationstore/conversations/simple/${conversationId}?returnDetailed=true&returnCurrentStepOnly=false`,
     );
     return res.data;
   } catch (err) {

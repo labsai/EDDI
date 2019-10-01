@@ -73,6 +73,9 @@ export default class ConversationHelper {
   }
 
   static convertTimespan(timeSpan: number): string {
+    if (!timeSpan) {
+      return 'N/A';
+    }
     return timeSpan > 999
       ? `${(timeSpan / 1000).toFixed(2)}s`
       : `${timeSpan}ms`;

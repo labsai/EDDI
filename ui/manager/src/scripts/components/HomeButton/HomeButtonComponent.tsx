@@ -5,15 +5,11 @@ import { Component, compose, pure, setDisplayName } from 'recompose';
 import styles from './HomeButton.styles';
 import { historyPush } from '../../history';
 
-interface IProps {
-  extraPath?: string;
-}
+interface IProps {}
 
 const HomeButton: React.StatelessComponent<IProps> = (props: IProps) => (
   <div style={styles.navigationBar}>
-    <div
-      onClick={() => historyPush(`/${props.extraPath || ''}`)}
-      style={styles.homeButton}>
+    <div onClick={() => historyPush(`/`)} style={styles.homeButton}>
       <div style={styles.homeArrow}> </div>
       <div style={styles.homeSquare}> </div>
       <div style={styles.homeText}>{'Home'}</div>

@@ -1365,19 +1365,13 @@ export function fetchConversationsFailedAction(
 }
 
 export interface IFetchConversationAction extends Action {
-  environment: string;
-  botId: string;
   conversationId: string;
 }
 
 export function fetchConversationAction(
-  environment: string,
-  botId: string,
   conversationId: string,
 ): IFetchConversationAction {
   return {
-    environment,
-    botId,
     conversationId,
     type: FETCH_CONVERSATION,
   };

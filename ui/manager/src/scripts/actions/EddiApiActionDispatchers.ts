@@ -219,11 +219,7 @@ export interface IEddiApiActionDispatchers extends ActionCreatorsMapObject {
     conversations,
   ) => IFetchConversationsSuccessAction;
   fetchConversationsFailedAction: (error) => IFetchConversationsFailedAction;
-  fetchConversationAction: (
-    environment,
-    botId,
-    conversationId,
-  ) => IFetchConversationAction;
+  fetchConversationAction: (conversationId) => IFetchConversationAction;
   fetchConversationSuccessAction: (
     conversationId,
     conversation,

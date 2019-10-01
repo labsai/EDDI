@@ -65,7 +65,10 @@ class ConversationProperties extends React.Component<IProps> {
                 {this.props.conversationProperties[property].name}
               </div>
               <div style={styles.propertyValue}>
-                {this.props.conversationProperties[property].value}
+                {typeof this.props.conversationProperties[property].value ===
+                'object'
+                  ? '{Object}'
+                  : this.props.conversationProperties[property].value}
               </div>
               <div style={styles.propertyValue}>
                 {this.props.conversationProperties[property].scope}

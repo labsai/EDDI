@@ -50,7 +50,7 @@ class ConversationStep extends React.Component<IProps, IState> {
       timeSpan: null,
       expanded: false,
       conversationOutputExpanded: true,
-      conversationStepExpanded: true,
+      conversationStepExpanded: false,
     };
   }
 
