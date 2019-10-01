@@ -12,7 +12,8 @@ export const authenticationSelector: (
   keycloak: Keycloak.KeycloakInstance;
   isKeycloakEnabled: boolean;
   isBasicAuthEnabled: boolean;
-  isAuthenticated: boolean;
+  keycloakAuthenticated: boolean;
+  basicAuthAuthenticated: boolean;
   error: Error;
 } = createSelector(AuthenticationStateSelector, function(
   authenticationState: IAuthenticationState,
@@ -20,16 +21,16 @@ export const authenticationSelector: (
   keycloak: Keycloak.KeycloakInstance;
   isKeycloakEnabled: boolean;
   isBasicAuthEnabled: boolean;
-  isAuthenticated: boolean;
+  keycloakAuthenticated: boolean;
+  basicAuthAuthenticated: boolean;
   error: Error;
 } {
   return {
     keycloak: authenticationState.keycloak,
     isKeycloakEnabled: authenticationState.isKeycloakEnabled,
     isBasicAuthEnabled: authenticationState.isBasicAuthEnabled,
-    isAuthenticated:
-      authenticationState.keycloakAuthenticated &&
-      authenticationState.basicAuthAuthenticated,
+    keycloakAuthenticated: authenticationState.keycloakAuthenticated,
+    basicAuthAuthenticated: authenticationState.basicAuthAuthenticated,
     error: authenticationState.error,
   };
 });

@@ -68,7 +68,8 @@ interface IPrivateProps extends IRouteProps {
   keycloak: Keycloak.KeycloakInstance;
   isKeycloakEnabled: boolean;
   isBasicAuthEnabled: boolean;
-  isAuthenticated: boolean;
+  keycloakAuthenticated: boolean;
+  basicAuthAuthenticated: boolean;
 }
 
 const sleep = milliseconds => {
@@ -112,14 +113,16 @@ class App extends React.Component<IPrivateProps> {
   };
 
   render() {
+    const authenticated =
+      this.props.keycloakAuthenticated && this.props.basicAuthAuthenticated;
     return (
       <div className="ui container">
         {renderIf(this.props.isAppReady)(() => (
           <div>
-            {renderIf(!this.props.isAuthenticated)(() => (
+            {renderIf(!authenticated)(() => (
               <div>{'You need to login to see this page'}</div>
             ))}
-            {renderIf(this.props.isAuthenticated)(() => (
+            {renderIf(authenticated)(() => (
               <div>
                 {renderIf(!!this.props.keycloak)(() => (
                   <WhiteButton
@@ -144,7 +147,9 @@ class App extends React.Component<IPrivateProps> {
                 <Route path={'/packageview/:id'} component={PackageViewPage} />
               </div>
             ))}
-            <ModalComponentFrame />
+            {renderIf(this.props.keycloakAuthenticated)(() => (
+              <ModalComponentFrame />
+            ))}
           </div>
         ))}
       </div>
