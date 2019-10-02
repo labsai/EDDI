@@ -42,16 +42,23 @@ class BasicAuthModal extends React.Component<IPrivateProps, IState> {
     this.setState({ apiUrl });
   }
 
-  signIn = () => {
+  signIn = event => {
+    event.preventDefault();
     authenticationActionDispatchers.basicAuthSignInAction(
       this.state.name,
       this.state.password,
     );
   };
 
+  handleButtonPress = e => {
+    if (e.key === 'Enter') {
+      this.signIn(e);
+    }
+  };
+
   render() {
     return (
-      <div>
+      <form>
         <div style={styles.modalHeader}>
           <div style={styles.modalTopHeader}>
             {`${this.state.apiUrl} is requesting authentication`}
@@ -70,6 +77,9 @@ class BasicAuthModal extends React.Component<IPrivateProps, IState> {
           <div style={styles.inputTitle}>{'Username'}</div>
           <input
             style={styles.input}
+            type={'text'}
+            autoComplete={'username'}
+            autoFocus={true}
             onChange={e =>
               this.setState({
                 name: e.target.value,
@@ -79,12 +89,14 @@ class BasicAuthModal extends React.Component<IPrivateProps, IState> {
           <div style={styles.inputTitle}>{'Password'}</div>
           <input
             type={'password'}
+            autoComplete={'current-password'}
             style={styles.input}
             onChange={e =>
               this.setState({
                 password: e.target.value,
               })
             }
+            onKeyPress={this.handleButtonPress}
           />
           <div style={styles.buttons}>
             <BlueButton
@@ -98,7 +110,7 @@ class BasicAuthModal extends React.Component<IPrivateProps, IState> {
             />
           </div>
         </div>
-      </div>
+      </form>
     );
   }
 }

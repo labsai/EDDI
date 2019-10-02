@@ -214,6 +214,7 @@ export async function basicAuthSignIn(username: string, password: string) {
     console.error(
       `Failed to sign in with username and password. Error: ${err.message}`,
     );
+    throw err;
   }
 }
 
