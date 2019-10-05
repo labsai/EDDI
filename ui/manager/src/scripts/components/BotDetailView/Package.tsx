@@ -137,7 +137,7 @@ class Package extends React.Component<IPrivateProps> {
                   onClick={() =>
                     historyPush(`/packageview/${packagePayload.id}`)
                   }>
-                  {'Edit package'}
+                  {'View package'}
                 </button>
               </div>
               {renderIf(_.isUndefined(packagePayload.packageData))(() => (

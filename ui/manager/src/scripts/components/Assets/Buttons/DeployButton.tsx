@@ -66,6 +66,7 @@ interface IProps {
   botResource: string;
   deploymentStatus: string;
   customStyles: {};
+  readOnly: boolean;
 }
 
 const sleep = milliseconds => {
@@ -115,6 +116,7 @@ class DeployButton extends React.Component<IProps> {
             }
             styles={undeployStyle}
             customStyles={this.props.customStyles}
+            disabled={this.props.readOnly}
           />
         );
       case ERROR:
@@ -144,6 +146,7 @@ class DeployButton extends React.Component<IProps> {
             }
             styles={deployStyle}
             customStyles={this.props.customStyles}
+            disabled={this.props.readOnly}
           />
         );
       case undefined:

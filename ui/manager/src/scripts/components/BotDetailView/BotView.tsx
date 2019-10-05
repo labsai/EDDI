@@ -15,9 +15,15 @@ import { historyPush } from '../../history';
 import { getAPIUrl } from '../utils/ApiFunctions';
 import { BOT } from '../utils/EddiTypes';
 import Options from '../Assets/Buttons/BotOptions';
+import { readOnlySelector } from '../../selectors/AuthenticationSelectors';
+import { connect } from 'react-redux';
 
-interface IProps {
+interface IPublicProps {
   bot: IBot;
+}
+
+interface IPrivateProps extends IPublicProps {
+  readOnly: boolean;
 }
 
 interface IState {
@@ -26,7 +32,7 @@ interface IState {
 
 const warningIcon = require('../../../public/images/WarningIcon.png');
 const foundUnpublishedChanges = false; // todo : add function to check if there are unpublished changes.
-class BotView extends React.Component<IProps, IState> {
+class BotView extends React.Component<IPrivateProps, IState> {
   constructor(props) {
     super(props);
     this.state = {
@@ -75,6 +81,8 @@ class BotView extends React.Component<IProps, IState> {
   };
 
   render() {
+    const isCurrentVersion =
+      this.props.bot.version !== this.props.bot.currentVersion;
     return (
       <div>
         {renderIf(this.props.bot)(() => (
@@ -92,16 +100,12 @@ class BotView extends React.Component<IProps, IState> {
                 text={'Rename'}
                 onClick={this.openEditBotModal}
                 customStyles={styles.button}
-                disabled={
-                  this.props.bot.version !== this.props.bot.currentVersion
-                }
+                disabled={isCurrentVersion || this.props.readOnly}
               />
               <WhiteButton
                 text={'Edit JSON'}
                 onClick={this.openEditJsonModal}
-                disabled={
-                  this.props.bot.version !== this.props.bot.currentVersion
-                }
+                disabled={isCurrentVersion || this.props.readOnly}
                 customStyles={styles.button}
               />
               {renderIf(foundUnpublishedChanges)(() => (
@@ -121,6 +125,7 @@ class BotView extends React.Component<IProps, IState> {
                 botResource={this.props.bot.resource}
                 deploymentStatus={this.props.bot.deploymentStatus}
                 customStyles={styles.deployButton}
+                readOnly={this.props.readOnly}
               />
             </div>
             <BotDescriptor
@@ -128,10 +133,7 @@ class BotView extends React.Component<IProps, IState> {
               botLastModified={this.props.bot.lastModifiedOn}
               botDescription={this.props.bot.description}
             />
-            <PackageList
-              packages={this.props.bot.packages}
-              bot={this.props.bot}
-            />
+            <PackageList bot={this.props.bot} readOnly={this.props.readOnly} />
           </div>
         ))}
       </div>
@@ -139,8 +141,9 @@ class BotView extends React.Component<IProps, IState> {
   }
 }
 
-const ComposedBotView: Component<IProps> = compose<IProps>(
+const ComposedBotView: Component<IPrivateProps> = compose<IPrivateProps>(
   pure,
+  connect(readOnlySelector),
   setDisplayName('BotView'),
 )(BotView);
 

@@ -16,10 +16,15 @@ import * as _ from 'lodash';
 import * as renderIf from 'render-if';
 import { getTypeFromResource } from '../../utils/ApiFunctions';
 import { PACKAGE } from '../../utils/EddiTypes';
+import { readOnlySelector } from '../../../selectors/AuthenticationSelectors';
+import { connect } from 'react-redux';
 
-interface IProps {
+interface IPublicProps {
   descriptor: IDetailedDescriptor;
   data: string;
+}
+interface IPrivateProps extends IPublicProps {
+  readOnly: boolean;
 }
 
 const trigger = (
@@ -30,7 +35,7 @@ const trigger = (
   />
 );
 
-class Options extends React.Component<IProps> {
+class Options extends React.Component<IPrivateProps> {
   render() {
     const { descriptor } = this.props;
     const isCurrentVersion = descriptor.version === descriptor.currentVersion;
@@ -42,7 +47,7 @@ class Options extends React.Component<IProps> {
             <Dropdown.Item
               text={'Rename'}
               icon={'edit outline'}
-              disabled={!isCurrentVersion}
+              disabled={!isCurrentVersion || this.props.readOnly}
               onClick={() =>
                 modalActionDispatchers.showEditDescriptorModalAction(descriptor)
               }
@@ -50,7 +55,7 @@ class Options extends React.Component<IProps> {
             <Dropdown.Item
               text={'Edit JSON'}
               icon={'edit'}
-              disabled={!isCurrentVersion}
+              disabled={!isCurrentVersion || this.props.readOnly}
               onClick={() =>
                 modalActionDispatchers.showEditJsonModal(
                   descriptor.resource,
@@ -60,7 +65,7 @@ class Options extends React.Component<IProps> {
             />
             {renderIf(isPackage)(() => (
               <Dropdown.Item>
-                <Dropdown text={'Duplicate'}>
+                <Dropdown text={'Duplicate'} disabled={this.props.readOnly}>
                   <Dropdown.Menu>
                     <Dropdown.Item
                       text={'Normal'}
@@ -71,6 +76,7 @@ class Options extends React.Component<IProps> {
                           false,
                         )
                       }
+                      disabled={this.props.readOnly}
                     />
                     <Dropdown.Item
                       text={'Deep copy'}
@@ -81,6 +87,7 @@ class Options extends React.Component<IProps> {
                           true,
                         )
                       }
+                      disabled={this.props.readOnly}
                     />
                   </Dropdown.Menu>
                 </Dropdown>
@@ -96,6 +103,7 @@ class Options extends React.Component<IProps> {
                     false,
                   )
                 }
+                disabled={this.props.readOnly}
               />
             ))}
             <Dropdown.Divider />
@@ -107,8 +115,9 @@ class Options extends React.Component<IProps> {
   }
 }
 
-const ComposedOptions: Component<IProps> = compose<IProps>(
+const ComposedOptions: Component<IPrivateProps> = compose<IPrivateProps>(
   pure,
+  connect(readOnlySelector),
   Radium,
   setDisplayName('Options'),
 )(Options);

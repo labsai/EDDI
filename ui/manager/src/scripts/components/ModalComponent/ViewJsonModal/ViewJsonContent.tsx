@@ -16,14 +16,18 @@ import PackagesUsingPlugin from '../../PackageDetailView/UsedByComponent/Package
 import eddiApiActionDispatchers from '../../../actions/EddiApiActionDispatchers';
 import { getTypeFromResource } from '../../utils/ApiFunctions';
 import Options from '../../Assets/Buttons/Options';
-
-interface IPrivateProps extends IPublicProps {}
+import { readOnlySelector } from '../../../selectors/AuthenticationSelectors';
+import { connect } from 'react-redux';
 
 interface IPublicProps {
   descriptor: IDetailedDescriptor;
   data: string;
   usedBy: string[];
   selectVersion(version: number): void;
+}
+
+interface IPrivateProps extends IPublicProps {
+  readOnly: boolean;
 }
 
 interface IState {
@@ -70,7 +74,9 @@ class ViewJsonContent extends React.Component<IPrivateProps, IState> {
       <div>
         <div style={styles.header}>
           <div style={styles.topHeader}>
-            <div style={styles.title}>{this.props.descriptor.name}</div>
+            <div style={styles.title}>
+              {this.props.descriptor.name || this.props.descriptor.id}
+            </div>
             <VersionSelectComponent
               selectedVersion={this.props.descriptor.version}
               currentVersion={this.props.descriptor.currentVersion}
@@ -86,7 +92,7 @@ class ViewJsonContent extends React.Component<IPrivateProps, IState> {
             <BlueButton
               onClick={this.openEditJsonModal}
               customStyles={styles.button}
-              disabled={!isCurrentVersion}
+              disabled={!isCurrentVersion || this.props.readOnly}
               text={`Edit JSON`}
             />
           </div>
@@ -137,6 +143,7 @@ class ViewJsonContent extends React.Component<IPrivateProps, IState> {
 
 const ComposedViewJsonContent: Component<IProps> = compose<IProps>(
   pure,
+  connect(readOnlySelector),
   setDisplayName('ViewJsonContent'),
 )(ViewJsonContent);
 

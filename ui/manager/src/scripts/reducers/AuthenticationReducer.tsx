@@ -21,6 +21,7 @@ import {
 export interface IAuthenticationState {
   isKeycloakEnabled: boolean;
   isBasicAuthEnabled: boolean;
+  readOnly: boolean;
   keycloakAuthenticated: boolean;
   basicAuthAuthenticated: boolean;
   keycloak: Keycloak.KeycloakInstance;
@@ -30,6 +31,7 @@ export interface IAuthenticationState {
 export const initialState: IAuthenticationState = {
   isKeycloakEnabled: false,
   isBasicAuthEnabled: false,
+  readOnly: false,
   keycloakAuthenticated: false,
   basicAuthAuthenticated: false,
   keycloak: null,
@@ -88,6 +90,9 @@ const AuthenticationReducer: IAuthenticationReducer = (
         isBasicAuthEnabled: {
           $set: (action as ICheckAuthenticationSuccessAction)
             .isBasicAuthEnabled,
+        },
+        readOnly: {
+          $set: (action as ICheckAuthenticationSuccessAction).isReadOnly,
         },
         keycloak: {
           $set: (action as ICheckAuthenticationSuccessAction).keycloak,

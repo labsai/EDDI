@@ -13,15 +13,20 @@ import DeployButton from '../Assets/Buttons/DeployButton';
 import { ClipLoader } from 'react-spinners';
 import { historyPush } from '../../history';
 import Options from '../Assets/Buttons/BotOptions';
+import { readOnlySelector } from '../../selectors/AuthenticationSelectors';
+import { connect } from 'react-redux';
 
-interface IProps {
+interface IPublicProps {
   bot: IBot;
   apiUrl: string;
+}
+interface IPrivateProps extends IPublicProps {
+  readOnly: boolean;
 }
 
 const warningIcon = require('../../../public/images/WarningIcon.png');
 
-class Bot extends React.Component<IProps> {
+class Bot extends React.Component<IPrivateProps> {
   async componentDidMount() {
     if (_.isUndefined(this.props.bot.packages)) {
       eddiApiActionDispatchers.fetchBotDataAction(this.props.bot.resource);
@@ -80,6 +85,7 @@ class Bot extends React.Component<IProps> {
                 botResource={this.props.bot.resource}
                 deploymentStatus={this.props.bot.deploymentStatus}
                 customStyles={styles.deployButton}
+                readOnly={this.props.readOnly}
               />
             </div>
           </div>
@@ -106,6 +112,7 @@ class Bot extends React.Component<IProps> {
 
 const ComposedBot: Component<IProps> = compose<IProps>(
   pure,
+  connect(readOnlySelector),
   Radium,
   setDisplayName('Bot'),
 )(Bot);

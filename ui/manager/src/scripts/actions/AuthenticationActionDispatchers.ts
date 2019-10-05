@@ -50,6 +50,7 @@ export interface IAuthenticationActionDispatchers
   checkAuthenticationSuccessAction: (
     isKeycloakEnabled,
     isBasicAuthEnabled,
+    isReadOnly,
     keycloak,
   ) => ICheckAuthenticationSuccessAction;
   checkAuthenticationFailedAction: (error) => ICheckAuthenticationFailedAction;

@@ -35,6 +35,7 @@ import {
   setAuthorizationHeader,
   updateToken,
 } from '../components/utils/keycloakFunctions';
+import { getReadOnly } from '../components/utils/ApiFunctions';
 
 export function* BasicAuthSignIn(action: IBasicAuthSignInAction) {
   try {
@@ -101,6 +102,7 @@ export function* checkAuthentication(
   try {
     const basicAuthEnabled = yield call(isBasicAuthRequired);
     const keycloakEnabled = yield call(isKeycloakEnabled);
+    const isReadOnly = yield call(getReadOnly);
     const keycloak = keycloakEnabled
       ? yield call(createKeycloakInstance)
       : null;
@@ -108,6 +110,7 @@ export function* checkAuthentication(
       checkAuthenticationSuccessAction(
         keycloakEnabled,
         basicAuthEnabled,
+        isReadOnly === 'true',
         keycloak,
       ),
     );
