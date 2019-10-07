@@ -110,7 +110,7 @@ export function* checkAuthentication(
       checkAuthenticationSuccessAction(
         keycloakEnabled,
         basicAuthEnabled,
-        isReadOnly === 'true',
+        isReadOnly,
         keycloak,
       ),
     );

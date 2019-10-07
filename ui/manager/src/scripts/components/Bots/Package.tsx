@@ -15,6 +15,7 @@ import ModalActionDispatchers from '../../actions/ModalActionDispatchers';
 import { ModalEnum } from '../utils/ModalEnum';
 import { history, historyPush } from '../../history';
 import { ClipLoader } from 'react-spinners';
+import { readOnlySelector } from '../../selectors/AuthenticationSelectors';
 
 interface IPrivateProps extends IPublicProps {
   packagePayload: IPackage;
@@ -26,6 +27,7 @@ interface IPrivateProps extends IPublicProps {
 interface IPublicProps {
   packageResource: string;
   bot: IBot;
+  readOnly: boolean;
 }
 
 interface IState {
@@ -109,6 +111,7 @@ class Package extends React.Component<IPrivateProps, IState> {
                         this.props.packagePayload,
                       )
                     }
+                    disabled={this.props.readOnly}
                   />
                 ))}
               </div>
@@ -123,6 +126,12 @@ class Package extends React.Component<IPrivateProps, IState> {
 const ComposedPackage: Component<IPublicProps> = compose<
   IPrivateProps,
   IPublicProps
->(pure, Radium, connect(packageSelector), setDisplayName('Package'))(Package);
+>(
+  pure,
+  Radium,
+  connect(packageSelector),
+  connect(readOnlySelector),
+  setDisplayName('Package'),
+)(Package);
 
 export default ComposedPackage;

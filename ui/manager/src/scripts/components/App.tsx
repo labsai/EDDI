@@ -20,6 +20,7 @@ import {
   getAuthClientId,
   getReadOnly,
   setApiUrlQuery,
+  setReadOnlyQuery,
 } from './utils/ApiFunctions';
 import { library } from '@fortawesome/fontawesome-svg-core';
 import Parser from './utils/Parser';
@@ -54,14 +55,6 @@ library.add(faMinus);
 library.add(faComments);
 library.add(faSync);
 
-const styles: CSSProperties = {
-  logoutButton: {
-    height: '36px',
-    marginTop: '7px',
-    float: 'right',
-  },
-};
-
 interface IRouteProps {
   match: { params: { id: string } };
   location: { search: string };
@@ -87,6 +80,9 @@ class App extends React.Component<IPrivateProps> {
     if (queryStrings.apiUrl) {
       setApiUrlQuery(decodeURIComponent(queryStrings.apiUrl));
     }
+    if (queryStrings.readOnly) {
+      setReadOnlyQuery(decodeURIComponent(queryStrings.readOnly));
+    }
     SystemActionDispatchers.appReady();
     authenticationActionDispatchers.checkAuthenticationAction();
   }
@@ -111,11 +107,6 @@ class App extends React.Component<IPrivateProps> {
     await sleep(240000).then(() => this.refreshToken());
   }
 
-  logout = () => {
-    historyPush('/');
-    authenticationActionDispatchers.signOutAction(this.props.keycloak);
-  };
-
   render() {
     const authenticated =
       this.props.keycloakAuthenticated && this.props.basicAuthAuthenticated;
@@ -128,13 +119,6 @@ class App extends React.Component<IPrivateProps> {
             ))}
             {renderIf(authenticated)(() => (
               <div>
-                {renderIf(!!this.props.keycloak)(() => (
-                  <WhiteButton
-                    text={'Logout'}
-                    customStyles={styles.logoutButton}
-                    onClick={this.logout}
-                  />
-                ))}
                 <Route path={'/'} exact component={Dashboard} />
                 <Route path={'/packages'} exact component={PackagePage} />
                 <Route

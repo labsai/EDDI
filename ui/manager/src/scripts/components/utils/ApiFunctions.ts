@@ -216,32 +216,33 @@ export async function getAuthClientId(): Promise<string> {
   }
 }
 
-let readOnlyPromise: Promise<string>;
-let readOnlyQuery: string;
+let readOnlyPromise: Promise<boolean>;
+let readOnlyQuery: boolean;
 
-export function setReadOnlyQuery(url: string) {
-  readOnlyQuery = url;
+export function setReadOnlyQuery(urlQuery: string) {
+  readOnlyQuery = urlQuery === 'true';
 }
 
-export function getReadOnlyQuery(): string {
+export function getReadOnlyQuery(): boolean {
   return readOnlyQuery;
 }
 
-export async function getReadOnly(): Promise<string> {
+export async function getReadOnly(): Promise<boolean> {
   if (!_.isEmpty(readOnlyQuery)) {
     return readOnlyQuery;
   }
+  const apiUrl = await getAPIUrl();
   if (!readOnlyPromise) {
     return (readOnlyPromise = axios
       .get(envUrl)
       .then(overrides => {
-        if (overrides.data.READ_ONLY) {
-          console.log(overrides.data.READ_ONLY);
-          let readOnly = overrides.data.READ_ONLY;
-          return readOnly;
+        if (overrides.data.READ_ONLY_DOMAIN) {
+          let readOnlyDomain = overrides.data.READ_ONLY_DOMAIN.split(',');
+          return readOnlyDomain.includes(apiUrl);
         } else {
-          if (process.env.readOnly) {
-            return process.env.readOnly;
+          if (process.env.readOnlyDomain) {
+            let readOnlyDomain = process.env.readOnlyDomain.split(',');
+            return readOnlyDomain.includes(apiUrl);
           } else {
             throw new Error('No readOnly defined');
           }
@@ -249,7 +250,10 @@ export async function getReadOnly(): Promise<string> {
       })
       .catch(err => {
         if (process.env.environment === 'local') {
-          return (readOnlyPromise = Promise.resolve(process.env.readOnly));
+          let readOnlyDomain = process.env.readOnlyDomain.split(',');
+          return (readOnlyPromise = Promise.resolve(
+            readOnlyDomain.includes(apiUrl),
+          ));
         } else {
           console.error(`Failed to get readOnly. Error: ${err.message}`);
           readOnlyPromise = null;

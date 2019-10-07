@@ -11,12 +11,18 @@ import * as renderIf from 'render-if';
 import * as Radium from 'radium';
 import { connect } from 'react-redux';
 import { Component, compose, pure, setDisplayName } from 'recompose';
-import { readOnlySelector } from '../../selectors/AuthenticationSelectors';
+import {
+  authenticationSelector,
+  readOnlySelector,
+} from '../../selectors/AuthenticationSelectors';
 import {
   MEDIUM_FONT,
   RED_BORDER,
   RED_COLOR,
 } from '../../../styles/DefaultStylingProperties';
+import WhiteButton from '../Assets/Buttons/WhiteButton';
+import authenticationActionDispatchers from '../../actions/AuthenticationActionDispatchers';
+import { historyPush } from '../../history';
 
 const styles: CSSProperties = {
   createNewBotButton: {
@@ -51,6 +57,10 @@ const styles: CSSProperties = {
     width: '20px',
     marginRight: '5px',
   },
+  logoutButton: {
+    height: '36px',
+    float: 'right',
+  },
 };
 
 const warningIcon = require('../../../public/images/WarningIcon.png');
@@ -63,6 +73,7 @@ interface IPublicProps {
 
 interface IPrivateProps extends IPublicProps {
   readOnly: boolean;
+  keycloak: Keycloak.KeycloakInstance;
 }
 
 class TopBarComponent extends React.Component<IPrivateProps> {
@@ -88,6 +99,11 @@ class TopBarComponent extends React.Component<IPrivateProps> {
     }
   }
 
+  logout = () => {
+    historyPush('/');
+    authenticationActionDispatchers.signOutAction(this.props.keycloak);
+  };
+
   render() {
     return (
       <div>
@@ -97,11 +113,18 @@ class TopBarComponent extends React.Component<IPrivateProps> {
               <img src={warningIcon} style={styles.warningIcon} />
               <div>
                 {
-                  'This site is Read-Only. Launch your own instance to enabled editing.'
+                  'This site is Read-Only. Launch your own instance of EDDI to enabled editing.'
                 }
               </div>
             </div>
           </div>
+        ))}
+        {renderIf(!!this.props.keycloak)(() => (
+          <WhiteButton
+            text={'Logout'}
+            customStyles={styles.logoutButton}
+            onClick={this.logout}
+          />
         ))}
         <div style={styles.topBarComponent}>
           <NavigationComponent page={this.props.page} />
@@ -124,8 +147,12 @@ class TopBarComponent extends React.Component<IPrivateProps> {
 
 const ComposedTopBarComponent: Component<IPrivateProps> = compose<
   IPrivateProps
->(pure, connect(readOnlySelector), Radium, setDisplayName('TopBarComponent'))(
-  TopBarComponent,
-);
+>(
+  pure,
+  connect(readOnlySelector),
+  connect(authenticationSelector),
+  Radium,
+  setDisplayName('TopBarComponent'),
+)(TopBarComponent);
 
 export default ComposedTopBarComponent;
