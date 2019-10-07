@@ -217,19 +217,19 @@ export async function getAuthClientId(): Promise<string> {
 }
 
 let readOnlyPromise: Promise<boolean>;
-let readOnlyQuery: boolean;
+let readOnlyQuery: string;
 
 export function setReadOnlyQuery(urlQuery: string) {
-  readOnlyQuery = urlQuery === 'true';
+  readOnlyQuery = urlQuery;
 }
 
-export function getReadOnlyQuery(): boolean {
+export function getReadOnlyQuery(): string {
   return readOnlyQuery;
 }
 
 export async function getReadOnly(): Promise<boolean> {
   if (!_.isEmpty(readOnlyQuery)) {
-    return readOnlyQuery;
+    return readOnlyQuery === 'true';
   }
   const apiUrl = await getAPIUrl();
   if (!readOnlyPromise) {

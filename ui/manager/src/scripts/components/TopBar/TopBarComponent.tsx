@@ -113,8 +113,14 @@ class TopBarComponent extends React.Component<IPrivateProps> {
               <img src={warningIcon} style={styles.warningIcon} />
               <div>
                 {
-                  'This site is Read-Only. Launch your own instance of EDDI to enabled editing.'
+                  'This site is Read-Only. Launch your own instance of EDDI to enabled editing. '
                 }
+                <a
+                  href={
+                    'https://console.cloud.google.com/marketplace/details/labsai-public/labsai-eddi-dev'
+                  }>
+                  {'Learn more.'}
+                </a>
               </div>
             </div>
           </div>
