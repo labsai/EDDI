@@ -17,6 +17,7 @@ import {
 } from '../../selectors/AuthenticationSelectors';
 import {
   MEDIUM_FONT,
+  MEDIUM_FONT2,
   RED_BORDER,
   RED_COLOR,
 } from '../../../styles/DefaultStylingProperties';
@@ -53,17 +54,24 @@ const styles: CSSProperties = {
     display: 'flex',
   },
   warningIcon: {
-    height: '20px',
-    width: '20px',
+    height: '38px',
+    width: '38px',
     marginRight: '5px',
   },
   logoutButton: {
     height: '36px',
     float: 'right',
   },
+  warningText: {
+    whiteSpace: 'pre',
+  },
+  bold: {
+    fontSize: MEDIUM_FONT2,
+    fontWeight: 'bold',
+  },
 };
 
-const warningIcon = require('../../../public/images/WarningIcon.png');
+const warningIcon = require('../../../public/images/WarningIcon@3x.png');
 
 interface IPublicProps {
   page: pageEnum;
@@ -111,9 +119,12 @@ class TopBarComponent extends React.Component<IPrivateProps> {
           <div style={styles.readOnly}>
             <div style={styles.warning}>
               <img src={warningIcon} style={styles.warningIcon} />
-              <div>
+              <div style={styles.warningText}>
+                <span style={styles.bold}>
+                  {'This is a read-only demo Instance of EDDI.'}
+                </span>
                 {
-                  'This site is Read-Only. Launch your own instance of EDDI to enabled editing. '
+                  '\nCreate your own bot today by launching EDDI with one-click on Google Marketplace. '
                 }
                 <a
                   href={
