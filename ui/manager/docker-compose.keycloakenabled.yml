@@ -25,6 +25,7 @@ services:
     - eddi
     environment:
       EDDI_API_URL: "http://localhost:7070"
+      READ_ONLY_DOMAIN: "https://app.labs.ai"
       PORT: 7071
       AUTH_METHOD: 'keycloak'
       AUTH_URL: 'https://auth.labs.ai/auth'

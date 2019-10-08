@@ -9,10 +9,16 @@ import modalActionDispatchers from '../../../actions/ModalActionDispatchers';
 import eddiApiActionDispatchers from '../../../actions/EddiApiActionDispatchers';
 import { NOT_FOUND, READY } from '../../utils/helpers/BotHelper';
 import styles from './Options.styles';
+import { readOnlySelector } from '../../../selectors/AuthenticationSelectors';
+import { connect } from 'react-redux';
 
-interface IProps {
+interface IPublicProps {
   bot: IBot;
   apiUrl: string;
+}
+
+interface IPrivateProps extends IPublicProps {
+  readOnly: boolean;
 }
 
 const trigger = (
@@ -23,7 +29,7 @@ const trigger = (
   />
 );
 
-class BotOptions extends React.Component<IProps> {
+class BotOptions extends React.Component<IPrivateProps> {
   render() {
     const { bot } = this.props;
     const botDeployed = bot.deploymentStatus === READY;
@@ -66,7 +72,7 @@ class BotOptions extends React.Component<IProps> {
                   ? 'arrow alternate circle down outline'
                   : 'arrow alternate circle up outline'
               }
-              disabled={!botDeployed && !botUndeployed}
+              disabled={(!botDeployed && !botUndeployed) || this.props.readOnly}
               onClick={() =>
                 (botUndeployed &&
                   eddiApiActionDispatchers.deployBotAction(bot.resource)) ||
@@ -82,7 +88,7 @@ class BotOptions extends React.Component<IProps> {
             <Dropdown.Item
               text={'Rename'}
               icon={'edit outline'}
-              disabled={!isCurrentVersion}
+              disabled={!isCurrentVersion || this.props.readOnly}
               onClick={() =>
                 modalActionDispatchers.showEditDescriptorModalAction(bot)
               }
@@ -90,7 +96,7 @@ class BotOptions extends React.Component<IProps> {
             <Dropdown.Item
               text={'Edit JSON'}
               icon={'edit'}
-              disabled={!isCurrentVersion}
+              disabled={!isCurrentVersion || this.props.readOnly}
               onClick={() =>
                 modalActionDispatchers.showEditJsonModal(
                   bot.resource,
@@ -106,7 +112,7 @@ class BotOptions extends React.Component<IProps> {
               }
             />
             <Dropdown.Item>
-              <Dropdown text={'Duplicate'}>
+              <Dropdown text={'Duplicate'} disabled={this.props.readOnly}>
                 <Dropdown.Menu>
                   <Dropdown.Item
                     text={'Normal'}
@@ -117,6 +123,7 @@ class BotOptions extends React.Component<IProps> {
                         false,
                       )
                     }
+                    disabled={this.props.readOnly}
                   />
                   <Dropdown.Item
                     text={'Deep copy'}
@@ -127,6 +134,7 @@ class BotOptions extends React.Component<IProps> {
                         true,
                       )
                     }
+                    disabled={this.props.readOnly}
                   />
                 </Dropdown.Menu>
               </Dropdown>
@@ -140,8 +148,9 @@ class BotOptions extends React.Component<IProps> {
   }
 }
 
-const ComposedBotOptions: Component<IProps> = compose<IProps>(
+const ComposedBotOptions: Component<IPrivateProps> = compose<IPrivateProps>(
   pure,
+  connect(readOnlySelector),
   Radium,
   setDisplayName('BotOptions'),
 )(BotOptions);

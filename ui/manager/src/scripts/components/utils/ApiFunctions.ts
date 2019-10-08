@@ -17,6 +17,7 @@ import {
 } from './EddiTypes';
 import * as _ from 'lodash';
 
+const envUrl = '/_/env.json';
 let apiUrlPromise: Promise<string>;
 let apiUrlQuery: string;
 
@@ -34,7 +35,7 @@ export async function getAPIUrl(): Promise<string> {
   }
   if (!apiUrlPromise) {
     return (apiUrlPromise = axios
-      .get('/_/env.json')
+      .get(envUrl)
       .then(overrides => {
         if (overrides.data.EDDI_API_URL) {
           let apiUrl = overrides.data.EDDI_API_URL;
@@ -74,7 +75,7 @@ let authMethodPromise: Promise<string>;
 export async function getAuthMethod(): Promise<string> {
   if (!authMethodPromise) {
     return (authMethodPromise = axios
-      .get('/_/env.json')
+      .get(envUrl)
       .then(overrides => {
         if (overrides.data.AUTH_METHOD) {
           let authMethod = overrides.data.AUTH_METHOD;
@@ -91,7 +92,7 @@ export async function getAuthMethod(): Promise<string> {
         if (process.env.environment === 'local') {
           return (authMethodPromise = Promise.resolve(process.env.authMethod));
         } else {
-          console.error(`Failed to get API url. Error: ${err.message}`);
+          console.error(`Failed to get authMethod. Error: ${err.message}`);
           authMethodPromise = null;
           throw err;
         }
@@ -110,7 +111,7 @@ let authRealmPromise: Promise<string>;
 export async function getAuthRealm(): Promise<string> {
   if (!authRealmPromise) {
     return (authRealmPromise = axios
-      .get('/_/env.json')
+      .get(envUrl)
       .then(overrides => {
         if (overrides.data.AUTH_REALM) {
           let authRealm = overrides.data.AUTH_REALM;
@@ -127,7 +128,7 @@ export async function getAuthRealm(): Promise<string> {
         if (process.env.environment === 'local') {
           return (authRealmPromise = Promise.resolve(process.env.authRealm));
         } else {
-          console.error(`Failed to get API url. Error: ${err.message}`);
+          console.error(`Failed to get authRealm url. Error: ${err.message}`);
           authRealmPromise = null;
           throw err;
         }
@@ -146,7 +147,7 @@ let authUrlPromise: Promise<string>;
 export async function getAuthUrl(): Promise<string> {
   if (!authUrlPromise) {
     return (authUrlPromise = axios
-      .get('/_/env.json')
+      .get(envUrl)
       .then(overrides => {
         if (overrides.data.AUTH_URL) {
           let authUrl = overrides.data.AUTH_URL;
@@ -163,7 +164,7 @@ export async function getAuthUrl(): Promise<string> {
         if (process.env.environment === 'local') {
           return (authUrlPromise = Promise.resolve(process.env.authUrl));
         } else {
-          console.error(`Failed to get API url. Error: ${err.message}`);
+          console.error(`Failed to get authUrl. Error: ${err.message}`);
           authUrlPromise = null;
           throw err;
         }
@@ -182,7 +183,7 @@ let authClientIdPromise: Promise<string>;
 export async function getAuthClientId(): Promise<string> {
   if (!authClientIdPromise) {
     return (authClientIdPromise = axios
-      .get('/_/env.json')
+      .get(envUrl)
       .then(overrides => {
         if (overrides.data.AUTH_CLIENT_ID) {
           let authClientId = overrides.data.AUTH_CLIENT_ID;
@@ -191,7 +192,7 @@ export async function getAuthClientId(): Promise<string> {
           if (process.env.authClientId) {
             return process.env.authClientId;
           } else {
-            throw new Error('No authUrl defined');
+            throw new Error('No authClientId defined');
           }
         }
       })
@@ -201,7 +202,7 @@ export async function getAuthClientId(): Promise<string> {
             process.env.authClientId,
           ));
         } else {
-          console.error(`Failed to get API url. Error: ${err.message}`);
+          console.error(`Failed to get authClientId. Error: ${err.message}`);
           authClientIdPromise = null;
           throw err;
         }
@@ -212,6 +213,55 @@ export async function getAuthClientId(): Promise<string> {
       authClientId = authClientId.substring(0, authClientId.length - 1);
     }
     return authClientId;
+  }
+}
+
+let readOnlyPromise: Promise<boolean>;
+let readOnlyQuery: string;
+
+export function setReadOnlyQuery(urlQuery: string) {
+  readOnlyQuery = urlQuery;
+}
+
+export function getReadOnlyQuery(): string {
+  return readOnlyQuery;
+}
+
+export async function getReadOnly(): Promise<boolean> {
+  if (!_.isEmpty(readOnlyQuery)) {
+    return readOnlyQuery === 'true';
+  }
+  const apiUrl = await getAPIUrl();
+  if (!readOnlyPromise) {
+    return (readOnlyPromise = axios
+      .get(envUrl)
+      .then(overrides => {
+        if (overrides.data.READ_ONLY_DOMAIN) {
+          let readOnlyDomain = overrides.data.READ_ONLY_DOMAIN.split(',');
+          return readOnlyDomain.includes(apiUrl);
+        } else {
+          if (process.env.readOnlyDomain) {
+            let readOnlyDomain = process.env.readOnlyDomain.split(',');
+            return readOnlyDomain.includes(apiUrl);
+          } else {
+            throw new Error('No readOnly defined');
+          }
+        }
+      })
+      .catch(err => {
+        if (process.env.environment === 'local') {
+          let readOnlyDomain = process.env.readOnlyDomain.split(',');
+          return (readOnlyPromise = Promise.resolve(
+            readOnlyDomain.includes(apiUrl),
+          ));
+        } else {
+          console.error(`Failed to get readOnly. Error: ${err.message}`);
+          readOnlyPromise = null;
+          throw err;
+        }
+      }));
+  } else {
+    return await readOnlyPromise;
   }
 }
 

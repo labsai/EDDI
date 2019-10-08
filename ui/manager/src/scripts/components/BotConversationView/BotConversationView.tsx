@@ -21,14 +21,16 @@ import {
 import modalActionDispatchers from '../../actions/ModalActionDispatchers';
 import { ClipLoader } from 'react-spinners';
 import { BLUE_COLOR } from '../../../styles/DefaultStylingProperties';
+import { readOnlySelector } from '../../selectors/AuthenticationSelectors';
 
-interface IPrivateProps {
+interface IPublicProps {
   conversationId: string;
 }
 
-interface IPublicProps extends IPrivateProps {
+interface IPrivateProps extends IPublicProps {
   conversation: IConversation;
   isLoading: boolean;
+  readOnly: boolean;
 }
 
 enum TabEnum {
@@ -40,7 +42,7 @@ interface IState {
   selectedTab: TabEnum;
 }
 
-class BotConversationView extends React.Component<IPublicProps, IState> {
+class BotConversationView extends React.Component<IPrivateProps, IState> {
   constructor(props) {
     super(props);
     this.state = {
@@ -117,7 +119,8 @@ class BotConversationView extends React.Component<IPublicProps, IState> {
                   text={'End Conversation'}
                   customStyles={styles.endConversationButton}
                   disabled={
-                    conversation.conversationState !== CONVERSATION_READY
+                    conversation.conversationState !== CONVERSATION_READY ||
+                    this.props.readOnly
                   }
                   onClick={this.endConversation}
                 />
@@ -223,9 +226,12 @@ class BotConversationView extends React.Component<IPublicProps, IState> {
   }
 }
 
-const ComposedBotConversationView: Component<IProps> = compose<IProps>(
+const ComposedBotConversationView: Component<IPrivateProps> = compose<
+  IPrivateProps
+>(
   pure,
   connect(conversationSelector),
+  connect(readOnlySelector),
   setDisplayName('BotConversationView'),
 )(BotConversationView);
 

@@ -23,6 +23,7 @@ export interface IQueryStringProperties {
   version?: string;
   apiUrl?: string;
   type?: string;
+  readOnly?: string;
 }
 
 export default class Parser {

@@ -34,3 +34,9 @@ export const authenticationSelector: (
     error: authenticationState.error,
   };
 });
+
+export function readOnlySelector(state: IAppState) {
+  return {
+    readOnly: state.authenticationState.readOnly,
+  };
+}

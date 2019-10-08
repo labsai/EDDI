@@ -25,8 +25,8 @@ import Parser from '../utils/Parser';
 import { hasExtensions } from '../utils/helpers/PluginParser';
 import PluginHelper from '../utils/helpers/PluginHelper';
 import { PACKAGE } from '../utils/EddiTypes';
-import { getAPIUrl } from '../utils/ApiFunctions';
 import Options from '../Assets/Buttons/Options';
+import { readOnlySelector } from '../../selectors/AuthenticationSelectors';
 
 export interface IOptions extends IPluginExtensions {
   extensionKey: number;
@@ -38,6 +38,7 @@ interface IPublicProps {
 
 interface IPrivateProps extends IPublicProps {
   defaultPluginTypes: IDefaultPluginTypes[];
+  readOnly: boolean;
 }
 
 interface IState {
@@ -229,13 +230,13 @@ class PackageView extends React.Component<IPrivateProps, IState> {
             onClick={this.openEditPackageModal}
             text={'Rename'}
             customStyles={styles.editPackageButton}
-            disabled={!isCurrentVersion}
+            disabled={!isCurrentVersion || this.props.readOnly}
           />
           <WhiteButton
             onClick={this.openEditJsonModal}
             text={'Edit JSON'}
             customStyles={styles.editPackageButton}
-            disabled={!isCurrentVersion}
+            disabled={!isCurrentVersion || this.props.readOnly}
           />
           {renderIf(foundUnpublishedChanges)(() => (
             <div style={styles.unpublishedChanges}>
@@ -278,7 +279,7 @@ class PackageView extends React.Component<IPrivateProps, IState> {
                   pluginResource={PluginHelper.getResource(ext)}
                   deletePlugin={this.deletePlugin}
                   updatePlugin={this.updatePlugin}
-                  editDisabled={!isCurrentVersion}
+                  editDisabled={!isCurrentVersion || this.props.readOnly}
                 />
               ))}
             <div style={styles.pluginList}>
@@ -291,13 +292,13 @@ class PackageView extends React.Component<IPrivateProps, IState> {
                     deletePlugin={this.deletePlugin}
                     pluginResource={PluginHelper.getResource(ext)}
                     updatePlugin={this.updatePlugin}
-                    editDisabled={!isCurrentVersion}
+                    editDisabled={!isCurrentVersion || this.props.readOnly}
                   />
                 ))}
             </div>
           </div>
         ))}
-        {renderIf(isCurrentVersion)(() => (
+        {renderIf(isCurrentVersion && !this.props.readOnly)(() => (
           <div>
             <div style={styles.pluginAddTitle}>{'Add plugins'}</div>
             <div style={styles.pluginDropdown}>
@@ -317,11 +318,11 @@ class PackageView extends React.Component<IPrivateProps, IState> {
   }
 }
 
-const ComposedPackageView: Component<IPublicProps> = compose<
-  IPrivateProps,
-  IPublicProps
->(pure, connect(defaultPluginTypesSelector), setDisplayName('PackageView'))(
-  PackageView,
-);
+const ComposedPackageView: Component<IPrivateProps> = compose<IPrivateProps>(
+  pure,
+  connect(defaultPluginTypesSelector),
+  connect(readOnlySelector),
+  setDisplayName('PackageView'),
+)(PackageView);
 
 export default ComposedPackageView;

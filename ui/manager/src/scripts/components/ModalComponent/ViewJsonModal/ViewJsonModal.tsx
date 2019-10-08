@@ -7,12 +7,14 @@ import Parser from '../../utils/Parser';
 import { PACKAGE } from '../../utils/EddiTypes';
 import PackageContainer from './PackageContainer';
 import PluginContainer from './PluginContainer';
-
-interface IPrivateProps extends IPublicProps {}
+import { readOnlySelector } from '../../../selectors/AuthenticationSelectors';
+import { connect } from 'react-redux';
 
 interface IPublicProps {
   resource: string;
 }
+
+interface IPrivateProps extends IPublicProps {}
 
 interface IState {
   selectedResource: string;

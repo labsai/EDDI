@@ -33,6 +33,9 @@ const undeployStyle: CSSProperties = {
       backgroundColor: DARK_RED_COLOR,
     },
   },
+  disabled: {
+    cursor: 'not-allowed',
+  },
 };
 const deployStyle: CSSProperties = {
   button: {
@@ -43,13 +46,16 @@ const deployStyle: CSSProperties = {
       backgroundColor: DARK_GREEN_COLOR,
     },
   },
+  disabled: {
+    cursor: 'not-allowed',
+  },
 };
 const inProgressStyle: CSSProperties = {
   disabled: {
     color: 'white',
     backgroundColor: YELLOW_COLOR,
     border: YELLOW_BORDER,
-    cursor: 'default',
+    cursor: 'not-allowed',
   },
 };
 const errorStyle: CSSProperties = {
@@ -57,7 +63,7 @@ const errorStyle: CSSProperties = {
     color: DARK_RED_COLOR,
     backgroundColor: 'white',
     border: LIGHT_GREY_BORDER,
-    cursor: 'default',
+    cursor: 'not-allowed',
   },
 };
 
@@ -66,6 +72,7 @@ interface IProps {
   botResource: string;
   deploymentStatus: string;
   customStyles: {};
+  readOnly: boolean;
 }
 
 const sleep = milliseconds => {
@@ -115,6 +122,7 @@ class DeployButton extends React.Component<IProps> {
             }
             styles={undeployStyle}
             customStyles={this.props.customStyles}
+            disabled={this.props.readOnly}
           />
         );
       case ERROR:
@@ -144,6 +152,7 @@ class DeployButton extends React.Component<IProps> {
             }
             styles={deployStyle}
             customStyles={this.props.customStyles}
+            disabled={this.props.readOnly}
           />
         );
       case undefined:

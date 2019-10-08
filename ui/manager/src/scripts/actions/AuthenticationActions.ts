@@ -172,18 +172,21 @@ export function checkAuthenticationAction(): ICheckAuthenticationAction {
 export interface ICheckAuthenticationSuccessAction extends Action {
   isKeycloakEnabled: boolean;
   isBasicAuthEnabled: boolean;
+  isReadOnly: boolean;
   keycloak: Keycloak.KeycloakInstance;
 }
 
 export function checkAuthenticationSuccessAction(
   isKeycloakEnabled: boolean,
   isBasicAuthEnabled: boolean,
+  isReadOnly: boolean,
   keycloak: Keycloak.KeycloakInstance,
 ): ICheckAuthenticationSuccessAction {
   return {
     keycloak,
     isKeycloakEnabled,
     isBasicAuthEnabled,
+    isReadOnly,
     type: CHECK_AUTHENTICATION_SUCCESS,
   };
 }

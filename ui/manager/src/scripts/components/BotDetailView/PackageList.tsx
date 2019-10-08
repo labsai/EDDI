@@ -35,6 +35,7 @@ const styles: CSSProperties = {
 
 interface IPublicProps {
   bot: IBot;
+  readOnly: boolean;
 }
 
 interface IPrivateProps extends IPublicProps {}
@@ -61,6 +62,8 @@ class PackageList extends React.Component<IPrivateProps, IState> {
   };
 
   render() {
+    const isCurrentVersion =
+      this.props.bot.version !== this.props.bot.currentVersion;
     return (
       <div style={styles.packages}>
         <div style={styles.packagesHeader}>
@@ -71,12 +74,12 @@ class PackageList extends React.Component<IPrivateProps, IState> {
             onClick={() => {
               this.openModal();
             }}
-            disabled={this.props.bot.version !== this.props.bot.currentVersion}
+            disabled={isCurrentVersion || this.props.readOnly}
           />
           <WhiteButton
             text={'Add package'}
             onClick={this.openAddPackagesModal}
-            disabled={this.props.bot.version !== this.props.bot.currentVersion}
+            disabled={isCurrentVersion || this.props.readOnly}
             customStyles={styles.button}
           />
         </div>
