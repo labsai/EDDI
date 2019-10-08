@@ -95,8 +95,8 @@ class App extends React.Component<IPrivateProps> {
     }
     if (
       nextProps.isKeycloakEnabled &&
-      nextProps.keycloak.authenticated &&
-      !this.props.keycloak.authenticated
+      nextProps.keycloakAuthenticated &&
+      !this.props.keycloakAuthenticated
     ) {
       this.refreshToken(nextProps);
     }
