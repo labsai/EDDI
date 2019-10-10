@@ -42,7 +42,9 @@ class BotList extends React.Component<IPrivateProps, IState> {
   }
 
   async componentDidMount() {
-    this.loadMore();
+    if (!this.props.isLoading) {
+      this.loadMore();
+    }
     this.setState({ apiUrl: await getAPIUrl() });
   }
 
