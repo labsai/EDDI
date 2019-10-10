@@ -95,6 +95,9 @@ import {
   END_CONVERSATION,
   END_CONVERSATION_SUCCESS,
   END_CONVERSATION_FAILED,
+  DEPLOY_EXAMPLE_BOTS,
+  DEPLOY_EXAMPLE_BOTS_SUCCESS,
+  DEPLOY_EXAMPLE_BOTS_FAILED,
 } from './EddiApiActionTypes';
 import {
   IBot,
@@ -1442,5 +1445,39 @@ export function endConversationFailedAction(
   return {
     error,
     type: END_CONVERSATION_FAILED,
+  };
+}
+
+export interface IDeployExampleBotsAction extends Action {}
+
+export function deployExampleBotsAction(): IDeployExampleBotsAction {
+  return {
+    type: DEPLOY_EXAMPLE_BOTS,
+  };
+}
+
+export interface IDeployExampleBotsSuccessAction extends Action {
+  bots: IBot[];
+}
+
+export function deployExampleBotsSuccessAction(
+  bots: IBot[],
+): IDeployExampleBotsSuccessAction {
+  return {
+    bots,
+    type: DEPLOY_EXAMPLE_BOTS_SUCCESS,
+  };
+}
+
+export interface IDeployExampleBotsFailedAction extends Action {
+  error: Error;
+}
+
+export function deployExampleBotsFailedAction(
+  error,
+): IDeployExampleBotsFailedAction {
+  return {
+    error,
+    type: DEPLOY_EXAMPLE_BOTS_FAILED,
   };
 }

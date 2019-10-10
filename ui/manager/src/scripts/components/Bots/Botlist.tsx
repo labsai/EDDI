@@ -5,7 +5,7 @@ import * as _ from 'lodash';
 import * as Radium from 'radium';
 import { Component, compose, pure, setDisplayName } from 'recompose';
 import eddiApiActionDispatchers from '../../actions/EddiApiActionDispatchers';
-import { IBot } from '../utils/AxiosFunctions';
+import { deployExampleBots, IBot } from '../utils/AxiosFunctions';
 import { connect } from 'react-redux';
 import { botsSelector } from '../../selectors/BotSelectors';
 import styles from './Botlist.styles';
@@ -13,6 +13,7 @@ import { ClimbingBoxLoader } from 'react-spinners';
 import { DEFAULT_LIMIT, getAPIUrl } from '../utils/ApiFunctions';
 import * as InfiniteScrollTypes from 'react-infinite-scroller';
 const InfiniteScroll = require('react-infinite-scroller') as InfiniteScrollTypes;
+import BlueButton from '../Assets/Buttons/BlueButton';
 
 interface IPublicProps {
   filterText: string;
@@ -99,7 +100,18 @@ class BotList extends React.Component<IPrivateProps, IState> {
               !this.props.error &&
                 !this.props.isLoading &&
                 _.isEmpty(this.props.bots),
-            )(() => <p>{`There are no bots yet`}</p>)}
+            )(() => (
+              <div>
+                <div>{`There are no bots yet..`}</div>
+                <BlueButton
+                  customStyles={styles.deployExampleBotsButton}
+                  onClick={() =>
+                    eddiApiActionDispatchers.deployExampleBotsAction()
+                  }
+                  text={'Deploy Example Bots'}
+                />
+              </div>
+            ))}
             {renderIf(!this.props.error && !_.isEmpty(this.props.bots))(() => (
               <div>
                 {renderIf(_.isEmpty(botList))(() => (

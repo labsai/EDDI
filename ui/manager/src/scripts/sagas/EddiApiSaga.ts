@@ -32,6 +32,7 @@ import {
   FETCH_CONVERSATIONS,
   FETCH_CONVERSATION,
   END_CONVERSATION,
+  DEPLOY_EXAMPLE_BOTS,
 } from '../actions/EddiApiActionTypes';
 import {
   getPackage,
@@ -73,6 +74,7 @@ import {
   IConversationData,
   getConversation,
   endConversation as axiosEndConversation,
+  deployExampleBots as axiosDeployExampleBots,
 } from '../components/utils/AxiosFunctions';
 import {
   fetchBotFailedAction,
@@ -166,6 +168,9 @@ import {
   IEndConversationAction,
   endConversationSuccessAction,
   endConversationFailedAction,
+  IDeployExampleBotsAction,
+  deployExampleBotsFailedAction,
+  deployExampleBotsSuccessAction,
 } from '../actions/EddiApiActions';
 import * as Edditypes from '../components/utils/EddiTypes';
 import Parser from '../components/utils/Parser';
@@ -793,4 +798,19 @@ export function* endConversation(action: IEndConversationAction): Iterator<{}> {
 
 export function* watchEndConversation(): Iterator<{}> {
   yield takeEvery(END_CONVERSATION, endConversation);
+}
+
+export function* deployExampleBots(
+  action: IDeployExampleBotsAction,
+): Iterator<{}> {
+  try {
+    const bots: IBot[] = yield call(axiosDeployExampleBots);
+    yield put(deployExampleBotsSuccessAction(bots));
+  } catch (err) {
+    yield put(deployExampleBotsFailedAction(err));
+  }
+}
+
+export function* watchDeployExampleBots(): Iterator<{}> {
+  yield takeEvery(DEPLOY_EXAMPLE_BOTS, deployExampleBots);
 }
