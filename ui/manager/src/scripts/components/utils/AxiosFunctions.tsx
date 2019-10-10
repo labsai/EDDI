@@ -1138,3 +1138,32 @@ export async function endConversation(conversationId: string) {
     console.error(`Failed to end conversation. Error: ${err.message}`);
   }
 }
+
+interface IExampleBotsResponseData {
+  environment: string;
+  botId: string;
+  botVersion: number;
+  status: string;
+  descriptor: IDescriptor;
+}
+
+export async function deployExampleBots(): Promise<IBot[]> {
+  try {
+    const response = await axios.post(
+      `${await getAPIUrl()}/backup/import/examples`,
+    );
+    const exampleBots: IExampleBotsResponseData[] = response.data;
+    return exampleBots.map(bot => {
+      return {
+        ...bot.descriptor,
+        environment: bot.environment,
+        id: bot.botId,
+        version: bot.botVersion,
+        currentVersion: bot.botVersion,
+        deploymentStatus: bot.status,
+      };
+    });
+  } catch (err) {
+    console.error(`Failed to deploy example bots. Error: ${err.message}`);
+  }
+}

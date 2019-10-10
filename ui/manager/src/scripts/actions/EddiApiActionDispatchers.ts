@@ -114,6 +114,12 @@ import {
   endConversationAction,
   endConversationSuccessAction,
   endConversationFailedAction,
+  IDeployExampleBotsAction,
+  IDeployExampleBotsSuccessAction,
+  IDeployExampleBotsFailedAction,
+  deployExampleBotsAction,
+  deployExampleBotsFailedAction,
+  deployExampleBotsSuccessAction,
 } from './EddiApiActions';
 
 export interface IEddiApiActionDispatchers extends ActionCreatorsMapObject {
@@ -230,6 +236,9 @@ export interface IEddiApiActionDispatchers extends ActionCreatorsMapObject {
     conversationId,
   ) => IEndConversationSuccessAction;
   endConversationFailedAction: (conversationId) => IEndConversationFailedAction;
+  deployExampleBotsAction: () => IDeployExampleBotsAction;
+  deployExampleBotsSuccessAction: (bots) => IDeployExampleBotsSuccessAction;
+  deployExampleBotsFailedAction: (error) => IDeployExampleBotsFailedAction;
 }
 
 const actions: IEddiApiActionDispatchers = {
@@ -294,6 +303,9 @@ const actions: IEddiApiActionDispatchers = {
   endConversationAction,
   endConversationSuccessAction,
   endConversationFailedAction,
+  deployExampleBotsAction,
+  deployExampleBotsFailedAction,
+  deployExampleBotsSuccessAction,
 };
 
 const eddiApiActionDispatchers: IEddiApiActionDispatchers = bindActionCreators<

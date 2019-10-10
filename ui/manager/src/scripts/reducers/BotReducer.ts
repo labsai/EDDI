@@ -21,6 +21,9 @@ import {
   FETCH_BOT_JSON_SCHEMA_SUCCESS,
   DUPLICATE_SUCCESS,
   FETCH_CONVERSATIONS_SUCCESS,
+  DEPLOY_EXAMPLE_BOTS,
+  DEPLOY_EXAMPLE_BOTS_FAILED,
+  DEPLOY_EXAMPLE_BOTS_SUCCESS,
 } from '../actions/EddiApiActionTypes';
 import * as update from 'immutability-helper';
 import {
@@ -41,6 +44,8 @@ import {
   IFetchJsonSchemaSuccessAction,
   IDuplicateSuccessAction,
   IFetchConversationsSuccessAction,
+  IDeployExampleBotsFailedAction,
+  IDeployExampleBotsSuccessAction,
 } from '../actions/EddiApiActions';
 import * as _ from 'lodash';
 import { JSONSchema4 } from 'json-schema';
@@ -428,6 +433,39 @@ const BotReducer: IBotReducer = (
         },
         botsLoaded: {
           $set: state.botsLoaded + 1,
+        },
+      });
+    }
+
+    case DEPLOY_EXAMPLE_BOTS: {
+      return update(state, {
+        isLoadingAllBots: {
+          $set: true,
+        },
+      });
+    }
+
+    case DEPLOY_EXAMPLE_BOTS_FAILED: {
+      return update(state, {
+        isLoadingAllBots: {
+          $set: false,
+        },
+        error: {
+          $set: (action as IDeployExampleBotsFailedAction).error,
+        },
+      });
+    }
+
+    case DEPLOY_EXAMPLE_BOTS_SUCCESS: {
+      return update(state, {
+        isLoadingAllBots: {
+          $set: false,
+        },
+        bots: {
+          $set: (action as IDeployExampleBotsSuccessAction).bots,
+        },
+        botsLoaded: {
+          $set: (action as IDeployExampleBotsSuccessAction).bots.length,
         },
       });
     }
