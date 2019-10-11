@@ -14,8 +14,7 @@ EXPOSE 7070
 EXPOSE 7443
 EXPOSE 9001
 
-RUN microdnf --enablerepo=rhel-8-server-rpms install shadow-utils ;\
-    adduser eddi
+RUN adduser eddi
 
 USER eddi
 
