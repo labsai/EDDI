@@ -14,7 +14,8 @@ EXPOSE 7070
 EXPOSE 7443
 EXPOSE 9001
 
-RUN useradd -r -u 999 -g eddi eddi
+RUN groupadd -g eddi && \
+    useradd -r -u 999 -g eddi eddi
 USER eddi
 
 RUN mkdir -p /apiserver/ && \
