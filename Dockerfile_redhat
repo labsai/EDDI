@@ -1,5 +1,10 @@
 FROM labsai/base-image:redhat-latest
 
+LABEL name="E.D.D.I"
+LABEL vendor="LABS.AI"
+LABEL summary="High Performance, In-Memory Chatbot Platform. Build multiple Chatbots with NLP, Behavior Rules, API Connector, Templating."
+LABEL description="The Chatbot System - E.D.D.I (Enhanced Dialog Driven Intelligence), has been developed with the focus on the use in enterprise applications as well as the ease of connecting it to other resources (such as databases or other Services)."
+
 ARG EDDI_VERSION
 ARG EDDI_ENV
 ARG EDDI_MEMORY_MIN
@@ -8,6 +13,11 @@ ARG EDDI_MEMORY_MAX
 EXPOSE 7070
 EXPOSE 7443
 EXPOSE 9001
+
+RUN microdnf --enablerepo=rhel-8-server-rpms install shadow-utils ;\
+    adduser eddi
+
+USER eddi
 
 RUN mkdir -p /apiserver/ && \
     mkdir /apiserver/logs && \
