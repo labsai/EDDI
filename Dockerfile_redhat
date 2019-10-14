@@ -14,15 +14,11 @@ EXPOSE 7070
 EXPOSE 7443
 EXPOSE 9001
 
-RUN groupadd -g eddi && \
-    useradd -r -u 999 -g eddi eddi
-USER eddi
-
 RUN mkdir -p /apiserver/ && \
     mkdir /apiserver/logs && \
     mkdir /apiserver/install
 
-COPY /licenses/ /apiserver/licences
+COPY /licenses/ /licences
 COPY /apiserver/target/apiserver-$EDDI_VERSION-package.zip /apiserver/install
 COPY /start_eddi.sh /apiserver
 
