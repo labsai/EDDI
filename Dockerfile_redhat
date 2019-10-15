@@ -14,9 +14,15 @@ EXPOSE 7070
 EXPOSE 7443
 EXPOSE 9001
 
+USER root
+RUN groupadd -g 1111 appuser && \
+    useradd -r -u 1111 appuser
 RUN mkdir -p /apiserver/ && \
     mkdir /apiserver/logs && \
     mkdir /apiserver/install
+RUN chown -R appuser:appuser /apiserver
+
+USER appuser
 
 COPY /licenses/ /licenses
 COPY /apiserver/target/apiserver-$EDDI_VERSION-package.zip /apiserver/install
