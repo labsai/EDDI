@@ -15,14 +15,13 @@ EXPOSE 7443
 EXPOSE 9001
 
 USER root
-RUN groupadd -g 1111 appuser && \
-    useradd -r -u 1111 appuser
+
+RUN groupadd -f appuser && \
+    useradd -r -g appuser -u 1111 appuser
 RUN mkdir -p /apiserver/ && \
     mkdir /apiserver/logs && \
     mkdir /apiserver/install
 RUN chown -R appuser:appuser /apiserver
-
-USER appuser
 
 COPY /licenses/ /licenses
 COPY /apiserver/target/apiserver-$EDDI_VERSION-package.zip /apiserver/install
@@ -31,6 +30,8 @@ COPY /start_eddi.sh /apiserver
 RUN unzip /apiserver/install/apiserver-$EDDI_VERSION-package.zip -d /apiserver  && \
     chmod -R 777 /apiserver/ && \
     rm /apiserver/install/apiserver-$EDDI_VERSION-package.zip
+
+USER appuser
 
 HEALTHCHECK --interval=10s --timeout=10s CMD curl --fail http://localhost:7070/health || exit 1
 
