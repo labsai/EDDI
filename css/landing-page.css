@@ -148,7 +148,7 @@ nav a, footer a {
 }
 
 .tech-icons {
-    color: #1e99dc !important;
+    color: #black !important;
     text-shadow: 2px 2px 3px rgba(0, 0, 0, 0.1);
     margin: 0 5%;
 }
@@ -201,6 +201,11 @@ nav a, footer a {
 .banner-social-buttons {
     float: right;
     margin-top: 0;
+}
+
+.partner-button {
+    font-family: 'RedHatDisplay';
+    font-weight: 900;
 }
 
 @media (max-width: 1199px) {

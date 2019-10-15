@@ -47,9 +47,11 @@
     <link href="css/landing-page.css" rel="stylesheet">
 
     <!-- Custom Fonts -->
-    <link href="font-awesome/css/font-awesome.min.css" rel="stylesheet" type="text/css">
+    <link href="css/font-awesome-5.11.2.min.css" rel="stylesheet" type="text/css">
     <link href="https://fonts.googleapis.com/css?family=Lato:300,400,700,300italic,400italic,700italic" rel="stylesheet"
           type="text/css">
+
+    <link href="fonts/redhat-webfonts/red-hat-font.css" rel="stylesheet" type="text/css">
 
     <link rel="stylesheet" href="css/font-mfizz.css">
 
@@ -59,6 +61,7 @@
     <script src="js/html5shiv.js-3.7.0.js"></script>
     <script src="js/respond.min.js-1.4.2.js"></script>
     <![endif]-->
+    <script src="js/font-awesome-5.11.2.min.js"></script>
     <script src="js/eddi.js"></script>
 
     <!-- Google Tag Manager Start -->
@@ -111,21 +114,21 @@
                     <a id="NavDocs"
                        href="https://www.notion.so/labsai/EDDI-Documentation-641a65d27d0940d09d7569b7b04b24ff"
                        target="_blank">
-                        <i class="fa fa-book fa-fw"></i>&nbsp;Docs
+                        <i class="fas fa-book fa-fw"></i>&nbsp;Docs
                     </a>
                 </li>
                 <li>
                     <a id="NavIssues"
                        href="https://github.com/labsai/EDDI/issues"
                        target="_blank">
-                        <i class="fa fa-pencil fa-fw"></i>&nbsp;Issues
+                        <i class="fas fa-pencil-alt fa-fw"></i>&nbsp;Issues
                     </a>
                 </li>
                 <li>
                     <a id="NavSupport"
                        href="https://www.labs.ai"
                        target="_blank">
-                        <i class="fa fa-envelope fa-fw"></i>&nbsp;Professional Support
+                        <i class="fas fa-envelope fa-fw"></i>&nbsp;Professional Support
                     </a>
                 </li>
             </ul>
@@ -156,15 +159,25 @@
                            href="https://console.cloud.google.com/marketplace/details/labsai-public/labsai-eddi-dev"
                            class="btn btn-primary btn-lg"
                            target="_blank">
-                            <span class="network-name">One-Click Setup: <i
-                                    class="fa fa-cloud fa-fw"></i> Google Cloud</span></a>
+                            <span class="network-name partner-button">
+                                <i class="fab fa-google fa-fw"></i> Google Cloud</span></a>
                         <span style="padding-left: 0.5em;">
                             <a id="IntroAWS"
                                href="https://aws.amazon.com/marketplace/pp/B07N1W4MVB"
                                class="btn btn-lg aws"
                                style="background-color:orange; color: white"
                                target="_blank">
-                                <i class="fa fa-cloud fa-fw"></i> <span class="network-name">AWS Cloud</span></a>
+                                <i class="fab fa-aws fa-fw" style="color: black;"></i> <span
+                                    class="network-name partner-button">&nbsp;Amazon Web Services</span></a>
+                        </span>
+                        <span style="padding-left: 0.5em;">
+                            <a id="IntroRedhat"
+                               href="https://access.redhat.com/containers/#/registry.connect.redhat.com/labsai/eddi"
+                               class="btn btn-lg partner-button"
+                               style="background-color:black; color: white"
+                               target="_blank">
+                                <i class="fab fa-redhat" style="color: #ee0000"></i> <span
+                                    class="network-name partner-button">&nbsp;Redhat Openshift</span></a>
                         </span>
                     </div>
                     <br>
@@ -174,19 +187,19 @@
                                href="https://manager.labs.ai/?apiUrl=https%3A%2F%2Fapp.labs.ai"
                                class="btn btn-default btn-lg"
                                target="_blank">
-                                <i class="fa fa-cloud fa-fw"></i> <span class="network-name">Check out Demo</span></a>
+                                <i class="fas fa-cloud fa-fw"></i> <span class="network-name">Check out Demo</span></a>
                         </li>
                         <li>
                             <a id="IntroDocker"
                                href="https://hub.docker.com/r/labsai/eddi/" class="btn btn-default btn-lg"
                                target="_blank">
-                                <i class="fa icon-docker fa-fw"></i> <span class="network-name">Docker</span></a>
+                                <i class="fab fa-docker fa-fw"></i> <span class="network-name">Docker</span></a>
                         </li>
                         <li>
                             <a id="IntroGithub"
                                href="https://github.com/labsai/EDDI" class="btn btn-default btn-lg"
                                target="_blank">
-                                <i class="fa fa-github fa-fw"></i> <span class="network-name">Github</span></a>
+                                <i class="fab fa-github fa-fw"></i> <span class="network-name">Github</span></a>
                         </li>
                     </ul>
                     <br>
@@ -281,12 +294,14 @@
                 <h4 class="section-heading">Build with industry proven technologies</h4>
                 <p class="lead" style="text-align: center;">
                 <span title="Java">
-                    <i class="tech-icons fa icon-java-bold fa-5x" aria-hidden="true"></i>
+                    <i class="tech-icons fab fa-java fa-5x" aria-hidden="true"></i>
                 </span>
-                    <span title="Docker"><i class="tech-icons fa icon-docker fa-5x" aria-hidden="true"></i></span>
-                    <span title="Alpine Linux"><i class="tech-icons fa icon-alpinelinux fa-5x"
+                    <span title="Docker"><i class="tech-icons fab fa-docker fa-5x" aria-hidden="true"></i></span>
+                    <span title="Alpine Linux"><i class="tech-icons icon-alpinelinux fa-5x"
                                                   aria-hidden="true"></i></span>
-                    <span title="MongoDB"><i class="tech-icons fa icon-mongodb fa-5x" aria-hidden="true"></i></span>
+                    <span title="Red Hat"><i class="tech-icons fab fa-redhat fa-5x"
+                                                  aria-hidden="true"></i></span>
+                    <span title="MongoDB"><i class="tech-icons icon-mongodb fa-5x" aria-hidden="true"></i></span>
                 </p>
             </div>
         </div>
@@ -341,16 +356,19 @@
         <div class="row">
             <div class="col-lg-12">
                 <div class="clearfix"></div>
-                <h4 class="section-heading">Development Partners</h4>
+                <h4 class="section-heading">Technology Partners</h4>
                 <p class="lead" style="text-align: center;">
                     <span title="DIFFER.CHAT">
-                            <img src="img/differ_logo.png" alt="DIFFER" class="partner-logos"/>
+                            <img src="img/differ_logo.png" alt="DIFFER.CHAT" class="partner-logos"/>
                     </span>
                     <span title="GOOGLE CLOUD">
                              <img src="img/google_cloud_platform_logo.png" alt="Google Cloud" class="partner-logos"/>
                     </span>
-                    <span title="AMAZON CLOUD">
-                            <img src="img/aws_marketplace_logo.png" alt="AWS Cloud" class="partner-logos"/>
+                    <span title="AMAZON WEB SERVICES">
+                            <img src="img/aws_marketplace_logo.png" alt="Amazon Web Services" class="partner-logos"/>
+                    </span>
+                    <span title="RED HAT OPENSHIFT">
+                            <img src="img/redhat_logo.png" alt="Red Hat" class="partner-logos"/>
                     </span>
                 </p>
             </div>
@@ -367,25 +385,35 @@
     <div class="container">
 
         <div class="row">
-            <div class="col-lg-6">
+            <div class="col-lg-4">
                 <h2>Build a Chatbot with E.D.D.I</h2>
             </div>
-            <div class="col-lg-6">
+            <div class="col-lg-8">
                 <ul class="list-inline banner-social-buttons">
                     <li>
                         <a id="IntroGoogleCloudBottom"
                            href="https://console.cloud.google.com/marketplace/details/labsai-public/labsai-eddi-dev"
                            class="btn btn-primary btn-lg"
                            target="_blank">
-                            <span class="network-name">One-click Setup: <i
-                                    class="fa fa-cloud fa-fw"></i> Google Cloud</span></a>
+                            <span class="network-name partner-button"><i
+                                    class="fab fa-google fa-fw"></i> &nbsp;Google Cloud</span></a>
                         <span style="padding-left: 0.5em;" class="aws">
                             <a id="IntroAWSBottom"
                                href="https://aws.amazon.com/marketplace/pp/B07N1W4MVB"
                                class="btn btn-lg aws"
                                style="background-color:orange; color: white"
                                target="_blank">
-                                <i class="fa fa-cloud fa-fw"></i> <span class="network-name">AWS Cloud</span></a>
+                                <i class="fab fa-aws fa-fw" style="color: black;"></i> <span
+                                    class="network-name partner-button">&nbsp;Amazon Web Services</span></a>
+                        </span>
+                        <span style="padding-left: 0.5em;">
+                            <a id="IntroRedhatBottom"
+                               href="https://access.redhat.com/containers/#/registry.connect.redhat.com/labsai/eddi"
+                               class="btn btn-lg partner-button"
+                               style="background-color:black; color: white"
+                               target="_blank">
+                                <i class="fab fa-redhat" style="color: #ee0000;"></i> <span
+                                    class="network-name partner-button">&nbsp;Redhat Openshift</span></a>
                         </span>
                     </li>
                     <br><br>
@@ -394,19 +422,19 @@
                            href="https://www.notion.so/labsai/EDDI-Documentation-641a65d27d0940d09d7569b7b04b24ff"
                            class="btn btn-default btn-lg"
                            target="_blank">
-                            <i class="fa fa-book fa-fw"></i> <span class="network-name">Docs</span></a>
+                            <i class="fas fa-book fa-fw"></i> <span class="network-name">Docs</span></a>
                     </li>
                     <li>
                         <a id="BannerDocker"
                            href="https://hub.docker.com/r/labsai/eddi/" class="btn btn-default btn-lg"
                            target="_blank">
-                            <i class="fa icon-docker fa-fw"></i> <span class="network-name">Docker</span></a>
+                            <i class="fab fa-docker fa-fw"></i> <span class="network-name">Docker</span></a>
                     </li>
                     <li>
                         <a id="BannerGithub"
                            href="https://github.com/labsai/EDDI" class="btn btn-default btn-lg"
                            target="_blank">
-                            <i class="fa fa-github fa-fw"></i> <span class="network-name">Github</span></a>
+                            <i class="fab fa-github fa-fw"></i> <span class="network-name">Github</span></a>
                     </li>
                 </ul>
             </div>
@@ -465,33 +493,33 @@
                         <a id="FooterDocs"
                            href="https://www.notion.so/labsai/EDDI-Documentation-641a65d27d0940d09d7569b7b04b24ff"
                            target="_blank">
-                            <i class="fa fa-book fa-fw"></i>&nbsp;Docs
+                            <i class="fas fa-book fa-fw"></i>&nbsp;Docs
                         </a>
                     </li>
                     <li>
                         <a id="FooterIssues"
                            href="https://github.com/labsai/EDDI/issues"
                            target="_blank">
-                            <i class="fa fa-pencil fa-fw"></i>&nbsp;Issues
+                            <i class="fas fa-pencil-alt fa-fw"></i>&nbsp;Issues
                         </a>
                     </li>
                     <li>
                         <a id="FooterSupport"
                            href="https://www.labs.ai"
                            target="_blank">
-                            <i class="fa fa-envelope fa-fw"></i>&nbsp;Professional Support
+                            <i class="fas fa-envelope fa-fw"></i>&nbsp;Professional Support
                         </a>
                     </li>
                     <li>
                         <a id="FooterFacebook" href="https://www.facebook.com/eddilabsai/"
                            target="_blank">
-                            <i class="fa fa-facebook fa-fw"></i>Facebook
+                            <i class="fab fa-facebook-f fa-fw"></i>Facebook
                         </a>
                     </li>
                 </ul>
                 <p class="copyright text-muted small">
                     Developed with
-                    <i class="fa fa-heart" aria-hidden="true" title="LOVE"></i>
+                    <i class="fas fa-heart" aria-hidden="true" title="LOVE"></i>
                     in <a id="MapVienna" href="https://www.google.com/maps/place/Vienna,+Austria/"
                           target="_blank">Vienna</a><br>
                     by <a id="byLabsai" href="https://www.labs.ai"
