@@ -18,6 +18,7 @@ import {
 import eddiApiActionDispatchers from '../../../actions/EddiApiActionDispatchers';
 
 interface IProps {
+  isLoading: boolean;
   conversationId: string;
   conversationSteps: IConversationSteps[];
   conversationOutputs: IConversationOutput[];
@@ -67,6 +68,7 @@ class ConversationSteps extends React.Component<IProps, IState> {
   render() {
     return (
       <div>
+        <div style={styles.title}>{`Conversation Steps`}</div>
         <div style={styles.toolbar}>
           <div style={styles.conversationSettings}>
             <div style={styles.toggleBox}>
@@ -98,19 +100,6 @@ class ConversationSteps extends React.Component<IProps, IState> {
                 ))}
               </div>
               <div style={styles.toggleText}>{'Auto refresh'}</div>
-            </div>
-            <div
-              style={styles.refresh}
-              onClick={() =>
-                eddiApiActionDispatchers.fetchConversationAction(
-                  this.props.conversationId,
-                )
-              }>
-              <FontAwesomeIcon
-                style={styles.icon}
-                icon={['fas', 'sync']}
-                color={WHITE_COLOR}
-              />
             </div>
           </div>
         </div>

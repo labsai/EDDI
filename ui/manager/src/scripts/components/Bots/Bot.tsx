@@ -33,10 +33,10 @@ class Bot extends React.Component<IPrivateProps> {
     }
   }
 
-  componentWillReceiveProps(nextProps) {
-    if (nextProps.bot.deploymentStatus === null) {
+  componentDidUpdate(prevProps) {
+    if (this.props.bot.deploymentStatus === null && prevProps !== this.props) {
       eddiApiActionDispatchers.fetchBotDeploymentStatusAction(
-        nextProps.bot.resource,
+        this.props.bot.resource,
       );
     }
   }

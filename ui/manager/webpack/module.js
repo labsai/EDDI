@@ -12,7 +12,9 @@ if (isBuild) {
   tsLoaderConfiguration.unshift('babel-loader');
 } else {
   // only include react-hot-loader runtime in development
-  tsLoaderConfiguration.unshift('react-hot-loader');
+  tsLoaderConfiguration.unshift('babel-loader');
+  // todo: Fix this
+  // tsLoaderConfiguration.unshift('react-hot-loader');
 }
 
 export const module = {

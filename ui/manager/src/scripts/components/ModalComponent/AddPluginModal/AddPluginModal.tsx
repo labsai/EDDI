@@ -69,13 +69,13 @@ class AddPluginModal extends React.Component<IPrivateProps, IState> {
     this.discardChanges();
   }
 
-  componentWillReceiveProps(nextProps) {
+  componentDidUpdate(prevProps) {
     if (
       !_.isEmpty(
-        _.differenceBy(nextProps.plugins, this.props.plugins, 'resource'),
+        _.differenceBy(this.props.plugins, prevProps.plugins, 'resource'),
       )
     ) {
-      this.discardChanges(nextProps);
+      this.discardChanges(this.props);
     }
   }
 

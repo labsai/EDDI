@@ -27,10 +27,12 @@ class PackageContainer extends React.Component<IProps, IState> {
     });
   }
 
-  componentWillReceiveProps(nextProps) {
-    this.setState({
-      selectedPackageResource: nextProps.packageResource,
-    });
+  componentDidUpdate(prevProps) {
+    if (prevProps !== this.props) {
+      this.setState({
+        selectedPackageResource: this.props.packageResource,
+      });
+    }
   }
 
   selectVersion = (newVersion: number) => {

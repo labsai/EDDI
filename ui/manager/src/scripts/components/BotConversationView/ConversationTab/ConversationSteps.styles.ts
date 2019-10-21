@@ -53,7 +53,6 @@ const styles: CSSProperties = {
   conversationSettings: {
     display: 'flex',
     marginBottom: '5px',
-    marginLeft: 'auto',
   },
   refresh: {
     ':hover': {
@@ -71,7 +70,13 @@ const styles: CSSProperties = {
   },
   toolbar: {
     display: 'table',
-    marginLeft: 'auto',
+  },
+  title: {
+    fontSize: MEDIUM_FONT3,
+    color: DARK_BLUE_COLOR,
+    textAlign: 'center',
+    margin: '20px 0px 20px 0px',
+    borderBottom: DARK_BLUE_BORDER,
   },
 };
 export default styles;

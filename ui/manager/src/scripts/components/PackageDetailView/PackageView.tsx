@@ -70,19 +70,21 @@ class PackageView extends React.Component<IPrivateProps, IState> {
     this.discardChanges();
   }
 
-  componentWillReceiveProps(nextProps) {
-    if (!nextProps.packagePayload.packageData) {
-      eddiApiActionDispatchers.fetchPackageDataAction(
-        nextProps.packagePayload.resource,
-      );
+  componentDidUpdate(prevProps) {
+    if (prevProps !== this.props) {
+      if (!this.props.packagePayload.packageData) {
+        eddiApiActionDispatchers.fetchPackageDataAction(
+          this.props.packagePayload.resource,
+        );
+      }
+      if (
+        _.isEmpty(prevProps.packagePayload.packageData) &&
+        !_.isEmpty(this.props.packagePayload.packageData)
+      ) {
+        this.discardChanges(this.props);
+      }
+      this.setState({ defaultPluginTypes: this.props.defaultPluginTypes });
     }
-    if (
-      _.isEmpty(this.props.packagePayload.packageData) &&
-      !_.isEmpty(nextProps.packagePayload.packageData)
-    ) {
-      this.discardChanges(nextProps);
-    }
-    this.setState({ defaultPluginTypes: nextProps.defaultPluginTypes });
   }
 
   openEditPackageModal = () => {

@@ -35,10 +35,12 @@ class PluginContainer extends React.Component<IPrivateProps, IState> {
     });
   }
 
-  componentWillReceiveProps(nextProps) {
-    this.setState({
-      data: JSON.stringify(nextProps.plugin.pluginData, null, '\t'),
-    });
+  componentDidUpdate(prevProps) {
+    if (prevProps !== this.props) {
+      this.setState({
+        data: JSON.stringify(this.props.plugin.pluginData, null, '\t'),
+      });
+    }
   }
 
   render() {

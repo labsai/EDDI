@@ -87,18 +87,18 @@ class App extends React.Component<IPrivateProps> {
     authenticationActionDispatchers.checkAuthenticationAction();
   }
 
-  async componentWillReceiveProps(nextProps) {
-    if (nextProps.isKeycloakEnabled && !nextProps.authenticated) {
-      if (!nextProps.keycloak.authenticated) {
-        await kcHelper.initKeycloak(nextProps.keycloak);
+  async componentDidUpdate(prevProps) {
+    if (this.props.isKeycloakEnabled && !this.props.keycloakAuthenticated) {
+      if (!this.props.keycloak.authenticated) {
+        await kcHelper.initKeycloak(this.props.keycloak);
       }
     }
     if (
-      nextProps.isKeycloakEnabled &&
-      nextProps.keycloakAuthenticated &&
-      !this.props.keycloakAuthenticated
+      this.props.isKeycloakEnabled &&
+      this.props.keycloakAuthenticated &&
+      !prevProps.keycloakAuthenticated
     ) {
-      this.refreshToken(nextProps);
+      this.refreshToken();
     }
   }
 

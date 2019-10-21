@@ -36,12 +36,12 @@ class Plugin extends React.Component<IPrivateProps> {
     }
   }
 
-  componentWillReceiveProps(nextProps) {
+  componentDidUpdate(prevProps) {
     if (
-      nextProps.pluginResource &&
-      nextProps.pluginResource !== this.props.pluginResource
+      this.props.pluginResource &&
+      this.props.pluginResource !== prevProps.pluginResource
     ) {
-      eddiApiActionDispatchers.fetchPluginAction(nextProps.pluginResource);
+      eddiApiActionDispatchers.fetchPluginAction(this.props.pluginResource);
     }
   }
 

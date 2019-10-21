@@ -41,16 +41,16 @@ class ConversationList extends React.Component<IPrivateProps, IState> {
     this.loadMore();
   }
 
-  componentWillReceiveProps(nextProps) {
-    if (this.props.isLoading && !nextProps.isLoading) {
+  componentDidUpdate(prevProps) {
+    if (prevProps.isLoading && !this.props.isLoading) {
       this.setState({ loading: false });
     }
-    if (this.props.botResource !== nextProps.botResource) {
+    if (prevProps.botResource !== this.props.botResource) {
       eddiApiActionDispatchers.fetchConversationsAction(
         DEFAULT_LIMIT,
         0,
         null,
-        nextProps.botResource,
+        this.props.botResource,
       );
       this.setState({ loading: true });
     }

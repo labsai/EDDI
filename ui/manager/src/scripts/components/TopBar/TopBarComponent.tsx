@@ -69,6 +69,9 @@ const styles: CSSProperties = {
     fontSize: MEDIUM_FONT2,
     fontWeight: 'bold',
   },
+  link: {
+    cursor: 'pointer',
+  },
 };
 
 const warningIcon = require('../../../public/images/WarningIcon@3x.png');
@@ -127,8 +130,12 @@ class TopBarComponent extends React.Component<IPrivateProps> {
                   '\nCreate your own bot today by launching EDDI with one-click on Google Marketplace. '
                 }
                 <a
-                  href={
-                    'https://console.cloud.google.com/marketplace/details/labsai-public/labsai-eddi-dev'
+                  style={styles.link}
+                  onClick={() =>
+                    window.open(
+                      'https://console.cloud.google.com/marketplace/details/labsai-public/labsai-eddi-dev',
+                      '_blank',
+                    )
                   }>
                   {'Learn more.'}
                 </a>

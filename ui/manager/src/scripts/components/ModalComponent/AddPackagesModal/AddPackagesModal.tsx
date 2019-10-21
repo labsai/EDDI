@@ -52,8 +52,8 @@ class AddPackagesModal extends React.Component<IPrivateProps, IState> {
     this.discardChanges();
   }
 
-  componentWillReceiveProps(nextProps) {
-    if (this.props.isLoading && !nextProps.isLoading) {
+  componentDidUpdate(prevProps) {
+    if (prevProps.isLoading && !this.props.isLoading) {
       this.setState({ loading: false });
     }
   }

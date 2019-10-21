@@ -41,8 +41,8 @@ class ConversationList extends React.Component<IPrivateProps, IState> {
     this.loadMore();
   }
 
-  componentWillReceiveProps(nextProps) {
-    if (this.props.isLoading && !nextProps.isLoading) {
+  componentDidUpdate(prevProps) {
+    if (prevProps.isLoading && !this.props.isLoading) {
       this.setState({ loading: false });
     }
   }

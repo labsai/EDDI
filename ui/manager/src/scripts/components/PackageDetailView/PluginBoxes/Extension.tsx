@@ -34,12 +34,12 @@ class Extension extends React.Component<IPrivateProps> {
     }
   }
 
-  componentWillReceiveProps(nextProps) {
+  componentDidUpdate(prevProps) {
     if (
-      !_.isEmpty(nextProps.pluginResource) &&
-      nextProps.pluginResource !== this.props.pluginResource
+      !_.isEmpty(this.props.pluginResource) &&
+      this.props.pluginResource !== prevProps.pluginResource
     ) {
-      eddiApiActionDispatchers.fetchPluginAction(nextProps.pluginResource);
+      eddiApiActionDispatchers.fetchPluginAction(this.props.pluginResource);
     }
   }
 

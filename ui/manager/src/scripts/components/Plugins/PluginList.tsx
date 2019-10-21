@@ -46,11 +46,11 @@ class PluginList extends React.Component<IPrivateProps, IState> {
     this.setState({ apiUrl: await getAPIUrl() });
   }
 
-  componentWillReceiveProps(nextProps) {
-    if (nextProps.pluginType !== this.props.pluginType) {
-      this.loadMore(nextProps);
+  componentDidUpdate(prevProps) {
+    if (prevProps.pluginType !== this.props.pluginType) {
+      this.loadMore();
     }
-    if (this.props.isLoading && !nextProps.isLoading) {
+    if (prevProps.isLoading && !this.props.isLoading) {
       this.setState({ loading: false });
     }
   }

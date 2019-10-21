@@ -79,8 +79,10 @@ class CreateNewConfig2Modal extends React.Component<IPrivateProps, IState> {
     langTools.setCompleters([langTools.snippetCompleter]);
   }
 
-  componentWillReceiveProps(nextProps) {
-    this.discardChanges(nextProps);
+  componentDidUpdate(prevProps) {
+    if (prevProps !== this.props) {
+      this.discardChanges();
+    }
   }
 
   onChange = value => {

@@ -35,9 +35,9 @@ class PackageContainer extends React.Component<IPrivateProps, IState> {
     });
   }
 
-  componentWillReceiveProps(nextProps) {
+  componentDidUpdate(prevProps) {
     this.setState({
-      data: JSON.stringify(nextProps.packagePayload.packageData, null, '\t'),
+      data: JSON.stringify(this.props.packagePayload.packageData, null, '\t'),
     });
   }
 
