@@ -148,7 +148,7 @@ nav a, footer a {
 }
 
 .tech-icons {
-    color: #black !important;
+    color: black !important;
     text-shadow: 2px 2px 3px rgba(0, 0, 0, 0.1);
     margin: 0 5%;
 }
@@ -246,7 +246,7 @@ nav a, footer a {
         margin-bottom: 0;
     }
 
-    .aws {
+    .aws, .redhat {
         margin-top: 1.0em;
     }
 }
