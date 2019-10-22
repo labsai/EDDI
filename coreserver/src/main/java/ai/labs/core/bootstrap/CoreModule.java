@@ -16,6 +16,7 @@ import io.micrometer.core.instrument.binder.system.ProcessorMetrics;
 import io.micrometer.prometheus.PrometheusConfig;
 import io.micrometer.prometheus.PrometheusMeterRegistry;
 
+import javax.inject.Named;
 import javax.inject.Singleton;
 import java.io.InputStream;
 import java.util.concurrent.ExecutorService;
@@ -43,7 +44,8 @@ public class CoreModule extends AbstractBaseModule {
 
     @Provides
     @Singleton
-    public PrometheusMeterRegistry providePrometheusMeterRegistry(ExecutorService executorService) {
+    public PrometheusMeterRegistry providePrometheusMeterRegistry(ExecutorService executorService,
+                                                                  @Named("systemRuntime.projectName") String projectName) {
         PrometheusMeterRegistry registry = new PrometheusMeterRegistry(PrometheusConfig.DEFAULT);
         new LogbackMetrics().bindTo(registry);
         new ClassLoaderMetrics().bindTo(registry);
@@ -54,6 +56,8 @@ public class CoreModule extends AbstractBaseModule {
         new JvmGcMetrics().bindTo(registry);
         new JvmThreadMetrics().bindTo(registry);
         new ProcessorMetrics().bindTo(registry);
+
+        registry.config().commonTags("application", projectName);
 
         return registry;
     }
