@@ -50,8 +50,8 @@ public class CoreModule extends AbstractBaseModule {
         new LogbackMetrics().bindTo(registry);
         new ClassLoaderMetrics().bindTo(registry);
         new ExecutorServiceMetrics(executorService,
-                "EDDI-ExecutorService",
-                () -> Tags.of("EDDI", "ExecutorService").iterator()).bindTo(registry);
+                projectName + "-ExecutorService",
+                () -> Tags.of(projectName, "ExecutorService").iterator()).bindTo(registry);
         new JvmMemoryMetrics().bindTo(registry);
         new JvmGcMetrics().bindTo(registry);
         new JvmThreadMetrics().bindTo(registry);
