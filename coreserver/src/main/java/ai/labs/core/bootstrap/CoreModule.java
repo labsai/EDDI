@@ -30,7 +30,7 @@ public class CoreModule extends AbstractBaseModule {
     protected void configure() {
         registerConfigFiles(configFiles);
 
-        bind(ILogoutEndpoint.class).to(LogoutEndpoint.class).in(Scopes.SINGLETON);
+        bind(ILogoutEndpoint.class).to(LogoutEndpoint.class);
         bind(IRestBotEngine.class).to(RestBotEngine.class).in(Scopes.SINGLETON);
         bind(IRestBotAdministration.class).to(RestBotAdministration.class).in(Scopes.SINGLETON);
         bind(IRestBotManagement.class).to(RestBotManagement.class).in(Scopes.SINGLETON);

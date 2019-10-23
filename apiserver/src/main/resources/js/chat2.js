@@ -112,13 +112,12 @@ function createMessage(outputArray, quickRepliesArray, hasConversationEnded, dis
         }
 
         // delay override - Make first responses quick
-        if (delay === -1) {
             if (eddi.skipDelay || message == null) {
                 delay = 50;
             } else {
                 delay = calculateDelay(message);
             }
-        }
+
 
         let typingIndicator = new Message('<img src="/binary/img/typing-indicator.svg" />');
         typingIndicator.draw();
