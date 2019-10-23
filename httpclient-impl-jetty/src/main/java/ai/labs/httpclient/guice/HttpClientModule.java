@@ -4,6 +4,7 @@ import ai.labs.httpclient.IHttpClient;
 import ai.labs.httpclient.impl.HttpClientWrapper;
 import ai.labs.runtime.bootstrap.AbstractBaseModule;
 import com.google.inject.Provides;
+import com.google.inject.Scopes;
 import org.eclipse.jetty.client.HttpClient;
 import org.eclipse.jetty.util.ssl.SslContextFactory;
 
@@ -23,7 +24,7 @@ public class HttpClientModule extends AbstractBaseModule {
     protected void configure() {
         registerConfigFiles(configFiles);
 
-        bind(IHttpClient.class).to(HttpClientWrapper.class);
+        bind(IHttpClient.class).to(HttpClientWrapper.class).in(Scopes.SINGLETON);
     }
 
     @Provides

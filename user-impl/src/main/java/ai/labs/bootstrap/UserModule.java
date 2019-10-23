@@ -20,7 +20,7 @@ public class UserModule extends AbstractBaseModule {
         bind(IGroupStore.class).to(GroupStore.class).in(Scopes.SINGLETON);
         bind(IUserStore.class).to(UserStore.class).in(Scopes.SINGLETON);
 
-        bind(IRestGroupStore.class).to(RestGroupStore.class);
-        bind(IRestUserStore.class).to(RestUserStore.class);
+        bind(IRestGroupStore.class).to(RestGroupStore.class).in(Scopes.SINGLETON);
+        bind(IRestUserStore.class).to(RestUserStore.class).in(Scopes.SINGLETON);
     }
 }

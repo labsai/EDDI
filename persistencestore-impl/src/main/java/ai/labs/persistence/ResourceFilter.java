@@ -67,41 +67,47 @@ public class ResourceFilter<T> implements IResourceFilter<T> {
             Document sort = createSortQuery(sortTypes);
             results = results.sort(sort);
 
-            if (limit > 0) {
-                results = results.skip(index * limit);
-            } else {
-                results = results.skip(index);
-            }
-
-            for (Document result : results) {
-                if (limit > 0 && ret.size() >= limit) {
-                    break;
+            boolean queryHadResults;
+            do {
+                if (limit > 0) {
+                    results = results.skip(index * limit);
+                } else {
+                    results = results.skip(index);
                 }
 
-                String id = result.get(FIELD_ID).toString();
-                T model = buildDocument(result);
-                Permissions permissions = null;
-                try {
-                    permissions = getPermissions(id);
-                } catch (IResourceStore.ResourceNotFoundException e) {
-                    log.warn("Missing Permission with Resource id: %s , access has been granted.");
-                }
-
-                if (permissions != null && permissions.getPermissions().values().isEmpty()) {
-                    continue;
-                }
-
-                Object versionField = result.get(FIELD_VERSION);
-                if (versionField != null && permissions != null) {
-                    Integer currentVersion = Integer.parseInt(versionField.toString());
-                    Integer highestPermittedVersion = getHighestPermittedVersion(currentVersion, permissions.getPermissions());
-                    if (highestPermittedVersion < currentVersion) {
-                        model = resourceStore.read(id, highestPermittedVersion);
+                queryHadResults = false;
+                for (Document result : results) {
+                    queryHadResults = true;
+                    if (limit > 0 && ret.size() >= limit) {
+                        break;
                     }
-                }
 
-                ret.add(model);
-            }
+                    String id = result.get(FIELD_ID).toString();
+                    T model = buildDocument(result);
+                    Permissions permissions = null;
+                    try {
+                        permissions = getPermissions(id);
+                    } catch (IResourceStore.ResourceNotFoundException e) {
+                        log.warn("Missing Permission with Resource id: %s , access has been granted.");
+                    }
+
+                    if (permissions != null && permissions.getPermissions().values().isEmpty()) {
+                        permissions = null;
+                    }
+
+                    Object versionField = result.get(FIELD_VERSION);
+                    if (permissions != null && versionField != null) {
+                        Integer currentVersion = Integer.parseInt(versionField.toString());
+                        Integer highestPermittedVersion = getHighestPermittedVersion(currentVersion, permissions.getPermissions());
+                        if (highestPermittedVersion < currentVersion) {
+                            model = resourceStore.read(id, highestPermittedVersion);
+                        }
+                    }
+
+                    ret.add(model);
+                }
+                index++;
+            } while (ret.size() < limit && queryHadResults);
         } catch (IOException e) {
             throw new IResourceStore.ResourceStoreException(e.getLocalizedMessage(), e);
         }
