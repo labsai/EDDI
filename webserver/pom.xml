@@ -49,22 +49,22 @@
         <dependency>
             <groupId>org.eclipse.jetty</groupId>
             <artifactId>jetty-server</artifactId>
-            <version>9.4.20.v20190813</version>
+            <version>9.4.22.v20191022</version>
         </dependency>
         <dependency>
             <groupId>org.eclipse.jetty.http2</groupId>
             <artifactId>http2-server</artifactId>
-            <version>9.4.20.v20190813</version>
+            <version>9.4.22.v20191022</version>
         </dependency>
         <dependency>
             <groupId>org.eclipse.jetty</groupId>
             <artifactId>jetty-alpn-server</artifactId>
-            <version>9.4.20.v20190813</version>
+            <version>9.4.22.v20191022</version>
         </dependency>
         <dependency>
             <groupId>org.eclipse.jetty</groupId>
             <artifactId>jetty-alpn-java-server</artifactId>
-            <version>9.4.20.v20190813</version>
+            <version>9.4.22.v20191022</version>
         </dependency>
         <dependency>
             <groupId>org.eclipse.jetty.alpn</groupId>
@@ -80,27 +80,27 @@
         <dependency>
             <groupId>org.eclipse.jetty</groupId>
             <artifactId>jetty-security</artifactId>
-            <version>9.4.20.v20190813</version>
+            <version>9.4.22.v20191022</version>
         </dependency>
         <dependency>
             <groupId>org.eclipse.jetty</groupId>
             <artifactId>jetty-servlet</artifactId>
-            <version>9.4.20.v20190813</version>
+            <version>9.4.22.v20191022</version>
         </dependency>
         <dependency>
             <groupId>org.eclipse.jetty</groupId>
             <artifactId>jetty-servlets</artifactId>
-            <version>9.4.20.v20190813</version>
+            <version>9.4.22.v20191022</version>
         </dependency>
         <dependency>
             <groupId>org.eclipse.jetty</groupId>
             <artifactId>jetty-rewrite</artifactId>
-            <version>9.4.20.v20190813</version>
+            <version>9.4.22.v20191022</version>
         </dependency>
         <dependency>
             <groupId>org.eclipse.jetty</groupId>
             <artifactId>jetty-util</artifactId>
-            <version>9.4.20.v20190813</version>
+            <version>9.4.22.v20191022</version>
         </dependency>
         <dependency>
             <groupId>ro.isdc.wro4j</groupId>
@@ -130,18 +130,18 @@
         <dependency>
             <groupId>org.keycloak</groupId>
             <artifactId>keycloak-core</artifactId>
-            <version>7.0.0</version>
+            <version>7.0.1</version>
         </dependency>
         <dependency>
             <groupId>org.keycloak</groupId>
             <artifactId>keycloak-jetty94-adapter</artifactId>
-            <version>7.0.0</version>
+            <version>7.0.1</version>
         </dependency>
 
         <dependency>
             <groupId>org.keycloak</groupId>
             <artifactId>keycloak-servlet-filter-adapter</artifactId>
-            <version>7.0.0</version>
+            <version>7.0.1</version>
         </dependency>
     </dependencies>
 
