@@ -5,7 +5,6 @@ import ai.labs.memory.descriptor.IConversationDescriptorStore;
 import ai.labs.models.ResourceDescriptor;
 import ai.labs.persistence.IDescriptorStore;
 import ai.labs.persistence.IResourceStore;
-import ai.labs.resources.rest.config.bots.IRestBotStore;
 import ai.labs.resources.rest.documentdescriptor.IDocumentDescriptorStore;
 import ai.labs.resources.rest.method.PATCH;
 import ai.labs.runtime.DependencyInjector;
@@ -33,7 +32,6 @@ import java.net.URI;
 import java.security.Principal;
 import java.util.Date;
 
-import static ai.labs.resources.impl.utilities.ResourceUtilities.createConversationDescriptor;
 import static ai.labs.resources.impl.utilities.ResourceUtilities.createDocumentDescriptor;
 
 /**
@@ -88,14 +86,7 @@ public class DocumentDescriptorInterceptor implements ContainerResponseFilter {
                             if (httpStatus == 201) {
                                 if (resourceLocationUri.startsWith("eddi://ai.labs.testcases")) {
                                     testCaseDescriptorStore.createDescriptor(resourceId.getId(), resourceId.getVersion(), createTestCaseDescriptor(createdResourceURI, userURI));
-                                } else if (resourceLocationUri.startsWith("eddi://ai.labs.conversation")) {
-                                    var memorySnapshot = conversationMemoryStore.loadConversationMemorySnapshot(resourceId.getId());
-                                    var botId = memorySnapshot.getBotId();
-                                    var botVersion = memorySnapshot.getBotVersion();
-                                    var botResourceURI = URI.create(IRestBotStore.resourceURI + botId + IRestBotStore.versionQueryParam + botVersion);
-                                    conversationDescriptorStore.createDescriptor(resourceId.getId(), resourceId.getVersion(),
-                                            createConversationDescriptor(createdResourceURI, botResourceURI, userURI));
-                                } else if (isResourceIdValid(resourceId)) {
+                                } else if (isResourceIdValid(resourceId) && !resourceLocationUri.startsWith("eddi://ai.labs.conversation")) {
                                     try {
                                         documentDescriptorStore.readDescriptor(resourceId.getId(), resourceId.getVersion());
                                     } catch (IResourceStore.ResourceNotFoundException e) {
