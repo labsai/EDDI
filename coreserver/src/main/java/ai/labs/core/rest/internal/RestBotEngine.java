@@ -2,6 +2,7 @@ package ai.labs.core.rest.internal;
 
 import ai.labs.caching.ICache;
 import ai.labs.caching.ICacheFactory;
+import ai.labs.core.rest.utilities.IConversationSetup;
 import ai.labs.lifecycle.IConversation;
 import ai.labs.lifecycle.LifecycleException;
 import ai.labs.memory.IConversationMemory;
@@ -13,25 +14,17 @@ import ai.labs.models.Context;
 import ai.labs.models.ConversationState;
 import ai.labs.models.Deployment.Environment;
 import ai.labs.models.InputData;
-import ai.labs.permission.IAuthorization;
-import ai.labs.permission.IPermissionStore;
-import ai.labs.permission.model.AuthorizedUser;
-import ai.labs.permission.model.Permissions;
-import ai.labs.permission.utilities.PermissionUtilities;
-import ai.labs.resources.impl.utilities.ResourceUtilities;
-import ai.labs.resources.rest.config.bots.IRestBotStore;
 import ai.labs.resources.rest.properties.IPropertiesStore;
 import ai.labs.resources.rest.properties.model.Properties;
 import ai.labs.rest.rest.IRestBotEngine;
-import ai.labs.runtime.*;
+import ai.labs.runtime.IBot;
+import ai.labs.runtime.IBotFactory;
+import ai.labs.runtime.IConversationCoordinator;
+import ai.labs.runtime.SystemRuntime;
 import ai.labs.runtime.SystemRuntime.IRuntime.IFinishedExecution;
 import ai.labs.runtime.service.ServiceException;
-import ai.labs.user.IUserStore;
-import ai.labs.user.impl.utilities.UserUtilities;
 import ai.labs.utilities.RuntimeUtilities;
-import ai.labs.utilities.SecurityUtilities;
 import lombok.extern.slf4j.Slf4j;
-import org.apache.commons.lang3.RandomStringUtils;
 import org.jboss.resteasy.spi.NoLogWebApplicationException;
 
 import javax.inject.Inject;
@@ -42,7 +35,6 @@ import javax.ws.rs.container.AsyncResponse;
 import javax.ws.rs.core.MediaType;
 import javax.ws.rs.core.Response;
 import java.net.URI;
-import java.security.Principal;
 import java.util.*;
 import java.util.concurrent.*;
 import java.util.stream.Collectors;
@@ -69,8 +61,7 @@ public class RestBotEngine implements IRestBotEngine {
     private final SystemRuntime.IRuntime runtime;
     private final IContextLogger contextLogger;
     private final int botTimeout;
-    private final IUserStore userStore;
-    private final IPermissionStore permissionStore;
+    private final IConversationSetup conversationSetup;
     private final ICache<String, ConversationState> conversationStateCache;
 
     @Inject
@@ -79,8 +70,7 @@ public class RestBotEngine implements IRestBotEngine {
                          IConversationDescriptorStore conversationDescriptorStore,
                          IPropertiesStore propertiesStore,
                          IConversationCoordinator conversationCoordinator,
-                         IUserStore userStore,
-                         IPermissionStore permissionStore,
+                         IConversationSetup conversationSetup,
                          ICacheFactory cacheFactory,
                          SystemRuntime.IRuntime runtime,
                          IContextLogger contextLogger,
@@ -90,14 +80,12 @@ public class RestBotEngine implements IRestBotEngine {
         this.conversationDescriptorStore = conversationDescriptorStore;
         this.propertiesStore = propertiesStore;
         this.conversationCoordinator = conversationCoordinator;
-        this.userStore = userStore;
-        this.permissionStore = permissionStore;
+        this.conversationSetup = conversationSetup;
         this.conversationStateCache = cacheFactory.getCache(CACHE_NAME_CONVERSATION_STATE);
         this.runtime = runtime;
         this.contextLogger = contextLogger;
         this.botTimeout = botTimeout;
     }
-
 
     @Override
     public Response startConversation(Environment environment, String botId, String userId) {
@@ -124,7 +112,7 @@ public class RestBotEngine implements IRestBotEngine {
                 return Response.status(Response.Status.NOT_FOUND).type(MediaType.TEXT_PLAIN).entity(message).build();
             }
 
-            userId = computeAnonymousUserIdIfEmpty(userId);
+            userId = conversationSetup.computeAnonymousUserIdIfEmpty(userId);
             IConversation conversation = latestBot.startConversation(userId, context,
                     createPropertiesHandler(userId), null);
 
@@ -132,8 +120,8 @@ public class RestBotEngine implements IRestBotEngine {
             cacheConversationState(conversationId, ConversationState.READY);
             var conversationUri = createURI(resourceURI, conversationId);
 
-            URI userUri = createConversationDescriptor(botId, latestBot, conversationId, conversationUri);
-            createPermissions(conversationId, userUri);
+            URI userUri = conversationSetup.createConversationDescriptor(botId, latestBot, conversationId, conversationUri);
+            conversationSetup.createPermissions(conversationId, userUri);
 
             return Response.created(conversationUri).build();
         } catch (ServiceException |
@@ -146,31 +134,6 @@ public class RestBotEngine implements IRestBotEngine {
             log.error(e.getLocalizedMessage(), e);
             throw new InternalServerErrorException(e.getLocalizedMessage(), e);
         }
-    }
-
-    private URI createConversationDescriptor(String botId, IBot latestBot, String conversationId, URI conversationUri)
-            throws ResourceStoreException, ResourceNotFoundException {
-
-        var botVersion = latestBot.getBotVersion();
-        var botResourceUri = createURI(IRestBotStore.resourceURI, botId, IRestBotStore.versionQueryParam, botVersion);
-        Principal userPrincipal = SecurityUtilities.getPrincipal(ThreadContext.getSubject());
-        URI userUri = UserUtilities.getUserURI(userStore, userPrincipal);
-        conversationDescriptorStore.createDescriptor(conversationId, 0,
-                ResourceUtilities.createConversationDescriptor(conversationUri, botResourceUri, userUri));
-        return userUri;
-    }
-
-    private void createPermissions(String conversationId, URI userURI) throws ResourceStoreException {
-        Permissions permissions = new Permissions();
-        if (userURI != null) {
-            PermissionUtilities.addAuthorizedUser(permissions, IAuthorization.Type.WRITE, new AuthorizedUser(userURI, null));
-        }
-        permissionStore.createPermissions(conversationId, permissions);
-    }
-
-    private String computeAnonymousUserIdIfEmpty(String userId) {
-        return isNullOrEmpty(userId) ?
-                "anonymous-" + RandomStringUtils.randomAlphanumeric(10) : userId;
     }
 
     private IPropertiesHandler createPropertiesHandler(final String userId) {

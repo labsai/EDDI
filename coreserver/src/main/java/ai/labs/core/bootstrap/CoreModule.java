@@ -1,6 +1,8 @@
 package ai.labs.core.bootstrap;
 
 import ai.labs.core.rest.internal.*;
+import ai.labs.core.rest.utilities.ConversationSetup;
+import ai.labs.core.rest.utilities.IConversationSetup;
 import ai.labs.rest.rest.*;
 import ai.labs.runtime.DatabaseLogs;
 import ai.labs.runtime.IConversationCoordinator;
@@ -40,6 +42,7 @@ public class CoreModule extends AbstractBaseModule {
         bind(IDatabaseLogs.class).to(DatabaseLogs.class).in(Scopes.SINGLETON);
         bind(IConversationCoordinator.class).to(ConversationCoordinator.class).in(Scopes.SINGLETON);
         bind(IContextLogger.class).to(ContextLogger.class).in(Scopes.SINGLETON);
+        bind(IConversationSetup.class).to(ConversationSetup.class).in(Scopes.SINGLETON);
     }
 
     @Provides
