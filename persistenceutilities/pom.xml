@@ -10,7 +10,7 @@
         <version>4.7</version>
         <relativePath>../pom.xml</relativePath>
     </parent>
-    <artifactId>persistence-utilities</artifactId>
+    <artifactId>persistenceutilities</artifactId>
     <packaging>jar</packaging>
 
     <dependencies>

@@ -51,7 +51,7 @@
         </dependency>
         <dependency>
             <groupId>ai.labs</groupId>
-            <artifactId>persistence-utilities</artifactId>
+            <artifactId>persistenceutilities</artifactId>
             <version>${project.version}</version>
         </dependency>
     </dependencies>

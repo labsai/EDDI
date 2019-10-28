@@ -26,6 +26,7 @@
         <module>persistencestore-impl</module>
         <module>conversationmemory-impl</module>
         <module>automatedtesting-impl</module>
+        <module>persistenceutilities</module>
         <module>coreutilities</module>
         <module>configurationrepository-impl</module>
         <module>runtime-impl</module>
@@ -67,9 +68,9 @@
                 <artifactId>maven-compiler-plugin</artifactId>
                 <version>3.8.1</version>
                 <configuration>
-                    <source>12</source>
-                    <target>12</target>
-                    <release>12</release>
+                    <source>11</source>
+                    <target>11</target>
+                    <release>11</release>
                 </configuration>
             </plugin>
             <plugin>
