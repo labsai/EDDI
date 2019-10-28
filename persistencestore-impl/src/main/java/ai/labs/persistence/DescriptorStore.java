@@ -17,6 +17,8 @@ import org.bson.Document;
 import java.util.LinkedList;
 import java.util.List;
 
+import static ai.labs.persistence.IResourceStore.*;
+
 /**
  * @author ginccc
  */
@@ -50,7 +52,7 @@ public class DescriptorStore<T> implements IDescriptorStore<T> {
 
     @Override
     public List<T> readDescriptors(String type, String filter, Integer index, Integer limit, boolean includeDeleted)
-            throws IResourceStore.ResourceStoreException, IResourceStore.ResourceNotFoundException {
+            throws ResourceStoreException, ResourceNotFoundException {
         List<IResourceFilter.QueryFilter> queryFiltersRequired = new LinkedList<>();
         String filterURI = "eddi://" + type + ".*";
         queryFiltersRequired.add(new IResourceFilter.QueryFilter(FIELD_RESOURCE, filterURI));
@@ -69,27 +71,27 @@ public class DescriptorStore<T> implements IDescriptorStore<T> {
     }
 
     @Override
-    public T readDescriptor(String resourceId, Integer version) throws IResourceStore.ResourceStoreException, IResourceStore.ResourceNotFoundException {
+    public T readDescriptor(String resourceId, Integer version) throws ResourceStoreException, ResourceNotFoundException {
         return descriptorResourceStore.read(resourceId, version);
     }
 
     @Override
-    public Integer updateDescriptor(String resourceId, Integer version, T documentDescriptor) throws IResourceStore.ResourceStoreException, IResourceStore.ResourceModifiedException, IResourceStore.ResourceNotFoundException {
+    public Integer updateDescriptor(String resourceId, Integer version, T documentDescriptor) throws ResourceStoreException, ResourceModifiedException, ResourceNotFoundException {
         return descriptorResourceStore.update(resourceId, version, documentDescriptor);
     }
 
     @Override
-    public void setDescriptor(String resourceId, Integer version, T documentDescriptor) throws IResourceStore.ResourceStoreException, IResourceStore.ResourceNotFoundException {
+    public void setDescriptor(String resourceId, Integer version, T documentDescriptor) throws ResourceStoreException, ResourceNotFoundException {
         descriptorResourceStore.set(resourceId, version, documentDescriptor);
     }
 
     @Override
-    public void createDescriptor(String resourceId, Integer version, T documentDescriptor) throws IResourceStore.ResourceStoreException, IResourceStore.ResourceNotFoundException {
+    public void createDescriptor(String resourceId, Integer version, T documentDescriptor) throws ResourceStoreException {
         descriptorResourceStore.create(resourceId, version, documentDescriptor);
     }
 
     @Override
-    public void deleteDescriptor(String resourceId, Integer version) throws IResourceStore.ResourceStoreException, IResourceStore.ResourceNotFoundException, IResourceStore.ResourceModifiedException {
+    public void deleteDescriptor(String resourceId, Integer version) throws ResourceNotFoundException, ResourceModifiedException {
         descriptorResourceStore.delete(resourceId, version);
     }
 
@@ -99,7 +101,7 @@ public class DescriptorStore<T> implements IDescriptorStore<T> {
     }
 
 
-    public IResourceStore.IResourceId getCurrentResourceId(String id) throws IResourceStore.ResourceNotFoundException {
+    public IResourceId getCurrentResourceId(String id) throws ResourceNotFoundException {
         return descriptorResourceStore.getCurrentResourceId(id);
     }
 }
