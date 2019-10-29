@@ -1,18 +1,18 @@
 package ai.labs.persistence.bootstrap;
 
+import ai.labs.persistence.mongo.codec.JacksonProvider;
 import ai.labs.runtime.bootstrap.AbstractBaseModule;
 import ai.labs.utilities.RuntimeUtilities;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.google.inject.Provides;
 import com.mongodb.*;
 import com.mongodb.client.MongoDatabase;
+import de.undercouch.bson4jackson.BsonFactory;
 import org.bson.BsonInvalidOperationException;
 import org.bson.BsonReader;
 import org.bson.BsonWriter;
-import org.bson.codecs.Codec;
-import org.bson.codecs.DecoderContext;
-import org.bson.codecs.EncoderContext;
+import org.bson.codecs.*;
 import org.bson.codecs.configuration.CodecRegistry;
-import org.bson.codecs.pojo.PojoCodecProvider;
 
 import javax.inject.Named;
 import javax.inject.Singleton;
@@ -23,6 +23,7 @@ import java.net.UnknownHostException;
 import java.util.LinkedList;
 import java.util.List;
 
+import static ai.labs.SerializationUtilities.configureObjectMapper;
 import static org.bson.codecs.configuration.CodecRegistries.*;
 
 /**
@@ -63,20 +64,20 @@ public class PersistenceModule extends AbstractBaseModule {
                                         @Named("mongodb.serverSelectionTimeout") Integer serverSelectionTimeout,
                                         @Named("mongodb.socketTimeout") Integer socketTimeout,
                                         @Named("mongodb.sslEnabled") Boolean sslEnabled,
-                                        @Named("mongodb.threadsAllowedToBlockForConnectionMultiplier") Integer threadsAllowedToBlockForConnectionMultiplier) {
+                                        @Named("mongodb.threadsAllowedToBlockForConnectionMultiplier") Integer threadsAllowedToBlockForConnectionMultiplier,
+                                        BsonFactory bsonFactory) {
         try {
 
             List<ServerAddress> seeds = hostsToServerAddress(hosts, port);
 
             MongoClient mongoClient;
             MongoClientOptions mongoClientOptions = buildMongoClientOptions(
-                    WriteConcern.MAJORITY, ReadPreference.nearest(),
-                    connectionsPerHost, connectTimeout, heartbeatConnectTimeout,
-                    heartbeatFrequency, heartbeatSocketTimeout, localThreshold,
-                    maxConnectionIdleTime, maxConnectionLifeTime, maxWaitTime,
+                    ReadPreference.nearest(), connectionsPerHost, connectTimeout,
+                    heartbeatConnectTimeout, heartbeatFrequency, heartbeatSocketTimeout,
+                    localThreshold, maxConnectionIdleTime, maxConnectionLifeTime, maxWaitTime,
                     minConnectionsPerHost, minHeartbeatFrequency, requiredReplicaSetName,
-                    serverSelectionTimeout, socketTimeout,
-                    sslEnabled, threadsAllowedToBlockForConnectionMultiplier);
+                    serverSelectionTimeout, socketTimeout, sslEnabled,
+                    threadsAllowedToBlockForConnectionMultiplier, bsonFactory);
             if ("".equals(username) || "".equals(password)) {
                 mongoClient = new MongoClient(seeds, mongoClientOptions);
             } else {
@@ -92,7 +93,7 @@ public class PersistenceModule extends AbstractBaseModule {
         }
     }
 
-    private MongoClientOptions buildMongoClientOptions(WriteConcern writeConcern, ReadPreference readPreference,
+    private MongoClientOptions buildMongoClientOptions(ReadPreference readPreference,
                                                        Integer connectionsPerHost, Integer connectTimeout,
                                                        Integer heartbeatConnectTimeout, Integer heartbeatFrequency,
                                                        Integer heartbeatSocketTimeout, Integer localThreshold,
@@ -101,14 +102,20 @@ public class PersistenceModule extends AbstractBaseModule {
                                                        Integer minHeartbeatFrequency, String requiredReplicaSetName,
                                                        Integer serverSelectionTimeout, Integer socketTimeout,
                                                        Boolean sslEnabled,
-                                                       Integer threadsAllowedToBlockForConnectionMultiplier) {
+                                                       Integer threadsAllowedToBlockForConnectionMultiplier,
+                                                       BsonFactory bsonFactory) {
         MongoClientOptions.Builder builder = MongoClientOptions.builder();
         CodecRegistry codecRegistry = fromRegistries(
                 MongoClient.getDefaultCodecRegistry(),
-                fromCodecs(new URIStringCodec()),
-                fromProviders(PojoCodecProvider.builder().automatic(true).build()));
+                fromCodecs(new URIStringCodec(), new RawBsonDocumentCodec()),
+                fromProviders(
+                        new ValueCodecProvider(), new BsonValueCodecProvider(),
+                        new DocumentCodecProvider(), new IterableCodecProvider(), new MapCodecProvider(),
+                        new JacksonProvider(configureObjectMapper(new ObjectMapper(bsonFactory)))
+                )
+        );
         builder.codecRegistry(codecRegistry);
-        builder.writeConcern(writeConcern);
+        builder.writeConcern(WriteConcern.MAJORITY);
         builder.readPreference(readPreference);
         builder.connectionsPerHost(connectionsPerHost);
         builder.connectTimeout(connectTimeout);
@@ -137,6 +144,7 @@ public class PersistenceModule extends AbstractBaseModule {
         return builder.build();
     }
 
+    @SuppressWarnings("RedundantThrows")
     private static List<ServerAddress> hostsToServerAddress(String hosts, Integer port) throws UnknownHostException {
         List<ServerAddress> ret = new LinkedList<>();
 

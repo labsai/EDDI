@@ -26,6 +26,7 @@
         <module>persistencestore-impl</module>
         <module>conversationmemory-impl</module>
         <module>automatedtesting-impl</module>
+        <module>persistenceutilities</module>
         <module>coreutilities</module>
         <module>configurationrepository-impl</module>
         <module>runtime-impl</module>
