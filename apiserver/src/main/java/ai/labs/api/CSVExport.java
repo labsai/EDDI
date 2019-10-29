@@ -6,6 +6,7 @@ import ai.labs.expressions.utilities.IExpressionProvider;
 import ai.labs.memory.ConversationMemoryUtilities;
 import ai.labs.memory.descriptor.model.ConversationDescriptor;
 import ai.labs.memory.rest.IRestConversationStore;
+import ai.labs.models.Property;
 import ai.labs.persistence.IResourceStore;
 import ai.labs.utilities.URIUtilities;
 import lombok.AllArgsConstructor;
@@ -44,35 +45,36 @@ public class CSVExport implements ICSVExport {
         StringBuilder retValues = new StringBuilder();
 
         List<ConversationDescriptor> conversationDescriptors = restConversationStore.
-                readConversationDescriptors(index, limit, botId, null, null, null, lastModifiedSince);
+                readConversationDescriptors(index, limit, null, botId, null, null, null, lastModifiedSince);
 
 
         List<String> csvAvailableHeaderKeys = new LinkedList<>();
         for (ConversationDescriptor conversationDescriptor : conversationDescriptors) {
-            String tic = null;
-            String psID = null;
+            /*String tic = null;
+            String psID = null;*/
             boolean firstIteration = retHeader.length() == 0;
             String conversationId = URIUtilities.extractResourceId(conversationDescriptor.getResource()).getId();
 
             Date timestampStartConversation = conversationDescriptor.getCreatedOn();
             var memorySnapshot = ConversationMemoryUtilities.convertSimpleConversationMemory(restConversationStore.readRawConversationLog(conversationId), true);
+            String userId = memorySnapshot.getUserId();
             LinkedHashMap<String, Values> csvMap = new LinkedHashMap<>();
             for (var conversationStep : memorySnapshot.getConversationSteps()) {
                 for (var conversationStepData : conversationStep.getConversationStep()) {
                     String key = conversationStepData.getKey();
                     String value = conversationStepData.getValue().toString();
                     Date timestamp = conversationStepData.getTimestamp();
-                    if (key.equals("context:url") && value.contains("tic=") && value.contains("psID=")) {
+                    /*if (key.equals("context:url") && value.contains("tic=") && value.contains("psID=")) {
                         tic = value.substring(value.indexOf("?") + 5, value.indexOf("&", value.indexOf("?")));
                         psID = value.substring(value.indexOf("psID=", value.indexOf("?")) + 5, value.indexOf(",", value.indexOf("?")));
-                    }
+                    }*/
 
                     if (key.equals("expressions:parsed") && value.startsWith("property")) {
                         Expressions expressions = expressionProvider.parseExpressions(value);
                         Expression property = expressions.get(0);
                         Expression categoryExp = property.getSubExpressions()[0];
                         String questionId = categoryExp.getExpressionName();
-                        questionId = questionId.replace("_", "[").concat("]");
+                        questionId = prepareQuestionId(questionId);
                         String answer = categoryExp.getSubExpressions()[0].getExpressionName();
                         var values = new Values(answer, timestamp);
                         csvMap.put(questionId, values);
@@ -80,17 +82,30 @@ public class CSVExport implements ICSVExport {
                 }
             }
 
+            var conversationProperties = memorySnapshot.getConversationProperties();
+            for (String key : conversationProperties.keySet()) {
+                if (csvMap.containsKey(prepareQuestionId(key))) {
+                    continue;
+                }
+                Property property = conversationProperties.get(key);
+                csvMap.put(key, new Values(property.getValue().toString(), new Date(0)));
+            }
+
             if (!csvMap.isEmpty()) {
                 if (firstIteration) {
                     wrapInQuotes(retHeader, "datestamp");
-                    wrapInQuotes(retHeader, "tic");
-                    wrapInQuotes(retHeader, "psID");
+                    wrapInQuotes(retHeader, "userId");
+                    wrapInQuotes(retHeader, "conversationId");
+                    /*wrapInQuotes(retHeader, "tic");
+                    wrapInQuotes(retHeader, "psID");*/
                 }
 
                 if (timestampStartConversation != null) {
                     wrapInQuotes(retValues, dateFormat.format(timestampStartConversation));
-                    wrapInQuotes(retValues, tic == null ? "null" : tic);
-                    wrapInQuotes(retValues, psID == null ? "null" : psID);
+                    wrapInQuotes(retValues, userId == null ? "null" : userId);
+                    wrapInQuotes(retValues, conversationId == null ? "null" : conversationId);
+                    /*wrapInQuotes(retValues, tic == null ? "null" : tic);
+                    wrapInQuotes(retValues, psID == null ? "null" : psID);*/
                 }
                 addNewHeaderKeys(csvAvailableHeaderKeys, csvMap.keySet());
                 for (String key : csvAvailableHeaderKeys) {
@@ -122,6 +137,13 @@ public class CSVExport implements ICSVExport {
         }
 
         return Response.ok(ret.toString()).type("text/csv").build();
+    }
+
+    private String prepareQuestionId(String questionId) {
+        if (questionId.contains("_")) {
+            questionId = questionId.replace("_", "[").concat("]");
+        }
+        return questionId;
     }
 
     private void addNewHeaderKeys(List<String> csvAvailableHeaderKeys, Set<String> keySet) {
