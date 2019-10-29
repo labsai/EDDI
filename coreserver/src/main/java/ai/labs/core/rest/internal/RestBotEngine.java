@@ -2,6 +2,7 @@ package ai.labs.core.rest.internal;
 
 import ai.labs.caching.ICache;
 import ai.labs.caching.ICacheFactory;
+import ai.labs.core.rest.utilities.IConversationSetup;
 import ai.labs.lifecycle.IConversation;
 import ai.labs.lifecycle.LifecycleException;
 import ai.labs.memory.IConversationMemory;
@@ -22,10 +23,8 @@ import ai.labs.runtime.IConversationCoordinator;
 import ai.labs.runtime.SystemRuntime;
 import ai.labs.runtime.SystemRuntime.IRuntime.IFinishedExecution;
 import ai.labs.runtime.service.ServiceException;
-import ai.labs.utilities.RestUtilities;
 import ai.labs.utilities.RuntimeUtilities;
 import lombok.extern.slf4j.Slf4j;
-import org.apache.commons.lang3.RandomStringUtils;
 import org.jboss.resteasy.spi.NoLogWebApplicationException;
 
 import javax.inject.Inject;
@@ -43,6 +42,7 @@ import java.util.stream.Collectors;
 import static ai.labs.memory.ConversationMemoryUtilities.*;
 import static ai.labs.persistence.IResourceStore.ResourceNotFoundException;
 import static ai.labs.persistence.IResourceStore.ResourceStoreException;
+import static ai.labs.utilities.RestUtilities.createURI;
 import static ai.labs.utilities.RuntimeUtilities.isNullOrEmpty;
 
 /**
@@ -61,6 +61,7 @@ public class RestBotEngine implements IRestBotEngine {
     private final SystemRuntime.IRuntime runtime;
     private final IContextLogger contextLogger;
     private final int botTimeout;
+    private final IConversationSetup conversationSetup;
     private final ICache<String, ConversationState> conversationStateCache;
 
     @Inject
@@ -69,6 +70,7 @@ public class RestBotEngine implements IRestBotEngine {
                          IConversationDescriptorStore conversationDescriptorStore,
                          IPropertiesStore propertiesStore,
                          IConversationCoordinator conversationCoordinator,
+                         IConversationSetup conversationSetup,
                          ICacheFactory cacheFactory,
                          SystemRuntime.IRuntime runtime,
                          IContextLogger contextLogger,
@@ -78,12 +80,12 @@ public class RestBotEngine implements IRestBotEngine {
         this.conversationDescriptorStore = conversationDescriptorStore;
         this.propertiesStore = propertiesStore;
         this.conversationCoordinator = conversationCoordinator;
+        this.conversationSetup = conversationSetup;
         this.conversationStateCache = cacheFactory.getCache(CACHE_NAME_CONVERSATION_STATE);
         this.runtime = runtime;
         this.contextLogger = contextLogger;
         this.botTimeout = botTimeout;
     }
-
 
     @Override
     public Response startConversation(Environment environment, String botId, String userId) {
@@ -110,16 +112,21 @@ public class RestBotEngine implements IRestBotEngine {
                 return Response.status(Response.Status.NOT_FOUND).type(MediaType.TEXT_PLAIN).entity(message).build();
             }
 
-            userId = computeAnonymousUserIdIfEmpty(userId);
+            userId = conversationSetup.computeAnonymousUserIdIfEmpty(userId);
             IConversation conversation = latestBot.startConversation(userId, context,
                     createPropertiesHandler(userId), null);
 
-            String conversationId = storeConversationMemory(conversation.getConversationMemory(), environment);
+            var conversationId = storeConversationMemory(conversation.getConversationMemory(), environment);
             cacheConversationState(conversationId, ConversationState.READY);
-            URI createdUri = RestUtilities.createURI(resourceURI, conversationId);
-            return Response.created(createdUri).build();
+            var conversationUri = createURI(resourceURI, conversationId);
+
+            URI userUri = conversationSetup.createConversationDescriptor(botId, latestBot, conversationId, conversationUri);
+            conversationSetup.createPermissions(conversationId, userUri);
+
+            return Response.created(conversationUri).build();
         } catch (ServiceException |
                 ResourceStoreException |
+                ResourceNotFoundException |
                 InstantiationException |
                 LifecycleException |
                 IllegalAccessException e) {
@@ -127,11 +134,6 @@ public class RestBotEngine implements IRestBotEngine {
             log.error(e.getLocalizedMessage(), e);
             throw new InternalServerErrorException(e.getLocalizedMessage(), e);
         }
-    }
-
-    private String computeAnonymousUserIdIfEmpty(String userId) {
-        return isNullOrEmpty(userId) ?
-                "anonymous-" + RandomStringUtils.randomAlphanumeric(10) : userId;
     }
 
     private IPropertiesHandler createPropertiesHandler(final String userId) {
