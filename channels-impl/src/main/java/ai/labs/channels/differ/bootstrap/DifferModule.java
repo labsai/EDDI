@@ -20,6 +20,6 @@ public class DifferModule extends AbstractBaseModule {
         bind(IDifferConversationStore.class).to(DifferConversationStore.class).in(Scopes.SINGLETON);
         bind(IDifferBotMappingStore.class).to(DifferBotMappingStore.class).in(Scopes.SINGLETON);
 
-        bind(IRestDifferBotMappingStore.class).to(RestDifferBotMappingStore.class);
+        bind(IRestDifferBotMappingStore.class).to(RestDifferBotMappingStore.class).in(Scopes.SINGLETON);
     }
 }

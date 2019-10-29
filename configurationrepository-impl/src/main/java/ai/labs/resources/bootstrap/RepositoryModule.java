@@ -93,25 +93,25 @@ public class RepositoryModule extends AbstractBaseModule {
         bind(IPropertiesStore.class).to(PropertiesStore.class).in(Scopes.SINGLETON);
         bind(IPropertySetterStore.class).to(PropertySetterStore.class).in(Scopes.SINGLETON);
 
-        bind(IRestPermissionStore.class).to(RestPermissionStore.class);
-        bind(IRestDocumentDescriptorStore.class).to(RestDocumentDescriptorStore.class);
-        bind(IRestExtensionStore.class).to(RestExtensionStore.class);
-        bind(IRestExpression.class).to(RestExpression.class);
-        bind(IRestDeploymentStore.class).to(RestDeploymentStore.class);
+        bind(IRestPermissionStore.class).to(RestPermissionStore.class).in(Scopes.SINGLETON);
+        bind(IRestDocumentDescriptorStore.class).to(RestDocumentDescriptorStore.class).in(Scopes.SINGLETON);
+        bind(IRestExtensionStore.class).to(RestExtensionStore.class).in(Scopes.SINGLETON);
+        bind(IRestExpression.class).to(RestExpression.class).in(Scopes.SINGLETON);
+        bind(IRestDeploymentStore.class).to(RestDeploymentStore.class).in(Scopes.SINGLETON);
 
-        bind(IRestBotStore.class).to(RestBotStore.class);
-        bind(IRestBotTriggerStore.class).to(RestBotTriggerStore.class);
-        bind(IRestUserConversationStore.class).to(RestUserConversationStore.class);
-        bind(IRestPackageStore.class).to(RestPackageStore.class);
-        bind(IRestParserStore.class).to(RestParserStore.class);
-        bind(IRestRegularDictionaryStore.class).to(RestRegularDictionaryStore.class);
-        bind(IRestBehaviorStore.class).to(RestBehaviorStore.class);
-        bind(IRestOutputStore.class).to(RestOutputStore.class);
-        bind(IRestConversationStore.class).to(RestConversationStore.class);
-        bind(IRestHttpCallsStore.class).to(RestHttpCallsStore.class);
-        bind(IRestPropertiesStore.class).to(RestPropertiesStore.class);
-        bind(IRestPropertySetterStore.class).to(RestPropertySetterStore.class);
+        bind(IRestBotStore.class).to(RestBotStore.class).in(Scopes.SINGLETON);
+        bind(IRestBotTriggerStore.class).to(RestBotTriggerStore.class).in(Scopes.SINGLETON);
+        bind(IRestUserConversationStore.class).to(RestUserConversationStore.class).in(Scopes.SINGLETON);
+        bind(IRestPackageStore.class).to(RestPackageStore.class).in(Scopes.SINGLETON);
+        bind(IRestParserStore.class).to(RestParserStore.class).in(Scopes.SINGLETON);
+        bind(IRestRegularDictionaryStore.class).to(RestRegularDictionaryStore.class).in(Scopes.SINGLETON);
+        bind(IRestBehaviorStore.class).to(RestBehaviorStore.class).in(Scopes.SINGLETON);
+        bind(IRestOutputStore.class).to(RestOutputStore.class).in(Scopes.SINGLETON);
+        bind(IRestConversationStore.class).to(RestConversationStore.class).in(Scopes.SINGLETON);
+        bind(IRestHttpCallsStore.class).to(RestHttpCallsStore.class).in(Scopes.SINGLETON);
+        bind(IRestPropertiesStore.class).to(RestPropertiesStore.class).in(Scopes.SINGLETON);
+        bind(IRestPropertySetterStore.class).to(RestPropertySetterStore.class).in(Scopes.SINGLETON);
 
-        bind(IRestOutputKeys.class).to(RestOutputKeys.class);
+        bind(IRestOutputKeys.class).to(RestOutputKeys.class).in(Scopes.SINGLETON);
     }
 }

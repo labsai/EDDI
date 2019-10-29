@@ -17,7 +17,7 @@ public interface IDescriptorStore<T> {
 
     void setDescriptor(String resourceId, Integer version, T descriptor) throws IResourceStore.ResourceStoreException, IResourceStore.ResourceNotFoundException;
 
-    void createDescriptor(String resourceId, Integer version, T descriptor) throws IResourceStore.ResourceStoreException, IResourceStore.ResourceNotFoundException;
+    void createDescriptor(String resourceId, Integer version, T descriptor) throws IResourceStore.ResourceStoreException;
 
     IResourceStore.IResourceId getCurrentResourceId(String id) throws IResourceStore.ResourceNotFoundException;
 

@@ -354,6 +354,7 @@ public class ServerRuntime implements IServerRuntime {
 
     private static void addCorsHeader(HttpServletResponse httpResponse) {
         httpResponse.setHeader("Access-Control-Allow-Origin", "*");
+        httpResponse.setHeader("Access-Control-Allow-Credentials", "true");
         httpResponse.setHeader("Access-Control-Allow-Headers", "Authorization,X-Requested-With,Content-Type,Accept,Origin,Cache-Control");
         httpResponse.setHeader("Access-Control-Allow-Methods", "HEAD,GET,PUT,POST,DELETE,PATCH,OPTIONS");
         httpResponse.setHeader("Access-Control-Expose-Headers", "Location");

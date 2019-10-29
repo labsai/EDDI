@@ -1,0 +1,39 @@
+FROM labsai/base-image:redhat-latest
+
+LABEL name="E.D.D.I"
+LABEL vendor="LABS.AI"
+LABEL summary="High Performance, In-Memory Chatbot Platform. Build multiple Chatbots with NLP, Behavior Rules, API Connector, Templating."
+LABEL description="The Chatbot System - E.D.D.I (Enhanced Dialog Driven Intelligence), has been developed with the focus on the use in enterprise applications as well as the ease of connecting it to other resources (such as databases or other Services)."
+
+ARG EDDI_VERSION
+ARG EDDI_ENV
+ARG EDDI_MEMORY_MIN
+ARG EDDI_MEMORY_MAX
+
+EXPOSE 7070
+EXPOSE 7443
+EXPOSE 9001
+
+USER root
+
+RUN groupadd -f appuser && \
+    useradd -r -g appuser -u 1111 appuser
+RUN mkdir -p /apiserver/ && \
+    mkdir /apiserver/logs && \
+    mkdir /apiserver/install
+RUN chown -R appuser:appuser /apiserver
+
+COPY /licenses/ /licenses
+COPY /apiserver/target/apiserver-$EDDI_VERSION-package.zip /apiserver/install
+COPY /start_eddi.sh /apiserver
+
+RUN unzip /apiserver/install/apiserver-$EDDI_VERSION-package.zip -d /apiserver  && \
+    chmod -R 777 /apiserver/ && \
+    rm /apiserver/install/apiserver-$EDDI_VERSION-package.zip
+
+USER appuser
+
+HEALTHCHECK --interval=10s --timeout=10s CMD curl --fail http://localhost:7070/health || exit 1
+
+WORKDIR /apiserver/
+ENTRYPOINT /apiserver/start_eddi.sh

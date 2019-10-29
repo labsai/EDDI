@@ -15,7 +15,6 @@ import ai.labs.runtime.ThreadContext;
 import ai.labs.runtime.service.ServiceException;
 import ai.labs.utilities.RuntimeUtilities;
 import lombok.extern.slf4j.Slf4j;
-import org.jboss.resteasy.plugins.guice.RequestScoped;
 import org.jboss.resteasy.spi.NoLogWebApplicationException;
 
 import javax.inject.Inject;
@@ -32,7 +31,6 @@ import static ai.labs.resources.rest.deployment.model.DeploymentInfo.DeploymentS
 /**
  * @author ginccc
  */
-@RequestScoped
 @Slf4j
 public class RestBotAdministration implements IRestBotAdministration {
     private final IBotFactory botFactory;

@@ -13,6 +13,7 @@ import ai.labs.utilities.RuntimeUtilities;
 import ai.labs.utilities.StringUtilities;
 import com.google.inject.Provider;
 import com.google.inject.Provides;
+import com.google.inject.Scopes;
 import io.micrometer.prometheus.PrometheusMeterRegistry;
 import org.apache.commons.lang3.RandomStringUtils;
 import org.eclipse.jetty.security.ConstraintMapping;
@@ -48,7 +49,7 @@ public class ServerRuntimeModule extends AbstractBaseModule {
     @Override
     protected void configure() {
         registerConfigFiles(configFiles);
-        bind(LoginService.class).to(MongoLoginService.class);
+        bind(LoginService.class).to(MongoLoginService.class).in(Scopes.SINGLETON);
     }
 
     @Provides
@@ -211,7 +212,7 @@ public class ServerRuntimeModule extends AbstractBaseModule {
         mapping = new ConstraintMapping();
         mapping.setMethod(HTTP_METHOD_OPTIONS);
         mapping.setConstraint(constraint);
-        mapping.setPathSpec("/");
+        mapping.setPathSpec("/*");
         securityHandler.addConstraintMapping(mapping);
     }
 

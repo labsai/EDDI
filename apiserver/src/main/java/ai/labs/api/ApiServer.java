@@ -25,6 +25,7 @@ import ai.labs.resources.bootstrap.RepositoryModule;
 import ai.labs.rest.bootstrap.RestInterfaceModule;
 import ai.labs.restapi.connector.bootstrap.HttpCallsModule;
 import ai.labs.runtime.DependencyInjector;
+import ai.labs.runtime.DependencyInjector.Environment;
 import ai.labs.runtime.IAutoBotDeployment;
 import ai.labs.runtime.bootstrap.LoggingModule;
 import ai.labs.runtime.bootstrap.RuntimeModule;
@@ -64,7 +65,6 @@ public class ApiServer {
         final String configDir = FileUtilities.buildPath(USER_DIR, "config", eddiEnv);
 
         //bootstrapping modules
-        DependencyInjector.Environment environment = DependencyInjector.Environment.valueOf(eddiEnv.toUpperCase());
         Module[] modules = {
                 new LoggingModule(),
                 new RuntimeModule(
@@ -106,7 +106,7 @@ public class ApiServer {
         };
 
         //init modules
-        final DependencyInjector injector = DependencyInjector.init(environment, modules);
+        final DependencyInjector injector = DependencyInjector.init(Environment.PRODUCTION, modules);
 
         //init webserver
         injector.getInstance(IServerRuntime.class).startup(() -> {

@@ -9,6 +9,6 @@ public class ChannelModule extends AbstractBaseModule {
     protected void configure() {
         bind(IChannelDefinitionStore.class).to(ChannelDefinitionStore.class).in(Scopes.SINGLETON);
         bind(IChannelManager.class).to(ChannelManager.class).in(Scopes.SINGLETON);
-        bind(IRestChannelDefinitionStore.class).to(RestChannelDefinitionStore.class);
+        bind(IRestChannelDefinitionStore.class).to(RestChannelDefinitionStore.class).in(Scopes.SINGLETON);
     }
 }

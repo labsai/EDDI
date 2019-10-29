@@ -1,6 +1,8 @@
 package ai.labs.core.bootstrap;
 
 import ai.labs.core.rest.internal.*;
+import ai.labs.core.rest.utilities.ConversationSetup;
+import ai.labs.core.rest.utilities.IConversationSetup;
 import ai.labs.rest.rest.*;
 import ai.labs.runtime.DatabaseLogs;
 import ai.labs.runtime.IConversationCoordinator;
@@ -16,6 +18,7 @@ import io.micrometer.core.instrument.binder.system.ProcessorMetrics;
 import io.micrometer.prometheus.PrometheusConfig;
 import io.micrometer.prometheus.PrometheusMeterRegistry;
 
+import javax.inject.Named;
 import javax.inject.Singleton;
 import java.io.InputStream;
 import java.util.concurrent.ExecutorService;
@@ -30,30 +33,34 @@ public class CoreModule extends AbstractBaseModule {
         registerConfigFiles(configFiles);
 
         bind(ILogoutEndpoint.class).to(LogoutEndpoint.class);
-        bind(IRestBotEngine.class).to(RestBotEngine.class);
-        bind(IRestBotAdministration.class).to(RestBotAdministration.class);
-        bind(IRestBotManagement.class).to(RestBotManagement.class);
-        bind(IRestHealthCheck.class).to(RestHealthCheck.class);
-        bind(IRestLogs.class).to(RestLogs.class);
+        bind(IRestBotEngine.class).to(RestBotEngine.class).in(Scopes.SINGLETON);
+        bind(IRestBotAdministration.class).to(RestBotAdministration.class).in(Scopes.SINGLETON);
+        bind(IRestBotManagement.class).to(RestBotManagement.class).in(Scopes.SINGLETON);
+        bind(IRestHealthCheck.class).to(RestHealthCheck.class).in(Scopes.SINGLETON);
+        bind(IRestLogs.class).to(RestLogs.class).in(Scopes.SINGLETON);
         bind(IRestPrometheusMonitoring.class).to(RestPrometheusMonitoring.class);
         bind(IDatabaseLogs.class).to(DatabaseLogs.class).in(Scopes.SINGLETON);
         bind(IConversationCoordinator.class).to(ConversationCoordinator.class).in(Scopes.SINGLETON);
         bind(IContextLogger.class).to(ContextLogger.class).in(Scopes.SINGLETON);
+        bind(IConversationSetup.class).to(ConversationSetup.class).in(Scopes.SINGLETON);
     }
 
     @Provides
     @Singleton
-    public PrometheusMeterRegistry providePrometheusMeterRegistry(ExecutorService executorService) {
+    public PrometheusMeterRegistry providePrometheusMeterRegistry(ExecutorService executorService,
+                                                                  @Named("systemRuntime.projectName") String projectName) {
         PrometheusMeterRegistry registry = new PrometheusMeterRegistry(PrometheusConfig.DEFAULT);
         new LogbackMetrics().bindTo(registry);
         new ClassLoaderMetrics().bindTo(registry);
         new ExecutorServiceMetrics(executorService,
-                "EDDI-ExecutorService",
-                () -> Tags.of("EDDI", "ExecutorService").iterator()).bindTo(registry);
+                projectName + "-ExecutorService",
+                () -> Tags.of(projectName, "ExecutorService").iterator()).bindTo(registry);
         new JvmMemoryMetrics().bindTo(registry);
         new JvmGcMetrics().bindTo(registry);
         new JvmThreadMetrics().bindTo(registry);
         new ProcessorMetrics().bindTo(registry);
+
+        registry.config().commonTags("application", projectName);
 
         return registry;
     }

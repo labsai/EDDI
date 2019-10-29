@@ -13,7 +13,7 @@ RUN mkdir -p /apiserver/ && \
     mkdir /apiserver/logs && \
     mkdir /apiserver/install
 
-COPY /licenses/ /apiserver/licences
+COPY /licenses/ /apiserver/licenses
 COPY /apiserver/target/apiserver-$EDDI_VERSION-package.zip /apiserver/install
 COPY /start_eddi.sh /apiserver
 

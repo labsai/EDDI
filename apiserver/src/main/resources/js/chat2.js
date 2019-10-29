@@ -112,12 +112,10 @@ function createMessage(outputArray, quickRepliesArray, hasConversationEnded, dis
         }
 
         // delay override - Make first responses quick
-        if (delay === -1) {
-            if (eddi.skipDelay || message == null) {
-                delay = 50;
-            } else {
-                delay = calculateDelay(message);
-            }
+        if (eddi.skipDelay || message == null) {
+            delay = 50;
+        } else {
+            delay = calculateDelay(message);
         }
 
         let typingIndicator = new Message('<img src="/binary/img/typing-indicator.svg" />');
@@ -179,7 +177,7 @@ function createAnswerField(inputField) {
     let inputFieldObj;
 
     if (typeof inputField !== 'undefined') {
-        inputFieldObj = new InputField(inputField.placeholder, inputField.defaultValue);
+        inputFieldObj = new InputField(inputField.placeholder, inputField.defaultValue, inputField.isPassword);
     } else {
         inputFieldObj = new InputField();
     }

@@ -30,9 +30,10 @@ class Message {
 }
 
 class InputField {
-    constructor(placeholder, defaultValue) {
+    constructor(placeholder, defaultValue, isPassword) {
         this.placeholder = typeof placeholder !== 'undefined' ? placeholder : 'Type your response…';
         this.defaultValue = typeof defaultValue !== 'undefined' ? defaultValue : '';
+        this.isPassword = typeof isPassword !== 'undefined' ? isPassword : false;
         this.element = $('<div>');
     }
 
@@ -40,7 +41,7 @@ class InputField {
         return function () {
             this.element = $('<div>');
             this.element.addClass('line textInputContainer');
-            const $inputField = $('<input type="text" name="answer" required="required" autocomplete="off" autofocus="autofocus">');
+            const $inputField = $('<input type="' + (this.isPassword ? 'password' : 'text') + '" name="answer" required="required" autocomplete="off" autofocus="autofocus">');
             if (this.placeholder !== '') {
                 $inputField.attr('placeholder', this.placeholder);
             }
@@ -61,7 +62,11 @@ class InputField {
 
                         if (answer !== "") {
                             _this.remove();
-                            createAnswerMessage(answer);
+                            if (_this.isPassword) {
+                                createAnswerMessage('*****');
+                            } else {
+                                createAnswerMessage(answer);
+                            }
                             eddi.submitUserMessage(answer);
                         } else {
                             $(this).removeClass('shake').removeClass('fadeInUp');
@@ -396,7 +401,7 @@ $(function () {
 
     const checkBotDeployment = function () {
         //check if bot is deployed
-        if (eddi.environment !== 'unrestricted') {
+        if (eddi.environment === 'test') {
             $.get('/administration/' + eddi.environment + '/deploymentstatus/' + eddi.botId + '?version=' + eddi.botVersion)
                 .done(function (data) {
                     if (data === 'NOT_FOUND') {
@@ -474,7 +479,7 @@ $(function () {
             eddi.botVersion = extractedParams.botVersion;
             checkBotDeployment();
         } else {
-            if (eddi.environment !== "unrestricted") {
+            if (eddi.environment === 'test') {
                 $.get('/botstore/bots/' + eddi.botId + '/currentversion', function (data) {
                     eddi.botVersion = data;
                     checkBotDeployment();
