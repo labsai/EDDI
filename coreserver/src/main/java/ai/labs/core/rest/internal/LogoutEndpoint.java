@@ -1,6 +1,6 @@
 package ai.labs.core.rest.internal;
 
-import ai.labs.rest.rest.ILogoutEndpoint;
+import ai.labs.rest.restinterfaces.ILogoutEndpoint;
 import lombok.extern.slf4j.Slf4j;
 import org.jboss.resteasy.plugins.guice.RequestScoped;
 

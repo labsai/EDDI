@@ -1,7 +1,7 @@
 package ai.labs.core.rest.internal;
 
 import ai.labs.models.DatabaseLog;
-import ai.labs.rest.rest.IRestLogs;
+import ai.labs.rest.restinterfaces.IRestLogs;
 import ai.labs.runtime.IDatabaseLogs;
 import ch.qos.logback.classic.Level;
 import ch.qos.logback.classic.Logger;

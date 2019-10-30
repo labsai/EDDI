@@ -7,8 +7,8 @@ import ai.labs.resources.rest.config.parser.IParserStore;
 import ai.labs.resources.rest.config.parser.IRestParserStore;
 import ai.labs.resources.rest.config.parser.model.ParserConfiguration;
 import ai.labs.resources.rest.documentdescriptor.IDocumentDescriptorStore;
-import ai.labs.rest.restinterfaces.IRestInterfaceFactory;
-import ai.labs.rest.restinterfaces.RestInterfaceFactory;
+import ai.labs.rest.restinterfaces.factory.IRestInterfaceFactory;
+import ai.labs.rest.restinterfaces.factory.RestInterfaceFactory;
 import lombok.extern.slf4j.Slf4j;
 
 import javax.inject.Inject;

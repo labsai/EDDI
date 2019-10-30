@@ -7,8 +7,8 @@ import ai.labs.resources.rest.config.propertysetter.IPropertySetterStore;
 import ai.labs.resources.rest.config.propertysetter.IRestPropertySetterStore;
 import ai.labs.resources.rest.config.propertysetter.model.PropertySetterConfiguration;
 import ai.labs.resources.rest.documentdescriptor.IDocumentDescriptorStore;
-import ai.labs.rest.restinterfaces.IRestInterfaceFactory;
-import ai.labs.rest.restinterfaces.RestInterfaceFactory;
+import ai.labs.rest.restinterfaces.factory.IRestInterfaceFactory;
+import ai.labs.rest.restinterfaces.factory.RestInterfaceFactory;
 import ai.labs.schema.IJsonSchemaCreator;
 import lombok.extern.slf4j.Slf4j;
 

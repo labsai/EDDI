@@ -3,7 +3,7 @@ package ai.labs.core.bootstrap;
 import ai.labs.core.rest.internal.*;
 import ai.labs.core.rest.utilities.ConversationSetup;
 import ai.labs.core.rest.utilities.IConversationSetup;
-import ai.labs.rest.rest.*;
+import ai.labs.rest.restinterfaces.*;
 import ai.labs.runtime.DatabaseLogs;
 import ai.labs.runtime.IConversationCoordinator;
 import ai.labs.runtime.IDatabaseLogs;
@@ -38,7 +38,7 @@ public class CoreModule extends AbstractBaseModule {
         bind(IRestBotManagement.class).to(RestBotManagement.class).in(Scopes.SINGLETON);
         bind(IRestHealthCheck.class).to(RestHealthCheck.class).in(Scopes.SINGLETON);
         bind(IRestLogs.class).to(RestLogs.class).in(Scopes.SINGLETON);
-        bind(IRestPrometheusMonitoring.class).to(RestPrometheusMonitoring.class);
+        bind(IRestPrometheusMonitoring.class).to(RestPrometheusMonitoring.class).in(Scopes.SINGLETON);
         bind(IDatabaseLogs.class).to(DatabaseLogs.class).in(Scopes.SINGLETON);
         bind(IConversationCoordinator.class).to(ConversationCoordinator.class).in(Scopes.SINGLETON);
         bind(IContextLogger.class).to(ContextLogger.class).in(Scopes.SINGLETON);

@@ -1,4 +1,4 @@
-package ai.labs.rest.rest;
+package ai.labs.rest.restinterfaces;
 
 import ai.labs.memory.model.SimpleConversationMemorySnapshot;
 import ai.labs.models.InputData;

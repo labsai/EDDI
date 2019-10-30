@@ -1,7 +1,7 @@
 package ai.labs.rest.bootstrap;
 
-import ai.labs.rest.restinterfaces.IRestInterfaceFactory;
-import ai.labs.rest.restinterfaces.RestInterfaceFactory;
+import ai.labs.rest.restinterfaces.factory.IRestInterfaceFactory;
+import ai.labs.rest.restinterfaces.factory.RestInterfaceFactory;
 import ai.labs.runtime.bootstrap.AbstractBaseModule;
 import com.google.inject.Scopes;
 

@@ -1,7 +1,7 @@
 package ai.labs.testing.impl.rest;
 
 import ai.labs.memory.IConversationMemoryStore;
-import ai.labs.rest.restinterfaces.IRestInterfaceFactory;
+import ai.labs.rest.restinterfaces.factory.IRestInterfaceFactory;
 import ai.labs.testing.ITestCaseStore;
 import ai.labs.testing.impl.TestCaseRuntime;
 import ai.labs.testing.model.TestCaseState;

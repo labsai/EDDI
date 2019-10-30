@@ -1,4 +1,4 @@
-package ai.labs.rest.restinterfaces;
+package ai.labs.rest.restinterfaces.factory;
 
 /**
  * @author ginccc

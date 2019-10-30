@@ -20,9 +20,9 @@ import ai.labs.resources.rest.config.regulardictionary.IRestRegularDictionarySto
 import ai.labs.resources.rest.config.regulardictionary.model.RegularDictionaryConfiguration;
 import ai.labs.resources.rest.documentdescriptor.IRestDocumentDescriptorStore;
 import ai.labs.resources.rest.patch.PatchInstruction;
-import ai.labs.rest.rest.IRestBotAdministration;
-import ai.labs.rest.restinterfaces.IRestInterfaceFactory;
-import ai.labs.rest.restinterfaces.RestInterfaceFactory;
+import ai.labs.rest.restinterfaces.IRestBotAdministration;
+import ai.labs.rest.restinterfaces.factory.IRestInterfaceFactory;
+import ai.labs.rest.restinterfaces.factory.RestInterfaceFactory;
 import ai.labs.serialization.IJsonSerialization;
 import ai.labs.utilities.FileUtilities;
 import ai.labs.utilities.RestUtilities;

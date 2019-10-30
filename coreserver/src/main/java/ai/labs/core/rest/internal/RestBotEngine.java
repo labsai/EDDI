@@ -16,7 +16,7 @@ import ai.labs.models.Deployment.Environment;
 import ai.labs.models.InputData;
 import ai.labs.resources.rest.properties.IPropertiesStore;
 import ai.labs.resources.rest.properties.model.Properties;
-import ai.labs.rest.rest.IRestBotEngine;
+import ai.labs.rest.restinterfaces.IRestBotEngine;
 import ai.labs.runtime.IBot;
 import ai.labs.runtime.IBotFactory;
 import ai.labs.runtime.IConversationCoordinator;
