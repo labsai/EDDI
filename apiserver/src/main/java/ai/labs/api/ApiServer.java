@@ -16,6 +16,8 @@ import ai.labs.core.bootstrap.CoreModule;
 import ai.labs.expressions.bootstrap.ExpressionModule;
 import ai.labs.httpclient.guice.HttpClientModule;
 import ai.labs.memory.bootstrap.ConversationMemoryModule;
+import ai.labs.migration.IMigrationManager;
+import ai.labs.migration.bootstrap.MigrationModule;
 import ai.labs.output.bootstrap.OutputGenerationModule;
 import ai.labs.parser.bootstrap.SemanticParserModule;
 import ai.labs.permission.bootstrap.PermissionModule;
@@ -101,7 +103,8 @@ public class ApiServer {
                 new XmppModule(),
                 new AMQPModule(),
                 new DifferModule(),
-                new ChannelModule()
+                new ChannelModule(),
+                new MigrationModule()
         };
 
         //init modules
@@ -111,6 +114,8 @@ public class ApiServer {
         injector.getInstance(IServerRuntime.class).startup(() -> {
             //auto re-deploy bots
             injector.getInstance(IAutoBotDeployment.class).autoDeployBots();
+
+            injector.getInstance(IMigrationManager.class).checkForMigration();
 
             //load channel definitions
             var channelDefinitions = injector.getInstance(IChannelDefinitionStore.class).readAllChannelDefinitions();

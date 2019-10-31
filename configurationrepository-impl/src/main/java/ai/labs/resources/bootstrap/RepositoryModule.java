@@ -31,6 +31,7 @@ import ai.labs.resources.impl.descriptor.mongo.DocumentDescriptorStore;
 import ai.labs.resources.impl.descriptor.rest.RestDocumentDescriptorStore;
 import ai.labs.resources.impl.expression.RestExpression;
 import ai.labs.resources.impl.extensions.RestExtensionStore;
+import ai.labs.resources.impl.migration.MigrationLogStore;
 import ai.labs.resources.impl.monitor.rest.RestConversationStore;
 import ai.labs.resources.impl.permission.rest.RestPermissionStore;
 import ai.labs.resources.impl.properties.mongo.PropertiesStore;
@@ -62,6 +63,7 @@ import ai.labs.resources.rest.deployment.IRestDeploymentStore;
 import ai.labs.resources.rest.documentdescriptor.IDocumentDescriptorStore;
 import ai.labs.resources.rest.documentdescriptor.IRestDocumentDescriptorStore;
 import ai.labs.resources.rest.extensions.IRestExtensionStore;
+import ai.labs.resources.rest.migration.IMigrationLogStore;
 import ai.labs.resources.rest.properties.IPropertiesStore;
 import ai.labs.resources.rest.properties.IRestPropertiesStore;
 import ai.labs.runtime.bootstrap.AbstractBaseModule;
@@ -113,5 +115,6 @@ public class RepositoryModule extends AbstractBaseModule {
         bind(IRestPropertySetterStore.class).to(RestPropertySetterStore.class).in(Scopes.SINGLETON);
 
         bind(IRestOutputKeys.class).to(RestOutputKeys.class).in(Scopes.SINGLETON);
+        bind(IMigrationLogStore.class).to(MigrationLogStore.class).in(Scopes.SINGLETON);
     }
 }
