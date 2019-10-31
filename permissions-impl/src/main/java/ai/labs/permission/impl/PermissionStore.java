@@ -15,6 +15,7 @@ import ai.labs.user.impl.utilities.UserUtilities;
 import ai.labs.utilities.SecurityUtilities;
 import com.mongodb.client.MongoCollection;
 import com.mongodb.client.MongoDatabase;
+import com.mongodb.client.model.UpdateOptions;
 import lombok.extern.slf4j.Slf4j;
 import org.bson.Document;
 import org.bson.types.ObjectId;
@@ -100,7 +101,8 @@ public class PermissionStore implements IPermissionStore {
 
         permissionsDocument.put("_id", new ObjectId(resourceId));
 
-        collection.insertOne(permissionsDocument);
+        collection.updateOne(new Document("_id", new ObjectId(resourceId)),
+                new Document("$set", permissions), new UpdateOptions().upsert(true));
     }
 
     @Override
