@@ -1,7 +1,7 @@
 package ai.labs.api;
 
 import ai.labs.persistence.IResourceStore;
-import ai.labs.rest.restinterfaces.RestInterfaceFactory;
+import ai.labs.rest.restinterfaces.factory.RestInterfaceFactory;
 
 import javax.ws.rs.*;
 import javax.ws.rs.core.Response;
