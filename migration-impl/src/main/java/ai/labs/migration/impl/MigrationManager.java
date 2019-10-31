@@ -38,8 +38,10 @@ public class MigrationManager implements IMigrationManager {
         try {
             var migrationLog = migrationCheck.readMigrationLog(MIGRATION_CHANNELS);
             if (migrationLog == null || !migrationLog.isFinished()) {
+                log.info("Migrating ChannelDefinitions from within BotConfigurations to stand-alone...");
                 migrateChannels();
                 migrationCheck.createMigrationLog(new MigrationLog(MIGRATION_CHANNELS));
+                log.info("Migration of ChannelDefinitions has finished successfully.");
             }
         } catch (MigrationException e) {
             log.error("Error while migrating channels.");
