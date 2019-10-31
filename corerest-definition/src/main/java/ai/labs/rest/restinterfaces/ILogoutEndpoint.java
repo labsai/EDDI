@@ -1,4 +1,4 @@
-package ai.labs.rest.rest;
+package ai.labs.rest.restinterfaces;
 
 import io.swagger.annotations.Api;
 import io.swagger.annotations.ApiOperation;

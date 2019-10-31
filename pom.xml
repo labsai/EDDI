@@ -58,6 +58,8 @@
         <module>backupservice-impl</module>
         <module>httpCallsTask-definition</module>
         <module>httpCallsTask-impl</module>
+        <module>migration-definition</module>
+        <module>migration-impl</module>
         <module>basemodels</module>
     </modules>
 
@@ -128,7 +130,7 @@
         <dependency>
             <groupId>org.jboss.resteasy</groupId>
             <artifactId>resteasy-core-spi</artifactId>
-            <version>4.3.1.Final</version>
+            <version>4.4.0.Final</version>
             <exclusions>
                 <exclusion>
                     <artifactId>slf4j-simple</artifactId>
@@ -147,12 +149,12 @@
         <dependency>
             <groupId>org.jboss.resteasy</groupId>
             <artifactId>resteasy-guice</artifactId>
-            <version>4.3.1.Final</version>
+            <version>4.4.0.Final</version>
         </dependency>
         <dependency>
             <groupId>org.jboss.resteasy</groupId>
             <artifactId>resteasy-jackson2-provider</artifactId>
-            <version>4.3.1.Final</version>
+            <version>4.4.0.Final</version>
             <exclusions>
                 <exclusion>
                     <groupId>com.fasterxml.jackson.core</groupId>

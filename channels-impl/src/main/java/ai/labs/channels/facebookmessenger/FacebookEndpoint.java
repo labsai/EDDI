@@ -9,8 +9,8 @@ import ai.labs.models.Deployment;
 import ai.labs.persistence.model.ResourceId;
 import ai.labs.resources.rest.config.bots.IBotStore;
 import ai.labs.resources.rest.config.bots.model.BotConfiguration;
-import ai.labs.rest.rest.IRestBotEngine;
-import ai.labs.rest.restinterfaces.IRestInterfaceFactory;
+import ai.labs.rest.restinterfaces.IRestBotEngine;
+import ai.labs.rest.restinterfaces.factory.IRestInterfaceFactory;
 import ai.labs.runtime.IBotFactory;
 import ai.labs.runtime.SystemRuntime;
 import ai.labs.runtime.service.ServiceException;
@@ -52,7 +52,7 @@ import java.util.concurrent.TimeoutException;
 import static ai.labs.models.Deployment.Environment.unrestricted;
 import static ai.labs.persistence.IResourceStore.ResourceNotFoundException;
 import static ai.labs.persistence.IResourceStore.ResourceStoreException;
-import static ai.labs.rest.restinterfaces.RestInterfaceFactory.RestInterfaceFactoryException;
+import static ai.labs.rest.restinterfaces.factory.RestInterfaceFactory.RestInterfaceFactoryException;
 import static java.util.concurrent.TimeUnit.MILLISECONDS;
 
 @Slf4j

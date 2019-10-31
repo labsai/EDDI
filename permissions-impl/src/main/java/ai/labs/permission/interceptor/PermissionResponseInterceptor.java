@@ -79,24 +79,24 @@ public class PermissionResponseInterceptor implements ContainerResponseFilter {
                     IResourceStore.IResourceId respondedResourceId = RestUtilities.extractResourceId(respondedResourceURI);
 
                     //if the created resource is a user, we treat it differently
+                    String resourceId = respondedResourceId.getId();
                     if (methodName.equals(METHOD_NAME_CREATE_USER)) {
-                        permissionStore.createPermissions(respondedResourceId.getId(), PermissionUtilities.createDefaultPermissions(respondedResourceURI));
+                        permissionStore.createPermissions(resourceId, PermissionUtilities.createDefaultPermissions(respondedResourceURI));
                     } else if (!methodName.startsWith(METHOD_NAME_DUPLICATE_RESOURCE)) {
                         Principal userPrincipal = SecurityUtilities.getPrincipal(ThreadContext.getSubject());
                         URI userURI = UserUtilities.getUserURI(userStore, userPrincipal);
 
                         if (methodName.equals(METHOD_NAME_CREATE_TESTCASE)) {
                             ITestCaseStore testCaseStore = injector.getInstance(ITestCaseStore.class);
-                            TestCase testCase = testCaseStore.loadTestCase(respondedResourceId.getId());
+                            TestCase testCase = testCaseStore.loadTestCase(resourceId);
                             Permissions permissions = permissionStore.readPermissions(testCase.getBotId());
                             if (userURI != null) {
                                 PermissionUtilities.addAuthorizedUser(permissions, IAuthorization.Type.ADMINISTRATION, new AuthorizedUser(userURI, null));
                             }
-                            permissionStore.createPermissions(respondedResourceId.getId(), permissions);
+                            permissionStore.createPermissions(resourceId, permissions);
                         } else if (!methodName.equals(METHOD_NAME_START_CONVERSATION)) {
-                            permissionStore.createPermissions(respondedResourceId.getId(), PermissionUtilities.createDefaultPermissions(userURI));
+                            permissionStore.createPermissions(resourceId, PermissionUtilities.createDefaultPermissions(userURI));
                         }
-
                     }
                 }
             }

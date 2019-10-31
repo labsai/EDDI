@@ -1,6 +1,6 @@
 # EDDI - Enhanced Dialog Driven Intelligence
 
-High Performance, In-Memory Chatbot Platform. Build multiple Chatbots with NLP, Behavior Rules, API Connector, Templating. 
+Scalable Open Source Chatbot Platform. Build multiple Chatbots with NLP, Behavior Rules, API Connector, Templating. 
 
 v4.7.0 - LATEST
 
@@ -55,7 +55,7 @@ technical spec:
 
 ## Prerequirements
 
-- Java 12
+- Java 11
 - Maven 3
 
 

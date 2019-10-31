@@ -5,7 +5,7 @@ import ai.labs.memory.model.ConversationOutput;
 import ai.labs.memory.model.SimpleConversationMemorySnapshot;
 import ai.labs.models.InputData;
 import ai.labs.rest.MockAsyncResponse;
-import ai.labs.rest.rest.IRestBotManagement;
+import ai.labs.rest.restinterfaces.IRestBotManagement;
 import lombok.extern.slf4j.Slf4j;
 import org.jivesoftware.smack.ConnectionConfiguration;
 import org.jivesoftware.smack.SmackException;

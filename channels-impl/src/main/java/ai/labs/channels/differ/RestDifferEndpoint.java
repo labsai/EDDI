@@ -22,7 +22,7 @@ import ai.labs.models.InputData;
 import ai.labs.persistence.IResourceStore.ResourceAlreadyExistsException;
 import ai.labs.persistence.IResourceStore.ResourceStoreException;
 import ai.labs.rest.MockAsyncResponse;
-import ai.labs.rest.rest.IRestBotManagement;
+import ai.labs.rest.restinterfaces.IRestBotManagement;
 import ai.labs.runtime.SystemRuntime;
 import ai.labs.serialization.IJsonSerialization;
 import com.rabbitmq.client.DeliverCallback;

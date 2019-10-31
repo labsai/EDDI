@@ -1,4 +1,4 @@
-package ai.labs.rest.restinterfaces;
+package ai.labs.rest.restinterfaces.factory;
 
 import ai.labs.runtime.ThreadContext;
 import ai.labs.utilities.RuntimeUtilities;

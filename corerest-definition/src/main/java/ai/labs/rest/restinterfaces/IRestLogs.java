@@ -1,4 +1,4 @@
-package ai.labs.rest.rest;
+package ai.labs.rest.restinterfaces;
 
 import ai.labs.models.DatabaseLog;
 import ai.labs.models.Deployment;

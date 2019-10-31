@@ -4,8 +4,8 @@ import ai.labs.memory.model.SimpleConversationMemorySnapshot;
 import ai.labs.models.*;
 import ai.labs.resources.rest.botmanagement.IRestBotTriggerStore;
 import ai.labs.resources.rest.botmanagement.IRestUserConversationStore;
-import ai.labs.rest.rest.IRestBotEngine;
-import ai.labs.rest.rest.IRestBotManagement;
+import ai.labs.rest.restinterfaces.IRestBotEngine;
+import ai.labs.rest.restinterfaces.IRestBotManagement;
 import ai.labs.utilities.RestUtilities;
 import lombok.extern.slf4j.Slf4j;
 

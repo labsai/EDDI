@@ -10,21 +10,7 @@
         <relativePath>../pom.xml</relativePath>
     </parent>
     <packaging>jar</packaging>
-
-    <artifactId>backupservice-defintion</artifactId>
-
-    <dependencies>
-        <dependency>
-            <groupId>ai.labs</groupId>
-            <artifactId>basemodels</artifactId>
-            <version>${project.version}</version>
-        </dependency>
-        <dependency>
-            <groupId>org.jboss.resteasy</groupId>
-            <artifactId>resteasy-multipart-provider</artifactId>
-            <version>4.4.0.Final</version>
-        </dependency>
-    </dependencies>
+    <artifactId>migration-definition</artifactId>
 
     <properties>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>

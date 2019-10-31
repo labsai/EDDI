@@ -1,6 +1,6 @@
 package ai.labs.core.rest.internal;
 
-import ai.labs.rest.rest.IRestPrometheusMonitoring;
+import ai.labs.rest.restinterfaces.IRestPrometheusMonitoring;
 import io.micrometer.prometheus.PrometheusMeterRegistry;
 
 import javax.inject.Inject;
