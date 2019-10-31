@@ -55,7 +55,7 @@ technical spec:
 
 ## Prerequirements
 
-- Java 12
+- Java 11
 - Maven 3
 
 
