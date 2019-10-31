@@ -58,6 +58,8 @@
         <module>backupservice-impl</module>
         <module>httpCallsTask-definition</module>
         <module>httpCallsTask-impl</module>
+        <module>migration-definition</module>
+        <module>migration-impl</module>
         <module>basemodels</module>
     </modules>
 
