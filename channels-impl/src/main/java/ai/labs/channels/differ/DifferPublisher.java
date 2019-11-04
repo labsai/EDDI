@@ -56,7 +56,7 @@ public class DifferPublisher implements IDifferPublisher {
             channel.basicConsume(MESSAGE_CREATED_QUEUE_NAME, false, messageCreatedCallback, cancelCallback);
 
             channel.queueDeclare(MESSAGE_CREATED_EDDI_FAILED_ROUTING_KEY, true, false, false, null);
-            channel.queueBind(MESSAGE_CREATED_EDDI_FAILED_ROUTING_KEY, MESSAGE_CREATED_EXCHANGE, "");
+            channel.queueBind(MESSAGE_CREATED_EDDI_FAILED_ROUTING_KEY, FAILED_MESSAGE_EXCHANGE, "");
 
             channel.confirmSelect();
 
