@@ -35,7 +35,6 @@ public class RestLogs implements IRestLogs {
         log.info("Changing LogLevel for packageName: " + packageName + " with current logger level: " + logger.getLevel());
         logger.setLevel(Level.toLevel(logLevel));
         log.info("Changed LogLevel for packageName: " + packageName + " to logger level: " + logger.getLevel());
-
     }
 
     @Override
