@@ -1,10 +1,9 @@
 package ai.labs.resources.rest.config.regulardictionary.model;
 
 import com.fasterxml.jackson.annotation.JsonAlias;
-import com.kjetland.jackson.jsonSchema.annotations.JsonSchemaDefault;
-import com.kjetland.jackson.jsonSchema.annotations.JsonSchemaDescription;
-import com.kjetland.jackson.jsonSchema.annotations.JsonSchemaInject;
-import com.kjetland.jackson.jsonSchema.annotations.JsonSchemaString;
+import com.fasterxml.jackson.annotation.JsonClassDescription;
+import com.fasterxml.jackson.annotation.JsonPropertyDescription;
+import com.github.imifou.jsonschema.module.addon.annotation.JsonSchema;
 import lombok.Getter;
 import lombok.Setter;
 
@@ -31,19 +30,18 @@ public class RegularDictionaryConfiguration {
 
     @Getter
     @Setter
-    @JsonSchemaDescription(value = "A word definition of the dictionary.")
+    @JsonClassDescription(value = "A word definition of the dictionary.")
     public static class WordConfiguration implements Comparable<WordConfiguration> {
-        @JsonSchemaDescription(value =
+        @JsonPropertyDescription(value =
                 "A word of a natural language such as German or English" +
                         " that you want the parser to recognize (e.g. hello).")
 
         @NotNull
         private String word;
-        @JsonSchemaDescription(value =
+        @JsonPropertyDescription(value =
                 "Prolog like expressions describing the meaning of this word " +
                         "(e.g. greeting(hello) or property(car(BMW(X5))) )")
-        @JsonSchemaDefault(value = "unused")
-        @JsonSchemaInject(strings = {@JsonSchemaString(path = "patternProperties/^[^ ]{2,}(\\\\([^ ]{2,}\\\\))$/type", value = "string")})
+        @JsonSchema(defaultValue = "unused", pattern = "^[^ ]{2,}(\\\\([^ ]{2,}\\\\))$")
         @JsonAlias({"exp", "exps"})
         private String expressions;
         private int frequency;
@@ -71,18 +69,17 @@ public class RegularDictionaryConfiguration {
 
     @Getter
     @Setter
-    @JsonSchemaDescription(value = "A RegEx definition of the dictionary.")
+    @JsonClassDescription(value = "A RegEx definition of the dictionary.")
     public static class RegExConfiguration implements Comparable<RegExConfiguration> {
-        @JsonSchemaDescription(value =
+        @JsonPropertyDescription(value =
                 "A regular expression (regEx) e.g. \"(\\\\w)(\\\\s+)([\\\\.,])\"")
 
         @NotNull
         private String regEx;
-        @JsonSchemaDescription(value =
+        @JsonPropertyDescription(value =
                 "Prolog like expressions describing the meaning of this word " +
                         "(e.g. greeting(hello) or property(car(BMW(X5))) )")
-        @JsonSchemaDefault(value = "unused")
-        @JsonSchemaInject(strings = {@JsonSchemaString(path = "patternProperties/^[^ ]{2,}(\\\\([^ ]{2,}\\\\))$/type", value = "string")})
+        @JsonSchema(defaultValue = "unused", pattern = "^[^ ]{2,}(\\\\([^ ]{2,}\\\\))$")
         @JsonAlias({"exp", "exps"})
         private String expressions;
 
@@ -109,18 +106,18 @@ public class RegularDictionaryConfiguration {
 
     @Getter
     @Setter
-    @JsonSchemaDescription(value = "A phrase definition of the dictionary.")
+    @JsonClassDescription(value = "A phrase definition of the dictionary.")
     public static class PhraseConfiguration {
-        @JsonSchemaDescription(value =
+        @JsonPropertyDescription(value =
                 "A phrase of a natural language such as German or English" +
                         " that you want the parser to recognize (e.g. good morning).")
         @NotNull
         protected String phrase;
 
-        @JsonSchemaDescription(value =
+        @JsonPropertyDescription(value =
                 "A prolog like expressions describing the meaning of this word " +
                         "(e.g. greeting(good_morning) )")
-        @JsonSchemaDefault(value = "unused")
+        @JsonSchema(defaultValue = "unused")
         @JsonAlias({"exp", "exps"})
         protected String expressions;
 

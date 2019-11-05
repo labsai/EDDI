@@ -32,6 +32,7 @@ import ai.labs.runtime.IAutoBotDeployment;
 import ai.labs.runtime.bootstrap.LoggingModule;
 import ai.labs.runtime.bootstrap.RuntimeModule;
 import ai.labs.runtime.bootstrap.SwaggerModule;
+import ai.labs.schema.bootstrap.JsonSchemaModule;
 import ai.labs.serialization.bootstrap.SerializationModule;
 import ai.labs.server.IServerRuntime;
 import ai.labs.server.bootstrap.ServerRuntimeModule;
@@ -104,7 +105,8 @@ public class ApiServer {
                 new AMQPModule(),
                 new DifferModule(),
                 new ChannelModule(),
-                new MigrationModule()
+                new MigrationModule(),
+                new JsonSchemaModule()
         };
 
         //init modules

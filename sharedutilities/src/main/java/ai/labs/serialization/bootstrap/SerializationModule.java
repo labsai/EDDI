@@ -1,7 +1,5 @@
 package ai.labs.serialization.bootstrap;
 
-import ai.labs.schema.IJsonSchemaCreator;
-import ai.labs.schema.JsonSchemaCreator;
 import ai.labs.serialization.DocumentBuilder;
 import ai.labs.serialization.IDocumentBuilder;
 import ai.labs.serialization.IJsonSerialization;
@@ -26,7 +24,6 @@ public class SerializationModule extends AbstractModule {
     @Override
     protected void configure() {
         bind(IJsonSerialization.class).to(JsonSerialization.class).in(Scopes.SINGLETON);
-        bind(IJsonSchemaCreator.class).to(JsonSchemaCreator.class).in(Scopes.SINGLETON);
         bind(IDocumentBuilder.class).to(DocumentBuilder.class).in(Scopes.SINGLETON);
     }
 
