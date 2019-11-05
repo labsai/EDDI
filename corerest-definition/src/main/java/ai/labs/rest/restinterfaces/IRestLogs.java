@@ -15,6 +15,7 @@ import java.util.List;
 public interface IRestLogs {
 
     @POST
+    @ApiOperation(value = "Set logLevel of a specific packageName.")
     void setLogLevel(@QueryParam("packageName") String packageName, @QueryParam("logLevel") String logLevel);
 
 

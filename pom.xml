@@ -7,7 +7,7 @@
     <groupId>ai.labs</groupId>
     <artifactId>eddi</artifactId>
     <packaging>pom</packaging>
-    <version>4.7</version>
+    <version>4.8</version>
 
     <modules>
         <module>expressions</module>

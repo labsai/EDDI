@@ -78,7 +78,7 @@ public class DifferPublisherTest {
         //assert
         Mockito.verify(channel).basicNack(eq(deliveryTag), eq(false), eq(false));
         Mockito.verify(channel).basicPublish(
-                eq(FAILED_MESSAGE_EXCHANGE), eq(MESSAGE_CREATED_EDDI_FAILED_ROUTING_KEY), eq(null), eq(body));
+                eq(EDDI_EXCHANGE), eq(MESSAGE_CREATED_EDDI_FAILED_ROUTING_KEY), eq(null), eq(body));
         Mockito.verify(channel).waitForConfirmsOrDie(eq(TIMEOUT_CONFIRMS_IN_MILLIS));
     }
 
