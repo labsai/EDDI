@@ -41,7 +41,7 @@ public class RegularDictionaryConfiguration {
         @JsonPropertyDescription(value =
                 "Prolog like expressions describing the meaning of this word " +
                         "(e.g. greeting(hello) or property(car(BMW(X5))) )")
-        @JsonSchema(defaultValue = "unused", pattern = "^[^ ]{2,}(\\\\([^ ]{2,}\\\\))$")
+        @JsonSchema(defaultValue = "unused", pattern = "^[^ ]{2,}(\\([^ ]{2,}\\))$")
         @JsonAlias({"exp", "exps"})
         private String expressions;
         private int frequency;
@@ -79,7 +79,7 @@ public class RegularDictionaryConfiguration {
         @JsonPropertyDescription(value =
                 "Prolog like expressions describing the meaning of this word " +
                         "(e.g. greeting(hello) or property(car(BMW(X5))) )")
-        @JsonSchema(defaultValue = "unused", pattern = "^[^ ]{2,}(\\\\([^ ]{2,}\\\\))$")
+        @JsonSchema(defaultValue = "unused", pattern = "^[^ ]{2,}(\\([^ ]{2,}\\))$")
         @JsonAlias({"exp", "exps"})
         private String expressions;
 
@@ -117,7 +117,7 @@ public class RegularDictionaryConfiguration {
         @JsonPropertyDescription(value =
                 "A prolog like expressions describing the meaning of this word " +
                         "(e.g. greeting(good_morning) )")
-        @JsonSchema(defaultValue = "unused")
+        @JsonSchema(defaultValue = "unused", pattern = "^[^ ]{2,}(\\([^ ]{2,}\\))$")
         @JsonAlias({"exp", "exps"})
         protected String expressions;
 
