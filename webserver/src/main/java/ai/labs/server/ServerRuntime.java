@@ -3,10 +3,10 @@ package ai.labs.server;
 import ai.labs.runtime.SwaggerServletContextListener;
 import ai.labs.runtime.ThreadContext;
 import ai.labs.utilities.FileUtilities;
+import io.micrometer.core.instrument.MeterRegistry;
 import io.micrometer.core.instrument.Tags;
 import io.micrometer.core.instrument.binder.jetty.JettyServerThreadPoolMetrics;
 import io.micrometer.core.instrument.binder.jetty.JettyStatisticsMetrics;
-import io.micrometer.prometheus.PrometheusMeterRegistry;
 import lombok.AllArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.eclipse.jetty.alpn.server.ALPNServerConnectionFactory;
@@ -86,7 +86,7 @@ public class ServerRuntime implements IServerRuntime {
     private final ThreadPoolExecutor threadPoolExecutor;
     private final MongoLoginService mongoLoginService;
     private final AdapterConfig keycloakAdapterConfig;
-    private final PrometheusMeterRegistry meterRegistry;
+    private final MeterRegistry meterRegistry;
     private final String environment;
     private final String resourceDir;
 
@@ -98,7 +98,7 @@ public class ServerRuntime implements IServerRuntime {
                          ThreadPoolExecutor threadPoolExecutor,
                          MongoLoginService mongoLoginService,
                          AdapterConfig keycloakAdapterConfig,
-                         PrometheusMeterRegistry meterRegistry,
+                         MeterRegistry meterRegistry,
                          @Named("system.environment") String environment,
                          @Named("systemRuntime.resourceDir") String resourceDir) {
         this.options = options;

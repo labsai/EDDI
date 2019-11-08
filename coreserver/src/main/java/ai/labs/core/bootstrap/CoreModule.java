@@ -13,6 +13,7 @@ import com.google.inject.Provides;
 import com.google.inject.Scopes;
 import io.github.mweirauch.micrometer.jvm.extras.ProcessMemoryMetrics;
 import io.github.mweirauch.micrometer.jvm.extras.ProcessThreadMetrics;
+import io.micrometer.core.instrument.MeterRegistry;
 import io.micrometer.core.instrument.Tags;
 import io.micrometer.core.instrument.binder.jvm.*;
 import io.micrometer.core.instrument.binder.logging.LogbackMetrics;
@@ -48,6 +49,12 @@ public class CoreModule extends AbstractBaseModule {
         bind(IConversationCoordinator.class).to(ConversationCoordinator.class).in(Scopes.SINGLETON);
         bind(IContextLogger.class).to(ContextLogger.class).in(Scopes.SINGLETON);
         bind(IConversationSetup.class).to(ConversationSetup.class).in(Scopes.SINGLETON);
+    }
+
+    @Provides
+    @Singleton
+    public MeterRegistry providePrometheusMeterRegistry(PrometheusMeterRegistry prometheusMeterRegistry) {
+        return prometheusMeterRegistry;
     }
 
     @Provides
