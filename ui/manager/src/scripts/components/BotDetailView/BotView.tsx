@@ -32,6 +32,7 @@ interface IState {
 
 const warningIcon = require('../../../public/images/WarningIcon.png');
 const foundUnpublishedChanges = false; // todo : add function to check if there are unpublished changes.
+
 class BotView extends React.Component<IPrivateProps, IState> {
   constructor(props) {
     super(props);

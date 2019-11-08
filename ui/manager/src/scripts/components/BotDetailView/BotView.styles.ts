@@ -21,7 +21,6 @@ const styles: CSSProperties = {
     color: DARK_BLUE_COLOR,
     fontSize: LARGE_FONT3,
     marginRight: '20px',
-    paddingTop: '6px',
     textAlign: 'left',
     maxWidth: '350px',
     overflow: 'hidden',

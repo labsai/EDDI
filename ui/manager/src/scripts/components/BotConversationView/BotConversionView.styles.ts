@@ -63,7 +63,6 @@ const styles: CSSProperties = {
     },
     color: DARK_BLUE_COLOR,
     fontSize: LARGE_FONT3,
-    padding: '10px 0',
     textAlign: 'left',
     maxWidth: '350px',
     overflow: 'hidden',

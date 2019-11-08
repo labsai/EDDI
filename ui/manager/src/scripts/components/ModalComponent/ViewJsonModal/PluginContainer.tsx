@@ -5,6 +5,7 @@ import { IPlugin } from '../../utils/AxiosFunctions';
 import { connect } from 'react-redux';
 import * as renderIf from 'render-if';
 import { pluginSelector } from '../../../selectors/PluginSelectors';
+import * as _ from 'lodash';
 
 interface IPublicProps {
   pluginResource: string;
@@ -46,7 +47,7 @@ class PluginContainer extends React.Component<IPrivateProps, IState> {
   render() {
     return (
       <div>
-        {renderIf(this.props.plugin)(() => (
+        {renderIf(!_.isEmpty(this.props.plugin))(() => (
           <ViewJsonContent
             descriptor={this.props.plugin}
             data={this.state.data}

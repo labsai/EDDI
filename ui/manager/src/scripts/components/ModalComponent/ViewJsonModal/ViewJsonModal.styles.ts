@@ -43,7 +43,6 @@ const styles: CSSProperties = {
     height: '36px',
     marginLeft: '50px',
     marginRight: '8px',
-    paddingTop: '6px',
     textOverflow: 'ellipsis',
     whiteSpace: 'nowrap',
     overflow: 'hidden',

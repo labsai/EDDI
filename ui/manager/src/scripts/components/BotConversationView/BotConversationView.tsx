@@ -14,10 +14,7 @@ import HomeButtonComponent from '../HomeButton/HomeButtonComponent';
 import { historyPush } from '../../history';
 import ConversationProperties from './ConversationTab/ConversationProperties';
 import WhiteButton from '../Assets/Buttons/WhiteButton';
-import {
-  CONVERSATION_ENDED,
-  CONVERSATION_READY,
-} from '../utils/helpers/ConversationHelper';
+import { CONVERSATION_READY } from '../utils/helpers/ConversationHelper';
 import modalActionDispatchers from '../../actions/ModalActionDispatchers';
 import { ClipLoader } from 'react-spinners';
 import { BLUE_COLOR } from '../../../styles/DefaultStylingProperties';

@@ -36,7 +36,7 @@ const styles: CSSProperties = {
     textAlign: 'center',
     marginLeft: 'auto',
     marginRight: 'auto',
-    marginTop: '1px',
+    marginTop: '-10px',
   },
 };
 

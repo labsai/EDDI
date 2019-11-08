@@ -22,6 +22,8 @@ import {
 import * as Snippets from './Snippets';
 import { ISnippet } from './Snippets';
 
+const metaSchema = require('ajv/lib/refs/json-schema-draft-04.json');
+
 export async function postJsonHelper(
   url: string,
   payload: string,
@@ -59,17 +61,13 @@ function formatKeyPath(path: string): string {
 export function compileJsonSchema(schema: {}, jsonText: string): IJsonError[] {
   const json = Jsm.parse(jsonText);
   const ajv = new Ajv({ schemaId: 'id', allErrors: true });
-  ajv.addMetaSchema(require('ajv/lib/refs/json-schema-draft-04.json'));
+  ajv.addMetaSchema(metaSchema);
   const validate = ajv.compile(schema);
   validate(json.data);
   if (_.isEmpty(validate.errors)) {
     return [];
   }
   const errors: IJsonError[] = validate.errors.map(err => {
-    console.log(err.message);
-    console.log(err.dataPath);
-    console.log(formatKeyPath(err.dataPath));
-    console.log(json.pointers);
     return {
       message: err.message,
       line: json.pointers[formatKeyPath(err.dataPath)].value.line,

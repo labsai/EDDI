@@ -36,13 +36,28 @@ const trigger = (
 );
 
 class Options extends React.Component<IPrivateProps> {
+  fetchData(isPackage: boolean) {
+    if (isPackage) {
+      eddiApiActionDispatchers.fetchPackageDataAction(
+        this.props.descriptor.resource,
+      );
+    } else {
+      eddiApiActionDispatchers.fetchPluginAction(
+        this.props.descriptor.resource,
+      );
+    }
+  }
+
   render() {
     const { descriptor } = this.props;
     const isCurrentVersion = descriptor.version === descriptor.currentVersion;
     const isPackage = getTypeFromResource(descriptor.resource) === PACKAGE;
     return (
       <div style={styles.optionButton}>
-        <Dropdown trigger={trigger} icon={null}>
+        <Dropdown
+          trigger={trigger}
+          icon={null}
+          onClick={() => this.fetchData(isPackage)}>
           <Dropdown.Menu>
             <Dropdown.Item
               text={'Rename'}

@@ -139,10 +139,10 @@ export const PROPERTYSETTER_POST_EXAMPLE: string = `{
 `;
 /* tslint:disable */
 export const BOT_POST_EXAMPLE: string = `{
-"packages": [
-"eddi://ai.labs.package/packagestore/packages/<UNIQUE_PACKAGE_ID>?version=<PACKAGE_VERSION>"
-],
-"channels": []
+  "packages": [
+    "eddi://ai.labs.package/packagestore/packages/<UNIQUE_PACKAGE_ID>?version=<PACKAGE_VERSION>"
+  ],
+  "channels": []
 }`;
 
 export const PACKAGE_POST_EXAMPLE: string = `{

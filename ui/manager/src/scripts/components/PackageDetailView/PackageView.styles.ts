@@ -24,9 +24,9 @@ const styles: CSSProperties = {
     fontSize: LARGE_FONT3,
     marginRight: '20px',
     textAlign: 'left',
-    paddingTop: '6px',
     maxWidth: '400px',
     overflow: 'hidden',
+    whiteSpace: 'nowrap',
     textOverflow: 'ellipsis',
   },
   pluginAddTitle: {
@@ -34,7 +34,7 @@ const styles: CSSProperties = {
     fontSize: SMALL_FONT,
   },
   pluginDropdown: {
-    paddingBottom: '320px',
+    paddingBottom: '450px',
   },
   unpublishedChanges: {
     display: 'flex',

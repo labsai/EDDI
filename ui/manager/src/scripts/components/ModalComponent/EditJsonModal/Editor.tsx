@@ -13,11 +13,10 @@ import {
   getSnippets,
   IJsonError,
 } from '../../utils/helpers/JsonHelpers';
-import * as ace from 'brace';
-import 'brace/ext/language_tools';
-import 'brace/mode/json';
-import 'brace/theme/monokai';
-import 'brace/snippets/json';
+import 'ace-builds/src-noconflict/ext-language_tools';
+import 'ace-builds/src-noconflict/mode-json';
+import 'ace-builds/src-noconflict/theme-monokai';
+import 'ace-builds/src-noconflict/snippets/json';
 import { schemaSelector } from '../../../selectors/SystemSelectors';
 import { connect } from 'react-redux';
 import { JSONSchema4 } from 'json-schema';
@@ -26,13 +25,10 @@ import ExpandButton from './EditorButtons/ExpandButton';
 import UndoButton from './EditorButtons/UndoButton';
 import RedoButton from './EditorButtons/RedoButton';
 import ValidateButton from './EditorButtons/ValidateButton';
-
-const langTools = ace.acequire('ace/ext/language_tools');
-const snippetManager = ace.acequire('ace/snippets').snippetManager;
+import * as ace from 'ace-builds';
 
 interface IState {
   editorText: string;
-  editor: ace.Editor;
   expanded: boolean;
   enableBasicAutocompletion: boolean;
   enableLiveAutocompletion: boolean;
@@ -55,8 +51,7 @@ class CreateNewConfig2Modal extends React.Component<IPrivateProps, IState> {
   constructor(props) {
     super(props);
     this.state = {
-      editorText: '',
-      editor: null,
+      editorText: '{}',
       expanded: false,
       enableBasicAutocompletion: true,
       enableLiveAutocompletion: false,
@@ -64,19 +59,7 @@ class CreateNewConfig2Modal extends React.Component<IPrivateProps, IState> {
   }
 
   componentDidMount() {
-    this.setState({ editor: ace.edit('OutputJson') });
     this.discardChanges();
-    this.initEditor();
-  }
-
-  componentWillUnmount() {
-    snippetManager.snippetMap.json = [];
-  }
-
-  initEditor() {
-    const customSnippets = getSnippets(this.props.type);
-    snippetManager.register(customSnippets, 'json');
-    langTools.setCompleters([langTools.snippetCompleter]);
   }
 
   componentDidUpdate(prevProps) {
@@ -106,32 +89,6 @@ class CreateNewConfig2Modal extends React.Component<IPrivateProps, IState> {
           <div style={styles.editorUI}>
             <div style={styles.editorButtons}>
               <ValidateButton onClick={() => this.props.validate()} />
-              <UndoButton onClick={() => this.state.editor.undo()} />
-              <RedoButton onClick={() => this.state.editor.redo()} />
-              <CheckBox
-                checked={this.state.enableBasicAutocompletion}
-                onClick={() =>
-                  this.setState({
-                    enableBasicAutocompletion: !this.state
-                      .enableBasicAutocompletion,
-                  })
-                }
-              />
-              <div style={styles.checkBoxText}>
-                {'Enable Basic Autocomplete'}
-              </div>
-              <CheckBox
-                checked={this.state.enableLiveAutocompletion}
-                onClick={() =>
-                  this.setState({
-                    enableLiveAutocompletion: !this.state
-                      .enableLiveAutocompletion,
-                  })
-                }
-              />
-              <div style={styles.checkBoxText}>
-                {'Enable Live Autocomplete'}
-              </div>
               <ExpandButton
                 customStyles={styles.expandButton}
                 expanded={this.state.expanded}

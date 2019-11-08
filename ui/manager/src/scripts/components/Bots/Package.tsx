@@ -2,7 +2,6 @@ import { IBot, IPackage } from '../utils/AxiosFunctions';
 import * as React from 'react';
 import * as renderIf from 'render-if';
 import styles from './Package.styles';
-import './Package.scss';
 import * as moment from 'moment';
 import { Component, compose, pure, setDisplayName } from 'recompose';
 import eddiApiActionDispatchers from '../../actions/EddiApiActionDispatchers';
@@ -16,6 +15,7 @@ import { ModalEnum } from '../utils/ModalEnum';
 import { history, historyPush } from '../../history';
 import { ClipLoader } from 'react-spinners';
 import { readOnlySelector } from '../../selectors/AuthenticationSelectors';
+import { BLUE_COLOR } from '../../../styles/DefaultStylingProperties';
 
 interface IPrivateProps extends IPublicProps {
   packagePayload: IPackage;
@@ -52,6 +52,28 @@ class Package extends React.Component<IPrivateProps, IState> {
     ModalActionDispatchers.showViewJsonModal(this.props.packageResource);
   };
 
+  getPackageNameStyling() {
+    if (
+      this.props.packagePayload.version <
+      this.props.packagePayload.currentVersion
+    ) {
+      return { ...styles.botPackageName, ...styles.hasNewVersion };
+    } else {
+      return styles.botPackageName;
+    }
+  }
+
+  getPackageModifiedOnStyling() {
+    if (
+      this.props.packagePayload.version <
+      this.props.packagePayload.currentVersion
+    ) {
+      return { ...styles.botPackageLastModifiedOn, ...styles.hasNewVersion };
+    } else {
+      return styles.botPackageLastModifiedOn;
+    }
+  }
+
   render() {
     const packageHasNewVersion = this.props.packagePayload
       ? this.props.packagePayload.version <
@@ -66,7 +88,7 @@ class Package extends React.Component<IPrivateProps, IState> {
             ))}
             {renderIf(
               !this.props.error && _.isEmpty(this.props.packagePayload),
-            )(() => <ClipLoader color={'#0070D2'} />)}
+            )(() => <ClipLoader color={BLUE_COLOR} />)}
             {renderIf(
               !this.props.error && !_.isEmpty(this.props.packagePayload),
             )(() => (
@@ -81,21 +103,11 @@ class Package extends React.Component<IPrivateProps, IState> {
                     )
                   }
                   style={styles.botPackageButton}>
-                  <div
-                    className={
-                      packageHasNewVersion
-                        ? 'botPackageName hasNewVersion'
-                        : 'botPackageName'
-                    }>
+                  <div style={this.getPackageNameStyling()}>
                     {this.props.packagePayload.name ||
                       this.props.packagePayload.id}
                   </div>
-                  <div
-                    className={
-                      packageHasNewVersion
-                        ? 'botPackageLastModifiedOn hasNewVersion'
-                        : 'botPackageLastModifiedOn'
-                    }>
+                  <div style={this.getPackageModifiedOnStyling()}>
                     {moment(this.props.packagePayload.lastModifiedOn).format(
                       'DD.MM.YYYY',
                     )}
