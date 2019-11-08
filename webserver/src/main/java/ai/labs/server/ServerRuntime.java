@@ -243,15 +243,12 @@ public class ServerRuntime implements IServerRuntime {
 
         //monitoring stats
         StatisticsHandler statisticsHandler = new StatisticsHandler();
-        statisticsHandler.setHandler(server.getHandler());
-        handlers.addHandler(statisticsHandler);
-        ServerConnectionStatistics.addToAllConnectors(server);
-
+        statisticsHandler.setHandler(handlers);
         var tags = Tags.of("eddi.jetty", "jetty-server");
         new JettyStatisticsMetrics(statisticsHandler, tags).bindTo(meterRegistry);
         new JettyServerThreadPoolMetrics(threadPool, tags).bindTo(meterRegistry);
 
-        server.setHandler(handlers);
+        server.setHandler(statisticsHandler);
 
         // Start the server
         server.setStopAtShutdown(true);
