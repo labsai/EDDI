@@ -11,6 +11,8 @@ import ai.labs.runtime.bootstrap.AbstractBaseModule;
 import ai.labs.runtime.internal.ConversationCoordinator;
 import com.google.inject.Provides;
 import com.google.inject.Scopes;
+import io.github.mweirauch.micrometer.jvm.extras.ProcessMemoryMetrics;
+import io.github.mweirauch.micrometer.jvm.extras.ProcessThreadMetrics;
 import io.micrometer.core.instrument.Tags;
 import io.micrometer.core.instrument.binder.jvm.*;
 import io.micrometer.core.instrument.binder.logging.LogbackMetrics;
@@ -59,8 +61,11 @@ public class CoreModule extends AbstractBaseModule {
         new JvmGcMetrics().bindTo(registry);
         new JvmThreadMetrics().bindTo(registry);
         new ProcessorMetrics().bindTo(registry);
+        new ProcessMemoryMetrics().bindTo(registry);
+        new ProcessThreadMetrics().bindTo(registry);
 
         registry.config().commonTags("application", projectName);
+        registry.config().commonTags("service", projectName);
 
         return registry;
     }
