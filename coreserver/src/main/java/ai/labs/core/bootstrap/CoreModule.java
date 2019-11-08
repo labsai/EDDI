@@ -16,12 +16,15 @@ import io.github.mweirauch.micrometer.jvm.extras.ProcessThreadMetrics;
 import io.micrometer.core.instrument.Tags;
 import io.micrometer.core.instrument.binder.jvm.*;
 import io.micrometer.core.instrument.binder.logging.LogbackMetrics;
+import io.micrometer.core.instrument.binder.system.FileDescriptorMetrics;
 import io.micrometer.core.instrument.binder.system.ProcessorMetrics;
+import io.micrometer.core.instrument.binder.system.UptimeMetrics;
 import io.micrometer.prometheus.PrometheusConfig;
 import io.micrometer.prometheus.PrometheusMeterRegistry;
 
 import javax.inject.Named;
 import javax.inject.Singleton;
+import java.io.File;
 import java.io.InputStream;
 import java.util.concurrent.ExecutorService;
 
@@ -63,7 +66,11 @@ public class CoreModule extends AbstractBaseModule {
         new ProcessorMetrics().bindTo(registry);
         new ProcessMemoryMetrics().bindTo(registry);
         new ProcessThreadMetrics().bindTo(registry);
+        new FileDescriptorMetrics().bindTo(registry);
+        new DiskSpaceMetrics(new File("/")).bindTo(registry);
+        new UptimeMetrics().bindTo(registry);
 
+        registry.config().commonTags("instance", projectName);
         registry.config().commonTags("application", projectName);
         registry.config().commonTags("service", projectName);
 
