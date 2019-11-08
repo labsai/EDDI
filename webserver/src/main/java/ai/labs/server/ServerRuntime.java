@@ -241,10 +241,12 @@ public class ServerRuntime implements IServerRuntime {
         }
         servletHandler.addFilter(new FilterHolder(createInitThreadBoundValuesFilter()), ANY_PATH, getAllDispatcherTypes());
 
-        StatisticsHandler statisticsHandler = new StatisticsHandler();
-        handlers.addHandler(statisticsHandler);
-
         //monitoring stats
+        StatisticsHandler statisticsHandler = new StatisticsHandler();
+        statisticsHandler.setHandler(server.getHandler());
+        handlers.addHandler(statisticsHandler);
+        ServerConnectionStatistics.addToAllConnectors(server);
+
         var tags = Tags.of("eddi.jetty", "jetty-server");
         new JettyStatisticsMetrics(statisticsHandler, tags).bindTo(meterRegistry);
         new JettyServerThreadPoolMetrics(threadPool, tags).bindTo(meterRegistry);
