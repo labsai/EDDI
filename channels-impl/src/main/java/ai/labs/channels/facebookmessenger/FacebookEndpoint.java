@@ -389,14 +389,14 @@ public class FacebookEndpoint implements IFacebookEndpoint {
     @Setter
     @AllArgsConstructor
     private static class MessengerClient {
-        MessengerSendClient sendClient;
-        MessengerReceiveClient receiveClient;
+        private MessengerSendClient sendClient;
+        private MessengerReceiveClient receiveClient;
     }
 
     @Getter
     @AllArgsConstructor
     @EqualsAndHashCode
-    private class BotResourceId {
+    private static class BotResourceId {
         private final String id;
         private final Integer version;
     }
@@ -404,8 +404,8 @@ public class FacebookEndpoint implements IFacebookEndpoint {
     @AllArgsConstructor
     @Getter
     @Setter
-    private class Output {
-        String type;
-        String value;
+    private static class Output {
+        private String type;
+        private String value;
     }
 }

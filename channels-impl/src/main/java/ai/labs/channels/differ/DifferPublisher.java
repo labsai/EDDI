@@ -3,7 +3,11 @@ package ai.labs.channels.differ;
 import ai.labs.channels.differ.model.CommandInfo;
 import ai.labs.channels.differ.model.commands.CreateMessageCommand;
 import ai.labs.serialization.IJsonSerialization;
-import com.rabbitmq.client.*;
+import com.rabbitmq.client.BuiltinExchangeType;
+import com.rabbitmq.client.CancelCallback;
+import com.rabbitmq.client.Channel;
+import com.rabbitmq.client.DeliverCallback;
+import com.rabbitmq.client.Delivery;
 import lombok.extern.slf4j.Slf4j;
 
 import javax.inject.Inject;

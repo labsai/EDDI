@@ -25,7 +25,9 @@ import java.net.URI;
 import java.util.List;
 import java.util.Map;
 
-import static ai.labs.resources.impl.utilities.ResourceUtilities.*;
+import static ai.labs.resources.impl.utilities.ResourceUtilities.createDocumentDescriptorForDuplicate;
+import static ai.labs.resources.impl.utilities.ResourceUtilities.createMalFormattedResourceUriException;
+import static ai.labs.resources.impl.utilities.ResourceUtilities.validateUri;
 import static ai.labs.utilities.RuntimeUtilities.isNullOrEmpty;
 import static javax.ws.rs.core.Response.Status.BAD_REQUEST;
 

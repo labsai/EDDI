@@ -14,7 +14,9 @@ import java.util.Map;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
-import static ai.labs.behavior.impl.conditions.IBehaviorCondition.ExecutionState.*;
+import static ai.labs.behavior.impl.conditions.IBehaviorCondition.ExecutionState.FAIL;
+import static ai.labs.behavior.impl.conditions.IBehaviorCondition.ExecutionState.NOT_EXECUTED;
+import static ai.labs.behavior.impl.conditions.IBehaviorCondition.ExecutionState.SUCCESS;
 
 /**
  * @author ginccc

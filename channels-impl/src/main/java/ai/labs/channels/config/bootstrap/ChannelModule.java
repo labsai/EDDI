@@ -1,6 +1,11 @@
 package ai.labs.channels.config.bootstrap;
 
-import ai.labs.channels.config.*;
+import ai.labs.channels.config.ChannelDefinitionStore;
+import ai.labs.channels.config.ChannelManager;
+import ai.labs.channels.config.IChannelDefinitionStore;
+import ai.labs.channels.config.IChannelManager;
+import ai.labs.channels.config.IRestChannelDefinitionStore;
+import ai.labs.channels.config.RestChannelDefinitionStore;
 import ai.labs.runtime.bootstrap.AbstractBaseModule;
 import com.google.inject.Scopes;
 

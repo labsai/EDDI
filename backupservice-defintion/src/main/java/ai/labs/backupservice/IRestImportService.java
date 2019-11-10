@@ -1,7 +1,11 @@
 package ai.labs.backupservice;
 
 import ai.labs.models.BotDeploymentStatus;
-import io.swagger.annotations.*;
+import io.swagger.annotations.Api;
+import io.swagger.annotations.ApiImplicitParam;
+import io.swagger.annotations.ApiResponse;
+import io.swagger.annotations.Authorization;
+import io.swagger.annotations.ResponseHeader;
 
 import javax.ws.rs.Consumes;
 import javax.ws.rs.POST;

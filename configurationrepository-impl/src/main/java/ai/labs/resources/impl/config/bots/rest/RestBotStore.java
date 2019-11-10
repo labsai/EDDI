@@ -24,7 +24,9 @@ import javax.ws.rs.core.Response;
 import java.net.URI;
 import java.util.List;
 
-import static ai.labs.resources.impl.utilities.ResourceUtilities.*;
+import static ai.labs.resources.impl.utilities.ResourceUtilities.createDocumentDescriptorForDuplicate;
+import static ai.labs.resources.impl.utilities.ResourceUtilities.createMalFormattedResourceUriException;
+import static ai.labs.resources.impl.utilities.ResourceUtilities.validateUri;
 import static javax.ws.rs.core.Response.Status.BAD_REQUEST;
 
 /**
