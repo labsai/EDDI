@@ -19,13 +19,13 @@ Check out the full documentation [here](http://docs.labs.ai/).
 
 ## Why choose E.D.D.I over other technologies
 ### We have asked that question to our users and here are some reasons they mentioned
-  * it is open source 💚
-  * the configuration is extremely open and flexible
-  * the code is self-explanatory and easy to extend
-  * eddi is channel independent, therefore can be used anywhere
-  * the (NLP) parser is extremely cool
-  * the framework is focused and does not pretend to be the magic bullet that solves it all
-  * great tech stack, when you want to build a chatbot product yourself
+* it is open source 💚
+* the configuration is extremely open and flexible
+* the code is self-explanatory and easy to extend
+* eddi is channel independent, therefore can be used anywhere
+* the (NLP) parser is extremely cool
+* the framework is focused and does not pretend to be the magic bullet that solves it all
+* great tech stack, when you want to build a chatbot product yourself
 
 ## Intro
 
@@ -37,20 +37,20 @@ This platform has been developed for over many years and completely restructured
 because of logical "dead ends" in the art of building chatbots - thus version 4.
 
 The most outstanding features are:
-  * Flexible in NLP and Behavior
-  * Fluently connect to REST APIs
-  * Powerful Templating
-  * Reuse Conversation Flows in multiple bots
+* Flexible in NLP and Behavior
+* Fluently connect to REST APIs
+* Powerful Templating
+* Reuse Conversation Flows in multiple bots
 
 technical spec:
-  * Resource- / REST-oriented architecture
-  * OAuth 2.0 / Basic Authentication
-  * Java
-  * JAX-RS
-  * Dependency Injection
-  * Embedded Jetty
-  * NoSQL
-  * HTML, CSS, Javascript, JSON
+* Resource- / REST-oriented architecture
+* OAuth 2.0 / Basic Authentication
+* Java
+* JAX-RS
+* Dependency Injection
+* Embedded Jetty
+* NoSQL
+* HTML, CSS, Javascript, JSON
 
 ## Prerequirements
 
@@ -63,12 +63,12 @@ Go to the root directory and execute
     mvn clean install
 
 ## Start Servers
- 1. Setup a local mongodb (> v3.0)
- 2. launch with VM options 
+1. Setup a local mongodb (> v3.0)
+2. launch with VM options 
    ```
     -DEDDI_ENV=[development/production] -Duser.dir=[LOCAL_PATH_TO_EDDI]\apiserver ai.labs.api.ApiServer
    ```
- 3. Go to Browser --> http://localhost:7070
+3. Go to Browser --> http://localhost:7070
 
 Note: If running locally inside an IDE you need *lombok* to be enabled (otherwise you will get compile errors complaining about missing constructors). Either download as plugin (e.g. inside Intellij) or follow instructions here https://projectlombok.org/
 
