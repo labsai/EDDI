@@ -24,7 +24,16 @@ fi
 
 echo "memory params: ${memory_string}"
 
+# enable additional JVM options
+jvm_options=""
+if ! [[ -z "${EDDI_JVM_OPTIONS}" ]]; then
+    jvm_options=${EDDI_JVM_OPTIONS}
+fi
+
+
+
 java -server ${memory_string} \
+${jvm_options} \
 -classpath '.:lib/*' \
 -DEDDI_ENV=$EDDI_ENV ${argument_string} \
 --add-opens java.base/java.lang=ALL-UNNAMED \
