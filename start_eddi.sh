@@ -22,7 +22,18 @@ if ! [[ -z "${EDDI_MEMORY_MAX}" ]]; then
     memory_string="${memory_string} -Xmx${EDDI_MEMORY_MAX} -XX:NewSize=${EDDI_MEMORY_MAX}"
 fi
 
+if ! [[ -z "${EDDI_MEMORY_PERCENTAGE_MIN}" ]]; then
+    memory_string="${memory_string} -XX:MinRAMPercentage=${EDDI_MEMORY_PERCENTAGE_MIN}"
+fi
+
+if ! [[ -z "${EDDI_MEMORY_PERCENTAGE_MAX}" ]]; then
+    memory_string="${memory_string} -XX:MaxRAMPercentage=${EDDI_MEMORY_PERCENTAGE_MAX}"
+fi
+
+
 echo "memory params: ${memory_string}"
+
+
 
 # enable additional JVM options
 jvm_options=""
