@@ -11,9 +11,13 @@ services:
       - mongodb
     environment:
       EDDI_VERSION: 4.8
+      EDDI_JVM_OPTIONS: "-verbose:class -Xlog:gc*=debug:stdout:time,uptime,level -XX:+HeapDumpOnOutOfMemoryError -XX:HeapDumpPath=/dumps/oom.bin -XX:+UseContainerSupport"
       EDDI_ENV: production
-      EDDI_MEMORY_MIN: 1G
-      EDDI_MEMORY_MAX: 1G
+      # configure memory as percentage (usefull for cgrouped envs like docker/k8s so you don't need to configure memory 2 times)
+      EDDI_MEMORY_PERCENTAGE_MIN: 50
+      # 70-80% as a good starting point
+      EDDI_MEMORY_PERCENTAGE_MAX: 80
+      EDDI_JAVA_ENV_TUNE_BUFFER: "jdk.nio.MaxCachedBufferSize=1048576"
       #EDDI_JAVA_ENV_MONGODB_HOST: mongodb.hosts=mongodb
   mongodb:
     image: mongo:3.6
