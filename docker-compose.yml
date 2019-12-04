@@ -1,11 +1,10 @@
 version: '3'
 services:
   eddi:
-    image: labsai/eddi:4.8.0-kkorsakov
+    image: labsai/eddi:latest
     ports:
       - "7070:7070"
       - "7443:7443"
-      - "9001:9001"
     links:
       - mongodb
     depends_on:
