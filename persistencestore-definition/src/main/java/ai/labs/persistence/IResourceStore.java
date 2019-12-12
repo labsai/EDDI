@@ -10,6 +10,8 @@ import java.lang.annotation.Target;
  */
 public interface IResourceStore<T> {
 
+    T readIncludingDeleted(String id, Integer version) throws ResourceNotFoundException, ResourceStoreException;
+
     @Retention(RetentionPolicy.RUNTIME) @Target(ElementType.METHOD)
     @interface ConfigurationUpdate {}
 

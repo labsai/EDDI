@@ -14,6 +14,7 @@ import ai.labs.resources.rest.config.packages.IPackageStore;
 import ai.labs.resources.rest.config.packages.model.PackageConfiguration;
 import ai.labs.resources.rest.config.propertysetter.IPropertySetterStore;
 import ai.labs.resources.rest.config.regulardictionary.IRegularDictionaryStore;
+import ai.labs.resources.rest.config.regulardictionary.model.RegularDictionaryConfiguration;
 import ai.labs.resources.rest.documentdescriptor.IDocumentDescriptorStore;
 import ai.labs.serialization.IJsonSerialization;
 import ai.labs.utilities.FileUtilities;
@@ -124,6 +125,15 @@ public class RestExportService extends AbstractBackupService implements IRestExp
 
                 writeConfigs(packagePath, convertConfigsToString(readConfigs(outputStore,
                         extractResourcesUris(packageConfigurationString, OUTPUT_URI_PATTERN))), OUTPUT_EXT);
+
+                Path unusedPath = Files.createDirectories(Paths.get(tmpPath.toString(), botId, "unused"));
+
+                writeAllVersionsOfUris(unusedPath, regularDictionaryStore, extractResourcesUris(packageConfigurationString, DICTIONARY_URI_PATTERN), DICTIONARY_EXT);
+                writeAllVersionsOfUris(unusedPath, behaviorStore, extractResourcesUris(packageConfigurationString, BEHAVIOR_URI_PATTERN), BEHAVIOR_EXT);
+                writeAllVersionsOfUris(unusedPath, httpCallsStore, extractResourcesUris(packageConfigurationString, HTTPCALLS_URI_PATTERN), HTTPCALLS_EXT);
+                writeAllVersionsOfUris(unusedPath, propertySetterStore, extractResourcesUris(packageConfigurationString, PROPERTY_URI_PATTERN), PROPERTY_EXT);
+                writeAllVersionsOfUris(unusedPath, outputStore, extractResourcesUris(packageConfigurationString, OUTPUT_URI_PATTERN), OUTPUT_EXT);
+
             }
 
             String zipFilename = prepareZipFilename(botDocumentDescriptor, botId, botVersion);
@@ -136,6 +146,45 @@ public class RestExportService extends AbstractBackupService implements IRestExp
             log.error(e.getLocalizedMessage(), e);
             throw new InternalServerErrorException();
         }
+    }
+
+    private <T> void writeAllVersionsOfUris(Path unusedPath, IResourceStore<T> store, List<URI> dictionaryUris, String ext) {
+        for (URI dictionaryUri : dictionaryUris) {
+            Integer versionToExport = 1;
+            IResourceId resourceIdUnused = RestUtilities.extractResourceId(dictionaryUri);
+            final String strResId = resourceIdUnused.getId();
+            Map<IResourceId, T>  toStore = new LinkedHashMap<>();
+            T config = null;
+            try {
+                config = store.readIncludingDeleted(resourceIdUnused.getId(), versionToExport);
+            } catch (IResourceStore.ResourceNotFoundException | IResourceStore.ResourceStoreException e) {
+                log.error(e.getLocalizedMessage(), e);
+            }
+            while (versionToExport < 10000) {
+                try {
+                    toStore.put(resourceIdUnused, config);
+                    final Integer currentVersion = versionToExport;
+                    resourceIdUnused = new IResourceId() {
+
+                        @Override
+                        public String getId() {
+                            return strResId;
+                        }
+
+                        @Override
+                        public Integer getVersion() {
+                            return currentVersion;
+                        }
+                    };
+                    config = store.readIncludingDeleted(resourceIdUnused.getId(), versionToExport);
+                } catch (IResourceStore.ResourceNotFoundException | IBehaviorStore.ResourceStoreException ex) {
+                    break;
+                }
+                versionToExport++;
+            }
+            writeUnusedConfigs(unusedPath, convertConfigsToString(toStore), ext);
+        }
+
     }
 
     private String prepareZipFilename(DocumentDescriptor botDocumentDescriptor, String botId, Integer botVersion)
@@ -178,6 +227,23 @@ public class RestExportService extends AbstractBackupService implements IRestExp
         });
     }
 
+    private void writeUnusedConfigs(Path path, Map<IResourceId, String> configs, String fileExtension) {
+        configs.forEach((resourceId, value) -> {
+            String filename = MessageFormat.format("{0}.{1}.{2}.json", resourceId.getId(), resourceId.getVersion(), fileExtension);
+            Path filePath = Paths.get(path.toString(), filename);
+            try {
+                deleteFileIfExists(filePath);
+                try (BufferedWriter writer = Files.newBufferedWriter(filePath)) {
+                    writer.write(value);
+                    writeDocumentDescriptor(path, resourceId.getId(), resourceId.getVersion());
+                }
+            } catch (IOException | IResourceStore.ResourceStoreException | IResourceStore.ResourceNotFoundException e) {
+                log.error(e.getLocalizedMessage(), e);
+            }
+        });
+    }
+
+
     private Path writeDirAndDocument(String documentId, Integer documentVersion,
                                      String configurationString, Path tmpPath, String fileExtension)
             throws IOException {
@@ -197,7 +263,7 @@ public class RestExportService extends AbstractBackupService implements IRestExp
 
     private DocumentDescriptor writeDocumentDescriptor(Path path, String documentId, Integer documentVersion)
             throws IResourceStore.ResourceStoreException, IResourceStore.ResourceNotFoundException, IOException {
-        DocumentDescriptor documentDescriptor = documentDescriptorStore.readDescriptor(documentId, documentVersion);
+        DocumentDescriptor documentDescriptor = documentDescriptorStore.readDescriptorWithHistory(documentId, documentVersion);
         String filename = MessageFormat.format("{0}.descriptor.json", documentId);
         Path filePath = Paths.get(path.toString(), filename);
         deleteFileIfExists(filePath);

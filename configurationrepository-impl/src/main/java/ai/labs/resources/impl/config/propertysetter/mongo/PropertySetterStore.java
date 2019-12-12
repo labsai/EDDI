@@ -26,6 +26,11 @@ public class PropertySetterStore implements IPropertySetterStore {
     }
 
     @Override
+    public PropertySetterConfiguration readIncludingDeleted(String id, Integer version) throws ResourceNotFoundException, ResourceStoreException {
+        return propertySetterResourceStore.readIncludingDeleted(id, version);
+    }
+
+    @Override
     public IResourceId create(PropertySetterConfiguration propertySetterConfiguration) throws ResourceStoreException {
         return propertySetterResourceStore.create(propertySetterConfiguration);
     }
@@ -36,11 +41,13 @@ public class PropertySetterStore implements IPropertySetterStore {
     }
 
     @Override
+    @ConfigurationUpdate
     public Integer update(String id, Integer version, PropertySetterConfiguration propertySetterConfiguration) throws ResourceStoreException, ResourceModifiedException, ResourceNotFoundException {
         return propertySetterResourceStore.update(id, version, propertySetterConfiguration);
     }
 
     @Override
+    @ConfigurationUpdate
     public void delete(String id, Integer version) throws ResourceModifiedException, ResourceNotFoundException {
         propertySetterResourceStore.delete(id, version);
     }

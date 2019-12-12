@@ -34,6 +34,11 @@ public class RegularDictionaryStore implements IRegularDictionaryStore {
     }
 
     @Override
+    public RegularDictionaryConfiguration readIncludingDeleted(String id, Integer version) throws ResourceNotFoundException, ResourceStoreException {
+        return regularDictionaryResourceStore.readIncludingDeleted(id, version);
+    }
+
+    @Override
     public IResourceId create(RegularDictionaryConfiguration regularDictionaryConfiguration) throws ResourceStoreException {
         RuntimeUtilities.checkCollectionNoNullElements(regularDictionaryConfiguration.getWords(), "words");
         RuntimeUtilities.checkCollectionNoNullElements(regularDictionaryConfiguration.getPhrases(), "phrases");
@@ -113,6 +118,7 @@ public class RegularDictionaryStore implements IRegularDictionaryStore {
     }
 
     @Override
+    @ConfigurationUpdate
     public Integer update(String id, Integer version, RegularDictionaryConfiguration regularDictionaryConfiguration) throws ResourceStoreException, ResourceModifiedException, ResourceNotFoundException {
         RuntimeUtilities.checkCollectionNoNullElements(regularDictionaryConfiguration.getWords(), "words");
         RuntimeUtilities.checkCollectionNoNullElements(regularDictionaryConfiguration.getPhrases(), "phrases");
@@ -121,6 +127,7 @@ public class RegularDictionaryStore implements IRegularDictionaryStore {
     }
 
     @Override
+    @ConfigurationUpdate
     public void delete(String id, Integer version) throws ResourceStoreException, ResourceModifiedException, ResourceNotFoundException {
         regularDictionaryResourceStore.delete(id, version);
     }

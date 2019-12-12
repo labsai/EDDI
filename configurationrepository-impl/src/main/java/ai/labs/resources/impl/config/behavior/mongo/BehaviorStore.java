@@ -34,6 +34,11 @@ public class BehaviorStore implements IBehaviorStore {
     }
 
     @Override
+    public BehaviorConfiguration readIncludingDeleted(String id, Integer version) throws ResourceNotFoundException, ResourceStoreException {
+        return behaviorResourceStore.readIncludingDeleted(id, version);
+    }
+
+    @Override
     public IResourceId create(BehaviorConfiguration behaviorConfiguration) throws ResourceStoreException {
         RuntimeUtilities.checkCollectionNoNullElements(behaviorConfiguration.getBehaviorGroups(), "behaviorGroups");
         return behaviorResourceStore.create(behaviorConfiguration);
@@ -44,13 +49,16 @@ public class BehaviorStore implements IBehaviorStore {
         return behaviorResourceStore.read(id, version);
     }
 
+
     @Override
+    @ConfigurationUpdate
     public synchronized Integer update(String id, Integer version, BehaviorConfiguration behaviorConfiguration) throws ResourceStoreException, ResourceModifiedException, ResourceNotFoundException {
         RuntimeUtilities.checkCollectionNoNullElements(behaviorConfiguration.getBehaviorGroups(), "behaviorGroups");
         return behaviorResourceStore.update(id, version, behaviorConfiguration);
     }
 
     @Override
+    @ConfigurationUpdate
     public void delete(String id, Integer version) throws ResourceStoreException, ResourceModifiedException, ResourceNotFoundException {
         behaviorResourceStore.delete(id, version);
     }

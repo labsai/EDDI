@@ -27,6 +27,11 @@ public class ParserStore implements IParserStore {
     }
 
     @Override
+    public ParserConfiguration readIncludingDeleted(String id, Integer version) throws ResourceNotFoundException, ResourceStoreException {
+        return parserResourceStore.readIncludingDeleted(id, version);
+    }
+
+    @Override
     public IResourceId create(ParserConfiguration parserConfiguration) throws ResourceStoreException {
         return parserResourceStore.create(parserConfiguration);
     }
@@ -37,11 +42,13 @@ public class ParserStore implements IParserStore {
     }
 
     @Override
+    @ConfigurationUpdate
     public Integer update(String id, Integer version, ParserConfiguration content) throws ResourceStoreException, ResourceModifiedException, ResourceNotFoundException {
         return parserResourceStore.update(id, version, content);
     }
 
     @Override
+    @ConfigurationUpdate
     public void delete(String id, Integer version) throws ResourceStoreException, ResourceModifiedException, ResourceNotFoundException {
         parserResourceStore.delete(id, version);
     }

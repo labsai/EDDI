@@ -15,6 +15,7 @@ import org.eclipse.jgit.api.PullResult;
 import org.eclipse.jgit.api.errors.GitAPIException;
 import org.eclipse.jgit.api.errors.InvalidRemoteException;
 import org.eclipse.jgit.lib.RepositoryCache;
+import org.eclipse.jgit.lib.StoredConfig;
 import org.eclipse.jgit.revwalk.RevCommit;
 import org.eclipse.jgit.transport.PushResult;
 import org.eclipse.jgit.transport.UsernamePasswordCredentialsProvider;
@@ -23,12 +24,16 @@ import org.eclipse.jgit.util.FS;
 import javax.inject.Inject;
 import javax.ws.rs.InternalServerErrorException;
 import javax.ws.rs.core.Response;
+import java.io.File;
 import java.io.FileInputStream;
 import java.io.IOException;
 import java.nio.file.DirectoryStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
+import java.util.Comparator;
+
+import static org.eclipse.jgit.lib.ConfigConstants.CONFIG_BRANCH_SECTION;
 
 /**
  * @author rpi
@@ -79,12 +84,16 @@ public class RestGitBackupService implements IRestGitBackupService {
         try {
             deleteFileIfExists(Paths.get(tmpPath + botId));
             Path gitPath = Files.createDirectories(Paths.get(tmpPath + botId));
-            Git.cloneRepository()
+            Git git = Git.cloneRepository()
                     .setBranch(gitBranch)
                     .setURI(gitUrl)
                     .setCredentialsProvider(new UsernamePasswordCredentialsProvider(gitUsername, gitPassword))
                     .setDirectory(gitPath.toFile())
                     .call();
+            StoredConfig config = git.getRepository().getConfig();
+            config.setString( CONFIG_BRANCH_SECTION, "local-branch", "remote", gitBranch);
+            config.setString( CONFIG_BRANCH_SECTION, "local-branch", "merge", "refs/heads/" + gitBranch );
+            config.save();
 
         } catch (IOException | GitAPIException e) {
             log.error(e.getLocalizedMessage(), e);
@@ -128,22 +137,18 @@ public class RestGitBackupService implements IRestGitBackupService {
             Path gitPath = Paths.get(tmpPath + botId);
             if (gitUrl != null) {
                 exportService.exportBot(botId, resourceId.getVersion());
-                if (RepositoryCache.FileKey.isGitRepository(gitPath.toFile(), FS.DETECTED)) {
-                    Git.open(gitPath.toFile())
-                            .add()
-                            .addFilepattern(".")
-                            .call();
-                    RevCommit commit = Git.open(gitPath.toFile())
-                            .commit()
-                            .setMessage(commitMessage)
-                            .setCommitter(gitCommiterName, gitCommiterEmail)
-                            .call();
-                    return Response.status(Response.Status.OK).entity(commit.getFullMessage()).build();
-                } else {
-                    return Response.status(Response.Status.BAD_REQUEST).entity("Git repo not initializsed, please call gitInit first").build();
-                }
+                Git.open(gitPath.toFile())
+                        .add()
+                        .addFilepattern(".")
+                        .call();
+                RevCommit commit = Git.open(gitPath.toFile())
+                        .commit()
+                        .setMessage(commitMessage)
+                        .setCommitter(gitCommiterName, gitCommiterEmail)
+                        .call();
+                return Response.status(Response.Status.OK).entity(commit.getFullMessage()).build();
             } else {
-                return Response.status(Response.Status.NOT_FOUND).entity("No git settings in bot configuration, please add git settings!").build();
+                return Response.status(Response.Status.BAD_REQUEST).entity("Git repo not initializsed, please call gitInit first").build();
             }
         } catch (IResourceStore.ResourceNotFoundException e) {
             return Response.status(Response.Status.NOT_FOUND).entity("commit failed - bot id is incorrect").build();
@@ -187,8 +192,15 @@ public class RestGitBackupService implements IRestGitBackupService {
 
 
     private void deleteFileIfExists(Path path) throws IOException {
-        if (Files.exists(path)) {
-            Files.delete(path);
+        if (Files.isDirectory(path)) {
+            Files.walk(path)
+                    .sorted(Comparator.reverseOrder())
+                    .map(Path::toFile)
+                    .forEach(File::delete);
+        } else {
+            if (Files.exists(path)) {
+                Files.delete(path);
+            }
         }
     }
 
@@ -201,4 +213,12 @@ public class RestGitBackupService implements IRestGitBackupService {
         importService.importBot(new FileInputStream(targetZipPath), null);
     }
 
+    public boolean isGitAutomatic() {
+        return gitAutomatic;
+    }
+
+    public boolean isGitInitialised(String botId) {
+        Path gitPath = Paths.get(tmpPath + botId);
+        return RepositoryCache.FileKey.isGitRepository(gitPath.toFile(), FS.DETECTED);
+    }
 }

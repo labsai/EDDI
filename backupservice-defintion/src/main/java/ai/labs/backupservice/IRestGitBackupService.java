@@ -42,4 +42,6 @@ public interface IRestGitBackupService {
     @ApiResponse(code = 200, message = "returns the git message of the attempted push into the configured git repository.")
     Response gitPush(@PathParam("botId") String botId);
 
+    boolean isGitAutomatic();
+    boolean isGitInitialised(String botId);
 }
