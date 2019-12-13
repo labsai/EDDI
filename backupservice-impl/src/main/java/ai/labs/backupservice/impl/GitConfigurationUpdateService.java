@@ -30,24 +30,26 @@ import java.util.function.Predicate;
 @Slf4j
 public class GitConfigurationUpdateService implements MethodInterceptor {
 
-    @Inject
     private IRestGitBackupService backupService;
-
-    @Inject
     private IBotStore botStore;
-
-    @Inject
     private IDeploymentStore deploymentStore;
-
-    @Inject
     private IPackageStore packageStore;
-
-    @Inject
     private IJsonSerialization jsonSerialization;
 
     private ExecutorService gitSingleThreadedExecutor = Executors.newFixedThreadPool(1);
 
-    public GitConfigurationUpdateService() {
+    @Inject
+    public GitConfigurationUpdateService(IRestGitBackupService backupService,
+                                         IBotStore botStore,
+                                         IDeploymentStore deploymentStore,
+                                         IPackageStore packageStore,
+                                         IJsonSerialization jsonSerialization) {
+
+        this.backupService = backupService;
+        this.botStore = botStore;
+        this.deploymentStore = deploymentStore;
+        this.packageStore = packageStore;
+        this.jsonSerialization = jsonSerialization;
     }
 
 

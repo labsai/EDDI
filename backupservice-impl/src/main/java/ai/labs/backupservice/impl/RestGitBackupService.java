@@ -148,7 +148,7 @@ public class RestGitBackupService implements IRestGitBackupService {
                         .call();
                 return Response.status(Response.Status.OK).entity(commit.getFullMessage()).build();
             } else {
-                return Response.status(Response.Status.BAD_REQUEST).entity("Git repo not initializsed, please call gitInit first").build();
+                return Response.status(Response.Status.BAD_REQUEST).entity("Git repo not initialized, please call gitInit first").build();
             }
         } catch (IResourceStore.ResourceNotFoundException e) {
             return Response.status(Response.Status.NOT_FOUND).entity("commit failed - bot id is incorrect").build();
