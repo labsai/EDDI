@@ -17,6 +17,7 @@ import org.aopalliance.intercept.MethodInterceptor;
 import org.aopalliance.intercept.MethodInvocation;
 
 import javax.inject.Inject;
+import javax.inject.Provider;
 import java.io.IOException;
 import java.net.URI;
 import java.util.LinkedHashMap;
@@ -30,20 +31,20 @@ import java.util.function.Predicate;
 @Slf4j
 public class GitConfigurationUpdateService implements MethodInterceptor {
 
-    private IRestGitBackupService backupService;
-    private IBotStore botStore;
-    private IDeploymentStore deploymentStore;
-    private IPackageStore packageStore;
-    private IJsonSerialization jsonSerialization;
+    private Provider<IRestGitBackupService> backupService;
+    private Provider<IBotStore> botStore;
+    private Provider<IDeploymentStore> deploymentStore;
+    private Provider<IPackageStore> packageStore;
+    private Provider<IJsonSerialization> jsonSerialization;
 
     private ExecutorService gitSingleThreadedExecutor = Executors.newFixedThreadPool(1);
 
     @Inject
-    public GitConfigurationUpdateService(IRestGitBackupService backupService,
-                                         IBotStore botStore,
-                                         IDeploymentStore deploymentStore,
-                                         IPackageStore packageStore,
-                                         IJsonSerialization jsonSerialization) {
+    public GitConfigurationUpdateService(Provider<IRestGitBackupService> backupService,
+                                         Provider<IBotStore> botStore,
+                                         Provider<IDeploymentStore> deploymentStore,
+                                         Provider<IPackageStore> packageStore,
+                                         Provider<IJsonSerialization> jsonSerialization) {
 
         this.backupService = backupService;
         this.botStore = botStore;
@@ -58,7 +59,7 @@ public class GitConfigurationUpdateService implements MethodInterceptor {
         Object result = methodInvocation.proceed();
         gitSingleThreadedExecutor.execute(() -> {
             try {
-                if (backupService.isGitAutomatic() && (methodInvocation.getMethod().getName().startsWith("update") || methodInvocation.getMethod().getName().startsWith("delete"))) {
+                if (backupService.get().isGitAutomatic() && (methodInvocation.getMethod().getName().startsWith("update") || methodInvocation.getMethod().getName().startsWith("delete"))) {
                     performAutomaticUpdate((String) methodInvocation.getArguments()[0]);
                 }
             } catch (Throwable th) {
@@ -73,26 +74,26 @@ public class GitConfigurationUpdateService implements MethodInterceptor {
 
         String botId = findBotId(documentId);
         if (botId != null) {
-            if (!backupService.isGitInitialised(botId)) {
-                backupService.gitInit(botId);
+            if (!backupService.get().isGitInitialised(botId)) {
+                backupService.get().gitInit(botId);
             }
-            backupService.gitCommit(botId, "automatic commit on change, timestamp of commit " + System.currentTimeMillis() /1000);
-            backupService.gitPush(botId);
+            backupService.get().gitCommit(botId, "automatic commit on change, timestamp of commit " + System.currentTimeMillis() /1000);
+            backupService.get().gitPush(botId);
         }
 
     }
 
     private String findBotId(String documentId) throws IResourceStore.ResourceStoreException, IResourceStore.ResourceNotFoundException, IOException {
-        for (DeploymentInfo di : deploymentStore.readDeploymentInfos()) {
-            BotConfiguration botConfiguration = botStore.read(di.getBotId(), di.getBotVersion());
+        for (DeploymentInfo di : deploymentStore.get().readDeploymentInfos()) {
+            BotConfiguration botConfiguration = botStore.get().read(di.getBotId(), di.getBotVersion());
             Map<IResourceStore.IResourceId, PackageConfiguration> packageConfigurations =
-                    readConfigs(packageStore, botConfiguration.getPackages());
+                    readConfigs(packageStore.get(), botConfiguration.getPackages());
 
             if (di.getBotId().equals(documentId)) return di.getBotId();
 
             for (IResourceStore.IResourceId resourceId : packageConfigurations.keySet()) {
                 PackageConfiguration packageConfiguration = packageConfigurations.get(resourceId);
-                String packageConfigurationString = jsonSerialization.serialize(packageConfiguration);
+                String packageConfigurationString = jsonSerialization.get().serialize(packageConfiguration);
                 if (packageConfigurationString.contains(documentId)) return di.getBotId();
             }
         }
