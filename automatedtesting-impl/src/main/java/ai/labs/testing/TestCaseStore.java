@@ -91,6 +91,11 @@ public class TestCaseStore implements ITestCaseStore, IResourceStore<TestCase> {
     }
 
     @Override
+    public TestCase readIncludingDeleted(String id, Integer version) throws ResourceNotFoundException, ResourceStoreException {
+        return loadTestCase(id);
+    }
+
+    @Override
     public IResourceId create(TestCase content) throws ResourceStoreException {
         final String id = storeTestCase(null, content);
 

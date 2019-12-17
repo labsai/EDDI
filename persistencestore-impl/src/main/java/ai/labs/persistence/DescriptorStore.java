@@ -76,6 +76,12 @@ public class DescriptorStore<T> implements IDescriptorStore<T> {
     }
 
     @Override
+    public T readDescriptorWithHistory(String resourceId, Integer version) throws ResourceStoreException, ResourceNotFoundException {
+        return descriptorResourceStore.readIncludingDeleted(resourceId, version);
+    }
+
+
+    @Override
     public Integer updateDescriptor(String resourceId, Integer version, T documentDescriptor) throws ResourceStoreException, ResourceModifiedException, ResourceNotFoundException {
         return descriptorResourceStore.update(resourceId, version, documentDescriptor);
     }

@@ -10,6 +10,7 @@ import java.io.IOException;
  * @author ginccc
  */
 public class HistorizedResourceStore<T> implements IResourceStore<T> {
+
     static IResourceStore.ResourceNotFoundException createResourceNotFoundException(String id, Integer version) {
         String message = "Resource not found. (id=%s, version=%s)";
         message = String.format(message, id, version);
@@ -131,6 +132,32 @@ public class HistorizedResourceStore<T> implements IResourceStore<T> {
             IResourceStorage.IHistoryResource historyResource = resourceStorage.readHistory(id, version);
 
             if (historyResource == null || historyResource.isDeleted()) {
+                throw createResourceNotFoundException(id, version);
+            }
+
+            current = historyResource;
+        }
+
+        try {
+            return current.getData();
+        } catch (IOException e) {
+            String message = "Unable to deserialize resource (id=%s, version=%s)";
+            message = String.format(message, id, version);
+            throw new IResourceStore.ResourceStoreException(message, e);
+        }
+    }
+
+    @Override
+    public T readIncludingDeleted(String id, Integer version) throws IResourceStore.ResourceNotFoundException, IResourceStore.ResourceStoreException {
+        RuntimeUtilities.checkNotNull(id, "id");
+        RuntimeUtilities.checkNotNull(version, "version");
+
+        IResourceStorage.IResource<T> current = resourceStorage.read(id, version);
+
+        if (current == null) {
+            IResourceStorage.IHistoryResource historyResource = resourceStorage.readHistory(id, version);
+
+            if (historyResource == null) {
                 throw createResourceNotFoundException(id, version);
             }
 

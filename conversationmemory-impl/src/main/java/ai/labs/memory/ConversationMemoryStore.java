@@ -97,6 +97,11 @@ public class ConversationMemoryStore implements IConversationMemoryStore, IResou
     }
 
     @Override
+    public ConversationMemorySnapshot readIncludingDeleted(String id, Integer version) throws ResourceNotFoundException, ResourceStoreException {
+        return loadConversationMemorySnapshot(id);
+    }
+
+    @Override
     public IResourceId create(ConversationMemorySnapshot content) {
         final String conversationId = storeConversationMemorySnapshot(content);
 

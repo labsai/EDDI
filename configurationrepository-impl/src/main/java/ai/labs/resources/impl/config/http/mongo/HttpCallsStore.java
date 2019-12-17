@@ -26,6 +26,11 @@ public class HttpCallsStore implements IHttpCallsStore {
     }
 
     @Override
+    public HttpCallsConfiguration readIncludingDeleted(String id, Integer version) throws ResourceNotFoundException, ResourceStoreException {
+        return httpCallsResourceStore.readIncludingDeleted(id, version);
+    }
+
+    @Override
     public IResourceId create(HttpCallsConfiguration httpCallsConfiguration) throws ResourceStoreException {
         return httpCallsResourceStore.create(httpCallsConfiguration);
     }
@@ -36,11 +41,13 @@ public class HttpCallsStore implements IHttpCallsStore {
     }
 
     @Override
+    @ConfigurationUpdate
     public Integer update(String id, Integer version, HttpCallsConfiguration httpCallsConfiguration) throws ResourceStoreException, ResourceModifiedException, ResourceNotFoundException {
         return httpCallsResourceStore.update(id, version, httpCallsConfiguration);
     }
 
     @Override
+    @ConfigurationUpdate
     public void delete(String id, Integer version) throws ResourceStoreException, ResourceModifiedException, ResourceNotFoundException {
         httpCallsResourceStore.delete(id, version);
     }
