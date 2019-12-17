@@ -115,7 +115,7 @@ public class RestGitBackupService implements IRestGitBackupService {
                         .call();
                 if (pullResult.isSuccessful()) {
                     importBot(botId, resourceId.getVersion());
-                    return Response.status(Response.Status.OK).entity("Pulled from: " + pullResult.getFetchedFrom() + ". Was successful!").build();
+                    return Response.status(Response.Status.OK).build();
                 } else {
                     return Response.status(Response.Status.OK).entity("Pull from repository was not successful! Please check your git settings! Maybe the path " + tmpPath + " is not empty or not a git repository").build();
                 }
@@ -146,7 +146,7 @@ public class RestGitBackupService implements IRestGitBackupService {
                         .setMessage(commitMessage)
                         .setCommitter(gitCommiterName, gitCommiterEmail)
                         .call();
-                return Response.status(Response.Status.OK).entity(commit.getFullMessage()).build();
+                return Response.status(Response.Status.OK).build();
             } else {
                 return Response.status(Response.Status.BAD_REQUEST).entity("Git repo not initialized, please call gitInit first").build();
             }
@@ -174,7 +174,7 @@ public class RestGitBackupService implements IRestGitBackupService {
                 for (PushResult pushResult : pushResults) {
                     pushResultMessage.append(pushResult.getMessages());
                 }
-                return Response.status(Response.Status.OK).entity(pushResultMessage.toString()).build();
+                return Response.status(Response.Status.OK).build();
             } else {
                 return Response.status(Response.Status.NOT_FOUND).entity("No git settings in bot configuration, please add git settings!").build();
             }
