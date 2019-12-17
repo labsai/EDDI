@@ -1,0 +1,20 @@
+version: '3'
+services:
+  eddi:
+    image: labsai/eddi:latest-redhat
+    ports:
+      - "7070:7070"
+      - "7443:7443"
+    links:
+      - mongodb
+    depends_on:
+      - mongodb
+    environment:
+      EDDI_VERSION: 4.8
+      EDDI_ENV: production
+      EDDI_MEMORY_MIN: 1G
+      EDDI_MEMORY_MAX: 1G
+      #EDDI_JAVA_ENV_MONGODB_HOST: mongodb.hosts=mongodb
+  mongodb:
+    image: mongo:3.6
+    restart: always

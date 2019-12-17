@@ -15,7 +15,9 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
-import static ai.labs.behavior.impl.conditions.IBehaviorCondition.ExecutionState.*;
+import static ai.labs.behavior.impl.conditions.IBehaviorCondition.ExecutionState.FAIL;
+import static ai.labs.behavior.impl.conditions.IBehaviorCondition.ExecutionState.NOT_EXECUTED;
+import static ai.labs.behavior.impl.conditions.IBehaviorCondition.ExecutionState.SUCCESS;
 import static ai.labs.memory.IConversationMemory.IConversationStepStack;
 
 /**

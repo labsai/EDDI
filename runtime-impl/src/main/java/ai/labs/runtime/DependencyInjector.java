@@ -1,7 +1,7 @@
 package ai.labs.runtime;
 
-import com.google.inject.*;
 import com.google.inject.Module;
+import com.google.inject.*;
 
 /**
  * @author ginccc

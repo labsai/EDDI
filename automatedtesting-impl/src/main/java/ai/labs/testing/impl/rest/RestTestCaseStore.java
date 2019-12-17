@@ -15,7 +15,6 @@ import ai.labs.testing.rest.IRestTestCaseStore;
 import ai.labs.utilities.RestUtilities;
 import ai.labs.utilities.RuntimeUtilities;
 import lombok.extern.slf4j.Slf4j;
-import org.jboss.resteasy.plugins.guice.RequestScoped;
 import org.jboss.resteasy.spi.NoLogWebApplicationException;
 
 import javax.inject.Inject;
@@ -29,7 +28,6 @@ import java.util.List;
 /**
  * @author ginccc
  */
-@RequestScoped
 @Slf4j
 public class RestTestCaseStore implements IRestTestCaseStore {
     private final ITestCaseStore testCaseStore;

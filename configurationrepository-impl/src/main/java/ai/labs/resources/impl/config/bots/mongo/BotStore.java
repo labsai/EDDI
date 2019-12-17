@@ -40,6 +40,11 @@ public class BotStore implements IBotStore {
     }
 
     @Override
+    public BotConfiguration readIncludingDeleted(String id, Integer version) throws ResourceNotFoundException, ResourceStoreException {
+        return botResourceStore.readIncludingDeleted(id, version);
+    }
+
+    @Override
     public IResourceId create(BotConfiguration botConfiguration) throws ResourceStoreException {
         RuntimeUtilities.checkCollectionNoNullElements(botConfiguration.getPackages(), "packages");
         return botResourceStore.create(botConfiguration);
@@ -51,12 +56,14 @@ public class BotStore implements IBotStore {
     }
 
     @Override
+    @ConfigurationUpdate
     public Integer update(String id, Integer version, BotConfiguration botConfiguration) throws ResourceStoreException, ResourceModifiedException, ResourceNotFoundException {
         RuntimeUtilities.checkCollectionNoNullElements(botConfiguration.getPackages(), "packages");
         return botResourceStore.update(id, version, botConfiguration);
     }
 
     @Override
+    @ConfigurationUpdate
     public void delete(String id, Integer version) throws ResourceModifiedException, ResourceNotFoundException {
         botResourceStore.delete(id, version);
     }

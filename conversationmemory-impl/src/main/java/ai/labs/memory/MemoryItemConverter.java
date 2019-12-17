@@ -4,7 +4,11 @@ import ai.labs.memory.model.ConversationOutput;
 import ai.labs.models.Context;
 import lombok.extern.slf4j.Slf4j;
 
-import java.util.*;
+import java.util.HashMap;
+import java.util.LinkedHashMap;
+import java.util.LinkedList;
+import java.util.List;
+import java.util.Map;
 
 import static ai.labs.memory.ConversationMemoryUtilities.prepareContext;
 import static ai.labs.memory.IConversationMemory.IConversationStep;

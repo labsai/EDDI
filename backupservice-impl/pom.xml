@@ -6,7 +6,7 @@
     <parent>
         <artifactId>eddi</artifactId>
         <groupId>ai.labs</groupId>
-        <version>4.7</version>
+        <version>4.8</version>
         <relativePath>../pom.xml</relativePath>
     </parent>
     <packaging>jar</packaging>
@@ -31,6 +31,11 @@
         <dependency>
             <groupId>ai.labs</groupId>
             <artifactId>runtime-definition</artifactId>
+            <version>${project.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>ai.labs</groupId>
+            <artifactId>corerest-definition</artifactId>
             <version>${project.version}</version>
         </dependency>
         <dependency>

@@ -36,6 +36,11 @@ public class PackageStore implements IPackageStore {
     }
 
     @Override
+    public PackageConfiguration readIncludingDeleted(String id, Integer version) throws ResourceNotFoundException, ResourceStoreException {
+        return readIncludingDeleted(id, version);
+    }
+
+    @Override
     public IResourceId create(PackageConfiguration packageConfiguration) throws ResourceStoreException {
         RuntimeUtilities.checkCollectionNoNullElements(packageConfiguration.getPackageExtensions(), "packageExtensions");
         return packageResourceStore.create(packageConfiguration);
@@ -47,12 +52,14 @@ public class PackageStore implements IPackageStore {
     }
 
     @Override
+    @ConfigurationUpdate
     public Integer update(String id, Integer version, PackageConfiguration packageConfiguration) throws ResourceStoreException, ResourceModifiedException, ResourceNotFoundException {
         RuntimeUtilities.checkCollectionNoNullElements(packageConfiguration.getPackageExtensions(), "packageExtensions");
         return packageResourceStore.update(id, version, packageConfiguration);
     }
 
     @Override
+    @ConfigurationUpdate
     public void delete(String id, Integer version) throws ResourceModifiedException, ResourceNotFoundException {
         packageResourceStore.delete(id, version);
     }

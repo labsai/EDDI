@@ -53,7 +53,9 @@ public class RestConversationStore implements IRestConversationStore {
     }
 
     @Override
-    public List<ConversationDescriptor> readConversationDescriptors(Integer index, Integer limit, String botId, Integer botVersion, ConversationState conversationState, ConversationDescriptor.ViewState viewState) {
+    public List<ConversationDescriptor> readConversationDescriptors(Integer index, Integer limit,
+                                                                    String conversationId, String botId, Integer botVersion,
+                                                                    ConversationState conversationState, ConversationDescriptor.ViewState viewState) {
         try {
             List<ConversationDescriptor> conversationDescriptors;
             List<ConversationDescriptor> retConversationDescriptors = new LinkedList<>();
@@ -72,6 +74,12 @@ public class RestConversationStore implements IRestConversationStore {
                         message += "Ignoring this resource.";
                         log.warn(String.format(message, conversationDescriptor.getResource()));
                         continue;
+                    }
+
+                    if (!RuntimeUtilities.isNullOrEmpty(conversationId)) {
+                        if (!conversationId.equals(memorySnapshot.getConversationId())) {
+                            continue;
+                        }
                     }
 
                     if (!RuntimeUtilities.isNullOrEmpty(botId)) {
@@ -181,7 +189,7 @@ public class RestConversationStore implements IRestConversationStore {
         List<ConversationDescriptor> conversationDescriptors;
         List<ConversationStatus> conversationStatuses = new LinkedList<>();
         do {
-            conversationDescriptors = readConversationDescriptors(index, limit, botId, botVersion,
+            conversationDescriptors = readConversationDescriptors(index, limit, null, botId, botVersion,
                     null, null);
 
             conversationStatuses.addAll(conversationDescriptors.stream().

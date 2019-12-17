@@ -6,17 +6,18 @@ import ai.labs.serialization.DocumentBuilder;
 import ai.labs.serialization.IDocumentBuilder;
 import ai.labs.serialization.IJsonSerialization;
 import ai.labs.serialization.JsonSerialization;
-import com.fasterxml.jackson.annotation.JsonInclude;
 import com.fasterxml.jackson.core.JsonFactory;
-import com.fasterxml.jackson.databind.DeserializationFeature;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.databind.SerializationFeature;
 import com.google.inject.AbstractModule;
 import com.google.inject.Provides;
 import com.google.inject.Scopes;
 import com.google.inject.Singleton;
+import de.undercouch.bson4jackson.BsonFactory;
+import de.undercouch.bson4jackson.BsonParser;
 
 import javax.inject.Named;
+
+import static ai.labs.SerializationUtilities.configureObjectMapper;
 
 /**
  * @author ginccc
@@ -34,10 +35,7 @@ public class SerializationModule extends AbstractModule {
     public ObjectMapper provideObjectMapper(@Named("json.prettyPrint") boolean prettyPrint, JsonFactory jsonFactory) {
         ObjectMapper objectMapper = new ObjectMapper(jsonFactory);
 
-        objectMapper.setSerializationInclusion(JsonInclude.Include.NON_NULL);
-        objectMapper.configure(SerializationFeature.INDENT_OUTPUT, prettyPrint);
-        objectMapper.configure(SerializationFeature.FAIL_ON_EMPTY_BEANS, false);
-        objectMapper.configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false);
+        configureObjectMapper(prettyPrint, objectMapper);
         return objectMapper;
     }
 
@@ -48,4 +46,13 @@ public class SerializationModule extends AbstractModule {
         jsonFactory.disable(JsonFactory.Feature.CANONICALIZE_FIELD_NAMES);
         return jsonFactory;
     }
+
+    @Provides
+    @Singleton
+    public BsonFactory provideBsonFactory() {
+        BsonFactory bsonFactory = new BsonFactory();
+        bsonFactory.enable(BsonParser.Feature.HONOR_DOCUMENT_LENGTH);
+        return bsonFactory;
+    }
+
 }

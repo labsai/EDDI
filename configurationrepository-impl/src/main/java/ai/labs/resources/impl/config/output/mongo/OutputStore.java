@@ -35,6 +35,11 @@ public class OutputStore implements IOutputStore {
     }
 
     @Override
+    public OutputConfigurationSet readIncludingDeleted(String id, Integer version) throws ResourceNotFoundException, ResourceStoreException {
+        return outputResourceStore.readIncludingDeleted(id, version);
+    }
+
+    @Override
     public IResourceId create(OutputConfigurationSet outputConfigurationSet) throws ResourceStoreException {
         RuntimeUtilities.checkCollectionNoNullElements(outputConfigurationSet.getOutputSet(), "outputSets");
         return outputResourceStore.create(outputConfigurationSet);
@@ -94,12 +99,14 @@ public class OutputStore implements IOutputStore {
     }
 
     @Override
+    @ConfigurationUpdate
     public Integer update(String id, Integer version, OutputConfigurationSet outputConfigurationSet) throws ResourceStoreException, ResourceModifiedException, ResourceNotFoundException {
         RuntimeUtilities.checkCollectionNoNullElements(outputConfigurationSet.getOutputSet(), "outputSets");
         return outputResourceStore.update(id, version, outputConfigurationSet);
     }
 
     @Override
+    @ConfigurationUpdate
     public void delete(String id, Integer version) throws ResourceStoreException, ResourceModifiedException, ResourceNotFoundException {
         outputResourceStore.delete(id, version);
     }

@@ -13,7 +13,8 @@ import ai.labs.utilities.RuntimeUtilities;
 import ai.labs.utilities.StringUtilities;
 import com.google.inject.Provider;
 import com.google.inject.Provides;
-import io.micrometer.prometheus.PrometheusMeterRegistry;
+import com.google.inject.Scopes;
+import io.micrometer.core.instrument.MeterRegistry;
 import org.apache.commons.lang3.RandomStringUtils;
 import org.eclipse.jetty.security.ConstraintMapping;
 import org.eclipse.jetty.security.ConstraintSecurityHandler;
@@ -39,7 +40,7 @@ import static ai.labs.utilities.SecurityUtilities.generateSalt;
 public class ServerRuntimeModule extends AbstractBaseModule {
     private static final String AUTHENTICATION_BASIC_AUTH = "basic";
     private static final String AUTHENTICATION_KEYCLOAK = "keycloak";
-    public static final String HTTP_METHOD_OPTIONS = "OPTIONS";
+    private static final String HTTP_METHOD_OPTIONS = "OPTIONS";
 
     public ServerRuntimeModule(InputStream... configFile) {
         super(configFile);
@@ -48,7 +49,7 @@ public class ServerRuntimeModule extends AbstractBaseModule {
     @Override
     protected void configure() {
         registerConfigFiles(configFiles);
-        bind(LoginService.class).to(MongoLoginService.class);
+        bind(LoginService.class).to(MongoLoginService.class).in(Scopes.SINGLETON);
     }
 
     @Provides
@@ -76,7 +77,7 @@ public class ServerRuntimeModule extends AbstractBaseModule {
                                                HttpServletDispatcher httpServletDispatcher,
                                                MongoLoginService mongoLoginService,
                                                AdapterConfig keycloakAdapterConfig,
-                                               PrometheusMeterRegistry meterRegistry)
+                                               MeterRegistry meterRegistry)
             throws ClassNotFoundException {
 
         ServerRuntime.Options options = new ServerRuntime.Options();
@@ -211,7 +212,7 @@ public class ServerRuntimeModule extends AbstractBaseModule {
         mapping = new ConstraintMapping();
         mapping.setMethod(HTTP_METHOD_OPTIONS);
         mapping.setConstraint(constraint);
-        mapping.setPathSpec("/");
+        mapping.setPathSpec("/*");
         securityHandler.addConstraintMapping(mapping);
     }
 

@@ -3,6 +3,7 @@ package ai.labs.channels.differ;
 import ai.labs.channels.differ.model.CommandInfo;
 import ai.labs.channels.differ.model.commands.CreateMessageCommand;
 import ai.labs.serialization.IJsonSerialization;
+import com.rabbitmq.client.BuiltinExchangeType;
 import com.rabbitmq.client.CancelCallback;
 import com.rabbitmq.client.Channel;
 import com.rabbitmq.client.DeliverCallback;
@@ -21,12 +22,13 @@ import static ai.labs.channels.differ.utilities.DifferUtilities.calculateSentAt;
 @Slf4j
 @Singleton
 public class DifferPublisher implements IDifferPublisher {
-    static final String MESSAGE_CREATED_EXCHANGE = "message.created";
+    private static final String MESSAGE_CREATED_EXCHANGE = "message.created";
+    static final String EDDI_EXCHANGE = "eddi";
     private static final String MESSAGE_CREATED_QUEUE_NAME = MESSAGE_CREATED_EXCHANGE + ".eddi";
     private static final String CONVERSATION_CREATED_EXCHANGE = "conversation.created";
     private static final String CONVERSATION_CREATED_QUEUE_NAME = CONVERSATION_CREATED_EXCHANGE + ".eddi";
 
-    static final String MESSAGE_CREATED_EDDI_FAILED_ROUTING_KEY = MESSAGE_CREATED_EXCHANGE + ".eddi.failed";
+    static final String MESSAGE_CREATED_EDDI_FAILED_ROUTING_KEY = MESSAGE_CREATED_EXCHANGE + ".eddi.failed-events";
     static final long TIMEOUT_CONFIRMS_IN_MILLIS = 60000;
 
     private final Provider<Channel> channelProvider;
@@ -46,6 +48,9 @@ public class DifferPublisher implements IDifferPublisher {
     public void init(DeliverCallback conversationCreatedCallback, DeliverCallback messageCreatedCallback) {
         try {
             channel = channelProvider.get();
+
+            channel.exchangeDeclare(EDDI_EXCHANGE, BuiltinExchangeType.TOPIC, true, false, null);
+
             channel.queueDeclare(CONVERSATION_CREATED_QUEUE_NAME, true, false, false, null);
             channel.queueBind(CONVERSATION_CREATED_QUEUE_NAME, CONVERSATION_CREATED_EXCHANGE, "");
             channel.basicConsume(CONVERSATION_CREATED_QUEUE_NAME, false, conversationCreatedCallback, cancelCallback);
@@ -55,7 +60,7 @@ public class DifferPublisher implements IDifferPublisher {
             channel.basicConsume(MESSAGE_CREATED_QUEUE_NAME, false, messageCreatedCallback, cancelCallback);
 
             channel.queueDeclare(MESSAGE_CREATED_EDDI_FAILED_ROUTING_KEY, true, false, false, null);
-            channel.queueBind(MESSAGE_CREATED_EDDI_FAILED_ROUTING_KEY, MESSAGE_CREATED_EXCHANGE, "");
+            channel.queueBind(MESSAGE_CREATED_EDDI_FAILED_ROUTING_KEY, EDDI_EXCHANGE, "");
 
             channel.confirmSelect();
 
@@ -90,7 +95,7 @@ public class DifferPublisher implements IDifferPublisher {
     private void publishEventToFailedQueue(Delivery delivery) {
         try {
             channel.basicPublish(
-                    MESSAGE_CREATED_EXCHANGE,
+                    EDDI_EXCHANGE,
                     MESSAGE_CREATED_EDDI_FAILED_ROUTING_KEY, null, delivery.getBody()
             );
 

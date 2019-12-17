@@ -16,6 +16,8 @@ import ai.labs.core.bootstrap.CoreModule;
 import ai.labs.expressions.bootstrap.ExpressionModule;
 import ai.labs.httpclient.guice.HttpClientModule;
 import ai.labs.memory.bootstrap.ConversationMemoryModule;
+import ai.labs.migration.IMigrationManager;
+import ai.labs.migration.bootstrap.MigrationModule;
 import ai.labs.output.bootstrap.OutputGenerationModule;
 import ai.labs.parser.bootstrap.SemanticParserModule;
 import ai.labs.permission.bootstrap.PermissionModule;
@@ -25,6 +27,7 @@ import ai.labs.resources.bootstrap.RepositoryModule;
 import ai.labs.rest.bootstrap.RestInterfaceModule;
 import ai.labs.restapi.connector.bootstrap.HttpCallsModule;
 import ai.labs.runtime.DependencyInjector;
+import ai.labs.runtime.DependencyInjector.Environment;
 import ai.labs.runtime.IAutoBotDeployment;
 import ai.labs.runtime.bootstrap.LoggingModule;
 import ai.labs.runtime.bootstrap.RuntimeModule;
@@ -64,7 +67,6 @@ public class ApiServer {
         final String configDir = FileUtilities.buildPath(USER_DIR, "config", eddiEnv);
 
         //bootstrapping modules
-        DependencyInjector.Environment environment = DependencyInjector.Environment.valueOf(eddiEnv.toUpperCase());
         Module[] modules = {
                 new LoggingModule(),
                 new RuntimeModule(
@@ -101,16 +103,19 @@ public class ApiServer {
                 new XmppModule(),
                 new AMQPModule(),
                 new DifferModule(),
-                new ChannelModule()
+                new ChannelModule(),
+                new MigrationModule()
         };
 
         //init modules
-        final DependencyInjector injector = DependencyInjector.init(environment, modules);
+        final DependencyInjector injector = DependencyInjector.init(Environment.PRODUCTION, modules);
 
         //init webserver
         injector.getInstance(IServerRuntime.class).startup(() -> {
             //auto re-deploy bots
             injector.getInstance(IAutoBotDeployment.class).autoDeployBots();
+
+            injector.getInstance(IMigrationManager.class).checkForMigration();
 
             //load channel definitions
             var channelDefinitions = injector.getInstance(IChannelDefinitionStore.class).readAllChannelDefinitions();

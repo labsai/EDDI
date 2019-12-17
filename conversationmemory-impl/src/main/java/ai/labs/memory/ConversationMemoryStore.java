@@ -3,19 +3,15 @@ package ai.labs.memory;
 import ai.labs.memory.model.ConversationMemorySnapshot;
 import ai.labs.models.ConversationState;
 import ai.labs.persistence.IResourceStore;
-import ai.labs.serialization.IDocumentBuilder;
-import com.mongodb.BasicDBObject;
 import com.mongodb.client.MongoCollection;
 import com.mongodb.client.MongoDatabase;
 import com.mongodb.client.model.Filters;
 import com.mongodb.client.model.Indexes;
-import com.mongodb.client.model.UpdateOptions;
 import org.bson.Document;
 import org.bson.conversions.Bson;
 import org.bson.types.ObjectId;
 
 import javax.inject.Inject;
-import java.io.IOException;
 
 import static ai.labs.models.ConversationState.ENDED;
 
@@ -28,78 +24,61 @@ public class ConversationMemoryStore implements IConversationMemoryStore, IResou
     private static final String CONVERSATION_BOT_ID_FIELD = "botId";
     private static final String CONVERSATION_BOT_VERSION_FIELD = "botVersion";
     private static final String OBJECT_ID = "_id";
-    private final MongoCollection<Document> conversationCollection;
-    private final IDocumentBuilder documentBuilder;
+    private final MongoCollection<Document> conversationCollectionDocument;
+    private final MongoCollection<ConversationMemorySnapshot> conversationCollectionObject;
 
     @Inject
-    public ConversationMemoryStore(MongoDatabase database, IDocumentBuilder documentBuilder) {
-        conversationCollection = database.getCollection(CONVERSATION_COLLECTION);
-        this.documentBuilder = documentBuilder;
-        conversationCollection.createIndex(Indexes.ascending(CONVERSATION_STATE_FIELD));
-        conversationCollection.createIndex(Indexes.ascending(CONVERSATION_BOT_ID_FIELD));
-        conversationCollection.createIndex(Indexes.ascending(CONVERSATION_BOT_VERSION_FIELD));
+    public ConversationMemoryStore(MongoDatabase database) {
+        this.conversationCollectionDocument = database.getCollection(CONVERSATION_COLLECTION, Document.class);
+        this.conversationCollectionObject = database.getCollection(CONVERSATION_COLLECTION, ConversationMemorySnapshot.class);
+        conversationCollectionDocument.createIndex(Indexes.ascending(CONVERSATION_STATE_FIELD));
+        conversationCollectionDocument.createIndex(Indexes.ascending(CONVERSATION_BOT_ID_FIELD));
+        conversationCollectionDocument.createIndex(Indexes.ascending(CONVERSATION_BOT_VERSION_FIELD));
     }
 
     @Override
-    public String storeConversationMemorySnapshot(ConversationMemorySnapshot snapshot) throws IResourceStore.ResourceStoreException {
-        try {
-            String json = documentBuilder.toString(snapshot);
-            Document document = Document.parse(json);
-
-            document.remove("conversationId");
-
-            if (snapshot.getConversationId() != null) {
-                document.put(OBJECT_ID, new ObjectId(snapshot.getConversationId()));
-                conversationCollection.updateOne(new Document(OBJECT_ID, new ObjectId(snapshot.getConversationId())),
-                        new Document("$set", document),
-                        new UpdateOptions().upsert(true));
-            } else {
-                conversationCollection.insertOne(document);
-            }
-
-            return document.get(OBJECT_ID).toString();
-        } catch (IOException e) {
-            throw new IResourceStore.ResourceStoreException(e.getLocalizedMessage(), e);
+    public String storeConversationMemorySnapshot(ConversationMemorySnapshot snapshot) {
+        String conversationId = snapshot.getConversationId();
+        if (conversationId != null) {
+            conversationCollectionObject.replaceOne(
+                    new Document(OBJECT_ID, new ObjectId(conversationId)), snapshot);
+        } else {
+            snapshot.setId(new ObjectId().toString());
+            conversationCollectionObject.insertOne(snapshot);
         }
+
+        return snapshot.getConversationId();
     }
 
     @Override
-    public ConversationMemorySnapshot loadConversationMemorySnapshot(String conversationId) throws IResourceStore.ResourceNotFoundException, IResourceStore.ResourceStoreException {
-        Document document = conversationCollection.find(new Document(OBJECT_ID, new ObjectId(conversationId))).first();
+    public ConversationMemorySnapshot loadConversationMemorySnapshot(String conversationId)
+            throws IResourceStore.ResourceNotFoundException {
 
-        try {
-            if (document == null) {
-                String message = "Could not find ConversationMemorySnapshot (conversationId=%s)";
-                message = String.format(message, conversationId);
-                throw new IResourceStore.ResourceNotFoundException(message);
-            }
+        var memorySnapshot = conversationCollectionObject.find(new Document(OBJECT_ID, new ObjectId(conversationId))).first();
 
-            document.remove(OBJECT_ID);
-
-            ConversationMemorySnapshot snapshot = documentBuilder.build(document, ConversationMemorySnapshot.class);
-
-            snapshot.setConversationId(conversationId);
-
-            return snapshot;
-        } catch (IOException e) {
-            throw new IResourceStore.ResourceStoreException(e.getLocalizedMessage(), e);
+        if (memorySnapshot == null) {
+            String message = "Could not find ConversationMemorySnapshot (conversationId=%s)";
+            message = String.format(message, conversationId);
+            throw new ResourceNotFoundException(message);
         }
+
+        return memorySnapshot;
     }
 
     @Override
     public void setConversationState(String conversationId, ConversationState conversationState) {
-        Document updateConversationStateField = new Document("$set", new BasicDBObject(CONVERSATION_STATE_FIELD, conversationState.name()));
-        conversationCollection.updateOne(new Document(OBJECT_ID, new ObjectId(conversationId)), updateConversationStateField);
+        Document updateConversationStateField = new Document("$set", new Document(CONVERSATION_STATE_FIELD, conversationState.name()));
+        conversationCollectionDocument.updateOne(new Document(OBJECT_ID, new ObjectId(conversationId)), updateConversationStateField);
     }
 
     @Override
     public void deleteConversationMemorySnapshot(String conversationId) {
-        conversationCollection.deleteOne(new Document(OBJECT_ID, new ObjectId(conversationId)));
+        conversationCollectionDocument.deleteOne(new Document(OBJECT_ID, new ObjectId(conversationId)));
     }
 
     @Override
     public ConversationState getConversationState(String conversationId) {
-        Document conversationMemoryDocument = conversationCollection.find(
+        Document conversationMemoryDocument = conversationCollectionDocument.find(
                 new Document(OBJECT_ID, new ObjectId(conversationId))).
                 projection(new Document(CONVERSATION_STATE_FIELD, 1).append(OBJECT_ID, 0)).
                 first();
@@ -114,11 +93,16 @@ public class ConversationMemoryStore implements IConversationMemoryStore, IResou
     public Long getActiveConversationCount(String botId, Integer botVersion) {
         Bson query = Filters.and(Filters.eq("botId", botId), Filters.eq("botVersion", botVersion),
                 Filters.not(new Document("conversationState", ENDED.toString())));
-        return conversationCollection.countDocuments(query);
+        return conversationCollectionDocument.countDocuments(query);
     }
 
     @Override
-    public IResourceId create(ConversationMemorySnapshot content) throws ResourceStoreException {
+    public ConversationMemorySnapshot readIncludingDeleted(String id, Integer version) throws ResourceNotFoundException, ResourceStoreException {
+        return loadConversationMemorySnapshot(id);
+    }
+
+    @Override
+    public IResourceId create(ConversationMemorySnapshot content) {
         final String conversationId = storeConversationMemorySnapshot(content);
 
         return new IResourceId() {
@@ -135,12 +119,12 @@ public class ConversationMemoryStore implements IConversationMemoryStore, IResou
     }
 
     @Override
-    public ConversationMemorySnapshot read(String id, Integer version) throws ResourceNotFoundException, ResourceStoreException {
+    public ConversationMemorySnapshot read(String id, Integer version) throws ResourceNotFoundException {
         return loadConversationMemorySnapshot(id);
     }
 
     @Override
-    public Integer update(String id, Integer version, ConversationMemorySnapshot content) throws ResourceStoreException {
+    public Integer update(String id, Integer version, ConversationMemorySnapshot content) {
         storeConversationMemorySnapshot(content);
         return 0;
     }

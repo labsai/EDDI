@@ -1,4 +1,4 @@
-package ai.labs.rest.rest;
+package ai.labs.rest.restinterfaces;
 
 import org.jboss.resteasy.annotations.cache.NoCache;
 

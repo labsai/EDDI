@@ -4,8 +4,8 @@ import ai.labs.memory.model.SimpleConversationMemorySnapshot;
 import ai.labs.models.*;
 import ai.labs.resources.rest.botmanagement.IRestBotTriggerStore;
 import ai.labs.resources.rest.botmanagement.IRestUserConversationStore;
-import ai.labs.rest.rest.IRestBotEngine;
-import ai.labs.rest.rest.IRestBotManagement;
+import ai.labs.rest.restinterfaces.IRestBotEngine;
+import ai.labs.rest.restinterfaces.IRestBotManagement;
 import ai.labs.utilities.RestUtilities;
 import lombok.extern.slf4j.Slf4j;
 
@@ -117,8 +117,9 @@ public class RestBotManagement implements IRestBotManagement {
 
         BotTriggerConfiguration botTriggerConfiguration = getBotTrigger(intent);
         BotDeployment botDeployment = getRandom(botTriggerConfiguration.getBotDeployments());
+        String botId = botDeployment.getBotId();
         Response botResponse = restBotEngine.startConversationWithContext(botDeployment.getEnvironment(),
-                botDeployment.getBotId(),
+                botId,
                 userId,
                 botDeployment.getInitialContext());
         int responseHttpCode = botResponse.getStatus();
@@ -129,7 +130,7 @@ public class RestBotManagement implements IRestBotManagement {
         } else {
             throw new CannotCreateConversationException(
                     String.format("Cannot create conversation for botId=%s in environment=%s (httpCode=%s)",
-                            botDeployment.getBotId(),
+                            botId,
                             botDeployment.getEnvironment(),
                             responseHttpCode));
         }
@@ -166,7 +167,7 @@ public class RestBotManagement implements IRestBotManagement {
         restUserConversationStore.createUserConversation(intent, userId, userConversation);
     }
 
-    private class CannotCreateConversationException extends Exception {
+    private static class CannotCreateConversationException extends Exception {
         CannotCreateConversationException(String message) {
             super(message);
         }

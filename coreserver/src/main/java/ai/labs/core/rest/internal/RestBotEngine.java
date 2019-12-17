@@ -2,6 +2,7 @@ package ai.labs.core.rest.internal;
 
 import ai.labs.caching.ICache;
 import ai.labs.caching.ICacheFactory;
+import ai.labs.core.rest.utilities.IConversationSetup;
 import ai.labs.lifecycle.IConversation;
 import ai.labs.lifecycle.LifecycleException;
 import ai.labs.memory.IConversationMemory;
@@ -15,17 +16,17 @@ import ai.labs.models.Deployment.Environment;
 import ai.labs.models.InputData;
 import ai.labs.resources.rest.properties.IPropertiesStore;
 import ai.labs.resources.rest.properties.model.Properties;
-import ai.labs.rest.rest.IRestBotEngine;
+import ai.labs.rest.restinterfaces.IRestBotEngine;
 import ai.labs.runtime.IBot;
 import ai.labs.runtime.IBotFactory;
 import ai.labs.runtime.IConversationCoordinator;
 import ai.labs.runtime.SystemRuntime;
 import ai.labs.runtime.SystemRuntime.IRuntime.IFinishedExecution;
 import ai.labs.runtime.service.ServiceException;
-import ai.labs.utilities.RestUtilities;
 import ai.labs.utilities.RuntimeUtilities;
+import io.micrometer.core.instrument.MeterRegistry;
+import io.micrometer.core.instrument.Timer;
 import lombok.extern.slf4j.Slf4j;
-import org.apache.commons.lang3.RandomStringUtils;
 import org.jboss.resteasy.spi.NoLogWebApplicationException;
 
 import javax.inject.Inject;
@@ -43,6 +44,7 @@ import java.util.stream.Collectors;
 import static ai.labs.memory.ConversationMemoryUtilities.*;
 import static ai.labs.persistence.IResourceStore.ResourceNotFoundException;
 import static ai.labs.persistence.IResourceStore.ResourceStoreException;
+import static ai.labs.utilities.RestUtilities.createURI;
 import static ai.labs.utilities.RuntimeUtilities.isNullOrEmpty;
 
 /**
@@ -61,7 +63,11 @@ public class RestBotEngine implements IRestBotEngine {
     private final SystemRuntime.IRuntime runtime;
     private final IContextLogger contextLogger;
     private final int botTimeout;
+    private final IConversationSetup conversationSetup;
     private final ICache<String, ConversationState> conversationStateCache;
+    private final Timer timerConversationStart;
+    private final Timer timerConversationRead;
+    private final Timer timerConversationSay;
 
     @Inject
     public RestBotEngine(IBotFactory botFactory,
@@ -69,21 +75,27 @@ public class RestBotEngine implements IRestBotEngine {
                          IConversationDescriptorStore conversationDescriptorStore,
                          IPropertiesStore propertiesStore,
                          IConversationCoordinator conversationCoordinator,
+                         IConversationSetup conversationSetup,
                          ICacheFactory cacheFactory,
                          SystemRuntime.IRuntime runtime,
                          IContextLogger contextLogger,
+                         MeterRegistry meterRegistry,
                          @Named("system.botTimeoutInSeconds") int botTimeout) {
         this.botFactory = botFactory;
         this.conversationMemoryStore = conversationMemoryStore;
         this.conversationDescriptorStore = conversationDescriptorStore;
         this.propertiesStore = propertiesStore;
         this.conversationCoordinator = conversationCoordinator;
+        this.conversationSetup = conversationSetup;
         this.conversationStateCache = cacheFactory.getCache(CACHE_NAME_CONVERSATION_STATE);
         this.runtime = runtime;
         this.contextLogger = contextLogger;
         this.botTimeout = botTimeout;
-    }
 
+        this.timerConversationStart = meterRegistry.timer("conversation.start");
+        this.timerConversationRead = meterRegistry.timer("conversation.load");
+        this.timerConversationSay = meterRegistry.timer("conversation.processing");
+    }
 
     @Override
     public Response startConversation(Environment environment, String botId, String userId) {
@@ -95,6 +107,8 @@ public class RestBotEngine implements IRestBotEngine {
                                                  String botId,
                                                  String userId,
                                                  Map<String, Context> context) {
+
+        long startTime = System.nanoTime();
 
         RuntimeUtilities.checkNotNull(environment, "environment");
         RuntimeUtilities.checkNotNull(botId, "botId");
@@ -110,28 +124,30 @@ public class RestBotEngine implements IRestBotEngine {
                 return Response.status(Response.Status.NOT_FOUND).type(MediaType.TEXT_PLAIN).entity(message).build();
             }
 
-            userId = computeAnonymousUserIdIfEmpty(userId);
+            userId = conversationSetup.computeAnonymousUserIdIfEmpty(userId);
             IConversation conversation = latestBot.startConversation(userId, context,
                     createPropertiesHandler(userId), null);
 
-            String conversationId = storeConversationMemory(conversation.getConversationMemory(), environment);
+            var conversationId = storeConversationMemory(conversation.getConversationMemory(), environment);
             cacheConversationState(conversationId, ConversationState.READY);
-            URI createdUri = RestUtilities.createURI(resourceURI, conversationId);
-            return Response.created(createdUri).build();
+            var conversationUri = createURI(resourceURI, conversationId);
+
+            URI userUri = conversationSetup.createConversationDescriptor(botId, latestBot, conversationId, conversationUri);
+            conversationSetup.createPermissions(conversationId, userUri);
+
+            return Response.created(conversationUri).build();
         } catch (ServiceException |
                 ResourceStoreException |
+                ResourceNotFoundException |
                 InstantiationException |
                 LifecycleException |
                 IllegalAccessException e) {
             contextLogger.setLoggingContext(contextLogger.createLoggingContext(environment, botId, null, userId));
             log.error(e.getLocalizedMessage(), e);
             throw new InternalServerErrorException(e.getLocalizedMessage(), e);
+        } finally {
+            record(startTime, timerConversationStart);
         }
-    }
-
-    private String computeAnonymousUserIdIfEmpty(String userId) {
-        return isNullOrEmpty(userId) ?
-                "anonymous-" + RandomStringUtils.randomAlphanumeric(10) : userId;
     }
 
     private IPropertiesHandler createPropertiesHandler(final String userId) {
@@ -173,6 +189,8 @@ public class RestBotEngine implements IRestBotEngine {
                                                              Boolean returnCurrentStepOnly,
                                                              List<String> returningFields) {
 
+        long startTime = System.nanoTime();
+
         validateParams(environment, botId, conversationId);
         contextLogger.setLoggingContext(contextLogger.createLoggingContext(environment, botId, conversationId, null));
         try {
@@ -193,6 +211,8 @@ public class RestBotEngine implements IRestBotEngine {
             throw new InternalServerErrorException(e.getLocalizedMessage(), e);
         } catch (ResourceNotFoundException e) {
             throw new NoLogWebApplicationException(Response.Status.NOT_FOUND);
+        } finally {
+            record(startTime, timerConversationRead);
         }
     }
 
@@ -232,6 +252,8 @@ public class RestBotEngine implements IRestBotEngine {
                                  final Boolean returnDetailed, final Boolean returnCurrentStepOnly,
                                  final List<String> returningFields, final InputData inputData,
                                  final AsyncResponse response) {
+
+        long startTime = System.nanoTime();
 
         validateParams(environment, botId, conversationId);
         RuntimeUtilities.checkNotNull(inputData, "inputData");
@@ -275,6 +297,7 @@ public class RestBotEngine implements IRestBotEngine {
                         cacheConversationState(conversationId, memorySnapshot.getConversationState());
                         conversationDescriptorStore.updateTimeStamp(conversationId);
                         response.resume(memorySnapshot);
+                        record(startTime, timerConversationSay);
                     });
 
             if (conversation.isEnded()) {
@@ -551,5 +574,9 @@ public class RestBotEngine implements IRestBotEngine {
             message = String.format(message, conversationId);
             throw new IllegalAccessException(message);
         }
+    }
+
+    private static void record(long startTime, Timer timer) {
+        timer.record(System.nanoTime() - startTime, TimeUnit.NANOSECONDS);
     }
 }

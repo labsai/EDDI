@@ -11,7 +11,11 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
-import static ai.labs.behavior.impl.conditions.BaseMatcher.ConversationStepOccurrence.*;
+import static ai.labs.behavior.impl.conditions.BaseMatcher.ConversationStepOccurrence.anyStep;
+import static ai.labs.behavior.impl.conditions.BaseMatcher.ConversationStepOccurrence.currentStep;
+import static ai.labs.behavior.impl.conditions.BaseMatcher.ConversationStepOccurrence.lastStep;
+import static ai.labs.behavior.impl.conditions.BaseMatcher.ConversationStepOccurrence.never;
+import static ai.labs.behavior.impl.conditions.BaseMatcher.ConversationStepOccurrence.values;
 import static ai.labs.behavior.impl.conditions.IBehaviorCondition.ExecutionState.SUCCESS;
 
 /**

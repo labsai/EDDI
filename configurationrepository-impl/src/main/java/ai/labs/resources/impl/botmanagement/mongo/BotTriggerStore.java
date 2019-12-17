@@ -15,7 +15,9 @@ import org.bson.Document;
 import javax.inject.Inject;
 import java.io.IOException;
 
-import static ai.labs.persistence.IResourceStore.*;
+import static ai.labs.persistence.IResourceStore.ResourceAlreadyExistsException;
+import static ai.labs.persistence.IResourceStore.ResourceNotFoundException;
+import static ai.labs.persistence.IResourceStore.ResourceStoreException;
 
 /**
  * @author ginccc

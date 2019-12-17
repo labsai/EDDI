@@ -4,7 +4,11 @@ import ai.labs.parser.extensions.dictionaries.IDictionary;
 import ai.labs.parser.model.FoundWord;
 import org.tartarus.snowball.SnowballStemmer;
 
-import java.util.*;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
 
 
 /**

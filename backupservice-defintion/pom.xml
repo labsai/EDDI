@@ -6,7 +6,7 @@
     <parent>
         <artifactId>eddi</artifactId>
         <groupId>ai.labs</groupId>
-        <version>4.7</version>
+        <version>4.8</version>
         <relativePath>../pom.xml</relativePath>
     </parent>
     <packaging>jar</packaging>
@@ -22,7 +22,7 @@
         <dependency>
             <groupId>org.jboss.resteasy</groupId>
             <artifactId>resteasy-multipart-provider</artifactId>
-            <version>4.2.0.Final</version>
+            <version>4.4.0.Final</version>
         </dependency>
     </dependencies>
 

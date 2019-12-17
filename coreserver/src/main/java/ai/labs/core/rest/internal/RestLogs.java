@@ -1,7 +1,7 @@
 package ai.labs.core.rest.internal;
 
 import ai.labs.models.DatabaseLog;
-import ai.labs.rest.rest.IRestLogs;
+import ai.labs.rest.restinterfaces.IRestLogs;
 import ai.labs.runtime.IDatabaseLogs;
 import ch.qos.logback.classic.Level;
 import ch.qos.logback.classic.Logger;
@@ -35,7 +35,6 @@ public class RestLogs implements IRestLogs {
         log.info("Changing LogLevel for packageName: " + packageName + " with current logger level: " + logger.getLevel());
         logger.setLevel(Level.toLevel(logLevel));
         log.info("Changed LogLevel for packageName: " + packageName + " to logger level: " + logger.getLevel());
-
     }
 
     @Override

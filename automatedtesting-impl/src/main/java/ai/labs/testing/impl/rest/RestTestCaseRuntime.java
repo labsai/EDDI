@@ -1,13 +1,12 @@
 package ai.labs.testing.impl.rest;
 
 import ai.labs.memory.IConversationMemoryStore;
-import ai.labs.rest.restinterfaces.IRestInterfaceFactory;
+import ai.labs.rest.restinterfaces.factory.IRestInterfaceFactory;
 import ai.labs.testing.ITestCaseStore;
 import ai.labs.testing.impl.TestCaseRuntime;
 import ai.labs.testing.model.TestCaseState;
 import ai.labs.testing.rest.IRestTestCaseRuntime;
 import lombok.extern.slf4j.Slf4j;
-import org.jboss.resteasy.plugins.guice.RequestScoped;
 
 import javax.inject.Inject;
 import javax.ws.rs.InternalServerErrorException;
@@ -16,7 +15,6 @@ import javax.ws.rs.core.Response;
 /**
  * @author ginccc
  */
-@RequestScoped
 @Slf4j
 public class RestTestCaseRuntime implements IRestTestCaseRuntime {
     private final IRestInterfaceFactory restInterfaceFactory;

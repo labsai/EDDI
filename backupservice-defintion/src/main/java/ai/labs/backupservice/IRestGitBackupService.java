@@ -4,8 +4,17 @@ import io.swagger.annotations.Api;
 import io.swagger.annotations.ApiResponse;
 import io.swagger.annotations.Authorization;
 
-import javax.ws.rs.*;
+import javax.ws.rs.GET;
+import javax.ws.rs.POST;
+import javax.ws.rs.Path;
+import javax.ws.rs.PathParam;
+import javax.ws.rs.QueryParam;
 import javax.ws.rs.core.Response;
+
+/**
+ * @author rpi
+ */
+
 
 @Api(value = "Backup", authorizations = {@Authorization(value = "eddi_auth")})
 @Path("/backup/git")
@@ -33,4 +42,6 @@ public interface IRestGitBackupService {
     @ApiResponse(code = 200, message = "returns the git message of the attempted push into the configured git repository.")
     Response gitPush(@PathParam("botId") String botId);
 
+    boolean isGitAutomatic();
+    boolean isGitInitialised(String botId);
 }

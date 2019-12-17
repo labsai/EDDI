@@ -8,8 +8,8 @@ import ai.labs.resources.rest.config.packages.IRestPackageStore;
 import ai.labs.resources.rest.config.packages.model.PackageConfiguration;
 import ai.labs.resources.rest.config.packages.model.PackageConfiguration.PackageExtension;
 import ai.labs.resources.rest.documentdescriptor.IDocumentDescriptorStore;
-import ai.labs.rest.restinterfaces.IRestInterfaceFactory;
-import ai.labs.rest.restinterfaces.RestInterfaceFactory;
+import ai.labs.rest.restinterfaces.factory.IRestInterfaceFactory;
+import ai.labs.rest.restinterfaces.factory.RestInterfaceFactory;
 import ai.labs.runtime.client.configuration.ResourceClientLibrary;
 import ai.labs.runtime.service.ServiceException;
 import ai.labs.schema.IJsonSchemaCreator;
@@ -25,7 +25,9 @@ import java.net.URI;
 import java.util.List;
 import java.util.Map;
 
-import static ai.labs.resources.impl.utilities.ResourceUtilities.*;
+import static ai.labs.resources.impl.utilities.ResourceUtilities.createDocumentDescriptorForDuplicate;
+import static ai.labs.resources.impl.utilities.ResourceUtilities.createMalFormattedResourceUriException;
+import static ai.labs.resources.impl.utilities.ResourceUtilities.validateUri;
 import static ai.labs.utilities.RuntimeUtilities.isNullOrEmpty;
 import static javax.ws.rs.core.Response.Status.BAD_REQUEST;
 

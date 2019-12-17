@@ -1,5 +1,6 @@
 package ai.labs.resources.impl.utilities;
 
+import ai.labs.memory.descriptor.model.ConversationDescriptor;
 import ai.labs.models.DocumentDescriptor;
 import ai.labs.persistence.IResourceStore;
 import ai.labs.persistence.IResourceStore.IResourceId;
@@ -127,5 +128,33 @@ public class ResourceUtilities {
                 newResourceId.getVersion(),
                 oldDescriptor);
 
+    }
+
+    public static DocumentDescriptor createDocumentDescriptor(URI resource, URI author) {
+        Date current = new Date(System.currentTimeMillis());
+
+        DocumentDescriptor descriptor = new DocumentDescriptor();
+        descriptor.setResource(resource);
+        descriptor.setName("");
+        descriptor.setDescription("");
+        descriptor.setCreatedBy(author);
+        descriptor.setCreatedOn(current);
+        descriptor.setLastModifiedOn(current);
+        descriptor.setLastModifiedBy(author);
+
+        return descriptor;
+    }
+
+    public static ConversationDescriptor createConversationDescriptor(URI resource, URI botResourceURI, URI user) {
+        ConversationDescriptor conversationDescriptor = new ConversationDescriptor();
+        conversationDescriptor.setResource(resource);
+        conversationDescriptor.setBotResource(botResourceURI);
+        Date createdOn = new Date(System.currentTimeMillis());
+        conversationDescriptor.setCreatedOn(createdOn);
+        conversationDescriptor.setLastModifiedOn(createdOn);
+        conversationDescriptor.setCreatedBy(user);
+        conversationDescriptor.setLastModifiedBy(user);
+        conversationDescriptor.setViewState(ConversationDescriptor.ViewState.UNSEEN);
+        return conversationDescriptor;
     }
 }

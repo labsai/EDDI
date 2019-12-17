@@ -3,10 +3,10 @@ package ai.labs.server;
 import ai.labs.runtime.SwaggerServletContextListener;
 import ai.labs.runtime.ThreadContext;
 import ai.labs.utilities.FileUtilities;
+import io.micrometer.core.instrument.MeterRegistry;
 import io.micrometer.core.instrument.Tags;
 import io.micrometer.core.instrument.binder.jetty.JettyServerThreadPoolMetrics;
 import io.micrometer.core.instrument.binder.jetty.JettyStatisticsMetrics;
-import io.micrometer.prometheus.PrometheusMeterRegistry;
 import lombok.AllArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.eclipse.jetty.alpn.server.ALPNServerConnectionFactory;
@@ -86,7 +86,7 @@ public class ServerRuntime implements IServerRuntime {
     private final ThreadPoolExecutor threadPoolExecutor;
     private final MongoLoginService mongoLoginService;
     private final AdapterConfig keycloakAdapterConfig;
-    private final PrometheusMeterRegistry meterRegistry;
+    private final MeterRegistry meterRegistry;
     private final String environment;
     private final String resourceDir;
 
@@ -98,7 +98,7 @@ public class ServerRuntime implements IServerRuntime {
                          ThreadPoolExecutor threadPoolExecutor,
                          MongoLoginService mongoLoginService,
                          AdapterConfig keycloakAdapterConfig,
-                         PrometheusMeterRegistry meterRegistry,
+                         MeterRegistry meterRegistry,
                          @Named("system.environment") String environment,
                          @Named("systemRuntime.resourceDir") String resourceDir) {
         this.options = options;
@@ -241,15 +241,14 @@ public class ServerRuntime implements IServerRuntime {
         }
         servletHandler.addFilter(new FilterHolder(createInitThreadBoundValuesFilter()), ANY_PATH, getAllDispatcherTypes());
 
-        StatisticsHandler statisticsHandler = new StatisticsHandler();
-        handlers.addHandler(statisticsHandler);
-
         //monitoring stats
+        StatisticsHandler statisticsHandler = new StatisticsHandler();
+        statisticsHandler.setHandler(handlers);
         var tags = Tags.of("eddi.jetty", "jetty-server");
         new JettyStatisticsMetrics(statisticsHandler, tags).bindTo(meterRegistry);
         new JettyServerThreadPoolMetrics(threadPool, tags).bindTo(meterRegistry);
 
-        server.setHandler(handlers);
+        server.setHandler(statisticsHandler);
 
         // Start the server
         server.setStopAtShutdown(true);
@@ -354,6 +353,7 @@ public class ServerRuntime implements IServerRuntime {
 
     private static void addCorsHeader(HttpServletResponse httpResponse) {
         httpResponse.setHeader("Access-Control-Allow-Origin", "*");
+        httpResponse.setHeader("Access-Control-Allow-Credentials", "true");
         httpResponse.setHeader("Access-Control-Allow-Headers", "Authorization,X-Requested-With,Content-Type,Accept,Origin,Cache-Control");
         httpResponse.setHeader("Access-Control-Allow-Methods", "HEAD,GET,PUT,POST,DELETE,PATCH,OPTIONS");
         httpResponse.setHeader("Access-Control-Expose-Headers", "Location");

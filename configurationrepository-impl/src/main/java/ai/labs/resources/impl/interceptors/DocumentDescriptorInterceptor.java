@@ -2,12 +2,9 @@ package ai.labs.resources.impl.interceptors;
 
 import ai.labs.memory.IConversationMemoryStore;
 import ai.labs.memory.descriptor.IConversationDescriptorStore;
-import ai.labs.memory.descriptor.model.ConversationDescriptor;
-import ai.labs.models.DocumentDescriptor;
 import ai.labs.models.ResourceDescriptor;
 import ai.labs.persistence.IDescriptorStore;
 import ai.labs.persistence.IResourceStore;
-import ai.labs.resources.rest.config.bots.IRestBotStore;
 import ai.labs.resources.rest.documentdescriptor.IDocumentDescriptorStore;
 import ai.labs.resources.rest.method.PATCH;
 import ai.labs.runtime.DependencyInjector;
@@ -22,7 +19,12 @@ import lombok.extern.slf4j.Slf4j;
 import org.jboss.resteasy.plugins.guice.RequestScoped;
 
 import javax.inject.Inject;
-import javax.ws.rs.*;
+import javax.ws.rs.BadRequestException;
+import javax.ws.rs.DELETE;
+import javax.ws.rs.InternalServerErrorException;
+import javax.ws.rs.NotFoundException;
+import javax.ws.rs.POST;
+import javax.ws.rs.PUT;
 import javax.ws.rs.container.ContainerRequestContext;
 import javax.ws.rs.container.ContainerResponseContext;
 import javax.ws.rs.container.ContainerResponseFilter;
@@ -34,6 +36,8 @@ import java.lang.reflect.Method;
 import java.net.URI;
 import java.security.Principal;
 import java.util.Date;
+
+import static ai.labs.resources.impl.utilities.ResourceUtilities.createDocumentDescriptor;
 
 /**
  * @author ginccc
@@ -87,14 +91,7 @@ public class DocumentDescriptorInterceptor implements ContainerResponseFilter {
                             if (httpStatus == 201) {
                                 if (resourceLocationUri.startsWith("eddi://ai.labs.testcases")) {
                                     testCaseDescriptorStore.createDescriptor(resourceId.getId(), resourceId.getVersion(), createTestCaseDescriptor(createdResourceURI, userURI));
-                                } else if (resourceLocationUri.startsWith("eddi://ai.labs.conversation")) {
-                                    var memorySnapshot = conversationMemoryStore.loadConversationMemorySnapshot(resourceId.getId());
-                                    var botId = memorySnapshot.getBotId();
-                                    var botVersion = memorySnapshot.getBotVersion();
-                                    var botResourceURI = URI.create(IRestBotStore.resourceURI + botId + IRestBotStore.versionQueryParam + botVersion);
-                                    conversationDescriptorStore.createDescriptor(resourceId.getId(), resourceId.getVersion(),
-                                            createConversationDescriptor(createdResourceURI, botResourceURI, userURI));
-                                } else if (isResourceIdValid(resourceId)) {
+                                } else if (isResourceIdValid(resourceId) && !resourceLocationUri.startsWith("eddi://ai.labs.conversation")) {
                                     try {
                                         documentDescriptorStore.readDescriptor(resourceId.getId(), resourceId.getVersion());
                                     } catch (IResourceStore.ResourceNotFoundException e) {
@@ -166,34 +163,6 @@ public class DocumentDescriptorInterceptor implements ContainerResponseFilter {
         descriptor.setLastModifiedBy(author);
 
         return descriptor;
-    }
-
-    private static DocumentDescriptor createDocumentDescriptor(URI resource, URI author) {
-        Date current = new Date(System.currentTimeMillis());
-
-        DocumentDescriptor descriptor = new DocumentDescriptor();
-        descriptor.setResource(resource);
-        descriptor.setName("");
-        descriptor.setDescription("");
-        descriptor.setCreatedBy(author);
-        descriptor.setCreatedOn(current);
-        descriptor.setLastModifiedOn(current);
-        descriptor.setLastModifiedBy(author);
-
-        return descriptor;
-    }
-
-    private static ConversationDescriptor createConversationDescriptor(URI resource, URI botResourceURI, URI user) {
-        ConversationDescriptor conversationDescriptor = new ConversationDescriptor();
-        conversationDescriptor.setResource(resource);
-        conversationDescriptor.setBotResource(botResourceURI);
-        Date createdOn = new Date(System.currentTimeMillis());
-        conversationDescriptor.setCreatedOn(createdOn);
-        conversationDescriptor.setLastModifiedOn(createdOn);
-        conversationDescriptor.setCreatedBy(user);
-        conversationDescriptor.setLastModifiedBy(user);
-        conversationDescriptor.setViewState(ConversationDescriptor.ViewState.UNSEEN);
-        return conversationDescriptor;
     }
 
     private static URI createNewVersionOfResource(final URI resource, Integer version) {
