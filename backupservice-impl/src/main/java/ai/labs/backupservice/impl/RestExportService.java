@@ -14,7 +14,6 @@ import ai.labs.resources.rest.config.packages.IPackageStore;
 import ai.labs.resources.rest.config.packages.model.PackageConfiguration;
 import ai.labs.resources.rest.config.propertysetter.IPropertySetterStore;
 import ai.labs.resources.rest.config.regulardictionary.IRegularDictionaryStore;
-import ai.labs.resources.rest.config.regulardictionary.model.RegularDictionaryConfiguration;
 import ai.labs.resources.rest.documentdescriptor.IDocumentDescriptorStore;
 import ai.labs.serialization.IJsonSerialization;
 import ai.labs.utilities.FileUtilities;
