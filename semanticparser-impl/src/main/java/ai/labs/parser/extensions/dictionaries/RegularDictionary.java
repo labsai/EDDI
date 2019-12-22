@@ -1,11 +1,19 @@
 package ai.labs.parser.extensions.dictionaries;
 
 import ai.labs.expressions.Expressions;
-import ai.labs.parser.model.*;
+import ai.labs.parser.model.FoundRegEx;
+import ai.labs.parser.model.FoundWord;
+import ai.labs.parser.model.Phrase;
+import ai.labs.parser.model.RegEx;
+import ai.labs.parser.model.Word;
 import lombok.Getter;
 import lombok.Setter;
 
-import java.util.*;
+import java.util.Collections;
+import java.util.LinkedList;
+import java.util.List;
+import java.util.Map;
+import java.util.TreeMap;
 import java.util.stream.Collectors;
 
 /**
@@ -37,9 +45,14 @@ public class RegularDictionary implements IDictionary {
     @Override
     public List<IFoundWord> lookupTerm(String lookup) {
         List<IFoundWord> ret = phrases.stream().flatMap(phrase -> phrase.getWords().stream()).
-                filter(partOfPhrase -> partOfPhrase.getValue().equalsIgnoreCase(lookup)).
+                filter(partOfPhrase -> partOfPhrase.getValue().equals(lookup)).
                 map(partOfPhrase -> new FoundWord(partOfPhrase, false, 1.0)).
                 collect(Collectors.toList());
+
+        phrases.stream().flatMap(phrase -> phrase.getWords().stream()).
+                filter(partOfPhrase -> partOfPhrase.getValue().equalsIgnoreCase(lookup)).
+                map(partOfPhrase -> new FoundWord(partOfPhrase, false, 0.9)).
+                collect(Collectors.toList()).stream().filter(foundWord -> !ret.contains(foundWord)).forEach(ret::add);
 
         IWord word;
         if ((word = words.get(lookup)) != null) {
