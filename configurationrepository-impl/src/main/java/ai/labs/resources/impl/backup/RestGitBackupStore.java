@@ -2,11 +2,8 @@ package ai.labs.resources.impl.backup;
 
 import ai.labs.resources.rest.backup.IGitBackupStore;
 import ai.labs.resources.rest.backup.model.GitBackupSettings;
-import ai.labs.utilities.FileUtilities;
 
 import java.io.*;
-import java.net.URI;
-import java.net.URISyntaxException;
 import java.nio.file.Files;
 import java.nio.file.Paths;
 import java.util.Properties;

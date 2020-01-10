@@ -3,7 +3,6 @@ package ai.labs.resources.rest.backup.model;
 import lombok.Getter;
 import lombok.Setter;
 
-import java.net.URI;
 
 @Getter
 @Setter
