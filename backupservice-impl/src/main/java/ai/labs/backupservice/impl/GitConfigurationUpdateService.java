@@ -1,6 +1,5 @@
 package ai.labs.backupservice.impl;
 
-import ai.labs.backupservice.IRestExportService;
 import ai.labs.backupservice.IRestGitBackupService;
 import ai.labs.persistence.IResourceStore;
 import ai.labs.resources.rest.config.bots.IBotStore;
@@ -9,7 +8,6 @@ import ai.labs.resources.rest.config.packages.IPackageStore;
 import ai.labs.resources.rest.config.packages.model.PackageConfiguration;
 import ai.labs.resources.rest.deployment.IDeploymentStore;
 import ai.labs.resources.rest.deployment.model.DeploymentInfo;
-import ai.labs.resources.rest.documentdescriptor.IDocumentDescriptorStore;
 import ai.labs.serialization.IJsonSerialization;
 import ai.labs.utilities.RestUtilities;
 import lombok.extern.slf4j.Slf4j;
@@ -25,7 +23,6 @@ import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
-import java.util.function.Predicate;
 
 
 @Slf4j
