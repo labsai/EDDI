@@ -3,7 +3,13 @@ package ai.labs.resources.impl.backup;
 import ai.labs.resources.rest.backup.IGitBackupStore;
 import ai.labs.resources.rest.backup.model.GitBackupSettings;
 
-import java.io.*;
+import java.io.File;
+import java.io.FileOutputStream;
+import java.io.IOException;
+import java.io.OutputStream;
+import java.io.InputStream;
+import java.io.FileInputStream;
+import java.io.FileNotFoundException;
 import java.nio.file.Files;
 import java.nio.file.Paths;
 import java.util.Properties;
