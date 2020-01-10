@@ -5,9 +5,10 @@ import ai.labs.backupservice.IRestGitBackupService;
 import ai.labs.backupservice.IRestImportService;
 import ai.labs.backupservice.IZipArchive;
 import ai.labs.persistence.IResourceStore;
+import ai.labs.resources.rest.backup.IGitBackupStore;
+import ai.labs.resources.rest.backup.model.GitBackupSettings;
 import ai.labs.resources.rest.config.bots.IBotStore;
 import ai.labs.utilities.FileUtilities;
-import com.google.inject.name.Named;
 import lombok.extern.slf4j.Slf4j;
 import org.eclipse.jgit.api.Git;
 import org.eclipse.jgit.api.PullResult;
@@ -53,27 +54,23 @@ public class RestGitBackupService implements IRestGitBackupService {
 
     @Inject
     public RestGitBackupService(IBotStore botStore,
+                                IGitBackupStore backupStore,
                                 IZipArchive zipArchive,
                                 IRestImportService importService,
-                                IRestExportService exportService,
-                                @Named("git.username") String gitUsername,
-                                @Named("git.password") String gitPassword,
-                                @Named("git.url") String gitUrl,
-                                @Named("git.branch") String gitBranch,
-                                @Named("git.automatic") boolean gitAutomatic,
-                                @Named("git.commiter_name") String gitCommitterName,
-                                @Named("git.commiter_email") String gitCommiterEmail) {
+                                IRestExportService exportService) {
         this.botStore = botStore;
         this.zipArchive = zipArchive;
         this.importService = importService;
         this.exportService = exportService;
-        this.gitUsername = gitUsername;
-        this.gitPassword = gitPassword;
-        this.gitUrl = gitUrl;
-        this.gitBranch = gitBranch;
-        this.gitAutomatic = gitAutomatic;
-        this.gitCommiterName = gitCommitterName;
-        this.gitCommiterEmail = gitCommiterEmail;
+
+        GitBackupSettings settings = backupStore.readSettingsInternal();
+        this.gitUsername = settings.getUsername();
+        this.gitPassword = settings.getPassword();
+        this.gitUrl = settings.getRepositoryUrl();
+        this.gitBranch = settings.getBranch();
+        this.gitAutomatic = settings.isAutomatic();
+        this.gitCommiterName = settings.getCommitterName();
+        this.gitCommiterEmail = settings.getCommitterEmail();
 
     }
 
@@ -113,7 +110,7 @@ public class RestGitBackupService implements IRestGitBackupService {
                         .call();
                 if (pullResult.isSuccessful()) {
                     importBot(botId, resourceId.getVersion());
-                    return Response.status(Response.Status.OK).entity("Pulled from: " + pullResult.getFetchedFrom() + ". Was successful!").build();
+                    return Response.status(Response.Status.OK).entity(pullResult.toString()).build();
                 } else {
                     return Response.status(Response.Status.OK).entity("Pull from repository was not successful! Please check your git settings! Maybe the path " + tmpPath + " is not empty or not a git repository").build();
                 }
@@ -172,7 +169,7 @@ public class RestGitBackupService implements IRestGitBackupService {
                 for (PushResult pushResult : pushResults) {
                     pushResultMessage.append(pushResult.getMessages());
                 }
-                return Response.status(Response.Status.OK).entity(pushResultMessage.toString()).build();
+                return Response.status(Response.Status.OK).entity(pushResultMessage).build();
             } else {
                 return Response.status(Response.Status.NOT_FOUND).entity("No git settings in bot configuration, please add git settings!").build();
             }

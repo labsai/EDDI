@@ -4,6 +4,7 @@ import ai.labs.group.IGroupStore;
 import ai.labs.group.impl.mongo.GroupStore;
 import ai.labs.memory.rest.IRestConversationStore;
 import ai.labs.permission.rest.IRestPermissionStore;
+import ai.labs.resources.impl.backup.RestGitBackupStore;
 import ai.labs.resources.impl.botmanagement.mongo.BotTriggerStore;
 import ai.labs.resources.impl.botmanagement.mongo.UserConversationStore;
 import ai.labs.resources.impl.botmanagement.rest.RestBotTriggerStore;
@@ -36,6 +37,7 @@ import ai.labs.resources.impl.monitor.rest.RestConversationStore;
 import ai.labs.resources.impl.permission.rest.RestPermissionStore;
 import ai.labs.resources.impl.properties.mongo.PropertiesStore;
 import ai.labs.resources.impl.properties.rest.RestPropertiesStore;
+import ai.labs.resources.rest.backup.IGitBackupStore;
 import ai.labs.resources.rest.botmanagement.IBotTriggerStore;
 import ai.labs.resources.rest.botmanagement.IRestBotTriggerStore;
 import ai.labs.resources.rest.botmanagement.IRestUserConversationStore;
@@ -116,5 +118,6 @@ public class RepositoryModule extends AbstractBaseModule {
 
         bind(IRestOutputKeys.class).to(RestOutputKeys.class).in(Scopes.SINGLETON);
         bind(IMigrationLogStore.class).to(MigrationLogStore.class).in(Scopes.SINGLETON);
+        bind(IGitBackupStore.class).to(RestGitBackupStore.class).in(Scopes.SINGLETON);
     }
 }
