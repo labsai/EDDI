@@ -15,7 +15,13 @@ import ai.labs.models.Context;
 import ai.labs.models.HttpCodeValidator;
 import ai.labs.models.Property;
 import ai.labs.models.PropertyInstruction;
-import ai.labs.resources.rest.config.http.model.*;
+import ai.labs.resources.rest.config.http.model.BatchRequestBuildingInstruction;
+import ai.labs.resources.rest.config.http.model.HttpCall;
+import ai.labs.resources.rest.config.http.model.HttpCallsConfiguration;
+import ai.labs.resources.rest.config.http.model.PostResponse;
+import ai.labs.resources.rest.config.http.model.PreRequest;
+import ai.labs.resources.rest.config.http.model.QuickRepliesBuildingInstruction;
+import ai.labs.resources.rest.config.http.model.Request;
 import ai.labs.resources.rest.extensions.model.ExtensionDescriptor;
 import ai.labs.resources.rest.extensions.model.ExtensionDescriptor.ConfigValue;
 import ai.labs.resources.rest.extensions.model.ExtensionDescriptor.FieldType;
@@ -114,11 +120,12 @@ public class HttpCallsTask implements ILifecycleTask {
                     if (call.getFireAndForget()) {
                         executeFireAndForgetCalls(call, preRequest, templateDataObjects);
                     } else {
-                        IRequest request = buildRequest(call.getRequest(), templateDataObjects);
+                        IRequest request;
                         IResponse response;
                         boolean retryCall = false;
                         int amountOfExecutions = 0;
                         do {
+                            request = buildRequest(call.getRequest(), templateDataObjects);
                             response = executeAndMeasureRequest(call, request, retryCall, amountOfExecutions);
 
                             if (response.getHttpCode() != 200) {
@@ -185,7 +192,11 @@ public class HttpCallsTask implements ILifecycleTask {
         return response;
     }
 
-    private Map<String, Object> executePreRequestPropertyInstructions(IConversationMemory memory, Map<String, Object> templateDataObjects, PreRequest preRequest) throws ITemplatingEngine.TemplateEngineException {
+    private Map<String, Object> executePreRequestPropertyInstructions(IConversationMemory memory,
+                                                                      Map<String, Object> templateDataObjects,
+                                                                      PreRequest preRequest)
+            throws ITemplatingEngine.TemplateEngineException {
+
         if (preRequest != null && preRequest.getPropertyInstructions() != null) {
             var propertyInstructions = preRequest.getPropertyInstructions();
             executePropertyInstructions(propertyInstructions, 0, memory, templateDataObjects);
@@ -194,7 +205,9 @@ public class HttpCallsTask implements ILifecycleTask {
         return templateDataObjects;
     }
 
-    private void executeFireAndForgetCalls(HttpCall call, PreRequest preRequest, Map<String, Object> templateDataObjects) throws ITemplatingEngine.TemplateEngineException, IRequest.HttpRequestException {
+    private void executeFireAndForgetCalls(HttpCall call, PreRequest preRequest, Map<String, Object> templateDataObjects)
+            throws ITemplatingEngine.TemplateEngineException, IRequest.HttpRequestException {
+
         if (preRequest != null && preRequest.getBatchRequests() != null) {
             BatchRequestBuildingInstruction batchRequest = preRequest.getBatchRequests();
             if (batchRequest.getExecuteCallsSequentially() == null) {

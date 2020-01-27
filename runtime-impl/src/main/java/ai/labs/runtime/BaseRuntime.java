@@ -7,7 +7,6 @@ import javax.inject.Inject;
 import javax.inject.Named;
 import java.util.Map;
 import java.util.concurrent.Callable;
-import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Future;
 import java.util.concurrent.ScheduledFuture;
@@ -96,10 +95,16 @@ public class BaseRuntime implements SystemRuntime.IRuntime {
                                                           final Map<Object, Object> threadBindings) {
         return executorService.schedule(() -> {
             try {
-                return BaseRuntime.this.submitCallable(callable, threadBindings).get();
-            } catch (InterruptedException | ExecutionException e) {
-                log.error(e.getLocalizedMessage(), e);
-                throw e;
+                if (threadBindings != null) {
+                    ThreadContext.setResources(threadBindings);
+                }
+
+                return callable.call();
+            } catch (Throwable t) {
+                log.error(t.getLocalizedMessage(), t);
+                return null;
+            } finally {
+                ThreadContext.remove();
             }
         }, delay, timeUnit);
     }
