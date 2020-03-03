@@ -7,7 +7,7 @@
     <parent>
         <groupId>ai.labs</groupId>
         <artifactId>eddi</artifactId>
-        <version>4.8</version>
+        <version>4.8.1</version>
         <relativePath>../pom.xml</relativePath>
     </parent>
     <artifactId>corerest-definition</artifactId>
@@ -17,12 +17,12 @@
         <dependency>
             <groupId>org.eclipse.jetty</groupId>
             <artifactId>jetty-client</artifactId>
-            <version>9.4.26.v20200117</version>
+            <version>9.4.27.v20200227</version>
         </dependency>
         <dependency>
             <groupId>org.jboss.resteasy</groupId>
             <artifactId>resteasy-client</artifactId>
-            <version>4.4.2.Final</version>
+            <version>4.5.1.Final</version>
             <exclusions>
                 <exclusion>
                     <groupId>commons-io</groupId>
@@ -33,7 +33,7 @@
         <dependency>
             <groupId>org.jboss.resteasy</groupId>
             <artifactId>resteasy-client-jetty</artifactId>
-            <version>4.4.2.Final</version>
+            <version>4.5.1.Final</version>
             <exclusions>
                 <exclusion>
                     <groupId>commons-io</groupId>
@@ -44,7 +44,7 @@
         <dependency>
             <groupId>org.eclipse.jetty</groupId>
             <artifactId>jetty-servlet</artifactId>
-            <version>9.4.26.v20200117</version>
+            <version>9.4.27.v20200227</version>
             <scope>provided</scope>
         </dependency>
         <dependency>

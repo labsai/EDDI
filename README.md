@@ -2,9 +2,7 @@
 
 Scalable Open Source Chatbot Platform. Build multiple Chatbots with NLP, Behavior Rules, API Connector, Templating. 
 
-v4.8.0 - IN DEVELOPMENT
-
-v4.7.1 - STABLE
+v4.8.1 - STABLE
 
 License: Apache License 2.0
 

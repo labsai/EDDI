@@ -6,7 +6,7 @@
     <parent>
         <artifactId>eddi</artifactId>
         <groupId>ai.labs</groupId>
-        <version>4.8</version>
+        <version>4.8.1</version>
         <relativePath>../pom.xml</relativePath>
     </parent>
     <packaging>jar</packaging>
