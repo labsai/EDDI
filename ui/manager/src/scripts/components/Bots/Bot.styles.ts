@@ -36,8 +36,8 @@ const styles: CSSProperties = {
     fontSize: MEDIUM_FONT3,
     height: '25px',
     marginLeft: '25px',
-    marginTop: '20px',
-    maxWidth: '200px',
+    marginTop: '15px',
+    maxWidth: '300px',
     overflow: 'hidden',
     textDecoration: 'none',
     textOverflow: 'ellipsis',
@@ -68,6 +68,9 @@ const styles: CSSProperties = {
     flex: '1',
     textDecoration: 'none',
     cursor: 'pointer',
+    ':hover': {
+      textDecoration: 'underline',
+    },
   },
   deployButton: {
     height: '35px',
@@ -100,7 +103,7 @@ const styles: CSSProperties = {
     padding: '2px 10px',
     textAlign: 'center',
     width: 'fit-content',
-    lineHeight: '16px',
+    lineHeight: '18px',
   },
   warning: {
     display: 'flex',
