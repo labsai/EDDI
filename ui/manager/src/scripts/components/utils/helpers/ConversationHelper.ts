@@ -69,7 +69,10 @@ export default class ConversationHelper {
       return output;
     } else {
       i++;
-      while (parseInt(conversationStep[i].key.split(/[:]+/).pop(), 10)) {
+      while (
+        i < conversationStep.length &&
+        parseInt(conversationStep[i].key.split(/[:]+/).pop(), 10)
+      ) {
         output.push(
           this.parseConversationStepOutput(conversationStep[i] as IOutput),
         );

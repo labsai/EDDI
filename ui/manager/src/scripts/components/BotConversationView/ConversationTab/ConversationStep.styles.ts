@@ -39,14 +39,13 @@ const styles: CSSProperties = {
     wordWrap: 'break-word',
     maxWidth: '100%',
   },
-  quickReplies: {
-    display: 'flex',
-  },
+  quickReplies: {},
   quickReply: {
     backgroundColor: GREY_COLOR3,
     borderRadius: '18px',
     color: WHITE_COLOR,
-    display: 'table',
+    display: 'inline-block',
+    whiteSpace: 'pre',
     padding: '14px 28px',
     marginTop: '12px',
     marginRight: '10px',

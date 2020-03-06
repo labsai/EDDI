@@ -16,7 +16,7 @@ const styles: CSSProperties = {
   },
   active: {
     ':hover': {
-      backgroundColor: '#F4F6F9',
+      backgroundColor: '#E4E6E9',
     },
     ':active': {
       backgroundColor: '#FFFFFF',
