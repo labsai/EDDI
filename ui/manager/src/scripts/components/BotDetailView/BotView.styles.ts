@@ -41,14 +41,14 @@ const styles: CSSProperties = {
     marginTop: '9px',
   },
   button: {
-    height: '38px',
+    height: '35px',
     marginLeft: '10px',
     color: BLUE_COLOR,
     fontSize: SMALL_FONT,
     textAlign: 'center',
   },
   deployButton: {
-    height: '39px',
+    height: '35px',
     marginLeft: '10px',
   },
   options: {

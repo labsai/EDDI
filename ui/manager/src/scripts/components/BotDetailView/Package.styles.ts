@@ -54,7 +54,7 @@ const styles: CSSProperties = {
   },
   options: {
     marginTop: '5px',
-    marginRight: '10px',
+    marginRight: '5px',
   },
 };
 export default styles;

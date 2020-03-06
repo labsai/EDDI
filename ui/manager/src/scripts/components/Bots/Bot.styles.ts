@@ -72,7 +72,14 @@ const styles: CSSProperties = {
   deployButton: {
     height: '35px',
     width: '108px',
-    marginRight: '25px',
+    marginRight: '15px',
+    marginTop: '17px',
+  },
+  chatButton: {
+    height: '35px',
+    width: '108px',
+    marginLeft: '0',
+    marginRight: '10px',
     marginTop: '17px',
   },
   updateAvailable: {
@@ -105,7 +112,7 @@ const styles: CSSProperties = {
   },
   optionsMenu: {
     marginTop: '20px',
-    marginRight: '10px',
+    marginRight: '5px',
     height: 'fit-content',
   },
 };

@@ -17,6 +17,7 @@ import { BOT } from '../utils/EddiTypes';
 import Options from '../Assets/Buttons/BotOptions';
 import { readOnlySelector } from '../../selectors/AuthenticationSelectors';
 import { connect } from 'react-redux';
+import { READY } from '../utils/helpers/BotHelper';
 
 interface IPublicProps {
   bot: IBot;
@@ -121,6 +122,21 @@ class BotView extends React.Component<IPrivateProps, IState> {
               <div style={styles.options}>
                 <Options bot={this.props.bot} apiUrl={this.state.apiUrl} />
               </div>
+              <WhiteButton
+                text={'Open Chat'}
+                customStyles={styles.chatButton}
+                disabled={this.props.bot.deploymentStatus !== READY}
+                onClick={() =>
+                  window
+                    .open(
+                      `${this.state.apiUrl}/chat/unrestricted/${
+                        this.props.bot.id
+                      }`,
+                      '_blank',
+                    )
+                    .focus()
+                }
+              />
               <DeployButton
                 botName={this.props.bot.name}
                 botResource={this.props.bot.resource}

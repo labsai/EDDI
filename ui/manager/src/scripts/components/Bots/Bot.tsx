@@ -3,6 +3,7 @@ import * as renderIf from 'render-if';
 import styles from './Bot.styles';
 import * as Radium from 'radium';
 import { Link, browserHistory } from 'react-router-dom';
+import WhiteButton from '../Assets/Buttons/WhiteButton';
 import { IBot } from '../utils/AxiosFunctions';
 import Packages from './Packages';
 import { Component, compose, pure, setDisplayName } from 'recompose';
@@ -15,6 +16,7 @@ import { historyPush } from '../../history';
 import Options from '../Assets/Buttons/BotOptions';
 import { readOnlySelector } from '../../selectors/AuthenticationSelectors';
 import { connect } from 'react-redux';
+import { READY } from '../utils/helpers/BotHelper';
 
 interface IPublicProps {
   bot: IBot;
@@ -80,6 +82,21 @@ class Bot extends React.Component<IPrivateProps> {
               <Options bot={this.props.bot} apiUrl={this.props.apiUrl} />
             </div>
             <div onClick={e => e.stopPropagation()}>
+              <WhiteButton
+                text={'Open Chat'}
+                customStyles={styles.chatButton}
+                disabled={this.props.bot.deploymentStatus !== READY}
+                onClick={() =>
+                  window
+                    .open(
+                      `${this.props.apiUrl}/chat/unrestricted/${
+                        this.props.bot.id
+                      }`,
+                      '_blank',
+                    )
+                    .focus()
+                }
+              />
               <DeployButton
                 botName={this.props.bot.name}
                 botResource={this.props.bot.resource}
