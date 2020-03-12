@@ -7,7 +7,7 @@
     <parent>
         <groupId>ai.labs</groupId>
         <artifactId>eddi</artifactId>
-        <version>4.8.1</version>
+        <version>4.8.2</version>
         <relativePath>../pom.xml</relativePath>
     </parent>
     <artifactId>corerest-definition</artifactId>
@@ -22,7 +22,7 @@
         <dependency>
             <groupId>org.jboss.resteasy</groupId>
             <artifactId>resteasy-client</artifactId>
-            <version>4.5.1.Final</version>
+            <version>4.5.2.Final</version>
             <exclusions>
                 <exclusion>
                     <groupId>commons-io</groupId>
@@ -33,7 +33,7 @@
         <dependency>
             <groupId>org.jboss.resteasy</groupId>
             <artifactId>resteasy-client-jetty</artifactId>
-            <version>4.5.1.Final</version>
+            <version>4.5.2.Final</version>
             <exclusions>
                 <exclusion>
                     <groupId>commons-io</groupId>

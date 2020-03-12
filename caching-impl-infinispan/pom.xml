@@ -5,7 +5,7 @@
     <parent>
         <artifactId>eddi</artifactId>
         <groupId>ai.labs</groupId>
-        <version>4.8.1</version>
+        <version>4.8.2</version>
         <relativePath>../pom.xml</relativePath>
     </parent>
     <modelVersion>4.0.0</modelVersion>
@@ -36,6 +36,11 @@
         <dependency>
             <groupId>ai.labs</groupId>
             <artifactId>runtime-definition</artifactId>
+            <version>${project.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>ai.labs</groupId>
+            <artifactId>sharedutilities</artifactId>
             <version>${project.version}</version>
         </dependency>
     </dependencies>
