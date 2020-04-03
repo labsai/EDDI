@@ -134,7 +134,7 @@
         <dependency>
             <groupId>com.google.inject.extensions</groupId>
             <artifactId>guice-multibindings</artifactId>
-            <version>4.2.2</version>
+            <version>4.2.3</version>
         </dependency>
 
         <dependency>
