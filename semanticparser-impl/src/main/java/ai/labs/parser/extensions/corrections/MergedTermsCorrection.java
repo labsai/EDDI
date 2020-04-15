@@ -3,6 +3,7 @@ package ai.labs.parser.extensions.corrections;
 import ai.labs.parser.extensions.dictionaries.IDictionary;
 
 import java.util.ArrayList;
+import java.util.LinkedList;
 import java.util.List;
 
 /**
@@ -18,14 +19,19 @@ public class MergedTermsCorrection implements ICorrection {
 
     @Override
     public List<IDictionary.IFoundWord> correctWord(String word) {
+        return correctWord(word, new LinkedList<>());
+    }
+
+    @Override
+    public List<IDictionary.IFoundWord> correctWord(String word, List<IDictionary> temporaryDictionaries) {
         List<IDictionary.IFoundWord> possibleTerms = new ArrayList<>();
         String part;
         for (int i = word.length(); i > 0; i--) {
             part = word.substring(0, i);
-            List<IDictionary.IFoundWord> match = matchWord(part);
+            List<IDictionary.IFoundWord> match = matchWord(part, temporaryDictionaries);
             if (match.size() > 0) {
                 possibleTerms.addAll(match);
-                word = word.substring(i, word.length());
+                word = word.substring(i);
                 i = word.length() + 1;
             }
         }
@@ -33,8 +39,8 @@ public class MergedTermsCorrection implements ICorrection {
         if (!word.isEmpty()) {
             possibleTerms.clear();
             for (int i = 0; i < word.length(); i++) {
-                part = word.substring(i, word.length());
-                List<IDictionary.IFoundWord> match = matchWord(part);
+                part = word.substring(i);
+                List<IDictionary.IFoundWord> match = matchWord(part, temporaryDictionaries);
                 if (match.size() > 0) {
                     possibleTerms.addAll(match);
                     word = word.substring(0, i);
@@ -51,8 +57,12 @@ public class MergedTermsCorrection implements ICorrection {
         }
     }
 
-    private List<IDictionary.IFoundWord> matchWord(String part) {
-        return dictionaries.stream().
+    private List<IDictionary.IFoundWord> matchWord(String part, List<IDictionary> temporaryDictionaries) {
+        List<IDictionary> allDictionaries = new LinkedList<>();
+        allDictionaries.addAll(temporaryDictionaries);
+        allDictionaries.addAll(dictionaries);
+
+        return allDictionaries.stream().
                 map(dictionary -> dictionary.lookupTerm(part)).
                 filter(result -> result.size() > 0).
                 findFirst().orElse(IDictionary.NO_WORDS_FOUND);
