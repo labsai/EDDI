@@ -1,11 +1,6 @@
----
-description: >-
-  Scalable Open Source Chatbot Platform. Build multiple Chatbots with NLP,
-  Behavior Rules, API Connector, Templating.  Developed in Java, provided with
-  Docker, orchestrated with Kubernetes or Openshift.
----
-
 # E.D.D.I
+Scalable Open Source Chatbot Platform. Build multiple Chatbots with NLP, Behavior Rules, API Connector, Templating. Developed in Java, provided with Docker, orchestrated with Kubernetes or Openshift. 
+
 
 v4.8.2 - STABLE
 
