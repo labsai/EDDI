@@ -37,11 +37,21 @@ import javax.ws.rs.container.AsyncResponse;
 import javax.ws.rs.core.MediaType;
 import javax.ws.rs.core.Response;
 import java.net.URI;
-import java.util.*;
-import java.util.concurrent.*;
+import java.util.Collections;
+import java.util.HashMap;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.concurrent.Callable;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 import java.util.stream.Collectors;
 
-import static ai.labs.memory.ConversationMemoryUtilities.*;
+import static ai.labs.memory.ConversationMemoryUtilities.convertConversationMemory;
+import static ai.labs.memory.ConversationMemoryUtilities.convertConversationMemorySnapshot;
+import static ai.labs.memory.ConversationMemoryUtilities.convertSimpleConversationMemorySnapshot;
 import static ai.labs.persistence.IResourceStore.ResourceNotFoundException;
 import static ai.labs.persistence.IResourceStore.ResourceStoreException;
 import static ai.labs.utilities.RestUtilities.createURI;
@@ -442,25 +452,15 @@ public class RestBotEngine implements IRestBotEngine {
         try {
             IConversationMemory conversationMemory = loadAndValidateConversationMemory(botId, conversationId);
             loggingContext.put(USER_ID, conversationMemory.getUserId());
-            Callable<Void> processUserInput = () -> {
 
-                try {
-                    if (conversationMemory.isUndoAvailable()) {
-                        conversationMemory.undoLastStep();
-                        storeConversationMemory(conversationMemory, environment);
-                    }
-                } catch (Exception e) {
-                    contextLogger.setLoggingContext(loggingContext);
-                    log.error("Error while Undo!", e);
-                    throw e;
-                }
+            if (conversationMemory.isUndoAvailable()) {
+                conversationMemory.undoLastStep();
+                storeConversationMemory(conversationMemory, environment);
+                return Response.ok().build();
+            } else {
+                return Response.status(Response.Status.CONFLICT).build();
+            }
 
-                return null;
-            };
-
-            SystemRuntime.getRuntime().submitCallable(processUserInput, null);
-
-            return Response.accepted().build();
         } catch (IllegalAccessException e) {
             contextLogger.setLoggingContext(loggingContext);
             String errorMsg = "Error while processing message!";
@@ -511,22 +511,15 @@ public class RestBotEngine implements IRestBotEngine {
 
         try {
             IConversationMemory conversationMemory = loadAndValidateConversationMemory(botId, conversationId);
-            Callable<Void> processUserInput = () -> {
-                try {
-                    if (conversationMemory.isRedoAvailable()) {
-                        conversationMemory.redoLastStep();
-                        storeConversationMemory(conversationMemory, environment);
-                    }
-                } catch (Exception e) {
-                    log.error("Error while Redo!", e);
-                    throw e;
-                }
 
-                return null;
-            };
+            if (conversationMemory.isRedoAvailable()) {
+                conversationMemory.redoLastStep();
+                storeConversationMemory(conversationMemory, environment);
+                return Response.ok().build();
+            } else {
+                return Response.status(Response.Status.CONFLICT).build();
+            }
 
-            SystemRuntime.getRuntime().submitCallable(processUserInput, null);
-            return Response.accepted().build();
         } catch (IllegalAccessException e) {
             String errorMsg = "Error while processing message!";
             log.error(errorMsg, e);

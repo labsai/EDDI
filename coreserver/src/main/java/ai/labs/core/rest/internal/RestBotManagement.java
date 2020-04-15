@@ -1,7 +1,11 @@
 package ai.labs.core.rest.internal;
 
 import ai.labs.memory.model.SimpleConversationMemorySnapshot;
-import ai.labs.models.*;
+import ai.labs.models.BotDeployment;
+import ai.labs.models.BotTriggerConfiguration;
+import ai.labs.models.ConversationState;
+import ai.labs.models.InputData;
+import ai.labs.models.UserConversation;
 import ai.labs.resources.rest.botmanagement.IRestBotTriggerStore;
 import ai.labs.resources.rest.botmanagement.IRestUserConversationStore;
 import ai.labs.rest.restinterfaces.IRestBotEngine;
@@ -100,6 +104,42 @@ public class RestBotManagement implements IRestBotManagement {
         UserConversation userConversation = restUserConversationStore.readUserConversation(intent, userId);
         restBotEngine.endConversation(userConversation.getConversationId());
         return Response.ok().build();
+    }
+
+    @Override
+    public Boolean isUndoAvailable(String intent, String userId) {
+        var userConversation = getUserConversation(intent, userId);
+        return restBotEngine.isUndoAvailable(
+                userConversation.getEnvironment(),
+                userConversation.getBotId(),
+                userConversation.getConversationId());
+    }
+
+    @Override
+    public Response undo(String intent, String userId) {
+        var userConversation = getUserConversation(intent, userId);
+        return restBotEngine.undo(
+                userConversation.getEnvironment(),
+                userConversation.getBotId(),
+                userConversation.getConversationId());
+    }
+
+    @Override
+    public Boolean isRedoAvailable(String intent, String userId) {
+        var userConversation = getUserConversation(intent, userId);
+        return restBotEngine.isRedoAvailable(
+                userConversation.getEnvironment(),
+                userConversation.getBotId(),
+                userConversation.getConversationId());
+    }
+
+    @Override
+    public Response redo(String intent, String userId) {
+        var userConversation = getUserConversation(intent, userId);
+        return restBotEngine.redo(
+                userConversation.getEnvironment(),
+                userConversation.getBotId(),
+                userConversation.getConversationId());
     }
 
     private void deleteUserConversation(String intent, String userId) {

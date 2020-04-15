@@ -15,15 +15,15 @@ import java.util.stream.Collectors;
  */
 public class ConversationMemory implements IConversationMemory {
     private String conversationId;
-    private String botId;
-    private Integer botVersion;
+    private final String botId;
+    private final Integer botVersion;
     private String userId;
 
     private IWritableConversationStep currentStep;
-    private Stack<IConversationStep> previousSteps;
-    private Stack<IConversationStep> redoCache = new Stack<>();
-    private List<ConversationOutput> conversationOutputs = new LinkedList<>();
-    private IConversationProperties conversationProperties = new ConversationProperties(this);
+    private final Stack<IConversationStep> previousSteps;
+    private final Stack<IConversationStep> redoCache = new Stack<>();
+    private final Stack<ConversationOutput> conversationOutputs = new Stack<>();
+    private final IConversationProperties conversationProperties = new ConversationProperties(this);
     private ConversationState conversationState;
 
     public ConversationMemory(String conversationId, String botId, Integer botVersion, String userId) {
@@ -73,7 +73,7 @@ public class ConversationMemory implements IConversationMemory {
         if (conversationOutput == null) {
             conversationOutput = new ConversationOutput();
         }
-        conversationOutputs.add(conversationOutput);
+        conversationOutputs.push(conversationOutput);
         currentStep = new ConversationStep(conversationOutput);
         return currentStep;
     }
@@ -91,6 +91,7 @@ public class ConversationMemory implements IConversationMemory {
 
         redoCache.push(currentStep);
         currentStep = (IWritableConversationStep) previousSteps.pop();
+        conversationOutputs.pop();
     }
 
     @Override
@@ -111,6 +112,7 @@ public class ConversationMemory implements IConversationMemory {
 
         previousSteps.push(currentStep);
         currentStep = (IWritableConversationStep) redoCache.pop();
+        conversationOutputs.push(currentStep.getConversationOutput());
     }
 
     @Override
@@ -157,7 +159,7 @@ public class ConversationMemory implements IConversationMemory {
     }
 
     public final static class ConversationStepStack implements IConversationStepStack {
-        private List<IConversationStep> conversationSteps = new ArrayList<>();
+        private final List<IConversationStep> conversationSteps = new ArrayList<>();
 
         public ConversationStepStack(List<IConversationStep> steps) {
             conversationSteps.addAll(steps);

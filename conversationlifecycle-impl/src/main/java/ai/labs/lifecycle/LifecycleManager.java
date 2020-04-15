@@ -9,7 +9,7 @@ import java.util.List;
 
 public class LifecycleManager implements ILifecycleManager {
     private static final String KEY_ACTIONS = "actions";
-    private List<ILifecycleTask> lifecycleTasks;
+    private final List<ILifecycleTask> lifecycleTasks;
 
     public LifecycleManager() {
         lifecycleTasks = new LinkedList<>();

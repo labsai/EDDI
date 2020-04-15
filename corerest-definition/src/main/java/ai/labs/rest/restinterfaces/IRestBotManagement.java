@@ -54,4 +54,30 @@ public interface IRestBotManagement {
     @Path("/{intent}/{userId}/endConversation")
     @ApiOperation(value = "End conversation.")
     Response endCurrentConversation(@PathParam("intent") String intent, @PathParam("userId") String userId);
+
+    @GET
+    @Path("/{intent}/{userId}/undo")
+    @Produces(MediaType.TEXT_PLAIN)
+    @ApiOperation(value = "Is UNDO available?")
+    Boolean isUndoAvailable(@PathParam("intent") String intent,
+                            @PathParam("userId") String userId);
+
+    @POST
+    @Path("/{intent}/{userId}/undo")
+    @ApiOperation(value = "UNDO last conversation step.")
+    Response undo(@PathParam("intent") String intent,
+                  @PathParam("userId") String userId);
+
+    @GET
+    @Path("/{intent}/{userId}/redo")
+    @Produces(MediaType.TEXT_PLAIN)
+    @ApiOperation(value = "Is REDO available?")
+    Boolean isRedoAvailable(@PathParam("intent") String intent,
+                            @PathParam("userId") String userId);
+
+    @POST
+    @Path("/{intent}/{userId}/redo")
+    @ApiOperation(value = "REDO last conversation step.")
+    Response redo(@PathParam("intent") String intent,
+                  @PathParam("userId") String userId);
 }
