@@ -159,7 +159,7 @@
         <dependency>
             <groupId>org.jboss.resteasy</groupId>
             <artifactId>resteasy-guice</artifactId>
-            <version>4.5.2.Final</version>
+            <version>4.5.3.Final</version>
         </dependency>
         <dependency>
             <groupId>org.jboss.resteasy</groupId>
