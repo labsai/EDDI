@@ -43,7 +43,7 @@
         <dependency>
             <groupId>org.jboss.resteasy</groupId>
             <artifactId>resteasy-jsapi</artifactId>
-            <version>4.5.2.Final</version>
+            <version>4.5.3.Final</version>
         </dependency>
         <!-- Jetty -->
         <dependency>
@@ -85,12 +85,12 @@
         <dependency>
             <groupId>org.eclipse.jetty</groupId>
             <artifactId>jetty-servlet</artifactId>
-            <version>9.4.27.v20200227</version>
+            <version>9.4.28.v20200408</version>
         </dependency>
         <dependency>
             <groupId>org.eclipse.jetty</groupId>
             <artifactId>jetty-servlets</artifactId>
-            <version>9.4.27.v20200227</version>
+            <version>9.4.28.v20200408</version>
         </dependency>
         <dependency>
             <groupId>org.eclipse.jetty</groupId>
@@ -100,7 +100,7 @@
         <dependency>
             <groupId>org.eclipse.jetty</groupId>
             <artifactId>jetty-util</artifactId>
-            <version>9.4.27.v20200227</version>
+            <version>9.4.28.v20200408</version>
         </dependency>
         <dependency>
             <groupId>ro.isdc.wro4j</groupId>
