@@ -54,6 +54,7 @@ technical spec:
 
 * Java 11
 * Maven 3
+* MongoDB >3.5
 
 ## Build project with maven
 
