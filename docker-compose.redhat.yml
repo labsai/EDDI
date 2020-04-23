@@ -16,5 +16,5 @@ services:
       EDDI_MEMORY_MAX: 1G
       #EDDI_JAVA_ENV_MONGODB_HOST: mongodb.hosts=mongodb
   mongodb:
-    image: mongo:3.6
+    image: mongo:4.2
     restart: always
