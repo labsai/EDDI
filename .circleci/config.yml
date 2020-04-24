@@ -39,24 +39,24 @@ jobs:
             if [ "${CIRCLE_BRANCH}" == "master" ]; then
             docker login -u $DOCKER_USER -p $DOCKER_PASS
 
-            docker build --label "version=4.8.2" --label "release=4.8.2-b$CIRCLE_BUILD_NUM" --build-arg EDDI_VERSION=4.8.2 --build-arg EDDI_ENV=production -t labsai/eddi:4.8.2-b$CIRCLE_BUILD_NUM .
-            docker push labsai/eddi:4.8.2-b$CIRCLE_BUILD_NUM
+            docker build --label "version=4.8.3" --label "release=4.8.3-b$CIRCLE_BUILD_NUM" --build-arg EDDI_VERSION=4.8.3 --build-arg EDDI_ENV=production -t labsai/eddi:4.8.3-b$CIRCLE_BUILD_NUM .
+            docker push labsai/eddi:4.8.3-b$CIRCLE_BUILD_NUM
 
-            docker build --label "version=4.8.2" --label "release=4.8.2-b$CIRCLE_BUILD_NUM" --build-arg EDDI_VERSION=4.8.2 --build-arg EDDI_ENV=production -t labsai/eddi:latest .
+            docker build --label "version=4.8.3" --label "release=4.8.3-b$CIRCLE_BUILD_NUM" --build-arg EDDI_VERSION=4.8.3 --build-arg EDDI_ENV=production -t labsai/eddi:latest .
             docker push labsai/eddi:latest
 
-            docker build --label "version=4.8.2" --label "release=4.8.2-redhat-b$CIRCLE_BUILD_NUM" -f Dockerfile_redhat --build-arg EDDI_VERSION=4.8.2 --build-arg EDDI_ENV=production -t labsai/eddi:4.8.2-redhat-b$CIRCLE_BUILD_NUM .
-            docker push labsai/eddi:4.8.2-redhat-b$CIRCLE_BUILD_NUM
+            docker build --label "version=4.8.3" --label "release=4.8.3-redhat-b$CIRCLE_BUILD_NUM" -f Dockerfile_redhat --build-arg EDDI_VERSION=4.8.3 --build-arg EDDI_ENV=production -t labsai/eddi:4.8.3-redhat-b$CIRCLE_BUILD_NUM .
+            docker push labsai/eddi:4.8.3-redhat-b$CIRCLE_BUILD_NUM
 
-            docker build --label "version=4.8.2" --label "release=4.8.2-redhat-b$CIRCLE_BUILD_NUM" -f Dockerfile_redhat --build-arg EDDI_VERSION=4.8.2 --build-arg EDDI_ENV=production -t labsai/eddi:latest-redhat .
+            docker build --label "version=4.8.3" --label "release=4.8.3-redhat-b$CIRCLE_BUILD_NUM" -f Dockerfile_redhat --build-arg EDDI_VERSION=4.8.3 --build-arg EDDI_ENV=production -t labsai/eddi:latest-redhat .
             docker push labsai/eddi:latest-redhat
 
-            # docker build --build-arg EDDI_VERSION=4.8.2 --build-arg EDDI_ENV=production -t labsai/eddi:4.8.2.1 .
-            # docker push labsai/eddi:4.8.2
+            # docker build --build-arg EDDI_VERSION=4.8.3 --build-arg EDDI_ENV=production -t labsai/eddi:4.8.3.1 .
+            # docker push labsai/eddi:4.8.3
 
-            # docker build --build-arg EDDI_VERSION=4.8.2 --build-arg EDDI_ENV=production -t labsai/eddi:4.8.2 .
-            # docker push labsai/eddi:4.8.2
+            # docker build --build-arg EDDI_VERSION=4.8.3 --build-arg EDDI_ENV=production -t labsai/eddi:4.8.3 .
+            # docker push labsai/eddi:4.8.3
 
-            # docker build --build-arg EDDI_VERSION=4.8.2 --build-arg EDDI_ENV=production -t labsai/eddi:4 .
+            # docker build --build-arg EDDI_VERSION=4.8.3 --build-arg EDDI_ENV=production -t labsai/eddi:4 .
             # docker push labsai/eddi:4
             fi
