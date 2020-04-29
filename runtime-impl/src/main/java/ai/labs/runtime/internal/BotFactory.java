@@ -10,11 +10,20 @@ import ai.labs.runtime.IBotFactory;
 import ai.labs.runtime.IExecutablePackage;
 import ai.labs.runtime.client.bots.IBotStoreClientLibrary;
 import ai.labs.runtime.service.ServiceException;
-import lombok.*;
+import lombok.AllArgsConstructor;
+import lombok.EqualsAndHashCode;
+import lombok.Getter;
+import lombok.Setter;
+import lombok.ToString;
 import lombok.extern.slf4j.Slf4j;
 
 import javax.inject.Inject;
-import java.util.*;
+import java.util.Collections;
+import java.util.HashMap;
+import java.util.LinkedHashMap;
+import java.util.LinkedList;
+import java.util.List;
+import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.stream.Collectors;
 
@@ -114,8 +123,6 @@ public class BotFactory implements IBotFactory {
                 } catch (ServiceException e) {
                     Deployment.Status error = Deployment.Status.ERROR;
                     progressDummyBot.setDeploymentStatus(error);
-                    // on failure, remove any entry from environment to allow redeployment
-                    botEnvironment.remove(id);
                     deploymentProcess.completed(error);
                     logBotDeployment(environment.toString(), botId, version, error);
                     throw e;
