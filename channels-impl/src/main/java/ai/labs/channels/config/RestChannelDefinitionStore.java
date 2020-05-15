@@ -11,6 +11,9 @@ import javax.ws.rs.InternalServerErrorException;
 import javax.ws.rs.core.Response;
 import java.util.List;
 
+import static ai.labs.utilities.RuntimeUtilities.checkNotEmpty;
+import static ai.labs.utilities.RuntimeUtilities.checkNotNull;
+
 @Slf4j
 public class RestChannelDefinitionStore implements IRestChannelDefinitionStore {
     private final IChannelDefinitionStore channelDefinitionStore;
@@ -36,6 +39,8 @@ public class RestChannelDefinitionStore implements IRestChannelDefinitionStore {
 
     @Override
     public ChannelDefinition readChannelDefinition(String name) {
+        checkNotEmpty(name, "name");
+
         try {
             return channelDefinitionStore.readChannelDefinition(name);
         } catch (IResourceStore.ResourceNotFoundException e) {
@@ -48,6 +53,10 @@ public class RestChannelDefinitionStore implements IRestChannelDefinitionStore {
 
     @Override
     public Response createChannelDefinition(ChannelDefinition channelDefinition) {
+        checkNotNull(channelDefinition, "channelDefinition");
+        checkNotEmpty(channelDefinition.getName(), "channelDefinition.name");
+        checkNotEmpty(channelDefinition.getType(), "channelDefinition.type");
+
         try {
             channelDefinitionStore.createChannelDefinition(channelDefinition);
             if (channelDefinition.isActive()) {
@@ -64,6 +73,8 @@ public class RestChannelDefinitionStore implements IRestChannelDefinitionStore {
 
     @Override
     public Response deleteChannelDefinition(String name) {
+        checkNotEmpty(name, "name");
+
         try {
             channelDefinitionStore.deleteChannelDefinition(name);
             return Response.ok().build();
