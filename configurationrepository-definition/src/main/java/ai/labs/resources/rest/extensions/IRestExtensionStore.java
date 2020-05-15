@@ -17,12 +17,13 @@ import java.util.List;
  * @author ginccc
  */
 @Api(value = "Configurations -> (1) General", authorizations = {@Authorization(value = "eddi_auth")})
+@Deprecated
 @Path("/extensionstore/extensions")
 public interface IRestExtensionStore {
     String resourceURI = "eddi://ai.labs.extensions/extensionstore/extensions/";
 
     @GET
     @Produces(MediaType.APPLICATION_JSON)
-    @ApiOperation(value = "Read extension descriptors.")
+    @ApiOperation(value = "Read extension descriptors. (deprecated. use /packagestore/extensions instead.)")
     List<ExtensionDescriptor> readExtensionDescriptors(@QueryParam("filter") @DefaultValue("") String filter);
 }

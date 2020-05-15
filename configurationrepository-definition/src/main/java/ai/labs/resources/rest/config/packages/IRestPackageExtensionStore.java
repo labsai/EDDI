@@ -1,12 +1,14 @@
 package ai.labs.resources.rest.config.packages;
 
-import ai.labs.resources.rest.config.packages.model.PackageConfiguration;
+import ai.labs.resources.rest.extensions.model.ExtensionDescriptor;
 import io.swagger.annotations.Api;
 import io.swagger.annotations.Authorization;
 
+import javax.ws.rs.DefaultValue;
 import javax.ws.rs.GET;
 import javax.ws.rs.Path;
 import javax.ws.rs.Produces;
+import javax.ws.rs.QueryParam;
 import javax.ws.rs.core.MediaType;
 import java.util.List;
 
@@ -18,5 +20,5 @@ import java.util.List;
 public interface IRestPackageExtensionStore {
     @GET
     @Produces(MediaType.APPLICATION_JSON)
-    List<PackageConfiguration.PackageExtension> getBehaviorRuleExtensions();
+    List<ExtensionDescriptor> getPackageExtensions(@QueryParam("filter") @DefaultValue("") String filter);
 }
