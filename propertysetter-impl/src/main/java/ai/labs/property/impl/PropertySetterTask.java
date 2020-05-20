@@ -33,6 +33,7 @@ import java.util.stream.Collectors;
 
 import static ai.labs.memory.IConversationMemory.IConversationStepStack;
 import static ai.labs.models.Property.Scope.conversation;
+import static ai.labs.utilities.RuntimeUtilities.checkNotNull;
 import static ai.labs.utilities.RuntimeUtilities.isNullOrEmpty;
 import static java.lang.Boolean.parseBoolean;
 
@@ -110,12 +111,13 @@ public class PropertySetterTask implements ILifecycleTask {
             aggregatedExpressions.addAll(expressionProvider.parseExpressions(expressionsData.getResult()));
         }
 
-        List<Property> properties = propertySetter.extractProperties(aggregatedExpressions);
+        var properties = propertySetter.extractProperties(aggregatedExpressions);
 
-        Map<String, Object> templateDataObjects = memoryItemConverter.convert(memory);
+        var templateDataObjects = memoryItemConverter.convert(memory);
+        var conversationProperties = memory.getConversationProperties();
         if (actionsData != null && !isNullOrEmpty(actionsData.getResult())) {
             for (String action : actionsData.getResult()) {
-                List<PropertyInstruction> propertyInstructions = new LinkedList<>();
+                var propertyInstructions = new LinkedList<PropertyInstruction>();
                 setOnActionsList.forEach(setOnAction -> {
                     List<String> actions = setOnAction.getActions();
                     if (actions.contains(action) || actions.contains("*")) {
@@ -131,8 +133,7 @@ public class PropertySetterTask implements ILifecycleTask {
                             String name = property.getName();
                             String fromObjectPath = property.getFromObjectPath();
                             Scope scope = property.getScope();
-                            boolean override = property.getOverride();
-                            RuntimeUtilities.checkNotNull(name, "property.name");
+                            checkNotNull(name, "property.name");
                             name = templatingEngine.processTemplate(name, templateDataObjects);
 
                             Object templatedObj;
@@ -148,12 +149,10 @@ public class PropertySetterTask implements ILifecycleTask {
                                 templatedObj = value;
                             }
 
-                            if (!override && memory.getConversationProperties().containsKey(name)) {
-                                continue;
+                            if (!conversationProperties.containsKey(name) || property.getOverride()) {
+                                conversationProperties.put(name, new Property(name, templatedObj, scope));
+                                templateDataObjects.put(PROPERTIES_IDENTIFIER, conversationProperties.toMap());
                             }
-
-                            memory.getConversationProperties().put(name, new Property(name, templatedObj, scope));
-                            templateDataObjects.put(PROPERTIES_IDENTIFIER, memory.getConversationProperties().toMap());
                         }
                     } catch (Exception e) {
                         throw new LifecycleException(e.getLocalizedMessage(), e);
@@ -180,7 +179,7 @@ public class PropertySetterTask implements ILifecycleTask {
 
         if (!properties.isEmpty()) {
             currentStep.storeData(dataFactory.createData(PROPERTIES_EXTRACTED_IDENTIFIER, properties, true));
-            properties.forEach(property -> memory.getConversationProperties().put(property.getName(), property));
+            properties.forEach(property -> conversationProperties.put(property.getName(), property));
         }
     }
 

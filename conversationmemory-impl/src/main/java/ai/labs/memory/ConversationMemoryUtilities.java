@@ -10,6 +10,8 @@ import ai.labs.memory.model.ConversationOutput;
 import ai.labs.memory.model.Data;
 import ai.labs.memory.model.SimpleConversationMemorySnapshot;
 import ai.labs.models.Context;
+import ai.labs.models.Context.ContextType;
+import lombok.extern.slf4j.Slf4j;
 
 import java.util.HashMap;
 import java.util.LinkedList;
@@ -23,6 +25,7 @@ import static ai.labs.utilities.RuntimeUtilities.isNullOrEmpty;
 /**
  * @author ginccc
  */
+@Slf4j
 public class ConversationMemoryUtilities {
     public static ConversationMemorySnapshot convertConversationMemory(IConversationMemory conversationMemory) {
         ConversationMemorySnapshot snapshot = new ConversationMemorySnapshot();
@@ -208,10 +211,15 @@ public class ConversationMemoryUtilities {
         Map<String, Object> dynamicAttributesMap = new HashMap<>();
         contextDataList.forEach(contextData -> {
             Context context = contextData.getResult();
-            Context.ContextType contextType = context.getType();
-            if (contextType.equals(Context.ContextType.object) || contextType.equals(Context.ContextType.string)) {
-                String dataKey = contextData.getKey();
-                dynamicAttributesMap.put(dataKey.substring(dataKey.indexOf(":") + 1), context.getValue());
+            String dataKey = contextData.getKey();
+            String key = dataKey.substring(dataKey.indexOf(":") + 1);
+            if (context != null) {
+                var contextType = context.getType();
+                if (contextType.equals(ContextType.object) || contextType.equals(ContextType.string)) {
+                    dynamicAttributesMap.put(key, context.getValue());
+                }
+            } else {
+                dynamicAttributesMap.put(key, null);
             }
         });
         return dynamicAttributesMap;

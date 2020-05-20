@@ -4,8 +4,12 @@ import ai.labs.lifecycle.ConversationStopException;
 import ai.labs.lifecycle.IConversation;
 import ai.labs.lifecycle.ILifecycleManager;
 import ai.labs.lifecycle.LifecycleException;
-import ai.labs.memory.*;
+import ai.labs.memory.ConversationMemory;
+import ai.labs.memory.ConversationMemoryUtilities;
+import ai.labs.memory.IConversationMemory;
 import ai.labs.memory.IConversationMemory.IConversationProperties;
+import ai.labs.memory.IData;
+import ai.labs.memory.IPropertiesHandler;
 import ai.labs.memory.model.Data;
 import ai.labs.models.Context;
 import ai.labs.models.ConversationState;
@@ -15,7 +19,12 @@ import ai.labs.persistence.IResourceStore;
 import ai.labs.resources.rest.properties.model.Properties;
 import ai.labs.runtime.IExecutablePackage;
 
-import java.util.*;
+import java.util.Collections;
+import java.util.LinkedHashMap;
+import java.util.LinkedList;
+import java.util.List;
+import java.util.Map;
+import java.util.Objects;
 import java.util.stream.Collectors;
 
 import static ai.labs.memory.IConversationMemory.IWritableConversationStep;
@@ -69,6 +78,8 @@ public class Conversation implements IConversation {
             executePackages(new LinkedList<>(createContextData(context)));
         } catch (ConversationStopException e) {
             throw new LifecycleException(e.getLocalizedMessage(), e);
+        } finally {
+            checkActionsForConversationEnd();
         }
     }
 
@@ -122,10 +133,7 @@ public class Conversation implements IConversation {
 
             var lifecycleData = prepareLifecycleData(message, contexts);
             executeConversationStep(lifecycleData);
-
-            checkActionsForConversationEnd();
-            removeOldInvalidProperties();
-            storePropertiesPermanently();
+            postConversationLifecycleTasks();
 
         } catch (LifecycleException.LifecycleInterruptedException e) {
             setConversationState(ConversationState.EXECUTION_INTERRUPTED);
@@ -134,6 +142,8 @@ public class Conversation implements IConversation {
             setConversationState(ConversationState.ERROR);
             throw new LifecycleException(e.getLocalizedMessage(), e);
         } finally {
+            checkActionsForConversationEnd();
+
             if (getConversationState() == ConversationState.IN_PROGRESS) {
                 setConversationState(ConversationState.READY);
             }
@@ -142,6 +152,11 @@ public class Conversation implements IConversation {
                 outputProvider.renderOutput(conversationMemory);
             }
         }
+    }
+
+    private void postConversationLifecycleTasks() throws IResourceStore.ResourceStoreException {
+        removeOldInvalidProperties();
+        storePropertiesPermanently();
     }
 
     private void startNextStep() {

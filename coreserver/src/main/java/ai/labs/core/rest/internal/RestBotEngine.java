@@ -47,7 +47,6 @@ import java.util.concurrent.ExecutionException;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
-import java.util.stream.Collectors;
 
 import static ai.labs.memory.ConversationMemoryUtilities.convertConversationMemory;
 import static ai.labs.memory.ConversationMemoryUtilities.convertConversationMemorySnapshot;
@@ -138,8 +137,9 @@ public class RestBotEngine implements IRestBotEngine {
             IConversation conversation = latestBot.startConversation(userId, context,
                     createPropertiesHandler(userId), null);
 
-            var conversationId = storeConversationMemory(conversation.getConversationMemory(), environment);
-            cacheConversationState(conversationId, ConversationState.READY);
+            var conversationMemory = conversation.getConversationMemory();
+            var conversationId = storeConversationMemory(conversationMemory, environment);
+            cacheConversationState(conversationId, conversationMemory.getConversationState());
             var conversationUri = createURI(resourceURI, conversationId);
 
             URI userUri = conversationSetup.createConversationDescriptor(botId, latestBot, conversationId, conversationUri);
@@ -347,7 +347,7 @@ public class RestBotEngine implements IRestBotEngine {
         return () -> {
             waitForExecutionFinishOrTimeout(loggingContext, conversationId, runtime.submitCallable(() -> {
                         try {
-                            conversation.say(message, convertContext(inputDataContext));
+                            conversation.say(message, inputDataContext);
                         } catch (LifecycleException | IConversation.ConversationNotReadyException e) {
                             contextLogger.setLoggingContext(loggingContext);
                             log.error(e.getLocalizedMessage(), e);
@@ -408,24 +408,6 @@ public class RestBotEngine implements IRestBotEngine {
         msg = String.format(msg, conversationId, ConversationState.ERROR);
         contextLogger.setLoggingContext(loggingContext);
         log.error(msg, t);
-    }
-
-    private Map<String, Context> convertContext(Map<String, Context> inputDataContext) {
-        if (inputDataContext == null) {
-            return new HashMap<>();
-        } else {
-            return inputDataContext.entrySet()
-                    .stream()
-                    .collect(Collectors.toMap(Map.Entry::getKey,
-                            e -> {
-                                Context context = e.getValue();
-                                return new Context(
-                                        //TODO proper error handling if null or unknown
-                                        Context.ContextType.valueOf(context.getType().toString()),
-                                        context.getValue());
-                            }));
-        }
-
     }
 
     @Override
