@@ -18,13 +18,13 @@ Check out the full documentation [here](http://docs.labs.ai/).
 
 ### We have asked that question to our users and here are some reasons they mentioned
 
-* it is open source 💚
-* the configuration is extremely open and flexible
-* the code is self-explanatory and easy to extend
-* eddi is channel independent, therefore can be used anywhere
-* the \(NLP\) parser is extremely cool
-* the framework is focused and does not pretend to be the magic bullet that solves it all
-* great tech stack, when you want to build a chatbot product yourself
+*   it is open source 💚
+*   the configuration is extremely open and flexible
+*   the code is self-explanatory and easy to extend
+*   eddi is channel independent, therefore can be used anywhere
+*   the \(NLP\) parser is extremely cool
+*   the framework is focused and does not pretend to be the magic bullet that solves it all
+*   great tech stack, when you want to build a chatbot product yourself
 
 ## Intro
 
@@ -34,27 +34,27 @@ This platform has been developed for over many years and completely restructured
 
 The most outstanding features are:
 
-* Flexible in NLP and Behavior
-* Fluently connect to REST APIs
-* Powerful Templating
-* Reuse Conversation Flows in multiple bots
+*   Flexible in NLP and Behavior
+*   Fluently connect to REST APIs
+*   Powerful Templating
+*   Reuse Conversation Flows in multiple bots
 
 technical spec:
 
-* Resource- / REST-oriented architecture
-* OAuth 2.0 / Basic Authentication
-* Java
-* JAX-RS
-* Dependency Injection
-* Embedded Jetty
-* NoSQL
-* HTML, CSS, Javascript, JSON
+*   Resource- / REST-oriented architecture
+*   OAuth 2.0 / Basic Authentication
+*   Java
+*   JAX-RS
+*   Dependency Injection
+*   Embedded Jetty
+*   NoSQL
+*   HTML, CSS, Javascript, JSON
 
 ## Prerequirements
 
-* Java 11
-* Maven 3
-* MongoDB >3.5
+*   Java 11
+*   Maven 3
+*   MongoDB >3.5
 
 ## Build project with maven
 

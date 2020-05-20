@@ -5,7 +5,6 @@ import ai.labs.parser.extensions.corrections.similarities.IDistanceCalculator;
 import ai.labs.parser.extensions.dictionaries.IDictionary;
 import ai.labs.parser.model.FoundWord;
 import ai.labs.parser.model.Word;
-import lombok.NoArgsConstructor;
 
 import java.util.Collections;
 import java.util.LinkedList;
@@ -15,12 +14,15 @@ import java.util.stream.Collectors;
 /**
  * @author ginccc
  */
-@NoArgsConstructor
 public class DamerauLevenshteinCorrection implements ICorrection {
-    private int maxDistance = 2;
-    private boolean lookupIfKnown;
+    private final int maxDistance;
     private final IDistanceCalculator distanceCalculator = new DamerauLevenshteinDistance();
+    private final boolean lookupIfKnown;
     private List<IDictionary> dictionaries;
+
+    public DamerauLevenshteinCorrection() {
+        this(2, false);
+    }
 
     public DamerauLevenshteinCorrection(int maxDistance, boolean lookupIfKnown) {
         this.maxDistance = maxDistance;
@@ -40,7 +42,7 @@ public class DamerauLevenshteinCorrection implements ICorrection {
     @Override
     public List<IDictionary.IFoundWord> correctWord(String lookup, List<IDictionary> temporaryDictionaries) {
         List<WordDistanceWrapper> foundWords = new LinkedList<>();
-        lookup = lookup.toLowerCase();
+        var lowerCaseLookup = lookup.toLowerCase();
 
         List<IDictionary> allDictionaries = new LinkedList<>();
         allDictionaries.addAll(temporaryDictionaries);
@@ -48,7 +50,7 @@ public class DamerauLevenshteinCorrection implements ICorrection {
 
         for (IDictionary dictionary : allDictionaries) {
             for (IDictionary.IWord word : dictionary.getWords()) {
-                final int distance = calculateDistance(lookup, word.getValue().toLowerCase());
+                final int distance = calculateDistance(lowerCaseLookup, word.getValue().toLowerCase());
 
                 if (distance > -1) {
                     Word entry = new Word(word.getValue(),
@@ -88,13 +90,13 @@ public class DamerauLevenshteinCorrection implements ICorrection {
     }
 
     private static class WordDistanceWrapper implements Comparable<WordDistanceWrapper> {
+        private final int distance;
+        private final IDictionary.IWord word;
+
         private WordDistanceWrapper(int distance, IDictionary.IWord word) {
             this.distance = distance;
             this.word = word;
         }
-
-        private final int distance;
-        private final IDictionary.IWord word;
 
         @Override
         public int compareTo(WordDistanceWrapper o) {

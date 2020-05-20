@@ -26,30 +26,31 @@ public class MergedTermsCorrection implements ICorrection {
     public List<IDictionary.IFoundWord> correctWord(String word, List<IDictionary> temporaryDictionaries) {
         List<IDictionary.IFoundWord> possibleTerms = new ArrayList<>();
         String part;
-        for (int i = word.length(); i > 0; i--) {
-            part = word.substring(0, i);
+        String tmpWord = word;
+        for (int i = tmpWord.length(); i > 0; i--) {
+            part = tmpWord.substring(0, i);
             List<IDictionary.IFoundWord> match = matchWord(part, temporaryDictionaries);
             if (match.size() > 0) {
                 possibleTerms.addAll(match);
-                word = word.substring(i);
-                i = word.length() + 1;
+                tmpWord = tmpWord.substring(i);
+                i = tmpWord.length() + 1;
             }
         }
 
-        if (!word.isEmpty()) {
+        if (!tmpWord.isEmpty()) {
             possibleTerms.clear();
-            for (int i = 0; i < word.length(); i++) {
-                part = word.substring(i);
+            for (int i = 0; i < tmpWord.length(); i++) {
+                part = tmpWord.substring(i);
                 List<IDictionary.IFoundWord> match = matchWord(part, temporaryDictionaries);
                 if (match.size() > 0) {
                     possibleTerms.addAll(match);
-                    word = word.substring(0, i);
-                    i = word.length();
+                    tmpWord = tmpWord.substring(0, i);
+                    i = tmpWord.length();
                 }
             }
         }
 
-        if (word.isEmpty() &&   // all terms are known
+        if (tmpWord.isEmpty() &&   // all terms are known
                 !possibleTerms.isEmpty()) {
             return possibleTerms;
         } else {
