@@ -132,6 +132,7 @@ public class ConversationMemoryUtilities {
             simpleSnapshot.setUserId(conversationMemorySnapshot.getUserId());
         }
 
+        simpleSnapshot.setConversationId(conversationMemorySnapshot.getConversationId());
         simpleSnapshot.setBotId(conversationMemorySnapshot.getBotId());
         simpleSnapshot.setBotVersion(conversationMemorySnapshot.getBotVersion());
         simpleSnapshot.setConversationState(conversationMemorySnapshot.getConversationState());

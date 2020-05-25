@@ -33,10 +33,6 @@ public class MemoryItemConverter implements IMemoryItemConverter {
         var contextMap = prepareContext(contextDataList);
         var memoryMap = convertMemoryItems(memory);
         var userId = memory.getUserId();
-        if (!isNullOrEmpty(userId)) {
-            ret.put(KEY_USER_INFO, Map.of(KEY_USER_ID, userId));
-        }
-
         var conversationProperties = memory.getConversationProperties();
 
         if (!contextMap.isEmpty()) {
@@ -50,6 +46,17 @@ public class MemoryItemConverter implements IMemoryItemConverter {
 
         if (!memoryMap.isEmpty()) {
             ret.put(KEY_MEMORY, convertMemoryItems(memory));
+        }
+
+        if (!isNullOrEmpty(userId)) {
+            if (ret.containsKey(KEY_USER_INFO)) {
+                Object o = ret.get(KEY_USER_INFO);
+                if (o instanceof Map) {
+                    ((Map) o).put(KEY_USER_ID, userId);
+                }
+            } else {
+                ret.put(KEY_USER_INFO, Map.of(KEY_USER_ID, userId));
+            }
         }
 
         return ret;

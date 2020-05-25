@@ -18,6 +18,7 @@ import java.util.List;
 @Getter
 @Setter
 public class SimpleConversationMemorySnapshot {
+    private String conversationId;
     private String botId;
     private Integer botVersion;
     private String userId;
