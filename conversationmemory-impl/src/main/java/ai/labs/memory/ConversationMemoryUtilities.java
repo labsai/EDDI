@@ -137,7 +137,8 @@ public class ConversationMemoryUtilities {
         simpleSnapshot.setBotVersion(conversationMemorySnapshot.getBotVersion());
         simpleSnapshot.setConversationState(conversationMemorySnapshot.getConversationState());
         simpleSnapshot.setEnvironment(conversationMemorySnapshot.getEnvironment());
-        simpleSnapshot.setRedoCacheSize(conversationMemorySnapshot.getRedoCache().size());
+        simpleSnapshot.setUndoAvailable(conversationMemorySnapshot.getConversationSteps().size() > 1);
+        simpleSnapshot.setRedoAvailable(conversationMemorySnapshot.getRedoCache().size() > 0);
 
         simpleSnapshot.getConversationOutputs().addAll(conversationMemorySnapshot.getConversationOutputs());
         simpleSnapshot.getConversationProperties().putAll(conversationMemorySnapshot.getConversationProperties());
