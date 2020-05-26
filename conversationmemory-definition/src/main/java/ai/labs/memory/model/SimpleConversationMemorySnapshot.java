@@ -24,8 +24,8 @@ public class SimpleConversationMemorySnapshot {
     private String userId;
     private Deployment.Environment environment;
     private ConversationState conversationState;
-    private boolean isUndoAvailable;
-    private boolean isRedoAvailable;
+    private boolean undoAvailable;
+    private boolean redoAvailable;
     private List<ConversationOutput> conversationOutputs = new LinkedList<>();
     private IConversationMemory.IConversationProperties conversationProperties = new ConversationProperties(null);
     private List<SimpleConversationStep> conversationSteps = new LinkedList<>();
