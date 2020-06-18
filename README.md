@@ -2,7 +2,7 @@
 Scalable Open Source Chatbot Platform. Build multiple Chatbots with NLP, Behavior Rules, API Connector, Templating. Developed in Java, provided with Docker, orchestrated with Kubernetes or Openshift. 
 
 
-v4.8.4 - STABLE
+v4.8.3 - STABLE
 
 License: Apache License 2.0
 
