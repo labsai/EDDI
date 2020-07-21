@@ -3,7 +3,7 @@ import { Component, compose, pure, setDisplayName } from 'recompose';
 import { connect } from 'react-redux';
 import styles from './BotConversionView.styles';
 import eddiApiActionDispatchers from '../../actions/EddiApiActionDispatchers';
-import { IConversation } from '../utils/AxiosFunctions';
+import { IConversation, IConversationData } from '../utils/AxiosFunctions';
 import { conversationSelector } from '../../selectors/ConversationSelectors';
 import * as renderIf from 'render-if';
 import ConversationSteps from './ConversationTab/ConversationSteps';

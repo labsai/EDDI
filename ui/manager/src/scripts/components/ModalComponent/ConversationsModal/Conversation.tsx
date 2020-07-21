@@ -9,20 +9,21 @@ import styles from './Conversation.styles';
 import { IConversation } from '../../utils/AxiosFunctions';
 import Parser from '../../utils/Parser';
 import { historyPush } from '../../../history';
+import modalActionDispatchers from '../../../actions/ModalActionDispatchers';
 
 interface IProps {
   conversation: IConversation;
 }
 
 const Conversation: React.StatelessComponent<IProps> = (props: IProps) => {
+  function handleClick() {
+    modalActionDispatchers.closeModal();
+    historyPush(
+      `/conversationview/${Parser.getId(props.conversation.resource)}`,
+    );
+  }
   return (
-    <div
-      style={styles.conversation}
-      onClick={() =>
-        historyPush(
-          `/conversationview/${Parser.getId(props.conversation.resource)}`,
-        )
-      }>
+    <div style={styles.conversation} onClick={() => handleClick()}>
       <div style={styles.conversationName}>{props.conversation.botName}</div>
       <div style={styles.conversationVersion}>{`V${Parser.getVersion(
         props.conversation.botResource,

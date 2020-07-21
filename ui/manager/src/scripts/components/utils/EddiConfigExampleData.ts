@@ -12,14 +12,14 @@ export const REGULAR_DICTIONARY_POST_EXAMPLE: string = `{
     "words": [
         {
             "word": "Hello",
-            "exp": "greeting(hello)",
+            "expressions": "greeting(hello)",
             "frequency": 0
         }
     ],
     "phrases": [
         {
             "phrase": "Good morning",
-            "exp": "greeting(good_morning)"
+            "expressions": "greeting(good_morning)"
         }
     ]
 }`;

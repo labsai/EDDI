@@ -2,13 +2,10 @@ import * as React from 'react';
 import { Component, compose, pure, setDisplayName } from 'recompose';
 import styles from './ConversationStep.styles';
 import {
-  IAction,
   IConversationOutput,
   IConversationStep,
   IConversationSteps,
-  IInput,
-  IOutput,
-  IQuickReplies,
+  IOutputValue,
 } from '../../utils/AxiosFunctions';
 import * as renderIf from 'render-if';
 import ReactJson from 'react-json-view';
@@ -20,10 +17,7 @@ import {
   RED_COLOR,
 } from '../../../../styles/DefaultStylingProperties';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
-import { isNumber } from 'util';
-import ConversationHelper, {
-  IConversationStepOutput,
-} from '../../utils/helpers/ConversationHelper';
+import ConversationHelper from '../../utils/helpers/ConversationHelper';
 
 interface IProps {
   showAction: boolean;
@@ -34,7 +28,7 @@ interface IProps {
 interface IState {
   action: string;
   input: string;
-  output: IConversationStepOutput[];
+  output: IOutputValue[];
   quickReplies: string[];
   timeSpan: number;
   expanded: boolean;
@@ -62,7 +56,7 @@ class ConversationStep extends React.Component<IProps, IState> {
       .conversationStep;
     const action = ConversationHelper.getAction(conversationStep);
     const input = ConversationHelper.getInput(conversationStep);
-    const output = ConversationHelper.getOutput(conversationStep);
+    const output = ConversationHelper.getOutput(this.props.conversationOutput);
     const quickReplies = ConversationHelper.getQuickReplies(conversationStep);
     const timeSpan = ConversationHelper.getTimespan(conversationStep);
     this.setState({ action, input, output, quickReplies, timeSpan });
@@ -97,13 +91,13 @@ class ConversationStep extends React.Component<IProps, IState> {
     });
   }
 
-  getOutputRender(output: IConversationStepOutput, key: number) {
+  getOutputRender(output: IOutputValue, key: number) {
     if (output.type === 'image' || output.type === 'botIcon') {
-      return <img src={output.value} alt={output.type} key={key} />;
+      return <img src={output.text} alt={output.type} key={key} />;
     } else {
       return (
         <div style={styles.output} key={key}>
-          {output.value}
+          {output.text}
         </div>
       );
     }

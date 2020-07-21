@@ -29,7 +29,6 @@ const customStyles = {
     fontSize: '12px',
     height: '36px',
     marginLeft: '32px',
-    marginTop: '8px',
     textAlign: 'center',
     minWidth: '100px',
   },

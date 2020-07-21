@@ -1,8 +1,10 @@
 import {
   IAction,
+  IConversationOutput,
   IConversationStep,
   IInput,
   IOutput,
+  IOutputValue,
   IQuickReplies,
 } from '../AxiosFunctions';
 
@@ -11,11 +13,6 @@ export const CONVERSATION_ENDED = 'ENDED';
 export const CONVERSATION_IN_PROGRESS = 'IN_PROGRESS';
 export const CONVERSATION_ERROR = 'ERROR';
 export const CONVERSATION_EXECUTION_INTERRUPTED = 'EXECUTION_INTERRUPTED';
-
-export interface IConversationStepOutput {
-  type: string;
-  value: string;
-}
 
 export default class ConversationHelper {
   static getAction(conversationStep: IConversationStep[]) {
@@ -33,53 +30,24 @@ export default class ConversationHelper {
     }
   }
 
-  static parseConversationStepOutput(output: IOutput): IConversationStepOutput {
-    let type: string;
-    let value: string;
-    if (typeof output.value === 'object') {
-      type = output.value.type;
-      if (type === 'image' || type === 'botIcon') {
-        value = output.value.uri;
-      } else {
-        value = output.value.text;
-      }
-    } else {
-      type = 'text';
-      value = output.value;
+  static parseConversationOutput(output: IOutputValue | string): IOutputValue {
+    if (typeof output === 'string') {
+      return {
+        text: output,
+        type: 'text',
+      };
     }
-    return {
-      type,
-      value,
-    };
+    return output;
   }
 
-  static getOutput(
-    conversationStep: IConversationStep[],
-  ): IConversationStepOutput[] {
-    let i = conversationStep.findIndex(step => step.key.includes('output'));
-    const output: IConversationStepOutput[] = [];
-    if (i < 0) {
-      return;
-    }
-    output.push(
-      this.parseConversationStepOutput(conversationStep[i] as IOutput),
-    );
-
-    if (isNaN(parseInt(conversationStep[i].key.split(/[:]+/).pop(), 10))) {
-      return output;
-    } else {
-      i++;
-      while (
-        i < conversationStep.length &&
-        parseInt(conversationStep[i].key.split(/[:]+/).pop(), 10)
-      ) {
-        output.push(
-          this.parseConversationStepOutput(conversationStep[i] as IOutput),
-        );
-        i++;
+  static getOutput(conversationOutput: IConversationOutput): IOutputValue[] {
+    const output: IOutputValue[] = [];
+    if (conversationOutput.output) {
+      for (let o of conversationOutput.output) {
+        output.push(this.parseConversationOutput(o));
       }
-      return output;
     }
+    return output;
   }
 
   static getQuickReplies(conversationStep: IConversationStep[]): string[] {

@@ -72,10 +72,8 @@ const styles: CSSProperties = {
   headerTextUpdate: {
     fontSize: '25px',
     maxWidth: '400px',
-    maxHeight: '25px',
     overflow: 'hidden',
     textOverflow: 'ellipsis',
-    paddingTop: '5px',
   },
   modalBottomHeader: {
     marginLeft: '50px',

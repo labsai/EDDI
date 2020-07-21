@@ -1041,7 +1041,7 @@ export interface IConversationOutput {
   intents?: string[];
   actions?: string[];
   quickReplies?: IQuickReply[];
-  output?: string[];
+  output?: string[] | IOutputValue[];
 }
 
 export interface IConversationSteps {
@@ -1060,7 +1060,7 @@ export interface IInput extends IConversationStep {
 
 export interface IOutputValue {
   type: string;
-  delay: number;
+  delay?: number;
   uri?: string;
   text?: string;
 }
