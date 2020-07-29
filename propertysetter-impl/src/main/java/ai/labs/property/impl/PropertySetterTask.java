@@ -20,6 +20,7 @@ import ai.labs.resources.rest.extensions.model.ExtensionDescriptor;
 import ai.labs.runtime.client.configuration.IResourceClientLibrary;
 import ai.labs.runtime.service.ServiceException;
 import ai.labs.templateengine.ITemplatingEngine;
+import ai.labs.utilities.CharacterUtilities;
 import ai.labs.utilities.RuntimeUtilities;
 import ognl.Ognl;
 
@@ -141,12 +142,16 @@ public class PropertySetterTask implements ILifecycleTask {
                                 templatedObj = Ognl.getValue(fromObjectPath, templateDataObjects);
                             } else {
                                 var value = property.getValue();
-
                                 if (!isNullOrEmpty(value) && value instanceof String) {
                                     value = templatingEngine.processTemplate((String) value, templateDataObjects);
                                 }
 
-                                templatedObj = value;
+                                var valueLookup = value.toString();
+                                if (CharacterUtilities.isNumber(valueLookup, false)) {
+                                    templatedObj = Double.parseDouble(valueLookup);
+                                } else {
+                                    templatedObj = value;
+                                }
                             }
 
                             if (!conversationProperties.containsKey(name) || property.getOverride()) {
