@@ -146,9 +146,8 @@ public class PropertySetterTask implements ILifecycleTask {
                                     value = templatingEngine.processTemplate((String) value, templateDataObjects);
                                 }
 
-                                var valueLookup = value.toString();
-                                if (CharacterUtilities.isNumber(valueLookup, false)) {
-                                    templatedObj = Double.parseDouble(valueLookup);
+                                if (value != null && CharacterUtilities.isNumber(value.toString(), false)) {
+                                    templatedObj = Double.parseDouble(value.toString());
                                 } else {
                                     templatedObj = value;
                                 }
