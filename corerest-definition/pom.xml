@@ -17,12 +17,12 @@
         <dependency>
             <groupId>org.eclipse.jetty</groupId>
             <artifactId>jetty-client</artifactId>
-            <version>9.4.28.v20200408</version>
+            <version>9.4.31.v20200723</version>
         </dependency>
         <dependency>
             <groupId>org.jboss.resteasy</groupId>
             <artifactId>resteasy-client</artifactId>
-            <version>4.5.3.Final</version>
+            <version>4.5.6.Final</version>
             <exclusions>
                 <exclusion>
                     <groupId>commons-io</groupId>
@@ -33,7 +33,7 @@
         <dependency>
             <groupId>org.jboss.resteasy</groupId>
             <artifactId>resteasy-client-jetty</artifactId>
-            <version>4.5.3.Final</version>
+            <version>4.5.6.Final</version>
             <exclusions>
                 <exclusion>
                     <groupId>commons-io</groupId>
@@ -44,7 +44,7 @@
         <dependency>
             <groupId>org.eclipse.jetty</groupId>
             <artifactId>jetty-servlet</artifactId>
-            <version>9.4.28.v20200408</version>
+            <version>9.4.31.v20200723</version>
             <scope>provided</scope>
         </dependency>
         <dependency>
