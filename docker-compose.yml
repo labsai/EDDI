@@ -20,5 +20,5 @@ services:
       EDDI_JAVA_ENV_TUNE_BUFFER: "jdk.nio.MaxCachedBufferSize=1048576"
       #EDDI_JAVA_ENV_MONGODB_HOST: mongodb.hosts=mongodb
   mongodb:
-    image: mongo:4.2
+    image: mongo:4.4
     restart: always
