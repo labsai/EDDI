@@ -51,14 +51,9 @@ export default class ConversationHelper {
     return output;
   }
 
-  static getQuickReplies(conversationStep: IConversationStep[]): string[] {
-    const quickReplies = conversationStep.find(step =>
-      step.key.includes('quickReplies'),
-    );
-    if (quickReplies && !_.isEmpty((quickReplies as IQuickReplies).value)) {
-      return (quickReplies as IQuickReplies).value.map(
-        quickReply => quickReply.value,
-      );
+  static getQuickReplies(converstionOutput: IConversationOutput): string[] {
+    if (!_.isEmpty(converstionOutput.quickReplies)) {
+      return converstionOutput.quickReplies.map(qr => qr.value);
     }
   }
 
