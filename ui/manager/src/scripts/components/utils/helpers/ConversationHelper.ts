@@ -7,6 +7,7 @@ import {
   IOutputValue,
   IQuickReplies,
 } from '../AxiosFunctions';
+import * as _ from 'lodash';
 
 export const CONVERSATION_READY = 'READY';
 export const CONVERSATION_ENDED = 'ENDED';
@@ -54,7 +55,7 @@ export default class ConversationHelper {
     const quickReplies = conversationStep.find(step =>
       step.key.includes('quickReplies'),
     );
-    if (quickReplies) {
+    if (quickReplies && !_.isEmpty((quickReplies as IQuickReplies).value)) {
       return (quickReplies as IQuickReplies).value.map(
         quickReply => quickReply.value,
       );
