@@ -7,6 +7,7 @@ import {
   IOutputValue,
   IQuickReplies,
 } from '../AxiosFunctions';
+import * as _ from 'lodash';
 
 export const CONVERSATION_READY = 'READY';
 export const CONVERSATION_ENDED = 'ENDED';
@@ -50,14 +51,9 @@ export default class ConversationHelper {
     return output;
   }
 
-  static getQuickReplies(conversationStep: IConversationStep[]): string[] {
-    const quickReplies = conversationStep.find(step =>
-      step.key.includes('quickReplies'),
-    );
-    if (quickReplies) {
-      return (quickReplies as IQuickReplies).value.map(
-        quickReply => quickReply.value,
-      );
+  static getQuickReplies(converstionOutput: IConversationOutput): string[] {
+    if (!_.isEmpty(converstionOutput.quickReplies)) {
+      return converstionOutput.quickReplies.map(qr => qr.value);
     }
   }
 

@@ -57,7 +57,9 @@ class ConversationStep extends React.Component<IProps, IState> {
     const action = ConversationHelper.getAction(conversationStep);
     const input = ConversationHelper.getInput(conversationStep);
     const output = ConversationHelper.getOutput(this.props.conversationOutput);
-    const quickReplies = ConversationHelper.getQuickReplies(conversationStep);
+    const quickReplies = ConversationHelper.getQuickReplies(
+      this.props.conversationOutput,
+    );
     const timeSpan = ConversationHelper.getTimespan(conversationStep);
     this.setState({ action, input, output, quickReplies, timeSpan });
   }
