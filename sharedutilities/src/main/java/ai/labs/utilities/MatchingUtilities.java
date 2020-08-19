@@ -24,6 +24,8 @@ public class MatchingUtilities {
                     } else if (value instanceof List && ((List) value).contains(contains)) {
                         success = true;
                     }
+                } else if (value instanceof Boolean) {
+                    success = (Boolean) value;
                 } else if (isNullOrEmpty(equals) && isNullOrEmpty(contains)) {
                     success = true;
                 }
