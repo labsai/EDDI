@@ -9,13 +9,10 @@ import ai.labs.memory.rest.IRestConversationStore;
 import ai.labs.models.ConversationState;
 import ai.labs.models.ConversationStatus;
 import ai.labs.persistence.IResourceStore;
-import ai.labs.persistence.model.ResourceId;
 import ai.labs.resources.rest.documentdescriptor.IDocumentDescriptorStore;
 import ai.labs.user.IUserStore;
 import ai.labs.user.model.User;
-import ai.labs.utilities.RestUtilities;
 import ai.labs.utilities.RuntimeUtilities;
-import ai.labs.utilities.URIUtilities;
 import lombok.extern.slf4j.Slf4j;
 import org.jboss.resteasy.spi.NoLogWebApplicationException;
 
@@ -24,11 +21,12 @@ import javax.ws.rs.InternalServerErrorException;
 import javax.ws.rs.NotFoundException;
 import javax.ws.rs.core.Response;
 import java.net.URI;
+import java.util.Collections;
 import java.util.LinkedList;
 import java.util.List;
-import java.util.stream.Collectors;
 
 import static ai.labs.memory.ConversationMemoryUtilities.convertSimpleConversationMemory;
+import static ai.labs.utilities.RestUtilities.extractResourceId;
 import static ai.labs.utilities.RuntimeUtilities.checkNotNull;
 
 /**
@@ -65,8 +63,22 @@ public class RestConversationStore implements IRestConversationStore {
 
                 ConversationMemorySnapshot memorySnapshot;
                 for (ConversationDescriptor conversationDescriptor : conversationDescriptors) {
-                    IResourceStore.IResourceId resourceId =
-                            RestUtilities.extractResourceId(conversationDescriptor.getResource());
+                    var resourceId = extractResourceId(conversationDescriptor.getResource());
+
+                    if (!RuntimeUtilities.isNullOrEmpty(conversationId) && resourceId.getId().equals(conversationId)) {
+                        return Collections.singletonList(conversationDescriptor);
+                    }
+
+                    var botResourceId = extractResourceId(conversationDescriptor.getBotResource());
+
+                    if (!RuntimeUtilities.isNullOrEmpty(botId) && !botId.equals(botResourceId.getId())) {
+                        continue;
+                    }
+
+                    if (!RuntimeUtilities.isNullOrEmpty(botVersion) && !botVersion.equals(botResourceId.getVersion())) {
+                        continue;
+                    }
+
                     try {
                         memorySnapshot = conversationMemoryStore.loadConversationMemorySnapshot(resourceId.getId());
                     } catch (IResourceStore.ResourceNotFoundException e) {
@@ -76,23 +88,6 @@ public class RestConversationStore implements IRestConversationStore {
                         continue;
                     }
 
-                    if (!RuntimeUtilities.isNullOrEmpty(conversationId)) {
-                        if (!conversationId.equals(memorySnapshot.getConversationId())) {
-                            continue;
-                        }
-                    }
-
-                    if (!RuntimeUtilities.isNullOrEmpty(botId)) {
-                        if (!botId.equals(memorySnapshot.getBotId())) {
-                            continue;
-                        }
-                    }
-
-                    if (!RuntimeUtilities.isNullOrEmpty(botVersion)) {
-                        if (!botVersion.equals(memorySnapshot.getBotVersion())) {
-                            continue;
-                        }
-                    }
 
                     if (!RuntimeUtilities.isNullOrEmpty(conversationState)) {
                         if (!conversationState.equals(memorySnapshot.getConversationState())) {
@@ -110,7 +105,7 @@ public class RestConversationStore implements IRestConversationStore {
                     conversationDescriptor.setConversationStepSize(memorySnapshot.getConversationSteps().size());
                     URI createdBy = conversationDescriptor.getCreatedBy();
                     if (createdBy != null) {
-                        User user = userStore.readUser(RestUtilities.extractResourceId(createdBy).getId());
+                        User user = userStore.readUser(extractResourceId(createdBy).getId());
                         conversationDescriptor.setCreatedByUserName(user.getDisplayName());
                     }
                     conversationDescriptor.setBotName(documentDescriptorStore.readDescriptor(memorySnapshot.getBotId(), memorySnapshot.getBotVersion()).getName());
@@ -179,35 +174,26 @@ public class RestConversationStore implements IRestConversationStore {
     }
 
     @Override
-    public List<ConversationStatus> getActiveConversations(String botId,
-                                                           Integer botVersion,
-                                                           Integer index,
-                                                           Integer limit) {
+    public List<ConversationStatus> getActiveConversations(String botId, Integer botVersion)
+            throws IResourceStore.ResourceStoreException, IResourceStore.ResourceNotFoundException {
         checkNotNull(botId, "botId");
         checkNotNull(botVersion, "botVersion");
 
-        List<ConversationDescriptor> conversationDescriptors;
+        List<ConversationMemorySnapshot> conversationMemorySnapshots;
         List<ConversationStatus> conversationStatuses = new LinkedList<>();
-        do {
-            conversationDescriptors = readConversationDescriptors(index, limit, null, botId, botVersion,
-                    null, null);
 
-            conversationStatuses.addAll(conversationDescriptors.stream().
-                    filter(conversationDescriptor ->
-                            conversationDescriptor.getConversationState() != ConversationState.ENDED).
-                    map(conversationDescriptor -> {
-                        ConversationStatus conversationStatus = new ConversationStatus();
-                        URI resourceUri = conversationDescriptor.getResource();
-                        ResourceId resourceId = URIUtilities.extractResourceId(resourceUri);
-                        conversationStatus.setConversationId(resourceId.getId());
-                        conversationStatus.setBotId(botId);
-                        conversationStatus.setBotVersion(botVersion);
-                        conversationStatus.setConversationState(conversationDescriptor.getConversationState());
-                        conversationStatus.setLastInteraction(conversationDescriptor.getLastModifiedOn());
-                        return conversationStatus;
-                    }).collect(Collectors.toList()));
-            index++;
-        } while (!conversationDescriptors.isEmpty() && conversationStatuses.size() < limit);
+        conversationMemorySnapshots = conversationMemoryStore.loadActiveConversationMemorySnapshot(botId, botVersion);
+        for (var snapshot : conversationMemorySnapshots) {
+            ConversationStatus conversationStatus = new ConversationStatus();
+            String conversationId = snapshot.getId();
+            conversationStatus.setConversationId(conversationId);
+            conversationStatus.setBotId(botId);
+            conversationStatus.setBotVersion(botVersion);
+            conversationStatus.setConversationState(snapshot.getConversationState());
+            var conversationDescriptor = conversationDescriptorStore.readDescriptor(conversationId, 0);
+            conversationStatus.setLastInteraction(conversationDescriptor.getLastModifiedOn());
+            conversationStatuses.add(conversationStatus);
+        }
 
         return conversationStatuses;
     }
