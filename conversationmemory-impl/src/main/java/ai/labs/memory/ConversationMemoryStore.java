@@ -12,6 +12,8 @@ import org.bson.conversions.Bson;
 import org.bson.types.ObjectId;
 
 import javax.inject.Inject;
+import java.util.ArrayList;
+import java.util.List;
 
 import static ai.labs.models.ConversationState.ENDED;
 
@@ -63,6 +65,29 @@ public class ConversationMemoryStore implements IConversationMemoryStore, IResou
         }
 
         return memorySnapshot;
+    }
+
+    @Override
+    public List<ConversationMemorySnapshot> loadActiveConversationMemorySnapshot(String botId, Integer botVersion)
+            throws IResourceStore.ResourceStoreException {
+
+        try {
+            List<ConversationMemorySnapshot> ret = new ArrayList<>();
+
+            Document query = new Document();
+            query.put("botId", botId);
+            query.put("botVersion", botVersion);
+            query.put("conversationState", new Document("$ne", ENDED.toString()));
+
+            var cursor = conversationCollectionObject.find(query).cursor();
+            while (cursor.hasNext()) {
+                ret.add(cursor.next());
+            }
+
+            return ret;
+        } catch (Exception e) {
+            throw new ResourceStoreException(e.getLocalizedMessage(), e);
+        }
     }
 
     @Override

@@ -64,11 +64,8 @@ public interface IRestConversationStore {
     @Produces(MediaType.APPLICATION_JSON)
     List<ConversationStatus> getActiveConversations(@PathParam("botId") String botId,
                                                     @ApiParam(name = "botVersion", required = true, format = "integer", example = "1")
-                                                    @QueryParam("botVersion") Integer botVersion,
-                                                    @ApiParam(name = "index", required = true, format = "integer", example = "0")
-                                                    @QueryParam("index") @DefaultValue("0") Integer index,
-                                                    @ApiParam(name = "limit", required = true, format = "integer", example = "20")
-                                                    @QueryParam("limit") @DefaultValue("20") Integer limit);
+                                                    @QueryParam("botVersion") Integer botVersion)
+            throws IResourceStore.ResourceStoreException, IResourceStore.ResourceNotFoundException;
 
     @POST
     @Path("end")

@@ -1,6 +1,7 @@
 package ai.labs.core.rest.internal;
 
 import ai.labs.memory.IConversationMemoryStore;
+import ai.labs.memory.rest.IRestConversationStore;
 import ai.labs.models.BotDeploymentStatus;
 import ai.labs.models.Deployment;
 import ai.labs.models.Deployment.Status;
@@ -21,7 +22,11 @@ import javax.inject.Inject;
 import javax.ws.rs.InternalServerErrorException;
 import javax.ws.rs.core.MediaType;
 import javax.ws.rs.core.Response;
-import java.util.*;
+import java.util.Collections;
+import java.util.Comparator;
+import java.util.EnumSet;
+import java.util.LinkedList;
+import java.util.List;
 import java.util.concurrent.Callable;
 
 import static ai.labs.persistence.IResourceStore.ResourceNotFoundException;
@@ -36,16 +41,19 @@ public class RestBotAdministration implements IRestBotAdministration {
     private final IBotFactory botFactory;
     private final IDeploymentStore deploymentStore;
     private final IConversationMemoryStore conversationMemoryStore;
+    private final IRestConversationStore restConversationStore;
     private final IDocumentDescriptorStore documentDescriptorStore;
 
     @Inject
     public RestBotAdministration(IBotFactory botFactory,
                                  IDeploymentStore deploymentStore,
                                  IConversationMemoryStore conversationMemoryStore,
+                                 IRestConversationStore restConversationStore,
                                  IDocumentDescriptorStore documentDescriptorStore) {
         this.botFactory = botFactory;
         this.deploymentStore = deploymentStore;
         this.conversationMemoryStore = conversationMemoryStore;
+        this.restConversationStore = restConversationStore;
         this.documentDescriptorStore = documentDescriptorStore;
     }
 
@@ -94,24 +102,36 @@ public class RestBotAdministration implements IRestBotAdministration {
     }
 
     @Override
-    public Response undeployBot(Deployment.Environment environment, String botId, Integer version) {
+    public Response undeployBot(Deployment.Environment environment, String botId, Integer version,
+                                Boolean endAllActiveConversations, Boolean undeployThisAndAllPreviousBotVersions) {
         RuntimeUtilities.checkNotNull(environment, "environment");
         RuntimeUtilities.checkNotNull(botId, "botId");
         RuntimeUtilities.checkNotNull(version, "version");
 
         try {
-            Long activeConversationCount = conversationMemoryStore.getActiveConversationCount(botId, version);
-            if (activeConversationCount > 0) {
-                String message = "%s active (thus not ENDED) conversation(s) going on with this bot!" +
-                        "\nCheck GET /conversationstore/conversations/active/%s?botVersion=%s " +
-                        "to see active conversations and end conversations with " +
-                        "POST /conversationstore/conversations/end , " +
-                        "providing the list you receive with GET";
-                message = String.format(message, activeConversationCount, botId, version);
-                return Response.status(Response.Status.CONFLICT).entity(message).type(MediaType.TEXT_PLAIN).build();
-            }
+            do {
+                Long activeConversationCount = conversationMemoryStore.getActiveConversationCount(botId, version);
+                if (activeConversationCount > 0) {
+                    if (endAllActiveConversations) {
+                        var activeConversations = restConversationStore.getActiveConversations(botId, version);
+                        restConversationStore.endActiveConversations(activeConversations);
+                    } else {
+                        String message = "%s active (thus not ENDED) conversation(s) going on with this bot!" +
+                                "\nCheck GET /conversationstore/conversations/active/%s?botVersion=%s " +
+                                "to see active conversations and end conversations with " +
+                                "POST /conversationstore/conversations/end , " +
+                                "providing the list you receive with GET" +
+                                "\nIn order to end all active conversations, the query param 'endAllActiveConversations' " +
+                                "can be set to true.";
+                        message = String.format(message, activeConversationCount, botId, version);
+                        return Response.status(Response.Status.CONFLICT).entity(message).type(MediaType.TEXT_PLAIN).build();
+                    }
+                }
 
-            undeploy(environment, botId, version);
+                undeploy(environment, botId, version);
+                log.info(String.format("Successfully undeployed bot (botId=%s, botVersion=%s, environment=%s)", botId, version, environment));
+            } while (undeployThisAndAllPreviousBotVersions && version-- > 1);
+
             return Response.accepted().build();
         } catch (Exception e) {
             log.error(e.getLocalizedMessage(), e);
