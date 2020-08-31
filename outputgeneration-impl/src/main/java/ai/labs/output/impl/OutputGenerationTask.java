@@ -126,8 +126,9 @@ public class OutputGenerationTask implements ILifecycleTask {
         IntStream.range(0, outputValues.size()).forEach(index -> {
             OutputValue outputValue = outputValues.get(index);
             List<Object> possibleValueAlternatives = outputValue.getValueAlternatives();
+            Object randomValue;
             if (!possibleValueAlternatives.isEmpty()) {
-                Object randomValue = chooseRandomly(possibleValueAlternatives);
+                randomValue = chooseRandomly(possibleValueAlternatives);
                 if (randomValue instanceof Map) {
                     Map<String, String> randomValueMap = new LinkedHashMap<>((Map) randomValue);
                     randomValueMap.put("type", outputValue.getType());
@@ -138,13 +139,17 @@ public class OutputGenerationTask implements ILifecycleTask {
 
                     randomValue = randomValueMap;
                 }
-
-                String outputKey = createOutputKey(action, outputValues, outputValue, index);
-                IData<Object> outputData = dataFactory.createData(outputKey, randomValue, possibleValueAlternatives);
-                outputData.setPublic(true);
-                currentStep.storeData(outputData);
-                currentStep.addConversationOutputList(MEMORY_OUTPUT_IDENTIFIER, Collections.singletonList(randomValue));
+            } else {
+                var tmpValueHolder = new LinkedHashMap<>();
+                tmpValueHolder.put("type", outputValue.getType());
+                randomValue = tmpValueHolder;
             }
+
+            String outputKey = createOutputKey(action, outputValues, outputValue, index);
+            IData<Object> outputData = dataFactory.createData(outputKey, randomValue, possibleValueAlternatives);
+            outputData.setPublic(true);
+            currentStep.storeData(outputData);
+            currentStep.addConversationOutputList(MEMORY_OUTPUT_IDENTIFIER, Collections.singletonList(randomValue));
         });
 
         if (!quickReplies.isEmpty()) {
