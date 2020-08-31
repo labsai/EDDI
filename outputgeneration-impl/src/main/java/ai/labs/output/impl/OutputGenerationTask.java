@@ -21,11 +21,18 @@ import ai.labs.utilities.StringUtilities;
 
 import javax.inject.Inject;
 import java.net.URI;
-import java.util.*;
+import java.util.Collections;
+import java.util.LinkedHashMap;
+import java.util.LinkedList;
+import java.util.List;
+import java.util.Map;
+import java.util.Random;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 
-import static ai.labs.memory.IConversationMemory.*;
+import static ai.labs.memory.IConversationMemory.IConversationStep;
+import static ai.labs.memory.IConversationMemory.IConversationStepStack;
+import static ai.labs.memory.IConversationMemory.IWritableConversationStep;
 
 /**
  * @author ginccc
@@ -119,23 +126,25 @@ public class OutputGenerationTask implements ILifecycleTask {
         IntStream.range(0, outputValues.size()).forEach(index -> {
             OutputValue outputValue = outputValues.get(index);
             List<Object> possibleValueAlternatives = outputValue.getValueAlternatives();
-            Object randomValue = chooseRandomly(possibleValueAlternatives);
-            if (randomValue instanceof Map) {
-                Map<String, String> randomValueMap = new LinkedHashMap<>((Map) randomValue);
-                randomValueMap.put("type", outputValue.getType());
-                if (OUTPUT_TYPE_QUICK_REPLY.equals(outputValue.getType())) {
-                    quickReplies.add(new QuickReply(randomValueMap.get(KEY_VALUE), randomValueMap.get(KEY_EXPRESSIONS),
-                            Boolean.parseBoolean(randomValueMap.getOrDefault(KEY_IS_DEFAULT, "false"))));
+            if (!possibleValueAlternatives.isEmpty()) {
+                Object randomValue = chooseRandomly(possibleValueAlternatives);
+                if (randomValue instanceof Map) {
+                    Map<String, String> randomValueMap = new LinkedHashMap<>((Map) randomValue);
+                    randomValueMap.put("type", outputValue.getType());
+                    if (OUTPUT_TYPE_QUICK_REPLY.equals(outputValue.getType())) {
+                        quickReplies.add(new QuickReply(randomValueMap.get(KEY_VALUE), randomValueMap.get(KEY_EXPRESSIONS),
+                                Boolean.parseBoolean(randomValueMap.getOrDefault(KEY_IS_DEFAULT, "false"))));
+                    }
+
+                    randomValue = randomValueMap;
                 }
 
-                randomValue = randomValueMap;
+                String outputKey = createOutputKey(action, outputValues, outputValue, index);
+                IData<Object> outputData = dataFactory.createData(outputKey, randomValue, possibleValueAlternatives);
+                outputData.setPublic(true);
+                currentStep.storeData(outputData);
+                currentStep.addConversationOutputList(MEMORY_OUTPUT_IDENTIFIER, Collections.singletonList(randomValue));
             }
-
-            String outputKey = createOutputKey(action, outputValues, outputValue, index);
-            IData<Object> outputData = dataFactory.createData(outputKey, randomValue, possibleValueAlternatives);
-            outputData.setPublic(true);
-            currentStep.storeData(outputData);
-            currentStep.addConversationOutputList(MEMORY_OUTPUT_IDENTIFIER, Collections.singletonList(randomValue));
         });
 
         if (!quickReplies.isEmpty()) {
