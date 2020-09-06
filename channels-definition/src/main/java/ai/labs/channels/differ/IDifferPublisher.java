@@ -7,7 +7,9 @@ import com.rabbitmq.client.Delivery;
 import java.io.IOException;
 
 public interface IDifferPublisher {
-    void init(DeliverCallback conversationCreatedCallback, DeliverCallback messageCreatedCallback);
+    void init(DeliverCallback conversationCreatedCallback,
+              DeliverCallback messageCreatedCallback,
+              DeliverCallback actionTriggeredCallback);
 
     void positiveDeliveryAck(long deliveryTag);
 

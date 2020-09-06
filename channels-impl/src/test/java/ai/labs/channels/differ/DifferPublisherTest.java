@@ -23,7 +23,9 @@ import java.util.Collections;
 import java.util.concurrent.TimeoutException;
 
 import static ai.labs.channels.differ.DifferOutputTransformer.INPUT_TYPE_TEXT;
-import static ai.labs.channels.differ.DifferPublisher.*;
+import static ai.labs.channels.differ.DifferPublisher.EDDI_EXCHANGE;
+import static ai.labs.channels.differ.DifferPublisher.MESSAGE_CREATED_EDDI_FAILED_ROUTING_KEY;
+import static ai.labs.channels.differ.DifferPublisher.TIMEOUT_CONFIRMS_IN_MILLIS;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
@@ -42,7 +44,7 @@ public class DifferPublisherTest {
         when(channelProvider.get()).thenAnswer(invocation -> channel);
 
         differPublisher = new DifferPublisher(channelProvider, jsonSerialization);
-        differPublisher.init(null, null);
+        differPublisher.init(null, null, null);
     }
 
     private IJsonSerialization createDummyJsonSerializer() {

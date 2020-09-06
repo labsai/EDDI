@@ -10,6 +10,7 @@ import ai.labs.channels.differ.model.commands.Command;
 import ai.labs.channels.differ.model.commands.CreateActionsCommand;
 import ai.labs.channels.differ.model.commands.CreateConversationCommand;
 import ai.labs.channels.differ.model.commands.CreateMessageCommand;
+import ai.labs.channels.differ.model.events.ActionTriggeredEvent;
 import ai.labs.channels.differ.model.events.ConversationCreatedEvent;
 import ai.labs.channels.differ.model.events.Event;
 import ai.labs.channels.differ.model.events.MessageCreatedEvent;
@@ -35,7 +36,11 @@ import javax.ws.rs.InternalServerErrorException;
 import javax.ws.rs.core.Response;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
-import java.util.*;
+import java.util.Collections;
+import java.util.HashMap;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
 import java.util.concurrent.ExecutionException;
 import java.util.stream.Collectors;
 
@@ -43,7 +48,9 @@ import static ai.labs.channels.differ.model.commands.CreateConversationCommand.C
 import static ai.labs.channels.differ.model.commands.CreateConversationCommand.CREATE_CONVERSATION_ROUTING_KEY;
 import static ai.labs.channels.differ.utilities.DifferUtilities.getCurrentTime;
 import static ai.labs.lifecycle.IConversation.CONVERSATION_END;
-import static ai.labs.utilities.RuntimeUtilities.*;
+import static ai.labs.utilities.RuntimeUtilities.checkNotEmpty;
+import static ai.labs.utilities.RuntimeUtilities.checkNotNull;
+import static ai.labs.utilities.RuntimeUtilities.isNullOrEmpty;
 import static java.util.concurrent.TimeUnit.MILLISECONDS;
 
 
@@ -108,7 +115,7 @@ public class RestDifferEndpoint implements IRestDifferEndpoint {
             return;
         }
 
-        differPublisher.init(conversationCreatedCallback(), messageCreatedCallback());
+        differPublisher.init(conversationCreatedCallback(), messageCreatedCallback(), actionTriggeredCallback());
 
         isInit = true;
         log.info("Differ integration started");
@@ -209,10 +216,12 @@ public class RestDifferEndpoint implements IRestDifferEndpoint {
                 var conversationInfo = getConversationInfo(conversationId);
                 if (conversationInfo == null) {
                     log.warn("ConversationId {} is unknown in the system, yet it contains a know botUserId {}. " +
-                            "Likely to eddi instances interfere each other here. " +
+                            "Likely two eddi instances interfere each other here. " +
                             "This message.created event will be ignored due to lack of information.", conversationId, senderId);
+                    differPublisher.positiveDeliveryAck(deliveryTag);
                     return;
                 }
+
                 if (isGroupChat(conversationInfo.getAllParticipantIds())) {
                     List<MessageCreatedEvent.Mention> mentions = message.getMentions();
                     if (mentions == null ||
@@ -238,6 +247,48 @@ public class RestDifferEndpoint implements IRestDifferEndpoint {
 
             } catch (Exception e) {
                 log.error("Error processing delivery {} of message.created.eddi with body {}", deliveryTag, receivedMessage);
+                log.error(e.getLocalizedMessage(), e);
+                differPublisher.negativeDeliveryAck(delivery);
+            }
+        };
+    }
+
+    private DeliverCallback actionTriggeredCallback() {
+        return (consumerTag, delivery) -> {
+            final long deliveryTag = delivery.getEnvelope().getDeliveryTag();
+            String receivedActionTriggered = new String(delivery.getBody(), StandardCharsets.UTF_8);
+            log.info("Received Raw Action Trigger Event Message: {}", receivedActionTriggered);
+
+            try {
+                var actionTriggeredEvent = jsonSerialization.deserialize(receivedActionTriggered, ActionTriggeredEvent.class);
+                var payload = actionTriggeredEvent.getPayload();
+                final var conversationId = payload.getAction().getConversationId();
+                if (!availableConversationIds.containsKey(conversationId)) {
+                    log.debug("Ignored action triggered because " +
+                            "conversationId is not part of any known conversations " +
+                            "(conversationId={}).", conversationId);
+                    differPublisher.positiveDeliveryAck(deliveryTag);
+                    return;
+                }
+
+                var conversationInfo = getConversationInfo(conversationId);
+                if (conversationInfo == null) {
+                    log.warn("ConversationId {} is unknown in the system, yet it contains a know botUserId {}. " +
+                            "Likely two eddi instances interfere each other here. " +
+                            "This message-actions.triggered event will be ignored due to lack of information.", conversationId, payload.getUserId());
+                    differPublisher.positiveDeliveryAck(deliveryTag);
+                    return;
+                }
+
+                log.info(" [x] Received and accepted amqp event: '" + receivedActionTriggered + "'");
+
+                String userInput = payload.getAction().getText();
+                String botUserId = payload.getMessage().getSenderId();
+                processUserMessage(delivery, botUserId, conversationId,
+                        userInput, actionTriggeredEvent, getBotIntent(botUserId), Collections.emptyMap());
+
+            } catch (Exception e) {
+                log.error("Error processing delivery {} of message-actions.triggered with body {}", deliveryTag, receivedActionTriggered);
                 log.error(e.getLocalizedMessage(), e);
                 differPublisher.negativeDeliveryAck(delivery);
             }

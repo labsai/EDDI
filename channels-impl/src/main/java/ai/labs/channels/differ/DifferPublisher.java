@@ -23,8 +23,10 @@ import static ai.labs.channels.differ.utilities.DifferUtilities.calculateSentAt;
 @Singleton
 public class DifferPublisher implements IDifferPublisher {
     private static final String MESSAGE_CREATED_EXCHANGE = "message.created";
+    private static final String ACTION_TRIGGERED_EXCHANGE = "message-actions.triggered";
     static final String EDDI_EXCHANGE = "eddi";
     private static final String MESSAGE_CREATED_QUEUE_NAME = MESSAGE_CREATED_EXCHANGE + ".eddi";
+    private static final String ACTION_TRIGGERED_QUEUE_NAME = ACTION_TRIGGERED_EXCHANGE + ".eddi";
     private static final String CONVERSATION_CREATED_EXCHANGE = "conversation.created";
     private static final String CONVERSATION_CREATED_QUEUE_NAME = CONVERSATION_CREATED_EXCHANGE + ".eddi";
 
@@ -45,27 +47,31 @@ public class DifferPublisher implements IDifferPublisher {
     }
 
     @Override
-    public void init(DeliverCallback conversationCreatedCallback, DeliverCallback messageCreatedCallback) {
+    public void init(DeliverCallback conversationCreatedCallback,
+                     DeliverCallback messageCreatedCallback,
+                     DeliverCallback actionTriggeredCallback) {
         try {
             channel = channelProvider.get();
 
             channel.exchangeDeclare(EDDI_EXCHANGE, BuiltinExchangeType.TOPIC, true, false, null);
 
-            channel.queueDeclare(CONVERSATION_CREATED_QUEUE_NAME, true, false, false, null);
-            channel.queueBind(CONVERSATION_CREATED_QUEUE_NAME, CONVERSATION_CREATED_EXCHANGE, "");
-            channel.basicConsume(CONVERSATION_CREATED_QUEUE_NAME, false, conversationCreatedCallback, cancelCallback);
-
-            channel.queueDeclare(MESSAGE_CREATED_QUEUE_NAME, true, false, false, null);
-            channel.queueBind(MESSAGE_CREATED_QUEUE_NAME, MESSAGE_CREATED_EXCHANGE, "");
-            channel.basicConsume(MESSAGE_CREATED_QUEUE_NAME, false, messageCreatedCallback, cancelCallback);
-
-            channel.queueDeclare(MESSAGE_CREATED_EDDI_FAILED_ROUTING_KEY, true, false, false, null);
-            channel.queueBind(MESSAGE_CREATED_EDDI_FAILED_ROUTING_KEY, EDDI_EXCHANGE, "");
+            setupQueue(CONVERSATION_CREATED_QUEUE_NAME, CONVERSATION_CREATED_EXCHANGE, conversationCreatedCallback, true);
+            setupQueue(MESSAGE_CREATED_QUEUE_NAME, MESSAGE_CREATED_EXCHANGE, messageCreatedCallback, true);
+            setupQueue(ACTION_TRIGGERED_QUEUE_NAME, ACTION_TRIGGERED_EXCHANGE, actionTriggeredCallback, true);
+            setupQueue(MESSAGE_CREATED_EDDI_FAILED_ROUTING_KEY, EDDI_EXCHANGE, null, false);
 
             channel.confirmSelect();
 
         } catch (IOException e) {
             log.error(e.getLocalizedMessage(), e);
+        }
+    }
+
+    private void setupQueue(String name, String exchange, DeliverCallback deliverCallback, boolean consume) throws IOException {
+        channel.queueDeclare(name, true, false, false, null);
+        channel.queueBind(name, exchange, "");
+        if (consume) {
+            channel.basicConsume(name, false, deliverCallback, cancelCallback);
         }
     }
 
