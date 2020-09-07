@@ -257,7 +257,7 @@ public class RestDifferEndpoint implements IRestDifferEndpoint {
         return (consumerTag, delivery) -> {
             final long deliveryTag = delivery.getEnvelope().getDeliveryTag();
             String receivedActionTriggered = new String(delivery.getBody(), StandardCharsets.UTF_8);
-            log.info("Received Raw Action Trigger Event Message: {}", receivedActionTriggered);
+            log.trace("Received Raw Action Trigger Event Message: {}", receivedActionTriggered);
 
             try {
                 var actionTriggeredEvent = jsonSerialization.deserialize(receivedActionTriggered, ActionTriggeredEvent.class);
