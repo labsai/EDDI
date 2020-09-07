@@ -280,6 +280,13 @@ public class RestDifferEndpoint implements IRestDifferEndpoint {
                     return;
                 }
 
+                if (!isGroupChat(conversationInfo.getAllParticipantIds())) {
+                    // this is a 1:1 conversation (2 users) in which all messages get parsed by the bot,
+                    // so if we would proceed here we would create duplicate messages for the bot
+                    differPublisher.positiveDeliveryAck(deliveryTag);
+                    return;
+                }
+
                 log.info(" [x] Received and accepted amqp event: '" + receivedActionTriggered + "'");
 
                 String userInput = payload.getAction().getText();
