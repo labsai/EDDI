@@ -152,7 +152,6 @@ public class RestDifferEndpoint implements IRestDifferEndpoint {
                 log.info(" [x] Received and accepted amqp event: {}", receivedMessage);
 
                 var conversationInfo = createDifferConversation(conversationId, participantIds, botUserParticipantIds);
-                log.debug("Differ Conversation created. {}", conversationInfo);
 
                 botUserParticipantIds.forEach(botUserId ->
                         startConversationWithUser(delivery, botUserId, conversationId, conversationCreatedEvent, conversationInfo));
@@ -169,10 +168,16 @@ public class RestDifferEndpoint implements IRestDifferEndpoint {
                                                             List<String> botUserParticipantIds)
             throws ResourceAlreadyExistsException, ResourceStoreException {
 
-        var conversationInfo = new DifferConversationInfo(conversationId, participantIds, botUserParticipantIds);
-        differConversationStore.createDifferConversation(conversationInfo);
+        DifferConversationInfo conversationInfo;
+        if ((conversationInfo = differConversationStore.readDifferConversation(conversationId)) == null) {
+            conversationInfo = new DifferConversationInfo(conversationId, participantIds, botUserParticipantIds);
+            differConversationStore.createDifferConversation(conversationInfo);
+            log.debug("Differ Conversation created. {}", conversationInfo);
+        }
+
         conversationInfoCache.put(conversationId, conversationInfo);
         availableConversationIds.put(conversationId, true);
+
         return conversationInfo;
     }
 
