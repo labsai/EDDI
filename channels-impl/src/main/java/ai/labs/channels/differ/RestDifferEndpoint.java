@@ -37,7 +37,6 @@ import javax.ws.rs.core.Response;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.util.Collections;
-import java.util.Date;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -437,7 +436,7 @@ public class RestDifferEndpoint implements IRestDifferEndpoint {
                 }
 
                 long sendingDelay = firstCommandInfo.getSendingDelay();
-                setCreatedAtTime(firstCommand, sendingDelay);
+                firstCommandInfo.setMinSentAt(firstCommandInfo.getMinSentAt() + sendingDelay);
 
                 return runtime.submitScheduledCallable(() ->
                                 differPublisher.publishCommandAndWaitForConfirm(firstCommandInfo),
@@ -451,10 +450,6 @@ public class RestDifferEndpoint implements IRestDifferEndpoint {
             log.error(e.getLocalizedMessage(), e);
             return false;
         }
-    }
-
-    private static void setCreatedAtTime(Command command, long sendingDelay) {
-        command.setCreatedAt(new Date(command.getCreatedAt().getTime() + sendingDelay));
     }
 
     private String getReferenceId(Command command) {
