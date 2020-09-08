@@ -37,6 +37,7 @@ import javax.ws.rs.core.Response;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.util.Collections;
+import java.util.Date;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -435,9 +436,12 @@ public class RestDifferEndpoint implements IRestDifferEndpoint {
                     referenceCommandId = getReferenceId(commandInfo.getCommand());
                 }
 
+                long sendingDelay = firstCommandInfo.getSendingDelay();
+                setCreatedAtTime(firstCommand, sendingDelay);
+
                 return runtime.submitScheduledCallable(() ->
                                 differPublisher.publishCommandAndWaitForConfirm(firstCommandInfo),
-                        0, MILLISECONDS, null).get();
+                        sendingDelay, MILLISECONDS, null).get();
             } else {
                 log.debug("Size of commandsInfos was 0 when calling publishCommand. Therefore no commands have been published.");
             }
@@ -447,6 +451,10 @@ public class RestDifferEndpoint implements IRestDifferEndpoint {
             log.error(e.getLocalizedMessage(), e);
             return false;
         }
+    }
+
+    private static void setCreatedAtTime(Command command, long sendingDelay) {
+        command.setCreatedAt(new Date(command.getCreatedAt().getTime() + sendingDelay));
     }
 
     private String getReferenceId(Command command) {
@@ -469,9 +477,10 @@ public class RestDifferEndpoint implements IRestDifferEndpoint {
         if (messageId != null) {
             var commandInfo = ackAwaitingCommandsCache.get(messageId);
             if (commandInfo != null) {
+                long sendingDelay = commandInfo.getSendingDelay();
                 runtime.submitScheduledCallable(() -> {
                     try {
-                        commandInfo.setMinSentAt(messageSentAtTime);
+                        commandInfo.setMinSentAt(messageSentAtTime + sendingDelay);
                         var success = differPublisher.publishCommandAndWaitForConfirm(commandInfo);
 
                         if (success) {
@@ -486,7 +495,7 @@ public class RestDifferEndpoint implements IRestDifferEndpoint {
                     }
 
                     return null;
-                }, commandInfo.getSendingDelay(), MILLISECONDS, null);
+                }, sendingDelay, MILLISECONDS, null);
             }
         }
     }
