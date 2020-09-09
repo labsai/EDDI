@@ -75,9 +75,7 @@ public class Conversation implements IConversation {
         loadLongTermProperties(conversationMemory);
 
         try {
-            executePackages(new LinkedList<>(createContextData(context)));
-        } catch (ConversationStopException e) {
-            throw new LifecycleException(e.getLocalizedMessage(), e);
+            executeConversationStep(new LinkedList<>(createContextData(context)));
         } finally {
             checkActionsForConversationEnd();
         }
@@ -133,7 +131,6 @@ public class Conversation implements IConversation {
 
             var lifecycleData = prepareLifecycleData(message, contexts);
             executeConversationStep(lifecycleData);
-            postConversationLifecycleTasks();
 
         } catch (LifecycleException.LifecycleInterruptedException e) {
             setConversationState(ConversationState.EXECUTION_INTERRUPTED);
@@ -196,6 +193,12 @@ public class Conversation implements IConversation {
             executePackages(lifecycleData);
         } catch (ConversationStopException unused) {
             endConversation();
+        }
+
+        try {
+            postConversationLifecycleTasks();
+        } catch (IResourceStore.ResourceStoreException e) {
+            throw new LifecycleException(e.getLocalizedMessage(), e);
         }
     }
 
