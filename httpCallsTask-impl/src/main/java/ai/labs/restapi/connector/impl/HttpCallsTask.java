@@ -121,50 +121,55 @@ public class HttpCallsTask implements ILifecycleTask {
                         executeFireAndForgetCalls(call, preRequest, templateDataObjects);
                     } else {
                         IRequest request;
-                        IResponse response;
+                        IResponse response = null;
                         boolean retryCall = false;
                         int amountOfExecutions = 0;
-                        do {
-                            request = buildRequest(call.getRequest(), templateDataObjects);
-                            response = executeAndMeasureRequest(call, request, retryCall, amountOfExecutions);
+                        boolean validationError = false;
+                        try {
+                            do {
+                                request = buildRequest(call.getRequest(), templateDataObjects);
+                                response = executeAndMeasureRequest(call, request, retryCall, amountOfExecutions);
 
-                            if (response.getHttpCode() != 200) {
-                                String message = "HttpCall (%s) didn't return http code 200, instead %s.";
-                                log.warn(String.format(message, call.getName(), response.getHttpCode()));
-                                log.warn("Error Msg:" + response.getHttpCodeMessage());
-                            }
-
-                            if (response.getHttpCode() == 200 && call.getSaveResponse()) {
-                                final String responseBody = response.getContentAsString();
-                                String actualContentType = response.getHttpHeader().get(CONTENT_TYPE);
-                                if (actualContentType != null) {
-                                    actualContentType = actualContentType.split(";")[0];
-                                } else {
-                                    actualContentType = "<not-present>";
+                                if (response.getHttpCode() != 200) {
+                                    String message = "HttpCall (%s) didn't return http code 200, instead %s.";
+                                    log.warn(String.format(message, call.getName(), response.getHttpCode()));
+                                    log.warn("Error Msg:" + response.getHttpCodeMessage());
                                 }
 
-                                if (!CONTENT_TYPE_APPLICATION_JSON.startsWith(actualContentType)) {
-                                    String message = "HttpCall (%s) didn't return application/json as content-type, instead was (%s)";
-                                    log.warn(String.format(message, call.getName(), actualContentType));
+                                if (response.getHttpCode() == 200 && call.getSaveResponse()) {
+                                    final String responseBody = response.getContentAsString();
+                                    String actualContentType = response.getHttpHeader().get(CONTENT_TYPE);
+                                    if (actualContentType != null) {
+                                        actualContentType = actualContentType.split(";")[0];
+                                    } else {
+                                        actualContentType = "<not-present>";
+                                    }
+
+                                    if (!CONTENT_TYPE_APPLICATION_JSON.startsWith(actualContentType)) {
+                                        String message = "HttpCall (%s) didn't return application/json as content-type, instead was (%s)";
+                                        log.warn(String.format(message, call.getName(), actualContentType));
+                                    }
+
+                                    Object responseObject = jsonSerialization.deserialize(responseBody, Object.class);
+                                    String responseObjectName = call.getResponseObjectName();
+                                    templateDataObjects.put(responseObjectName, responseObject);
+
+                                    String memoryDataName = "httpCalls:" + responseObjectName;
+                                    IData<Object> httpResponseData = dataFactory.createData(memoryDataName, responseObject);
+                                    currentStep.storeData(httpResponseData);
+                                    currentStep.addConversationOutputMap(KEY_HTTP_CALLS, Map.of(responseObjectName, responseObject));
                                 }
 
-                                Object responseObject = jsonSerialization.deserialize(responseBody, Object.class);
-                                String responseObjectName = call.getResponseObjectName();
-                                templateDataObjects.put(responseObjectName, responseObject);
+                                amountOfExecutions++;
+                                retryCall = retryCall(call.getPostResponse(),
+                                        templateDataObjects, amountOfExecutions,
+                                        response.getHttpCode(), response.getContentAsString());
+                            } while (retryCall);
+                        } catch (HttpCallsValidationException e) {
+                            validationError = true;
+                        }
 
-                                String memoryDataName = "httpCalls:" + responseObjectName;
-                                IData<Object> httpResponseData = dataFactory.createData(memoryDataName, responseObject);
-                                currentStep.storeData(httpResponseData);
-                                currentStep.addConversationOutputMap(KEY_HTTP_CALLS, Map.of(responseObjectName, responseObject));
-                            }
-
-                            amountOfExecutions++;
-                            retryCall = retryCall(call.getPostResponse(),
-                                    templateDataObjects, amountOfExecutions,
-                                    response.getHttpCode(), response.getContentAsString());
-                        } while (retryCall);
-
-                        runPostResponse(memory, call, templateDataObjects, response.getHttpCode());
+                        runPostResponse(memory, call, templateDataObjects, response.getHttpCode(), validationError);
                     }
                 } catch (Exception e) {
                     log.error(e.getLocalizedMessage(), e);
@@ -199,7 +204,7 @@ public class HttpCallsTask implements ILifecycleTask {
 
         if (preRequest != null && preRequest.getPropertyInstructions() != null) {
             var propertyInstructions = preRequest.getPropertyInstructions();
-            executePropertyInstructions(propertyInstructions, 0, memory, templateDataObjects);
+            executePropertyInstructions(propertyInstructions, 0, false, memory, templateDataObjects);
             templateDataObjects = memoryItemConverter.convert(memory);
         }
         return templateDataObjects;
@@ -281,7 +286,7 @@ public class HttpCallsTask implements ILifecycleTask {
 
     private boolean retryCall(PostResponse postResponse,
                               Map<String, Object> conversationValues,
-                              int amountOfExecutions, int httpCode, String contentAsString) {
+                              int amountOfExecutions, int httpCode, String contentAsString) throws HttpCallsValidationException {
 
         if (isNullOrEmpty(postResponse)) {
             return false;
@@ -316,20 +321,20 @@ public class HttpCallsTask implements ILifecycleTask {
             }
         }
 
-        return false;
+        throw new HttpCallsValidationException();
     }
 
     private List<HttpCall> removeDuplicates(List<HttpCall> httpCalls) {
         return httpCalls.stream().distinct().collect(Collectors.toList());
     }
 
-    private void runPostResponse(IConversationMemory memory, HttpCall call, Map<String, Object> templateDataObjects, int httpCode)
+    private void runPostResponse(IConversationMemory memory, HttpCall call, Map<String, Object> templateDataObjects, int httpCode, boolean validationError)
             throws IOException, ITemplatingEngine.TemplateEngineException {
 
         var postResponse = call.getPostResponse();
         if (postResponse != null) {
             var propertyInstructions = postResponse.getPropertyInstructions();
-            executePropertyInstructions(propertyInstructions, httpCode, memory, templateDataObjects);
+            executePropertyInstructions(propertyInstructions, httpCode, validationError, memory, templateDataObjects);
 
             var qrBuildInstructions = postResponse.getQrBuildInstructions();
             if (qrBuildInstructions != null) {
@@ -358,13 +363,14 @@ public class HttpCallsTask implements ILifecycleTask {
     }
 
     private void executePropertyInstructions(List<PropertyInstruction> propertyInstructions,
-                                             int httpCode, IConversationMemory memory,
+                                             int httpCode, boolean validationError, IConversationMemory memory,
                                              Map<String, Object> templateDataObjects)
             throws ITemplatingEngine.TemplateEngineException {
 
         if (propertyInstructions != null) {
             for (PropertyInstruction propertyInstruction : propertyInstructions) {
-                if (httpCode == 0 || verifyHttpCode(propertyInstruction.getHttpCodeValidator(), httpCode)) {
+                if ((validationError && propertyInstruction.getRunOnValidationError()) || (httpCode == 0 ||
+                        verifyHttpCode(propertyInstruction.getHttpCodeValidator(), httpCode))) {
 
                     String propertyName = propertyInstruction.getName();
                     checkNotNull(propertyName, "name");
@@ -526,5 +532,8 @@ public class HttpCallsTask implements ILifecycleTask {
         ConfigValue configValue = new ConfigValue("Resource URI", FieldType.URI, false, null);
         extensionDescriptor.getConfigs().put("uri", configValue);
         return extensionDescriptor;
+    }
+
+    private class HttpCallsValidationException extends Exception {
     }
 }
