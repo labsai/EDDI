@@ -61,6 +61,7 @@
         <module>migration-definition</module>
         <module>migration-impl</module>
         <module>basemodels</module>
+        <module>gitCallsTask-impl</module>
     </modules>
 
     <build>
