@@ -13,6 +13,8 @@ import ai.labs.resources.impl.config.behavior.mongo.BehaviorStore;
 import ai.labs.resources.impl.config.behavior.rest.RestBehaviorStore;
 import ai.labs.resources.impl.config.bots.mongo.BotStore;
 import ai.labs.resources.impl.config.bots.rest.RestBotStore;
+import ai.labs.resources.impl.config.git.mongo.GitCallsStore;
+import ai.labs.resources.impl.config.git.rest.RestGitCallsStore;
 import ai.labs.resources.impl.config.http.mongo.HttpCallsStore;
 import ai.labs.resources.impl.config.http.rest.RestHttpCallsStore;
 import ai.labs.resources.impl.config.output.mongo.OutputStore;
@@ -47,6 +49,8 @@ import ai.labs.resources.rest.config.behavior.IBehaviorStore;
 import ai.labs.resources.rest.config.behavior.IRestBehaviorStore;
 import ai.labs.resources.rest.config.bots.IBotStore;
 import ai.labs.resources.rest.config.bots.IRestBotStore;
+import ai.labs.resources.rest.config.git.IGitCallsStore;
+import ai.labs.resources.rest.config.git.IRestGitCallsStore;
 import ai.labs.resources.rest.config.http.IHttpCallsStore;
 import ai.labs.resources.rest.config.http.IRestHttpCallsStore;
 import ai.labs.resources.rest.config.output.IOutputStore;
@@ -96,6 +100,7 @@ public class RepositoryModule extends AbstractBaseModule {
         bind(IOutputStore.class).to(OutputStore.class).in(Scopes.SINGLETON);
         bind(IDeploymentStore.class).to(DeploymentStore.class).in(Scopes.SINGLETON);
         bind(IHttpCallsStore.class).to(HttpCallsStore.class).in(Scopes.SINGLETON);
+        bind(IGitCallsStore.class).to(GitCallsStore.class).in(Scopes.SINGLETON);
         bind(IPropertiesStore.class).to(PropertiesStore.class).in(Scopes.SINGLETON);
         bind(IPropertySetterStore.class).to(PropertySetterStore.class).in(Scopes.SINGLETON);
 
@@ -122,5 +127,7 @@ public class RepositoryModule extends AbstractBaseModule {
         bind(IRestOutputKeys.class).to(RestOutputKeys.class).in(Scopes.SINGLETON);
         bind(IMigrationLogStore.class).to(MigrationLogStore.class).in(Scopes.SINGLETON);
         bind(IGitBackupStore.class).to(RestGitBackupStore.class).in(Scopes.SINGLETON);
+
+        bind(IRestGitCallsStore.class).to(RestGitCallsStore.class).in(Scopes.SINGLETON);
     }
 }

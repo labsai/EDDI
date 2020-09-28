@@ -163,8 +163,7 @@
         <dependency>
             <groupId>ai.labs</groupId>
             <artifactId>gitCallsTask-impl</artifactId>
-            <version>4.8.4</version>
-            <scope>compile</scope>
+            <version>${project.version}</version>
         </dependency>
     </dependencies>
 

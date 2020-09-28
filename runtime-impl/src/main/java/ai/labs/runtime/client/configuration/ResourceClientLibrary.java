@@ -2,6 +2,7 @@ package ai.labs.runtime.client.configuration;
 
 import ai.labs.persistence.model.ResourceId;
 import ai.labs.resources.rest.config.behavior.IRestBehaviorStore;
+import ai.labs.resources.rest.config.git.IRestGitCallsStore;
 import ai.labs.resources.rest.config.http.IRestHttpCallsStore;
 import ai.labs.resources.rest.config.output.IRestOutputStore;
 import ai.labs.resources.rest.config.parser.IRestParserStore;
@@ -27,6 +28,7 @@ public class ResourceClientLibrary implements IResourceClientLibrary {
     private final IRestHttpCallsStore restHttpCallsStore;
     private final IRestOutputStore restOutputStore;
     private final IRestPropertySetterStore restPropertySetterStore;
+    private final IRestGitCallsStore restGitCallsStore;
     private Map<String, IResourceService> restInterfaces;
 
     @Inject
@@ -35,13 +37,15 @@ public class ResourceClientLibrary implements IResourceClientLibrary {
                                  IRestBehaviorStore restBehaviorStore,
                                  IRestHttpCallsStore restHttpCallsStore,
                                  IRestOutputStore restOutputStore,
-                                 IRestPropertySetterStore restPropertySetterStore) {
+                                 IRestPropertySetterStore restPropertySetterStore,
+                                 IRestGitCallsStore restGitCallsStore) {
         this.restParserStore = restParserStore;
         this.restRegularDictionaryStore = restRegularDictionaryStore;
         this.restBehaviorStore = restBehaviorStore;
         this.restHttpCallsStore = restHttpCallsStore;
         this.restOutputStore = restOutputStore;
         this.restPropertySetterStore = restPropertySetterStore;
+        this.restGitCallsStore = restGitCallsStore;
 
         init();
     }
@@ -120,6 +124,19 @@ public class ResourceClientLibrary implements IResourceClientLibrary {
                 return restPropertySetterStore.duplicatePropertySetter(id, version);
             }
         });
+
+        restInterfaces.put("ai.labs.gitcalls", new IResourceService() {
+            @Override
+            public Object read(String id, Integer version) {
+                return restGitCallsStore.readGitCalls(id, version);
+            }
+
+            @Override
+            public Response duplicate(String id, Integer version) {
+                return restGitCallsStore.duplicateGitCalls(id, version);
+            }
+        });
+
     }
 
     @Override

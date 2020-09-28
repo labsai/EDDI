@@ -182,11 +182,13 @@ public class GitCallsTask implements ILifecycleTask {
                                 .filter(Files::isRegularFile)
                                 .forEach(path -> {
                                             try {
-                                                GitFileEntry fileEntry = new GitFileEntry();
-                                                fileEntry.setFilename(path.getFileName().toString());
-                                                fileEntry.setDirectory(gitPath.toString());
-                                                fileEntry.setContent(Files.readString(path, StandardCharsets.UTF_8));
-                                                fileEntries.add(fileEntry);
+                                                if (!path.getParent().toString().contains(".git")) {
+                                                    GitFileEntry fileEntry = new GitFileEntry();
+                                                    fileEntry.setFilename(path.getFileName().toString());
+                                                    fileEntry.setDirectory(gitPath.toString());
+                                                    fileEntry.setContent(Files.readString(path, StandardCharsets.UTF_8));
+                                                    fileEntries.add(fileEntry);
+                                                }
                                             } catch (IOException e) {
                                                 log.error("Error reading from directory");
                                             }
