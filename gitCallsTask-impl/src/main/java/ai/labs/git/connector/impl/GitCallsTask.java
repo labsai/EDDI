@@ -45,7 +45,6 @@ public class GitCallsTask implements ILifecycleTask {
     private static final String ID = "ai.labs.gitcalls";
     private static final String ACTION_KEY = "actions";
     private static final String KEY_GIT_CALLS = "gitCalls";
-    private final IJsonSerialization jsonSerialization;
     private final IResourceClientLibrary resourceClientLibrary;
     private final IDataFactory dataFactory;
     private final ITemplatingEngine templatingEngine;
@@ -65,7 +64,6 @@ public class GitCallsTask implements ILifecycleTask {
                         ITemplatingEngine templatingEngine,
                         IMemoryItemConverter memoryItemConverter,
                         SystemRuntime.IRuntime runtime) {
-        this.jsonSerialization = jsonSerialization;
         this.resourceClientLibrary = resourceClientLibrary;
         this.dataFactory = dataFactory;
         this.templatingEngine = templatingEngine;
