@@ -16,6 +16,7 @@ public class GitCall {
     private List<String> actions;
     private GitCommand command;
     private String message;
+    private String branch;
     private String directory;
     private String filename;
     private String content;

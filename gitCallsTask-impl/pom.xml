@@ -17,6 +17,24 @@
             <artifactId>runtime-definition</artifactId>
             <version>${project.version}</version>
         </dependency>
+        <dependency>
+            <groupId>ai.labs</groupId>
+            <artifactId>sharedutilities</artifactId>
+            <version>${project.version}</version>
+            <scope>compile</scope>
+        </dependency>
+        <dependency>
+            <groupId>ai.labs</groupId>
+            <artifactId>templateengine-definition</artifactId>
+            <version>${project.version}</version>
+            <scope>compile</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.eclipse.jgit</groupId>
+            <artifactId>org.eclipse.jgit</artifactId>
+            <version>5.7.0.202003110725-r</version>
+            <scope>compile</scope>
+        </dependency>
     </dependencies>
 
 
