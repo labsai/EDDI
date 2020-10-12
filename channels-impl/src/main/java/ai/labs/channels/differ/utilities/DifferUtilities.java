@@ -3,7 +3,12 @@ package ai.labs.channels.differ.utilities;
 import ai.labs.memory.model.ConversationOutput;
 import ai.labs.output.model.QuickReply;
 
-import java.util.*;
+import java.util.Date;
+import java.util.LinkedList;
+import java.util.List;
+import java.util.Map;
+import java.util.Objects;
+import java.util.UUID;
 import java.util.stream.Collectors;
 
 import static ai.labs.utilities.RuntimeUtilities.isNullOrEmpty;
@@ -65,7 +70,7 @@ public class DifferUtilities {
                     if (quickRepliesObj.get(0) instanceof QuickReply) {
                         return quickRepliesObj;
                     } else {
-                        return ((List<Map>) quickRepliesObj).stream().map(map -> {
+                        return ((List<Map>) quickRepliesObj).stream().filter(Objects::nonNull).map(map -> {
                             Object isDefault = map.get("isDefault");
                             return new QuickReply(
                                     map.get("value").toString(),
