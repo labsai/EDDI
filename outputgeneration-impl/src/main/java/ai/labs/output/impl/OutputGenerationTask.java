@@ -46,6 +46,8 @@ public class OutputGenerationTask implements ILifecycleTask {
     private static final String QUICK_REPLIES_IDENTIFIER = "quickReplies";
     private static final String OUTPUT_SET_CONFIG_URI = "uri";
     private static final String KEY_VALUE = "value";
+    private static final String KEY_VALUE_ALTERNATIVES = "valueAlternatives";
+    private static final String KEY_TYPE = "type";
     private static final String KEY_EXPRESSIONS = "expressions";
     private static final String KEY_IS_DEFAULT = "isDefault";
     private static final String OUTPUT_TYPE_QUICK_REPLY = "quickReply";
@@ -76,6 +78,7 @@ public class OutputGenerationTask implements ILifecycleTask {
     public void executeTask(IConversationMemory memory) {
         IWritableConversationStep currentStep = memory.getCurrentStep();
         List<IData<Context>> contextDataList = currentStep.getAllData("context");
+        storeContextOutput(currentStep, contextDataList);
         storeContextQuickReplies(currentStep, contextDataList);
 
         IData<List<String>> latestData = currentStep.getLatestData(KEY_ACTIONS);
@@ -94,6 +97,18 @@ public class OutputGenerationTask implements ILifecycleTask {
                 }));
     }
 
+    private void storeContextOutput(IWritableConversationStep currentStep, List<IData<Context>> contextDataList) {
+        contextDataList.forEach(contextData -> {
+            String contextKey = contextData.getKey();
+            Context context = contextData.getResult();
+            String key = contextKey.substring((CONTEXT_IDENTIFIER + ":").length());
+            if (key.startsWith(MEMORY_OUTPUT_IDENTIFIER) && context.getType().equals(Context.ContextType.object)) {
+                List<OutputValue> outputList = convertOutputMap((List<Map<String, Object>>) context.getValue());
+                selectAndStoreOutput(currentStep, CONTEXT_IDENTIFIER, outputList);
+            }
+        });
+    }
+
     private void storeContextQuickReplies(IWritableConversationStep currentStep, List<IData<Context>> contextDataList) {
         contextDataList.forEach(contextData -> {
             String contextKey = contextData.getKey();
@@ -106,19 +121,24 @@ public class OutputGenerationTask implements ILifecycleTask {
                     quickRepliesKey = contextKey.substring(contextQuickReplyKey.length());
                 }
 
-                if (context.getType().equals(Context.ContextType.object)) {
-                    List<QuickReply> quickReplies = convertMapToObjects((List<Map<String, String>>) context.getValue());
-                    storeQuickReplies(currentStep, quickReplies, quickRepliesKey);
-                }
+                List<QuickReply> quickReplies = convertQuickReplyMap((List<Map<String, String>>) context.getValue());
+                storeQuickReplies(currentStep, quickReplies, quickRepliesKey);
             }
         });
     }
 
-    private List<QuickReply> convertMapToObjects(List<Map<String, String>> quickRepliesMapList) {
+    private List<OutputValue> convertOutputMap(List<Map<String, Object>> outputMapList) {
+        return outputMapList.stream().map(map ->
+                new OutputValue(map.get(KEY_TYPE).toString(),
+                        (List<Object>) map.get(KEY_VALUE_ALTERNATIVES))).
+                collect(Collectors.toList());
+    }
+
+    private List<QuickReply> convertQuickReplyMap(List<Map<String, String>> quickRepliesMapList) {
         return quickRepliesMapList.stream().map(map ->
                 new QuickReply(map.get(KEY_VALUE), map.get(KEY_EXPRESSIONS),
                         Boolean.parseBoolean(map.getOrDefault(KEY_IS_DEFAULT, "false")))).
-                collect(Collectors.toCollection(LinkedList::new));
+                collect(Collectors.toList());
     }
 
     private void selectAndStoreOutput(IWritableConversationStep currentStep, String action, List<OutputValue> outputValues) {

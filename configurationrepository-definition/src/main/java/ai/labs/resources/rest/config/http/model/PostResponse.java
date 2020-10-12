@@ -11,5 +11,6 @@ import java.util.List;
 public class PostResponse {
     private RetryHttpCallInstruction retryHttpCallInstruction;
     private List<PropertyInstruction> propertyInstructions;
+    private List<OutputBuildingInstruction> outputBuildInstructions;
     private List<QuickRepliesBuildingInstruction> qrBuildInstructions;
 }

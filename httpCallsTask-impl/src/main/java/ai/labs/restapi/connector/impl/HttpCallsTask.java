@@ -336,30 +336,61 @@ public class HttpCallsTask implements ILifecycleTask {
             var propertyInstructions = postResponse.getPropertyInstructions();
             executePropertyInstructions(propertyInstructions, httpCode, validationError, memory, templateDataObjects);
 
-            var qrBuildInstructions = postResponse.getQrBuildInstructions();
-            if (qrBuildInstructions != null) {
-                List<Object> quickReplies = new LinkedList<>();
-                for (QuickRepliesBuildingInstruction qrBuildInstruction : qrBuildInstructions) {
-                    if (verifyHttpCode(qrBuildInstruction.getHttpCodeValidator(), httpCode)) {
-
-                        quickReplies.addAll(
-                                buildQuickReplies(
-                                        qrBuildInstruction.getIterationObjectName(),
-                                        qrBuildInstruction.getPathToTargetArray(),
-                                        qrBuildInstruction.getTemplateFilterExpression(),
-                                        qrBuildInstruction.getQuickReplyValue(),
-                                        qrBuildInstruction.getQuickReplyExpressions(),
-                                        templateDataObjects));
-                    }
-                }
-
-                var context = new Context(Context.ContextType.object, quickReplies);
-                IData<Context> contextData = dataFactory.createData("context:quickReplies", context);
-                memory.getCurrentStep().storeData(contextData);
-            }
+            buildOutput(memory, templateDataObjects, httpCode, postResponse);
+            buildQuickReplies(memory, templateDataObjects, httpCode, postResponse);
         }
 
 
+    }
+
+    private void buildOutput(IConversationMemory memory, Map<String, Object> templateDataObjects, int httpCode, PostResponse postResponse)
+            throws IOException, ITemplatingEngine.TemplateEngineException {
+
+        var outputBuildInstructions = postResponse.getOutputBuildInstructions();
+        if (outputBuildInstructions != null) {
+            List<Object> output = new LinkedList<>();
+            for (var buildingInstruction : outputBuildInstructions) {
+                if (verifyHttpCode(buildingInstruction.getHttpCodeValidator(), httpCode)) {
+
+                    output.addAll(
+                            buildOutput(
+                                    buildingInstruction.getIterationObjectName(),
+                                    buildingInstruction.getPathToTargetArray(),
+                                    buildingInstruction.getTemplateFilterExpression(),
+                                    buildingInstruction.getOutputType(),
+                                    buildingInstruction.getOutputValue(),
+                                    templateDataObjects));
+                }
+            }
+
+            var context = new Context(Context.ContextType.object, output);
+            IData<Context> contextData = dataFactory.createData("context:output", context);
+            memory.getCurrentStep().storeData(contextData);
+        }
+    }
+
+    private void buildQuickReplies(IConversationMemory memory, Map<String, Object> templateDataObjects, int httpCode, PostResponse postResponse) throws IOException, ITemplatingEngine.TemplateEngineException {
+        var qrBuildInstructions = postResponse.getQrBuildInstructions();
+        if (qrBuildInstructions != null) {
+            List<Object> quickReplies = new LinkedList<>();
+            for (QuickRepliesBuildingInstruction qrBuildInstruction : qrBuildInstructions) {
+                if (verifyHttpCode(qrBuildInstruction.getHttpCodeValidator(), httpCode)) {
+
+                    quickReplies.addAll(
+                            buildQuickReplies(
+                                    qrBuildInstruction.getIterationObjectName(),
+                                    qrBuildInstruction.getPathToTargetArray(),
+                                    qrBuildInstruction.getTemplateFilterExpression(),
+                                    qrBuildInstruction.getQuickReplyValue(),
+                                    qrBuildInstruction.getQuickReplyExpressions(),
+                                    templateDataObjects));
+                }
+            }
+
+            var context = new Context(Context.ContextType.object, quickReplies);
+            IData<Context> contextData = dataFactory.createData("context:quickReplies", context);
+            memory.getCurrentStep().storeData(contextData);
+        }
     }
 
     private void executePropertyInstructions(List<PropertyInstruction> propertyInstructions,
@@ -449,6 +480,26 @@ public class HttpCallsTask implements ILifecycleTask {
             throws ITemplatingEngine.TemplateEngineException {
 
         return templatingEngine.processTemplate(toBeTemplated, properties);
+    }
+
+    private List<Object> buildOutput(String iterationObjectName,
+                                     String pathToTargetArray,
+                                     String templateFilterExpression,
+                                     String outputType,
+                                     String outputValue,
+                                     Map<String, Object> templateDataObjects)
+            throws IOException, ITemplatingEngine.TemplateEngineException {
+
+        final String quickReplyTemplate = "    {" +
+                "        \"type\":\"" + outputType + "\"," +
+                "        \"valueAlternatives\":[{" +
+                "               \"type\":\"" + outputType + "\"," +
+                "               \"text\":\"" + outputValue + "\"" +
+                "        }]" +
+                "    },";
+
+        return buildListFromJson(iterationObjectName,
+                pathToTargetArray, templateFilterExpression, quickReplyTemplate, templateDataObjects);
     }
 
     private List<Object> buildQuickReplies(String iterationObjectName,
