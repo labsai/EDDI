@@ -17,7 +17,10 @@ import org.bson.Document;
 import java.util.LinkedList;
 import java.util.List;
 
-import static ai.labs.persistence.IResourceStore.*;
+import static ai.labs.persistence.IResourceStore.IResourceId;
+import static ai.labs.persistence.IResourceStore.ResourceModifiedException;
+import static ai.labs.persistence.IResourceStore.ResourceNotFoundException;
+import static ai.labs.persistence.IResourceStore.ResourceStoreException;
 
 /**
  * @author ginccc
@@ -48,6 +51,10 @@ public class DescriptorStore<T> implements IDescriptorStore<T> {
                 permissionStore, userStore, groupStore, documentBuilder, documentType);
 
         descriptorCollection.createIndex(Indexes.ascending(FIELD_RESOURCE), new IndexOptions().unique(true));
+        descriptorCollection.createIndex(Indexes.ascending(FIELD_NAME), new IndexOptions().unique(false));
+        descriptorCollection.createIndex(Indexes.ascending(FIELD_DESCRIPTION), new IndexOptions().unique(false));
+        descriptorCollection.createIndex(Indexes.ascending(FIELD_LAST_MODIFIED), new IndexOptions().unique(false));
+        descriptorCollection.createIndex(Indexes.ascending(FIELD_DELETED), new IndexOptions().unique(false));
     }
 
     @Override
