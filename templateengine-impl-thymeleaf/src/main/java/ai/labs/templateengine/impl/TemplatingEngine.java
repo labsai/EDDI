@@ -18,13 +18,16 @@ public class TemplatingEngine implements ITemplatingEngine {
     private static final List<String> templatingControlChars = Arrays.asList("${", "*{", "#{", "@{", "~{", "th:");
     private final TextTemplateEngine textTemplateEngine;
     private final HtmlTemplateEngine htmlTemplateEngine;
+    private final JavaScriptTemplateEngine javaScriptTemplateEngine;
 
     @Inject
     public TemplatingEngine(TextTemplateEngine textTemplateEngine,
-                            HtmlTemplateEngine htmlTemplateEngine) {
+                            HtmlTemplateEngine htmlTemplateEngine,
+                            JavaScriptTemplateEngine javaScriptTemplateEngine) {
 
         this.textTemplateEngine = textTemplateEngine;
         this.htmlTemplateEngine = htmlTemplateEngine;
+        this.javaScriptTemplateEngine = javaScriptTemplateEngine;
     }
 
     @Override
@@ -57,10 +60,14 @@ public class TemplatingEngine implements ITemplatingEngine {
     }
 
     private TemplateEngine getTemplateEngine(TemplateMode templateMode) {
-        if (templateMode.equals(TemplateMode.HTML)) {
-            return htmlTemplateEngine.getTemplateEngine();
-        } else {
-            return textTemplateEngine.getTemplateEngine();
+        switch (templateMode) {
+            case HTML:
+                return htmlTemplateEngine.getTemplateEngine();
+            case JAVASCRIPT:
+                return javaScriptTemplateEngine.getTemplateEngine();
+            case TEXT:
+            default:
+                return textTemplateEngine.getTemplateEngine();
         }
     }
 }

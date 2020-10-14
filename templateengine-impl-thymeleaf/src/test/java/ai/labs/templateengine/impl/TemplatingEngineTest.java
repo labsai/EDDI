@@ -21,7 +21,9 @@ public class TemplatingEngineTest {
     public void setup() {
         TemplateEngineModule engineModule = new TemplateEngineModule();
         templatingEngine = new TemplatingEngine(
-                engineModule.provideTextTemplateEngine(), engineModule.provideHtmlTemplateEngine());
+                engineModule.provideTextTemplateEngine(null),
+                engineModule.provideHtmlTemplateEngine(null),
+                engineModule.provideJavaScriptTemplateEngine(null));
     }
 
     @Test

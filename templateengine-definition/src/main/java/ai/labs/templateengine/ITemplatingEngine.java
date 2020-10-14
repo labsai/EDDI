@@ -12,7 +12,8 @@ public interface ITemplatingEngine {
 
     enum TemplateMode {
         TEXT,
-        HTML
+        HTML,
+        JAVASCRIPT
     }
 
     class TemplateEngineException extends Exception {
