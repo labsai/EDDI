@@ -14,6 +14,7 @@ import ai.labs.channels.facebookmessenger.bootstrap.FacebookMessengerModule;
 import ai.labs.channels.xmpp.bootstrap.XmppModule;
 import ai.labs.core.bootstrap.CoreModule;
 import ai.labs.expressions.bootstrap.ExpressionModule;
+import ai.labs.git.connector.bootstrap.GitCallsModule;
 import ai.labs.httpclient.guice.HttpClientModule;
 import ai.labs.memory.bootstrap.ConversationMemoryModule;
 import ai.labs.migration.IMigrationManager;
@@ -104,7 +105,8 @@ public class ApiServer {
                 new AMQPModule(),
                 new DifferModule(),
                 new ChannelModule(),
-                new MigrationModule()
+                new MigrationModule(),
+                new GitCallsModule()
         };
 
         //init modules
