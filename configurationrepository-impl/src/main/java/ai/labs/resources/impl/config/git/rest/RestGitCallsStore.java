@@ -55,7 +55,7 @@ public class RestGitCallsStore extends RestVersionInfo<GitCallsConfiguration> im
 
     @Override
     public List<DocumentDescriptor> readGitCallsDescriptors(String filter, Integer index, Integer limit) {
-        return readDescriptors("ai.labs.httpcalls", filter, index, limit);
+        return readDescriptors("ai.labs.gitcalls", filter, index, limit);
     }
 
     @Override

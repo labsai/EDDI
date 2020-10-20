@@ -8,6 +8,7 @@ import ai.labs.persistence.IResourceStore.IResourceId;
 import ai.labs.resources.rest.config.behavior.IBehaviorStore;
 import ai.labs.resources.rest.config.bots.IBotStore;
 import ai.labs.resources.rest.config.bots.model.BotConfiguration;
+import ai.labs.resources.rest.config.git.IGitCallsStore;
 import ai.labs.resources.rest.config.http.IHttpCallsStore;
 import ai.labs.resources.rest.config.output.IOutputStore;
 import ai.labs.resources.rest.config.packages.IPackageStore;
@@ -58,6 +59,7 @@ public class RestExportService extends AbstractBackupService implements IRestExp
     private final IOutputStore outputStore;
     private final IJsonSerialization jsonSerialization;
     private final IZipArchive zipArchive;
+    private final IGitCallsStore gitCallsStore;
     private final Path tmpPath = Paths.get(FileUtilities.buildPath(System.getProperty("user.dir"), "tmp"));
 
     @Inject
@@ -70,7 +72,8 @@ public class RestExportService extends AbstractBackupService implements IRestExp
                              IPropertySetterStore propertySetterStore,
                              IOutputStore outputStore,
                              IJsonSerialization jsonSerialization,
-                             IZipArchive zipArchive) {
+                             IZipArchive zipArchive,
+                             IGitCallsStore gitCallsStore) {
         this.documentDescriptorStore = documentDescriptorStore;
         this.botStore = botStore;
         this.packageStore = packageStore;
@@ -81,6 +84,7 @@ public class RestExportService extends AbstractBackupService implements IRestExp
         this.outputStore = outputStore;
         this.jsonSerialization = jsonSerialization;
         this.zipArchive = zipArchive;
+        this.gitCallsStore = gitCallsStore;
     }
 
     @Override
@@ -125,6 +129,9 @@ public class RestExportService extends AbstractBackupService implements IRestExp
                 writeConfigs(packagePath, convertConfigsToString(readConfigs(outputStore,
                         extractResourcesUris(packageConfigurationString, OUTPUT_URI_PATTERN))), OUTPUT_EXT);
 
+                writeConfigs(packagePath, convertConfigsToString(readConfigs(gitCallsStore,
+                        extractResourcesUris(packageConfigurationString, GITCALLS_URI_PATTERN))), GITCALLS_EXT);
+
                 Path unusedPath = Files.createDirectories(Paths.get(tmpPath.toString(), botId, "unused"));
 
                 writeAllVersionsOfUris(unusedPath, regularDictionaryStore, extractResourcesUris(packageConfigurationString, DICTIONARY_URI_PATTERN), DICTIONARY_EXT);
@@ -132,6 +139,7 @@ public class RestExportService extends AbstractBackupService implements IRestExp
                 writeAllVersionsOfUris(unusedPath, httpCallsStore, extractResourcesUris(packageConfigurationString, HTTPCALLS_URI_PATTERN), HTTPCALLS_EXT);
                 writeAllVersionsOfUris(unusedPath, propertySetterStore, extractResourcesUris(packageConfigurationString, PROPERTY_URI_PATTERN), PROPERTY_EXT);
                 writeAllVersionsOfUris(unusedPath, outputStore, extractResourcesUris(packageConfigurationString, OUTPUT_URI_PATTERN), OUTPUT_EXT);
+                writeAllVersionsOfUris(unusedPath, gitCallsStore, extractResourcesUris(packageConfigurationString, GITCALLS_URI_PATTERN), GITCALLS_EXT);
 
             }
 
