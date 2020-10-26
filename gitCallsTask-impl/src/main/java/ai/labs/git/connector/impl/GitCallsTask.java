@@ -1,7 +1,6 @@
 package ai.labs.git.connector.impl;
 
 import ai.labs.lifecycle.ILifecycleTask;
-import ai.labs.lifecycle.LifecycleException;
 import ai.labs.lifecycle.PackageConfigurationException;
 import ai.labs.memory.IConversationMemory;
 import ai.labs.memory.IData;
@@ -9,10 +8,8 @@ import ai.labs.memory.IDataFactory;
 import ai.labs.memory.IMemoryItemConverter;
 import ai.labs.resources.rest.config.git.model.GitCall;
 import ai.labs.resources.rest.config.git.model.GitCallsConfiguration;
-import ai.labs.runtime.SystemRuntime;
 import ai.labs.runtime.client.configuration.IResourceClientLibrary;
 import ai.labs.runtime.service.ServiceException;
-import ai.labs.serialization.IJsonSerialization;
 import ai.labs.templateengine.ITemplatingEngine;
 import lombok.extern.slf4j.Slf4j;
 import org.eclipse.jgit.api.Git;
@@ -24,8 +21,6 @@ import org.eclipse.jgit.revwalk.RevCommit;
 import org.eclipse.jgit.transport.PushResult;
 import org.eclipse.jgit.transport.UsernamePasswordCredentialsProvider;
 
-import static org.eclipse.jgit.lib.ConfigConstants.CONFIG_BRANCH_SECTION;
-
 import javax.inject.Inject;
 import java.io.File;
 import java.io.IOException;
@@ -34,11 +29,16 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
-import java.util.*;
+import java.util.ArrayList;
+import java.util.Comparator;
+import java.util.LinkedList;
+import java.util.List;
+import java.util.Map;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
 import static ai.labs.utilities.RuntimeUtilities.isNullOrEmpty;
+import static org.eclipse.jgit.lib.ConfigConstants.CONFIG_BRANCH_SECTION;
 
 @Slf4j
 public class GitCallsTask implements ILifecycleTask {
@@ -49,7 +49,6 @@ public class GitCallsTask implements ILifecycleTask {
     private final IDataFactory dataFactory;
     private final ITemplatingEngine templatingEngine;
     private final IMemoryItemConverter memoryItemConverter;
-    private final SystemRuntime.IRuntime runtime;
     private String repositoryUrl;
     private List<GitCall> gitCalls;
     private final String tmpPath = System.getProperty("user.dir") + "/gitcalls/";
@@ -58,17 +57,14 @@ public class GitCallsTask implements ILifecycleTask {
 
 
     @Inject
-    public GitCallsTask(IJsonSerialization jsonSerialization,
-                        IResourceClientLibrary resourceClientLibrary,
+    public GitCallsTask(IResourceClientLibrary resourceClientLibrary,
                         IDataFactory dataFactory,
                         ITemplatingEngine templatingEngine,
-                        IMemoryItemConverter memoryItemConverter,
-                        SystemRuntime.IRuntime runtime) {
+                        IMemoryItemConverter memoryItemConverter) {
         this.resourceClientLibrary = resourceClientLibrary;
         this.dataFactory = dataFactory;
         this.templatingEngine = templatingEngine;
         this.memoryItemConverter = memoryItemConverter;
-        this.runtime = runtime;
     }
 
 
@@ -83,7 +79,7 @@ public class GitCallsTask implements ILifecycleTask {
     }
 
     @Override
-    public void executeTask(IConversationMemory memory) throws LifecycleException {
+    public void executeTask(IConversationMemory memory) {
         IConversationMemory.IWritableConversationStep currentStep = memory.getCurrentStep();
         IData<List<String>> latestData = currentStep.getLatestData(ACTION_KEY);
         if (latestData == null) {
@@ -104,18 +100,16 @@ public class GitCallsTask implements ILifecycleTask {
             for (GitCall gitCall : gitCalls) {
                 switch (gitCall.getCommand()) {
                     case PUSH_TO_REPOSITORY:
-                        gitInit(gitCall);
+                        gitInit(gitCall, templateDataObjects);
                         gitCommit(gitCall, templateDataObjects);
-                        gitPush(gitCall);
+                        gitPush(gitCall, templateDataObjects);
                         break;
                     case PULL_FROM_REPOSITORY:
-                        gitInit(gitCall);
+                        gitInit(gitCall, templateDataObjects);
                         gitPull(gitCall, currentStep);
                         break;
                 }
-
             }
-
         }
     }
 
@@ -146,22 +140,22 @@ public class GitCallsTask implements ILifecycleTask {
         return gitCalls.stream().distinct().collect(Collectors.toList());
     }
 
-    public void gitInit(GitCall gitCall) {
+    public void gitInit(GitCall gitCall, Map<String, Object> templateDataObjects) {
         try {
             deleteFileIfExists(Paths.get(tmpPath + "/" + gitCall.getDirectory()));
-            Path gitPath = Files.createDirectories(Paths.get(tmpPath + "/" +  gitCall.getDirectory()));
+            Path gitPath = Files.createDirectories(Paths.get(tmpPath + "/" + gitCall.getDirectory()));
             Git git = Git.cloneRepository()
                     .setBranch(gitCall.getBranch())
-                    .setURI(this.repositoryUrl)
+                    .setURI(template(this.repositoryUrl, templateDataObjects))
                     .setCredentialsProvider(new UsernamePasswordCredentialsProvider(this.username, this.password))
                     .setDirectory(gitPath.toFile())
                     .call();
             StoredConfig config = git.getRepository().getConfig();
-            config.setString( CONFIG_BRANCH_SECTION, "local-branch", "remote", gitCall.getBranch());
-            config.setString( CONFIG_BRANCH_SECTION, "local-branch", "merge", "refs/heads/" + gitCall.getBranch() );
+            config.setString(CONFIG_BRANCH_SECTION, "local-branch", "remote", gitCall.getBranch());
+            config.setString(CONFIG_BRANCH_SECTION, "local-branch", "merge", "refs/heads/" + gitCall.getBranch());
             config.save();
 
-        } catch (IOException | GitAPIException e) {
+        } catch (IOException | GitAPIException | ITemplatingEngine.TemplateEngineException e) {
             log.error(e.getLocalizedMessage(), e);
         }
     }
@@ -194,7 +188,7 @@ public class GitCallsTask implements ILifecycleTask {
                                             }
                                         }
                                 );
-                    } catch (Exception e){
+                    } catch (Exception e) {
                         log.error("Error in pulling from repo", e);
                     }
                     String memoryDataName = "gitCalls:" + gitCall.getDirectory();
@@ -215,11 +209,13 @@ public class GitCallsTask implements ILifecycleTask {
 
     public void gitCommit(GitCall gitCall, Map<String, Object> templatingDataObjects) {
         try {
-            Path gitPath = Paths.get(tmpPath + "/" + gitCall.getDirectory());
             if (this.repositoryUrl != null) {
-                String filename = templatingEngine.processTemplate(gitCall.getFilename(), templatingDataObjects);
-                String content = templatingEngine.processTemplate(gitCall.getContent(), templatingDataObjects);
-                Path filepath = Paths.get(tmpPath + "/" + gitCall.getDirectory() + "/" + filename);
+                var filename = template(gitCall.getFilename(), templatingDataObjects);
+                var directory = template(gitCall.getDirectory(), templatingDataObjects);
+                var content = template(gitCall.getContent(), templatingDataObjects);
+                var path = tmpPath + "/" + directory;
+                var gitPath = Paths.get(path);
+                var filepath = Paths.get(path + "/" + filename);
                 Files.writeString(filepath, content);
                 Git.open(gitPath.toFile())
                         .add()
@@ -240,9 +236,9 @@ public class GitCallsTask implements ILifecycleTask {
 
     }
 
-    public void gitPush(GitCall gitCall) {
+    public void gitPush(GitCall gitCall, Map<String, Object> templatingDataObjects) {
         try {
-            Path gitPath = Paths.get(tmpPath + "/" + gitCall.getDirectory());
+            Path gitPath = Paths.get(tmpPath + "/" + template(gitCall.getDirectory(), templatingDataObjects));
 
             if (this.repositoryUrl != null) {
                 Iterable<PushResult> pushResults = Git.open(gitPath.toFile())
@@ -257,12 +253,15 @@ public class GitCallsTask implements ILifecycleTask {
             } else {
                 log.error("No git settings in git call configuration, please add git settings!");
             }
-        } catch (IOException | GitAPIException e) {
+        } catch (IOException | GitAPIException | ITemplatingEngine.TemplateEngineException e) {
             log.error(e.getLocalizedMessage(), e);
         }
     }
 
-
+    private String template(String toBeTemplated, Map<String, Object> templatingDataObjects)
+            throws ITemplatingEngine.TemplateEngineException {
+        return templatingEngine.processTemplate(toBeTemplated, templatingDataObjects);
+    }
 
     private void deleteFileIfExists(Path path) throws IOException {
         if (Files.isDirectory(path)) {
