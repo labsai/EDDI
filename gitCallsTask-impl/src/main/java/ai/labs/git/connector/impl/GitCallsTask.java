@@ -25,6 +25,7 @@ import javax.inject.Inject;
 import java.io.File;
 import java.io.IOException;
 import java.net.URI;
+import java.net.URISyntaxException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -50,6 +51,7 @@ public class GitCallsTask implements ILifecycleTask {
     private final ITemplatingEngine templatingEngine;
     private final IMemoryItemConverter memoryItemConverter;
     private String repositoryUrl;
+    private String repositoryLocalDirectory;
     private List<GitCall> gitCalls;
     private final String tmpPath = System.getProperty("user.dir") + "/gitcalls/";
     private String username;
@@ -101,8 +103,9 @@ public class GitCallsTask implements ILifecycleTask {
                 switch (gitCall.getCommand()) {
                     case PUSH_TO_REPOSITORY:
                         gitInit(gitCall, templateDataObjects);
+                        gitPull(gitCall, currentStep);
                         gitCommit(gitCall, templateDataObjects);
-                        gitPush(gitCall, templateDataObjects);
+                        gitPush(gitCall);
                         break;
                     case PULL_FROM_REPOSITORY:
                         gitInit(gitCall, templateDataObjects);
@@ -126,8 +129,9 @@ public class GitCallsTask implements ILifecycleTask {
                 this.username = gitCallsConfig.getUsername();
                 this.password = gitCallsConfig.getPassword();
                 this.gitCalls = gitCallsConfig.getGitCalls();
+                this.repositoryLocalDirectory = getRepositoryNameFromUrl();
 
-            } catch (ServiceException e) {
+            } catch (ServiceException | URISyntaxException e) {
                 log.error(e.getLocalizedMessage(), e);
                 throw new PackageConfigurationException(e.getMessage(), e);
             }
@@ -142,8 +146,8 @@ public class GitCallsTask implements ILifecycleTask {
 
     public void gitInit(GitCall gitCall, Map<String, Object> templateDataObjects) {
         try {
-            deleteFileIfExists(Paths.get(tmpPath + "/" + gitCall.getDirectory()));
-            Path gitPath = Files.createDirectories(Paths.get(tmpPath + "/" + gitCall.getDirectory()));
+            deleteFileIfExists(Paths.get(tmpPath + "/" + this.repositoryLocalDirectory));
+            Path gitPath = Files.createDirectories(Paths.get(tmpPath + "/" + this.repositoryLocalDirectory));
             Git git = Git.cloneRepository()
                     .setBranch(gitCall.getBranch())
                     .setURI(template(this.repositoryUrl, templateDataObjects))
@@ -162,7 +166,7 @@ public class GitCallsTask implements ILifecycleTask {
 
     public void gitPull(GitCall gitCall, IConversationMemory.IWritableConversationStep currentStep) {
         try {
-            Path gitPath = Paths.get(tmpPath + "/" + gitCall.getDirectory());
+            Path gitPath = Paths.get(tmpPath + "/" + this.repositoryLocalDirectory);
 
             if (this.repositoryUrl != null) {
                 PullResult pullResult = Git.open(gitPath.toFile())
@@ -213,17 +217,19 @@ public class GitCallsTask implements ILifecycleTask {
                 var filename = template(gitCall.getFilename(), templatingDataObjects);
                 var directory = template(gitCall.getDirectory(), templatingDataObjects);
                 var content = template(gitCall.getContent(), templatingDataObjects);
-                var path = tmpPath + "/" + directory;
-                var gitPath = Paths.get(path);
+                var message = template(gitCall.getMessage(), templatingDataObjects);
+                var path = tmpPath + "/" + this.repositoryLocalDirectory + "/" + directory;
+                Files.createDirectories(Paths.get(path));
                 var filepath = Paths.get(path + "/" + filename);
                 Files.writeString(filepath, content);
+                Path gitPath = Paths.get(tmpPath + "/" + this.repositoryLocalDirectory);
                 Git.open(gitPath.toFile())
                         .add()
                         .addFilepattern(".")
                         .call();
                 RevCommit commit = Git.open(gitPath.toFile())
                         .commit()
-                        .setMessage(gitCall.getMessage())
+                        .setMessage(message)
                         .setCommitter("eddi", "eddi@labs.ai")
                         .call();
                 log.info(commit.getFullMessage());
@@ -236,9 +242,9 @@ public class GitCallsTask implements ILifecycleTask {
 
     }
 
-    public void gitPush(GitCall gitCall, Map<String, Object> templatingDataObjects) {
+    public void gitPush(GitCall gitCall) {
         try {
-            Path gitPath = Paths.get(tmpPath + "/" + template(gitCall.getDirectory(), templatingDataObjects));
+            Path gitPath = Paths.get(tmpPath + "/" + this.repositoryLocalDirectory);
 
             if (this.repositoryUrl != null) {
                 Iterable<PushResult> pushResults = Git.open(gitPath.toFile())
@@ -253,7 +259,7 @@ public class GitCallsTask implements ILifecycleTask {
             } else {
                 log.error("No git settings in git call configuration, please add git settings!");
             }
-        } catch (IOException | GitAPIException | ITemplatingEngine.TemplateEngineException e) {
+        } catch (IOException | GitAPIException e) {
             log.error(e.getLocalizedMessage(), e);
         }
     }
@@ -274,6 +280,12 @@ public class GitCallsTask implements ILifecycleTask {
                 Files.delete(path);
             }
         }
+    }
+
+    private String getRepositoryNameFromUrl() throws URISyntaxException {
+        URI uri = new URI(this.repositoryUrl);
+        String path = uri.getPath();
+        return path.substring(path.lastIndexOf('/') + 1);
     }
 
 }
