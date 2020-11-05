@@ -23,7 +23,7 @@ public class JsonSerializationThymeleafDialect extends AbstractDialect implement
         super("Json Converter");
         ObjectMapper objectMapper = new ObjectMapper(jsonFactory);
 
-        configureObjectMapper(false, objectMapper);
+        configureObjectMapper(true, objectMapper);
         this.jsonSerialization = new JsonSerialization(objectMapper);
     }
 

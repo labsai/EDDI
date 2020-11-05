@@ -11,6 +11,7 @@ import lombok.Setter;
 @AllArgsConstructor
 public class PropertyInstruction extends Property {
     private String fromObjectPath = "";
+    private String toObjectPath = "";
     private Boolean override = true;
     private Boolean runOnValidationError = false;
     private HttpCodeValidator httpCodeValidator;
