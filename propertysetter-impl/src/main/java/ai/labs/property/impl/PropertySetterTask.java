@@ -131,15 +131,19 @@ public class PropertySetterTask implements ILifecycleTask {
                 if (!isNullOrEmpty(propertyInstructions)) {
                     try {
                         for (PropertyInstruction property : propertyInstructions) {
-                            String name = property.getName();
-                            String fromObjectPath = property.getFromObjectPath();
-                            Scope scope = property.getScope();
+                            var name = property.getName();
                             checkNotNull(name, "property.name");
+                            var fromObjectPath = property.getFromObjectPath();
+                            var toObjectPath = property.getToObjectPath();
+                            var scope = property.getScope();
                             name = templatingEngine.processTemplate(name, templateDataObjects);
 
                             Object templatedObj;
                             if (!isNullOrEmpty(fromObjectPath)) {
                                 templatedObj = Ognl.getValue(fromObjectPath, templateDataObjects);
+                                if (!isNullOrEmpty(templatedObj) && !isNullOrEmpty(toObjectPath)) {
+                                    Ognl.setValue(toObjectPath, templateDataObjects, templatedObj);
+                                }
                             } else {
                                 var value = property.getValue();
                                 if (!isNullOrEmpty(value) && value instanceof String) {
