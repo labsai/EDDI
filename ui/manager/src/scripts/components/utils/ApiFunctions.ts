@@ -14,6 +14,8 @@ import {
   PACKAGE_PATH,
   REGULAR_DICTIONARY,
   REGULAR_DICTIONARY_PATH,
+  GITCALLS_PATH,
+  GITCALLS,
 } from './EddiTypes';
 import * as _ from 'lodash';
 
@@ -274,6 +276,8 @@ export function getTypeFromResource(resource: string): string {
     return OUTPUT;
   } else if (resource.includes(HTTPCALLS_PATH)) {
     return HTTPCALLS;
+  } else if (resource.includes(GITCALLS_PATH)) {
+    return GITCALLS;
   } else if (resource.includes(PROPERTYSETTER_PATH)) {
     return PROPERTYSETTER;
   } else if (resource.includes(BOT_PATH)) {
@@ -293,6 +297,8 @@ export function getTypePath(type: string): string {
       return OUTPUT_PATH;
     case HTTPCALLS:
       return HTTPCALLS_PATH;
+    case GITCALLS:
+      return GITCALLS_PATH;
     case PROPERTYSETTER:
       return PROPERTYSETTER_PATH;
     case BOT:

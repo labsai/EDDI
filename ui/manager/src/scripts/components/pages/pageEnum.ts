@@ -3,6 +3,7 @@ export enum pageEnum {
   'behavior',
   'output',
   'httpCalls',
+  'gitCalls',
   'property',
   'bot',
   'package',

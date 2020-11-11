@@ -6,6 +6,7 @@ export const PARSER: string = 'eddi://ai.labs.parser';
 export const BEHAVIOR: string = 'eddi://ai.labs.behavior';
 export const OUTPUT: string = 'eddi://ai.labs.output';
 export const HTTPCALLS: string = 'eddi://ai.labs.httpcalls';
+export const GITCALLS: string = 'eddi://ai.labs.gitcalls';
 export const PROPERTYSETTER: string = 'eddi://ai.labs.property';
 export const CONVERSATION: string = 'eddi://ai.labs.conversation';
 
@@ -19,6 +20,7 @@ export const OUTPUT_PATH: string = '/outputstore/outputsets';
 export const PACKAGE_PATH: string = '/packagestore/packages';
 export const BOT_PATH: string = '/botstore/bots';
 export const HTTPCALLS_PATH: string = '/httpcallsstore/httpcalls';
+export const GITCALLS_PATH: string = '/gitcallsstore/gitcalls';
 export const PROPERTYSETTER_PATH: string =
   '/propertysetterstore/propertysetters';
 export const CONVERSATION_PATH: string = '/conversationstore/conversations';

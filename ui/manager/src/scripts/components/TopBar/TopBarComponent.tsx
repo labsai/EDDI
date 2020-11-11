@@ -105,6 +105,8 @@ class TopBarComponent extends React.Component<IPrivateProps> {
   getSearchName(page: pageEnum) {
     if (page === pageEnum.httpCalls) {
       return 'HTTP calls';
+    } else if (page === pageEnum.gitCalls) {
+      return 'Git calls';
     } else {
       return pageEnum[page];
     }
