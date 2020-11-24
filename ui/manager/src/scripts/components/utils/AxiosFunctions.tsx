@@ -24,6 +24,8 @@ import {
   HTTPCALLS_PATH,
   PROPERTYSETTER,
   PROPERTYSETTER_PATH,
+  GITCALLS,
+  GITCALLS_PATH,
 } from './EddiTypes';
 import { setAuthorizationHeader } from './keycloakFunctions';
 
@@ -804,6 +806,12 @@ export async function getPluginDescriptors(
       case HTTPCALLS:
         res = await axios.get(
           `${await getAPIUrl()}${HTTPCALLS_PATH}/descriptors?index=${index}&limit=${limit}`,
+        );
+        break;
+
+      case GITCALLS:
+        res = await axios.get(
+          `${await getAPIUrl()}${GITCALLS_PATH}/descriptors?index=${index}&limit=${limit}`,
         );
         break;
       case PROPERTYSETTER:

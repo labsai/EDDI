@@ -104,6 +104,8 @@ export default class Parser {
         break;
       case PluginType.HTTPCALLS:
         return 'HTTP calls';
+      case PluginType.GITCALLS:
+        return 'Git calls';
       case PluginType.PROPERTYSETTER:
         if (plural) {
           pluginName = 'Properties';

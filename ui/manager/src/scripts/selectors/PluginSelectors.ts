@@ -2,6 +2,7 @@ import { IAppState } from '../reducers';
 import Parser from '../components/utils/Parser';
 import {
   BEHAVIOR,
+  GITCALLS,
   HTTPCALLS,
   OUTPUT,
   PROPERTYSETTER,
@@ -54,6 +55,10 @@ export function pluginsSelector(
     case HTTPCALLS:
       isAllPluginsLoaded = state.pluginState.allHttpCallsLoaded;
       loadedPlugins = state.pluginState.loadedHttpCalls;
+      break;
+    case GITCALLS:
+      isAllPluginsLoaded = state.pluginState.allGitCallsLoaded;
+      loadedPlugins = state.pluginState.loadedGitCalls;
       break;
     case PROPERTYSETTER:
       isAllPluginsLoaded = state.pluginState.allPropertysetterLoaded;

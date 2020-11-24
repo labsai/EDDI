@@ -38,6 +38,7 @@ import {
 import * as _ from 'lodash';
 import {
   BEHAVIOR,
+  GITCALLS,
   HTTPCALLS,
   OUTPUT,
   PROPERTYSETTER,
@@ -61,12 +62,14 @@ export interface IPluginState {
   allBehaviorsLoaded: boolean;
   allOutputsLoaded: boolean;
   allHttpCallsLoaded: boolean;
+  allGitCallsLoaded: boolean;
   allPropertysetterLoaded: boolean;
 
   loadedDictionaries: number;
   loadedBehaviors: number;
   loadedOutputs: number;
   loadedHttpCalls: number;
+  loadedGitCalls: number;
   loadedPropertysetters: number;
 }
 
@@ -83,12 +86,14 @@ export const initialState: IPluginState = {
   allBehaviorsLoaded: false,
   allOutputsLoaded: false,
   allHttpCallsLoaded: false,
+  allGitCallsLoaded: false,
   allPropertysetterLoaded: false,
 
   loadedDictionaries: 0,
   loadedBehaviors: 0,
   loadedOutputs: 0,
   loadedHttpCalls: 0,
+  loadedGitCalls: 0,
   loadedPropertysetters: 0,
 };
 
@@ -196,6 +201,15 @@ const PluginReducer: IPluginReducer = (
         },
         allHttpCallsLoaded: {
           $set: pluginType === HTTPCALLS ? lastPage : state.allHttpCallsLoaded,
+        },
+        loadedGitCalls: {
+          $set:
+            pluginType === GITCALLS
+              ? state.loadedGitCalls + newPluginsLoaded
+              : state.loadedGitCalls,
+        },
+        allGitCallsLoaded: {
+          $set: pluginType === GITCALLS ? lastPage : state.allHttpCallsLoaded,
         },
         loadedPropertysetter: {
           $set:
@@ -334,6 +348,10 @@ const PluginReducer: IPluginReducer = (
               ? state.loadedHttpCalls + 1
               : state.loadedHttpCalls,
         },
+        loadedGitCalls: {
+          $set:
+            type === GITCALLS ? state.loadedGitCalls + 1 : state.loadedGitCalls,
+        },
         loadedPropertysetter: {
           $set:
             type === PROPERTYSETTER
@@ -399,6 +417,14 @@ const PluginReducer: IPluginReducer = (
             state.loadedHttpCalls +
             PluginHelper.countResources(
               HTTPCALLS,
+              (action as IDuplicateSuccessAction).plugins,
+            ),
+        },
+        loadedGitCalls: {
+          $set:
+            state.loadedGitCalls +
+            PluginHelper.countResources(
+              GITCALLS,
               (action as IDuplicateSuccessAction).plugins,
             ),
         },

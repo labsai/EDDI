@@ -6,6 +6,7 @@ import Parser from '../utils/Parser';
 import PluginList from '../Plugins/PluginList';
 import {
   BEHAVIOR,
+  GITCALLS,
   HTTPCALLS,
   OUTPUT,
   PROPERTYSETTER,
@@ -52,6 +53,8 @@ class ExtensionsPage extends React.Component<IProps, IState> {
         return OUTPUT;
       case 'httpCalls':
         return HTTPCALLS;
+      case 'gitCalls':
+        return GITCALLS;
       case 'property':
         return PROPERTYSETTER;
       default:

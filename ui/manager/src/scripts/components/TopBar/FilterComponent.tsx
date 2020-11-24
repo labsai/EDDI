@@ -45,6 +45,8 @@ interface IProps {
 function getSearchName(page: pageEnum) {
   if (page === pageEnum.httpCalls) {
     return 'HTTP calls';
+  } else if (page === pageEnum.gitCalls) {
+    return 'Git calls';
   } else {
     return pageEnum[page];
   }
