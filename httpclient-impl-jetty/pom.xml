@@ -21,7 +21,7 @@
         <dependency>
             <groupId>org.eclipse.jetty</groupId>
             <artifactId>jetty-client</artifactId>
-            <version>9.4.32.v20200930</version>
+            <version>9.4.35.v20201120</version>
         </dependency>
         <dependency>
             <groupId>com.sun.xml.security</groupId>
