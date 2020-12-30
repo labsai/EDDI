@@ -52,7 +52,7 @@ technical spec:
 
 ## Prerequirements
 
-*   Java 11
+* Java 11
 * Maven 3
 * MongoDB >4.0
 
