@@ -100,10 +100,10 @@ public class ApiServer {
                 ),
                 new BackupServiceModule(new FileInputStream(configDir + "git.properties")),
                 new HttpCallsModule(),
-                //new FacebookMessengerModule(),
-                //new XmppModule(),
+                new FacebookMessengerModule(),
+                new XmppModule(),
                 new AMQPModule(),
-                //new DifferModule(),
+                new DifferModule(),
                 new ChannelModule(),
                 new MigrationModule(),
                 new GitCallsModule()
