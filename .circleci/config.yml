@@ -51,6 +51,15 @@ jobs:
             docker build --label "version=4.9.0" --label "release=4.9.0-redhat-b$CIRCLE_BUILD_NUM" -f Dockerfile_redhat --build-arg EDDI_VERSION=4.9.0 --build-arg EDDI_ENV=production -t labsai/eddi:latest-redhat .
             docker push labsai/eddi:latest-redhat
 
+            docker build --label "version=4.9.0" --label "release=4.9.0-redhat-b$CIRCLE_BUILD_NUM" -f Dockerfile_redhat --build-arg EDDI_VERSION=4.9.0 --build-arg EDDI_ENV=production -t labsai/eddi:4.9.0-redhat .
+            docker push labsai/eddi:4.9.0-redhat
+
+            docker build --label "version=4.9.0" --label "release=4.9.0-redhat-b$CIRCLE_BUILD_NUM" -f Dockerfile_redhat --build-arg EDDI_VERSION=4.9.0 --build-arg EDDI_ENV=production -t labsai/eddi:4.8-redhat .
+            docker push labsai/eddi:4.8-redhat
+
+            docker build --label "version=4.9.0" --label "release=4.9.0-redhat-b$CIRCLE_BUILD_NUM" -f Dockerfile_redhat --build-arg EDDI_VERSION=4.9.0 --build-arg EDDI_ENV=production -t labsai/eddi:4-redhat .
+            docker push labsai/eddi:4-redhat
+
             docker build --build-arg EDDI_VERSION=4.9.0 --build-arg EDDI_ENV=production -t labsai/eddi:4.9.0 .
             docker push labsai/eddi:4.9.0
 
