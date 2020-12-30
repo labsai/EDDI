@@ -20,7 +20,7 @@
         <dependency>
             <groupId>org.infinispan</groupId>
             <artifactId>infinispan-core</artifactId>
-            <version>9.4.19.Final</version>
+            <version>9.4.21.Final</version>
             <exclusions>
                 <exclusion>
                     <groupId>org.jboss.spec.javax.transaction</groupId>
