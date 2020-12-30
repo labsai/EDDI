@@ -6,3 +6,4 @@
 *.iml
 /.idea/
 tmp
+/apiserver/gitcalls/**/
