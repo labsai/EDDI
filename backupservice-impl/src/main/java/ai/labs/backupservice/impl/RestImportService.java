@@ -8,6 +8,8 @@ import ai.labs.resources.rest.config.behavior.IRestBehaviorStore;
 import ai.labs.resources.rest.config.behavior.model.BehaviorConfiguration;
 import ai.labs.resources.rest.config.bots.IRestBotStore;
 import ai.labs.resources.rest.config.bots.model.BotConfiguration;
+import ai.labs.resources.rest.config.git.IRestGitCallsStore;
+import ai.labs.resources.rest.config.git.model.GitCallsConfiguration;
 import ai.labs.resources.rest.config.http.IRestHttpCallsStore;
 import ai.labs.resources.rest.config.http.model.HttpCallsConfiguration;
 import ai.labs.resources.rest.config.output.IRestOutputStore;
@@ -218,6 +220,15 @@ public class RestImportService extends AbstractBackupService implements IRestImp
                             updateDocumentDescriptor(packagePath, propertyUris, newPropertyUris);
                             packageFileString = replaceURIs(packageFileString, propertyUris, newPropertyUris);
 
+                            // ... for git calls
+                            List<URI> gitCallsUris = extractResourcesUris(packageFileString, GITCALLS_URI_PATTERN);
+                            List<URI> newGitCallsUris = createNewGitCalls(
+                                    readResources(gitCallsUris, packagePath,
+                                            GITCALLS_EXT, GitCallsConfiguration.class));
+
+                            updateDocumentDescriptor(packagePath, gitCallsUris, newGitCallsUris);
+                            packageFileString = replaceURIs(packageFileString, gitCallsUris, newGitCallsUris);
+
                             // ... for output
                             List<URI> outputUris = extractResourcesUris(packageFileString, OUTPUT_URI_PATTERN);
                             List<URI> newOutputUris = createNewOutputs(
@@ -301,6 +312,16 @@ public class RestImportService extends AbstractBackupService implements IRestImp
             Response propertySetter = restPropertySetterStore.createPropertySetter(propertySetterConfiguration);
             checkIfCreatedResponse(propertySetter);
             return propertySetter.getLocation();
+        }).collect(Collectors.toList());
+    }
+
+    private List<URI> createNewGitCalls(List<GitCallsConfiguration> gitCallsConfigurations)
+            throws RestInterfaceFactory.RestInterfaceFactoryException {
+        IRestGitCallsStore restGitCallsStore = getRestResourceStore(IRestGitCallsStore.class);
+        return gitCallsConfigurations.stream().map(gitCallsConfiguration -> {
+            Response gitCallsResponse = restGitCallsStore.createGitCalls(gitCallsConfiguration);
+            checkIfCreatedResponse(gitCallsResponse);
+            return gitCallsResponse.getLocation();
         }).collect(Collectors.toList());
     }
 
