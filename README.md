@@ -1,8 +1,8 @@
 # E.D.D.I
-Scalable Open Source Chatbot Platform. Build multiple Chatbots with NLP, Behavior Rules, API Connector, Templating. Developed in Java, provided with Docker, orchestrated with Kubernetes or Openshift.
+Scalable Open Source Chatbot Platform. Build multiple Chatbots with NLP, Behavior Rules, API Connector, Templating.
+Developed in Java, provided with Docker, orchestrated with Kubernetes or Openshift.
 
-
-v4.8.3 - STABLE
+v4.9.0 - STABLE
 
 License: Apache License 2.0
 
@@ -18,9 +18,9 @@ Check out the full documentation [here](http://docs.labs.ai/).
 
 ### We have asked that question to our users and here are some reasons they mentioned
 
-*   it is open source 💚
-*   the configuration is extremely open and flexible
-*   the code is self-explanatory and easy to extend
+* it is open source 💚
+* the configuration is very open and flexible
+* the code is self-explanatory and easy to extend
 *   eddi is channel independent, therefore can be used anywhere
 *   the \(NLP\) parser is extremely cool
 *   the framework is focused and does not pretend to be the magic bullet that solves it all
