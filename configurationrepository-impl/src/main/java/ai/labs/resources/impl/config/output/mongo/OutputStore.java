@@ -11,10 +11,9 @@ import ai.labs.utilities.RuntimeUtilities;
 import com.mongodb.client.MongoDatabase;
 
 import javax.inject.Inject;
-import java.util.Collections;
 import java.util.Comparator;
-import java.util.LinkedList;
 import java.util.List;
+import java.util.stream.Collectors;
 
 /**
  * @author ginccc
@@ -75,39 +74,29 @@ public class OutputStore implements IOutputStore {
     }
 
     @Override
-    public List<String> readOutputActions(String id, Integer version, String filter, String order, Integer limit) throws ResourceStoreException, ResourceNotFoundException {
-        List<String> retOutputKeys = new LinkedList<>();
-        OutputConfigurationSet outputSet = read(id, version);
-        List<OutputConfiguration> outputs = outputSet.getOutputSet();
-        for (OutputConfiguration output : outputs) {
-            String key = output.getAction();
-            if (key.contains(filter)) {
-                retOutputKeys.add(key);
-                if (retOutputKeys.size() >= limit) {
-                    break;
-                }
-            }
-        }
+    public List<String> readActions(String id, Integer version, String filter, Integer limit)
+            throws ResourceStoreException, ResourceNotFoundException {
 
-        if ("asc".equals(order)) {
-            Collections.sort(retOutputKeys);
-        } else {
-            retOutputKeys.sort(Collections.reverseOrder());
-        }
+        List<String> actions = read(id, version).
+                getOutputSet().stream().
+                map(OutputConfiguration::getAction).
+                collect(Collectors.toList());
 
-        return retOutputKeys;
+        return limit > 0 ? actions.subList(0, limit) : actions;
     }
 
     @Override
     @ConfigurationUpdate
-    public Integer update(String id, Integer version, OutputConfigurationSet outputConfigurationSet) throws ResourceStoreException, ResourceModifiedException, ResourceNotFoundException {
+    public Integer update(String id, Integer version, OutputConfigurationSet outputConfigurationSet)
+            throws ResourceStoreException, ResourceModifiedException, ResourceNotFoundException {
+
         RuntimeUtilities.checkCollectionNoNullElements(outputConfigurationSet.getOutputSet(), "outputSets");
         return outputResourceStore.update(id, version, outputConfigurationSet);
     }
 
     @Override
     @ConfigurationUpdate
-    public void delete(String id, Integer version) throws ResourceStoreException, ResourceModifiedException, ResourceNotFoundException {
+    public void delete(String id, Integer version) throws ResourceModifiedException, ResourceNotFoundException {
         outputResourceStore.delete(id, version);
     }
 

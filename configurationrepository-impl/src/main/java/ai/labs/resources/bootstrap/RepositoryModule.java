@@ -19,7 +19,7 @@ import ai.labs.resources.impl.config.http.mongo.HttpCallsStore;
 import ai.labs.resources.impl.config.http.rest.RestHttpCallsStore;
 import ai.labs.resources.impl.config.output.mongo.OutputStore;
 import ai.labs.resources.impl.config.output.rest.RestOutputStore;
-import ai.labs.resources.impl.config.output.rest.keys.RestOutputKeys;
+import ai.labs.resources.impl.config.output.rest.keys.RestOutputActions;
 import ai.labs.resources.impl.config.packages.mongo.PackageStore;
 import ai.labs.resources.impl.config.packages.rest.RestPackageExtensionStore;
 import ai.labs.resources.impl.config.packages.rest.RestPackageStore;
@@ -55,7 +55,7 @@ import ai.labs.resources.rest.config.http.IHttpCallsStore;
 import ai.labs.resources.rest.config.http.IRestHttpCallsStore;
 import ai.labs.resources.rest.config.output.IOutputStore;
 import ai.labs.resources.rest.config.output.IRestOutputStore;
-import ai.labs.resources.rest.config.output.keys.IRestOutputKeys;
+import ai.labs.resources.rest.config.output.keys.IRestOutputActions;
 import ai.labs.resources.rest.config.packages.IPackageStore;
 import ai.labs.resources.rest.config.packages.IRestPackageExtensionStore;
 import ai.labs.resources.rest.config.packages.IRestPackageStore;
@@ -124,7 +124,7 @@ public class RepositoryModule extends AbstractBaseModule {
         bind(IRestPropertiesStore.class).to(RestPropertiesStore.class).in(Scopes.SINGLETON);
         bind(IRestPropertySetterStore.class).to(RestPropertySetterStore.class).in(Scopes.SINGLETON);
 
-        bind(IRestOutputKeys.class).to(RestOutputKeys.class).in(Scopes.SINGLETON);
+        bind(IRestOutputActions.class).to(RestOutputActions.class).in(Scopes.SINGLETON);
         bind(IMigrationLogStore.class).to(MigrationLogStore.class).in(Scopes.SINGLETON);
         bind(IGitBackupStore.class).to(RestGitBackupStore.class).in(Scopes.SINGLETON);
 

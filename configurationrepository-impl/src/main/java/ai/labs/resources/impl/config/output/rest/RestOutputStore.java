@@ -71,9 +71,9 @@ public class RestOutputStore extends RestVersionInfo<OutputConfigurationSet> imp
     }
 
     @Override
-    public List<String> readOutputKeys(String id, Integer version, String filter, String order, Integer limit) {
+    public List<String> readOutputKeys(String id, Integer version, String filter, Integer limit) {
         try {
-            return outputStore.readOutputActions(id, version, filter, order, limit);
+            return outputStore.readActions(id, version, filter, limit);
         } catch (IResourceStore.ResourceStoreException e) {
             log.error(e.getLocalizedMessage(), e);
             throw new InternalServerErrorException(e.getLocalizedMessage(), e);

@@ -70,7 +70,6 @@ public interface IRestOutputStore extends IRestVersionInfo {
                                 @ApiParam(name = "version", required = true, format = "integer", example = "1")
                                 @QueryParam("version") Integer version,
                                 @QueryParam("filter") @DefaultValue("") String filter,
-                                @QueryParam("order") @DefaultValue("") String order,
                                 @QueryParam("limit") @DefaultValue("20") Integer limit);
 
     @PUT

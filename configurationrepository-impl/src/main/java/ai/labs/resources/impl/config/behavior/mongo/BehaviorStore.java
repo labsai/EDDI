@@ -11,9 +11,9 @@ import ai.labs.utilities.RuntimeUtilities;
 import com.mongodb.client.MongoDatabase;
 
 import javax.inject.Inject;
-import java.util.Collections;
-import java.util.LinkedList;
+import java.util.Collection;
 import java.util.List;
+import java.util.stream.Collectors;
 
 /**
  * @author ginccc
@@ -34,7 +34,9 @@ public class BehaviorStore implements IBehaviorStore {
     }
 
     @Override
-    public BehaviorConfiguration readIncludingDeleted(String id, Integer version) throws ResourceNotFoundException, ResourceStoreException {
+    public BehaviorConfiguration readIncludingDeleted(String id, Integer version)
+            throws ResourceNotFoundException, ResourceStoreException {
+
         return behaviorResourceStore.readIncludingDeleted(id, version);
     }
 
@@ -52,14 +54,16 @@ public class BehaviorStore implements IBehaviorStore {
 
     @Override
     @ConfigurationUpdate
-    public synchronized Integer update(String id, Integer version, BehaviorConfiguration behaviorConfiguration) throws ResourceStoreException, ResourceModifiedException, ResourceNotFoundException {
+    public synchronized Integer update(String id, Integer version, BehaviorConfiguration behaviorConfiguration)
+            throws ResourceStoreException, ResourceModifiedException, ResourceNotFoundException {
+
         RuntimeUtilities.checkCollectionNoNullElements(behaviorConfiguration.getBehaviorGroups(), "behaviorGroups");
         return behaviorResourceStore.update(id, version, behaviorConfiguration);
     }
 
     @Override
     @ConfigurationUpdate
-    public void delete(String id, Integer version) throws ResourceStoreException, ResourceModifiedException, ResourceNotFoundException {
+    public void delete(String id, Integer version) throws ResourceModifiedException, ResourceNotFoundException {
         behaviorResourceStore.delete(id, version);
     }
 
@@ -75,28 +79,16 @@ public class BehaviorStore implements IBehaviorStore {
     }
 
     @Override
-    public List<String> readBehaviorRuleNames(String id, Integer version, String filter, String order, Integer limit) throws ResourceStoreException, ResourceNotFoundException {
-        List<String> retBehaviorRuleNames = new LinkedList<>();
-        BehaviorConfiguration behaviorConfiguration = read(id, version);
-        for (BehaviorGroupConfiguration groupConfiguration : behaviorConfiguration.getBehaviorGroups()) {
-            List<BehaviorRuleConfiguration> behaviorRules = groupConfiguration.getBehaviorRules();
-            for (BehaviorRuleConfiguration behaviorRule : behaviorRules) {
-                String name = behaviorRule.getName();
-                if (name.contains(filter)) {
-                    retBehaviorRuleNames.add(name);
-                    if (retBehaviorRuleNames.size() >= limit) {
-                        break;
-                    }
-                }
-            }
-        }
+    public List<String> readActions(String id, Integer version, String filter, Integer limit)
+            throws ResourceStoreException, ResourceNotFoundException {
 
-        if ("asc".equals(order)) {
-            Collections.sort(retBehaviorRuleNames);
-        } else {
-            Collections.sort(retBehaviorRuleNames, Collections.reverseOrder());
-        }
+        List<String> actions = read(id, version).getBehaviorGroups().stream().
+                map(BehaviorGroupConfiguration::getBehaviorRules).
+                flatMap(Collection::stream).
+                map(BehaviorRuleConfiguration::getActions).
+                flatMap(Collection::stream).
+                collect(Collectors.toList());
 
-        return retBehaviorRuleNames;
+        return limit > 0 ? actions.subList(0, limit) : actions;
     }
 }

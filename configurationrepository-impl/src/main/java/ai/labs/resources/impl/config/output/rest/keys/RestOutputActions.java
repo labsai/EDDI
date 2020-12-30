@@ -6,7 +6,7 @@ import ai.labs.resources.rest.config.behavior.model.BehaviorConfiguration;
 import ai.labs.resources.rest.config.behavior.model.BehaviorGroupConfiguration;
 import ai.labs.resources.rest.config.behavior.model.BehaviorRuleConfiguration;
 import ai.labs.resources.rest.config.output.IOutputStore;
-import ai.labs.resources.rest.config.output.keys.IRestOutputKeys;
+import ai.labs.resources.rest.config.output.keys.IRestOutputActions;
 import ai.labs.resources.rest.config.packages.IPackageStore;
 import ai.labs.resources.rest.config.packages.model.PackageConfiguration;
 import ai.labs.utilities.CollectionUtilities;
@@ -28,22 +28,22 @@ import java.util.Map;
  * @author ginccc
  */
 @Slf4j
-public class RestOutputKeys implements IRestOutputKeys {
+public class RestOutputActions implements IRestOutputActions {
     private final IPackageStore packageStore;
     private final IBehaviorStore behaviorStore;
     private final IOutputStore outputStore;
 
     @Inject
-    public RestOutputKeys(IPackageStore packageStore,
-                          IBehaviorStore behaviorStore,
-                          IOutputStore outputStore) {
+    public RestOutputActions(IPackageStore packageStore,
+                             IBehaviorStore behaviorStore,
+                             IOutputStore outputStore) {
         this.packageStore = packageStore;
         this.behaviorStore = behaviorStore;
         this.outputStore = outputStore;
     }
-    
+
     @Override
-    public List<String> readOutputKeys(String packageId, Integer packageVersion, String filter, Integer limit) {
+    public List<String> readOutputActions(String packageId, Integer packageVersion, String filter, Integer limit) {
         List<String> retOutputKeys = new LinkedList<String>();
         try {
             PackageConfiguration packageConfiguration = packageStore.read(packageId, packageVersion);
@@ -67,7 +67,7 @@ public class RestOutputKeys implements IRestOutputKeys {
 
             resourceIds = readOutputSetResourceIds(packageConfiguration);
             for (IResourceStore.IResourceId resourceId : resourceIds) {
-                List<String> outputKeys = outputStore.readOutputActions(resourceId.getId(), resourceId.getVersion(), filter, "asc", limit);
+                List<String> outputKeys = outputStore.readActions(resourceId.getId(), resourceId.getVersion(), filter, limit);
                 CollectionUtilities.addAllWithoutDuplicates(retOutputKeys, outputKeys);
                 if (retOutputKeys.size() >= limit) {
                     return sortedOutputKeys(retOutputKeys);
