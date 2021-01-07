@@ -62,6 +62,7 @@
         <module>migration-impl</module>
         <module>basemodels</module>
         <module>gitCallsTask-impl</module>
+        <module>peerToPeerTask-impl</module>
     </modules>
 
     <build>

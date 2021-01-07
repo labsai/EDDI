@@ -1,5 +1,6 @@
 package ai.labs.resources.rest;
 
+import ai.labs.persistence.IResourceStore;
 import io.swagger.annotations.ApiOperation;
 
 import javax.ws.rs.GET;
@@ -25,5 +26,5 @@ public interface IRestVersionInfo {
     @Path("/{id}/currentversion")
     @Produces(MediaType.TEXT_PLAIN)
     @ApiOperation(value = "Get current version of this resource.")
-    Integer getCurrentVersion(@PathParam("id") String id);
+    IResourceStore.IResourceId getCurrentVersion(@PathParam("id") String id) throws IResourceStore.ResourceNotFoundException;
 }

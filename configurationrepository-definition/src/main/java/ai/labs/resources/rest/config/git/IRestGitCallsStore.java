@@ -15,7 +15,7 @@ import java.util.Map;
  * @author rpi
  */
 
-@Api(value = "Configurations -> (2) Conversation LifeCycle Tasks -> (3) GitCalls", authorizations = {@Authorization(value = "eddi_auth")})
+@Api(value = "Configurations -> (2) Conversation LifeCycle Tasks -> (4) GitCalls", authorizations = {@Authorization(value = "eddi_auth")})
 @Path("/gitcallsstore/gitcalls")
 public interface IRestGitCallsStore extends IRestVersionInfo {
     String resourceURI = "eddi://ai.labs.gitcalls/gitcallsstore/gitcalls/";
