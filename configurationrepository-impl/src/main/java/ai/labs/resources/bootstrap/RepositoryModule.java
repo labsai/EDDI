@@ -20,6 +20,7 @@ import ai.labs.resources.impl.config.http.rest.RestHttpCallsStore;
 import ai.labs.resources.impl.config.output.mongo.OutputStore;
 import ai.labs.resources.impl.config.output.rest.RestOutputStore;
 import ai.labs.resources.impl.config.output.rest.keys.RestOutputActions;
+import ai.labs.resources.impl.config.p2p.mongo.P2PStore;
 import ai.labs.resources.impl.config.p2p.rest.RestP2PStore;
 import ai.labs.resources.impl.config.packages.mongo.PackageStore;
 import ai.labs.resources.impl.config.packages.rest.RestPackageExtensionStore;
@@ -56,6 +57,7 @@ import ai.labs.resources.rest.config.http.IHttpCallsStore;
 import ai.labs.resources.rest.config.http.IRestHttpCallsStore;
 import ai.labs.resources.rest.config.output.IOutputStore;
 import ai.labs.resources.rest.config.output.IRestOutputStore;
+import ai.labs.resources.rest.config.p2p.IP2PStore;
 import ai.labs.resources.rest.config.p2p.IRestP2PStore;
 import ai.labs.resources.rest.config.packages.IPackageStore;
 import ai.labs.resources.rest.config.packages.IRestPackageExtensionStore;
@@ -102,6 +104,7 @@ public class RepositoryModule extends AbstractBaseModule {
         bind(IDeploymentStore.class).to(DeploymentStore.class).in(Scopes.SINGLETON);
         bind(IHttpCallsStore.class).to(HttpCallsStore.class).in(Scopes.SINGLETON);
         bind(IGitCallsStore.class).to(GitCallsStore.class).in(Scopes.SINGLETON);
+        bind(IP2PStore.class).to(P2PStore.class).in(Scopes.SINGLETON);
         bind(IPropertiesStore.class).to(PropertiesStore.class).in(Scopes.SINGLETON);
         bind(IPropertySetterStore.class).to(PropertySetterStore.class).in(Scopes.SINGLETON);
 
