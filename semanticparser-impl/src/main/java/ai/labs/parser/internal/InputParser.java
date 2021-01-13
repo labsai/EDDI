@@ -23,12 +23,15 @@ import java.util.Objects;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
+import static ai.labs.utilities.RuntimeUtilities.isNullOrEmpty;
+
 /**
  * @author ginccc
  */
 public class InputParser implements IInputParser {
     private static final Pattern REGEX_MATCHER_MULTIPLE_SPACES = Pattern.compile(" +");
     private static final String BLANK_CHAR = " ";
+    private static final String DEFAULT_USER_LANGUAGE = "en";
 
     private final List<INormalizer> normalizers;
     private final List<IDictionary> dictionaries;
@@ -52,12 +55,13 @@ public class InputParser implements IInputParser {
 
     @Override
     public List<RawSolution> parse(String sentence) throws InterruptedException {
-        return parse(sentence, Collections.emptyList());
+        return parse(sentence, DEFAULT_USER_LANGUAGE, Collections.emptyList());
     }
 
     @Override
-    public String normalize(final String sentence) throws InterruptedException {
-        String normalizedSentence = iterateNormalizers(sentence);
+    public String normalize(final String sentence, String userLanguage) throws InterruptedException {
+        userLanguage = getLanguageOrDefault(userLanguage);
+        String normalizedSentence = iterateNormalizers(sentence, userLanguage);
         normalizedSentence = normalizeWhitespaces(normalizedSentence);
         return normalizedSentence;
     }
@@ -67,8 +71,10 @@ public class InputParser implements IInputParser {
     }
 
     @Override
-    public List<RawSolution> parse(final String sentence, final List<IDictionary> temporaryDictionaries)
+    public List<RawSolution> parse(final String sentence, String userLanguage, final List<IDictionary> temporaryDictionaries)
             throws InterruptedException {
+
+        userLanguage = getLanguageOrDefault(userLanguage);
 
         InputHolder holder = new InputHolder();
         holder.input = sentence.split(" ");
@@ -76,10 +82,10 @@ public class InputParser implements IInputParser {
         for (; holder.index < holder.input.length; holder.index++) {
             final String currentInputPart = holder.input[holder.index];
 
-            iterateDictionaries(holder, currentInputPart, temporaryDictionaries);
-            iterateDictionaries(holder, currentInputPart, dictionaries);
+            iterateDictionaries(holder, currentInputPart, userLanguage, temporaryDictionaries);
+            iterateDictionaries(holder, currentInputPart, userLanguage, dictionaries);
 
-            iterateCorrections(holder, currentInputPart, temporaryDictionaries);
+            iterateCorrections(holder, currentInputPart, userLanguage, temporaryDictionaries);
 
             if (holder.getMatchingResultSize(holder.index) == 0) {
                 FoundUnknown foundUnknown = new FoundUnknown(new Unknown(currentInputPart));
@@ -90,19 +96,26 @@ public class InputParser implements IInputParser {
         return lookupPhrases(holder, preparePhrases(temporaryDictionaries));
     }
 
-    private String iterateNormalizers(String sentence) throws InterruptedException {
+    private String iterateNormalizers(String sentence, String userLanguage) throws InterruptedException {
         for (INormalizer normalizer : normalizers) {
             throwExceptionIfInterrupted("normalizers");
-            sentence = normalizer.normalize(sentence);
+            sentence = normalizer.normalize(sentence, userLanguage);
         }
 
         return sentence;
     }
 
-    private void iterateDictionaries(InputHolder holder, String currentInputPart, List<IDictionary> dictionaries)
+    private void iterateDictionaries(InputHolder holder,
+                                     String currentInputPart,
+                                     String userLanguage,
+                                     List<IDictionary> dictionaries)
             throws InterruptedException {
         for (IDictionary dictionary : dictionaries) {
             throwExceptionIfInterrupted("dictionaries");
+
+            if (!isNullOrEmpty(dictionary.getLanguageCode()) && !userLanguage.equals(dictionary.getLanguageCode())) {
+                continue;
+            }
 
             //lookup input part in dictionary
             List<IDictionary.IFoundWord> dictionaryEntries = dictionary.lookupTerm(currentInputPart);
@@ -115,6 +128,7 @@ public class InputParser implements IInputParser {
 
     private void iterateCorrections(InputHolder holder,
                                     String currentInputPart,
+                                    String userLanguage,
                                     List<IDictionary> temporaryDictionaries)
             throws InterruptedException {
 
@@ -125,7 +139,8 @@ public class InputParser implements IInputParser {
                 continue;
             }
 
-            var correctedWords = correction.correctWord(currentInputPart, temporaryDictionaries);
+            var correctedWords =
+                    correction.correctWord(currentInputPart, userLanguage, temporaryDictionaries);
             if (correctedWords.size() > 0) {
                 addDictionaryEntriesTo(holder, currentInputPart, correctedWords);
             }
@@ -380,5 +395,9 @@ public class InputParser implements IInputParser {
                         filter(phrase -> !ret.contains(phrase)).forEach(ret::add));
 
         return ret;
+    }
+
+    private static String getLanguageOrDefault(String languageCode) {
+        return isNullOrEmpty(languageCode) ? DEFAULT_USER_LANGUAGE : languageCode;
     }
 }

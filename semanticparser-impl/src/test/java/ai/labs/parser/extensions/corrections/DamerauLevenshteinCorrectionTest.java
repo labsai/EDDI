@@ -19,6 +19,7 @@ import java.util.List;
  * @author ginccc
  */
 public class DamerauLevenshteinCorrectionTest {
+    private static final String DEFAULT_LANGUAGE = "en";
     private IExpressionProvider expressionUtilities;
 
     @Before
@@ -34,7 +35,7 @@ public class DamerauLevenshteinCorrectionTest {
         levenshteinCorrection.init(Arrays.asList(new IDictionary[]{testDictionary}));
 
         //test
-        List<IDictionary.IFoundWord> foundWords = levenshteinCorrection.correctWord("helo");
+        List<IDictionary.IFoundWord> foundWords = levenshteinCorrection.correctWord("helo", DEFAULT_LANGUAGE);
 
         //assert
         Assert.assertEquals(1, foundWords.size());
@@ -48,7 +49,7 @@ public class DamerauLevenshteinCorrectionTest {
         levenshteinCorrection.init(Arrays.asList(new IDictionary[]{testDictionary}));
 
         //test
-        List<IDictionary.IFoundWord> foundWords = levenshteinCorrection.correctWord("heo");
+        List<IDictionary.IFoundWord> foundWords = levenshteinCorrection.correctWord("heo", DEFAULT_LANGUAGE);
 
         //assert
         Assert.assertEquals(1, foundWords.size());
@@ -62,7 +63,7 @@ public class DamerauLevenshteinCorrectionTest {
         levenshteinCorrection.init(Arrays.asList(new IDictionary[]{testDictionary}));
 
         //test
-        List<IDictionary.IFoundWord> foundWords = levenshteinCorrection.correctWord("he");
+        List<IDictionary.IFoundWord> foundWords = levenshteinCorrection.correctWord("he", DEFAULT_LANGUAGE);
 
         //assert
         Assert.assertEquals(0, foundWords.size());

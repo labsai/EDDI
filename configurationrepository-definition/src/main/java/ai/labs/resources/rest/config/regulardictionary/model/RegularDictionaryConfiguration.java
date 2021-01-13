@@ -19,6 +19,7 @@ import java.util.List;
 @Getter
 @Setter
 public class RegularDictionaryConfiguration {
+    private String lang;
     private List<WordConfiguration> words;
     private List<RegExConfiguration> regExs;
     private List<PhraseConfiguration> phrases;

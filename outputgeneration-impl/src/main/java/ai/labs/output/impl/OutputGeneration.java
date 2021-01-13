@@ -5,7 +5,11 @@ import ai.labs.output.IOutputGeneration;
 import ai.labs.output.model.OutputEntry;
 import lombok.Getter;
 
-import java.util.*;
+import java.util.Collections;
+import java.util.LinkedHashMap;
+import java.util.LinkedList;
+import java.util.List;
+import java.util.Map;
 
 /**
  * @author ginccc
@@ -30,7 +34,7 @@ public class OutputGeneration implements IOutputGeneration {
 
     @Override
     public Map<String, List<OutputEntry>> getOutputs(List<IOutputFilter> outputFilter) {
-        LinkedHashMap<String, List<OutputEntry>> outputs = new LinkedHashMap<>();
+        Map<String, List<OutputEntry>> outputs = new LinkedHashMap<>();
 
         for (IOutputFilter filter : outputFilter) {
             List<OutputEntry> entryList = outputMapper.get(filter.getAction());

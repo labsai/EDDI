@@ -2,6 +2,7 @@ package ai.labs.parser.extensions.corrections;
 
 import ai.labs.parser.extensions.dictionaries.IDictionary;
 
+import java.util.LinkedList;
 import java.util.List;
 
 /**
@@ -11,11 +12,13 @@ public interface ICorrection {
 
     void init(List<IDictionary> dictionaries);
 
-    List<IDictionary.IFoundWord> correctWord(String word);
-
-    default List<IDictionary.IFoundWord> correctWord(String word, List<IDictionary> temporaryDictionaries) {
-        return correctWord(word);
+    default List<IDictionary.IFoundWord> correctWord(String word, String userLanguage) {
+        return correctWord(word, userLanguage, new LinkedList<>());
     }
+
+    ;
+
+    List<IDictionary.IFoundWord> correctWord(String word, String userLanguage, List<IDictionary> temporaryDictionaries);
 
     boolean lookupIfKnown();
 }

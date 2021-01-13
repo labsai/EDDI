@@ -15,5 +15,10 @@ import java.util.List;
 @Setter
 @EqualsAndHashCode
 public class OutputConfigurationSet {
+    private String lang;
     private List<OutputConfiguration> outputSet = new ArrayList<>();
+
+    public OutputConfigurationSet() {
+        this.lang = "en";
+    }
 }

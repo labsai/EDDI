@@ -30,6 +30,7 @@ import java.util.Random;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 
+import static ai.labs.memory.ContextUtilities.retrieveAndStoreContextLanguageInLongTermMemory;
 import static ai.labs.memory.IConversationMemory.IConversationStep;
 import static ai.labs.memory.IConversationMemory.IConversationStepStack;
 import static ai.labs.memory.IConversationMemory.IWritableConversationStep;
@@ -50,10 +51,12 @@ public class OutputGenerationTask implements ILifecycleTask {
     private static final String KEY_TYPE = "type";
     private static final String KEY_EXPRESSIONS = "expressions";
     private static final String KEY_IS_DEFAULT = "isDefault";
+    private static final String KEY_DEFAULT_USER_LANGUAGE = "en";
     private static final String OUTPUT_TYPE_QUICK_REPLY = "quickReply";
     private final IResourceClientLibrary resourceClientLibrary;
     private final IDataFactory dataFactory;
     private final IOutputGeneration outputGeneration;
+    private String userLanguage = KEY_DEFAULT_USER_LANGUAGE;
 
     @Inject
     public OutputGenerationTask(IResourceClientLibrary resourceClientLibrary,
@@ -76,25 +79,28 @@ public class OutputGenerationTask implements ILifecycleTask {
 
     @Override
     public void executeTask(IConversationMemory memory) {
-        IWritableConversationStep currentStep = memory.getCurrentStep();
-        List<IData<Context>> contextDataList = currentStep.getAllData("context");
-        storeContextOutput(currentStep, contextDataList);
-        storeContextQuickReplies(currentStep, contextDataList);
+        var userLanguage = retrieveAndStoreContextLanguageInLongTermMemory(memory);
+        if (this.userLanguage.equals(userLanguage)) {
+            IWritableConversationStep currentStep = memory.getCurrentStep();
+            List<IData<Context>> contextDataList = currentStep.getAllData(CONTEXT_IDENTIFIER);
+            storeContextOutput(currentStep, contextDataList);
+            storeContextQuickReplies(currentStep, contextDataList);
 
-        IData<List<String>> latestData = currentStep.getLatestData(KEY_ACTIONS);
-        if (latestData == null) {
-            return;
+            IData<List<String>> latestData = currentStep.getLatestData(KEY_ACTIONS);
+            if (latestData == null) {
+                return;
+            }
+            List<String> actions = latestData.getResult();
+            List<IOutputFilter> outputFilters = createOutputFilters(memory, actions);
+
+            Map<String, List<OutputEntry>> outputs = outputGeneration.getOutputs(outputFilters);
+            outputs.forEach((action, outputEntries) ->
+                    outputEntries.forEach(outputEntry -> {
+                        List<OutputValue> outputValues = outputEntry.getOutputs();
+                        selectAndStoreOutput(currentStep, action, outputValues);
+                        storeQuickReplies(currentStep, outputEntry.getQuickReplies(), outputEntry.getAction());
+                    }));
         }
-        List<String> actions = latestData.getResult();
-        List<IOutputFilter> outputFilters = createOutputFilters(memory, actions);
-
-        Map<String, List<OutputEntry>> outputs = outputGeneration.getOutputs(outputFilters);
-        outputs.forEach((action, outputEntries) ->
-                outputEntries.forEach(outputEntry -> {
-                    List<OutputValue> outputValues = outputEntry.getOutputs();
-                    selectAndStoreOutput(currentStep, action, outputValues);
-                    storeQuickReplies(currentStep, outputEntry.getQuickReplies(), outputEntry.getAction());
-                }));
     }
 
     private void storeContextOutput(IWritableConversationStep currentStep, List<IData<Context>> contextDataList) {
@@ -201,6 +207,7 @@ public class OutputGenerationTask implements ILifecycleTask {
 
         try {
             var outputConfigurationSet = resourceClientLibrary.getResource(uri, OutputConfigurationSet.class);
+            this.userLanguage = outputConfigurationSet.getLang();
 
             var outputSet = outputConfigurationSet.getOutputSet();
             outputSet.sort((o1, o2) -> {

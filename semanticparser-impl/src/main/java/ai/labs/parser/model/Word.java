@@ -7,7 +7,7 @@ import ai.labs.parser.extensions.dictionaries.IDictionary;
  * @author ginccc
  */
 public class Word extends DictionaryEntry implements IDictionary.IWord {
-    private boolean isPartOfPhrase;
+    private final boolean isPartOfPhrase;
 
     public Word(String value, Expressions expressions, String identifier) {
         this(value, expressions, identifier, 0, false);

@@ -35,12 +35,7 @@ public class DamerauLevenshteinCorrection implements ICorrection {
     }
 
     @Override
-    public List<IDictionary.IFoundWord> correctWord(String word) {
-        return correctWord(word, new LinkedList<>());
-    }
-
-    @Override
-    public List<IDictionary.IFoundWord> correctWord(String lookup, List<IDictionary> temporaryDictionaries) {
+    public List<IDictionary.IFoundWord> correctWord(String lookup, String userLanguage, List<IDictionary> temporaryDictionaries) {
         List<WordDistanceWrapper> foundWords = new LinkedList<>();
         var lowerCaseLookup = lookup.toLowerCase();
 
@@ -55,7 +50,7 @@ public class DamerauLevenshteinCorrection implements ICorrection {
                 if (distance > -1) {
                     Word entry = new Word(word.getValue(),
                             word.getExpressions(),
-                            word.getIdentifier(),
+                            word.getLanguageCode(),
                             word.getFrequency(),
                             word.isPartOfPhrase());
 
