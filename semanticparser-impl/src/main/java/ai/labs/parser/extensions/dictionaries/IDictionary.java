@@ -22,7 +22,7 @@ public interface IDictionary {
     }
 
     default String getLanguageCode() {
-        return "en";
+        return null;
     }
 
     List<IFoundWord> lookupTerm(String value);

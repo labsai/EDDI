@@ -31,7 +31,11 @@ public class ContextUtilities {
 
         if (isNullOrEmpty(lang)) {
             Property languageProperty = memory.getConversationProperties().get(KEY_LANG);
-            lang = languageProperty != null ? languageProperty.getValue().toString() : DEFAULT_USER_LANGUAGE;
+            if (languageProperty != null && languageProperty.getValue() != null) {
+                lang = languageProperty.getValue().toString();
+            } else {
+                lang = DEFAULT_USER_LANGUAGE;
+            }
         }
 
         return lang;

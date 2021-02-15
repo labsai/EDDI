@@ -30,7 +30,6 @@ import java.util.Random;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 
-import static ai.labs.memory.ContextUtilities.DEFAULT_USER_LANGUAGE;
 import static ai.labs.memory.ContextUtilities.retrieveAndStoreContextLanguageInLongTermMemory;
 import static ai.labs.memory.IConversationMemory.IConversationStep;
 import static ai.labs.memory.IConversationMemory.IConversationStepStack;
@@ -53,12 +52,11 @@ public class OutputGenerationTask implements ILifecycleTask {
     private static final String KEY_TYPE = "type";
     private static final String KEY_EXPRESSIONS = "expressions";
     private static final String KEY_IS_DEFAULT = "isDefault";
-    private static final String KEY_DEFAULT_USER_LANGUAGE = "en";
     private static final String OUTPUT_TYPE_QUICK_REPLY = "quickReply";
     private final IResourceClientLibrary resourceClientLibrary;
     private final IDataFactory dataFactory;
     private final IOutputGeneration outputGeneration;
-    private String outputLanguage = KEY_DEFAULT_USER_LANGUAGE;
+    private String outputLanguage = null;
 
     @Inject
     public OutputGenerationTask(IResourceClientLibrary resourceClientLibrary,
@@ -81,12 +79,13 @@ public class OutputGenerationTask implements ILifecycleTask {
 
     @Override
     public void executeTask(IConversationMemory memory) {
+        var currentStep = memory.getCurrentStep();
+        List<IData<Context>> contextDataList = currentStep.getAllData(CONTEXT_IDENTIFIER);
+        storeContextOutput(currentStep, contextDataList);
+        storeContextQuickReplies(currentStep, contextDataList);
+
         var userLanguage = retrieveAndStoreContextLanguageInLongTermMemory(memory);
-        if (this.outputLanguage.equals(userLanguage)) {
-            IWritableConversationStep currentStep = memory.getCurrentStep();
-            List<IData<Context>> contextDataList = currentStep.getAllData(CONTEXT_IDENTIFIER);
-            storeContextOutput(currentStep, contextDataList);
-            storeContextQuickReplies(currentStep, contextDataList);
+        if (this.outputLanguage == null || this.outputLanguage.equals(userLanguage)) {
 
             IData<List<String>> latestData = currentStep.getLatestData(KEY_ACTIONS);
             if (latestData == null) {
@@ -210,7 +209,7 @@ public class OutputGenerationTask implements ILifecycleTask {
         try {
             var outputConfigurationSet = resourceClientLibrary.getResource(uri, OutputConfigurationSet.class);
             var outputLanguage = outputConfigurationSet.getLang();
-            this.outputLanguage = !isNullOrEmpty(outputLanguage) ? outputLanguage : DEFAULT_USER_LANGUAGE;
+            this.outputLanguage = !isNullOrEmpty(outputLanguage) ? outputLanguage : null;
             var outputSet = outputConfigurationSet.getOutputSet();
             outputSet.sort((o1, o2) -> {
                 int comparisonOfKeys = o1.getAction().compareTo(o2.getAction());
