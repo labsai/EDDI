@@ -3,6 +3,8 @@ package ai.labs.utilities;
 import java.util.HashMap;
 import java.util.Map;
 
+import static ai.labs.utilities.RuntimeUtilities.isNullOrEmpty;
+
 public class CharacterUtilities {
     private static final Map<Character, Character> specialCharacters = new HashMap<>();
 
@@ -25,7 +27,11 @@ public class CharacterUtilities {
     }
 
     public static boolean isNumber(String lookup, boolean mustContainComma) {
-        if (mustContainComma && !lookup.contains("") && !lookup.contains(",")) {
+        if (isNullOrEmpty(lookup)) {
+            return false;
+        }
+
+        if (mustContainComma && !(lookup.contains(",") || lookup.contains("."))) {
             return false;
         }
 

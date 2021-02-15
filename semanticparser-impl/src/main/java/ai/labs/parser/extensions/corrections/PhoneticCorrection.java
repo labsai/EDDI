@@ -1,7 +1,7 @@
 package ai.labs.parser.extensions.corrections;
 
-import ai.labs.parser.model.FoundWord;
 import ai.labs.parser.extensions.dictionaries.IDictionary;
+import ai.labs.parser.model.FoundWord;
 import org.apache.commons.codec.language.DoubleMetaphone;
 import org.apache.commons.codec.language.RefinedSoundex;
 
@@ -62,7 +62,7 @@ public class PhoneticCorrection implements ICorrection {
     }
 
     @Override
-    public List<IDictionary.IFoundWord> correctWord(String word) {
+    public List<IDictionary.IFoundWord> correctWord(String word, String userLanguage, List<IDictionary> temporaryDictionaries) {
         return lookupPhonetic(word);
     }
 

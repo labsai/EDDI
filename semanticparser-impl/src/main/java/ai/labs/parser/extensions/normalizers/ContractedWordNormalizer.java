@@ -1,6 +1,8 @@
 package ai.labs.parser.extensions.normalizers;
 
-import java.util.*;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
 import java.util.stream.IntStream;
 
 public class ContractedWordNormalizer implements INormalizer {
@@ -28,7 +30,7 @@ public class ContractedWordNormalizer implements INormalizer {
     }
 
     @Override
-    public String normalize(String input) {
+    public String normalize(String input, String userLanguage) {
         List<String> inputParts = toStringList(input);
 
         IntStream.range(0, inputParts.size()).forEach(idx -> {

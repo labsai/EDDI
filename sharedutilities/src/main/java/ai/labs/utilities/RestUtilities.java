@@ -10,6 +10,8 @@ import java.net.URI;
 import java.util.HashMap;
 import java.util.Map;
 
+import static ai.labs.utilities.RuntimeUtilities.isNullOrEmpty;
+
 /**
  * @author ginccc
  */
@@ -38,6 +40,10 @@ public class RestUtilities {
     }
 
     public static IResourceStore.IResourceId extractResourceId(URI uri) {
+        if (isNullOrEmpty(uri)) {
+            return null;
+        }
+
         String uriString = uri.toString();
 
         String relativeUriString;

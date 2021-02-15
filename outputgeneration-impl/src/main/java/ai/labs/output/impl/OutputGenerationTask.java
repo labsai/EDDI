@@ -30,9 +30,12 @@ import java.util.Random;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 
+import static ai.labs.memory.ContextUtilities.retrieveContextLanguageFromLongTermMemory;
+import static ai.labs.memory.IConversationMemory.IConversationProperties;
 import static ai.labs.memory.IConversationMemory.IConversationStep;
 import static ai.labs.memory.IConversationMemory.IConversationStepStack;
 import static ai.labs.memory.IConversationMemory.IWritableConversationStep;
+import static ai.labs.utilities.RuntimeUtilities.isNullOrEmpty;
 
 /**
  * @author ginccc
@@ -54,6 +57,7 @@ public class OutputGenerationTask implements ILifecycleTask {
     private final IResourceClientLibrary resourceClientLibrary;
     private final IDataFactory dataFactory;
     private final IOutputGeneration outputGeneration;
+    private String outputLanguage = null;
 
     @Inject
     public OutputGenerationTask(IResourceClientLibrary resourceClientLibrary,
@@ -76,25 +80,33 @@ public class OutputGenerationTask implements ILifecycleTask {
 
     @Override
     public void executeTask(IConversationMemory memory) {
-        IWritableConversationStep currentStep = memory.getCurrentStep();
-        List<IData<Context>> contextDataList = currentStep.getAllData("context");
+        var currentStep = memory.getCurrentStep();
+        List<IData<Context>> contextDataList = currentStep.getAllData(CONTEXT_IDENTIFIER);
         storeContextOutput(currentStep, contextDataList);
         storeContextQuickReplies(currentStep, contextDataList);
 
-        IData<List<String>> latestData = currentStep.getLatestData(KEY_ACTIONS);
-        if (latestData == null) {
-            return;
-        }
-        List<String> actions = latestData.getResult();
-        List<IOutputFilter> outputFilters = createOutputFilters(memory, actions);
+        if (checkLanguage(memory.getConversationProperties())) {
 
-        Map<String, List<OutputEntry>> outputs = outputGeneration.getOutputs(outputFilters);
-        outputs.forEach((action, outputEntries) ->
-                outputEntries.forEach(outputEntry -> {
-                    List<OutputValue> outputValues = outputEntry.getOutputs();
-                    selectAndStoreOutput(currentStep, action, outputValues);
-                    storeQuickReplies(currentStep, outputEntry.getQuickReplies(), outputEntry.getAction());
-                }));
+            IData<List<String>> latestData = currentStep.getLatestData(KEY_ACTIONS);
+            if (latestData == null) {
+                return;
+            }
+            List<String> actions = latestData.getResult();
+            List<IOutputFilter> outputFilters = createOutputFilters(memory, actions);
+
+            Map<String, List<OutputEntry>> outputs = outputGeneration.getOutputs(outputFilters);
+            outputs.forEach((action, outputEntries) ->
+                    outputEntries.forEach(outputEntry -> {
+                        List<OutputValue> outputValues = outputEntry.getOutputs();
+                        selectAndStoreOutput(currentStep, action, outputValues);
+                        storeQuickReplies(currentStep, outputEntry.getQuickReplies(), outputEntry.getAction());
+                    }));
+        }
+    }
+
+    private boolean checkLanguage(IConversationProperties conversationProperties) {
+        return this.outputLanguage == null ||
+                this.outputLanguage.equals(retrieveContextLanguageFromLongTermMemory(conversationProperties));
     }
 
     private void storeContextOutput(IWritableConversationStep currentStep, List<IData<Context>> contextDataList) {
@@ -201,7 +213,8 @@ public class OutputGenerationTask implements ILifecycleTask {
 
         try {
             var outputConfigurationSet = resourceClientLibrary.getResource(uri, OutputConfigurationSet.class);
-
+            var outputLanguage = outputConfigurationSet.getLang();
+            this.outputLanguage = !isNullOrEmpty(outputLanguage) ? outputLanguage : null;
             var outputSet = outputConfigurationSet.getOutputSet();
             outputSet.sort((o1, o2) -> {
                 int comparisonOfKeys = o1.getAction().compareTo(o2.getAction());

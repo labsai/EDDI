@@ -27,6 +27,7 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.stream.Collectors;
 
+import static ai.labs.memory.ContextUtilities.storeContextLanguageInLongTermMemory;
 import static ai.labs.memory.IConversationMemory.IWritableConversationStep;
 
 /**
@@ -163,7 +164,10 @@ public class Conversation implements IConversation {
     private List<IData> prepareLifecycleData(String message, Map<String, Context> contexts) {
         List<IData<Context>> contextData = createContextData(contexts);
         List<IData> lifecycleData = new LinkedList<>(contextData);
+
+        storeContextLanguageInLongTermMemory(contexts, conversationMemory);
         addContextToConversationOutput(conversationMemory.getCurrentStep(), contextData);
+
         storeUserInputInMemory(message, lifecycleData);
         return lifecycleData;
     }

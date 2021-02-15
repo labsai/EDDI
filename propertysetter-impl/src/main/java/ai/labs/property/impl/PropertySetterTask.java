@@ -20,7 +20,6 @@ import ai.labs.resources.rest.extensions.model.ExtensionDescriptor;
 import ai.labs.runtime.client.configuration.IResourceClientLibrary;
 import ai.labs.runtime.service.ServiceException;
 import ai.labs.templateengine.ITemplatingEngine;
-import ai.labs.utilities.CharacterUtilities;
 import ai.labs.utilities.RuntimeUtilities;
 import ognl.Ognl;
 
@@ -34,6 +33,7 @@ import java.util.stream.Collectors;
 
 import static ai.labs.memory.IConversationMemory.IConversationStepStack;
 import static ai.labs.models.Property.Scope.conversation;
+import static ai.labs.utilities.CharacterUtilities.isNumber;
 import static ai.labs.utilities.RuntimeUtilities.checkNotNull;
 import static ai.labs.utilities.RuntimeUtilities.isNullOrEmpty;
 import static java.lang.Boolean.parseBoolean;
@@ -138,7 +138,7 @@ public class PropertySetterTask implements ILifecycleTask {
                             var scope = property.getScope();
                             name = templatingEngine.processTemplate(name, templateDataObjects);
 
-                            Object templatedObj;
+                            Object templatedObj = null;
                             if (!isNullOrEmpty(fromObjectPath)) {
                                 templatedObj = Ognl.getValue(fromObjectPath, templateDataObjects);
                                 if (!isNullOrEmpty(templatedObj) && !isNullOrEmpty(toObjectPath)) {
@@ -150,10 +150,17 @@ public class PropertySetterTask implements ILifecycleTask {
                                     value = templatingEngine.processTemplate((String) value, templateDataObjects);
                                 }
 
-                                if (value != null && CharacterUtilities.isNumber(value.toString(), false)) {
-                                    templatedObj = Double.parseDouble(value.toString());
-                                } else {
-                                    templatedObj = value;
+                                if (value != null) {
+                                    var valueString = value.toString();
+                                    if (isNumber(valueString, false)) {
+                                        if (isNumber(valueString, true)) {
+                                            templatedObj = Double.parseDouble(valueString);
+                                        } else {
+                                            templatedObj = Integer.parseInt(valueString);
+                                        }
+                                    } else {
+                                        templatedObj = value;
+                                    }
                                 }
                             }
 

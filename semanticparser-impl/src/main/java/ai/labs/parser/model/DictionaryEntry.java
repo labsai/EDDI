@@ -3,6 +3,8 @@ package ai.labs.parser.model;
 import ai.labs.expressions.Expressions;
 import ai.labs.parser.extensions.dictionaries.IDictionary;
 
+import java.util.Objects;
+
 /**
  * @author ginccc
  */
@@ -11,7 +13,7 @@ public class DictionaryEntry implements IDictionary.IDictionaryEntry {
     protected String value;
 
     protected Expressions expressions;
-    private String identifier;
+    private String languageCode;
     private int rating;
 
     boolean isWord = false;
@@ -20,13 +22,13 @@ public class DictionaryEntry implements IDictionary.IDictionaryEntry {
     int frequency;
 
     DictionaryEntry(String value, Expressions expressions) {
-        this(value, expressions, "", 0);
+        this(value, expressions, "en", 0);
     }
 
-    DictionaryEntry(String value, Expressions expressions, String identifier, int rating) {
+    DictionaryEntry(String value, Expressions expressions, String languageCode, int rating) {
         this.value = value;
         this.expressions = expressions;
-        this.identifier = identifier;
+        this.languageCode = languageCode;
         this.rating = rating;
     }
 
@@ -42,8 +44,8 @@ public class DictionaryEntry implements IDictionary.IDictionaryEntry {
         return expressions;
     }
 
-    public String getIdentifier() {
-        return identifier;
+    public String getLanguageCode() {
+        return languageCode;
     }
 
     public boolean isWord() {
@@ -68,9 +70,9 @@ public class DictionaryEntry implements IDictionary.IDictionaryEntry {
 
         if (frequency != that.frequency) return false;
         if (rating != that.rating) return false;
-        if (expressions != null ? !expressions.equals(that.expressions) : that.expressions != null) return false;
-        if (identifier != null ? !identifier.equals(that.identifier) : that.identifier != null) return false;
-        return value != null ? value.equals(that.value) : that.value == null;
+        if (!Objects.equals(expressions, that.expressions)) return false;
+        if (!Objects.equals(languageCode, that.languageCode)) return false;
+        return Objects.equals(value, that.value);
 
     }
 
@@ -78,7 +80,7 @@ public class DictionaryEntry implements IDictionary.IDictionaryEntry {
     public int hashCode() {
         int result = value != null ? value.hashCode() : 0;
         result = 31 * result + (expressions != null ? expressions.hashCode() : 0);
-        result = 31 * result + (identifier != null ? identifier.hashCode() : 0);
+        result = 31 * result + (languageCode != null ? languageCode.hashCode() : 0);
         result = 31 * result + rating;
         result = 31 * result + frequency;
         return result;

@@ -3,6 +3,7 @@ package ai.labs.output.impl;
 import ai.labs.memory.IConversationMemory;
 import ai.labs.memory.IData;
 import ai.labs.memory.IDataFactory;
+import ai.labs.memory.model.ConversationProperties;
 import ai.labs.memory.model.Data;
 import ai.labs.output.IOutputGeneration;
 import ai.labs.output.model.OutputEntry;
@@ -15,9 +16,23 @@ import org.junit.Before;
 import org.junit.Test;
 
 import java.net.URI;
-import java.util.*;
+import java.util.Arrays;
+import java.util.Collections;
+import java.util.HashMap;
+import java.util.LinkedHashMap;
+import java.util.LinkedList;
+import java.util.List;
+import java.util.Map;
 
-import static org.mockito.Mockito.*;
+import static org.mockito.Mockito.any;
+import static org.mockito.Mockito.anyInt;
+import static org.mockito.Mockito.anyList;
+import static org.mockito.Mockito.anyString;
+import static org.mockito.Mockito.eq;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.times;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
 
 /**
  * @author ginccc
@@ -81,12 +96,15 @@ public class OutputGenerationTaskTest {
         IData<List<QuickReply>> expectedQuickReplyData = new Data<>(QUICK_REPLIES + ACTION_1, quickReplies);
         when(dataFactory.createData(eq(QUICK_REPLIES + ACTION_1), anyList())).
                 thenAnswer(invocation -> expectedQuickReplyData);
+        when(conversationMemory.getConversationProperties()).
+                thenAnswer(invocation -> new ConversationProperties(conversationMemory));
 
         //test
         outputGenerationTask.executeTask(conversationMemory);
 
         //assert
         verify(conversationMemory, times(1)).getCurrentStep();
+        verify(conversationMemory, times(1)).getConversationProperties();
         verify(currentStep, times(2)).storeData(any());
         verify(currentStep, times(2)).addConversationOutputList(anyString(), anyList());
     }

@@ -14,7 +14,7 @@ public class ContractedWordNormalizerTest {
 
 
         //test
-        String actual = normalizer.normalize(testString);
+        String actual = normalizer.normalize(testString, "en");
 
         //assert
         Assert.assertEquals(expected, actual);

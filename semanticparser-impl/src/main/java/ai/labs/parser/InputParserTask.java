@@ -27,9 +27,15 @@ import lombok.extern.slf4j.Slf4j;
 import javax.inject.Inject;
 import javax.inject.Provider;
 import java.net.URI;
-import java.util.*;
+import java.util.Collections;
+import java.util.HashMap;
+import java.util.LinkedList;
+import java.util.List;
+import java.util.Map;
+import java.util.Objects;
 import java.util.stream.Collectors;
 
+import static ai.labs.memory.ContextUtilities.retrieveContextLanguageFromLongTermMemory;
 import static ai.labs.parser.DictionaryUtilities.convertQuickReplies;
 import static ai.labs.parser.DictionaryUtilities.extractExpressions;
 import static ai.labs.resources.rest.extensions.model.ExtensionDescriptor.ConfigValue;
@@ -104,13 +110,15 @@ public class InputParserTask implements ILifecycleTask {
             return;
         }
 
+        String userLanguage = retrieveContextLanguageFromLongTermMemory(memory.getConversationProperties());
+
         List<IDictionary> temporaryDictionaries = prepareTemporaryDictionaries(memory);
         List<RawSolution> parsedSolutions;
         try {
             String userInput = inputData.getResult();
-            String normalizedUserInput = sentenceParser.normalize(userInput);
+            String normalizedUserInput = sentenceParser.normalize(userInput, userLanguage);
             storeNormalizedResultInMemory(memory.getCurrentStep(), normalizedUserInput);
-            parsedSolutions = sentenceParser.parse(normalizedUserInput, temporaryDictionaries);
+            parsedSolutions = sentenceParser.parse(normalizedUserInput, userLanguage, temporaryDictionaries);
         } catch (InterruptedException e) {
             log.warn(e.getLocalizedMessage(), e);
             return;
@@ -118,6 +126,7 @@ public class InputParserTask implements ILifecycleTask {
 
         storeResultInMemory(memory.getCurrentStep(), parsedSolutions);
     }
+
 
     private List<IDictionary> prepareTemporaryDictionaries(IConversationMemory memory) {
         List<ConversationOutput> conversationOutputs = memory.getConversationOutputs();
