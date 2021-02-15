@@ -28,8 +28,11 @@ public class PropertySetter implements IPropertySetter {
                     List<String> meanings = new LinkedList<>();
                     Value value = new Value();
                     extractMeanings(meanings, value, expression.getSubExpressions()[0]);
-                    return new Property(String.join(".", meanings),
-                            value.isNumeric() ? value.toDouble() : value.getExpressionName(), conversation);
+                    var propertyValue =
+                            value.isNumeric() ?
+                                    (value.isDouble() ? value.toDouble() : value.toInteger())
+                                    : value.getExpressionName();
+                    return new Property(String.join(".", meanings), propertyValue, conversation);
                 }).collect(Collectors.toCollection(LinkedList::new));
     }
 

@@ -33,6 +33,14 @@ public class Value extends Expression {
         return CharacterUtilities.isNumber(expressionName, false);
     }
 
+    public Boolean isDouble() {
+        return CharacterUtilities.isNumber(expressionName, true);
+    }
+
+    public Integer toInteger() {
+        return Integer.parseInt(expressionName);
+    }
+
     public Double toDouble() {
         if (!isNumeric())
             return Double.NaN;
