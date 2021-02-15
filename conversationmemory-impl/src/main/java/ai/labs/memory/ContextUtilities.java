@@ -10,7 +10,6 @@ import static ai.labs.utilities.RuntimeUtilities.isNullOrEmpty;
 
 public class ContextUtilities {
     private static final String KEY_LANG = "lang";
-    public static final String DEFAULT_USER_LANGUAGE = "en";
 
     public static void storeContextLanguageInLongTermMemory(Map<String, Context> contextMap, IConversationMemory memory) {
         for (String contextKey : contextMap.keySet()) {
