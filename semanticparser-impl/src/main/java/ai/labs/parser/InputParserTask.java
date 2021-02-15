@@ -35,7 +35,7 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.stream.Collectors;
 
-import static ai.labs.memory.ContextUtilities.retrieveAndStoreContextLanguageInLongTermMemory;
+import static ai.labs.memory.ContextUtilities.retrieveContextLanguageFromLongTermMemory;
 import static ai.labs.parser.DictionaryUtilities.convertQuickReplies;
 import static ai.labs.parser.DictionaryUtilities.extractExpressions;
 import static ai.labs.resources.rest.extensions.model.ExtensionDescriptor.ConfigValue;
@@ -110,7 +110,7 @@ public class InputParserTask implements ILifecycleTask {
             return;
         }
 
-        String userLanguage = retrieveAndStoreContextLanguageInLongTermMemory(memory);
+        String userLanguage = retrieveContextLanguageFromLongTermMemory(memory.getConversationProperties());
 
         List<IDictionary> temporaryDictionaries = prepareTemporaryDictionaries(memory);
         List<RawSolution> parsedSolutions;

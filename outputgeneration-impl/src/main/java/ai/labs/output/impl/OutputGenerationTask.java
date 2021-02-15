@@ -30,7 +30,8 @@ import java.util.Random;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 
-import static ai.labs.memory.ContextUtilities.retrieveAndStoreContextLanguageInLongTermMemory;
+import static ai.labs.memory.ContextUtilities.retrieveContextLanguageFromLongTermMemory;
+import static ai.labs.memory.IConversationMemory.IConversationProperties;
 import static ai.labs.memory.IConversationMemory.IConversationStep;
 import static ai.labs.memory.IConversationMemory.IConversationStepStack;
 import static ai.labs.memory.IConversationMemory.IWritableConversationStep;
@@ -84,8 +85,7 @@ public class OutputGenerationTask implements ILifecycleTask {
         storeContextOutput(currentStep, contextDataList);
         storeContextQuickReplies(currentStep, contextDataList);
 
-        var userLanguage = retrieveAndStoreContextLanguageInLongTermMemory(memory);
-        if (this.outputLanguage == null || this.outputLanguage.equals(userLanguage)) {
+        if (checkLanguage(memory.getConversationProperties())) {
 
             IData<List<String>> latestData = currentStep.getLatestData(KEY_ACTIONS);
             if (latestData == null) {
@@ -102,6 +102,11 @@ public class OutputGenerationTask implements ILifecycleTask {
                         storeQuickReplies(currentStep, outputEntry.getQuickReplies(), outputEntry.getAction());
                     }));
         }
+    }
+
+    private boolean checkLanguage(IConversationProperties conversationProperties) {
+        return this.outputLanguage == null ||
+                this.outputLanguage.equals(retrieveContextLanguageFromLongTermMemory(conversationProperties));
     }
 
     private void storeContextOutput(IWritableConversationStep currentStep, List<IData<Context>> contextDataList) {
