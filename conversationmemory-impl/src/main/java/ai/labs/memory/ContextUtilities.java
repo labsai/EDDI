@@ -21,8 +21,11 @@ public class ContextUtilities {
             Context context = contextData.getResult();
             String key = contextKey.substring((KEY_CONTEXT + ":").length());
             if (key.startsWith(KEY_LANG) && context.getType().equals(Context.ContextType.string)) {
-                lang = context.getValue().toString();
-                memory.getConversationProperties().put(KEY_LANG, new Property(KEY_LANG, lang, Property.Scope.longTerm));
+                var contextValue = context.getValue();
+                if (!isNullOrEmpty(contextValue)) {
+                    lang = contextValue.toString();
+                    memory.getConversationProperties().put(KEY_LANG, new Property(KEY_LANG, lang, Property.Scope.longTerm));
+                }
             }
         }
 

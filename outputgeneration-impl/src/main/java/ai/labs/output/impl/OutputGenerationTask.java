@@ -30,10 +30,12 @@ import java.util.Random;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 
+import static ai.labs.memory.ContextUtilities.DEFAULT_USER_LANGUAGE;
 import static ai.labs.memory.ContextUtilities.retrieveAndStoreContextLanguageInLongTermMemory;
 import static ai.labs.memory.IConversationMemory.IConversationStep;
 import static ai.labs.memory.IConversationMemory.IConversationStepStack;
 import static ai.labs.memory.IConversationMemory.IWritableConversationStep;
+import static ai.labs.utilities.RuntimeUtilities.isNullOrEmpty;
 
 /**
  * @author ginccc
@@ -56,7 +58,7 @@ public class OutputGenerationTask implements ILifecycleTask {
     private final IResourceClientLibrary resourceClientLibrary;
     private final IDataFactory dataFactory;
     private final IOutputGeneration outputGeneration;
-    private String userLanguage = KEY_DEFAULT_USER_LANGUAGE;
+    private String outputLanguage = KEY_DEFAULT_USER_LANGUAGE;
 
     @Inject
     public OutputGenerationTask(IResourceClientLibrary resourceClientLibrary,
@@ -80,7 +82,7 @@ public class OutputGenerationTask implements ILifecycleTask {
     @Override
     public void executeTask(IConversationMemory memory) {
         var userLanguage = retrieveAndStoreContextLanguageInLongTermMemory(memory);
-        if (this.userLanguage.equals(userLanguage)) {
+        if (this.outputLanguage.equals(userLanguage)) {
             IWritableConversationStep currentStep = memory.getCurrentStep();
             List<IData<Context>> contextDataList = currentStep.getAllData(CONTEXT_IDENTIFIER);
             storeContextOutput(currentStep, contextDataList);
@@ -207,8 +209,8 @@ public class OutputGenerationTask implements ILifecycleTask {
 
         try {
             var outputConfigurationSet = resourceClientLibrary.getResource(uri, OutputConfigurationSet.class);
-            this.userLanguage = outputConfigurationSet.getLang();
-
+            var outputLanguage = outputConfigurationSet.getLang();
+            this.outputLanguage = !isNullOrEmpty(outputLanguage) ? outputLanguage : DEFAULT_USER_LANGUAGE;
             var outputSet = outputConfigurationSet.getOutputSet();
             outputSet.sort((o1, o2) -> {
                 int comparisonOfKeys = o1.getAction().compareTo(o2.getAction());
