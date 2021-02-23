@@ -21,6 +21,10 @@ public interface IDictionary {
         return Collections.emptyList();
     }
 
+    default String getLanguageCode() {
+        return null;
+    }
+
     List<IFoundWord> lookupTerm(String value);
 
     boolean lookupIfKnown();
@@ -34,7 +38,7 @@ public interface IDictionary {
 
         Expressions getExpressions();
 
-        String getIdentifier();
+        String getLanguageCode();
 
         boolean isWord();
 

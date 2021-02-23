@@ -12,7 +12,6 @@ import ai.labs.persistence.IResourceStore;
 import ai.labs.resources.rest.documentdescriptor.IDocumentDescriptorStore;
 import ai.labs.user.IUserStore;
 import ai.labs.user.model.User;
-import ai.labs.utilities.RuntimeUtilities;
 import lombok.extern.slf4j.Slf4j;
 import org.jboss.resteasy.spi.NoLogWebApplicationException;
 
@@ -28,6 +27,7 @@ import java.util.List;
 import static ai.labs.memory.ConversationMemoryUtilities.convertSimpleConversationMemory;
 import static ai.labs.utilities.RestUtilities.extractResourceId;
 import static ai.labs.utilities.RuntimeUtilities.checkNotNull;
+import static ai.labs.utilities.RuntimeUtilities.isNullOrEmpty;
 
 /**
  * @author ginccc
@@ -63,19 +63,25 @@ public class RestConversationStore implements IRestConversationStore {
 
                 ConversationMemorySnapshot memorySnapshot;
                 for (ConversationDescriptor conversationDescriptor : conversationDescriptors) {
-                    var resourceId = extractResourceId(conversationDescriptor.getResource());
+                    URI resourceUri = conversationDescriptor.getResource();
+                    var resourceId = extractResourceId(resourceUri);
 
-                    if (!RuntimeUtilities.isNullOrEmpty(conversationId) && resourceId.getId().equals(conversationId)) {
+                    if (!isNullOrEmpty(conversationId) && resourceId.getId().equals(conversationId)) {
                         return Collections.singletonList(conversationDescriptor);
                     }
 
                     var botResourceId = extractResourceId(conversationDescriptor.getBotResource());
 
-                    if (!RuntimeUtilities.isNullOrEmpty(botId) && !botId.equals(botResourceId.getId())) {
+                    if (isNullOrEmpty(botResourceId)) {
+                        log.warn(String.format("botResourceId was null, should have an uri! (resource=%s)", resourceUri));
                         continue;
                     }
 
-                    if (!RuntimeUtilities.isNullOrEmpty(botVersion) && !botVersion.equals(botResourceId.getVersion())) {
+                    if (!isNullOrEmpty(botId) && !botId.equals(botResourceId.getId())) {
+                        continue;
+                    }
+
+                    if (!isNullOrEmpty(botVersion) && !botVersion.equals(botResourceId.getVersion())) {
                         continue;
                     }
 
@@ -84,18 +90,18 @@ public class RestConversationStore implements IRestConversationStore {
                     } catch (IResourceStore.ResourceNotFoundException e) {
                         String message = "Resource referenced in descriptor does not exist (anymore) [%s]. ";
                         message += "Ignoring this resource.";
-                        log.warn(String.format(message, conversationDescriptor.getResource()));
+                        log.warn(String.format(message, resourceUri));
                         continue;
                     }
 
 
-                    if (!RuntimeUtilities.isNullOrEmpty(conversationState)) {
+                    if (!isNullOrEmpty(conversationState)) {
                         if (!conversationState.equals(memorySnapshot.getConversationState())) {
                             continue;
                         }
                     }
 
-                    if (!RuntimeUtilities.isNullOrEmpty(viewState)) {
+                    if (!isNullOrEmpty(viewState)) {
                         if (!viewState.equals(conversationDescriptor.getViewState())) {
                             continue;
                         }

@@ -7,6 +7,7 @@ import org.junit.Test;
 
 public class PunctuationNormalizerTest {
 
+    private static final String DEFAULT_USER_LANGUAGE = "en";
     private PunctuationNormalizer normalizer;
     private final String testString =
             "This is!just an:example,of a string,that needs? to be fixed.by inserting:a whitespace;" +
@@ -27,7 +28,7 @@ public class PunctuationNormalizerTest {
         normalizer.setRemovePunctuation(false);
 
         //test
-        String actual = normalizer.normalize(testString);
+        String actual = normalizer.normalize(testString, DEFAULT_USER_LANGUAGE);
 
         //assert
         Assert.assertEquals(expected, actual);
@@ -40,7 +41,7 @@ public class PunctuationNormalizerTest {
         normalizer.setRemovePunctuation(true);
 
         //test
-        String actual = normalizer.normalize(testString);
+        String actual = normalizer.normalize(testString, DEFAULT_USER_LANGUAGE);
 
         //assert
         Assert.assertEquals(expected, actual);

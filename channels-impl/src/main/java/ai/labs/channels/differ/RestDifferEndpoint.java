@@ -313,8 +313,8 @@ public class RestDifferEndpoint implements IRestDifferEndpoint {
         DifferConversationInfo conversationInfo;
         if ((conversationInfo = conversationInfoCache.get(conversationId)) == null) {
 
-            var differConversationInfo = differConversationStore.readDifferConversation(conversationId);
-            conversationInfoCache.put(conversationId, differConversationInfo);
+            conversationInfo = differConversationStore.readDifferConversation(conversationId);
+            conversationInfoCache.put(conversationId, conversationInfo);
         }
 
         return conversationInfo;

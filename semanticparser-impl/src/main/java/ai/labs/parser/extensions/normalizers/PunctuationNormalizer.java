@@ -20,7 +20,7 @@ public class PunctuationNormalizer implements INormalizer {
     private Pattern punctuationPattern;
     private boolean removePunctuation;
 
-    public String normalize(String input) {
+    public String normalize(String input, String userLanguage) {
         List<String> inputParts = toStringList(input);
 
         final String replacement = removePunctuation ? BLANK_CHAR : REPLACE_REGEX;

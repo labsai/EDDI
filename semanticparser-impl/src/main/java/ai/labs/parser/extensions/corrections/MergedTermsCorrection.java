@@ -17,13 +17,9 @@ public class MergedTermsCorrection implements ICorrection {
         this.dictionaries = dictionaries;
     }
 
-    @Override
-    public List<IDictionary.IFoundWord> correctWord(String word) {
-        return correctWord(word, new LinkedList<>());
-    }
 
     @Override
-    public List<IDictionary.IFoundWord> correctWord(String word, List<IDictionary> temporaryDictionaries) {
+    public List<IDictionary.IFoundWord> correctWord(String word, String userLanguage, List<IDictionary> temporaryDictionaries) {
         List<IDictionary.IFoundWord> possibleTerms = new ArrayList<>();
         String part;
         String tmpWord = word;

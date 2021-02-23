@@ -23,6 +23,7 @@ import java.util.stream.Collectors;
 @Setter
 public class RegularDictionary implements IDictionary {
     private static final String ID = "regular";
+    private String languageCode;
     private List<IPhrase> phrases = new LinkedList<>();
     private Map<String, IWord> words = new TreeMap<>(String.CASE_INSENSITIVE_ORDER);
     private List<IRegEx> regExs = new LinkedList<>();
@@ -64,7 +65,7 @@ public class RegularDictionary implements IDictionary {
             regExs.stream().
                     filter(regEx -> regEx.match(lookup)).
                     forEach(regEx ->
-                            ret.add(new FoundRegEx(new Word(lookup, regEx.getExpressions(), regEx.getIdentifier()), regEx))
+                            ret.add(new FoundRegEx(new Word(lookup, regEx.getExpressions(), regEx.getLanguageCode()), regEx))
                     );
         }
 

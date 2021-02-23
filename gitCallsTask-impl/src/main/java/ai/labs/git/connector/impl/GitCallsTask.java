@@ -27,14 +27,9 @@ import java.io.IOException;
 import java.net.URI;
 import java.net.URISyntaxException;
 import java.nio.charset.StandardCharsets;
-import java.nio.file.Files;
-import java.nio.file.Path;
-import java.nio.file.Paths;
-import java.util.ArrayList;
-import java.util.Comparator;
-import java.util.LinkedList;
-import java.util.List;
-import java.util.Map;
+import java.nio.file.*;
+import java.nio.file.attribute.BasicFileAttributes;
+import java.util.*;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
@@ -175,26 +170,24 @@ public class GitCallsTask implements ILifecycleTask {
                         .call();
                 if (pullResult.isSuccessful()) {
                     List<GitFileEntry> fileEntries = new ArrayList<>();
-                    try (Stream<Path> paths = Files.walk(gitPath)) {
-                        paths
-                                .filter(Files::isRegularFile)
-                                .forEach(path -> {
-                                            try {
-                                                if (!path.getParent().toString().contains(".git")) {
-                                                    GitFileEntry fileEntry = new GitFileEntry();
-                                                    fileEntry.setFilename(path.getFileName().toString());
-                                                    fileEntry.setDirectory(gitPath.toString());
-                                                    fileEntry.setContent(Files.readString(path, StandardCharsets.UTF_8));
-                                                    fileEntries.add(fileEntry);
-                                                }
-                                            } catch (IOException e) {
-                                                log.error("Error reading from directory");
-                                            }
-                                        }
-                                );
-                    } catch (Exception e) {
-                        log.error("Error in pulling from repo", e);
-                    }
+                     Files.walkFileTree(gitPath, Collections.emptySet(), 3, new SimpleFileVisitor<>() {
+                         @Override
+                         public FileVisitResult visitFile(Path file, BasicFileAttributes attrs) throws IOException {
+                             if (Files.isRegularFile(file) && !file.getParent().toString().contains(".git")) {
+                                 GitFileEntry fileEntry = new GitFileEntry();
+                                 fileEntry.setFilename(file.getFileName().toString());
+                                 fileEntry.setDirectory(gitPath.toString());
+                                 fileEntry.setContent(Files.readString(file, StandardCharsets.UTF_8));
+                                 fileEntries.add(fileEntry);
+                             }
+                             return FileVisitResult.CONTINUE;
+                         }
+
+                         @Override
+                         public FileVisitResult visitFileFailed(Path file, IOException exc) {
+                             return FileVisitResult.CONTINUE;
+                         }
+                     });
                     String memoryDataName = "gitCalls:" + gitCall.getDirectory();
                     IData<Object> gitData = dataFactory.createData(memoryDataName, fileEntries);
                     currentStep.storeData(gitData);

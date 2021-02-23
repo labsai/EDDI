@@ -7,7 +7,6 @@ import java.util.Date;
 import java.util.LinkedList;
 import java.util.List;
 import java.util.Map;
-import java.util.Objects;
 import java.util.UUID;
 import java.util.stream.Collectors;
 
@@ -65,21 +64,32 @@ public class DifferUtilities {
         var quickReplyActions = new LinkedList<QuickReply>();
         conversationOutputs.stream().
                 filter(conversationOutput -> !isNullOrEmpty(conversationOutput.get("quickReplies"))).
-                map(conversationOutput -> {
-                    List quickRepliesObj = (List) conversationOutput.get("quickReplies");
-                    if (quickRepliesObj.get(0) instanceof QuickReply) {
-                        return quickRepliesObj;
-                    } else {
-                        return ((List<Map>) quickRepliesObj).stream().filter(Objects::nonNull).map(map -> {
-                            Object isDefault = map.get("isDefault");
-                            return new QuickReply(
-                                    map.get("value").toString(),
-                                    map.get("expressions").toString(),
-                                    isDefault != null && Boolean.parseBoolean(isDefault.toString()));
-                        }).collect(Collectors.toList());
-                    }
-                }).forEach(quickReplyActions::addAll);
+                map(DifferUtilities::extractQuickReplies).forEach(quickReplyActions::addAll);
 
         return quickReplyActions;
+    }
+
+    private static List<QuickReply> extractQuickReplies(ConversationOutput conversationOutput) {
+        List quickRepliesObj = (List) conversationOutput.get("quickReplies");
+        Object quickReplyObj = quickRepliesObj.get(0);
+        if (quickReplyObj instanceof QuickReply) {
+            return quickRepliesObj;
+        } else {
+            List<QuickReply> ret = new LinkedList<>();
+            for (Object obj : quickRepliesObj) {
+                if (quickReplyObj instanceof Map) {
+                    var map = (Map) obj;
+                    Object isDefault = map.get("isDefault");
+                    ret.add(new QuickReply(
+                            map.get("value").toString(),
+                            map.get("expressions").toString(),
+                            isDefault != null && Boolean.parseBoolean(isDefault.toString())));
+                } else {
+                    ret.add((QuickReply) obj);
+                }
+            }
+
+            return ret;
+        }
     }
 }

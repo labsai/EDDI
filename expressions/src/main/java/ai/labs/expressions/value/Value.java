@@ -1,8 +1,9 @@
 package ai.labs.expressions.value;
 
 import ai.labs.expressions.Expression;
-import ai.labs.utilities.CharacterUtilities;
 import lombok.extern.slf4j.Slf4j;
+
+import static ai.labs.utilities.CharacterUtilities.isNumber;
 
 /**
  * @author ginccc
@@ -30,12 +31,18 @@ public class Value extends Expression {
     }
 
     public Boolean isNumeric() {
-        return CharacterUtilities.isNumber(expressionName, false);
+        return isNumber(expressionName, false);
+    }
+
+    public Boolean isDouble() {
+        return isNumber(expressionName, true);
+    }
+
+    public Integer toInteger() {
+        return Integer.parseInt(expressionName);
     }
 
     public Double toDouble() {
-        if (!isNumeric())
-            return Double.NaN;
         return Double.parseDouble(expressionName);
     }
 
@@ -43,7 +50,7 @@ public class Value extends Expression {
     public boolean equals(Object o) {
         if (this == o) return true;
 
-        if (isNumeric() && o instanceof Value) {
+        if (o instanceof Value && isNumeric()) {
             Value value = (Value) o;
             return value.toDouble().equals(this.toDouble());
         }

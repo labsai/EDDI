@@ -7,7 +7,7 @@ import java.util.List;
 public interface INormalizer {
     String BLANK_CHAR = " ";
 
-    String normalize(String input);
+    String normalize(String input, String userLanguage);
 
     default List<String> toStringList(String input) {
         return new ArrayList<>(Arrays.asList(input.split(BLANK_CHAR)));

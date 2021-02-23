@@ -50,7 +50,7 @@ public class StemmingCorrection implements ICorrection {
     }
 
     @Override
-    public List<IDictionary.IFoundWord> correctWord(String word) {
+    public List<IDictionary.IFoundWord> correctWord(String word, String userLanguage, List<IDictionary> temporaryDictionaries) {
         stemmer = createNewStemmer();
         stemmer.setCurrent(word.toLowerCase());
         stemmer.stem();

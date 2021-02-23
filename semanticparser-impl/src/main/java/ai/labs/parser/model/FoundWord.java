@@ -18,7 +18,7 @@ public class FoundWord extends FoundDictionaryEntry implements IDictionary.IFoun
     }
 
     public FoundWord(String unknownValue, Expressions unknownExp) {
-        super(unknownValue, unknownExp, false, 0.0);
+        super(unknownValue, unknownExp);
         word = null;
         isWord = true;
     }

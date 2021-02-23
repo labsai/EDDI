@@ -19,6 +19,7 @@ import java.util.List;
  */
 public class TemporaryDictionaryParserTest {
 
+    public static final String DEFAULT_USER_LANGUAGE = "en";
     private ExpressionProvider expressionProvider;
     private InputParser inputParser;
 
@@ -43,7 +44,7 @@ public class TemporaryDictionaryParserTest {
 
         //test
         List<RawSolution> rawSolutions = inputParser.parse("test1 test2 tmp1 tmp2",
-                Collections.singletonList(temporaryTestDictionary));
+                DEFAULT_USER_LANGUAGE, Collections.singletonList(temporaryTestDictionary));
 
         //assert
         List<Solution> actual = DictionaryUtilities.extractExpressions(rawSolutions, true, true);
@@ -60,7 +61,7 @@ public class TemporaryDictionaryParserTest {
 
         //test
         List<RawSolution> rawSolutions = inputParser.parse("test1 test2 test tmp phrase",
-                Collections.singletonList(temporaryTestDictionary));
+                DEFAULT_USER_LANGUAGE, Collections.singletonList(temporaryTestDictionary));
 
         //assert
         List<Solution> actual = DictionaryUtilities.extractExpressions(rawSolutions, true, true);
@@ -77,7 +78,7 @@ public class TemporaryDictionaryParserTest {
 
         //test
         List<RawSolution> rawSolutions = inputParser.parse("test1",
-                Collections.singletonList(temporaryTestDictionary));
+                DEFAULT_USER_LANGUAGE, Collections.singletonList(temporaryTestDictionary));
 
         //assert
         List<Solution> actual = DictionaryUtilities.extractExpressions(rawSolutions, true, true);
