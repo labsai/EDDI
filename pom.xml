@@ -63,6 +63,8 @@
         <module>basemodels</module>
         <module>gitCallsTask-impl</module>
         <module>peerToPeerTask-impl</module>
+        <module>peertopeer-definition</module>
+        <module>peertopeer-implementation</module>
     </modules>
 
     <build>

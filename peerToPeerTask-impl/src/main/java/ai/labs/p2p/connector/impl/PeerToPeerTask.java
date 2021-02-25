@@ -18,6 +18,9 @@ import java.util.Map;
 
 import static ai.labs.utilities.RuntimeUtilities.isNullOrEmpty;
 
+/**
+ * @author rpi
+ */
 @Slf4j
 public class PeerToPeerTask implements ILifecycleTask {
     private static final String ID = "ai.labs.p2p";
@@ -70,6 +73,7 @@ public class PeerToPeerTask implements ILifecycleTask {
 
             try {
                 P2PConfiguration p2PConfiguration = resourceClientLibrary.getResource(uri, P2PConfiguration.class);
+
 
 
             } catch (ServiceException  e) {

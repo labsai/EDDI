@@ -5,6 +5,10 @@ import ai.labs.p2p.connector.impl.PeerToPeerTask;
 import ai.labs.runtime.bootstrap.AbstractBaseModule;
 import com.google.inject.multibindings.MapBinder;
 
+
+/**
+ * @author rpi
+ */
 public class PeerToPeerModule extends AbstractBaseModule {
     @Override
     protected void configure() {
