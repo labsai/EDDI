@@ -118,32 +118,33 @@ public class Server implements IServer {
             @Override
             public void run() {
                 try {
-                    serverSocket = new ServerSocket(PORT);
-                    Socket clientSocket = serverSocket.accept();
+                    while (true) {
+                        serverSocket = new ServerSocket(PORT);
+                        Socket clientSocket = serverSocket.accept();
 
-                    serverSocketWorker.execute(new Runnable() {
-                        @Override
-                        public void run() {
-                            try {
-                                log.info("got client socket");
-                                InputStream is = clientSocket.getInputStream();
-                                String message = IOUtils.toString(is, StandardCharsets.UTF_8);
-                                log.info("Message received {}", message);
-                                OutputStream os = clientSocket.getOutputStream();
-                                PeerMessageHandler peerMessageHandler = new PeerMessageHandler(message);
-                                peerMessageHandler.handleMessage(Server.this, os);
-                                is.close();
-                                os.close();
-                                clientSocket.close();
-                            } catch (IOException e) {
-                                log.error("Error on receive from peer");
+                        serverSocketWorker.execute(new Runnable() {
+                            @Override
+                            public void run() {
+                                try {
+                                    log.info("got client socket");
+                                    InputStream is = clientSocket.getInputStream();
+                                    String message = IOUtils.toString(is, StandardCharsets.UTF_8);
+                                    log.info("Message received {}", message);
+                                    OutputStream os = clientSocket.getOutputStream();
+                                    PeerMessageHandler peerMessageHandler = new PeerMessageHandler(message);
+                                    peerMessageHandler.handleMessage(Server.this, os);
+                                    is.close();
+                                    os.close();
+                                    clientSocket.close();
+                                } catch (IOException e) {
+                                    log.error("Error on receive from peer");
+                                }
                             }
-                        }
-                    });
-                } catch (IOException e) {
+                        });
+                    }
+                } catch(IOException e){
                     log.error("Error opening peer to peer port", e);
                 }
-
             }
         });
 
