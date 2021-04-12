@@ -118,20 +118,24 @@ public class Server implements IServer {
             @Override
             public void run() {
                 try {
+                    serverSocket = new ServerSocket(PORT, 50, InetAddress.getByName(myself.getHostName()));
                     while (true) {
-                        serverSocket = new ServerSocket(PORT, 50);
-                        Socket clientSocket = serverSocket.accept();
+                        try {
+                            Socket clientSocket = serverSocket.accept();
 
-                       log.info("got client socket");
-                        InputStream is = clientSocket.getInputStream();
-                        String message = IOUtils.toString(is, StandardCharsets.UTF_8);
-                        log.info("Message received {}", message);
-                        OutputStream os = clientSocket.getOutputStream();
-                        PeerMessageHandler peerMessageHandler = new PeerMessageHandler(message);
-                        peerMessageHandler.handleMessage(Server.this, os);
-                        is.close();
-                        os.close();
-                        clientSocket.close();
+                            log.info("got client socket");
+                            InputStream is = clientSocket.getInputStream();
+                            String message = IOUtils.toString(is, StandardCharsets.UTF_8);
+                            log.info("Message received {}", message);
+                            OutputStream os = clientSocket.getOutputStream();
+                            PeerMessageHandler peerMessageHandler = new PeerMessageHandler(message);
+                            peerMessageHandler.handleMessage(Server.this, os);
+                            is.close();
+                            os.close();
+                            clientSocket.close();
+                        } catch (Exception e) {
+                            log.error("Message handling failed", e);
+                        }
                     }
                 } catch(IOException e){
                     log.error("Error opening peer to peer port", e);
