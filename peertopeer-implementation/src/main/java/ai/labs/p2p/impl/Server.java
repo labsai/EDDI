@@ -11,9 +11,11 @@ import lombok.SneakyThrows;
 import lombok.extern.slf4j.Slf4j;
 
 import javax.net.SocketFactory;
+
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
+import java.net.InetAddress;
 import java.net.ServerSocket;
 import java.net.Socket;
 import java.nio.charset.StandardCharsets;
@@ -41,7 +43,8 @@ public class Server implements IServer {
     private final String PUBLIC_KEY_FILE = "./pub.key";
     private final String SERVER_ID = "./server.id";
     private final int PORT = 42042;
-    private final String DEFAULT_PEER = "eddi-peer.labs.ai";
+    private final String DEFAULT_PEER = "35.205.127.43 ";
+    private final byte[] DEFAULT_PEER_BYTE = new byte[]{0x23, (byte) 0xCD, 0x7F, 0x2B};
 
     private static final int SOCKETTIMEOUT = 10000;
 
@@ -94,9 +97,11 @@ public class Server implements IServer {
                 KeyPairGenerator keyPairGenerator = KeyPairGenerator.getInstance("RSA");
                 KeyPair keyPair = keyPairGenerator.generateKeyPair();
                 serverId = UUID.randomUUID();
+                privateKey = keyPair.getPrivate();
+                publicKey = keyPair.getPublic();
 
-                Files.write(Paths.get(PRIVATE_KEY_FILE), keyPair.getPrivate().getEncoded());
-                Files.write(Paths.get(PUBLIC_KEY_FILE), keyPair.getPublic().getEncoded());
+                Files.write(Paths.get(PRIVATE_KEY_FILE), privateKey.getEncoded());
+                Files.write(Paths.get(PUBLIC_KEY_FILE), publicKey.getEncoded());
                 Files.write(Paths.get(SERVER_ID), serverId.toString().getBytes(StandardCharsets.UTF_8));
             }
         } catch (Exception ex) {
@@ -123,6 +128,8 @@ public class Server implements IServer {
 
                                 InputStream is = clientSocket.getInputStream();
                                 byte[] message = is.readAllBytes();
+                                String strMessage = new String(message, StandardCharsets.UTF_8);
+                                log.info("Message received {}", strMessage);
                                 OutputStream os = clientSocket.getOutputStream();
                                 PeerMessageHandler peerMessageHandler = new PeerMessageHandler(message);
                                 peerMessageHandler.handleMessage(Server.this, os);
@@ -152,6 +159,7 @@ public class Server implements IServer {
                         Peer defaultPeer = new Peer();
                         defaultPeer.setAuthState(IPeer.PeerAuthState.PUBLIC);
                         defaultPeer.setHostName(DEFAULT_PEER);
+                        defaultPeer.setPort(PORT);
                         connectedPeers.add(defaultPeer);
                     }
 
@@ -174,7 +182,7 @@ public class Server implements IServer {
     @Override
     public void connectToPeer(IPeer peer) {
         try {
-            Socket socket = SocketFactory.getDefault().createSocket(peer.getHostName(), peer.getPort());
+            Socket socket = SocketFactory.getDefault().createSocket(InetAddress.getByAddress(DEFAULT_PEER_BYTE), peer.getPort());
             OutputStream os = socket.getOutputStream();
             PeerMessage message = new PeerMessage();
             message.setPeerMessageType(IPeerMessage.PeerMessageType.REGISTER);
