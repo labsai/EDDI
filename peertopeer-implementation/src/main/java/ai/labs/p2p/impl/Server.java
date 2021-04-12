@@ -9,6 +9,7 @@ import com.google.inject.Inject;
 import com.google.inject.name.Named;
 import lombok.SneakyThrows;
 import lombok.extern.slf4j.Slf4j;
+import org.apache.commons.io.IOUtils;
 
 import javax.net.SocketFactory;
 
@@ -126,9 +127,8 @@ public class Server implements IServer {
                             try {
                                 log.info("got client socket");
                                 InputStream is = clientSocket.getInputStream();
-                                byte[] message = is.readAllBytes();
-                                String strMessage = new String(message, StandardCharsets.UTF_8);
-                                log.info("Message received {}", strMessage);
+                                String message = IOUtils.toString(is, StandardCharsets.UTF_8);
+                                log.info("Message received {}", message);
                                 OutputStream os = clientSocket.getOutputStream();
                                 PeerMessageHandler peerMessageHandler = new PeerMessageHandler(message);
                                 peerMessageHandler.handleMessage(Server.this, os);
@@ -189,8 +189,8 @@ public class Server implements IServer {
             message.setPeer(myself);
             os.write(message.toString().getBytes(StandardCharsets.UTF_8));
             os.flush();
-            byte[] byteResponse = is.readAllBytes();
-            PeerMessageHandler peerMessageHandler = new PeerMessageHandler(byteResponse);
+            String response = IOUtils.toString(is, StandardCharsets.UTF_8);
+            PeerMessageHandler peerMessageHandler = new PeerMessageHandler(response);
             peerMessageHandler.handleMessage(this, socket.getOutputStream());
             os.close();
             is.close();

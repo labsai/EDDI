@@ -13,9 +13,8 @@ public class PeerMessageHandler {
 
     PeerMessage peerMessage;
 
-    public PeerMessageHandler(byte[] message) {
-        String strMessage  = new String(message, StandardCharsets.UTF_8);
-        String[] splitStrMessage = strMessage.split("\\|");
+    public PeerMessageHandler(String message) {
+        String[] splitStrMessage = message.split("\\|");
         peerMessage = new PeerMessage();
         peerMessage.setPeerMessageType(IPeerMessage.PeerMessageType.valueOf(splitStrMessage[0]));
         peerMessage.setMessage(splitStrMessage[1]);
