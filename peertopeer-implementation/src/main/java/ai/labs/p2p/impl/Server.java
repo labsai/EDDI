@@ -164,9 +164,11 @@ public class Server implements IServer {
                         defaultPeer.setHostName(DEFAULT_PEER);
                         defaultPeer.setPort(PORT);
                         connectedPeers.add(defaultPeer);
+                        log.info("added defalut peer {}", defaultPeer);
                     }
 
                     for (IPeer peer : connectedPeers) {
+                        log.error("connecting to peer {}", peer);
                         connectToPeer(peer);
                     }
 
