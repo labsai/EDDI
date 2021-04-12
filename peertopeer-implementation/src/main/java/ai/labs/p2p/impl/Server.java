@@ -154,7 +154,7 @@ public class Server implements IServer {
             public void run()  {
                 while (true) {
 
-                    if (connectedPeers.isEmpty()) {
+                    if (connectedPeers.isEmpty() && !myself.getHostName().equals(DEFAULT_PEER)) {
                         Peer defaultPeer = new Peer();
                         defaultPeer.setAuthState(IPeer.PeerAuthState.PUBLIC);
                         defaultPeer.setHostName(DEFAULT_PEER);
@@ -183,16 +183,18 @@ public class Server implements IServer {
         try {
             Socket socket = SocketFactory.getDefault().createSocket(InetAddress.getByName(peer.getHostName()), peer.getPort());
             OutputStream os = socket.getOutputStream();
+            InputStream is = socket.getInputStream();
             PeerMessage message = new PeerMessage();
             message.setPeerMessageType(IPeerMessage.PeerMessageType.REGISTER);
             message.setPeer(myself);
             os.write(message.toString().getBytes(StandardCharsets.UTF_8));
             os.flush();
-            os.close();
-            InputStream is = socket.getInputStream();
             byte[] byteResponse = is.readAllBytes();
             PeerMessageHandler peerMessageHandler = new PeerMessageHandler(byteResponse);
             peerMessageHandler.handleMessage(this, socket.getOutputStream());
+            os.close();
+            is.close();
+            socket.close();
         } catch (IOException e) {
             log.error("Connect to peer {} failed!", peer.getHostName(), e);
         }
