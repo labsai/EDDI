@@ -26,25 +26,22 @@ public class PeerMessageHandler {
         peerMessage.setPeer(peer);
     }
 
-    public void handleMessage(IServer server, OutputStream outputStream) {
+    public PeerMessage handleMessage(IServer server) {
+        PeerMessage response = new PeerMessage();
         switch (peerMessage.getMessageType()) {
             case REGISTER:
             case REGISTERRESPONSE:
                 if (!server.getAvailablePeers().contains(peerMessage.getPeer())) {
                     server.getAvailablePeers().add(peerMessage.getPeer());
-                    PeerMessage response = new PeerMessage();
+                    response = new PeerMessage();
                     response.setPeer(server.getMyself());
                     response.setPeerMessageType(IPeerMessage.PeerMessageType.REGISTERRESPONSE);
-                    try {
-                        outputStream.write(response.toString().getBytes(StandardCharsets.UTF_8));
-                    } catch (IOException e) {
-                        log.error("Can't respond to peer", e);
-                    }
                 }
                 break;
             case QUESTION:
                 break;
             default:
         }
+        return response;
     }
 }

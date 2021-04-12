@@ -13,9 +13,12 @@ import org.apache.commons.io.IOUtils;
 
 import javax.net.SocketFactory;
 
+import java.io.BufferedReader;
 import java.io.IOException;
 import java.io.InputStream;
+import java.io.InputStreamReader;
 import java.io.OutputStream;
+import java.io.PrintWriter;
 import java.net.InetAddress;
 import java.net.ServerSocket;
 import java.net.Socket;
@@ -44,7 +47,7 @@ public class Server implements IServer {
     private final String PUBLIC_KEY_FILE = "./pub.key";
     private final String SERVER_ID = "./server.id";
     private final int PORT = 42042;
-    private final String DEFAULT_PEER = "35.205.127.43";
+    private final String DEFAULT_PEER = "192.168.1.152";
 
     private static final int SOCKETTIMEOUT = 10000;
 
@@ -119,30 +122,24 @@ public class Server implements IServer {
             public void run() {
                 try {
                     serverSocket = new ServerSocket(PORT, 50, InetAddress.getByName(myself.getHostName()));
-                    serverSocket.setSoTimeout(1000);
                     while (true) {
                         Socket clientSocket = null;
-                        InputStream is = null;
-                        OutputStream os = null;
                         try {
                             clientSocket = serverSocket.accept();
 
                             log.info("got client socket");
-                            is = clientSocket.getInputStream();
-                            String message = IOUtils.toString(is, StandardCharsets.UTF_8);
+                            BufferedReader is = new BufferedReader(new InputStreamReader(clientSocket.getInputStream()));
+                            String message = is.readLine();
                             log.info("Message received {}", message);
-                            os = clientSocket.getOutputStream();
+                            PrintWriter os = new PrintWriter(clientSocket.getOutputStream(), true);
                             PeerMessageHandler peerMessageHandler = new PeerMessageHandler(message);
-                            peerMessageHandler.handleMessage(Server.this, os);
+                            PeerMessage response = peerMessageHandler.handleMessage(Server.this);
+                            os.println(response.toString());
                             is.close();
                             os.close();
                             clientSocket.close();
                         } catch (Exception e) {
                             log.error("Message handling failed", e);
-                        } finally {
-                            if (is != null) is.close();
-                            if (os != null) os.close();
-                            if (clientSocket != null) clientSocket.close();
                         }
                     }
                 } catch(IOException e){
@@ -171,8 +168,6 @@ public class Server implements IServer {
                         log.error("connecting to peer {}", peer);
                         connectToPeer(peer);
                     }
-
-                    Thread.currentThread().wait(10000);
                 }
             }
         });
@@ -188,18 +183,15 @@ public class Server implements IServer {
     public void connectToPeer(IPeer peer) {
         try {
             Socket socket = SocketFactory.getDefault().createSocket(InetAddress.getByName(peer.getHostName()), peer.getPort());
-            OutputStream os = socket.getOutputStream();
-            InputStream is = socket.getInputStream();
+            PrintWriter os = new PrintWriter(socket.getOutputStream(), true);
+            BufferedReader is = new BufferedReader(new InputStreamReader(socket.getInputStream()));
             PeerMessage message = new PeerMessage();
             message.setPeerMessageType(IPeerMessage.PeerMessageType.REGISTER);
             message.setPeer(myself);
-            os.write(message.toString().getBytes(StandardCharsets.UTF_8));
-            os.flush();
-            String response = IOUtils.toString(is, StandardCharsets.UTF_8);
+            os.println(message.toString());
+            String response = is.readLine();
             PeerMessageHandler peerMessageHandler = new PeerMessageHandler(response);
-            peerMessageHandler.handleMessage(this, socket.getOutputStream());
-            os.close();
-            is.close();
+            peerMessageHandler.handleMessage(this);
             socket.close();
         } catch (IOException e) {
             log.error("Connect to peer {} failed!", peer.getHostName(), e);
