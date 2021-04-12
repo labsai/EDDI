@@ -119,6 +119,7 @@ public class Server implements IServer {
             public void run() {
                 try {
                     serverSocket = new ServerSocket(PORT, 50, InetAddress.getByName(myself.getHostName()));
+                    serverSocket.setSoTimeout(1000);
                     while (true) {
                         Socket clientSocket = null;
                         InputStream is = null;
