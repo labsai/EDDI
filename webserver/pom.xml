@@ -43,28 +43,28 @@
         <dependency>
             <groupId>org.jboss.resteasy</groupId>
             <artifactId>resteasy-jsapi</artifactId>
-            <version>4.5.8.Final</version>
+            <version>4.6.0.Final</version>
         </dependency>
         <!-- Jetty -->
         <dependency>
             <groupId>org.eclipse.jetty</groupId>
             <artifactId>jetty-server</artifactId>
-            <version>9.4.35.v20201120</version>
+            <version>9.4.38.v20210224</version>
         </dependency>
         <dependency>
             <groupId>org.eclipse.jetty.http2</groupId>
             <artifactId>http2-server</artifactId>
-            <version>9.4.35.v20201120</version>
+            <version>9.4.38.v20210224</version>
         </dependency>
         <dependency>
             <groupId>org.eclipse.jetty</groupId>
             <artifactId>jetty-alpn-server</artifactId>
-            <version>9.4.35.v20201120</version>
+            <version>9.4.38.v20210224</version>
         </dependency>
         <dependency>
             <groupId>org.eclipse.jetty</groupId>
             <artifactId>jetty-alpn-java-server</artifactId>
-            <version>9.4.35.v20201120</version>
+            <version>9.4.38.v20210224</version>
         </dependency>
         <dependency>
             <groupId>org.eclipse.jetty.alpn</groupId>
@@ -80,27 +80,27 @@
         <dependency>
             <groupId>org.eclipse.jetty</groupId>
             <artifactId>jetty-security</artifactId>
-            <version>9.4.35.v20201120</version>
+            <version>9.4.38.v20210224</version>
         </dependency>
         <dependency>
             <groupId>org.eclipse.jetty</groupId>
             <artifactId>jetty-servlet</artifactId>
-            <version>9.4.35.v20201120</version>
+            <version>9.4.38.v20210224</version>
         </dependency>
         <dependency>
             <groupId>org.eclipse.jetty</groupId>
             <artifactId>jetty-servlets</artifactId>
-            <version>9.4.35.v20201120</version>
+            <version>9.4.38.v20210224</version>
         </dependency>
         <dependency>
             <groupId>org.eclipse.jetty</groupId>
             <artifactId>jetty-rewrite</artifactId>
-            <version>9.4.35.v20201120</version>
+            <version>9.4.38.v20210224</version>
         </dependency>
         <dependency>
             <groupId>org.eclipse.jetty</groupId>
             <artifactId>jetty-util</artifactId>
-            <version>9.4.35.v20201120</version>
+            <version>9.4.38.v20210224</version>
         </dependency>
         <dependency>
             <groupId>ro.isdc.wro4j</groupId>
