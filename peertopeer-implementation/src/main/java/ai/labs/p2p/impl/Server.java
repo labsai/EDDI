@@ -120,14 +120,17 @@ public class Server implements IServer {
                 try {
                     serverSocket = new ServerSocket(PORT, 50, InetAddress.getByName(myself.getHostName()));
                     while (true) {
+                        Socket clientSocket = null;
+                        InputStream is = null;
+                        OutputStream os = null;
                         try {
-                            Socket clientSocket = serverSocket.accept();
+                            clientSocket = serverSocket.accept();
 
                             log.info("got client socket");
-                            InputStream is = clientSocket.getInputStream();
+                            is = clientSocket.getInputStream();
                             String message = IOUtils.toString(is, StandardCharsets.UTF_8);
                             log.info("Message received {}", message);
-                            OutputStream os = clientSocket.getOutputStream();
+                            os = clientSocket.getOutputStream();
                             PeerMessageHandler peerMessageHandler = new PeerMessageHandler(message);
                             peerMessageHandler.handleMessage(Server.this, os);
                             is.close();
@@ -135,6 +138,10 @@ public class Server implements IServer {
                             clientSocket.close();
                         } catch (Exception e) {
                             log.error("Message handling failed", e);
+                        } finally {
+                            if (is != null) is.close();
+                            if (os != null) os.close();
+                            if (clientSocket != null) clientSocket.close();
                         }
                     }
                 } catch(IOException e){
