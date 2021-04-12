@@ -43,8 +43,7 @@ public class Server implements IServer {
     private final String PUBLIC_KEY_FILE = "./pub.key";
     private final String SERVER_ID = "./server.id";
     private final int PORT = 42042;
-    private final String DEFAULT_PEER = "35.205.127.43 ";
-    private final byte[] DEFAULT_PEER_BYTE = new byte[]{0x23, (byte) 0xCD, 0x7F, 0x2B};
+    private final String DEFAULT_PEER = "35.205.127.43";
 
     private static final int SOCKETTIMEOUT = 10000;
 
@@ -125,7 +124,7 @@ public class Server implements IServer {
                         @Override
                         public void run() {
                             try {
-
+                                log.info("got client socket");
                                 InputStream is = clientSocket.getInputStream();
                                 byte[] message = is.readAllBytes();
                                 String strMessage = new String(message, StandardCharsets.UTF_8);
@@ -182,13 +181,14 @@ public class Server implements IServer {
     @Override
     public void connectToPeer(IPeer peer) {
         try {
-            Socket socket = SocketFactory.getDefault().createSocket(InetAddress.getByAddress(DEFAULT_PEER_BYTE), peer.getPort());
+            Socket socket = SocketFactory.getDefault().createSocket(InetAddress.getByName(peer.getHostName()), peer.getPort());
             OutputStream os = socket.getOutputStream();
             PeerMessage message = new PeerMessage();
             message.setPeerMessageType(IPeerMessage.PeerMessageType.REGISTER);
             message.setPeer(myself);
             os.write(message.toString().getBytes(StandardCharsets.UTF_8));
             os.flush();
+            os.close();
             InputStream is = socket.getInputStream();
             byte[] byteResponse = is.readAllBytes();
             PeerMessageHandler peerMessageHandler = new PeerMessageHandler(byteResponse);
