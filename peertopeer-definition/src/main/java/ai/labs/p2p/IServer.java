@@ -9,5 +9,7 @@ public interface IServer {
 
     void init();
     List<IPeer> getAvailablePeers();
-    IClient connectToPeer(IPeer peer);
+    void connectToPeer(IPeer peer);
+
+    IPeer getMyself();
 }

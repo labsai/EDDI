@@ -20,6 +20,8 @@ import ai.labs.memory.bootstrap.ConversationMemoryModule;
 import ai.labs.migration.IMigrationManager;
 import ai.labs.migration.bootstrap.MigrationModule;
 import ai.labs.output.bootstrap.OutputGenerationModule;
+import ai.labs.p2p.bootstrap.PeerToPeerServerModule;
+import ai.labs.p2p.connector.bootstrap.PeerToPeerModule;
 import ai.labs.parser.bootstrap.SemanticParserModule;
 import ai.labs.permission.bootstrap.PermissionModule;
 import ai.labs.persistence.bootstrap.PersistenceModule;
@@ -106,7 +108,9 @@ public class ApiServer {
                 new DifferModule(),
                 new ChannelModule(),
                 new MigrationModule(),
-                new GitCallsModule()
+                new GitCallsModule(),
+                new PeerToPeerServerModule(new FileInputStream(configDir + "p2pServer.properties")),
+                new PeerToPeerModule()
         };
 
         //init modules
