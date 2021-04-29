@@ -120,7 +120,7 @@
         <dependency>
             <groupId>com.google.inject</groupId>
             <artifactId>guice</artifactId>
-            <version>4.2.3</version>
+            <version>5.0.1</version>
             <exclusions>
                 <exclusion>
                     <groupId>error_prone_annotations</groupId>
@@ -137,7 +137,7 @@
             <artifactId>guice-multibindings</artifactId>
             <version>4.2.3</version>
         </dependency>
-
+        20
         <dependency>
             <groupId>org.jboss.resteasy</groupId>
             <artifactId>resteasy-core-spi</artifactId>
