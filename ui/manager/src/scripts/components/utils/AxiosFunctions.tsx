@@ -1,4 +1,5 @@
-import axios from 'axios';
+import axios from './axiosInterseptor';
+
 import * as React from 'react';
 import {
   DEFAULT_LIMIT,
@@ -208,9 +209,11 @@ export async function basicAuthSignIn(username: string, password: string) {
         },
       },
     );
+    const encryptedToken = btoa(`${username}:${password}`)
+    localStorage.setItem('bearer', encryptedToken);
     setDefaultGlobalHeader(
       'Authorization',
-      `Basic ${btoa(`${username}:${password}`)}`,
+      `Basic ${encryptedToken}`,
     );
   } catch (err) {
     console.error(
