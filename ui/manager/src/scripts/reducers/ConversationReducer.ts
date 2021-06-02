@@ -1,7 +1,7 @@
 import { Reducer, Action } from 'redux';
 import { IBot, IConversation } from '../components/utils/AxiosFunctions';
 import * as _ from 'lodash';
-import * as update from 'immutability-helper';
+import update from 'immutability-helper';
 import {
   END_CONVERSATION_SUCCESS,
   FETCH_CONVERSATION,

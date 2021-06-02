@@ -1,7 +1,7 @@
 import * as React from 'react';
 import * as renderIf from 'render-if';
 import styles from './Bot.styles';
-import * as Radium from 'radium';
+import Radium from 'radium';
 import WhiteButton from '../Assets/Buttons/WhiteButton';
 import { IBot } from '../utils/AxiosFunctions';
 import Packages from './Packages';

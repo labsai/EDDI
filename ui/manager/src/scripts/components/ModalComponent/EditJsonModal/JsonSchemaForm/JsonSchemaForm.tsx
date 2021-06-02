@@ -1,5 +1,5 @@
 import * as React from 'react';
-import * as Radium from 'radium';
+import Radium from 'radium';
 import { compose, pure, setDisplayName } from 'recompose';
 import * as renderIf from 'render-if';
 import Form from 'react-jsonschema-form';
@@ -51,9 +51,9 @@ const JsonSchemaForm: React.StatelessComponent<IProps> = (props: IProps) => {
 
 const ComposedJsonSchemaForm: React.ComponentClass<IProps> = compose<IProps, IProps>(
   pure,
+  connect(schemaSelector),
   Radium,
   setDisplayName('JsonSchemaForm'),
-  connect(schemaSelector),
 )(JsonSchemaForm);
 
 export default ComposedJsonSchemaForm;

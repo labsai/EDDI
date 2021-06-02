@@ -1,6 +1,6 @@
 import * as React from 'react';
 import { compose, pure, setDisplayName } from 'recompose';
-import * as Radium from 'radium';
+import Radium from 'radium';
 import { IPackage } from '../../utils/AxiosFunctions';
 import { connect } from 'react-redux';
 import NameAndVersion from './NameAndVersion';

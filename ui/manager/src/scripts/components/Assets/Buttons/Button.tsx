@@ -1,7 +1,7 @@
 import * as React from 'react';
 import { compose, pure, setDisplayName } from 'recompose';
 import { CSSProperties } from 'react';
-import * as Radium from 'radium';
+import Radium from 'radium';
 
 const styles: { [key: string]: IExtendedCSSProperties } = {
   button: {

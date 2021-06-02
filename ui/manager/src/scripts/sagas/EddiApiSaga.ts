@@ -75,6 +75,7 @@ import {
   getConversation,
   endConversation as axiosEndConversation,
   deployExampleBots as axiosDeployExampleBots,
+  IPlugins,
 } from '../components/utils/AxiosFunctions';
 import {
   fetchBotFailedAction,
@@ -412,7 +413,7 @@ export function* watchUpdatePackage(): Iterator<{}> {
 
 export function* FetchPackageData(action: IFetchPackageDataAction) {
   try {
-    const packageData: IPluginsResponse[] = yield call(
+    const packageData: IPlugins = yield call(
       getPackageData,
       action.packageResource,
     );

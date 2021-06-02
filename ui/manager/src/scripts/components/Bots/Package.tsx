@@ -7,7 +7,7 @@ import { compose, pure, setDisplayName } from 'recompose';
 import eddiApiActionDispatchers from '../../actions/EddiApiActionDispatchers';
 import { connect } from 'react-redux';
 import { packageSelector } from '../../selectors/PackageSelectors';
-import * as Radium from 'radium';
+import Radium from 'radium';
 import * as _ from 'lodash';
 import WhiteButton from '../Assets/Buttons/WhiteButton';
 import ModalActionDispatchers from '../../actions/ModalActionDispatchers';
@@ -140,9 +140,9 @@ const ComposedPackage: React.ComponentClass<IPublicProps> = compose<
   IPublicProps
 >(
   pure,
-  Radium,
   connect(packageSelector),
   connect(readOnlySelector),
+  Radium,
   setDisplayName('Package'),
 )(Package);
 

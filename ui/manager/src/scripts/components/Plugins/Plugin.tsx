@@ -12,7 +12,7 @@ import PackagesUsingPlugin from '../PackageDetailView/UsedByComponent/PackagesUs
 import styles from './Plugin.styles';
 import ClipLoader from 'react-spinners/ClipLoader';
 import modalActionDispatchers from '../../actions/ModalActionDispatchers';
-import * as Radium from 'radium';
+import Radium from 'radium';
 import { BLUE_COLOR } from '../../../styles/DefaultStylingProperties';
 import Options from '../Assets/Buttons/Options';
 

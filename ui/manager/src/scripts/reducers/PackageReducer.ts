@@ -24,7 +24,7 @@ import {
   FETCH_PACKAGE_JSON_SCHEMA_SUCCESS,
   DUPLICATE_SUCCESS,
 } from '../actions/EddiApiActionTypes';
-import * as update from 'immutability-helper';
+import update from 'immutability-helper';
 import {
   IFetchPackageDataFailedAction,
   IFetchPackageDataSuccessAction,
@@ -419,9 +419,9 @@ const PackageReducer: IPackageReducer = (
             });
             return newPackageList.concat(updatedPackages);
           },
-          isLoadingAllPackages: {
-            $set: false,
-          },
+        },
+        isLoadingAllPackages: {
+          $set: false,
         },
       });
 

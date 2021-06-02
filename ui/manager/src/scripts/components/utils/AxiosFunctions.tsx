@@ -357,7 +357,7 @@ export interface IPluginExtensions {
 }
 
 export interface IPlugins {
-  packageExtensions: IPluginExtensions[];
+  packageExtensions?: IPluginExtensions[];
 }
 
 export interface IPluginsResponse {

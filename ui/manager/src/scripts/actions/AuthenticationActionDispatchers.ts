@@ -77,8 +77,6 @@ const actions: IAuthenticationActionDispatchers = {
   signOutSuccessAction,
 };
 
-const authenticationActionDispatchers: IAuthenticationActionDispatchers = bindActionCreators<
-  IAuthenticationActionDispatchers
->(actions, store.dispatch);
+const authenticationActionDispatchers: IAuthenticationActionDispatchers = bindActionCreators(actions, store.dispatch);
 
 export default authenticationActionDispatchers;

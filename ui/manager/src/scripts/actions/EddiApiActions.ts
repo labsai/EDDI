@@ -108,6 +108,7 @@ import {
   IEddiSchema,
   IPackage,
   IPlugin,
+  IPlugins,
   IPluginsResponse,
 } from '../components/utils/AxiosFunctions';
 
@@ -653,12 +654,12 @@ export function fetchPackageDataAction(
 }
 
 export interface IFetchPackageDataSuccessAction extends Action {
-  packageData: IPluginsResponse[];
+  packageData: IPlugins;
   packageResource: string;
 }
 
 export function fetchPackageDataSuccessAction(
-  packageData: IPluginsResponse[],
+  packageData: IPlugins,
   packageResource: string,
 ): IFetchPackageDataSuccessAction {
   return {

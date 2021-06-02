@@ -2,7 +2,7 @@ import * as React from 'react';
 import { compose, pure, setDisplayName } from 'recompose';
 import { Dropdown } from 'semantic-ui-react';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
-import * as Radium from 'radium';
+import Radium from 'radium';
 import { GREY_COLOR } from '../../../../styles/DefaultStylingProperties';
 import { IBot } from '../../utils/AxiosFunctions';
 import modalActionDispatchers from '../../../actions/ModalActionDispatchers';

@@ -1,7 +1,7 @@
 import * as React from 'react';
 import * as renderIf from 'render-if';
 import * as _ from 'lodash';
-import * as Radium from 'radium';
+import Radium from 'radium';
 import { compose, pure, setDisplayName } from 'recompose';
 import eddiApiActionDispatchers from '../../actions/EddiApiActionDispatchers';
 import { IConversation } from '../utils/AxiosFunctions';
@@ -153,8 +153,8 @@ const ComposedConversationList: React.ComponentClass<IPublicProps> = compose<
   IPrivateProps
 >(
   pure,
-  Radium,
   connect(conversationsSelector),
+  Radium,
   setDisplayName('ConversationList'),
 )(ConversationList);
 

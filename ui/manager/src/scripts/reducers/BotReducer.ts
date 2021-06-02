@@ -25,7 +25,7 @@ import {
   DEPLOY_EXAMPLE_BOTS_FAILED,
   DEPLOY_EXAMPLE_BOTS_SUCCESS,
 } from '../actions/EddiApiActionTypes';
-import * as update from 'immutability-helper';
+import update from 'immutability-helper';
 import {
   IFetchBotsFailedAction,
   IFetchBotsSuccessAction,
@@ -231,7 +231,8 @@ const BotReducer: IBotReducer = (
               }
               return bot;
             });
-            return updatedBotList.unshift(updatedBot);
+            updatedBotList.unshift(updatedBot);
+            return updatedBotList;
           },
         },
       });
@@ -300,9 +301,9 @@ const BotReducer: IBotReducer = (
             });
             return newBotList.concat(updatedBots);
           },
-          isLoadingAllBots: {
-            $set: false,
-          },
+        },
+        isLoadingAllBots: {
+          $set: false,
         },
       });
 

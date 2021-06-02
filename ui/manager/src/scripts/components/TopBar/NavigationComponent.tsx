@@ -1,5 +1,5 @@
 import * as React from 'react';
-import * as Radium from 'radium';
+import Radium from 'radium';
 import { CSSProperties } from 'react';
 import { historyPush } from '../../history';
 import PluginSelectComponent from './PluginSelectComponent';

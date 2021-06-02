@@ -1,7 +1,7 @@
 import * as React from 'react';
 import * as renderIf from 'render-if';
 import * as _ from 'lodash';
-import * as Radium from 'radium';
+import Radium from 'radium';
 import { compose, pure, setDisplayName } from 'recompose';
 import { connect } from 'react-redux';
 import styles from './ConversationList.styles';
@@ -131,8 +131,8 @@ const ComposedConversationList: React.ComponentClass<IPublicProps> = compose<
   IPrivateProps
 >(
   pure,
-  Radium,
   connect(botConversationSelector),
+  Radium,
   setDisplayName('ConversationList'),
 )(ConversationList);
 

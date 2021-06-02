@@ -1,6 +1,6 @@
 import * as React from 'react';
 import { compose, pure, setDisplayName } from 'recompose';
-import * as Radium from 'radium';
+import Radium from 'radium';
 import { CSSProperties } from 'react';
 import { IDetailedDescriptor } from '../../utils/AxiosFunctions';
 import modalActionDispatchers from '../../../actions/ModalActionDispatchers';

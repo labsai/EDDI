@@ -12,7 +12,7 @@ import WhiteButton from '../../Assets/Buttons/WhiteButton';
 import SquareXButton from '../../Assets/Buttons/SquareXButton';
 import PluginHelper from '../../utils/helpers/PluginHelper';
 import ModalActionDispatchers from '../../../actions/ModalActionDispatchers';
-import * as Radium from 'radium';
+import Radium from 'radium';
 
 interface IPublicProps {
   pluginType: IPluginExtensions;

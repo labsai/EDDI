@@ -1,6 +1,6 @@
 import * as React from 'react';
 import * as renderIf from 'render-if';
-import * as Radium from 'radium';
+import Radium from 'radium';
 import { compose, pure, setDisplayName } from 'recompose';
 import * as _ from 'lodash';
 import * as moment from 'moment';

@@ -2,7 +2,7 @@ import * as React from 'react';
 import Bot from './Bot';
 import * as renderIf from 'render-if';
 import * as _ from 'lodash';
-import * as Radium from 'radium';
+import Radium from 'radium';
 import { compose, pure, setDisplayName } from 'recompose';
 import eddiApiActionDispatchers from '../../actions/EddiApiActionDispatchers';
 import { deployExampleBots, IBot } from '../utils/AxiosFunctions';
@@ -148,6 +148,6 @@ class BotList extends React.Component<IPrivateProps, IState> {
 const ComposedBotList: React.ComponentClass<IPublicProps> = compose<
   IPublicProps,
   IPrivateProps
->(pure, Radium, connect(botsSelector), setDisplayName('BotList'))(BotList);
+>(pure, connect(botsSelector), Radium, setDisplayName('BotList'))(BotList);
 
 export default ComposedBotList;

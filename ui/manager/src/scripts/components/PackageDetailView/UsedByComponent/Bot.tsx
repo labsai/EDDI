@@ -1,6 +1,6 @@
 import * as React from 'react';
 import { compose, pure, setDisplayName } from 'recompose';
-import * as Radium from 'radium';
+import Radium from 'radium';
 import { IBot } from '../../utils/AxiosFunctions';
 import { connect } from 'react-redux';
 import { botSelector } from '../../../selectors/BotSelectors';

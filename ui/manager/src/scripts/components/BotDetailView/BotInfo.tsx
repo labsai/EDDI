@@ -3,7 +3,7 @@ import BotView from './BotView';
 import { IBot } from '../utils/AxiosFunctions';
 import { compose, pure, setDisplayName } from 'recompose';
 import HomeButtonComponent from '../HomeButton/HomeButtonComponent';
-import * as Radium from 'radium';
+import Radium from 'radium';
 import { specificBotSelector } from '../../selectors/BotSelectors';
 import { connect } from 'react-redux';
 import eddiApiActionDispatchers from '../../actions/EddiApiActionDispatchers';
@@ -70,8 +70,8 @@ class BotInfo extends React.Component<IPrivateProps> {
 
 const ComposedBotInfo: React.ComponentClass<IPublicProps> = compose<IPrivateProps, IPublicProps>(
   pure,
-  Radium,
   connect(specificBotSelector),
+  Radium,
   setDisplayName('BotInfo'),
 )(BotInfo);
 

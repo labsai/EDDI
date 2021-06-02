@@ -15,7 +15,7 @@ import {
   FETCH_PLUGIN_JSON_SCHEMA_SUCCESS,
   DUPLICATE_SUCCESS,
 } from '../actions/EddiApiActionTypes';
-import * as update from 'immutability-helper';
+import update from 'immutability-helper';
 import {
   IFetchPluginFailedAction,
   IFetchPluginSuccessAction,
@@ -211,7 +211,7 @@ const PluginReducer: IPluginReducer = (
         allGitCallsLoaded: {
           $set: pluginType === GITCALLS ? lastPage : state.allHttpCallsLoaded,
         },
-        loadedPropertysetter: {
+        loadedPropertysetters: {
           $set:
             pluginType === PROPERTYSETTER
               ? state.loadedPropertysetters + newPluginsLoaded
@@ -352,7 +352,7 @@ const PluginReducer: IPluginReducer = (
           $set:
             type === GITCALLS ? state.loadedGitCalls + 1 : state.loadedGitCalls,
         },
-        loadedPropertysetter: {
+        loadedPropertysetters: {
           $set:
             type === PROPERTYSETTER
               ? state.loadedPropertysetters + 1

@@ -8,7 +8,7 @@ import BlueButton from '../Assets/Buttons/BlueButton';
 import { pageEnum } from '../pages/pageEnum';
 import * as renderIf from 'render-if';
 import * as Keycloak from 'keycloak-js';
-import * as Radium from 'radium';
+import Radium from 'radium';
 import { connect } from 'react-redux';
 import { compose, pure, setDisplayName } from 'recompose';
 import {

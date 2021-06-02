@@ -1,4 +1,4 @@
-import * as update from 'immutability-helper';
+import update from 'immutability-helper';
 import { Action, Reducer } from 'redux';
 import {
   IShowAddPackagesModalAction,
@@ -77,6 +77,8 @@ export interface IModalState {
   title: string;
   addPlugin?: (plugins: string[]) => void;
   onConfirm?: () => void;
+  name: string;
+  description: string;
 }
 
 export const initialState: IModalState = {
@@ -93,6 +95,8 @@ export const initialState: IModalState = {
   message: null,
   title: null,
   onConfirm: null,
+  name: null,
+  description: null,
 };
 
 const ModalReducer: IModalReducer = (

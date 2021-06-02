@@ -9,7 +9,7 @@ import {
 } from '../../utils/AxiosFunctions';
 import * as renderIf from 'render-if';
 import ReactJson from 'react-json-view';
-import * as Radium from 'radium';
+import Radium from 'radium';
 import {
   DARK_YELLOW_COLOR,
   LIGHT_GREY_COLOR,

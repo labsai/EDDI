@@ -9,7 +9,7 @@ import {
   MEDIUM_FONT3,
   SMALL_FONT2,
 } from '../../../../styles/DefaultStylingProperties';
-import * as Radium from 'radium';
+import Radium from 'radium';
 import TruncateTextComponent from '../../Assets/TruncateTextComponent';
 
 const styles: { [key: string]: IExtendedCSSProperties } = {

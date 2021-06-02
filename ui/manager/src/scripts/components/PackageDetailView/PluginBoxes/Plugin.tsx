@@ -15,7 +15,7 @@ import SquareXButton from '../../Assets/Buttons/SquareXButton';
 import * as PluginType from '../../utils/EddiTypes';
 import PluginHelper from '../../utils/helpers/PluginHelper';
 import { REGULAR_DICTIONARY } from '../../utils/EddiTypes';
-import * as Radium from 'radium';
+import Radium from 'radium';
 
 interface IPublicProps {
   pluginType: IOptions;

@@ -1,4 +1,4 @@
-import * as update from 'immutability-helper';
+import update from 'immutability-helper';
 import { Action, Reducer } from 'redux';
 import { APP_READY } from '../actions/SystemActionTypes';
 

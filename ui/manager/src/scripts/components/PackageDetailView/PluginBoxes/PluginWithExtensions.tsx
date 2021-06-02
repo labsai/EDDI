@@ -18,7 +18,7 @@ import {
   DICTIONARY,
   REGULAR_DICTIONARY,
 } from '../../utils/EddiTypes';
-import * as Radium from 'radium';
+import Radium from 'radium';
 
 const customStyles: { [key: string]: IExtendedCSSProperties } = {
   extensionList: {
@@ -284,8 +284,8 @@ class PluginWithExtensions extends React.Component<IPrivateProps> {
 
 const ComposedPluginWithExtensions: React.ComponentClass<IPublicProps> = compose<IPrivateProps, IPublicProps>(
   pure,
-  setDisplayName('PluginWithExtensions'),
   Radium,
+  setDisplayName('PluginWithExtensions'),
 )(PluginWithExtensions);
 
 export default ComposedPluginWithExtensions;

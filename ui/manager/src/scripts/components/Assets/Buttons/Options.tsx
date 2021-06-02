@@ -3,7 +3,7 @@ import { compose, pure, setDisplayName } from 'recompose';
 import { CSSProperties } from 'react';
 import { Dropdown } from 'semantic-ui-react';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
-import * as Radium from 'radium';
+import Radium from 'radium';
 import {
   GREY_COLOR,
   LIGHT_GREY_COLOR2,

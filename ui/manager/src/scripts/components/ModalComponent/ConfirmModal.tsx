@@ -1,5 +1,4 @@
 import * as React from 'react';
-import * as Modal from 'react-modal';
 import styles from './ConfirmModal.styles';
 import './ModalComponent.styles.scss';
 import { compose, pure, setDisplayName } from 'recompose';

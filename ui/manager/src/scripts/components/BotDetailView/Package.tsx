@@ -1,5 +1,5 @@
 import * as React from 'react';
-import * as Radium from 'radium';
+import Radium from 'radium';
 import * as renderIf from 'render-if';
 import PluginList from './PluginList';
 import styles from './Package.styles';

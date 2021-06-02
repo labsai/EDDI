@@ -2,7 +2,7 @@ import * as React from 'react';
 import { compose, pure, setDisplayName } from 'recompose';
 import { CSSProperties } from 'react';
 import Button from './Button';
-import * as Radium from 'radium';
+import Radium from 'radium';
 import {
   ERROR,
   IN_PROGRESS,

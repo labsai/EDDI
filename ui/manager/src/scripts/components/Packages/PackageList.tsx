@@ -1,7 +1,7 @@
 import * as React from 'react';
 import * as renderIf from 'render-if';
 import * as _ from 'lodash';
-import * as Radium from 'radium';
+import Radium from 'radium';
 import { compose, pure, setDisplayName } from 'recompose';
 import eddiApiActionDispatchers from '../../actions/EddiApiActionDispatchers';
 import { IPackage } from '../utils/AxiosFunctions';
@@ -134,7 +134,12 @@ class PackageList extends React.Component<IPrivateProps, IState> {
 const ComposedPackageList: React.ComponentClass<IPublicProps> = compose<
   IPublicProps,
   IPrivateProps
->(pure, Radium, connect(packagesSelector), setDisplayName('PackageList'))(
+>(
+    pure,
+    connect(packagesSelector),
+    Radium,
+    setDisplayName('PackageList'),
+  )(
   PackageList,
 );
 

@@ -1,7 +1,7 @@
 import * as React from 'react';
 import { compose, pure, setDisplayName } from 'recompose';
 import { CSSProperties } from 'react';
-import * as Radium from 'radium';
+import Radium from 'radium';
 import { BLUE_COLOR } from '../../../../../styles/DefaultStylingProperties';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import styles from './EditorButton.styles';

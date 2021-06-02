@@ -1,7 +1,7 @@
 import { IBot, IPackage } from '../utils/AxiosFunctions';
 import Package from './Package';
 import * as React from 'react';
-import * as Radium from 'radium';
+import Radium from 'radium';
 import { compose, pure, setDisplayName } from 'recompose';
 import { CSSProperties } from 'react';
 

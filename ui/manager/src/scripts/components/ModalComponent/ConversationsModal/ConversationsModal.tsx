@@ -14,7 +14,7 @@ import BlueButton from '../../Assets/Buttons/BlueButton';
 import VersionSelectComponent from '../../Assets/VersionSelectComponent';
 import Parser from '../../utils/Parser';
 import Options from '../../Assets/Buttons/Options';
-import * as Radium from 'radium';
+import Radium from 'radium';
 import { historyPush } from '../../../history';
 import ConversationList from './ConversationList';
 

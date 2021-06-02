@@ -8,7 +8,7 @@ import {
 } from '../../utils/AxiosFunctions';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import styles from './ConversationSteps.styles';
-import * as Radium from 'radium';
+import Radium from 'radium';
 import {
   BLUE_COLOR,
   GREY_COLOR,

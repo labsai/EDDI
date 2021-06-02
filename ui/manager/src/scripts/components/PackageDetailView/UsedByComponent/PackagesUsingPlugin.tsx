@@ -1,6 +1,6 @@
 import * as React from 'react';
 import { compose, pure, setDisplayName } from 'recompose';
-import * as Radium from 'radium';
+import Radium from 'radium';
 import * as _ from 'lodash';
 import Package from './Package';
 import eddiApiActionDispatchers from '../../../actions/EddiApiActionDispatchers';
