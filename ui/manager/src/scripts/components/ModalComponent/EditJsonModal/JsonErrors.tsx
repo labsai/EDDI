@@ -1,16 +1,11 @@
 import * as React from 'react';
 import { compose, pure, setDisplayName } from 'recompose';
-import * as renderIf from 'render-if';
 import {
   BLACK_COLOR,
   MEDIUM_FONT,
   MEDIUM_FONT2,
   RED_COLOR,
-  SMALL_FONT,
-  SMALL_FONT2,
 } from '../../../../styles/DefaultStylingProperties';
-import { CSSProperties } from 'react';
-import * as Ajv from 'ajv';
 import { IJsonError } from '../../utils/helpers/JsonHelpers';
 
 const warningIcon = require('../../../../public/images/WarningIcon@3x.png');

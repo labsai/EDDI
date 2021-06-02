@@ -240,11 +240,11 @@ export async function getReadOnly(): Promise<boolean> {
       .then(overrides => {
         if (overrides.data.READ_ONLY_DOMAIN) {
           let readOnlyDomain = overrides.data.READ_ONLY_DOMAIN.split(',');
-          return readOnlyDomain.includes(apiUrl);
+          return readOnlyDomain?.includes(apiUrl);
         } else {
           if (process.env.readOnlyDomain) {
             let readOnlyDomain = process.env.readOnlyDomain.split(',');
-            return readOnlyDomain.includes(apiUrl);
+            return readOnlyDomain?.includes(apiUrl);
           } else {
             throw new Error('No readOnly defined');
           }
@@ -254,7 +254,7 @@ export async function getReadOnly(): Promise<boolean> {
         if (process.env.environment === 'local') {
           let readOnlyDomain = process.env.readOnlyDomain.split(',');
           return (readOnlyPromise = Promise.resolve(
-            readOnlyDomain.includes(apiUrl),
+            readOnlyDomain?.includes(apiUrl),
           ));
         } else {
           console.error(`Failed to get readOnly. Error: ${err.message}`);
@@ -268,21 +268,21 @@ export async function getReadOnly(): Promise<boolean> {
 }
 
 export function getTypeFromResource(resource: string): string {
-  if (resource.includes(REGULAR_DICTIONARY_PATH)) {
+  if (resource?.includes(REGULAR_DICTIONARY_PATH)) {
     return REGULAR_DICTIONARY;
-  } else if (resource.includes(BEHAVIOR_PATH)) {
+  } else if (resource?.includes(BEHAVIOR_PATH)) {
     return BEHAVIOR;
-  } else if (resource.includes(OUTPUT_PATH)) {
+  } else if (resource?.includes(OUTPUT_PATH)) {
     return OUTPUT;
-  } else if (resource.includes(HTTPCALLS_PATH)) {
+  } else if (resource?.includes(HTTPCALLS_PATH)) {
     return HTTPCALLS;
-  } else if (resource.includes(GITCALLS_PATH)) {
+  } else if (resource?.includes(GITCALLS_PATH)) {
     return GITCALLS;
-  } else if (resource.includes(PROPERTYSETTER_PATH)) {
+  } else if (resource?.includes(PROPERTYSETTER_PATH)) {
     return PROPERTYSETTER;
-  } else if (resource.includes(BOT_PATH)) {
+  } else if (resource?.includes(BOT_PATH)) {
     return BOT;
-  } else if (resource.includes(PACKAGE_PATH)) {
+  } else if (resource?.includes(PACKAGE_PATH)) {
     return PACKAGE;
   }
 }
