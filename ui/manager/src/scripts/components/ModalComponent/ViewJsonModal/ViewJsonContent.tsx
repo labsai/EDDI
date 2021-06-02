@@ -1,8 +1,7 @@
 import * as React from 'react';
-import * as Modal from 'react-modal';
 import styles from './ViewJsonModal.styles';
 import '../ModalComponent.styles.scss';
-import { Component, compose, pure, setDisplayName } from 'recompose';
+import { compose, pure, setDisplayName } from 'recompose';
 import * as moment from 'moment';
 import * as _ from 'lodash';
 import * as renderIf from 'render-if';
@@ -143,7 +142,7 @@ class ViewJsonContent extends React.Component<IPrivateProps, IState> {
   }
 }
 
-const ComposedViewJsonContent: Component<IProps> = compose<IProps>(
+const ComposedViewJsonContent: React.ComponentClass<IPublicProps> = compose<IPrivateProps, IPublicProps>(
   pure,
   connect(readOnlySelector),
   setDisplayName('ViewJsonContent'),

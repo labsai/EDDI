@@ -1,7 +1,7 @@
 import * as React from 'react';
 import TopBarComponent from '../TopBar/TopBarComponent';
 import styles from '../App.style';
-import { Component, compose, pure, setDisplayName } from 'recompose';
+import { compose, pure, setDisplayName } from 'recompose';
 import { pageEnum } from './pageEnum';
 import ConversationList from '../Conversations/ConversationList';
 
@@ -37,9 +37,9 @@ class ConversationsPage extends React.Component<IProps, IState> {
   }
 }
 
-const ComposedConversationsPage: Component<IPublicProps> = compose<
-  IPublicProps,
-  IPrivateProps
->(pure, setDisplayName('ConversationsPage'))(ConversationsPage);
+const ComposedConversationsPage: React.ComponentClass<IProps> = compose<IProps, IState>(
+  pure,
+  setDisplayName('ConversationsPage'),
+)(ConversationsPage);
 
 export default ComposedConversationsPage;

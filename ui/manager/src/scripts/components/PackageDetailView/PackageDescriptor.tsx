@@ -1,12 +1,12 @@
 import * as React from 'react';
 import * as Radium from 'radium';
 import { CSSProperties } from 'react';
-import { Component, compose, pure, setDisplayName } from 'recompose';
+import { compose, pure, setDisplayName } from 'recompose';
 import * as moment from 'moment';
 import { IPackage } from '../utils/AxiosFunctions';
 import { getDate } from '../utils/DateFormat';
 
-const styles: CSSProperties = {
+const styles: { [key: string]: IExtendedCSSProperties } = {
   content: {
     color: '#16325C',
     fontSize: '13px',
@@ -59,7 +59,7 @@ const PackageDescriptor: React.StatelessComponent<IProps> = (props: IProps) => (
   </div>
 );
 
-const ComposedPackageDescriptor: Component<IProps> = compose<IProps>(
+const ComposedPackageDescriptor: React.ComponentClass<IProps> = compose<IProps, IProps>(
   pure,
   setDisplayName('PackageDescriptor'),
 )(PackageDescriptor);

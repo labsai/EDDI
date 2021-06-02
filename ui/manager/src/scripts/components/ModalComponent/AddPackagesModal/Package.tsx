@@ -1,5 +1,5 @@
 import * as React from 'react';
-import { Component, compose, pure, setDisplayName } from 'recompose';
+import { compose, pure, setDisplayName } from 'recompose';
 import { IPackage } from '../../utils/AxiosFunctions';
 import { packageSelector } from '../../../selectors/PackageSelectors';
 import * as moment from 'moment';
@@ -8,7 +8,6 @@ import VersionSelectComponent from '../../Assets/VersionSelectComponent';
 import TruncateTextComponent from '../../Assets/TruncateTextComponent';
 import * as _ from 'lodash';
 import { connect } from 'react-redux';
-import eddiApiActionDispatchers from '../../../actions/EddiApiActionDispatchers';
 import styles from './Package.styles';
 import BotsUsingPackage from '../../PackageDetailView/UsedByComponent/BotsUsingPackage';
 
@@ -126,7 +125,7 @@ class Package extends React.Component<IPrivateProps> {
   }
 }
 
-const ComposedPackage: Component<IPrivateProps> = compose<
+const ComposedPackage: React.ComponentClass<IPublicProps> = compose<
   IPrivateProps,
   IPublicProps
 >(pure, connect(packageSelector), setDisplayName('Package'))(Package);

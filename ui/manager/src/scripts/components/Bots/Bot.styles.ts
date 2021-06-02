@@ -10,7 +10,7 @@ import {
   SMALL_FONT,
 } from '../../../styles/DefaultStylingProperties';
 
-const styles: CSSProperties = {
+const styles: { [key: string]: IExtendedCSSProperties } = {
   botBox: {
     border: `1px solid ${LIGHT_GREY_COLOR2}`,
     borderRadius: '4px',
@@ -29,7 +29,7 @@ const styles: CSSProperties = {
     width: '100%',
   },
   botHeaderCenter: {
-    flex: '1',
+    flex: 1,
   },
   botHeaderName: {
     color: DARK_GREY_COLOR,
@@ -65,7 +65,7 @@ const styles: CSSProperties = {
   },
   link: {
     display: 'flex',
-    flex: '1',
+    flex: 1,
     textDecoration: 'none',
     cursor: 'pointer',
     ':hover': {

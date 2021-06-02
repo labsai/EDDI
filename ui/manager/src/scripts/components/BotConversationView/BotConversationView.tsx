@@ -1,9 +1,9 @@
 import * as React from 'react';
-import { Component, compose, pure, setDisplayName } from 'recompose';
+import { compose, pure, setDisplayName } from 'recompose';
 import { connect } from 'react-redux';
 import styles from './BotConversionView.styles';
 import eddiApiActionDispatchers from '../../actions/EddiApiActionDispatchers';
-import { IConversation, IConversationData } from '../utils/AxiosFunctions';
+import { IConversation } from '../utils/AxiosFunctions';
 import { conversationSelector } from '../../selectors/ConversationSelectors';
 import * as renderIf from 'render-if';
 import ConversationSteps from './ConversationTab/ConversationSteps';
@@ -16,7 +16,7 @@ import ConversationProperties from './ConversationTab/ConversationProperties';
 import WhiteButton from '../Assets/Buttons/WhiteButton';
 import { CONVERSATION_READY } from '../utils/helpers/ConversationHelper';
 import modalActionDispatchers from '../../actions/ModalActionDispatchers';
-import { ClipLoader } from 'react-spinners';
+import ClipLoader from 'react-spinners/ClipLoader';
 import { BLUE_COLOR } from '../../../styles/DefaultStylingProperties';
 import { readOnlySelector } from '../../selectors/AuthenticationSelectors';
 
@@ -224,8 +224,8 @@ class BotConversationView extends React.Component<IPrivateProps, IState> {
   }
 }
 
-const ComposedBotConversationView: Component<IPrivateProps> = compose<
-  IPrivateProps
+const ComposedBotConversationView: React.ComponentClass<IPublicProps> = compose<
+  IPrivateProps, IPublicProps
 >(
   pure,
   connect(conversationSelector),

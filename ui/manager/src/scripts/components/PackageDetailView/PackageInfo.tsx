@@ -1,13 +1,13 @@
 import * as React from 'react';
 import PackageView from './PackageView';
 import { IPackage } from '../utils/AxiosFunctions';
-import { Component, compose, pure, setDisplayName } from 'recompose';
+import { compose, pure, setDisplayName } from 'recompose';
 import HomeButtonComponent from '../HomeButton/HomeButtonComponent';
 import { connect } from 'react-redux';
 import eddiApiActionDispatchers from '../../actions/EddiApiActionDispatchers';
 import styles from '../Bots/Botlist.styles';
 import * as _ from 'lodash';
-import { ClimbingBoxLoader } from 'react-spinners';
+import ClimbingBoxLoader from 'react-spinners/ClimbingBoxLoader';
 import * as renderIf from 'render-if';
 import { specificPackageSelector } from '../../selectors/PackageSelectors';
 import { PACKAGE, PACKAGE_PATH } from '../utils/EddiTypes';
@@ -63,7 +63,7 @@ class PackageInfo extends React.Component<IPrivateProps> {
   }
 }
 
-const ComposedPackageInfo: Component<IPrivateProps> = compose<IPrivateProps>(
+const ComposedPackageInfo: React.ComponentClass<IPublicProps, IPrivateProps> = compose<IPublicProps, IPrivateProps>(
   pure,
   connect(specificPackageSelector),
   setDisplayName('PackageInfo'),

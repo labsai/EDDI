@@ -1,6 +1,5 @@
 import * as React from 'react';
-import { Component, compose, pure, setDisplayName } from 'recompose';
-import * as renderIf from 'render-if';
+import { compose, pure, setDisplayName } from 'recompose';
 import { IConversationProperties } from '../../utils/AxiosFunctions';
 import { CSSProperties } from 'react';
 import {
@@ -13,7 +12,7 @@ import {
 import * as Radium from 'radium';
 import TruncateTextComponent from '../../Assets/TruncateTextComponent';
 
-const styles: CSSProperties = {
+const styles: { [key: string]: IExtendedCSSProperties } = {
   title: {
     fontSize: MEDIUM_FONT3,
     color: DARK_BLUE_COLOR,
@@ -94,7 +93,7 @@ class ConversationProperties extends React.Component<IProps> {
   }
 }
 
-const ComposedConversationProperties: Component<IProps> = compose<IProps>(
+const ComposedConversationProperties: React.ComponentClass<IProps> = compose<IProps, IProps>(
   pure,
   Radium,
   setDisplayName('ConversationProperties'),

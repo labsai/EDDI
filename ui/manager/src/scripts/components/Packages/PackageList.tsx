@@ -2,11 +2,11 @@ import * as React from 'react';
 import * as renderIf from 'render-if';
 import * as _ from 'lodash';
 import * as Radium from 'radium';
-import { Component, compose, pure, setDisplayName } from 'recompose';
+import { compose, pure, setDisplayName } from 'recompose';
 import eddiApiActionDispatchers from '../../actions/EddiApiActionDispatchers';
 import { IPackage } from '../utils/AxiosFunctions';
 import { connect } from 'react-redux';
-import { ClimbingBoxLoader } from 'react-spinners';
+import ClimbingBoxLoader from 'react-spinners/ClimbingBoxLoader';
 import { getAPIUrl } from '../utils/ApiFunctions';
 import * as InfiniteScrollTypes from 'react-infinite-scroller';
 import PackageContainer from '../BotDetailView/PackageContainer';
@@ -121,7 +121,6 @@ class PackageList extends React.Component<IPrivateProps, IState> {
                 <PackageContainer
                   key={pkg.id}
                   packageResource={pkg.resource}
-                  style={styles.pkg}
                 />
               ))}
             </InfiniteScroll>
@@ -132,7 +131,7 @@ class PackageList extends React.Component<IPrivateProps, IState> {
   }
 }
 
-const ComposedPackageList: Component<IPublicProps> = compose<
+const ComposedPackageList: React.ComponentClass<IPublicProps> = compose<
   IPublicProps,
   IPrivateProps
 >(pure, Radium, connect(packagesSelector), setDisplayName('PackageList'))(

@@ -1,5 +1,4 @@
 import * as React from 'react';
-import * as Modal from 'react-modal';
 import { connect } from 'react-redux';
 import ModalActionDispatchers from '../../actions/ModalActionDispatchers';
 import { modalSelector } from '../../selectors/ModalSelectors';
@@ -11,8 +10,7 @@ import {
 } from '../utils/AxiosFunctions';
 import styles from './ModalComponent.styles';
 import './ModalComponent.styles.scss';
-import { Link, browserHistory } from 'react-router-dom';
-import { Component, compose, pure, setDisplayName } from 'recompose';
+import { compose, pure, setDisplayName } from 'recompose';
 import CreateBotModal from './CreateBotModal';
 import EditDescriptorModal from './EditDescriptorModal';
 import AddPackagesModal from './AddPackagesModal/AddPackagesModal';
@@ -34,7 +32,7 @@ import { getTypeFromResource } from '../utils/ApiFunctions';
 import ConversationsModal from './ConversationsModal/ConversationsModal';
 import BasicAuthModal from './BasicAuthModal/BasicAuthModal';
 
-const randomStyles: CSSProperties = {
+const randomStyles: { [key: string]: IExtendedCSSProperties } = {
   content: {
     background: '#fff',
     border: '1px solid #ccc',
@@ -98,7 +96,7 @@ interface IPrivateProps {
   selectedResources: string[];
   descriptor?: IDetailedDescriptor;
   resource?: string;
-  data?: {};
+  data?: string;
   name?: string;
   description?: string;
   message?: string;
@@ -106,6 +104,8 @@ interface IPrivateProps {
   onConfirm?(): void;
   addPlugin?(plugins: string[]): void;
 }
+
+interface IPublicProps {}
 
 class ModalComponentFrame extends React.Component<IPrivateProps, IState> {
   constructor(props) {
@@ -244,8 +244,8 @@ class ModalComponentFrame extends React.Component<IPrivateProps, IState> {
   }
 }
 
-const ComposedModalComponentFrame: Component<IPrivateProps> = compose<
-  IPrivateProps
+const ComposedModalComponentFrame: React.ComponentClass<IPublicProps> = compose<
+  IPrivateProps, IPublicProps
 >(pure, setDisplayName('Modal'), connect(modalSelector))(ModalComponentFrame);
 
 export default ComposedModalComponentFrame;

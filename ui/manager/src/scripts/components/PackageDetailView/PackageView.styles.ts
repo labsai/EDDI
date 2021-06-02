@@ -9,15 +9,15 @@ import {
   SMALL_FONT2,
 } from '../../../styles/DefaultStylingProperties';
 
-const styles: CSSProperties = {
+const styles: { [key: string]: IExtendedCSSProperties } = {
   packageHeader: {
     display: 'flex',
-    flex: '1',
+    flex: 1,
     height: '35px',
     marginTop: '47px',
   },
   packageHeaderSpacing: {
-    flexGrow: '1',
+    flexGrow: 1,
   },
   packageName: {
     color: DARK_BLUE_COLOR,

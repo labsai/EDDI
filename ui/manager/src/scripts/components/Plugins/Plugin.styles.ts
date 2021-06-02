@@ -8,7 +8,7 @@ import {
   LIGHT_GREY_COLOR3,
 } from '../../../styles/DefaultStylingProperties';
 
-const styles: CSSProperties = {
+const styles: { [key: string]: IExtendedCSSProperties } = {
   pluginName: {
     color: DARK_BLUE_COLOR,
     fontSize: LARGE_FONT,
@@ -20,7 +20,7 @@ const styles: CSSProperties = {
     overflow: 'hidden',
   },
   centerFlex: {
-    flex: '1',
+    flex: 1,
   },
   modifiedDate: {
     color: GREY_COLOR,

@@ -1,7 +1,6 @@
 import * as React from 'react';
 import '../ModalComponent.styles.scss';
-import { Link, browserHistory } from 'react-router-dom';
-import { Component, compose, pure, setDisplayName } from 'recompose';
+import { compose, pure, setDisplayName } from 'recompose';
 import { IBot, IPackage } from '../../utils/AxiosFunctions';
 import { connect } from 'react-redux';
 import * as _ from 'lodash';
@@ -10,7 +9,7 @@ import styles from '../AddPackagesModal/AddPackagesModal.styles';
 import ModalActionDispatchers from '../../../actions/ModalActionDispatchers';
 import * as renderIf from 'render-if';
 import BlueButton from '../../Assets/Buttons/BlueButton';
-import { ClimbingBoxLoader } from 'react-spinners';
+import ClimbingBoxLoader from 'react-spinners/ClimbingBoxLoader';
 import SelectableConfig from './SelectableConfig';
 import { botsSelector } from '../../../selectors/BotSelectors';
 import { DEFAULT_LIMIT } from '../../utils/ApiFunctions';
@@ -141,7 +140,7 @@ class AddNewPackageToBotModal extends React.Component<IPrivateProps, IState> {
   }
 }
 
-const ComposedAddNewPackageToBotModal: Component<IPrivateProps> = compose<
+const ComposedAddNewPackageToBotModal: React.ComponentClass<IPublicProps> = compose<
   IPrivateProps,
   IPublicProps
 >(pure, setDisplayName('AddNewPackageToBotModal'), connect(botsSelector))(

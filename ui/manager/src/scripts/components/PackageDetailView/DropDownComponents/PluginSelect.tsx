@@ -1,5 +1,5 @@
 import * as React from 'react';
-import { Component, compose, pure, setDisplayName } from 'recompose';
+import { compose, pure, setDisplayName } from 'recompose';
 import Select from 'react-select';
 import * as _ from 'lodash';
 import Parser from '../../utils/Parser';
@@ -10,7 +10,7 @@ import {
   IPluginExtensions,
 } from '../../utils/AxiosFunctions';
 
-const styling: CSSProperties = {
+const styling: { [key: string]: IExtendedCSSProperties } = {
   dropDown: {
     maxWidth: '40%',
   },
@@ -84,7 +84,7 @@ class VersionDropDownComponent extends React.Component<IProps, IState> {
   }
 }
 
-const ComposedVersionDropDownComponent: Component<IProps> = compose<
+const ComposedVersionDropDownComponent: React.ComponentClass<IProps> = compose<
   IProps,
   IProps
 >(pure, setDisplayName('VersionDropDownComponent'))(VersionDropDownComponent);

@@ -1,7 +1,7 @@
 import * as React from 'react';
 import TopBarComponent from '../TopBar/TopBarComponent';
 import styles from '../App.style';
-import { Component, compose, pure, setDisplayName } from 'recompose';
+import { compose, pure, setDisplayName } from 'recompose';
 import Parser from '../utils/Parser';
 import PluginList from '../Plugins/PluginList';
 import {
@@ -84,9 +84,9 @@ class ExtensionsPage extends React.Component<IProps, IState> {
   }
 }
 
-const ComposedExtensionsPage: Component<IPublicProps> = compose<
-  IPublicProps,
-  IPrivateProps
->(pure, setDisplayName('ExtensionsPage'))(ExtensionsPage);
+const ComposedExtensionsPage: React.ComponentClass<IProps>  = compose<IProps, IProps>(
+  pure,
+  setDisplayName('ExtensionsPage'),
+)(ExtensionsPage);
 
 export default ComposedExtensionsPage;

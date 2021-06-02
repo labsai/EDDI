@@ -11,7 +11,7 @@ import {
   SMALL_FONT2,
 } from '../../../../styles/DefaultStylingProperties';
 
-const styles: CSSProperties = {
+const styles: { [key: string]: IExtendedCSSProperties } = {
   packageName: {
     color: GREY_COLOR,
     fontSize: LARGE_FONT,
@@ -23,7 +23,7 @@ const styles: CSSProperties = {
     overflow: 'hidden',
   },
   centerFlex: {
-    flex: '1',
+    flex: 1,
   },
   modifiedDate: {
     color: GREY_COLOR,

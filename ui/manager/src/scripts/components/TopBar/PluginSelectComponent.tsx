@@ -1,7 +1,7 @@
 import * as React from 'react';
 import * as Radium from 'radium';
 import * as renderIf from 'render-if';
-import { Component, compose, pure, setDisplayName } from 'recompose';
+import { compose, pure, setDisplayName } from 'recompose';
 import Select from 'react-select';
 import * as _ from 'lodash';
 import { CSSProperties } from 'react';
@@ -10,7 +10,7 @@ import { historyPush } from '../../history';
 import styles from './PluginSelectComponent.styles';
 import { pageEnum } from '../pages/pageEnum';
 
-const customStyles = {
+const customStyles: { [key: string]: (base: any, state: any) => React.CSSProperties } = {
   control: (base, state) => ({
     ...base,
     ...styles.control,
@@ -146,7 +146,7 @@ class PluginSelectComponent extends React.Component<IProps, IState> {
   }
 }
 
-const ComposedPluginSelectComponent: Component<IProps> = compose<IProps>(
+const ComposedPluginSelectComponent: React.ComponentClass<IProps> = compose<IProps, IProps>(
   pure,
   setDisplayName('PluginSelectComponent'),
 )(PluginSelectComponent);

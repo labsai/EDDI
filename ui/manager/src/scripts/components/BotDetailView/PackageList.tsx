@@ -3,7 +3,7 @@ import ModalActionDispatchers from '../../actions/ModalActionDispatchers';
 import PackageContainer from './PackageContainer';
 import Package from './Package';
 import { CSSProperties } from 'react';
-import { Component, compose, pure, setDisplayName } from 'recompose';
+import { compose, pure, setDisplayName } from 'recompose';
 import { IBot } from '../utils/AxiosFunctions';
 import * as _ from 'lodash';
 import * as renderIf from 'render-if';
@@ -11,13 +11,13 @@ import eddiApiActionDispatchers from '../../actions/EddiApiActionDispatchers';
 import { ModalEnum } from '../utils/ModalEnum';
 import WhiteButton from '../Assets/Buttons/WhiteButton';
 
-const styles: CSSProperties = {
+const styles: { [key: string]: IExtendedCSSProperties } = {
   packagesHeader: {
     display: 'flex',
     marginTop: '50px',
   },
   headerCenter: {
-    flex: '1',
+    flex: 1,
   },
   packagesTitle: {
     color: '#54698D',
@@ -98,7 +98,7 @@ class PackageList extends React.Component<IPrivateProps, IState> {
   }
 }
 
-const ComposedPackageList: Component<IProps> = compose<IProps>(
+const ComposedPackageList: React.ComponentClass<IPublicProps> = compose<IPrivateProps, IPublicProps>(
   pure,
   setDisplayName('PackageList'),
 )(PackageList);

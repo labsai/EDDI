@@ -1,8 +1,7 @@
 import * as React from 'react';
-import * as Modal from 'react-modal';
 import styles from './BasicAuthModal.styles';
 import '../ModalComponent.styles.scss';
-import { Component, compose, pure, setDisplayName } from 'recompose';
+import { compose, pure, setDisplayName } from 'recompose';
 import WhiteButton from '../../Assets/Buttons/WhiteButton';
 import BlueButton from '../../Assets/Buttons/BlueButton';
 import modalActionDispatchers from '../../../actions/ModalActionDispatchers';
@@ -115,7 +114,7 @@ class BasicAuthModal extends React.Component<IPrivateProps, IState> {
   }
 }
 
-const ComposedBasicAuthModal: Component<IProps> = compose<IProps>(
+const ComposedBasicAuthModal: React.ComponentClass<IPublicProps> = compose<IPrivateProps, IPublicProps>(
   pure,
   connect(authenticationSelector),
   setDisplayName('BasicAuthModal'),

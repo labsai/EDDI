@@ -1,9 +1,9 @@
 import * as React from 'react';
-import { Component, compose, pure, setDisplayName } from 'recompose';
+import { compose, pure, setDisplayName } from 'recompose';
 import { CSSProperties } from 'react';
 import * as Radium from 'radium';
 
-const styles: CSSProperties = {
+const styles: { [key: string]: IExtendedCSSProperties } = {
   button: {
     height: '35px',
     width: '108px',
@@ -50,10 +50,10 @@ function getButtonStyling(props: IProps) {
 }
 interface IProps {
   text: string;
-  disabled: boolean;
-  styles: { button; disabled; active };
-  customStyles: CSSProperties;
-  onClick(): void;
+  disabled?: boolean;
+  styles: { [key: string]: IExtendedCSSProperties };
+  customStyles: { [key: string]: IExtendedCSSProperties };
+  onClick?: (event: React.MouseEvent) => void;
 }
 
 const Button: React.StatelessComponent<IProps> = (props: IProps) => (
@@ -65,7 +65,7 @@ const Button: React.StatelessComponent<IProps> = (props: IProps) => (
   </button>
 );
 
-const ComposedButton: Component<IProps> = compose<IProps>(
+const ComposedButton: React.ComponentClass<IProps> = compose<IProps, IProps>(
   pure,
   Radium,
   setDisplayName('Button'),

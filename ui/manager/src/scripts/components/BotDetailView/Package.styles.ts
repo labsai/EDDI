@@ -1,7 +1,7 @@
 import { CSSProperties } from 'react';
 import { LIGHT_GREY_COLOR3 } from '../../../styles/DefaultStylingProperties';
 
-const styles: CSSProperties = {
+const styles: { [key: string]: IExtendedCSSProperties } = {
   editPackage: {
     border: 'none',
     outline: 'none',
@@ -16,7 +16,7 @@ const styles: CSSProperties = {
     cursor: 'default',
   },
   centerFlex: {
-    flexGrow: '1',
+    flexGrow: 1,
   },
   pack: {
     marginTop: '20px',
@@ -28,7 +28,7 @@ const styles: CSSProperties = {
     },
     cursor: 'pointer',
     display: 'flex',
-    flex: '1',
+    flex: 1,
   },
   packageName: {
     color: '#16325C',

@@ -1,6 +1,6 @@
 import * as React from 'react';
 import '../ModalComponent.styles.scss';
-import { Component, compose, pure, setDisplayName } from 'recompose';
+import { compose, pure, setDisplayName } from 'recompose';
 import * as renderIf from 'render-if';
 import eddiApiActionDispatchers from '../../../actions/EddiApiActionDispatchers';
 import styles from '../ViewJsonModal/ViewJsonModal.styles';
@@ -85,7 +85,7 @@ class ConversationsModal extends React.Component<IProps, IState> {
   }
 }
 
-const ComposedConversationsModal: Component<IProps> = compose<IProps>(
+const ComposedConversationsModal: React.ComponentClass<IProps> = compose<IProps, IProps>(
   pure,
   setDisplayName('ConversationsModal'),
 )(ConversationsModal);

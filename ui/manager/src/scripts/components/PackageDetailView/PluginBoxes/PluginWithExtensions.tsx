@@ -1,5 +1,5 @@
 import * as React from 'react';
-import { Component, compose, pure, setDisplayName } from 'recompose';
+import { compose, pure, setDisplayName } from 'recompose';
 import { IOptions } from '../PackageView';
 import Parser from '../../utils/Parser';
 import * as renderIf from 'render-if';
@@ -20,7 +20,7 @@ import {
 } from '../../utils/EddiTypes';
 import * as Radium from 'radium';
 
-const customStyles: CSSProperties = {
+const customStyles: { [key: string]: IExtendedCSSProperties } = {
   extensionList: {
     display: 'grid',
     marginTop: '10px',
@@ -282,7 +282,7 @@ class PluginWithExtensions extends React.Component<IPrivateProps> {
   }
 }
 
-const ComposedPluginWithExtensions: Component<IProps, IProps> = compose<IProps>(
+const ComposedPluginWithExtensions: React.ComponentClass<IPublicProps> = compose<IPrivateProps, IPublicProps>(
   pure,
   setDisplayName('PluginWithExtensions'),
   Radium,

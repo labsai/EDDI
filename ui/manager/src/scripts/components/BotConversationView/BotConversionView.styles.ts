@@ -13,7 +13,7 @@ import {
   SMALL_FONT2,
 } from '../../../styles/DefaultStylingProperties';
 
-const styles: CSSProperties = {
+const styles: { [key: string]: IExtendedCSSProperties } = {
   content: {
     paddingBottom: '500px',
   },
@@ -33,7 +33,7 @@ const styles: CSSProperties = {
     fontSize: SMALL_FONT2,
     height: '39px',
     textAlign: 'center',
-    flex: '1',
+    flex: 1,
     lineHeight: '42px',
   },
   tabDisabled: {
@@ -87,7 +87,7 @@ const styles: CSSProperties = {
     border: `1px solid ${RED_COLOR}`,
     width: '150px',
     marginLeft: 'auto',
-    disabled: {
+    ':disabled': {
       border: LIGHT_GREY_BORDER,
     },
   },

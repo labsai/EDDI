@@ -1,7 +1,7 @@
 import * as React from 'react';
 import styles from '../ModalComponent.styles';
 import '../ModalComponent.styles.scss';
-import { Component, compose, pure, setDisplayName } from 'recompose';
+import { compose, pure, setDisplayName } from 'recompose';
 import * as renderIf from 'render-if';
 import Parser from '../../utils/Parser';
 import { getPostExample } from '../../utils/EddiConfigExampleData';
@@ -52,7 +52,7 @@ class JsonExample extends React.Component<IPrivateProps, IState> {
   }
 }
 
-const ComposedJsonExample: Component<IPrivateProps> = compose<IPrivateProps>(
+const ComposedJsonExample: React.ComponentClass<IPublicProps> = compose<IPrivateProps, IPublicProps>(
   pure,
   setDisplayName('JsonExample'),
 )(JsonExample);

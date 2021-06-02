@@ -4,7 +4,7 @@ import BotDescriptor from './BotDescriptor';
 import PackageList from './PackageList';
 import * as renderIf from 'render-if';
 import styles from './BotView.styles';
-import { Component, compose, pure, setDisplayName } from 'recompose';
+import { compose, pure, setDisplayName } from 'recompose';
 import { IBot } from '../utils/AxiosFunctions';
 import VersionSelectComponent from '../Assets/VersionSelectComponent';
 import WhiteButton from '../Assets/Buttons/WhiteButton';
@@ -158,7 +158,7 @@ class BotView extends React.Component<IPrivateProps, IState> {
   }
 }
 
-const ComposedBotView: Component<IPrivateProps> = compose<IPrivateProps>(
+const ComposedBotView: React.ComponentClass<IPublicProps> = compose<IPrivateProps, IPublicProps>(
   pure,
   connect(readOnlySelector),
   setDisplayName('BotView'),

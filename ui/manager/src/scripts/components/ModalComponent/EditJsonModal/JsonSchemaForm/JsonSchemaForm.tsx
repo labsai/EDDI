@@ -1,6 +1,6 @@
 import * as React from 'react';
 import * as Radium from 'radium';
-import { Component, compose, pure, setDisplayName } from 'recompose';
+import { compose, pure, setDisplayName } from 'recompose';
 import * as renderIf from 'render-if';
 import Form from 'react-jsonschema-form';
 import { connect } from 'react-redux';
@@ -8,7 +8,7 @@ import { schemaSelector } from '../../../../selectors/SystemSelectors';
 import { JSONSchema4 } from 'json-schema';
 import { CSSProperties } from 'react';
 import * as metaSchema4 from 'ajv/lib/refs/json-schema-draft-04.json';
-const styles: CSSProperties = {
+const styles: { [key: string]: IExtendedCSSProperties } = {
   form: {
     marginTop: '20px',
     marginLeft: '5px',
@@ -49,7 +49,7 @@ const JsonSchemaForm: React.StatelessComponent<IProps> = (props: IProps) => {
   );
 };
 
-const ComposedJsonSchemaForm: Component<IProps> = compose<IProps>(
+const ComposedJsonSchemaForm: React.ComponentClass<IProps> = compose<IProps, IProps>(
   pure,
   Radium,
   setDisplayName('JsonSchemaForm'),

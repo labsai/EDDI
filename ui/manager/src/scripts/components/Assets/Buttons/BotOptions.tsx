@@ -1,5 +1,5 @@
 import * as React from 'react';
-import { Component, compose, pure, setDisplayName } from 'recompose';
+import { compose, pure, setDisplayName } from 'recompose';
 import { Dropdown } from 'semantic-ui-react';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import * as Radium from 'radium';
@@ -148,7 +148,7 @@ class BotOptions extends React.Component<IPrivateProps> {
   }
 }
 
-const ComposedBotOptions: Component<IPrivateProps> = compose<IPrivateProps>(
+const ComposedBotOptions: React.ComponentClass<IPublicProps, IPrivateProps> = compose<IPrivateProps, IPublicProps>(
   pure,
   connect(readOnlySelector),
   Radium,

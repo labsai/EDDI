@@ -8,7 +8,7 @@ import {
   SMALL_FONT2,
 } from '../../../../styles/DefaultStylingProperties';
 
-const editStyles: CSSProperties = {
+const editStyles: { [key: string]: IExtendedCSSProperties } = {
   tabs: {
     display: 'flex',
     marginTop: '30px',
@@ -25,7 +25,7 @@ const editStyles: CSSProperties = {
     fontSize: SMALL_FONT2,
     height: '39px',
     textAlign: 'center',
-    flex: '1',
+    flex: 1,
     lineHeight: '42px',
   },
   tabDisabled: {

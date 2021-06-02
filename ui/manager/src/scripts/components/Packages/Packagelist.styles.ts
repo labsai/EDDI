@@ -1,7 +1,7 @@
 import { CSSProperties } from 'react';
 import { LIGHT_GREY_COLOR } from '../../../styles/DefaultStylingProperties';
 
-const styles: CSSProperties = {
+const styles: { [key: string]: IExtendedCSSProperties } = {
   loadingWrapper: {
     alignItems: 'center',
     display: 'flex',

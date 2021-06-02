@@ -1,7 +1,6 @@
 import * as React from 'react';
 import '../ModalComponent.styles.scss';
-import { Link, browserHistory } from 'react-router-dom';
-import { Component, compose, pure, setDisplayName } from 'recompose';
+import { compose, pure, setDisplayName } from 'recompose';
 import Plugin from './Plugin';
 import { IBot, IDescriptor, IPackage } from '../../utils/AxiosFunctions';
 import { pluginsSelector } from '../../../selectors/PluginSelectors';
@@ -14,7 +13,7 @@ import ModalActionDispatchers from '../../../actions/ModalActionDispatchers';
 import * as renderIf from 'render-if';
 import BlueButton from '../../Assets/Buttons/BlueButton';
 import WhiteButton from '../../Assets/Buttons/WhiteButton';
-import { ClimbingBoxLoader } from 'react-spinners';
+import ClimbingBoxLoader from 'react-spinners/ClimbingBoxLoader';
 import { REGULAR_DICTIONARY } from '../../utils/EddiTypes';
 import { DEFAULT_LIMIT } from '../../utils/ApiFunctions';
 
@@ -268,7 +267,7 @@ class AddPluginModal extends React.Component<IPrivateProps, IState> {
     );
   }
 }
-const ComposedAddPluginModal: Component<IPrivateProps> = compose<IPrivateProps>(
+const ComposedAddPluginModal: React.ComponentClass<IPublicProps> = compose<IPrivateProps, IPublicProps>(
   pure,
   setDisplayName('AddPluginModal'),
   connect(pluginsSelector),

@@ -1,7 +1,7 @@
 import * as React from 'react';
 import styles from '../ModalComponent.styles';
 import '../ModalComponent.styles.scss';
-import { Component, compose, pure, setDisplayName } from 'recompose';
+import { compose, pure, setDisplayName } from 'recompose';
 import eddiApiActionDispatchers from '../../../actions/EddiApiActionDispatchers';
 import BlueButton from '../../Assets/Buttons/BlueButton';
 import modalActionDispatchers from '../../../actions/ModalActionDispatchers';
@@ -32,13 +32,13 @@ interface IState {
   selectedTab: TabEnum;
 }
 
-interface IPrivateProps extends IPublicProps {
+interface IPublicProps  {
   resource: string;
   data: string;
   type: string;
 }
 
-interface IPublicProps {
+interface IPrivateProps extends IPublicProps {
   schema?: JSONSchema4;
 }
 
@@ -206,7 +206,7 @@ class EditJsonModal extends React.Component<IPrivateProps, IState> {
   }
 }
 
-const ComposedEditJsonModal: Component<IPublicProps> = compose<
+const ComposedEditJsonModal: React.ComponentClass<IPublicProps> = compose<
   IPrivateProps,
   IPublicProps
 >(pure, connect(schemaSelector), setDisplayName('EditJsonModal'))(

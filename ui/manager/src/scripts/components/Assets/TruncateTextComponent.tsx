@@ -1,9 +1,9 @@
 import * as React from 'react';
-import { Component, compose, pure, setDisplayName } from 'recompose';
+import { compose, pure, setDisplayName } from 'recompose';
 import { CSSProperties } from 'react';
 import * as renderIf from 'render-if';
 
-const styles: CSSProperties = {
+const styles: { [key: string]: IExtendedCSSProperties } = {
   truncate: {
     overflow: 'hidden',
     textOverflow: 'ellipsis',
@@ -27,6 +27,7 @@ interface IState {
 }
 
 interface IProps {
+  style?: React.CSSProperties;
   text: string;
   length: number;
 }
@@ -83,7 +84,7 @@ class TruncateTextComponent extends React.Component<IProps, IState> {
   }
 }
 
-const ComposedTruncateTextComponent: Component<IProps> = compose<IProps>(
+const ComposedTruncateTextComponent: React.ComponentClass<IProps> = compose<IProps, IProps>(
   pure,
   setDisplayName('TruncateTextComponent'),
 )(TruncateTextComponent);

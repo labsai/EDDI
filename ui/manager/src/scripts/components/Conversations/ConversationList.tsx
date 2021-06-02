@@ -2,12 +2,12 @@ import * as React from 'react';
 import * as renderIf from 'render-if';
 import * as _ from 'lodash';
 import * as Radium from 'radium';
-import { Component, compose, pure, setDisplayName } from 'recompose';
+import { compose, pure, setDisplayName } from 'recompose';
 import eddiApiActionDispatchers from '../../actions/EddiApiActionDispatchers';
 import { IConversation } from '../utils/AxiosFunctions';
 import { connect } from 'react-redux';
 import styles from './ConversationList.styles';
-import { ClimbingBoxLoader } from 'react-spinners';
+import ClimbingBoxLoader from 'react-spinners/ClimbingBoxLoader';
 import * as InfiniteScrollTypes from 'react-infinite-scroller';
 const InfiniteScroll = require('react-infinite-scroller') as InfiniteScrollTypes;
 import Conversation from './Conversation';
@@ -148,7 +148,7 @@ class ConversationList extends React.Component<IPrivateProps, IState> {
   }
 }
 
-const ComposedConversationList: Component<IPublicProps> = compose<
+const ComposedConversationList: React.ComponentClass<IPublicProps> = compose<
   IPublicProps,
   IPrivateProps
 >(

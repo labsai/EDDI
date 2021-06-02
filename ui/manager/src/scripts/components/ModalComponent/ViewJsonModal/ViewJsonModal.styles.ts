@@ -1,6 +1,6 @@
 import { CSSProperties } from 'react';
 
-const styles: CSSProperties = {
+const styles: { [key: string]: IExtendedCSSProperties } = {
   conversation: {
     display: 'flex',
   },
@@ -48,7 +48,7 @@ const styles: CSSProperties = {
     overflow: 'hidden',
   },
   centerFlex: {
-    flex: '1',
+    flex: 1,
   },
   button: {
     width: '165px',
@@ -64,7 +64,7 @@ const styles: CSSProperties = {
     color: '#7A849E',
     fontSize: '14px',
     backgroundColor: '#FFF',
-    flex: '1',
+    flex: 1,
     minHeight: '200px',
     minWidth: '500px',
     overflow: 'hidden',

@@ -4,7 +4,7 @@ import {
   SMALL_FONT,
 } from '../../../../styles/DefaultStylingProperties';
 
-const styles: CSSProperties = {
+const styles: { [key: string]: IExtendedCSSProperties } = {
   conversationList: {
     margin: '20px 20px',
     paddingBottom: '150px',

@@ -1,11 +1,11 @@
 import * as React from 'react';
 import styles from '../ModalComponent.styles';
 import '../ModalComponent.styles.scss';
-import { Component, compose, pure, setDisplayName } from 'recompose';
+import { compose, pure, setDisplayName } from 'recompose';
 import ModalActionDispatchers from '../../../actions/ModalActionDispatchers';
 import Parser from '../../utils/Parser';
 
-const customStyles = {
+const customStyles: { [key: string]: React.CSSProperties } = {
   createNewBotButton: {
     backgroundColor: '#0070D2',
     border: '0px',
@@ -124,7 +124,7 @@ class CreateNewConfigModal extends React.Component<IProps, IState> {
   }
 }
 
-const ComposedCreateNewConfigModal: Component<IProps> = compose<IProps>(
+const ComposedCreateNewConfigModal: React.ComponentClass<IProps> = compose<IProps, IProps>(
   pure,
   setDisplayName('CreateNewConfigModal'),
 )(CreateNewConfigModal);

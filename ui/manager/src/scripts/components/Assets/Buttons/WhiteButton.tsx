@@ -1,10 +1,10 @@
 import * as React from 'react';
-import { Component, compose, pure, setDisplayName } from 'recompose';
+import { compose, pure, setDisplayName } from 'recompose';
 import { CSSProperties } from 'react';
 import Button from './Button';
 import * as Radium from 'radium';
 
-const styles: CSSProperties = {
+const styles: { [key: string]: IExtendedCSSProperties } = {
   button: {
     border: '1px solid #D8DDE6',
     backgroundColor: '#FFFFFF',
@@ -26,8 +26,8 @@ const styles: CSSProperties = {
 
 interface IProps {
   text: string;
-  disabled: boolean;
-  customStyles: {};
+  disabled?: boolean;
+  customStyles?: {};
   onClick(): void;
 }
 
@@ -41,7 +41,7 @@ const WhiteButton: React.StatelessComponent<IProps> = (props: IProps) => (
   />
 );
 
-const ComposedWhiteButton: Component<IProps> = compose<IProps>(
+const ComposedWhiteButton: React.ComponentClass<IProps> = compose<IProps, IProps>(
   pure,
   Radium,
   setDisplayName('WhiteButton'),

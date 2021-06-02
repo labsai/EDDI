@@ -2,11 +2,11 @@ import * as React from 'react';
 import * as Modal from 'react-modal';
 import styles from './ModalComponent.styles';
 import './ModalComponent.styles.scss';
-import { Component, compose, pure, setDisplayName } from 'recompose';
+import { compose, pure, setDisplayName } from 'recompose';
 import { ModalEnum } from '../utils/ModalEnum';
 import ModalActionDispatchers from '../../actions/ModalActionDispatchers';
 
-const customStyles = {
+const customStyles: { [key: string]: React.CSSProperties } = {
   createNewBotButton: {
     backgroundColor: '#0070D2',
     border: '0px',
@@ -117,7 +117,7 @@ class CreatePackageModal extends React.Component<IProps, IState> {
   }
 }
 
-const ComposedCreatePackageModal: Component<IProps> = compose<IProps>(
+const ComposedCreatePackageModal: React.ComponentClass<IProps> = compose<IProps, IProps>(
   pure,
   setDisplayName('Modal'),
 )(CreatePackageModal);

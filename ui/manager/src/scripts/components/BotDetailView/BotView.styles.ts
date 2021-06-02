@@ -7,15 +7,15 @@ import {
   SMALL_FONT,
 } from '../../../styles/DefaultStylingProperties';
 
-const styles: CSSProperties = {
+const styles: { [key: string]: IExtendedCSSProperties } = {
   botHeader: {
     display: 'flex',
-    flex: '1',
+    flex: 1,
     height: '35px',
     marginTop: '47px',
   },
   botHeaderSpacing: {
-    flexGrow: '1',
+    flexGrow: 1,
   },
   botName: {
     color: DARK_BLUE_COLOR,

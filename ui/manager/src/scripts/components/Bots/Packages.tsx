@@ -2,15 +2,15 @@ import { IBot, IPackage } from '../utils/AxiosFunctions';
 import Package from './Package';
 import * as React from 'react';
 import * as Radium from 'radium';
-import { Component, compose, pure, setDisplayName } from 'recompose';
+import { compose, pure, setDisplayName } from 'recompose';
 import { CSSProperties } from 'react';
 
 interface IProps {
   packages: string[];
-  packHasNewVersion: boolean;
+  packHasNewVersion?: boolean;
   bot: IBot;
 }
-const styles: CSSProperties = {
+const styles: { [key: string]: IExtendedCSSProperties } = {
   packageList: {
     display: 'grid',
     flex: 1,
@@ -30,7 +30,7 @@ const Packages: React.StatelessComponent<IProps> = (props: IProps) => {
   );
 };
 
-const ComposedPackages: Component<IProps> = compose<IProps>(
+const ComposedPackages: React.ComponentClass<IProps> = compose<IProps, IProps>(
   pure,
   Radium,
   setDisplayName('Packages'),

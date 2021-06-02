@@ -3,16 +3,15 @@ import * as Radium from 'radium';
 import * as renderIf from 'render-if';
 import PluginList from './PluginList';
 import styles from './Package.styles';
-import { Component, compose, pure, setDisplayName } from 'recompose';
+import { compose, pure, setDisplayName } from 'recompose';
 import { IPackage } from '../utils/AxiosFunctions';
 import { connect } from 'react-redux';
 import { packageSelector } from '../../selectors/PackageSelectors';
 import * as _ from 'lodash';
 import VersionSelectComponent from '../Assets/VersionSelectComponent';
-import { Link, browserHistory } from 'react-router-dom';
 import { historyPush } from '../../history';
 import eddiApiActionDispatchers from '../../actions/EddiApiActionDispatchers';
-import { ClipLoader } from 'react-spinners';
+import ClipLoader from 'react-spinners/ClipLoader';
 import { BLUE_COLOR } from '../../../styles/DefaultStylingProperties';
 import Options from '../Assets/Buttons/Options';
 
@@ -156,7 +155,7 @@ class Package extends React.Component<IPrivateProps> {
   }
 }
 
-const ComposedPackage: Component<IPublicProps> = compose<IPublicProps>(
+const ComposedPackage: React.ComponentClass<IPublicProps> = compose<IPrivateProps, IPublicProps>(
   pure,
   connect(packageSelector),
   Radium,

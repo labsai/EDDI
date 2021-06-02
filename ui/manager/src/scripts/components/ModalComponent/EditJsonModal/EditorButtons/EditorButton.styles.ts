@@ -5,7 +5,7 @@ import {
   LIGHT_GREY_COLOR,
 } from '../../../../../styles/DefaultStylingProperties';
 
-const styles: CSSProperties = {
+const styles: { [key: string]: IExtendedCSSProperties } = {
   button: {
     ':hover': {
       backgroundColor: '#666666',

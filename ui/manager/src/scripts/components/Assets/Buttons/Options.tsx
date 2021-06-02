@@ -1,5 +1,5 @@
 import * as React from 'react';
-import { Component, compose, pure, setDisplayName } from 'recompose';
+import { compose, pure, setDisplayName } from 'recompose';
 import { CSSProperties } from 'react';
 import { Dropdown } from 'semantic-ui-react';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
@@ -21,7 +21,7 @@ import { connect } from 'react-redux';
 
 interface IPublicProps {
   descriptor: IDetailedDescriptor;
-  data: string;
+  data: string | string[];
 }
 interface IPrivateProps extends IPublicProps {
   readOnly: boolean;
@@ -130,7 +130,7 @@ class Options extends React.Component<IPrivateProps> {
   }
 }
 
-const ComposedOptions: Component<IPrivateProps> = compose<IPrivateProps>(
+const ComposedOptions: React.ComponentClass<IPublicProps> = compose<IPrivateProps, IPublicProps>(
   pure,
   connect(readOnlySelector),
   Radium,

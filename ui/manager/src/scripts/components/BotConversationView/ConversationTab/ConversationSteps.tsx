@@ -1,5 +1,5 @@
 import * as React from 'react';
-import { Component, compose, pure, setDisplayName } from 'recompose';
+import { compose, pure, setDisplayName } from 'recompose';
 import * as renderIf from 'render-if';
 import ConversationStep from './ConversationStep';
 import {
@@ -116,7 +116,7 @@ class ConversationSteps extends React.Component<IProps, IState> {
   }
 }
 
-const ComposedConversationSteps: Component<IProps> = compose<IProps>(
+const ComposedConversationSteps: React.ComponentClass<IProps> = compose<IProps, IProps>(
   pure,
   Radium,
   setDisplayName('ConversationSteps'),

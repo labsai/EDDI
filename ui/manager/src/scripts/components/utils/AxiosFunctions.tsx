@@ -209,7 +209,7 @@ export async function basicAuthSignIn(username: string, password: string) {
         },
       },
     );
-    const encryptedToken = btoa(`${username}:${password}`)
+    const encryptedToken = btoa(`${username}:${password}`);
     localStorage.setItem('bearer', encryptedToken);
     setDefaultGlobalHeader(
       'Authorization',

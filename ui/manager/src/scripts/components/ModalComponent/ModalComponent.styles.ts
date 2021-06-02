@@ -1,7 +1,7 @@
 import { CSSProperties } from 'react';
 import { DARK_BLUE_COLOR } from '../../../styles/DefaultStylingProperties';
 
-const styles: CSSProperties = {
+const styles: { [key: string]: IExtendedCSSProperties } = {
   close: {
     ':focus': {
       color: '#000',
@@ -49,7 +49,7 @@ const styles: CSSProperties = {
   },
   descriptors: {
     display: 'flex',
-    flex: '1',
+    flex: 1,
     marginTop: '20px',
     overflow: 'hidden',
   },
@@ -62,7 +62,7 @@ const styles: CSSProperties = {
     fontSize: '14px',
     paddingTop: '5px',
     paddingBottom: '5px',
-    flex: '1',
+    flex: 1,
     overflow: 'hidden',
     maxWidth: '300px',
     maxHeight: '80px',
@@ -108,11 +108,11 @@ const styles: CSSProperties = {
     paddingTop: '50px',
   },
   modalTopHeaderCenter: {
-    flex: '1',
+    flex: 1,
   },
   packageData: {
     backgroundColor: '#FFF',
-    flex: '1',
+    flex: 1,
     minHeight: '200px',
     minWidth: '500px',
     overflow: 'hidden',
@@ -212,13 +212,13 @@ const styles: CSSProperties = {
   },
   collapsibleRightSign: {
     textAlign: 'right',
-    flex: '1',
+    flex: 1,
   },
   exampleData: {
     color: '#7A849E',
     fontSize: '14px',
     backgroundColor: '#fdf1bf',
-    flex: '1',
+    flex: 1,
     overflow: 'hidden',
     whiteSpace: 'pre-wrap',
     padding: '5px 20px 5px 20px',

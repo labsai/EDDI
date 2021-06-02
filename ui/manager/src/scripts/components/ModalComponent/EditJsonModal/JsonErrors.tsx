@@ -1,5 +1,5 @@
 import * as React from 'react';
-import { Component, compose, pure, setDisplayName } from 'recompose';
+import { compose, pure, setDisplayName } from 'recompose';
 import * as renderIf from 'render-if';
 import {
   BLACK_COLOR,
@@ -15,7 +15,7 @@ import { IJsonError } from '../../utils/helpers/JsonHelpers';
 
 const warningIcon = require('../../../../public/images/WarningIcon@3x.png');
 
-const styles: CSSProperties = {
+const styles: { [key: string]: IExtendedCSSProperties } = {
   content: {
     marginLeft: '20px',
   },
@@ -80,7 +80,7 @@ const JsonErrors: React.StatelessComponent<IProps> = (props: IProps) => (
   </div>
 );
 
-const ComposedJsonErrors: Component<IProps> = compose<IProps>(
+const ComposedJsonErrors: React.ComponentClass<IProps> = compose<IProps, IProps>(
   pure,
   setDisplayName('JsonErrors'),
 )(JsonErrors);

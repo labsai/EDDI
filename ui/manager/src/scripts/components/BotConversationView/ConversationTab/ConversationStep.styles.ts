@@ -18,12 +18,12 @@ import {
   WHITE_COLOR,
 } from '../../../../styles/DefaultStylingProperties';
 
-const styles: CSSProperties = {
+const styles: { [key: string]: IExtendedCSSProperties } = {
   content: {
     ':hover': {
       backgroundColor: LIGHT_GREY_COLOR2,
     },
-    flex: '1',
+    flex: 1,
     fontSize: MEDIUM_FONT,
     borderRadius: '18px',
     width: '100%',
@@ -102,7 +102,7 @@ const styles: CSSProperties = {
     display: 'flex',
   },
   chatStep: {
-    flex: '1',
+    flex: 1,
     cursor: 'pointer',
     paddingBottom: '5px',
     minWidth: 0,
@@ -123,7 +123,7 @@ const styles: CSSProperties = {
     width: '50px',
   },
   titleText: {
-    flex: '1',
+    flex: 1,
   },
   actions: {
     fontSize: SMALL_FONT2,

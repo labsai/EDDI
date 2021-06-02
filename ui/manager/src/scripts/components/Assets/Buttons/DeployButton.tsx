@@ -1,5 +1,5 @@
 import * as React from 'react';
-import { Component, compose, pure, setDisplayName } from 'recompose';
+import { compose, pure, setDisplayName } from 'recompose';
 import { CSSProperties } from 'react';
 import Button from './Button';
 import * as Radium from 'radium';
@@ -24,7 +24,7 @@ import {
   YELLOW_COLOR,
 } from '../../../../styles/DefaultStylingProperties';
 
-const undeployStyle: CSSProperties = {
+const undeployStyle: { [key: string]: IExtendedCSSProperties } = {
   button: {
     color: 'white',
     backgroundColor: RED_COLOR,
@@ -37,7 +37,7 @@ const undeployStyle: CSSProperties = {
     cursor: 'not-allowed',
   },
 };
-const deployStyle: CSSProperties = {
+const deployStyle: { [key: string]: IExtendedCSSProperties } = {
   button: {
     color: 'white',
     backgroundColor: GREEN_COLOR,
@@ -50,7 +50,7 @@ const deployStyle: CSSProperties = {
     cursor: 'not-allowed',
   },
 };
-const inProgressStyle: CSSProperties = {
+const inProgressStyle: { [key: string]: IExtendedCSSProperties } = {
   disabled: {
     color: 'white',
     backgroundColor: YELLOW_COLOR,
@@ -58,7 +58,7 @@ const inProgressStyle: CSSProperties = {
     cursor: 'not-allowed',
   },
 };
-const errorStyle: CSSProperties = {
+const errorStyle: { [key: string]: IExtendedCSSProperties } = {
   disabled: {
     color: DARK_RED_COLOR,
     backgroundColor: 'white',
@@ -183,7 +183,7 @@ class DeployButton extends React.Component<IProps> {
   }
 }
 
-const ComposedDeployButton: Component<IProps> = compose<IProps>(
+const ComposedDeployButton: React.ComponentClass<IProps> = compose<IProps, IProps>(
   pure,
   Radium,
   setDisplayName('DeployButton'),

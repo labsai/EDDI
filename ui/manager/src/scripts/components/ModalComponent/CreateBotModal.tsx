@@ -1,14 +1,13 @@
 import * as React from 'react';
-import * as Modal from 'react-modal';
 import styles from './ModalComponent.styles';
 import './ModalComponent.styles.scss';
-import { Component, compose, pure, setDisplayName } from 'recompose';
+import { compose, pure, setDisplayName } from 'recompose';
 import { createNewBot } from '../utils/AxiosFunctions';
 import { historyPush } from '../../history';
 import modalActionDispatchers from '../../actions/ModalActionDispatchers';
 import eddiApiActionDispatchers from '../../actions/EddiApiActionDispatchers';
 
-const customStyles = {
+const customStyles: { [key: string]: React.CSSProperties } = {
   createNewBotButton: {
     backgroundColor: '#0070D2',
     border: '0px',
@@ -110,7 +109,7 @@ class CreateBotModal extends React.Component<IProps, IState> {
   }
 }
 
-const ComposedCreateBotModal: Component<IProps> = compose<IProps>(
+const ComposedCreateBotModal: React.ComponentClass<IProps> = compose<IProps, IProps>(
   pure,
   setDisplayName('Modal'),
 )(CreateBotModal);

@@ -1,15 +1,16 @@
 import * as React from 'react';
 import * as Radium from 'radium';
-import { Link } from 'react-router-dom';
-import { Component, compose, pure, setDisplayName } from 'recompose';
+import { compose, pure, setDisplayName } from 'recompose';
 import styles from './HomeButton.styles';
 import { historyPush } from '../../history';
 
-interface IProps {
-  extraPath: string;
+interface IPublic {
+  extraPath?: string;
 }
 
-const HomeButton: React.StatelessComponent<IProps> = (props: IProps) => (
+interface IProps extends IPublic {}
+
+const HomeButton = (props: IProps) => (
   <div style={styles.navigationBar}>
     <div
       onClick={() => historyPush(`/${props.extraPath || ''}`)}
@@ -22,7 +23,7 @@ const HomeButton: React.StatelessComponent<IProps> = (props: IProps) => (
   </div>
 );
 
-const ComposedHomeButton: Component<IProps> = compose<IProps>(
+const ComposedHomeButton: React.ComponentClass<IProps> = compose<IProps, IPublic>(
   pure,
   Radium,
   setDisplayName('HomeButton'),

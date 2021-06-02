@@ -1,5 +1,5 @@
 import * as React from 'react';
-import { Component, compose, pure, setDisplayName } from 'recompose';
+import { compose, pure, setDisplayName } from 'recompose';
 import Parser from '../utils/Parser';
 import Plugin from './Plugin';
 import eddiApiActionDispatchers from '../../actions/EddiApiActionDispatchers';
@@ -45,7 +45,7 @@ class PluginContainer extends React.Component<IPrivateProps, IState> {
   }
 }
 
-const ComposedPluginContainer: Component<IPrivateProps> = compose<
+const ComposedPluginContainer: React.ComponentClass<IPrivateProps> = compose<
   IPrivateProps,
   IPublicProps
 >(pure, setDisplayName('PluginContainer'))(PluginContainer);

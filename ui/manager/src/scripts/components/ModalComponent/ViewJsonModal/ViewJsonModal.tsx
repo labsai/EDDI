@@ -1,6 +1,6 @@
 import * as React from 'react';
 import '../ModalComponent.styles.scss';
-import { Component, compose, pure, setDisplayName } from 'recompose';
+import { compose, pure, setDisplayName } from 'recompose';
 import * as renderIf from 'render-if';
 import eddiApiActionDispatchers from '../../../actions/EddiApiActionDispatchers';
 import Parser from '../../utils/Parser';
@@ -87,7 +87,7 @@ class ViewJsonModal extends React.Component<IPrivateProps, IState> {
   }
 }
 
-const ComposedViewJsonModal: Component<IProps> = compose<IProps>(
+const ComposedViewJsonModal: React.ComponentClass<IPrivateProps> = compose<IPrivateProps, IPrivateProps>(
   pure,
   setDisplayName('ViewJsonModal'),
 )(ViewJsonModal);

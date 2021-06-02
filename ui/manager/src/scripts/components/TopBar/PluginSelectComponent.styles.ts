@@ -10,7 +10,7 @@ import {
   WHITE_COLOR,
 } from '../../../styles/DefaultStylingProperties';
 
-const styles: CSSProperties = {
+const styles: { [key: string]: IExtendedCSSProperties } = {
   indicatorsContainer: {
     position: 'relative',
     borderLeft: '6px solid transparent',

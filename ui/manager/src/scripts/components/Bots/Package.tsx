@@ -3,7 +3,7 @@ import * as React from 'react';
 import * as renderIf from 'render-if';
 import styles from './Package.styles';
 import * as moment from 'moment';
-import { Component, compose, pure, setDisplayName } from 'recompose';
+import { compose, pure, setDisplayName } from 'recompose';
 import eddiApiActionDispatchers from '../../actions/EddiApiActionDispatchers';
 import { connect } from 'react-redux';
 import { packageSelector } from '../../selectors/PackageSelectors';
@@ -13,7 +13,7 @@ import WhiteButton from '../Assets/Buttons/WhiteButton';
 import ModalActionDispatchers from '../../actions/ModalActionDispatchers';
 import { ModalEnum } from '../utils/ModalEnum';
 import { history, historyPush } from '../../history';
-import { ClipLoader } from 'react-spinners';
+import ClipLoader from 'react-spinners/ClipLoader';
 import { readOnlySelector } from '../../selectors/AuthenticationSelectors';
 import { BLUE_COLOR } from '../../../styles/DefaultStylingProperties';
 
@@ -27,7 +27,7 @@ interface IPrivateProps extends IPublicProps {
 interface IPublicProps {
   packageResource: string;
   bot: IBot;
-  readOnly: boolean;
+  readOnly?: boolean;
 }
 
 interface IState {
@@ -135,7 +135,7 @@ class Package extends React.Component<IPrivateProps, IState> {
   }
 }
 
-const ComposedPackage: Component<IPublicProps> = compose<
+const ComposedPackage: React.ComponentClass<IPublicProps> = compose<
   IPrivateProps,
   IPublicProps
 >(

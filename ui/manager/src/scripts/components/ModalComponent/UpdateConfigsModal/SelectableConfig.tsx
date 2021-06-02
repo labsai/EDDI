@@ -1,5 +1,5 @@
 import * as React from 'react';
-import { Component, compose, pure, setDisplayName } from 'recompose';
+import { compose, pure, setDisplayName } from 'recompose';
 import { IDetailedDescriptor } from '../../utils/AxiosFunctions';
 import { packageSelector } from '../../../selectors/PackageSelectors';
 import * as moment from 'moment';
@@ -72,7 +72,7 @@ class SelectableConfig extends React.Component<IProps> {
   }
 }
 
-const ComposedSelectableConfig: Component<IPrivateProps> = compose<IProps>(
+const ComposedSelectableConfig: React.ComponentClass<IProps> = compose<IProps, IProps>(
   pure,
   setDisplayName('SelectableConfig'),
 )(SelectableConfig);

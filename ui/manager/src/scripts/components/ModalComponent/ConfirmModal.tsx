@@ -2,7 +2,7 @@ import * as React from 'react';
 import * as Modal from 'react-modal';
 import styles from './ConfirmModal.styles';
 import './ModalComponent.styles.scss';
-import { Component, compose, pure, setDisplayName } from 'recompose';
+import { compose, pure, setDisplayName } from 'recompose';
 import WhiteButton from '../Assets/Buttons/WhiteButton';
 import BlueButton from '../Assets/Buttons/BlueButton';
 import modalActionDispatchers from '../../actions/ModalActionDispatchers';
@@ -46,7 +46,7 @@ class ConfirmModal extends React.Component<IProps> {
   }
 }
 
-const ComposedConfirmModal: Component<IProps> = compose<IProps>(
+const ComposedConfirmModal: React.ComponentClass<IProps> = compose<IProps, IProps>(
   pure,
   setDisplayName('Modal'),
 )(ConfirmModal);

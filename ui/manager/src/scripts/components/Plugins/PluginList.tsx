@@ -2,7 +2,7 @@ import * as React from 'react';
 import * as renderIf from 'render-if';
 import * as _ from 'lodash';
 import * as Radium from 'radium';
-import { Component, compose, pure, setDisplayName } from 'recompose';
+import { compose, pure, setDisplayName } from 'recompose';
 import eddiApiActionDispatchers from '../../actions/EddiApiActionDispatchers';
 import { connect } from 'react-redux';
 import { getAPIUrl } from '../utils/ApiFunctions';
@@ -137,7 +137,7 @@ class PluginList extends React.Component<IPrivateProps, IState> {
   }
 }
 
-const ComposedPluginList: Component<IPublicProps> = compose<
+const ComposedPluginList: React.ComponentClass<IPublicProps> = compose<
   IPublicProps,
   IPrivateProps
 >(pure, connect(pluginsSelector), Radium, setDisplayName('PluginList'))(

@@ -2,10 +2,10 @@ import * as React from 'react';
 import * as renderIf from 'render-if';
 import * as _ from 'lodash';
 import * as Radium from 'radium';
-import { Component, compose, pure, setDisplayName } from 'recompose';
+import { compose, pure, setDisplayName } from 'recompose';
 import { connect } from 'react-redux';
 import styles from './ConversationList.styles';
-import { ClimbingBoxLoader } from 'react-spinners';
+import ClimbingBoxLoader from 'react-spinners/ClimbingBoxLoader';
 import Conversation from './Conversation';
 import { botConversationSelector } from '../../../selectors/ConversationSelectors';
 import eddiApiActionDispatchers from '../../../actions/EddiApiActionDispatchers';
@@ -126,7 +126,7 @@ class ConversationList extends React.Component<IPrivateProps, IState> {
   }
 }
 
-const ComposedConversationList: Component<IPublicProps> = compose<
+const ComposedConversationList: React.ComponentClass<IPublicProps> = compose<
   IPublicProps,
   IPrivateProps
 >(

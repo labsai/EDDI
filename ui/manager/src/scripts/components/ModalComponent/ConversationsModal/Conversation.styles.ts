@@ -11,7 +11,7 @@ import {
   SMALL_FONT,
 } from '../../../../styles/DefaultStylingProperties';
 
-const styles: CSSProperties = {
+const styles: { [key: string]: IExtendedCSSProperties } = {
   conversation: {
     ':hover': {
       backgroundColor: LIGHT_GREY_COLOR3,

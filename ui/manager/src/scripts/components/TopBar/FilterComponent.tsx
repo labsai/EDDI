@@ -3,7 +3,7 @@ import * as Radium from 'radium';
 import { CSSProperties } from 'react';
 import { pageEnum } from '../pages/pageEnum';
 
-const styles: CSSProperties = {
+const styles: { [key: string]: IExtendedCSSProperties } = {
   filter: {
     display: 'flex',
   },

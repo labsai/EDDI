@@ -1,7 +1,7 @@
 import { CSSProperties } from 'react';
 import { LIGHT_GREY_COLOR2 } from '../../../../styles/DefaultStylingProperties';
 
-const styles: CSSProperties = {
+const styles: { [key: string]: IExtendedCSSProperties } = {
   optionButton: {
     ':hover': {
       backgroundColor: LIGHT_GREY_COLOR2,

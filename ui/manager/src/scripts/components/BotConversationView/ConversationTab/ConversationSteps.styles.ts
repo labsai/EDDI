@@ -20,7 +20,7 @@ import {
   WHITE_COLOR,
 } from '../../../../styles/DefaultStylingProperties';
 
-const styles: CSSProperties = {
+const styles: { [key: string]: IExtendedCSSProperties } = {
   toggleBox: {
     display: 'flex',
   },

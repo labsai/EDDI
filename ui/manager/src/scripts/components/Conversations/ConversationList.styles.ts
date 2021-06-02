@@ -4,7 +4,7 @@ import {
   SMALL_FONT,
 } from '../../../styles/DefaultStylingProperties';
 
-const styles: CSSProperties = {
+const styles: { [key: string]: IExtendedCSSProperties } = {
   title: {
     display: 'flex',
     color: DARK_GREY_COLOR,

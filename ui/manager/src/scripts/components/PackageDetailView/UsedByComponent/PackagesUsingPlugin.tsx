@@ -1,5 +1,5 @@
 import * as React from 'react';
-import { Component, compose, pure, setDisplayName } from 'recompose';
+import { compose, pure, setDisplayName } from 'recompose';
 import * as Radium from 'radium';
 import * as _ from 'lodash';
 import Package from './Package';
@@ -10,7 +10,7 @@ import Parser from '../../utils/Parser';
 import { IUsedResource } from '../../utils/Parser';
 import { CSSProperties } from 'react';
 
-const styles: CSSProperties = {
+const styles: { [key: string]: IExtendedCSSProperties } = {
   content: {
     width: '100%',
   },
@@ -29,7 +29,7 @@ const styles: CSSProperties = {
 
 interface IProps {
   plugin: IPlugin;
-  isSmallName: boolean;
+  isSmallName?: boolean;
 }
 
 interface IState {
@@ -120,7 +120,7 @@ class PackagesUsingPlugin extends React.Component<IProps, IState> {
   }
 }
 
-const ComposedPackagesUsingPlugin: Component<IProps> = compose<IProps>(
+const ComposedPackagesUsingPlugin: React.ComponentClass<IProps> = compose<IProps, IProps>(
   pure,
   setDisplayName('PackagesUsingPlugin'),
 )(PackagesUsingPlugin);

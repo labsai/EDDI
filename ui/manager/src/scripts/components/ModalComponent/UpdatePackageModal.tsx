@@ -2,7 +2,7 @@ import * as React from 'react';
 import * as Modal from 'react-modal';
 import styles from './ModalComponent.styles';
 import './ModalComponent.styles.scss';
-import { Component, compose, pure, setDisplayName } from 'recompose';
+import { compose, pure, setDisplayName } from 'recompose';
 import {
   createNewPackage,
   getAllDefaultPluginTypes,
@@ -19,7 +19,7 @@ import { defaultPluginTypesSelector } from '../../selectors/PluginSelectors';
 import { historyPush } from '../../history';
 import modalActionDispatchers from '../../actions/ModalActionDispatchers';
 
-const customStyles = {
+const customStyles: { [key: string]: React.CSSProperties } = {
   createNewBotButton: {
     backgroundColor: '#0070D2',
     border: '0px',
@@ -161,7 +161,7 @@ class UpdatePackageModal extends React.Component<IPrivateProps, IState> {
   }
 }
 
-const ComposedUpdatePackageModal: Component<IProps> = compose<IProps>(
+const ComposedUpdatePackageModal: React.ComponentClass<IPublicProps> = compose<IPrivateProps, IPublicProps>(
   pure,
   setDisplayName('Modal'),
   connect(defaultPluginTypesSelector),

@@ -5,7 +5,7 @@ import {
   RED_COLOR,
 } from '../../../styles/DefaultStylingProperties';
 
-const styles: CSSProperties = {
+const styles: { [key: string]: IExtendedCSSProperties } = {
   botPackageName: {
     color: BLUE_COLOR2,
     display: 'inline-block',

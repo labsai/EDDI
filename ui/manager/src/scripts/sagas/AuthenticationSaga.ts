@@ -73,7 +73,7 @@ export function* SignOut(action: ISignOutAction) {
       yield call(logout, action.keycloak);
     }
     yield call(deleteGlobalHeader, 'Authorization');
-    yield call(localStorage.removeItem, "bearer");
+    yield call(localStorage.removeItem, 'bearer');
     yield put(signOutSuccessAction());
   } catch (err) {
     yield put(signOutFailedAction(err));

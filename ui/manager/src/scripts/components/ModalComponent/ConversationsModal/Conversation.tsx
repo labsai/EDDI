@@ -1,8 +1,7 @@
 import * as React from 'react';
 import * as renderIf from 'render-if';
 import * as Radium from 'radium';
-import { Link, browserHistory } from 'react-router-dom';
-import { Component, compose, pure, setDisplayName } from 'recompose';
+import { compose, pure, setDisplayName } from 'recompose';
 import * as _ from 'lodash';
 import * as moment from 'moment';
 import styles from './Conversation.styles';
@@ -48,7 +47,7 @@ const Conversation: React.StatelessComponent<IProps> = (props: IProps) => {
   );
 };
 
-const ComposedConversation: Component<IProps> = compose<IProps>(
+const ComposedConversation: React.ComponentClass<IProps> = compose<IProps, IProps>(
   pure,
   Radium,
   setDisplayName('Conversation'),

@@ -1,14 +1,14 @@
 import * as React from 'react';
 import styles from './ModalComponent.styles';
 import './ModalComponent.styles.scss';
-import { Component, compose, pure, setDisplayName } from 'recompose';
+import { compose, pure, setDisplayName } from 'recompose';
 import { IDescriptor } from '../utils/AxiosFunctions';
 import eddiApiActionDispatchers from '../../actions/EddiApiActionDispatchers';
 import ModalActionDispatchers from '../../actions/ModalActionDispatchers';
 import { BLUE_COLOR } from '../../../styles/DefaultStylingProperties';
 import BlueButton from '../Assets/Buttons/BlueButton';
 
-const customStyles = {
+const customStyles: { [key: string]: React.CSSProperties } = {
   button: {
     marginLeft: 'auto',
   },
@@ -94,7 +94,7 @@ class EditDescriptorModal extends React.Component<IProps, IState> {
     );
   }
 }
-const ComposedEditDescriptorModal: Component<IProps> = compose<IProps>(
+const ComposedEditDescriptorModal: React.ComponentClass<IProps> = compose<IProps, IProps>(
   pure,
   setDisplayName('EditDescriptorModal'),
 )(EditDescriptorModal);

@@ -1,13 +1,12 @@
 import * as React from 'react';
 import * as Radium from 'radium';
-import { Component, compose, pure, setDisplayName } from 'recompose';
-import { CSSProperties } from 'react';
+import { compose, pure, setDisplayName } from 'recompose';
 import Plugin from '../PackageDetailView/PluginBoxes/Plugin';
 import { IPackage } from '../utils/AxiosFunctions';
 import * as _ from 'lodash';
 import * as renderIf from 'render-if';
 
-const styles: CSSProperties = {
+const styles: { [key: string]: IExtendedCSSProperties } = {
   pluginList: {
     display: 'grid',
     marginTop: '20px',
@@ -37,7 +36,6 @@ const PluginList: React.StatelessComponent<IProps> = (props: IProps) => {
                 pluginType={plug}
                 pluginResource={plug.config.uri || ''}
                 editDisabled={true}
-                packagePayload={props.packagePayload}
               />
             ),
           )}
@@ -47,7 +45,7 @@ const PluginList: React.StatelessComponent<IProps> = (props: IProps) => {
   );
 };
 
-const ComposedPluginList: Component<IProps> = compose<IProps>(
+const ComposedPluginList: React.ComponentClass<IProps> = compose<IProps, IProps>(
   pure,
   Radium,
   setDisplayName('PluginList'),

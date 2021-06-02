@@ -1,5 +1,5 @@
 import * as React from 'react';
-import { Component, compose, pure, setDisplayName } from 'recompose';
+import { compose, pure, setDisplayName } from 'recompose';
 import * as Radium from 'radium';
 import {
   BLUE_COLOR,
@@ -12,7 +12,7 @@ import { CSSProperties } from 'react';
 
 interface IProps {
   checked: boolean;
-  customStyles: CSSProperties;
+  customStyles: { [key: string]: React.CSSProperties };
   onClick(): void;
 }
 
@@ -30,7 +30,7 @@ const CheckBox: React.StatelessComponent<IProps> = (props: IProps) => (
   </div>
 );
 
-const ComposedCheckBox: Component<IProps> = compose<IProps>(
+const ComposedCheckBox: React.ComponentClass<IProps> = compose<IProps, IProps>(
   pure,
   Radium,
   setDisplayName('CheckBox'),

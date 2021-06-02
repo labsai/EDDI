@@ -1,5 +1,5 @@
 import * as React from 'react';
-import { Component, compose, pure, setDisplayName } from 'recompose';
+import { compose, pure, setDisplayName } from 'recompose';
 import { CSSProperties } from 'react';
 import * as Radium from 'radium';
 import { LIGHT_GREY_COLOR } from '../../../../../styles/DefaultStylingProperties';
@@ -8,7 +8,7 @@ import styles from './EditorButton.styles';
 
 interface IProps {
   expanded: boolean;
-  customStyles: CSSProperties;
+  customStyles?: CSSProperties;
   onClick(): void;
 }
 
@@ -24,7 +24,7 @@ const ExpandButton: React.StatelessComponent<IProps> = (props: IProps) => (
   </div>
 );
 
-const ComposedExpandButton: Component<IProps> = compose<IProps>(
+const ComposedExpandButton: React.ComponentClass<IProps> = compose<IProps, IProps>(
   pure,
   Radium,
   setDisplayName('ExpandButton'),

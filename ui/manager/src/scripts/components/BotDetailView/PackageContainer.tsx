@@ -1,5 +1,5 @@
 import * as React from 'react';
-import { Component, compose, pure, setDisplayName } from 'recompose';
+import { compose, pure, setDisplayName } from 'recompose';
 import eddiApiActionDispatchers from '../../actions/EddiApiActionDispatchers';
 import Parser from '../utils/Parser';
 import Package from './Package';
@@ -59,7 +59,7 @@ class PackageContainer extends React.Component<IProps, IState> {
   }
 }
 
-const ComposedPackageContainer: Component<IProps> = compose<IProps, IProps>(
+const ComposedPackageContainer: React.ComponentClass<IProps> = compose<IProps, IProps>(
   pure,
   setDisplayName('PackageContainer'),
 )(PackageContainer);

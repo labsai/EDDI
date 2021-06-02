@@ -13,9 +13,9 @@ import {
   SMALL_FONT,
 } from '../../../../styles/DefaultStylingProperties';
 
-const styles: CSSProperties = {
+const styles: { [key: string]: IExtendedCSSProperties } = {
   pluginCenter: {
-    flex: '1',
+    flex: 1,
   },
   pluginContainer: {
     display: 'inline-block',
@@ -79,7 +79,7 @@ const styles: CSSProperties = {
     marginTop: '15px',
   },
   centerFlex: {
-    flex: '1',
+    flex: 1,
   },
   addExtensionButton: {
     fontSize: SMALL_FONT,

@@ -1,7 +1,7 @@
 import * as React from 'react';
 import TopBarComponent from '../TopBar/TopBarComponent';
 import styles from '../App.style';
-import { Component, compose, pure, setDisplayName } from 'recompose';
+import { compose, pure, setDisplayName } from 'recompose';
 import PackageList from '../Packages/PackageList';
 import { pageEnum } from './pageEnum';
 
@@ -37,9 +37,6 @@ class PackagePage extends React.Component<IProps, IState> {
   }
 }
 
-const ComposedPackagePage: Component<IPublicProps> = compose<
-  IPublicProps,
-  IPrivateProps
->(pure, setDisplayName('PackagePage'))(PackagePage);
+const ComposedPackagePage: React.ComponentClass = compose<IProps, IState>(pure, setDisplayName('PackagePage'))(PackagePage);
 
 export default ComposedPackagePage;

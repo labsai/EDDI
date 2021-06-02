@@ -1,5 +1,5 @@
 import * as React from 'react';
-import { Component, compose, pure, setDisplayName } from 'recompose';
+import { compose, pure, setDisplayName } from 'recompose';
 import Parser from '../../utils/Parser';
 import * as renderIf from 'render-if';
 import * as _ from 'lodash';
@@ -150,7 +150,7 @@ class Extension extends React.Component<IPrivateProps> {
   }
 }
 
-const ComposedExtension: Component<IProps, IProps> = compose<IProps>(
+const ComposedExtension: React.ComponentClass<IPublicProps> = compose<IPrivateProps, IPublicProps>(
   pure,
   connect(pluginSelector),
   setDisplayName('Extension'),

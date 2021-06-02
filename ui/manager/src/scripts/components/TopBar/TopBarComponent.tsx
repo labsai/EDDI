@@ -3,14 +3,14 @@ import ModalActionDispatchers from '../../actions/ModalActionDispatchers';
 import FilterComponent from './FilterComponent';
 import NavigationComponent from './NavigationComponent';
 import { CSSProperties } from 'react';
-import { Link } from 'react-router-dom';
 import { ModalEnum } from '../utils/ModalEnum';
 import BlueButton from '../Assets/Buttons/BlueButton';
 import { pageEnum } from '../pages/pageEnum';
 import * as renderIf from 'render-if';
+import * as Keycloak from 'keycloak-js';
 import * as Radium from 'radium';
 import { connect } from 'react-redux';
-import { Component, compose, pure, setDisplayName } from 'recompose';
+import { compose, pure, setDisplayName } from 'recompose';
 import {
   authenticationSelector,
   readOnlySelector,
@@ -25,7 +25,7 @@ import WhiteButton from '../Assets/Buttons/WhiteButton';
 import authenticationActionDispatchers from '../../actions/AuthenticationActionDispatchers';
 import { historyPush } from '../../history';
 
-const styles: CSSProperties = {
+const styles: { [key: string]: IExtendedCSSProperties } = {
   createNewBotButton: {
     height: '36px',
     marginLeft: '32px',
@@ -33,7 +33,7 @@ const styles: CSSProperties = {
     minWidth: '108px',
   },
   topBarCenter: {
-    flex: '1',
+    flex: 1,
   },
   topBarComponent: {
     display: 'flex',
@@ -162,7 +162,6 @@ class TopBarComponent extends React.Component<IPrivateProps> {
               customStyles={styles.createNewBotButton}
               disabled={this.props.readOnly}
               onClick={this.openModal}
-              style={styles.createNewBot}
             />
           ))}
         </div>
@@ -171,8 +170,8 @@ class TopBarComponent extends React.Component<IPrivateProps> {
   }
 }
 
-const ComposedTopBarComponent: Component<IPrivateProps> = compose<
-  IPrivateProps
+const ComposedTopBarComponent: React.ComponentClass<IPublicProps> = compose<
+  IPrivateProps, IPublicProps
 >(
   pure,
   connect(readOnlySelector),

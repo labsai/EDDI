@@ -1,5 +1,5 @@
 import * as React from 'react';
-import { Component, compose, pure, setDisplayName } from 'recompose';
+import { compose, pure, setDisplayName } from 'recompose';
 import * as Radium from 'radium';
 import { CSSProperties } from 'react';
 import * as _ from 'lodash';
@@ -12,14 +12,14 @@ import Parser from '../../utils/Parser';
 
 interface IProps {
   packagePayload: IPackage;
-  isSmallName: boolean;
+  isSmallName?: boolean;
 }
 
 interface IState {
   expandList: boolean;
 }
 
-const styles: CSSProperties = {
+const styles: { [key: string]: IExtendedCSSProperties } = {
   content: {
     width: '100%',
   },
@@ -126,7 +126,7 @@ class BotsUsingPackage extends React.Component<IProps, IState> {
   }
 }
 
-const ComposedBotsUsingPackage: Component<IProps> = compose<IProps>(
+const ComposedBotsUsingPackage: React.ComponentClass<IProps> = compose<IProps, IProps>(
   pure,
   setDisplayName('BotsUsingPackage'),
 )(BotsUsingPackage);

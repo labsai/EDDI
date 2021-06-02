@@ -1,7 +1,7 @@
 import * as React from 'react';
 import styles from './ErrorMessageModal.styles';
 import './ModalComponent.styles.scss';
-import { Component, compose, pure, setDisplayName } from 'recompose';
+import { compose, pure, setDisplayName } from 'recompose';
 import WhiteButton from '../Assets/Buttons/WhiteButton';
 import modalActionDispatchers from '../../actions/ModalActionDispatchers';
 
@@ -41,7 +41,7 @@ class ErrorMessageModal extends React.Component<IProps> {
   }
 }
 
-const ComposedErrorMessageModal: Component<IProps> = compose<IProps>(
+const ComposedErrorMessageModal: React.ComponentClass<IProps> = compose<IProps, IProps>(
   pure,
   setDisplayName('ErrorMessageModal'),
 )(ErrorMessageModal);

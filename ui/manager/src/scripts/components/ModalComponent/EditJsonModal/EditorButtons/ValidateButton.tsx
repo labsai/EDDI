@@ -1,5 +1,5 @@
 import * as React from 'react';
-import { Component, compose, pure, setDisplayName } from 'recompose';
+import { compose, pure, setDisplayName } from 'recompose';
 import * as Radium from 'radium';
 import styles from './EditorButton.styles';
 import { CSSProperties } from 'react';
@@ -10,7 +10,7 @@ import {
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 
 interface IProps {
-  customStyles: CSSProperties;
+  customStyles?: { [key: string]: React.CSSProperties };
   onClick(): void;
 }
 
@@ -27,7 +27,7 @@ const ValidateButton: React.StatelessComponent<IProps> = (props: IProps) => (
   </div>
 );
 
-const ComposedValidateButton: Component<IProps> = compose<IProps>(
+const ComposedValidateButton: React.ComponentClass<IProps> = compose<IProps, IProps>(
   pure,
   Radium,
   setDisplayName('ValidateButton'),

@@ -1,19 +1,19 @@
 import * as React from 'react';
 import * as Radium from 'radium';
 import * as renderIf from 'render-if';
-import { Component, compose, pure, setDisplayName } from 'recompose';
+import { compose, pure, setDisplayName } from 'recompose';
 import Select from 'react-select';
 import * as _ from 'lodash';
 import { CSSProperties } from 'react';
 import Parser from '../utils/Parser';
 
-const styles: CSSProperties = {
+const styles: { [key: string]: IExtendedCSSProperties } = {
   selectContainer: {
     width: '80px',
   },
 };
 
-const customStyles = {
+const customStyles: { [key: string]: (base: any, state: any) => React.CSSProperties } = {
   indicatorsContainer: (base, state) => ({
     position: 'relative',
     borderLeft: '6px solid transparent',
@@ -131,7 +131,7 @@ class VersionSelectComponent extends React.Component<IProps, IState> {
   }
 }
 
-const ComposedVersionSelectComponent: Component<IProps> = compose<IProps>(
+const ComposedVersionSelectComponent: React.ComponentClass<IProps> = compose<IProps, IProps>(
   pure,
   setDisplayName('VersionSelectComponent'),
 )(VersionSelectComponent);

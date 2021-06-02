@@ -1,6 +1,6 @@
 import { CSSProperties } from 'react';
 
-const styles: CSSProperties = {
+const styles: { [key: string]: IExtendedCSSProperties } = {
   homeArrow: {
     borderBottom: '6px solid transparent',
     borderRight: '6px solid #A8B7C7',
@@ -37,7 +37,7 @@ const styles: CSSProperties = {
   },
   link: {
     display: 'flex',
-    flex: '1',
+    flex: 1,
     textDecoration: 'none',
   },
   navigationBar: {
@@ -45,7 +45,7 @@ const styles: CSSProperties = {
     marginTop: '40px',
   },
   navigationBarRightSide: {
-    flex: '1',
+    flex: 1,
   },
 };
 export default styles;

@@ -7,7 +7,7 @@ import {
   SMALL_FONT,
 } from '../../../../styles/DefaultStylingProperties';
 
-const styles: CSSProperties = {
+const styles: { [key: string]: IExtendedCSSProperties } = {
   header: {
     height: '156px',
     backgroundColor: LIGHT_GREY_COLOR3,
@@ -23,7 +23,7 @@ const styles: CSSProperties = {
     marginLeft: '50px',
   },
   centerFlex: {
-    flex: '1',
+    flex: 1,
   },
   button: {
     width: '165px',
@@ -56,7 +56,7 @@ const styles: CSSProperties = {
     marginTop: '-40px',
   },
   closeContainerCenter: {
-    flexGrow: '1',
+    flexGrow: 1,
   },
   loadingWrapper: {
     alignItems: 'center',

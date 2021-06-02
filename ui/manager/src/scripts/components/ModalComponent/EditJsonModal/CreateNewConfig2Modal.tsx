@@ -1,8 +1,7 @@
 import * as React from 'react';
 import styles from '../ModalComponent.styles';
 import '../ModalComponent.styles.scss';
-import { Component, compose, pure, setDisplayName } from 'recompose';
-import AceEditor from 'react-ace';
+import { compose, pure, setDisplayName } from 'recompose';
 import eddiApiActionDispatchers from '../../../actions/EddiApiActionDispatchers';
 import BlueButton from '../../Assets/Buttons/BlueButton';
 import WhiteButton from '../../Assets/Buttons/WhiteButton';
@@ -239,8 +238,8 @@ class CreateNewConfig2Modal extends React.Component<IPrivateProps, IState> {
   }
 }
 
-const ComposedCreateNewConfig2Modal: Component<IPrivateProps> = compose<
-  IPrivateProps
+const ComposedCreateNewConfig2Modal: React.ComponentClass<IPrivateProps> = compose<
+  IPrivateProps, IPrivateProps
 >(pure, connect(schemaSelector), setDisplayName('CreateNewConfig2Modal'))(
   CreateNewConfig2Modal,
 );

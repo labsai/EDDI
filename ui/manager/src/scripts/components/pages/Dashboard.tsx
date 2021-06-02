@@ -2,7 +2,7 @@ import * as React from 'react';
 import Botlist from '../Bots/Botlist';
 import TopBarComponent from '../TopBar/TopBarComponent';
 import styles from '../App.style';
-import { Component, compose, pure, setDisplayName } from 'recompose';
+import { compose, pure, setDisplayName } from 'recompose';
 import { pageEnum } from './pageEnum';
 
 interface IProps {}
@@ -37,9 +37,6 @@ class Dashboard extends React.Component<IProps, IState> {
   }
 }
 
-const ComposedDashboard: Component<IPublicProps> = compose<
-  IPublicProps,
-  IPrivateProps
->(pure, setDisplayName('Dashboard'))(Dashboard);
+const ComposedDashboard: React.ComponentClass<IProps> = compose<IProps, IProps>(pure, setDisplayName('Dashboard'))(Dashboard);
 
 export default ComposedDashboard;

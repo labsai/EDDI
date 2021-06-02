@@ -1,5 +1,5 @@
 import * as React from 'react';
-import { Component, compose, pure, setDisplayName } from 'recompose';
+import { compose, pure, setDisplayName } from 'recompose';
 import { CSSProperties } from 'react';
 import * as Radium from 'radium';
 import {
@@ -11,7 +11,7 @@ import {
   WHITE_COLOR,
 } from '../../../../styles/DefaultStylingProperties';
 
-const styles: CSSProperties = {
+const styles: { [key: string]: IExtendedCSSProperties } = {
   container: {
     ':hover': {
       color: RED_COLOR,
@@ -58,7 +58,7 @@ const SquareXButton: React.StatelessComponent<IProps> = (props: IProps) => (
   </div>
 );
 
-const ComposedSquareXButton: Component<IProps> = compose<IProps>(
+const ComposedSquareXButton: React.ComponentClass<IProps> = compose<IProps, IProps>(
   pure,
   Radium,
   setDisplayName('SquareXButton'),

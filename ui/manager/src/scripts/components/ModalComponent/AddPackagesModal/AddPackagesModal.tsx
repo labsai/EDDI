@@ -1,7 +1,6 @@
 import * as React from 'react';
 import '../ModalComponent.styles.scss';
-import { Link, browserHistory } from 'react-router-dom';
-import { Component, compose, pure, setDisplayName } from 'recompose';
+import { compose, pure, setDisplayName } from 'recompose';
 import PackageContainer from './PackageContainer';
 import { IBot, IPackage } from '../../utils/AxiosFunctions';
 import { packagesSelector } from '../../../selectors/PackageSelectors';
@@ -13,7 +12,7 @@ import styles from './AddPackagesModal.styles';
 import ModalActionDispatchers from '../../../actions/ModalActionDispatchers';
 import * as renderIf from 'render-if';
 import BlueButton from '../../Assets/Buttons/BlueButton';
-import { ClimbingBoxLoader } from 'react-spinners';
+import ClimbingBoxLoader from 'react-spinners/ClimbingBoxLoader';
 import { DEFAULT_LIMIT } from '../../utils/ApiFunctions';
 
 interface IState {
@@ -171,8 +170,8 @@ class AddPackagesModal extends React.Component<IPrivateProps, IState> {
     );
   }
 }
-const ComposedAddPackagesModal: Component<IPrivateProps> = compose<
-  IPrivateProps
+const ComposedAddPackagesModal: React.ComponentClass<IPublicProps> = compose<
+  IPrivateProps, IPublicProps
 >(pure, setDisplayName('AddPackagesModal'), connect(packagesSelector))(
   AddPackagesModal,
 );

@@ -5,7 +5,7 @@ import Plugin from './PluginBoxes/Plugin';
 import PluginWithExtension from './PluginBoxes/PluginWithExtensions';
 import * as renderIf from 'render-if';
 import styles from './PackageView.styles';
-import { Component, compose, pure, setDisplayName } from 'recompose';
+import { compose, pure, setDisplayName } from 'recompose';
 import PluginSelect from './DropDownComponents/PluginSelect';
 import * as _ from 'lodash';
 import {
@@ -29,7 +29,7 @@ import Options from '../Assets/Buttons/Options';
 import { readOnlySelector } from '../../selectors/AuthenticationSelectors';
 
 export interface IOptions extends IPluginExtensions {
-  extensionKey: number;
+  extensionKey?: number;
 }
 
 interface IPublicProps {
@@ -257,7 +257,13 @@ class PackageView extends React.Component<IPrivateProps, IState> {
             </button>
           ))}
           <div style={styles.options}>
-            <Options descriptor={this.props.packagePayload} />
+            <Options
+              descriptor={this.props.packagePayload}
+              data={JSON.stringify(
+                this.props.packagePayload.packageData,
+                null,
+                '\t',
+              )}/>
           </div>
           <BlueButton
             text={'Save'}
@@ -320,7 +326,7 @@ class PackageView extends React.Component<IPrivateProps, IState> {
   }
 }
 
-const ComposedPackageView: Component<IPrivateProps> = compose<IPrivateProps>(
+const ComposedPackageView: React.ComponentClass<IPublicProps> = compose<IPrivateProps, IPublicProps>(
   pure,
   connect(defaultPluginTypesSelector),
   connect(readOnlySelector),

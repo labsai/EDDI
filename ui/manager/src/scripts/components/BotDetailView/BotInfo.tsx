@@ -1,7 +1,7 @@
 import * as React from 'react';
 import BotView from './BotView';
 import { IBot } from '../utils/AxiosFunctions';
-import { Component, compose, pure, setDisplayName } from 'recompose';
+import { compose, pure, setDisplayName } from 'recompose';
 import HomeButtonComponent from '../HomeButton/HomeButtonComponent';
 import * as Radium from 'radium';
 import { specificBotSelector } from '../../selectors/BotSelectors';
@@ -9,7 +9,7 @@ import { connect } from 'react-redux';
 import eddiApiActionDispatchers from '../../actions/EddiApiActionDispatchers';
 import styles from '../Bots/Botlist.styles';
 import * as _ from 'lodash';
-import { ClimbingBoxLoader } from 'react-spinners';
+import ClimbingBoxLoader from 'react-spinners/ClimbingBoxLoader';
 import * as renderIf from 'render-if';
 import { BOT, BOT_PATH } from '../utils/EddiTypes';
 
@@ -68,7 +68,7 @@ class BotInfo extends React.Component<IPrivateProps> {
   }
 }
 
-const ComposedBotInfo: Component<IProps> = compose<IProps>(
+const ComposedBotInfo: React.ComponentClass<IPublicProps> = compose<IPrivateProps, IPublicProps>(
   pure,
   Radium,
   connect(specificBotSelector),

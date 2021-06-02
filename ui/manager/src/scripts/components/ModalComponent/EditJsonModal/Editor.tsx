@@ -1,9 +1,8 @@
 import * as React from 'react';
 import '../ModalComponent.styles.scss';
-import { Component, compose, pure, setDisplayName } from 'recompose';
+import { compose, pure, setDisplayName } from 'recompose';
 import AceEditor from 'react-ace';
 import eddiApiActionDispatchers from '../../../actions/EddiApiActionDispatchers';
-import * as renderIf from 'render-if';
 import * as _ from 'lodash';
 import JsonErrors from './JsonErrors';
 import JsonExample from './JsonExample';
@@ -25,7 +24,6 @@ import ExpandButton from './EditorButtons/ExpandButton';
 import UndoButton from './EditorButtons/UndoButton';
 import RedoButton from './EditorButtons/RedoButton';
 import ValidateButton from './EditorButtons/ValidateButton';
-import * as ace from 'ace-builds';
 
 interface IState {
   editorText: string;
@@ -136,8 +134,8 @@ class CreateNewConfig2Modal extends React.Component<IPrivateProps, IState> {
   }
 }
 
-const ComposedCreateNewConfig2Modal: Component<IPrivateProps> = compose<
-  IPrivateProps
+const ComposedCreateNewConfig2Modal: React.ComponentClass<IPrivateProps> = compose<
+  IPrivateProps, IPrivateProps
 >(pure, connect(schemaSelector), setDisplayName('CreateNewConfig2Modal'))(
   CreateNewConfig2Modal,
 );

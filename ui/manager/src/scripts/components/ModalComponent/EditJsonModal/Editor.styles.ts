@@ -1,12 +1,12 @@
 import { CSSProperties } from 'react';
 import { LIGHT_GREY_COLOR } from '../../../../styles/DefaultStylingProperties';
 
-const styles: CSSProperties = {
+const styles: { [key: string]: IExtendedCSSProperties } = {
   expand: {
     position: 'fixed',
     height: '100%',
     width: '100%',
-    zIndex: '0',
+    zIndex: 0,
     top: '0',
     left: '0',
     marginBottom: '0px',

@@ -1,16 +1,11 @@
 import * as React from 'react';
 import '../ModalComponent.styles.scss';
-import { Link, browserHistory } from 'react-router-dom';
-import { Component, compose, pure, setDisplayName } from 'recompose';
-import Package from '../AddPackagesModal/Package';
+import { compose, pure, setDisplayName } from 'recompose';
 import {
-  getBotsUsingPackage,
   getPackagesUsingPlugin,
-  IBot,
   IPackage,
 } from '../../utils/AxiosFunctions';
 import {
-  packagesSelector,
   packagesWithPluginSelector,
 } from '../../../selectors/PackageSelectors';
 import { connect } from 'react-redux';
@@ -21,7 +16,7 @@ import styles from '../AddPackagesModal/AddPackagesModal.styles';
 import ModalActionDispatchers from '../../../actions/ModalActionDispatchers';
 import * as renderIf from 'render-if';
 import BlueButton from '../../Assets/Buttons/BlueButton';
-import { ClimbingBoxLoader } from 'react-spinners';
+import ClimbingBoxLoader from 'react-spinners/ClimbingBoxLoader';
 import SelectableConfig from './SelectableConfig';
 
 interface IState {
@@ -144,7 +139,7 @@ class UpdatePackagesModal extends React.Component<IPrivateProps, IState> {
     );
   }
 }
-const ComposedUpdatePackagesModal: Component<IPrivateProps> = compose<
+const ComposedUpdatePackagesModal: React.ComponentClass<IPublicProps> = compose<
   IPrivateProps,
   IPublicProps
 >(

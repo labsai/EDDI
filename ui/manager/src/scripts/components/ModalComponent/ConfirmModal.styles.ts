@@ -1,6 +1,6 @@
 import { CSSProperties } from 'react';
 
-const styles: CSSProperties = {
+const styles: { [key: string]: IExtendedCSSProperties } = {
   close: {
     ':focus': {
       color: '#000',

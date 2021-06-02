@@ -1,11 +1,11 @@
 import * as React from 'react';
-import { Component, compose, pure, setDisplayName } from 'recompose';
+import { compose, pure, setDisplayName } from 'recompose';
 import * as Radium from 'radium';
 import { CSSProperties } from 'react';
 import { IDetailedDescriptor } from '../../utils/AxiosFunctions';
 import modalActionDispatchers from '../../../actions/ModalActionDispatchers';
 
-const styles: CSSProperties = {
+const styles: { [key: string]: IExtendedCSSProperties } = {
   content: {
     ':hover': {
       backgroundColor: '#F4F6F9',
@@ -65,7 +65,7 @@ class NameAndVersion extends React.Component<IProps> {
   }
 }
 
-const ComposedNameAndVersion: Component<IProps> = compose<IProps>(
+const ComposedNameAndVersion: React.ComponentClass<IProps> = compose<IProps, IProps>(
   pure,
   Radium,
   setDisplayName('NameAndVersion'),

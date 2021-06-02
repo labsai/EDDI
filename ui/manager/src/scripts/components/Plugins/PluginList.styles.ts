@@ -6,7 +6,7 @@ import {
   SMALL_FONT,
 } from '../../../styles/DefaultStylingProperties';
 
-const styles: CSSProperties = {
+const styles: { [key: string]: IExtendedCSSProperties } = {
   loadingWrapper: {
     alignItems: 'center',
     display: 'flex',

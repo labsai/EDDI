@@ -7,7 +7,7 @@ import {
   SMALL_FONT2,
 } from '../../../../styles/DefaultStylingProperties';
 
-const styles: CSSProperties = {
+const styles: { [key: string]: IExtendedCSSProperties } = {
   content: {
     color: '#54698D',
     fontSize: '12px',

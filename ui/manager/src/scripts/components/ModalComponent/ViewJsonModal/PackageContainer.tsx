@@ -1,5 +1,5 @@
 import * as React from 'react';
-import { Component, compose, pure, setDisplayName } from 'recompose';
+import { compose, pure, setDisplayName } from 'recompose';
 import ViewJsonContent from './ViewJsonContent';
 import { IPackage } from '../../utils/AxiosFunctions';
 import { connect } from 'react-redux';
@@ -59,7 +59,7 @@ class PackageContainer extends React.Component<IPrivateProps, IState> {
   }
 }
 
-const ComposedPackageContainer: Component<IProps> = compose<IProps, IProps>(
+const ComposedPackageContainer: React.ComponentClass<IPublicProps> = compose<IPrivateProps, IPublicProps>(
   pure,
   setDisplayName('PackageContainer'),
   connect(packageSelector),

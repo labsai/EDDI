@@ -1,4 +1,3 @@
-import { useRouterHistory } from 'react-router';
 import { createBrowserHistory } from 'history';
 import { getApiUrlQuery } from './components/utils/ApiFunctions';
 import * as _ from 'lodash';

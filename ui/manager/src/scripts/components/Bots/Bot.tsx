@@ -2,16 +2,15 @@ import * as React from 'react';
 import * as renderIf from 'render-if';
 import styles from './Bot.styles';
 import * as Radium from 'radium';
-import { Link, browserHistory } from 'react-router-dom';
 import WhiteButton from '../Assets/Buttons/WhiteButton';
 import { IBot } from '../utils/AxiosFunctions';
 import Packages from './Packages';
-import { Component, compose, pure, setDisplayName } from 'recompose';
+import { compose, pure, setDisplayName } from 'recompose';
 import eddiApiActionDispatchers from '../../actions/EddiApiActionDispatchers';
 import * as _ from 'lodash';
 import * as moment from 'moment';
 import DeployButton from '../Assets/Buttons/DeployButton';
-import { ClipLoader } from 'react-spinners';
+import ClipLoader from 'react-spinners/ClipLoader';
 import { historyPush } from '../../history';
 import Options from '../Assets/Buttons/BotOptions';
 import { readOnlySelector } from '../../selectors/AuthenticationSelectors';
@@ -127,7 +126,7 @@ class Bot extends React.Component<IPrivateProps> {
   }
 }
 
-const ComposedBot: Component<IProps> = compose<IProps>(
+const ComposedBot: React.ComponentClass<IPublicProps> = compose<IPrivateProps, IPublicProps>(
   pure,
   connect(readOnlySelector),
   Radium,

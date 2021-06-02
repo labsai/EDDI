@@ -1,5 +1,5 @@
 import * as React from 'react';
-import { Component, compose, pure, setDisplayName } from 'recompose';
+import { compose, pure, setDisplayName } from 'recompose';
 import { IPlugin } from '../../utils/AxiosFunctions';
 import { pluginSelector } from '../../../selectors/PluginSelectors';
 import * as moment from 'moment';
@@ -135,7 +135,7 @@ class Plugin extends React.Component<IPrivateProps> {
   }
 }
 
-const ComposedPlugin: Component<IPrivateProps> = compose<
+const ComposedPlugin: React.ComponentClass<IPublicProps> = compose<
   IPrivateProps,
   IPublicProps
 >(pure, connect(pluginSelector), setDisplayName('Plugin'))(Plugin);

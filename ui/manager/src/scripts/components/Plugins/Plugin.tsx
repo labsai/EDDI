@@ -1,5 +1,5 @@
 import * as React from 'react';
-import { Component, compose, pure, setDisplayName } from 'recompose';
+import { compose, pure, setDisplayName } from 'recompose';
 import { IPlugin } from '../utils/AxiosFunctions';
 import { pluginSelector } from '../../selectors/PluginSelectors';
 import * as moment from 'moment';
@@ -10,7 +10,7 @@ import * as _ from 'lodash';
 import { connect } from 'react-redux';
 import PackagesUsingPlugin from '../PackageDetailView/UsedByComponent/PackagesUsingPlugin';
 import styles from './Plugin.styles';
-import { ClipLoader } from 'react-spinners';
+import ClipLoader from 'react-spinners/ClipLoader';
 import modalActionDispatchers from '../../actions/ModalActionDispatchers';
 import * as Radium from 'radium';
 import { BLUE_COLOR } from '../../../styles/DefaultStylingProperties';
@@ -87,9 +87,8 @@ const Plugin: React.StatelessComponent<IPrivateProps> = (
   );
 };
 
-const ComposedPlugin: Component<IPrivateProps> = compose<
-  IPrivateProps,
-  IPublicProps
+const ComposedPlugin: React.ComponentClass<IPublicProps, IPrivateProps> = compose<
+  IPublicProps, IPrivateProps
 >(pure, connect(pluginSelector), Radium, setDisplayName('Plugin'))(Plugin);
 
 export default ComposedPlugin;

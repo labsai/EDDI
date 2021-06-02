@@ -3,13 +3,13 @@ import Bot from './Bot';
 import * as renderIf from 'render-if';
 import * as _ from 'lodash';
 import * as Radium from 'radium';
-import { Component, compose, pure, setDisplayName } from 'recompose';
+import { compose, pure, setDisplayName } from 'recompose';
 import eddiApiActionDispatchers from '../../actions/EddiApiActionDispatchers';
 import { deployExampleBots, IBot } from '../utils/AxiosFunctions';
 import { connect } from 'react-redux';
 import { botsSelector } from '../../selectors/BotSelectors';
 import styles from './Botlist.styles';
-import { ClimbingBoxLoader } from 'react-spinners';
+import ClimbingBoxLoader from 'react-spinners/ClimbingBoxLoader';
 import { DEFAULT_LIMIT, getAPIUrl } from '../utils/ApiFunctions';
 import * as InfiniteScrollTypes from 'react-infinite-scroller';
 const InfiniteScroll = require('react-infinite-scroller') as InfiniteScrollTypes;
@@ -145,7 +145,7 @@ class BotList extends React.Component<IPrivateProps, IState> {
   }
 }
 
-const ComposedBotList: Component<IPublicProps> = compose<
+const ComposedBotList: React.ComponentClass<IPublicProps> = compose<
   IPublicProps,
   IPrivateProps
 >(pure, Radium, connect(botsSelector), setDisplayName('BotList'))(BotList);

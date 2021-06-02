@@ -1,5 +1,5 @@
 import * as React from 'react';
-import { Component, compose, pure, setDisplayName } from 'recompose';
+import { compose, pure, setDisplayName } from 'recompose';
 import { CSSProperties } from 'react';
 import * as Radium from 'radium';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
@@ -8,7 +8,7 @@ import {
   LIGHT_GREY_COLOR,
 } from '../../../../styles/DefaultStylingProperties';
 
-const styles: CSSProperties = {
+const styles: { [key: string]: IExtendedCSSProperties } = {
   content: {
     display: 'flex',
     color: GREEN_COLOR,
@@ -38,7 +38,10 @@ const JsonIsValid: React.StatelessComponent = () => (
   </div>
 );
 
-const ComposedJsonIsValid: Component<IProps> = compose<IProps>(
+interface IProps {
+}
+
+const ComposedJsonIsValid: React.ComponentClass<IProps> = compose<IProps, IProps>(
   pure,
   Radium,
   setDisplayName('JsonIsValid'),

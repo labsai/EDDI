@@ -1,5 +1,5 @@
 import * as React from 'react';
-import { Component, compose, pure, setDisplayName } from 'recompose';
+import { compose, pure, setDisplayName } from 'recompose';
 import { IOptions } from '../PackageView';
 import Parser from '../../utils/Parser';
 import * as renderIf from 'render-if';
@@ -16,14 +16,13 @@ import * as PluginType from '../../utils/EddiTypes';
 import PluginHelper from '../../utils/helpers/PluginHelper';
 import { REGULAR_DICTIONARY } from '../../utils/EddiTypes';
 import * as Radium from 'radium';
-import { BLUE_COLOR } from '../../../../styles/DefaultStylingProperties';
 
 interface IPublicProps {
   pluginType: IOptions;
-  pluginResource: string;
+  pluginResource?: string;
   editDisabled: boolean;
-  deletePlugin(extensionKey: number): void;
-  updatePlugin(extensionKey: number, newPlugin: IPluginExtensions): void;
+  deletePlugin?: (extensionKey: number) => void;
+  updatePlugin?: (extensionKey: number, newPlugin: IPluginExtensions) => void;
 }
 interface IPrivateProps extends IPublicProps {
   plugin: IPlugin;
@@ -230,8 +229,8 @@ class Plugin extends React.Component<IPrivateProps> {
   }
 }
 
-const ComposedPlugin: Component<IPublicProps, IPrivateProps> = compose<
-  IPublicProps
+const ComposedPlugin: React.ComponentClass<IPublicProps> = compose<
+  IPrivateProps, IPublicProps
 >(pure, connect(pluginSelector), Radium, setDisplayName('Plugin'))(Plugin);
 
 export default ComposedPlugin;

@@ -3,18 +3,16 @@ import * as Radium from 'radium';
 import { CSSProperties } from 'react';
 import { historyPush } from '../../history';
 import PluginSelectComponent from './PluginSelectComponent';
-import { REGULAR_DICTIONARY } from '../utils/EddiTypes';
 import {
   DARK_BLUE_COLOR,
   GREY_COLOR,
-  LIGHT_GREY_COLOR,
   LIGHT_GREY_COLOR2,
   LIGHT_GREY_COLOR3,
   SMALL_FONT2,
 } from '../../../styles/DefaultStylingProperties';
 import { pageEnum } from '../pages/pageEnum';
 
-const styles: CSSProperties = {
+const styles: { [key: string]: IExtendedCSSProperties } = {
   navBar: {
     width: 'fit-content',
     display: 'flex',
@@ -52,7 +50,7 @@ const NavigationComponent = (props: IProps) => (
       style={
         props.page === pageEnum.bot
           ? styles.navBarItem
-          : [styles.navBarItem, styles.navBarItemDisabled]
+          : [styles.navBarItem, styles.navBarItemDisabled] as any
       }>
       <div>{'Bots'}</div>
     </div>
@@ -62,7 +60,7 @@ const NavigationComponent = (props: IProps) => (
       style={
         props.page === pageEnum.package
           ? styles.navBarItem
-          : [styles.navBarItem, styles.navBarItemDisabled]
+          : [styles.navBarItem, styles.navBarItemDisabled] as any
       }>
       <div>{'Packages'}</div>
     </div>
@@ -72,7 +70,7 @@ const NavigationComponent = (props: IProps) => (
       style={
         props.page === pageEnum.conversation
           ? styles.navBarItem
-          : [styles.navBarItem, styles.navBarItemDisabled]
+          : [styles.navBarItem, styles.navBarItemDisabled] as any
       }>
       {'Conversations'}
     </div>

@@ -40,7 +40,7 @@ import {
 import BotConversationViewPage from './pages/BotConversationViewPage';
 import ConversationsPage from './pages/ConversationsPage';
 import { authenticationSelector } from '../selectors/AuthenticationSelectors';
-import { Component, compose, pure, setDisplayName } from 'recompose';
+import { compose, pure, setDisplayName } from 'recompose';
 import authenticationActionDispatchers from '../actions/AuthenticationActionDispatchers';
 
 library.add(faUndo);
@@ -145,7 +145,7 @@ class App extends React.Component<IPrivateProps> {
   }
 }
 
-const ComposedApp: Component<IProps> = compose<IProps>(
+const ComposedApp: React.ComponentClass<IPrivateProps> = compose<IPrivateProps, IPrivateProps>(
   pure,
   connect(authenticationSelector),
   connect(isAppReadySelector),

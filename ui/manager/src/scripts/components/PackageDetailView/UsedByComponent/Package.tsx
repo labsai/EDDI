@@ -1,5 +1,5 @@
 import * as React from 'react';
-import { Component, compose, pure, setDisplayName } from 'recompose';
+import { compose, pure, setDisplayName } from 'recompose';
 import * as Radium from 'radium';
 import { IPackage } from '../../utils/AxiosFunctions';
 import { connect } from 'react-redux';
@@ -9,8 +9,8 @@ import { historyPush } from '../../../history';
 
 interface IPublicProps {
   packageResource: string;
-  usedByOlderVersion: boolean;
   isSmallName: boolean;
+  usedByOlderVersion?: boolean;
 }
 
 interface IPrivateProps extends IPublicProps {
@@ -34,7 +34,7 @@ class Package extends React.Component<IPrivateProps> {
   }
 }
 
-const ComposedPackage: Component<IProps> = compose<IProps>(
+const ComposedPackage: React.ComponentClass<IPublicProps> = compose<IPrivateProps, IPublicProps>(
   pure,
   connect(packageSelector),
   Radium,

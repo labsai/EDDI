@@ -1,5 +1,5 @@
 import * as React from 'react';
-import { Component, compose, pure, setDisplayName } from 'recompose';
+import { compose, pure, setDisplayName } from 'recompose';
 import * as Radium from 'radium';
 import { IBot } from '../../utils/AxiosFunctions';
 import { connect } from 'react-redux';
@@ -9,7 +9,7 @@ import { historyPush } from '../../../history';
 
 interface IPublicProps {
   botResource: string;
-  usedByOlderVersion: boolean;
+  usedByOlderVersion?: boolean;
   isSmallName: boolean;
 }
 
@@ -32,7 +32,7 @@ class Bot extends React.Component<IPrivateProps> {
   }
 }
 
-const ComposedBot: Component<IProps> = compose<IProps>(
+const ComposedBot: React.ComponentClass<IPublicProps> = compose<IPrivateProps, IPublicProps>(
   pure,
   connect(botSelector),
   setDisplayName('Bot'),

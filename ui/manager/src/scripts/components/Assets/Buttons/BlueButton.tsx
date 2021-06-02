@@ -1,10 +1,10 @@
 import * as React from 'react';
-import { Component, compose, pure, setDisplayName } from 'recompose';
+import { compose, pure, setDisplayName } from 'recompose';
 import { CSSProperties } from 'react';
 import Button from './Button';
 import * as Radium from 'radium';
 
-const styles: CSSProperties = {
+const styles: { [key: string]: IExtendedCSSProperties } = {
   button: {
     border: '0px',
     color: '#FFFFFF',
@@ -26,9 +26,9 @@ const styles: CSSProperties = {
 
 interface IProps {
   text: string;
-  disabled: boolean;
-  customStyles: {};
-  onClick(): void;
+  disabled?: boolean;
+  customStyles?: {};
+  onClick(event: React.MouseEvent): void;
 }
 
 const BlueButton: React.StatelessComponent<IProps> = (props: IProps) => (
@@ -41,7 +41,7 @@ const BlueButton: React.StatelessComponent<IProps> = (props: IProps) => (
   />
 );
 
-const ComposedBlueButton: Component<IProps> = compose<IProps>(
+const ComposedBlueButton: React.ComponentClass<IProps> = compose<IProps, IProps>(
   pure,
   Radium,
   setDisplayName('BlueButton'),

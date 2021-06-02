@@ -1,10 +1,10 @@
 import * as React from 'react';
 import * as Radium from 'radium';
 import { CSSProperties } from 'react';
-import { Component, compose, pure, setDisplayName } from 'recompose';
+import { compose, pure, setDisplayName } from 'recompose';
 import * as moment from 'moment';
 
-const styles: CSSProperties = {
+const styles: { [key: string]: IExtendedCSSProperties } = {
   content: {
     color: '#16325C',
     fontSize: '13px',
@@ -59,7 +59,7 @@ const BotDescriptor: React.StatelessComponent<IProps> = (props: IProps) => (
   </div>
 );
 
-const ComposedBotDescriptor: Component<IProps> = compose<IProps>(
+const ComposedBotDescriptor: React.ComponentClass<IProps> = compose<IProps, IProps>(
   pure,
   Radium,
   setDisplayName('BotDescriptor'),
