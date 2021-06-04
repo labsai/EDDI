@@ -67,7 +67,7 @@ export function compileJsonSchema(schema: {}, jsonText: string): IJsonError[] {
   if (_.isEmpty(validate.errors)) {
     return [];
   }
-  const errors: IJsonError[] = validate.errors.map(err => {
+  const errors: IJsonError[] = validate.errors.map((err) => {
     return {
       message: err.message,
       line: json.pointers[formatKeyPath(err.dataPath)].value.line,

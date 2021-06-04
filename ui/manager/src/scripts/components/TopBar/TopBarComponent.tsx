@@ -171,7 +171,8 @@ class TopBarComponent extends React.Component<IPrivateProps> {
 }
 
 const ComposedTopBarComponent: React.ComponentClass<IPublicProps> = compose<
-  IPrivateProps, IPublicProps
+  IPrivateProps,
+  IPublicProps
 >(
   pure,
   connect(readOnlySelector),

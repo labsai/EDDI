@@ -66,7 +66,7 @@ class AddPackagesModal extends React.Component<IPrivateProps, IState> {
     if (this.state.selectedPackages.includes(packageResource)) {
       this.setState({
         selectedPackages: this.state.selectedPackages.filter(
-          pack => pack !== packageResource,
+          (pack) => pack !== packageResource,
         ),
       });
     } else {
@@ -88,14 +88,15 @@ class AddPackagesModal extends React.Component<IPrivateProps, IState> {
 
   isPackageSelected(packageResource: string): boolean {
     return !!this.state.selectedPackages.find(
-      selectedPackage =>
+      (selectedPackage) =>
         Parser.getId(packageResource) === Parser.getId(selectedPackage),
     );
   }
 
   getBotPackageIfUsed(packageResource: string): string {
     const botPackage = this.props.bot.packages.find(
-      botPackage => Parser.getId(packageResource) === Parser.getId(botPackage),
+      (botPackage) =>
+        Parser.getId(packageResource) === Parser.getId(botPackage),
     );
     return botPackage || packageResource;
   }
@@ -122,9 +123,10 @@ class AddPackagesModal extends React.Component<IPrivateProps, IState> {
       <div>
         <div style={styles.header}>
           <div style={styles.topHeader}>
-            <div style={styles.title}>{`Select packages for <${
-              this.props.bot.name
-            }>`}</div>
+            <div
+              style={
+                styles.title
+              }>{`Select packages for <${this.props.bot.name}>`}</div>
             <div style={styles.centerFlex} />
             <BlueButton
               customStyles={styles.button}
@@ -171,9 +173,12 @@ class AddPackagesModal extends React.Component<IPrivateProps, IState> {
   }
 }
 const ComposedAddPackagesModal: React.ComponentClass<IPublicProps> = compose<
-  IPrivateProps, IPublicProps
->(pure, setDisplayName('AddPackagesModal'), connect(packagesSelector))(
-  AddPackagesModal,
-);
+  IPrivateProps,
+  IPublicProps
+>(
+  pure,
+  setDisplayName('AddPackagesModal'),
+  connect(packagesSelector),
+)(AddPackagesModal);
 
 export default ComposedAddPackagesModal;

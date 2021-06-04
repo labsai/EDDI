@@ -78,7 +78,7 @@ class UpdatePackageModal extends React.Component<IPrivateProps, IState> {
   }
 
   createNewPackage = async () => {
-    const list = this.state.addedPlugins.map(a => ({
+    const list = this.state.addedPlugins.map((a) => ({
       type: a.type,
     }));
     const packageID = await createNewPackage(
@@ -104,7 +104,7 @@ class UpdatePackageModal extends React.Component<IPrivateProps, IState> {
   deletePlugin = (extensionKey: number) => {
     this.setState({
       addedPlugins: this.state.addedPlugins.filter(
-        ext => !_.isEqual(ext.extensionKey, extensionKey),
+        (ext) => !_.isEqual(ext.extensionKey, extensionKey),
       ),
     });
   };
@@ -147,9 +147,11 @@ class UpdatePackageModal extends React.Component<IPrivateProps, IState> {
             {'Add plugins'}
             <div style={styles.pluginSelector}>
               <PluginSelect
-                packageExtensions={this.props.defaultPluginTypes.map(plugin => {
-                  return plugin;
-                })}
+                packageExtensions={this.props.defaultPluginTypes.map(
+                  (plugin) => {
+                    return plugin;
+                  },
+                )}
                 addExtension={this.addPluginsInModal}
               />
             </div>
@@ -160,7 +162,10 @@ class UpdatePackageModal extends React.Component<IPrivateProps, IState> {
   }
 }
 
-const ComposedUpdatePackageModal: React.ComponentClass<IPublicProps> = compose<IPrivateProps, IPublicProps>(
+const ComposedUpdatePackageModal: React.ComponentClass<IPublicProps> = compose<
+  IPrivateProps,
+  IPublicProps
+>(
   pure,
   setDisplayName('Modal'),
   connect(defaultPluginTypesSelector),

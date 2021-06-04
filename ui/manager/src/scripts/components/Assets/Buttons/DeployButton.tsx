@@ -75,8 +75,8 @@ interface IProps {
   readOnly: boolean;
 }
 
-const sleep = milliseconds => {
-  return new Promise(resolve => setTimeout(resolve, milliseconds));
+const sleep = (milliseconds) => {
+  return new Promise((resolve) => setTimeout(resolve, milliseconds));
 };
 
 class DeployButton extends React.Component<IProps> {
@@ -183,7 +183,10 @@ class DeployButton extends React.Component<IProps> {
   }
 }
 
-const ComposedDeployButton: React.ComponentClass<IProps> = compose<IProps, IProps>(
+const ComposedDeployButton: React.ComponentClass<IProps> = compose<
+  IProps,
+  IProps
+>(
   pure,
   Radium,
   setDisplayName('DeployButton'),

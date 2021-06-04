@@ -12,7 +12,8 @@ import * as InfiniteScrollTypes from 'react-infinite-scroller';
 import PackageContainer from '../BotDetailView/PackageContainer';
 import styles from './Packagelist.styles';
 import { packagesSelector } from '../../selectors/PackageSelectors';
-const InfiniteScroll = require('react-infinite-scroller') as InfiniteScrollTypes;
+const InfiniteScroll =
+  require('react-infinite-scroller') as InfiniteScrollTypes;
 
 interface IPublicProps {
   filterText: string;
@@ -54,7 +55,7 @@ class PackageList extends React.Component<IPrivateProps, IState> {
   filterPackages() {
     if (!_.isEmpty(this.props.filterText)) {
       return this.props.packages.filter(
-        pkg =>
+        (pkg) =>
           pkg.name
             .toLowerCase()
             .includes(this.props.filterText.toLowerCase()) ||
@@ -102,7 +103,9 @@ class PackageList extends React.Component<IPrivateProps, IState> {
           !this.props.isLoading &&
             !this.props.error &&
             _.isEmpty(this.props.packages),
-        )(() => <p>{`There are no packages yet`}</p>)}
+        )(() => (
+          <p>{`There are no packages yet`}</p>
+        ))}
         {renderIf(!this.props.error && !_.isEmpty(this.props.packages))(() => (
           <div style={styles.packageList}>
             {renderIf(_.isEmpty(packageList))(() => (
@@ -117,11 +120,8 @@ class PackageList extends React.Component<IPrivateProps, IState> {
                   Loading ...
                 </div>
               }>
-              {packageList.map(pkg => (
-                <PackageContainer
-                  key={pkg.id}
-                  packageResource={pkg.resource}
-                />
+              {packageList.map((pkg) => (
+                <PackageContainer key={pkg.id} packageResource={pkg.resource} />
               ))}
             </InfiniteScroll>
           </div>
@@ -135,12 +135,10 @@ const ComposedPackageList: React.ComponentClass<IPublicProps> = compose<
   IPublicProps,
   IPrivateProps
 >(
-    pure,
-    connect(packagesSelector),
-    Radium,
-    setDisplayName('PackageList'),
-  )(
-  PackageList,
-);
+  pure,
+  connect(packagesSelector),
+  Radium,
+  setDisplayName('PackageList'),
+)(PackageList);
 
 export default ComposedPackageList;

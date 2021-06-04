@@ -129,9 +129,7 @@ class BotView extends React.Component<IPrivateProps, IState> {
                 onClick={() =>
                   window
                     .open(
-                      `${this.state.apiUrl}/chat/unrestricted/${
-                        this.props.bot.id
-                      }`,
+                      `${this.state.apiUrl}/chat/unrestricted/${this.props.bot.id}`,
                       '_blank',
                     )
                     .focus()
@@ -158,7 +156,10 @@ class BotView extends React.Component<IPrivateProps, IState> {
   }
 }
 
-const ComposedBotView: React.ComponentClass<IPublicProps> = compose<IPrivateProps, IPublicProps>(
+const ComposedBotView: React.ComponentClass<IPublicProps> = compose<
+  IPrivateProps,
+  IPublicProps
+>(
   pure,
   connect(readOnlySelector),
   setDisplayName('BotView'),

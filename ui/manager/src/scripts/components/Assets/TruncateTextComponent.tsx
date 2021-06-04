@@ -84,7 +84,10 @@ class TruncateTextComponent extends React.Component<IProps, IState> {
   }
 }
 
-const ComposedTruncateTextComponent: React.ComponentClass<IProps> = compose<IProps, IProps>(
+const ComposedTruncateTextComponent: React.ComponentClass<IProps> = compose<
+  IProps,
+  IProps
+>(
   pure,
   setDisplayName('TruncateTextComponent'),
 )(TruncateTextComponent);

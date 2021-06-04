@@ -88,7 +88,9 @@ class Package extends React.Component<IPrivateProps, IState> {
             ))}
             {renderIf(
               !this.props.error && _.isEmpty(this.props.packagePayload),
-            )(() => <ClipLoader color={BLUE_COLOR} />)}
+            )(() => (
+              <ClipLoader color={BLUE_COLOR} />
+            ))}
             {renderIf(
               !this.props.error && !_.isEmpty(this.props.packagePayload),
             )(() => (

@@ -77,10 +77,12 @@ class Bot extends React.Component<IPrivateProps> {
                 </span>
               </div>
             </div>
-            <div style={styles.optionsMenu} onClick={e => e.stopPropagation()}>
+            <div
+              style={styles.optionsMenu}
+              onClick={(e) => e.stopPropagation()}>
               <Options bot={this.props.bot} apiUrl={this.props.apiUrl} />
             </div>
-            <div onClick={e => e.stopPropagation()}>
+            <div onClick={(e) => e.stopPropagation()}>
               <WhiteButton
                 text={'Open Chat'}
                 customStyles={styles.chatButton}
@@ -88,9 +90,7 @@ class Bot extends React.Component<IPrivateProps> {
                 onClick={() =>
                   window
                     .open(
-                      `${this.props.apiUrl}/chat/unrestricted/${
-                        this.props.bot.id
-                      }`,
+                      `${this.props.apiUrl}/chat/unrestricted/${this.props.bot.id}`,
                       '_blank',
                     )
                     .focus()
@@ -109,7 +109,9 @@ class Bot extends React.Component<IPrivateProps> {
             {renderIf(
               _.isEmpty(this.props.bot.packages) &&
                 !_.isUndefined(this.props.bot.packages),
-            )(() => <p>{`This bot has no packages yet`}</p>)}
+            )(() => (
+              <p>{`This bot has no packages yet`}</p>
+            ))}
             {renderIf(_.isUndefined(this.props.bot.packages))(() => (
               <ClipLoader color={'#0070D2'} />
             ))}
@@ -126,7 +128,10 @@ class Bot extends React.Component<IPrivateProps> {
   }
 }
 
-const ComposedBot: React.ComponentClass<IPublicProps> = compose<IPrivateProps, IPublicProps>(
+const ComposedBot: React.ComponentClass<IPublicProps> = compose<
+  IPrivateProps,
+  IPublicProps
+>(
   pure,
   connect(readOnlySelector),
   Radium,

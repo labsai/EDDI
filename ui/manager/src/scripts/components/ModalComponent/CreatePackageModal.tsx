@@ -86,7 +86,7 @@ class CreatePackageModal extends React.Component<IProps, IState> {
                 name={'packageName'}
                 style={styles.inputBoxName}
                 placeholder={'Give the package a name..'}
-                onChange={e =>
+                onChange={(e) =>
                   this.setState({
                     packageName: e.target.value,
                   })
@@ -102,7 +102,7 @@ class CreatePackageModal extends React.Component<IProps, IState> {
                 name={'packageDescription'}
                 style={styles.inputBox}
                 placeholder={'Give the package a short description..'}
-                onChange={e =>
+                onChange={(e) =>
                   this.setState({
                     packageDescription: e.target.value,
                   })
@@ -116,7 +116,10 @@ class CreatePackageModal extends React.Component<IProps, IState> {
   }
 }
 
-const ComposedCreatePackageModal: React.ComponentClass<IProps> = compose<IProps, IProps>(
+const ComposedCreatePackageModal: React.ComponentClass<IProps> = compose<
+  IProps,
+  IProps
+>(
   pure,
   setDisplayName('Modal'),
 )(CreatePackageModal);

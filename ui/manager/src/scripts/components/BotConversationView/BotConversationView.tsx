@@ -225,7 +225,8 @@ class BotConversationView extends React.Component<IPrivateProps, IState> {
 }
 
 const ComposedBotConversationView: React.ComponentClass<IPublicProps> = compose<
-  IPrivateProps, IPublicProps
+  IPrivateProps,
+  IPublicProps
 >(
   pure,
   connect(conversationSelector),

@@ -68,14 +68,14 @@ class AddNewPackageToBotModal extends React.Component<IPrivateProps, IState> {
   };
 
   selectBot = (botResource: string) => {
-    const newBotList = this.state.selectedBots.map(bot => bot);
+    const newBotList = this.state.selectedBots.map((bot) => bot);
     if (this.isBotSelected(botResource)) {
       this.setState({
-        selectedBots: newBotList.filter(bot => bot.resource !== botResource),
+        selectedBots: newBotList.filter((bot) => bot.resource !== botResource),
       });
     } else {
       newBotList.push(
-        this.props.bots.find(bot => bot.resource === botResource),
+        this.props.bots.find((bot) => bot.resource === botResource),
       );
       this.setState({ selectedBots: newBotList });
     }
@@ -83,7 +83,7 @@ class AddNewPackageToBotModal extends React.Component<IPrivateProps, IState> {
 
   isBotSelected(botResource: string): boolean {
     return !_.isEmpty(
-      this.state.selectedBots.find(bot => bot.resource === botResource),
+      this.state.selectedBots.find((bot) => bot.resource === botResource),
     );
   }
 
@@ -140,11 +140,11 @@ class AddNewPackageToBotModal extends React.Component<IPrivateProps, IState> {
   }
 }
 
-const ComposedAddNewPackageToBotModal: React.ComponentClass<IPublicProps> = compose<
-  IPrivateProps,
-  IPublicProps
->(pure, setDisplayName('AddNewPackageToBotModal'), connect(botsSelector))(
-  AddNewPackageToBotModal,
-);
+const ComposedAddNewPackageToBotModal: React.ComponentClass<IPublicProps> =
+  compose<IPrivateProps, IPublicProps>(
+    pure,
+    setDisplayName('AddNewPackageToBotModal'),
+    connect(botsSelector),
+  )(AddNewPackageToBotModal);
 
 export default ComposedAddNewPackageToBotModal;

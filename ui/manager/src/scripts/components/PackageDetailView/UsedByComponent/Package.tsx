@@ -34,7 +34,10 @@ class Package extends React.Component<IPrivateProps> {
   }
 }
 
-const ComposedPackage: React.ComponentClass<IPublicProps> = compose<IPrivateProps, IPublicProps>(
+const ComposedPackage: React.ComponentClass<IPublicProps> = compose<
+  IPrivateProps,
+  IPublicProps
+>(
   pure,
   connect(packageSelector),
   Radium,

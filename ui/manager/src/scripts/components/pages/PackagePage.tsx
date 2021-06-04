@@ -37,6 +37,9 @@ class PackagePage extends React.Component<IProps, IState> {
   }
 }
 
-const ComposedPackagePage: React.ComponentClass = compose<IProps, IState>(pure, setDisplayName('PackagePage'))(PackagePage);
+const ComposedPackagePage: React.ComponentClass = compose<IProps, IState>(
+  pure,
+  setDisplayName('PackagePage'),
+)(PackagePage);
 
 export default ComposedPackagePage;

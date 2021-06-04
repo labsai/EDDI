@@ -23,7 +23,7 @@ var styles = {
     },
   },
 };
-var WhiteButton = function(props) {
+var WhiteButton = function (props) {
   return (
     <Button_1.default
       text={props.text}

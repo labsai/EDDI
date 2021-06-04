@@ -22,7 +22,10 @@ const UndoButton: React.StatelessComponent<IProps> = (props: IProps) => (
   </div>
 );
 
-const ComposedUndoButton: React.ComponentClass<IProps> = compose<IProps, IProps>(
+const ComposedUndoButton: React.ComponentClass<IProps> = compose<
+  IProps,
+  IProps
+>(
   pure,
   Radium,
   setDisplayName('UndoButton'),

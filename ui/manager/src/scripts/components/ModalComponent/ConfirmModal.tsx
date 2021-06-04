@@ -45,7 +45,10 @@ class ConfirmModal extends React.Component<IProps> {
   }
 }
 
-const ComposedConfirmModal: React.ComponentClass<IProps> = compose<IProps, IProps>(
+const ComposedConfirmModal: React.ComponentClass<IProps> = compose<
+  IProps,
+  IProps
+>(
   pure,
   setDisplayName('Modal'),
 )(ConfirmModal);

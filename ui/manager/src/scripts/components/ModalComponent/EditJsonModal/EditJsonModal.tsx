@@ -32,7 +32,7 @@ interface IState {
   selectedTab: TabEnum;
 }
 
-interface IPublicProps  {
+interface IPublicProps {
   resource: string;
   data: string;
   type: string;
@@ -68,7 +68,7 @@ class EditJsonModal extends React.Component<IPrivateProps, IState> {
     }
   }
 
-  onChange = value => {
+  onChange = (value) => {
     this.setState({
       editorText: value,
       isValidJson: false,
@@ -176,7 +176,9 @@ class EditJsonModal extends React.Component<IPrivateProps, IState> {
             {'Form'}
           </div>
         </div>
-        {renderIf(this.state.isValidJson)(() => <JsonIsValid />)}
+        {renderIf(this.state.isValidJson)(() => (
+          <JsonIsValid />
+        ))}
         {renderIf(this.state.selectedTab === TabEnum.editor)(() => (
           <div>
             {renderIf(!_.isEmpty(this.state.errors))(() => (
@@ -209,8 +211,10 @@ class EditJsonModal extends React.Component<IPrivateProps, IState> {
 const ComposedEditJsonModal: React.ComponentClass<IPublicProps> = compose<
   IPrivateProps,
   IPublicProps
->(pure, connect(schemaSelector), setDisplayName('EditJsonModal'))(
-  EditJsonModal,
-);
+>(
+  pure,
+  connect(schemaSelector),
+  setDisplayName('EditJsonModal'),
+)(EditJsonModal);
 
 export default ComposedEditJsonModal;

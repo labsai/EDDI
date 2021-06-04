@@ -79,7 +79,7 @@ class CreateBotModal extends React.Component<IProps, IState> {
                 defaultValue={''}
                 style={styles.inputBoxName}
                 placeholder={'Give the bot a name..'}
-                onChange={e =>
+                onChange={(e) =>
                   this.setState({
                     name: e.target.value,
                   })
@@ -95,7 +95,7 @@ class CreateBotModal extends React.Component<IProps, IState> {
                 style={styles.inputBox}
                 defaultValue={''}
                 placeholder={'Give the bot a short description..'}
-                onChange={e =>
+                onChange={(e) =>
                   this.setState({
                     description: e.target.value,
                   })
@@ -109,7 +109,10 @@ class CreateBotModal extends React.Component<IProps, IState> {
   }
 }
 
-const ComposedCreateBotModal: React.ComponentClass<IProps> = compose<IProps, IProps>(
+const ComposedCreateBotModal: React.ComponentClass<IProps> = compose<
+  IProps,
+  IProps
+>(
   pure,
   setDisplayName('Modal'),
 )(CreateBotModal);

@@ -10,6 +10,9 @@ const actions: ISystemActionDispatchers = {
   appReady,
 };
 
-const systemActionDispatchers: ISystemActionDispatchers = bindActionCreators(actions, store.dispatch);
+const systemActionDispatchers: ISystemActionDispatchers = bindActionCreators(
+  actions,
+  store.dispatch,
+);
 
 export default systemActionDispatchers;

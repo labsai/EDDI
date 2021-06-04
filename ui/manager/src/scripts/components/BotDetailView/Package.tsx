@@ -106,7 +106,9 @@ class Package extends React.Component<IPrivateProps> {
                 <div style={this.getNameStyle()}>
                   {packagePayload.name || packagePayload.id}
                 </div>
-                <div onClick={e => e.stopPropagation()} style={styles.version}>
+                <div
+                  onClick={(e) => e.stopPropagation()}
+                  style={styles.version}>
                   <VersionSelectComponent
                     selectedVersion={packagePayload.version}
                     currentVersion={packagePayload.currentVersion}
@@ -155,7 +157,10 @@ class Package extends React.Component<IPrivateProps> {
   }
 }
 
-const ComposedPackage: React.ComponentClass<IPublicProps> = compose<IPrivateProps, IPublicProps>(
+const ComposedPackage: React.ComponentClass<IPublicProps> = compose<
+  IPrivateProps,
+  IPublicProps
+>(
   pure,
   connect(packageSelector),
   Radium,

@@ -245,7 +245,12 @@ class ModalComponentFrame extends React.Component<IPrivateProps, IState> {
 }
 
 const ComposedModalComponentFrame: React.ComponentClass<IPublicProps> = compose<
-  IPrivateProps, IPublicProps
->(pure, setDisplayName('Modal'), connect(modalSelector))(ModalComponentFrame);
+  IPrivateProps,
+  IPublicProps
+>(
+  pure,
+  setDisplayName('Modal'),
+  connect(modalSelector),
+)(ModalComponentFrame);
 
 export default ComposedModalComponentFrame;

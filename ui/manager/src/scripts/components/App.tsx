@@ -69,8 +69,8 @@ interface IPrivateProps extends IRouteProps {
   basicAuthAuthenticated: boolean;
 }
 
-const sleep = milliseconds => {
-  return new Promise(resolve => setTimeout(resolve, milliseconds));
+const sleep = (milliseconds) => {
+  return new Promise((resolve) => setTimeout(resolve, milliseconds));
 };
 
 const App = ({
@@ -81,7 +81,6 @@ const App = ({
   isAppReady,
   basicAuthAuthenticated,
 }: IPrivateProps) => {
-
   React.useEffect(() => {
     runSagaMiddleware();
     const queryStrings = Parser.getQueryStrings(location.search);
@@ -96,13 +95,17 @@ const App = ({
   }, []);
 
   const refreshToken = async () => {
-    if (!keycloak) { return; }
+    if (!keycloak) {
+      return;
+    }
     authenticationActionDispatchers.keycloakRefreshTokenAction(keycloak);
     await sleep(240000).then(() => refreshToken());
   };
 
   const initKeycloak = async () => {
-    if (!keycloak) { return; }
+    if (!keycloak) {
+      return;
+    }
     await kcHelper.initKeycloak(keycloak);
   };
 
@@ -115,17 +118,16 @@ const App = ({
   }, [isKeycloakEnabled, keycloakAuthenticated, keycloak]);
 
   React.useEffect(() => {
-    if (isKeycloakEnabled &&
-      keycloakAuthenticated) {
-        refreshToken();
-      }
+    if (isKeycloakEnabled && keycloakAuthenticated) {
+      refreshToken();
+    }
   }, []);
 
   const authenticated = keycloakAuthenticated && basicAuthAuthenticated;
 
   return (
     <div className="ui container">
-      {renderIf(isAppReady)(() => (
+      {isAppReady && (
         <div>
           {renderIf(!authenticated)(() => (
             <div>{'You need to login to see this page'}</div>
@@ -152,12 +154,15 @@ const App = ({
             <ModalComponentFrame />
           ))}
         </div>
-      ))}
+      )}
     </div>
   );
 };
 
-const ComposedApp: React.ComponentClass<IPrivateProps> = compose<IPrivateProps, IPrivateProps>(
+const ComposedApp: React.ComponentClass<IPrivateProps> = compose<
+  IPrivateProps,
+  IPrivateProps
+>(
   pure,
   connect(authenticationSelector),
   connect(isAppReadySelector),

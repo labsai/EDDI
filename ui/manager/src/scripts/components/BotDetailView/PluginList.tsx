@@ -45,7 +45,10 @@ const PluginList: React.StatelessComponent<IProps> = (props: IProps) => {
   );
 };
 
-const ComposedPluginList: React.ComponentClass<IProps> = compose<IProps, IProps>(
+const ComposedPluginList: React.ComponentClass<IProps> = compose<
+  IProps,
+  IProps
+>(
   pure,
   Radium,
   setDisplayName('PluginList'),

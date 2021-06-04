@@ -112,10 +112,11 @@ class PluginWithExtensions extends React.Component<IPrivateProps> {
 
   updatePluginResource = (newPluginResourceList: string[]) => {
     if (this.props.pluginType.type === PluginType.PARSER) {
-      const otherDictionaries = this.props.pluginType.extensions.dictionaries.filter(
-        d => d.type !== REGULAR_DICTIONARY,
-      );
-      const newRegularDictionaryList = newPluginResourceList.map(resource => {
+      const otherDictionaries =
+        this.props.pluginType.extensions.dictionaries.filter(
+          (d) => d.type !== REGULAR_DICTIONARY,
+        );
+      const newRegularDictionaryList = newPluginResourceList.map((resource) => {
         return { type: REGULAR_DICTIONARY, config: { uri: resource } };
       });
       const newPlugin: IPluginExtensions = {
@@ -147,8 +148,8 @@ class PluginWithExtensions extends React.Component<IPrivateProps> {
         !_.isEmpty(this.props.pluginType.extensions.dictionaries)
       ) {
         extensionList = this.props.pluginType.extensions.dictionaries
-          .filter(d => d.config && d.config.uri)
-          .map(resource => {
+          .filter((d) => d.config && d.config.uri)
+          .map((resource) => {
             return resource.config.uri;
           });
       }
@@ -170,7 +171,7 @@ class PluginWithExtensions extends React.Component<IPrivateProps> {
 
   updateExtension = (extensionResource: string) => {
     const newExtensionList = this.props.pluginType.extensions.dictionaries.map(
-      ext => {
+      (ext) => {
         if (
           ext.config &&
           Parser.getId(ext.config.uri) === Parser.getId(extensionResource)
@@ -282,10 +283,11 @@ class PluginWithExtensions extends React.Component<IPrivateProps> {
   }
 }
 
-const ComposedPluginWithExtensions: React.ComponentClass<IPublicProps> = compose<IPrivateProps, IPublicProps>(
-  pure,
-  Radium,
-  setDisplayName('PluginWithExtensions'),
-)(PluginWithExtensions);
+const ComposedPluginWithExtensions: React.ComponentClass<IPublicProps> =
+  compose<IPrivateProps, IPublicProps>(
+    pure,
+    Radium,
+    setDisplayName('PluginWithExtensions'),
+  )(PluginWithExtensions);
 
 export default ComposedPluginWithExtensions;

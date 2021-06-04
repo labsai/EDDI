@@ -59,7 +59,10 @@ const PackageDescriptor: React.StatelessComponent<IProps> = (props: IProps) => (
   </div>
 );
 
-const ComposedPackageDescriptor: React.ComponentClass<IProps> = compose<IProps, IProps>(
+const ComposedPackageDescriptor: React.ComponentClass<IProps> = compose<
+  IProps,
+  IProps
+>(
   pure,
   setDisplayName('PackageDescriptor'),
 )(PackageDescriptor);

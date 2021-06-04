@@ -31,13 +31,13 @@ const JsonSchemaForm: React.StatelessComponent<IProps> = (props: IProps) => {
       <button onClick={() => yourForm.submit()}>{'Validate form'}</button>
       {renderIf(props.schema && props.data)(() => (
         <Form
-          ref={form => {
+          ref={(form) => {
             yourForm = form;
           }}
           additionalMetaSchemas={[metaSchema4]}
           schema={props.schema}
           formData={JSON.parse(props.data)}
-          onChange={data =>
+          onChange={(data) =>
             props.onChange(JSON.stringify(data.formData, null, '\t'))
           }
           onSubmit={() => props.validate()}
@@ -49,7 +49,10 @@ const JsonSchemaForm: React.StatelessComponent<IProps> = (props: IProps) => {
   );
 };
 
-const ComposedJsonSchemaForm: React.ComponentClass<IProps> = compose<IProps, IProps>(
+const ComposedJsonSchemaForm: React.ComponentClass<IProps> = compose<
+  IProps,
+  IProps
+>(
   pure,
   connect(schemaSelector),
   Radium,

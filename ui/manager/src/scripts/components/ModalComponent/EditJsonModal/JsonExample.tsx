@@ -52,7 +52,10 @@ class JsonExample extends React.Component<IPrivateProps, IState> {
   }
 }
 
-const ComposedJsonExample: React.ComponentClass<IPublicProps> = compose<IPrivateProps, IPublicProps>(
+const ComposedJsonExample: React.ComponentClass<IPublicProps> = compose<
+  IPrivateProps,
+  IPublicProps
+>(
   pure,
   setDisplayName('JsonExample'),
 )(JsonExample);

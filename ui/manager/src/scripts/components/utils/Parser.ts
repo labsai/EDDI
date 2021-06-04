@@ -133,7 +133,7 @@ export default class Parser {
     currentVersion = false,
   ): IDetailedDescriptor[] {
     if (currentVersion) {
-      return data.data.map(pkg => {
+      return data.data.map((pkg) => {
         const version = Parser.getVersion(pkg.resource);
         return {
           id: Parser.getId(pkg.resource),
@@ -147,7 +147,7 @@ export default class Parser {
         };
       });
     }
-    return data.data.map(pkg => {
+    return data.data.map((pkg) => {
       return {
         id: Parser.getId(pkg.resource),
         version: Parser.getVersion(pkg.resource),
@@ -161,23 +161,23 @@ export default class Parser {
   }
 
   static shortenResourceList(list: string[]): IUsedResource[] {
-    let longList = list.map(resource => resource);
+    let longList = list.map((resource) => resource);
     const shorterList: IUsedResource[] = [];
     while (_.size(longList) > 0) {
       const currentResource = longList[0];
       const currentId = Parser.getId(currentResource);
       const resourcesWithSameId = longList.filter(
-        res => Parser.getId(res) === currentId,
+        (res) => Parser.getId(res) === currentId,
       );
       const hasOlderVersion = _.size(resourcesWithSameId) > 1;
       shorterList.push({
-        resource: _.maxBy(resourcesWithSameId, function(o) {
+        resource: _.maxBy(resourcesWithSameId, function (o) {
           return Parser.getVersion(o);
         }),
         usedByOlderVersion: hasOlderVersion,
       });
       longList = longList.filter(
-        resource => Parser.getId(resource) !== currentId,
+        (resource) => Parser.getId(resource) !== currentId,
       );
     }
     return shorterList;

@@ -320,7 +320,7 @@ const ModalReducer: IModalReducer = (
         },
         selectedResources: {
           $set: (action as IUpdatePackagesSuccessAction).packages.map(
-            pkg => pkg.resource,
+            (pkg) => pkg.resource,
           ),
         },
       });

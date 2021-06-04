@@ -23,7 +23,10 @@ const RedoButton: React.StatelessComponent<IProps> = (props: IProps) => (
   </div>
 );
 
-const ComposedRedoButton: React.ComponentClass<IProps> = compose<IProps, IProps>(
+const ComposedRedoButton: React.ComponentClass<IProps> = compose<
+  IProps,
+  IProps
+>(
   pure,
   Radium,
   setDisplayName('RedoButton'),

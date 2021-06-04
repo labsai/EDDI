@@ -85,7 +85,10 @@ class ConversationsModal extends React.Component<IProps, IState> {
   }
 }
 
-const ComposedConversationsModal: React.ComponentClass<IProps> = compose<IProps, IProps>(
+const ComposedConversationsModal: React.ComponentClass<IProps> = compose<
+  IProps,
+  IProps
+>(
   pure,
   setDisplayName('ConversationsModal'),
 )(ConversationsModal);

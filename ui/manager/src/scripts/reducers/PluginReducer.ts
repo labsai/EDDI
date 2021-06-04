@@ -156,7 +156,7 @@ const PluginReducer: IPluginReducer = (
             if (!_.isEmpty((action as IFetchPluginsSuccessAction).plugins)) {
               return _.uniqBy(
                 plugins.concat((action as IFetchPluginsSuccessAction).plugins),
-                plugin => plugin.resource,
+                (plugin) => plugin.resource,
               );
             } else {
               return plugins;
@@ -244,7 +244,7 @@ const PluginReducer: IPluginReducer = (
 
     case FETCH_PLUGIN_SUCCESS:
       const pluginList = state.plugins.filter(
-        plugin =>
+        (plugin) =>
           plugin.resource !==
           (action as IFetchPluginSuccessAction).plugin.resource,
       );
@@ -274,7 +274,7 @@ const PluginReducer: IPluginReducer = (
       return update(state, {
         plugins: {
           $apply: (plugins: IPlugin[]) => {
-            return plugins.map(plugin => {
+            return plugins.map((plugin) => {
               if (
                 plugin.resource ===
                 (action as IFetchPackagesUsingPluginSuccessAction)
@@ -282,9 +282,9 @@ const PluginReducer: IPluginReducer = (
               ) {
                 return update(plugin, {
                   usedByPackages: {
-                    $set: (action as IFetchPackagesUsingPluginSuccessAction).packages.map(
-                      pkg => pkg.resource,
-                    ),
+                    $set: (
+                      action as IFetchPackagesUsingPluginSuccessAction
+                    ).packages.map((pkg) => pkg.resource),
                   },
                 });
               } else {
@@ -300,7 +300,7 @@ const PluginReducer: IPluginReducer = (
         plugins: {
           $apply: (plugins: IPlugin[]) => {
             const updatedPlugin = (action as IUpdatePluginSuccessAction).plugin;
-            const newPluginList = plugins.map(plugin => {
+            const newPluginList = plugins.map((plugin) => {
               if (plugin.id === updatedPlugin.id) {
                 return update(plugin, {
                   currentVersion: { $set: updatedPlugin.version },
@@ -369,7 +369,7 @@ const PluginReducer: IPluginReducer = (
                 schemas.concat(
                   (action as IFetchJsonSchemaSuccessAction).schema,
                 ),
-                schema => schema.name,
+                (schema) => schema.name,
               );
             } else {
               return schemas;
@@ -384,7 +384,7 @@ const PluginReducer: IPluginReducer = (
           $apply: (plugins: IPlugin[]) => {
             return _.uniqBy(
               plugins.concat((action as IDuplicateSuccessAction).plugins),
-              plugin => plugin.resource,
+              (plugin) => plugin.resource,
             );
           },
         },

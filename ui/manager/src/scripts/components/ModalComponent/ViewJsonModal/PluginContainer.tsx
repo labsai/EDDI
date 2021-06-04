@@ -63,8 +63,10 @@ class PluginContainer extends React.Component<IPrivateProps, IState> {
 const ComposedPluginContainer: React.ComponentClass<IPublicProps> = compose<
   IPrivateProps,
   IPublicProps
->(pure, setDisplayName('PluginContainer'), connect(pluginSelector))(
-  PluginContainer,
-);
+>(
+  pure,
+  setDisplayName('PluginContainer'),
+  connect(pluginSelector),
+)(PluginContainer);
 
 export default ComposedPluginContainer;

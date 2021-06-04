@@ -60,7 +60,7 @@ const FilterComponent = (props: IProps) => (
         type={'text'}
         placeholder={`Find ${getSearchName(props.page)}`}
         style={styles.searchBoxInput}
-        onChange={f => props.filter(f.target.value)}
+        onChange={(f) => props.filter(f.target.value)}
       />
     </div>
   </div>

@@ -4,11 +4,11 @@ services:
     build:
       context: .
       args:
-        EDDI_API_URL: "http://localhost:7070"
-        READ_ONLY_DOMAIN: "https://app.labs.ai"
+        EDDI_API_URL: 'http://localhost:7070'
+        READ_ONLY_DOMAIN: 'https://app.labs.ai'
         PORT: 7071
     image: labsai/eddi-config-ui:local
     environment:
-      EDDI_API_URL: "http://localhost:7070"
-      READ_ONLY_DOMAIN: "https://app.labs.ai"
+      EDDI_API_URL: 'http://localhost:7070'
+      READ_ONLY_DOMAIN: 'https://app.labs.ai'
       PORT: 7071

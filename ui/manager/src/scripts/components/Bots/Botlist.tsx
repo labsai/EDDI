@@ -12,7 +12,8 @@ import styles from './Botlist.styles';
 import ClimbingBoxLoader from 'react-spinners/ClimbingBoxLoader';
 import { DEFAULT_LIMIT, getAPIUrl } from '../utils/ApiFunctions';
 import * as InfiniteScrollTypes from 'react-infinite-scroller';
-const InfiniteScroll = require('react-infinite-scroller') as InfiniteScrollTypes;
+const InfiniteScroll =
+  require('react-infinite-scroller') as InfiniteScrollTypes;
 import BlueButton from '../Assets/Buttons/BlueButton';
 
 interface IPublicProps {
@@ -57,7 +58,7 @@ class BotList extends React.Component<IPrivateProps, IState> {
   filterBots() {
     if (!_.isEmpty(this.props.filterText)) {
       return this.props.bots.filter(
-        bot =>
+        (bot) =>
           bot.name
             .toLowerCase()
             .includes(this.props.filterText.toLowerCase()) ||
@@ -128,7 +129,7 @@ class BotList extends React.Component<IPrivateProps, IState> {
                       Loading ...
                     </div>
                   }>
-                  {botList.map(bot => (
+                  {botList.map((bot) => (
                     <Bot
                       key={bot.resource}
                       bot={bot}
@@ -148,6 +149,11 @@ class BotList extends React.Component<IPrivateProps, IState> {
 const ComposedBotList: React.ComponentClass<IPublicProps> = compose<
   IPublicProps,
   IPrivateProps
->(pure, connect(botsSelector), Radium, setDisplayName('BotList'))(BotList);
+>(
+  pure,
+  connect(botsSelector),
+  Radium,
+  setDisplayName('BotList'),
+)(BotList);
 
 export default ComposedBotList;

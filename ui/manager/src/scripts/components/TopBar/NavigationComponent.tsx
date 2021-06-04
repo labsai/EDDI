@@ -50,7 +50,7 @@ const NavigationComponent = (props: IProps) => (
       style={
         props.page === pageEnum.bot
           ? styles.navBarItem
-          : [styles.navBarItem, styles.navBarItemDisabled] as any
+          : ([styles.navBarItem, styles.navBarItemDisabled] as any)
       }>
       <div>{'Bots'}</div>
     </div>
@@ -60,7 +60,7 @@ const NavigationComponent = (props: IProps) => (
       style={
         props.page === pageEnum.package
           ? styles.navBarItem
-          : [styles.navBarItem, styles.navBarItemDisabled] as any
+          : ([styles.navBarItem, styles.navBarItemDisabled] as any)
       }>
       <div>{'Packages'}</div>
     </div>
@@ -70,7 +70,7 @@ const NavigationComponent = (props: IProps) => (
       style={
         props.page === pageEnum.conversation
           ? styles.navBarItem
-          : [styles.navBarItem, styles.navBarItemDisabled] as any
+          : ([styles.navBarItem, styles.navBarItemDisabled] as any)
       }>
       {'Conversations'}
     </div>

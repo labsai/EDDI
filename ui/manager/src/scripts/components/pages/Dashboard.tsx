@@ -37,6 +37,9 @@ class Dashboard extends React.Component<IProps, IState> {
   }
 }
 
-const ComposedDashboard: React.ComponentClass<IProps> = compose<IProps, IProps>(pure, setDisplayName('Dashboard'))(Dashboard);
+const ComposedDashboard: React.ComponentClass<IProps> = compose<IProps, IProps>(
+  pure,
+  setDisplayName('Dashboard'),
+)(Dashboard);
 
 export default ComposedDashboard;

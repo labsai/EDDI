@@ -42,7 +42,7 @@ class VersionDropDownComponent extends React.Component<IProps, IState> {
   }
 
   componentDidMount() {
-    const options = this.props.packageExtensions.map(option => ({
+    const options = this.props.packageExtensions.map((option) => ({
       value: option.type,
       label: Parser.getPluginName(option.type, true),
     }));
@@ -53,7 +53,7 @@ class VersionDropDownComponent extends React.Component<IProps, IState> {
 
   componentDidUpdate(prevProps) {
     if (prevProps !== this.props) {
-      const options = this.props.packageExtensions.map(option => ({
+      const options = this.props.packageExtensions.map((option) => ({
         value: option.type,
         label: Parser.getPluginName(option.type, true),
       }));
@@ -63,7 +63,7 @@ class VersionDropDownComponent extends React.Component<IProps, IState> {
     }
   }
 
-  handleSelect = option => {
+  handleSelect = (option) => {
     if (!_.isEmpty(option)) {
       this.setState({ option: this.state.options[option] });
       this.props.addExtension({ type: `eddi://${option.value}` });
@@ -87,6 +87,9 @@ class VersionDropDownComponent extends React.Component<IProps, IState> {
 const ComposedVersionDropDownComponent: React.ComponentClass<IProps> = compose<
   IProps,
   IProps
->(pure, setDisplayName('VersionDropDownComponent'))(VersionDropDownComponent);
+>(
+  pure,
+  setDisplayName('VersionDropDownComponent'),
+)(VersionDropDownComponent);
 
 export default ComposedVersionDropDownComponent;

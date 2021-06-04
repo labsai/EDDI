@@ -66,7 +66,7 @@ class EditDescriptorModal extends React.Component<IProps, IState> {
                 defaultValue={this.state.name}
                 name={'name'}
                 style={styles.inputBoxName}
-                onChange={e =>
+                onChange={(e) =>
                   this.setState({
                     name: e.target.value,
                   })
@@ -81,7 +81,7 @@ class EditDescriptorModal extends React.Component<IProps, IState> {
                 defaultValue={this.state.description}
                 name={'description'}
                 style={styles.inputBox}
-                onChange={e =>
+                onChange={(e) =>
                   this.setState({
                     description: e.target.value,
                   })
@@ -94,7 +94,10 @@ class EditDescriptorModal extends React.Component<IProps, IState> {
     );
   }
 }
-const ComposedEditDescriptorModal: React.ComponentClass<IProps> = compose<IProps, IProps>(
+const ComposedEditDescriptorModal: React.ComponentClass<IProps> = compose<
+  IProps,
+  IProps
+>(
   pure,
   setDisplayName('EditDescriptorModal'),
 )(EditDescriptorModal);

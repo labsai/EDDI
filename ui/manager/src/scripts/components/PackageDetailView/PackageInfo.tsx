@@ -29,9 +29,7 @@ class PackageInfo extends React.Component<IPrivateProps> {
       eddiApiActionDispatchers.fetchCurrentPackageAction(this.props.packageId);
     } else {
       eddiApiActionDispatchers.fetchPackageAction(
-        `${PACKAGE}${PACKAGE_PATH}/${this.props.packageId}?version=${
-          this.props.version
-        }`,
+        `${PACKAGE}${PACKAGE_PATH}/${this.props.packageId}?version=${this.props.version}`,
       );
     }
   }
@@ -52,10 +50,14 @@ class PackageInfo extends React.Component<IPrivateProps> {
             ))}
             {renderIf(
               !this.props.error && _.isEmpty(this.props.packagePayload),
-            )(() => <p>{'Package not found'}</p>)}
+            )(() => (
+              <p>{'Package not found'}</p>
+            ))}
             {renderIf(
               !this.props.error && !_.isEmpty(this.props.packagePayload),
-            )(() => <PackageView packagePayload={this.props.packagePayload} />)}
+            )(() => (
+              <PackageView packagePayload={this.props.packagePayload} />
+            ))}
           </div>
         ))}
       </div>
@@ -63,10 +65,11 @@ class PackageInfo extends React.Component<IPrivateProps> {
   }
 }
 
-const ComposedPackageInfo: React.ComponentClass<IPublicProps, IPrivateProps> = compose<IPublicProps, IPrivateProps>(
-  pure,
-  connect(specificPackageSelector),
-  setDisplayName('PackageInfo'),
-)(PackageInfo);
+const ComposedPackageInfo: React.ComponentClass<IPublicProps, IPrivateProps> =
+  compose<IPublicProps, IPrivateProps>(
+    pure,
+    connect(specificPackageSelector),
+    setDisplayName('PackageInfo'),
+  )(PackageInfo);
 
 export default ComposedPackageInfo;

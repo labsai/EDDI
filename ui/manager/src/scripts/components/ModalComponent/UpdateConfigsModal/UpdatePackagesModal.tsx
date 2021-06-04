@@ -1,13 +1,8 @@
 import * as React from 'react';
 import '../ModalComponent.styles.scss';
 import { compose, pure, setDisplayName } from 'recompose';
-import {
-  getPackagesUsingPlugin,
-  IPackage,
-} from '../../utils/AxiosFunctions';
-import {
-  packagesWithPluginSelector,
-} from '../../../selectors/PackageSelectors';
+import { getPackagesUsingPlugin, IPackage } from '../../utils/AxiosFunctions';
+import { packagesWithPluginSelector } from '../../../selectors/PackageSelectors';
 import { connect } from 'react-redux';
 import * as _ from 'lodash';
 import eddiApiActionDispatchers from '../../../actions/EddiApiActionDispatchers';
@@ -75,7 +70,7 @@ class UpdatePackagesModal extends React.Component<IPrivateProps, IState> {
     if (this.state.selectedPackages.includes(packageResource)) {
       this.setState({
         selectedPackages: this.state.selectedPackages.filter(
-          pack => pack !== packageResource,
+          (pack) => pack !== packageResource,
         ),
       });
     } else {
@@ -87,7 +82,7 @@ class UpdatePackagesModal extends React.Component<IPrivateProps, IState> {
 
   isPackageSelected(packageResource: string): boolean {
     return !!this.state.selectedPackages.find(
-      selectedPackage =>
+      (selectedPackage) =>
         Parser.getId(packageResource) === Parser.getId(selectedPackage),
     );
   }
@@ -132,7 +127,9 @@ class UpdatePackagesModal extends React.Component<IPrivateProps, IState> {
             </div>
           ))}
           {renderIf(this.state.packages && _.isEmpty(this.state.packages))(
-            () => <div>{'Found no packages that can be updated'}</div>,
+            () => (
+              <div>{'Found no packages that can be updated'}</div>
+            ),
           )}
         </div>
       </div>

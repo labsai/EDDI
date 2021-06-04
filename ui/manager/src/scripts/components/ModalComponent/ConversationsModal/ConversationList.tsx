@@ -97,11 +97,13 @@ class ConversationList extends React.Component<IPrivateProps, IState> {
           !this.props.isLoading &&
             !this.props.error &&
             _.isEmpty(this.props.conversations),
-        )(() => <p>{`There are no conversations yet`}</p>)}
+        )(() => (
+          <p>{`There are no conversations yet`}</p>
+        ))}
         {renderIf(!this.props.error && !_.isEmpty(this.props.conversations))(
           () => (
             <div>
-              {this.props.conversations.map(conversation => (
+              {this.props.conversations.map((conversation) => (
                 <Conversation
                   key={conversation.resource}
                   conversation={conversation}

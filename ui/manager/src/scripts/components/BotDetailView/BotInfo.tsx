@@ -34,9 +34,7 @@ class BotInfo extends React.Component<IPrivateProps> {
       eddiApiActionDispatchers.fetchCurrentBotAction(this.props.botId);
     } else {
       eddiApiActionDispatchers.fetchBotAction(
-        `${BOT}${BOT_PATH}/${this.props.botId}?version=${
-          this.props.botVersion
-        }`,
+        `${BOT}${BOT_PATH}/${this.props.botId}?version=${this.props.botVersion}`,
       );
     }
   }
@@ -68,7 +66,10 @@ class BotInfo extends React.Component<IPrivateProps> {
   }
 }
 
-const ComposedBotInfo: React.ComponentClass<IPublicProps> = compose<IPrivateProps, IPublicProps>(
+const ComposedBotInfo: React.ComponentClass<IPublicProps> = compose<
+  IPrivateProps,
+  IPublicProps
+>(
   pure,
   connect(specificBotSelector),
   Radium,

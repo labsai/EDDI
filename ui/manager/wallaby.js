@@ -1,4 +1,4 @@
-module.exports = function(wallaby) {
+module.exports = function (wallaby) {
   return {
     files: [
       'src/**/*.ts?(x)',
@@ -33,7 +33,7 @@ module.exports = function(wallaby) {
       type: 'node',
     },
     testFramework: 'mocha',
-    setup: function() {
+    setup: function () {
       require('./tests/unit/setup');
     },
   };

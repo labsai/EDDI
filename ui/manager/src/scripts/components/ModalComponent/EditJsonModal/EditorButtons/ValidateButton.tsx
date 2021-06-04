@@ -27,7 +27,10 @@ const ValidateButton: React.StatelessComponent<IProps> = (props: IProps) => (
   </div>
 );
 
-const ComposedValidateButton: React.ComponentClass<IProps> = compose<IProps, IProps>(
+const ComposedValidateButton: React.ComponentClass<IProps> = compose<
+  IProps,
+  IProps
+>(
   pure,
   Radium,
   setDisplayName('ValidateButton'),

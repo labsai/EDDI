@@ -59,7 +59,10 @@ class PackageContainer extends React.Component<IPrivateProps, IState> {
   }
 }
 
-const ComposedPackageContainer: React.ComponentClass<IPublicProps> = compose<IPrivateProps, IPublicProps>(
+const ComposedPackageContainer: React.ComponentClass<IPublicProps> = compose<
+  IPrivateProps,
+  IPublicProps
+>(
   pure,
   setDisplayName('PackageContainer'),
   connect(packageSelector),

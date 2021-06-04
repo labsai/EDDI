@@ -1,17 +1,17 @@
 'use strict';
 var __extends =
   (this && this.__extends) ||
-  (function() {
+  (function () {
     var extendStatics =
       Object.setPrototypeOf ||
       ({ __proto__: [] } instanceof Array &&
-        function(d, b) {
+        function (d, b) {
           d.__proto__ = b;
         }) ||
-      function(d, b) {
+      function (d, b) {
         for (var p in b) if (b.hasOwnProperty(p)) d[p] = b[p];
       };
-    return function(d, b) {
+    return function (d, b) {
       extendStatics(d, b);
       function __() {
         this.constructor = d;
@@ -61,12 +61,12 @@ var styles = {
     marginRight: '5px',
   },
 };
-var JsonErrors = (function(_super) {
+var JsonErrors = (function (_super) {
   __extends(JsonErrors, _super);
   function JsonErrors() {
     return (_super !== null && _super.apply(this, arguments)) || this;
   }
-  JsonErrors.prototype.render = function() {
+  JsonErrors.prototype.render = function () {
     return (
       <div style={styles.content}>
         <div style={styles.header}>
@@ -76,7 +76,7 @@ var JsonErrors = (function(_super) {
           </div>
         </div>
         <div>
-          {this.props.errors.map(function(error, i) {
+          {this.props.errors.map(function (error, i) {
             return (
               <div style={styles.errorContainer} key={i}>
                 <div style={styles.error}>

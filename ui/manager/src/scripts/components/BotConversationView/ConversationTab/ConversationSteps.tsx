@@ -116,7 +116,10 @@ class ConversationSteps extends React.Component<IProps, IState> {
   }
 }
 
-const ComposedConversationSteps: React.ComponentClass<IProps> = compose<IProps, IProps>(
+const ComposedConversationSteps: React.ComponentClass<IProps> = compose<
+  IProps,
+  IProps
+>(
   pure,
   Radium,
   setDisplayName('ConversationSteps'),

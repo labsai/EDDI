@@ -107,7 +107,7 @@ const BotReducer: IBotReducer = (
             if (!_.isEmpty((action as IFetchBotsSuccessAction).bots)) {
               return _.uniqBy(
                 bots.concat((action as IFetchBotsSuccessAction).bots),
-                bot => bot.resource,
+                (bot) => bot.resource,
               );
             } else {
               return bots;
@@ -139,7 +139,7 @@ const BotReducer: IBotReducer = (
       return update(state, {
         bots: {
           $apply: (bots: IBot[]) => {
-            return bots.map(bot => {
+            return bots.map((bot) => {
               if (
                 bot.resource ===
                 (action as IFetchBotDataSuccessAction).botResource
@@ -172,7 +172,7 @@ const BotReducer: IBotReducer = (
       return update(state, {
         bots: {
           $apply: (bots: IBot[]) => {
-            const alreadyExists: boolean = !!bots.find(bot => {
+            const alreadyExists: boolean = !!bots.find((bot) => {
               return (
                 bot.resource === (action as IFetchBotSuccessAction).bot.resource
               );
@@ -204,7 +204,7 @@ const BotReducer: IBotReducer = (
         bots: {
           $apply: (bots: IBot[]) => {
             const updatedBot = (action as IUpdateBotSuccessAction).bot;
-            const updatedBotList = bots.map(bot => {
+            const updatedBotList = bots.map((bot) => {
               if (bot.id === updatedBot.id) {
                 return update(bot, {
                   currentVersion: { $set: updatedBot.version },
@@ -223,7 +223,7 @@ const BotReducer: IBotReducer = (
         bots: {
           $apply: (bots: IBot[]) => {
             const updatedBot = (action as IUpdateBotPackagesSuccessAction).bot;
-            const updatedBotList = bots.map(bot => {
+            const updatedBotList = bots.map((bot) => {
               if (bot.id === updatedBot.id) {
                 return update(bot, {
                   currentVersion: { $set: updatedBot.version },
@@ -241,7 +241,7 @@ const BotReducer: IBotReducer = (
       return update(state, {
         bots: {
           $apply: (bots: IBot[]) => {
-            return bots.map(bot => {
+            return bots.map((bot) => {
               if (
                 bot.resource ===
                 (action as IUpdateDescriptorSuccessAction).resource
@@ -274,7 +274,7 @@ const BotReducer: IBotReducer = (
                 bots.concat(
                   (action as IFetchBotsUsingPackageSuccessAction).bots,
                 ),
-                bot => bot.resource,
+                (bot) => bot.resource,
               );
             } else {
               return bots;
@@ -289,7 +289,7 @@ const BotReducer: IBotReducer = (
           $apply: (bots: IBot[]) => {
             const updatedBots: IBot[] = (action as IUpdateBotsSuccessAction)
               .bots;
-            const newBotList: IBot[] = bots.map(bot => {
+            const newBotList: IBot[] = bots.map((bot) => {
               for (let i = 0; i < _.size(updatedBots); i++) {
                 if (bot.id === updatedBots[i].id) {
                   return update(bot, {
@@ -311,7 +311,7 @@ const BotReducer: IBotReducer = (
       return update(state, {
         bots: {
           $apply: (bots: IBot[]) => {
-            return bots.map(bot => {
+            return bots.map((bot) => {
               if (
                 bot.resource === (action as IDeployBotSuccessAction).botResource
               ) {
@@ -331,7 +331,7 @@ const BotReducer: IBotReducer = (
       return update(state, {
         bots: {
           $apply: (bots: IBot[]) => {
-            return bots.map(bot => {
+            return bots.map((bot) => {
               if (
                 bot.resource ===
                 (action as IUndeployBotSuccessAction).botResource
@@ -352,7 +352,7 @@ const BotReducer: IBotReducer = (
       return update(state, {
         bots: {
           $apply: (bots: IBot[]) => {
-            return bots.map(bot => {
+            return bots.map((bot) => {
               if (
                 bot.resource ===
                 (action as IFetchBotDeploymentStatusSuccessAction).botResource
@@ -376,7 +376,7 @@ const BotReducer: IBotReducer = (
           $apply: (bots: IBot[]) => {
             return _.uniqBy(
               bots.concat((action as ICreateNewBotSuccessAction).bot),
-              bot => bot.resource,
+              (bot) => bot.resource,
             );
           },
         },
@@ -388,8 +388,8 @@ const BotReducer: IBotReducer = (
     case ADD_NEW_PACKAGE_TO_BOTS_SUCCESS:
       const updatedBots: IBot[] = (action as IAddNewPackageToBotsSuccessAction)
         .bots;
-      const botList: IBot[] = state.bots.map(bot => {
-        const newBot = updatedBots.find(newBot => newBot.id === bot.id);
+      const botList: IBot[] = state.bots.map((bot) => {
+        const newBot = updatedBots.find((newBot) => newBot.id === bot.id);
         if (!_.isEmpty(newBot)) {
           return update(bot, {
             currentVersion: { $set: newBot.version },
@@ -400,7 +400,7 @@ const BotReducer: IBotReducer = (
       });
       const newBotList = _.uniqBy(
         updatedBots.concat(botList),
-        bot => bot.resource,
+        (bot) => bot.resource,
       );
       return update(state, {
         bots: {
@@ -419,7 +419,7 @@ const BotReducer: IBotReducer = (
       return update(state, {
         bots: {
           $apply: (bots: IBot[]) => {
-            const alreadyExists: boolean = !!bots.find(bot => {
+            const alreadyExists: boolean = !!bots.find((bot) => {
               return (
                 bot.resource ===
                 (action as IDuplicateSuccessAction).bot.resource

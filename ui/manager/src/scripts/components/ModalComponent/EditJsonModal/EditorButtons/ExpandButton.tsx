@@ -24,7 +24,10 @@ const ExpandButton: React.StatelessComponent<IProps> = (props: IProps) => (
   </div>
 );
 
-const ComposedExpandButton: React.ComponentClass<IProps> = compose<IProps, IProps>(
+const ComposedExpandButton: React.ComponentClass<IProps> = compose<
+  IProps,
+  IProps
+>(
   pure,
   Radium,
   setDisplayName('ExpandButton'),

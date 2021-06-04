@@ -70,7 +70,7 @@ class CreateNewConfig2Modal extends React.Component<IPrivateProps, IState> {
     }
   }
 
-  onChange = value => {
+  onChange = (value) => {
     this.setState({
       editorText: value,
       isValidJson: false,
@@ -208,7 +208,9 @@ class CreateNewConfig2Modal extends React.Component<IPrivateProps, IState> {
             {'Form'}
           </div>
         </div>
-        {renderIf(this.state.isValidJson)(() => <JsonIsValid />)}
+        {renderIf(this.state.isValidJson)(() => (
+          <JsonIsValid />
+        ))}
         {renderIf(this.state.selectedTab === TabEnum.editor)(() => (
           <div>
             {renderIf(!_.isEmpty(this.state.errors))(() => (
@@ -238,10 +240,11 @@ class CreateNewConfig2Modal extends React.Component<IPrivateProps, IState> {
   }
 }
 
-const ComposedCreateNewConfig2Modal: React.ComponentClass<IPrivateProps> = compose<
-  IPrivateProps, IPrivateProps
->(pure, connect(schemaSelector), setDisplayName('CreateNewConfig2Modal'))(
-  CreateNewConfig2Modal,
-);
+const ComposedCreateNewConfig2Modal: React.ComponentClass<IPrivateProps> =
+  compose<IPrivateProps, IPrivateProps>(
+    pure,
+    connect(schemaSelector),
+    setDisplayName('CreateNewConfig2Modal'),
+  )(CreateNewConfig2Modal);
 
 export default ComposedCreateNewConfig2Modal;

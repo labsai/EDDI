@@ -148,11 +148,12 @@ class BotOptions extends React.Component<IPrivateProps> {
   }
 }
 
-const ComposedBotOptions: React.ComponentClass<IPublicProps, IPrivateProps> = compose<IPrivateProps, IPublicProps>(
-  pure,
-  connect(readOnlySelector),
-  Radium,
-  setDisplayName('BotOptions'),
-)(BotOptions);
+const ComposedBotOptions: React.ComponentClass<IPublicProps, IPrivateProps> =
+  compose<IPrivateProps, IPublicProps>(
+    pure,
+    connect(readOnlySelector),
+    Radium,
+    setDisplayName('BotOptions'),
+  )(BotOptions);
 
 export default ComposedBotOptions;

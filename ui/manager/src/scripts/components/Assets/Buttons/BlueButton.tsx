@@ -41,7 +41,10 @@ const BlueButton: React.StatelessComponent<IProps> = (props: IProps) => (
   />
 );
 
-const ComposedBlueButton: React.ComponentClass<IProps> = compose<IProps, IProps>(
+const ComposedBlueButton: React.ComponentClass<IProps> = compose<
+  IProps,
+  IProps
+>(
   pure,
   Radium,
   setDisplayName('BlueButton'),

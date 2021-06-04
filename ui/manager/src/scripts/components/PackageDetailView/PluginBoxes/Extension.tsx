@@ -150,7 +150,10 @@ class Extension extends React.Component<IPrivateProps> {
   }
 }
 
-const ComposedExtension: React.ComponentClass<IPublicProps> = compose<IPrivateProps, IPublicProps>(
+const ComposedExtension: React.ComponentClass<IPublicProps> = compose<
+  IPrivateProps,
+  IPublicProps
+>(
   pure,
   connect(pluginSelector),
   setDisplayName('Extension'),

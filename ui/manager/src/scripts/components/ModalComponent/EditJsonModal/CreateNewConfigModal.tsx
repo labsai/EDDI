@@ -94,7 +94,7 @@ class CreateNewConfigModal extends React.Component<IProps, IState> {
                 name={'name'}
                 style={styles.inputBoxName}
                 placeholder={`Give the ${typeName} a name..`}
-                onChange={e =>
+                onChange={(e) =>
                   this.setState({
                     name: e.target.value,
                   })
@@ -110,7 +110,7 @@ class CreateNewConfigModal extends React.Component<IProps, IState> {
                 name={'description'}
                 style={styles.inputBox}
                 placeholder={`Give the ${typeName} a short description..`}
-                onChange={e =>
+                onChange={(e) =>
                   this.setState({
                     description: e.target.value,
                   })
@@ -124,7 +124,10 @@ class CreateNewConfigModal extends React.Component<IProps, IState> {
   }
 }
 
-const ComposedCreateNewConfigModal: React.ComponentClass<IProps> = compose<IProps, IProps>(
+const ComposedCreateNewConfigModal: React.ComponentClass<IProps> = compose<
+  IProps,
+  IProps
+>(
   pure,
   setDisplayName('CreateNewConfigModal'),
 )(CreateNewConfigModal);

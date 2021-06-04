@@ -59,7 +59,10 @@ const BotDescriptor: React.StatelessComponent<IProps> = (props: IProps) => (
   </div>
 );
 
-const ComposedBotDescriptor: React.ComponentClass<IProps> = compose<IProps, IProps>(
+const ComposedBotDescriptor: React.ComponentClass<IProps> = compose<
+  IProps,
+  IProps
+>(
   pure,
   Radium,
   setDisplayName('BotDescriptor'),

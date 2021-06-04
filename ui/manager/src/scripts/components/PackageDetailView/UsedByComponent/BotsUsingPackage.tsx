@@ -82,7 +82,7 @@ class BotsUsingPackage extends React.Component<IProps, IState> {
           <div style={styles.content}>
             {renderIf(this.state.expandList)(() => (
               <div style={styles.list}>
-                {this.props.packagePayload.usedByBots.map(resource => (
+                {this.props.packagePayload.usedByBots.map((resource) => (
                   <Bot
                     key={resource}
                     botResource={resource}
@@ -93,7 +93,7 @@ class BotsUsingPackage extends React.Component<IProps, IState> {
             ))}
             {renderIf(!this.state.expandList)(() => (
               <div style={styles.list}>
-                {shortList.map(r => (
+                {shortList.map((r) => (
                   <Bot
                     key={r.resource}
                     botResource={r.resource}
@@ -126,7 +126,10 @@ class BotsUsingPackage extends React.Component<IProps, IState> {
   }
 }
 
-const ComposedBotsUsingPackage: React.ComponentClass<IProps> = compose<IProps, IProps>(
+const ComposedBotsUsingPackage: React.ComponentClass<IProps> = compose<
+  IProps,
+  IProps
+>(
   pure,
   setDisplayName('BotsUsingPackage'),
 )(BotsUsingPackage);

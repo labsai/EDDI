@@ -32,7 +32,10 @@ class Bot extends React.Component<IPrivateProps> {
   }
 }
 
-const ComposedBot: React.ComponentClass<IPublicProps> = compose<IPrivateProps, IPublicProps>(
+const ComposedBot: React.ComponentClass<IPublicProps> = compose<
+  IPrivateProps,
+  IPublicProps
+>(
   pure,
   connect(botSelector),
   setDisplayName('Bot'),

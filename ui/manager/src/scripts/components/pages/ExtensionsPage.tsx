@@ -84,7 +84,10 @@ class ExtensionsPage extends React.Component<IProps, IState> {
   }
 }
 
-const ComposedExtensionsPage: React.ComponentClass<IProps>  = compose<IProps, IProps>(
+const ComposedExtensionsPage: React.ComponentClass<IProps> = compose<
+  IProps,
+  IProps
+>(
   pure,
   setDisplayName('ExtensionsPage'),
 )(ExtensionsPage);

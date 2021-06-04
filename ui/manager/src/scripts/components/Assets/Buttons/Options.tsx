@@ -130,7 +130,10 @@ class Options extends React.Component<IPrivateProps> {
   }
 }
 
-const ComposedOptions: React.ComponentClass<IPublicProps> = compose<IPrivateProps, IPublicProps>(
+const ComposedOptions: React.ComponentClass<IPublicProps> = compose<
+  IPrivateProps,
+  IPublicProps
+>(
   pure,
   connect(readOnlySelector),
   Radium,

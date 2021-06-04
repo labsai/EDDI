@@ -23,7 +23,10 @@ const HomeButton = (props: IProps) => (
   </div>
 );
 
-const ComposedHomeButton: React.ComponentClass<IProps> = compose<IProps, IPublic>(
+const ComposedHomeButton: React.ComponentClass<IProps> = compose<
+  IProps,
+  IPublic
+>(
   pure,
   Radium,
   setDisplayName('HomeButton'),

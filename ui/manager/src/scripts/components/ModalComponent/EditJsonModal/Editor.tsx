@@ -66,7 +66,7 @@ class CreateNewConfig2Modal extends React.Component<IPrivateProps, IState> {
     }
   }
 
-  onChange = value => {
+  onChange = (value) => {
     this.props.onChange(value);
     this.setState({
       editorText: value,
@@ -106,7 +106,7 @@ class CreateNewConfig2Modal extends React.Component<IPrivateProps, IState> {
               annotations={
                 _.isEmpty(this.props.errors)
                   ? null
-                  : this.props.errors.map(err => {
+                  : this.props.errors.map((err) => {
                       return {
                         row: err.line,
                         column: 1,
@@ -134,10 +134,11 @@ class CreateNewConfig2Modal extends React.Component<IPrivateProps, IState> {
   }
 }
 
-const ComposedCreateNewConfig2Modal: React.ComponentClass<IPrivateProps> = compose<
-  IPrivateProps, IPrivateProps
->(pure, connect(schemaSelector), setDisplayName('CreateNewConfig2Modal'))(
-  CreateNewConfig2Modal,
-);
+const ComposedCreateNewConfig2Modal: React.ComponentClass<IPrivateProps> =
+  compose<IPrivateProps, IPrivateProps>(
+    pure,
+    connect(schemaSelector),
+    setDisplayName('CreateNewConfig2Modal'),
+  )(CreateNewConfig2Modal);
 
 export default ComposedCreateNewConfig2Modal;

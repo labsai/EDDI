@@ -112,6 +112,9 @@ const actions: IModalActionDispatchers = {
   showBasicAuthModal,
 };
 
-const modalActionDispatchers: IModalActionDispatchers = bindActionCreators(actions, store.dispatch);
+const modalActionDispatchers: IModalActionDispatchers = bindActionCreators(
+  actions,
+  store.dispatch,
+);
 
 export default modalActionDispatchers;

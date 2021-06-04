@@ -45,7 +45,10 @@ const Conversation: React.StatelessComponent<IProps> = (props: IProps) => {
   );
 };
 
-const ComposedConversation: React.ComponentClass<IProps> = compose<IProps, IProps>(
+const ComposedConversation: React.ComponentClass<IProps> = compose<
+  IProps,
+  IProps
+>(
   pure,
   Radium,
   setDisplayName('Conversation'),

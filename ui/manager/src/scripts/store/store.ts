@@ -6,9 +6,8 @@ import {
   Middleware,
   StoreEnhancer,
 } from 'redux';
-import createSagaMiddleware from 'redux-saga';
+import createSagaMiddleware, { SagaMiddleware } from 'redux-saga';
 import reducers from '../reducers/index';
-import { SagaMiddleware } from 'redux-saga';
 import { IAppState } from '../reducers/index';
 import * as _ from 'lodash';
 import { persistStore, persistReducer, Persistor } from 'redux-persist';
@@ -46,7 +45,11 @@ function configureStore(initialState?: any) {
 
   const persistedReducer = persistReducer(persistConfig, reducers);
 
-  const store: Store<IAppState> = createStore(persistedReducer, initialState, enhancer);
+  const store: Store<IAppState> = createStore(
+    persistedReducer,
+    initialState,
+    enhancer,
+  );
   const persistor: Persistor = persistStore(store);
 
   if (module.hot) {

@@ -41,7 +41,10 @@ class ErrorMessageModal extends React.Component<IProps> {
   }
 }
 
-const ComposedErrorMessageModal: React.ComponentClass<IProps> = compose<IProps, IProps>(
+const ComposedErrorMessageModal: React.ComponentClass<IProps> = compose<
+  IProps,
+  IProps
+>(
   pure,
   setDisplayName('ErrorMessageModal'),
 )(ErrorMessageModal);

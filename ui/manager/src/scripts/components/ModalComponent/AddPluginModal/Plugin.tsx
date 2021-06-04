@@ -70,7 +70,9 @@ class Plugin extends React.Component<IPrivateProps> {
       <div>
         {renderIf(!this.props.plugin)(() => (
           <div>
-            {renderIf(this.props.isLoading)(() => <p>{'Loading plugin'}</p>)}
+            {renderIf(this.props.isLoading)(() => (
+              <p>{'Loading plugin'}</p>
+            ))}
             {renderIf(this.props.error)(() => (
               <p>{'Error: Could not load plugin'}</p>
             ))}
@@ -138,6 +140,10 @@ class Plugin extends React.Component<IPrivateProps> {
 const ComposedPlugin: React.ComponentClass<IPublicProps> = compose<
   IPrivateProps,
   IPublicProps
->(pure, connect(pluginSelector), setDisplayName('Plugin'))(Plugin);
+>(
+  pure,
+  connect(pluginSelector),
+  setDisplayName('Plugin'),
+)(Plugin);
 
 export default ComposedPlugin;

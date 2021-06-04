@@ -98,10 +98,10 @@ class UpdateBotsModal extends React.Component<IPrivateProps, IState> {
   selectBot = (botResource: string) => {
     const currentPackageResource = this.props.packageResources[this.state.page];
     const selectedBot = this.state.selectedBots.find(
-      bot => bot.botResource === botResource,
+      (bot) => bot.botResource === botResource,
     );
     if (_.isEmpty(selectedBot)) {
-      const newList = this.state.selectedBots.map(bot => bot);
+      const newList = this.state.selectedBots.map((bot) => bot);
       newList.push({
         botResource: botResource,
         packageResources: [currentPackageResource],
@@ -109,13 +109,13 @@ class UpdateBotsModal extends React.Component<IPrivateProps, IState> {
       this.setState({ selectedBots: newList });
     } else {
       const newList = this.state.selectedBots.filter(
-        bot => bot.botResource !== botResource,
+        (bot) => bot.botResource !== botResource,
       );
       if (selectedBot.packageResources.includes(currentPackageResource)) {
         newList.push({
           botResource: selectedBot.botResource,
           packageResources: selectedBot.packageResources.filter(
-            resource => resource !== currentPackageResource,
+            (resource) => resource !== currentPackageResource,
           ),
         });
         this.setState({ selectedBots: newList });
@@ -129,7 +129,7 @@ class UpdateBotsModal extends React.Component<IPrivateProps, IState> {
 
   isBotSelected(botResource: string): boolean {
     return !!this.state.selectedBots.find(
-      selectedBot =>
+      (selectedBot) =>
         selectedBot.botResource === botResource &&
         selectedBot.packageResources.includes(
           this.props.packageResources[this.state.page],
@@ -204,8 +204,10 @@ class UpdateBotsModal extends React.Component<IPrivateProps, IState> {
 const ComposedUpdateBotsModal: React.ComponentClass<IPublicProps> = compose<
   IPrivateProps,
   IPublicProps
->(pure, setDisplayName('UpdateBotsModal'), connect(loadingBotSelector))(
-  UpdateBotsModal,
-);
+>(
+  pure,
+  setDisplayName('UpdateBotsModal'),
+  connect(loadingBotSelector),
+)(UpdateBotsModal);
 
 export default ComposedUpdateBotsModal;

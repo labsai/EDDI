@@ -59,7 +59,10 @@ class PackageContainer extends React.Component<IProps, IState> {
   }
 }
 
-const ComposedPackageContainer: React.ComponentClass<IProps> = compose<IProps, IProps>(
+const ComposedPackageContainer: React.ComponentClass<IProps> = compose<
+  IProps,
+  IProps
+>(
   pure,
   setDisplayName('PackageContainer'),
 )(PackageContainer);

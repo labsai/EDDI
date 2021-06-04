@@ -53,17 +53,19 @@ const JsonErrors: React.StatelessComponent<IProps> = (props: IProps) => (
   <div style={styles.content}>
     <div style={styles.header}>
       <img src={warningIcon} style={styles.warningIcon} />
-      <div style={styles.errorTitle}>{`Found ${
-        props.errors.length
-      } Error(s):`}</div>
+      <div
+        style={
+          styles.errorTitle
+        }>{`Found ${props.errors.length} Error(s):`}</div>
     </div>
     <div>
       {props.errors.map((error, i) => (
         <div style={styles.errorContainer} key={i}>
           <div style={styles.error}>
             <div style={styles.key}>{'Location:'}</div>
-            <div style={styles.errorMessage}>{`ERROR at line: ${error.line +
-              1}`}</div>
+            <div style={styles.errorMessage}>{`ERROR at line: ${
+              error.line + 1
+            }`}</div>
           </div>
           <div style={styles.error}>
             <div style={styles.key}>{'Message:'}</div>
@@ -75,7 +77,10 @@ const JsonErrors: React.StatelessComponent<IProps> = (props: IProps) => (
   </div>
 );
 
-const ComposedJsonErrors: React.ComponentClass<IProps> = compose<IProps, IProps>(
+const ComposedJsonErrors: React.ComponentClass<IProps> = compose<
+  IProps,
+  IProps
+>(
   pure,
   setDisplayName('JsonErrors'),
 )(JsonErrors);

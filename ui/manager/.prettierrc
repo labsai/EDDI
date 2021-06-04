@@ -1,9 +1,8 @@
 {
-    "useTabs": false,
-    "printWidth": 80,
-    "tabWidth": 2,
-    "singleQuote": true,
-    "trailingComma": "all",
-    "jsxBracketSameLine": true,
-    "parser": "babylon"
+  "useTabs": false,
+  "printWidth": 80,
+  "tabWidth": 2,
+  "singleQuote": true,
+  "trailingComma": "all",
+  "jsxBracketSameLine": true
 }

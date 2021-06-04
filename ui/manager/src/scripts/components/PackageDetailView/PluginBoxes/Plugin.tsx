@@ -48,7 +48,7 @@ class Plugin extends React.Component<IPrivateProps> {
     this.props.deletePlugin(this.props.pluginType.extensionKey);
   };
 
-  openAddPluginsModal = e => {
+  openAddPluginsModal = (e) => {
     e.stopPropagation();
     let extensionList: string[] = [];
     let pluginType;
@@ -57,9 +57,11 @@ class Plugin extends React.Component<IPrivateProps> {
         this.props.pluginType.config &&
         !_.isEmpty(this.props.pluginType.extensions.dictionaries)
       ) {
-        extensionList = this.props.pluginType.extensions.dictionaries.map(p => {
-          return p.config.uri;
-        });
+        extensionList = this.props.pluginType.extensions.dictionaries.map(
+          (p) => {
+            return p.config.uri;
+          },
+        );
       }
       pluginType = PluginType.REGULAR_DICTIONARY;
     } else {
@@ -81,11 +83,12 @@ class Plugin extends React.Component<IPrivateProps> {
         !_.isEmpty(this.props.pluginType.extensions) &&
         !_.isEmpty(this.props.pluginType.extensions.dictionaries)
       ) {
-        otherDictionaries = this.props.pluginType.extensions.dictionaries.filter(
-          d => d.type !== REGULAR_DICTIONARY,
-        );
+        otherDictionaries =
+          this.props.pluginType.extensions.dictionaries.filter(
+            (d) => d.type !== REGULAR_DICTIONARY,
+          );
       }
-      const newRegularDictionaryList = newPluginResourceList.map(resource => {
+      const newRegularDictionaryList = newPluginResourceList.map((resource) => {
         return { type: REGULAR_DICTIONARY, config: { uri: resource } };
       });
       const newPlugin: IPluginExtensions = {
@@ -230,7 +233,13 @@ class Plugin extends React.Component<IPrivateProps> {
 }
 
 const ComposedPlugin: React.ComponentClass<IPublicProps> = compose<
-  IPrivateProps, IPublicProps
->(pure, connect(pluginSelector), Radium, setDisplayName('Plugin'))(Plugin);
+  IPrivateProps,
+  IPublicProps
+>(
+  pure,
+  connect(pluginSelector),
+  Radium,
+  setDisplayName('Plugin'),
+)(Plugin);
 
 export default ComposedPlugin;

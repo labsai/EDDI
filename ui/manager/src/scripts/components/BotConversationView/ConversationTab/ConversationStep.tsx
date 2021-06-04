@@ -52,8 +52,8 @@ class ConversationStep extends React.Component<IProps, IState> {
   }
 
   componentDidMount() {
-    const conversationStep: IConversationStep[] = this.props.conversationStep
-      .conversationStep;
+    const conversationStep: IConversationStep[] =
+      this.props.conversationStep.conversationStep;
     const action = ConversationHelper.getAction(conversationStep);
     const input = ConversationHelper.getInput(conversationStep);
     const output = ConversationHelper.getOutput(this.props.conversationOutput);
@@ -155,7 +155,7 @@ class ConversationStep extends React.Component<IProps, IState> {
             </div>
           </div>
           {renderIf(this.state.expanded)(() => (
-            <div style={styles.jsonView} onClick={e => e.stopPropagation()}>
+            <div style={styles.jsonView} onClick={(e) => e.stopPropagation()}>
               <div>
                 <div
                   key={'ConversationOutputTitle'}
@@ -224,7 +224,10 @@ class ConversationStep extends React.Component<IProps, IState> {
   }
 }
 
-const ComposedConversationStep: React.ComponentClass<IProps> = compose<IProps, IProps>(
+const ComposedConversationStep: React.ComponentClass<IProps> = compose<
+  IProps,
+  IProps
+>(
   pure,
   Radium,
   setDisplayName('ConversationStep'),

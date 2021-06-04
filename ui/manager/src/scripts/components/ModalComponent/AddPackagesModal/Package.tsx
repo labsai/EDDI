@@ -60,7 +60,9 @@ class Package extends React.Component<IPrivateProps> {
       <div>
         {renderIf(!this.props.packagePayload)(() => (
           <div>
-            {renderIf(this.props.isLoading)(() => <p>{'Loading package'}</p>)}
+            {renderIf(this.props.isLoading)(() => (
+              <p>{'Loading package'}</p>
+            ))}
             {renderIf(this.props.error)(() => (
               <p>{'Error: Could not load package'}</p>
             ))}
@@ -76,7 +78,9 @@ class Package extends React.Component<IPrivateProps> {
             ))}
             {renderIf(
               !this.props.error && _.isEmpty(this.props.packagePayload),
-            )(() => <p>{'This package does not exist'}</p>)}
+            )(() => (
+              <p>{'This package does not exist'}</p>
+            ))}
             {renderIf(
               !this.props.error && !_.isEmpty(this.props.packagePayload),
             )(() => (
@@ -128,6 +132,10 @@ class Package extends React.Component<IPrivateProps> {
 const ComposedPackage: React.ComponentClass<IPublicProps> = compose<
   IPrivateProps,
   IPublicProps
->(pure, connect(packageSelector), setDisplayName('Package'))(Package);
+>(
+  pure,
+  connect(packageSelector),
+  setDisplayName('Package'),
+)(Package);
 
 export default ComposedPackage;

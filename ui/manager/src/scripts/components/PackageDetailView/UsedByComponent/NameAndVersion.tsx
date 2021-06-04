@@ -65,7 +65,10 @@ class NameAndVersion extends React.Component<IProps> {
   }
 }
 
-const ComposedNameAndVersion: React.ComponentClass<IProps> = compose<IProps, IProps>(
+const ComposedNameAndVersion: React.ComponentClass<IProps> = compose<
+  IProps,
+  IProps
+>(
   pure,
   Radium,
   setDisplayName('NameAndVersion'),

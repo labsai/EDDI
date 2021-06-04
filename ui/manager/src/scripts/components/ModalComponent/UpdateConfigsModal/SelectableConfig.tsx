@@ -72,7 +72,10 @@ class SelectableConfig extends React.Component<IProps> {
   }
 }
 
-const ComposedSelectableConfig: React.ComponentClass<IProps> = compose<IProps, IProps>(
+const ComposedSelectableConfig: React.ComponentClass<IProps> = compose<
+  IProps,
+  IProps
+>(
   pure,
   setDisplayName('SelectableConfig'),
 )(SelectableConfig);

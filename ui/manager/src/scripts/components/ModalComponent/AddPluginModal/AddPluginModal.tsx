@@ -85,14 +85,14 @@ class AddPluginModal extends React.Component<IPrivateProps, IState> {
 
   selectVersion = (resource: string, version: number) => {
     const id = Parser.getId(resource);
-    const availablePlugins = this.state.availablePlugins.map(p => {
+    const availablePlugins = this.state.availablePlugins.map((p) => {
       if (Parser.getId(p) === id) {
         return Parser.replaceResourceVersion(p, version);
       }
       return p;
     });
     const selectedPlugins = this.state.selectedPlugins.filter(
-      selectedPackage => Parser.getId(selectedPackage) !== id,
+      (selectedPackage) => Parser.getId(selectedPackage) !== id,
     );
     this.setState({
       availablePlugins,
@@ -115,7 +115,7 @@ class AddPluginModal extends React.Component<IPrivateProps, IState> {
       if (this.state.selectedPlugins.includes(pluginResource)) {
         this.setState({
           selectedPlugins: this.state.selectedPlugins.filter(
-            p => p !== pluginResource,
+            (p) => p !== pluginResource,
           ),
         });
       } else {
@@ -134,7 +134,7 @@ class AddPluginModal extends React.Component<IPrivateProps, IState> {
   }
 
   discardChanges(props = this.props): void {
-    const availablePlugins = props.plugins.map(pkg => {
+    const availablePlugins = props.plugins.map((pkg) => {
       return this.getPluginIfUsed(pkg.resource);
     });
     this.setState({
@@ -145,14 +145,14 @@ class AddPluginModal extends React.Component<IPrivateProps, IState> {
 
   isPluginSelected(pluginResource: string): boolean {
     return !!this.state.selectedPlugins.find(
-      selectedPlugin =>
+      (selectedPlugin) =>
         Parser.getId(pluginResource) === Parser.getId(selectedPlugin),
     );
   }
 
   getPluginIfUsed(pluginResource: string): string {
     const plugin = this.props.oldPlugins.find(
-      p => Parser.getId(pluginResource) === Parser.getId(p),
+      (p) => Parser.getId(pluginResource) === Parser.getId(p),
     );
     return plugin || pluginResource;
   }
@@ -267,7 +267,10 @@ class AddPluginModal extends React.Component<IPrivateProps, IState> {
     );
   }
 }
-const ComposedAddPluginModal: React.ComponentClass<IPublicProps> = compose<IPrivateProps, IPublicProps>(
+const ComposedAddPluginModal: React.ComponentClass<IPublicProps> = compose<
+  IPrivateProps,
+  IPublicProps
+>(
   pure,
   setDisplayName('AddPluginModal'),
   connect(pluginsSelector),

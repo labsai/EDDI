@@ -58,7 +58,10 @@ const SquareXButton: React.StatelessComponent<IProps> = (props: IProps) => (
   </div>
 );
 
-const ComposedSquareXButton: React.ComponentClass<IProps> = compose<IProps, IProps>(
+const ComposedSquareXButton: React.ComponentClass<IProps> = compose<
+  IProps,
+  IProps
+>(
   pure,
   Radium,
   setDisplayName('SquareXButton'),

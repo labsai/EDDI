@@ -41,7 +41,10 @@ const WhiteButton: React.StatelessComponent<IProps> = (props: IProps) => (
   />
 );
 
-const ComposedWhiteButton: React.ComponentClass<IProps> = compose<IProps, IProps>(
+const ComposedWhiteButton: React.ComponentClass<IProps> = compose<
+  IProps,
+  IProps
+>(
   pure,
   Radium,
   setDisplayName('WhiteButton'),

@@ -38,7 +38,7 @@ export async function getAPIUrl(): Promise<string> {
   if (!apiUrlPromise) {
     return (apiUrlPromise = axios
       .get(envUrl)
-      .then(overrides => {
+      .then((overrides) => {
         if (overrides.data.EDDI_API_URL) {
           let apiUrl = overrides.data.EDDI_API_URL;
           if (apiUrl[apiUrl.length - 1] === '/') {
@@ -53,7 +53,7 @@ export async function getAPIUrl(): Promise<string> {
           }
         }
       })
-      .catch(err => {
+      .catch((err) => {
         if (process.env.environment === 'local') {
           console.log('Running locally. using local config for API url');
           return (apiUrlPromise = Promise.resolve(process.env.eddiApiUrl));
@@ -78,7 +78,7 @@ export async function getAuthMethod(): Promise<string> {
   if (!authMethodPromise) {
     return (authMethodPromise = axios
       .get(envUrl)
-      .then(overrides => {
+      .then((overrides) => {
         if (overrides.data.AUTH_METHOD) {
           let authMethod = overrides.data.AUTH_METHOD;
           return authMethod;
@@ -90,7 +90,7 @@ export async function getAuthMethod(): Promise<string> {
           }
         }
       })
-      .catch(err => {
+      .catch((err) => {
         if (process.env.environment === 'local') {
           return (authMethodPromise = Promise.resolve(process.env.authMethod));
         } else {
@@ -114,7 +114,7 @@ export async function getAuthRealm(): Promise<string> {
   if (!authRealmPromise) {
     return (authRealmPromise = axios
       .get(envUrl)
-      .then(overrides => {
+      .then((overrides) => {
         if (overrides.data.AUTH_REALM) {
           let authRealm = overrides.data.AUTH_REALM;
           return authRealm;
@@ -126,7 +126,7 @@ export async function getAuthRealm(): Promise<string> {
           }
         }
       })
-      .catch(err => {
+      .catch((err) => {
         if (process.env.environment === 'local') {
           return (authRealmPromise = Promise.resolve(process.env.authRealm));
         } else {
@@ -150,7 +150,7 @@ export async function getAuthUrl(): Promise<string> {
   if (!authUrlPromise) {
     return (authUrlPromise = axios
       .get(envUrl)
-      .then(overrides => {
+      .then((overrides) => {
         if (overrides.data.AUTH_URL) {
           let authUrl = overrides.data.AUTH_URL;
           return authUrl;
@@ -162,7 +162,7 @@ export async function getAuthUrl(): Promise<string> {
           }
         }
       })
-      .catch(err => {
+      .catch((err) => {
         if (process.env.environment === 'local') {
           return (authUrlPromise = Promise.resolve(process.env.authUrl));
         } else {
@@ -186,7 +186,7 @@ export async function getAuthClientId(): Promise<string> {
   if (!authClientIdPromise) {
     return (authClientIdPromise = axios
       .get(envUrl)
-      .then(overrides => {
+      .then((overrides) => {
         if (overrides.data.AUTH_CLIENT_ID) {
           let authClientId = overrides.data.AUTH_CLIENT_ID;
           return authClientId;
@@ -198,7 +198,7 @@ export async function getAuthClientId(): Promise<string> {
           }
         }
       })
-      .catch(err => {
+      .catch((err) => {
         if (process.env.environment === 'local') {
           return (authClientIdPromise = Promise.resolve(
             process.env.authClientId,
@@ -237,7 +237,7 @@ export async function getReadOnly(): Promise<boolean> {
   if (!readOnlyPromise) {
     return (readOnlyPromise = axios
       .get(envUrl)
-      .then(overrides => {
+      .then((overrides) => {
         if (overrides.data.READ_ONLY_DOMAIN) {
           let readOnlyDomain = overrides.data.READ_ONLY_DOMAIN.split(',');
           return readOnlyDomain?.includes(apiUrl);
@@ -250,7 +250,7 @@ export async function getReadOnly(): Promise<boolean> {
           }
         }
       })
-      .catch(err => {
+      .catch((err) => {
         if (process.env.environment === 'local') {
           let readOnlyDomain = process.env.readOnlyDomain.split(',');
           return (readOnlyPromise = Promise.resolve(

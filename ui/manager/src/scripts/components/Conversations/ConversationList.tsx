@@ -9,7 +9,8 @@ import { connect } from 'react-redux';
 import styles from './ConversationList.styles';
 import ClimbingBoxLoader from 'react-spinners/ClimbingBoxLoader';
 import * as InfiniteScrollTypes from 'react-infinite-scroller';
-const InfiniteScroll = require('react-infinite-scroller') as InfiniteScrollTypes;
+const InfiniteScroll =
+  require('react-infinite-scroller') as InfiniteScrollTypes;
 import Conversation from './Conversation';
 import { conversationsSelector } from '../../selectors/ConversationSelectors';
 
@@ -50,7 +51,7 @@ class ConversationList extends React.Component<IPrivateProps, IState> {
   filterConversations() {
     if (!_.isEmpty(this.props.filterText)) {
       return this.props.conversations.filter(
-        conversation =>
+        (conversation) =>
           conversation.botName
             .toLowerCase()
             .includes(this.props.filterText.toLowerCase()) ||
@@ -113,14 +114,14 @@ class ConversationList extends React.Component<IPrivateProps, IState> {
           !this.props.isLoading &&
             !this.props.error &&
             _.isEmpty(this.props.conversations),
-        )(() => <p>{`There are no conversations yet`}</p>)}
+        )(() => (
+          <p>{`There are no conversations yet`}</p>
+        ))}
         {renderIf(!this.props.error && !_.isEmpty(this.props.conversations))(
           () => (
             <div style={styles.packageList}>
               {renderIf(_.isEmpty(conversationList))(() => (
-                <p>{`Found no conversations matching: "${
-                  this.props.filterText
-                }"`}</p>
+                <p>{`Found no conversations matching: "${this.props.filterText}"`}</p>
               ))}
               <InfiniteScroll
                 pageStart={0}
@@ -133,7 +134,7 @@ class ConversationList extends React.Component<IPrivateProps, IState> {
                     Loading ...
                   </div>
                 }>
-                {conversationList.map(conversation => (
+                {conversationList.map((conversation) => (
                   <Conversation
                     key={conversation.resource}
                     conversation={conversation}

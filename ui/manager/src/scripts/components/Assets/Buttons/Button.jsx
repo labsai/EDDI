@@ -2,7 +2,7 @@
 var __assign =
   (this && this.__assign) ||
   Object.assign ||
-  function(t) {
+  function (t) {
     for (var s, i = 1, n = arguments.length; i < n; i++) {
       s = arguments[i];
       for (var p in s)
@@ -50,7 +50,7 @@ function getButtonStyling(props) {
     );
   }
 }
-var Button = function(props) {
+var Button = function (props) {
   return (
     <button
       onClick={props.onClick}

@@ -93,7 +93,10 @@ class ConversationProperties extends React.Component<IProps> {
   }
 }
 
-const ComposedConversationProperties: React.ComponentClass<IProps> = compose<IProps, IProps>(
+const ComposedConversationProperties: React.ComponentClass<IProps> = compose<
+  IProps,
+  IProps
+>(
   pure,
   Radium,
   setDisplayName('ConversationProperties'),

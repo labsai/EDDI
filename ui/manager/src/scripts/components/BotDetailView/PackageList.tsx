@@ -88,7 +88,7 @@ class PackageList extends React.Component<IPrivateProps, IState> {
         ))}
         {renderIf(!_.isEmpty(this.props.bot.packages))(() => (
           <div>
-            {this.props.bot.packages.map(pack => (
+            {this.props.bot.packages.map((pack) => (
               <PackageContainer key={pack} packageResource={pack} />
             ))}
           </div>
@@ -98,7 +98,10 @@ class PackageList extends React.Component<IPrivateProps, IState> {
   }
 }
 
-const ComposedPackageList: React.ComponentClass<IPublicProps> = compose<IPrivateProps, IPublicProps>(
+const ComposedPackageList: React.ComponentClass<IPublicProps> = compose<
+  IPrivateProps,
+  IPublicProps
+>(
   pure,
   setDisplayName('PackageList'),
 )(PackageList);

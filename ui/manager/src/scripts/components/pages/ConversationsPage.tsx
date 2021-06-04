@@ -37,7 +37,10 @@ class ConversationsPage extends React.Component<IProps, IState> {
   }
 }
 
-const ComposedConversationsPage: React.ComponentClass<IProps> = compose<IProps, IState>(
+const ComposedConversationsPage: React.ComponentClass<IProps> = compose<
+  IProps,
+  IState
+>(
   pure,
   setDisplayName('ConversationsPage'),
 )(ConversationsPage);

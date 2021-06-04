@@ -10,7 +10,9 @@ import { historyPush } from '../../history';
 import styles from './PluginSelectComponent.styles';
 import { pageEnum } from '../pages/pageEnum';
 
-const customStyles: { [key: string]: (base: any, state: any) => React.CSSProperties } = {
+const customStyles: {
+  [key: string]: (base: any, state: any) => React.CSSProperties;
+} = {
   control: (base, state) => ({
     ...base,
     ...styles.control,
@@ -146,7 +148,10 @@ class PluginSelectComponent extends React.Component<IProps, IState> {
   }
 }
 
-const ComposedPluginSelectComponent: React.ComponentClass<IProps> = compose<IProps, IProps>(
+const ComposedPluginSelectComponent: React.ComponentClass<IProps> = compose<
+  IProps,
+  IProps
+>(
   pure,
   setDisplayName('PluginSelectComponent'),
 )(PluginSelectComponent);

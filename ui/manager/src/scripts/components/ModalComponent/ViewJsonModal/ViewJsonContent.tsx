@@ -142,7 +142,10 @@ class ViewJsonContent extends React.Component<IPrivateProps, IState> {
   }
 }
 
-const ComposedViewJsonContent: React.ComponentClass<IPublicProps> = compose<IPrivateProps, IPublicProps>(
+const ComposedViewJsonContent: React.ComponentClass<IPublicProps> = compose<
+  IPrivateProps,
+  IPublicProps
+>(
   pure,
   connect(readOnlySelector),
   setDisplayName('ViewJsonContent'),

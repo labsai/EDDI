@@ -23,7 +23,7 @@ const styles: { [key: string]: IExtendedCSSProperties } = {
 const Packages: React.StatelessComponent<IProps> = (props: IProps) => {
   return (
     <div style={styles.packageList}>
-      {props.packages.map(pack => (
+      {props.packages.map((pack) => (
         <Package key={pack} packageResource={pack} bot={props.bot} />
       ))}
     </div>

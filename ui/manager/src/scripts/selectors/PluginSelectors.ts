@@ -20,7 +20,7 @@ export interface IPluginSelectorProps {
 
 export function pluginSelector(state: IAppState, props: IPluginSelectorProps) {
   const plugin = state.pluginState.plugins.find(
-    plug => plug.resource === props.pluginResource,
+    (plug) => plug.resource === props.pluginResource,
   );
   return {
     plugin: plugin || [],
@@ -70,11 +70,11 @@ export function pluginsSelector(
       break;
   }
   const plugins = state.pluginState.plugins.filter(
-    plug =>
+    (plug) =>
       plug.resource.includes(pluginName) &&
       plug.version === plug.currentVersion,
   );
-  const sortedPlugins = plugins.sort(function(a, b) {
+  const sortedPlugins = plugins.sort(function (a, b) {
     return b.lastModifiedOn - a.lastModifiedOn;
   });
   return {

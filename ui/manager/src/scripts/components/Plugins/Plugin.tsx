@@ -37,7 +37,9 @@ const Plugin: React.StatelessComponent<IPrivateProps> = (
       ))}
       {renderIf(props.plugin)(() => (
         <div>
-          {renderIf(props.error)(() => <p>{'Error: Could not load plugin'}</p>)}
+          {renderIf(props.error)(() => (
+            <p>{'Error: Could not load plugin'}</p>
+          ))}
           {renderIf(!props.error)(() => (
             <div>
               <div
@@ -54,7 +56,7 @@ const Plugin: React.StatelessComponent<IPrivateProps> = (
                 </div>
                 <div
                   style={styles.versionSelect}
-                  onClick={e => e.stopPropagation()}>
+                  onClick={(e) => e.stopPropagation()}>
                   <VersionSelectComponent
                     currentVersion={props.plugin.currentVersion}
                     selectedVersion={props.plugin.version}
@@ -87,8 +89,12 @@ const Plugin: React.StatelessComponent<IPrivateProps> = (
   );
 };
 
-const ComposedPlugin: React.ComponentClass<IPublicProps, IPrivateProps> = compose<
-  IPublicProps, IPrivateProps
->(pure, connect(pluginSelector), Radium, setDisplayName('Plugin'))(Plugin);
+const ComposedPlugin: React.ComponentClass<IPublicProps, IPrivateProps> =
+  compose<IPublicProps, IPrivateProps>(
+    pure,
+    connect(pluginSelector),
+    Radium,
+    setDisplayName('Plugin'),
+  )(Plugin);
 
 export default ComposedPlugin;

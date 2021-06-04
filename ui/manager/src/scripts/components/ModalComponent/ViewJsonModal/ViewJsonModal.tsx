@@ -87,7 +87,10 @@ class ViewJsonModal extends React.Component<IPrivateProps, IState> {
   }
 }
 
-const ComposedViewJsonModal: React.ComponentClass<IPrivateProps> = compose<IPrivateProps, IPrivateProps>(
+const ComposedViewJsonModal: React.ComponentClass<IPrivateProps> = compose<
+  IPrivateProps,
+  IPrivateProps
+>(
   pure,
   setDisplayName('ViewJsonModal'),
 )(ViewJsonModal);

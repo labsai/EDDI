@@ -41,7 +41,7 @@ class BasicAuthModal extends React.Component<IPrivateProps, IState> {
     this.setState({ apiUrl });
   }
 
-  signIn = event => {
+  signIn = (event) => {
     event.preventDefault();
     authenticationActionDispatchers.basicAuthSignInAction(
       this.state.name,
@@ -49,7 +49,7 @@ class BasicAuthModal extends React.Component<IPrivateProps, IState> {
     );
   };
 
-  handleButtonPress = e => {
+  handleButtonPress = (e) => {
     if (e.key === 'Enter') {
       this.signIn(e);
     }
@@ -79,7 +79,7 @@ class BasicAuthModal extends React.Component<IPrivateProps, IState> {
             type={'text'}
             autoComplete={'username'}
             autoFocus={true}
-            onChange={e =>
+            onChange={(e) =>
               this.setState({
                 name: e.target.value,
               })
@@ -90,7 +90,7 @@ class BasicAuthModal extends React.Component<IPrivateProps, IState> {
             type={'password'}
             autoComplete={'current-password'}
             style={styles.input}
-            onChange={e =>
+            onChange={(e) =>
               this.setState({
                 password: e.target.value,
               })
@@ -114,7 +114,10 @@ class BasicAuthModal extends React.Component<IPrivateProps, IState> {
   }
 }
 
-const ComposedBasicAuthModal: React.ComponentClass<IPublicProps> = compose<IPrivateProps, IPublicProps>(
+const ComposedBasicAuthModal: React.ComponentClass<IPublicProps> = compose<
+  IPrivateProps,
+  IPublicProps
+>(
   pure,
   connect(authenticationSelector),
   setDisplayName('BasicAuthModal'),

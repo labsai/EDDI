@@ -76,7 +76,7 @@ class PackagesUsingPlugin extends React.Component<IProps, IState> {
           <div style={styles.content}>
             {renderIf(this.state.expandList)(() => (
               <div style={styles.list}>
-                {this.props.plugin.usedByPackages.map(resource => (
+                {this.props.plugin.usedByPackages.map((resource) => (
                   <Package
                     key={resource}
                     packageResource={resource}
@@ -87,7 +87,7 @@ class PackagesUsingPlugin extends React.Component<IProps, IState> {
             ))}
             {renderIf(!this.state.expandList)(() => (
               <div style={styles.list}>
-                {shortList.map(r => (
+                {shortList.map((r) => (
                   <Package
                     key={r.resource}
                     packageResource={r.resource}
@@ -120,7 +120,10 @@ class PackagesUsingPlugin extends React.Component<IProps, IState> {
   }
 }
 
-const ComposedPackagesUsingPlugin: React.ComponentClass<IProps> = compose<IProps, IProps>(
+const ComposedPackagesUsingPlugin: React.ComponentClass<IProps> = compose<
+  IProps,
+  IProps
+>(
   pure,
   setDisplayName('PackagesUsingPlugin'),
 )(PackagesUsingPlugin);

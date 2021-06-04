@@ -12,7 +12,8 @@ import styles from './PluginList.styles';
 import { pluginsSelector } from '../../selectors/PluginSelectors';
 import { IPlugin } from '../utils/AxiosFunctions';
 import Parser from '../utils/Parser';
-const InfiniteScroll = require('react-infinite-scroller') as InfiniteScrollTypes;
+const InfiniteScroll =
+  require('react-infinite-scroller') as InfiniteScrollTypes;
 
 interface IPublicProps {
   filterText: string;
@@ -58,7 +59,7 @@ class PluginList extends React.Component<IPrivateProps, IState> {
   filterPlugins() {
     if (!_.isEmpty(this.props.filterText)) {
       return this.props.plugins.filter(
-        plugin =>
+        (plugin) =>
           plugin.name
             .toLowerCase()
             .includes(this.props.filterText.toLowerCase()) ||
@@ -106,7 +107,9 @@ class PluginList extends React.Component<IPrivateProps, IState> {
           !this.props.isLoading &&
             !this.props.error &&
             _.isEmpty(this.props.plugins),
-        )(() => <p>{`There are no ${pluginName.toLowerCase()} yet`}</p>)}
+        )(() => (
+          <p>{`There are no ${pluginName.toLowerCase()} yet`}</p>
+        ))}
         {renderIf(!this.props.error && !_.isEmpty(this.props.plugins))(() => (
           <div style={styles.pluginList}>
             {renderIf(_.isEmpty(pluginList))(() => (
@@ -123,7 +126,7 @@ class PluginList extends React.Component<IPrivateProps, IState> {
                   Loading ...
                 </div>
               }>
-              {pluginList.map(plugin => (
+              {pluginList.map((plugin) => (
                 <PluginContainer
                   key={plugin.id}
                   pluginResource={plugin.resource}
@@ -140,8 +143,11 @@ class PluginList extends React.Component<IPrivateProps, IState> {
 const ComposedPluginList: React.ComponentClass<IPublicProps> = compose<
   IPublicProps,
   IPrivateProps
->(pure, connect(pluginsSelector), Radium, setDisplayName('PluginList'))(
-  PluginList,
-);
+>(
+  pure,
+  connect(pluginsSelector),
+  Radium,
+  setDisplayName('PluginList'),
+)(PluginList);
 
 export default ComposedPluginList;

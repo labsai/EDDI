@@ -13,7 +13,9 @@ const styles: { [key: string]: IExtendedCSSProperties } = {
   },
 };
 
-const customStyles: { [key: string]: (base: any, state: any) => React.CSSProperties } = {
+const customStyles: {
+  [key: string]: (base: any, state: any) => React.CSSProperties;
+} = {
   indicatorsContainer: (base, state) => ({
     position: 'relative',
     borderLeft: '6px solid transparent',
@@ -78,7 +80,7 @@ class VersionSelectComponent extends React.Component<IProps, IState> {
   }
 
   setOptions(props = this.props): void {
-    const options = _.times(props.currentVersion, i => ({
+    const options = _.times(props.currentVersion, (i) => ({
       value: ++i,
       label: Parser.getVersionString(i),
     })).reverse();
@@ -99,7 +101,7 @@ class VersionSelectComponent extends React.Component<IProps, IState> {
     if (this.props.selectedVersion === this.props.currentVersion) {
       return {
         ...customStyles,
-        control: styles => ({
+        control: (styles) => ({
           ...styles,
           backgroundColor: 'white',
           border: '1px solid green',
@@ -108,7 +110,7 @@ class VersionSelectComponent extends React.Component<IProps, IState> {
     } else {
       return {
         ...customStyles,
-        control: styles => ({
+        control: (styles) => ({
           ...styles,
           backgroundColor: 'white',
           border: '1px solid red',
@@ -131,7 +133,10 @@ class VersionSelectComponent extends React.Component<IProps, IState> {
   }
 }
 
-const ComposedVersionSelectComponent: React.ComponentClass<IProps> = compose<IProps, IProps>(
+const ComposedVersionSelectComponent: React.ComponentClass<IProps> = compose<
+  IProps,
+  IProps
+>(
   pure,
   setDisplayName('VersionSelectComponent'),
 )(VersionSelectComponent);
