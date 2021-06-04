@@ -1,24 +1,23 @@
-import * as React from 'react';
-import { compose, pure, setDisplayName } from 'recompose';
-import { connect } from 'react-redux';
-import styles from './BotConversionView.styles';
-import eddiApiActionDispatchers from '../../actions/EddiApiActionDispatchers';
-import { IConversation } from '../utils/AxiosFunctions';
-import { conversationSelector } from '../../selectors/ConversationSelectors';
-import * as renderIf from 'render-if';
-import ConversationSteps from './ConversationTab/ConversationSteps';
-import ReactJson from 'react-json-view';
-import Parser from '../utils/Parser';
 import * as moment from 'moment';
-import HomeButtonComponent from '../HomeButton/HomeButtonComponent';
-import { historyPush } from '../../history';
-import ConversationProperties from './ConversationTab/ConversationProperties';
-import WhiteButton from '../Assets/Buttons/WhiteButton';
-import { CONVERSATION_READY } from '../utils/helpers/ConversationHelper';
-import modalActionDispatchers from '../../actions/ModalActionDispatchers';
+import * as React from 'react';
+import ReactJson from 'react-json-view';
+import { connect } from 'react-redux';
 import ClipLoader from 'react-spinners/ClipLoader';
+import { compose, pure, setDisplayName } from 'recompose';
 import { BLUE_COLOR } from '../../../styles/DefaultStylingProperties';
+import eddiApiActionDispatchers from '../../actions/EddiApiActionDispatchers';
+import modalActionDispatchers from '../../actions/ModalActionDispatchers';
+import { historyPush } from '../../history';
 import { readOnlySelector } from '../../selectors/AuthenticationSelectors';
+import { conversationSelector } from '../../selectors/ConversationSelectors';
+import WhiteButton from '../Assets/Buttons/WhiteButton';
+import HomeButtonComponent from '../HomeButton/HomeButtonComponent';
+import { IConversation } from '../utils/AxiosFunctions';
+import { CONVERSATION_READY } from '../utils/helpers/ConversationHelper';
+import Parser from '../utils/Parser';
+import styles from './BotConversionView.styles';
+import ConversationProperties from './ConversationTab/ConversationProperties';
+import ConversationSteps from './ConversationTab/ConversationSteps';
 
 interface IPublicProps {
   conversationId: string;
@@ -86,12 +85,12 @@ class BotConversationView extends React.Component<IPrivateProps, IState> {
     return (
       <div style={styles.content}>
         <HomeButtonComponent extraPath={'conversations'} />
-        {renderIf(this.props.isLoading && !conversation)(() => (
+        {this.props.isLoading && !conversation && (
           <div style={styles.loadingWrapper}>
             <ClipLoader color={BLUE_COLOR} />
           </div>
-        ))}
-        {renderIf(conversation)(() => (
+        )}
+        {!!conversation && (
           <div>
             <div style={styles.header}>
               <div style={styles.topHeader}>
@@ -149,11 +148,11 @@ class BotConversationView extends React.Component<IPrivateProps, IState> {
                 </div>
                 <div style={styles.descriptor}>
                   <div style={styles.title}>{'User id'}</div>
-                  {renderIf(conversation.data)(() => (
+                  {!!conversation.data && (
                     <div style={styles.descriptorContent}>
                       {conversation.data.userId}
                     </div>
-                  ))}
+                  )}
                 </div>
               </div>
             </div>
@@ -179,33 +178,31 @@ class BotConversationView extends React.Component<IPrivateProps, IState> {
                 {'Raw JSON'}
               </div>
             </div>
-            {renderIf(!conversation.data)(() => (
+            {!conversation.data && (
               <div style={styles.loadingWrapper}>
                 <ClipLoader color={BLUE_COLOR} />
               </div>
-            ))}
-            {renderIf(conversation.data)(() => (
+            )}
+            {!!conversation.data && (
               <div>
-                {renderIf(this.state.selectedTab === TabEnum.conversationSteps)(
-                  () => (
-                    <div>
-                      <ConversationProperties
-                        conversationProperties={
-                          conversation.data.conversationProperties
-                        }
-                      />
-                      <ConversationSteps
-                        isLoading={this.props.isLoading}
-                        conversationId={this.props.conversationId}
-                        conversationSteps={conversation.data.conversationSteps}
-                        conversationOutputs={
-                          conversation.data.conversationOutputs
-                        }
-                      />
-                    </div>
-                  ),
+                {this.state.selectedTab === TabEnum.conversationSteps && (
+                  <div>
+                    <ConversationProperties
+                      conversationProperties={
+                        conversation.data.conversationProperties
+                      }
+                    />
+                    <ConversationSteps
+                      isLoading={this.props.isLoading}
+                      conversationId={this.props.conversationId}
+                      conversationSteps={conversation.data.conversationSteps}
+                      conversationOutputs={
+                        conversation.data.conversationOutputs
+                      }
+                    />
+                  </div>
                 )}
-                {renderIf(this.state.selectedTab === TabEnum.json)(() => (
+                {this.state.selectedTab === TabEnum.json && (
                   <ReactJson
                     style={styles.rjv}
                     src={conversation.data}
@@ -214,11 +211,11 @@ class BotConversationView extends React.Component<IPrivateProps, IState> {
                     displayDataTypes={false}
                     enableClipboard={false}
                   />
-                ))}
+                )}
               </div>
-            ))}
+            )}
           </div>
-        ))}
+        )}
       </div>
     );
   }

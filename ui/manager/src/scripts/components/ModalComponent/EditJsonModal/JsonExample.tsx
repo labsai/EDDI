@@ -1,10 +1,9 @@
 import * as React from 'react';
+import { compose, pure, setDisplayName } from 'recompose';
+import { getPostExample } from '../../utils/EddiConfigExampleData';
+import Parser from '../../utils/Parser';
 import styles from '../ModalComponent.styles';
 import '../ModalComponent.styles.scss';
-import { compose, pure, setDisplayName } from 'recompose';
-import * as renderIf from 'render-if';
-import Parser from '../../utils/Parser';
-import { getPostExample } from '../../utils/EddiConfigExampleData';
 
 interface IState {
   showExample: boolean;
@@ -42,11 +41,11 @@ class JsonExample extends React.Component<IPrivateProps, IState> {
             {this.state.showExample ? '-' : '+'}
           </div>
         </button>
-        {renderIf(this.state.showExample)(() => (
+        {this.state.showExample && (
           <div style={styles.exampleData}>
             {getPostExample(this.props.type)}
           </div>
-        ))}
+        )}
       </div>
     );
   }

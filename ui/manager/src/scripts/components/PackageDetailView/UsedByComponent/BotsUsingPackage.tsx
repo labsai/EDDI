@@ -1,14 +1,10 @@
+import * as _ from 'lodash';
 import * as React from 'react';
 import { compose, pure, setDisplayName } from 'recompose';
-import Radium from 'radium';
-import { CSSProperties } from 'react';
-import * as _ from 'lodash';
-import Bot from './Bot';
 import eddiApiActionDispatchers from '../../../actions/EddiApiActionDispatchers';
-import * as renderIf from 'render-if';
 import { IPackage } from '../../utils/AxiosFunctions';
-import { IUsedResource } from '../../utils/Parser';
-import Parser from '../../utils/Parser';
+import Parser, { IUsedResource } from '../../utils/Parser';
+import Bot from './Bot';
 
 interface IProps {
   packagePayload: IPackage;
@@ -78,9 +74,9 @@ class BotsUsingPackage extends React.Component<IProps, IState> {
     }
     return (
       <div>
-        {renderIf(!_.isEmpty(this.props.packagePayload.usedByBots))(() => (
+        {!_.isEmpty(this.props.packagePayload.usedByBots) && (
           <div style={styles.content}>
-            {renderIf(this.state.expandList)(() => (
+            {this.state.expandList ? (
               <div style={styles.list}>
                 {this.props.packagePayload.usedByBots.map((resource) => (
                   <Bot
@@ -90,8 +86,7 @@ class BotsUsingPackage extends React.Component<IProps, IState> {
                   />
                 ))}
               </div>
-            ))}
-            {renderIf(!this.state.expandList)(() => (
+            ) : (
               <div style={styles.list}>
                 {shortList.map((r) => (
                   <Bot
@@ -102,25 +97,21 @@ class BotsUsingPackage extends React.Component<IProps, IState> {
                   />
                 ))}
               </div>
-            ))}
-            {renderIf(
-              _.size(this.props.packagePayload.usedByBots) >
-                _.size(shortList) && !this.state.expandList,
-            )(() => (
-              <div style={styles.seeMore} onClick={this.expandList}>
-                {'...See more'}
-              </div>
-            ))}
+            )}
+            {_.size(this.props.packagePayload.usedByBots) > _.size(shortList) &&
+              !this.state.expandList && (
+                <div style={styles.seeMore} onClick={this.expandList}>
+                  {'...See more'}
+                </div>
+              )}
           </div>
-        ))}
-        {renderIf(
-          _.size(this.props.packagePayload.usedByBots) > _.size(shortList) &&
-            this.state.expandList,
-        )(() => (
-          <div style={styles.seeMore} onClick={this.expandList}>
-            {'See less'}
-          </div>
-        ))}
+        )}
+        {_.size(this.props.packagePayload.usedByBots) > _.size(shortList) &&
+          this.state.expandList && (
+            <div style={styles.seeMore} onClick={this.expandList}>
+              {'See less'}
+            </div>
+          )}
       </div>
     );
   }

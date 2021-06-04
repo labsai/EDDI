@@ -1,7 +1,6 @@
 import * as React from 'react';
 import { compose, pure, setDisplayName } from 'recompose';
 import Parser from '../../utils/Parser';
-import * as renderIf from 'render-if';
 import * as _ from 'lodash';
 import styles from './Plugin.styles';
 import { IPlugin, IPluginExtensions } from '../../utils/AxiosFunctions';
@@ -109,12 +108,12 @@ class Extension extends React.Component<IPrivateProps> {
     }
     return (
       <div style={styles.extensionContainer}>
-        {renderIf(!this.props.editDisabled)(() => (
+        {!this.props.editDisabled && (
           <SquareXButton
             customStyles={styles.closeButton}
             onClick={this.deleteExtension}
           />
-        ))}
+        )}
         <button style={this.getBoxStyling()} onClick={this.openViewJsonModal}>
           <div style={styles.pluginHeader}>
             <div style={this.getNameStyling()}>{this.getPluginName()}</div>
@@ -138,13 +137,13 @@ class Extension extends React.Component<IPrivateProps> {
             )}
           </div>
         </button>
-        {renderIf(!isCurrentVersion && !this.props.editDisabled)(() => (
+        {!isCurrentVersion && !this.props.editDisabled && (
           <WhiteButton
             onClick={this.updateVersion}
             text={`Update to ${pluginLatestVersion}`}
             customStyles={styles.updateAvailableButton}
           />
-        ))}
+        )}
       </div>
     );
   }

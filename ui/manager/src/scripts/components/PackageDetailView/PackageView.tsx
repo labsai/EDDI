@@ -1,32 +1,31 @@
-import * as React from 'react';
-import ModalActionDispatchers from '../../actions/ModalActionDispatchers';
-import PackageDescriptor from './PackageDescriptor';
-import Plugin from './PluginBoxes/Plugin';
-import PluginWithExtension from './PluginBoxes/PluginWithExtensions';
-import * as renderIf from 'render-if';
-import styles from './PackageView.styles';
-import { compose, pure, setDisplayName } from 'recompose';
-import PluginSelect from './DropDownComponents/PluginSelect';
 import * as _ from 'lodash';
+import * as React from 'react';
+import { connect } from 'react-redux';
+import { compose, pure, setDisplayName } from 'recompose';
+import eddiApiActionDispatchers from '../../actions/EddiApiActionDispatchers';
+import ModalActionDispatchers from '../../actions/ModalActionDispatchers';
+import { historyPush } from '../../history';
+import { readOnlySelector } from '../../selectors/AuthenticationSelectors';
+import { defaultPluginTypesSelector } from '../../selectors/PluginSelectors';
+import BlueButton from '../Assets/Buttons/BlueButton';
+import Options from '../Assets/Buttons/Options';
+import WhiteButton from '../Assets/Buttons/WhiteButton';
+import VersionSelectComponent from '../Assets/VersionSelectComponent';
 import {
   IDefaultPluginTypes,
   IPackage,
   IPluginExtensions,
 } from '../utils/AxiosFunctions';
-import eddiApiActionDispatchers from '../../actions/EddiApiActionDispatchers';
-import { connect } from 'react-redux';
-import { defaultPluginTypesSelector } from '../../selectors/PluginSelectors';
-import BlueButton from '../Assets/Buttons/BlueButton';
-import WhiteButton from '../Assets/Buttons/WhiteButton';
-import BotsUsingPackage from './UsedByComponent/BotsUsingPackage';
-import VersionSelectComponent from '../Assets/VersionSelectComponent';
-import { historyPush } from '../../history';
-import Parser from '../utils/Parser';
-import { hasExtensions } from '../utils/helpers/PluginParser';
-import PluginHelper from '../utils/helpers/PluginHelper';
 import { PACKAGE } from '../utils/EddiTypes';
-import Options from '../Assets/Buttons/Options';
-import { readOnlySelector } from '../../selectors/AuthenticationSelectors';
+import PluginHelper from '../utils/helpers/PluginHelper';
+import { hasExtensions } from '../utils/helpers/PluginParser';
+import Parser from '../utils/Parser';
+import PluginSelect from './DropDownComponents/PluginSelect';
+import PackageDescriptor from './PackageDescriptor';
+import styles from './PackageView.styles';
+import Plugin from './PluginBoxes/Plugin';
+import PluginWithExtension from './PluginBoxes/PluginWithExtensions';
+import BotsUsingPackage from './UsedByComponent/BotsUsingPackage';
 
 export interface IOptions extends IPluginExtensions {
   extensionKey?: number;
@@ -239,22 +238,22 @@ class PackageView extends React.Component<IPrivateProps, IState> {
             customStyles={styles.editPackageButton}
             disabled={!isCurrentVersion || this.props.readOnly}
           />
-          {renderIf(foundUnpublishedChanges)(() => (
+          {foundUnpublishedChanges && (
             <div style={styles.unpublishedChanges}>
               <img src={warningIcon} style={styles.warningIcon} />
               <div style={styles.unpublishedChangesText}>
                 {'This Package has unpublished changes'}
               </div>
             </div>
-          ))}
+          )}
           <div style={styles.packageHeaderSpacing} />
-          {renderIf(this.unsavedChanges())(() => (
+          {this.unsavedChanges() && (
             <button
               style={styles.discardChanges}
               onClick={() => this.discardChanges()}>
               {'Discard changes'}
             </button>
-          ))}
+          )}
           <div style={styles.options}>
             <Options
               descriptor={this.props.packagePayload}
@@ -276,37 +275,38 @@ class PackageView extends React.Component<IPrivateProps, IState> {
           {'Used in bots'}
           <BotsUsingPackage packagePayload={this.props.packagePayload} />
         </div>
-        {renderIf(this.state.selectedPlugins)(() => (
-          <div>
-            {this.state.selectedPlugins
-              .filter((p) => hasExtensions(p))
-              .map((ext, key) => (
-                <PluginWithExtension
-                  key={key}
-                  pluginType={ext}
-                  pluginResource={PluginHelper.getResource(ext)}
-                  deletePlugin={this.deletePlugin}
-                  updatePlugin={this.updatePlugin}
-                  editDisabled={!isCurrentVersion || this.props.readOnly}
-                />
-              ))}
-            <div style={styles.pluginList}>
+        {!!this.state.selectedPlugins &&
+          !_.isEmpty(this.state.selectedPlugins) && (
+            <div>
               {this.state.selectedPlugins
-                .filter((p) => !hasExtensions(p))
+                .filter((p) => hasExtensions(p))
                 .map((ext, key) => (
-                  <Plugin
+                  <PluginWithExtension
                     key={key}
                     pluginType={ext}
-                    deletePlugin={this.deletePlugin}
                     pluginResource={PluginHelper.getResource(ext)}
+                    deletePlugin={this.deletePlugin}
                     updatePlugin={this.updatePlugin}
                     editDisabled={!isCurrentVersion || this.props.readOnly}
                   />
                 ))}
+              <div style={styles.pluginList}>
+                {this.state.selectedPlugins
+                  .filter((p) => !hasExtensions(p))
+                  .map((ext, key) => (
+                    <Plugin
+                      key={key}
+                      pluginType={ext}
+                      deletePlugin={this.deletePlugin}
+                      pluginResource={PluginHelper.getResource(ext)}
+                      updatePlugin={this.updatePlugin}
+                      editDisabled={!isCurrentVersion || this.props.readOnly}
+                    />
+                  ))}
+              </div>
             </div>
-          </div>
-        ))}
-        {renderIf(isCurrentVersion && !this.props.readOnly)(() => (
+          )}
+        {isCurrentVersion && !this.props.readOnly && (
           <div>
             <div style={styles.pluginAddTitle}>{'Add plugins'}</div>
             <div style={styles.pluginDropdown}>
@@ -320,7 +320,7 @@ class PackageView extends React.Component<IPrivateProps, IState> {
               />
             </div>
           </div>
-        ))}
+        )}
       </div>
     );
   }

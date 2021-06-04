@@ -1,23 +1,17 @@
-import * as React from 'react';
-import { compose, pure, setDisplayName } from 'recompose';
-import { CSSProperties } from 'react';
-import { Dropdown } from 'semantic-ui-react';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import Radium from 'radium';
-import {
-  GREY_COLOR,
-  LIGHT_GREY_COLOR2,
-} from '../../../../styles/DefaultStylingProperties';
-import { IDetailedDescriptor } from '../../utils/AxiosFunctions';
-import modalActionDispatchers from '../../../actions/ModalActionDispatchers';
-import eddiApiActionDispatchers from '../../../actions/EddiApiActionDispatchers';
-import styles from './Options.styles';
-import * as _ from 'lodash';
-import * as renderIf from 'render-if';
-import { getTypeFromResource } from '../../utils/ApiFunctions';
-import { PACKAGE } from '../../utils/EddiTypes';
-import { readOnlySelector } from '../../../selectors/AuthenticationSelectors';
+import * as React from 'react';
 import { connect } from 'react-redux';
+import { compose, pure, setDisplayName } from 'recompose';
+import { Dropdown } from 'semantic-ui-react';
+import { GREY_COLOR } from '../../../../styles/DefaultStylingProperties';
+import eddiApiActionDispatchers from '../../../actions/EddiApiActionDispatchers';
+import modalActionDispatchers from '../../../actions/ModalActionDispatchers';
+import { readOnlySelector } from '../../../selectors/AuthenticationSelectors';
+import { getTypeFromResource } from '../../utils/ApiFunctions';
+import { IDetailedDescriptor } from '../../utils/AxiosFunctions';
+import { PACKAGE } from '../../utils/EddiTypes';
+import styles from './Options.styles';
 
 interface IPublicProps {
   descriptor: IDetailedDescriptor;
@@ -78,7 +72,7 @@ class Options extends React.Component<IPrivateProps> {
                 )
               }
             />
-            {renderIf(isPackage)(() => (
+            {isPackage && (
               <Dropdown.Item>
                 <Dropdown text={'Duplicate'} disabled={this.props.readOnly}>
                   <Dropdown.Menu>
@@ -107,8 +101,8 @@ class Options extends React.Component<IPrivateProps> {
                   </Dropdown.Menu>
                 </Dropdown>
               </Dropdown.Item>
-            ))}
-            {renderIf(!isPackage)(() => (
+            )}
+            {!isPackage && (
               <Dropdown.Item
                 text={'Duplicate'}
                 icon={'copy outline'}
@@ -120,7 +114,7 @@ class Options extends React.Component<IPrivateProps> {
                 }
                 disabled={this.props.readOnly}
               />
-            ))}
+            )}
             <Dropdown.Divider />
             <Dropdown.Item text={'Delete'} disabled={true} icon={'delete'} />
           </Dropdown.Menu>

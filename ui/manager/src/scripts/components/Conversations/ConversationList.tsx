@@ -1,18 +1,17 @@
-import * as React from 'react';
-import * as renderIf from 'render-if';
 import * as _ from 'lodash';
 import Radium from 'radium';
+import * as React from 'react';
+import * as InfiniteScrollTypes from 'react-infinite-scroller';
+import { connect } from 'react-redux';
+import ClimbingBoxLoader from 'react-spinners/ClimbingBoxLoader';
 import { compose, pure, setDisplayName } from 'recompose';
 import eddiApiActionDispatchers from '../../actions/EddiApiActionDispatchers';
+import { conversationsSelector } from '../../selectors/ConversationSelectors';
 import { IConversation } from '../utils/AxiosFunctions';
-import { connect } from 'react-redux';
+import Conversation from './Conversation';
 import styles from './ConversationList.styles';
-import ClimbingBoxLoader from 'react-spinners/ClimbingBoxLoader';
-import * as InfiniteScrollTypes from 'react-infinite-scroller';
 const InfiniteScroll =
   require('react-infinite-scroller') as InfiniteScrollTypes;
-import Conversation from './Conversation';
-import { conversationsSelector } from '../../selectors/ConversationSelectors';
 
 interface IPublicProps {
   filterText: string;
@@ -100,49 +99,41 @@ class ConversationList extends React.Component<IPrivateProps, IState> {
           <div style={styles.lastModifiedOn}>{'Last message'}</div>
           <div style={styles.createdOn}>{'Created on'}</div>
         </div>
-        {renderIf(this.props.isLoading && _.isEmpty(this.props.conversations))(
-          () => (
-            <div style={styles.loadingWrapper}>
-              <ClimbingBoxLoader loading />
-            </div>
-          ),
+        {this.props.isLoading && _.isEmpty(this.props.conversations) && (
+          <div style={styles.loadingWrapper}>
+            <ClimbingBoxLoader loading />
+          </div>
         )}
-        {renderIf(this.props.error)(() => (
-          <p>{'Error: Could not load conversations'}</p>
-        ))}
-        {renderIf(
-          !this.props.isLoading &&
-            !this.props.error &&
-            _.isEmpty(this.props.conversations),
-        )(() => (
-          <p>{`There are no conversations yet`}</p>
-        ))}
-        {renderIf(!this.props.error && !_.isEmpty(this.props.conversations))(
-          () => (
-            <div style={styles.packageList}>
-              {renderIf(_.isEmpty(conversationList))(() => (
-                <p>{`Found no conversations matching: "${this.props.filterText}"`}</p>
+        {!!this.props.error && <p>{'Error: Could not load conversations'}</p>}
+        {!this.props.isLoading &&
+          !this.props.error &&
+          _.isEmpty(this.props.conversations) && (
+            <p>{`There are no conversations yet`}</p>
+          )}
+        {!this.props.error && !_.isEmpty(this.props.conversations) && (
+          <div style={styles.packageList}>
+            {_.isEmpty(conversationList) && (
+              <p>{`Found no conversations matching: "${this.props.filterText}"`}</p>
+            )}
+            <InfiniteScroll
+              pageStart={0}
+              loadMore={this.loadMore}
+              hasMore={
+                !this.props.allConversationsLoaded && !this.props.isLoading
+              }
+              loader={
+                <div className="loader" key={0}>
+                  Loading ...
+                </div>
+              }>
+              {conversationList.map((conversation) => (
+                <Conversation
+                  key={conversation.resource}
+                  conversation={conversation}
+                />
               ))}
-              <InfiniteScroll
-                pageStart={0}
-                loadMore={this.loadMore}
-                hasMore={
-                  !this.props.allConversationsLoaded && !this.props.isLoading
-                }
-                loader={
-                  <div className="loader" key={0}>
-                    Loading ...
-                  </div>
-                }>
-                {conversationList.map((conversation) => (
-                  <Conversation
-                    key={conversation.resource}
-                    conversation={conversation}
-                  />
-                ))}
-              </InfiniteScroll>
-            </div>
-          ),
+            </InfiniteScroll>
+          </div>
         )}
       </div>
     );

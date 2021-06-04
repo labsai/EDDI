@@ -5,7 +5,6 @@ import { compose, pure, setDisplayName } from 'recompose';
 import WhiteButton from '../../Assets/Buttons/WhiteButton';
 import BlueButton from '../../Assets/Buttons/BlueButton';
 import modalActionDispatchers from '../../../actions/ModalActionDispatchers';
-import * as renderIf from 'render-if';
 import { connect } from 'react-redux';
 import { authenticationSelector } from '../../../selectors/AuthenticationSelectors';
 import authenticationActionDispatchers from '../../../actions/AuthenticationActionDispatchers';
@@ -65,14 +64,14 @@ class BasicAuthModal extends React.Component<IPrivateProps, IState> {
         </div>
         <div style={styles.content}>
           <div style={styles.message}>{'Sign in'}</div>
-          {renderIf(this.props.error)(() => (
+          {!!this.props.error && (
             <div style={styles.error}>
               <img src={warningIcon} style={styles.warningIcon} />
               <div style={styles.errorMessage}>
                 {'Invalid username or password.'}
               </div>
             </div>
-          ))}
+          )}
           <div style={styles.inputTitle}>{'Username'}</div>
           <input
             style={styles.input}

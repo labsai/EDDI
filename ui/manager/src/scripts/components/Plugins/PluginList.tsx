@@ -1,17 +1,16 @@
-import * as React from 'react';
-import * as renderIf from 'render-if';
 import * as _ from 'lodash';
 import Radium from 'radium';
+import * as React from 'react';
+import * as InfiniteScrollTypes from 'react-infinite-scroller';
+import { connect } from 'react-redux';
 import { compose, pure, setDisplayName } from 'recompose';
 import eddiApiActionDispatchers from '../../actions/EddiApiActionDispatchers';
-import { connect } from 'react-redux';
-import { getAPIUrl } from '../utils/ApiFunctions';
-import * as InfiniteScrollTypes from 'react-infinite-scroller';
-import PluginContainer from './PluginContainer';
-import styles from './PluginList.styles';
 import { pluginsSelector } from '../../selectors/PluginSelectors';
+import { getAPIUrl } from '../utils/ApiFunctions';
 import { IPlugin } from '../utils/AxiosFunctions';
 import Parser from '../utils/Parser';
+import PluginContainer from './PluginContainer';
+import styles from './PluginList.styles';
 const InfiniteScroll =
   require('react-infinite-scroller') as InfiniteScrollTypes;
 
@@ -100,23 +99,21 @@ class PluginList extends React.Component<IPrivateProps, IState> {
           <div style={styles.title}>{pluginName}</div>
           <div style={styles.lastModified}>{'Last Modified'}</div>
         </div>
-        {renderIf(this.props.error)(() => (
+        {this.props.error && (
           <p>{`Error: Could not load ${pluginName.toLowerCase()}`}</p>
-        ))}
-        {renderIf(
-          !this.props.isLoading &&
-            !this.props.error &&
-            _.isEmpty(this.props.plugins),
-        )(() => (
-          <p>{`There are no ${pluginName.toLowerCase()} yet`}</p>
-        ))}
-        {renderIf(!this.props.error && !_.isEmpty(this.props.plugins))(() => (
+        )}
+        {!this.props.isLoading &&
+          !this.props.error &&
+          _.isEmpty(this.props.plugins) && (
+            <p>{`There are no ${pluginName.toLowerCase()} yet`}</p>
+          )}
+        {!this.props.error && !_.isEmpty(this.props.plugins) && (
           <div style={styles.pluginList}>
-            {renderIf(_.isEmpty(pluginList))(() => (
+            {_.isEmpty(pluginList) && (
               <p>{`Found no ${pluginName.toLowerCase()} matching: "${
                 this.props.filterText
               }"`}</p>
-            ))}
+            )}
             <InfiniteScroll
               pageStart={0}
               loadMore={() => this.loadMore()}
@@ -134,7 +131,7 @@ class PluginList extends React.Component<IPrivateProps, IState> {
               ))}
             </InfiniteScroll>
           </div>
-        ))}
+        )}
       </div>
     );
   }

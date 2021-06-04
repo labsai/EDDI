@@ -1,21 +1,20 @@
-import * as React from 'react';
-import '../ModalComponent.styles.scss';
-import { compose, pure, setDisplayName } from 'recompose';
-import Plugin from './Plugin';
-import { IBot, IDescriptor, IPackage } from '../../utils/AxiosFunctions';
-import { pluginsSelector } from '../../../selectors/PluginSelectors';
-import { connect } from 'react-redux';
 import * as _ from 'lodash';
+import * as React from 'react';
+import { connect } from 'react-redux';
+import ClimbingBoxLoader from 'react-spinners/ClimbingBoxLoader';
+import { compose, pure, setDisplayName } from 'recompose';
 import eddiApiActionDispatchers from '../../../actions/EddiApiActionDispatchers';
-import Parser from '../../utils/Parser';
-import styles from '../AddPackagesModal/AddPackagesModal.styles';
 import ModalActionDispatchers from '../../../actions/ModalActionDispatchers';
-import * as renderIf from 'render-if';
+import { pluginsSelector } from '../../../selectors/PluginSelectors';
 import BlueButton from '../../Assets/Buttons/BlueButton';
 import WhiteButton from '../../Assets/Buttons/WhiteButton';
-import ClimbingBoxLoader from 'react-spinners/ClimbingBoxLoader';
-import { REGULAR_DICTIONARY } from '../../utils/EddiTypes';
 import { DEFAULT_LIMIT } from '../../utils/ApiFunctions';
+import { IDescriptor } from '../../utils/AxiosFunctions';
+import { REGULAR_DICTIONARY } from '../../utils/EddiTypes';
+import Parser from '../../utils/Parser';
+import styles from '../AddPackagesModal/AddPackagesModal.styles';
+import '../ModalComponent.styles.scss';
+import Plugin from './Plugin';
 
 interface IState {
   selectedPlugins: string[];
@@ -224,16 +223,14 @@ class AddPluginModal extends React.Component<IPrivateProps, IState> {
           </div>
         </div>
         <div style={styles.packageList}>
-          {renderIf(
-            this.props.isAllPluginsLoaded && _.isEmpty(this.props.plugins),
-          )(() => (
+          {this.props.isAllPluginsLoaded && _.isEmpty(this.props.plugins) && (
             <p>
               {'Found no plugins. Create a new ' +
                 Parser.getPluginName(this.props.pluginType, false) +
                 ' to select one.'}
             </p>
-          ))}
-          {renderIf(!_.isEmpty(this.state.availablePlugins))(() => (
+          )}
+          {!_.isEmpty(this.state.availablePlugins) && (
             <div>
               {this.state.availablePlugins.map((p, i) => (
                 <Plugin
@@ -245,23 +242,21 @@ class AddPluginModal extends React.Component<IPrivateProps, IState> {
                 />
               ))}
             </div>
-          ))}
-          {renderIf(this.props.isLoading)(() => (
+          )}
+          {this.props.isLoading && (
             <div style={styles.loadingWrapper}>
               <ClimbingBoxLoader loading />
             </div>
-          ))}
-          {renderIf(
-            !this.props.isAllPluginsLoaded &&
-              !this.props.isLoading &&
-              !this.state.loading,
-          )(() => (
-            <BlueButton
-              customStyles={styles.loadMoreButton}
-              onClick={this.loadMore}
-              text={'Load More'}
-            />
-          ))}
+          )}
+          {!this.props.isAllPluginsLoaded &&
+            !this.props.isLoading &&
+            !this.state.loading && (
+              <BlueButton
+                customStyles={styles.loadMoreButton}
+                onClick={this.loadMore}
+                text={'Load More'}
+              />
+            )}
         </div>
       </div>
     );

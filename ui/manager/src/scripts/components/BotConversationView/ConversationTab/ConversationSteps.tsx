@@ -1,21 +1,15 @@
+import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
+import Radium from 'radium';
 import * as React from 'react';
 import { compose, pure, setDisplayName } from 'recompose';
-import * as renderIf from 'render-if';
-import ConversationStep from './ConversationStep';
+import { GREY_COLOR } from '../../../../styles/DefaultStylingProperties';
+import eddiApiActionDispatchers from '../../../actions/EddiApiActionDispatchers';
 import {
   IConversationOutput,
   IConversationSteps,
 } from '../../utils/AxiosFunctions';
-import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
+import ConversationStep from './ConversationStep';
 import styles from './ConversationSteps.styles';
-import Radium from 'radium';
-import {
-  BLUE_COLOR,
-  GREY_COLOR,
-  LIGHT_GREY_COLOR,
-  WHITE_COLOR,
-} from '../../../../styles/DefaultStylingProperties';
-import eddiApiActionDispatchers from '../../../actions/EddiApiActionDispatchers';
 
 interface IProps {
   isLoading: boolean;
@@ -76,13 +70,13 @@ class ConversationSteps extends React.Component<IProps, IState> {
                 style={styles.button}
                 onClick={() => this.toggleShowAllActions()}
                 key={'showAllActions'}>
-                {renderIf(this.state.showAllActions)(() => (
+                {this.state.showAllActions && (
                   <FontAwesomeIcon
                     style={styles.icon}
                     icon={['fas', 'check']}
                     color={GREY_COLOR}
                   />
-                ))}
+                )}
               </div>
               <div style={styles.toggleText}>{'Show all actions'}</div>
             </div>
@@ -91,13 +85,13 @@ class ConversationSteps extends React.Component<IProps, IState> {
                 style={styles.button}
                 onClick={() => this.toggleAutoRefresh()}
                 key={'autoRefresh'}>
-                {renderIf(this.state.autoRefresh)(() => (
+                {this.state.autoRefresh && (
                   <FontAwesomeIcon
                     style={styles.icon}
                     icon={['fas', 'check']}
                     color={GREY_COLOR}
                   />
-                ))}
+                )}
               </div>
               <div style={styles.toggleText}>{'Auto refresh'}</div>
             </div>

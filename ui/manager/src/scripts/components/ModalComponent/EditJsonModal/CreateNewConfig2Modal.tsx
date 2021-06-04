@@ -1,25 +1,23 @@
+import { JSONSchema4 } from 'json-schema';
+import * as _ from 'lodash';
 import * as React from 'react';
-import styles from '../ModalComponent.styles';
-import '../ModalComponent.styles.scss';
+import { connect } from 'react-redux';
 import { compose, pure, setDisplayName } from 'recompose';
 import eddiApiActionDispatchers from '../../../actions/EddiApiActionDispatchers';
+import modalActionDispatchers from '../../../actions/ModalActionDispatchers';
+import { schemaSelector } from '../../../selectors/SystemSelectors';
 import BlueButton from '../../Assets/Buttons/BlueButton';
 import WhiteButton from '../../Assets/Buttons/WhiteButton';
-import modalActionDispatchers from '../../../actions/ModalActionDispatchers';
-import * as renderIf from 'render-if';
-import Parser from '../../utils/Parser';
-import * as _ from 'lodash';
-import Editor from './Editor';
 import { compileJsonSchema, IJsonError } from '../../utils/helpers/JsonHelpers';
-import { schemaSelector } from '../../../selectors/SystemSelectors';
-import { connect } from 'react-redux';
+import Parser from '../../utils/Parser';
+import styles from '../ModalComponent.styles';
+import '../ModalComponent.styles.scss';
+import editStyles from './EditJsonModal.styles';
+import Editor from './Editor';
 import JsonErrors from './JsonErrors';
 import JsonExample from './JsonExample';
-import { JSONSchema4 } from 'json-schema';
 import JsonIsValid from './JsonIsValid';
 import JsonSchemaForm from './JsonSchemaForm/JsonSchemaForm';
-import { getTypeFromResource } from '../../utils/ApiFunctions';
-import editStyles from './EditJsonModal.styles';
 
 enum TabEnum {
   'editor',
@@ -165,13 +163,13 @@ class CreateNewConfig2Modal extends React.Component<IPrivateProps, IState> {
                 styles.botHeaderText
               }>{`Edit new ${typeName} JSON data`}</div>
             <div style={styles.modalTopHeaderCenter} />
-            {renderIf(this.unsavedChanges())(() => (
+            {this.unsavedChanges() && (
               <button
                 style={styles.discardChanges}
                 onClick={() => this.discardChanges()}>
                 {'Discard changes'}
               </button>
-            ))}
+            )}
             <WhiteButton
               onClick={() => this.back()}
               text={'Back'}
@@ -208,14 +206,12 @@ class CreateNewConfig2Modal extends React.Component<IPrivateProps, IState> {
             {'Form'}
           </div>
         </div>
-        {renderIf(this.state.isValidJson)(() => (
-          <JsonIsValid />
-        ))}
-        {renderIf(this.state.selectedTab === TabEnum.editor)(() => (
+        {this.state.isValidJson && <JsonIsValid />}
+        {this.state.selectedTab === TabEnum.editor && (
           <div>
-            {renderIf(!_.isEmpty(this.state.errors))(() => (
+            {!_.isEmpty(this.state.errors) && (
               <JsonErrors errors={this.state.errors} />
-            ))}
+            )}
             <JsonExample type={this.props.type} />
             <Editor
               type={this.props.type}
@@ -226,15 +222,15 @@ class CreateNewConfig2Modal extends React.Component<IPrivateProps, IState> {
               validate={this.validateJson}
             />
           </div>
-        ))}
-        {renderIf(this.state.selectedTab === TabEnum.form)(() => (
+        )}
+        {this.state.selectedTab === TabEnum.form && (
           <JsonSchemaForm
             schema={this.props.schema}
             data={this.state.editorText || '{}'}
             onChange={this.onChange}
             validate={this.validateSchemaForm}
           />
-        ))}
+        )}
       </div>
     );
   }

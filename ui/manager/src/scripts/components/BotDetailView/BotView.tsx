@@ -1,23 +1,22 @@
 import * as React from 'react';
-import modalActionDispatchers from '../../actions/ModalActionDispatchers';
-import BotDescriptor from './BotDescriptor';
-import PackageList from './PackageList';
-import * as renderIf from 'render-if';
-import styles from './BotView.styles';
-import { compose, pure, setDisplayName } from 'recompose';
-import { IBot } from '../utils/AxiosFunctions';
-import VersionSelectComponent from '../Assets/VersionSelectComponent';
-import WhiteButton from '../Assets/Buttons/WhiteButton';
-import DeployButton from '../Assets/Buttons/DeployButton';
-import eddiApiActionDispatchers from '../../actions/EddiApiActionDispatchers';
-import Parser from '../utils/Parser';
-import { historyPush } from '../../history';
-import { getAPIUrl } from '../utils/ApiFunctions';
-import { BOT } from '../utils/EddiTypes';
-import Options from '../Assets/Buttons/BotOptions';
-import { readOnlySelector } from '../../selectors/AuthenticationSelectors';
 import { connect } from 'react-redux';
+import { compose, pure, setDisplayName } from 'recompose';
+import eddiApiActionDispatchers from '../../actions/EddiApiActionDispatchers';
+import modalActionDispatchers from '../../actions/ModalActionDispatchers';
+import { historyPush } from '../../history';
+import { readOnlySelector } from '../../selectors/AuthenticationSelectors';
+import Options from '../Assets/Buttons/BotOptions';
+import DeployButton from '../Assets/Buttons/DeployButton';
+import WhiteButton from '../Assets/Buttons/WhiteButton';
+import VersionSelectComponent from '../Assets/VersionSelectComponent';
+import { getAPIUrl } from '../utils/ApiFunctions';
+import { IBot } from '../utils/AxiosFunctions';
+import { BOT } from '../utils/EddiTypes';
 import { READY } from '../utils/helpers/BotHelper';
+import Parser from '../utils/Parser';
+import BotDescriptor from './BotDescriptor';
+import styles from './BotView.styles';
+import PackageList from './PackageList';
 
 interface IPublicProps {
   bot: IBot;
@@ -87,7 +86,7 @@ class BotView extends React.Component<IPrivateProps, IState> {
       this.props.bot.version !== this.props.bot.currentVersion;
     return (
       <div>
-        {renderIf(this.props.bot)(() => (
+        {!!this.props.bot && (
           <div>
             <div style={styles.botHeader}>
               <div style={styles.botName}>
@@ -110,14 +109,14 @@ class BotView extends React.Component<IPrivateProps, IState> {
                 disabled={isCurrentVersion || this.props.readOnly}
                 customStyles={styles.button}
               />
-              {renderIf(foundUnpublishedChanges)(() => (
+              {foundUnpublishedChanges && (
                 <div style={styles.unpublishedChanges}>
                   <img src={warningIcon} style={styles.warningIcon} />
                   <div style={styles.unpublishedChangesText}>
                     {'This Bot has unpublished changes'}
                   </div>
                 </div>
-              ))}
+              )}
               <div style={styles.botHeaderSpacing} />
               <div style={styles.options}>
                 <Options bot={this.props.bot} apiUrl={this.state.apiUrl} />
@@ -150,7 +149,7 @@ class BotView extends React.Component<IPrivateProps, IState> {
             />
             <PackageList bot={this.props.bot} readOnly={this.props.readOnly} />
           </div>
-        ))}
+        )}
       </div>
     );
   }

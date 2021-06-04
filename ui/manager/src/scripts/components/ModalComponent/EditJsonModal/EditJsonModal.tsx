@@ -1,23 +1,22 @@
+import { JSONSchema4 } from 'json-schema';
+import * as _ from 'lodash';
 import * as React from 'react';
-import styles from '../ModalComponent.styles';
-import '../ModalComponent.styles.scss';
+import { connect } from 'react-redux';
 import { compose, pure, setDisplayName } from 'recompose';
 import eddiApiActionDispatchers from '../../../actions/EddiApiActionDispatchers';
-import BlueButton from '../../Assets/Buttons/BlueButton';
 import modalActionDispatchers from '../../../actions/ModalActionDispatchers';
-import * as renderIf from 'render-if';
+import { schemaSelector } from '../../../selectors/SystemSelectors';
+import BlueButton from '../../Assets/Buttons/BlueButton';
+import { getTypeFromResource } from '../../utils/ApiFunctions';
 import { compileJsonSchema, IJsonError } from '../../utils/helpers/JsonHelpers';
+import styles from '../ModalComponent.styles';
+import '../ModalComponent.styles.scss';
+import editStyles from './EditJsonModal.styles';
 import Editor from './Editor';
-import * as _ from 'lodash';
 import JsonErrors from './JsonErrors';
 import JsonExample from './JsonExample';
 import JsonIsValid from './JsonIsValid';
-import { connect } from 'react-redux';
-import { schemaSelector } from '../../../selectors/SystemSelectors';
-import { JSONSchema4 } from 'json-schema';
-import editStyles from './EditJsonModal.styles';
 import JsonSchemaForm from './JsonSchemaForm/JsonSchemaForm';
-import { getTypeFromResource } from '../../utils/ApiFunctions';
 
 enum TabEnum {
   'editor',
@@ -138,13 +137,13 @@ class EditJsonModal extends React.Component<IPrivateProps, IState> {
           <div style={styles.modalTopHeader}>
             <div style={styles.botHeaderText}>{'Edit existing data'}</div>
             <div style={styles.modalTopHeaderCenter} />
-            {renderIf(this.unsavedChanges())(() => (
+            {this.unsavedChanges() && (
               <button
                 style={styles.discardChanges}
                 onClick={() => this.validateJson()}>
                 {'Discard changes'}
               </button>
-            ))}
+            )}
             <BlueButton
               onClick={this.updateJson}
               disabled={!this.unsavedChanges || !this.isJsonString()}
@@ -176,14 +175,12 @@ class EditJsonModal extends React.Component<IPrivateProps, IState> {
             {'Form'}
           </div>
         </div>
-        {renderIf(this.state.isValidJson)(() => (
-          <JsonIsValid />
-        ))}
-        {renderIf(this.state.selectedTab === TabEnum.editor)(() => (
+        {this.state.isValidJson && <JsonIsValid />}
+        {this.state.selectedTab === TabEnum.editor && (
           <div>
-            {renderIf(!_.isEmpty(this.state.errors))(() => (
+            {!_.isEmpty(this.state.errors) && (
               <JsonErrors errors={this.state.errors} />
-            ))}
+            )}
             <JsonExample type={this.props.type} />
             <Editor
               type={this.props.type}
@@ -194,15 +191,15 @@ class EditJsonModal extends React.Component<IPrivateProps, IState> {
               validate={this.validateJson}
             />
           </div>
-        ))}
-        {renderIf(this.state.selectedTab === TabEnum.form)(() => (
+        )}
+        {this.state.selectedTab === TabEnum.form && (
           <JsonSchemaForm
             schema={this.props.schema}
             data={this.state.editorText}
             onChange={this.onChange}
             validate={this.validateSchemaForm}
           />
-        ))}
+        )}
       </div>
     );
   }

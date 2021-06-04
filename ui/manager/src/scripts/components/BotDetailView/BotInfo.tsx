@@ -1,17 +1,16 @@
-import * as React from 'react';
-import BotView from './BotView';
-import { IBot } from '../utils/AxiosFunctions';
-import { compose, pure, setDisplayName } from 'recompose';
-import HomeButtonComponent from '../HomeButton/HomeButtonComponent';
-import Radium from 'radium';
-import { specificBotSelector } from '../../selectors/BotSelectors';
-import { connect } from 'react-redux';
-import eddiApiActionDispatchers from '../../actions/EddiApiActionDispatchers';
-import styles from '../Bots/Botlist.styles';
 import * as _ from 'lodash';
+import Radium from 'radium';
+import * as React from 'react';
+import { connect } from 'react-redux';
 import ClimbingBoxLoader from 'react-spinners/ClimbingBoxLoader';
-import * as renderIf from 'render-if';
+import { compose, pure, setDisplayName } from 'recompose';
+import eddiApiActionDispatchers from '../../actions/EddiApiActionDispatchers';
+import { specificBotSelector } from '../../selectors/BotSelectors';
+import styles from '../Bots/Botlist.styles';
+import HomeButtonComponent from '../HomeButton/HomeButtonComponent';
+import { IBot } from '../utils/AxiosFunctions';
 import { BOT, BOT_PATH } from '../utils/EddiTypes';
+import BotView from './BotView';
 
 interface IPublicProps {
   botId: string;
@@ -43,24 +42,21 @@ class BotInfo extends React.Component<IPrivateProps> {
     return (
       <div>
         <HomeButtonComponent />
-        {renderIf(this.props.isLoading)(() => (
+        {this.props.isLoading ? (
           <div style={styles.loadingWrapper}>
             <ClimbingBoxLoader loading />
           </div>
-        ))}
-        {renderIf(!this.props.isLoading)(() => (
+        ) : (
           <div>
-            {renderIf(this.props.error)(() => (
-              <p>{'Error: Could not load bot'}</p>
-            ))}
-            {renderIf(!this.props.error && _.isEmpty(this.props.bot))(() => (
+            {!!this.props.error && <p>{'Error: Could not load bot'}</p>}
+            {!this.props.error && _.isEmpty(this.props.bot) && (
               <p>{'Bot not found'}</p>
-            ))}
-            {renderIf(!this.props.error && !_.isEmpty(this.props.bot))(() => (
+            )}
+            {!this.props.error && !_.isEmpty(this.props.bot) && (
               <BotView bot={this.props.bot} />
-            ))}
+            )}
           </div>
-        ))}
+        )}
       </div>
     );
   }

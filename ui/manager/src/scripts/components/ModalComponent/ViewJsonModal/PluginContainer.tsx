@@ -3,7 +3,6 @@ import { compose, pure, setDisplayName } from 'recompose';
 import ViewJsonContent from './ViewJsonContent';
 import { IPlugin } from '../../utils/AxiosFunctions';
 import { connect } from 'react-redux';
-import * as renderIf from 'render-if';
 import { pluginSelector } from '../../../selectors/PluginSelectors';
 import * as _ from 'lodash';
 
@@ -47,14 +46,14 @@ class PluginContainer extends React.Component<IPrivateProps, IState> {
   render() {
     return (
       <div>
-        {renderIf(!_.isEmpty(this.props.plugin))(() => (
+        {!_.isEmpty(this.props.plugin) && (
           <ViewJsonContent
             descriptor={this.props.plugin}
             data={this.state.data}
             usedBy={this.props.plugin.usedByPackages}
             selectVersion={this.props.selectVersion}
           />
-        ))}
+        )}
       </div>
     );
   }

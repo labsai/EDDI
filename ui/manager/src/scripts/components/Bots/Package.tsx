@@ -1,21 +1,19 @@
-import { IBot, IPackage } from '../utils/AxiosFunctions';
-import * as React from 'react';
-import * as renderIf from 'render-if';
-import styles from './Package.styles';
-import * as moment from 'moment';
-import { compose, pure, setDisplayName } from 'recompose';
-import eddiApiActionDispatchers from '../../actions/EddiApiActionDispatchers';
-import { connect } from 'react-redux';
-import { packageSelector } from '../../selectors/PackageSelectors';
-import Radium from 'radium';
 import * as _ from 'lodash';
-import WhiteButton from '../Assets/Buttons/WhiteButton';
-import ModalActionDispatchers from '../../actions/ModalActionDispatchers';
-import { ModalEnum } from '../utils/ModalEnum';
-import { history, historyPush } from '../../history';
+import * as moment from 'moment';
+import Radium from 'radium';
+import * as React from 'react';
+import { connect } from 'react-redux';
 import ClipLoader from 'react-spinners/ClipLoader';
-import { readOnlySelector } from '../../selectors/AuthenticationSelectors';
+import { compose, pure, setDisplayName } from 'recompose';
 import { BLUE_COLOR } from '../../../styles/DefaultStylingProperties';
+import eddiApiActionDispatchers from '../../actions/EddiApiActionDispatchers';
+import ModalActionDispatchers from '../../actions/ModalActionDispatchers';
+import { historyPush } from '../../history';
+import { readOnlySelector } from '../../selectors/AuthenticationSelectors';
+import { packageSelector } from '../../selectors/PackageSelectors';
+import WhiteButton from '../Assets/Buttons/WhiteButton';
+import { IBot, IPackage } from '../utils/AxiosFunctions';
+import styles from './Package.styles';
 
 interface IPrivateProps extends IPublicProps {
   packagePayload: IPackage;
@@ -81,19 +79,13 @@ class Package extends React.Component<IPrivateProps, IState> {
       : false;
     return (
       <div>
-        {renderIf(!this.props.isLoading)(() => (
+        {!this.props.isLoading && (
           <div>
-            {renderIf(this.props.error)(() => (
-              <p>{'Error: Could not load package'}</p>
-            ))}
-            {renderIf(
-              !this.props.error && _.isEmpty(this.props.packagePayload),
-            )(() => (
+            {!!this.props.error && <p>{'Error: Could not load package'}</p>}
+            {!this.props.error && _.isEmpty(this.props.packagePayload) && (
               <ClipLoader color={BLUE_COLOR} />
-            ))}
-            {renderIf(
-              !this.props.error && !_.isEmpty(this.props.packagePayload),
-            )(() => (
+            )}
+            {!this.props.error && !_.isEmpty(this.props.packagePayload) && (
               <div>
                 <button
                   onClick={() =>
@@ -115,7 +107,7 @@ class Package extends React.Component<IPrivateProps, IState> {
                     )}
                   </div>
                 </button>
-                {renderIf(packageHasNewVersion)(() => (
+                {packageHasNewVersion && (
                   <WhiteButton
                     text={'Update'}
                     customStyles={styles.updatePackage}
@@ -127,11 +119,11 @@ class Package extends React.Component<IPrivateProps, IState> {
                     }
                     disabled={this.props.readOnly}
                   />
-                ))}
+                )}
               </div>
-            ))}
+            )}
           </div>
-        ))}
+        )}
       </div>
     );
   }

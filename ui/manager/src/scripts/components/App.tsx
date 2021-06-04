@@ -7,21 +7,12 @@ import Dashboard from './pages/Dashboard';
 import BotViewPage from './pages/BotViewPage';
 import PackagePage from './pages/PackagePage';
 import { run as runSagaMiddleware } from '../sagas';
-import * as renderIf from 'render-if';
 import { connect } from 'react-redux';
 import PackageViewPage from './pages/PackageViewPage';
 import ExtensionsPage from './pages/ExtensionsPage';
 import * as Keycloak from 'keycloak-js';
 import * as kcHelper from './utils/keycloakFunctions';
-import { historyPush } from '../history';
-import WhiteButton from './Assets/Buttons/WhiteButton';
-import { CSSProperties } from 'react';
-import {
-  getAuthClientId,
-  getReadOnly,
-  setApiUrlQuery,
-  setReadOnlyQuery,
-} from './utils/ApiFunctions';
+import { setApiUrlQuery, setReadOnlyQuery } from './utils/ApiFunctions';
 import { library } from '@fortawesome/fontawesome-svg-core';
 import Parser from './utils/Parser';
 import {
@@ -129,10 +120,8 @@ const App = ({
     <div className="ui container">
       {isAppReady && (
         <div>
-          {renderIf(!authenticated)(() => (
-            <div>{'You need to login to see this page'}</div>
-          ))}
-          {renderIf(authenticated)(() => (
+          {!authenticated && <div>{'You need to login to see this page'}</div>}
+          {authenticated && (
             <div>
               <Route path={'/'} exact component={Dashboard} />
               <Route path={'/packages'} exact component={PackagePage} />
@@ -149,10 +138,8 @@ const App = ({
               />
               <Route path={'/packageview/:id'} component={PackageViewPage} />
             </div>
-          ))}
-          {renderIf(keycloakAuthenticated)(() => (
-            <ModalComponentFrame />
-          ))}
+          )}
+          {keycloakAuthenticated && <ModalComponentFrame />}
         </div>
       )}
     </div>

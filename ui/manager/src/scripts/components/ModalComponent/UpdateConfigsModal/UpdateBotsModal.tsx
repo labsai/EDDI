@@ -1,22 +1,17 @@
-import * as React from 'react';
-import '../ModalComponent.styles.scss';
-import { compose, pure, setDisplayName } from 'recompose';
-import { getBotsUsingPackage, IBot } from '../../utils/AxiosFunctions';
-import { connect } from 'react-redux';
 import * as _ from 'lodash';
+import * as React from 'react';
+import { connect } from 'react-redux';
+import ClimbingBoxLoader from 'react-spinners/ClimbingBoxLoader';
+import { compose, pure, setDisplayName } from 'recompose';
 import eddiApiActionDispatchers from '../../../actions/EddiApiActionDispatchers';
-import styles from '../AddPackagesModal/AddPackagesModal.styles';
 import ModalActionDispatchers from '../../../actions/ModalActionDispatchers';
-import * as renderIf from 'render-if';
+import { loadingBotSelector } from '../../../selectors/BotSelectors';
 import BlueButton from '../../Assets/Buttons/BlueButton';
 import WhiteButton from '../../Assets/Buttons/WhiteButton';
-import ClimbingBoxLoader from 'react-spinners/ClimbingBoxLoader';
+import { getBotsUsingPackage, IBot } from '../../utils/AxiosFunctions';
+import styles from '../AddPackagesModal/AddPackagesModal.styles';
+import '../ModalComponent.styles.scss';
 import SelectableConfig from './SelectableConfig';
-import {
-  botsWithPackageSelector,
-  loadingBotSelector,
-} from '../../../selectors/BotSelectors';
-import { DEFAULT_LIMIT } from '../../utils/ApiFunctions';
 
 interface IBotToUpdate {
   botResource: string;
@@ -151,13 +146,13 @@ class UpdateBotsModal extends React.Component<IPrivateProps, IState> {
                 styles.title
               }>{`Select bots to update any old versions of the package to latest`}</div>
             <div style={styles.centerFlex} />
-            {renderIf(this.state.page > 0)(() => (
+            {this.state.page > 0 && (
               <WhiteButton
                 customStyles={styles.backButton}
                 onClick={this.previousPage}
                 text={'Back'}
               />
-            ))}
+            )}
             <BlueButton
               customStyles={styles.button}
               onClick={
@@ -172,30 +167,28 @@ class UpdateBotsModal extends React.Component<IPrivateProps, IState> {
           </div>
         </div>
         <div>
-          {renderIf(
-            !this.props.isLoading &&
-              !_.isEmpty(this.state.bots) &&
-              !_.isEmpty(this.state.bots[this.state.page]),
-          )(() => (
-            <div style={styles.packageList}>
-              {this.state.bots[this.state.page].map((bot, i) => (
-                <SelectableConfig
-                  key={i}
-                  selected={this.isBotSelected(bot.resource)}
-                  descriptor={bot}
-                  handleClick={this.selectBot}
-                />
-              ))}
-            </div>
-          ))}
-          {renderIf(this.props.isLoading)(() => (
+          {!this.props.isLoading &&
+            !_.isEmpty(this.state.bots) &&
+            !_.isEmpty(this.state.bots[this.state.page]) && (
+              <div style={styles.packageList}>
+                {this.state.bots[this.state.page].map((bot, i) => (
+                  <SelectableConfig
+                    key={i}
+                    selected={this.isBotSelected(bot.resource)}
+                    descriptor={bot}
+                    handleClick={this.selectBot}
+                  />
+                ))}
+              </div>
+            )}
+          {this.props.isLoading && (
             <div style={styles.loadingWrapper}>
               <ClimbingBoxLoader loading />
             </div>
-          ))}
-          {renderIf(!this.props.isLoading && _.isEmpty(this.state.bots))(() => (
+          )}
+          {!this.props.isLoading && _.isEmpty(this.state.bots) && (
             <div>{'Found no bots that can be updated'}</div>
-          ))}
+          )}
         </div>
       </div>
     );

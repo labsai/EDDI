@@ -1,21 +1,12 @@
-import * as React from 'react';
-import '../ModalComponent.styles.scss';
-import { compose, pure, setDisplayName } from 'recompose';
-import * as renderIf from 'render-if';
-import eddiApiActionDispatchers from '../../../actions/EddiApiActionDispatchers';
-import styles from '../ViewJsonModal/ViewJsonModal.styles';
 import * as moment from 'moment';
-import * as _ from 'lodash';
-import { IBot } from '../../utils/AxiosFunctions';
-import ModalActionDispatchers, {
-  default as modalActionDispatchers,
-} from '../../../actions/ModalActionDispatchers';
-import BlueButton from '../../Assets/Buttons/BlueButton';
-import VersionSelectComponent from '../../Assets/VersionSelectComponent';
-import Parser from '../../utils/Parser';
+import * as React from 'react';
+import { compose, pure, setDisplayName } from 'recompose';
 import Options from '../../Assets/Buttons/Options';
-import Radium from 'radium';
-import { historyPush } from '../../../history';
+import VersionSelectComponent from '../../Assets/VersionSelectComponent';
+import { IBot } from '../../utils/AxiosFunctions';
+import Parser from '../../utils/Parser';
+import '../ModalComponent.styles.scss';
+import styles from '../ViewJsonModal/ViewJsonModal.styles';
 import ConversationList from './ConversationList';
 
 interface IProps {

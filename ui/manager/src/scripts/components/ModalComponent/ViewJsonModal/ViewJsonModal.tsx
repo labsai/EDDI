@@ -1,14 +1,11 @@
 import * as React from 'react';
-import '../ModalComponent.styles.scss';
 import { compose, pure, setDisplayName } from 'recompose';
-import * as renderIf from 'render-if';
 import eddiApiActionDispatchers from '../../../actions/EddiApiActionDispatchers';
-import Parser from '../../utils/Parser';
 import { PACKAGE } from '../../utils/EddiTypes';
+import Parser from '../../utils/Parser';
+import '../ModalComponent.styles.scss';
 import PackageContainer from './PackageContainer';
 import PluginContainer from './PluginContainer';
-import { readOnlySelector } from '../../../selectors/AuthenticationSelectors';
-import { connect } from 'react-redux';
 
 interface IPublicProps {
   resource: string;
@@ -70,18 +67,18 @@ class ViewJsonModal extends React.Component<IPrivateProps, IState> {
     const isPackage = this.isPackage();
     return (
       <div>
-        {renderIf(isPackage)(() => (
+        {isPackage && (
           <PackageContainer
             packageResource={this.state.selectedResource}
             selectVersion={this.selectVersion}
           />
-        ))}
-        {renderIf(!isPackage)(() => (
+        )}
+        {!isPackage && (
           <PluginContainer
             pluginResource={this.state.selectedResource}
             selectVersion={this.selectVersion}
           />
-        ))}
+        )}
       </div>
     );
   }

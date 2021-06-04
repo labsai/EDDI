@@ -1,20 +1,19 @@
-import * as React from 'react';
-import { compose, pure, setDisplayName } from 'recompose';
-import { IPlugin } from '../utils/AxiosFunctions';
-import { pluginSelector } from '../../selectors/PluginSelectors';
-import * as moment from 'moment';
-import * as renderIf from 'render-if';
-import VersionSelectComponent from '../Assets/VersionSelectComponent';
-import TruncateTextComponent from '../Assets/TruncateTextComponent';
 import * as _ from 'lodash';
-import { connect } from 'react-redux';
-import PackagesUsingPlugin from '../PackageDetailView/UsedByComponent/PackagesUsingPlugin';
-import styles from './Plugin.styles';
-import ClipLoader from 'react-spinners/ClipLoader';
-import modalActionDispatchers from '../../actions/ModalActionDispatchers';
+import * as moment from 'moment';
 import Radium from 'radium';
+import * as React from 'react';
+import { connect } from 'react-redux';
+import ClipLoader from 'react-spinners/ClipLoader';
+import { compose, pure, setDisplayName } from 'recompose';
 import { BLUE_COLOR } from '../../../styles/DefaultStylingProperties';
+import modalActionDispatchers from '../../actions/ModalActionDispatchers';
+import { pluginSelector } from '../../selectors/PluginSelectors';
 import Options from '../Assets/Buttons/Options';
+import TruncateTextComponent from '../Assets/TruncateTextComponent';
+import VersionSelectComponent from '../Assets/VersionSelectComponent';
+import PackagesUsingPlugin from '../PackageDetailView/UsedByComponent/PackagesUsingPlugin';
+import { IPlugin } from '../utils/AxiosFunctions';
+import styles from './Plugin.styles';
 
 interface IPublicProps {
   pluginResource: string;
@@ -32,15 +31,14 @@ const Plugin: React.StatelessComponent<IPrivateProps> = (
 ) => {
   return (
     <div style={styles.content}>
-      {renderIf(!props.error && _.isEmpty(props.plugin))(() => (
+      {!props.error && _.isEmpty(props.plugin) && (
         <ClipLoader color={BLUE_COLOR} />
-      ))}
-      {renderIf(props.plugin)(() => (
+      )}
+      {!!props.plugin && (
         <div>
-          {renderIf(props.error)(() => (
+          {!!props.error ? (
             <p>{'Error: Could not load plugin'}</p>
-          ))}
-          {renderIf(!props.error)(() => (
+          ) : (
             <div>
               <div
                 style={styles.topContent}
@@ -82,9 +80,9 @@ const Plugin: React.StatelessComponent<IPrivateProps> = (
                 <PackagesUsingPlugin plugin={props.plugin} isSmallName={true} />
               </div>
             </div>
-          ))}
+          )}
         </div>
-      ))}
+      )}
     </div>
   );
 };

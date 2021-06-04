@@ -1,17 +1,16 @@
-import * as React from 'react';
-import * as renderIf from 'render-if';
 import * as _ from 'lodash';
 import Radium from 'radium';
-import { compose, pure, setDisplayName } from 'recompose';
-import eddiApiActionDispatchers from '../../actions/EddiApiActionDispatchers';
-import { IPackage } from '../utils/AxiosFunctions';
+import * as React from 'react';
+import * as InfiniteScrollTypes from 'react-infinite-scroller';
 import { connect } from 'react-redux';
 import ClimbingBoxLoader from 'react-spinners/ClimbingBoxLoader';
-import { getAPIUrl } from '../utils/ApiFunctions';
-import * as InfiniteScrollTypes from 'react-infinite-scroller';
-import PackageContainer from '../BotDetailView/PackageContainer';
-import styles from './Packagelist.styles';
+import { compose, pure, setDisplayName } from 'recompose';
+import eddiApiActionDispatchers from '../../actions/EddiApiActionDispatchers';
 import { packagesSelector } from '../../selectors/PackageSelectors';
+import PackageContainer from '../BotDetailView/PackageContainer';
+import { getAPIUrl } from '../utils/ApiFunctions';
+import { IPackage } from '../utils/AxiosFunctions';
+import styles from './Packagelist.styles';
 const InfiniteScroll =
   require('react-infinite-scroller') as InfiniteScrollTypes;
 
@@ -89,28 +88,22 @@ class PackageList extends React.Component<IPrivateProps, IState> {
     const packageList = this.filterPackages();
     return (
       <div>
-        {renderIf(this.props.isLoading && _.isEmpty(this.props.packages))(
-          () => (
-            <div style={styles.loadingWrapper}>
-              <ClimbingBoxLoader loading />
-            </div>
-          ),
+        {this.props.isLoading && _.isEmpty(this.props.packages) && (
+          <div style={styles.loadingWrapper}>
+            <ClimbingBoxLoader loading />
+          </div>
         )}
-        {renderIf(this.props.error)(() => (
-          <p>{'Error: Could not load bots'}</p>
-        ))}
-        {renderIf(
-          !this.props.isLoading &&
-            !this.props.error &&
-            _.isEmpty(this.props.packages),
-        )(() => (
-          <p>{`There are no packages yet`}</p>
-        ))}
-        {renderIf(!this.props.error && !_.isEmpty(this.props.packages))(() => (
+        {!!this.props.error && <p>{'Error: Could not load bots'}</p>}
+        {!this.props.isLoading &&
+          !this.props.error &&
+          _.isEmpty(this.props.packages) && (
+            <p>{`There are no packages yet`}</p>
+          )}
+        {!this.props.error && !_.isEmpty(this.props.packages) && (
           <div style={styles.packageList}>
-            {renderIf(_.isEmpty(packageList))(() => (
+            {_.isEmpty(packageList) && (
               <p>{`Found no packages matching: "${this.props.filterText}"`}</p>
-            ))}
+            )}
             <InfiniteScroll
               pageStart={0}
               loadMore={this.loadMore}
@@ -125,7 +118,7 @@ class PackageList extends React.Component<IPrivateProps, IState> {
               ))}
             </InfiniteScroll>
           </div>
-        ))}
+        )}
       </div>
     );
   }

@@ -1,19 +1,18 @@
-import * as React from 'react';
-import Radium from 'radium';
-import * as renderIf from 'render-if';
-import PluginList from './PluginList';
-import styles from './Package.styles';
-import { compose, pure, setDisplayName } from 'recompose';
-import { IPackage } from '../utils/AxiosFunctions';
-import { connect } from 'react-redux';
-import { packageSelector } from '../../selectors/PackageSelectors';
 import * as _ from 'lodash';
-import VersionSelectComponent from '../Assets/VersionSelectComponent';
-import { historyPush } from '../../history';
-import eddiApiActionDispatchers from '../../actions/EddiApiActionDispatchers';
+import Radium from 'radium';
+import * as React from 'react';
+import { connect } from 'react-redux';
 import ClipLoader from 'react-spinners/ClipLoader';
+import { compose, pure, setDisplayName } from 'recompose';
 import { BLUE_COLOR } from '../../../styles/DefaultStylingProperties';
+import eddiApiActionDispatchers from '../../actions/EddiApiActionDispatchers';
+import { historyPush } from '../../history';
+import { packageSelector } from '../../selectors/PackageSelectors';
 import Options from '../Assets/Buttons/Options';
+import VersionSelectComponent from '../Assets/VersionSelectComponent';
+import { IPackage } from '../utils/AxiosFunctions';
+import styles from './Package.styles';
+import PluginList from './PluginList';
 
 interface IPublicProps {
   isPackageInBot: boolean;
@@ -84,14 +83,12 @@ class Package extends React.Component<IPrivateProps> {
       packagePayload.version === packagePayload.currentVersion;
     return (
       <div>
-        {renderIf(this.props.isLoading && _.isEmpty(packagePayload))(() => (
+        {this.props.isLoading && _.isEmpty(packagePayload) && (
           <p>{'Loading package'}</p>
-        ))}
+        )}
         <div>
-          {renderIf(this.props.error)(() => (
-            <p>{'Error: Could not load package'}</p>
-          ))}
-          {renderIf(!this.props.error && !_.isEmpty(packagePayload))(() => (
+          {!!this.props.error && <p>{'Error: Could not load package'}</p>}
+          {!this.props.error && !_.isEmpty(packagePayload) && (
             <div style={styles.pack}>
               <div
                 style={styles.packageHeader}
@@ -115,14 +112,14 @@ class Package extends React.Component<IPrivateProps> {
                     selectVersion={this.selectVersion}
                   />
                 </div>
-                {renderIf(!_.isEmpty(packagePayload.updatablePlugins))(() => (
+                {!_.isEmpty(packagePayload.updatablePlugins) && (
                   <div style={styles.warning}>
                     <img src={warningIcon} style={styles.warningIcon} />
                     <div style={styles.updateAvailable}>
                       {'Updates Available'}
                     </div>
                   </div>
-                ))}
+                )}
                 <div style={styles.centerFlex} />
                 <div style={styles.options}>
                   <Options
@@ -143,14 +140,14 @@ class Package extends React.Component<IPrivateProps> {
                   {'View package'}
                 </button>
               </div>
-              {renderIf(_.isUndefined(packagePayload.packageData))(() => (
+              {_.isUndefined(packagePayload.packageData) && (
                 <ClipLoader color={BLUE_COLOR} />
-              ))}
+              )}
               <div style={styles.packageContent}>
                 <PluginList packagePayload={packagePayload} />
               </div>
             </div>
-          ))}
+          )}
         </div>
       </div>
     );

@@ -1,15 +1,14 @@
-import * as React from 'react';
-import { compose, pure, setDisplayName } from 'recompose';
-import { IPackage } from '../../utils/AxiosFunctions';
-import { packageSelector } from '../../../selectors/PackageSelectors';
-import * as moment from 'moment';
-import * as renderIf from 'render-if';
-import VersionSelectComponent from '../../Assets/VersionSelectComponent';
-import TruncateTextComponent from '../../Assets/TruncateTextComponent';
 import * as _ from 'lodash';
+import * as moment from 'moment';
+import * as React from 'react';
 import { connect } from 'react-redux';
-import styles from './Package.styles';
+import { compose, pure, setDisplayName } from 'recompose';
+import { packageSelector } from '../../../selectors/PackageSelectors';
+import TruncateTextComponent from '../../Assets/TruncateTextComponent';
+import VersionSelectComponent from '../../Assets/VersionSelectComponent';
 import BotsUsingPackage from '../../PackageDetailView/UsedByComponent/BotsUsingPackage';
+import { IPackage } from '../../utils/AxiosFunctions';
+import styles from './Package.styles';
 
 interface IPublicProps {
   packageResource: string;
@@ -58,32 +57,22 @@ class Package extends React.Component<IPrivateProps> {
   render() {
     return (
       <div>
-        {renderIf(!this.props.packagePayload)(() => (
+        {!this.props.packagePayload && (
           <div>
-            {renderIf(this.props.isLoading)(() => (
-              <p>{'Loading package'}</p>
-            ))}
-            {renderIf(this.props.error)(() => (
-              <p>{'Error: Could not load package'}</p>
-            ))}
-            {renderIf(!this.props.isLoading && !this.props.error)(() => (
+            {this.props.isLoading && <p>{'Loading package'}</p>}
+            {!!this.props.error && <p>{'Error: Could not load package'}</p>}
+            {!this.props.isLoading && !this.props.error && (
               <p>{'This package does not exist'}</p>
-            ))}
+            )}
           </div>
-        ))}
-        {renderIf(this.props.packagePayload)(() => (
+        )}
+        {!!this.props.packagePayload && (
           <div>
-            {renderIf(this.props.error)(() => (
-              <p>{'Error: Could not load package'}</p>
-            ))}
-            {renderIf(
-              !this.props.error && _.isEmpty(this.props.packagePayload),
-            )(() => (
+            {!!this.props.error && <p>{'Error: Could not load package'}</p>}
+            {!this.props.error && _.isEmpty(this.props.packagePayload) && (
               <p>{'This package does not exist'}</p>
-            ))}
-            {renderIf(
-              !this.props.error && !_.isEmpty(this.props.packagePayload),
-            )(() => (
+            )}
+            {!this.props.error && !_.isEmpty(this.props.packagePayload) && (
               <div style={styles.content}>
                 <div style={styles.topContent}>
                   <button
@@ -121,9 +110,9 @@ class Package extends React.Component<IPrivateProps> {
                   />
                 </div>
               </div>
-            ))}
+            )}
           </div>
-        ))}
+        )}
       </div>
     );
   }

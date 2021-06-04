@@ -1,19 +1,18 @@
-import * as React from 'react';
-import '../ModalComponent.styles.scss';
-import { compose, pure, setDisplayName } from 'recompose';
-import PackageContainer from './PackageContainer';
-import { IBot, IPackage } from '../../utils/AxiosFunctions';
-import { packagesSelector } from '../../../selectors/PackageSelectors';
-import { connect } from 'react-redux';
 import * as _ from 'lodash';
-import eddiApiActionDispatchers from '../../../actions/EddiApiActionDispatchers';
-import Parser from '../../utils/Parser';
-import styles from './AddPackagesModal.styles';
-import ModalActionDispatchers from '../../../actions/ModalActionDispatchers';
-import * as renderIf from 'render-if';
-import BlueButton from '../../Assets/Buttons/BlueButton';
+import * as React from 'react';
+import { connect } from 'react-redux';
 import ClimbingBoxLoader from 'react-spinners/ClimbingBoxLoader';
+import { compose, pure, setDisplayName } from 'recompose';
+import eddiApiActionDispatchers from '../../../actions/EddiApiActionDispatchers';
+import ModalActionDispatchers from '../../../actions/ModalActionDispatchers';
+import { packagesSelector } from '../../../selectors/PackageSelectors';
+import BlueButton from '../../Assets/Buttons/BlueButton';
 import { DEFAULT_LIMIT } from '../../utils/ApiFunctions';
+import { IBot, IPackage } from '../../utils/AxiosFunctions';
+import Parser from '../../utils/Parser';
+import '../ModalComponent.styles.scss';
+import styles from './AddPackagesModal.styles';
+import PackageContainer from './PackageContainer';
 
 interface IState {
   selectedPackages: string[];
@@ -151,22 +150,20 @@ class AddPackagesModal extends React.Component<IPrivateProps, IState> {
               />
             ))}
           </div>
-          {renderIf(this.props.isLoading)(() => (
+          {this.props.isLoading && (
             <div style={styles.loadingWrapper}>
               <ClimbingBoxLoader loading />
             </div>
-          ))}
-          {renderIf(
-            !this.props.allPackagesLoaded &&
-              !this.props.isLoading &&
-              !this.state.loading,
-          )(() => (
-            <BlueButton
-              customStyles={styles.loadMoreButton}
-              onClick={this.loadMore}
-              text={'Load More'}
-            />
-          ))}
+          )}
+          {!this.props.allPackagesLoaded &&
+            !this.props.isLoading &&
+            !this.state.loading && (
+              <BlueButton
+                customStyles={styles.loadMoreButton}
+                onClick={this.loadMore}
+                text={'Load More'}
+              />
+            )}
         </div>
       </div>
     );

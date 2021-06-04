@@ -1,21 +1,20 @@
-import * as React from 'react';
-import { compose, pure, setDisplayName } from 'recompose';
-import { IOptions } from '../PackageView';
-import Parser from '../../utils/Parser';
-import * as renderIf from 'render-if';
 import * as _ from 'lodash';
-import { IPlugin, IPluginExtensions } from '../../utils/AxiosFunctions';
-import eddiApiActionDispatchers from '../../../actions/EddiApiActionDispatchers';
-import styles from './Plugin.styles';
-import { connect } from 'react-redux';
-import { pluginSelector } from '../../../selectors/PluginSelectors';
-import ModalActionDispatchers from '../../../actions/ModalActionDispatchers';
-import WhiteButton from '../../Assets/Buttons/WhiteButton';
-import SquareXButton from '../../Assets/Buttons/SquareXButton';
-import * as PluginType from '../../utils/EddiTypes';
-import PluginHelper from '../../utils/helpers/PluginHelper';
-import { REGULAR_DICTIONARY } from '../../utils/EddiTypes';
 import Radium from 'radium';
+import * as React from 'react';
+import { connect } from 'react-redux';
+import { compose, pure, setDisplayName } from 'recompose';
+import eddiApiActionDispatchers from '../../../actions/EddiApiActionDispatchers';
+import ModalActionDispatchers from '../../../actions/ModalActionDispatchers';
+import { pluginSelector } from '../../../selectors/PluginSelectors';
+import SquareXButton from '../../Assets/Buttons/SquareXButton';
+import WhiteButton from '../../Assets/Buttons/WhiteButton';
+import { IPlugin, IPluginExtensions } from '../../utils/AxiosFunctions';
+import * as PluginType from '../../utils/EddiTypes';
+import { REGULAR_DICTIONARY } from '../../utils/EddiTypes';
+import PluginHelper from '../../utils/helpers/PluginHelper';
+import Parser from '../../utils/Parser';
+import { IOptions } from '../PackageView';
+import styles from './Plugin.styles';
 
 interface IPublicProps {
   pluginType: IOptions;
@@ -179,12 +178,12 @@ class Plugin extends React.Component<IPrivateProps> {
     }
     return (
       <div style={styles.pluginContainer}>
-        {renderIf(!this.props.editDisabled)(() => (
+        {!this.props.editDisabled && (
           <SquareXButton
             customStyles={styles.closeButton}
             onClick={this.deletePlugin}
           />
-        ))}
+        )}
         <button style={this.getBoxStyling()} onClick={this.openViewJsonModal}>
           <div style={styles.pluginHeader}>
             <div key={'pluginBox'} style={this.getNameStyling()}>
@@ -201,14 +200,14 @@ class Plugin extends React.Component<IPrivateProps> {
                 true,
               )}
             </div>
-            {renderIf(!this.props.editDisabled)(() => (
+            {!this.props.editDisabled && (
               <div
                 style={styles.addResourceButton}
                 key={'addResource'}
                 onClick={this.openAddPluginsModal}>
                 {this.getButtonName(this.props.pluginType.type)}
               </div>
-            ))}
+            )}
           </div>
           <div style={styles.pluginDate}>{this.props.pluginType.type}</div>
           <div style={styles.pluginDate}>
@@ -220,13 +219,13 @@ class Plugin extends React.Component<IPrivateProps> {
             )}
           </div>
         </button>
-        {renderIf(!isCurrentVersion && !this.props.editDisabled)(() => (
+        {!isCurrentVersion && !this.props.editDisabled && (
           <WhiteButton
             onClick={this.updateVersion}
             text={`Update to ${pluginCurrentVersion}`}
             customStyles={styles.updateAvailableButton}
           />
-        ))}
+        )}
       </div>
     );
   }

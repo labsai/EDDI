@@ -32,7 +32,6 @@ var EddiApiActionDispatchers_1 = require('../../../actions/EddiApiActionDispatch
 var BlueButton_1 = require('../../Assets/Buttons/BlueButton');
 var WhiteButton_1 = require('../../Assets/Buttons/WhiteButton');
 var ModalActionDispatchers_1 = require('../../../actions/ModalActionDispatchers');
-var renderIf = require('render-if');
 var Parser_1 = require('../../utils/Parser');
 var EddiConfigExampleData_1 = require('../../utils/EddiConfigExampleData');
 var _ = require('lodash');
@@ -143,17 +142,15 @@ var CreateNewConfig2Modal = (function (_super) {
               {'Edit new ' + typeName + ' JSON data'}
             </div>
             <div style={ModalComponent_styles_1.default.modalTopHeaderCenter} />
-            {renderIf(this.unsavedChanges())(function () {
-              return (
-                <button
-                  style={ModalComponent_styles_1.default.discardChanges}
-                  onClick={function () {
-                    return _this.validateJson();
-                  }}>
-                  {'Discard changes'}
-                </button>
-              );
-            })}
+            {this.unsavedChanges() && (
+              <button
+                style={ModalComponent_styles_1.default.discardChanges}
+                onClick={function () {
+                  return _this.validateJson();
+                }}>
+                {'Discard changes'}
+              </button>
+            )}
             <WhiteButton_1.default
               onClick={function () {
                 return _this.back();
@@ -168,9 +165,9 @@ var CreateNewConfig2Modal = (function (_super) {
             />
           </div>
         </div>
-        {renderIf(!_.isEmpty(this.state.errors))(function () {
-          return <JsonErrors_1.default errors={_this.state.errors} />;
-        })}
+        {!_.isEmpty(this.state.errors) && (
+          <JsonErrors_1.default errors={_this.state.errors} />
+        )}
         <button
           onClick={this.exampleClick}
           style={ModalComponent_styles_1.default.collapsibleButton}>
@@ -184,13 +181,11 @@ var CreateNewConfig2Modal = (function (_super) {
             {this.state.showExample ? '-' : '+'}
           </div>
         </button>
-        {renderIf(this.state.showExample)(function () {
-          return (
-            <div style={ModalComponent_styles_1.default.exampleData}>
-              {EddiConfigExampleData_1.getPostExample(_this.props.type)}
-            </div>
-          );
-        })}
+        {!!this.state.showExample && (
+          <div style={ModalComponent_styles_1.default.exampleData}>
+            {EddiConfigExampleData_1.getPostExample(_this.props.type)}
+          </div>
+        )}
         <react_ace_1.default
           ref={'ace'}
           mode={'json'}

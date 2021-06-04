@@ -1,10 +1,9 @@
 import * as React from 'react';
-import { compose, pure, setDisplayName } from 'recompose';
-import ViewJsonContent from './ViewJsonContent';
-import { IPackage } from '../../utils/AxiosFunctions';
 import { connect } from 'react-redux';
+import { compose, pure, setDisplayName } from 'recompose';
 import { packageSelector } from '../../../selectors/PackageSelectors';
-import * as renderIf from 'render-if';
+import { IPackage } from '../../utils/AxiosFunctions';
+import ViewJsonContent from './ViewJsonContent';
 
 interface IPublicProps {
   packageResource: string;
@@ -46,14 +45,14 @@ class PackageContainer extends React.Component<IPrivateProps, IState> {
   render() {
     return (
       <div>
-        {renderIf(this.props.packagePayload)(() => (
+        {!!this.props.packagePayload && (
           <ViewJsonContent
             descriptor={this.props.packagePayload}
             data={this.state.data}
             usedBy={this.props.packagePayload.usedByBots}
             selectVersion={this.props.selectVersion}
           />
-        ))}
+        )}
       </div>
     );
   }

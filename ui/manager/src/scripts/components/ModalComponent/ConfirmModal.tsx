@@ -1,12 +1,11 @@
+import * as _ from 'lodash';
 import * as React from 'react';
+import { compose, pure, setDisplayName } from 'recompose';
+import modalActionDispatchers from '../../actions/ModalActionDispatchers';
+import BlueButton from '../Assets/Buttons/BlueButton';
+import WhiteButton from '../Assets/Buttons/WhiteButton';
 import styles from './ConfirmModal.styles';
 import './ModalComponent.styles.scss';
-import { compose, pure, setDisplayName } from 'recompose';
-import WhiteButton from '../Assets/Buttons/WhiteButton';
-import BlueButton from '../Assets/Buttons/BlueButton';
-import modalActionDispatchers from '../../actions/ModalActionDispatchers';
-import * as renderIf from 'render-if';
-import * as _ from 'lodash';
 
 interface IProps {
   title: string;
@@ -25,9 +24,9 @@ class ConfirmModal extends React.Component<IProps> {
           <div style={styles.modalTopHeader}>{this.props.title}</div>
         </div>
         <div style={styles.content}>
-          {renderIf(!_.isEmpty(this.props.message))(() => (
+          {!_.isEmpty(this.props.message) && (
             <div style={styles.message}>{this.props.message}</div>
-          ))}
+          )}
           <div style={styles.buttons}>
             <BlueButton
               customStyles={styles.buttonMargin}

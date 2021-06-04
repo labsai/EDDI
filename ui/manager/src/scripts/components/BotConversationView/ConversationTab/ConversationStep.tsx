@@ -7,7 +7,6 @@ import {
   IConversationSteps,
   IOutputValue,
 } from '../../utils/AxiosFunctions';
-import * as renderIf from 'render-if';
 import ReactJson from 'react-json-view';
 import Radium from 'radium';
 import {
@@ -111,26 +110,24 @@ class ConversationStep extends React.Component<IProps, IState> {
         <div style={styles.content} onClick={() => this.expand()}>
           <div style={styles.container}>
             <div style={styles.chatStep}>
-              {renderIf(
-                (!this.state.input && this.state.action) ||
-                  this.props.showAction,
-              )(() => (
+              {((!this.state.input && this.state.action) ||
+                this.props.showAction) && (
                 <div style={styles.actions}>
                   <div style={styles.actionTitle}>{'Actions:'}</div>
                   <div style={styles.action}>{this.state.action}</div>
                 </div>
-              ))}
-              {renderIf(this.state.input)(() => (
+              )}
+              {!!this.state.input || (
                 <div style={styles.input}>{this.state.input}</div>
-              ))}
-              {renderIf(this.state.output)(() => (
+              )}
+              {!!this.state.output && (
                 <div>
                   {this.state.output.map((output, i) =>
                     this.getOutputRender(output, i),
                   )}
                 </div>
-              ))}
-              {renderIf(this.state.quickReplies)(() => (
+              )}
+              {!!this.state.quickReplies && (
                 <div>
                   <div style={styles.quickReplies}>
                     {this.state.quickReplies.map((quickReply, i) => (
@@ -140,7 +137,7 @@ class ConversationStep extends React.Component<IProps, IState> {
                     ))}
                   </div>
                 </div>
-              ))}
+              )}
             </div>
             <div style={styles.timeContainer}>
               <div style={styles.timeArrow}>
@@ -154,7 +151,7 @@ class ConversationStep extends React.Component<IProps, IState> {
               )}`}</div>
             </div>
           </div>
-          {renderIf(this.state.expanded)(() => (
+          {this.state.expanded && (
             <div style={styles.jsonView} onClick={(e) => e.stopPropagation()}>
               <div>
                 <div
@@ -176,7 +173,7 @@ class ConversationStep extends React.Component<IProps, IState> {
                     />
                   </div>
                 </div>
-                {renderIf(this.state.conversationOutputExpanded)(() => (
+                {this.state.conversationOutputExpanded && (
                   <ReactJson
                     style={styles.rjv}
                     src={this.props.conversationOutput}
@@ -185,7 +182,7 @@ class ConversationStep extends React.Component<IProps, IState> {
                     displayDataTypes={false}
                     enableClipboard={false}
                   />
-                ))}
+                )}
               </div>
               <div>
                 <div
@@ -205,7 +202,7 @@ class ConversationStep extends React.Component<IProps, IState> {
                     />
                   </div>
                 </div>
-                {renderIf(this.state.conversationStepExpanded)(() => (
+                {this.state.conversationStepExpanded && (
                   <ReactJson
                     style={styles.rjv}
                     src={this.props.conversationStep}
@@ -214,10 +211,10 @@ class ConversationStep extends React.Component<IProps, IState> {
                     displayDataTypes={false}
                     enableClipboard={false}
                   />
-                ))}
+                )}
               </div>
             </div>
-          ))}
+          )}
         </div>
       </div>
     );

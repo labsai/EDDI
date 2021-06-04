@@ -1,15 +1,12 @@
-import * as React from 'react';
-import ModalActionDispatchers from '../../actions/ModalActionDispatchers';
-import PackageContainer from './PackageContainer';
-import Package from './Package';
-import { CSSProperties } from 'react';
-import { compose, pure, setDisplayName } from 'recompose';
-import { IBot } from '../utils/AxiosFunctions';
 import * as _ from 'lodash';
-import * as renderIf from 'render-if';
+import * as React from 'react';
+import { compose, pure, setDisplayName } from 'recompose';
 import eddiApiActionDispatchers from '../../actions/EddiApiActionDispatchers';
-import { ModalEnum } from '../utils/ModalEnum';
+import ModalActionDispatchers from '../../actions/ModalActionDispatchers';
 import WhiteButton from '../Assets/Buttons/WhiteButton';
+import { IBot } from '../utils/AxiosFunctions';
+import { ModalEnum } from '../utils/ModalEnum';
+import PackageContainer from './PackageContainer';
 
 const styles: { [key: string]: IExtendedCSSProperties } = {
   packagesHeader: {
@@ -83,16 +80,15 @@ class PackageList extends React.Component<IPrivateProps, IState> {
             customStyles={styles.button}
           />
         </div>
-        {renderIf(_.isEmpty(this.props.bot.packages))(() => (
+        {_.isEmpty(this.props.bot.packages) ? (
           <p>{`There are no packages yet`}</p>
-        ))}
-        {renderIf(!_.isEmpty(this.props.bot.packages))(() => (
+        ) : (
           <div>
             {this.props.bot.packages.map((pack) => (
               <PackageContainer key={pack} packageResource={pack} />
             ))}
           </div>
-        ))}
+        )}
       </div>
     );
   }

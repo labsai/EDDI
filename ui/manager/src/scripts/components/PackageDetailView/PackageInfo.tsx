@@ -1,16 +1,15 @@
-import * as React from 'react';
-import PackageView from './PackageView';
-import { IPackage } from '../utils/AxiosFunctions';
-import { compose, pure, setDisplayName } from 'recompose';
-import HomeButtonComponent from '../HomeButton/HomeButtonComponent';
-import { connect } from 'react-redux';
-import eddiApiActionDispatchers from '../../actions/EddiApiActionDispatchers';
-import styles from '../Bots/Botlist.styles';
 import * as _ from 'lodash';
+import * as React from 'react';
+import { connect } from 'react-redux';
 import ClimbingBoxLoader from 'react-spinners/ClimbingBoxLoader';
-import * as renderIf from 'render-if';
+import { compose, pure, setDisplayName } from 'recompose';
+import eddiApiActionDispatchers from '../../actions/EddiApiActionDispatchers';
 import { specificPackageSelector } from '../../selectors/PackageSelectors';
+import styles from '../Bots/Botlist.styles';
+import HomeButtonComponent from '../HomeButton/HomeButtonComponent';
+import { IPackage } from '../utils/AxiosFunctions';
 import { PACKAGE, PACKAGE_PATH } from '../utils/EddiTypes';
+import PackageView from './PackageView';
 
 interface IPublicProps {
   packageId: string;
@@ -38,28 +37,22 @@ class PackageInfo extends React.Component<IPrivateProps> {
     return (
       <div>
         <HomeButtonComponent />
-        {renderIf(this.props.isLoading)(() => (
+        {this.props.isLoading && (
           <div style={styles.loadingWrapper}>
             <ClimbingBoxLoader loading />
           </div>
-        ))}
-        {renderIf(!this.props.isLoading)(() => (
+        )}
+        {!this.props.isLoading && (
           <div>
-            {renderIf(this.props.error)(() => (
-              <p>{'Error: Could not load package'}</p>
-            ))}
-            {renderIf(
-              !this.props.error && _.isEmpty(this.props.packagePayload),
-            )(() => (
+            {!!this.props.error && <p>{'Error: Could not load package'}</p>}
+            {!this.props.error && _.isEmpty(this.props.packagePayload) && (
               <p>{'Package not found'}</p>
-            ))}
-            {renderIf(
-              !this.props.error && !_.isEmpty(this.props.packagePayload),
-            )(() => (
+            )}
+            {!this.props.error && !_.isEmpty(this.props.packagePayload) && (
               <PackageView packagePayload={this.props.packagePayload} />
-            ))}
+            )}
           </div>
-        ))}
+        )}
       </div>
     );
   }

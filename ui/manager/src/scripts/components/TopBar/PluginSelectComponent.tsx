@@ -1,14 +1,10 @@
-import * as React from 'react';
-import Radium from 'radium';
-import * as renderIf from 'render-if';
-import { compose, pure, setDisplayName } from 'recompose';
-import Select from 'react-select';
 import * as _ from 'lodash';
-import { CSSProperties } from 'react';
-import Parser from '../utils/Parser';
+import * as React from 'react';
+import Select from 'react-select';
+import { compose, pure, setDisplayName } from 'recompose';
 import { historyPush } from '../../history';
-import styles from './PluginSelectComponent.styles';
 import { pageEnum } from '../pages/pageEnum';
+import styles from './PluginSelectComponent.styles';
 
 const customStyles: {
   [key: string]: (base: any, state: any) => React.CSSProperties;

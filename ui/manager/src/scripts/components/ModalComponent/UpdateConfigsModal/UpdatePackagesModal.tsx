@@ -1,17 +1,16 @@
-import * as React from 'react';
-import '../ModalComponent.styles.scss';
-import { compose, pure, setDisplayName } from 'recompose';
-import { getPackagesUsingPlugin, IPackage } from '../../utils/AxiosFunctions';
-import { packagesWithPluginSelector } from '../../../selectors/PackageSelectors';
-import { connect } from 'react-redux';
 import * as _ from 'lodash';
+import * as React from 'react';
+import { connect } from 'react-redux';
+import ClimbingBoxLoader from 'react-spinners/ClimbingBoxLoader';
+import { compose, pure, setDisplayName } from 'recompose';
 import eddiApiActionDispatchers from '../../../actions/EddiApiActionDispatchers';
+import ModalActionDispatchers from '../../../actions/ModalActionDispatchers';
+import { packagesWithPluginSelector } from '../../../selectors/PackageSelectors';
+import BlueButton from '../../Assets/Buttons/BlueButton';
+import { getPackagesUsingPlugin, IPackage } from '../../utils/AxiosFunctions';
 import Parser from '../../utils/Parser';
 import styles from '../AddPackagesModal/AddPackagesModal.styles';
-import ModalActionDispatchers from '../../../actions/ModalActionDispatchers';
-import * as renderIf from 'render-if';
-import BlueButton from '../../Assets/Buttons/BlueButton';
-import ClimbingBoxLoader from 'react-spinners/ClimbingBoxLoader';
+import '../ModalComponent.styles.scss';
 import SelectableConfig from './SelectableConfig';
 
 interface IState {
@@ -109,7 +108,7 @@ class UpdatePackagesModal extends React.Component<IPrivateProps, IState> {
           </div>
         </div>
         <div>
-          {renderIf(!_.isEmpty(this.state.packages))(() => (
+          {!_.isEmpty(this.state.packages) && (
             <div style={styles.packageList}>
               {this.state.packages.map((pack, i) => (
                 <SelectableConfig
@@ -120,16 +119,14 @@ class UpdatePackagesModal extends React.Component<IPrivateProps, IState> {
                 />
               ))}
             </div>
-          ))}
-          {renderIf(!this.state.packages)(() => (
+          )}
+          {!this.state.packages && (
             <div style={styles.loadingWrapper}>
               <ClimbingBoxLoader loading />
             </div>
-          ))}
-          {renderIf(this.state.packages && _.isEmpty(this.state.packages))(
-            () => (
-              <div>{'Found no packages that can be updated'}</div>
-            ),
+          )}
+          {!!this.state.packages && _.isEmpty(this.state.packages) && (
+            <div>{'Found no packages that can be updated'}</div>
           )}
         </div>
       </div>

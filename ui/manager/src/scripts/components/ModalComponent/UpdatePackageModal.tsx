@@ -1,22 +1,17 @@
+import * as _ from 'lodash';
 import * as React from 'react';
+import { connect } from 'react-redux';
+import { compose, pure, setDisplayName } from 'recompose';
+import eddiApiActionDispatchers from '../../actions/EddiApiActionDispatchers';
+import modalActionDispatchers from '../../actions/ModalActionDispatchers';
+import { historyPush } from '../../history';
+import { defaultPluginTypesSelector } from '../../selectors/PluginSelectors';
+import PluginSelect from '../PackageDetailView/DropDownComponents/PluginSelect';
+import { IOptions } from '../PackageDetailView/PackageView';
+import Plugin from '../PackageDetailView/PluginBoxes/Plugin';
+import { createNewPackage, IDefaultPluginTypes } from '../utils/AxiosFunctions';
 import styles from './ModalComponent.styles';
 import './ModalComponent.styles.scss';
-import { compose, pure, setDisplayName } from 'recompose';
-import {
-  createNewPackage,
-  getAllDefaultPluginTypes,
-  IDefaultPluginTypes,
-} from '../utils/AxiosFunctions';
-import PluginSelect from '../PackageDetailView/DropDownComponents/PluginSelect';
-import * as renderIf from 'render-if';
-import Plugin from '../PackageDetailView/PluginBoxes/Plugin';
-import { IOptions } from '../PackageDetailView/PackageView';
-import * as _ from 'lodash';
-import eddiApiActionDispatchers from '../../actions/EddiApiActionDispatchers';
-import { connect } from 'react-redux';
-import { defaultPluginTypesSelector } from '../../selectors/PluginSelectors';
-import { historyPush } from '../../history';
-import modalActionDispatchers from '../../actions/ModalActionDispatchers';
 
 const customStyles: { [key: string]: React.CSSProperties } = {
   createNewBotButton: {
@@ -131,7 +126,7 @@ class UpdatePackageModal extends React.Component<IPrivateProps, IState> {
           </div>
         </div>
         <div style={styles.updateModalContent}>
-          {renderIf(this.state.addedPlugins)(() => (
+          {!!this.state.addedPlugins && (
             <div style={customStyles.pluginList}>
               {this.state.addedPlugins.map((extension, key) => (
                 <Plugin
@@ -142,7 +137,7 @@ class UpdatePackageModal extends React.Component<IPrivateProps, IState> {
                 />
               ))}
             </div>
-          ))}
+          )}
           <div style={styles.pluginText}>
             {'Add plugins'}
             <div style={styles.pluginSelector}>

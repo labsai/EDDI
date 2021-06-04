@@ -1,29 +1,27 @@
-import * as React from 'react';
-import ModalActionDispatchers from '../../actions/ModalActionDispatchers';
-import FilterComponent from './FilterComponent';
-import NavigationComponent from './NavigationComponent';
-import { CSSProperties } from 'react';
-import { ModalEnum } from '../utils/ModalEnum';
-import BlueButton from '../Assets/Buttons/BlueButton';
-import { pageEnum } from '../pages/pageEnum';
-import * as renderIf from 'render-if';
 import * as Keycloak from 'keycloak-js';
 import Radium from 'radium';
+import * as React from 'react';
 import { connect } from 'react-redux';
 import { compose, pure, setDisplayName } from 'recompose';
-import {
-  authenticationSelector,
-  readOnlySelector,
-} from '../../selectors/AuthenticationSelectors';
 import {
   MEDIUM_FONT,
   MEDIUM_FONT2,
   RED_BORDER,
   RED_COLOR,
 } from '../../../styles/DefaultStylingProperties';
-import WhiteButton from '../Assets/Buttons/WhiteButton';
 import authenticationActionDispatchers from '../../actions/AuthenticationActionDispatchers';
+import ModalActionDispatchers from '../../actions/ModalActionDispatchers';
 import { historyPush } from '../../history';
+import {
+  authenticationSelector,
+  readOnlySelector,
+} from '../../selectors/AuthenticationSelectors';
+import BlueButton from '../Assets/Buttons/BlueButton';
+import WhiteButton from '../Assets/Buttons/WhiteButton';
+import { pageEnum } from '../pages/pageEnum';
+import { ModalEnum } from '../utils/ModalEnum';
+import FilterComponent from './FilterComponent';
+import NavigationComponent from './NavigationComponent';
 
 const styles: { [key: string]: IExtendedCSSProperties } = {
   createNewBotButton: {
@@ -120,7 +118,7 @@ class TopBarComponent extends React.Component<IPrivateProps> {
   render() {
     return (
       <div>
-        {renderIf(this.props.readOnly)(() => (
+        {this.props.readOnly && (
           <div style={styles.readOnly}>
             <div style={styles.warning}>
               <img src={warningIcon} style={styles.warningIcon} />
@@ -144,26 +142,26 @@ class TopBarComponent extends React.Component<IPrivateProps> {
               </div>
             </div>
           </div>
-        ))}
-        {renderIf(!!this.props.keycloak)(() => (
+        )}
+        {!!this.props.keycloak && (
           <WhiteButton
             text={'Logout'}
             customStyles={styles.logoutButton}
             onClick={this.logout}
           />
-        ))}
+        )}
         <div style={styles.topBarComponent}>
           <NavigationComponent page={this.props.page} />
           <div style={styles.topBarCenter} />
           <FilterComponent page={this.props.page} filter={this.props.filter} />
-          {renderIf(this.props.page !== pageEnum.conversation)(() => (
+          {this.props.page !== pageEnum.conversation && (
             <BlueButton
               text={`Create new ${this.getSearchName(this.props.page)}`}
               customStyles={styles.createNewBotButton}
               disabled={this.props.readOnly}
               onClick={this.openModal}
             />
-          ))}
+          )}
         </div>
       </div>
     );

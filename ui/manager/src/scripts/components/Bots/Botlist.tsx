@@ -1,20 +1,19 @@
-import * as React from 'react';
-import Bot from './Bot';
-import * as renderIf from 'render-if';
 import * as _ from 'lodash';
 import Radium from 'radium';
+import * as React from 'react';
+import * as InfiniteScrollTypes from 'react-infinite-scroller';
+import { connect } from 'react-redux';
+import ClimbingBoxLoader from 'react-spinners/ClimbingBoxLoader';
 import { compose, pure, setDisplayName } from 'recompose';
 import eddiApiActionDispatchers from '../../actions/EddiApiActionDispatchers';
-import { deployExampleBots, IBot } from '../utils/AxiosFunctions';
-import { connect } from 'react-redux';
 import { botsSelector } from '../../selectors/BotSelectors';
+import BlueButton from '../Assets/Buttons/BlueButton';
+import { getAPIUrl } from '../utils/ApiFunctions';
+import { IBot } from '../utils/AxiosFunctions';
+import Bot from './Bot';
 import styles from './Botlist.styles';
-import ClimbingBoxLoader from 'react-spinners/ClimbingBoxLoader';
-import { DEFAULT_LIMIT, getAPIUrl } from '../utils/ApiFunctions';
-import * as InfiniteScrollTypes from 'react-infinite-scroller';
 const InfiniteScroll =
   require('react-infinite-scroller') as InfiniteScrollTypes;
-import BlueButton from '../Assets/Buttons/BlueButton';
 
 interface IPublicProps {
   filterText: string;
@@ -89,21 +88,16 @@ class BotList extends React.Component<IPrivateProps, IState> {
     const botList = this.filterBots();
     return (
       <div>
-        {renderIf(this.props.isLoading && _.isEmpty(this.props.bots))(() => (
+        {this.props.isLoading && _.isEmpty(this.props.bots) && (
           <div style={styles.loadingWrapper}>
             <ClimbingBoxLoader loading />
           </div>
-        ))}
-        {renderIf(true)(() => (
-          <div>
-            {renderIf(this.props.error)(() => (
-              <p>{'Error: Could not load bots'}</p>
-            ))}
-            {renderIf(
-              !this.props.error &&
-                !this.props.isLoading &&
-                _.isEmpty(this.props.bots),
-            )(() => (
+        )}
+        <div>
+          {!!this.props.error && <p>{'Error: Could not load bots'}</p>}
+          {!this.props.error &&
+            !this.props.isLoading &&
+            _.isEmpty(this.props.bots) && (
               <div>
                 <div>{`There are no bots yet..`}</div>
                 <BlueButton
@@ -114,33 +108,32 @@ class BotList extends React.Component<IPrivateProps, IState> {
                   text={'Deploy Example Bots'}
                 />
               </div>
-            ))}
-            {renderIf(!this.props.error && !_.isEmpty(this.props.bots))(() => (
-              <div>
-                {renderIf(_.isEmpty(botList))(() => (
-                  <p>{`Found no bots matching: "${this.props.filterText}"`}</p>
+            )}
+          {!this.props.error && !_.isEmpty(this.props.bots) && (
+            <div>
+              {_.isEmpty(botList) && (
+                <p>{`Found no bots matching: "${this.props.filterText}"`}</p>
+              )}
+              <InfiniteScroll
+                pageStart={0}
+                loadMore={this.loadMore}
+                hasMore={!this.props.allBotsLoaded && !this.props.isLoading}
+                loader={
+                  <div className="loader" key={0}>
+                    Loading ...
+                  </div>
+                }>
+                {botList.map((bot) => (
+                  <Bot
+                    key={bot.resource}
+                    bot={bot}
+                    apiUrl={this.state.apiUrl}
+                  />
                 ))}
-                <InfiniteScroll
-                  pageStart={0}
-                  loadMore={this.loadMore}
-                  hasMore={!this.props.allBotsLoaded && !this.props.isLoading}
-                  loader={
-                    <div className="loader" key={0}>
-                      Loading ...
-                    </div>
-                  }>
-                  {botList.map((bot) => (
-                    <Bot
-                      key={bot.resource}
-                      bot={bot}
-                      apiUrl={this.state.apiUrl}
-                    />
-                  ))}
-                </InfiniteScroll>
-              </div>
-            ))}
-          </div>
-        ))}
+              </InfiniteScroll>
+            </div>
+          )}
+        </div>
       </div>
     );
   }

@@ -1,21 +1,20 @@
-import * as React from 'react';
-import * as renderIf from 'render-if';
-import styles from './Bot.styles';
-import Radium from 'radium';
-import WhiteButton from '../Assets/Buttons/WhiteButton';
-import { IBot } from '../utils/AxiosFunctions';
-import Packages from './Packages';
-import { compose, pure, setDisplayName } from 'recompose';
-import eddiApiActionDispatchers from '../../actions/EddiApiActionDispatchers';
 import * as _ from 'lodash';
 import * as moment from 'moment';
-import DeployButton from '../Assets/Buttons/DeployButton';
-import ClipLoader from 'react-spinners/ClipLoader';
-import { historyPush } from '../../history';
-import Options from '../Assets/Buttons/BotOptions';
-import { readOnlySelector } from '../../selectors/AuthenticationSelectors';
+import Radium from 'radium';
+import * as React from 'react';
 import { connect } from 'react-redux';
+import ClipLoader from 'react-spinners/ClipLoader';
+import { compose, pure, setDisplayName } from 'recompose';
+import eddiApiActionDispatchers from '../../actions/EddiApiActionDispatchers';
+import { historyPush } from '../../history';
+import { readOnlySelector } from '../../selectors/AuthenticationSelectors';
+import Options from '../Assets/Buttons/BotOptions';
+import DeployButton from '../Assets/Buttons/DeployButton';
+import WhiteButton from '../Assets/Buttons/WhiteButton';
+import { IBot } from '../utils/AxiosFunctions';
 import { READY } from '../utils/helpers/BotHelper';
+import styles from './Bot.styles';
+import Packages from './Packages';
 
 interface IPublicProps {
   bot: IBot;
@@ -57,14 +56,14 @@ class Bot extends React.Component<IPrivateProps> {
                 {'V'}
                 {this.props.bot.version}
               </div>
-              {renderIf(this.props.bot.hasAvailableUpdates)(() => (
+              {this.props.bot.hasAvailableUpdates && (
                 <div style={styles.warning}>
                   <img src={warningIcon} style={styles.warningIcon} />
                   <div style={styles.updateAvailable}>
                     {'Updates Available'}
                   </div>
                 </div>
-              ))}
+              )}
               <div style={styles.botIDNumber}>
                 {'Id:'}
                 {this.props.bot.id}
@@ -106,21 +105,19 @@ class Bot extends React.Component<IPrivateProps> {
             </div>
           </div>
           <div style={styles.botContent}>
-            {renderIf(
-              _.isEmpty(this.props.bot.packages) &&
-                !_.isUndefined(this.props.bot.packages),
-            )(() => (
-              <p>{`This bot has no packages yet`}</p>
-            ))}
-            {renderIf(_.isUndefined(this.props.bot.packages))(() => (
+            {_.isEmpty(this.props.bot.packages) &&
+              !_.isUndefined(this.props.bot.packages) && (
+                <p>{`This bot has no packages yet`}</p>
+              )}
+            {_.isUndefined(this.props.bot.packages) && (
               <ClipLoader color={'#0070D2'} />
-            ))}
-            {renderIf(!_.isEmpty(this.props.bot.packages))(() => (
+            )}
+            {!_.isEmpty(this.props.bot.packages) && (
               <Packages
                 packages={this.props.bot.packages}
                 bot={this.props.bot}
               />
-            ))}
+            )}
           </div>
         </div>
       </div>

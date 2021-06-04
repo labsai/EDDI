@@ -1,14 +1,12 @@
-import * as React from 'react';
-import * as renderIf from 'render-if';
-import Radium from 'radium';
-import { compose, pure, setDisplayName } from 'recompose';
-import * as _ from 'lodash';
 import * as moment from 'moment';
-import styles from './Conversation.styles';
+import Radium from 'radium';
+import * as React from 'react';
+import { compose, pure, setDisplayName } from 'recompose';
+import modalActionDispatchers from '../../../actions/ModalActionDispatchers';
+import { historyPush } from '../../../history';
 import { IConversation } from '../../utils/AxiosFunctions';
 import Parser from '../../utils/Parser';
-import { historyPush } from '../../../history';
-import modalActionDispatchers from '../../../actions/ModalActionDispatchers';
+import styles from './Conversation.styles';
 
 interface IProps {
   conversation: IConversation;

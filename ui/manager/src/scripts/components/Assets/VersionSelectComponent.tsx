@@ -1,10 +1,7 @@
 import * as React from 'react';
-import Radium from 'radium';
-import * as renderIf from 'render-if';
 import { compose, pure, setDisplayName } from 'recompose';
 import Select from 'react-select';
 import * as _ from 'lodash';
-import { CSSProperties } from 'react';
 import Parser from '../utils/Parser';
 
 const styles: { [key: string]: IExtendedCSSProperties } = {

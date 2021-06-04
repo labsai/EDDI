@@ -1,22 +1,21 @@
-import * as React from 'react';
-import styles from './ViewJsonModal.styles';
-import '../ModalComponent.styles.scss';
-import { compose, pure, setDisplayName } from 'recompose';
-import * as moment from 'moment';
 import * as _ from 'lodash';
-import * as renderIf from 'render-if';
+import * as moment from 'moment';
+import * as React from 'react';
+import { connect } from 'react-redux';
+import { compose, pure, setDisplayName } from 'recompose';
+import eddiApiActionDispatchers from '../../../actions/EddiApiActionDispatchers';
 import ModalActionDispatchers from '../../../actions/ModalActionDispatchers';
-import { IDetailedDescriptor } from '../../utils/AxiosFunctions';
+import { readOnlySelector } from '../../../selectors/AuthenticationSelectors';
 import BlueButton from '../../Assets/Buttons/BlueButton';
+import Options from '../../Assets/Buttons/Options';
 import VersionSelectComponent from '../../Assets/VersionSelectComponent';
-import { PACKAGE } from '../../utils/EddiTypes';
 import BotsUsingPackage from '../../PackageDetailView/UsedByComponent/BotsUsingPackage';
 import PackagesUsingPlugin from '../../PackageDetailView/UsedByComponent/PackagesUsingPlugin';
-import eddiApiActionDispatchers from '../../../actions/EddiApiActionDispatchers';
 import { getTypeFromResource } from '../../utils/ApiFunctions';
-import Options from '../../Assets/Buttons/Options';
-import { readOnlySelector } from '../../../selectors/AuthenticationSelectors';
-import { connect } from 'react-redux';
+import { IDetailedDescriptor } from '../../utils/AxiosFunctions';
+import { PACKAGE } from '../../utils/EddiTypes';
+import '../ModalComponent.styles.scss';
+import styles from './ViewJsonModal.styles';
 
 interface IPublicProps {
   descriptor: IDetailedDescriptor;
@@ -119,23 +118,21 @@ class ViewJsonContent extends React.Component<IPrivateProps, IState> {
               </div>
             </div>
           </div>
-          {renderIf(isPackage && !_.isEmpty(this.props.descriptor))(() => (
+          {isPackage && !_.isEmpty(this.props.descriptor) && (
             <div style={styles.usedInContainer}>
               {'Used in:'}
               <BotsUsingPackage packagePayload={this.props.descriptor} />
             </div>
-          ))}
-          {renderIf(!isPackage && !_.isEmpty(this.props.descriptor))(() => (
+          )}
+          {!isPackage && !_.isEmpty(this.props.descriptor) && (
             <div style={styles.usedInContainer}>
               {'Used in:'}
               <PackagesUsingPlugin plugin={this.props.descriptor} />
             </div>
-          ))}
+          )}
         </div>
         <div style={styles.data}>
-          {renderIf(!_.isEmpty(this.props.data))(() => (
-            <div>{this.state.jsonText}</div>
-          ))}
+          {!_.isEmpty(this.props.data) && <div>{this.state.jsonText}</div>}
         </div>
       </div>
     );

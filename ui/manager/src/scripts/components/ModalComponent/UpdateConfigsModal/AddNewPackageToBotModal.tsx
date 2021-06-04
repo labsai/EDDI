@@ -1,18 +1,17 @@
-import * as React from 'react';
-import '../ModalComponent.styles.scss';
-import { compose, pure, setDisplayName } from 'recompose';
-import { IBot, IPackage } from '../../utils/AxiosFunctions';
-import { connect } from 'react-redux';
 import * as _ from 'lodash';
-import eddiApiActionDispatchers from '../../../actions/EddiApiActionDispatchers';
-import styles from '../AddPackagesModal/AddPackagesModal.styles';
-import ModalActionDispatchers from '../../../actions/ModalActionDispatchers';
-import * as renderIf from 'render-if';
-import BlueButton from '../../Assets/Buttons/BlueButton';
+import * as React from 'react';
+import { connect } from 'react-redux';
 import ClimbingBoxLoader from 'react-spinners/ClimbingBoxLoader';
-import SelectableConfig from './SelectableConfig';
+import { compose, pure, setDisplayName } from 'recompose';
+import eddiApiActionDispatchers from '../../../actions/EddiApiActionDispatchers';
+import ModalActionDispatchers from '../../../actions/ModalActionDispatchers';
 import { botsSelector } from '../../../selectors/BotSelectors';
+import BlueButton from '../../Assets/Buttons/BlueButton';
 import { DEFAULT_LIMIT } from '../../utils/ApiFunctions';
+import { IBot, IPackage } from '../../utils/AxiosFunctions';
+import styles from '../AddPackagesModal/AddPackagesModal.styles';
+import '../ModalComponent.styles.scss';
+import SelectableConfig from './SelectableConfig';
 
 interface IState {
   selectedBots: IBot[];
@@ -119,21 +118,21 @@ class AddNewPackageToBotModal extends React.Component<IPrivateProps, IState> {
               />
             ))}
           </div>
-          {renderIf(this.props.isLoading)(() => (
+          {this.props.isLoading && (
             <div style={styles.loadingWrapper}>
               <ClimbingBoxLoader loading />
             </div>
-          ))}
-          {renderIf(!this.props.allBotsLoaded && !this.props.isLoading)(() => (
+          )}
+          {!this.props.allBotsLoaded && !this.props.isLoading && (
             <BlueButton
               customStyles={styles.loadMoreButton}
               onClick={this.loadMore}
               text={'Load More'}
             />
-          ))}
-          {renderIf(!this.props.isLoading && _.isEmpty(this.props.bots))(() => (
+          )}
+          {!this.props.isLoading && _.isEmpty(this.props.bots) && (
             <div>{'Found no bots that can be updated'}</div>
-          ))}
+          )}
         </div>
       </div>
     );

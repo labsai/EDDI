@@ -1,24 +1,22 @@
+import * as _ from 'lodash';
+import Radium from 'radium';
 import * as React from 'react';
 import { compose, pure, setDisplayName } from 'recompose';
-import { IOptions } from '../PackageView';
-import Parser from '../../utils/Parser';
-import * as renderIf from 'render-if';
-import * as _ from 'lodash';
-import { CSSProperties } from 'react';
-import styles from './Plugin.styles';
-import Extension from './Extension';
-import { IPlugin, IPluginExtensions } from '../../utils/AxiosFunctions';
 import eddiApiActionDispatchers from '../../../actions/EddiApiActionDispatchers';
 import ModalActionDispatchers from '../../../actions/ModalActionDispatchers';
-import * as PluginType from '../../utils/EddiTypes';
-import PluginHelper from '../../utils/helpers/PluginHelper';
 import SquareXButton from '../../Assets/Buttons/SquareXButton';
+import { IPlugin, IPluginExtensions } from '../../utils/AxiosFunctions';
+import * as PluginType from '../../utils/EddiTypes';
 import {
   CORRECTION,
   DICTIONARY,
   REGULAR_DICTIONARY,
 } from '../../utils/EddiTypes';
-import Radium from 'radium';
+import PluginHelper from '../../utils/helpers/PluginHelper';
+import Parser from '../../utils/Parser';
+import { IOptions } from '../PackageView';
+import Extension from './Extension';
+import styles from './Plugin.styles';
 
 const customStyles: { [key: string]: IExtendedCSSProperties } = {
   extensionList: {
@@ -205,12 +203,12 @@ class PluginWithExtensions extends React.Component<IPrivateProps> {
   render() {
     return (
       <div style={styles.pluginWithExtensionsContainer}>
-        {renderIf(!this.props.editDisabled)(() => (
+        {!this.props.editDisabled && (
           <SquareXButton
             customStyles={styles.packageWithExtensionCloseButton}
             onClick={this.deletePlugin}
           />
-        ))}
+        )}
         <div style={styles.pluginBoxWithExtensions}>
           <div style={styles.bigPluginName}>
             <div style={styles.pluginName}>
@@ -228,13 +226,13 @@ class PluginWithExtensions extends React.Component<IPrivateProps> {
               )}
             </div>
             <div style={styles.centerFlex} />
-            {renderIf(!this.props.editDisabled)(() => (
+            {!this.props.editDisabled && (
               <a
                 onClick={this.openAddPluginsModal}
                 style={styles.addResourceButton}>
                 {'Add dictionary'}
               </a>
-            ))}
+            )}
           </div>
           <div style={styles.pluginDate}>
             {PluginHelper.getLastModified(
@@ -245,7 +243,7 @@ class PluginWithExtensions extends React.Component<IPrivateProps> {
             )}
           </div>
           <div style={styles.pluginDate}>{this.props.pluginType.type}</div>
-          {renderIf(!_.isEmpty(this.props.pluginType.extensions))(() => (
+          {!_.isEmpty(this.props.pluginType.extensions) && (
             <div>
               <div style={customStyles.extensionList}>
                 {this.props.pluginType.extensions.dictionaries &&
@@ -276,7 +274,7 @@ class PluginWithExtensions extends React.Component<IPrivateProps> {
                   ))}
               </div>
             </div>
-          ))}
+          )}
         </div>
       </div>
     );

@@ -1,7 +1,5 @@
 import * as React from 'react';
 import { compose, pure, setDisplayName } from 'recompose';
-import { CSSProperties } from 'react';
-import * as renderIf from 'render-if';
 
 const styles: { [key: string]: IExtendedCSSProperties } = {
   truncate: {
@@ -57,28 +55,26 @@ class TruncateTextComponent extends React.Component<IProps, IState> {
   render() {
     return (
       <div>
-        {renderIf(this.props.text)(() => (
+        {!!this.props.text && (
           <div>
             <div style={styles.textContainer}>
               <div style={this.getTextStyling()}>{this.props.text}</div>
-              {renderIf(
-                !this.state.isExpanded &&
-                  this.props.text.length > this.props.length,
-              )(() => (
-                <a style={styles.textButton} onClick={this.toggleText}>
-                  {'See more'}
-                </a>
-              ))}
+              {!this.state.isExpanded &&
+                this.props.text.length > this.props.length && (
+                  <a style={styles.textButton} onClick={this.toggleText}>
+                    {'See more'}
+                  </a>
+                )}
             </div>
-            {renderIf(this.state.isExpanded)(() => (
+            {this.state.isExpanded && (
               <div>
                 <a style={styles.textButton} onClick={this.toggleText}>
                   {'See less'}
                 </a>
               </div>
-            ))}
+            )}
           </div>
-        ))}
+        )}
       </div>
     );
   }

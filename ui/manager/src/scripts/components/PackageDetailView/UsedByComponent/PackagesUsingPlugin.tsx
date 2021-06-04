@@ -1,14 +1,10 @@
+import * as _ from 'lodash';
 import * as React from 'react';
 import { compose, pure, setDisplayName } from 'recompose';
-import Radium from 'radium';
-import * as _ from 'lodash';
-import Package from './Package';
 import eddiApiActionDispatchers from '../../../actions/EddiApiActionDispatchers';
-import * as renderIf from 'render-if';
 import { IPlugin } from '../../utils/AxiosFunctions';
-import Parser from '../../utils/Parser';
-import { IUsedResource } from '../../utils/Parser';
-import { CSSProperties } from 'react';
+import Parser, { IUsedResource } from '../../utils/Parser';
+import Package from './Package';
 
 const styles: { [key: string]: IExtendedCSSProperties } = {
   content: {
@@ -72,9 +68,9 @@ class PackagesUsingPlugin extends React.Component<IProps, IState> {
     }
     return (
       <div>
-        {renderIf(!_.isEmpty(this.props.plugin.usedByPackages))(() => (
+        {!_.isEmpty(this.props.plugin.usedByPackages) && (
           <div style={styles.content}>
-            {renderIf(this.state.expandList)(() => (
+            {this.state.expandList ? (
               <div style={styles.list}>
                 {this.props.plugin.usedByPackages.map((resource) => (
                   <Package
@@ -84,8 +80,7 @@ class PackagesUsingPlugin extends React.Component<IProps, IState> {
                   />
                 ))}
               </div>
-            ))}
-            {renderIf(!this.state.expandList)(() => (
+            ) : (
               <div style={styles.list}>
                 {shortList.map((r) => (
                   <Package
@@ -96,25 +91,21 @@ class PackagesUsingPlugin extends React.Component<IProps, IState> {
                   />
                 ))}
               </div>
-            ))}
-            {renderIf(
-              _.size(this.props.plugin.usedByPackages) > _.size(shortList) &&
-                !this.state.expandList,
-            )(() => (
-              <div style={styles.seeMore} onClick={this.expandList}>
-                {'...See more'}
-              </div>
-            ))}
+            )}
+            {_.size(this.props.plugin.usedByPackages) > _.size(shortList) &&
+              !this.state.expandList && (
+                <div style={styles.seeMore} onClick={this.expandList}>
+                  {'...See more'}
+                </div>
+              )}
           </div>
-        ))}
-        {renderIf(
-          _.size(this.props.plugin.usedByPackages) > _.size(shortList) &&
-            this.state.expandList,
-        )(() => (
-          <div style={styles.seeMore} onClick={this.expandList}>
-            {'See less'}
-          </div>
-        ))}
+        )}
+        {_.size(this.props.plugin.usedByPackages) > _.size(shortList) &&
+          this.state.expandList && (
+            <div style={styles.seeMore} onClick={this.expandList}>
+              {'See less'}
+            </div>
+          )}
       </div>
     );
   }
