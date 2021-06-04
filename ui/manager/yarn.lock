@@ -1319,6 +1319,13 @@
   resolved "https://registry.yarnpkg.com/@types/json-schema/-/json-schema-7.0.7.tgz#98a993516c859eb0d5c4c8f098317a9ea68db9ad"
   integrity sha512-cxWFQVseBm6O9Gbw1IWb8r6OS4OhSt3hPZLkFApLjM8TEXROBuQGLAH2i2gZpcXdLBIrpXuTDhH7Vbm1iXmNGA==
 
+"@types/keycloak-js@^3.4.1":
+  version "3.4.1"
+  resolved "https://registry.yarnpkg.com/@types/keycloak-js/-/keycloak-js-3.4.1.tgz#32fe1c44ab750aa9e99bb62502ab782444765297"
+  integrity sha512-uWB18tdjmnABDxfS7XQULAy4rrL7mGxy1SN+ijvHJPbcIAhtZWqcJHrcMKruw7Eh4TKnLlK+vmIEmZDtpHFQmA==
+  dependencies:
+    keycloak-js "*"
+
 "@types/lodash@^4.14.170":
   version "4.14.170"
   resolved "https://registry.yarnpkg.com/@types/lodash/-/lodash-4.14.170.tgz#0d67711d4bf7f4ca5147e9091b847479b87925d6"
@@ -2669,6 +2676,11 @@ base16@^1.0.0:
   version "1.0.0"
   resolved "https://registry.yarnpkg.com/base16/-/base16-1.0.0.tgz#e297f60d7ec1014a7a971a39ebc8a98c0b681e70"
   integrity sha1-4pf2DX7BAUp6lxo568ipjAtoHnA=
+
+base64-js@1.3.1:
+  version "1.3.1"
+  resolved "https://registry.yarnpkg.com/base64-js/-/base64-js-1.3.1.tgz#58ece8cb75dd07e71ed08c736abc5fac4dbf8df1"
+  integrity sha512-mLQ4i2QO1ytvGWFWmcngKO//JXAQueZvwEKtjgQFM4jIK0kU+ytMfplL8j+n5mspOfjHwoAg+9yhb7BwAHm36g==
 
 base64-js@^1.3.1:
   version "1.5.1"
@@ -5905,6 +5917,11 @@ js-base64@^2.1.8:
   resolved "https://registry.yarnpkg.com/js-base64/-/js-base64-2.6.4.tgz#f4e686c5de1ea1f867dbcad3d46d969428df98c4"
   integrity sha512-pZe//GGmwJndub7ZghVHz7vjb2LgC1m8B07Au3eYqeqv9emhESByMXxaEgkUkEqJe87oBbSniGYoQNIBklc7IQ==
 
+js-sha256@0.9.0:
+  version "0.9.0"
+  resolved "https://registry.yarnpkg.com/js-sha256/-/js-sha256-0.9.0.tgz#0b89ac166583e91ef9123644bd3c5334ce9d0966"
+  integrity sha512-sga3MHh9sgQN2+pJ9VYZ+1LPwXOxuBJBA5nrR5/ofPfuiJBE2hnjsaN8se8JznOmGLN2p49Pe5U/ttafcs/apA==
+
 "js-tokens@^3.0.0 || ^4.0.0", js-tokens@^4.0.0:
   version "4.0.0"
   resolved "https://registry.yarnpkg.com/js-tokens/-/js-tokens-4.0.0.tgz#19203fb59991df98e3a287050d4647cdeaf32499"
@@ -6009,10 +6026,13 @@ keyboard-key@^1.1.0:
   resolved "https://registry.yarnpkg.com/keyboard-key/-/keyboard-key-1.1.0.tgz#6f2e8e37fa11475bb1f1d65d5174f1b35653f5b7"
   integrity sha512-qkBzPTi3rlAKvX7k0/ub44sqOfXeLc/jcnGGmj5c7BJpU8eDrEVPyhCvNYAaoubbsLm9uGWwQJO1ytQK1a9/dQ==
 
-keycloak-js@^5.0.0:
-  version "5.0.0"
-  resolved "https://registry.yarnpkg.com/keycloak-js/-/keycloak-js-5.0.0.tgz#ed7f640d7a1748135ae8ad1750f8925005d4895f"
-  integrity sha512-zJRgb9E1IV3GLXTMow2cpvRK1PEx9shVDx96uac7zO+uTG2ptLvrYxs1umemjGqDPmy5LJiaUgF30fc9MS3ykQ==
+keycloak-js@*, keycloak-js@13.0.1:
+  version "13.0.1"
+  resolved "https://registry.yarnpkg.com/keycloak-js/-/keycloak-js-13.0.1.tgz#4aae6a8fe1301aa3d7a12b2de6227a23b42f275d"
+  integrity sha512-S9mFX8HHlgw+i2HAIhteccrkffQmUn4CpYcU8ViGnODSBcnaf2YTtLhiiRH/a6SaOBpxmJTN3XVIZbE9d/HyXQ==
+  dependencies:
+    base64-js "1.3.1"
+    js-sha256 "0.9.0"
 
 killable@^1.0.1:
   version "1.0.1"

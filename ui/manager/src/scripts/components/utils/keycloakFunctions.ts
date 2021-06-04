@@ -25,7 +25,7 @@ export async function createKeycloakInstance(): Promise<
 
 export async function initKeycloak(keycloak: Keycloak.KeycloakInstance) {
   try {
-    await keycloak.init({ onLoad: 'login-required' }).success(() => {
+    await keycloak.init({ onLoad: 'login-required', checkLoginIframe: false }).then(() => {
       authenticationActionDispatchers.keycloakSignInAction(keycloak);
     });
   } catch (err) {
@@ -41,8 +41,8 @@ export async function updateToken(kc: Keycloak.KeycloakInstance) {
   try {
     await kc
       .updateToken(300)
-      .success(() => setAuthorizationHeader(kc))
-      .error(() => {
+      .then(() => setAuthorizationHeader(kc))
+      .catch(() => {
         throw new Error('Failed to update token.');
       });
   } catch (err) {

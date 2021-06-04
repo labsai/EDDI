@@ -73,10 +73,18 @@ const sleep = milliseconds => {
   return new Promise(resolve => setTimeout(resolve, milliseconds));
 };
 
-class App extends React.Component<IPrivateProps> {
-  async componentDidMount() {
-    await runSagaMiddleware();
-    const queryStrings = Parser.getQueryStrings(this.props.location.search);
+const App = ({
+  location,
+  keycloakAuthenticated,
+  isKeycloakEnabled,
+  keycloak,
+  isAppReady,
+  basicAuthAuthenticated,
+}: IPrivateProps) => {
+
+  React.useEffect(() => {
+    runSagaMiddleware();
+    const queryStrings = Parser.getQueryStrings(location.search);
     if (queryStrings.apiUrl) {
       setApiUrlQuery(decodeURIComponent(queryStrings.apiUrl));
     }
@@ -85,65 +93,69 @@ class App extends React.Component<IPrivateProps> {
     }
     SystemActionDispatchers.appReady();
     authenticationActionDispatchers.checkAuthenticationAction();
-  }
+  }, []);
 
-  async componentDidUpdate(prevProps) {
-    if (this.props.isKeycloakEnabled && !this.props.keycloakAuthenticated) {
-      if (!this.props.keycloak.authenticated) {
-        await kcHelper.initKeycloak(this.props.keycloak);
+  const refreshToken = async () => {
+    if (!keycloak) { return; }
+    authenticationActionDispatchers.keycloakRefreshTokenAction(keycloak);
+    await sleep(240000).then(() => refreshToken());
+  };
+
+  const initKeycloak = async () => {
+    if (!keycloak) { return; }
+    await kcHelper.initKeycloak(keycloak);
+  };
+
+  React.useEffect(() => {
+    if (isKeycloakEnabled && !keycloakAuthenticated) {
+      if (!keycloak.authenticated) {
+        initKeycloak();
       }
     }
-    if (
-      this.props.isKeycloakEnabled &&
-      this.props.keycloakAuthenticated &&
-      !prevProps.keycloakAuthenticated
-    ) {
-      this.refreshToken();
-    }
-  }
+  }, [isKeycloakEnabled, keycloakAuthenticated, keycloak]);
 
-  async refreshToken(props = this.props) {
-    authenticationActionDispatchers.keycloakRefreshTokenAction(props.keycloak);
-    await sleep(240000).then(() => this.refreshToken());
-  }
+  React.useEffect(() => {
+    if (isKeycloakEnabled &&
+      keycloakAuthenticated) {
+        refreshToken();
+      }
+  }, []);
 
-  render() {
-    const authenticated =
-      this.props.keycloakAuthenticated && this.props.basicAuthAuthenticated;
-    return (
-      <div className="ui container">
-        {renderIf(this.props.isAppReady)(() => (
-          <div>
-            {renderIf(!authenticated)(() => (
-              <div>{'You need to login to see this page'}</div>
-            ))}
-            {renderIf(authenticated)(() => (
-              <div>
-                <Route path={'/'} exact component={Dashboard} />
-                <Route path={'/packages'} exact component={PackagePage} />
-                <Route
-                  path={'/conversations'}
-                  exact
-                  component={ConversationsPage}
-                />
-                <Route path={'/resources'} component={ExtensionsPage} />
-                <Route path={'/botview/:id'} component={BotViewPage} />
-                <Route
-                  path={'/conversationview/:id'}
-                  component={BotConversationViewPage}
-                />
-                <Route path={'/packageview/:id'} component={PackageViewPage} />
-              </div>
-            ))}
-            {renderIf(this.props.keycloakAuthenticated)(() => (
-              <ModalComponentFrame />
-            ))}
-          </div>
-        ))}
-      </div>
-    );
-  }
-}
+  const authenticated = keycloakAuthenticated && basicAuthAuthenticated;
+
+  return (
+    <div className="ui container">
+      {renderIf(isAppReady)(() => (
+        <div>
+          {renderIf(!authenticated)(() => (
+            <div>{'You need to login to see this page'}</div>
+          ))}
+          {renderIf(authenticated)(() => (
+            <div>
+              <Route path={'/'} exact component={Dashboard} />
+              <Route path={'/packages'} exact component={PackagePage} />
+              <Route
+                path={'/conversations'}
+                exact
+                component={ConversationsPage}
+              />
+              <Route path={'/resources'} component={ExtensionsPage} />
+              <Route path={'/botview/:id'} component={BotViewPage} />
+              <Route
+                path={'/conversationview/:id'}
+                component={BotConversationViewPage}
+              />
+              <Route path={'/packageview/:id'} component={PackageViewPage} />
+            </div>
+          ))}
+          {renderIf(keycloakAuthenticated)(() => (
+            <ModalComponentFrame />
+          ))}
+        </div>
+      ))}
+    </div>
+  );
+};
 
 const ComposedApp: React.ComponentClass<IPrivateProps> = compose<IPrivateProps, IPrivateProps>(
   pure,
