@@ -1,7 +1,7 @@
+import Button from '@material-ui/core/Button';
+import Radium from 'radium';
 import * as React from 'react';
 import { compose, pure, setDisplayName } from 'recompose';
-import { CSSProperties } from 'react';
-import Radium from 'radium';
 
 const styles: { [key: string]: IExtendedCSSProperties } = {
   button: {
@@ -13,7 +13,9 @@ const styles: { [key: string]: IExtendedCSSProperties } = {
     borderRadius: '4px',
     cursor: 'pointer',
     fontSize: '12px',
+    lineHeight: '16px',
     textAlign: 'center',
+    textTransform: 'none',
   },
   disabled: {
     cursor: 'default',
@@ -56,19 +58,19 @@ interface IProps {
   onClick?: (event: React.MouseEvent) => void;
 }
 
-const Button: React.StatelessComponent<IProps> = (props: IProps) => (
-  <button
+const DefaultButton: React.StatelessComponent<IProps> = (props: IProps) => (
+  <Button
     onClick={props.onClick}
     disabled={props.disabled}
     style={getButtonStyling(props)}>
     {props.text}
-  </button>
+  </Button>
 );
 
 const ComposedButton: React.ComponentClass<IProps> = compose<IProps, IProps>(
   pure,
   Radium,
   setDisplayName('Button'),
-)(Button);
+)(DefaultButton);
 
 export default ComposedButton;

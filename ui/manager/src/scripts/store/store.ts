@@ -1,21 +1,21 @@
+import * as _ from 'lodash';
 import {
-  createStore,
   applyMiddleware,
   compose,
-  Store,
+  createStore,
   Middleware,
+  Store,
   StoreEnhancer,
 } from 'redux';
-import createSagaMiddleware, { SagaMiddleware } from 'redux-saga';
-import reducers from '../reducers/index';
-import { IAppState } from '../reducers/index';
-import * as _ from 'lodash';
-import { persistStore, persistReducer, Persistor } from 'redux-persist';
+import { Persistor, persistReducer, persistStore } from 'redux-persist';
 import storage from 'redux-persist/lib/storage';
+import createSagaMiddleware, { SagaMiddleware } from 'redux-saga';
+import reducers, { IAppState } from '../reducers/index';
 
 const persistConfig = {
   key: 'root',
   storage,
+  whitelist: ['authenticationState'],
 };
 
 export const sagaMiddleware: SagaMiddleware<any> = createSagaMiddleware();
