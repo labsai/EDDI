@@ -53,7 +53,8 @@ const styles: { [key: string]: IExtendedCSSProperties } = {
     display: 'flex',
   },
   options: {
-    marginTop: '5px',
+    marginTop: 'auto',
+    marginBottom: 'auto',
     marginRight: '5px',
   },
 };

@@ -52,7 +52,8 @@ const styles: { [key: string]: IExtendedCSSProperties } = {
     marginLeft: '10px',
   },
   options: {
-    marginTop: '5px',
+    marginTop: 'auto',
+    marginBottom: 'auto',
   },
 };
 export default styles;

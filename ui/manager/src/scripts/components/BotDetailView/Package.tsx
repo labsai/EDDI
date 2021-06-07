@@ -121,7 +121,9 @@ class Package extends React.Component<IPrivateProps> {
                   </div>
                 )}
                 <div style={styles.centerFlex} />
-                <div style={styles.options}>
+                <div
+                  style={styles.options}
+                  onClick={(e) => e.stopPropagation()}>
                   <Options
                     descriptor={packagePayload}
                     data={JSON.stringify(

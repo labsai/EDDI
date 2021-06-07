@@ -78,7 +78,8 @@ const styles: { [key: string]: IExtendedCSSProperties } = {
     marginTop: '20px',
   },
   options: {
-    marginTop: '3px',
+    marginTop: 'auto',
+    marginBottom: 'auto',
     marginRight: '5px',
   },
 };

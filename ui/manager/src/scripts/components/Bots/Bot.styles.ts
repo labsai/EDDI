@@ -114,7 +114,8 @@ const styles: { [key: string]: IExtendedCSSProperties } = {
     marginTop: '26px',
   },
   optionsMenu: {
-    marginTop: '20px',
+    marginTop: 'auto',
+    marginBottom: 'auto',
     marginRight: '5px',
     height: 'fit-content',
   },

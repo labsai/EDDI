@@ -42,11 +42,12 @@ const Plugin: React.StatelessComponent<IPrivateProps> = (
             <div>
               <div
                 style={styles.topContent}
-                onClick={() =>
+                onClick={(e) => {
+                  e.stopPropagation();
                   modalActionDispatchers.showViewJsonModal(
                     props.plugin.resource,
-                  )
-                }>
+                  );
+                }}>
                 <div style={styles.pluginName}>
                   {props.plugin.name === ''
                     ? props.plugin.id
