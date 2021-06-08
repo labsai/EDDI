@@ -1,4 +1,3 @@
-import { CSSProperties } from 'react';
 import {
   DARK_BLUE_COLOR,
   GREEN_COLOR,
@@ -81,6 +80,8 @@ const styles: { [key: string]: IExtendedCSSProperties } = {
   versionSelect: {
     position: 'relative',
     marginRight: '10px',
+    marginTop: 'auto',
+    marginBottom: 'auto',
   },
   versionName: {
     backgroundColor: LIGHT_GREY_COLOR2,

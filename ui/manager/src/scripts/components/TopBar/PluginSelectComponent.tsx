@@ -3,6 +3,7 @@ import MenuItem from '@material-ui/core/MenuItem';
 import OutlinedInput from '@material-ui/core/OutlinedInput';
 import Select from '@material-ui/core/Select';
 import { makeStyles } from '@material-ui/core/styles';
+import ArrowDropDownIcon from '@material-ui/icons/ArrowDropDown';
 import * as React from 'react';
 import { compose, pure, setDisplayName } from 'recompose';
 import { historyPush } from '../../history';
@@ -62,6 +63,10 @@ const useStyles = makeStyles({
     '& .Mui-selected:hover': {
       backgroundColor: '#2684FF',
     },
+  },
+  arrowDropdown: {
+    marginTop: 'auto',
+    marginBottom: 'auto',
   },
 });
 
@@ -138,6 +143,12 @@ const PluginSelectComponent = ({ page }: IProps) => {
       <Select
         value={selectedOption.value}
         onChange={handleSelect}
+        IconComponent={() => (
+          <ArrowDropDownIcon
+            className={classes.arrowDropdown}
+            fontSize={'large'}
+          />
+        )}
         input={<OutlinedInput className={classes.input} />}
         MenuProps={{ classes: { paper: classes.select } }}>
         <MenuItem key={'Resources'} value={-1} disabled>

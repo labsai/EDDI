@@ -1,7 +1,8 @@
+import { makeStyles } from '@material-ui/core/styles';
+import { ClassNameMap } from '@material-ui/styles/withStyles';
+import clsx from 'clsx';
 import * as React from 'react';
 import { compose, pure, setDisplayName } from 'recompose';
-import { CSSProperties } from 'react';
-import Radium from 'radium';
 import {
   LARGE_FONT2,
   LIGHT_GREY_BORDER,
@@ -11,13 +12,13 @@ import {
   WHITE_COLOR,
 } from '../../../../styles/DefaultStylingProperties';
 
-const styles: { [key: string]: IExtendedCSSProperties } = {
+const useStyles = makeStyles({
   container: {
-    ':hover': {
+    '&:hover': {
       color: RED_COLOR,
       border: RED_BORDER,
     },
-    ':focus': {
+    '&:focus': {
       color: RED_COLOR,
       border: RED_BORDER,
     },
@@ -38,32 +39,29 @@ const styles: { [key: string]: IExtendedCSSProperties } = {
     marginRight: 'auto',
     marginTop: '-10px',
   },
-};
-
-function getContainerStyling(props: IProps) {
-  return {
-    ...styles.container,
-    ...props.customStyles,
-  };
-}
+});
 
 interface IProps {
-  customStyles: {};
+  classes?: ClassNameMap;
   onClick(): void;
 }
 
-const SquareXButton: React.StatelessComponent<IProps> = (props: IProps) => (
-  <div onClick={props.onClick} style={getContainerStyling(props)}>
-    <div style={styles.text}>&times;</div>
-  </div>
-);
+const SquareXButton: React.StatelessComponent<IProps> = (props: IProps) => {
+  const classes = useStyles();
+  return (
+    <div
+      onClick={props.onClick}
+      className={clsx(classes.container, props.classes?.button)}>
+      <div className={classes.text}>&times;</div>
+    </div>
+  );
+};
 
 const ComposedSquareXButton: React.ComponentClass<IProps> = compose<
   IProps,
   IProps
 >(
   pure,
-  Radium,
   setDisplayName('SquareXButton'),
 )(SquareXButton);
 

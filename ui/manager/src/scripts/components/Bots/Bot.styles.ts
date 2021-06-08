@@ -1,4 +1,3 @@
-import { CSSProperties } from 'react';
 import {
   DARK_BLUE_COLOR,
   DARK_GREY_COLOR,
@@ -9,8 +8,9 @@ import {
   RED_COLOR,
   SMALL_FONT,
 } from '../../../styles/DefaultStylingProperties';
+import { makeStyles } from '@material-ui/core/styles';
 
-const styles: { [key: string]: IExtendedCSSProperties } = {
+const useStyles = makeStyles({
   botBox: {
     border: `1px solid ${LIGHT_GREY_COLOR2}`,
     borderRadius: '4px',
@@ -68,7 +68,7 @@ const styles: { [key: string]: IExtendedCSSProperties } = {
     flex: 1,
     textDecoration: 'none',
     cursor: 'pointer',
-    ':hover': {
+    '&:hover': {
       textDecoration: 'underline',
     },
   },
@@ -119,5 +119,6 @@ const styles: { [key: string]: IExtendedCSSProperties } = {
     marginRight: '5px',
     height: 'fit-content',
   },
-};
-export default styles;
+});
+
+export default useStyles;

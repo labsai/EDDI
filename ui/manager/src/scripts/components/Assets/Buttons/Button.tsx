@@ -1,9 +1,11 @@
 import Button from '@material-ui/core/Button';
-import Radium from 'radium';
+import { makeStyles } from '@material-ui/core/styles';
+import { ClassNameMap } from '@material-ui/styles/withStyles';
+import clsx from 'clsx';
 import * as React from 'react';
 import { compose, pure, setDisplayName } from 'recompose';
 
-const styles: { [key: string]: IExtendedCSSProperties } = {
+const useStyles = makeStyles({
   button: {
     height: '35px',
     width: '108px',
@@ -16,36 +18,34 @@ const styles: { [key: string]: IExtendedCSSProperties } = {
     lineHeight: '16px',
     textAlign: 'center',
     textTransform: 'none',
+
+    '&:disabled': {
+      cursor: 'default',
+      color: '#d8dde6',
+    },
   },
-  disabled: {
-    cursor: 'default',
-  },
-};
+});
+
 function getButtonStyling(props: IProps) {
   if (props.disabled) {
     if (props.customStyles) {
       return {
-        ...styles.button,
-        ...styles.disabled,
-        ...props.styles.button,
+        ...props.styles?.button,
+        ...props.styles?.disabled,
         ...props.customStyles,
-        ...props.styles.disabled,
-        ...props.customStyles.disabled,
+        ...props.customStyles?.disabled,
       };
     } else {
       return {
-        ...styles.button,
-        ...styles.disabled,
-        ...props.styles.button,
+        ...props.styles?.button,
+        ...props.styles?.disabled,
         ...props.customStyles,
-        ...props.styles.disabled,
       };
     }
   } else {
     return {
-      ...styles.button,
-      ...props.styles.button,
-      ...props.styles.active,
+      ...props.styles?.button,
+      ...props.styles?.active,
       ...props.customStyles,
     };
   }
@@ -53,23 +53,27 @@ function getButtonStyling(props: IProps) {
 interface IProps {
   text: string;
   disabled?: boolean;
-  styles: { [key: string]: IExtendedCSSProperties };
-  customStyles: { [key: string]: IExtendedCSSProperties };
+  styles?: { [key: string]: IExtendedCSSProperties };
+  customStyles?: { [key: string]: IExtendedCSSProperties };
   onClick?: (event: React.MouseEvent) => void;
+  classes?: ClassNameMap;
 }
 
-const DefaultButton: React.StatelessComponent<IProps> = (props: IProps) => (
-  <Button
-    onClick={props.onClick}
-    disabled={props.disabled}
-    style={getButtonStyling(props)}>
-    {props.text}
-  </Button>
-);
+const DefaultButton: React.StatelessComponent<IProps> = (props: IProps) => {
+  const classes = useStyles();
+  return (
+    <Button
+      onClick={props.onClick}
+      disabled={props.disabled}
+      className={clsx(classes.button, props.classes?.button)}
+      style={getButtonStyling(props)}>
+      {props.text}
+    </Button>
+  );
+};
 
 const ComposedButton: React.ComponentClass<IProps> = compose<IProps, IProps>(
   pure,
-  Radium,
   setDisplayName('Button'),
 )(DefaultButton);
 

@@ -11,7 +11,6 @@ import FileCopyIcon from '@material-ui/icons/FileCopy';
 import FileCopyOutlinedIcon from '@material-ui/icons/FileCopyOutlined';
 import HighlightOffOutlinedIcon from '@material-ui/icons/HighlightOffOutlined';
 import MoreVertIcon from '@material-ui/icons/MoreVert';
-import Radium from 'radium';
 import * as React from 'react';
 import { connect } from 'react-redux';
 import { compose, pure, setDisplayName } from 'recompose';
@@ -232,7 +231,6 @@ const ComposedOptions: React.ComponentClass<IPublicProps> = compose<
 >(
   pure,
   connect(readOnlySelector),
-  Radium,
   setDisplayName('Options'),
 )(Options);
 

@@ -16,21 +16,7 @@ import PluginHelper from '../../utils/helpers/PluginHelper';
 import Parser from '../../utils/Parser';
 import { IOptions } from '../PackageView';
 import Extension from './Extension';
-import styles from './Plugin.styles';
-
-const customStyles: { [key: string]: IExtendedCSSProperties } = {
-  extensionList: {
-    display: 'grid',
-    marginTop: '10px',
-    marginLeft: '10px',
-    marginRight: '10px',
-    marginBottom: '10px',
-    gridGap: '10px 20px',
-    gridTemplateColumns: 'repeat(auto-fill, minmax(240px, 1fr))',
-    minHeight: '5px',
-    minWidth: '5px',
-  },
-};
+import useStyles from './Plugin.styles';
 
 interface IPublicProps {
   pluginType: IOptions;
@@ -44,24 +30,33 @@ interface IPrivateProps extends IPublicProps {
   plugin: IPlugin;
 }
 
-class PluginWithExtensions extends React.Component<IPrivateProps> {
-  componentDidMount() {
-    if (this.props.pluginResource) {
-      eddiApiActionDispatchers.fetchPluginAction(this.props.pluginResource);
+const PluginWithExtensions = ({
+  pluginType,
+  pluginResource,
+  editDisabled,
+  deletePlugin,
+  updatePlugin,
+  plugin,
+}: IPrivateProps) => {
+  const classes = useStyles();
+
+  React.useEffect(() => {
+    if (pluginResource) {
+      eddiApiActionDispatchers.fetchPluginAction(pluginResource);
     }
     let dictionaries: IOptions[] = [];
     let corrections: IOptions[] = [];
-    if (!_.isEmpty(this.props.pluginType.extensions)) {
-      if (!_.isEmpty(this.props.pluginType.extensions.dictionaries)) {
-        dictionaries = this.props.pluginType.extensions.dictionaries.map(
+    if (!_.isEmpty(pluginType.extensions)) {
+      if (!_.isEmpty(pluginType.extensions.dictionaries)) {
+        dictionaries = pluginType.extensions.dictionaries.map(
           (dictionary, i) => ({
             ...dictionary,
             extensionKey: i,
           }),
         );
       }
-      if (!_.isEmpty(this.props.pluginType.extensions.corrections)) {
-        corrections = this.props.pluginType.extensions.corrections.map(
+      if (!_.isEmpty(pluginType.extensions.corrections)) {
+        corrections = pluginType.extensions.corrections.map(
           (correction, i) => ({
             ...correction,
             extensionKey: i,
@@ -69,83 +64,76 @@ class PluginWithExtensions extends React.Component<IPrivateProps> {
         );
       }
     }
-    this.setState({
-      selectedExtensions: { dictionaries, corrections },
-    });
-  }
+  }, []);
 
-  deletePlugin = () => {
-    this.props.deletePlugin(this.props.pluginType.extensionKey);
+  const handleDeletePlugin = () => {
+    deletePlugin(pluginType.extensionKey);
   };
 
-  deleteExtension = (extensionKey: number, type: string) => {
+  const deleteExtension = (extensionKey: number, type: string) => {
     let dictionaries = [];
     let corrections = [];
     if (type.includes(CORRECTION)) {
-      dictionaries = this.props.pluginType.extensions.dictionaries;
-      corrections = this.props.pluginType.extensions.corrrections.splice(
-        this.props.pluginType.extensions.corrections.findIndex(
+      dictionaries = pluginType.extensions.dictionaries;
+      corrections = pluginType.extensions.corrrections.splice(
+        pluginType.extensions.corrections.findIndex(
           (c, i) => i === extensionKey,
         ),
         1,
       );
     } else if (type.includes(DICTIONARY)) {
-      dictionaries = this.props.pluginType.extensions.dictionaries.splice(
-        this.props.pluginType.extensions.dictionaries.findIndex(
+      dictionaries = pluginType.extensions.dictionaries.splice(
+        pluginType.extensions.dictionaries.findIndex(
           (d, i) => i === extensionKey,
         ),
         1,
       );
-      corrections = this.props.pluginType.extensions.corrections;
+      corrections = pluginType.extensions.corrections;
     }
     const plugin: IPluginExtensions = {
-      ...this.props.pluginType,
+      ...pluginType,
       extensions: {
         dictionaries,
         corrections,
       },
     };
-    this.props.updatePlugin(this.props.pluginType.extensionKey, plugin);
+    updatePlugin(pluginType.extensionKey, plugin);
   };
 
-  updatePluginResource = (newPluginResourceList: string[]) => {
-    if (this.props.pluginType.type === PluginType.PARSER) {
-      const otherDictionaries =
-        this.props.pluginType.extensions.dictionaries.filter(
-          (d) => d.type !== REGULAR_DICTIONARY,
-        );
+  const updatePluginResource = (newPluginResourceList: string[]) => {
+    if (pluginType.type === PluginType.PARSER) {
+      const otherDictionaries = pluginType.extensions.dictionaries.filter(
+        (d) => d.type !== REGULAR_DICTIONARY,
+      );
       const newRegularDictionaryList = newPluginResourceList.map((resource) => {
         return { type: REGULAR_DICTIONARY, config: { uri: resource } };
       });
       const newPlugin: IPluginExtensions = {
-        ...this.props.pluginType,
+        ...pluginType,
         extensions: {
           dictionaries: otherDictionaries.concat(newRegularDictionaryList),
-          corrections: this.props.pluginType.extensions.corrections,
+          corrections: pluginType.extensions.corrections,
         },
       };
-      this.props.updatePlugin(this.props.pluginType.extensionKey, newPlugin);
+      updatePlugin(pluginType.extensionKey, newPlugin);
     } else if (!_.isEmpty(newPluginResourceList)) {
       const plugin: IPluginExtensions = {
-        ...this.props.pluginType,
+        ...pluginType,
         config: {
-          ...this.props.pluginType.config,
+          ...pluginType.config,
           uri: newPluginResourceList[0],
         },
       };
-      this.props.updatePlugin(this.props.pluginType.extensionKey, plugin);
+      updatePlugin(pluginType.extensionKey, plugin);
     }
   };
 
-  openAddPluginsModal = () => {
+  const openAddPluginsModal = () => {
     let extensionList: string[];
     let pluginType;
-    if (this.props.pluginType.type === PluginType.PARSER) {
-      if (
-        this.props.pluginType.config &&
-        !_.isEmpty(this.props.pluginType.extensions.dictionaries)
-      ) {
-        extensionList = this.props.pluginType.extensions.dictionaries
+    if (pluginType.type === PluginType.PARSER) {
+      if (pluginType.config && !_.isEmpty(pluginType.extensions.dictionaries)) {
+        extensionList = pluginType.extensions.dictionaries
           .filter((d) => d.config && d.config.uri)
           .map((resource) => {
             return resource.config.uri;
@@ -153,133 +141,110 @@ class PluginWithExtensions extends React.Component<IPrivateProps> {
       }
       pluginType = PluginType.REGULAR_DICTIONARY;
     } else {
-      pluginType = this.props.pluginType.type;
-      extensionList =
-        (this.props.pluginType.config.uri && [
-          this.props.pluginType.config.uri,
-        ]) ||
-        [];
+      pluginType = pluginType.type;
+      extensionList = (pluginType.config.uri && [pluginType.config.uri]) || [];
     }
     ModalActionDispatchers.showAddPluginsModal(
       pluginType,
       extensionList,
-      this.updatePluginResource,
+      updatePluginResource,
     );
   };
 
-  updateExtension = (extensionResource: string) => {
-    const newExtensionList = this.props.pluginType.extensions.dictionaries.map(
-      (ext) => {
-        if (
-          ext.config &&
-          Parser.getId(ext.config.uri) === Parser.getId(extensionResource)
-        ) {
-          return {
-            type: ext.type,
-            config: { ...ext.config, uri: extensionResource },
-          };
-        } else {
-          return ext;
-        }
-      },
-    );
+  const updateExtension = (extensionResource: string) => {
+    const newExtensionList = pluginType.extensions.dictionaries.map((ext) => {
+      if (
+        ext.config &&
+        Parser.getId(ext.config.uri) === Parser.getId(extensionResource)
+      ) {
+        return {
+          type: ext.type,
+          config: { ...ext.config, uri: extensionResource },
+        };
+      } else {
+        return ext;
+      }
+    });
     const plugin: IPluginExtensions = {
-      ...this.props.pluginType,
+      ...pluginType,
       extensions: {
         dictionaries: newExtensionList,
-        corrections: this.props.pluginType.extensions.corrections,
+        corrections: pluginType.extensions.corrections,
       },
     };
-    this.props.updatePlugin(this.props.pluginType.extensionKey, plugin);
+    updatePlugin(pluginType.extensionKey, plugin);
   };
 
-  getResource(plugin: IPluginExtensions) {
+  const getResource = (plugin: IPluginExtensions) => {
     if (plugin.config) {
       return plugin.config.uri;
     }
     return null;
-  }
+  };
 
-  render() {
-    return (
-      <div style={styles.pluginWithExtensionsContainer}>
-        {!this.props.editDisabled && (
-          <SquareXButton
-            customStyles={styles.packageWithExtensionCloseButton}
-            onClick={this.deletePlugin}
-          />
-        )}
-        <div style={styles.pluginBoxWithExtensions}>
-          <div style={styles.bigPluginName}>
-            <div style={styles.pluginName}>
-              {PluginHelper.getName(
-                this.props.pluginType.type,
-                this.props.plugin,
-                true,
-              )}
-            </div>
-            <div style={styles.pluginVersion}>
-              {PluginHelper.getVersion(
-                this.props.pluginType.type,
-                this.props.plugin,
-                true,
-              )}
-            </div>
-            <div style={styles.centerFlex} />
-            {!this.props.editDisabled && (
-              <a
-                onClick={this.openAddPluginsModal}
-                style={styles.addResourceButton}>
-                {'Add dictionary'}
-              </a>
-            )}
+  return (
+    <div className={classes.pluginWithExtensionsContainer}>
+      {!editDisabled && (
+        <SquareXButton
+          classes={{ button: classes.packageWithExtensionCloseButton }}
+          onClick={handleDeletePlugin}
+        />
+      )}
+      <div className={classes.pluginBoxWithExtensions}>
+        <div className={classes.bigPluginName}>
+          <div className={classes.pluginName}>
+            {PluginHelper.getName(pluginType.type, plugin, true)}
           </div>
-          <div style={styles.pluginDate}>
-            {PluginHelper.getLastModified(
-              this.props.pluginType.type,
-              this.props.plugin,
-              true,
-              '',
-            )}
+          <div className={classes.pluginVersion}>
+            {PluginHelper.getVersion(pluginType.type, plugin, true)}
           </div>
-          <div style={styles.pluginDate}>{this.props.pluginType.type}</div>
-          {!_.isEmpty(this.props.pluginType.extensions) && (
-            <div>
-              <div style={customStyles.extensionList}>
-                {this.props.pluginType.extensions.dictionaries &&
-                  this.props.pluginType.extensions.dictionaries.map(
-                    (ext, i) => (
-                      <Extension
-                        key={i}
-                        index={i}
-                        pluginType={ext}
-                        deleteExtension={this.deleteExtension}
-                        pluginResource={this.getResource(ext)}
-                        updateExtension={this.updateExtension}
-                        editDisabled={this.props.editDisabled}
-                      />
-                    ),
-                  )}
-                {this.props.pluginType.extensions.corrections &&
-                  this.props.pluginType.extensions.corrections.map((ext, i) => (
-                    <Extension
-                      key={i}
-                      index={i}
-                      pluginType={ext}
-                      deleteExtension={this.deleteExtension}
-                      pluginResource={this.getResource(ext)}
-                      updateExtension={this.updateExtension}
-                      editDisabled={this.props.editDisabled}
-                    />
-                  ))}
-              </div>
-            </div>
+          <div className={classes.centerFlex} />
+          {!editDisabled && (
+            <a
+              onClick={openAddPluginsModal}
+              className={classes.addResourceButton}>
+              {'Add dictionary'}
+            </a>
           )}
         </div>
+        <div className={classes.pluginDate}>
+          {PluginHelper.getLastModified(pluginType.type, plugin, true, '')}
+        </div>
+        <div className={classes.pluginDate}>{pluginType.type}</div>
+        {!_.isEmpty(pluginType.extensions) && (
+          <div>
+            <div className={classes.extensionList}>
+              {pluginType.extensions.dictionaries &&
+                pluginType.extensions.dictionaries.map((ext, i) => (
+                  <Extension
+                    key={i}
+                    index={i}
+                    pluginType={ext}
+                    deleteExtension={deleteExtension}
+                    pluginResource={getResource(ext)}
+                    updateExtension={updateExtension}
+                    editDisabled={editDisabled}
+                  />
+                ))}
+              {pluginType.extensions.corrections &&
+                pluginType.extensions.corrections.map((ext, i) => (
+                  <Extension
+                    key={i}
+                    index={i}
+                    pluginType={ext}
+                    deleteExtension={deleteExtension}
+                    pluginResource={getResource(ext)}
+                    updateExtension={updateExtension}
+                    editDisabled={editDisabled}
+                  />
+                ))}
+            </div>
+          </div>
+        )}
       </div>
-    );
-  }
-}
+    </div>
+  );
+};
 
 const ComposedPluginWithExtensions: React.ComponentClass<IPublicProps> =
   compose<IPrivateProps, IPublicProps>(

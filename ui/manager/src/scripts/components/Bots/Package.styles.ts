@@ -1,11 +1,11 @@
-import { CSSProperties } from 'react';
+import { makeStyles } from '@material-ui/core/styles';
 import {
   BLUE_COLOR2,
   MEDIUM_FONT,
   RED_COLOR,
 } from '../../../styles/DefaultStylingProperties';
 
-const styles: { [key: string]: IExtendedCSSProperties } = {
+const useStyles = makeStyles({
   botPackageName: {
     color: BLUE_COLOR2,
     display: 'inline-block',
@@ -41,5 +41,6 @@ const styles: { [key: string]: IExtendedCSSProperties } = {
   hasNewVersion: {
     color: RED_COLOR,
   },
-};
-export default styles;
+});
+
+export default useStyles;

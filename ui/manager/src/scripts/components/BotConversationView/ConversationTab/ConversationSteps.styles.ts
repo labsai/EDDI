@@ -1,31 +1,20 @@
-import { CSSProperties } from 'react';
+import { makeStyles } from '@material-ui/core/styles';
 import {
   BLUE_COLOR,
   DARK_BLUE_BORDER,
   DARK_BLUE_COLOR,
   GREY_BORDER,
-  GREY_COLOR,
-  GREY_COLOR3,
-  LARGE_FONT3,
   LIGHT_BLUE_COLOR,
-  LIGHT_BLUE_COLOR2,
-  LIGHT_GREY_BORDER,
   LIGHT_GREY_COLOR,
-  LIGHT_GREY_COLOR2,
-  MEDIUM_FONT,
   MEDIUM_FONT3,
-  RED_COLOR,
-  SMALL_FONT,
-  SMALL_FONT2,
-  WHITE_COLOR,
 } from '../../../../styles/DefaultStylingProperties';
 
-const styles: { [key: string]: IExtendedCSSProperties } = {
+const useStyles = makeStyles({
   toggleBox: {
     display: 'flex',
   },
   button: {
-    ':hover': {
+    '&:hover': {
       backgroundColor: LIGHT_GREY_COLOR,
     },
     position: 'relative',
@@ -55,7 +44,7 @@ const styles: { [key: string]: IExtendedCSSProperties } = {
     marginBottom: '5px',
   },
   refresh: {
-    ':hover': {
+    '&:hover': {
       backgroundColor: LIGHT_BLUE_COLOR,
     },
     position: 'relative',
@@ -78,5 +67,6 @@ const styles: { [key: string]: IExtendedCSSProperties } = {
     margin: '20px 0px 20px 0px',
     borderBottom: DARK_BLUE_BORDER,
   },
-};
-export default styles;
+});
+
+export default useStyles;

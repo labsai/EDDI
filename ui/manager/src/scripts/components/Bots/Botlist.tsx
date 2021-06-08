@@ -1,5 +1,4 @@
 import * as _ from 'lodash';
-import Radium from 'radium';
 import * as React from 'react';
 import * as InfiniteScrollTypes from 'react-infinite-scroller';
 import { connect } from 'react-redux';
@@ -11,7 +10,7 @@ import BlueButton from '../Assets/Buttons/BlueButton';
 import { getAPIUrl } from '../utils/ApiFunctions';
 import { IBot } from '../utils/AxiosFunctions';
 import Bot from './Bot';
-import styles from './Botlist.styles';
+import useStyles from './Botlist.styles';
 const InfiniteScroll =
   require('react-infinite-scroller') as InfiniteScrollTypes;
 
@@ -27,117 +26,109 @@ interface IPrivateProps extends IPublicProps {
   botsLoaded: number;
 }
 
-interface IState {
-  apiUrl: string;
-  loading: boolean;
-}
+const BotList = ({
+  isLoading,
+  bots,
+  allBotsLoaded,
+  error,
+  botsLoaded,
+  filterText,
+}: IPrivateProps) => {
+  const [apiUrl, setApiUrl] = React.useState('');
+  const [loading, setLoading] = React.useState(false);
 
-class BotList extends React.Component<IPrivateProps, IState> {
-  constructor(props) {
-    super(props);
-    this.state = {
-      apiUrl: '',
-      loading: false,
-    };
-  }
+  const classes = useStyles();
 
-  async componentDidMount() {
-    if (!this.props.isLoading) {
-      this.loadMore();
-    }
-    this.setState({ apiUrl: await getAPIUrl() });
-  }
+  const asyncSetApiUrl = async () => {
+    const apiUrl = await getAPIUrl();
+    setApiUrl(apiUrl);
+  };
 
-  componentDidUpdate(prevProps) {
-    if (prevProps.isLoading && !this.props.isLoading) {
-      this.setState({ loading: false });
-    }
-  }
-
-  filterBots() {
-    if (!_.isEmpty(this.props.filterText)) {
-      return this.props.bots.filter(
-        (bot) =>
-          bot.name
-            .toLowerCase()
-            .includes(this.props.filterText.toLowerCase()) ||
-          bot.id.toLowerCase().includes(this.props.filterText.toLowerCase()),
-      );
-    } else {
-      return this.props.bots;
-    }
-  }
-
-  loadMore = () => {
-    if (this.state.loading) {
+  const loadMore = () => {
+    if (loading) {
       return;
     }
-    this.setState({ loading: true });
+    setLoading(true);
     const limit = 5;
-    if (this.props.bots.length < limit && !this.props.allBotsLoaded) {
+    if (bots.length < limit && !allBotsLoaded) {
       eddiApiActionDispatchers.fetchBotsAction(limit, 0);
     } else {
       eddiApiActionDispatchers.fetchBotsAction(
         limit,
-        Math.floor(this.props.botsLoaded / limit),
+        Math.floor(botsLoaded / limit),
       );
     }
   };
 
-  render() {
-    const botList = this.filterBots();
-    return (
+  React.useEffect(() => {
+    if (!isLoading) {
+      loadMore();
+    }
+    asyncSetApiUrl();
+  }, []);
+
+  React.useEffect(() => {
+    if (!isLoading) {
+      setLoading(false);
+    }
+  }, [isLoading]);
+
+  const filterBots = () => {
+    if (!_.isEmpty(filterText)) {
+      return bots.filter(
+        (bot) =>
+          bot.name.toLowerCase().includes(filterText.toLowerCase()) ||
+          bot.id.toLowerCase().includes(filterText.toLowerCase()),
+      );
+    } else {
+      return bots;
+    }
+  };
+
+  const botList = filterBots();
+  return (
+    <div>
+      {isLoading && _.isEmpty(bots) && (
+        <div className={classes.loadingWrapper}>
+          <ClimbingBoxLoader loading />
+        </div>
+      )}
       <div>
-        {this.props.isLoading && _.isEmpty(this.props.bots) && (
-          <div style={styles.loadingWrapper}>
-            <ClimbingBoxLoader loading />
+        {!!error && <p>{'Error: Could not load bots'}</p>}
+        {!error && !isLoading && _.isEmpty(bots) && (
+          <div>
+            <div>{`There are no bots yet..`}</div>
+            <BlueButton
+              classes={{ button: classes.deployExampleBotsButton }}
+              onClick={() => eddiApiActionDispatchers.deployExampleBotsAction()}
+              text={'Deploy Example Bots'}
+            />
           </div>
         )}
-        <div>
-          {!!this.props.error && <p>{'Error: Could not load bots'}</p>}
-          {!this.props.error &&
-            !this.props.isLoading &&
-            _.isEmpty(this.props.bots) && (
-              <div>
-                <div>{`There are no bots yet..`}</div>
-                <BlueButton
-                  customStyles={styles.deployExampleBotsButton}
-                  onClick={() =>
-                    eddiApiActionDispatchers.deployExampleBotsAction()
-                  }
-                  text={'Deploy Example Bots'}
-                />
-              </div>
+        {!error && !_.isEmpty(bots) && (
+          <div>
+            {_.isEmpty(botList) && (
+              <p>{`Found no bots matching: "${filterText}"`}</p>
             )}
-          {!this.props.error && !_.isEmpty(this.props.bots) && (
-            <div>
-              {_.isEmpty(botList) && (
-                <p>{`Found no bots matching: "${this.props.filterText}"`}</p>
-              )}
-              <InfiniteScroll
-                pageStart={0}
-                loadMore={this.loadMore}
-                hasMore={!this.props.allBotsLoaded && !this.props.isLoading}
-                loader={
-                  <div className="loader" key={0}>
-                    Loading ...
-                  </div>
-                }>
-                {botList.map((bot) => (
-                  <Bot
-                    key={bot.resource}
-                    bot={bot}
-                    apiUrl={this.state.apiUrl}
-                  />
-                ))}
-              </InfiniteScroll>
-            </div>
-          )}
-        </div>
+            <InfiniteScroll
+              pageStart={0}
+              loadMore={loadMore}
+              hasMore={!allBotsLoaded && !isLoading}
+              loader={
+                <div className="loader" key={0}>
+                  Loading ...
+                </div>
+              }>
+              {botList.map((bot) => (
+                <Bot key={bot.resource} bot={bot} apiUrl={apiUrl} />
+              ))}
+            </InfiniteScroll>
+          </div>
+        )}
       </div>
-    );
-  }
-}
+    </div>
+  );
+};
 
 const ComposedBotList: React.ComponentClass<IPublicProps> = compose<
   IPublicProps,
@@ -145,7 +136,6 @@ const ComposedBotList: React.ComponentClass<IPublicProps> = compose<
 >(
   pure,
   connect(botsSelector),
-  Radium,
   setDisplayName('BotList'),
 )(BotList);
 

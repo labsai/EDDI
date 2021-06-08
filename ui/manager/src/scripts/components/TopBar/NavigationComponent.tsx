@@ -1,8 +1,6 @@
+import { makeStyles } from '@material-ui/core/styles';
+import clsx from 'clsx';
 import * as React from 'react';
-import Radium from 'radium';
-import { CSSProperties } from 'react';
-import { historyPush } from '../../history';
-import PluginSelectComponent from './PluginSelectComponent';
 import {
   DARK_BLUE_COLOR,
   GREY_COLOR,
@@ -10,18 +8,16 @@ import {
   LIGHT_GREY_COLOR3,
   SMALL_FONT2,
 } from '../../../styles/DefaultStylingProperties';
+import { historyPush } from '../../history';
 import { pageEnum } from '../pages/pageEnum';
+import PluginSelectComponent from './PluginSelectComponent';
 
-const styles: { [key: string]: IExtendedCSSProperties } = {
+const useStyles = makeStyles({
   navBar: {
     width: 'fit-content',
     display: 'flex',
   },
   navBarItem: {
-    ':hover': {
-      backgroundColor: LIGHT_GREY_COLOR3,
-      borderBottom: '3px solid ' + GREY_COLOR,
-    },
     borderBottom: '3px solid #4A90E2',
     color: DARK_BLUE_COLOR,
     cursor: 'pointer',
@@ -31,51 +27,52 @@ const styles: { [key: string]: IExtendedCSSProperties } = {
     textAlign: 'center',
     width: '100px',
     lineHeight: '42px',
+    '&:hover': {
+      backgroundColor: LIGHT_GREY_COLOR3,
+      borderBottom: '3px solid ' + GREY_COLOR,
+    },
   },
   navBarItemDisabled: {
     borderBottom: '3px solid ' + LIGHT_GREY_COLOR2,
     color: GREY_COLOR,
   },
-};
+});
 
 interface IProps {
   page: pageEnum;
 }
 
-const NavigationComponent = (props: IProps) => (
-  <div style={styles.navBar}>
-    <div
-      key={'bots'}
-      onClick={() => historyPush('/')}
-      style={
-        props.page === pageEnum.bot
-          ? styles.navBarItem
-          : ([styles.navBarItem, styles.navBarItemDisabled] as any)
-      }>
-      <div>{'Bots'}</div>
+const NavigationComponent = (props: IProps) => {
+  const classes = useStyles();
+  return (
+    <div className={classes.navBar}>
+      <div
+        key={'bots'}
+        onClick={() => historyPush('/')}
+        className={clsx(classes.navBarItem, {
+          [classes.navBarItemDisabled]: props.page !== pageEnum.bot,
+        })}>
+        <div>{'Bots'}</div>
+      </div>
+      <div
+        key={'packages'}
+        onClick={() => historyPush('/packages')}
+        className={clsx(classes.navBarItem, {
+          [classes.navBarItemDisabled]: props.page !== pageEnum.package,
+        })}>
+        <div>{'Packages'}</div>
+      </div>
+      <div
+        key={'conversations'}
+        onClick={() => historyPush('/conversations')}
+        className={clsx(classes.navBarItem, {
+          [classes.navBarItemDisabled]: props.page !== pageEnum.conversation,
+        })}>
+        {'Conversations'}
+      </div>
+      <PluginSelectComponent page={props.page} />
     </div>
-    <div
-      key={'packages'}
-      onClick={() => historyPush('/packages')}
-      style={
-        props.page === pageEnum.package
-          ? styles.navBarItem
-          : ([styles.navBarItem, styles.navBarItemDisabled] as any)
-      }>
-      <div>{'Packages'}</div>
-    </div>
-    <div
-      key={'conversations'}
-      onClick={() => historyPush('/conversations')}
-      style={
-        props.page === pageEnum.conversation
-          ? styles.navBarItem
-          : ([styles.navBarItem, styles.navBarItemDisabled] as any)
-      }>
-      {'Conversations'}
-    </div>
-    <PluginSelectComponent page={props.page} />
-  </div>
-);
+  );
+};
 
-export default Radium(NavigationComponent);
+export default NavigationComponent;

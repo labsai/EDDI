@@ -1,52 +1,57 @@
+import { makeStyles } from '@material-ui/core/styles';
+import { ClassNameMap } from '@material-ui/styles/withStyles';
+import clsx from 'clsx';
 import * as React from 'react';
 import { compose, pure, setDisplayName } from 'recompose';
-import { CSSProperties } from 'react';
 import Button from './Button';
-import Radium from 'radium';
 
-const styles: { [key: string]: IExtendedCSSProperties } = {
+const useStyles = makeStyles({
   button: {
     border: '1px solid #D8DDE6',
     backgroundColor: '#FFFFFF',
     color: '#0070D2',
-  },
-  disabled: {
-    color: '#D8DDE6',
-    cursor: 'default',
-  },
-  active: {
-    ':hover': {
+
+    '&:disabled': {
+      cursor: 'default',
+      color: '#d8dde6',
+    },
+    '&:hover': {
       backgroundColor: '#E4E6E9',
     },
-    ':active': {
+    '&:active': {
       backgroundColor: '#FFFFFF',
     },
   },
-};
+});
 
 interface IProps {
   text: string;
   disabled?: boolean;
   customStyles?: {};
+  classes?: ClassNameMap;
   onClick(): void;
 }
 
-const WhiteButton: React.StatelessComponent<IProps> = (props: IProps) => (
-  <Button
-    text={props.text}
-    onClick={props.onClick}
-    disabled={props.disabled}
-    styles={styles}
-    customStyles={props.customStyles}
-  />
-);
+const WhiteButton: React.StatelessComponent<IProps> = (props: IProps) => {
+  const classes = useStyles();
+  return (
+    <Button
+      text={props.text}
+      onClick={props.onClick}
+      disabled={props.disabled}
+      classes={{
+        button: clsx(classes.button, props.classes?.button),
+      }}
+      customStyles={props.customStyles}
+    />
+  );
+};
 
 const ComposedWhiteButton: React.ComponentClass<IProps> = compose<
   IProps,
   IProps
 >(
   pure,
-  Radium,
   setDisplayName('WhiteButton'),
 )(WhiteButton);
 

@@ -1,4 +1,4 @@
-import { CSSProperties } from 'react';
+import { makeStyles } from '@material-ui/core/styles';
 import {
   BLUE_COLOR,
   DARK_GREY_COLOR,
@@ -13,7 +13,7 @@ import {
   SMALL_FONT,
 } from '../../../../styles/DefaultStylingProperties';
 
-const styles: { [key: string]: IExtendedCSSProperties } = {
+const useStyles = makeStyles({
   pluginCenter: {
     flex: 1,
   },
@@ -46,7 +46,7 @@ const styles: { [key: string]: IExtendedCSSProperties } = {
     marginTop: '-5px',
   },
   clickablePluginBox: {
-    ':hover': {
+    '&:hover': {
       border: `1px solid ${BLUE_COLOR}`,
     },
     cursor: 'pointer',
@@ -88,7 +88,7 @@ const styles: { [key: string]: IExtendedCSSProperties } = {
     marginTop: '5px',
   },
   addResourceButton: {
-    ':hover': {
+    '&:hover': {
       color: GREY_COLOR,
     },
     cursor: 'pointer',
@@ -132,7 +132,7 @@ const styles: { [key: string]: IExtendedCSSProperties } = {
     textAlign: 'left',
   },
   updateAvailableButton: {
-    ':hover': {
+    '&:hover': {
       boxShadow: '0 0 3px #0070d2',
     },
     backgroundColor: '#ffffff',
@@ -173,5 +173,17 @@ const styles: { [key: string]: IExtendedCSSProperties } = {
     marginRight: '10px',
     marginLeft: 'auto',
   },
-};
-export default styles;
+  extensionList: {
+    display: 'grid',
+    marginTop: '10px',
+    marginLeft: '10px',
+    marginRight: '10px',
+    marginBottom: '10px',
+    gridGap: '10px 20px',
+    gridTemplateColumns: 'repeat(auto-fill, minmax(240px, 1fr))',
+    minHeight: '5px',
+    minWidth: '5px',
+  },
+});
+
+export default useStyles;

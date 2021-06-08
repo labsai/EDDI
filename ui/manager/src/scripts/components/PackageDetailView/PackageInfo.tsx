@@ -5,7 +5,7 @@ import ClimbingBoxLoader from 'react-spinners/ClimbingBoxLoader';
 import { compose, pure, setDisplayName } from 'recompose';
 import eddiApiActionDispatchers from '../../actions/EddiApiActionDispatchers';
 import { specificPackageSelector } from '../../selectors/PackageSelectors';
-import styles from '../Bots/Botlist.styles';
+import useStyles from '../Bots/Botlist.styles';
 import HomeButtonComponent from '../HomeButton/HomeButtonComponent';
 import { IPackage } from '../utils/AxiosFunctions';
 import { PACKAGE, PACKAGE_PATH } from '../utils/EddiTypes';
@@ -22,41 +22,45 @@ interface IPrivateProps extends IPublicProps {
   error: Error;
 }
 
-class PackageInfo extends React.Component<IPrivateProps> {
-  async componentDidMount() {
-    if (_.isEmpty(this.props.version)) {
-      eddiApiActionDispatchers.fetchCurrentPackageAction(this.props.packageId);
+const PackageInfo = ({
+  packageId,
+  version,
+  packagePayload,
+  isLoading,
+  error,
+}: IPrivateProps) => {
+  const classes = useStyles();
+
+  React.useEffect(() => {
+    if (_.isEmpty(version)) {
+      eddiApiActionDispatchers.fetchCurrentPackageAction(packageId);
     } else {
       eddiApiActionDispatchers.fetchPackageAction(
-        `${PACKAGE}${PACKAGE_PATH}/${this.props.packageId}?version=${this.props.version}`,
+        `${PACKAGE}${PACKAGE_PATH}/${packageId}?version=${version}`,
       );
     }
-  }
+  }, []);
 
-  render() {
-    return (
-      <div>
-        <HomeButtonComponent />
-        {this.props.isLoading && (
-          <div style={styles.loadingWrapper}>
-            <ClimbingBoxLoader loading />
-          </div>
-        )}
-        {!this.props.isLoading && (
-          <div>
-            {!!this.props.error && <p>{'Error: Could not load package'}</p>}
-            {!this.props.error && _.isEmpty(this.props.packagePayload) && (
-              <p>{'Package not found'}</p>
-            )}
-            {!this.props.error && !_.isEmpty(this.props.packagePayload) && (
-              <PackageView packagePayload={this.props.packagePayload} />
-            )}
-          </div>
-        )}
-      </div>
-    );
-  }
-}
+  return (
+    <div>
+      <HomeButtonComponent />
+      {isLoading && (
+        <div className={classes.loadingWrapper}>
+          <ClimbingBoxLoader loading />
+        </div>
+      )}
+      {!isLoading && (
+        <div>
+          {!!error && <p>{'Error: Could not load package'}</p>}
+          {!error && _.isEmpty(packagePayload) && <p>{'Package not found'}</p>}
+          {!error && !_.isEmpty(packagePayload) && (
+            <PackageView packagePayload={packagePayload} />
+          )}
+        </div>
+      )}
+    </div>
+  );
+};
 
 const ComposedPackageInfo: React.ComponentClass<IPublicProps, IPrivateProps> =
   compose<IPublicProps, IPrivateProps>(

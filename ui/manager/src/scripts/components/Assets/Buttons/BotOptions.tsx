@@ -14,7 +14,6 @@ import FileCopyOutlinedIcon from '@material-ui/icons/FileCopyOutlined';
 import ForumOutlinedIcon from '@material-ui/icons/ForumOutlined';
 import HighlightOffOutlinedIcon from '@material-ui/icons/HighlightOffOutlined';
 import MoreVertIcon from '@material-ui/icons/MoreVert';
-import Radium from 'radium';
 import * as React from 'react';
 import { connect } from 'react-redux';
 import { compose, pure, setDisplayName } from 'recompose';
@@ -262,7 +261,6 @@ const ComposedBotOptions: React.ComponentClass<IPublicProps, IPrivateProps> =
   compose<IPrivateProps, IPublicProps>(
     pure,
     connect(readOnlySelector),
-    Radium,
     setDisplayName('BotOptions'),
   )(BotOptions);
 

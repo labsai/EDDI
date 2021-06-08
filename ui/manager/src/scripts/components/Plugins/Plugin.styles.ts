@@ -1,14 +1,13 @@
-import { CSSProperties } from 'react';
+import { makeStyles } from '@material-ui/core/styles';
 import {
   DARK_BLUE_COLOR,
   GREY_COLOR,
   LARGE_FONT,
   LIGHT_GREY_COLOR,
-  LIGHT_GREY_COLOR2,
   LIGHT_GREY_COLOR3,
 } from '../../../styles/DefaultStylingProperties';
 
-const styles: { [key: string]: IExtendedCSSProperties } = {
+const useStyles = makeStyles({
   pluginName: {
     color: DARK_BLUE_COLOR,
     fontSize: LARGE_FONT,
@@ -32,7 +31,7 @@ const styles: { [key: string]: IExtendedCSSProperties } = {
     borderBottom: `2px solid ${LIGHT_GREY_COLOR}`,
   },
   topContent: {
-    ':hover': {
+    '&:hover': {
       backgroundColor: LIGHT_GREY_COLOR3,
     },
     cursor: 'pointer',
@@ -66,11 +65,14 @@ const styles: { [key: string]: IExtendedCSSProperties } = {
   versionSelect: {
     position: 'relative',
     marginRight: '10px',
+    marginTop: 'auto',
+    marginBottom: 'auto',
   },
   options: {
     marginTop: 'auto',
     marginBottom: 'auto',
     marginRight: '5px',
   },
-};
-export default styles;
+});
+
+export default useStyles;

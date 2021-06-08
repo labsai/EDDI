@@ -1,17 +1,17 @@
-import * as React from 'react';
-import { compose, pure, setDisplayName } from 'recompose';
-import Parser from '../../utils/Parser';
+import clsx from 'clsx';
 import * as _ from 'lodash';
-import styles from './Plugin.styles';
-import { IPlugin, IPluginExtensions } from '../../utils/AxiosFunctions';
-import eddiApiActionDispatchers from '../../../actions/EddiApiActionDispatchers';
-import { pluginSelector } from '../../../selectors/PluginSelectors';
+import * as React from 'react';
 import { connect } from 'react-redux';
-import WhiteButton from '../../Assets/Buttons/WhiteButton';
-import SquareXButton from '../../Assets/Buttons/SquareXButton';
-import PluginHelper from '../../utils/helpers/PluginHelper';
+import { compose, pure, setDisplayName } from 'recompose';
+import eddiApiActionDispatchers from '../../../actions/EddiApiActionDispatchers';
 import ModalActionDispatchers from '../../../actions/ModalActionDispatchers';
-import Radium from 'radium';
+import { pluginSelector } from '../../../selectors/PluginSelectors';
+import SquareXButton from '../../Assets/Buttons/SquareXButton';
+import WhiteButton from '../../Assets/Buttons/WhiteButton';
+import { IPlugin, IPluginExtensions } from '../../utils/AxiosFunctions';
+import PluginHelper from '../../utils/helpers/PluginHelper';
+import Parser from '../../utils/Parser';
+import useStyles from './Plugin.styles';
 
 interface IPublicProps {
   pluginType: IPluginExtensions;
@@ -26,128 +26,99 @@ interface IPrivateProps extends IPublicProps {
   plugin: IPlugin;
 }
 
-class Extension extends React.Component<IPrivateProps> {
-  componentDidMount() {
-    if (!_.isEmpty(this.props.pluginResource)) {
-      eddiApiActionDispatchers.fetchPluginAction(this.props.pluginResource);
+const Extension = ({
+  pluginType,
+  index,
+  pluginResource,
+  editDisabled,
+  deleteExtension,
+  updateExtension,
+  plugin,
+}: IPrivateProps) => {
+  const classes = useStyles();
+  React.useEffect(() => {
+    if (!_.isEmpty(pluginResource)) {
+      eddiApiActionDispatchers.fetchPluginAction(pluginResource);
     }
-  }
+  }, [pluginResource]);
 
-  componentDidUpdate(prevProps) {
-    if (
-      !_.isEmpty(this.props.pluginResource) &&
-      this.props.pluginResource !== prevProps.pluginResource
-    ) {
-      eddiApiActionDispatchers.fetchPluginAction(this.props.pluginResource);
-    }
-  }
-
-  deleteExtension = () => {
-    this.props.deleteExtension(this.props.index, this.props.pluginType.type);
+  const handleDeleteExtension = () => {
+    deleteExtension(index, pluginType.type);
   };
 
-  updateVersion = () => {
-    this.props.updateExtension(
-      Parser.replaceResourceVersion(
-        this.props.plugin.resource,
-        this.props.plugin.currentVersion,
-      ),
+  const updateVersion = () => {
+    updateExtension(
+      Parser.replaceResourceVersion(plugin.resource, plugin.currentVersion),
     );
   };
 
-  getPluginName() {
-    if (!_.isEmpty(this.props.plugin)) {
+  const getPluginName = () => {
+    if (!_.isEmpty(plugin)) {
       return (
-        (this.props.plugin && this.props.plugin.name) ||
-        Parser.getPluginName(this.props.pluginType.type, true)
+        (plugin && plugin.name) || Parser.getPluginName(pluginType.type, true)
       );
     } else {
-      return Parser.getPluginName(this.props.pluginType.type, true);
-    }
-  }
-
-  getNameStyling() {
-    if (this.props.plugin.version === this.props.plugin.currentVersion) {
-      return { ...styles.pluginName };
-    } else {
-      return {
-        ...styles.pluginName,
-        ...styles.updateAvailableTextColor,
-      };
-    }
-  }
-
-  getBoxStyling() {
-    if (this.props.plugin.version === this.props.plugin.currentVersion) {
-      if (!_.isEmpty(this.props.plugin)) {
-        return { ...styles.extensionBox, ...styles.clickablePluginBox };
-      } else {
-        return styles.extensionBox;
-      }
-    } else {
-      return {
-        ...styles.extensionBox,
-        ...styles.updateAvailableBorderColor,
-      };
-    }
-  }
-
-  openViewJsonModal = () => {
-    if (!_.isEmpty(this.props.pluginResource)) {
-      ModalActionDispatchers.showViewJsonModal(this.props.pluginResource);
+      return Parser.getPluginName(pluginType.type, true);
     }
   };
 
-  render() {
-    const { plugin } = this.props;
-    const isCurrentVersion: boolean =
-      plugin && plugin.version === plugin.currentVersion;
-    let pluginLatestVersion = 'v01';
-    if (!isCurrentVersion) {
-      pluginLatestVersion = Parser.getVersionString(plugin.currentVersion);
+  const openViewJsonModal = () => {
+    if (!_.isEmpty(pluginResource)) {
+      ModalActionDispatchers.showViewJsonModal(pluginResource);
     }
-    return (
-      <div style={styles.extensionContainer}>
-        {!this.props.editDisabled && (
-          <SquareXButton
-            customStyles={styles.closeButton}
-            onClick={this.deleteExtension}
-          />
-        )}
-        <button style={this.getBoxStyling()} onClick={this.openViewJsonModal}>
-          <div style={styles.pluginHeader}>
-            <div style={this.getNameStyling()}>{this.getPluginName()}</div>
-            <div style={styles.pluginVersion}>
-              {PluginHelper.getVersion(
-                this.props.pluginType.type,
-                this.props.plugin,
-                true,
-              )}
-            </div>
-          </div>
-          <div style={styles.pluginDate}>
-            {Parser.getExtensionType(this.props.pluginType.type)}
-          </div>
-          <div style={styles.pluginDate}>
-            {PluginHelper.getLastModified(
-              this.props.pluginType.type,
-              this.props.plugin,
-              true,
-              <br />,
-            )}
-          </div>
-        </button>
-        {!isCurrentVersion && !this.props.editDisabled && (
-          <WhiteButton
-            onClick={this.updateVersion}
-            text={`Update to ${pluginLatestVersion}`}
-            customStyles={styles.updateAvailableButton}
-          />
-        )}
-      </div>
-    );
+  };
+
+  const isCurrentVersion: boolean =
+    plugin && plugin.version === plugin.currentVersion;
+  let pluginLatestVersion = 'v01';
+  if (!isCurrentVersion) {
+    pluginLatestVersion = Parser.getVersionString(plugin.currentVersion);
   }
-}
+  return (
+    <div className={classes.extensionContainer}>
+      {!editDisabled && (
+        <SquareXButton
+          classes={{ button: classes.closeButton }}
+          onClick={handleDeleteExtension}
+        />
+      )}
+      <button
+        onClick={openViewJsonModal}
+        className={clsx(classes.extensionBox, {
+          [classes.clickablePluginBox]:
+            plugin.version === plugin.currentVersion && !_.isEmpty(plugin),
+          [classes.updateAvailableBorderColor]:
+            plugin.version !== plugin.currentVersion,
+        })}>
+        <div className={classes.pluginHeader}>
+          <div
+            className={clsx(classes.pluginName, {
+              [classes.updateAvailableTextColor]:
+                plugin.version !== plugin.currentVersion,
+            })}>
+            {getPluginName()}
+          </div>
+          <div className={classes.pluginVersion}>
+            {PluginHelper.getVersion(pluginType.type, plugin, true)}
+          </div>
+        </div>
+        <div className={classes.pluginDate}>
+          {Parser.getExtensionType(pluginType.type)}
+        </div>
+        <div className={classes.pluginDate}>
+          {PluginHelper.getLastModified(pluginType.type, plugin, true, <br />)}
+        </div>
+      </button>
+      {!isCurrentVersion && !editDisabled && (
+        <WhiteButton
+          onClick={updateVersion}
+          text={`Update to ${pluginLatestVersion}`}
+          classes={{ butoon: classes.updateAvailableButton }}
+        />
+      )}
+    </div>
+  );
+};
 
 const ComposedExtension: React.ComponentClass<IPublicProps> = compose<
   IPrivateProps,
@@ -156,7 +127,6 @@ const ComposedExtension: React.ComponentClass<IPublicProps> = compose<
   pure,
   connect(pluginSelector),
   setDisplayName('Extension'),
-  Radium,
 )(Extension);
 
 export default ComposedExtension;

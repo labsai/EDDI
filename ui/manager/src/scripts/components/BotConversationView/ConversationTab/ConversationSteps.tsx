@@ -1,5 +1,4 @@
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
-import Radium from 'radium';
 import * as React from 'react';
 import { compose, pure, setDisplayName } from 'recompose';
 import { GREY_COLOR } from '../../../../styles/DefaultStylingProperties';
@@ -9,7 +8,7 @@ import {
   IConversationSteps,
 } from '../../utils/AxiosFunctions';
 import ConversationStep from './ConversationStep';
-import styles from './ConversationSteps.styles';
+import useStyles from './ConversationSteps.styles';
 
 interface IProps {
   isLoading: boolean;
@@ -18,104 +17,93 @@ interface IProps {
   conversationOutputs: IConversationOutput[];
 }
 
-interface IState {
-  showAllActions: boolean;
-  autoRefresh: boolean;
-  autoRefreshInterval: number;
-}
+const ConversationSteps = ({
+  conversationOutputs,
+  conversationSteps,
+  conversationId,
+}: IProps) => {
+  const classes = useStyles();
 
-class ConversationSteps extends React.Component<IProps, IState> {
-  constructor(props) {
-    super(props);
-    this.state = {
-      showAllActions: false,
-      autoRefresh: false,
-      autoRefreshInterval: null,
-    };
-  }
+  const [showAllActions, setshowAllActions] = React.useState<boolean>(false);
+  const [autoRefresh, setAutoRefresh] = React.useState<boolean>(false);
+  const [autoRefreshInterval, setAutoRefreshInterval] =
+    React.useState<number>(null);
 
-  toggleShowAllActions() {
-    this.setState({ showAllActions: !this.state.showAllActions });
-  }
+  const toggleShowAllActions = () => {
+    setshowAllActions(!showAllActions);
+  };
 
-  toggleAutoRefresh() {
-    if (!this.state.autoRefresh) {
-      this.setState({
-        autoRefresh: true,
-        autoRefreshInterval: window.setInterval(
+  const toggleAutoRefresh = () => {
+    if (!autoRefresh) {
+      setAutoRefresh(true);
+      setAutoRefreshInterval(
+        window.setInterval(
           () =>
-            eddiApiActionDispatchers.fetchConversationAction(
-              this.props.conversationId,
-            ),
+            eddiApiActionDispatchers.fetchConversationAction(conversationId),
           1000,
         ),
-      });
+      );
     } else {
-      window.clearInterval(this.state.autoRefreshInterval);
-      this.setState({
-        autoRefresh: false,
-        autoRefreshInterval: null,
-      });
+      window.clearInterval(autoRefreshInterval);
+      setAutoRefresh(false);
+      setAutoRefreshInterval(null);
     }
-  }
+  };
 
-  render() {
-    return (
-      <div>
-        <div style={styles.title}>{`Conversation Steps`}</div>
-        <div style={styles.toolbar}>
-          <div style={styles.conversationSettings}>
-            <div style={styles.toggleBox}>
-              <div
-                style={styles.button}
-                onClick={() => this.toggleShowAllActions()}
-                key={'showAllActions'}>
-                {this.state.showAllActions && (
-                  <FontAwesomeIcon
-                    style={styles.icon}
-                    icon={['fas', 'check']}
-                    color={GREY_COLOR}
-                  />
-                )}
-              </div>
-              <div style={styles.toggleText}>{'Show all actions'}</div>
+  return (
+    <div>
+      <div className={classes.title}>{`Conversation Steps`}</div>
+      <div className={classes.toolbar}>
+        <div className={classes.conversationSettings}>
+          <div className={classes.toggleBox}>
+            <div
+              className={classes.button}
+              onClick={toggleShowAllActions}
+              key={'showAllActions'}>
+              {showAllActions && (
+                <FontAwesomeIcon
+                  className={classes.icon}
+                  icon={['fas', 'check']}
+                  color={GREY_COLOR}
+                />
+              )}
             </div>
-            <div style={styles.toggleBox}>
-              <div
-                style={styles.button}
-                onClick={() => this.toggleAutoRefresh()}
-                key={'autoRefresh'}>
-                {this.state.autoRefresh && (
-                  <FontAwesomeIcon
-                    style={styles.icon}
-                    icon={['fas', 'check']}
-                    color={GREY_COLOR}
-                  />
-                )}
-              </div>
-              <div style={styles.toggleText}>{'Auto refresh'}</div>
+            <div className={classes.toggleText}>{'Show all actions'}</div>
+          </div>
+          <div className={classes.toggleBox}>
+            <div
+              className={classes.button}
+              onClick={toggleAutoRefresh}
+              key={'autoRefresh'}>
+              {autoRefresh && (
+                <FontAwesomeIcon
+                  className={classes.icon}
+                  icon={['fas', 'check']}
+                  color={GREY_COLOR}
+                />
+              )}
             </div>
+            <div className={classes.toggleText}>{'Auto refresh'}</div>
           </div>
         </div>
-        {this.props.conversationSteps.map((conversationStep, i) => (
-          <ConversationStep
-            key={i}
-            showAction={this.state.showAllActions}
-            conversationStep={conversationStep}
-            conversationOutput={this.props.conversationOutputs[i]}
-          />
-        ))}
       </div>
-    );
-  }
-}
+      {conversationSteps.map((conversationStep, i) => (
+        <ConversationStep
+          key={i}
+          showAction={showAllActions}
+          conversationStep={conversationStep}
+          conversationOutput={conversationOutputs[i]}
+        />
+      ))}
+    </div>
+  );
+};
 
 const ComposedConversationSteps: React.ComponentClass<IProps> = compose<
   IProps,
   IProps
 >(
   pure,
-  Radium,
   setDisplayName('ConversationSteps'),
 )(ConversationSteps);
 
