@@ -1,13 +1,11 @@
-import { CSSProperties } from 'react';
+import { makeStyles } from '@material-ui/core/styles';
 import {
   GREY_BORDER,
-  MEDIUM_FONT,
   MEDIUM_FONT2,
   RED_COLOR,
-  SMALL_FONT2,
 } from '../../../../styles/DefaultStylingProperties';
 
-const styles: { [key: string]: IExtendedCSSProperties } = {
+const styles = makeStyles({
   content: {
     color: '#54698D',
     fontSize: '12px',
@@ -73,5 +71,5 @@ const styles: { [key: string]: IExtendedCSSProperties } = {
     marginLeft: '5px',
     marginTop: '6px',
   },
-};
+});
 export default styles;

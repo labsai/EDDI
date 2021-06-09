@@ -1,43 +1,33 @@
 import * as React from 'react';
-import TopBarComponent from '../TopBar/TopBarComponent';
-import styles from '../App.style';
 import { compose, pure, setDisplayName } from 'recompose';
+import useStyles from '../App.style';
 import PackageList from '../Packages/PackageList';
+import TopBarComponent from '../TopBar/TopBarComponent';
 import { pageEnum } from './pageEnum';
-
-interface IProps {}
-interface IState {
-  filterText: string;
-}
 
 const eddiLogo = require('../../../public/images/eddi-logo.png');
 
-class PackagePage extends React.Component<IProps, IState> {
-  constructor(props) {
-    super(props);
-    this.state = {
-      filterText: '',
-    };
-  }
+const PackagePage = () => {
+  const [filterText, setFilterText] = React.useState('');
 
-  filter = (text: string) => {
-    this.setState({ filterText: text });
+  const classes = useStyles();
+
+  const filter = (text: string) => {
+    setFilterText(text);
   };
 
-  render() {
-    return (
-      <div>
-        <img src={eddiLogo} style={styles.eddiLogo} />
-        <div className="content">
-          <TopBarComponent page={pageEnum.package} filter={this.filter} />
-          <PackageList filterText={this.state.filterText} />
-        </div>
+  return (
+    <div>
+      <img src={eddiLogo} className={classes.eddiLogo} />
+      <div className="content">
+        <TopBarComponent page={pageEnum.package} filter={filter} />
+        <PackageList filterText={filterText} />
       </div>
-    );
-  }
-}
+    </div>
+  );
+};
 
-const ComposedPackagePage: React.ComponentClass = compose<IProps, IState>(
+const ComposedPackagePage = compose(
   pure,
   setDisplayName('PackagePage'),
 )(PackagePage);

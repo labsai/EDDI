@@ -24,7 +24,8 @@ const useStyles = makeStyles({
   modifiedDate: {
     color: GREY_COLOR,
     fontSize: '13px',
-    marginTop: '10px',
+    marginTop: 'auto',
+    marginBottom: 'auto',
   },
   content: {
     marginTop: '30px',

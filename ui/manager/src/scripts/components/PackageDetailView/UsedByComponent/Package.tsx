@@ -1,6 +1,5 @@
 import * as React from 'react';
 import { compose, pure, setDisplayName } from 'recompose';
-import Radium from 'radium';
 import { IPackage } from '../../utils/AxiosFunctions';
 import { connect } from 'react-redux';
 import NameAndVersion from './NameAndVersion';
@@ -19,20 +18,20 @@ interface IPrivateProps extends IPublicProps {
   error: Error;
 }
 
-class Package extends React.Component<IPrivateProps> {
-  render() {
-    return (
-      <NameAndVersion
-        descriptor={this.props.packagePayload}
-        usedByOlderVersion={this.props.usedByOlderVersion}
-        isSmallName={this.props.isSmallName}
-        onClick={() =>
-          historyPush(`/packageview/${this.props.packagePayload.id}`)
-        }
-      />
-    );
-  }
-}
+const Package = ({
+  packagePayload,
+  usedByOlderVersion,
+  isSmallName,
+}: IPrivateProps) => {
+  return (
+    <NameAndVersion
+      descriptor={packagePayload}
+      usedByOlderVersion={usedByOlderVersion}
+      isSmallName={isSmallName}
+      onClick={() => historyPush(`/packageview/${packagePayload.id}`)}
+    />
+  );
+};
 
 const ComposedPackage: React.ComponentClass<IPublicProps> = compose<
   IPrivateProps,
@@ -40,7 +39,6 @@ const ComposedPackage: React.ComponentClass<IPublicProps> = compose<
 >(
   pure,
   connect(packageSelector),
-  Radium,
   setDisplayName('Package'),
 )(Package);
 

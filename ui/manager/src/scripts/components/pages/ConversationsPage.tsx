@@ -1,46 +1,33 @@
 import * as React from 'react';
-import TopBarComponent from '../TopBar/TopBarComponent';
-import styles from '../App.style';
 import { compose, pure, setDisplayName } from 'recompose';
-import { pageEnum } from './pageEnum';
+import useStyles from '../App.style';
 import ConversationList from '../Conversations/ConversationList';
-
-interface IProps {}
-interface IState {
-  filterText: string;
-}
+import TopBarComponent from '../TopBar/TopBarComponent';
+import { pageEnum } from './pageEnum';
 
 const eddiLogo = require('../../../public/images/eddi-logo.png');
 
-class ConversationsPage extends React.Component<IProps, IState> {
-  constructor(props) {
-    super(props);
-    this.state = {
-      filterText: '',
-    };
-  }
+const ConversationsPage = () => {
+  const [filterText, setFilterText] = React.useState('');
 
-  filter = (text: string) => {
-    this.setState({ filterText: text });
+  const classes = useStyles();
+
+  const filter = (text: string) => {
+    setFilterText(text);
   };
 
-  render() {
-    return (
-      <div>
-        <img src={eddiLogo} style={styles.eddiLogo} />
-        <div className="content">
-          <TopBarComponent page={pageEnum.conversation} filter={this.filter} />
-          <ConversationList filterText={this.state.filterText} />
-        </div>
+  return (
+    <div>
+      <img src={eddiLogo} className={classes.eddiLogo} />
+      <div className="content">
+        <TopBarComponent page={pageEnum.conversation} filter={filter} />
+        <ConversationList filterText={filterText} />
       </div>
-    );
-  }
-}
+    </div>
+  );
+};
 
-const ComposedConversationsPage: React.ComponentClass<IProps> = compose<
-  IProps,
-  IState
->(
+const ComposedConversationsPage = compose(
   pure,
   setDisplayName('ConversationsPage'),
 )(ConversationsPage);

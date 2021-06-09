@@ -17,72 +17,57 @@ interface IState {
   selectedResource: string;
 }
 
-class ViewJsonModal extends React.Component<IPrivateProps, IState> {
-  constructor(props) {
-    super(props);
-    this.state = {
-      selectedResource: this.props.resource,
-    };
-  }
+const ViewJsonModal = ({ resource }: IPrivateProps) => {
+  const [selectedResource, setSelectedResource] =
+    React.useState<string>(resource);
 
-  async componentDidMount() {
-    if (this.isPackage()) {
-      eddiApiActionDispatchers.fetchPackageAction(this.props.resource);
+  React.useEffect(() => {
+    if (isPackage()) {
+      eddiApiActionDispatchers.fetchPackageAction(resource);
     } else {
-      eddiApiActionDispatchers.fetchPluginAction(this.props.resource);
+      eddiApiActionDispatchers.fetchPluginAction(resource);
     }
-    this.setState({
-      selectedResource: this.props.resource,
-    });
-  }
+    setSelectedResource(resource);
+  }, []);
 
-  componentDidUpdate(prevProps) {
-    if (prevProps !== this.props) {
-      this.setState({
-        selectedResource: this.props.resource,
-      });
-    }
-  }
+  React.useEffect(() => {
+    setSelectedResource(resource);
+  }, [resource]);
 
-  selectVersion = (newVersion: number) => {
-    const selectedResource = Parser.replaceResourceVersion(
-      this.state.selectedResource,
+  const selectVersion = (newVersion: number) => {
+    const tempSelectedResource = Parser.replaceResourceVersion(
+      selectedResource,
       newVersion,
     );
-    this.setState({
-      selectedResource,
-    });
-    if (this.isPackage()) {
-      eddiApiActionDispatchers.fetchPackageAction(selectedResource);
+    setSelectedResource(tempSelectedResource);
+    if (isPackage()) {
+      eddiApiActionDispatchers.fetchPackageAction(tempSelectedResource);
     } else {
-      eddiApiActionDispatchers.fetchPluginAction(selectedResource);
+      eddiApiActionDispatchers.fetchPluginAction(tempSelectedResource);
     }
   };
 
-  isPackage() {
-    return this.props.resource.includes(PACKAGE);
-  }
+  const isPackage = () => {
+    return resource.includes(PACKAGE);
+  };
 
-  render() {
-    const isPackage = this.isPackage();
-    return (
-      <div>
-        {isPackage && (
-          <PackageContainer
-            packageResource={this.state.selectedResource}
-            selectVersion={this.selectVersion}
-          />
-        )}
-        {!isPackage && (
-          <PluginContainer
-            pluginResource={this.state.selectedResource}
-            selectVersion={this.selectVersion}
-          />
-        )}
-      </div>
-    );
-  }
-}
+  return (
+    <div>
+      {isPackage() && (
+        <PackageContainer
+          packageResource={selectedResource}
+          selectVersion={selectVersion}
+        />
+      )}
+      {!isPackage() && (
+        <PluginContainer
+          pluginResource={selectedResource}
+          selectVersion={selectVersion}
+        />
+      )}
+    </div>
+  );
+};
 
 const ComposedViewJsonModal: React.ComponentClass<IPrivateProps> = compose<
   IPrivateProps,

@@ -12,16 +12,9 @@ import { DEFAULT_LIMIT } from '../../utils/ApiFunctions';
 import { IDescriptor } from '../../utils/AxiosFunctions';
 import { REGULAR_DICTIONARY } from '../../utils/EddiTypes';
 import Parser from '../../utils/Parser';
-import styles from '../AddPackagesModal/AddPackagesModal.styles';
+import useStyles from '../AddPackagesModal/AddPackagesModal.styles';
 import '../ModalComponent.styles.scss';
 import Plugin from './Plugin';
-
-interface IState {
-  selectedPlugins: string[];
-  availablePlugins: string[];
-  limitedToOneSelect: boolean;
-  loading: boolean;
-}
 
 interface IPublicProps {
   pluginType: string;
@@ -37,231 +30,200 @@ interface IPrivateProps extends IPublicProps {
   loadedPlugins: number;
 }
 
-class AddPluginModal extends React.Component<IPrivateProps, IState> {
-  constructor(props) {
-    super(props);
-    this.state = {
-      selectedPlugins: [],
-      availablePlugins: [],
-      limitedToOneSelect: true,
-      loading: false,
-    };
-  }
+const AddPluginModal = (props: IPrivateProps) => {
+  const [selectedPlugins, setSelectedPlugins] = React.useState<string[]>([]);
+  const [availablePlugins, setAvailablePlugins] = React.useState<string[]>([]);
+  const [limitedToOneSelect, setLimitedToOneSelect] = React.useState(true);
+  const [loading, setLoading] = React.useState(false);
+  const classes = useStyles();
 
-  componentDidMount() {
-    if (this.props.pluginType === REGULAR_DICTIONARY) {
-      this.setState({
-        limitedToOneSelect: false,
-      });
+  const pluginsRef = React.useRef(null);
+
+  React.useEffect(() => {
+    if (props.pluginType === REGULAR_DICTIONARY) {
+      setLimitedToOneSelect(false);
     }
-    if (
-      this.props.plugins.length < DEFAULT_LIMIT &&
-      !this.props.isAllPluginsLoaded
-    ) {
+    if (props.plugins.length < DEFAULT_LIMIT && !props.isAllPluginsLoaded) {
       eddiApiActionDispatchers.fetchPluginsAction(
-        this.props.pluginType,
+        props.pluginType,
         DEFAULT_LIMIT,
         0,
       );
     }
-    this.discardChanges();
-  }
+    discardChanges();
+  }, []);
 
-  componentDidUpdate(prevProps) {
+  React.useEffect(() => {
+    pluginsRef.current = props.plugins;
+  });
+
+  React.useEffect(() => {
     if (
-      !_.isEmpty(
-        _.differenceBy(this.props.plugins, prevProps.plugins, 'resource'),
-      )
+      !_.isEmpty(_.differenceBy(props.plugins, pluginsRef.current, 'resource'))
     ) {
-      this.discardChanges(this.props);
+      discardChanges();
     }
-  }
+  }, [props.plugins]);
 
-  closeModal = () => {
-    this.discardChanges();
+  const closeModal = () => {
+    discardChanges();
     ModalActionDispatchers.closeModal();
   };
 
-  selectVersion = (resource: string, version: number) => {
+  const selectVersion = (resource: string, version: number) => {
     const id = Parser.getId(resource);
-    const availablePlugins = this.state.availablePlugins.map((p) => {
+    const tempAvailablePlugins = availablePlugins.map((p) => {
       if (Parser.getId(p) === id) {
         return Parser.replaceResourceVersion(p, version);
       }
       return p;
     });
-    const selectedPlugins = this.state.selectedPlugins.filter(
+    const tempSelectedPlugins = selectedPlugins.filter(
       (selectedPackage) => Parser.getId(selectedPackage) !== id,
     );
-    this.setState({
-      availablePlugins,
-      selectedPlugins,
-    });
+    setAvailablePlugins(tempAvailablePlugins);
+    setSelectedPlugins(tempSelectedPlugins);
   };
 
-  selectPlugin = (pluginResource: string) => {
-    if (this.state.limitedToOneSelect) {
-      if (_.first(this.state.selectedPlugins) === pluginResource) {
-        this.setState({
-          selectedPlugins: [],
-        });
+  const selectPlugin = (pluginResource: string) => {
+    if (limitedToOneSelect) {
+      if (_.first(selectedPlugins) === pluginResource) {
+        setSelectedPlugins([]);
       } else {
-        this.setState({
-          selectedPlugins: [pluginResource],
-        });
+        setSelectedPlugins([pluginResource]);
       }
     } else {
-      if (this.state.selectedPlugins.includes(pluginResource)) {
-        this.setState({
-          selectedPlugins: this.state.selectedPlugins.filter(
-            (p) => p !== pluginResource,
-          ),
-        });
+      if (selectedPlugins.includes(pluginResource)) {
+        setSelectedPlugins(selectedPlugins.filter((p) => p !== pluginResource));
       } else {
-        this.setState({
-          selectedPlugins: this.state.selectedPlugins.concat(pluginResource),
-        });
+        setSelectedPlugins(selectedPlugins.concat(pluginResource));
       }
     }
   };
 
-  unsavedChanges(): boolean {
-    return !_.isEqual(
-      this.state.selectedPlugins.sort(),
-      this.props.oldPlugins.sort(),
-    );
-  }
+  const unsavedChanges = (): boolean => {
+    return !_.isEqual(selectedPlugins.sort(), props.oldPlugins.sort());
+  };
 
-  discardChanges(props = this.props): void {
+  const discardChanges = (): void => {
     const availablePlugins = props.plugins.map((pkg) => {
-      return this.getPluginIfUsed(pkg.resource);
+      return getPluginIfUsed(pkg.resource);
     });
-    this.setState({
-      selectedPlugins: props.oldPlugins,
-      availablePlugins,
-    });
-  }
+    setSelectedPlugins(props.oldPlugins);
+    setAvailablePlugins(availablePlugins);
+  };
 
-  isPluginSelected(pluginResource: string): boolean {
-    return !!this.state.selectedPlugins.find(
+  const isPluginSelected = (pluginResource: string): boolean => {
+    return !!selectedPlugins.find(
       (selectedPlugin) =>
         Parser.getId(pluginResource) === Parser.getId(selectedPlugin),
     );
-  }
+  };
 
-  getPluginIfUsed(pluginResource: string): string {
-    const plugin = this.props.oldPlugins.find(
+  const getPluginIfUsed = (pluginResource: string): string => {
+    const plugin = props.oldPlugins.find(
       (p) => Parser.getId(pluginResource) === Parser.getId(p),
     );
     return plugin || pluginResource;
-  }
-
-  selectPlugins = () => {
-    this.props.addPlugins(this.state.selectedPlugins);
-    this.closeModal();
   };
 
-  createNewPlugin = () => {
-    eddiApiActionDispatchers.fetchJsonSchemaAction(this.props.pluginType);
+  const selectPlugins = () => {
+    props.addPlugins(selectedPlugins);
+    closeModal();
+  };
+
+  const createNewPlugin = () => {
+    eddiApiActionDispatchers.fetchJsonSchemaAction(props.pluginType);
     ModalActionDispatchers.showCreateNewConfigModal(
-      this.props.pluginType,
+      props.pluginType,
       null,
       null,
       null,
       () =>
         ModalActionDispatchers.showAddPluginsModal(
-          this.props.pluginType,
-          this.props.oldPlugins,
-          this.props.addPlugins,
+          props.pluginType,
+          props.oldPlugins,
+          props.addPlugins,
         ),
     );
   };
 
-  loadMore = () => {
-    const fetchIndex = Math.floor(this.props.loadedPlugins / DEFAULT_LIMIT);
-    if (this.state.loading || _.isEmpty(this.props.plugins)) {
+  const loadMore = () => {
+    const fetchIndex = Math.floor(props.loadedPlugins / DEFAULT_LIMIT);
+    if (loading || _.isEmpty(props.plugins)) {
       return;
     }
-    this.setState({ loading: true });
+    setLoading(true);
     eddiApiActionDispatchers.fetchPluginsAction(
-      this.props.pluginType,
+      props.pluginType,
       DEFAULT_LIMIT,
       fetchIndex,
     );
   };
 
-  render() {
-    return (
-      <div>
-        <div style={styles.header}>
-          <div style={styles.topHeader}>
-            <div style={styles.title}>{`Select ${Parser.getPluginName(
-              this.props.pluginType,
-              true,
-            )}`}</div>
-            <div style={styles.centerFlex} />
-            <WhiteButton
-              customStyles={styles.createButton}
-              onClick={this.createNewPlugin}
-              text={`Create new ${Parser.getPluginName(
-                this.props.pluginType,
-                false,
-              )}`}
-            />
-            <BlueButton
-              customStyles={styles.button}
-              disabled={
-                !this.unsavedChanges() || _.isEmpty(this.state.selectedPlugins)
-              }
-              onClick={this.selectPlugins}
-              text={`Add ${Parser.getPluginName(this.props.pluginType, false)}`}
-            />
-          </div>
-          <div style={styles.bottomHeader}>
-            <div style={styles.centerFlex} />
-            <div style={styles.lastModified}>{'Last modified'}</div>
-          </div>
+  return (
+    <div>
+      <div className={classes.header}>
+        <div className={classes.topHeader}>
+          <div className={classes.title}>{`Select ${Parser.getPluginName(
+            props.pluginType,
+            true,
+          )}`}</div>
+          <div className={classes.centerFlex} />
+          <WhiteButton
+            classes={{ button: classes.createButton }}
+            onClick={createNewPlugin}
+            text={`Create new ${Parser.getPluginName(props.pluginType, false)}`}
+          />
+          <BlueButton
+            classes={{ button: classes.button }}
+            disabled={!unsavedChanges() || _.isEmpty(selectedPlugins)}
+            onClick={selectPlugins}
+            text={`Add ${Parser.getPluginName(props.pluginType, false)}`}
+          />
         </div>
-        <div style={styles.packageList}>
-          {this.props.isAllPluginsLoaded && _.isEmpty(this.props.plugins) && (
-            <p>
-              {'Found no plugins. Create a new ' +
-                Parser.getPluginName(this.props.pluginType, false) +
-                ' to select one.'}
-            </p>
-          )}
-          {!_.isEmpty(this.state.availablePlugins) && (
-            <div>
-              {this.state.availablePlugins.map((p, i) => (
-                <Plugin
-                  key={i}
-                  selected={this.isPluginSelected(p)}
-                  pluginResource={p}
-                  handleClick={this.selectPlugin}
-                  selectVersion={this.selectVersion}
-                />
-              ))}
-            </div>
-          )}
-          {this.props.isLoading && (
-            <div style={styles.loadingWrapper}>
-              <ClimbingBoxLoader loading />
-            </div>
-          )}
-          {!this.props.isAllPluginsLoaded &&
-            !this.props.isLoading &&
-            !this.state.loading && (
-              <BlueButton
-                customStyles={styles.loadMoreButton}
-                onClick={this.loadMore}
-                text={'Load More'}
-              />
-            )}
+        <div className={classes.bottomHeader}>
+          <div className={classes.centerFlex} />
+          <div className={classes.lastModified}>{'Last modified'}</div>
         </div>
       </div>
-    );
-  }
-}
+      <div className={classes.packageList}>
+        {props.isAllPluginsLoaded && _.isEmpty(props.plugins) && (
+          <p>
+            {'Found no plugins. Create a new ' +
+              Parser.getPluginName(props.pluginType, false) +
+              ' to select one.'}
+          </p>
+        )}
+        {!_.isEmpty(availablePlugins) && (
+          <div>
+            {availablePlugins.map((p, i) => (
+              <Plugin
+                key={i}
+                selected={isPluginSelected(p)}
+                pluginResource={p}
+                handleClick={selectPlugin}
+                selectVersion={selectVersion}
+              />
+            ))}
+          </div>
+        )}
+        {props.isLoading && (
+          <div className={classes.loadingWrapper}>
+            <ClimbingBoxLoader loading />
+          </div>
+        )}
+        {!props.isAllPluginsLoaded && !props.isLoading && !loading && (
+          <BlueButton
+            classes={{ button: classes.loadMoreButton }}
+            onClick={loadMore}
+            text={'Load More'}
+          />
+        )}
+      </div>
+    </div>
+  );
+};
 const ComposedAddPluginModal: React.ComponentClass<IPublicProps> = compose<
   IPrivateProps,
   IPublicProps

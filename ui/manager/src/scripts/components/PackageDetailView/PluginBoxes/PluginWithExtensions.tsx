@@ -1,5 +1,4 @@
 import * as _ from 'lodash';
-import Radium from 'radium';
 import * as React from 'react';
 import { compose, pure, setDisplayName } from 'recompose';
 import eddiApiActionDispatchers from '../../../actions/EddiApiActionDispatchers';
@@ -249,7 +248,6 @@ const PluginWithExtensions = ({
 const ComposedPluginWithExtensions: React.ComponentClass<IPublicProps> =
   compose<IPrivateProps, IPublicProps>(
     pure,
-    Radium,
     setDisplayName('PluginWithExtensions'),
   )(PluginWithExtensions);
 

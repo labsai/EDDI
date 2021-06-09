@@ -1,5 +1,4 @@
 import * as _ from 'lodash';
-import Radium from 'radium';
 import * as React from 'react';
 import * as InfiniteScrollTypes from 'react-infinite-scroller';
 import { connect } from 'react-redux';
@@ -8,9 +7,8 @@ import { compose, pure, setDisplayName } from 'recompose';
 import eddiApiActionDispatchers from '../../actions/EddiApiActionDispatchers';
 import { packagesSelector } from '../../selectors/PackageSelectors';
 import PackageContainer from '../BotDetailView/PackageContainer';
-import { getAPIUrl } from '../utils/ApiFunctions';
 import { IPackage } from '../utils/AxiosFunctions';
-import styles from './Packagelist.styles';
+import useStyles from './Packagelist.styles';
 const InfiniteScroll =
   require('react-infinite-scroller') as InfiniteScrollTypes;
 
@@ -26,103 +24,93 @@ interface IPrivateProps extends IPublicProps {
   packagesLoaded: number;
 }
 
-interface IState {
-  apiUrl: string;
-  loading: boolean;
-}
+const PackageList = ({
+  packages,
+  isLoading,
+  allPackagesLoaded,
+  error,
+  packagesLoaded,
+  filterText,
+}: IPrivateProps) => {
+  const [loading, setLoading] = React.useState(false);
 
-class PackageList extends React.Component<IPrivateProps, IState> {
-  constructor(props) {
-    super(props);
-    this.state = {
-      apiUrl: '',
-      loading: false,
-    };
-  }
+  const classes = useStyles();
 
-  async componentDidMount() {
-    this.loadMore();
-    this.setState({ apiUrl: await getAPIUrl() });
-  }
-
-  componentDidUpdate(prevProps) {
-    if (prevProps.isLoading && !this.props.isLoading) {
-      this.setState({ loading: false });
+  React.useEffect(() => {
+    if (!isLoading) {
+      loadMore();
     }
-  }
+  }, []);
 
-  filterPackages() {
-    if (!_.isEmpty(this.props.filterText)) {
-      return this.props.packages.filter(
+  React.useEffect(() => {
+    if (!isLoading) {
+      setLoading(false);
+    }
+  }, [isLoading]);
+
+  const filterPackages = () => {
+    if (!_.isEmpty(filterText)) {
+      return packages.filter(
         (pkg) =>
-          pkg.name
-            .toLowerCase()
-            .includes(this.props.filterText.toLowerCase()) ||
-          pkg.id.toLowerCase().includes(this.props.filterText.toLowerCase()),
+          pkg.name.toLowerCase().includes(filterText.toLowerCase()) ||
+          pkg.id.toLowerCase().includes(filterText.toLowerCase()),
       );
     } else {
-      return this.props.packages;
+      return packages;
     }
-  }
+  };
 
-  loadMore = () => {
-    if (this.state.loading) {
+  const loadMore = () => {
+    if (loading) {
       return;
     }
-    this.setState({ loading: true });
+    setLoading(true);
     const loadNumber = 5;
-    if (
-      this.props.packages.length < loadNumber &&
-      !this.props.allPackagesLoaded
-    ) {
+    if (packages.length < loadNumber && !allPackagesLoaded) {
       eddiApiActionDispatchers.fetchPackagesAction(loadNumber, 0);
     } else {
       eddiApiActionDispatchers.fetchPackagesAction(
         loadNumber,
-        Math.floor(this.props.packagesLoaded / loadNumber),
+        Math.floor(packagesLoaded / loadNumber),
       );
     }
   };
 
-  render() {
-    const packageList = this.filterPackages();
-    return (
-      <div>
-        {this.props.isLoading && _.isEmpty(this.props.packages) && (
-          <div style={styles.loadingWrapper}>
-            <ClimbingBoxLoader loading />
-          </div>
-        )}
-        {!!this.props.error && <p>{'Error: Could not load bots'}</p>}
-        {!this.props.isLoading &&
-          !this.props.error &&
-          _.isEmpty(this.props.packages) && (
-            <p>{`There are no packages yet`}</p>
+  const packageList = filterPackages();
+  return (
+    <div>
+      {isLoading && _.isEmpty(packages) && (
+        <div className={classes.loadingWrapper}>
+          <ClimbingBoxLoader loading />
+        </div>
+      )}
+      {!!error && !isLoading && <p>{'Error: Could not load packages'}</p>}
+      {!isLoading && !error && _.isEmpty(packages) && (
+        <p>{`There are no packages yet`}</p>
+      )}
+      {!error && !_.isEmpty(packages) && (
+        <div className={classes.packageList}>
+          {_.isEmpty(packageList) && (
+            <p>{`Found no packages matching: "${filterText}"`}</p>
           )}
-        {!this.props.error && !_.isEmpty(this.props.packages) && (
-          <div style={styles.packageList}>
-            {_.isEmpty(packageList) && (
-              <p>{`Found no packages matching: "${this.props.filterText}"`}</p>
-            )}
-            <InfiniteScroll
-              pageStart={0}
-              loadMore={this.loadMore}
-              hasMore={!this.props.allPackagesLoaded && !this.props.isLoading}
-              loader={
-                <div className="loader" key={0}>
-                  Loading ...
-                </div>
-              }>
-              {packageList.map((pkg) => (
-                <PackageContainer key={pkg.id} packageResource={pkg.resource} />
-              ))}
-            </InfiniteScroll>
-          </div>
-        )}
-      </div>
-    );
-  }
-}
+          <InfiniteScroll
+            pageStart={0}
+            loadMore={loadMore}
+            hasMore={!allPackagesLoaded && !isLoading}
+            loader={
+              <div className="loader" key={0}>
+                Loading ...
+              </div>
+            }>
+            {packageList.map((pkg) => (
+              <PackageContainer key={pkg.id} packageResource={pkg.resource} />
+            ))}
+          </InfiniteScroll>
+        </div>
+      )}
+    </div>
+  );
+};
 
 const ComposedPackageList: React.ComponentClass<IPublicProps> = compose<
   IPublicProps,
@@ -130,7 +118,6 @@ const ComposedPackageList: React.ComponentClass<IPublicProps> = compose<
 >(
   pure,
   connect(packagesSelector),
-  Radium,
   setDisplayName('PackageList'),
 )(PackageList);
 

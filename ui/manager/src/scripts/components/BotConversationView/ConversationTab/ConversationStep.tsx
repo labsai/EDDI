@@ -103,7 +103,7 @@ const ConversationStep = ({
                 <div className={classes.action}>{action}</div>
               </div>
             )}
-            {!!input || <div className={classes.input}>{input}</div>}
+            {!!input && <div className={classes.input}>{input}</div>}
             {!!output && (
               <div>{output.map((output, i) => getOutputRender(output, i))}</div>
             )}

@@ -1,4 +1,4 @@
-import { CSSProperties } from 'react';
+import { makeStyles } from '@material-ui/core/styles';
 import {
   DARK_BLUE_COLOR,
   GREY_COLOR,
@@ -10,7 +10,7 @@ import {
   WHITE_COLOR,
 } from '../../../styles/DefaultStylingProperties';
 
-const styles: { [key: string]: IExtendedCSSProperties } = {
+const useStyles = makeStyles({
   indicatorsContainer: {
     position: 'relative',
     borderLeft: '6px solid transparent',
@@ -24,7 +24,7 @@ const styles: { [key: string]: IExtendedCSSProperties } = {
   input: {
     maxWidth: '60px',
     overflow: 'hidden',
-    ':active': {
+    '&:active': {
       outline: '0',
     },
   },
@@ -39,7 +39,7 @@ const styles: { [key: string]: IExtendedCSSProperties } = {
     fontSize: SMALL_FONT2,
     overflow: 'hidden',
     textAlign: 'left',
-    ':hover': {
+    '&:hover': {
       backgroundColor: LIGHT_GREY_COLOR,
     },
   },
@@ -53,7 +53,7 @@ const styles: { [key: string]: IExtendedCSSProperties } = {
     borderRadius: '0',
     border: '0',
     borderBottom: `3px solid ${LIGHT_GREY_COLOR2}`,
-    ':hover': {
+    '&:hover': {
       cursor: 'pointer',
       backgroundColor: LIGHT_GREY_COLOR3,
       borderBottom: `3px solid ${GREY_COLOR}`,
@@ -68,6 +68,6 @@ const styles: { [key: string]: IExtendedCSSProperties } = {
   singleValueSelected: {
     color: DARK_BLUE_COLOR,
   },
-};
+});
 
-export default styles;
+export default useStyles;

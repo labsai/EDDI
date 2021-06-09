@@ -1,3 +1,4 @@
+import clsx from 'clsx';
 import { JSONSchema4 } from 'json-schema';
 import * as _ from 'lodash';
 import * as React from 'react';
@@ -9,9 +10,9 @@ import { schemaSelector } from '../../../selectors/SystemSelectors';
 import BlueButton from '../../Assets/Buttons/BlueButton';
 import { getTypeFromResource } from '../../utils/ApiFunctions';
 import { compileJsonSchema, IJsonError } from '../../utils/helpers/JsonHelpers';
-import styles from '../ModalComponent.styles';
+import useStyles from '../ModalComponent.styles';
 import '../ModalComponent.styles.scss';
-import editStyles from './EditJsonModal.styles';
+import useEditStyles from './EditJsonModal.styles';
 import Editor from './Editor';
 import JsonErrors from './JsonErrors';
 import JsonExample from './JsonExample';
@@ -21,14 +22,6 @@ import JsonSchemaForm from './JsonSchemaForm/JsonSchemaForm';
 enum TabEnum {
   'editor',
   'form',
-}
-
-interface IState {
-  editorText: string;
-  showExample: boolean;
-  errors: IJsonError[];
-  isValidJson: boolean;
-  selectedTab: TabEnum;
 }
 
 interface IPublicProps {
@@ -41,169 +34,148 @@ interface IPrivateProps extends IPublicProps {
   schema?: JSONSchema4;
 }
 
-class EditJsonModal extends React.Component<IPrivateProps, IState> {
+const EditJsonModal = (props: IPrivateProps) => {
   // todo: reduxify this component and editor
-  constructor(props) {
-    super(props);
-    this.state = {
-      editorText: '',
-      showExample: false,
-      errors: [],
-      isValidJson: false,
-      selectedTab: TabEnum.editor,
-    };
-  }
 
-  componentDidMount() {
+  const [editorText, setEditorText] = React.useState('');
+  const [errors, setErrors] = React.useState<IJsonError[]>([]);
+  const [isValidJson, setIsValidJson] = React.useState(false);
+  const [selectedTab, setSelectedTab] = React.useState<TabEnum>(TabEnum.editor);
+  const classes = useStyles();
+  const editClasses = useEditStyles();
+
+  React.useEffect(() => {
     eddiApiActionDispatchers.fetchJsonSchemaAction(
-      getTypeFromResource(this.props.resource),
+      getTypeFromResource(props.resource),
     );
-    this.discardChanges();
-  }
+    discardChanges();
+  }, []);
 
-  componentDidUpdate(prevProps) {
-    if (prevProps !== this.props) {
-      this.discardChanges();
-    }
-  }
+  React.useEffect(() => {
+    discardChanges();
+  }, [props.resource, props.data, props.type, props.schema]);
 
-  onChange = (value) => {
-    this.setState({
-      editorText: value,
-      isValidJson: false,
-    });
+  const onChange = (value) => {
+    setEditorText(value);
+    setIsValidJson(false);
   };
 
-  discardChanges(props = this.props) {
-    this.setState({
-      editorText: props.data,
-    });
-  }
+  const discardChanges = () => {
+    setEditorText(props.data);
+  };
 
-  unsavedChanges() {
+  const unsavedChanges = () => {
     // todo: reduxify and refactor editor
     return false;
     /*
-    return this.state.editorText !== this.props.data;
+    return editorText !== props.data;
     */
-  }
+  };
 
-  updateJson = () => {
-    if (this.validateJson()) {
+  const updateJson = () => {
+    if (validateJson()) {
       eddiApiActionDispatchers.updateJsonDataAction(
-        this.props.resource,
-        JSON.parse(this.state.editorText),
+        props.resource,
+        JSON.parse(editorText),
       );
       modalActionDispatchers.closeModal();
     }
   };
 
-  isJsonString() {
+  const isJsonString = () => {
     try {
-      JSON.parse(this.state.editorText);
+      JSON.parse(editorText);
     } catch (e) {
       return false;
     }
     return true;
-  }
+  };
 
-  validateJson = (props = this.props, state = this.state) => {
+  const validateJson = () => {
     let errors: IJsonError[] = [];
-    if (!this.isJsonString()) {
+    if (!isJsonString()) {
       const jsonParseError: IJsonError = {
         message: 'Error parsing JSON.',
         line: 0,
       };
       errors.push(jsonParseError);
     } else {
-      errors = compileJsonSchema(props.schema, state.editorText);
+      errors = compileJsonSchema(props.schema, editorText);
     }
     const isValidJson = _.isEmpty(errors);
-    this.setState({
-      errors,
-      isValidJson,
-    });
+    setErrors(errors);
+    setIsValidJson(isValidJson);
     return isValidJson;
   };
 
-  validateSchemaForm = () => {
-    this.validateJson();
+  const validateSchemaForm = () => {
+    validateJson();
   };
 
-  render() {
-    return (
-      <div>
-        <div style={styles.modalHeader}>
-          <div style={styles.modalTopHeader}>
-            <div style={styles.botHeaderText}>{'Edit existing data'}</div>
-            <div style={styles.modalTopHeaderCenter} />
-            {this.unsavedChanges() && (
-              <button
-                style={styles.discardChanges}
-                onClick={() => this.validateJson()}>
-                {'Discard changes'}
-              </button>
-            )}
-            <BlueButton
-              onClick={this.updateJson}
-              disabled={!this.unsavedChanges || !this.isJsonString()}
-              text={'Save changes'}
-            />
-          </div>
-        </div>
-        <div style={editStyles.tabs}>
-          <div
-            style={
-              this.state.selectedTab === TabEnum.editor
-                ? editStyles.tab
-                : { ...editStyles.tab, ...editStyles.tabDisabled }
-            }
-            onClick={() => this.setState({ selectedTab: TabEnum.editor })}>
-            {'Editor'}
-          </div>
-          <div
-            style={
-              this.state.selectedTab === TabEnum.form
-                ? editStyles.tab
-                : { ...editStyles.tab, ...editStyles.tabDisabled }
-            }
-            onClick={() =>
-              this.validateJson()
-                ? this.setState({ selectedTab: TabEnum.form })
-                : this.validateJson()
-            }>
-            {'Form'}
-          </div>
-        </div>
-        {this.state.isValidJson && <JsonIsValid />}
-        {this.state.selectedTab === TabEnum.editor && (
-          <div>
-            {!_.isEmpty(this.state.errors) && (
-              <JsonErrors errors={this.state.errors} />
-            )}
-            <JsonExample type={this.props.type} />
-            <Editor
-              type={this.props.type}
-              data={this.state.editorText}
-              errors={this.state.errors}
-              onConfirm={this.updateJson}
-              onChange={this.onChange}
-              validate={this.validateJson}
-            />
-          </div>
-        )}
-        {this.state.selectedTab === TabEnum.form && (
-          <JsonSchemaForm
-            schema={this.props.schema}
-            data={this.state.editorText}
-            onChange={this.onChange}
-            validate={this.validateSchemaForm}
+  return (
+    <div>
+      <div className={classes.modalHeader}>
+        <div className={classes.modalTopHeader}>
+          <div className={classes.botHeaderText}>{'Edit existing data'}</div>
+          <div className={classes.modalTopHeaderCenter} />
+          {unsavedChanges() && (
+            <button
+              className={classes.discardChanges}
+              onClick={() => validateJson()}>
+              {'Discard changes'}
+            </button>
+          )}
+          <BlueButton
+            onClick={updateJson}
+            disabled={!unsavedChanges || !isJsonString()}
+            text={'Save changes'}
           />
-        )}
+        </div>
       </div>
-    );
-  }
-}
+      <div className={editClasses.tabs}>
+        <div
+          className={clsx(editClasses.tab, {
+            [editClasses.tabDisabled]: selectedTab !== TabEnum.editor,
+          })}
+          onClick={() => setSelectedTab(TabEnum.editor)}>
+          {'Editor'}
+        </div>
+        <div
+          className={clsx(editClasses.tab, {
+            [editClasses.tabDisabled]: selectedTab !== TabEnum.form,
+          })}
+          onClick={() =>
+            validateJson() ? setSelectedTab(TabEnum.form) : validateJson()
+          }>
+          {'Form'}
+        </div>
+      </div>
+      {isValidJson && <JsonIsValid />}
+      {selectedTab === TabEnum.editor && (
+        <div>
+          {!_.isEmpty(errors) && <JsonErrors errors={errors} />}
+          <JsonExample type={props.type} />
+          <Editor
+            type={props.type}
+            data={editorText}
+            errors={errors}
+            onConfirm={updateJson}
+            onChange={onChange}
+            validate={validateJson}
+          />
+        </div>
+      )}
+      {selectedTab === TabEnum.form && (
+        <JsonSchemaForm
+          schema={props.schema}
+          data={editorText}
+          onChange={onChange}
+          validate={validateSchemaForm}
+        />
+      )}
+    </div>
+  );
+};
 
 const ComposedEditJsonModal: React.ComponentClass<IPublicProps> = compose<
   IPrivateProps,

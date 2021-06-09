@@ -1,10 +1,10 @@
-import { CSSProperties } from 'react';
 import {
   DARK_GREY_COLOR,
   SMALL_FONT,
 } from '../../../styles/DefaultStylingProperties';
+import { makeStyles } from '@material-ui/core/styles';
 
-const styles: { [key: string]: IExtendedCSSProperties } = {
+const useStyles = makeStyles({
   title: {
     display: 'flex',
     color: DARK_GREY_COLOR,
@@ -30,5 +30,14 @@ const styles: { [key: string]: IExtendedCSSProperties } = {
   createdOn: {
     marginRight: '2px',
   },
-};
-export default styles;
+  loadingWrapper: {
+    alignItems: 'center',
+    display: 'flex',
+    flex: 1,
+    height: '500px',
+    justifyContent: 'center',
+  },
+  packageList: {},
+});
+
+export default useStyles;

@@ -1,10 +1,10 @@
+import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
+import { makeStyles } from '@material-ui/core/styles';
 import * as React from 'react';
 import { compose, pure, setDisplayName } from 'recompose';
-import Radium from 'radium';
-import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import { GREEN_COLOR } from '../../../../styles/DefaultStylingProperties';
 
-const styles: { [key: string]: IExtendedCSSProperties } = {
+const useStyles = makeStyles({
   content: {
     display: 'flex',
     color: GREEN_COLOR,
@@ -21,18 +21,21 @@ const styles: { [key: string]: IExtendedCSSProperties } = {
     marginTop: '2px',
     fontSize: '18px',
   },
-};
+});
 
-const JsonIsValid: React.StatelessComponent = () => (
-  <div style={styles.content}>
-    <FontAwesomeIcon
-      style={styles.icon}
-      icon={['fas', 'check-circle']}
-      color={GREEN_COLOR}
-    />
-    <div style={styles.text}>{'Found no errors. JSON is valid.'}</div>
-  </div>
-);
+const JsonIsValid: React.StatelessComponent = () => {
+  const classes = useStyles();
+  return (
+    <div className={classes.content}>
+      <FontAwesomeIcon
+        className={classes.icon}
+        icon={['fas', 'check-circle']}
+        color={GREEN_COLOR}
+      />
+      <div className={classes.text}>{'Found no errors. JSON is valid.'}</div>
+    </div>
+  );
+};
 
 interface IProps {}
 
@@ -41,7 +44,6 @@ const ComposedJsonIsValid: React.ComponentClass<IProps> = compose<
   IProps
 >(
   pure,
-  Radium,
   setDisplayName('JsonIsValid'),
 )(JsonIsValid);
 

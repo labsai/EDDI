@@ -1,18 +1,18 @@
 import * as metaSchema4 from 'ajv/lib/refs/json-schema-draft-04.json';
 import { JSONSchema4 } from 'json-schema';
-import Radium from 'radium';
 import * as React from 'react';
+import { makeStyles } from '@material-ui/core/styles';
 import Form from 'react-jsonschema-form';
 import { connect } from 'react-redux';
 import { compose, pure, setDisplayName } from 'recompose';
 import { schemaSelector } from '../../../../selectors/SystemSelectors';
-const styles: { [key: string]: IExtendedCSSProperties } = {
+const useStyles = makeStyles({
   form: {
     marginTop: '20px',
     marginLeft: '5px',
     marginRight: '5px',
   },
-};
+});
 
 interface IProps {
   schema?: JSONSchema4;
@@ -24,8 +24,9 @@ interface IProps {
 let yourForm;
 
 const JsonSchemaForm: React.StatelessComponent<IProps> = (props: IProps) => {
+  const classes = useStyles();
   return (
-    <div style={styles.form}>
+    <div className={classes.form}>
       <button onClick={() => yourForm.submit()}>{'Validate form'}</button>
       {!!props.schema && !!props.data && (
         <Form
@@ -53,7 +54,6 @@ const ComposedJsonSchemaForm: React.ComponentClass<IProps> = compose<
 >(
   pure,
   connect(schemaSelector),
-  Radium,
   setDisplayName('JsonSchemaForm'),
 )(JsonSchemaForm);
 

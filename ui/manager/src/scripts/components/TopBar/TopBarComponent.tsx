@@ -52,6 +52,7 @@ const useStyles = makeStyles({
     margin: 'auto',
     display: 'table',
     borderRadius: '5px',
+    marginBottom: '20px',
   },
   warning: {
     display: 'flex',

@@ -20,43 +20,26 @@ interface IState {
   data: string;
 }
 
-class PackageContainer extends React.Component<IPrivateProps, IState> {
-  constructor(props) {
-    super(props);
-    this.state = {
-      data: '',
-    };
-  }
+const PackageContainer = (props: IPrivateProps) => {
+  const [data, setData] = React.useState('');
 
-  componentDidMount() {
-    this.setState({
-      data: JSON.stringify(this.props.packagePayload.packageData, null, '\t'),
-    });
-  }
+  React.useEffect(() => {
+    setData(JSON.stringify(props.packagePayload.packageData, null, '\t'));
+  }, [props.packagePayload, props.isLoading, props.error]);
 
-  componentDidUpdate(prevProps) {
-    if (prevProps !== this.props) {
-      this.setState({
-        data: JSON.stringify(this.props.packagePayload.packageData, null, '\t'),
-      });
-    }
-  }
-
-  render() {
-    return (
-      <div>
-        {!!this.props.packagePayload && (
-          <ViewJsonContent
-            descriptor={this.props.packagePayload}
-            data={this.state.data}
-            usedBy={this.props.packagePayload.usedByBots}
-            selectVersion={this.props.selectVersion}
-          />
-        )}
-      </div>
-    );
-  }
-}
+  return (
+    <div>
+      {!!props.packagePayload && (
+        <ViewJsonContent
+          descriptor={props.packagePayload}
+          data={data}
+          usedBy={props.packagePayload.usedByBots}
+          selectVersion={props.selectVersion}
+        />
+      )}
+    </div>
+  );
+};
 
 const ComposedPackageContainer: React.ComponentClass<IPublicProps> = compose<
   IPrivateProps,

@@ -1,3 +1,4 @@
+import { makeStyles } from '@material-ui/core/styles';
 import {
   DARK_BLUE_COLOR,
   GREEN_COLOR,
@@ -10,7 +11,7 @@ import {
   SMALL_FONT2,
 } from '../../../../styles/DefaultStylingProperties';
 
-const styles: { [key: string]: IExtendedCSSProperties } = {
+const useStyles = makeStyles({
   packageName: {
     color: GREY_COLOR,
     fontSize: LARGE_FONT,
@@ -94,5 +95,6 @@ const styles: { [key: string]: IExtendedCSSProperties } = {
     textAlign: 'center',
     width: '40px',
   },
-};
-export default styles;
+});
+
+export default useStyles;

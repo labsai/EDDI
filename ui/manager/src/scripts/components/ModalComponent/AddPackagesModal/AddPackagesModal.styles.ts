@@ -1,4 +1,4 @@
-import { CSSProperties } from 'react';
+import { makeStyles } from '@material-ui/core/styles';
 import {
   DARK_BLUE_COLOR,
   DARK_GREY_COLOR,
@@ -7,7 +7,7 @@ import {
   SMALL_FONT,
 } from '../../../../styles/DefaultStylingProperties';
 
-const styles: { [key: string]: IExtendedCSSProperties } = {
+const useStyles = makeStyles({
   header: {
     height: '156px',
     backgroundColor: LIGHT_GREY_COLOR3,
@@ -73,5 +73,6 @@ const styles: { [key: string]: IExtendedCSSProperties } = {
     marginLeft: 'auto',
     marginRight: 'auto',
   },
-};
-export default styles;
+});
+
+export default useStyles;

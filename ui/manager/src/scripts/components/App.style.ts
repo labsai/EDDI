@@ -1,6 +1,6 @@
-import { CSSProperties } from 'react';
+import { makeStyles } from '@material-ui/core/styles';
 
-const styles: { [key: string]: IExtendedCSSProperties } = {
+const useStyles = makeStyles({
   body: {
     overflow: 'scroll',
   },
@@ -10,5 +10,6 @@ const styles: { [key: string]: IExtendedCSSProperties } = {
     marginRight: 'auto',
     width: '50px',
   },
-};
-export default styles;
+});
+
+export default useStyles;

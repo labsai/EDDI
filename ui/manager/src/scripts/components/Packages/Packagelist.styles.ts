@@ -1,7 +1,7 @@
-import { CSSProperties } from 'react';
+import { makeStyles } from '@material-ui/core/styles';
 import { LIGHT_GREY_COLOR } from '../../../styles/DefaultStylingProperties';
 
-const styles: { [key: string]: IExtendedCSSProperties } = {
+const useStyles = makeStyles({
   loadingWrapper: {
     alignItems: 'center',
     display: 'flex',
@@ -16,5 +16,6 @@ const styles: { [key: string]: IExtendedCSSProperties } = {
     borderBottom: `2px solid ${LIGHT_GREY_COLOR}`,
     paddingBottom: '5px',
   },
-};
-export default styles;
+});
+
+export default useStyles;

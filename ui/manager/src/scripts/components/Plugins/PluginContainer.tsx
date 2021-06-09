@@ -1,8 +1,8 @@
 import * as React from 'react';
 import { compose, pure, setDisplayName } from 'recompose';
+import eddiApiActionDispatchers from '../../actions/EddiApiActionDispatchers';
 import Parser from '../utils/Parser';
 import Plugin from './Plugin';
-import eddiApiActionDispatchers from '../../actions/EddiApiActionDispatchers';
 
 interface IPublicProps {
   pluginResource: string;
@@ -10,40 +10,26 @@ interface IPublicProps {
 
 interface IPrivateProps extends IPublicProps {}
 
-interface IState {
-  selectedResource: string;
-}
+const PluginContainer = (props: IPrivateProps) => {
+  const [selectedResource, setSelectedResource] = React.useState<string>(
+    props.pluginResource,
+  );
 
-class PluginContainer extends React.Component<IPrivateProps, IState> {
-  constructor(props) {
-    super(props);
-    this.state = {
-      selectedResource: this.props.pluginResource,
-    };
-  }
-
-  selectVersion = (newVersion: number) => {
+  const selectVersion = (newVersion: number) => {
     const newResource = Parser.replaceResourceVersion(
-      this.props.pluginResource,
+      props.pluginResource,
       newVersion,
     );
     eddiApiActionDispatchers.fetchPluginAction(newResource);
-    this.setState({
-      selectedResource: newResource,
-    });
+    setSelectedResource(newResource);
   };
 
-  render() {
-    return (
-      <div>
-        <Plugin
-          pluginResource={this.state.selectedResource}
-          selectVersion={this.selectVersion}
-        />
-      </div>
-    );
-  }
-}
+  return (
+    <div>
+      <Plugin pluginResource={selectedResource} selectVersion={selectVersion} />
+    </div>
+  );
+};
 
 const ComposedPluginContainer: React.ComponentClass<IPrivateProps> = compose<
   IPrivateProps,

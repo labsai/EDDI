@@ -6,75 +6,61 @@ import VersionSelectComponent from '../../Assets/VersionSelectComponent';
 import { IBot } from '../../utils/AxiosFunctions';
 import Parser from '../../utils/Parser';
 import '../ModalComponent.styles.scss';
-import styles from '../ViewJsonModal/ViewJsonModal.styles';
+import useStyle from '../ViewJsonModal/ViewJsonModal.styles';
 import ConversationList from './ConversationList';
 
 interface IProps {
   bot: IBot;
 }
 
-interface IState {
-  selectedResource: string;
-}
+const ConversationsModal = ({ bot }: IProps) => {
+  const [selectedResource, setSelectedResource] = React.useState<string>(
+    bot.resource,
+  );
+  const classes = useStyle();
 
-class ConversationsModal extends React.Component<IProps, IState> {
-  constructor(props) {
-    super(props);
-    this.state = {
-      selectedResource: this.props.bot.resource,
-    };
-  }
-
-  selectVersion = (version: number) => {
-    this.setState({
-      selectedResource: Parser.replaceResourceVersion(
-        this.props.bot.resource,
-        version,
-      ),
-    });
+  const selectVersion = (version: number) => {
+    setSelectedResource(Parser.replaceResourceVersion(bot.resource, version));
   };
 
-  render() {
-    const { bot } = this.props;
-    return (
-      <div>
-        <div style={styles.header}>
-          <div style={styles.topHeader}>
-            <div style={styles.title}>{bot.name}</div>
-            <VersionSelectComponent
-              selectedVersion={bot.version}
-              currentVersion={bot.currentVersion}
-              selectVersion={this.selectVersion}
-            />
-            <div style={styles.centerFlex} />
-            <div style={styles.options}>
-              <Options descriptor={bot} data={bot.packages} />
+  return (
+    <div>
+      <div className={classes.header}>
+        <div className={classes.topHeader}>
+          <div className={classes.title}>{bot.name}</div>
+          <VersionSelectComponent
+            selectedVersion={bot.version}
+            currentVersion={bot.currentVersion}
+            selectVersion={selectVersion}
+          />
+          <div className={classes.centerFlex} />
+          <div className={classes.options}>
+            <Options descriptor={bot} data={bot.packages} />
+          </div>
+        </div>
+        <div className={classes.bottomHeader}>
+          <div className={classes.descriptionContainer}>
+            <div className={classes.smallTitle}>{'Description'}</div>
+            <div className={classes.smallText}>{bot.description}</div>
+          </div>
+          <div className={classes.dateContainer}>
+            <div className={classes.smallTitle}>{'Created'}</div>
+            <div className={classes.smallText}>
+              {moment(bot.createdOn).format('DD.MM.YYYY')}
             </div>
           </div>
-          <div style={styles.bottomHeader}>
-            <div style={styles.descriptionContainer}>
-              <div style={styles.smallTitle}>{'Description'}</div>
-              <div style={styles.smallText}>{bot.description}</div>
-            </div>
-            <div style={styles.dateContainer}>
-              <div style={styles.smallTitle}>{'Created'}</div>
-              <div style={styles.smallText}>
-                {moment(bot.createdOn).format('DD.MM.YYYY')}
-              </div>
-            </div>
-            <div style={styles.dateContainer}>
-              <div style={styles.smallTitle}>{'Last modified'}</div>
-              <div style={styles.smallText}>
-                {moment(bot.lastModifiedOn).format('DD.MM.YYYY')}
-              </div>
+          <div className={classes.dateContainer}>
+            <div className={classes.smallTitle}>{'Last modified'}</div>
+            <div className={classes.smallText}>
+              {moment(bot.lastModifiedOn).format('DD.MM.YYYY')}
             </div>
           </div>
         </div>
-        <ConversationList botResource={this.state.selectedResource} />
       </div>
-    );
-  }
-}
+      <ConversationList botResource={selectedResource} />
+    </div>
+  );
+};
 
 const ComposedConversationsModal: React.ComponentClass<IProps> = compose<
   IProps,

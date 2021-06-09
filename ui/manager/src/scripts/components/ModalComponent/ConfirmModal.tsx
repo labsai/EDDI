@@ -4,7 +4,7 @@ import { compose, pure, setDisplayName } from 'recompose';
 import modalActionDispatchers from '../../actions/ModalActionDispatchers';
 import BlueButton from '../Assets/Buttons/BlueButton';
 import WhiteButton from '../Assets/Buttons/WhiteButton';
-import styles from './ConfirmModal.styles';
+import useStyles from './ConfirmModal.styles';
 import './ModalComponent.styles.scss';
 
 interface IProps {
@@ -12,37 +12,36 @@ interface IProps {
   message: string;
   onConfirm(): void;
 }
-class ConfirmModal extends React.Component<IProps> {
-  onClick = () => {
-    this.props.onConfirm();
+const ConfirmModal = ({ onConfirm, title, message }: IProps) => {
+  const classes = useStyles();
+  const onClick = () => {
+    onConfirm();
     modalActionDispatchers.closeModal();
   };
-  render() {
-    return (
-      <div>
-        <div style={styles.modalHeader}>
-          <div style={styles.modalTopHeader}>{this.props.title}</div>
-        </div>
-        <div style={styles.content}>
-          {!_.isEmpty(this.props.message) && (
-            <div style={styles.message}>{this.props.message}</div>
-          )}
-          <div style={styles.buttons}>
-            <BlueButton
-              customStyles={styles.buttonMargin}
-              text={'Confirm'}
-              onClick={this.onClick}
-            />
-            <WhiteButton
-              text={'Cancel'}
-              onClick={modalActionDispatchers.closeModal}
-            />
-          </div>
+  return (
+    <div>
+      <div className={classes.modalHeader}>
+        <div className={classes.modalTopHeader}>{title}</div>
+      </div>
+      <div className={classes.content}>
+        {!_.isEmpty(message) && (
+          <div className={classes.message}>{message}</div>
+        )}
+        <div className={classes.buttons}>
+          <BlueButton
+            classes={{ button: classes.buttonMargin }}
+            text={'Confirm'}
+            onClick={onClick}
+          />
+          <WhiteButton
+            text={'Cancel'}
+            onClick={modalActionDispatchers.closeModal}
+          />
         </div>
       </div>
-    );
-  }
-}
+    </div>
+  );
+};
 
 const ComposedConfirmModal: React.ComponentClass<IProps> = compose<
   IProps,

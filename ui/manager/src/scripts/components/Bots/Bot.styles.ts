@@ -99,6 +99,7 @@ const useStyles = makeStyles({
     fontSize: MEDIUM_FONT,
     height: '21px',
     marginLeft: '15px',
+    marginRight: '10px',
     marginTop: '20px',
     padding: '2px 10px',
     textAlign: 'center',

@@ -11,13 +11,8 @@ import { DEFAULT_LIMIT } from '../../utils/ApiFunctions';
 import { IBot, IPackage } from '../../utils/AxiosFunctions';
 import Parser from '../../utils/Parser';
 import '../ModalComponent.styles.scss';
-import styles from './AddPackagesModal.styles';
+import useStyles from './AddPackagesModal.styles';
 import PackageContainer from './PackageContainer';
-
-interface IState {
-  selectedPackages: string[];
-  loading: boolean;
-}
 
 interface IPublicProps {
   bot: IBot;
@@ -31,144 +26,127 @@ interface IPrivateProps extends IPublicProps {
   packagesLoaded: number;
 }
 
-class AddPackagesModal extends React.Component<IPrivateProps, IState> {
-  constructor(props) {
-    super(props);
-    this.state = {
-      selectedPackages: [],
-      loading: false,
-    };
-  }
+const AddPackagesModal = (props: IPrivateProps) => {
+  const classes = useStyles();
+  const [selectedPackages, setSelectedPackages] = React.useState<string[]>([]);
+  const [loading, setLoading] = React.useState<boolean>(false);
 
-  componentDidMount() {
-    if (
-      this.props.packagesLoaded < DEFAULT_LIMIT &&
-      !this.props.allPackagesLoaded
-    ) {
+  React.useEffect(() => {
+    if (props.packagesLoaded < DEFAULT_LIMIT && !props.allPackagesLoaded) {
       eddiApiActionDispatchers.fetchPackagesAction(DEFAULT_LIMIT, 0);
     }
-    this.discardChanges();
-  }
+    discardChanges();
+  }, []);
 
-  componentDidUpdate(prevProps) {
-    if (prevProps.isLoading && !this.props.isLoading) {
-      this.setState({ loading: false });
+  React.useEffect(() => {
+    if (!props.isLoading) {
+      setLoading(false);
     }
-  }
+  }, [props.isLoading]);
 
-  closeModal = () => {
-    this.discardChanges();
+  const closeModal = () => {
+    discardChanges();
     ModalActionDispatchers.closeModal();
   };
 
-  selectPackage = (packageResource: string) => {
-    if (this.state.selectedPackages.includes(packageResource)) {
-      this.setState({
-        selectedPackages: this.state.selectedPackages.filter(
-          (pack) => pack !== packageResource,
-        ),
-      });
+  const selectPackage = (packageResource: string) => {
+    if (selectedPackages.includes(packageResource)) {
+      setSelectedPackages(
+        selectedPackages.filter((pack) => pack !== packageResource),
+      );
     } else {
-      this.setState({
-        selectedPackages: this.state.selectedPackages.concat(packageResource),
-      });
+      setSelectedPackages(selectedPackages.concat(packageResource));
     }
   };
 
-  unsavedChanges(): boolean {
-    return _.isEqual(this.state.selectedPackages, this.props.bot.packages);
-  }
+  const unsavedChanges = (): boolean => {
+    return _.isEqual(selectedPackages, props.bot.packages);
+  };
 
-  discardChanges(props = this.props): void {
-    this.setState({
-      selectedPackages: props.bot.packages,
-    });
-  }
+  const discardChanges = (): void => {
+    setSelectedPackages(props.bot.packages);
+  };
 
-  isPackageSelected(packageResource: string): boolean {
-    return !!this.state.selectedPackages.find(
+  const isPackageSelected = (packageResource: string): boolean => {
+    return !!selectedPackages.find(
       (selectedPackage) =>
         Parser.getId(packageResource) === Parser.getId(selectedPackage),
     );
-  }
+  };
 
-  getBotPackageIfUsed(packageResource: string): string {
-    const botPackage = this.props.bot.packages.find(
+  const getBotPackageIfUsed = (packageResource: string): string => {
+    const botPackage = props.bot.packages.find(
       (botPackage) =>
         Parser.getId(packageResource) === Parser.getId(botPackage),
     );
     return botPackage || packageResource;
-  }
-
-  updateBot = () => {
-    eddiApiActionDispatchers.updateBotPackagesAction(
-      this.props.bot,
-      this.state.selectedPackages,
-    );
-    this.closeModal();
   };
 
-  loadMore = () => {
-    const fetchIndex = Math.floor(this.props.packagesLoaded / DEFAULT_LIMIT);
-    if (this.state.loading || _.isEmpty(this.props.packages)) {
+  const updateBot = () => {
+    eddiApiActionDispatchers.updateBotPackagesAction(
+      props.bot,
+      selectedPackages,
+    );
+    closeModal();
+  };
+
+  const loadMore = () => {
+    const fetchIndex = Math.floor(props.packagesLoaded / DEFAULT_LIMIT);
+    if (loading || _.isEmpty(props.packages)) {
       return;
     }
-    this.setState({ loading: true });
+    setLoading(true);
     eddiApiActionDispatchers.fetchPackagesAction(DEFAULT_LIMIT, fetchIndex);
   };
 
-  render() {
-    return (
-      <div>
-        <div style={styles.header}>
-          <div style={styles.topHeader}>
-            <div
-              style={
-                styles.title
-              }>{`Select packages for <${this.props.bot.name}>`}</div>
-            <div style={styles.centerFlex} />
-            <BlueButton
-              customStyles={styles.button}
-              disabled={this.unsavedChanges()}
-              onClick={this.updateBot}
-              text={'Save changes'}
-            />
-          </div>
-          <div style={styles.bottomHeader}>
-            <div style={styles.centerFlex} />
-            <div style={styles.lastModified}>{'Last modified'}</div>
-          </div>
+  return (
+    <div>
+      <div className={classes.header}>
+        <div className={classes.topHeader}>
+          <div
+            className={
+              classes.title
+            }>{`Select packages for <${props.bot.name}>`}</div>
+          <div className={classes.centerFlex} />
+          <BlueButton
+            classes={{ button: classes.button }}
+            disabled={unsavedChanges()}
+            onClick={updateBot}
+            text={'Save changes'}
+          />
         </div>
-        <div style={styles.packageList}>
-          <div>
-            {this.props.packages.map((pack, i) => (
-              <PackageContainer
-                key={i}
-                packageResource={this.getBotPackageIfUsed(pack.resource)}
-                selected={this.isPackageSelected(pack.resource)}
-                handleClick={this.selectPackage}
-              />
-            ))}
-          </div>
-          {this.props.isLoading && (
-            <div style={styles.loadingWrapper}>
-              <ClimbingBoxLoader loading />
-            </div>
-          )}
-          {!this.props.allPackagesLoaded &&
-            !this.props.isLoading &&
-            !this.state.loading && (
-              <BlueButton
-                customStyles={styles.loadMoreButton}
-                onClick={this.loadMore}
-                text={'Load More'}
-              />
-            )}
+        <div className={classes.bottomHeader}>
+          <div className={classes.centerFlex} />
+          <div className={classes.lastModified}>{'Last modified'}</div>
         </div>
       </div>
-    );
-  }
-}
+      <div className={classes.packageList}>
+        <div>
+          {props.packages.map((pack, i) => (
+            <PackageContainer
+              key={i}
+              packageResource={getBotPackageIfUsed(pack.resource)}
+              selected={isPackageSelected(pack.resource)}
+              handleClick={selectPackage}
+            />
+          ))}
+        </div>
+        {props.isLoading && (
+          <div className={classes.loadingWrapper}>
+            <ClimbingBoxLoader loading />
+          </div>
+        )}
+        {!props.allPackagesLoaded && !props.isLoading && !loading && (
+          <BlueButton
+            classes={{ button: classes.loadMoreButton }}
+            onClick={loadMore}
+            text={'Load More'}
+          />
+        )}
+      </div>
+    </div>
+  );
+};
 const ComposedAddPackagesModal: React.ComponentClass<IPublicProps> = compose<
   IPrivateProps,
   IPublicProps

@@ -15,7 +15,7 @@ import { getTypeFromResource } from '../../utils/ApiFunctions';
 import { IDetailedDescriptor } from '../../utils/AxiosFunctions';
 import { PACKAGE } from '../../utils/EddiTypes';
 import '../ModalComponent.styles.scss';
-import styles from './ViewJsonModal.styles';
+import useStyles from './ViewJsonModal.styles';
 
 interface IPublicProps {
   descriptor: IDetailedDescriptor;
@@ -28,116 +28,94 @@ interface IPrivateProps extends IPublicProps {
   readOnly: boolean;
 }
 
-interface IState {
-  jsonText: string;
-}
+const ViewJsonContent = (props: IPrivateProps) => {
+  const [jsonText, setJsonText] = React.useState('');
+  const classes = useStyles();
 
-class ViewJsonContent extends React.Component<IPrivateProps, IState> {
-  constructor(props) {
-    super(props);
-    this.state = {
-      jsonText: '',
-    };
-  }
+  React.useEffect(() => {
+    handleSetJsonText();
+  }, [props.descriptor, props.data, props.usedBy, props.readOnly]);
 
-  componentDidMount() {
-    this.setJsonText();
-  }
+  const handleSetJsonText = () => {
+    setJsonText(props.data);
+  };
 
-  componentDidUpdate(prevProps) {
-    if (prevProps !== this.props) {
-      this.setJsonText(this.props.data);
-    }
-  }
-
-  setJsonText(data = this.props.data) {
-    this.setState({ jsonText: data });
-  }
-
-  openEditJsonModal = () => {
+  const openEditJsonModal = () => {
     eddiApiActionDispatchers.fetchJsonSchemaAction(
-      getTypeFromResource(this.props.descriptor.resource),
+      getTypeFromResource(props.descriptor.resource),
     );
     ModalActionDispatchers.showEditJsonModal(
-      this.props.descriptor.resource,
-      this.props.data,
+      props.descriptor.resource,
+      props.data,
     );
   };
 
-  render() {
-    const isCurrentVersion =
-      this.props.descriptor.currentVersion === this.props.descriptor.version;
-    const isPackage =
-      !_.isEmpty(this.props.descriptor) &&
-      this.props.descriptor.resource.includes(PACKAGE);
-    return (
-      <div>
-        <div style={styles.header}>
-          <div style={styles.topHeader}>
-            <div style={styles.title}>
-              {this.props.descriptor.name || this.props.descriptor.id}
-            </div>
-            <VersionSelectComponent
-              selectedVersion={this.props.descriptor.version}
-              currentVersion={this.props.descriptor.currentVersion}
-              selectVersion={this.props.selectVersion}
-            />
-            <div style={styles.centerFlex} />
-            <div style={styles.options}>
-              <Options
-                descriptor={this.props.descriptor}
-                data={this.props.data}
-              />
-            </div>
-            <BlueButton
-              onClick={this.openEditJsonModal}
-              customStyles={styles.button}
-              disabled={!isCurrentVersion || this.props.readOnly}
-              text={`Edit JSON`}
-            />
+  const isCurrentVersion =
+    props.descriptor.currentVersion === props.descriptor.version;
+  const isPackage =
+    !_.isEmpty(props.descriptor) && props.descriptor.resource.includes(PACKAGE);
+  return (
+    <div>
+      <div className={classes.header}>
+        <div className={classes.topHeader}>
+          <div className={classes.title}>
+            {props.descriptor.name || props.descriptor.id}
           </div>
-          <div style={styles.bottomHeader}>
-            <div style={styles.descriptionContainer}>
-              <div style={styles.smallTitle}>{'Description'}</div>
-              <div style={styles.smallText}>
-                {this.props.descriptor.description}
-              </div>
-            </div>
-            <div style={styles.dateContainer}>
-              <div style={styles.smallTitle}>{'Created'}</div>
-              <div style={styles.smallText}>
-                {moment(this.props.descriptor.createdOn).format('DD.MM.YYYY')}
-              </div>
-            </div>
-            <div style={styles.dateContainer}>
-              <div style={styles.smallTitle}>{'Last modified'}</div>
-              <div style={styles.smallText}>
-                {moment(this.props.descriptor.lastModifiedOn).format(
-                  'DD.MM.YYYY',
-                )}
-              </div>
+          <VersionSelectComponent
+            selectedVersion={props.descriptor.version}
+            currentVersion={props.descriptor.currentVersion}
+            selectVersion={props.selectVersion}
+          />
+          <div className={classes.centerFlex} />
+          <div className={classes.options}>
+            <Options descriptor={props.descriptor} data={props.data} />
+          </div>
+          <BlueButton
+            onClick={openEditJsonModal}
+            classes={{ button: classes.button }}
+            // disabled={!isCurrentVersion || props.readOnly}
+            text={`Edit JSON`}
+          />
+        </div>
+        <div className={classes.bottomHeader}>
+          <div className={classes.descriptionContainer}>
+            <div className={classes.smallTitle}>{'Description'}</div>
+            <div className={classes.smallText}>
+              {props.descriptor.description}
             </div>
           </div>
-          {isPackage && !_.isEmpty(this.props.descriptor) && (
-            <div style={styles.usedInContainer}>
-              {'Used in:'}
-              <BotsUsingPackage packagePayload={this.props.descriptor} />
+          <div className={classes.dateContainer}>
+            <div className={classes.smallTitle}>{'Created'}</div>
+            <div className={classes.smallText}>
+              {moment(props.descriptor.createdOn).format('DD.MM.YYYY')}
             </div>
-          )}
-          {!isPackage && !_.isEmpty(this.props.descriptor) && (
-            <div style={styles.usedInContainer}>
-              {'Used in:'}
-              <PackagesUsingPlugin plugin={this.props.descriptor} />
+          </div>
+          <div className={classes.dateContainer}>
+            <div className={classes.smallTitle}>{'Last modified'}</div>
+            <div className={classes.smallText}>
+              {moment(props.descriptor.lastModifiedOn).format('DD.MM.YYYY')}
             </div>
-          )}
+          </div>
         </div>
-        <div style={styles.data}>
-          {!_.isEmpty(this.props.data) && <div>{this.state.jsonText}</div>}
-        </div>
+        {isPackage && !_.isEmpty(props.descriptor) && (
+          <div className={classes.usedInContainer}>
+            {'Used in:'}
+            <BotsUsingPackage packagePayload={props.descriptor} />
+          </div>
+        )}
+        {!isPackage && !_.isEmpty(props.descriptor) && (
+          <div className={classes.usedInContainer}>
+            {'Used in:'}
+            <PackagesUsingPlugin plugin={props.descriptor} />
+          </div>
+        )}
       </div>
-    );
-  }
-}
+      <div className={classes.data}>
+        {!_.isEmpty(props.data) && <div>{jsonText}</div>}
+      </div>
+    </div>
+  );
+};
 
 const ComposedViewJsonContent: React.ComponentClass<IPublicProps> = compose<
   IPrivateProps,

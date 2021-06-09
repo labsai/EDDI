@@ -1,11 +1,10 @@
 import * as React from 'react';
-import { compose, pure, setDisplayName } from 'recompose';
-import Radium from 'radium';
-import { IBot } from '../../utils/AxiosFunctions';
 import { connect } from 'react-redux';
-import { botSelector } from '../../../selectors/BotSelectors';
-import NameAndVersion from './NameAndVersion';
+import { compose, pure, setDisplayName } from 'recompose';
 import { historyPush } from '../../../history';
+import { botSelector } from '../../../selectors/BotSelectors';
+import { IBot } from '../../utils/AxiosFunctions';
+import NameAndVersion from './NameAndVersion';
 
 interface IPublicProps {
   botResource: string;
@@ -19,18 +18,14 @@ interface IPrivateProps extends IPublicProps {
   error: Error;
 }
 
-class Bot extends React.Component<IPrivateProps> {
-  render() {
-    return (
-      <NameAndVersion
-        descriptor={this.props.bot}
-        usedByOlderVersion={this.props.usedByOlderVersion}
-        isSmallName={this.props.isSmallName}
-        onClick={() => historyPush(`/botview/${this.props.bot.id}`)}
-      />
-    );
-  }
-}
+const Bot = (props: IPrivateProps) => (
+  <NameAndVersion
+    descriptor={props.bot}
+    usedByOlderVersion={props.usedByOlderVersion}
+    isSmallName={props.isSmallName}
+    onClick={() => historyPush(`/botview/${props.bot.id}`)}
+  />
+);
 
 const ComposedBot: React.ComponentClass<IPublicProps> = compose<
   IPrivateProps,

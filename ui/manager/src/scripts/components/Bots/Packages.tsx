@@ -1,16 +1,15 @@
-import { IBot, IPackage } from '../utils/AxiosFunctions';
+import { IBot } from '../utils/AxiosFunctions';
 import Package from './Package';
 import * as React from 'react';
-import Radium from 'radium';
 import { compose, pure, setDisplayName } from 'recompose';
-import { CSSProperties } from 'react';
+import { makeStyles } from '@material-ui/core/styles';
 
 interface IProps {
   packages: string[];
   packHasNewVersion?: boolean;
   bot: IBot;
 }
-const styles: { [key: string]: IExtendedCSSProperties } = {
+const useStyles = makeStyles({
   packageList: {
     display: 'grid',
     flex: 1,
@@ -18,11 +17,12 @@ const styles: { [key: string]: IExtendedCSSProperties } = {
     gridTemplateColumns: 'repeat(auto-fill, minmax(150px, 1fr))',
     margin: '25px 25px 10px 25px',
   },
-};
+});
 
 const Packages: React.StatelessComponent<IProps> = (props: IProps) => {
+  const classes = useStyles();
   return (
-    <div style={styles.packageList}>
+    <div className={classes.packageList}>
       {props.packages.map((pack) => (
         <Package key={pack} packageResource={pack} bot={props.bot} />
       ))}
@@ -32,7 +32,6 @@ const Packages: React.StatelessComponent<IProps> = (props: IProps) => {
 
 const ComposedPackages: React.ComponentClass<IProps> = compose<IProps, IProps>(
   pure,
-  Radium,
   setDisplayName('Packages'),
 )(Packages);
 

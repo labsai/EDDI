@@ -1,13 +1,13 @@
-import { CSSProperties } from 'react';
 import { DARK_BLUE_COLOR } from '../../../styles/DefaultStylingProperties';
+import { makeStyles } from '@material-ui/core/styles';
 
-const styles: { [key: string]: IExtendedCSSProperties } = {
+const useStyles = makeStyles({
   close: {
-    ':focus': {
+    '&:focus': {
       color: '#000',
       cursor: 'pointer',
     },
-    ':hover': {
+    '&:hover': {
       color: '#000',
       cursor: 'pointer',
     },
@@ -194,11 +194,11 @@ const styles: { [key: string]: IExtendedCSSProperties } = {
     marginRight: '5px',
   },
   collapsibleButton: {
-    ':focus': {
+    '&:focus': {
       backgroundColor: '#f9d648',
       outline: 'none',
     },
-    ':hover': {
+    '&:hover': {
       backgroundColor: '#f9d648',
     },
     display: 'flex',
@@ -223,5 +223,39 @@ const styles: { [key: string]: IExtendedCSSProperties } = {
     whiteSpace: 'pre-wrap',
     padding: '5px 20px 5px 20px',
   },
-};
-export default styles;
+  createNewBotButton: {
+    backgroundColor: '#0070D2',
+    border: '0px',
+    borderRadius: '4px',
+    color: '#FFFFFF',
+    fontSize: '12px',
+    height: '36px',
+    marginLeft: '60%',
+    marginTop: '8px',
+    textAlign: 'center',
+    minWidth: '100px',
+  },
+  createNewConfigModalButton: {
+    cursor: 'pointer',
+  },
+  updatePackageCreateNewBotButton: {
+    cursor: 'pointer',
+    marginLeft: '32px',
+  },
+  button: {
+    marginLeft: 'auto',
+  },
+  pluginList: {
+    display: 'grid',
+    marginTop: '20px',
+    marginBottom: '20px',
+    marginRight: '50px',
+    marginLeft: '50px',
+    gridGap: '20px',
+    gridTemplateColumns: 'repeat(auto-fill, minmax(252px, 1fr))',
+    minHeight: '5px',
+    minWidth: '5px',
+  },
+});
+
+export default useStyles;

@@ -1,10 +1,9 @@
-import { CSSProperties } from 'react';
+import { makeStyles } from '@material-ui/core/styles';
 import {
   DARK_BLUE_BORDER,
   DARK_BLUE_COLOR,
   DARK_GREY_COLOR,
   GREY_BORDER,
-  LIGHT_GREY_COLOR,
   LIGHT_GREY_COLOR2,
   LIGHT_GREY_COLOR3,
   MEDIUM_FONT,
@@ -12,9 +11,9 @@ import {
   SMALL_FONT,
 } from '../../../styles/DefaultStylingProperties';
 
-const styles: { [key: string]: IExtendedCSSProperties } = {
+const useStyles = makeStyles({
   conversation: {
-    ':hover': {
+    '&:hover': {
       backgroundColor: LIGHT_GREY_COLOR3,
     },
     display: 'flex',
@@ -103,5 +102,7 @@ const styles: { [key: string]: IExtendedCSSProperties } = {
     whiteSpace: 'nowrap',
     minWidth: '120px',
   },
-};
-export default styles;
+  centerFlex: {},
+});
+
+export default useStyles;

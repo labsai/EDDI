@@ -7,10 +7,11 @@ import {
   RED_COLOR,
 } from '../../../../styles/DefaultStylingProperties';
 import { IJsonError } from '../../utils/helpers/JsonHelpers';
+import { makeStyles } from '@material-ui/core/styles';
 
 const warningIcon = require('../../../../public/images/WarningIcon@3x.png');
 
-const styles: { [key: string]: IExtendedCSSProperties } = {
+const useStyles = makeStyles({
   content: {
     marginLeft: '20px',
   },
@@ -43,39 +44,43 @@ const styles: { [key: string]: IExtendedCSSProperties } = {
     height: '22px',
     marginRight: '5px',
   },
-};
+});
 
 interface IProps {
   errors: IJsonError[];
 }
 
-const JsonErrors: React.StatelessComponent<IProps> = (props: IProps) => (
-  <div style={styles.content}>
-    <div style={styles.header}>
-      <img src={warningIcon} style={styles.warningIcon} />
-      <div
-        style={
-          styles.errorTitle
-        }>{`Found ${props.errors.length} Error(s):`}</div>
-    </div>
-    <div>
-      {props.errors.map((error, i) => (
-        <div style={styles.errorContainer} key={i}>
-          <div style={styles.error}>
-            <div style={styles.key}>{'Location:'}</div>
-            <div style={styles.errorMessage}>{`ERROR at line: ${
-              error.line + 1
-            }`}</div>
+const JsonErrors: React.StatelessComponent<IProps> = (props: IProps) => {
+  const classes = useStyles();
+  return (
+    <div className={classes.content}>
+      <div className={classes.header}>
+        <img src={warningIcon} className={classes.warningIcon} />
+        <div
+          className={
+            classes.errorTitle
+          }>{`Found ${props.errors.length} Error(s):`}</div>
+      </div>
+      <div>
+        {props.errors.map((error, i) => (
+          <div className={classes.errorContainer} key={i}>
+            <div className={classes.error}>
+              <div className={classes.key}>{'Location:'}</div>
+              <div className={classes.errorMessage}>{`ERROR at line: ${
+                error.line + 1
+              }`}</div>
+            </div>
+            <div className={classes.error}>
+              <div className={classes.key}>{'Message:'}</div>
+              <div
+                className={classes.errorSchemaPath}>{`${error.message}`}</div>
+            </div>
           </div>
-          <div style={styles.error}>
-            <div style={styles.key}>{'Message:'}</div>
-            <div style={styles.errorSchemaPath}>{`${error.message}`}</div>
-          </div>
-        </div>
-      ))}
+        ))}
+      </div>
     </div>
-  </div>
-);
+  );
+};
 
 const ComposedJsonErrors: React.ComponentClass<IProps> = compose<
   IProps,

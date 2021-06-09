@@ -94,7 +94,7 @@ const BotList = ({
         </div>
       )}
       <div>
-        {!!error && <p>{'Error: Could not load bots'}</p>}
+        {!!error && !isLoading && <p>{'Error: Could not load bots'}</p>}
         {!error && !isLoading && _.isEmpty(bots) && (
           <div>
             <div>{`There are no bots yet..`}</div>

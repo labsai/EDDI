@@ -17,47 +17,26 @@ interface IPrivateProps extends IPublicProps {
   error: Error;
 }
 
-interface IState {
-  data: string;
-}
+const PluginContainer = (props: IPrivateProps) => {
+  const [data, setData] = React.useState('');
 
-class PluginContainer extends React.Component<IPrivateProps, IState> {
-  constructor(props) {
-    super(props);
-    this.state = {
-      data: '',
-    };
-  }
+  React.useEffect(() => {
+    setData(JSON.stringify(props.plugin.pluginData, null, '\t'));
+  }, [props.plugin, props.isLoading, props.error]);
 
-  componentDidMount() {
-    this.setState({
-      data: JSON.stringify(this.props.plugin.pluginData, null, '\t'),
-    });
-  }
-
-  componentDidUpdate(prevProps) {
-    if (prevProps !== this.props) {
-      this.setState({
-        data: JSON.stringify(this.props.plugin.pluginData, null, '\t'),
-      });
-    }
-  }
-
-  render() {
-    return (
-      <div>
-        {!_.isEmpty(this.props.plugin) && (
-          <ViewJsonContent
-            descriptor={this.props.plugin}
-            data={this.state.data}
-            usedBy={this.props.plugin.usedByPackages}
-            selectVersion={this.props.selectVersion}
-          />
-        )}
-      </div>
-    );
-  }
-}
+  return (
+    <div>
+      {!_.isEmpty(props.plugin) && (
+        <ViewJsonContent
+          descriptor={props.plugin}
+          data={data}
+          usedBy={props.plugin.usedByPackages}
+          selectVersion={props.selectVersion}
+        />
+      )}
+    </div>
+  );
+};
 
 const ComposedPluginContainer: React.ComponentClass<IPublicProps> = compose<
   IPrivateProps,

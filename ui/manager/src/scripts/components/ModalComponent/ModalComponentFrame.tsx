@@ -1,38 +1,32 @@
+import { makeStyles } from '@material-ui/core/styles';
 import * as React from 'react';
 import { connect } from 'react-redux';
+import { compose, pure, setDisplayName } from 'recompose';
 import ModalActionDispatchers from '../../actions/ModalActionDispatchers';
 import { modalSelector } from '../../selectors/ModalSelectors';
-import {
-  IBot,
-  IDescriptor,
-  IDetailedDescriptor,
-  IPackage,
-} from '../utils/AxiosFunctions';
-import styles from './ModalComponent.styles';
-import './ModalComponent.styles.scss';
-import { compose, pure, setDisplayName } from 'recompose';
-import CreateBotModal from './CreateBotModal';
-import EditDescriptorModal from './EditDescriptorModal';
+import { getTypeFromResource } from '../utils/ApiFunctions';
+import { IBot, IDetailedDescriptor, IPackage } from '../utils/AxiosFunctions';
+import { ModalEnum } from '../utils/ModalEnum';
 import AddPackagesModal from './AddPackagesModal/AddPackagesModal';
 import AddPluginModal from './AddPluginModal/AddPluginModal';
-import CreatePackageModal from './CreatePackageModal';
-import UpdatePackageModal from './UpdatePackageModal';
-import { ModalEnum } from '../utils/ModalEnum';
-import EditJsonModal from './EditJsonModal/EditJsonModal';
-import ViewJsonModal from './ViewJsonModal/ViewJsonModal';
-import CreateNewConfigModal from './EditJsonModal/CreateNewConfigModal';
-import CreateNewConfig2Modal from './EditJsonModal/CreateNewConfig2Modal';
-import UpdatePackagesModal from './UpdateConfigsModal/UpdatePackagesModal';
-import UpdateBotsModal from './UpdateConfigsModal/UpdateBotsModal';
-import ConfirmModal from './ConfirmModal';
-import ErrorMessageModal from './ErrorMessageModal';
-import { CSSProperties } from 'react';
-import AddNewPackageToBotModal from './UpdateConfigsModal/AddNewPackageToBotModal';
-import { getTypeFromResource } from '../utils/ApiFunctions';
-import ConversationsModal from './ConversationsModal/ConversationsModal';
 import BasicAuthModal from './BasicAuthModal/BasicAuthModal';
+import ConfirmModal from './ConfirmModal';
+import ConversationsModal from './ConversationsModal/ConversationsModal';
+import CreateBotModal from './CreateBotModal';
+import CreatePackageModal from './CreatePackageModal';
+import EditDescriptorModal from './EditDescriptorModal';
+import CreateNewConfig2Modal from './EditJsonModal/CreateNewConfig2Modal';
+import CreateNewConfigModal from './EditJsonModal/CreateNewConfigModal';
+import EditJsonModal from './EditJsonModal/EditJsonModal';
+import ErrorMessageModal from './ErrorMessageModal';
+import './ModalComponent.styles.scss';
+import AddNewPackageToBotModal from './UpdateConfigsModal/AddNewPackageToBotModal';
+import UpdateBotsModal from './UpdateConfigsModal/UpdateBotsModal';
+import UpdatePackagesModal from './UpdateConfigsModal/UpdatePackagesModal';
+import UpdatePackageModal from './UpdatePackageModal';
+import ViewJsonModal from './ViewJsonModal/ViewJsonModal';
 
-const randomStyles: { [key: string]: IExtendedCSSProperties } = {
+const useStyles = makeStyles({
   content: {
     background: '#fff',
     border: '1px solid #ccc',
@@ -57,11 +51,11 @@ const randomStyles: { [key: string]: IExtendedCSSProperties } = {
     bottom: 0,
   },
   close: {
-    ':focus': {
+    '&:focus': {
       color: '#000',
       cursor: 'pointer',
     },
-    ':hover': {
+    '&:hover': {
       color: '#000',
       cursor: 'pointer',
     },
@@ -80,7 +74,7 @@ const randomStyles: { [key: string]: IExtendedCSSProperties } = {
     position: 'relative',
     margin: '100px auto 100px',
   },
-};
+});
 
 interface IState {
   packageName: string;
@@ -107,142 +101,130 @@ interface IPrivateProps {
 
 interface IPublicProps {}
 
-class ModalComponentFrame extends React.Component<IPrivateProps, IState> {
-  constructor(props) {
-    super(props);
-    this.state = {
-      packageName: '',
-      packageDescription: '',
-    };
-  }
+const ModalComponentFrame = (props: IPrivateProps) => {
+  const [packageName, setPackageName] = React.useState('');
+  const [packageDescription, setPackageDescription] = React.useState('');
 
-  setPackageName = (name: string) => {
-    this.setState({ packageName: name });
+  const classes = useStyles();
+
+  const handleSetPackageName = (name: string) => {
+    setPackageName(name);
   };
 
-  setPackageDescription = (description: string) => {
-    this.setState({ packageDescription: description });
+  const handleSetPackageDescription = (description: string) => {
+    setPackageDescription(description);
   };
 
-  renderContent(mode: ModalEnum) {
+  const renderContent = (mode: ModalEnum) => {
     switch (mode) {
       case ModalEnum.createBot:
         return <CreateBotModal />;
       case ModalEnum.editDescriptor:
-        return <EditDescriptorModal descriptor={this.props.descriptor} />;
+        return <EditDescriptorModal descriptor={props.descriptor} />;
       case ModalEnum.createPackage:
         return (
           <CreatePackageModal
-            setName={this.setPackageName}
-            setDescription={this.setPackageDescription}
+            setName={handleSetPackageName}
+            setDescription={handleSetPackageDescription}
           />
         );
       case ModalEnum.viewJson:
-        return <ViewJsonModal resource={this.props.resource} />;
+        return <ViewJsonModal resource={props.resource} />;
       case ModalEnum.updatePackage:
         return (
           <UpdatePackageModal
-            packageName={this.state.packageName}
-            packageDescription={this.state.packageDescription}
+            packageName={packageName}
+            packageDescription={packageDescription}
           />
         );
       case ModalEnum.addPackages:
-        return <AddPackagesModal bot={this.props.bot} />;
+        return <AddPackagesModal bot={props.bot} />;
       case ModalEnum.editJson:
-        const type = getTypeFromResource(this.props.resource);
+        const type = getTypeFromResource(props.resource);
         return (
           <EditJsonModal
             type={type}
-            resource={this.props.resource}
-            data={this.props.data}
+            resource={props.resource}
+            data={props.data}
           />
         );
       case ModalEnum.addPlugins:
         return (
           <AddPluginModal
-            oldPlugins={this.props.selectedResources}
-            pluginType={this.props.pluginType}
-            addPlugins={this.props.addPlugin}
+            oldPlugins={props.selectedResources}
+            pluginType={props.pluginType}
+            addPlugins={props.addPlugin}
           />
         );
       case ModalEnum.createNewConfig:
         return (
           <CreateNewConfigModal
-            type={this.props.pluginType}
-            name={this.props.name}
-            description={this.props.description}
-            data={this.props.data}
-            onConfirm={this.props.onConfirm}
+            type={props.pluginType}
+            name={props.name}
+            description={props.description}
+            data={props.data}
+            onConfirm={props.onConfirm}
           />
         );
       case ModalEnum.createNewConfig2:
         return (
           <CreateNewConfig2Modal
-            type={this.props.pluginType}
-            name={this.props.name}
-            description={this.props.description}
-            data={this.props.data}
-            onConfirm={this.props.onConfirm}
+            type={props.pluginType}
+            name={props.name}
+            description={props.description}
+            data={props.data}
+            onConfirm={props.onConfirm}
           />
         );
       case ModalEnum.updatePackages:
-        return <UpdatePackagesModal pluginResource={this.props.resource} />;
+        return <UpdatePackagesModal pluginResource={props.resource} />;
       case ModalEnum.updateBots:
-        return (
-          <UpdateBotsModal packageResources={this.props.selectedResources} />
-        );
+        return <UpdateBotsModal packageResources={props.selectedResources} />;
       case ModalEnum.confirmation:
         return (
           <ConfirmModal
-            title={this.props.title}
-            message={this.props.message}
-            onConfirm={this.props.onConfirm}
+            title={props.title}
+            message={props.message}
+            onConfirm={props.onConfirm}
           />
         );
       case ModalEnum.error:
         return (
-          <ErrorMessageModal
-            title={this.props.title}
-            message={this.props.message}
-          />
+          <ErrorMessageModal title={props.title} message={props.message} />
         );
       case ModalEnum.addNewPackageToBot:
         return (
-          <AddNewPackageToBotModal packagePayload={this.props.packagePayload} />
+          <AddNewPackageToBotModal packagePayload={props.packagePayload} />
         );
       case ModalEnum.conversations:
-        return <ConversationsModal bot={this.props.bot} />;
+        return <ConversationsModal bot={props.bot} />;
       case ModalEnum.basicAuth:
         return <BasicAuthModal />;
       default:
         return null;
     }
-  }
+  };
 
-  closeModal = () => {
+  const closeModal = () => {
     ModalActionDispatchers.closeModal();
   };
 
-  render() {
-    if (this.props.isModalOpen) {
-      document.body.className = 'modal-body-open';
-      return (
-        <div style={randomStyles.overlay}>
-          <div style={randomStyles.box}>
-            <div onClick={this.closeModal} style={randomStyles.close}>
-              &times;
-            </div>
-            <div style={randomStyles.content}>
-              {this.renderContent(this.props.mode)}
-            </div>
+  if (props.isModalOpen) {
+    document.body.className = 'modal-body-open';
+    return (
+      <div className={classes.overlay}>
+        <div className={classes.box}>
+          <div onClick={closeModal} className={classes.close}>
+            &times;
           </div>
+          <div className={classes.content}>{renderContent(props.mode)}</div>
         </div>
-      );
-    }
-    document.body.className = 'modal-body-closed';
-    return <div />;
+      </div>
+    );
   }
-}
+  document.body.className = 'modal-body-closed';
+  return <div />;
+};
 
 const ComposedModalComponentFrame: React.ComponentClass<IPublicProps> = compose<
   IPrivateProps,

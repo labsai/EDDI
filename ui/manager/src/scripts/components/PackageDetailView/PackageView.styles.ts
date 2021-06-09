@@ -14,7 +14,7 @@ const useStyles = makeStyles(() =>
     packageHeader: {
       display: 'flex',
       flex: 1,
-      height: '35px',
+      alignItems: 'center',
       marginTop: '47px',
     },
     packageHeaderSpacing: {

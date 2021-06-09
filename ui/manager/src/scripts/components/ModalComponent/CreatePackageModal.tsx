@@ -1,120 +1,84 @@
 import * as React from 'react';
-import styles from './ModalComponent.styles';
+import useStyles from './ModalComponent.styles';
 import './ModalComponent.styles.scss';
 import { compose, pure, setDisplayName } from 'recompose';
 import { ModalEnum } from '../utils/ModalEnum';
 import ModalActionDispatchers from '../../actions/ModalActionDispatchers';
-
-const customStyles: { [key: string]: React.CSSProperties } = {
-  createNewBotButton: {
-    backgroundColor: '#0070D2',
-    border: '0px',
-    borderRadius: '4px',
-    color: '#FFFFFF',
-    cursor: 'pointer',
-    fontSize: '12px',
-    height: '36px',
-    marginLeft: '60%',
-    marginTop: '8px',
-    textAlign: 'center',
-    minWidth: '100px',
-  },
-};
-
-interface IState {
-  packageName: string;
-  packageDescription: string;
-}
 
 interface IProps {
   setName: (name: string) => void;
   setDescription: (description: string) => void;
 }
 
-class CreatePackageModal extends React.Component<IProps, IState> {
-  constructor(props) {
-    super(props);
-    this.state = {
-      packageName: '',
-      packageDescription: '',
-    };
-  }
+const CreatePackageModal = ({ setName, setDescription }: IProps) => {
+  const [packageName, setPackageName] = React.useState('');
+  const [packageDescription, setPackageDescription] = React.useState('');
 
-  getButtonStyle() {
-    if (!this.state.packageName) {
-      return { ...customStyles.createNewBotButton, backgroundColor: '#c4c9d2' };
+  const classes = useStyles();
+
+  const getButtonStyle = () => {
+    if (!packageName) {
+      return { backgroundColor: '#c4c9d2' };
     } else {
       return {
-        ...customStyles.createNewBotButton,
         backgroundColor: '#0070D2',
         cursor: 'pointer',
       };
     }
-  }
+  };
 
-  openModal = () => {
-    this.props.setName(this.state.packageName);
-    this.props.setDescription(this.state.packageDescription);
+  const openModal = () => {
+    setName(packageName);
+    setDescription(packageDescription);
     ModalActionDispatchers.showModal(ModalEnum.updatePackage, null, null);
   };
 
-  render() {
-    return (
-      <div>
-        <div style={styles.tallModalHeader}>
-          <div style={styles.modalTopHeader}>
-            <h2 style={styles.createPackageHeaderText}>
-              {'Create new Package'}
-            </h2>
-            <div style={styles.modalTopHeaderCenter} />
-            <button
-              disabled={!this.state.packageName}
-              onClick={() => {
-                this.openModal();
-              }}
-              style={this.getButtonStyle()}>
-              {'Create Package'}
-            </button>
+  return (
+    <div>
+      <div className={classes.tallModalHeader}>
+        <div className={classes.modalTopHeader}>
+          <h2 className={classes.createPackageHeaderText}>
+            {'Create new Package'}
+          </h2>
+          <div className={classes.modalTopHeaderCenter} />
+          <button
+            disabled={!packageName}
+            onClick={openModal}
+            style={getButtonStyle()}
+            className={classes.createNewBotButton}>
+            {'Create Package'}
+          </button>
+        </div>
+      </div>
+      <div className={classes.content}>
+        <div className={classes.botText}>
+          {'Give the package a name'}
+          <div className={classes.inputBoxContent}>
+            <textarea
+              defaultValue={''}
+              name={'packageName'}
+              className={classes.inputBoxName}
+              placeholder={'Give the package a name..'}
+              onChange={(e) => setPackageName(e.target.value)}
+            />
           </div>
         </div>
-        <div style={styles.content}>
-          <div style={styles.botText}>
-            {'Give the package a name'}
-            <div style={styles.inputBoxContent}>
-              <textarea
-                defaultValue={''}
-                name={'packageName'}
-                style={styles.inputBoxName}
-                placeholder={'Give the package a name..'}
-                onChange={(e) =>
-                  this.setState({
-                    packageName: e.target.value,
-                  })
-                }
-              />
-            </div>
-          </div>
-          <div style={styles.botText}>
-            {'Give the package a short description'}
-            <div style={styles.inputBoxContent}>
-              <textarea
-                defaultValue={''}
-                name={'packageDescription'}
-                style={styles.inputBox}
-                placeholder={'Give the package a short description..'}
-                onChange={(e) =>
-                  this.setState({
-                    packageDescription: e.target.value,
-                  })
-                }
-              />
-            </div>
+        <div className={classes.botText}>
+          {'Give the package a short description'}
+          <div className={classes.inputBoxContent}>
+            <textarea
+              defaultValue={''}
+              name={'packageDescription'}
+              className={classes.inputBox}
+              placeholder={'Give the package a short description..'}
+              onChange={(e) => setPackageDescription(e.target.value)}
+            />
           </div>
         </div>
       </div>
-    );
-  }
-}
+    </div>
+  );
+};
 
 const ComposedCreatePackageModal: React.ComponentClass<IProps> = compose<
   IProps,

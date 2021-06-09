@@ -20,7 +20,6 @@ import { readOnlySelector } from '../../../selectors/AuthenticationSelectors';
 import { getTypeFromResource } from '../../utils/ApiFunctions';
 import { IDetailedDescriptor } from '../../utils/AxiosFunctions';
 import { PACKAGE } from '../../utils/EddiTypes';
-import styles from './Options.styles';
 
 interface IPublicProps {
   descriptor: IDetailedDescriptor;
@@ -44,6 +43,9 @@ const useStyles = makeStyles({
     '& .MuiListItemIcon-root': {
       justifyContent: 'flex-end',
     },
+  },
+  optionButton: {
+    alignContent: 'center',
   },
 });
 
@@ -84,7 +86,7 @@ const Options = ({ descriptor, readOnly, data }: IPrivateProps) => {
   const isCurrentVersion = descriptor.version === descriptor.currentVersion;
 
   return (
-    <div style={styles.optionButton}>
+    <div className={classes.optionButton}>
       <IconButton
         aria-label="more"
         aria-controls="long-menu"

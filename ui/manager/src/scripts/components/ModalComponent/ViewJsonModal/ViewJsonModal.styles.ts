@@ -1,6 +1,6 @@
-import { CSSProperties } from 'react';
+import { makeStyles } from '@material-ui/core/styles';
 
-const styles: { [key: string]: IExtendedCSSProperties } = {
+const styles = makeStyles({
   conversation: {
     display: 'flex',
   },
@@ -16,6 +16,7 @@ const styles: { [key: string]: IExtendedCSSProperties } = {
     display: 'flex',
     flex: 1,
     paddingTop: '44px',
+    alignItems: 'center',
   },
   bottomHeader: {
     marginTop: '23px',
@@ -85,6 +86,7 @@ const styles: { [key: string]: IExtendedCSSProperties } = {
     marginTop: 'auto',
     marginBottom: 'auto',
     marginRight: '5px',
+    marginLeft: '5px',
   },
-};
+});
 export default styles;

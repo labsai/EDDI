@@ -8,56 +8,32 @@ interface IProps {
   packageResource: string;
 }
 
-interface IState {
-  selectedPackageResource: string;
-}
+const PackageContainer = (props: IProps) => {
+  const [selectedPackageResource, setSelectedPackageResource] =
+    React.useState('');
 
-class PackageContainer extends React.Component<IProps, IState> {
-  constructor(props) {
-    super(props);
-    this.state = {
-      selectedPackageResource: '',
-    };
-  }
+  React.useEffect(() => {
+    eddiApiActionDispatchers.fetchPackageAction(props.packageResource);
+    setSelectedPackageResource(props.packageResource);
+  }, [props.packageResource]);
 
-  async componentDidMount() {
-    eddiApiActionDispatchers.fetchPackageAction(this.props.packageResource);
-    this.setState({
-      selectedPackageResource: this.props.packageResource,
-    });
-  }
-
-  componentDidUpdate(prevProps) {
-    if (prevProps !== this.props) {
-      this.setState({
-        selectedPackageResource: this.props.packageResource,
-      });
-    }
-  }
-
-  selectVersion = (newVersion: number) => {
+  const selectVersion = (newVersion: number) => {
     const selectedPackageResource = Parser.replaceResourceVersion(
-      this.props.packageResource,
+      props.packageResource,
       newVersion,
     );
-    this.setState({
-      selectedPackageResource,
-    });
+    setSelectedPackageResource(selectedPackageResource);
     eddiApiActionDispatchers.fetchPackageAction(selectedPackageResource);
   };
 
-  render() {
-    return (
-      <Package
-        isPackageInBot={
-          this.state.selectedPackageResource !== this.props.packageResource
-        }
-        packageResource={this.state.selectedPackageResource}
-        selectVersion={this.selectVersion}
-      />
-    );
-  }
-}
+  return (
+    <Package
+      isPackageInBot={selectedPackageResource !== props.packageResource}
+      packageResource={selectedPackageResource}
+      selectVersion={selectVersion}
+    />
+  );
+};
 
 const ComposedPackageContainer: React.ComponentClass<IProps> = compose<
   IProps,

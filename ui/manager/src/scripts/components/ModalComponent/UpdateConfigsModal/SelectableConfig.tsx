@@ -1,12 +1,9 @@
+import * as moment from 'moment';
 import * as React from 'react';
 import { compose, pure, setDisplayName } from 'recompose';
-import { IDetailedDescriptor } from '../../utils/AxiosFunctions';
-import { packageSelector } from '../../../selectors/PackageSelectors';
-import * as moment from 'moment';
 import TruncateTextComponent from '../../Assets/TruncateTextComponent';
-import * as _ from 'lodash';
-import { connect } from 'react-redux';
-import styles from '../AddPackagesModal/Package.styles';
+import { IDetailedDescriptor } from '../../utils/AxiosFunctions';
+import useStyles from '../AddPackagesModal/Package.styles';
 
 interface IProps {
   descriptor: IDetailedDescriptor;
@@ -14,63 +11,48 @@ interface IProps {
   handleClick(resource: string): void;
 }
 
-class SelectableConfig extends React.Component<IProps> {
-  getNameStyle() {
-    if (this.props.selected) {
-      return { ...styles.packageName, color: '#16325C' };
-    } else {
-      return {
-        ...styles.packageName,
-      };
-    }
-  }
+const SelectableConfig = (props: IProps) => {
+  const classes = useStyles();
 
-  getButtonStyle() {
-    if (this.props.selected) {
-      return { ...styles.button, backgroundColor: '#4BCA81' };
-    } else {
-      return {
-        ...styles.button,
-      };
-    }
-  }
-
-  handleClick = () => {
-    this.props.handleClick(this.props.descriptor.resource);
+  const handleClick = () => {
+    props.handleClick(props.descriptor.resource);
   };
 
-  render() {
-    return (
-      <div>
-        <div style={styles.content}>
-          <div style={styles.topContent}>
-            <button
-              onClick={this.handleClick}
-              style={this.getButtonStyle()}>{`${
-              this.props.selected ? '\u2714' : '+'
-            }`}</button>
-            <div style={this.getNameStyle()}>{this.props.descriptor.name}</div>
-            <div style={styles.versionName}>
-              {`V${this.props.descriptor.version}`}
-            </div>
-            <div style={styles.centerFlex} />
-            <div style={styles.modifiedDate}>
-              {moment(this.props.descriptor.lastModifiedOn).format(
-                'DD.MM.YYYY',
-              )}
-            </div>
+  return (
+    <div>
+      <div className={classes.content}>
+        <div className={classes.topContent}>
+          <button
+            onClick={handleClick}
+            style={{
+              backgroundColor: props.selected ? '#4BCA81' : undefined,
+            }}
+            className={classes.button}>{`${
+            props.selected ? '\u2714' : '+'
+          }`}</button>
+          <div
+            style={{ color: props.selected ? '#16325C' : undefined }}
+            className={classes.packageName}>
+            {props.descriptor.name}
           </div>
-          <div style={styles.bottomContent}>
-            <TruncateTextComponent
-              text={this.props.descriptor.description}
-              length={80}
-            />
+          <div className={classes.versionName}>
+            {`V${props.descriptor.version}`}
+          </div>
+          <div className={classes.centerFlex} />
+          <div className={classes.modifiedDate}>
+            {moment(props.descriptor.lastModifiedOn).format('DD.MM.YYYY')}
           </div>
         </div>
+        <div className={classes.bottomContent}>
+          <TruncateTextComponent
+            text={props.descriptor.description}
+            length={80}
+          />
+        </div>
       </div>
-    );
-  }
-}
+    </div>
+  );
+};
 
 const ComposedSelectableConfig: React.ComponentClass<IProps> = compose<
   IProps,
