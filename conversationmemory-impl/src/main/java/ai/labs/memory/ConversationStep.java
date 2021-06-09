@@ -48,6 +48,11 @@ public class ConversationStep implements IConversationMemory.IWritableConversati
         store.put(data.getKey(), data);
     }
 
+    @Override
+    public void removeData(String keyToBeRemoved) {
+        store.entrySet().removeIf(dataEntry -> dataEntry.getValue().getKey().startsWith(keyToBeRemoved));
+    }
+
     public void resetConversationOutput(String rootKey) {
         conversationOutput.put(rootKey, new ArrayList<>());
     }

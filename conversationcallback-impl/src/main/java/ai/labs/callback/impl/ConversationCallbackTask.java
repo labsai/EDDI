@@ -34,6 +34,7 @@ public class ConversationCallbackTask implements ILifecycleTask {
     private static final String KEY_TIMEOUT_IN_MILLIS = "timeoutInMillis";
     private static final String KEY_CALL_ON_ACTIONS = "callOnActions";
     private static final long DEFAULT_TIMEOUT_IN_MILLIS = 10000L;
+    public static final String CALLBACK_TYPE = "callback";
 
     private final IConversationCallback conversationCallback;
     private List<String> callOnActions = Collections.emptyList();
@@ -48,6 +49,11 @@ public class ConversationCallbackTask implements ILifecycleTask {
     @Override
     public String getId() {
         return ID;
+    }
+
+    @Override
+    public String getType() {
+        return CALLBACK_TYPE;
     }
 
     @Override

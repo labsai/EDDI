@@ -88,6 +88,11 @@ public class HttpCallsTask implements ILifecycleTask {
     }
 
     @Override
+    public String getType() {
+        return KEY_HTTP_CALLS;
+    }
+
+    @Override
     public Object getComponent() {
         return null;
     }

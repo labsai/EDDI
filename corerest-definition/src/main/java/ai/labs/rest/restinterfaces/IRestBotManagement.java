@@ -1,6 +1,5 @@
 package ai.labs.rest.restinterfaces;
 
-import ai.labs.memory.model.SimpleConversationMemorySnapshot;
 import ai.labs.models.InputData;
 import io.swagger.annotations.Api;
 import io.swagger.annotations.ApiOperation;
@@ -29,13 +28,16 @@ public interface IRestBotManagement {
     @Path("/{intent}/{userId}")
     @Produces(MediaType.APPLICATION_JSON)
     @ApiOperation(value = "Read conversation.")
-    SimpleConversationMemorySnapshot loadConversationMemory(@PathParam("intent") String intent,
-                                                            @PathParam("userId") String userId,
-                                                            @ApiParam(name = "returnDetailed", format = "boolean", example = "false")
-                                                            @QueryParam("returnDetailed") @DefaultValue("false") Boolean returnDetailed,
-                                                            @ApiParam(name = "returnCurrentStepOnly", format = "boolean", example = "true")
-                                                            @QueryParam("returnCurrentStepOnly") @DefaultValue("true") Boolean returnCurrentStepOnly,
-                                                            @QueryParam("returningFields") List<String> returningFields);
+    void loadConversationMemory(@PathParam("intent") String intent,
+                                @PathParam("userId") String userId,
+                                @ApiParam(name = "language", format = "string", example = "en")
+                                @QueryParam("language") String language,
+                                @ApiParam(name = "returnDetailed", format = "boolean", example = "false")
+                                @QueryParam("returnDetailed") @DefaultValue("false") Boolean returnDetailed,
+                                @ApiParam(name = "returnCurrentStepOnly", format = "boolean", example = "true")
+                                @QueryParam("returnCurrentStepOnly") @DefaultValue("true") Boolean returnCurrentStepOnly,
+                                @QueryParam("returningFields") List<String> returningFields,
+                                @Suspended final AsyncResponse response);
 
     @POST
     @Path("/{intent}/{userId}")

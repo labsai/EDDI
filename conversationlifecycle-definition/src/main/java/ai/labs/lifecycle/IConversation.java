@@ -21,6 +21,8 @@ public interface IConversation {
 
     void endConversation();
 
+    void rerun(Map<String, Context> contexts) throws ConversationNotReadyException, LifecycleException;
+
     void say(final String message, Map<String, Context> contexts)
             throws LifecycleException, ConversationNotReadyException;
 

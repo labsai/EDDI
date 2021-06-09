@@ -14,6 +14,8 @@ import java.util.List;
 
 @Getter
 @Setter
+@NoArgsConstructor
+@AllArgsConstructor
 public class OutputConfiguration {
     private String action;
     private int timesOccurred;

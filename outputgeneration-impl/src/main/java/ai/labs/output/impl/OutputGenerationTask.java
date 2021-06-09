@@ -54,6 +54,7 @@ public class OutputGenerationTask implements ILifecycleTask {
     private static final String KEY_EXPRESSIONS = "expressions";
     private static final String KEY_IS_DEFAULT = "isDefault";
     private static final String OUTPUT_TYPE_QUICK_REPLY = "quickReply";
+    public static final String OUTPUT_TYPE = "output";
     private final IResourceClientLibrary resourceClientLibrary;
     private final IDataFactory dataFactory;
     private final IOutputGeneration outputGeneration;
@@ -71,6 +72,11 @@ public class OutputGenerationTask implements ILifecycleTask {
     @Override
     public String getId() {
         return ID;
+    }
+
+    @Override
+    public String getType() {
+        return OUTPUT_TYPE;
     }
 
     @Override
@@ -106,7 +112,7 @@ public class OutputGenerationTask implements ILifecycleTask {
 
     private boolean checkLanguage(IConversationProperties conversationProperties) {
         return this.outputLanguage == null ||
-                this.outputLanguage.equals(retrieveContextLanguageFromLongTermMemory(conversationProperties));
+                this.outputLanguage.equalsIgnoreCase(retrieveContextLanguageFromLongTermMemory(conversationProperties));
     }
 
     private void storeContextOutput(IWritableConversationStep currentStep, List<IData<Context>> contextDataList) {

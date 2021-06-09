@@ -19,6 +19,7 @@ import ai.labs.persistence.IResourceStore;
 import ai.labs.resources.rest.properties.model.Properties;
 import ai.labs.runtime.IExecutablePackage;
 
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.LinkedList;
@@ -29,6 +30,7 @@ import java.util.stream.Collectors;
 
 import static ai.labs.memory.ContextUtilities.storeContextLanguageInLongTermMemory;
 import static ai.labs.memory.IConversationMemory.IWritableConversationStep;
+import static ai.labs.utilities.RuntimeUtilities.isNullOrEmpty;
 
 /**
  * @author ginccc
@@ -38,6 +40,7 @@ public class Conversation implements IConversation {
     private static final String KEY_INPUT = "input";
     private static final String KEY_CONTEXT = "context";
     private static final String KEY_ACTIONS = "actions";
+    public static final String LIFECYCLE_TASK_KEY = "lifecycleTaskKey";
     private final List<IExecutablePackage> executablePackages;
     private final IConversationMemory conversationMemory;
     private final IPropertiesHandler propertiesHandler;
@@ -76,7 +79,8 @@ public class Conversation implements IConversation {
         loadLongTermProperties(conversationMemory);
 
         try {
-            executeConversationStep(new LinkedList<>(createContextData(context)));
+            var lifecycleData = prepareLifecycleData("", context, null);
+            executeConversationStep(lifecycleData, null);
         } finally {
             checkActionsForConversationEnd();
         }
@@ -117,21 +121,30 @@ public class Conversation implements IConversation {
     }
 
     @Override
+    public void rerun(final Map<String, Context> contexts) throws ConversationNotReadyException, LifecycleException {
+        runStep("", contexts, false, Arrays.asList("output", "quickReplies"));
+    }
+
+    @Override
     public void say(final String message, final Map<String, Context> contexts)
             throws LifecycleException, ConversationNotReadyException {
-        if (getConversationState() == ConversationState.IN_PROGRESS) {
-            String errorMessage = "Conversation is currently IN_PROGRESS! Please try again later!";
-            errorMessage = String.format(errorMessage, getConversationState());
-            throw new ConversationNotReadyException(errorMessage);
-        }
+        runStep(message, contexts, true, new LinkedList<>());
+    }
+
+    private void runStep(String message, Map<String, Context> contexts, boolean startNewStep, List<String> lifecycleTaskTypes)
+            throws ConversationNotReadyException, LifecycleException {
+
+        checkIfConversationInProgress();
 
         try {
             setConversationState(ConversationState.IN_PROGRESS);
 
-            startNextStep();
+            if (startNewStep) {
+                startNextStep();
+            }
 
-            var lifecycleData = prepareLifecycleData(message, contexts);
-            executeConversationStep(lifecycleData);
+            var lifecycleData = prepareLifecycleData(message, contexts, lifecycleTaskTypes);
+            executeConversationStep(lifecycleData, lifecycleTaskTypes);
 
         } catch (LifecycleException.LifecycleInterruptedException e) {
             setConversationState(ConversationState.EXECUTION_INTERRUPTED);
@@ -152,6 +165,14 @@ public class Conversation implements IConversation {
         }
     }
 
+    private void checkIfConversationInProgress() throws ConversationNotReadyException {
+        if (getConversationState() == ConversationState.IN_PROGRESS) {
+            String errorMessage = "Conversation is currently IN_PROGRESS! Please try again later!";
+            errorMessage = String.format(errorMessage, getConversationState());
+            throw new ConversationNotReadyException(errorMessage);
+        }
+    }
+
     private void postConversationLifecycleTasks() throws IResourceStore.ResourceStoreException {
         removeOldInvalidProperties();
         storePropertiesPermanently();
@@ -161,15 +182,31 @@ public class Conversation implements IConversation {
         ((ConversationMemory) conversationMemory).startNextStep();
     }
 
-    private List<IData> prepareLifecycleData(String message, Map<String, Context> contexts) {
+    private List<IData> prepareLifecycleData(String message, Map<String, Context> contexts,
+                                             List<String> taskTypeResultsToBeRemoved) {
+
         List<IData<Context>> contextData = createContextData(contexts);
         List<IData> lifecycleData = new LinkedList<>(contextData);
 
         storeContextLanguageInLongTermMemory(contexts, conversationMemory);
-        addContextToConversationOutput(conversationMemory.getCurrentStep(), contextData);
+
+        IWritableConversationStep currentStep = conversationMemory.getCurrentStep();
+        addContextToConversationOutput(currentStep, contextData);
+        removedTaskTypeResultsFromPreviousRuns(currentStep, taskTypeResultsToBeRemoved);
 
         storeUserInputInMemory(message, lifecycleData);
         return lifecycleData;
+    }
+
+    private void removedTaskTypeResultsFromPreviousRuns(IWritableConversationStep currentStep,
+                                                        List<String> taskTypeResultsToBeRemoved) {
+
+        if (!isNullOrEmpty(taskTypeResultsToBeRemoved)) {
+            taskTypeResultsToBeRemoved.forEach(type -> {
+                currentStep.removeData(type);
+                currentStep.resetConversationOutput(type);
+            });
+        }
     }
 
     private void addContextToConversationOutput(IWritableConversationStep currentStep,
@@ -192,9 +229,9 @@ public class Conversation implements IConversation {
         }
     }
 
-    private void executeConversationStep(List<IData> lifecycleData) throws LifecycleException {
+    private void executeConversationStep(List<IData> lifecycleData, List<String> lifecycleTaskTypes) throws LifecycleException {
         try {
-            executePackages(lifecycleData);
+            executePackages(lifecycleData, lifecycleTaskTypes);
         } catch (ConversationStopException unused) {
             endConversation();
         }
@@ -257,12 +294,12 @@ public class Conversation implements IConversation {
         return contextData;
     }
 
-    private void executePackages(List<IData> data) throws LifecycleException, ConversationStopException {
+    private void executePackages(List<IData> data, List<String> lifecycleTaskTypes) throws LifecycleException, ConversationStopException {
         for (IExecutablePackage executablePackage : executablePackages) {
             data.stream().filter(Objects::nonNull).
                     forEach(datum -> conversationMemory.getCurrentStep().storeData(datum));
             ILifecycleManager lifecycleManager = executablePackage.getLifecycleManager();
-            lifecycleManager.executeLifecycle(conversationMemory);
+            lifecycleManager.executeLifecycle(conversationMemory, lifecycleTaskTypes);
         }
     }
 }
