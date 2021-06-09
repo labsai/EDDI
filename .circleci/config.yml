@@ -36,7 +36,7 @@ jobs:
       - deploy:
           name: Build and push Docker image
           command: |
-            if [ "${CIRCLE_BRANCH}" == "master" ]; then
+            if [ "${CIRCLE_BRANCH}" == "feature-multi-language-support" ]; then
             docker login -u $DOCKER_USER -p $DOCKER_PASS
 
             docker build --label "version=4.9.1" --label "release=4.9.1-b$CIRCLE_BUILD_NUM" --build-arg EDDI_VERSION=4.9.1 --build-arg EDDI_ENV=production -t labsai/eddi:4.9.1-b$CIRCLE_BUILD_NUM .
