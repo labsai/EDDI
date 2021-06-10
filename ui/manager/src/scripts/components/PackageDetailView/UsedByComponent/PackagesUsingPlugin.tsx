@@ -29,72 +29,66 @@ interface IProps {
   isSmallName?: boolean;
 }
 
-const PackagesUsingPlugin = (props: IProps) => {
+const PackagesUsingPlugin = ({ plugin, isSmallName }: IProps) => {
   const [expandList, setExpandList] = React.useState(false);
+  const [usedByPackagesShort, setUsedByPackagesShort] =
+    React.useState<IUsedResource[]>(null);
+  const [usedByPackages, setUsedByPackages] = React.useState<string[]>(null);
 
   const classes = useStyles();
 
   React.useEffect(() => {
-    if (!_.isEmpty(props.plugin)) {
-      eddiApiActionDispatchers.fetchPackagesUsingPluginAction(
-        props.plugin.resource,
-        false,
-      );
-    }
-  }, [props.plugin, props.isSmallName]);
+    eddiApiActionDispatchers.fetchPackagesUsingPluginAction(
+      plugin.resource,
+      false,
+    );
+  }, []);
 
   React.useEffect(() => {
-    if (!props.plugin.usedByPackages) {
-      eddiApiActionDispatchers.fetchPackagesUsingPluginAction(
-        props.plugin.resource,
-        false,
-      );
+    if (!_.isEmpty(plugin.usedByPackages)) {
+      setUsedByPackagesShort(Parser.shortenResourceList(plugin.usedByPackages));
+      setUsedByPackages(plugin.usedByPackages);
     }
-  }, []);
+  }, [plugin.usedByPackages]);
 
   const handleExpandList = () => {
     setExpandList(!expandList);
   };
 
-  let shortList: IUsedResource[];
-  if (!_.isEmpty(props.plugin.usedByPackages)) {
-    shortList = Parser.shortenResourceList(props.plugin.usedByPackages);
-  }
   return (
     <div>
-      {!_.isEmpty(props.plugin.usedByPackages) && (
+      {!_.isEmpty(usedByPackages) && (
         <div className={classes.content}>
           {expandList ? (
             <div className={classes.list}>
-              {props.plugin.usedByPackages.map((resource) => (
+              {usedByPackages.map((resource) => (
                 <Package
                   key={resource}
                   packageResource={resource}
-                  isSmallName={!!props.isSmallName}
+                  isSmallName={!!isSmallName}
                 />
               ))}
             </div>
           ) : (
             <div className={classes.list}>
-              {shortList.map((r) => (
+              {usedByPackagesShort.map((r) => (
                 <Package
                   key={r.resource}
                   packageResource={r.resource}
                   usedByOlderVersion={r.usedByOlderVersion}
-                  isSmallName={!!props.isSmallName}
+                  isSmallName={!!isSmallName}
                 />
               ))}
             </div>
           )}
-          {_.size(props.plugin.usedByPackages) > _.size(shortList) &&
-            !expandList && (
-              <div className={classes.seeMore} onClick={handleExpandList}>
-                {'...See more'}
-              </div>
-            )}
+          {_.size(usedByPackages) > _.size(usedByPackagesShort) && !expandList && (
+            <div className={classes.seeMore} onClick={handleExpandList}>
+              {'...See more'}
+            </div>
+          )}
         </div>
       )}
-      {_.size(props.plugin.usedByPackages) > _.size(shortList) && expandList && (
+      {_.size(usedByPackages) > _.size(usedByPackagesShort) && expandList && (
         <div className={classes.seeMore} onClick={handleExpandList}>
           {'See less'}
         </div>
