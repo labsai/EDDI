@@ -63,7 +63,9 @@ const Plugin: React.StatelessComponent<IPrivateProps> = (
                   />
                 </div>
                 <div className={classes.centerFlex} />
-                <div className={classes.options}>
+                <div
+                  className={classes.options}
+                  onClick={(e) => e.stopPropagation()}>
                   <Options
                     descriptor={props.plugin}
                     data={JSON.stringify(props.plugin.pluginData, null, '\t')}

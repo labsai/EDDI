@@ -67,7 +67,7 @@ const ViewJsonContent = (props: IPrivateProps) => {
             selectVersion={props.selectVersion}
           />
           <div className={classes.centerFlex} />
-          <div className={classes.options}>
+          <div className={classes.options} onClick={(e) => e.stopPropagation()}>
             <Options descriptor={props.descriptor} data={props.data} />
           </div>
           <BlueButton

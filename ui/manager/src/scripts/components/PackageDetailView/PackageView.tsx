@@ -226,7 +226,7 @@ const PackageView = ({
             {'Discard changes'}
           </button>
         )}
-        <div className={classes.options}>
+        <div className={classes.options} onClick={(e) => e.stopPropagation()}>
           <Options
             descriptor={packagePayload}
             data={JSON.stringify(packagePayload.packageData, null, '\t')}

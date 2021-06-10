@@ -34,7 +34,7 @@ const ConversationsModal = ({ bot }: IProps) => {
             selectVersion={selectVersion}
           />
           <div className={classes.centerFlex} />
-          <div className={classes.options}>
+          <div className={classes.options} onClick={(e) => e.stopPropagation()}>
             <Options descriptor={bot} data={bot.packages} />
           </div>
         </div>
