@@ -73,7 +73,7 @@ const ViewJsonContent = (props: IPrivateProps) => {
           <BlueButton
             onClick={openEditJsonModal}
             classes={{ button: classes.button }}
-            // disabled={!isCurrentVersion || props.readOnly}
+            disabled={!isCurrentVersion || props.readOnly}
             text={`Edit JSON`}
           />
         </div>

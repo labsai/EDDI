@@ -40,7 +40,7 @@ const CreateNewConfig2Modal = ({
   const classes = useStyles();
   const [editorText, setEditorText] = React.useState<string>('{}');
   const [expanded, setExpanded] = React.useState<boolean>(false);
-
+  const aceEditorRef = React.useRef(null);
   React.useEffect(() => {
     discardChanges();
   }, [type, data, errors, schema, onConfirm, onChange, validate]);
@@ -68,7 +68,7 @@ const CreateNewConfig2Modal = ({
             />
           </div>
           <AceEditor
-            ref={'aceEditor'}
+            ref={aceEditorRef}
             mode={'json'}
             height={expanded ? '100%' : '800px'}
             width={'100%'}
