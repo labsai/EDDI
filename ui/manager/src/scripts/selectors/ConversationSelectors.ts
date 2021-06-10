@@ -23,8 +23,14 @@ export const conversationsSelector: (state: IAppState) => {
     error: Error;
     conversationsLoaded: number;
   } {
+    const sortedConversations = conversationState.conversations.sort(function (
+      a,
+      b,
+    ) {
+      return b.createdOn - a.createdOn;
+    });
     return {
-      conversations: conversationState.conversations,
+      conversations: sortedConversations,
       isLoading: conversationState.isLoadingAllConversations,
       allConversationsLoaded: conversationState.allConversationsLoaded,
       error: conversationState.error,

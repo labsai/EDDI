@@ -89,9 +89,9 @@ const ConversationReducer: IConversationReducer = (
               )
             ) {
               return _.uniqBy(
-                conversations.concat(
-                  (action as IFetchConversationsSuccessAction).conversations,
-                ),
+                (
+                  action as IFetchConversationsSuccessAction
+                ).conversations.concat(conversations),
                 (conversation) => conversation.resource,
               );
             } else {

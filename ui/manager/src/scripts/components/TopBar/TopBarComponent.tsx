@@ -4,6 +4,7 @@ import * as Keycloak from 'keycloak-js';
 import * as React from 'react';
 import { connect } from 'react-redux';
 import { compose, pure, setDisplayName } from 'recompose';
+import eddiApiActionDispatchers from '../../actions/EddiApiActionDispatchers';
 import {
   MEDIUM_FONT,
   MEDIUM_FONT2,
@@ -23,6 +24,8 @@ import { pageEnum } from '../pages/pageEnum';
 import { ModalEnum } from '../utils/ModalEnum';
 import FilterComponent from './FilterComponent';
 import NavigationComponent from './NavigationComponent';
+
+const LIMIT = 10;
 
 const useStyles = makeStyles({
   createNewBotButton: {
@@ -113,6 +116,10 @@ const TopBarComponent = ({
     }
   };
 
+  const refreshConversationList = () => {
+    eddiApiActionDispatchers.fetchConversationsAction(LIMIT, 0, null, null);
+  };
+
   const getSearchName = (page: pageEnum) => {
     if (page === pageEnum.httpCalls) {
       return 'HTTP calls';
@@ -172,6 +179,13 @@ const TopBarComponent = ({
             classes={{ button: classes.createNewBotButton }}
             disabled={readOnly}
             onClick={openModal}
+          />
+        )}
+        {page === pageEnum.conversation && (
+          <BlueButton
+            text={'Refresh'}
+            classes={{ button: classes.createNewBotButton }}
+            onClick={refreshConversationList}
           />
         )}
       </div>
