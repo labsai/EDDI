@@ -1,11 +1,12 @@
 import * as _ from 'lodash';
 import * as React from 'react';
 import * as InfiniteScrollTypes from 'react-infinite-scroller';
-import { connect, useSelector } from 'react-redux';
+import { connect } from 'react-redux';
 import ClimbingBoxLoader from 'react-spinners/ClimbingBoxLoader';
 import { compose, pure, setDisplayName } from 'recompose';
 import eddiApiActionDispatchers from '../../actions/EddiApiActionDispatchers';
 import { conversationsSelector } from '../../selectors/ConversationSelectors';
+import { IConversation } from '../utils/AxiosFunctions';
 import Conversation from './Conversation';
 import useStyle from './ConversationList.styles';
 
@@ -20,6 +21,7 @@ interface IPublicProps {
 }
 
 interface IPrivateProps extends IPublicProps {
+  conversations: IConversation[];
   isLoading: boolean;
   allConversationsLoaded: boolean;
   error: Error;
@@ -28,17 +30,14 @@ interface IPrivateProps extends IPublicProps {
 
 const ConversationList = ({
   filterText,
+  conversations,
+  isLoading,
+  allConversationsLoaded,
+  error,
   conversationsLoaded,
 }: IPrivateProps) => {
   const [loading, setLoading] = React.useState(false);
   const classes = useStyle();
-
-  const { conversations, isLoading, allConversationsLoaded, error } =
-    useSelector(conversationsSelector);
-
-  React.useEffect(() => {
-    loadMore();
-  }, []);
 
   React.useEffect(() => {
     if (!isLoading) {
@@ -71,6 +70,10 @@ const ConversationList = ({
     }, REFRESH_INTERVAL);
 
     return () => clearInterval(interval);
+  }, []);
+
+  React.useEffect(() => {
+    eddiApiActionDispatchers.fetchConversationsAction(LIMIT, 0, null, null);
   }, []);
 
   const loadMore = () => {
