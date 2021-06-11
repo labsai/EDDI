@@ -48,7 +48,6 @@ const PackageView = ({
   defaultPluginTypes: defaultPluginTypesProps,
   readOnly,
 }: IPrivateProps) => {
-  const packagePayloadRef = React.useRef(null);
   const [selectedPlugins, setSelectedPlugins] = React.useState<IOptions[]>([]);
   const [initialSelectedPluginState, setInitialSelectedPluginState] =
     React.useState<IOptions[]>([]);
@@ -57,9 +56,6 @@ const PackageView = ({
   >([]);
   const [extensionKey, setExtensionKey] = React.useState(0);
 
-  React.useEffect(() => {
-    packagePayloadRef.current = packagePayload;
-  });
   React.useEffect(() => {
     eddiApiActionDispatchers.fetchPackageDataAction(packagePayload.resource);
     eddiApiActionDispatchers.fetchDefaultPluginTypesAction();
@@ -72,14 +68,11 @@ const PackageView = ({
     if (!packagePayload.packageData) {
       eddiApiActionDispatchers.fetchPackageDataAction(packagePayload.resource);
     }
-    if (
-      _.isEmpty(packagePayloadRef.current.packageData) &&
-      !_.isEmpty(packagePayload.packageData)
-    ) {
+    if (!_.isEmpty(packagePayload.packageData)) {
       discardChanges();
     }
     setDefaultPluginTypes(defaultPluginTypesProps);
-  }, [defaultPluginTypesProps, packagePayload]);
+  }, [defaultPluginTypesProps, packagePayload.packageData]);
 
   const openEditPackageModal = () => {
     ModalActionDispatchers.showEditDescriptorModalAction(packagePayload);
