@@ -297,7 +297,10 @@ const ModalReducer: IModalReducer = (
         },
       });
 
-    case UPDATE_PACKAGE_SUCCESS:
+    case UPDATE_PACKAGE_SUCCESS: {
+      if ((action as IUpdatePackageSuccessAction).noModal) {
+        return state;
+      }
       return update(state, {
         mode: {
           $set: ModalEnum.updateBots,
@@ -309,6 +312,7 @@ const ModalReducer: IModalReducer = (
           $set: [(action as IUpdatePackageSuccessAction).package.resource],
         },
       });
+    }
 
     case UPDATE_PACKAGES_SUCCESS:
       return update(state, {

@@ -24,6 +24,7 @@ export interface IQueryStringProperties {
   apiUrl?: string;
   type?: string;
   readOnly?: string;
+  botId?: string;
 }
 
 export default class Parser {

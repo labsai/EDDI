@@ -183,6 +183,7 @@ import {
 } from '../components/utils/ApiFunctions';
 import { parsePlugins } from '../components/utils/helpers/PluginParser';
 import * as _ from 'lodash';
+import eddiApiActionDispatchers from '../actions/EddiApiActionDispatchers';
 
 export function* FetchBots(action: IFetchBotsAction) {
   try {
@@ -554,7 +555,19 @@ export function* updateJsonData(action: IUpdateJsonDataAction): Iterator<{}> {
         getCurrentPackage,
         Parser.getId(action.resource),
       );
-      yield put(updatePackageSuccessAction(updatedPackage));
+      if (action.data.botId) {
+        const currentBot: IBot = yield call(getCurrentBot, action.data.botId);
+        if (currentBot && updatedPackage) {
+          const botToUpdate = {
+            botResource: currentBot?.resource as string,
+            packageResources: [updatedPackage.resource] as string[],
+          };
+          yield put(updatePackageSuccessAction(updatedPackage, true));
+          eddiApiActionDispatchers.updateBotsAction([botToUpdate]);
+        }
+      } else {
+        yield put(updatePackageSuccessAction(updatedPackage));
+      }
     } else {
       const updatedPlugin: IPlugin = yield call(
         getCurrentPlugin,

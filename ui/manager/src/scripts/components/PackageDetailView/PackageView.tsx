@@ -85,6 +85,11 @@ const PackageView = ({
     ModalActionDispatchers.showEditDescriptorModalAction(packagePayload);
   };
 
+  const getBotIdFromQueryString = () => {
+    const botId = Parser.getQueryStrings(location.search).botId;
+    return botId;
+  };
+
   const replacer = (key, value) => {
     if (key === 'extensionKey') {
       return undefined;
@@ -136,6 +141,7 @@ const PackageView = ({
     });
     eddiApiActionDispatchers.updateJsonDataAction(packagePayload.resource, {
       packageExtensions: list,
+      botId: getBotIdFromQueryString(),
     });
   };
 

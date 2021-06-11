@@ -84,7 +84,7 @@ const UpdatePackagesModal = ({ pluginResource }: IPrivateProps) => {
             }>{`Select packages to update any old versions of the extension to latest`}</div>
           <div className={classes.centerFlex} />
           <BlueButton
-            customStyles={classes.button}
+            classes={{ button: classes.button }}
             onClick={updateSelectedPackages}
             text={'Update selected'}
           />

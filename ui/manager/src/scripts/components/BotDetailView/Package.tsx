@@ -17,6 +17,7 @@ import PluginList from './PluginList';
 interface IPublicProps {
   isPackageInBot: boolean;
   packageResource: string;
+  botId?: string;
   selectVersion(version: number): void;
 }
 
@@ -35,6 +36,7 @@ const Package = ({
   error,
   packagePayload,
   isLoading,
+  botId,
 }: IPrivateProps) => {
   const classes = useStyles();
   const fetchPlugins = () => {
@@ -73,14 +75,20 @@ const Package = ({
           <div className={classes.pack}>
             <div
               className={classes.packageHeader}
-              onClick={() =>
+              onClick={() => {
+                const query = [];
+                if (!isCurrentVersion) {
+                  query.push(`version=${packagePayload.version}`);
+                }
+                if (botId) {
+                  query.push(`botId=${botId}`);
+                }
                 historyPush(
                   `/packageview/${packagePayload.id}`,
-                  isCurrentVersion
-                    ? null
-                    : [`version=${packagePayload.version}`],
-                )
-              }>
+
+                  query,
+                );
+              }}>
               <div
                 className={clsx(classes.packageName, {
                   [classes.red]: isPackageInBot,

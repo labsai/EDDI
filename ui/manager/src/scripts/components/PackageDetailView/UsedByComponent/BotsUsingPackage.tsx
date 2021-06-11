@@ -12,6 +12,8 @@ interface IProps {
   isSmallName?: boolean;
 }
 
+const DELAY = 1000;
+
 const useStyles = makeStyles({
   content: {
     width: '100%',
@@ -34,22 +36,17 @@ const BotsUsingPackage = ({ packagePayload, isSmallName }: IProps) => {
   const classes = useStyles();
 
   React.useEffect(() => {
+    let timer: NodeJS.Timeout = null;
     if (!_.isEmpty(packagePayload)) {
-      eddiApiActionDispatchers.fetchBotsUsingPackageAction(
-        packagePayload.resource,
-        false,
-      );
+      timer = setTimeout(() => {
+        eddiApiActionDispatchers.fetchBotsUsingPackageAction(
+          packagePayload.resource,
+          false,
+        );
+      }, DELAY);
     }
-  }, []);
-
-  React.useEffect(() => {
-    if (_.isUndefined(packagePayload.usedByBots)) {
-      eddiApiActionDispatchers.fetchBotsUsingPackageAction(
-        packagePayload.resource,
-        false,
-      );
-    }
-  }, [packagePayload, isSmallName]);
+    return () => clearTimeout(timer);
+  }, [packagePayload.resource, isSmallName]);
 
   const handleExpandList = () => {
     setExpandList(!expandList);

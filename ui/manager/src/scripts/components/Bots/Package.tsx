@@ -57,14 +57,20 @@ const Package = ({
           {!error && !_.isEmpty(packagePayload) && (
             <div>
               <button
-                onClick={() =>
+                onClick={() => {
+                  const query = [];
+                  if (packageHasNewVersion) {
+                    query.push(`version=${packagePayload.version}`);
+                  }
+                  if (bot.id) {
+                    query.push(`botId=${bot.id}`);
+                  }
                   historyPush(
                     `/packageview/${packagePayload.id}`,
-                    packageHasNewVersion
-                      ? [`version=${packagePayload.version}`]
-                      : [],
-                  )
-                }
+
+                    query,
+                  );
+                }}
                 className={classes.botPackageButton}>
                 <div
                   className={clsx(classes.botPackageName, {

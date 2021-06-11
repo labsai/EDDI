@@ -609,12 +609,15 @@ export function updatePackageAction(
 }
 export interface IUpdatePackageSuccessAction extends Action {
   package: IPackage;
+  noModal: boolean;
 }
 export function updatePackageSuccessAction(
   pkg: IPackage,
+  noModal: boolean = false,
 ): IUpdatePackageSuccessAction {
   return {
     package: pkg,
+    noModal,
     type: UPDATE_PACKAGE_SUCCESS,
   };
 }
@@ -780,7 +783,7 @@ export function fetchPackagesUsingPluginFailedAction(
 
 export interface IUpdateJsonDataAction extends Action {
   resource: string;
-  data: string;
+  data: any;
 }
 
 export function updateJsonDataAction(

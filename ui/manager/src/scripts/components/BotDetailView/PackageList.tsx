@@ -78,7 +78,11 @@ const PackageList = ({ bot, readOnly }: IPrivateProps) => {
       ) : (
         <div>
           {bot.packages.map((pack) => (
-            <PackageContainer key={pack} packageResource={pack} />
+            <PackageContainer
+              key={pack}
+              packageResource={pack}
+              botId={bot.id}
+            />
           ))}
         </div>
       )}

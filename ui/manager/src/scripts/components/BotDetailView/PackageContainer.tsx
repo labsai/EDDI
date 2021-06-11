@@ -6,6 +6,7 @@ import Package from './Package';
 
 interface IProps {
   packageResource: string;
+  botId?: string;
 }
 
 const PackageContainer = (props: IProps) => {
@@ -31,6 +32,7 @@ const PackageContainer = (props: IProps) => {
       isPackageInBot={selectedPackageResource !== props.packageResource}
       packageResource={selectedPackageResource}
       selectVersion={selectVersion}
+      botId={props.botId}
     />
   );
 };
