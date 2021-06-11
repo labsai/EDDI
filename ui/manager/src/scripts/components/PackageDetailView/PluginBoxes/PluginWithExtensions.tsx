@@ -129,7 +129,7 @@ const PluginWithExtensions = ({
 
   const openAddPluginsModal = () => {
     let extensionList: string[];
-    let pluginType;
+    let tempPluginType;
     if (pluginType.type === PluginType.PARSER) {
       if (pluginType.config && !_.isEmpty(pluginType.extensions.dictionaries)) {
         extensionList = pluginType.extensions.dictionaries
@@ -138,13 +138,13 @@ const PluginWithExtensions = ({
             return resource.config.uri;
           });
       }
-      pluginType = PluginType.REGULAR_DICTIONARY;
+      tempPluginType = PluginType.REGULAR_DICTIONARY;
     } else {
-      pluginType = pluginType.type;
+      tempPluginType = pluginType.type;
       extensionList = (pluginType.config.uri && [pluginType.config.uri]) || [];
     }
     ModalActionDispatchers.showAddPluginsModal(
-      pluginType,
+      tempPluginType,
       extensionList,
       updatePluginResource,
     );

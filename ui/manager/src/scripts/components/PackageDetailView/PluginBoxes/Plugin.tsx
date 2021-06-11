@@ -49,20 +49,20 @@ const Plugin = ({
   const openAddPluginsModal = (e) => {
     e.stopPropagation();
     let extensionList: string[] = [];
-    let pluginType;
+    let tempPluginType;
     if (pluginType.type === PluginType.PARSER) {
       if (pluginType.config && !_.isEmpty(pluginType.extensions.dictionaries)) {
         extensionList = pluginType.extensions.dictionaries.map((p) => {
           return p.config.uri;
         });
       }
-      pluginType = PluginType.REGULAR_DICTIONARY;
+      tempPluginType = PluginType.REGULAR_DICTIONARY;
     } else {
-      pluginType = pluginType.type;
+      tempPluginType = pluginType.type;
       extensionList = (pluginResource && [pluginResource]) || [];
     }
     ModalActionDispatchers.showAddPluginsModal(
-      pluginType,
+      tempPluginType,
       extensionList,
       updatePluginResource,
     );
