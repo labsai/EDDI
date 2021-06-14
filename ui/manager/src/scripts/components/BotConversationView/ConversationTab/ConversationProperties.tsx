@@ -39,7 +39,7 @@ const useStyles = makeStyles({
     paddingBottom: '2px',
   },
   propertyValue: {
-    border: '1px solid red',
+    overflowWrap: 'anywhere',
   },
 });
 
@@ -73,9 +73,16 @@ const ConversationProperties = ({ conversationProperties }: IProps) => {
               classes={{ text: classes.propertyValue }}
               text={
                 typeof conversationProperties[property].value === 'string'
-                  ? JSON.stringify(conversationProperties, null, '\t')
-                  : conversationProperties[property].value +
-                    'lorem ipsum dalar dis doofus mabodis katonis lupus fungus is da frontos bontos ka le mongos'
+                  ? JSON.stringify(
+                      conversationProperties[property].value,
+                      null,
+                      '\t',
+                    )
+                  : JSON.stringify(
+                      conversationProperties[property].value,
+                      null,
+                      4,
+                    )
               }
               length={40}
             />

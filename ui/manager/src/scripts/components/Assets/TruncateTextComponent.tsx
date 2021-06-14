@@ -47,7 +47,7 @@ const TruncateTextComponent = ({
     <div>
       {!!text && (
         <div>
-          <div className={classes.textContainer}>
+          <div className={clsx(classes.textContainer, externalClasses?.text)}>
             <div className={clsx({ [classes.truncate]: !isExpanded })}>
               {text}
             </div>
