@@ -143,9 +143,9 @@ const PluginReducer: IPluginReducer = (
     case FETCH_PLUGINS_SUCCESS:
       const lastPage =
         (action as IFetchPluginsSuccessAction).limit >
-        (action as IFetchPluginsSuccessAction).plugins.length;
+        (action as IFetchPluginsSuccessAction).plugins?.length;
       const newPluginsLoaded = (action as IFetchPluginsSuccessAction).plugins
-        .length;
+        ?.length;
       const pluginType = (action as IFetchPluginsSuccessAction).pluginType;
       return update(state, {
         isLoadingPlugins: {

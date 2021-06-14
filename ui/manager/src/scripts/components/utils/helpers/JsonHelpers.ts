@@ -1,24 +1,19 @@
-import { getAPIUrl } from '../ApiFunctions';
-import Parser from '../Parser';
-import axios from 'axios';
-import {
-  IDescriptorResponse,
-  IDetailedDescriptor,
-  IResponse,
-} from '../AxiosFunctions';
-import { DICTIONARY_SCHEMA } from '../JsonSchemas/JsonSchemas';
 import * as Ajv from 'ajv';
 import * as Jsm from 'json-source-map';
 import * as _ from 'lodash';
+import { getAPIUrl } from '../ApiFunctions';
+import { IResponse } from '../AxiosFunctions';
+import axios from '../axiosInterseptor';
 import {
   BEHAVIOR,
   BOT,
   HTTPCALLS,
-  PROPERTYSETTER,
   OUTPUT,
   PACKAGE,
+  PROPERTYSETTER,
   REGULAR_DICTIONARY,
 } from '../EddiTypes';
+import Parser from '../Parser';
 import * as Snippets from './Snippets';
 import { ISnippet } from './Snippets';
 

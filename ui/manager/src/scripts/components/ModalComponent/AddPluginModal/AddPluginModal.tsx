@@ -37,8 +37,6 @@ const AddPluginModal = (props: IPrivateProps) => {
   const [loading, setLoading] = React.useState(false);
   const classes = useStyles();
 
-  const pluginsRef = React.useRef(null);
-
   React.useEffect(() => {
     if (props.pluginType === REGULAR_DICTIONARY) {
       setLimitedToOneSelect(false);
@@ -54,16 +52,8 @@ const AddPluginModal = (props: IPrivateProps) => {
   }, []);
 
   React.useEffect(() => {
-    pluginsRef.current = props.plugins;
-  });
-
-  React.useEffect(() => {
-    if (
-      !_.isEmpty(_.differenceBy(props.plugins, pluginsRef.current, 'resource'))
-    ) {
-      discardChanges();
-    }
-  }, [props.plugins]);
+    discardChanges();
+  }, [props.plugins, props.pluginType]);
 
   const closeModal = () => {
     discardChanges();
