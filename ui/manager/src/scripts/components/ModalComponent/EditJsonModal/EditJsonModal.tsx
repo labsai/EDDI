@@ -81,9 +81,13 @@ const EditJsonModal = (props: IPrivateProps) => {
     */
   };
 
-  const updateJson = () => {
+  const updateJson = (deploy: boolean = false) => {
     if (validateJson()) {
-      const data = Object.assign(JSON.parse(editorText), { botId, packageId });
+      const data = Object.assign(JSON.parse(editorText), {
+        botId,
+        packageId,
+        deploy,
+      });
       eddiApiActionDispatchers.updateJsonDataAction(props.resource, data);
       modalActionDispatchers.closeModal();
     }
@@ -133,9 +137,15 @@ const EditJsonModal = (props: IPrivateProps) => {
             </button>
           )}
           <BlueButton
-            onClick={updateJson}
+            onClick={() => updateJson()}
             disabled={!unsavedChanges || !isJsonString()}
             text={'Save changes'}
+          />
+          <BlueButton
+            onClick={() => updateJson(true)}
+            disabled={!unsavedChanges || !isJsonString()}
+            classes={{ button: classes.greenButton }}
+            text={'Save & test'}
           />
         </div>
       </div>

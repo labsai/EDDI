@@ -256,6 +256,17 @@ const useStyles = makeStyles({
     minHeight: '5px',
     minWidth: '5px',
   },
+  greenButton: {
+    backgroundColor: '#4BCA81',
+    marginLeft: '10px',
+
+    '&:hover': {
+      backgroundColor: '#4BCA81',
+    },
+    '&:active': {
+      backgroundColor: '#4BCA81',
+    },
+  },
 });
 
 export default useStyles;

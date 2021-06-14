@@ -128,13 +128,14 @@ const PackageView = ({
     setExtensionKey(newPluginList.length);
   };
 
-  const saveChanges = async () => {
+  const saveChanges = async (deploy: boolean = false) => {
     const list = selectedPlugins.map((selected) => {
       return { ...selected };
     });
     eddiApiActionDispatchers.updateJsonDataAction(packagePayload.resource, {
       packageExtensions: list,
       botId: getBotIdFromQueryString(),
+      deploy,
     });
   };
 
@@ -234,7 +235,13 @@ const PackageView = ({
         <BlueButton
           text={'Save'}
           disabled={!unsavedChanges()}
-          onClick={saveChanges}
+          onClick={() => saveChanges()}
+        />
+        <BlueButton
+          text={'Save & test'}
+          disabled={!unsavedChanges()}
+          onClick={() => saveChanges(true)}
+          classes={{ button: classes.greenButton }}
         />
       </div>
       <PackageDescriptor packagePayload={packagePayload} />

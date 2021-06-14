@@ -564,7 +564,15 @@ export function* updateJsonData(action: IUpdateJsonDataAction): Iterator<{}> {
             packageResources: [updatedPackage.resource] as string[],
           };
           yield put(updatePackageSuccessAction(updatedPackage, true));
-          eddiApiActionDispatchers.updateBotsAction([botToUpdate]);
+          const updatedBots: IBot[] = yield call(axiosUpdateBots, [
+            botToUpdate,
+          ]);
+          yield put(updateBotsSuccessAction(updatedBots));
+          if (action.data.deploy && !_.isEmpty(updatedBots)) {
+            yield call(deployBot, {
+              botResource: updatedBots[0].resource,
+            } as IDeployBotAction);
+          }
         }
       } else {
         yield put(updatePackageSuccessAction(updatedPackage));
@@ -597,7 +605,13 @@ export function* updateJsonData(action: IUpdateJsonDataAction): Iterator<{}> {
           packageResources: [updatedPackage.resource] as string[],
         };
 
-        eddiApiActionDispatchers.updateBotsAction([botToUpdate]);
+        const updatedBots: IBot[] = yield call(axiosUpdateBots, [botToUpdate]);
+        yield put(updateBotsSuccessAction(updatedBots));
+        if (action.data.deploy && !_.isEmpty(updatedBots)) {
+          yield call(deployBot, {
+            botResource: updatedBots[0].resource,
+          } as IDeployBotAction);
+        }
       } else {
         yield put(updatePluginSuccessAction(updatedPlugin));
       }
