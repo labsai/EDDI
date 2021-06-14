@@ -3,6 +3,7 @@ import * as _ from 'lodash';
 import * as React from 'react';
 import { connect } from 'react-redux';
 import { compose, pure, setDisplayName } from 'recompose';
+import { historyPush } from '../../../history';
 import eddiApiActionDispatchers from '../../../actions/EddiApiActionDispatchers';
 import ModalActionDispatchers from '../../../actions/ModalActionDispatchers';
 import { pluginSelector } from '../../../selectors/PluginSelectors';
@@ -18,6 +19,8 @@ import useStyles from './Plugin.styles';
 
 interface IPublicProps {
   pluginType: IOptions;
+  packageId?: string;
+  botId?: string;
   pluginResource?: string;
   editDisabled: boolean;
   deletePlugin?: (extensionKey: number) => void;
@@ -34,8 +37,11 @@ const Plugin = ({
   deletePlugin,
   updatePlugin,
   plugin,
+  packageId,
+  botId,
 }: IPrivateProps) => {
   const classes = useStyles();
+  const isBotPage = location.pathname.includes('botview');
   React.useEffect(() => {
     if (pluginResource) {
       eddiApiActionDispatchers.fetchPluginAction(pluginResource);
@@ -131,6 +137,21 @@ const Plugin = ({
   const openViewJsonModal = () => {
     if (!_.isEmpty(pluginResource)) {
       ModalActionDispatchers.showViewJsonModal(pluginResource);
+
+      const query = [];
+      if (botId && !isBotPage) {
+        query.push(`botId=${botId}`);
+      }
+      if (packageId) {
+        query.push(`packageId=${packageId}`);
+      }
+      if (!_.isEmpty(query)) {
+        historyPush(
+          location.pathname,
+
+          query,
+        );
+      }
     }
   };
 

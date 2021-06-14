@@ -555,6 +555,7 @@ export function* updateJsonData(action: IUpdateJsonDataAction): Iterator<{}> {
         getCurrentPackage,
         Parser.getId(action.resource),
       );
+      // auto update package
       if (action.data.botId) {
         const currentBot: IBot = yield call(getCurrentBot, action.data.botId);
         if (currentBot && updatedPackage) {
@@ -573,7 +574,33 @@ export function* updateJsonData(action: IUpdateJsonDataAction): Iterator<{}> {
         getCurrentPlugin,
         action.resource,
       );
-      yield put(updatePluginSuccessAction(updatedPlugin));
+
+      // auto update package and bot
+      if (action.data.botId && action.data.packageId) {
+        yield put(updatePluginSuccessAction(updatedPlugin, true));
+        const currentPackage: IPackage = yield call(
+          getCurrentPackage,
+          action.data.packageId,
+        );
+
+        const updatedPackage: IPackage = yield call(
+          axiosUpdatePackage,
+          currentPackage,
+          updatedPlugin.resource,
+        );
+
+        yield put(updatePackageSuccessAction(updatedPackage, true));
+
+        const currentBot: IBot = yield call(getCurrentBot, action.data.botId);
+        const botToUpdate = {
+          botResource: currentBot?.resource as string,
+          packageResources: [updatedPackage.resource] as string[],
+        };
+
+        eddiApiActionDispatchers.updateBotsAction([botToUpdate]);
+      } else {
+        yield put(updatePluginSuccessAction(updatedPlugin));
+      }
     }
   } catch (err) {
     yield put(updateJsonDataFailedAction(err));

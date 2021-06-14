@@ -285,6 +285,9 @@ const ModalReducer: IModalReducer = (
       });
 
     case UPDATE_PLUGIN_SUCCESS:
+      if ((action as IUpdatePluginSuccessAction).noModal) {
+        return state;
+      }
       return update(state, {
         mode: {
           $set: ModalEnum.updatePackages,

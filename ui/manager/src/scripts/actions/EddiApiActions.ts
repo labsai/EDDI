@@ -817,13 +817,16 @@ export interface IUpdateJsonDataSuccessAction extends Action {
 
 export interface IUpdatePluginSuccessAction extends Action {
   plugin: IPlugin;
+  noModal: boolean;
 }
 
 export function updatePluginSuccessAction(
   plugin: IPlugin,
+  noModal: boolean = false,
 ): IUpdatePluginSuccessAction {
   return {
     plugin,
+    noModal,
     type: UPDATE_PLUGIN_SUCCESS,
   };
 }
@@ -972,13 +975,16 @@ export function updatePackagesAction(
 
 export interface IUpdatePackagesSuccessAction extends Action {
   packages: IPackage[];
+  noModal: boolean;
 }
 
 export function updatePackagesSuccessAction(
   packages: IPackage[],
+  noModal: boolean = false,
 ): IUpdatePackagesSuccessAction {
   return {
     packages,
+    noModal,
     type: UPDATE_PACKAGES_SUCCESS,
   };
 }

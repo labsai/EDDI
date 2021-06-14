@@ -137,7 +137,11 @@ const Package = ({
               <ClipLoader color={BLUE_COLOR} />
             )}
             <div className={classes.packageContent}>
-              <PluginList packagePayload={packagePayload} />
+              <PluginList
+                packagePayload={packagePayload}
+                packageId={packagePayload.id}
+                botId={botId}
+              />
             </div>
           </div>
         )}

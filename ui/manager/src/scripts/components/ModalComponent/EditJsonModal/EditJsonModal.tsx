@@ -35,6 +35,15 @@ interface IPrivateProps extends IPublicProps {
 }
 
 const EditJsonModal = (props: IPrivateProps) => {
+  const isPackagePage = location.pathname.includes('packageview');
+  const isBotPage = location.pathname.includes('botview');
+  const urlSearchParams = new URLSearchParams(location.search);
+  const botId = isBotPage
+    ? location.pathname.split('/')?.[2]
+    : urlSearchParams.get('botId');
+  const packageId = isPackagePage
+    ? location.pathname.split('/')?.[2]
+    : urlSearchParams.get('packageId');
   // todo: reduxify this component and editor
 
   const [editorText, setEditorText] = React.useState('');
@@ -74,10 +83,8 @@ const EditJsonModal = (props: IPrivateProps) => {
 
   const updateJson = () => {
     if (validateJson()) {
-      eddiApiActionDispatchers.updateJsonDataAction(
-        props.resource,
-        JSON.parse(editorText),
-      );
+      const data = Object.assign(JSON.parse(editorText), { botId, packageId });
+      eddiApiActionDispatchers.updateJsonDataAction(props.resource, data);
       modalActionDispatchers.closeModal();
     }
   };

@@ -18,6 +18,8 @@ const useStyles = makeStyles({
 
 interface IProps {
   packagePayload: IPackage;
+  packageId?: string;
+  botId?: string;
 }
 
 const PluginList: React.StatelessComponent<IProps> = (props: IProps) => {
@@ -34,6 +36,8 @@ const PluginList: React.StatelessComponent<IProps> = (props: IProps) => {
                   pluginType={plug}
                   pluginResource={plug.config.uri || ''}
                   editDisabled={true}
+                  packageId={props.packageId}
+                  botId={props.botId}
                 />
               ),
             )}
