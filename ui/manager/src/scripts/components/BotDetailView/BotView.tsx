@@ -1,6 +1,7 @@
 import * as React from 'react';
-import { connect } from 'react-redux';
+import { connect, useDispatch } from 'react-redux';
 import { compose, pure, setDisplayName } from 'recompose';
+import { openChatAction } from '../../actions/ChatActions';
 import eddiApiActionDispatchers from '../../actions/EddiApiActionDispatchers';
 import modalActionDispatchers from '../../actions/ModalActionDispatchers';
 import { historyPush } from '../../history';
@@ -68,6 +69,8 @@ const BotView = ({ bot, readOnly }: IPrivateProps) => {
     historyPush(`${bot.id}`, [`version=${newVersion}`]);
   };
 
+  const dispatch = useDispatch();
+
   const isCurrentVersion = bot.version !== bot.currentVersion;
   return (
     <div>
@@ -108,11 +111,13 @@ const BotView = ({ bot, readOnly }: IPrivateProps) => {
               text={'Open Chat'}
               classes={{ button: classes.chatButton }}
               disabled={bot.deploymentStatus !== READY}
-              onClick={() =>
+              onClick={() => {
+                dispatch(openChatAction());
+                historyPush(location.pathname, [`botId=${bot.id}`]);
                 window
                   .open(`${apiUrl}/chat/unrestricted/${bot.id}`, '_blank')
-                  .focus()
-              }
+                  .focus();
+              }}
             />
             <DeployButton
               botName={bot.name}

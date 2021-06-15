@@ -27,3 +27,8 @@ img {
 .ui.container {
   max-width: 100%;
 }
+
+#root {
+  display: flex;
+  flex-direction: row;
+}

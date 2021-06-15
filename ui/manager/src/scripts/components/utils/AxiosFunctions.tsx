@@ -1177,3 +1177,40 @@ export async function deployExampleBots(): Promise<IBot[]> {
     console.error(`Failed to deploy example bots. Error: ${err.message}`);
   }
 }
+
+export async function axiosStartChat(botId: string): Promise<any> {
+  try {
+    const getConversationId = await axios.post(
+      `${await getAPIUrl()}/bots/unrestricted/${botId}`,
+    );
+    const conversationId = getConversationId?.headers?.location
+      ?.split('/')
+      ?.pop();
+
+    const response = await axios.get(
+      `${await getAPIUrl()}/bots/unrestricted/${botId}/${conversationId}`,
+    );
+    return response.data;
+  } catch (err) {
+    console.error(
+      `Failed to start chat with bot ${botId}. Error: ${err.message}`,
+    );
+  }
+}
+
+export async function axiosReplyInChat(
+  botId: string,
+  conversationId: string,
+  input: string,
+  context: any,
+): Promise<any> {
+  try {
+    const response = await axios.post(
+      `${await getAPIUrl()}/bots/unrestricted/${botId}/${conversationId}`,
+      { input, context },
+    );
+    return response.data;
+  } catch (err) {
+    console.error(`Failed to reply to bot ${botId}. Error: ${err.message}`);
+  }
+}

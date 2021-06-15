@@ -33,6 +33,8 @@ import ConversationsPage from './pages/ConversationsPage';
 import { authenticationSelector } from '../selectors/AuthenticationSelectors';
 import { compose, pure, setDisplayName } from 'recompose';
 import authenticationActionDispatchers from '../actions/AuthenticationActionDispatchers';
+import { isChatOpenedSelector } from '../selectors/ChatSelectors';
+import Chat from './Chat/Chat';
 
 library.add(faUndo);
 library.add(faRedo);
@@ -58,6 +60,7 @@ interface IPrivateProps extends IRouteProps {
   isBasicAuthEnabled: boolean;
   keycloakAuthenticated: boolean;
   basicAuthAuthenticated: boolean;
+  isOpened: boolean;
 }
 
 const sleep = (milliseconds) => {
@@ -71,6 +74,7 @@ const App = ({
   keycloak,
   isAppReady,
   basicAuthAuthenticated,
+  isOpened: isChatOpened,
 }: IPrivateProps) => {
   React.useEffect(() => {
     runSagaMiddleware();
@@ -117,32 +121,37 @@ const App = ({
   const authenticated = keycloakAuthenticated && basicAuthAuthenticated;
 
   return (
-    <div className="ui container">
-      {isAppReady && (
-        <div>
-          {!authenticated && <div>{'You need to login to see this page'}</div>}
-          {authenticated && (
-            <div>
-              <Route path={'/'} exact component={Dashboard} />
-              <Route path={'/packages'} exact component={PackagePage} />
-              <Route
-                path={'/conversations'}
-                exact
-                component={ConversationsPage}
-              />
-              <Route path={'/resources'} component={ExtensionsPage} />
-              <Route path={'/botview/:id'} component={BotViewPage} />
-              <Route
-                path={'/conversationview/:id'}
-                component={BotConversationViewPage}
-              />
-              <Route path={'/packageview/:id'} component={PackageViewPage} />
-            </div>
-          )}
-          {keycloakAuthenticated && <ModalComponentFrame />}
-        </div>
-      )}
-    </div>
+    <>
+      <div className="ui container">
+        {isAppReady && (
+          <div>
+            {!authenticated && (
+              <div>{'You need to login to see this page'}</div>
+            )}
+            {authenticated && (
+              <div>
+                <Route path={'/'} exact component={Dashboard} />
+                <Route path={'/packages'} exact component={PackagePage} />
+                <Route
+                  path={'/conversations'}
+                  exact
+                  component={ConversationsPage}
+                />
+                <Route path={'/resources'} component={ExtensionsPage} />
+                <Route path={'/botview/:id'} component={BotViewPage} />
+                <Route
+                  path={'/conversationview/:id'}
+                  component={BotConversationViewPage}
+                />
+                <Route path={'/packageview/:id'} component={PackageViewPage} />
+              </div>
+            )}
+            {keycloakAuthenticated && <ModalComponentFrame />}
+          </div>
+        )}
+      </div>
+      {isChatOpened && <Chat />}
+    </>
   );
 };
 
@@ -153,6 +162,7 @@ const ComposedApp: React.ComponentClass<IPrivateProps> = compose<
   pure,
   connect(authenticationSelector),
   connect(isAppReadySelector),
+  connect(isChatOpenedSelector),
   setDisplayName('App'),
 )(App);
 

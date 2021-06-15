@@ -21,6 +21,7 @@ import {
   IAuthenticationReducer,
   IAuthenticationState,
 } from './AuthenticationReducer';
+import ChatReducer, { IChatReducer, IChatState } from './ChatReducer';
 
 interface IBotNameSpace<T> {
   botState: T;
@@ -50,6 +51,10 @@ interface IAuthenticationNameSpace<T> {
   authenticationState: T;
 }
 
+interface IChatNameSpace<T> {
+  chatState: T;
+}
+
 export interface IAppState
   extends IBotNameSpace<IBotState>,
     IConversationNameSpace<IConversationState>,
@@ -57,7 +62,8 @@ export interface IAppState
     IPackageNameSpace<IPackageState>,
     IPluginNameSpace<IPluginState>,
     IModalNameSpace<IModalState>,
-    IAuthenticationNameSpace<IAuthenticationState> {}
+    IAuthenticationNameSpace<IAuthenticationState>,
+    IChatNameSpace<IChatState> {}
 
 interface IReducers
   extends ReducersMapObject,
@@ -67,7 +73,8 @@ interface IReducers
     IPackageNameSpace<IPackageReducer>,
     IPluginNameSpace<IPluginReducer>,
     IModalNameSpace<IModalReducer>,
-    IAuthenticationNameSpace<IAuthenticationReducer> {}
+    IAuthenticationNameSpace<IAuthenticationReducer>,
+    IChatNameSpace<IChatReducer> {}
 
 const reducers: IReducers = {
   botState: BotReducer,
@@ -77,6 +84,7 @@ const reducers: IReducers = {
   systemState: SystemReducer,
   modalState: ModalReducer,
   authenticationState: AuthenticationReducer,
+  chatState: ChatReducer,
 };
 
 export default combineReducers(reducers);
