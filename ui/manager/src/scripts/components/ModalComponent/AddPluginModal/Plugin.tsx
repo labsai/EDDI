@@ -27,7 +27,10 @@ interface IPrivateProps extends IPublicProps {
 const Plugin = (props: IPrivateProps) => {
   const classes = useStyles();
   React.useEffect(() => {
-    if (props.pluginResource && _.isUndefined(props.plugin)) {
+    if (
+      props.pluginResource &&
+      (_.isUndefined(props.plugin) || _.isEmpty(props.plugin))
+    ) {
       eddiApiActionDispatchers.fetchPluginAction(props.pluginResource);
     }
   }, [props.pluginResource]);
@@ -54,7 +57,10 @@ const Plugin = (props: IPrivateProps) => {
       {!!props.plugin && (
         <div>
           {!!props.error && <p>{'Error: Could not load plugin'}</p>}
-          {!props.error && _.isEmpty(props.plugin) && (
+          {props.isLoading && (
+            <p className={classes.loading}>{'Loading plugin'}</p>
+          )}
+          {!props.error && _.isEmpty(props.plugin) && !props.isLoading && (
             <p>{'This plugin does not exist'}</p>
           )}
           {!props.error && !_.isEmpty(props.plugin) && (

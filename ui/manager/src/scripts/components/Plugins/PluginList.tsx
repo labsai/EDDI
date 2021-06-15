@@ -1,7 +1,7 @@
 import * as _ from 'lodash';
 import * as React from 'react';
 import * as InfiniteScrollTypes from 'react-infinite-scroller';
-import { connect } from 'react-redux';
+import { useSelector } from 'react-redux';
 import { compose, pure, setDisplayName } from 'recompose';
 import eddiApiActionDispatchers from '../../actions/EddiApiActionDispatchers';
 import { pluginsSelector } from '../../selectors/PluginSelectors';
@@ -25,16 +25,12 @@ interface IPrivateProps extends IPublicProps {
   loadedPlugins: number;
 }
 
-const PluginList = ({
-  plugins,
-  isLoading,
-  isAllPluginsLoaded,
-  error,
-  loadedPlugins,
-  filterText,
-  pluginType,
-}: IPrivateProps) => {
+const PluginList = ({ error, filterText, pluginType }: IPrivateProps) => {
+  console.log('pluginType: ', pluginType);
   const [loading, setLoading] = React.useState(false);
+  const { isLoading, plugins, isAllPluginsLoaded, loadedPlugins } = useSelector(
+    (state) => pluginsSelector(state, pluginType),
+  );
 
   const classes = useStyles();
 
@@ -123,7 +119,6 @@ const ComposedPluginList: React.ComponentClass<IPublicProps> = compose<
   IPrivateProps
 >(
   pure,
-  connect(pluginsSelector),
   setDisplayName('PluginList'),
 )(PluginList);
 

@@ -95,6 +95,11 @@ const useStyles = makeStyles({
     textAlign: 'center',
     width: '40px',
   },
+  loading: {
+    marginLeft: '50px',
+    marginTop: '20px',
+    marginBottom: '20px',
+  },
 });
 
 export default useStyles;

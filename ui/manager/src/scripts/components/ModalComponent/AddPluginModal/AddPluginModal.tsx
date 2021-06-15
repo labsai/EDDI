@@ -1,6 +1,6 @@
 import * as _ from 'lodash';
 import * as React from 'react';
-import { connect } from 'react-redux';
+import { useSelector } from 'react-redux';
 import ClimbingBoxLoader from 'react-spinners/ClimbingBoxLoader';
 import { compose, pure, setDisplayName } from 'recompose';
 import eddiApiActionDispatchers from '../../../actions/EddiApiActionDispatchers';
@@ -9,12 +9,11 @@ import { pluginsSelector } from '../../../selectors/PluginSelectors';
 import BlueButton from '../../Assets/Buttons/BlueButton';
 import WhiteButton from '../../Assets/Buttons/WhiteButton';
 import { DEFAULT_LIMIT } from '../../utils/ApiFunctions';
-import { IDescriptor } from '../../utils/AxiosFunctions';
 import { REGULAR_DICTIONARY } from '../../utils/EddiTypes';
 import Parser from '../../utils/Parser';
 import useStyles from '../AddPackagesModal/AddPackagesModal.styles';
 import '../ModalComponent.styles.scss';
-import Plugin from './Plugin';
+import PluginsList from './PluginsList';
 
 interface IPublicProps {
   pluginType: string;
@@ -22,15 +21,12 @@ interface IPublicProps {
   addPlugins(selectedPlugins: string[]): void;
 }
 
-interface IPrivateProps extends IPublicProps {
-  error: Error;
-  isLoading: boolean;
-  plugins: IDescriptor[];
-  isAllPluginsLoaded: boolean;
-  loadedPlugins: number;
-}
+interface IPrivateProps extends IPublicProps {}
 
 const AddPluginModal = (props: IPrivateProps) => {
+  const { isLoading, plugins, isAllPluginsLoaded, loadedPlugins } = useSelector(
+    (state) => pluginsSelector(state, props.pluginType),
+  );
   const [selectedPlugins, setSelectedPlugins] = React.useState<string[]>([]);
   const [availablePlugins, setAvailablePlugins] = React.useState<string[]>([]);
   const [limitedToOneSelect, setLimitedToOneSelect] = React.useState(true);
@@ -41,7 +37,7 @@ const AddPluginModal = (props: IPrivateProps) => {
     if (props.pluginType === REGULAR_DICTIONARY) {
       setLimitedToOneSelect(false);
     }
-    if (props.plugins.length < DEFAULT_LIMIT && !props.isAllPluginsLoaded) {
+    if (plugins.length < DEFAULT_LIMIT && !isAllPluginsLoaded) {
       eddiApiActionDispatchers.fetchPluginsAction(
         props.pluginType,
         DEFAULT_LIMIT,
@@ -51,9 +47,19 @@ const AddPluginModal = (props: IPrivateProps) => {
     discardChanges();
   }, []);
 
+  const prevPluginsRef = React.useRef(null);
+
   React.useEffect(() => {
-    discardChanges();
-  }, [props.plugins, props.pluginType]);
+    if (
+      !_.isEmpty(_.differenceBy(plugins, prevPluginsRef.current, 'resource'))
+    ) {
+      discardChanges();
+    }
+  }, [plugins]);
+
+  React.useEffect(() => {
+    prevPluginsRef.current = plugins;
+  });
 
   const closeModal = () => {
     discardChanges();
@@ -96,7 +102,7 @@ const AddPluginModal = (props: IPrivateProps) => {
   };
 
   const discardChanges = (): void => {
-    const availablePlugins = props.plugins.map((pkg) => {
+    const availablePlugins = plugins.map((pkg) => {
       return getPluginIfUsed(pkg.resource);
     });
     setSelectedPlugins(props.oldPlugins);
@@ -139,8 +145,8 @@ const AddPluginModal = (props: IPrivateProps) => {
   };
 
   const loadMore = () => {
-    const fetchIndex = Math.floor(props.loadedPlugins / DEFAULT_LIMIT);
-    if (loading || _.isEmpty(props.plugins)) {
+    const fetchIndex = Math.floor(loadedPlugins / DEFAULT_LIMIT);
+    if (loading || _.isEmpty(plugins)) {
       return;
     }
     setLoading(true);
@@ -178,32 +184,25 @@ const AddPluginModal = (props: IPrivateProps) => {
         </div>
       </div>
       <div className={classes.packageList}>
-        {props.isAllPluginsLoaded && _.isEmpty(props.plugins) && (
+        {isAllPluginsLoaded && _.isEmpty(plugins) && (
           <p>
             {'Found no plugins. Create a new ' +
               Parser.getPluginName(props.pluginType, false) +
               ' to select one.'}
           </p>
         )}
-        {!_.isEmpty(availablePlugins) && (
-          <div>
-            {availablePlugins.map((p, i) => (
-              <Plugin
-                key={i}
-                selected={isPluginSelected(p)}
-                pluginResource={p}
-                handleClick={selectPlugin}
-                selectVersion={selectVersion}
-              />
-            ))}
-          </div>
-        )}
-        {props.isLoading && (
+        <PluginsList
+          availablePlugins={availablePlugins}
+          isPluginSelected={isPluginSelected}
+          selectPlugin={selectPlugin}
+          selectVersion={selectVersion}
+        />
+        {isLoading && (
           <div className={classes.loadingWrapper}>
             <ClimbingBoxLoader loading />
           </div>
         )}
-        {!props.isAllPluginsLoaded && !props.isLoading && !loading && (
+        {!isAllPluginsLoaded && !isLoading && !loading && (
           <BlueButton
             classes={{ button: classes.loadMoreButton }}
             onClick={loadMore}
@@ -220,7 +219,6 @@ const ComposedAddPluginModal: React.ComponentClass<IPublicProps> = compose<
 >(
   pure,
   setDisplayName('AddPluginModal'),
-  connect(pluginsSelector),
 )(AddPluginModal);
 
 export default ComposedAddPluginModal;
