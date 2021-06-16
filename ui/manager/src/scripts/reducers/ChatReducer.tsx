@@ -66,7 +66,17 @@ const ChatReducer: IChatReducer = (
           $set: null,
         },
       });
-    case START_CHAT_SUCCESS:
+    case START_CHAT_SUCCESS: {
+      if (!(action as IStartChatSuccessAction).data) {
+        return update(state, {
+          isLoading: {
+            $set: false,
+          },
+          error: {
+            $set: null,
+          },
+        });
+      }
       return update(state, {
         data: {
           $set: [(action as IStartChatSuccessAction).data],
@@ -78,6 +88,7 @@ const ChatReducer: IChatReducer = (
           $set: null,
         },
       });
+    }
     case START_CHAT_FAILED:
       return update(state, {
         isLoading: {

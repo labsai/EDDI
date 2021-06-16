@@ -15,8 +15,10 @@ import ForumOutlinedIcon from '@material-ui/icons/ForumOutlined';
 import HighlightOffOutlinedIcon from '@material-ui/icons/HighlightOffOutlined';
 import MoreVertIcon from '@material-ui/icons/MoreVert';
 import * as React from 'react';
-import { connect } from 'react-redux';
+import { connect, useDispatch } from 'react-redux';
 import { compose, pure, setDisplayName } from 'recompose';
+import { openChatAction } from '../../../actions/ChatActions';
+import { historyPush } from '../../../history';
 import eddiApiActionDispatchers from '../../../actions/EddiApiActionDispatchers';
 import modalActionDispatchers from '../../../actions/ModalActionDispatchers';
 import { readOnlySelector } from '../../../selectors/AuthenticationSelectors';
@@ -71,6 +73,8 @@ const BotOptions = ({ bot, readOnly, apiUrl }: IPrivateProps) => {
     setAnchorSubEl(null);
   };
 
+  const dispatch = useDispatch();
+
   const botDeployed = bot.deploymentStatus === READY;
   const botUndeployed = bot.deploymentStatus === NOT_FOUND;
   const isCurrentVersion = bot.version === bot.currentVersion;
@@ -101,9 +105,11 @@ const BotOptions = ({ bot, readOnly, apiUrl }: IPrivateProps) => {
           disabled={!botDeployed}
           onClick={() => {
             handleClose();
-            window
+            dispatch(openChatAction());
+            historyPush(location.pathname, [`botId=${bot.id}`]);
+            /* window
               .open(`${apiUrl}/chat/unrestricted/${bot.id}`, '_blank')
-              .focus();
+              .focus(); */
           }}>
           <ListItemIcon>
             <ChatBubbleIcon fontSize="small" />

@@ -6,10 +6,13 @@ const useStyles = makeStyles({
     display: 'flex',
     minWidth: '30vw',
     width: '30vw',
-    minHeight: '100%',
-    position: 'relative',
+    top: 0,
+    right: 0,
+    height: '100vh',
+    position: 'fixed',
     border: `1px solid ${GREY_COLOR}`,
     paddingTop: '50px',
+    overflow: 'auto',
   },
   closeChat: {
     position: 'absolute',
@@ -45,6 +48,7 @@ const useStyles = makeStyles({
     display: 'flex',
     flexDirection: 'column',
     width: '100%',
+    padding: '10px',
   },
   step: {
     display: 'flex',

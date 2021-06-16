@@ -1,15 +1,26 @@
 import * as React from 'react';
 import ChatOutput from '../ChatOutput/ChatOutput';
-
+import Delayed from '../Delay/Delay';
 import useStyles from './ChatOutputs.styles';
 
-const ChatOutputs = ({ outputs, input }) => {
+interface IChatOutputs {
+  input: string;
+  outputs: { text: string }[];
+}
+
+const ChatOutputs = ({ outputs, input }: IChatOutputs) => {
   const classes = useStyles();
   return (
     <div className={classes.chatOutputs}>
-      {!!input && <ChatOutput output={input} input />}
-      {outputs.map((o, i) => {
-        return <ChatOutput key={o + i} output={o} />;
+      <Delayed wait={500}>
+        {!!input && <ChatOutput output={{ text: input }} input />}
+      </Delayed>
+      {outputs?.map((o, i) => {
+        return (
+          <Delayed wait={500 * (i + 2)} key={JSON.stringify(o) + i}>
+            <ChatOutput output={o} />
+          </Delayed>
+        );
       })}
     </div>
   );

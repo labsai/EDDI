@@ -27,6 +27,9 @@ img {
 .ui.container {
   max-width: 100%;
 }
+.ui.container.with-chat {
+  margin-right: 30vw;
+}
 
 #root {
   display: flex;

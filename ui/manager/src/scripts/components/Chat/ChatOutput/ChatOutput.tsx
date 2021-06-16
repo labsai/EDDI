@@ -1,6 +1,7 @@
 import * as React from 'react';
 import useStyles from './ChatOutput.styles';
 import clsx from 'clsx';
+import useScrollIntoView from '../../utils/useScrollIntoView';
 
 interface IChatOutput {
   output: { text: string };
@@ -9,6 +10,7 @@ interface IChatOutput {
 
 const ChatOutput = ({ output, input }: IChatOutput) => {
   const classes = useStyles();
+  const chatOutputRef = React.useRef<HTMLDivElement>(null);
 
   const outputText = typeof output === 'string' ? output : output.text;
 
@@ -16,8 +18,12 @@ const ChatOutput = ({ output, input }: IChatOutput) => {
     return null;
   }
 
+  useScrollIntoView(chatOutputRef, output);
+
   return (
-    <div className={clsx(classes.chatOutput, input ? classes.chatInput : null)}>
+    <div
+      className={clsx(classes.chatOutput, input ? classes.chatInput : null)}
+      ref={chatOutputRef}>
       <p className={clsx(classes.outputText, input ? classes.inputText : null)}>
         {outputText}
       </p>

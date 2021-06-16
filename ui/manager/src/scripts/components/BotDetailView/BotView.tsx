@@ -114,9 +114,9 @@ const BotView = ({ bot, readOnly }: IPrivateProps) => {
               onClick={() => {
                 dispatch(openChatAction());
                 historyPush(location.pathname, [`botId=${bot.id}`]);
-                window
+                /* window
                   .open(`${apiUrl}/chat/unrestricted/${bot.id}`, '_blank')
-                  .focus();
+                  .focus(); */
               }}
             />
             <DeployButton

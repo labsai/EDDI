@@ -1,40 +1,41 @@
-import * as React from 'react';
-import { Route } from 'react-router-dom';
-import SystemActionDispatchers from '../actions/SystemActionDispatchers';
-import { isAppReadySelector } from '../selectors/SystemSelectors';
-import ModalComponentFrame from './ModalComponent/ModalComponentFrame';
-import Dashboard from './pages/Dashboard';
-import BotViewPage from './pages/BotViewPage';
-import PackagePage from './pages/PackagePage';
-import { run as runSagaMiddleware } from '../sagas';
-import { connect } from 'react-redux';
-import PackageViewPage from './pages/PackageViewPage';
-import ExtensionsPage from './pages/ExtensionsPage';
-import * as Keycloak from 'keycloak-js';
-import * as kcHelper from './utils/keycloakFunctions';
-import { setApiUrlQuery, setReadOnlyQuery } from './utils/ApiFunctions';
 import { library } from '@fortawesome/fontawesome-svg-core';
-import Parser from './utils/Parser';
 import {
   faCheck,
   faCheckCircle,
-  faCompress,
-  faExpand,
-  faRedo,
-  faUndo,
-  faEllipsisV,
-  faPlus,
-  faMinus,
   faComments,
+  faCompress,
+  faEllipsisV,
+  faExpand,
+  faMinus,
+  faPlus,
+  faRedo,
   faSync,
+  faUndo,
 } from '@fortawesome/free-solid-svg-icons';
-import BotConversationViewPage from './pages/BotConversationViewPage';
-import ConversationsPage from './pages/ConversationsPage';
-import { authenticationSelector } from '../selectors/AuthenticationSelectors';
+import * as Keycloak from 'keycloak-js';
+import * as React from 'react';
+import { connect } from 'react-redux';
+import { Route } from 'react-router-dom';
 import { compose, pure, setDisplayName } from 'recompose';
 import authenticationActionDispatchers from '../actions/AuthenticationActionDispatchers';
+import SystemActionDispatchers from '../actions/SystemActionDispatchers';
+import { run as runSagaMiddleware } from '../sagas';
+import { authenticationSelector } from '../selectors/AuthenticationSelectors';
 import { isChatOpenedSelector } from '../selectors/ChatSelectors';
+import { isAppReadySelector } from '../selectors/SystemSelectors';
 import Chat from './Chat/Chat';
+import ModalComponentFrame from './ModalComponent/ModalComponentFrame';
+import BotConversationViewPage from './pages/BotConversationViewPage';
+import BotViewPage from './pages/BotViewPage';
+import ConversationsPage from './pages/ConversationsPage';
+import Dashboard from './pages/Dashboard';
+import ExtensionsPage from './pages/ExtensionsPage';
+import PackagePage from './pages/PackagePage';
+import PackageViewPage from './pages/PackageViewPage';
+import { setApiUrlQuery, setReadOnlyQuery } from './utils/ApiFunctions';
+import * as kcHelper from './utils/keycloakFunctions';
+import Parser from './utils/Parser';
+import useChangeBodyMaxWidth from './utils/useChangeBodyMaxWidth';
 
 library.add(faUndo);
 library.add(faRedo);
@@ -120,9 +121,11 @@ const App = ({
 
   const authenticated = keycloakAuthenticated && basicAuthAuthenticated;
 
+  useChangeBodyMaxWidth(isChatOpened);
+
   return (
     <>
-      <div className="ui container">
+      <div className={`ui container ${isChatOpened ? 'with-chat' : null}`}>
         {isAppReady && (
           <div>
             {!authenticated && (

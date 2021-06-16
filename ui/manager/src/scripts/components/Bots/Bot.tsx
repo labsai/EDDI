@@ -1,9 +1,10 @@
 import * as _ from 'lodash';
 import * as moment from 'moment';
 import * as React from 'react';
-import { connect } from 'react-redux';
+import { connect, useDispatch } from 'react-redux';
 import ClipLoader from 'react-spinners/ClipLoader';
 import { compose, pure, setDisplayName } from 'recompose';
+import { openChatAction } from '../../actions/ChatActions';
 import eddiApiActionDispatchers from '../../actions/EddiApiActionDispatchers';
 import { historyPush } from '../../history';
 import { readOnlySelector } from '../../selectors/AuthenticationSelectors';
@@ -37,6 +38,8 @@ const Bot = ({ bot, apiUrl, readOnly }: IPrivateProps) => {
       eddiApiActionDispatchers.fetchBotDeploymentStatusAction(bot.resource);
     }
   }, [bot, apiUrl, readOnly]);
+
+  const dispatch = useDispatch();
 
   return (
     <div>
@@ -80,11 +83,13 @@ const Bot = ({ bot, apiUrl, readOnly }: IPrivateProps) => {
               text={'Open Chat'}
               classes={{ button: classes.chatButton }}
               disabled={bot.deploymentStatus !== READY}
-              onClick={() =>
-                window
+              onClick={() => {
+                dispatch(openChatAction());
+                historyPush(location.pathname, [`botId=${bot.id}`]);
+                /* window
                   .open(`${apiUrl}/chat/unrestricted/${bot.id}`, '_blank')
-                  .focus()
-              }
+                  .focus() */
+              }}
             />
             <DeployButton
               botName={bot.name}

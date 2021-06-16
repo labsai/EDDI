@@ -5,7 +5,7 @@ const useStyles = makeStyles({
     display: 'flex',
     flexDirection: 'row',
     flexWrap: 'wrap',
-    margin: '10px',
+    margin: '10px 0',
   },
   quickRepliesButton: {
     marginRight: '10px',
