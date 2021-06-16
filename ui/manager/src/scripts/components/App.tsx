@@ -127,7 +127,7 @@ const App = ({
     <>
       <div className={`ui container ${isChatOpened ? 'with-chat' : null}`}>
         {isAppReady && (
-          <div>
+          <div className="inner-container">
             {!authenticated && (
               <div>{'You need to login to see this page'}</div>
             )}

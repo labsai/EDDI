@@ -1,15 +1,26 @@
 import * as React from 'react';
+import Typing from '../Typing/Typing';
 
-const Delayed = ({ wait, children }: { wait: number; children: any }) => {
+const Delayed = ({
+  wait,
+  children,
+  showTyping = false,
+}: {
+  wait: number;
+  children: any;
+  showTyping?: boolean;
+}) => {
   const [hidden, setHidden] = React.useState(true);
+
+  const typingComponent = showTyping ? <Typing /> : null;
 
   React.useEffect(() => {
     setTimeout(() => {
       setHidden(false);
-    }, wait);
+    }, wait * 2);
   }, []);
 
-  return hidden ? null : children;
+  return hidden ? typingComponent : children;
 };
 
 export default Delayed;

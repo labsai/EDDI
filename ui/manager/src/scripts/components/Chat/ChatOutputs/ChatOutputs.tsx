@@ -17,7 +17,10 @@ const ChatOutputs = ({ outputs, input }: IChatOutputs) => {
       </Delayed>
       {outputs?.map((o, i) => {
         return (
-          <Delayed wait={500 * (i + 2)} key={JSON.stringify(o) + i}>
+          <Delayed
+            wait={500 * (i + 2)}
+            key={JSON.stringify(o) + i}
+            showTyping={i === outputs.length - 1}>
             <ChatOutput output={o} />
           </Delayed>
         );

@@ -1,10 +1,12 @@
 import { makeStyles } from '@material-ui/core/styles';
-import { GREY_COLOR } from '../../../styles/DefaultStylingProperties';
+import {
+  GREY_COLOR,
+  WHITE_COLOR,
+} from '../../../styles/DefaultStylingProperties';
 
 const useStyles = makeStyles({
   chatContainer: {
     display: 'flex',
-    minWidth: '30vw',
     width: '30vw',
     top: 0,
     right: 0,
@@ -13,6 +15,7 @@ const useStyles = makeStyles({
     border: `1px solid ${GREY_COLOR}`,
     paddingTop: '50px',
     overflow: 'auto',
+    backgroundColor: WHITE_COLOR,
   },
   closeChat: {
     position: 'absolute',

@@ -8,7 +8,7 @@ import { BLUE_COLOR } from '../../../styles/DefaultStylingProperties';
 import {
   closeChatAction,
   replyInChatAction,
-  startChatAction,
+  startChatAction
 } from '../../actions/ChatActions';
 import { chatDataSelector } from '../../selectors/ChatSelectors';
 import useStyles from './Chat.styles';
@@ -73,7 +73,7 @@ const Chat = () => {
                 <div className={classes.step} key={d.conversationId + i}>
                   <ChatOutputs outputs={outputs} input={input} />
                   <ChatQuickReplies
-                    delay={count * 500}
+                    delay={count * 400}
                     quickReplies={quickReplies}
                     handleReplyInChat={handleReplyInChat}
                     hidden={!lastStep}
