@@ -1,5 +1,30 @@
-import * as update from 'immutability-helper';
+import update from 'immutability-helper';
 import { Action, Reducer } from 'redux';
+import { ICheckAuthenticationSuccessAction } from '../actions/AuthenticationActions';
+import {
+  BASIC_AUTH_SIGN_IN_SUCCESS,
+  CHECK_AUTHENTICATION_SUCCESS,
+} from '../actions/AuthenticationActionTypes';
+import {
+  ICreateNewPackageSuccessAction,
+  IDeployBotSuccessAction,
+  IUndeployBotFailedAction,
+  IUpdateDescriptorFailedAction,
+  IUpdateJsonDataFailedAction,
+  IUpdatePackagesSuccessAction,
+  IUpdatePackageSuccessAction,
+  IUpdatePluginSuccessAction,
+} from '../actions/EddiApiActions';
+import {
+  CREATE_NEW_PACKAGE_SUCCESS,
+  DEPLOY_BOT_SUCCESS,
+  UNDEPLOY_BOT_FAILED,
+  UPDATE_DESCRIPTOR_FAILED,
+  UPDATE_JSON_DATA_FAILED,
+  UPDATE_PACKAGES_SUCCESS,
+  UPDATE_PACKAGE_SUCCESS,
+  UPDATE_PLUGIN_SUCCESS,
+} from '../actions/EddiApiActionTypes';
 import {
   IShowAddPackagesModalAction,
   IShowAddPluginsModalAction,
@@ -33,33 +58,6 @@ import {
   IPackage,
 } from '../components/utils/AxiosFunctions';
 import { ModalEnum } from '../components/utils/ModalEnum';
-import {
-  CREATE_NEW_PACKAGE_SUCCESS,
-  DEPLOY_BOT_SUCCESS,
-  UNDEPLOY_BOT_FAILED,
-  UPDATE_DESCRIPTOR_FAILED,
-  UPDATE_JSON_DATA_FAILED,
-  UPDATE_PACKAGE_SUCCESS,
-  UPDATE_PACKAGES_SUCCESS,
-  UPDATE_PLUGIN_SUCCESS,
-} from '../actions/EddiApiActionTypes';
-import {
-  ICreateNewPackageSuccessAction,
-  IDeployBotSuccessAction,
-  IUndeployBotFailedAction,
-  IUpdateDescriptorFailedAction,
-  IUpdateJsonDataFailedAction,
-  IUpdatePackagesSuccessAction,
-  IUpdatePackageSuccessAction,
-  IUpdatePluginSuccessAction,
-} from '../actions/EddiApiActions';
-import {
-  BASIC_AUTH_SIGN_IN,
-  BASIC_AUTH_SIGN_IN_FAILED,
-  BASIC_AUTH_SIGN_IN_SUCCESS,
-  CHECK_AUTHENTICATION_SUCCESS,
-} from '../actions/AuthenticationActionTypes';
-import { ICheckAuthenticationSuccessAction } from '../actions/AuthenticationActions';
 
 export type IModalReducer = Reducer<IModalState>;
 
@@ -77,6 +75,8 @@ export interface IModalState {
   title: string;
   addPlugin?: (plugins: string[]) => void;
   onConfirm?: () => void;
+  name: string;
+  description: string;
 }
 
 export const initialState: IModalState = {
@@ -93,6 +93,8 @@ export const initialState: IModalState = {
   message: null,
   title: null,
   onConfirm: null,
+  name: null,
+  description: null,
 };
 
 const ModalReducer: IModalReducer = (
@@ -281,6 +283,9 @@ const ModalReducer: IModalReducer = (
       });
 
     case UPDATE_PLUGIN_SUCCESS:
+      if ((action as IUpdatePluginSuccessAction).noModal) {
+        return state;
+      }
       return update(state, {
         mode: {
           $set: ModalEnum.updatePackages,
@@ -293,7 +298,10 @@ const ModalReducer: IModalReducer = (
         },
       });
 
-    case UPDATE_PACKAGE_SUCCESS:
+    case UPDATE_PACKAGE_SUCCESS: {
+      if ((action as IUpdatePackageSuccessAction).noModal) {
+        return state;
+      }
       return update(state, {
         mode: {
           $set: ModalEnum.updateBots,
@@ -305,6 +313,7 @@ const ModalReducer: IModalReducer = (
           $set: [(action as IUpdatePackageSuccessAction).package.resource],
         },
       });
+    }
 
     case UPDATE_PACKAGES_SUCCESS:
       return update(state, {
@@ -316,7 +325,7 @@ const ModalReducer: IModalReducer = (
         },
         selectedResources: {
           $set: (action as IUpdatePackagesSuccessAction).packages.map(
-            pkg => pkg.resource,
+            (pkg) => pkg.resource,
           ),
         },
       });
@@ -341,6 +350,7 @@ const ModalReducer: IModalReducer = (
       });
 
     case DEPLOY_BOT_SUCCESS:
+      return state;
       return update(state, {
         mode: {
           $set: ModalEnum.confirmation,

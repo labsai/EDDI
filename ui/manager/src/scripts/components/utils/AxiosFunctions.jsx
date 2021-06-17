@@ -1,8 +1,8 @@
 'use strict';
 var __awaiter =
   (this && this.__awaiter) ||
-  function(thisArg, _arguments, P, generator) {
-    return new (P || (P = Promise))(function(resolve, reject) {
+  function (thisArg, _arguments, P, generator) {
+    return new (P || (P = Promise))(function (resolve, reject) {
       function fulfilled(value) {
         try {
           step(generator.next(value));
@@ -20,7 +20,7 @@ var __awaiter =
       function step(result) {
         result.done
           ? resolve(result.value)
-          : new P(function(resolve) {
+          : new P(function (resolve) {
               resolve(result.value);
             }).then(fulfilled, rejected);
       }
@@ -29,10 +29,10 @@ var __awaiter =
   };
 var __generator =
   (this && this.__generator) ||
-  function(thisArg, body) {
+  function (thisArg, body) {
     var _ = {
         label: 0,
-        sent: function() {
+        sent: function () {
           if (t[0] & 1) throw t[1];
           return t[1];
         },
@@ -46,13 +46,13 @@ var __generator =
     return (
       (g = { next: verb(0), throw: verb(1), return: verb(2) }),
       typeof Symbol === 'function' &&
-        (g[Symbol.iterator] = function() {
+        (g[Symbol.iterator] = function () {
           return this;
         }),
       g
     );
     function verb(n) {
-      return function(v) {
+      return function (v) {
         return step([n, v]);
       };
     }
@@ -134,9 +134,9 @@ function setDefaultGlobalHeader(key, value) {
 }
 exports.setDefaultGlobalHeader = setDefaultGlobalHeader;
 function getDescriptor(id, version) {
-  return __awaiter(this, void 0, void 0, function() {
+  return __awaiter(this, void 0, void 0, function () {
     var descriptor, _a, _b, e_1;
-    return __generator(this, function(_c) {
+    return __generator(this, function (_c) {
       switch (_c.label) {
         case 0:
           _c.trys.push([0, 3, , 4]);
@@ -180,8 +180,8 @@ function getDescriptor(id, version) {
 exports.getDescriptor = getDescriptor;
 exports.ID_LENGTH = 24;
 function getBot(botResourceOrId) {
-  return __awaiter(this, void 0, void 0, function() {
-    return __generator(this, function(_a) {
+  return __awaiter(this, void 0, void 0, function () {
+    return __generator(this, function (_a) {
       switch (_a.label) {
         case 0:
           if (!(_.size(botResourceOrId) > exports.ID_LENGTH))
@@ -199,7 +199,7 @@ function getBot(botResourceOrId) {
 }
 exports.getBot = getBot;
 function getSpecificBot(botResource) {
-  return __awaiter(this, void 0, void 0, function() {
+  return __awaiter(this, void 0, void 0, function () {
     var id,
       version,
       botDescriptor,
@@ -207,7 +207,7 @@ function getSpecificBot(botResource) {
       currentVersion,
       deploymentStatus,
       err_1;
-    return __generator(this, function(_a) {
+    return __generator(this, function (_a) {
       switch (_a.label) {
         case 0:
           _a.trys.push([0, 5, , 6]);
@@ -253,9 +253,9 @@ function getSpecificBot(botResource) {
 }
 exports.getSpecificBot = getSpecificBot;
 function getBotData(botResource) {
-  return __awaiter(this, void 0, void 0, function() {
+  return __awaiter(this, void 0, void 0, function () {
     var botData, _a, _b, _c, err_2;
-    return __generator(this, function(_d) {
+    return __generator(this, function (_d) {
       switch (_d.label) {
         case 0:
           _d.trys.push([0, 3, , 4]);
@@ -286,9 +286,9 @@ function getBotData(botResource) {
 }
 exports.getBotData = getBotData;
 function getAllBots() {
-  return __awaiter(this, void 0, void 0, function() {
+  return __awaiter(this, void 0, void 0, function () {
     var botDescriptors, _a, _b, bots, temporaryBotList, i, bot, err_3;
-    return __generator(this, function(_c) {
+    return __generator(this, function (_c) {
       switch (_c.label) {
         case 0:
           _c.trys.push([0, 7, , 8]);
@@ -305,7 +305,7 @@ function getAllBots() {
           ];
         case 2:
           botDescriptors = _c.sent();
-          bots = botDescriptors.data.map(function(bot) {
+          bots = botDescriptors.data.map(function (bot) {
             var version = Parser_1.default.getVersion(bot.resource);
             return {
               id: Parser_1.default.getId(bot.resource),
@@ -346,9 +346,9 @@ function getAllBots() {
 }
 exports.getAllBots = getAllBots;
 function getBotPackages(resource) {
-  return __awaiter(this, void 0, void 0, function() {
+  return __awaiter(this, void 0, void 0, function () {
     var botData, _a, _b, _c, err_4;
-    return __generator(this, function(_d) {
+    return __generator(this, function (_d) {
       switch (_d.label) {
         case 0:
           _d.trys.push([0, 3, , 4]);
@@ -381,9 +381,9 @@ function getBotPackages(resource) {
 }
 exports.getBotPackages = getBotPackages;
 function getBotDescriptors(limit, index) {
-  return __awaiter(this, void 0, void 0, function() {
+  return __awaiter(this, void 0, void 0, function () {
     var res, _a, _b, err_5;
-    return __generator(this, function(_c) {
+    return __generator(this, function (_c) {
       switch (_c.label) {
         case 0:
           _c.trys.push([0, 3, , 4]);
@@ -404,7 +404,7 @@ function getBotDescriptors(limit, index) {
           res = _c.sent();
           return [
             2 /*return*/,
-            res.data.map(function(bot) {
+            res.data.map(function (bot) {
               var createdOn = bot.createdOn;
               var description = bot.description;
               var id = Parser_1.default.getId(bot.resource);
@@ -436,9 +436,9 @@ function getBotDescriptors(limit, index) {
 }
 exports.getBotDescriptors = getBotDescriptors;
 function getCurrentBot(id) {
-  return __awaiter(this, void 0, void 0, function() {
+  return __awaiter(this, void 0, void 0, function () {
     var version, _a, _b, descriptor, data, deploymentStatus, err_6;
-    return __generator(this, function(_c) {
+    return __generator(this, function (_c) {
       switch (_c.label) {
         case 0:
           _c.trys.push([0, 6, , 7]);
@@ -490,9 +490,9 @@ function getCurrentBot(id) {
 }
 exports.getCurrentBot = getCurrentBot;
 function getPluginData(pluginResource) {
-  return __awaiter(this, void 0, void 0, function() {
+  return __awaiter(this, void 0, void 0, function () {
     var res, _a, _b, _c, _d, err_7;
-    return __generator(this, function(_e) {
+    return __generator(this, function (_e) {
       switch (_e.label) {
         case 0:
           _e.trys.push([0, 3, , 4]);
@@ -525,9 +525,9 @@ function getPluginData(pluginResource) {
 }
 exports.getPluginData = getPluginData;
 function getPackageData(packageResource) {
-  return __awaiter(this, void 0, void 0, function() {
+  return __awaiter(this, void 0, void 0, function () {
     var res, _a, _b, _c, err_8;
-    return __generator(this, function(_d) {
+    return __generator(this, function (_d) {
       switch (_d.label) {
         case 0:
           _d.trys.push([0, 3, , 4]);
@@ -558,9 +558,9 @@ function getPackageData(packageResource) {
 }
 exports.getPackageData = getPackageData;
 function getPlugin(pluginResource) {
-  return __awaiter(this, void 0, void 0, function() {
+  return __awaiter(this, void 0, void 0, function () {
     var res, _a, _b, pluginData, currentVersion, err_9;
-    return __generator(this, function(_c) {
+    return __generator(this, function (_c) {
       switch (_c.label) {
         case 0:
           _c.trys.push([0, 5, , 6]);
@@ -615,9 +615,9 @@ function getPackageDescriptors(limit, index) {
   if (index === void 0) {
     index = 0;
   }
-  return __awaiter(this, void 0, void 0, function() {
+  return __awaiter(this, void 0, void 0, function () {
     var res, _a, _b, err_10;
-    return __generator(this, function(_c) {
+    return __generator(this, function (_c) {
       switch (_c.label) {
         case 0:
           _c.trys.push([0, 3, , 4]);
@@ -654,9 +654,9 @@ function getPackageDescriptors(limit, index) {
 }
 exports.getPackageDescriptors = getPackageDescriptors;
 function getPackage(resource) {
-  return __awaiter(this, void 0, void 0, function() {
+  return __awaiter(this, void 0, void 0, function () {
     var id, version, descriptor, packageData, currentVersion, err_11;
-    return __generator(this, function(_a) {
+    return __generator(this, function (_a) {
       switch (_a.label) {
         case 0:
           _a.trys.push([0, 4, , 5]);
@@ -697,9 +697,9 @@ function getPackage(resource) {
 }
 exports.getPackage = getPackage;
 function getCurrentPackage(id) {
-  return __awaiter(this, void 0, void 0, function() {
+  return __awaiter(this, void 0, void 0, function () {
     var version, _a, _b, descriptor, err_12;
-    return __generator(this, function(_c) {
+    return __generator(this, function (_c) {
       switch (_c.label) {
         case 0:
           _c.trys.push([0, 4, , 5]);
@@ -744,9 +744,9 @@ function getCurrentPackage(id) {
 }
 exports.getCurrentPackage = getCurrentPackage;
 function getCurrentPlugin(resource) {
-  return __awaiter(this, void 0, void 0, function() {
+  return __awaiter(this, void 0, void 0, function () {
     var requestUri, _a, version, id, descriptor, err_13;
-    return __generator(this, function(_b) {
+    return __generator(this, function (_b) {
       switch (_b.label) {
         case 0:
           _b.trys.push([0, 5, , 6]);
@@ -796,9 +796,9 @@ function getCurrentPlugin(resource) {
 }
 exports.getCurrentPlugin = getCurrentPlugin;
 function getCurrentVersion(resource) {
-  return __awaiter(this, void 0, void 0, function() {
+  return __awaiter(this, void 0, void 0, function () {
     var uri, _a, requestUri, currentVersion, err_14;
-    return __generator(this, function(_b) {
+    return __generator(this, function (_b) {
       switch (_b.label) {
         case 0:
           _b.trys.push([0, 3, , 4]);
@@ -829,9 +829,9 @@ function getCurrentVersion(resource) {
 }
 exports.getCurrentVersion = getCurrentVersion;
 function updateBot(currentBot, updatablePackageResource) {
-  return __awaiter(this, void 0, void 0, function() {
+  return __awaiter(this, void 0, void 0, function () {
     var currentBotUri, newPackage_1, packages, newBot, err_15;
-    return __generator(this, function(_a) {
+    return __generator(this, function (_a) {
       switch (_a.label) {
         case 0:
           return [4 /*yield*/, ApiFunctions_1.getAPIUrl()];
@@ -851,7 +851,7 @@ function updateBot(currentBot, updatablePackageResource) {
           ];
         case 3:
           newPackage_1 = _a.sent();
-          packages = currentBot.packages.map(function(pkg) {
+          packages = currentBot.packages.map(function (pkg) {
             if (Parser_1.default.getId(pkg) === newPackage_1.id) {
               return newPackage_1.resource;
             }
@@ -882,9 +882,9 @@ function updateBot(currentBot, updatablePackageResource) {
 }
 exports.updateBot = updateBot;
 function updateBotPackages(currentBot, packages) {
-  return __awaiter(this, void 0, void 0, function() {
+  return __awaiter(this, void 0, void 0, function () {
     var currentBotUri, newBot, err_16;
-    return __generator(this, function(_a) {
+    return __generator(this, function (_a) {
       switch (_a.label) {
         case 0:
           _a.trys.push([0, 4, , 5]);
@@ -923,9 +923,9 @@ function updateBotPackages(currentBot, packages) {
 }
 exports.updateBotPackages = updateBotPackages;
 function addPackageToBot(currentBot, packageResource) {
-  return __awaiter(this, void 0, void 0, function() {
+  return __awaiter(this, void 0, void 0, function () {
     var currentBotUri, botData, updatedBot, err_17;
-    return __generator(this, function(_a) {
+    return __generator(this, function (_a) {
       switch (_a.label) {
         case 0:
           _a.trys.push([0, 7, , 8]);
@@ -972,9 +972,9 @@ function addPackageToBot(currentBot, packageResource) {
 }
 exports.addPackageToBot = addPackageToBot;
 function updateResourcesInBot(botResource, packageResources) {
-  return __awaiter(this, void 0, void 0, function() {
+  return __awaiter(this, void 0, void 0, function () {
     var currentBotUri, oldBot, newBotPackageList, newBot, err_18;
-    return __generator(this, function(_a) {
+    return __generator(this, function (_a) {
       switch (_a.label) {
         case 0:
           _a.trys.push([0, 5, , 6]);
@@ -990,9 +990,9 @@ function updateResourcesInBot(botResource, packageResources) {
           ];
         case 2:
           oldBot = _a.sent();
-          newBotPackageList = oldBot.packages.map(function(pkg) {
+          newBotPackageList = oldBot.packages.map(function (pkg) {
             return (
-              packageResources.find(function(resource) {
+              packageResources.find(function (resource) {
                 return (
                   Parser_1.default.getId(resource) ===
                   Parser_1.default.getId(pkg)
@@ -1030,9 +1030,9 @@ function updateResourcesInBot(botResource, packageResources) {
 }
 exports.updateResourcesInBot = updateResourcesInBot;
 function updateBots(bots) {
-  return __awaiter(this, void 0, void 0, function() {
+  return __awaiter(this, void 0, void 0, function () {
     var newBots, i, newBot, err_19;
-    return __generator(this, function(_a) {
+    return __generator(this, function (_a) {
       switch (_a.label) {
         case 0:
           _a.trys.push([0, 5, , 6]);
@@ -1067,7 +1067,9 @@ function updateBots(bots) {
 exports.updateBots = updateBots;
 function updatePackageExtension(externalPackages, newExtensionResource) {
   var newExtensionId = Parser_1.default.getId(newExtensionResource);
-  var updatedExternalPackages = externalPackages.map(function(externalPackage) {
+  var updatedExternalPackages = externalPackages.map(function (
+    externalPackage,
+  ) {
     if (
       externalPackage.config &&
       externalPackage.config.uri &&
@@ -1106,14 +1108,14 @@ function updatePackageExtension(externalPackages, newExtensionResource) {
 }
 exports.updatePackageExtension = updatePackageExtension;
 function updatePackage(currentPackage, updatablePluginResource) {
-  return __awaiter(this, void 0, void 0, function() {
+  return __awaiter(this, void 0, void 0, function () {
     var currentPackageUri,
       packageData,
       newPlugin,
       newPackageData,
       newPackage,
       err_20;
-    return __generator(this, function(_a) {
+    return __generator(this, function (_a) {
       switch (_a.label) {
         case 0:
           _a.trys.push([0, 7, , 8]);
@@ -1164,9 +1166,9 @@ function updatePackage(currentPackage, updatablePluginResource) {
 }
 exports.updatePackage = updatePackage;
 function patchDescriptor(resource, name, description) {
-  return __awaiter(this, void 0, void 0, function() {
+  return __awaiter(this, void 0, void 0, function () {
     var res, _a, _b, err_21;
-    return __generator(this, function(_c) {
+    return __generator(this, function (_c) {
       switch (_c.label) {
         case 0:
           _c.trys.push([0, 3, , 4]);
@@ -1203,9 +1205,9 @@ function patchDescriptor(resource, name, description) {
 }
 exports.patchDescriptor = patchDescriptor;
 function createNewBot(name, description) {
-  return __awaiter(this, void 0, void 0, function() {
+  return __awaiter(this, void 0, void 0, function () {
     var response, resource, err_22;
-    return __generator(this, function(_a) {
+    return __generator(this, function (_a) {
       switch (_a.label) {
         case 0:
           _a.trys.push([0, 3, , 4]);
@@ -1235,9 +1237,9 @@ function createNewBot(name, description) {
 }
 exports.createNewBot = createNewBot;
 function createNewPackage(name, description, extensions) {
-  return __awaiter(this, void 0, void 0, function() {
+  return __awaiter(this, void 0, void 0, function () {
     var response, resource, err_23;
-    return __generator(this, function(_a) {
+    return __generator(this, function (_a) {
       switch (_a.label) {
         case 0:
           _a.trys.push([0, 2, , 3]);
@@ -1264,9 +1266,9 @@ function createNewPackage(name, description, extensions) {
 }
 exports.createNewPackage = createNewPackage;
 function addPluginType(resource, extensions) {
-  return __awaiter(this, void 0, void 0, function() {
+  return __awaiter(this, void 0, void 0, function () {
     var newPackage, err_24;
-    return __generator(this, function(_a) {
+    return __generator(this, function (_a) {
       switch (_a.label) {
         case 0:
           _a.trys.push([0, 3, , 4]);
@@ -1301,9 +1303,9 @@ function addPluginType(resource, extensions) {
 }
 exports.addPluginType = addPluginType;
 function getAllDefaultPluginTypes() {
-  return __awaiter(this, void 0, void 0, function() {
+  return __awaiter(this, void 0, void 0, function () {
     var res, _a, _b, err_25;
-    return __generator(this, function(_c) {
+    return __generator(this, function (_c) {
       switch (_c.label) {
         case 0:
           _c.trys.push([0, 3, , 4]);
@@ -1329,9 +1331,9 @@ function getAllDefaultPluginTypes() {
 }
 exports.getAllDefaultPluginTypes = getAllDefaultPluginTypes;
 function getPluginDescriptors(pluginType, limit, index) {
-  return __awaiter(this, void 0, void 0, function() {
+  return __awaiter(this, void 0, void 0, function () {
     var res, _a, _b, _c, _d, _e, _f, _g, _h, _j, _k, _l, _m, _o, err_26;
-    return __generator(this, function(_p) {
+    return __generator(this, function (_p) {
       switch (_p.label) {
         case 0:
           _p.trys.push([0, 15, , 16]);
@@ -1435,7 +1437,7 @@ function getPluginDescriptors(pluginType, limit, index) {
           if (res !== null) {
             return [
               2 /*return*/,
-              res.data.map(function(pkg) {
+              res.data.map(function (pkg) {
                 var version = Parser_1.default.getVersion(pkg.resource);
                 return {
                   createdOn: pkg.createdOn,
@@ -1470,9 +1472,9 @@ function getBotsUsingPackage(packageResource, usingOldVersions) {
   if (usingOldVersions === void 0) {
     usingOldVersions = false;
   }
-  return __awaiter(this, void 0, void 0, function() {
+  return __awaiter(this, void 0, void 0, function () {
     var config, res, _a, _b, err_27;
-    return __generator(this, function(_c) {
+    return __generator(this, function (_c) {
       switch (_c.label) {
         case 0:
           _c.trys.push([0, 3, , 4]);
@@ -1518,9 +1520,9 @@ function getPackagesUsingPlugin(pluginResource, usingOldVersions) {
   if (usingOldVersions === void 0) {
     usingOldVersions = false;
   }
-  return __awaiter(this, void 0, void 0, function() {
+  return __awaiter(this, void 0, void 0, function () {
     var config, res, _a, _b, err_28;
-    return __generator(this, function(_c) {
+    return __generator(this, function (_c) {
       switch (_c.label) {
         case 0:
           _c.trys.push([0, 3, , 4]);
@@ -1564,9 +1566,9 @@ function getPackagesUsingPlugin(pluginResource, usingOldVersions) {
 }
 exports.getPackagesUsingPlugin = getPackagesUsingPlugin;
 function updateJsonData(resource, data) {
-  return __awaiter(this, void 0, void 0, function() {
+  return __awaiter(this, void 0, void 0, function () {
     var _a, _b, _c, err_29;
-    return __generator(this, function(_d) {
+    return __generator(this, function (_d) {
       switch (_d.label) {
         case 0:
           _d.trys.push([0, 3, , 4]);
@@ -1598,9 +1600,9 @@ function updateJsonData(resource, data) {
 }
 exports.updateJsonData = updateJsonData;
 function postNewConfig(type, name, description, data) {
-  return __awaiter(this, void 0, void 0, function() {
+  return __awaiter(this, void 0, void 0, function () {
     var configPath, response, resource, err_30;
-    return __generator(this, function(_a) {
+    return __generator(this, function (_a) {
       switch (_a.label) {
         case 0:
           switch (type) {
@@ -1653,9 +1655,9 @@ function postNewConfig(type, name, description, data) {
 }
 exports.postNewConfig = postNewConfig;
 function updatePackages(pluginResource, packages) {
-  return __awaiter(this, void 0, void 0, function() {
+  return __awaiter(this, void 0, void 0, function () {
     var updatedPackages, i, currentPackage, updatedPackage, err_31;
-    return __generator(this, function(_a) {
+    return __generator(this, function (_a) {
       switch (_a.label) {
         case 0:
           _a.trys.push([0, 6, , 7]);
@@ -1692,9 +1694,9 @@ function updatePackages(pluginResource, packages) {
 }
 exports.updatePackages = updatePackages;
 function getDeploymentStatus(resource) {
-  return __awaiter(this, void 0, void 0, function() {
+  return __awaiter(this, void 0, void 0, function () {
     var res, _a, _b, err_32;
-    return __generator(this, function(_c) {
+    return __generator(this, function (_c) {
       switch (_c.label) {
         case 0:
           _c.trys.push([0, 3, , 4]);
@@ -1726,9 +1728,9 @@ function getDeploymentStatus(resource) {
 }
 exports.getDeploymentStatus = getDeploymentStatus;
 function deployBot(resource) {
-  return __awaiter(this, void 0, void 0, function() {
+  return __awaiter(this, void 0, void 0, function () {
     var _a, _b, err_33;
-    return __generator(this, function(_c) {
+    return __generator(this, function (_c) {
       switch (_c.label) {
         case 0:
           _c.trys.push([0, 3, , 4]);
@@ -1758,9 +1760,9 @@ function deployBot(resource) {
 }
 exports.deployBot = deployBot;
 function undeployBot(resource) {
-  return __awaiter(this, void 0, void 0, function() {
+  return __awaiter(this, void 0, void 0, function () {
     var res, _a, _b;
-    return __generator(this, function(_c) {
+    return __generator(this, function (_c) {
       switch (_c.label) {
         case 0:
           _b = (_a = axios_1.default).post;

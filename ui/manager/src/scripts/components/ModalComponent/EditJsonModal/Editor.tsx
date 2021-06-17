@@ -1,18 +1,9 @@
 import * as React from 'react';
 import '../ModalComponent.styles.scss';
-import { Component, compose, pure, setDisplayName } from 'recompose';
+import { compose, pure, setDisplayName } from 'recompose';
 import AceEditor from 'react-ace';
-import eddiApiActionDispatchers from '../../../actions/EddiApiActionDispatchers';
-import * as renderIf from 'render-if';
 import * as _ from 'lodash';
-import JsonErrors from './JsonErrors';
-import JsonExample from './JsonExample';
-import styles from './Editor.styles';
-import {
-  compileJsonSchema,
-  getSnippets,
-  IJsonError,
-} from '../../utils/helpers/JsonHelpers';
+import { IJsonError } from '../../utils/helpers/JsonHelpers';
 import 'ace-builds/src-noconflict/ext-language_tools';
 import 'ace-builds/src-noconflict/mode-json';
 import 'ace-builds/src-noconflict/theme-monokai';
@@ -20,19 +11,9 @@ import 'ace-builds/src-noconflict/snippets/json';
 import { schemaSelector } from '../../../selectors/SystemSelectors';
 import { connect } from 'react-redux';
 import { JSONSchema4 } from 'json-schema';
-import CheckBox from './EditorButtons/CheckBox';
+import useStyles from './Editor.styles';
 import ExpandButton from './EditorButtons/ExpandButton';
-import UndoButton from './EditorButtons/UndoButton';
-import RedoButton from './EditorButtons/RedoButton';
 import ValidateButton from './EditorButtons/ValidateButton';
-import * as ace from 'ace-builds';
-
-interface IState {
-  editorText: string;
-  expanded: boolean;
-  enableBasicAutocompletion: boolean;
-  enableLiveAutocompletion: boolean;
-}
 
 interface IPublicProps {
   type: string;
@@ -47,99 +28,88 @@ interface IPrivateProps extends IPublicProps {
   schema?: JSONSchema4;
 }
 
-class CreateNewConfig2Modal extends React.Component<IPrivateProps, IState> {
-  constructor(props) {
-    super(props);
-    this.state = {
-      editorText: '{}',
-      expanded: false,
-      enableBasicAutocompletion: true,
-      enableLiveAutocompletion: false,
-    };
-  }
+const CreateNewConfig2Modal = ({
+  type,
+  data,
+  errors,
+  onConfirm,
+  onChange,
+  validate,
+  schema,
+}: IPrivateProps) => {
+  const classes = useStyles();
+  const [editorText, setEditorText] = React.useState<string>('{}');
+  const [expanded, setExpanded] = React.useState<boolean>(false);
+  const aceEditorRef = React.useRef(null);
+  React.useEffect(() => {
+    discardChanges();
+  }, [type, data, errors, schema, onConfirm, onChange, validate]);
 
-  componentDidMount() {
-    this.discardChanges();
-  }
-
-  componentDidUpdate(prevProps) {
-    if (prevProps !== this.props) {
-      this.discardChanges();
-    }
-  }
-
-  onChange = value => {
-    this.props.onChange(value);
-    this.setState({
-      editorText: value,
-    });
+  const handleOnChange = (value) => {
+    onChange(value);
+    setEditorText(value);
   };
 
-  discardChanges(props = this.props) {
-    const editorText = _.isEmpty(props.data) ? '{\n\t\n}' : props.data;
-    this.setState({
-      editorText: editorText,
-    });
-  }
+  const discardChanges = () => {
+    const editorText = _.isEmpty(data) ? '{\n\t\n}' : data;
+    setEditorText(editorText);
+  };
 
-  render() {
-    return (
-      <div>
-        <div style={this.state.expanded ? styles.expand : {}}>
-          <div style={styles.editorUI}>
-            <div style={styles.editorButtons}>
-              <ValidateButton onClick={() => this.props.validate()} />
-              <ExpandButton
-                customStyles={styles.expandButton}
-                expanded={this.state.expanded}
-                onClick={() =>
-                  this.setState({ expanded: !this.state.expanded })
-                }
-              />
-            </div>
-            <AceEditor
-              ref={'aceEditor'}
-              mode={'json'}
-              height={this.state.expanded ? '100%' : '800px'}
-              width={'100%'}
-              name={'OutputJson'}
-              theme={'monokai'}
-              highlightActiveLine={true}
-              annotations={
-                _.isEmpty(this.props.errors)
-                  ? null
-                  : this.props.errors.map(err => {
-                      return {
-                        row: err.line,
-                        column: 1,
-                        type: 'error',
-                        text: err.message,
-                      };
-                    })
-              }
-              setOptions={{
-                enableBasicAutocompletion: this.state.enableBasicAutocompletion,
-                enableLiveAutocompletion: this.state.enableLiveAutocompletion,
-                enableSnippets: true,
-              }}
-              showGutter={true}
-              showPrintMargin={false}
-              focus={true}
-              onChange={this.onChange}
-              value={this.state.editorText}
-              editorProps={{ $blockScrolling: true }}
+  return (
+    <div>
+      <div className={expanded ? classes.expand : undefined}>
+        <div className={classes.editorUI}>
+          <div className={classes.editorButtons}>
+            <ValidateButton onClick={() => validate()} />
+            <ExpandButton
+              classes={{ button: classes.expandButton }}
+              expanded={expanded}
+              onClick={() => setExpanded(!expanded)}
             />
           </div>
+          <AceEditor
+            ref={aceEditorRef}
+            mode={'json'}
+            height={expanded ? '100%' : '800px'}
+            width={'100%'}
+            name={'OutputJson'}
+            theme={'monokai'}
+            highlightActiveLine={true}
+            annotations={
+              _.isEmpty(errors)
+                ? null
+                : errors.map((err) => {
+                    return {
+                      row: err.line,
+                      column: 1,
+                      type: 'error',
+                      text: err.message,
+                    };
+                  })
+            }
+            setOptions={{
+              enableBasicAutocompletion: true,
+              enableLiveAutocompletion: false,
+              enableSnippets: true,
+            }}
+            showGutter={true}
+            showPrintMargin={false}
+            focus={true}
+            onChange={handleOnChange}
+            value={editorText}
+            editorProps={{ $blockScrolling: true }}
+          />
         </div>
       </div>
-    );
-  }
-}
+    </div>
+  );
+};
 
-const ComposedCreateNewConfig2Modal: Component<IPrivateProps> = compose<
-  IPrivateProps
->(pure, connect(schemaSelector), setDisplayName('CreateNewConfig2Modal'))(
-  CreateNewConfig2Modal,
-);
+const ComposedCreateNewConfig2Modal: React.ComponentClass<IPrivateProps> =
+  compose<IPrivateProps, IPrivateProps>(
+    pure,
+    connect(schemaSelector),
+    setDisplayName('CreateNewConfig2Modal'),
+  )(CreateNewConfig2Modal);
 
 export default ComposedCreateNewConfig2Modal;

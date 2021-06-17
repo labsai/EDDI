@@ -1,8 +1,6 @@
 import * as React from 'react';
-import { Component, compose, pure, setDisplayName } from 'recompose';
-import * as renderIf from 'render-if';
+import { compose, pure, setDisplayName } from 'recompose';
 import { IConversationProperties } from '../../utils/AxiosFunctions';
-import { CSSProperties } from 'react';
 import {
   DARK_BLUE_BORDER,
   DARK_BLUE_COLOR,
@@ -10,10 +8,10 @@ import {
   MEDIUM_FONT3,
   SMALL_FONT2,
 } from '../../../../styles/DefaultStylingProperties';
-import * as Radium from 'radium';
 import TruncateTextComponent from '../../Assets/TruncateTextComponent';
+import { makeStyles } from '@material-ui/core/styles';
 
-const styles: CSSProperties = {
+const useStyles = makeStyles({
   title: {
     fontSize: MEDIUM_FONT3,
     color: DARK_BLUE_COLOR,
@@ -41,62 +39,65 @@ const styles: CSSProperties = {
     paddingBottom: '2px',
   },
   propertyValue: {
-    border: '1px solid red',
+    overflowWrap: 'anywhere',
   },
-};
+});
 
 interface IProps {
   conversationProperties: IConversationProperties;
 }
 
-class ConversationProperties extends React.Component<IProps> {
-  render() {
-    const keys = Object.keys(this.props.conversationProperties);
-    return (
-      <div style={styles.content}>
-        <div style={styles.title}>
-          {`Conversation Properties {${keys.length}}`}
-        </div>
-        <div style={styles.propertyTitle}>
-          <div style={styles.property}>{'Name'}</div>
-          <div style={styles.property}>{'Scope'}</div>
-          <div style={styles.property}>{'Value'}</div>
-        </div>
-        <div>
-          {keys.map((property, i) => (
-            <div style={styles.propertyValues} key={i}>
-              <div style={styles.propertyName}>
-                {this.props.conversationProperties[property].name}
-              </div>
-              <div style={styles.propertyName}>
-                {this.props.conversationProperties[property].scope}
-              </div>
-              <TruncateTextComponent
-                style={styles.propertyValue}
-                text={
-                  typeof this.props.conversationProperties[property].value ===
-                  'string'
-                    ? JSON.stringify(
-                        this.props.conversationProperties,
-                        null,
-                        '\t',
-                      )
-                    : this.props.conversationProperties[property].value +
-                      'lorem ipsum dalar dis doofus mabodis katonis lupus fungus is da frontos bontos ka le mongos'
-                }
-                length={40}
-              />
-            </div>
-          ))}
-        </div>
+const ConversationProperties = ({ conversationProperties }: IProps) => {
+  const classes = useStyles();
+  const keys = Object.keys(conversationProperties);
+  return (
+    <div className={classes.content}>
+      <div className={classes.title}>
+        {`Conversation Properties {${keys.length}}`}
       </div>
-    );
-  }
-}
+      <div className={classes.propertyTitle}>
+        <div className={classes.property}>{'Name'}</div>
+        <div className={classes.property}>{'Scope'}</div>
+        <div className={classes.property}>{'Value'}</div>
+      </div>
+      <div>
+        {keys.map((property, i) => (
+          <div className={classes.propertyValues} key={i}>
+            <div className={classes.propertyName}>
+              {conversationProperties[property].name}
+            </div>
+            <div className={classes.propertyName}>
+              {conversationProperties[property].scope}
+            </div>
+            <TruncateTextComponent
+              classes={{ text: classes.propertyValue }}
+              text={
+                typeof conversationProperties[property].value === 'string'
+                  ? JSON.stringify(
+                      conversationProperties[property].value,
+                      null,
+                      '\t',
+                    )
+                  : JSON.stringify(
+                      conversationProperties[property].value,
+                      null,
+                      4,
+                    )
+              }
+              length={40}
+            />
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+};
 
-const ComposedConversationProperties: Component<IProps> = compose<IProps>(
+const ComposedConversationProperties: React.ComponentClass<IProps> = compose<
+  IProps,
+  IProps
+>(
   pure,
-  Radium,
   setDisplayName('ConversationProperties'),
 )(ConversationProperties);
 

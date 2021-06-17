@@ -1,10 +1,9 @@
 import * as React from 'react';
-import * as Radium from 'radium';
-import { CSSProperties } from 'react';
-import { Component, compose, pure, setDisplayName } from 'recompose';
+import { compose, pure, setDisplayName } from 'recompose';
 import * as moment from 'moment';
+import { makeStyles } from '@material-ui/core/styles';
 
-const styles: CSSProperties = {
+const useStyles = makeStyles({
   content: {
     color: '#16325C',
     fontSize: '13px',
@@ -30,7 +29,7 @@ const styles: CSSProperties = {
     whiteSpace: 'nowrap',
     width: 'fit-content',
   },
-};
+});
 
 interface IProps {
   botCreated: number;
@@ -38,30 +37,35 @@ interface IProps {
   botDescription: string;
 }
 
-const BotDescriptor: React.StatelessComponent<IProps> = (props: IProps) => (
-  <div style={styles.descriptors}>
-    <div>
-      <div style={styles.title}>{'Description'}</div>
-      <div style={styles.content}>{props.botDescription || 'N/A'}</div>
-    </div>
-    <div style={styles.dateTime}>
-      <div style={styles.title}>{'Created'}</div>
-      <div style={styles.content}>
-        {moment(props.botCreated).format('DD.MM.YYYY')}
+const BotDescriptor: React.StatelessComponent<IProps> = (props: IProps) => {
+  const classes = useStyles();
+  return (
+    <div className={classes.descriptors}>
+      <div>
+        <div className={classes.title}>{'Description'}</div>
+        <div className={classes.content}>{props.botDescription || 'N/A'}</div>
+      </div>
+      <div className={classes.dateTime}>
+        <div className={classes.title}>{'Created'}</div>
+        <div className={classes.content}>
+          {moment(props.botCreated).format('DD.MM.YYYY')}
+        </div>
+      </div>
+      <div className={classes.dateTime}>
+        <div className={classes.title}>{'Last Modified'}</div>
+        <div className={classes.content}>
+          {moment(props.botLastModified).format('DD.MM.YYYY')}
+        </div>
       </div>
     </div>
-    <div style={styles.dateTime}>
-      <div style={styles.title}>{'Last Modified'}</div>
-      <div style={styles.content}>
-        {moment(props.botLastModified).format('DD.MM.YYYY')}
-      </div>
-    </div>
-  </div>
-);
+  );
+};
 
-const ComposedBotDescriptor: Component<IProps> = compose<IProps>(
+const ComposedBotDescriptor: React.ComponentClass<IProps> = compose<
+  IProps,
+  IProps
+>(
   pure,
-  Radium,
   setDisplayName('BotDescriptor'),
 )(BotDescriptor);
 

@@ -1,100 +1,79 @@
 import * as React from 'react';
-import styles from './ModalComponent.styles';
-import './ModalComponent.styles.scss';
-import { Component, compose, pure, setDisplayName } from 'recompose';
-import { IDescriptor } from '../utils/AxiosFunctions';
+import { compose, pure, setDisplayName } from 'recompose';
 import eddiApiActionDispatchers from '../../actions/EddiApiActionDispatchers';
 import ModalActionDispatchers from '../../actions/ModalActionDispatchers';
-import { BLUE_COLOR } from '../../../styles/DefaultStylingProperties';
 import BlueButton from '../Assets/Buttons/BlueButton';
-
-const customStyles = {
-  button: {
-    marginLeft: 'auto',
-  },
-};
-
-interface IState {
-  name: string;
-  description: string;
-}
+import { IDescriptor } from '../utils/AxiosFunctions';
+import useStyles from './ModalComponent.styles';
+import './ModalComponent.styles.scss';
 
 interface IProps {
   descriptor: IDescriptor;
 }
 
-class EditDescriptorModal extends React.Component<IProps, IState> {
-  constructor(props) {
-    super(props);
-    this.state = {
-      name: this.props.descriptor.name || '',
-      description: this.props.descriptor.description || '',
-    };
-  }
+const EditDescriptorModal = ({ descriptor }: IProps) => {
+  const [name, setName] = React.useState(descriptor.name || '');
+  const [description, setDescription] = React.useState(
+    descriptor.description || '',
+  );
 
-  render() {
-    return (
-      <div>
-        <div style={styles.modalHeader}>
-          <div style={styles.modalTopHeader}>
-            <div style={styles.botHeaderText}>
-              {'Edit name and description'}
-            </div>
-            <BlueButton
-              text={'Save'}
-              customStyles={customStyles.button}
-              disabled={
-                this.state.name === this.props.descriptor.name &&
-                this.state.description === this.props.descriptor.description
-              }
-              onClick={() => {
-                eddiApiActionDispatchers.updateDescriptorAction(
-                  this.props.descriptor.resource,
-                  this.state.name,
-                  this.state.description,
-                );
-                ModalActionDispatchers.closeModal();
-              }}
+  const classes = useStyles();
+
+  return (
+    <div>
+      <div className={classes.modalHeader}>
+        <div className={classes.modalTopHeader}>
+          <div className={classes.botHeaderText}>
+            {'Edit name and description'}
+          </div>
+          <BlueButton
+            text={'Save'}
+            classes={{ button: classes.button }}
+            disabled={
+              name === descriptor.name && description === descriptor.description
+            }
+            onClick={() => {
+              eddiApiActionDispatchers.updateDescriptorAction(
+                descriptor.resource,
+                name,
+                description,
+              );
+              ModalActionDispatchers.closeModal();
+            }}
+          />
+        </div>
+      </div>
+      <div className={classes.content}>
+        <div className={classes.botText}>
+          {'Name'}
+          <div className={classes.inputBoxContent}>
+            <textarea
+              defaultValue={name}
+              name={'name'}
+              className={classes.inputBoxName}
+              onChange={(e) => setName(e.target.value)}
             />
           </div>
         </div>
-        <div style={styles.content}>
-          <div style={styles.botText}>
-            {'Name'}
-            <div style={styles.inputBoxContent}>
-              <textarea
-                defaultValue={this.state.name}
-                name={'name'}
-                style={styles.inputBoxName}
-                onChange={e =>
-                  this.setState({
-                    name: e.target.value,
-                  })
-                }
-              />
-            </div>
-          </div>
-          <div style={styles.botText}>
-            {'Description'}
-            <div style={styles.inputBoxContent}>
-              <textarea
-                defaultValue={this.state.description}
-                name={'description'}
-                style={styles.inputBox}
-                onChange={e =>
-                  this.setState({
-                    description: e.target.value,
-                  })
-                }
-              />
-            </div>
+        <div className={classes.botText}>
+          {'Description'}
+          <div className={classes.inputBoxContent}>
+            <textarea
+              defaultValue={description}
+              name={'description'}
+              className={classes.inputBox}
+              onChange={(e) => setDescription(e.target.value)}
+            />
           </div>
         </div>
       </div>
-    );
-  }
-}
-const ComposedEditDescriptorModal: Component<IProps> = compose<IProps>(
+    </div>
+  );
+};
+const ComposedEditDescriptorModal: React.ComponentClass<IProps> = compose<
+  IProps,
+  IProps
+>(
   pure,
   setDisplayName('EditDescriptorModal'),
 )(EditDescriptorModal);

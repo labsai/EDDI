@@ -1,4 +1,3 @@
-import { CSSProperties } from 'react';
 import {
   DARK_BLUE_COLOR,
   DARK_GREY_COLOR,
@@ -9,8 +8,9 @@ import {
   RED_COLOR,
   SMALL_FONT,
 } from '../../../styles/DefaultStylingProperties';
+import { makeStyles } from '@material-ui/core/styles';
 
-const styles: CSSProperties = {
+const useStyles = makeStyles({
   botBox: {
     border: `1px solid ${LIGHT_GREY_COLOR2}`,
     borderRadius: '4px',
@@ -29,7 +29,7 @@ const styles: CSSProperties = {
     width: '100%',
   },
   botHeaderCenter: {
-    flex: '1',
+    flex: 1,
   },
   botHeaderName: {
     color: DARK_GREY_COLOR,
@@ -65,10 +65,10 @@ const styles: CSSProperties = {
   },
   link: {
     display: 'flex',
-    flex: '1',
+    flex: 1,
     textDecoration: 'none',
     cursor: 'pointer',
-    ':hover': {
+    '&:hover': {
       textDecoration: 'underline',
     },
   },
@@ -99,6 +99,7 @@ const styles: CSSProperties = {
     fontSize: MEDIUM_FONT,
     height: '21px',
     marginLeft: '15px',
+    marginRight: '10px',
     marginTop: '20px',
     padding: '2px 10px',
     textAlign: 'center',
@@ -114,9 +115,11 @@ const styles: CSSProperties = {
     marginTop: '26px',
   },
   optionsMenu: {
-    marginTop: '20px',
+    marginTop: 'auto',
+    marginBottom: 'auto',
     marginRight: '5px',
     height: 'fit-content',
   },
-};
-export default styles;
+});
+
+export default useStyles;

@@ -1,139 +1,238 @@
+import IconButton from '@material-ui/core/IconButton';
+import ListItemIcon from '@material-ui/core/ListItemIcon';
+import Menu from '@material-ui/core/Menu';
+import MenuItem from '@material-ui/core/MenuItem';
+import { makeStyles } from '@material-ui/core/styles';
+import Typography from '@material-ui/core/Typography';
+import ArrowRightOutlinedIcon from '@material-ui/icons/ArrowRightOutlined';
+import CreateIcon from '@material-ui/icons/Create';
+import CreateOutlinedIcon from '@material-ui/icons/CreateOutlined';
+import FileCopyIcon from '@material-ui/icons/FileCopy';
+import FileCopyOutlinedIcon from '@material-ui/icons/FileCopyOutlined';
+import HighlightOffOutlinedIcon from '@material-ui/icons/HighlightOffOutlined';
+import MoreVertIcon from '@material-ui/icons/MoreVert';
 import * as React from 'react';
-import { Component, compose, pure, setDisplayName } from 'recompose';
-import { CSSProperties } from 'react';
-import { Dropdown } from 'semantic-ui-react';
-import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
-import * as Radium from 'radium';
-import {
-  GREY_COLOR,
-  LIGHT_GREY_COLOR2,
-} from '../../../../styles/DefaultStylingProperties';
-import { IDetailedDescriptor } from '../../utils/AxiosFunctions';
-import modalActionDispatchers from '../../../actions/ModalActionDispatchers';
-import eddiApiActionDispatchers from '../../../actions/EddiApiActionDispatchers';
-import styles from './Options.styles';
-import * as _ from 'lodash';
-import * as renderIf from 'render-if';
-import { getTypeFromResource } from '../../utils/ApiFunctions';
-import { PACKAGE } from '../../utils/EddiTypes';
-import { readOnlySelector } from '../../../selectors/AuthenticationSelectors';
 import { connect } from 'react-redux';
+import { compose, pure, setDisplayName } from 'recompose';
+import eddiApiActionDispatchers from '../../../actions/EddiApiActionDispatchers';
+import modalActionDispatchers from '../../../actions/ModalActionDispatchers';
+import { readOnlySelector } from '../../../selectors/AuthenticationSelectors';
+import { getTypeFromResource } from '../../utils/ApiFunctions';
+import { IDetailedDescriptor } from '../../utils/AxiosFunctions';
+import { PACKAGE } from '../../utils/EddiTypes';
 
 interface IPublicProps {
   descriptor: IDetailedDescriptor;
-  data: string;
+  data: string | string[];
 }
 interface IPrivateProps extends IPublicProps {
   readOnly: boolean;
 }
 
-const trigger = (
-  <FontAwesomeIcon
-    style={styles.trigger}
-    icon={['fas', 'ellipsis-v']}
-    color={GREY_COLOR}
-  />
-);
+const ITEM_HEIGHT = 48;
 
-class Options extends React.Component<IPrivateProps> {
-  fetchData(isPackage: boolean) {
+const useStyles = makeStyles({
+  menu: {
+    '& .MuiListItemIcon-root': {
+      minWidth: 20,
+    },
+  },
+  submenu: {
+    justifyContent: 'space-between',
+
+    '& .MuiListItemIcon-root': {
+      justifyContent: 'flex-end',
+    },
+  },
+  optionButton: {
+    alignContent: 'center',
+  },
+});
+
+const Options = ({ descriptor, readOnly, data }: IPrivateProps) => {
+  const classes = useStyles();
+  const [anchorEl, setAnchorEl] = React.useState<null | HTMLElement>(null);
+  const [anchorSubEl, setAnchorSubEl] =
+    React.useState<null | HTMLElement>(null);
+
+  const isPackage = getTypeFromResource(descriptor.resource) === PACKAGE;
+  const open = Boolean(anchorEl);
+  const submenuOpen = Boolean(anchorSubEl);
+
+  const handleClick = (event: React.MouseEvent<HTMLElement>) => {
+    event.stopPropagation();
+    setAnchorEl(event.currentTarget);
+    fetchData(isPackage);
+  };
+
+  const handleSubClick = (event: React.MouseEvent<HTMLElement>) => {
+    event.stopPropagation();
+    setAnchorSubEl(Boolean(anchorSubEl) ? null : event.currentTarget);
+  };
+
+  const handleClose = () => {
+    setAnchorEl(null);
+    setAnchorSubEl(null);
+  };
+
+  const fetchData = (isPackage: boolean) => {
     if (isPackage) {
-      eddiApiActionDispatchers.fetchPackageDataAction(
-        this.props.descriptor.resource,
-      );
+      eddiApiActionDispatchers.fetchPackageDataAction(descriptor.resource);
     } else {
-      eddiApiActionDispatchers.fetchPluginAction(
-        this.props.descriptor.resource,
-      );
+      eddiApiActionDispatchers.fetchPluginAction(descriptor.resource);
     }
-  }
+  };
 
-  render() {
-    const { descriptor } = this.props;
-    const isCurrentVersion = descriptor.version === descriptor.currentVersion;
-    const isPackage = getTypeFromResource(descriptor.resource) === PACKAGE;
-    return (
-      <div style={styles.optionButton}>
-        <Dropdown
-          trigger={trigger}
-          icon={null}
-          onClick={() => this.fetchData(isPackage)}>
-          <Dropdown.Menu>
-            <Dropdown.Item
-              text={'Rename'}
-              icon={'edit outline'}
-              disabled={!isCurrentVersion || this.props.readOnly}
-              onClick={() =>
-                modalActionDispatchers.showEditDescriptorModalAction(descriptor)
-              }
-            />
-            <Dropdown.Item
-              text={'Edit JSON'}
-              icon={'edit'}
-              disabled={!isCurrentVersion || this.props.readOnly}
-              onClick={() =>
-                modalActionDispatchers.showEditJsonModal(
-                  descriptor.resource,
-                  this.props.data,
-                )
-              }
-            />
-            {renderIf(isPackage)(() => (
-              <Dropdown.Item>
-                <Dropdown text={'Duplicate'} disabled={this.props.readOnly}>
-                  <Dropdown.Menu>
-                    <Dropdown.Item
-                      text={'Normal'}
-                      icon={'copy outline'}
-                      onClick={() =>
-                        eddiApiActionDispatchers.duplicateAction(
-                          descriptor.resource,
-                          false,
-                        )
-                      }
-                      disabled={this.props.readOnly}
-                    />
-                    <Dropdown.Item
-                      text={'Deep copy'}
-                      icon={'copy'}
-                      onClick={() =>
-                        eddiApiActionDispatchers.duplicateAction(
-                          descriptor.resource,
-                          true,
-                        )
-                      }
-                      disabled={this.props.readOnly}
-                    />
-                  </Dropdown.Menu>
-                </Dropdown>
-              </Dropdown.Item>
-            ))}
-            {renderIf(!isPackage)(() => (
-              <Dropdown.Item
-                text={'Duplicate'}
-                icon={'copy outline'}
-                onClick={() =>
+  const isCurrentVersion = descriptor.version === descriptor.currentVersion;
+
+  return (
+    <div className={classes.optionButton}>
+      <IconButton
+        aria-label="more"
+        aria-controls="long-menu"
+        aria-haspopup="true"
+        onClick={handleClick}>
+        <MoreVertIcon fontSize="large" />
+      </IconButton>
+      <Menu
+        id="long-menu"
+        anchorEl={anchorEl}
+        keepMounted
+        open={open}
+        className={classes.menu}
+        onClose={handleClose}
+        PaperProps={{
+          style: {
+            maxHeight: ITEM_HEIGHT * 4.5,
+            width: '20ch',
+          },
+        }}>
+        <MenuItem
+          key={'Rename'}
+          disabled={!isCurrentVersion || readOnly}
+          onClick={() => {
+            handleClose();
+            modalActionDispatchers.showEditDescriptorModalAction(descriptor);
+          }}>
+          <ListItemIcon>
+            <CreateIcon fontSize="small" />
+          </ListItemIcon>
+          <Typography variant="inherit">{'Rename'}</Typography>
+        </MenuItem>
+        <MenuItem
+          key={'Edit JSON'}
+          disabled={!isCurrentVersion || readOnly}
+          onClick={() => {
+            handleClose();
+            modalActionDispatchers.showEditJsonModal(descriptor.resource, data);
+          }}>
+          <ListItemIcon>
+            <CreateOutlinedIcon fontSize="small" />
+          </ListItemIcon>
+          <Typography variant="inherit">{'Edit JSON'}</Typography>
+        </MenuItem>
+        {isPackage ? (
+          <MenuItem
+            key={'Duplicate'}
+            disabled={readOnly}
+            className={classes.submenu}
+            onClick={handleSubClick}>
+            <Typography variant="inherit">{'Duplicate'}</Typography>
+            <ListItemIcon>
+              <ArrowRightOutlinedIcon fontSize="small" />
+            </ListItemIcon>
+            <Menu
+              id="long-submenu"
+              anchorEl={anchorSubEl}
+              keepMounted
+              open={submenuOpen}
+              onClose={handleClose}
+              className={classes.menu}
+              anchorOrigin={{
+                vertical: 'top',
+                horizontal: 'right',
+              }}
+              transformOrigin={{
+                vertical: 'top',
+                horizontal: 'left',
+              }}
+              PaperProps={{
+                style: {
+                  maxHeight: ITEM_HEIGHT * 4.5,
+                  width: '20ch',
+                },
+              }}>
+              <MenuItem
+                key={'Normal'}
+                disabled={readOnly}
+                onClick={() => {
+                  handleClose();
                   eddiApiActionDispatchers.duplicateAction(
                     descriptor.resource,
                     false,
-                  )
-                }
-                disabled={this.props.readOnly}
-              />
-            ))}
-            <Dropdown.Divider />
-            <Dropdown.Item text={'Delete'} disabled={true} icon={'delete'} />
-          </Dropdown.Menu>
-        </Dropdown>
-      </div>
-    );
-  }
-}
+                  );
+                }}>
+                <ListItemIcon>
+                  <FileCopyOutlinedIcon fontSize="small" />
+                </ListItemIcon>
+                <Typography variant="inherit">{'Normal'}</Typography>
+              </MenuItem>
+              <MenuItem
+                key={'Deep copy'}
+                disabled={readOnly}
+                onClick={() => {
+                  handleClose();
+                  eddiApiActionDispatchers.duplicateAction(
+                    descriptor.resource,
+                    true,
+                  );
+                }}>
+                <ListItemIcon>
+                  <FileCopyIcon fontSize="small" />
+                </ListItemIcon>
+                <Typography variant="inherit">{'Deep copy'}</Typography>
+              </MenuItem>
+            </Menu>
+          </MenuItem>
+        ) : (
+          <MenuItem
+            key={'Duplicate'}
+            disabled={readOnly}
+            onClick={() => {
+              handleClose();
+              eddiApiActionDispatchers.duplicateAction(
+                descriptor.resource,
+                false,
+              );
+            }}>
+            <ListItemIcon>
+              <FileCopyOutlinedIcon fontSize="small" />
+            </ListItemIcon>
+            <Typography variant="inherit">{'Duplicate'}</Typography>
+          </MenuItem>
+        )}
+        <MenuItem
+          key={'Delete'}
+          disabled={true}
+          onClick={() => {
+            handleClose();
+          }}>
+          <ListItemIcon>
+            <HighlightOffOutlinedIcon fontSize="small" />
+          </ListItemIcon>
+          <Typography variant="inherit">{'Delete'}</Typography>
+        </MenuItem>
+      </Menu>
+    </div>
+  );
+};
 
-const ComposedOptions: Component<IPrivateProps> = compose<IPrivateProps>(
+const ComposedOptions: React.ComponentClass<IPublicProps> = compose<
+  IPrivateProps,
+  IPublicProps
+>(
   pure,
   connect(readOnlySelector),
-  Radium,
   setDisplayName('Options'),
 )(Options);
 

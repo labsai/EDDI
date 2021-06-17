@@ -1,23 +1,21 @@
-import * as React from 'react';
-import ModalActionDispatchers from '../../actions/ModalActionDispatchers';
-import PackageContainer from './PackageContainer';
-import Package from './Package';
-import { CSSProperties } from 'react';
-import { Component, compose, pure, setDisplayName } from 'recompose';
-import { IBot } from '../utils/AxiosFunctions';
 import * as _ from 'lodash';
-import * as renderIf from 'render-if';
+import * as React from 'react';
+import { compose, pure, setDisplayName } from 'recompose';
 import eddiApiActionDispatchers from '../../actions/EddiApiActionDispatchers';
-import { ModalEnum } from '../utils/ModalEnum';
+import ModalActionDispatchers from '../../actions/ModalActionDispatchers';
 import WhiteButton from '../Assets/Buttons/WhiteButton';
+import { IBot } from '../utils/AxiosFunctions';
+import { ModalEnum } from '../utils/ModalEnum';
+import PackageContainer from './PackageContainer';
+import { makeStyles } from '@material-ui/core/styles';
 
-const styles: CSSProperties = {
+const useStyles = makeStyles({
   packagesHeader: {
     display: 'flex',
     marginTop: '50px',
   },
   headerCenter: {
-    flex: '1',
+    flex: 1,
   },
   packagesTitle: {
     color: '#54698D',
@@ -31,7 +29,7 @@ const styles: CSSProperties = {
   packages: {
     marginBottom: '100px',
   },
-};
+});
 
 interface IPublicProps {
   bot: IBot;
@@ -40,65 +38,62 @@ interface IPublicProps {
 
 interface IPrivateProps extends IPublicProps {}
 
-interface IState {}
+const PackageList = ({ bot, readOnly }: IPrivateProps) => {
+  const classes = useStyles();
 
-class PackageList extends React.Component<IPrivateProps, IState> {
-  constructor(props) {
-    super(props);
-  }
-
-  componentDidMount() {
-    if (_.isUndefined(this.props.bot.packages)) {
-      eddiApiActionDispatchers.fetchBotDataAction(this.props.bot);
+  React.useEffect(() => {
+    if (_.isUndefined(bot.packages)) {
+      eddiApiActionDispatchers.fetchBotDataAction(bot);
     }
-  }
+  }, []);
 
-  openModal = () => {
+  const openModal = () => {
     ModalActionDispatchers.showModal(ModalEnum.createPackage);
   };
 
-  openAddPackagesModal = () => {
-    ModalActionDispatchers.showAddPackagesModal(this.props.bot);
+  const openAddPackagesModal = () => {
+    ModalActionDispatchers.showAddPackagesModal(bot);
   };
 
-  render() {
-    const isCurrentVersion =
-      this.props.bot.version !== this.props.bot.currentVersion;
-    return (
-      <div style={styles.packages}>
-        <div style={styles.packagesHeader}>
-          <div style={styles.packagesTitle}>{'PACKAGES'}</div>
-          <div style={styles.headerCenter} />
-          <WhiteButton
-            text={'Create package'}
-            onClick={() => {
-              this.openModal();
-            }}
-            disabled={isCurrentVersion || this.props.readOnly}
-          />
-          <WhiteButton
-            text={'Add package'}
-            onClick={this.openAddPackagesModal}
-            disabled={isCurrentVersion || this.props.readOnly}
-            customStyles={styles.button}
-          />
-        </div>
-        {renderIf(_.isEmpty(this.props.bot.packages))(() => (
-          <p>{`There are no packages yet`}</p>
-        ))}
-        {renderIf(!_.isEmpty(this.props.bot.packages))(() => (
-          <div>
-            {this.props.bot.packages.map(pack => (
-              <PackageContainer key={pack} packageResource={pack} />
-            ))}
-          </div>
-        ))}
+  const isCurrentVersion = bot.version !== bot.currentVersion;
+  return (
+    <div className={classes.packages}>
+      <div className={classes.packagesHeader}>
+        <div className={classes.packagesTitle}>{'PACKAGES'}</div>
+        <div className={classes.headerCenter} />
+        <WhiteButton
+          text={'Create package'}
+          onClick={openModal}
+          disabled={isCurrentVersion || readOnly}
+        />
+        <WhiteButton
+          text={'Add package'}
+          onClick={openAddPackagesModal}
+          disabled={isCurrentVersion || readOnly}
+          classes={{ button: classes.button }}
+        />
       </div>
-    );
-  }
-}
+      {_.isEmpty(bot.packages) ? (
+        <p>{`There are no packages yet`}</p>
+      ) : (
+        <div>
+          {bot.packages.map((pack) => (
+            <PackageContainer
+              key={pack}
+              packageResource={pack}
+              botId={bot.id}
+            />
+          ))}
+        </div>
+      )}
+    </div>
+  );
+};
 
-const ComposedPackageList: Component<IProps> = compose<IProps>(
+const ComposedPackageList: React.ComponentClass<IPublicProps> = compose<
+  IPrivateProps,
+  IPublicProps
+>(
   pure,
   setDisplayName('PackageList'),
 )(PackageList);

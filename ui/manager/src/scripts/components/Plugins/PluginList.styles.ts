@@ -1,4 +1,4 @@
-import { CSSProperties } from 'react';
+import { makeStyles } from '@material-ui/core/styles';
 import {
   DARK_BLUE_COLOR,
   GREY_COLOR,
@@ -6,7 +6,7 @@ import {
   SMALL_FONT,
 } from '../../../styles/DefaultStylingProperties';
 
-const styles: CSSProperties = {
+const useStyles = makeStyles({
   loadingWrapper: {
     alignItems: 'center',
     display: 'flex',
@@ -31,5 +31,6 @@ const styles: CSSProperties = {
   pluginList: {
     paddingBottom: '250px',
   },
-};
-export default styles;
+});
+
+export default useStyles;

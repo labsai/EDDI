@@ -1,18 +1,25 @@
 import { createSelector } from 'reselect';
+import { BOT, PACKAGE } from '../components/utils/EddiTypes';
 import { IAppState } from '../reducers';
 import { ISystemState } from '../reducers/SystemReducer';
-import { BOT, PACKAGE } from '../components/utils/EddiTypes';
 
-export const SystemStateSelector: (state: IAppState) => ISystemState = state =>
-  state.systemState;
+export const SystemStateSelector: (state: IAppState) => ISystemState = (
+  state,
+) => state.systemState;
 
-export const isAppReadySelector: (
-  state: IAppState,
-) => { isAppReady: boolean } = createSelector(SystemStateSelector, function(
-  systemState: ISystemState,
-): { isAppReady } {
-  return { isAppReady: systemState.isAppReady };
-});
+export const isAppReadySelector: (state: IAppState) => { isAppReady: boolean } =
+  createSelector(SystemStateSelector, function (systemState: ISystemState): {
+    isAppReady;
+  } {
+    return { isAppReady: systemState.isAppReady };
+  });
+
+export const isLoadingSelector: (state: IAppState) => { isLoading: boolean } =
+  createSelector(SystemStateSelector, function (systemState: ISystemState): {
+    isLoading;
+  } {
+    return { isLoading: systemState.isLoading };
+  });
 
 export interface ISchemaSelectorProps {
   type: string;
@@ -30,7 +37,7 @@ export function schemaSelector(state: IAppState, props: ISchemaSelectorProps) {
       };
     default:
       const eddiSchema = state.pluginState.schemas.find(
-        schema => schema.name === props.type,
+        (schema) => schema.name === props.type,
       );
       if (eddiSchema) {
         return {

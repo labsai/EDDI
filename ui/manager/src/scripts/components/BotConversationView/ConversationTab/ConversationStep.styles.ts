@@ -1,29 +1,24 @@
-import { CSSProperties } from 'react';
 import {
   BLUE_COLOR,
-  DARK_BLUE_BORDER,
   DARK_BLUE_COLOR,
   GREY_BORDER,
-  GREY_COLOR,
   GREY_COLOR3,
-  LARGE_FONT3,
-  LIGHT_BLUE_COLOR,
   LIGHT_BLUE_COLOR2,
   LIGHT_GREY_COLOR2,
   MEDIUM_FONT,
   MEDIUM_FONT3,
-  RED_COLOR,
   SMALL_FONT,
   SMALL_FONT2,
   WHITE_COLOR,
 } from '../../../../styles/DefaultStylingProperties';
+import { makeStyles } from '@material-ui/core/styles';
 
-const styles: CSSProperties = {
+export const useStyles = makeStyles({
   content: {
-    ':hover': {
+    '&:hover': {
       backgroundColor: LIGHT_GREY_COLOR2,
     },
-    flex: '1',
+    flex: 1,
     fontSize: MEDIUM_FONT,
     borderRadius: '18px',
     width: '100%',
@@ -64,11 +59,6 @@ const styles: CSSProperties = {
     marginTop: '12px',
     maxWidth: '100%',
   },
-  rjv: {
-    border: GREY_BORDER,
-    borderRadius: '5px',
-    fontSize: SMALL_FONT2,
-  },
   timeContainer: {
     margin: '0',
     width: '65px',
@@ -102,13 +92,13 @@ const styles: CSSProperties = {
     display: 'flex',
   },
   chatStep: {
-    flex: '1',
+    flex: 1,
     cursor: 'pointer',
     paddingBottom: '5px',
     minWidth: 0,
   },
   titleContainer: {
-    ':hover': {
+    '&:hover': {
       opacity: '0.5',
     },
     cursor: 'pointer',
@@ -123,7 +113,7 @@ const styles: CSSProperties = {
     width: '50px',
   },
   titleText: {
-    flex: '1',
+    flex: 1,
   },
   actions: {
     fontSize: SMALL_FONT2,
@@ -133,5 +123,15 @@ const styles: CSSProperties = {
   actionTitle: {
     textDecoration: 'underline',
   },
+  action: {},
+  jsonView: {},
+  icon: {},
+});
+
+export const rjvStyles = {
+  rjv: {
+    border: GREY_BORDER,
+    borderRadius: '5px',
+    fontSize: SMALL_FONT2,
+  },
 };
-export default styles;

@@ -1,17 +1,17 @@
 'use strict';
 var __extends =
   (this && this.__extends) ||
-  (function() {
+  (function () {
     var extendStatics =
       Object.setPrototypeOf ||
       ({ __proto__: [] } instanceof Array &&
-        function(d, b) {
+        function (d, b) {
           d.__proto__ = b;
         }) ||
-      function(d, b) {
+      function (d, b) {
         for (var p in b) if (b.hasOwnProperty(p)) d[p] = b[p];
       };
-    return function(d, b) {
+    return function (d, b) {
       extendStatics(d, b);
       function __() {
         this.constructor = d;
@@ -32,7 +32,6 @@ var EddiApiActionDispatchers_1 = require('../../../actions/EddiApiActionDispatch
 var BlueButton_1 = require('../../Assets/Buttons/BlueButton');
 var WhiteButton_1 = require('../../Assets/Buttons/WhiteButton');
 var ModalActionDispatchers_1 = require('../../../actions/ModalActionDispatchers');
-var renderIf = require('render-if');
 var Parser_1 = require('../../utils/Parser');
 var EddiConfigExampleData_1 = require('../../utils/EddiConfigExampleData');
 var _ = require('lodash');
@@ -41,16 +40,16 @@ var JsonSchemas_1 = require('../../utils/JsonSchemas/JsonSchemas');
 var JsonHelpers_1 = require('../../utils/helpers/JsonHelpers');
 require('brace/mode/json');
 require('brace/theme/monokai');
-var CreateNewConfig2Modal = (function(_super) {
+var CreateNewConfig2Modal = (function (_super) {
   __extends(CreateNewConfig2Modal, _super);
   function CreateNewConfig2Modal(props) {
     var _this = _super.call(this, props) || this;
-    _this.onChange = function(value) {
+    _this.onChange = function (value) {
       _this.setState({
         editorText: value,
       });
     };
-    _this.createNew = function() {
+    _this.createNew = function () {
       if (_this.validateJson()) {
         EddiApiActionDispatchers_1.default.createNewConfigAction(
           _this.props.type,
@@ -62,7 +61,7 @@ var CreateNewConfig2Modal = (function(_super) {
       }
       // modalActionDispatchers.closeModal();
     };
-    _this.back = function() {
+    _this.back = function () {
       ModalActionDispatchers_1.default.showCreateNewConfigModal(
         _this.props.type,
         _this.props.name,
@@ -70,7 +69,7 @@ var CreateNewConfig2Modal = (function(_super) {
         _this.state.editorText,
       );
     };
-    _this.exampleClick = function() {
+    _this.exampleClick = function () {
       _this.setState({
         showExample: !_this.state.showExample,
       });
@@ -83,16 +82,16 @@ var CreateNewConfig2Modal = (function(_super) {
     };
     return _this;
   }
-  CreateNewConfig2Modal.prototype.componentDidMount = function() {
+  CreateNewConfig2Modal.prototype.componentDidMount = function () {
     this.discardChanges();
     // const editor: AE.AceEditor = this.refs.ace['editor'];
   };
-  CreateNewConfig2Modal.prototype.componentWillReceiveProps = function(
+  CreateNewConfig2Modal.prototype.componentWillReceiveProps = function (
     nextProps,
   ) {
     this.discardChanges(nextProps);
   };
-  CreateNewConfig2Modal.prototype.discardChanges = function(props) {
+  CreateNewConfig2Modal.prototype.discardChanges = function (props) {
     if (props === void 0) {
       props = this.props;
     }
@@ -101,13 +100,13 @@ var CreateNewConfig2Modal = (function(_super) {
       editorText: editorText,
     });
   };
-  CreateNewConfig2Modal.prototype.unsavedChanges = function() {
+  CreateNewConfig2Modal.prototype.unsavedChanges = function () {
     return (
       this.state.editorText !==
       (_.isEmpty(this.props.data) ? '{\n\t\n}' : this.props.data)
     );
   };
-  CreateNewConfig2Modal.prototype.isJsonString = function() {
+  CreateNewConfig2Modal.prototype.isJsonString = function () {
     try {
       JSON.parse(this.state.editorText);
     } catch (e) {
@@ -115,7 +114,7 @@ var CreateNewConfig2Modal = (function(_super) {
     }
     return true;
   };
-  CreateNewConfig2Modal.prototype.validateJson = function() {
+  CreateNewConfig2Modal.prototype.validateJson = function () {
     var errors = JsonHelpers_1.compileJsonSchema(
       JsonSchemas_1.DICTIONARY_SCHEMA,
       this.state.editorText,
@@ -125,7 +124,7 @@ var CreateNewConfig2Modal = (function(_super) {
     });
     return _.isEmpty(errors);
   };
-  CreateNewConfig2Modal.prototype.render = function() {
+  CreateNewConfig2Modal.prototype.render = function () {
     var _this = this;
     var typeName = Parser_1.default.getPluginName(this.props.type, false);
     var test = this.refs.ace;
@@ -143,19 +142,17 @@ var CreateNewConfig2Modal = (function(_super) {
               {'Edit new ' + typeName + ' JSON data'}
             </div>
             <div style={ModalComponent_styles_1.default.modalTopHeaderCenter} />
-            {renderIf(this.unsavedChanges())(function() {
-              return (
-                <button
-                  style={ModalComponent_styles_1.default.discardChanges}
-                  onClick={function() {
-                    return _this.validateJson();
-                  }}>
-                  {'Discard changes'}
-                </button>
-              );
-            })}
+            {this.unsavedChanges() && (
+              <button
+                style={ModalComponent_styles_1.default.discardChanges}
+                onClick={function () {
+                  return _this.validateJson();
+                }}>
+                {'Discard changes'}
+              </button>
+            )}
             <WhiteButton_1.default
-              onClick={function() {
+              onClick={function () {
                 return _this.back();
               }}
               text={'Back'}
@@ -168,9 +165,9 @@ var CreateNewConfig2Modal = (function(_super) {
             />
           </div>
         </div>
-        {renderIf(!_.isEmpty(this.state.errors))(function() {
-          return <JsonErrors_1.default errors={_this.state.errors} />;
-        })}
+        {!_.isEmpty(this.state.errors) && (
+          <JsonErrors_1.default errors={_this.state.errors} />
+        )}
         <button
           onClick={this.exampleClick}
           style={ModalComponent_styles_1.default.collapsibleButton}>
@@ -184,13 +181,11 @@ var CreateNewConfig2Modal = (function(_super) {
             {this.state.showExample ? '-' : '+'}
           </div>
         </button>
-        {renderIf(this.state.showExample)(function() {
-          return (
-            <div style={ModalComponent_styles_1.default.exampleData}>
-              {EddiConfigExampleData_1.getPostExample(_this.props.type)}
-            </div>
-          );
-        })}
+        {!!this.state.showExample && (
+          <div style={ModalComponent_styles_1.default.exampleData}>
+            {EddiConfigExampleData_1.getPostExample(_this.props.type)}
+          </div>
+        )}
         <react_ace_1.default
           ref={'ace'}
           mode={'json'}
@@ -202,7 +197,7 @@ var CreateNewConfig2Modal = (function(_super) {
           annotations={
             _.isEmpty(this.state.errors)
               ? null
-              : this.state.errors.map(function(err) {
+              : this.state.errors.map(function (err) {
                   return {
                     row: err.line,
                     column: 1,

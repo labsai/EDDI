@@ -1,6 +1,4 @@
 const webpack = require('webpack');
-const CopyWebpackPlugin = require('copy-webpack-plugin');
-const ExtractTextPlugin = require('extract-text-webpack-plugin');
 const HtmlWebpackPlugin = require('html-webpack-plugin');
 const UglifyJSPlugin = require('uglifyjs-webpack-plugin');
 const GenerateJsonPlugin = require('generate-json-webpack-plugin');
@@ -8,7 +6,7 @@ const _ = require('lodash');
 
 const isBuild = process.env.npm_lifecycle_event === 'build';
 
-const isVendorModule = (module) => {
+export const isVendorModule = (module) => {
   // returns true for everything in node_modules
   return module.context && module.context.indexOf('node_modules') !== -1;
 };
@@ -26,21 +24,7 @@ export function getPlugins() {
 
     new HtmlWebpackPlugin({
       template: 'public/index.html',
-      chunksSortMode: 'dependency',
     }),
-
-    new ExtractTextPlugin({
-      filename: 'css/[name].[hash].css',
-      disable: !isBuild,
-    }),
-
-    new webpack.optimize.CommonsChunkPlugin({
-      name: 'vendor',
-      filename: 'vendor.bundle.[hash].js',
-      minChunks: isVendorModule,
-    }),
-
-    new CopyWebpackPlugin([{from: 'public'}]),
 
     new webpack.EnvironmentPlugin(_.defaults({appVersion: appVersion}, {eddiApiUrl: process.env.EDDI_API_URL},
       {authMethod: process.env.AUTH_METHOD}, {authRealm: process.env.AUTH_REALM}, {authUrl: process.env.AUTH_URL},
@@ -48,7 +32,6 @@ export function getPlugins() {
 
     new webpack.DefinePlugin({
       '__DEV__': JSON.stringify(ENV !== 'production' && ENV !== 'staging'),
-      'process.env.NODE_ENV': JSON.stringify(ENV),
     }),
 
     new webpack.HotModuleReplacementPlugin(),

@@ -1,14 +1,11 @@
 import * as React from 'react';
-import '../ModalComponent.styles.scss';
-import { Component, compose, pure, setDisplayName } from 'recompose';
-import * as renderIf from 'render-if';
+import { compose, pure, setDisplayName } from 'recompose';
 import eddiApiActionDispatchers from '../../../actions/EddiApiActionDispatchers';
-import Parser from '../../utils/Parser';
 import { PACKAGE } from '../../utils/EddiTypes';
+import Parser from '../../utils/Parser';
+import '../ModalComponent.styles.scss';
 import PackageContainer from './PackageContainer';
 import PluginContainer from './PluginContainer';
-import { readOnlySelector } from '../../../selectors/AuthenticationSelectors';
-import { connect } from 'react-redux';
 
 interface IPublicProps {
   resource: string;
@@ -20,74 +17,62 @@ interface IState {
   selectedResource: string;
 }
 
-class ViewJsonModal extends React.Component<IPrivateProps, IState> {
-  constructor(props) {
-    super(props);
-    this.state = {
-      selectedResource: this.props.resource,
-    };
-  }
+const ViewJsonModal = ({ resource }: IPrivateProps) => {
+  const [selectedResource, setSelectedResource] =
+    React.useState<string>(resource);
 
-  async componentDidMount() {
-    if (this.isPackage()) {
-      eddiApiActionDispatchers.fetchPackageAction(this.props.resource);
+  React.useEffect(() => {
+    if (isPackage()) {
+      eddiApiActionDispatchers.fetchPackageAction(resource);
     } else {
-      eddiApiActionDispatchers.fetchPluginAction(this.props.resource);
+      eddiApiActionDispatchers.fetchPluginAction(resource);
     }
-    this.setState({
-      selectedResource: this.props.resource,
-    });
-  }
+    setSelectedResource(resource);
+  }, []);
 
-  componentDidUpdate(prevProps) {
-    if (prevProps !== this.props) {
-      this.setState({
-        selectedResource: this.props.resource,
-      });
-    }
-  }
+  React.useEffect(() => {
+    setSelectedResource(resource);
+  }, [resource]);
 
-  selectVersion = (newVersion: number) => {
-    const selectedResource = Parser.replaceResourceVersion(
-      this.state.selectedResource,
+  const selectVersion = (newVersion: number) => {
+    const tempSelectedResource = Parser.replaceResourceVersion(
+      selectedResource,
       newVersion,
     );
-    this.setState({
-      selectedResource,
-    });
-    if (this.isPackage()) {
-      eddiApiActionDispatchers.fetchPackageAction(selectedResource);
+    setSelectedResource(tempSelectedResource);
+    if (isPackage()) {
+      eddiApiActionDispatchers.fetchPackageAction(tempSelectedResource);
     } else {
-      eddiApiActionDispatchers.fetchPluginAction(selectedResource);
+      eddiApiActionDispatchers.fetchPluginAction(tempSelectedResource);
     }
   };
 
-  isPackage() {
-    return this.props.resource.includes(PACKAGE);
-  }
+  const isPackage = () => {
+    return resource.includes(PACKAGE);
+  };
 
-  render() {
-    const isPackage = this.isPackage();
-    return (
-      <div>
-        {renderIf(isPackage)(() => (
-          <PackageContainer
-            packageResource={this.state.selectedResource}
-            selectVersion={this.selectVersion}
-          />
-        ))}
-        {renderIf(!isPackage)(() => (
-          <PluginContainer
-            pluginResource={this.state.selectedResource}
-            selectVersion={this.selectVersion}
-          />
-        ))}
-      </div>
-    );
-  }
-}
+  return (
+    <div>
+      {isPackage() && (
+        <PackageContainer
+          packageResource={selectedResource}
+          selectVersion={selectVersion}
+        />
+      )}
+      {!isPackage() && (
+        <PluginContainer
+          pluginResource={selectedResource}
+          selectVersion={selectVersion}
+        />
+      )}
+    </div>
+  );
+};
 
-const ComposedViewJsonModal: Component<IProps> = compose<IProps>(
+const ComposedViewJsonModal: React.ComponentClass<IPrivateProps> = compose<
+  IPrivateProps,
+  IPrivateProps
+>(
   pure,
   setDisplayName('ViewJsonModal'),
 )(ViewJsonModal);

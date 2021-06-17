@@ -1,4 +1,4 @@
-import { CSSProperties } from 'react';
+import { makeStyles } from '@material-ui/core/styles';
 import {
   DARK_BLUE_COLOR,
   GREEN_COLOR,
@@ -11,7 +11,7 @@ import {
   SMALL_FONT2,
 } from '../../../../styles/DefaultStylingProperties';
 
-const styles: CSSProperties = {
+const useStyles = makeStyles({
   packageName: {
     color: GREY_COLOR,
     fontSize: LARGE_FONT,
@@ -23,7 +23,7 @@ const styles: CSSProperties = {
     overflow: 'hidden',
   },
   centerFlex: {
-    flex: '1',
+    flex: 1,
   },
   modifiedDate: {
     color: GREY_COLOR,
@@ -81,6 +81,8 @@ const styles: CSSProperties = {
   versionSelect: {
     position: 'relative',
     marginRight: '10px',
+    marginTop: 'auto',
+    marginBottom: 'auto',
   },
   versionName: {
     backgroundColor: LIGHT_GREY_COLOR2,
@@ -93,5 +95,11 @@ const styles: CSSProperties = {
     textAlign: 'center',
     width: '40px',
   },
-};
-export default styles;
+  loading: {
+    marginLeft: '50px',
+    marginTop: '20px',
+    marginBottom: '20px',
+  },
+});
+
+export default useStyles;

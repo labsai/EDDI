@@ -3,8 +3,8 @@ services:
   eddi:
     image: labsai/eddi:latest
     ports:
-      - "7070:7070"
-      - "7443:7443"
+      - '7070:7070'
+      - '7443:7443'
     links:
       - mongodb
     depends_on:
@@ -18,14 +18,14 @@ services:
   eddi-config-ui:
     image: labsai/eddi-config-ui:latest
     ports:
-    - "7071:7071"
+      - '7071:7071'
     links:
-    - eddi
+      - eddi
     depends_on:
-    - eddi
+      - eddi
     environment:
-      EDDI_API_URL: "http://localhost:7070"
-      READ_ONLY_DOMAIN: "https://app.labs.ai"
+      EDDI_API_URL: 'http://localhost:7070'
+      READ_ONLY_DOMAIN: 'https://app.labs.ai'
       PORT: 7071
       AUTH_METHOD: 'keycloak'
       AUTH_URL: 'https://auth.labs.ai/auth'

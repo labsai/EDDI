@@ -7,32 +7,37 @@ import { IConversationState } from '../reducers/ConversationReducer';
 
 export const ConversationStateSelector: (
   state: IAppState,
-) => IConversationState = state => state.conversationState;
+) => IConversationState = (state) => state.conversationState;
 
-export const conversationsSelector: (
-  state: IAppState,
-) => {
+export const conversationsSelector: (state: IAppState) => {
   conversations: IConversation[];
   isLoading: boolean;
   allConversationsLoaded: boolean;
   error: Error;
-} = createSelector(ConversationStateSelector, function(
-  conversationState: IConversationState,
-): {
-  conversations: IConversation[];
-  isLoading: boolean;
-  allConversationsLoaded: boolean;
-  error: Error;
-  conversationsLoaded: number;
-} {
-  return {
-    conversations: conversationState.conversations,
-    isLoading: conversationState.isLoadingAllConversations,
-    allConversationsLoaded: conversationState.allConversationsLoaded,
-    error: conversationState.error,
-    conversationsLoaded: conversationState.conversationsLoaded,
-  };
-});
+} = createSelector(
+  ConversationStateSelector,
+  function (conversationState: IConversationState): {
+    conversations: IConversation[];
+    isLoading: boolean;
+    allConversationsLoaded: boolean;
+    error: Error;
+    conversationsLoaded: number;
+  } {
+    const sortedConversations = conversationState.conversations.sort(function (
+      a,
+      b,
+    ) {
+      return b.createdOn - a.createdOn;
+    });
+    return {
+      conversations: sortedConversations,
+      isLoading: conversationState.isLoadingAllConversations,
+      allConversationsLoaded: conversationState.allConversationsLoaded,
+      error: conversationState.error,
+      conversationsLoaded: conversationState.conversationsLoaded,
+    };
+  },
+);
 
 export interface IConversationSelectorProps {
   conversationId: string;
@@ -42,7 +47,7 @@ export function conversationSelector(
   state: IAppState,
   props: IConversationSelectorProps,
 ) {
-  const conversation = state.conversationState.conversations.find(conv =>
+  const conversation = state.conversationState.conversations.find((conv) =>
     conv.resource.includes(props.conversationId),
   );
   return {
@@ -62,9 +67,9 @@ export function botConversationSelector(
   props: IBotConversationsSelectorProps,
 ) {
   const conversations = state.conversationState.conversations.filter(
-    conversation => conversation.botResource === props.botResource,
+    (conversation) => conversation.botResource === props.botResource,
   );
-  const sortedConversations = conversations.sort(function(a, b) {
+  const sortedConversations = conversations.sort(function (a, b) {
     return b.createdOn - a.createdOn;
   });
   return {

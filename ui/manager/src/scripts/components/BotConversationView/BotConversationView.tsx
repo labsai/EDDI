@@ -1,24 +1,24 @@
-import * as React from 'react';
-import { Component, compose, pure, setDisplayName } from 'recompose';
-import { connect } from 'react-redux';
-import styles from './BotConversionView.styles';
-import eddiApiActionDispatchers from '../../actions/EddiApiActionDispatchers';
-import { IConversation, IConversationData } from '../utils/AxiosFunctions';
-import { conversationSelector } from '../../selectors/ConversationSelectors';
-import * as renderIf from 'render-if';
-import ConversationSteps from './ConversationTab/ConversationSteps';
-import ReactJson from 'react-json-view';
-import Parser from '../utils/Parser';
+import clsx from 'clsx';
 import * as moment from 'moment';
-import HomeButtonComponent from '../HomeButton/HomeButtonComponent';
-import { historyPush } from '../../history';
-import ConversationProperties from './ConversationTab/ConversationProperties';
-import WhiteButton from '../Assets/Buttons/WhiteButton';
-import { CONVERSATION_READY } from '../utils/helpers/ConversationHelper';
-import modalActionDispatchers from '../../actions/ModalActionDispatchers';
-import { ClipLoader } from 'react-spinners';
+import * as React from 'react';
+import ReactJson from 'react-json-view';
+import { connect } from 'react-redux';
+import ClipLoader from 'react-spinners/ClipLoader';
+import { compose, pure, setDisplayName } from 'recompose';
 import { BLUE_COLOR } from '../../../styles/DefaultStylingProperties';
+import eddiApiActionDispatchers from '../../actions/EddiApiActionDispatchers';
+import modalActionDispatchers from '../../actions/ModalActionDispatchers';
+import { historyPush } from '../../history';
 import { readOnlySelector } from '../../selectors/AuthenticationSelectors';
+import { conversationSelector } from '../../selectors/ConversationSelectors';
+import WhiteButton from '../Assets/Buttons/WhiteButton';
+import HomeButtonComponent from '../HomeButton/HomeButtonComponent';
+import { IConversation } from '../utils/AxiosFunctions';
+import { CONVERSATION_READY } from '../utils/helpers/ConversationHelper';
+import Parser from '../utils/Parser';
+import useStyles from './BotConversionView.styles';
+import ConversationProperties from './ConversationTab/ConversationProperties';
+import ConversationSteps from './ConversationTab/ConversationSteps';
 
 interface IPublicProps {
   conversationId: string;
@@ -35,197 +35,172 @@ enum TabEnum {
   'json',
 }
 
-interface IState {
-  selectedTab: TabEnum;
-}
+const BotConversationView = ({
+  conversation,
+  isLoading,
+  readOnly,
+  conversationId,
+}: IPrivateProps) => {
+  const [selectedTab, setSelectedTab] = React.useState<TabEnum>(
+    TabEnum.conversationSteps,
+  );
 
-class BotConversationView extends React.Component<IPrivateProps, IState> {
-  constructor(props) {
-    super(props);
-    this.state = {
-      selectedTab: TabEnum.conversationSteps,
-    };
-  }
+  const classes = useStyles();
 
-  componentDidMount() {
-    if (this.props.conversation) {
-      this.fetchConversation();
+  React.useEffect(() => {
+    if (conversation) {
+      fetchConversation();
     } else {
       eddiApiActionDispatchers.fetchConversationsAction(
         1,
         0,
-        this.props.conversationId,
+        conversationId,
         null,
       );
     }
-  }
+  }, [conversation]);
 
-  componentDidUpdate(prevProps) {
-    if (!prevProps.conversation && this.props.conversation) {
-      this.fetchConversation(this.props);
-    }
-  }
+  const fetchConversation = () => {
+    eddiApiActionDispatchers.fetchConversationAction(conversationId);
+  };
 
-  fetchConversation(props = this.props) {
-    eddiApiActionDispatchers.fetchConversationAction(props.conversationId);
-  }
-
-  endConversation = () => {
+  const endConversation = () => {
     modalActionDispatchers.showConfirmationModal(
       `Are you sure you want to end this conversation?`,
       null,
-      () =>
-        eddiApiActionDispatchers.endConversationAction(
-          this.props.conversationId,
-        ),
+      () => eddiApiActionDispatchers.endConversationAction(conversationId),
     );
   };
 
-  render() {
-    const { conversation } = this.props;
-    return (
-      <div style={styles.content}>
-        <HomeButtonComponent extraPath={'conversations'} />
-        {renderIf(this.props.isLoading && !conversation)(() => (
-          <div style={styles.loadingWrapper}>
-            <ClipLoader color={BLUE_COLOR} />
-          </div>
-        ))}
-        {renderIf(conversation)(() => (
-          <div>
-            <div style={styles.header}>
-              <div style={styles.topHeader}>
-                <div
-                  style={styles.botName}
-                  onClick={() =>
-                    historyPush(
-                      `/botview/${Parser.getId(conversation.botResource)}`,
-                      [
-                        `version=${Parser.getVersion(
-                          conversation.botResource,
-                        )}`,
-                      ],
-                    )
-                  }>
-                  {conversation.botName}
-                </div>
-                <div style={styles.botVersion}>{`V${Parser.getVersion(
-                  conversation.botResource,
-                )}`}</div>
-                <WhiteButton
-                  text={'End Conversation'}
-                  customStyles={styles.endConversationButton}
-                  disabled={
-                    conversation.conversationState !== CONVERSATION_READY ||
-                    this.props.readOnly
-                  }
-                  onClick={this.endConversation}
-                />
-              </div>
-              <div style={styles.bottomHeader}>
-                <div style={styles.descriptor}>
-                  <div style={styles.title}>{'Environment'}</div>
-                  <div style={styles.descriptorContent}>
-                    {conversation.environment}
-                  </div>
-                </div>
-                <div style={styles.descriptor}>
-                  <div style={styles.title}>{'Conversation state'}</div>
-                  <div style={styles.descriptorContent}>
-                    {conversation.conversationState}
-                  </div>
-                </div>
-                <div style={styles.descriptor}>
-                  <div style={styles.title}>{'Last message'}</div>
-                  <div style={styles.descriptorContent}>
-                    {moment(conversation.lastModifiedOn).fromNow()}
-                  </div>
-                </div>
-                <div style={styles.descriptor}>
-                  <div style={styles.title}>{'Created on'}</div>
-                  <div style={styles.descriptorContent}>
-                    {moment(conversation.createdOn).format('DD.MM.YYYY')}
-                  </div>
-                </div>
-                <div style={styles.descriptor}>
-                  <div style={styles.title}>{'User id'}</div>
-                  {renderIf(conversation.data)(() => (
-                    <div style={styles.descriptorContent}>
-                      {conversation.data.userId}
-                    </div>
-                  ))}
-                </div>
-              </div>
-            </div>
-            <div style={styles.tabs}>
+  return (
+    <div className={classes.content}>
+      <HomeButtonComponent extraPath={'conversations'} />
+      {isLoading && !conversation && (
+        <div className={classes.loadingWrapper}>
+          <ClipLoader color={BLUE_COLOR} />
+        </div>
+      )}
+      {!!conversation && (
+        <div>
+          <div className={classes.header}>
+            <div className={classes.topHeader}>
               <div
-                style={
-                  this.state.selectedTab === TabEnum.conversationSteps
-                    ? styles.tab
-                    : { ...styles.tab, ...styles.tabDisabled }
-                }
+                className={classes.botName}
                 onClick={() =>
-                  this.setState({ selectedTab: TabEnum.conversationSteps })
+                  historyPush(
+                    `/botview/${Parser.getId(conversation.botResource)}`,
+                    [`version=${Parser.getVersion(conversation.botResource)}`],
+                  )
                 }>
-                {'Conversation'}
+                {conversation.botName}
               </div>
-              <div
-                style={
-                  this.state.selectedTab === TabEnum.json
-                    ? styles.tab
-                    : { ...styles.tab, ...styles.tabDisabled }
+              <div className={classes.botVersion}>{`V${Parser.getVersion(
+                conversation.botResource,
+              )}`}</div>
+              <WhiteButton
+                text={'End Conversation'}
+                classes={{ button: classes.endConversationButton }}
+                disabled={
+                  conversation.conversationState !== CONVERSATION_READY ||
+                  readOnly
                 }
-                onClick={() => this.setState({ selectedTab: TabEnum.json })}>
-                {'Raw JSON'}
+                onClick={endConversation}
+              />
+            </div>
+            <div className={classes.bottomHeader}>
+              <div className={classes.descriptor}>
+                <div className={classes.title}>{'Environment'}</div>
+                <div className={classes.descriptorContent}>
+                  {conversation.environment}
+                </div>
+              </div>
+              <div className={classes.descriptor}>
+                <div className={classes.title}>{'Conversation state'}</div>
+                <div className={classes.descriptorContent}>
+                  {conversation.conversationState}
+                </div>
+              </div>
+              <div className={classes.descriptor}>
+                <div className={classes.title}>{'Last message'}</div>
+                <div className={classes.descriptorContent}>
+                  {moment(conversation.lastModifiedOn).fromNow()}
+                </div>
+              </div>
+              <div className={classes.descriptor}>
+                <div className={classes.title}>{'Created on'}</div>
+                <div className={classes.descriptorContent}>
+                  {moment(conversation.createdOn).format('DD.MM.YYYY')}
+                </div>
+              </div>
+              <div className={classes.descriptor}>
+                <div className={classes.title}>{'User id'}</div>
+                {!!conversation.data && (
+                  <div className={classes.descriptorContent}>
+                    {conversation.data.userId}
+                  </div>
+                )}
               </div>
             </div>
-            {renderIf(!conversation.data)(() => (
-              <div style={styles.loadingWrapper}>
-                <ClipLoader color={BLUE_COLOR} />
-              </div>
-            ))}
-            {renderIf(conversation.data)(() => (
-              <div>
-                {renderIf(this.state.selectedTab === TabEnum.conversationSteps)(
-                  () => (
-                    <div>
-                      <ConversationProperties
-                        conversationProperties={
-                          conversation.data.conversationProperties
-                        }
-                      />
-                      <ConversationSteps
-                        isLoading={this.props.isLoading}
-                        conversationId={this.props.conversationId}
-                        conversationSteps={conversation.data.conversationSteps}
-                        conversationOutputs={
-                          conversation.data.conversationOutputs
-                        }
-                      />
-                    </div>
-                  ),
-                )}
-                {renderIf(this.state.selectedTab === TabEnum.json)(() => (
-                  <ReactJson
-                    style={styles.rjv}
-                    src={conversation.data}
-                    theme={'monokai'}
-                    collapsed={2}
-                    displayDataTypes={false}
-                    enableClipboard={false}
-                  />
-                ))}
-              </div>
-            ))}
           </div>
-        ))}
-      </div>
-    );
-  }
-}
+          <div className={classes.tabs}>
+            <div
+              className={clsx(classes.tab, {
+                [classes.tabDisabled]:
+                  selectedTab !== TabEnum.conversationSteps,
+              })}
+              onClick={() => setSelectedTab(TabEnum.conversationSteps)}>
+              {'Conversation'}
+            </div>
+            <div
+              className={clsx(classes.tab, {
+                [classes.tabDisabled]: selectedTab !== TabEnum.json,
+              })}
+              onClick={() => setSelectedTab(TabEnum.json)}>
+              {'Raw JSON'}
+            </div>
+          </div>
+          {!conversation.data && (
+            <div className={classes.loadingWrapper}>
+              <ClipLoader color={BLUE_COLOR} />
+            </div>
+          )}
+          {!!conversation.data && (
+            <div>
+              {selectedTab === TabEnum.conversationSteps && (
+                <div>
+                  <ConversationProperties
+                    conversationProperties={
+                      conversation.data.conversationProperties
+                    }
+                  />
+                  <ConversationSteps
+                    isLoading={isLoading}
+                    conversationId={conversationId}
+                    conversationSteps={conversation.data.conversationSteps}
+                    conversationOutputs={conversation.data.conversationOutputs}
+                  />
+                </div>
+              )}
+              {selectedTab === TabEnum.json && (
+                <ReactJson
+                  src={conversation.data}
+                  theme={'monokai'}
+                  collapsed={2}
+                  displayDataTypes={false}
+                  enableClipboard={false}
+                />
+              )}
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+};
 
-const ComposedBotConversationView: Component<IPrivateProps> = compose<
-  IPrivateProps
+const ComposedBotConversationView: React.ComponentClass<IPublicProps> = compose<
+  IPrivateProps,
+  IPublicProps
 >(
   pure,
   connect(conversationSelector),

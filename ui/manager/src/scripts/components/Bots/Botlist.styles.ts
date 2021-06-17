@@ -1,6 +1,6 @@
-import { CSSProperties } from 'react';
+import { makeStyles } from '@material-ui/core/styles';
 
-const styles: CSSProperties = {
+const useStyles = makeStyles({
   loadingWrapper: {
     alignItems: 'center',
     display: 'flex',
@@ -12,5 +12,6 @@ const styles: CSSProperties = {
     marginTop: '5px',
     width: '160px',
   },
-};
-export default styles;
+});
+
+export default useStyles;

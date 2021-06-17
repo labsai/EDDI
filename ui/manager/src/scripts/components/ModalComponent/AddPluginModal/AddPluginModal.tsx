@@ -1,29 +1,19 @@
-import * as React from 'react';
-import '../ModalComponent.styles.scss';
-import { Link, browserHistory } from 'react-router-dom';
-import { Component, compose, pure, setDisplayName } from 'recompose';
-import Plugin from './Plugin';
-import { IBot, IDescriptor, IPackage } from '../../utils/AxiosFunctions';
-import { pluginsSelector } from '../../../selectors/PluginSelectors';
-import { connect } from 'react-redux';
 import * as _ from 'lodash';
+import * as React from 'react';
+import { useSelector } from 'react-redux';
+import ClimbingBoxLoader from 'react-spinners/ClimbingBoxLoader';
+import { compose, pure, setDisplayName } from 'recompose';
 import eddiApiActionDispatchers from '../../../actions/EddiApiActionDispatchers';
-import Parser from '../../utils/Parser';
-import styles from '../AddPackagesModal/AddPackagesModal.styles';
 import ModalActionDispatchers from '../../../actions/ModalActionDispatchers';
-import * as renderIf from 'render-if';
+import { pluginsSelector } from '../../../selectors/PluginSelectors';
 import BlueButton from '../../Assets/Buttons/BlueButton';
 import WhiteButton from '../../Assets/Buttons/WhiteButton';
-import { ClimbingBoxLoader } from 'react-spinners';
-import { REGULAR_DICTIONARY } from '../../utils/EddiTypes';
 import { DEFAULT_LIMIT } from '../../utils/ApiFunctions';
-
-interface IState {
-  selectedPlugins: string[];
-  availablePlugins: string[];
-  limitedToOneSelect: boolean;
-  loading: boolean;
-}
+import { REGULAR_DICTIONARY } from '../../utils/EddiTypes';
+import Parser from '../../utils/Parser';
+import useStyles from '../AddPackagesModal/AddPackagesModal.styles';
+import '../ModalComponent.styles.scss';
+import PluginsList from './PluginsList';
 
 interface IPublicProps {
   pluginType: string;
@@ -31,247 +21,204 @@ interface IPublicProps {
   addPlugins(selectedPlugins: string[]): void;
 }
 
-interface IPrivateProps extends IPublicProps {
-  error: Error;
-  isLoading: boolean;
-  plugins: IDescriptor[];
-  isAllPluginsLoaded: boolean;
-  loadedPlugins: number;
-}
+interface IPrivateProps extends IPublicProps {}
 
-class AddPluginModal extends React.Component<IPrivateProps, IState> {
-  constructor(props) {
-    super(props);
-    this.state = {
-      selectedPlugins: [],
-      availablePlugins: [],
-      limitedToOneSelect: true,
-      loading: false,
-    };
-  }
+const AddPluginModal = (props: IPrivateProps) => {
+  const { isLoading, plugins, isAllPluginsLoaded, loadedPlugins } = useSelector(
+    (state) => pluginsSelector(state, props.pluginType),
+  );
+  const [selectedPlugins, setSelectedPlugins] = React.useState<string[]>([]);
+  const [availablePlugins, setAvailablePlugins] = React.useState<string[]>([]);
+  const [limitedToOneSelect, setLimitedToOneSelect] = React.useState(true);
+  const [loading, setLoading] = React.useState(false);
+  const classes = useStyles();
 
-  componentDidMount() {
-    if (this.props.pluginType === REGULAR_DICTIONARY) {
-      this.setState({
-        limitedToOneSelect: false,
-      });
+  React.useEffect(() => {
+    if (props.pluginType === REGULAR_DICTIONARY) {
+      setLimitedToOneSelect(false);
     }
-    if (
-      this.props.plugins.length < DEFAULT_LIMIT &&
-      !this.props.isAllPluginsLoaded
-    ) {
+    if (plugins.length < DEFAULT_LIMIT && !isAllPluginsLoaded) {
       eddiApiActionDispatchers.fetchPluginsAction(
-        this.props.pluginType,
+        props.pluginType,
         DEFAULT_LIMIT,
         0,
       );
     }
-    this.discardChanges();
-  }
+    discardChanges();
+  }, []);
 
-  componentDidUpdate(prevProps) {
+  const prevPluginsRef = React.useRef(null);
+
+  React.useEffect(() => {
     if (
-      !_.isEmpty(
-        _.differenceBy(this.props.plugins, prevProps.plugins, 'resource'),
-      )
+      !_.isEmpty(_.differenceBy(plugins, prevPluginsRef.current, 'resource'))
     ) {
-      this.discardChanges(this.props);
+      discardChanges();
     }
-  }
+  }, [plugins]);
 
-  closeModal = () => {
-    this.discardChanges();
+  React.useEffect(() => {
+    prevPluginsRef.current = plugins;
+  });
+
+  const closeModal = () => {
+    discardChanges();
     ModalActionDispatchers.closeModal();
   };
 
-  selectVersion = (resource: string, version: number) => {
+  const selectVersion = (resource: string, version: number) => {
     const id = Parser.getId(resource);
-    const availablePlugins = this.state.availablePlugins.map(p => {
+    const tempAvailablePlugins = availablePlugins.map((p) => {
       if (Parser.getId(p) === id) {
         return Parser.replaceResourceVersion(p, version);
       }
       return p;
     });
-    const selectedPlugins = this.state.selectedPlugins.filter(
-      selectedPackage => Parser.getId(selectedPackage) !== id,
+    const tempSelectedPlugins = selectedPlugins.filter(
+      (selectedPackage) => Parser.getId(selectedPackage) !== id,
     );
-    this.setState({
-      availablePlugins,
-      selectedPlugins,
-    });
+    setAvailablePlugins(tempAvailablePlugins);
+    setSelectedPlugins(tempSelectedPlugins);
   };
 
-  selectPlugin = (pluginResource: string) => {
-    if (this.state.limitedToOneSelect) {
-      if (_.first(this.state.selectedPlugins) === pluginResource) {
-        this.setState({
-          selectedPlugins: [],
-        });
+  const selectPlugin = (pluginResource: string) => {
+    if (limitedToOneSelect) {
+      if (_.first(selectedPlugins) === pluginResource) {
+        setSelectedPlugins([]);
       } else {
-        this.setState({
-          selectedPlugins: [pluginResource],
-        });
+        setSelectedPlugins([pluginResource]);
       }
     } else {
-      if (this.state.selectedPlugins.includes(pluginResource)) {
-        this.setState({
-          selectedPlugins: this.state.selectedPlugins.filter(
-            p => p !== pluginResource,
-          ),
-        });
+      if (selectedPlugins.includes(pluginResource)) {
+        setSelectedPlugins(selectedPlugins.filter((p) => p !== pluginResource));
       } else {
-        this.setState({
-          selectedPlugins: this.state.selectedPlugins.concat(pluginResource),
-        });
+        setSelectedPlugins(selectedPlugins.concat(pluginResource));
       }
     }
   };
 
-  unsavedChanges(): boolean {
-    return !_.isEqual(
-      this.state.selectedPlugins.sort(),
-      this.props.oldPlugins.sort(),
-    );
-  }
-
-  discardChanges(props = this.props): void {
-    const availablePlugins = props.plugins.map(pkg => {
-      return this.getPluginIfUsed(pkg.resource);
-    });
-    this.setState({
-      selectedPlugins: props.oldPlugins,
-      availablePlugins,
-    });
-  }
-
-  isPluginSelected(pluginResource: string): boolean {
-    return !!this.state.selectedPlugins.find(
-      selectedPlugin =>
-        Parser.getId(pluginResource) === Parser.getId(selectedPlugin),
-    );
-  }
-
-  getPluginIfUsed(pluginResource: string): string {
-    const plugin = this.props.oldPlugins.find(
-      p => Parser.getId(pluginResource) === Parser.getId(p),
-    );
-    return plugin || pluginResource;
-  }
-
-  selectPlugins = () => {
-    this.props.addPlugins(this.state.selectedPlugins);
-    this.closeModal();
+  const unsavedChanges = (): boolean => {
+    return !_.isEqual(selectedPlugins.sort(), props.oldPlugins.sort());
   };
 
-  createNewPlugin = () => {
-    eddiApiActionDispatchers.fetchJsonSchemaAction(this.props.pluginType);
+  const discardChanges = (): void => {
+    const availablePlugins = plugins.map((pkg) => {
+      return getPluginIfUsed(pkg.resource);
+    });
+    setSelectedPlugins(props.oldPlugins);
+    setAvailablePlugins(availablePlugins);
+  };
+
+  const isPluginSelected = (pluginResource: string): boolean => {
+    return !!selectedPlugins.find(
+      (selectedPlugin) =>
+        Parser.getId(pluginResource) === Parser.getId(selectedPlugin),
+    );
+  };
+
+  const getPluginIfUsed = (pluginResource: string): string => {
+    const plugin = props.oldPlugins.find(
+      (p) => Parser.getId(pluginResource) === Parser.getId(p),
+    );
+    return plugin || pluginResource;
+  };
+
+  const selectPlugins = () => {
+    props.addPlugins(selectedPlugins);
+    closeModal();
+  };
+
+  const createNewPlugin = () => {
+    eddiApiActionDispatchers.fetchJsonSchemaAction(props.pluginType);
     ModalActionDispatchers.showCreateNewConfigModal(
-      this.props.pluginType,
+      props.pluginType,
       null,
       null,
       null,
       () =>
         ModalActionDispatchers.showAddPluginsModal(
-          this.props.pluginType,
-          this.props.oldPlugins,
-          this.props.addPlugins,
+          props.pluginType,
+          props.oldPlugins,
+          props.addPlugins,
         ),
     );
   };
 
-  loadMore = () => {
-    const fetchIndex = Math.floor(this.props.loadedPlugins / DEFAULT_LIMIT);
-    if (this.state.loading || _.isEmpty(this.props.plugins)) {
+  const loadMore = () => {
+    const fetchIndex = Math.floor(loadedPlugins / DEFAULT_LIMIT);
+    if (loading || _.isEmpty(plugins)) {
       return;
     }
-    this.setState({ loading: true });
+    setLoading(true);
     eddiApiActionDispatchers.fetchPluginsAction(
-      this.props.pluginType,
+      props.pluginType,
       DEFAULT_LIMIT,
       fetchIndex,
     );
   };
 
-  render() {
-    return (
-      <div>
-        <div style={styles.header}>
-          <div style={styles.topHeader}>
-            <div style={styles.title}>{`Select ${Parser.getPluginName(
-              this.props.pluginType,
-              true,
-            )}`}</div>
-            <div style={styles.centerFlex} />
-            <WhiteButton
-              customStyles={styles.createButton}
-              onClick={this.createNewPlugin}
-              text={`Create new ${Parser.getPluginName(
-                this.props.pluginType,
-                false,
-              )}`}
-            />
-            <BlueButton
-              customStyles={styles.button}
-              disabled={
-                !this.unsavedChanges() || _.isEmpty(this.state.selectedPlugins)
-              }
-              onClick={this.selectPlugins}
-              text={`Add ${Parser.getPluginName(this.props.pluginType, false)}`}
-            />
-          </div>
-          <div style={styles.bottomHeader}>
-            <div style={styles.centerFlex} />
-            <div style={styles.lastModified}>{'Last modified'}</div>
-          </div>
+  return (
+    <div>
+      <div className={classes.header}>
+        <div className={classes.topHeader}>
+          <div className={classes.title}>{`Select ${Parser.getPluginName(
+            props.pluginType,
+            true,
+          )}`}</div>
+          <div className={classes.centerFlex} />
+          <WhiteButton
+            classes={{ button: classes.createButton }}
+            onClick={createNewPlugin}
+            text={`Create new ${Parser.getPluginName(props.pluginType, false)}`}
+          />
+          <BlueButton
+            classes={{ button: classes.button }}
+            disabled={!unsavedChanges() || _.isEmpty(selectedPlugins)}
+            onClick={selectPlugins}
+            text={`Add ${Parser.getPluginName(props.pluginType, false)}`}
+          />
         </div>
-        <div style={styles.packageList}>
-          {renderIf(
-            this.props.isAllPluginsLoaded && _.isEmpty(this.props.plugins),
-          )(() => (
-            <p>
-              {'Found no plugins. Create a new ' +
-                Parser.getPluginName(this.props.pluginType, false) +
-                ' to select one.'}
-            </p>
-          ))}
-          {renderIf(!_.isEmpty(this.state.availablePlugins))(() => (
-            <div>
-              {this.state.availablePlugins.map((p, i) => (
-                <Plugin
-                  key={i}
-                  selected={this.isPluginSelected(p)}
-                  pluginResource={p}
-                  handleClick={this.selectPlugin}
-                  selectVersion={this.selectVersion}
-                />
-              ))}
-            </div>
-          ))}
-          {renderIf(this.props.isLoading)(() => (
-            <div style={styles.loadingWrapper}>
-              <ClimbingBoxLoader loading />
-            </div>
-          ))}
-          {renderIf(
-            !this.props.isAllPluginsLoaded &&
-              !this.props.isLoading &&
-              !this.state.loading,
-          )(() => (
-            <BlueButton
-              customStyles={styles.loadMoreButton}
-              onClick={this.loadMore}
-              text={'Load More'}
-            />
-          ))}
+        <div className={classes.bottomHeader}>
+          <div className={classes.centerFlex} />
+          <div className={classes.lastModified}>{'Last modified'}</div>
         </div>
       </div>
-    );
-  }
-}
-const ComposedAddPluginModal: Component<IPrivateProps> = compose<IPrivateProps>(
+      <div className={classes.packageList}>
+        {isAllPluginsLoaded && _.isEmpty(plugins) && (
+          <p>
+            {'Found no plugins. Create a new ' +
+              Parser.getPluginName(props.pluginType, false) +
+              ' to select one.'}
+          </p>
+        )}
+        <PluginsList
+          availablePlugins={availablePlugins}
+          isPluginSelected={isPluginSelected}
+          selectPlugin={selectPlugin}
+          selectVersion={selectVersion}
+        />
+        {isLoading && (
+          <div className={classes.loadingWrapper}>
+            <ClimbingBoxLoader loading />
+          </div>
+        )}
+        {!isAllPluginsLoaded && !isLoading && !loading && (
+          <BlueButton
+            classes={{ button: classes.loadMoreButton }}
+            onClick={loadMore}
+            text={'Load More'}
+          />
+        )}
+      </div>
+    </div>
+  );
+};
+const ComposedAddPluginModal: React.ComponentClass<IPublicProps> = compose<
+  IPrivateProps,
+  IPublicProps
+>(
   pure,
   setDisplayName('AddPluginModal'),
-  connect(pluginsSelector),
 )(AddPluginModal);
 
 export default ComposedAddPluginModal;

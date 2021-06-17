@@ -1,6 +1,6 @@
-import { CSSProperties } from 'react';
+import { makeStyles } from '@material-ui/core/styles';
 
-const styles: CSSProperties = {
+const styles = makeStyles({
   conversation: {
     display: 'flex',
   },
@@ -16,6 +16,7 @@ const styles: CSSProperties = {
     display: 'flex',
     flex: 1,
     paddingTop: '44px',
+    alignItems: 'center',
   },
   bottomHeader: {
     marginTop: '23px',
@@ -48,7 +49,7 @@ const styles: CSSProperties = {
     overflow: 'hidden',
   },
   centerFlex: {
-    flex: '1',
+    flex: 1,
   },
   button: {
     width: '165px',
@@ -64,7 +65,7 @@ const styles: CSSProperties = {
     color: '#7A849E',
     fontSize: '14px',
     backgroundColor: '#FFF',
-    flex: '1',
+    flex: 1,
     minHeight: '200px',
     minWidth: '500px',
     overflow: 'hidden',
@@ -82,8 +83,10 @@ const styles: CSSProperties = {
     marginRight: '30px',
   },
   options: {
-    marginTop: '3px',
+    marginTop: 'auto',
+    marginBottom: 'auto',
     marginRight: '5px',
+    marginLeft: '5px',
   },
-};
+});
 export default styles;

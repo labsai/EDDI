@@ -1,4 +1,3 @@
-import { CSSProperties } from 'react';
 import {
   BLUE_COLOR,
   DARK_BLUE_COLOR,
@@ -6,16 +5,17 @@ import {
   RED_COLOR,
   SMALL_FONT,
 } from '../../../styles/DefaultStylingProperties';
+import { makeStyles } from '@material-ui/core/styles';
 
-const styles: CSSProperties = {
+const styles = makeStyles({
   botHeader: {
     display: 'flex',
-    flex: '1',
-    height: '35px',
+    flex: 1,
     marginTop: '47px',
+    alignItems: 'center',
   },
   botHeaderSpacing: {
-    flexGrow: '1',
+    flexGrow: 1,
   },
   botName: {
     color: DARK_BLUE_COLOR,
@@ -52,7 +52,11 @@ const styles: CSSProperties = {
     marginLeft: '10px',
   },
   options: {
-    marginTop: '5px',
+    marginTop: 'auto',
+    marginBottom: 'auto',
+    marginRight: '10px',
+    marginLeft: '10px',
   },
-};
+  chatButton: {},
+});
 export default styles;

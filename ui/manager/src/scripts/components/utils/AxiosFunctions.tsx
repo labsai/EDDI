@@ -1,4 +1,5 @@
-import axios from 'axios';
+import axios from './axiosInterseptor';
+
 import * as React from 'react';
 import {
   DEFAULT_LIMIT,
@@ -141,7 +142,7 @@ export async function getAllBots(): Promise<IBot[]> {
     const botDescriptors = await axios.get(
       `${await getAPIUrl()}/botstore/bots/descriptors?limit=${DEFAULT_LIMIT}`,
     );
-    const bots: IBot[] = botDescriptors.data.map(bot => {
+    const bots: IBot[] = botDescriptors.data.map((bot) => {
       const version = Parser.getVersion(bot.resource);
       return {
         id: Parser.getId(bot.resource),
@@ -208,10 +209,9 @@ export async function basicAuthSignIn(username: string, password: string) {
         },
       },
     );
-    setDefaultGlobalHeader(
-      'Authorization',
-      `Basic ${btoa(`${username}:${password}`)}`,
-    );
+    const encryptedToken = btoa(`${username}:${password}`);
+    localStorage.setItem('bearer', encryptedToken);
+    setDefaultGlobalHeader('Authorization', `Basic ${encryptedToken}`);
   } catch (err) {
     console.error(
       `Failed to sign in with username and password. Error: ${err.message}`,
@@ -228,7 +228,7 @@ export async function getBotDescriptors(
     const res: IDescriptorResponse = await axios.get(
       `${await getAPIUrl()}/botstore/bots/descriptors?index=${index}&limit=${limit}`,
     );
-    return res.data.map(bot => {
+    return res.data.map((bot) => {
       const createdOn = bot.createdOn;
       const description = bot.description;
       const id = Parser.getId(bot.resource);
@@ -255,9 +255,9 @@ export async function getBotDescriptors(
 
 export async function getCurrentBot(id: string): Promise<IBot> {
   try {
-    const version = (await axios.get(
-      `${await getAPIUrl()}/botstore/bots/${id}/currentversion`,
-    )).data;
+    const version = (
+      await axios.get(`${await getAPIUrl()}/botstore/bots/${id}/currentversion`)
+    ).data;
     const descriptor = await getDescriptor(id, version);
     const data: IBotData = await getBotData(descriptor.resource);
     const deploymentStatus = await getDeploymentStatus(descriptor.resource);
@@ -354,7 +354,7 @@ export interface IPluginExtensions {
 }
 
 export interface IPlugins {
-  packageExtensions: IPluginExtensions[];
+  packageExtensions?: IPluginExtensions[];
 }
 
 export interface IPluginsResponse {
@@ -419,9 +419,11 @@ export async function getPackage(resource: string): Promise<IPackage> {
 
 export async function getCurrentPackage(id: string): Promise<IPackage> {
   try {
-    const version = (await axios.get(
-      `${await getAPIUrl()}/packagestore/packages/${id}/currentversion`,
-    )).data;
+    const version = (
+      await axios.get(
+        `${await getAPIUrl()}/packagestore/packages/${id}/currentversion`,
+      )
+    ).data;
     const descriptor = await getDescriptor(id, version);
     return {
       id,
@@ -493,7 +495,7 @@ export async function updateBot(
     const newPackage: IPackage = await getCurrentPackage(
       Parser.getId(updatablePackageResource),
     );
-    const packages = currentBot.packages.map(pkg => {
+    const packages = currentBot.packages.map((pkg) => {
       if (Parser.getId(pkg) === newPackage.id) {
         return newPackage.resource;
       }
@@ -564,10 +566,10 @@ export async function updateResourcesInBot(
       botResource,
     )}`;
     const oldBot: IBot = await getCurrentBot(Parser.getId(botResource));
-    const newBotPackageList = oldBot.packages.map(pkg => {
+    const newBotPackageList = oldBot.packages.map((pkg) => {
       return (
         packageResources.find(
-          resource => Parser.getId(resource) === Parser.getId(pkg),
+          (resource) => Parser.getId(resource) === Parser.getId(pkg),
         ) || pkg
       );
     });
@@ -610,7 +612,7 @@ export function updatePackageExtension(
   newExtensionResource: string,
 ) {
   const newExtensionId = Parser.getId(newExtensionResource);
-  const updatedExternalPackages = externalPackages.map(externalPackage => {
+  const updatedExternalPackages = externalPackages.map((externalPackage) => {
     if (
       externalPackage.config &&
       externalPackage.config.uri &&
@@ -824,7 +826,7 @@ export async function getPluginDescriptors(
         res = null;
     }
     if (res !== null) {
-      return res.data.map(pkg => {
+      return res.data.map((pkg) => {
         const version = Parser.getVersion(pkg.resource);
         return {
           createdOn: pkg.createdOn,
@@ -1161,7 +1163,7 @@ export async function deployExampleBots(): Promise<IBot[]> {
       `${await getAPIUrl()}/backup/import/examples`,
     );
     const exampleBots: IExampleBotsResponseData[] = response.data;
-    return exampleBots.map(bot => {
+    return exampleBots.map((bot) => {
       return {
         ...bot.descriptor,
         environment: bot.environment,
@@ -1173,5 +1175,42 @@ export async function deployExampleBots(): Promise<IBot[]> {
     });
   } catch (err) {
     console.error(`Failed to deploy example bots. Error: ${err.message}`);
+  }
+}
+
+export async function axiosStartChat(botId: string): Promise<any> {
+  try {
+    const getConversationId = await axios.post(
+      `${await getAPIUrl()}/bots/unrestricted/${botId}`,
+    );
+    const conversationId = getConversationId?.headers?.location
+      ?.split('/')
+      ?.pop();
+
+    const response = await axios.get(
+      `${await getAPIUrl()}/bots/unrestricted/${botId}/${conversationId}`,
+    );
+    return response.data;
+  } catch (err) {
+    console.error(
+      `Failed to start chat with bot ${botId}. Error: ${err.message}`,
+    );
+  }
+}
+
+export async function axiosReplyInChat(
+  botId: string,
+  conversationId: string,
+  input: string,
+  context: any,
+): Promise<any> {
+  try {
+    const response = await axios.post(
+      `${await getAPIUrl()}/bots/unrestricted/${botId}/${conversationId}`,
+      { input, context },
+    );
+    return response.data;
+  } catch (err) {
+    console.error(`Failed to reply to bot ${botId}. Error: ${err.message}`);
   }
 }

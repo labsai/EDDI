@@ -1,23 +1,17 @@
-import * as React from 'react';
-import '../ModalComponent.styles.scss';
-import { Link, browserHistory } from 'react-router-dom';
-import { Component, compose, pure, setDisplayName } from 'recompose';
-import { IBot, IPackage } from '../../utils/AxiosFunctions';
-import { connect } from 'react-redux';
 import * as _ from 'lodash';
+import * as React from 'react';
+import { connect } from 'react-redux';
+import ClimbingBoxLoader from 'react-spinners/ClimbingBoxLoader';
+import { compose, pure, setDisplayName } from 'recompose';
 import eddiApiActionDispatchers from '../../../actions/EddiApiActionDispatchers';
-import styles from '../AddPackagesModal/AddPackagesModal.styles';
 import ModalActionDispatchers from '../../../actions/ModalActionDispatchers';
-import * as renderIf from 'render-if';
-import BlueButton from '../../Assets/Buttons/BlueButton';
-import { ClimbingBoxLoader } from 'react-spinners';
-import SelectableConfig from './SelectableConfig';
 import { botsSelector } from '../../../selectors/BotSelectors';
+import BlueButton from '../../Assets/Buttons/BlueButton';
 import { DEFAULT_LIMIT } from '../../utils/ApiFunctions';
-
-interface IState {
-  selectedBots: IBot[];
-}
+import { IBot, IPackage } from '../../utils/AxiosFunctions';
+import useStyles from '../AddPackagesModal/AddPackagesModal.styles';
+import '../ModalComponent.styles.scss';
+import SelectableConfig from './SelectableConfig';
 
 interface IPublicProps {
   packagePayload: IPackage;
@@ -31,121 +25,110 @@ interface IPrivateProps extends IPublicProps {
   botsLoaded: number;
 }
 
-class AddNewPackageToBotModal extends React.Component<IPrivateProps, IState> {
-  constructor(props) {
-    super(props);
-    this.state = {
-      selectedBots: [],
-    };
-  }
+const AddNewPackageToBotModal = (props: IPrivateProps) => {
+  const [selectedBots, setSelectedBots] = React.useState<IBot[]>([]);
 
-  componentDidMount() {
-    if (!this.props.allBotsLoaded && this.props.botsLoaded < DEFAULT_LIMIT) {
-      this.loadMore();
+  const classes = useStyles();
+
+  React.useEffect(() => {
+    if (!props.allBotsLoaded && props.botsLoaded < DEFAULT_LIMIT) {
+      loadMore();
     }
-  }
+  }, []);
 
-  closeModal = () => {
+  const closeModal = () => {
     ModalActionDispatchers.closeModal();
   };
 
-  updateSelectedBots = () => {
+  const updateSelectedBots = () => {
     eddiApiActionDispatchers.addNewPackageToBotsAction(
-      this.props.packagePayload.resource,
-      this.state.selectedBots,
+      props.packagePayload.resource,
+      selectedBots,
     );
-    this.closeModal();
+    closeModal();
   };
 
-  loadMore = () => {
-    if (this.props.bots.length < DEFAULT_LIMIT && !this.props.allBotsLoaded) {
+  const loadMore = () => {
+    if (props.bots.length < DEFAULT_LIMIT && !props.allBotsLoaded) {
       eddiApiActionDispatchers.fetchBotsAction(DEFAULT_LIMIT, 0);
     } else {
       eddiApiActionDispatchers.fetchBotsAction(
         DEFAULT_LIMIT,
-        Math.floor(this.props.botsLoaded / DEFAULT_LIMIT),
+        Math.floor(props.botsLoaded / DEFAULT_LIMIT),
       );
     }
   };
 
-  selectBot = (botResource: string) => {
-    const newBotList = this.state.selectedBots.map(bot => bot);
-    if (this.isBotSelected(botResource)) {
-      this.setState({
-        selectedBots: newBotList.filter(bot => bot.resource !== botResource),
-      });
+  const selectBot = (botResource: string) => {
+    const newBotList = selectedBots.map((bot) => bot);
+    if (isBotSelected(botResource)) {
+      setSelectedBots(newBotList.filter((bot) => bot.resource !== botResource));
     } else {
-      newBotList.push(
-        this.props.bots.find(bot => bot.resource === botResource),
-      );
-      this.setState({ selectedBots: newBotList });
+      newBotList.push(props.bots.find((bot) => bot.resource === botResource));
+      setSelectedBots(newBotList);
     }
   };
 
-  isBotSelected(botResource: string): boolean {
-    return !_.isEmpty(
-      this.state.selectedBots.find(bot => bot.resource === botResource),
-    );
-  }
+  const isBotSelected = (botResource: string): boolean => {
+    return !_.isEmpty(selectedBots.find((bot) => bot.resource === botResource));
+  };
 
-  render() {
-    return (
-      <div>
-        <div style={styles.header}>
-          <div style={styles.topHeader}>
-            <div
-              style={
-                styles.title
-              }>{`Select bots you want to add the package to.`}</div>
-            <div style={styles.centerFlex} />
-            <BlueButton
-              onClick={this.updateSelectedBots}
-              customStyles={styles.button}
-              text={'Update Bots'}
-            />
-          </div>
-          <div style={styles.bottomHeader}>
-            <div style={styles.centerFlex} />
-            <div style={styles.lastModified}>{'Last modified'}</div>
-          </div>
+  return (
+    <div>
+      <div className={classes.header}>
+        <div className={classes.topHeader}>
+          <div
+            className={
+              classes.title
+            }>{`Select bots you want to add the package to.`}</div>
+          <div className={classes.centerFlex} />
+          <BlueButton
+            onClick={updateSelectedBots}
+            classes={{ button: classes.button }}
+            text={'Update Bots'}
+          />
         </div>
-        <div>
-          <div style={styles.packageList}>
-            {this.props.bots.map((bot, i) => (
-              <SelectableConfig
-                key={i}
-                selected={this.isBotSelected(bot.resource)}
-                descriptor={bot}
-                handleClick={this.selectBot}
-              />
-            ))}
-          </div>
-          {renderIf(this.props.isLoading)(() => (
-            <div style={styles.loadingWrapper}>
-              <ClimbingBoxLoader loading />
-            </div>
-          ))}
-          {renderIf(!this.props.allBotsLoaded && !this.props.isLoading)(() => (
-            <BlueButton
-              customStyles={styles.loadMoreButton}
-              onClick={this.loadMore}
-              text={'Load More'}
-            />
-          ))}
-          {renderIf(!this.props.isLoading && _.isEmpty(this.props.bots))(() => (
-            <div>{'Found no bots that can be updated'}</div>
-          ))}
+        <div className={classes.bottomHeader}>
+          <div className={classes.centerFlex} />
+          <div className={classes.lastModified}>{'Last modified'}</div>
         </div>
       </div>
-    );
-  }
-}
+      <div>
+        <div className={classes.packageList}>
+          {props.bots.map((bot, i) => (
+            <SelectableConfig
+              key={i}
+              selected={isBotSelected(bot.resource)}
+              descriptor={bot}
+              handleClick={selectBot}
+            />
+          ))}
+        </div>
+        {props.isLoading && (
+          <div className={classes.loadingWrapper}>
+            <ClimbingBoxLoader loading />
+          </div>
+        )}
+        {!props.allBotsLoaded && !props.isLoading && (
+          <BlueButton
+            classes={{ button: classes.loadMoreButton }}
+            onClick={loadMore}
+            text={'Load More'}
+          />
+        )}
+        {!props.isLoading && _.isEmpty(props.bots) && (
+          <div>{'Found no bots that can be updated'}</div>
+        )}
+      </div>
+    </div>
+  );
+};
 
-const ComposedAddNewPackageToBotModal: Component<IPrivateProps> = compose<
-  IPrivateProps,
-  IPublicProps
->(pure, setDisplayName('AddNewPackageToBotModal'), connect(botsSelector))(
-  AddNewPackageToBotModal,
-);
+const ComposedAddNewPackageToBotModal: React.ComponentClass<IPublicProps> =
+  compose<IPrivateProps, IPublicProps>(
+    pure,
+    setDisplayName('AddNewPackageToBotModal'),
+    connect(botsSelector),
+  )(AddNewPackageToBotModal);
 
 export default ComposedAddNewPackageToBotModal;

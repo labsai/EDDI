@@ -1,17 +1,6 @@
+import { makeStyles } from '@material-ui/core/styles';
 import * as React from 'react';
-import { Component, compose, pure, setDisplayName } from 'recompose';
-import { CSSProperties } from 'react';
-import Button from './Button';
-import * as Radium from 'radium';
-import {
-  ERROR,
-  IN_PROGRESS,
-  NOT_FOUND,
-  READY,
-} from '../../utils/helpers/BotHelper';
-import modalActionDispatchers from '../../../actions/ModalActionDispatchers';
-import eddiApiActionDispatchers from '../../../actions/EddiApiActionDispatchers';
-import { getDeploymentStatus } from '../../utils/AxiosFunctions';
+import { compose, pure, setDisplayName } from 'recompose';
 import {
   DARK_GREEN_COLOR,
   DARK_RED_COLOR,
@@ -23,116 +12,129 @@ import {
   YELLOW_BORDER,
   YELLOW_COLOR,
 } from '../../../../styles/DefaultStylingProperties';
+import eddiApiActionDispatchers from '../../../actions/EddiApiActionDispatchers';
+import modalActionDispatchers from '../../../actions/ModalActionDispatchers';
+import { getDeploymentStatus } from '../../utils/AxiosFunctions';
+import {
+  ERROR,
+  IN_PROGRESS,
+  NOT_FOUND,
+  READY,
+} from '../../utils/helpers/BotHelper';
+import Button from './Button';
+import { ClassNameMap } from '@material-ui/styles/withStyles';
+import clsx from 'clsx';
 
-const undeployStyle: CSSProperties = {
-  button: {
+const useStyles = makeStyles({
+  undeployStyle: {
     color: 'white',
     backgroundColor: RED_COLOR,
     border: RED_BORDER,
-    ':hover': {
+
+    '&:hover': {
       backgroundColor: DARK_RED_COLOR,
     },
+    '&:disabled': {
+      cursor: 'not-allowed',
+    },
   },
-  disabled: {
-    cursor: 'not-allowed',
-  },
-};
-const deployStyle: CSSProperties = {
-  button: {
+  deployStyle: {
     color: 'white',
     backgroundColor: GREEN_COLOR,
     border: GREEN_BORDER,
-    ':hover': {
+    '&:hover': {
       backgroundColor: DARK_GREEN_COLOR,
     },
+    '&:disabled': {
+      cursor: 'not-allowed',
+    },
   },
-  disabled: {
-    cursor: 'not-allowed',
+  inProgressStyle: {
+    '&:disabled': {
+      color: 'white',
+      backgroundColor: YELLOW_COLOR,
+      border: YELLOW_BORDER,
+      cursor: 'not-allowed',
+    },
   },
-};
-const inProgressStyle: CSSProperties = {
-  disabled: {
-    color: 'white',
-    backgroundColor: YELLOW_COLOR,
-    border: YELLOW_BORDER,
-    cursor: 'not-allowed',
+  errorStyle: {
+    '&:disabled': {
+      color: DARK_RED_COLOR,
+      backgroundColor: 'white',
+      border: LIGHT_GREY_BORDER,
+      cursor: 'not-allowed',
+    },
   },
-};
-const errorStyle: CSSProperties = {
-  disabled: {
-    color: DARK_RED_COLOR,
-    backgroundColor: 'white',
-    border: LIGHT_GREY_BORDER,
-    cursor: 'not-allowed',
-  },
-};
+});
 
 interface IProps {
   botName: string;
   botResource: string;
   deploymentStatus: string;
-  customStyles: {};
+  customStyles?: {};
   readOnly: boolean;
+  classes?: ClassNameMap;
 }
 
-const sleep = milliseconds => {
-  return new Promise(resolve => setTimeout(resolve, milliseconds));
+const sleep = (milliseconds) => {
+  return new Promise((resolve) => setTimeout(resolve, milliseconds));
 };
 
-class DeployButton extends React.Component<IProps> {
-  componentDidMount() {
-    this.waitForUpdatedStatus();
-  }
-
-  componentDidUpdate(prevProps) {
-    if (prevProps !== this.props) {
-      this.waitForUpdatedStatus();
-    }
-  }
-
-  checkStatus() {
-    return getDeploymentStatus(this.props.botResource);
-  }
-
-  async waitForUpdatedStatus() {
-    const status = await this.checkStatus();
+const DeployButton = ({
+  botName,
+  botResource,
+  deploymentStatus,
+  customStyles,
+  readOnly,
+  classes: externalClasses,
+}: IProps) => {
+  const classes = useStyles();
+  const waitForUpdatedStatus = async () => {
+    const status = await checkStatus();
     if (status === IN_PROGRESS) {
-      return await sleep(500).then(() => this.waitForUpdatedStatus());
+      return await sleep(500).then(() => waitForUpdatedStatus());
     } else {
-      eddiApiActionDispatchers.fetchBotDeploymentStatusAction(
-        this.props.botResource,
-      );
+      eddiApiActionDispatchers.fetchBotDeploymentStatusAction(botResource);
       return status;
     }
-  }
+  };
 
-  getButton() {
-    switch (this.props.deploymentStatus) {
+  React.useEffect(() => {
+    waitForUpdatedStatus();
+  }, [botName, botResource, deploymentStatus]);
+
+  const checkStatus = () => {
+    return getDeploymentStatus(botResource);
+  };
+
+  const getButton = () => {
+    switch (deploymentStatus) {
       case READY:
         return (
           <Button
             text={'Undeploy'}
             onClick={() =>
               modalActionDispatchers.showConfirmationModal(
-                `Are you sure you want to undeploy ${this.props.botName}?`,
+                `Are you sure you want to undeploy ${botName}?`,
                 null,
-                () =>
-                  eddiApiActionDispatchers.undeployBotAction(
-                    this.props.botResource,
-                  ),
+                () => eddiApiActionDispatchers.undeployBotAction(botResource),
               )
             }
-            styles={undeployStyle}
-            customStyles={this.props.customStyles}
-            disabled={this.props.readOnly}
+            classes={{
+              button: clsx(classes.undeployStyle, externalClasses?.button),
+            }}
+            customStyles={customStyles}
+            disabled={readOnly}
           />
         );
       case ERROR:
         return (
           <Button
             text={'ERROR'}
-            styles={errorStyle}
-            customStyles={this.props.customStyles}
+            classes={{
+              button: clsx(classes.errorStyle, externalClasses?.button),
+            }}
+            customStyles={customStyles}
             disabled={true}
           />
         );
@@ -140,8 +142,10 @@ class DeployButton extends React.Component<IProps> {
         return (
           <Button
             text={'In Progress'}
-            styles={inProgressStyle}
-            customStyles={this.props.customStyles}
+            classes={{
+              button: clsx(classes.inProgressStyle, externalClasses?.button),
+            }}
+            customStyles={customStyles}
             disabled={true}
           />
         );
@@ -150,19 +154,23 @@ class DeployButton extends React.Component<IProps> {
           <Button
             text={'Deploy'}
             onClick={() =>
-              eddiApiActionDispatchers.deployBotAction(this.props.botResource)
+              eddiApiActionDispatchers.deployBotAction(botResource)
             }
-            styles={deployStyle}
-            customStyles={this.props.customStyles}
-            disabled={this.props.readOnly}
+            classes={{
+              button: clsx(classes.deployStyle, externalClasses?.button),
+            }}
+            customStyles={customStyles}
+            disabled={readOnly}
           />
         );
       case undefined:
         return (
           <Button
             text={'Loading...'}
-            styles={errorStyle}
-            customStyles={this.props.customStyles}
+            classes={{
+              button: clsx(classes.errorStyle, externalClasses?.button),
+            }}
+            customStyles={customStyles}
             disabled={true}
           />
         );
@@ -170,22 +178,24 @@ class DeployButton extends React.Component<IProps> {
         return (
           <Button
             text={'STATUS ERROR'}
-            styles={errorStyle}
-            customStyles={this.props.customStyles}
+            classes={{
+              button: clsx(classes.errorStyle, externalClasses?.button),
+            }}
+            customStyles={customStyles}
             disabled={true}
           />
         );
     }
-  }
+  };
 
-  render() {
-    return this.getButton();
-  }
-}
+  return getButton();
+};
 
-const ComposedDeployButton: Component<IProps> = compose<IProps>(
+const ComposedDeployButton: React.ComponentClass<IProps> = compose<
+  IProps,
+  IProps
+>(
   pure,
-  Radium,
   setDisplayName('DeployButton'),
 )(DeployButton);
 

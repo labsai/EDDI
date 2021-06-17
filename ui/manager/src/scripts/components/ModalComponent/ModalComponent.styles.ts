@@ -1,13 +1,13 @@
-import { CSSProperties } from 'react';
 import { DARK_BLUE_COLOR } from '../../../styles/DefaultStylingProperties';
+import { makeStyles } from '@material-ui/core/styles';
 
-const styles: CSSProperties = {
+const useStyles = makeStyles({
   close: {
-    ':focus': {
+    '&:focus': {
       color: '#000',
       cursor: 'pointer',
     },
-    ':hover': {
+    '&:hover': {
       color: '#000',
       cursor: 'pointer',
     },
@@ -49,7 +49,7 @@ const styles: CSSProperties = {
   },
   descriptors: {
     display: 'flex',
-    flex: '1',
+    flex: 1,
     marginTop: '20px',
     overflow: 'hidden',
   },
@@ -62,7 +62,7 @@ const styles: CSSProperties = {
     fontSize: '14px',
     paddingTop: '5px',
     paddingBottom: '5px',
-    flex: '1',
+    flex: 1,
     overflow: 'hidden',
     maxWidth: '300px',
     maxHeight: '80px',
@@ -108,11 +108,11 @@ const styles: CSSProperties = {
     paddingTop: '50px',
   },
   modalTopHeaderCenter: {
-    flex: '1',
+    flex: 1,
   },
   packageData: {
     backgroundColor: '#FFF',
-    flex: '1',
+    flex: 1,
     minHeight: '200px',
     minWidth: '500px',
     overflow: 'hidden',
@@ -194,11 +194,11 @@ const styles: CSSProperties = {
     marginRight: '5px',
   },
   collapsibleButton: {
-    ':focus': {
+    '&:focus': {
       backgroundColor: '#f9d648',
       outline: 'none',
     },
-    ':hover': {
+    '&:hover': {
       backgroundColor: '#f9d648',
     },
     display: 'flex',
@@ -212,16 +212,61 @@ const styles: CSSProperties = {
   },
   collapsibleRightSign: {
     textAlign: 'right',
-    flex: '1',
+    flex: 1,
   },
   exampleData: {
     color: '#7A849E',
     fontSize: '14px',
     backgroundColor: '#fdf1bf',
-    flex: '1',
+    flex: 1,
     overflow: 'hidden',
     whiteSpace: 'pre-wrap',
     padding: '5px 20px 5px 20px',
   },
-};
-export default styles;
+  createNewBotButton: {
+    backgroundColor: '#0070D2',
+    border: '0px',
+    borderRadius: '4px',
+    color: '#FFFFFF',
+    fontSize: '12px',
+    height: '36px',
+    marginLeft: '60%',
+    marginTop: '8px',
+    textAlign: 'center',
+    minWidth: '100px',
+  },
+  createNewConfigModalButton: {
+    cursor: 'pointer',
+  },
+  updatePackageCreateNewBotButton: {
+    cursor: 'pointer',
+    marginLeft: '32px',
+  },
+  button: {
+    marginLeft: 'auto',
+  },
+  pluginList: {
+    display: 'grid',
+    marginTop: '20px',
+    marginBottom: '20px',
+    marginRight: '50px',
+    marginLeft: '50px',
+    gridGap: '20px',
+    gridTemplateColumns: 'repeat(auto-fill, minmax(252px, 1fr))',
+    minHeight: '5px',
+    minWidth: '5px',
+  },
+  greenButton: {
+    backgroundColor: '#4BCA81',
+    marginLeft: '10px',
+
+    '&:hover': {
+      backgroundColor: '#4BCA81',
+    },
+    '&:active': {
+      backgroundColor: '#4BCA81',
+    },
+  },
+});
+
+export default useStyles;

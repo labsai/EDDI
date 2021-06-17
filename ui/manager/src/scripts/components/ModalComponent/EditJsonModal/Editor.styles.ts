@@ -1,12 +1,12 @@
-import { CSSProperties } from 'react';
 import { LIGHT_GREY_COLOR } from '../../../../styles/DefaultStylingProperties';
+import { makeStyles } from '@material-ui/core/styles';
 
-const styles: CSSProperties = {
+const useStyles = makeStyles({
   expand: {
     position: 'fixed',
     height: '100%',
     width: '100%',
-    zIndex: '0',
+    zIndex: 0,
     top: '0',
     left: '0',
     marginBottom: '0px',
@@ -31,6 +31,6 @@ const styles: CSSProperties = {
     marginLeft: '2px',
     color: LIGHT_GREY_COLOR,
   },
-};
+});
 
-export default styles;
+export default useStyles;

@@ -1,49 +1,18 @@
-import * as React from 'react';
-import * as Modal from 'react-modal';
-import styles from './ModalComponent.styles';
-import './ModalComponent.styles.scss';
-import { Component, compose, pure, setDisplayName } from 'recompose';
-import {
-  createNewPackage,
-  getAllDefaultPluginTypes,
-  IDefaultPluginTypes,
-} from '../utils/AxiosFunctions';
-import PluginSelect from '../PackageDetailView/DropDownComponents/PluginSelect';
-import * as renderIf from 'render-if';
-import Plugin from '../PackageDetailView/PluginBoxes/Plugin';
-import { IOptions } from '../PackageDetailView/PackageView';
 import * as _ from 'lodash';
-import eddiApiActionDispatchers from '../../actions/EddiApiActionDispatchers';
+import * as React from 'react';
 import { connect } from 'react-redux';
-import { defaultPluginTypesSelector } from '../../selectors/PluginSelectors';
-import { historyPush } from '../../history';
+import { compose, pure, setDisplayName } from 'recompose';
+import eddiApiActionDispatchers from '../../actions/EddiApiActionDispatchers';
 import modalActionDispatchers from '../../actions/ModalActionDispatchers';
-
-const customStyles = {
-  createNewBotButton: {
-    backgroundColor: '#0070D2',
-    border: '0px',
-    borderRadius: '4px',
-    color: '#FFFFFF',
-    cursor: 'pointer',
-    fontSize: '12px',
-    height: '36px',
-    marginLeft: '32px',
-    textAlign: 'center',
-    minWidth: '100px',
-  },
-  pluginList: {
-    display: 'grid',
-    marginTop: '20px',
-    marginBottom: '20px',
-    marginRight: '50px',
-    marginLeft: '50px',
-    gridGap: '20px',
-    gridTemplateColumns: 'repeat(auto-fill, minmax(252px, 1fr))',
-    minHeight: '5px',
-    minWidth: '5px',
-  },
-};
+import { historyPush } from '../../history';
+import { defaultPluginTypesSelector } from '../../selectors/PluginSelectors';
+import PluginSelect from '../PackageDetailView/DropDownComponents/PluginSelect';
+import { IOptions } from '../PackageDetailView/PackageView';
+import Plugin from '../PackageDetailView/PluginBoxes/Plugin';
+import { createNewPackage, IDefaultPluginTypes } from '../utils/AxiosFunctions';
+import useStyles from './ModalComponent.styles';
+import './ModalComponent.styles.scss';
+import clsx from 'clsx';
 
 interface IPublicProps {
   packageName: string;
@@ -52,39 +21,36 @@ interface IPublicProps {
 interface IPrivateProps extends IPublicProps {
   defaultPluginTypes: IDefaultPluginTypes[];
 }
-interface IState {
-  addedPlugins: IOptions[];
-  defaultPluginTypes: IDefaultPluginTypes[];
-  extensionKey: number;
-}
 
-class UpdatePackageModal extends React.Component<IPrivateProps, IState> {
-  constructor(props) {
-    super(props);
-    this.state = {
-      addedPlugins: [],
-      defaultPluginTypes: [],
-      extensionKey: 0,
-    };
-  }
-  async componentDidMount() {
+const UpdatePackageModal = (props: IPrivateProps) => {
+  const classes = useStyles();
+
+  const [addedPlugins, setAddedPlugins] = React.useState<IOptions[]>([]);
+  const [extensionKey, setExtensionKey] = React.useState<number>(0);
+
+  React.useEffect(() => {
     eddiApiActionDispatchers.fetchDefaultPluginTypesAction();
-  }
-  getButtonStyle() {
-    if (!this.props.packageName) {
-      return { ...customStyles.createNewBotButton, backgroundColor: '#c4c9d2' };
-    } else {
-      return { ...customStyles.createNewBotButton, backgroundColor: '#0070D2' };
-    }
-  }
+  }, []);
 
-  createNewPackage = async () => {
-    const list = this.state.addedPlugins.map(a => ({
+  const getButtonStyle = () => {
+    if (!props.packageName) {
+      return {
+        backgroundColor: '#c4c9d2',
+      };
+    } else {
+      return {
+        backgroundColor: '#0070D2',
+      };
+    }
+  };
+
+  const handleCreateNewPackage = async () => {
+    const list = addedPlugins.map((a) => ({
       type: a.type,
     }));
     const packageID = await createNewPackage(
-      this.props.packageName,
-      this.props.packageDescription,
+      props.packageName,
+      props.packageDescription,
       list,
     );
     modalActionDispatchers.closeModal();
@@ -92,76 +58,78 @@ class UpdatePackageModal extends React.Component<IPrivateProps, IState> {
     historyPush(`/packageview/${packageID}`);
   };
 
-  addPluginsInModal = (addedPlugin: IOptions) => {
-    const plugins = this.state.addedPlugins.concat({
+  const addPluginsInModal = (addedPlugin: IOptions) => {
+    const plugins = addedPlugins.concat({
       ...addedPlugin,
-      extensionKey: this.state.extensionKey,
+      extensionKey: extensionKey,
     });
-    this.setState({
-      addedPlugins: plugins,
-      extensionKey: this.state.extensionKey + 1,
-    });
-  };
-  deletePlugin = (extensionKey: number) => {
-    this.setState({
-      addedPlugins: this.state.addedPlugins.filter(
-        ext => !_.isEqual(ext.extensionKey, extensionKey),
-      ),
-    });
+    setAddedPlugins(plugins);
+    setExtensionKey(extensionKey + 1);
   };
 
-  render() {
-    return (
-      <div>
-        <div style={styles.tallModalHeader}>
-          <div style={styles.modalTopHeader}>
-            <div style={styles.headerTextUpdate}> {this.props.packageName}</div>
-            <div style={styles.modalTopHeaderCenter} />
-            <button
-              style={this.getButtonStyle()}
-              onClick={this.createNewPackage}>
-              {'Save'}
-            </button>
-          </div>
-          <div style={styles.modalBottomHeader}>
-            <div style={styles.descriptionHeaderText}>
-              <div style={styles.descriptorsUpdate}>
-                {this.props.packageDescription}
-              </div>
-            </div>
-          </div>
+  const deletePlugin = (extensionKey: number) => {
+    setAddedPlugins(
+      addedPlugins.filter((ext) => !_.isEqual(ext.extensionKey, extensionKey)),
+    );
+  };
+
+  return (
+    <div>
+      <div className={classes.tallModalHeader}>
+        <div className={classes.modalTopHeader}>
+          <div className={classes.headerTextUpdate}> {props.packageName}</div>
+          <div className={classes.modalTopHeaderCenter} />
+          <button
+            style={getButtonStyle()}
+            className={clsx(
+              classes.createNewBotButton,
+              classes.updatePackageCreateNewBotButton,
+            )}
+            onClick={handleCreateNewPackage}>
+            {'Save'}
+          </button>
         </div>
-        <div style={styles.updateModalContent}>
-          {renderIf(this.state.addedPlugins)(() => (
-            <div style={customStyles.pluginList}>
-              {this.state.addedPlugins.map((extension, key) => (
-                <Plugin
-                  key={key}
-                  pluginType={extension}
-                  editDisabled={true}
-                  deletePlugin={this.deletePlugin}
-                />
-              ))}
-            </div>
-          ))}
-          <div style={styles.pluginText}>
-            {'Add plugins'}
-            <div style={styles.pluginSelector}>
-              <PluginSelect
-                packageExtensions={this.props.defaultPluginTypes.map(plugin => {
-                  return plugin;
-                })}
-                addExtension={this.addPluginsInModal}
-              />
+        <div className={classes.modalBottomHeader}>
+          <div className={classes.descriptionHeaderText}>
+            <div className={classes.descriptorsUpdate}>
+              {props.packageDescription}
             </div>
           </div>
         </div>
       </div>
-    );
-  }
-}
+      <div className={classes.updateModalContent}>
+        {!!addedPlugins && (
+          <div className={classes.pluginList}>
+            {addedPlugins.map((extension, key) => (
+              <Plugin
+                key={key}
+                pluginType={extension}
+                editDisabled={true}
+                deletePlugin={deletePlugin}
+              />
+            ))}
+          </div>
+        )}
+        <div className={classes.pluginText}>
+          {'Add plugins'}
+          <div className={classes.pluginSelector}>
+            <PluginSelect
+              packageExtensions={props.defaultPluginTypes.map((plugin) => {
+                return plugin;
+              })}
+              addExtension={addPluginsInModal}
+            />
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+};
 
-const ComposedUpdatePackageModal: Component<IProps> = compose<IProps>(
+const ComposedUpdatePackageModal: React.ComponentClass<IPublicProps> = compose<
+  IPrivateProps,
+  IPublicProps
+>(
   pure,
   setDisplayName('Modal'),
   connect(defaultPluginTypesSelector),

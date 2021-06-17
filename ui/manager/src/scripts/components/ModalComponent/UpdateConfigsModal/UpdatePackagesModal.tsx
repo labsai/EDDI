@@ -1,33 +1,17 @@
-import * as React from 'react';
-import '../ModalComponent.styles.scss';
-import { Link, browserHistory } from 'react-router-dom';
-import { Component, compose, pure, setDisplayName } from 'recompose';
-import Package from '../AddPackagesModal/Package';
-import {
-  getBotsUsingPackage,
-  getPackagesUsingPlugin,
-  IBot,
-  IPackage,
-} from '../../utils/AxiosFunctions';
-import {
-  packagesSelector,
-  packagesWithPluginSelector,
-} from '../../../selectors/PackageSelectors';
-import { connect } from 'react-redux';
 import * as _ from 'lodash';
+import * as React from 'react';
+import { connect } from 'react-redux';
+import ClimbingBoxLoader from 'react-spinners/ClimbingBoxLoader';
+import { compose, pure, setDisplayName } from 'recompose';
 import eddiApiActionDispatchers from '../../../actions/EddiApiActionDispatchers';
-import Parser from '../../utils/Parser';
-import styles from '../AddPackagesModal/AddPackagesModal.styles';
 import ModalActionDispatchers from '../../../actions/ModalActionDispatchers';
-import * as renderIf from 'render-if';
+import { packagesWithPluginSelector } from '../../../selectors/PackageSelectors';
 import BlueButton from '../../Assets/Buttons/BlueButton';
-import { ClimbingBoxLoader } from 'react-spinners';
+import { getPackagesUsingPlugin, IPackage } from '../../utils/AxiosFunctions';
+import Parser from '../../utils/Parser';
+import useStyles from '../AddPackagesModal/AddPackagesModal.styles';
+import '../ModalComponent.styles.scss';
 import SelectableConfig from './SelectableConfig';
-
-interface IState {
-  selectedPackages: string[];
-  packages: IPackage[];
-}
 
 interface IPublicProps {
   pluginResource: string;
@@ -39,112 +23,103 @@ interface IPrivateProps extends IPublicProps {
   packages: IPackage[];
 }
 
-class UpdatePackagesModal extends React.Component<IPrivateProps, IState> {
-  constructor(props) {
-    super(props);
-    this.state = {
-      selectedPackages: [],
-      packages: null,
-    };
-  }
+const UpdatePackagesModal = ({ pluginResource }: IPrivateProps) => {
+  const [selectedPackages, setSelectedPackages] = React.useState<string[]>([]);
+  const [packages, setPackages] = React.useState<IPackage[]>(null);
 
-  componentDidMount() {
-    this.loadPackagesUsingPlugin();
-  }
+  const classes = useStyles();
 
-  closeModal = () => {
+  React.useEffect(() => {
+    loadPackagesUsingPlugin();
+  }, []);
+
+  const closeModal = () => {
     ModalActionDispatchers.closeModal();
   };
 
-  updateSelectedPackages = () => {
+  const updateSelectedPackages = () => {
     eddiApiActionDispatchers.updatePackagesAction(
-      this.props.pluginResource,
-      this.state.selectedPackages,
+      pluginResource,
+      selectedPackages,
     );
-    this.closeModal();
+    closeModal();
   };
 
-  async loadPackagesUsingPlugin() {
+  const loadPackagesUsingPlugin = async () => {
     eddiApiActionDispatchers.fetchPackagesUsingPluginAction(
-      this.props.pluginResource,
+      pluginResource,
       true,
     );
     const packages: IPackage[] = await getPackagesUsingPlugin(
-      this.props.pluginResource,
+      pluginResource,
       true,
     );
-    this.setState({ packages });
-  }
+    setPackages(packages);
+  };
 
-  selectPackage = (packageResource: string) => {
-    if (this.state.selectedPackages.includes(packageResource)) {
-      this.setState({
-        selectedPackages: this.state.selectedPackages.filter(
-          pack => pack !== packageResource,
-        ),
-      });
+  const selectPackage = (packageResource: string) => {
+    if (selectedPackages.includes(packageResource)) {
+      setSelectedPackages(
+        selectedPackages.filter((pack) => pack !== packageResource),
+      );
     } else {
-      this.setState({
-        selectedPackages: this.state.selectedPackages.concat(packageResource),
-      });
+      setSelectedPackages(selectedPackages.concat(packageResource));
     }
   };
 
-  isPackageSelected(packageResource: string): boolean {
-    return !!this.state.selectedPackages.find(
-      selectedPackage =>
+  const isPackageSelected = (packageResource: string): boolean => {
+    return !!selectedPackages.find(
+      (selectedPackage) =>
         Parser.getId(packageResource) === Parser.getId(selectedPackage),
     );
-  }
+  };
 
-  render() {
-    return (
-      <div>
-        <div style={styles.header}>
-          <div style={styles.topHeader}>
-            <div
-              style={
-                styles.title
-              }>{`Select packages to update any old versions of the extension to latest`}</div>
-            <div style={styles.centerFlex} />
-            <BlueButton
-              customStyles={styles.button}
-              onClick={this.updateSelectedPackages}
-              text={'Update selected'}
-            />
-          </div>
-          <div style={styles.bottomHeader}>
-            <div style={styles.centerFlex} />
-            <div style={styles.lastModified}>{'Last modified'}</div>
-          </div>
+  return (
+    <div>
+      <div className={classes.header}>
+        <div className={classes.topHeader}>
+          <div
+            className={
+              classes.title
+            }>{`Select packages to update any old versions of the extension to latest`}</div>
+          <div className={classes.centerFlex} />
+          <BlueButton
+            classes={{ button: classes.button }}
+            onClick={updateSelectedPackages}
+            text={'Update selected'}
+          />
         </div>
-        <div>
-          {renderIf(!_.isEmpty(this.state.packages))(() => (
-            <div style={styles.packageList}>
-              {this.state.packages.map((pack, i) => (
-                <SelectableConfig
-                  key={i}
-                  selected={this.isPackageSelected(pack.resource)}
-                  descriptor={pack}
-                  handleClick={this.selectPackage}
-                />
-              ))}
-            </div>
-          ))}
-          {renderIf(!this.state.packages)(() => (
-            <div style={styles.loadingWrapper}>
-              <ClimbingBoxLoader loading />
-            </div>
-          ))}
-          {renderIf(this.state.packages && _.isEmpty(this.state.packages))(
-            () => <div>{'Found no packages that can be updated'}</div>,
-          )}
+        <div className={classes.bottomHeader}>
+          <div className={classes.centerFlex} />
+          <div className={classes.lastModified}>{'Last modified'}</div>
         </div>
       </div>
-    );
-  }
-}
-const ComposedUpdatePackagesModal: Component<IPrivateProps> = compose<
+      <div>
+        {!_.isEmpty(packages) && (
+          <div className={classes.packageList}>
+            {packages.map((pack, i) => (
+              <SelectableConfig
+                key={i}
+                selected={isPackageSelected(pack.resource)}
+                descriptor={pack}
+                handleClick={selectPackage}
+              />
+            ))}
+          </div>
+        )}
+        {!packages && (
+          <div className={classes.loadingWrapper}>
+            <ClimbingBoxLoader loading />
+          </div>
+        )}
+        {!!packages && _.isEmpty(packages) && (
+          <div>{'Found no packages that can be updated'}</div>
+        )}
+      </div>
+    </div>
+  );
+};
+const ComposedUpdatePackagesModal: React.ComponentClass<IPublicProps> = compose<
   IPrivateProps,
   IPublicProps
 >(

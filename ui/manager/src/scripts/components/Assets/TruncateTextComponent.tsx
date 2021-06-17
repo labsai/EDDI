@@ -1,13 +1,15 @@
+import { ClassNameMap } from '@material-ui/styles/withStyles';
 import * as React from 'react';
-import { Component, compose, pure, setDisplayName } from 'recompose';
-import { CSSProperties } from 'react';
-import * as renderIf from 'render-if';
+import { makeStyles } from '@material-ui/core/styles';
+import { compose, pure, setDisplayName } from 'recompose';
+import clsx from 'clsx';
 
-const styles: CSSProperties = {
+const useStyles = makeStyles({
   truncate: {
     overflow: 'hidden',
     textOverflow: 'ellipsis',
     whiteSpace: 'nowrap',
+    maxWidth: ({ length }: { length: number }) => `${length}ch`,
   },
   textContainer: {
     display: 'flex',
@@ -20,70 +22,58 @@ const styles: CSSProperties = {
     color: '#16325C',
     whiteSpace: 'nowrap',
   },
-};
-
-interface IState {
-  isExpanded: boolean;
-}
+});
 
 interface IProps {
+  style?: React.CSSProperties;
   text: string;
   length: number;
+  classes?: ClassNameMap;
 }
 
-class TruncateTextComponent extends React.Component<IProps, IState> {
-  constructor(props) {
-    super(props);
-    this.state = {
-      isExpanded: false,
-    };
-  }
+const TruncateTextComponent = ({
+  length,
+  text,
+  classes: externalClasses,
+}: IProps) => {
+  const classes = useStyles({ length });
+  const [isExpanded, setisExpanded] = React.useState(false);
 
-  toggleText = () => {
-    this.setState({ isExpanded: !this.state.isExpanded });
+  const toggleText = () => {
+    setisExpanded(!isExpanded);
   };
 
-  getTextStyling() {
-    if (this.state.isExpanded) {
-      return {};
-    } else {
-      return {
-        ...styles.truncate,
-        maxWidth: `${this.props.length}ch`,
-      };
-    }
-  }
-  render() {
-    return (
-      <div>
-        {renderIf(this.props.text)(() => (
-          <div>
-            <div style={styles.textContainer}>
-              <div style={this.getTextStyling()}>{this.props.text}</div>
-              {renderIf(
-                !this.state.isExpanded &&
-                  this.props.text.length > this.props.length,
-              )(() => (
-                <a style={styles.textButton} onClick={this.toggleText}>
-                  {'See more'}
-                </a>
-              ))}
+  return (
+    <div>
+      {!!text && (
+        <div>
+          <div className={clsx(classes.textContainer, externalClasses?.text)}>
+            <div className={clsx({ [classes.truncate]: !isExpanded })}>
+              {text}
             </div>
-            {renderIf(this.state.isExpanded)(() => (
-              <div>
-                <a style={styles.textButton} onClick={this.toggleText}>
-                  {'See less'}
-                </a>
-              </div>
-            ))}
+            {!isExpanded && text.length > length && (
+              <a className={classes.textButton} onClick={toggleText}>
+                {'See more'}
+              </a>
+            )}
           </div>
-        ))}
-      </div>
-    );
-  }
-}
+          {isExpanded && (
+            <div>
+              <a className={classes.textButton} onClick={toggleText}>
+                {'See less'}
+              </a>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+};
 
-const ComposedTruncateTextComponent: Component<IProps> = compose<IProps>(
+const ComposedTruncateTextComponent: React.ComponentClass<IProps> = compose<
+  IProps,
+  IProps
+>(
   pure,
   setDisplayName('TruncateTextComponent'),
 )(TruncateTextComponent);

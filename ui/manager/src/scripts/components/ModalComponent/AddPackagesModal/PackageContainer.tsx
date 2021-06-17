@@ -1,5 +1,5 @@
 import * as React from 'react';
-import { Component, compose, pure, setDisplayName } from 'recompose';
+import { compose, pure, setDisplayName } from 'recompose';
 import eddiApiActionDispatchers from '../../../actions/EddiApiActionDispatchers';
 import Parser from '../../utils/Parser';
 import Package from './Package';
@@ -10,60 +10,42 @@ interface IProps {
   handleClick(resource: string): void;
 }
 
-interface IState {
-  selectedPackageResource: string;
-}
+const PackageContainer = (props: IProps) => {
+  const [selectedPackageResource, setSelectedPackageResource] = React.useState(
+    props.packageResource,
+  );
 
-class PackageContainer extends React.Component<IProps, IState> {
-  constructor(props) {
-    super(props);
-    this.state = {
-      selectedPackageResource: this.props.packageResource,
-    };
-  }
+  React.useEffect(() => {
+    setSelectedPackageResource(props.packageResource);
+  }, [props.packageResource]);
 
-  async componentDidMount() {
-    this.setState({
-      selectedPackageResource: this.props.packageResource,
-    });
-  }
-
-  componentDidUpdate(prevProps) {
-    if (prevProps !== this.props) {
-      this.setState({
-        selectedPackageResource: this.props.packageResource,
-      });
-    }
-  }
-
-  selectVersion = (resource: string, newVersion: number) => {
+  const selectVersion = (resource: string, newVersion: number) => {
     const selectedPackageResource = Parser.replaceResourceVersion(
       resource,
       newVersion,
     );
-    this.setState({
-      selectedPackageResource,
-    });
+    setSelectedPackageResource(selectedPackageResource);
     eddiApiActionDispatchers.fetchPackageAction(selectedPackageResource);
   };
 
-  handleClick = () => {
-    this.props.handleClick(this.state.selectedPackageResource);
+  const handleClick = () => {
+    props.handleClick(selectedPackageResource);
   };
 
-  render() {
-    return (
-      <Package
-        selected={this.props.selected}
-        handleClick={this.handleClick}
-        packageResource={this.state.selectedPackageResource}
-        selectVersion={this.selectVersion}
-      />
-    );
-  }
-}
+  return (
+    <Package
+      selected={props.selected}
+      handleClick={handleClick}
+      packageResource={selectedPackageResource}
+      selectVersion={selectVersion}
+    />
+  );
+};
 
-const ComposedPackageContainer: Component<IProps> = compose<IProps, IProps>(
+const ComposedPackageContainer: React.ComponentClass<IProps> = compose<
+  IProps,
+  IProps
+>(
   pure,
   setDisplayName('PackageContainer'),
 )(PackageContainer);

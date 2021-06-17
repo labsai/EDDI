@@ -1,17 +1,15 @@
-import * as React from 'react';
-import BotView from './BotView';
-import { IBot } from '../utils/AxiosFunctions';
-import { Component, compose, pure, setDisplayName } from 'recompose';
-import HomeButtonComponent from '../HomeButton/HomeButtonComponent';
-import * as Radium from 'radium';
-import { specificBotSelector } from '../../selectors/BotSelectors';
-import { connect } from 'react-redux';
-import eddiApiActionDispatchers from '../../actions/EddiApiActionDispatchers';
-import styles from '../Bots/Botlist.styles';
 import * as _ from 'lodash';
-import { ClimbingBoxLoader } from 'react-spinners';
-import * as renderIf from 'render-if';
+import * as React from 'react';
+import { connect } from 'react-redux';
+import ClimbingBoxLoader from 'react-spinners/ClimbingBoxLoader';
+import { compose, pure, setDisplayName } from 'recompose';
+import eddiApiActionDispatchers from '../../actions/EddiApiActionDispatchers';
+import { specificBotSelector } from '../../selectors/BotSelectors';
+import useStyles from '../Bots/Botlist.styles';
+import HomeButtonComponent from '../HomeButton/HomeButtonComponent';
+import { IBot } from '../utils/AxiosFunctions';
 import { BOT, BOT_PATH } from '../utils/EddiTypes';
+import BotView from './BotView';
 
 interface IPublicProps {
   botId: string;
@@ -24,53 +22,47 @@ interface IPrivateProps extends IPublicProps {
   isLoading: boolean;
 }
 
-class BotInfo extends React.Component<IPrivateProps> {
-  constructor(props) {
-    super(props);
-  }
-
-  componentDidMount() {
-    if (_.isEmpty(this.props.botVersion)) {
-      eddiApiActionDispatchers.fetchCurrentBotAction(this.props.botId);
+const BotInfo = ({
+  botId,
+  botVersion,
+  bot,
+  error,
+  isLoading,
+}: IPrivateProps) => {
+  const classes = useStyles();
+  React.useEffect(() => {
+    if (_.isEmpty(botVersion)) {
+      eddiApiActionDispatchers.fetchCurrentBotAction(botId);
     } else {
       eddiApiActionDispatchers.fetchBotAction(
-        `${BOT}${BOT_PATH}/${this.props.botId}?version=${
-          this.props.botVersion
-        }`,
+        `${BOT}${BOT_PATH}/${botId}?version=${botVersion}`,
       );
     }
-  }
+  }, []);
 
-  render() {
-    return (
-      <div>
-        <HomeButtonComponent />
-        {renderIf(this.props.isLoading)(() => (
-          <div style={styles.loadingWrapper}>
-            <ClimbingBoxLoader loading />
-          </div>
-        ))}
-        {renderIf(!this.props.isLoading)(() => (
-          <div>
-            {renderIf(this.props.error)(() => (
-              <p>{'Error: Could not load bot'}</p>
-            ))}
-            {renderIf(!this.props.error && _.isEmpty(this.props.bot))(() => (
-              <p>{'Bot not found'}</p>
-            ))}
-            {renderIf(!this.props.error && !_.isEmpty(this.props.bot))(() => (
-              <BotView bot={this.props.bot} />
-            ))}
-          </div>
-        ))}
-      </div>
-    );
-  }
-}
+  return (
+    <div>
+      <HomeButtonComponent />
+      {isLoading ? (
+        <div className={classes.loadingWrapper}>
+          <ClimbingBoxLoader loading />
+        </div>
+      ) : (
+        <div>
+          {!!error && <p>{'Error: Could not load bot'}</p>}
+          {!error && _.isEmpty(bot) && <p>{'Bot not found'}</p>}
+          {!error && !_.isEmpty(bot) && <BotView bot={bot} />}
+        </div>
+      )}
+    </div>
+  );
+};
 
-const ComposedBotInfo: Component<IProps> = compose<IProps>(
+const ComposedBotInfo: React.ComponentClass<IPublicProps> = compose<
+  IPrivateProps,
+  IPublicProps
+>(
   pure,
-  Radium,
   connect(specificBotSelector),
   setDisplayName('BotInfo'),
 )(BotInfo);

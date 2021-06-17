@@ -1,13 +1,13 @@
+import { makeStyles } from '@material-ui/core/styles';
 import * as React from 'react';
-import { Component, compose, pure, setDisplayName } from 'recompose';
-import * as Radium from 'radium';
-import { CSSProperties } from 'react';
-import { IDetailedDescriptor } from '../../utils/AxiosFunctions';
+import { compose, pure, setDisplayName } from 'recompose';
 import modalActionDispatchers from '../../../actions/ModalActionDispatchers';
+import { IDetailedDescriptor } from '../../utils/AxiosFunctions';
+import clsx from 'clsx';
 
-const styles: CSSProperties = {
+const useStyles = makeStyles({
   content: {
-    ':hover': {
+    '&:hover': {
       backgroundColor: '#F4F6F9',
     },
     display: 'inline-flex',
@@ -32,7 +32,7 @@ const styles: CSSProperties = {
     marginTop: '4px',
     marginLeft: '5px',
   },
-};
+});
 
 interface IProps {
   descriptor: IDetailedDescriptor;
@@ -41,33 +41,40 @@ interface IProps {
   onClick(): void;
 }
 
-class NameAndVersion extends React.Component<IProps> {
-  getNameStyling() {
-    return this.props.isSmallName ? styles.smallName : styles.name;
-  }
+const NameAndVersion = ({
+  descriptor,
+  usedByOlderVersion,
+  isSmallName,
+  onClick,
+}: IProps) => {
+  const classes = useStyles();
 
-  buttonClick = () => {
-    this.props.onClick();
+  const buttonClick = () => {
+    onClick();
     modalActionDispatchers.closeModal();
   };
 
-  render() {
-    return (
-      <div style={styles.content} onClick={this.buttonClick}>
-        <div style={this.getNameStyling()}>
-          {this.props.descriptor.name || this.props.descriptor.id}
-        </div>
-        <div style={styles.version}>{`v${this.props.descriptor.version}${
-          !!this.props.usedByOlderVersion ? '*' : ''
-        }`}</div>
+  return (
+    <div className={classes.content} onClick={buttonClick}>
+      <div
+        className={clsx({
+          [classes.smallName]: isSmallName,
+          [classes.name]: !isSmallName,
+        })}>
+        {descriptor.name || descriptor.id}
       </div>
-    );
-  }
-}
+      <div className={classes.version}>{`v${descriptor.version}${
+        !!usedByOlderVersion ? '*' : ''
+      }`}</div>
+    </div>
+  );
+};
 
-const ComposedNameAndVersion: Component<IProps> = compose<IProps>(
+const ComposedNameAndVersion: React.ComponentClass<IProps> = compose<
+  IProps,
+  IProps
+>(
   pure,
-  Radium,
   setDisplayName('NameAndVersion'),
 )(NameAndVersion);
 

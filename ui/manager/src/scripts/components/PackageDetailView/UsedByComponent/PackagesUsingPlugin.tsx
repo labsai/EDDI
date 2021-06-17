@@ -1,16 +1,13 @@
-import * as React from 'react';
-import { Component, compose, pure, setDisplayName } from 'recompose';
-import * as Radium from 'radium';
+import { makeStyles } from '@material-ui/core/styles';
 import * as _ from 'lodash';
-import Package from './Package';
+import * as React from 'react';
+import { compose, pure, setDisplayName } from 'recompose';
 import eddiApiActionDispatchers from '../../../actions/EddiApiActionDispatchers';
-import * as renderIf from 'render-if';
 import { IPlugin } from '../../utils/AxiosFunctions';
-import Parser from '../../utils/Parser';
-import { IUsedResource } from '../../utils/Parser';
-import { CSSProperties } from 'react';
+import Parser, { IUsedResource } from '../../utils/Parser';
+import Package from './Package';
 
-const styles: CSSProperties = {
+const useStyles = makeStyles({
   content: {
     width: '100%',
   },
@@ -25,102 +22,85 @@ const styles: CSSProperties = {
     display: 'inline-block',
     minWidth: 'fit-content',
   },
-};
+});
 
 interface IProps {
   plugin: IPlugin;
-  isSmallName: boolean;
+  isSmallName?: boolean;
 }
 
-interface IState {
-  expandList: boolean;
-}
+const PackagesUsingPlugin = ({ plugin, isSmallName }: IProps) => {
+  const [expandList, setExpandList] = React.useState(false);
+  const [usedByPackagesShort, setUsedByPackagesShort] =
+    React.useState<IUsedResource[]>(null);
+  const [usedByPackages, setUsedByPackages] = React.useState<string[]>(null);
 
-class PackagesUsingPlugin extends React.Component<IProps, IState> {
-  constructor(props) {
-    super(props);
-    this.state = {
-      expandList: false,
-    };
-  }
+  const classes = useStyles();
 
-  componentDidMount() {
-    if (!_.isEmpty(this.props.plugin)) {
-      eddiApiActionDispatchers.fetchPackagesUsingPluginAction(
-        this.props.plugin.resource,
-        false,
-      );
+  React.useEffect(() => {
+    eddiApiActionDispatchers.fetchPackagesUsingPluginAction(
+      plugin.resource,
+      false,
+    );
+  }, []);
+
+  React.useEffect(() => {
+    if (!_.isEmpty(plugin.usedByPackages)) {
+      setUsedByPackagesShort(Parser.shortenResourceList(plugin.usedByPackages));
+      setUsedByPackages(plugin.usedByPackages);
     }
-  }
-  componentDidUpdate(prevProps) {
-    if (!this.props.plugin.usedByPackages && prevProps !== this.props) {
-      eddiApiActionDispatchers.fetchPackagesUsingPluginAction(
-        this.props.plugin.resource,
-        false,
-      );
-    }
-  }
+  }, [plugin.usedByPackages]);
 
-  expandList = () => {
-    this.setState({ expandList: !this.state.expandList });
+  const handleExpandList = () => {
+    setExpandList(!expandList);
   };
 
-  render() {
-    let shortList: IUsedResource[];
-    if (!_.isEmpty(this.props.plugin.usedByPackages)) {
-      shortList = Parser.shortenResourceList(this.props.plugin.usedByPackages);
-    }
-    return (
-      <div>
-        {renderIf(!_.isEmpty(this.props.plugin.usedByPackages))(() => (
-          <div style={styles.content}>
-            {renderIf(this.state.expandList)(() => (
-              <div style={styles.list}>
-                {this.props.plugin.usedByPackages.map(resource => (
-                  <Package
-                    key={resource}
-                    packageResource={resource}
-                    isSmallName={!!this.props.isSmallName}
-                  />
-                ))}
-              </div>
-            ))}
-            {renderIf(!this.state.expandList)(() => (
-              <div style={styles.list}>
-                {shortList.map(r => (
-                  <Package
-                    key={r.resource}
-                    packageResource={r.resource}
-                    usedByOlderVersion={r.usedByOlderVersion}
-                    isSmallName={!!this.props.isSmallName}
-                  />
-                ))}
-              </div>
-            ))}
-            {renderIf(
-              _.size(this.props.plugin.usedByPackages) > _.size(shortList) &&
-                !this.state.expandList,
-            )(() => (
-              <div style={styles.seeMore} onClick={this.expandList}>
-                {'...See more'}
-              </div>
-            ))}
-          </div>
-        ))}
-        {renderIf(
-          _.size(this.props.plugin.usedByPackages) > _.size(shortList) &&
-            this.state.expandList,
-        )(() => (
-          <div style={styles.seeMore} onClick={this.expandList}>
-            {'See less'}
-          </div>
-        ))}
-      </div>
-    );
-  }
-}
+  return (
+    <div>
+      {!_.isEmpty(usedByPackages) && (
+        <div className={classes.content}>
+          {expandList ? (
+            <div className={classes.list}>
+              {usedByPackages.map((resource) => (
+                <Package
+                  key={resource}
+                  packageResource={resource}
+                  isSmallName={!!isSmallName}
+                />
+              ))}
+            </div>
+          ) : (
+            <div className={classes.list}>
+              {usedByPackagesShort.map((r) => (
+                <Package
+                  key={r.resource}
+                  packageResource={r.resource}
+                  usedByOlderVersion={r.usedByOlderVersion}
+                  isSmallName={!!isSmallName}
+                />
+              ))}
+            </div>
+          )}
+          {_.size(usedByPackages) > _.size(usedByPackagesShort) && !expandList && (
+            <div className={classes.seeMore} onClick={handleExpandList}>
+              {'...See more'}
+            </div>
+          )}
+        </div>
+      )}
+      {_.size(usedByPackages) > _.size(usedByPackagesShort) && expandList && (
+        <div className={classes.seeMore} onClick={handleExpandList}>
+          {'See less'}
+        </div>
+      )}
+    </div>
+  );
+};
 
-const ComposedPackagesUsingPlugin: Component<IProps> = compose<IProps>(
+const ComposedPackagesUsingPlugin: React.ComponentClass<IProps> = compose<
+  IProps,
+  IProps
+>(
   pure,
   setDisplayName('PackagesUsingPlugin'),
 )(PackagesUsingPlugin);

@@ -1,4 +1,4 @@
-import { CSSProperties } from 'react';
+import { makeStyles } from '@material-ui/core/styles';
 import {
   BLUE_COLOR,
   DARK_GREY_COLOR,
@@ -13,9 +13,9 @@ import {
   SMALL_FONT,
 } from '../../../../styles/DefaultStylingProperties';
 
-const styles: CSSProperties = {
+const useStyles = makeStyles({
   pluginCenter: {
-    flex: '1',
+    flex: 1,
   },
   pluginContainer: {
     display: 'inline-block',
@@ -46,7 +46,7 @@ const styles: CSSProperties = {
     marginTop: '-5px',
   },
   clickablePluginBox: {
-    ':hover': {
+    '&:hover': {
       border: `1px solid ${BLUE_COLOR}`,
     },
     cursor: 'pointer',
@@ -79,7 +79,7 @@ const styles: CSSProperties = {
     marginTop: '15px',
   },
   centerFlex: {
-    flex: '1',
+    flex: 1,
   },
   addExtensionButton: {
     fontSize: SMALL_FONT,
@@ -88,7 +88,7 @@ const styles: CSSProperties = {
     marginTop: '5px',
   },
   addResourceButton: {
-    ':hover': {
+    '&:hover': {
       color: GREY_COLOR,
     },
     cursor: 'pointer',
@@ -132,7 +132,7 @@ const styles: CSSProperties = {
     textAlign: 'left',
   },
   updateAvailableButton: {
-    ':hover': {
+    '&:hover': {
       boxShadow: '0 0 3px #0070d2',
     },
     backgroundColor: '#ffffff',
@@ -173,5 +173,17 @@ const styles: CSSProperties = {
     marginRight: '10px',
     marginLeft: 'auto',
   },
-};
-export default styles;
+  extensionList: {
+    display: 'grid',
+    marginTop: '10px',
+    marginLeft: '10px',
+    marginRight: '10px',
+    marginBottom: '10px',
+    gridGap: '10px 20px',
+    gridTemplateColumns: 'repeat(auto-fill, minmax(240px, 1fr))',
+    minHeight: '5px',
+    minWidth: '5px',
+  },
+});
+
+export default useStyles;

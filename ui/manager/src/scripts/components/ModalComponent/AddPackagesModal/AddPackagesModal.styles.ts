@@ -1,4 +1,4 @@
-import { CSSProperties } from 'react';
+import { makeStyles } from '@material-ui/core/styles';
 import {
   DARK_BLUE_COLOR,
   DARK_GREY_COLOR,
@@ -7,7 +7,7 @@ import {
   SMALL_FONT,
 } from '../../../../styles/DefaultStylingProperties';
 
-const styles: CSSProperties = {
+const useStyles = makeStyles({
   header: {
     height: '156px',
     backgroundColor: LIGHT_GREY_COLOR3,
@@ -23,7 +23,7 @@ const styles: CSSProperties = {
     marginLeft: '50px',
   },
   centerFlex: {
-    flex: '1',
+    flex: 1,
   },
   button: {
     width: '165px',
@@ -56,7 +56,7 @@ const styles: CSSProperties = {
     marginTop: '-40px',
   },
   closeContainerCenter: {
-    flexGrow: '1',
+    flexGrow: 1,
   },
   loadingWrapper: {
     alignItems: 'center',
@@ -73,5 +73,6 @@ const styles: CSSProperties = {
     marginLeft: 'auto',
     marginRight: 'auto',
   },
-};
-export default styles;
+});
+
+export default useStyles;

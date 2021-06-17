@@ -1,14 +1,9 @@
 import * as React from 'react';
-import styles from '../ModalComponent.styles';
-import '../ModalComponent.styles.scss';
-import { Component, compose, pure, setDisplayName } from 'recompose';
-import * as renderIf from 'render-if';
-import Parser from '../../utils/Parser';
+import { compose, pure, setDisplayName } from 'recompose';
 import { getPostExample } from '../../utils/EddiConfigExampleData';
-
-interface IState {
-  showExample: boolean;
-}
+import Parser from '../../utils/Parser';
+import useStyles from '../ModalComponent.styles';
+import '../ModalComponent.styles.scss';
 
 interface IPublicProps {
   type: string;
@@ -16,43 +11,36 @@ interface IPublicProps {
 
 interface IPrivateProps extends IPublicProps {}
 
-class JsonExample extends React.Component<IPrivateProps, IState> {
-  constructor(props) {
-    super(props);
-    this.state = {
-      showExample: false,
-    };
-  }
+const JsonExample = ({ type }: IPrivateProps) => {
+  const classes = useStyles();
+  const [showExample, setShowExample] = React.useState(false);
 
-  onButtonClick = () => {
-    this.setState({
-      showExample: !this.state.showExample,
-    });
+  const onButtonClick = () => {
+    setShowExample(!showExample);
   };
 
-  render() {
-    const typeName = Parser.getPluginName(this.props.type, false);
-    return (
-      <div>
-        <button onClick={this.onButtonClick} style={styles.collapsibleButton}>
-          <div>{`${
-            this.state.showExample ? 'Hide' : 'Show'
-          } ${typeName.toLowerCase()} example data`}</div>
-          <div style={styles.collapsibleRightSign}>
-            {this.state.showExample ? '-' : '+'}
-          </div>
-        </button>
-        {renderIf(this.state.showExample)(() => (
-          <div style={styles.exampleData}>
-            {getPostExample(this.props.type)}
-          </div>
-        ))}
-      </div>
-    );
-  }
-}
+  const typeName = Parser.getPluginName(type, false);
+  return (
+    <div>
+      <button onClick={onButtonClick} className={classes.collapsibleButton}>
+        <div>{`${
+          showExample ? 'Hide' : 'Show'
+        } ${typeName.toLowerCase()} example data`}</div>
+        <div className={classes.collapsibleRightSign}>
+          {showExample ? '-' : '+'}
+        </div>
+      </button>
+      {showExample && (
+        <div className={classes.exampleData}>{getPostExample(type)}</div>
+      )}
+    </div>
+  );
+};
 
-const ComposedJsonExample: Component<IPrivateProps> = compose<IPrivateProps>(
+const ComposedJsonExample: React.ComponentClass<IPublicProps> = compose<
+  IPrivateProps,
+  IPublicProps
+>(
   pure,
   setDisplayName('JsonExample'),
 )(JsonExample);

@@ -1,17 +1,15 @@
-import * as React from 'react';
-import * as renderIf from 'render-if';
 import * as _ from 'lodash';
-import * as Radium from 'radium';
-import { Component, compose, pure, setDisplayName } from 'recompose';
+import * as React from 'react';
 import { connect } from 'react-redux';
-import styles from './ConversationList.styles';
-import { ClimbingBoxLoader } from 'react-spinners';
-import Conversation from './Conversation';
-import { botConversationSelector } from '../../../selectors/ConversationSelectors';
+import ClimbingBoxLoader from 'react-spinners/ClimbingBoxLoader';
+import { compose, pure, setDisplayName } from 'recompose';
 import eddiApiActionDispatchers from '../../../actions/EddiApiActionDispatchers';
-import { IConversation } from '../../utils/AxiosFunctions';
-import { DEFAULT_LIMIT } from '../../utils/ApiFunctions';
+import { botConversationSelector } from '../../../selectors/ConversationSelectors';
 import BlueButton from '../../Assets/Buttons/BlueButton';
+import { DEFAULT_LIMIT } from '../../utils/ApiFunctions';
+import { IConversation } from '../../utils/AxiosFunctions';
+import Conversation from './Conversation';
+import useStyles from './ConversationList.styles';
 
 interface IPublicProps {
   botResource: string;
@@ -25,113 +23,99 @@ interface IPrivateProps extends IPublicProps {
   conversationsLoaded: number;
 }
 
-interface IState {
-  loading: boolean;
-}
+const ConversationList = ({
+  botResource,
+  conversations,
+  isLoading,
+  allConversationsLoaded,
+  error,
+  conversationsLoaded,
+}: IPrivateProps) => {
+  const [loading, setLoading] = React.useState(false);
 
-class ConversationList extends React.Component<IPrivateProps, IState> {
-  constructor(props) {
-    super(props);
-    this.state = {
-      loading: false,
-    };
-  }
+  const classes = useStyles();
 
-  async componentDidMount() {
-    this.loadMore();
-  }
+  React.useEffect(() => {
+    loadMore();
+  }, []);
 
-  componentDidUpdate(prevProps) {
-    if (prevProps.isLoading && !this.props.isLoading) {
-      this.setState({ loading: false });
+  React.useEffect(() => {
+    if (!isLoading) {
+      setLoading(false);
     }
-    if (prevProps.botResource !== this.props.botResource) {
+  }, [isLoading]);
+
+  React.useEffect(() => {
+    if (botResource) {
       eddiApiActionDispatchers.fetchConversationsAction(
         DEFAULT_LIMIT,
         0,
         null,
-        this.props.botResource,
+        botResource,
       );
-      this.setState({ loading: true });
+      setLoading(true);
     }
-  }
+  }, [botResource]);
 
-  loadMore = () => {
-    const fetchIndex = Math.floor(
-      this.props.conversationsLoaded / DEFAULT_LIMIT,
-    );
-    if (this.state.loading || _.isEmpty(this.props.conversations)) {
+  const loadMore = () => {
+    const fetchIndex = Math.floor(conversationsLoaded / DEFAULT_LIMIT);
+    if (loading || _.isEmpty(conversations)) {
       return;
     }
-    this.setState({ loading: true });
+    setLoading(true);
     eddiApiActionDispatchers.fetchConversationsAction(
       DEFAULT_LIMIT,
       fetchIndex,
       null,
-      this.props.botResource,
+      botResource,
     );
   };
 
-  render() {
-    return (
-      <div style={styles.conversationList}>
-        <div style={styles.title}>
-          <div>{'Bot name'}</div>
-          <div style={styles.stepSize}>{'Step size'}</div>
-          <div style={styles.environment}>{'Environment'}</div>
-          <div style={styles.conversationState}>{'Conversation state'}</div>
-          <div style={styles.lastModifiedOn}>{'Last message'}</div>
-          <div style={styles.createdOn}>{'Created on'}</div>
-        </div>
-        {renderIf(this.props.isLoading && _.isEmpty(this.props.conversations))(
-          () => (
-            <div style={styles.loadingWrapper}>
-              <ClimbingBoxLoader loading />
-            </div>
-          ),
-        )}
-        {renderIf(this.props.error)(() => (
-          <p>{'Error: Could not load conversations'}</p>
-        ))}
-        {renderIf(
-          !this.props.isLoading &&
-            !this.props.error &&
-            _.isEmpty(this.props.conversations),
-        )(() => <p>{`There are no conversations yet`}</p>)}
-        {renderIf(!this.props.error && !_.isEmpty(this.props.conversations))(
-          () => (
-            <div>
-              {this.props.conversations.map(conversation => (
-                <Conversation
-                  key={conversation.resource}
-                  conversation={conversation}
-                />
-              ))}
-            </div>
-          ),
-        )}
-        {renderIf(
-          !this.props.allConversationsLoaded &&
-            !this.props.isLoading &&
-            !this.state.loading,
-        )(() => (
-          <BlueButton
-            customStyles={styles.loadMoreButton}
-            onClick={this.loadMore}
-            text={'Load More'}
-          />
-        ))}
+  return (
+    <div className={classes.conversationList}>
+      <div className={classes.title}>
+        <div>{'Bot name'}</div>
+        <div className={classes.stepSize}>{'Step size'}</div>
+        <div className={classes.environment}>{'Environment'}</div>
+        <div className={classes.conversationState}>{'Conversation state'}</div>
+        <div className={classes.lastModifiedOn}>{'Last message'}</div>
+        <div className={classes.createdOn}>{'Created on'}</div>
       </div>
-    );
-  }
-}
+      {isLoading && _.isEmpty(conversations) && (
+        <div className={classes.loadingWrapper}>
+          <ClimbingBoxLoader loading />
+        </div>
+      )}
+      {!isLoading && !!error && <p>{'Error: Could not load conversations'}</p>}
+      {!isLoading && !error && _.isEmpty(conversations) && (
+        <p>{`There are no conversations yet`}</p>
+      )}
+      {!error && !_.isEmpty(conversations) && (
+        <div>
+          {conversations.map((conversation) => (
+            <Conversation
+              key={conversation.resource}
+              conversation={conversation}
+            />
+          ))}
+        </div>
+      )}
+      {!allConversationsLoaded && !isLoading && !loading && (
+        <BlueButton
+          classes={{ button: classes.loadMoreButton }}
+          onClick={loadMore}
+          text={'Load More'}
+        />
+      )}
+    </div>
+  );
+};
 
-const ComposedConversationList: Component<IPublicProps> = compose<
+const ComposedConversationList: React.ComponentClass<IPublicProps> = compose<
   IPublicProps,
   IPrivateProps
 >(
   pure,
-  Radium,
   connect(botConversationSelector),
   setDisplayName('ConversationList'),
 )(ConversationList);

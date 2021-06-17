@@ -1,17 +1,17 @@
 'use strict';
 var __extends =
   (this && this.__extends) ||
-  (function() {
+  (function () {
     var extendStatics =
       Object.setPrototypeOf ||
       ({ __proto__: [] } instanceof Array &&
-        function(d, b) {
+        function (d, b) {
           d.__proto__ = b;
         }) ||
-      function(d, b) {
+      function (d, b) {
         for (var p in b) if (b.hasOwnProperty(p)) d[p] = b[p];
       };
-    return function(d, b) {
+    return function (d, b) {
       extendStatics(d, b);
       function __() {
         this.constructor = d;
@@ -25,7 +25,7 @@ var __extends =
 var __assign =
   (this && this.__assign) ||
   Object.assign ||
-  function(t) {
+  function (t) {
     for (var s, i = 1, n = arguments.length; i < n; i++) {
       s = arguments[i];
       for (var p in s)
@@ -55,11 +55,11 @@ var customStyles = {
     minWidth: '100px',
   },
 };
-var CreateNewConfigModal = (function(_super) {
+var CreateNewConfigModal = (function (_super) {
   __extends(CreateNewConfigModal, _super);
   function CreateNewConfigModal(props) {
     var _this = _super.call(this, props) || this;
-    _this.nextButton = function() {
+    _this.nextButton = function () {
       ModalActionDispatchers_1.default.showCreateNewConfig2Modal(
         _this.props.type,
         _this.state.name,
@@ -74,7 +74,7 @@ var CreateNewConfigModal = (function(_super) {
     };
     return _this;
   }
-  CreateNewConfigModal.prototype.getButtonStyle = function() {
+  CreateNewConfigModal.prototype.getButtonStyle = function () {
     if (!this.state.name) {
       return __assign({}, customStyles.createNewBotButton, {
         backgroundColor: '#c4c9d2',
@@ -86,7 +86,7 @@ var CreateNewConfigModal = (function(_super) {
       });
     }
   };
-  CreateNewConfigModal.prototype.render = function() {
+  CreateNewConfigModal.prototype.render = function () {
     var _this = this;
     var typeName = Parser_1.default.getPluginName(this.props.type, false);
     return (
@@ -99,7 +99,7 @@ var CreateNewConfigModal = (function(_super) {
             <div style={ModalComponent_styles_1.default.modalTopHeaderCenter} />
             <button
               disabled={!this.state.name}
-              onClick={function() {
+              onClick={function () {
                 _this.nextButton();
               }}
               style={this.getButtonStyle()}>
@@ -116,7 +116,7 @@ var CreateNewConfigModal = (function(_super) {
                 name={'name'}
                 style={ModalComponent_styles_1.default.inputBoxName}
                 placeholder={'Give the ' + typeName + ' a name..'}
-                onChange={function(e) {
+                onChange={function (e) {
                   return _this.setState({
                     name: e.target.value,
                   });
@@ -132,7 +132,7 @@ var CreateNewConfigModal = (function(_super) {
                 name={'description'}
                 style={ModalComponent_styles_1.default.inputBox}
                 placeholder={'Give the ' + typeName + ' a short description..'}
-                onChange={function(e) {
+                onChange={function (e) {
                   return _this.setState({
                     description: e.target.value,
                   });

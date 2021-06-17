@@ -1,18 +1,16 @@
-import * as React from 'react';
-import * as renderIf from 'render-if';
 import * as _ from 'lodash';
-import * as Radium from 'radium';
-import { Component, compose, pure, setDisplayName } from 'recompose';
-import eddiApiActionDispatchers from '../../actions/EddiApiActionDispatchers';
-import { connect } from 'react-redux';
-import { getAPIUrl } from '../utils/ApiFunctions';
+import * as React from 'react';
 import * as InfiniteScrollTypes from 'react-infinite-scroller';
-import PluginContainer from './PluginContainer';
-import styles from './PluginList.styles';
+import { useSelector } from 'react-redux';
+import { compose, pure, setDisplayName } from 'recompose';
+import eddiApiActionDispatchers from '../../actions/EddiApiActionDispatchers';
 import { pluginsSelector } from '../../selectors/PluginSelectors';
 import { IPlugin } from '../utils/AxiosFunctions';
 import Parser from '../utils/Parser';
-const InfiniteScroll = require('react-infinite-scroller') as InfiniteScrollTypes;
+import PluginContainer from './PluginContainer';
+import useStyles from './PluginList.styles';
+const InfiniteScroll =
+  require('react-infinite-scroller') as InfiniteScrollTypes;
 
 interface IPublicProps {
   filterText: string;
@@ -27,121 +25,101 @@ interface IPrivateProps extends IPublicProps {
   loadedPlugins: number;
 }
 
-interface IState {
-  apiUrl: string;
-  loading: boolean;
-}
+const PluginList = ({ error, filterText, pluginType }: IPrivateProps) => {
+  console.log('pluginType: ', pluginType);
+  const [loading, setLoading] = React.useState(false);
+  const { isLoading, plugins, isAllPluginsLoaded, loadedPlugins } = useSelector(
+    (state) => pluginsSelector(state, pluginType),
+  );
 
-class PluginList extends React.Component<IPrivateProps, IState> {
-  constructor(props) {
-    super(props);
-    this.state = {
-      apiUrl: '',
-      loading: false,
-    };
-  }
+  const classes = useStyles();
 
-  async componentDidMount() {
-    this.loadMore();
-    this.setState({ apiUrl: await getAPIUrl() });
-  }
-
-  componentDidUpdate(prevProps) {
-    if (prevProps.pluginType !== this.props.pluginType) {
-      this.loadMore();
+  React.useEffect(() => {
+    if (!isLoading) {
+      loadMore();
     }
-    if (prevProps.isLoading && !this.props.isLoading) {
-      this.setState({ loading: false });
-    }
-  }
+  }, [pluginType]);
 
-  filterPlugins() {
-    if (!_.isEmpty(this.props.filterText)) {
-      return this.props.plugins.filter(
-        plugin =>
-          plugin.name
-            .toLowerCase()
-            .includes(this.props.filterText.toLowerCase()) ||
-          plugin.id.toLowerCase().includes(this.props.filterText.toLowerCase()),
+  React.useEffect(() => {
+    if (!isLoading) {
+      setLoading(false);
+    }
+  }, [isLoading]);
+
+  const filterPlugins = () => {
+    if (!_.isEmpty(filterText)) {
+      return plugins.filter(
+        (plugin) =>
+          plugin.name.toLowerCase().includes(filterText.toLowerCase()) ||
+          plugin.id.toLowerCase().includes(filterText.toLowerCase()),
       );
     } else {
-      return this.props.plugins;
+      return plugins;
     }
-  }
+  };
 
-  loadMore(props = this.props) {
-    if (this.state.loading || !props.pluginType) {
+  const loadMore = () => {
+    if (loading || !pluginType) {
       return;
     }
-    this.setState({ loading: true });
-    if (props.plugins.length < 5 && !props.isAllPluginsLoaded) {
-      eddiApiActionDispatchers.fetchPluginsAction(props.pluginType, 5, 0);
+    setLoading(true);
+    if (plugins.length < 5 && !isAllPluginsLoaded) {
+      eddiApiActionDispatchers.fetchPluginsAction(pluginType, 5, 0);
     } else {
       eddiApiActionDispatchers.fetchPluginsAction(
-        props.pluginType,
+        pluginType,
         5,
-        Math.floor(props.loadedPlugins / 5),
+        Math.floor(loadedPlugins / 5),
       );
       return;
     }
-  }
+  };
 
-  render() {
-    const pluginList: IPlugin[] = this.filterPlugins();
-    const pluginName = Parser.getFullPluginName(
-      this.props.pluginType,
-      true,
-      true,
-    );
-    return (
-      <div>
-        <div style={styles.topHeader}>
-          <div style={styles.title}>{pluginName}</div>
-          <div style={styles.lastModified}>{'Last Modified'}</div>
-        </div>
-        {renderIf(this.props.error)(() => (
-          <p>{`Error: Could not load ${pluginName.toLowerCase()}`}</p>
-        ))}
-        {renderIf(
-          !this.props.isLoading &&
-            !this.props.error &&
-            _.isEmpty(this.props.plugins),
-        )(() => <p>{`There are no ${pluginName.toLowerCase()} yet`}</p>)}
-        {renderIf(!this.props.error && !_.isEmpty(this.props.plugins))(() => (
-          <div style={styles.pluginList}>
-            {renderIf(_.isEmpty(pluginList))(() => (
-              <p>{`Found no ${pluginName.toLowerCase()} matching: "${
-                this.props.filterText
-              }"`}</p>
-            ))}
-            <InfiniteScroll
-              pageStart={0}
-              loadMore={() => this.loadMore()}
-              hasMore={!this.props.isAllPluginsLoaded}
-              loader={
-                <div className="loader" key={0}>
-                  Loading ...
-                </div>
-              }>
-              {pluginList.map(plugin => (
-                <PluginContainer
-                  key={plugin.id}
-                  pluginResource={plugin.resource}
-                />
-              ))}
-            </InfiniteScroll>
-          </div>
-        ))}
+  const pluginList: IPlugin[] = filterPlugins();
+  const pluginName = Parser.getFullPluginName(pluginType, true, true);
+  return (
+    <div>
+      <div className={classes.topHeader}>
+        <div className={classes.title}>{pluginName}</div>
+        <div className={classes.lastModified}>{'Last Modified'}</div>
       </div>
-    );
-  }
-}
+      {error && <p>{`Error: Could not load ${pluginName.toLowerCase()}`}</p>}
+      {!isLoading && !error && _.isEmpty(plugins) && (
+        <p>{`There are no ${pluginName.toLowerCase()} yet`}</p>
+      )}
+      {!error && !_.isEmpty(plugins) && (
+        <div className={classes.pluginList}>
+          {_.isEmpty(pluginList) && (
+            <p>{`Found no ${pluginName.toLowerCase()} matching: "${filterText}"`}</p>
+          )}
+          <InfiniteScroll
+            pageStart={0}
+            loadMore={loadMore}
+            hasMore={!isAllPluginsLoaded}
+            loader={
+              <div className="loader" key={0}>
+                Loading ...
+              </div>
+            }>
+            {pluginList.map((plugin) => (
+              <PluginContainer
+                key={plugin.id}
+                pluginResource={plugin.resource}
+              />
+            ))}
+          </InfiniteScroll>
+        </div>
+      )}
+    </div>
+  );
+};
 
-const ComposedPluginList: Component<IPublicProps> = compose<
+const ComposedPluginList: React.ComponentClass<IPublicProps> = compose<
   IPublicProps,
   IPrivateProps
->(pure, connect(pluginsSelector), Radium, setDisplayName('PluginList'))(
-  PluginList,
-);
+>(
+  pure,
+  setDisplayName('PluginList'),
+)(PluginList);
 
 export default ComposedPluginList;

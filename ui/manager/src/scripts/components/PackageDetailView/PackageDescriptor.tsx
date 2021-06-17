@@ -1,12 +1,10 @@
+import { makeStyles } from '@material-ui/core/styles';
 import * as React from 'react';
-import * as Radium from 'radium';
-import { CSSProperties } from 'react';
-import { Component, compose, pure, setDisplayName } from 'recompose';
-import * as moment from 'moment';
+import { compose, pure, setDisplayName } from 'recompose';
 import { IPackage } from '../utils/AxiosFunctions';
 import { getDate } from '../utils/DateFormat';
 
-const styles: CSSProperties = {
+const useStyles = makeStyles({
   content: {
     color: '#16325C',
     fontSize: '13px',
@@ -30,36 +28,42 @@ const styles: CSSProperties = {
     whiteSpace: 'nowrap',
     width: 'fit-content',
   },
-};
+});
 
 interface IProps {
   packagePayload: IPackage;
 }
 
-const PackageDescriptor: React.StatelessComponent<IProps> = (props: IProps) => (
-  <div style={styles.descriptors}>
-    <div>
-      <div style={styles.title}>{'Description'}</div>
-      <div style={styles.content}>
-        {props.packagePayload.description || 'N/A'}
+const PackageDescriptor: React.StatelessComponent<IProps> = (props: IProps) => {
+  const classes = useStyles();
+  return (
+    <div className={classes.descriptors}>
+      <div>
+        <div className={classes.title}>{'Description'}</div>
+        <div className={classes.content}>
+          {props.packagePayload.description || 'N/A'}
+        </div>
+      </div>
+      <div className={classes.dateTime}>
+        <div className={classes.title}>{'Created'}</div>
+        <div className={classes.content}>
+          {getDate(props.packagePayload.createdOn)}
+        </div>
+      </div>
+      <div className={classes.dateTime}>
+        <div className={classes.title}>{'Last Modified'}</div>
+        <div className={classes.content}>
+          {getDate(props.packagePayload.lastModifiedOn)}
+        </div>
       </div>
     </div>
-    <div style={styles.dateTime}>
-      <div style={styles.title}>{'Created'}</div>
-      <div style={styles.content}>
-        {getDate(props.packagePayload.createdOn)}
-      </div>
-    </div>
-    <div style={styles.dateTime}>
-      <div style={styles.title}>{'Last Modified'}</div>
-      <div style={styles.content}>
-        {getDate(props.packagePayload.lastModifiedOn)}
-      </div>
-    </div>
-  </div>
-);
+  );
+};
 
-const ComposedPackageDescriptor: Component<IProps> = compose<IProps>(
+const ComposedPackageDescriptor: React.ComponentClass<IProps> = compose<
+  IProps,
+  IProps
+>(
   pure,
   setDisplayName('PackageDescriptor'),
 )(PackageDescriptor);

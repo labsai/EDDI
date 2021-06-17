@@ -1,38 +1,36 @@
-import * as React from 'react';
-import { Component, compose, pure, setDisplayName } from 'recompose';
-import * as Radium from 'radium';
-import {
-  BLUE_COLOR,
-  LIGHT_GREY_COLOR,
-} from '../../../../../styles/DefaultStylingProperties';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
-import styles from './EditorButton.styles';
-import * as renderIf from 'render-if';
-import { CSSProperties } from 'react';
+import { ClassNameMap } from '@material-ui/styles/withStyles';
+import clsx from 'clsx';
+import * as React from 'react';
+import { compose, pure, setDisplayName } from 'recompose';
+import { LIGHT_GREY_COLOR } from '../../../../../styles/DefaultStylingProperties';
+import useStyles from './EditorButton.styles';
 
 interface IProps {
   checked: boolean;
-  customStyles: CSSProperties;
+  classes?: ClassNameMap;
   onClick(): void;
 }
 
-const CheckBox: React.StatelessComponent<IProps> = (props: IProps) => (
-  <div
-    onClick={props.onClick}
-    style={{ ...styles.button, ...props.customStyles }}>
-    {renderIf(props.checked)(() => (
-      <FontAwesomeIcon
-        style={styles.icon}
-        icon={['fas', 'check']}
-        color={LIGHT_GREY_COLOR}
-      />
-    ))}
-  </div>
-);
+const CheckBox: React.StatelessComponent<IProps> = (props: IProps) => {
+  const classes = useStyles();
+  return (
+    <div
+      onClick={props.onClick}
+      className={clsx(classes.button, props.classes.checkbox)}>
+      {props.checked && (
+        <FontAwesomeIcon
+          className={classes.icon}
+          icon={['fas', 'check']}
+          color={LIGHT_GREY_COLOR}
+        />
+      )}
+    </div>
+  );
+};
 
-const ComposedCheckBox: Component<IProps> = compose<IProps>(
+const ComposedCheckBox: React.ComponentClass<IProps> = compose<IProps, IProps>(
   pure,
-  Radium,
   setDisplayName('CheckBox'),
 )(CheckBox);
 

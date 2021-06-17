@@ -1,7 +1,7 @@
 import { Reducer, Action } from 'redux';
 import { IBot, IConversation } from '../components/utils/AxiosFunctions';
 import * as _ from 'lodash';
-import * as update from 'immutability-helper';
+import update from 'immutability-helper';
 import {
   END_CONVERSATION_SUCCESS,
   FETCH_CONVERSATION,
@@ -89,10 +89,10 @@ const ConversationReducer: IConversationReducer = (
               )
             ) {
               return _.uniqBy(
-                conversations.concat(
-                  (action as IFetchConversationsSuccessAction).conversations,
-                ),
-                conversation => conversation.resource,
+                (
+                  action as IFetchConversationsSuccessAction
+                ).conversations.concat(conversations),
+                (conversation) => conversation.resource,
               );
             } else {
               return conversations;
@@ -134,7 +134,7 @@ const ConversationReducer: IConversationReducer = (
         },
         conversations: {
           $apply: (conversations: IConversation[]) => {
-            return conversations.map(conversation => {
+            return conversations.map((conversation) => {
               if (
                 conversation.resource.includes(
                   (action as IFetchConversationSuccessAction).conversationId,
@@ -157,7 +157,7 @@ const ConversationReducer: IConversationReducer = (
       return update(state, {
         conversations: {
           $apply: (conversations: IConversation[]) => {
-            return conversations.map(conversation => {
+            return conversations.map((conversation) => {
               if (
                 conversation.resource.includes(
                   (action as IEndConversationSuccessAction).conversationId,

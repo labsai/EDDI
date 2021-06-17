@@ -4,8 +4,8 @@ services:
     build:
       context: .
       args:
-        EDDI_API_URL: "http://localhost:7070"
-        READ_ONLY_DOMAIN: "https://app.labs.ai"
+        EDDI_API_URL: 'http://localhost:7070'
+        READ_ONLY_DOMAIN: 'https://app.labs.ai'
         PORT: 7071
         AUTH_METHOD: 'keycloak'
         AUTH_URL: 'https://auth.labs.ai/auth'
@@ -13,8 +13,8 @@ services:
         AUTH_CLIENT_ID: 'eddi-config-ui'
     image: labsai/eddi-config-ui:local
     environment:
-      EDDI_API_URL: "http://localhost:7070"
-      READ_ONLY_DOMAIN: "https://app.labs.ai"
+      EDDI_API_URL: 'http://localhost:7070'
+      READ_ONLY_DOMAIN: 'https://app.labs.ai'
       PORT: 7071
       AUTH_METHOD: 'keycloak'
       AUTH_URL: 'https://auth.labs.ai/auth'

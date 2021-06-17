@@ -1,20 +1,24 @@
+import * as _ from 'lodash';
 import {
-  createStore,
   applyMiddleware,
   compose,
-  Store,
+  createStore,
   Middleware,
+  Store,
   StoreEnhancer,
 } from 'redux';
-import createSagaMiddleware from 'redux-saga';
-import reducers from '../reducers/index';
-import { SagaMiddleware } from 'redux-saga';
-import { IAppState } from '../reducers/index';
-import * as _ from 'lodash';
+import { Persistor, persistReducer, persistStore } from 'redux-persist';
+import storage from 'redux-persist/lib/storage';
+import createSagaMiddleware, { SagaMiddleware } from 'redux-saga';
+import reducers, { IAppState } from '../reducers/index';
+
+const persistConfig = {
+  key: 'root',
+  storage,
+  whitelist: ['authenticationState'],
+};
 
 export const sagaMiddleware: SagaMiddleware<any> = createSagaMiddleware();
-
-export const store: Store<IAppState> = configureStore();
 
 declare const __DEV__: boolean; // provided by webpack.DefinePlugin
 
@@ -39,7 +43,14 @@ function configureStore(initialState?: any) {
     devTools,
   );
 
-  const store: Store<IAppState> = createStore(reducers, initialState, enhancer);
+  const persistedReducer = persistReducer(persistConfig, reducers);
+
+  const store: Store<IAppState> = createStore(
+    persistedReducer,
+    initialState,
+    enhancer,
+  );
+  const persistor: Persistor = persistStore(store);
 
   if (module.hot) {
     module.hot.accept(() => {
@@ -48,5 +59,8 @@ function configureStore(initialState?: any) {
     });
   }
 
-  return store;
+  return { store, persistor };
 }
+
+export const persistor: Persistor = configureStore().persistor;
+export const store: Store<IAppState> = configureStore().store;

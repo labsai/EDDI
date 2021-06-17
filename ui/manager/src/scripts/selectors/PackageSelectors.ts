@@ -11,9 +11,9 @@ export interface IPackageSelectorProps {
 
 export function packagesSelector(state: IAppState) {
   const packages = state.packageState.packages.filter(
-    pkg => pkg.version === pkg.currentVersion,
+    (pkg) => pkg.version === pkg.currentVersion,
   );
-  const sortedPackages = packages.sort(function(a, b) {
+  const sortedPackages = packages.sort(function (a, b) {
     return b.lastModifiedOn - a.lastModifiedOn;
   });
   return {
@@ -35,14 +35,14 @@ export function packagesWithPluginSelector(
   props: IPackagesWithPluginSelectorProps,
 ) {
   const packages = state.packageState.packages.filter(
-    pkg =>
+    (pkg) =>
       pkg.version === pkg.currentVersion &&
-      (!_.isEmpty(pkg.packageData) &&
-        JSON.stringify(pkg.packageData).includes(
-          Parser.getId(props.pluginResource),
-        )),
+      !_.isEmpty(pkg.packageData) &&
+      JSON.stringify(pkg.packageData).includes(
+        Parser.getId(props.pluginResource),
+      ),
   );
-  const sortedPackages = packages.sort(function(a, b) {
+  const sortedPackages = packages.sort(function (a, b) {
     return b.lastModifiedOn - a.lastModifiedOn;
   });
   return {
@@ -57,7 +57,7 @@ export function packageSelector(
   props: IPackageSelectorProps,
 ) {
   const pkg = state.packageState.packages.find(
-    pkg => pkg.resource === props.packageResource,
+    (pkg) => pkg.resource === props.packageResource,
   );
   return {
     packagePayload: pkg,
@@ -77,9 +77,9 @@ export function latestPackageSelector(
   props: ILatestPackageSelectorProps,
 ) {
   const packages = state.packageState.packages.filter(
-    pack => pack.id === props.packageId,
+    (pack) => pack.id === props.packageId,
   );
-  const packagePayload = _.maxBy(packages, p => p.version);
+  const packagePayload = _.maxBy(packages, (p) => p.version);
   return {
     packagePayload,
     error: state.packageState.error,
@@ -99,13 +99,13 @@ export function specificPackageSelector(
   let packagePayload: IPackage;
   if (!_.isEmpty(props.version)) {
     packagePayload = state.packageState.packages.find(
-      pack =>
+      (pack) =>
         pack.id === props.packageId &&
         pack.version.toString() === props.version,
     );
   } else {
     packagePayload = state.packageState.packages.find(
-      pack =>
+      (pack) =>
         pack.id === props.packageId && pack.version === pack.currentVersion,
     );
   }

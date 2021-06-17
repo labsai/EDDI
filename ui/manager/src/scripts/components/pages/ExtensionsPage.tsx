@@ -1,9 +1,8 @@
 import * as React from 'react';
-import TopBarComponent from '../TopBar/TopBarComponent';
-import styles from '../App.style';
-import { Component, compose, pure, setDisplayName } from 'recompose';
-import Parser from '../utils/Parser';
+import { compose, pure, setDisplayName } from 'recompose';
+import useStyles from '../App.style';
 import PluginList from '../Plugins/PluginList';
+import TopBarComponent from '../TopBar/TopBarComponent';
 import {
   BEHAVIOR,
   GITCALLS,
@@ -12,6 +11,7 @@ import {
   PROPERTYSETTER,
   REGULAR_DICTIONARY,
 } from '../utils/EddiTypes';
+import Parser from '../utils/Parser';
 import { pageEnum } from './pageEnum';
 
 const eddiLogo = require('../../../public/images/eddi-logo.png');
@@ -20,30 +20,21 @@ interface IRouteProps {
   location: { search: string };
 }
 
-interface IState {
-  filterText: string;
-}
+const ExtensionsPage = ({ location }: IRouteProps) => {
+  const [filterText, setFilterText] = React.useState('');
 
-interface IProps extends IRouteProps {}
+  const classes = useStyles();
 
-class ExtensionsPage extends React.Component<IProps, IState> {
-  constructor(props) {
-    super(props);
-    this.state = {
-      filterText: '',
-    };
-  }
-
-  filter = (text: string) => {
-    this.setState({ filterText: text });
+  const filter = (text: string) => {
+    setFilterText(text);
   };
 
-  getTypeFromQueryString() {
-    const type = Parser.getQueryStrings(this.props.location.search).type;
+  const getTypeFromQueryString = () => {
+    const type = Parser.getQueryStrings(location.search).type;
     return type;
-  }
+  };
 
-  getEddiType(type: string) {
+  const getEddiType = (type: string) => {
     switch (type) {
       case 'dictionary':
         return REGULAR_DICTIONARY;
@@ -60,33 +51,31 @@ class ExtensionsPage extends React.Component<IProps, IState> {
       default:
         return;
     }
-  }
+  };
 
-  render() {
-    const type = this.getTypeFromQueryString();
-    const eddiType = this.getEddiType(type);
-    return (
+  const type = getTypeFromQueryString();
+  const eddiType = getEddiType(type);
+  return (
+    <div>
+      <img src={eddiLogo} className={classes.eddiLogo} />
       <div>
-        <img src={eddiLogo} style={styles.eddiLogo} />
-        <div>
-          <TopBarComponent
-            page={pageEnum[type]}
-            filter={this.filter}
-            type={eddiType}
-          />
-          <PluginList
-            filterText={this.state.filterText}
-            pluginType={eddiType}
-          />
-        </div>
+        <TopBarComponent
+          page={pageEnum[type]}
+          filter={filter}
+          type={eddiType}
+        />
+        <PluginList filterText={filterText} pluginType={eddiType} />
       </div>
-    );
-  }
-}
+    </div>
+  );
+};
 
-const ComposedExtensionsPage: Component<IPublicProps> = compose<
-  IPublicProps,
-  IPrivateProps
->(pure, setDisplayName('ExtensionsPage'))(ExtensionsPage);
+const ComposedExtensionsPage: React.ComponentClass<IRouteProps> = compose<
+  IRouteProps,
+  IRouteProps
+>(
+  pure,
+  setDisplayName('ExtensionsPage'),
+)(ExtensionsPage);
 
 export default ComposedExtensionsPage;

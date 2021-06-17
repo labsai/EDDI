@@ -1,4 +1,3 @@
-import { CSSProperties } from 'react';
 import {
   BLUE_COLOR2,
   DARK_BLUE_COLOR,
@@ -7,14 +6,15 @@ import {
   LIGHT_GREY_COLOR3,
   SMALL_FONT2,
 } from '../../../../styles/DefaultStylingProperties';
+import { makeStyles } from '@material-ui/core/styles';
 
-const editStyles: CSSProperties = {
+const editStyles = makeStyles({
   tabs: {
     display: 'flex',
     marginTop: '30px',
   },
   tab: {
-    ':hover': {
+    '&:hover': {
       backgroundColor: LIGHT_GREY_COLOR3,
       borderBottom: `3px solid ${GREY_COLOR}`,
     },
@@ -25,7 +25,7 @@ const editStyles: CSSProperties = {
     fontSize: SMALL_FONT2,
     height: '39px',
     textAlign: 'center',
-    flex: '1',
+    flex: 1,
     lineHeight: '42px',
   },
   tabDisabled: {
@@ -35,6 +35,6 @@ const editStyles: CSSProperties = {
   schemaForm: {
     paddingTop: '20px',
   },
-};
+});
 
 export default editStyles;

@@ -1,13 +1,11 @@
+import { makeStyles } from '@material-ui/core/styles';
+import * as _ from 'lodash';
 import * as React from 'react';
-import * as Radium from 'radium';
-import { Component, compose, pure, setDisplayName } from 'recompose';
-import { CSSProperties } from 'react';
+import { compose, pure, setDisplayName } from 'recompose';
 import Plugin from '../PackageDetailView/PluginBoxes/Plugin';
 import { IPackage } from '../utils/AxiosFunctions';
-import * as _ from 'lodash';
-import * as renderIf from 'render-if';
 
-const styles: CSSProperties = {
+const useStyles = makeStyles({
   pluginList: {
     display: 'grid',
     marginTop: '20px',
@@ -16,40 +14,44 @@ const styles: CSSProperties = {
     minHeight: '5px',
     minWidth: '5px',
   },
-};
+});
 
 interface IProps {
   packagePayload: IPackage;
+  packageId?: string;
+  botId?: string;
 }
 
 const PluginList: React.StatelessComponent<IProps> = (props: IProps) => {
+  const classes = useStyles();
   return (
     <div>
-      {renderIf(
-        props.packagePayload.packageData &&
-          !_.isEmpty(props.packagePayload.packageData.packageExtensions),
-      )(() => (
-        <div style={styles.pluginList}>
-          {props.packagePayload.packageData.packageExtensions.map(
-            (plug, key) => (
-              <Plugin
-                key={key}
-                pluginType={plug}
-                pluginResource={plug.config.uri || ''}
-                editDisabled={true}
-                packagePayload={props.packagePayload}
-              />
-            ),
-          )}
-        </div>
-      ))}
+      {!!props.packagePayload.packageData &&
+        !_.isEmpty(props.packagePayload.packageData.packageExtensions) && (
+          <div className={classes.pluginList}>
+            {props.packagePayload.packageData.packageExtensions.map(
+              (plug, key) => (
+                <Plugin
+                  key={key}
+                  pluginType={plug}
+                  pluginResource={plug.config.uri || ''}
+                  editDisabled={true}
+                  packageId={props.packageId}
+                  botId={props.botId}
+                />
+              ),
+            )}
+          </div>
+        )}
     </div>
   );
 };
 
-const ComposedPluginList: Component<IProps> = compose<IProps>(
+const ComposedPluginList: React.ComponentClass<IProps> = compose<
+  IProps,
+  IProps
+>(
   pure,
-  Radium,
   setDisplayName('PluginList'),
 )(PluginList);
 

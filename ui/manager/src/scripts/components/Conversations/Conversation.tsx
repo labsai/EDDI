@@ -1,11 +1,8 @@
 import * as React from 'react';
-import * as renderIf from 'render-if';
-import * as Radium from 'radium';
-import { Link, browserHistory } from 'react-router-dom';
-import { Component, compose, pure, setDisplayName } from 'recompose';
+import { compose, pure, setDisplayName } from 'recompose';
 import * as _ from 'lodash';
 import * as moment from 'moment';
-import styles from './Conversation.styles';
+import useStyles from './Conversation.styles';
 import { IConversation } from '../utils/AxiosFunctions';
 import Parser from '../utils/Parser';
 import { historyPush } from '../../history';
@@ -15,41 +12,48 @@ interface IProps {
 }
 
 const Conversation: React.StatelessComponent<IProps> = (props: IProps) => {
+  const classes = useStyles();
   return (
     <div
-      style={styles.conversation}
+      className={classes.conversation}
       onClick={() =>
         historyPush(
           `/conversationview/${Parser.getId(props.conversation.resource)}`,
         )
       }>
-      <div style={styles.conversationName}>{props.conversation.botName}</div>
-      <div style={styles.conversationVersion}>{`V${Parser.getVersion(
+      <div className={classes.conversationName}>
+        {props.conversation.botName}
+      </div>
+      <div className={classes.conversationVersion}>{`V${Parser.getVersion(
         props.conversation.botResource,
       )}`}</div>
-      <div style={styles.centerFlex} />
-      <div style={styles.conversationStepSizeContainer}>
-        <div style={styles.conversationStepSize}>
+      <div className={classes.centerFlex} />
+      <div className={classes.conversationStepSizeContainer}>
+        <div className={classes.conversationStepSize}>
           {props.conversation.conversationStepSize}
         </div>
       </div>
-      <div style={styles.environment}>{props.conversation.environment}</div>
-      <div style={styles.conversationState}>
+      <div className={classes.environment}>
+        {props.conversation.environment}
+      </div>
+      <div className={classes.conversationState}>
         {props.conversation.conversationState}
       </div>
-      <div style={styles.lastModifiedOn}>
+      <div className={classes.lastModifiedOn}>
         {moment(props.conversation.lastModifiedOn).fromNow()}
       </div>
-      <div style={styles.createdOn}>
+      <div className={classes.createdOn}>
         {moment(props.conversation.createdOn).format('DD.MM.YYYY')}
       </div>
     </div>
   );
 };
 
-const ComposedConversation: Component<IProps> = compose<IProps>(
+const ComposedConversation: React.ComponentClass<IProps> = compose<
+  IProps,
+  IProps
+>(
   pure,
-  Radium,
   setDisplayName('Conversation'),
 )(Conversation);
 

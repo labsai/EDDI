@@ -1,9 +1,8 @@
+import { makeStyles } from '@material-ui/core/styles';
 import * as React from 'react';
-import * as Radium from 'radium';
-import { CSSProperties } from 'react';
 import { pageEnum } from '../pages/pageEnum';
 
-const styles: CSSProperties = {
+const useStyles = makeStyles({
   filter: {
     display: 'flex',
   },
@@ -24,7 +23,7 @@ const styles: CSSProperties = {
     width: '15px',
   },
   searchBoxInput: {
-    ':focus': {
+    '&:focus': {
       outline: 'none',
     },
     backgroundColor: '#FFFFFF',
@@ -33,7 +32,7 @@ const styles: CSSProperties = {
     marginLeft: '10px',
     width: '150px',
   },
-};
+});
 
 const SearchIcon = require('../../../public/images/searchIcon.png');
 
@@ -52,18 +51,21 @@ function getSearchName(page: pageEnum) {
   }
 }
 
-const FilterComponent = (props: IProps) => (
-  <div style={styles.filter}>
-    <div style={styles.searchBox}>
-      <img src={SearchIcon} style={styles.searchBoxIcon} />
-      <input
-        type={'text'}
-        placeholder={`Find ${getSearchName(props.page)}`}
-        style={styles.searchBoxInput}
-        onChange={f => props.filter(f.target.value)}
-      />
+const FilterComponent = (props: IProps) => {
+  const classes = useStyles();
+  return (
+    <div className={classes.filter}>
+      <div className={classes.searchBox}>
+        <img src={SearchIcon} className={classes.searchBoxIcon} />
+        <input
+          type={'text'}
+          placeholder={`Find ${getSearchName(props.page)}`}
+          className={classes.searchBoxInput}
+          onChange={(f) => props.filter(f.target.value)}
+        />
+      </div>
     </div>
-  </div>
-);
+  );
+};
 
-export default Radium(FilterComponent);
+export default FilterComponent;

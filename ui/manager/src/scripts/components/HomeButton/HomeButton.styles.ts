@@ -1,6 +1,6 @@
-import { CSSProperties } from 'react';
+import { makeStyles } from '@material-ui/core/styles';
 
-const styles: CSSProperties = {
+const useStyles = makeStyles({
   homeArrow: {
     borderBottom: '6px solid transparent',
     borderRight: '6px solid #A8B7C7',
@@ -10,7 +10,7 @@ const styles: CSSProperties = {
     width: '0',
   },
   homeButton: {
-    ':hover': {
+    '&:hover': {
       backgroundColor: '#F7F9FB',
     },
     borderRadius: '3px',
@@ -37,7 +37,7 @@ const styles: CSSProperties = {
   },
   link: {
     display: 'flex',
-    flex: '1',
+    flex: 1,
     textDecoration: 'none',
   },
   navigationBar: {
@@ -45,7 +45,7 @@ const styles: CSSProperties = {
     marginTop: '40px',
   },
   navigationBarRightSide: {
-    flex: '1',
+    flex: 1,
   },
-};
-export default styles;
+});
+export default useStyles;

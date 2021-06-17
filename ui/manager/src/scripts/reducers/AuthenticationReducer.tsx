@@ -1,7 +1,7 @@
 import { Reducer, Action } from 'redux';
 export type IAuthenticationReducer = Reducer<IAuthenticationState>;
 import * as Keycloak from 'keycloak-js';
-import * as update from 'immutability-helper';
+import update from 'immutability-helper';
 import {
   BASIC_AUTH_SIGN_IN,
   BASIC_AUTH_SIGN_IN_FAILED,

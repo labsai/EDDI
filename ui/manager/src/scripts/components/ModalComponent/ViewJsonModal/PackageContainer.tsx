@@ -1,10 +1,9 @@
 import * as React from 'react';
-import { Component, compose, pure, setDisplayName } from 'recompose';
-import ViewJsonContent from './ViewJsonContent';
-import { IPackage } from '../../utils/AxiosFunctions';
 import { connect } from 'react-redux';
+import { compose, pure, setDisplayName } from 'recompose';
 import { packageSelector } from '../../../selectors/PackageSelectors';
-import * as renderIf from 'render-if';
+import { IPackage } from '../../utils/AxiosFunctions';
+import ViewJsonContent from './ViewJsonContent';
 
 interface IPublicProps {
   packageResource: string;
@@ -21,45 +20,31 @@ interface IState {
   data: string;
 }
 
-class PackageContainer extends React.Component<IPrivateProps, IState> {
-  constructor(props) {
-    super(props);
-    this.state = {
-      data: '',
-    };
-  }
+const PackageContainer = (props: IPrivateProps) => {
+  const [data, setData] = React.useState('');
 
-  componentDidMount() {
-    this.setState({
-      data: JSON.stringify(this.props.packagePayload.packageData, null, '\t'),
-    });
-  }
+  React.useEffect(() => {
+    setData(JSON.stringify(props.packagePayload.packageData, null, '\t'));
+  }, [props.packagePayload, props.isLoading, props.error]);
 
-  componentDidUpdate(prevProps) {
-    if (prevProps !== this.props) {
-      this.setState({
-        data: JSON.stringify(this.props.packagePayload.packageData, null, '\t'),
-      });
-    }
-  }
+  return (
+    <div>
+      {!!props.packagePayload && (
+        <ViewJsonContent
+          descriptor={props.packagePayload}
+          data={data}
+          usedBy={props.packagePayload.usedByBots}
+          selectVersion={props.selectVersion}
+        />
+      )}
+    </div>
+  );
+};
 
-  render() {
-    return (
-      <div>
-        {renderIf(this.props.packagePayload)(() => (
-          <ViewJsonContent
-            descriptor={this.props.packagePayload}
-            data={this.state.data}
-            usedBy={this.props.packagePayload.usedByBots}
-            selectVersion={this.props.selectVersion}
-          />
-        ))}
-      </div>
-    );
-  }
-}
-
-const ComposedPackageContainer: Component<IProps> = compose<IProps, IProps>(
+const ComposedPackageContainer: React.ComponentClass<IPublicProps> = compose<
+  IPrivateProps,
+  IPublicProps
+>(
   pure,
   setDisplayName('PackageContainer'),
   connect(packageSelector),

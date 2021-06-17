@@ -108,6 +108,7 @@ import {
   IEddiSchema,
   IPackage,
   IPlugin,
+  IPlugins,
   IPluginsResponse,
 } from '../components/utils/AxiosFunctions';
 
@@ -608,12 +609,15 @@ export function updatePackageAction(
 }
 export interface IUpdatePackageSuccessAction extends Action {
   package: IPackage;
+  noModal: boolean;
 }
 export function updatePackageSuccessAction(
   pkg: IPackage,
+  noModal: boolean = false,
 ): IUpdatePackageSuccessAction {
   return {
     package: pkg,
+    noModal,
     type: UPDATE_PACKAGE_SUCCESS,
   };
 }
@@ -653,12 +657,12 @@ export function fetchPackageDataAction(
 }
 
 export interface IFetchPackageDataSuccessAction extends Action {
-  packageData: IPluginsResponse[];
+  packageData: IPlugins;
   packageResource: string;
 }
 
 export function fetchPackageDataSuccessAction(
-  packageData: IPluginsResponse[],
+  packageData: IPlugins,
   packageResource: string,
 ): IFetchPackageDataSuccessAction {
   return {
@@ -779,7 +783,7 @@ export function fetchPackagesUsingPluginFailedAction(
 
 export interface IUpdateJsonDataAction extends Action {
   resource: string;
-  data: string;
+  data: any;
 }
 
 export function updateJsonDataAction(
@@ -813,13 +817,16 @@ export interface IUpdateJsonDataSuccessAction extends Action {
 
 export interface IUpdatePluginSuccessAction extends Action {
   plugin: IPlugin;
+  noModal: boolean;
 }
 
 export function updatePluginSuccessAction(
   plugin: IPlugin,
+  noModal: boolean = false,
 ): IUpdatePluginSuccessAction {
   return {
     plugin,
+    noModal,
     type: UPDATE_PLUGIN_SUCCESS,
   };
 }
@@ -968,13 +975,16 @@ export function updatePackagesAction(
 
 export interface IUpdatePackagesSuccessAction extends Action {
   packages: IPackage[];
+  noModal: boolean;
 }
 
 export function updatePackagesSuccessAction(
   packages: IPackage[],
+  noModal: boolean = false,
 ): IUpdatePackagesSuccessAction {
   return {
     packages,
+    noModal,
     type: UPDATE_PACKAGES_SUCCESS,
   };
 }

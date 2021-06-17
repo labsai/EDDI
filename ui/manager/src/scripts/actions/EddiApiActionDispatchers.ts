@@ -308,8 +308,9 @@ const actions: IEddiApiActionDispatchers = {
   deployExampleBotsSuccessAction,
 };
 
-const eddiApiActionDispatchers: IEddiApiActionDispatchers = bindActionCreators<
-  IEddiApiActionDispatchers
->(actions, store.dispatch);
+const eddiApiActionDispatchers: IEddiApiActionDispatchers = bindActionCreators(
+  actions,
+  store.dispatch,
+);
 
 export default eddiApiActionDispatchers;

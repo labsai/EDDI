@@ -1,17 +1,20 @@
-import * as React from 'react';
-import * as renderIf from 'render-if';
 import * as _ from 'lodash';
-import * as Radium from 'radium';
-import { Component, compose, pure, setDisplayName } from 'recompose';
-import eddiApiActionDispatchers from '../../actions/EddiApiActionDispatchers';
-import { IConversation } from '../utils/AxiosFunctions';
-import { connect } from 'react-redux';
-import styles from './ConversationList.styles';
-import { ClimbingBoxLoader } from 'react-spinners';
+import * as React from 'react';
 import * as InfiniteScrollTypes from 'react-infinite-scroller';
-const InfiniteScroll = require('react-infinite-scroller') as InfiniteScrollTypes;
-import Conversation from './Conversation';
+import { connect } from 'react-redux';
+import ClimbingBoxLoader from 'react-spinners/ClimbingBoxLoader';
+import { compose, pure, setDisplayName } from 'recompose';
+import eddiApiActionDispatchers from '../../actions/EddiApiActionDispatchers';
 import { conversationsSelector } from '../../selectors/ConversationSelectors';
+import { IConversation } from '../utils/AxiosFunctions';
+import Conversation from './Conversation';
+import useStyle from './ConversationList.styles';
+
+const InfiniteScroll =
+  require('react-infinite-scroller') as InfiniteScrollTypes;
+
+const REFRESH_INTERVAL = 30000;
+const LIMIT = 10;
 
 interface IPublicProps {
   filterText: string;
@@ -25,135 +28,124 @@ interface IPrivateProps extends IPublicProps {
   conversationsLoaded: number;
 }
 
-interface IState {
-  loading: boolean;
-}
+const ConversationList = ({
+  filterText,
+  conversations,
+  isLoading,
+  allConversationsLoaded,
+  error,
+  conversationsLoaded,
+}: IPrivateProps) => {
+  const [loading, setLoading] = React.useState(false);
+  const classes = useStyle();
 
-class ConversationList extends React.Component<IPrivateProps, IState> {
-  constructor(props) {
-    super(props);
-    this.state = {
-      loading: false,
-    };
-  }
-
-  async componentDidMount() {
-    this.loadMore();
-  }
-
-  componentDidUpdate(prevProps) {
-    if (prevProps.isLoading && !this.props.isLoading) {
-      this.setState({ loading: false });
+  React.useEffect(() => {
+    if (!isLoading) {
+      setLoading(false);
     }
-  }
+  }, [isLoading]);
 
-  filterConversations() {
-    if (!_.isEmpty(this.props.filterText)) {
-      return this.props.conversations.filter(
-        conversation =>
+  const filterConversations = () => {
+    if (!_.isEmpty(filterText)) {
+      return conversations.filter(
+        (conversation) =>
           conversation.botName
             .toLowerCase()
-            .includes(this.props.filterText.toLowerCase()) ||
+            .includes(filterText.toLowerCase()) ||
           conversation.resource
             .toLowerCase()
-            .includes(this.props.filterText.toLowerCase()) ||
+            .includes(filterText.toLowerCase()) ||
           conversation.botResource
             .toLowerCase()
-            .includes(this.props.filterText.toLowerCase()),
+            .includes(filterText.toLowerCase()),
       );
     } else {
-      return this.props.conversations;
+      return conversations;
     }
-  }
+  };
 
-  loadMore = () => {
-    if (this.state.loading) {
+  React.useEffect(() => {
+    const interval = setInterval(() => {
+      eddiApiActionDispatchers.fetchConversationsAction(LIMIT, 0, null, null);
+    }, REFRESH_INTERVAL);
+
+    return () => clearInterval(interval);
+  }, []);
+
+  React.useEffect(() => {
+    eddiApiActionDispatchers.fetchConversationsAction(LIMIT, 0, null, null);
+  }, []);
+
+  const loadMore = () => {
+    if (loading) {
       return;
     }
-    this.setState({ loading: true });
+    setLoading(true);
     const limit = 20;
-    if (
-      this.props.conversations.length < limit &&
-      !this.props.allConversationsLoaded
-    ) {
+    if (conversations.length < limit && !allConversationsLoaded) {
       eddiApiActionDispatchers.fetchConversationsAction(limit, 0, null, null);
     } else {
       eddiApiActionDispatchers.fetchConversationsAction(
         limit,
-        Math.floor(this.props.conversationsLoaded / limit),
+        Math.floor(conversationsLoaded / limit),
         null,
         null,
       );
     }
   };
 
-  render() {
-    const conversationList = this.filterConversations();
-    return (
-      <div>
-        <div style={styles.title}>
-          <div>{'Bot name'}</div>
-          <div style={styles.stepSize}>{'Step size'}</div>
-          <div style={styles.environment}>{'Environment'}</div>
-          <div style={styles.conversationState}>{'Conversation state'}</div>
-          <div style={styles.lastModifiedOn}>{'Last message'}</div>
-          <div style={styles.createdOn}>{'Created on'}</div>
-        </div>
-        {renderIf(this.props.isLoading && _.isEmpty(this.props.conversations))(
-          () => (
-            <div style={styles.loadingWrapper}>
-              <ClimbingBoxLoader loading />
-            </div>
-          ),
-        )}
-        {renderIf(this.props.error)(() => (
-          <p>{'Error: Could not load conversations'}</p>
-        ))}
-        {renderIf(
-          !this.props.isLoading &&
-            !this.props.error &&
-            _.isEmpty(this.props.conversations),
-        )(() => <p>{`There are no conversations yet`}</p>)}
-        {renderIf(!this.props.error && !_.isEmpty(this.props.conversations))(
-          () => (
-            <div style={styles.packageList}>
-              {renderIf(_.isEmpty(conversationList))(() => (
-                <p>{`Found no conversations matching: "${
-                  this.props.filterText
-                }"`}</p>
-              ))}
-              <InfiniteScroll
-                pageStart={0}
-                loadMore={this.loadMore}
-                hasMore={
-                  !this.props.allConversationsLoaded && !this.props.isLoading
-                }
-                loader={
-                  <div className="loader" key={0}>
-                    Loading ...
-                  </div>
-                }>
-                {conversationList.map(conversation => (
-                  <Conversation
-                    key={conversation.resource}
-                    conversation={conversation}
-                  />
-                ))}
-              </InfiniteScroll>
-            </div>
-          ),
-        )}
+  const conversationList = filterConversations();
+  return (
+    <div>
+      <div className={classes.title}>
+        <div>{'Bot name'}</div>
+        <div className={classes.stepSize}>{'Step size'}</div>
+        <div className={classes.environment}>{'Environment'}</div>
+        <div className={classes.conversationState}>{'Conversation state'}</div>
+        <div className={classes.lastModifiedOn}>{'Last message'}</div>
+        <div className={classes.createdOn}>{'Created on'}</div>
       </div>
-    );
-  }
-}
+      {isLoading && _.isEmpty(conversations) && (
+        <div className={classes.loadingWrapper}>
+          <ClimbingBoxLoader loading />
+        </div>
+      )}
+      {!!error && !isLoading && <p>{'Error: Could not load conversations'}</p>}
+      {!isLoading && !error && _.isEmpty(conversations) && (
+        <p>{`There are no conversations yet`}</p>
+      )}
+      {!error && !_.isEmpty(conversations) && (
+        <div className={classes.packageList}>
+          {_.isEmpty(conversationList) && (
+            <p>{`Found no conversations matching: "${filterText}"`}</p>
+          )}
+          <InfiniteScroll
+            pageStart={0}
+            loadMore={loadMore}
+            hasMore={!allConversationsLoaded && !isLoading}
+            loader={
+              <div className="loader" key={0}>
+                Loading ...
+              </div>
+            }>
+            {conversationList.map((conversation) => (
+              <Conversation
+                key={conversation.resource}
+                conversation={conversation}
+              />
+            ))}
+          </InfiniteScroll>
+        </div>
+      )}
+    </div>
+  );
+};
 
-const ComposedConversationList: Component<IPublicProps> = compose<
+const ComposedConversationList: React.ComponentClass<IPublicProps> = compose<
   IPublicProps,
   IPrivateProps
 >(
   pure,
-  Radium,
   connect(conversationsSelector),
   setDisplayName('ConversationList'),
 )(ConversationList);

@@ -1,4 +1,5 @@
 import { IAppState } from '../reducers';
+import { createSelector } from 'reselect';
 import Parser from '../components/utils/Parser';
 import {
   BEHAVIOR,
@@ -8,6 +9,7 @@ import {
   PROPERTYSETTER,
   REGULAR_DICTIONARY,
 } from '../components/utils/EddiTypes';
+import { IPluginState } from '../reducers/PluginReducer';
 
 export function defaultPluginTypesSelector(state: IAppState) {
   return {
@@ -20,7 +22,7 @@ export interface IPluginSelectorProps {
 
 export function pluginSelector(state: IAppState, props: IPluginSelectorProps) {
   const plugin = state.pluginState.plugins.find(
-    plug => plug.resource === props.pluginResource,
+    (plug) => plug.resource === props.pluginResource,
   );
   return {
     plugin: plugin || [],
@@ -29,61 +31,69 @@ export function pluginSelector(state: IAppState, props: IPluginSelectorProps) {
   };
 }
 
+export const PluginStateSelector: (state: IAppState) => IPluginState = (
+  state,
+) => state.pluginState;
+
+const getPluginType = (_, pluginType: string) => pluginType;
+
 export interface IPluginsSelectorProps {
   pluginType: string;
 }
-export function pluginsSelector(
-  state: IAppState,
-  props: IPluginsSelectorProps,
-) {
-  let isAllPluginsLoaded;
-  let loadedPlugins;
-  let pluginName = Parser.getPluginName(props.pluginType, false);
-  switch (props.pluginType) {
-    case REGULAR_DICTIONARY:
-      isAllPluginsLoaded = state.pluginState.allDictionariesLoaded;
-      loadedPlugins = state.pluginState.loadedDictionaries;
-      break;
-    case BEHAVIOR:
-      isAllPluginsLoaded = state.pluginState.allBehaviorsLoaded;
-      loadedPlugins = state.pluginState.loadedBehaviors;
-      break;
-    case OUTPUT:
-      isAllPluginsLoaded = state.pluginState.allOutputsLoaded;
-      loadedPlugins = state.pluginState.loadedOutputs;
-      break;
-    case HTTPCALLS:
-      isAllPluginsLoaded = state.pluginState.allHttpCallsLoaded;
-      loadedPlugins = state.pluginState.loadedHttpCalls;
-      break;
-    case GITCALLS:
-      isAllPluginsLoaded = state.pluginState.allGitCallsLoaded;
-      loadedPlugins = state.pluginState.loadedGitCalls;
-      break;
-    case PROPERTYSETTER:
-      isAllPluginsLoaded = state.pluginState.allPropertysetterLoaded;
-      loadedPlugins = state.pluginState.loadedPropertysetters;
-      break;
-    default:
-      isAllPluginsLoaded = false;
-      loadedPlugins = 0;
-      break;
-  }
-  const plugins = state.pluginState.plugins.filter(
-    plug =>
-      plug.resource.includes(pluginName) &&
-      plug.version === plug.currentVersion,
-  );
-  const sortedPlugins = plugins.sort(function(a, b) {
-    return b.lastModifiedOn - a.lastModifiedOn;
-  });
-  return {
-    plugins:
-      (sortedPlugins ? sortedPlugins : sortedPlugins.slice(0, loadedPlugins)) ||
-      [],
-    isAllPluginsLoaded,
-    loadedPlugins,
-    isLoading: state.pluginState.isLoadingPlugins,
-    error: state.pluginState.error,
-  };
-}
+export const pluginsSelector = createSelector(
+  PluginStateSelector,
+  getPluginType,
+  (pluginState: IPluginState, pluginType: string) => {
+    let isAllPluginsLoaded;
+    let loadedPlugins;
+    let pluginName = Parser.getPluginName(pluginType, false);
+    switch (pluginType) {
+      case REGULAR_DICTIONARY:
+        isAllPluginsLoaded = pluginState.allDictionariesLoaded;
+        loadedPlugins = pluginState.loadedDictionaries;
+        break;
+      case BEHAVIOR:
+        isAllPluginsLoaded = pluginState.allBehaviorsLoaded;
+        loadedPlugins = pluginState.loadedBehaviors;
+        break;
+      case OUTPUT:
+        isAllPluginsLoaded = pluginState.allOutputsLoaded;
+        loadedPlugins = pluginState.loadedOutputs;
+        break;
+      case HTTPCALLS:
+        isAllPluginsLoaded = pluginState.allHttpCallsLoaded;
+        loadedPlugins = pluginState.loadedHttpCalls;
+        break;
+      case GITCALLS:
+        isAllPluginsLoaded = pluginState.allGitCallsLoaded;
+        loadedPlugins = pluginState.loadedGitCalls;
+        break;
+      case PROPERTYSETTER:
+        isAllPluginsLoaded = pluginState.allPropertysetterLoaded;
+        loadedPlugins = pluginState.loadedPropertysetters;
+        break;
+      default:
+        isAllPluginsLoaded = false;
+        loadedPlugins = 0;
+        break;
+    }
+    const plugins = pluginState.plugins.filter(
+      (plug) =>
+        plug.resource.includes(pluginName) &&
+        plug.version === plug.currentVersion,
+    );
+    const sortedPlugins = plugins.sort(function (a, b) {
+      return b.lastModifiedOn - a.lastModifiedOn;
+    });
+    return {
+      plugins:
+        (sortedPlugins
+          ? sortedPlugins
+          : sortedPlugins.slice(0, loadedPlugins)) || [],
+      isAllPluginsLoaded,
+      loadedPlugins,
+      isLoading: pluginState.isLoadingPlugins,
+      error: pluginState.error,
+    };
+  },
+);

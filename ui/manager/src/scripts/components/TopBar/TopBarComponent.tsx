@@ -1,39 +1,45 @@
+import { makeStyles } from '@material-ui/core/styles';
+import WarningRoundedIcon from '@material-ui/icons/WarningRounded';
+import * as Keycloak from 'keycloak-js';
 import * as React from 'react';
-import ModalActionDispatchers from '../../actions/ModalActionDispatchers';
-import FilterComponent from './FilterComponent';
-import NavigationComponent from './NavigationComponent';
-import { CSSProperties } from 'react';
-import { Link } from 'react-router-dom';
-import { ModalEnum } from '../utils/ModalEnum';
-import BlueButton from '../Assets/Buttons/BlueButton';
-import { pageEnum } from '../pages/pageEnum';
-import * as renderIf from 'render-if';
-import * as Radium from 'radium';
 import { connect } from 'react-redux';
-import { Component, compose, pure, setDisplayName } from 'recompose';
-import {
-  authenticationSelector,
-  readOnlySelector,
-} from '../../selectors/AuthenticationSelectors';
+import { compose, pure, setDisplayName } from 'recompose';
+import eddiApiActionDispatchers from '../../actions/EddiApiActionDispatchers';
 import {
   MEDIUM_FONT,
   MEDIUM_FONT2,
   RED_BORDER,
   RED_COLOR,
 } from '../../../styles/DefaultStylingProperties';
-import WhiteButton from '../Assets/Buttons/WhiteButton';
 import authenticationActionDispatchers from '../../actions/AuthenticationActionDispatchers';
+import ModalActionDispatchers from '../../actions/ModalActionDispatchers';
 import { historyPush } from '../../history';
+import {
+  authenticationSelector,
+  readOnlySelector,
+} from '../../selectors/AuthenticationSelectors';
+import BlueButton from '../Assets/Buttons/BlueButton';
+import WhiteButton from '../Assets/Buttons/WhiteButton';
+import { pageEnum } from '../pages/pageEnum';
+import { ModalEnum } from '../utils/ModalEnum';
+import FilterComponent from './FilterComponent';
+import NavigationComponent from './NavigationComponent';
 
-const styles: CSSProperties = {
+const LIMIT = 10;
+
+const useStyles = makeStyles({
   createNewBotButton: {
     height: '36px',
     marginLeft: '32px',
     marginTop: '7px',
     minWidth: '108px',
+
+    '&:disabled': {
+      color: '#fff',
+    },
   },
   topBarCenter: {
-    flex: '1',
+    flex: 1,
   },
   topBarComponent: {
     display: 'flex',
@@ -49,6 +55,7 @@ const styles: CSSProperties = {
     margin: 'auto',
     display: 'table',
     borderRadius: '5px',
+    marginBottom: '20px',
   },
   warning: {
     display: 'flex',
@@ -57,6 +64,8 @@ const styles: CSSProperties = {
     height: '38px',
     width: '38px',
     marginRight: '5px',
+    marginTop: 'auto',
+    marginBottom: 'auto',
   },
   logoutButton: {
     height: '36px',
@@ -72,9 +81,7 @@ const styles: CSSProperties = {
   link: {
     cursor: 'pointer',
   },
-};
-
-const warningIcon = require('../../../public/images/WarningIcon@3x.png');
+});
 
 interface IPublicProps {
   page: pageEnum;
@@ -87,9 +94,16 @@ interface IPrivateProps extends IPublicProps {
   keycloak: Keycloak.KeycloakInstance;
 }
 
-class TopBarComponent extends React.Component<IPrivateProps> {
-  openModal = () => {
-    switch (this.props.page) {
+const TopBarComponent = ({
+  page,
+  type,
+  filter,
+  readOnly,
+  keycloak,
+}: IPrivateProps) => {
+  const classes = useStyles();
+  const openModal = () => {
+    switch (page) {
       case pageEnum.bot:
         ModalActionDispatchers.showModal(ModalEnum.createBot);
         return;
@@ -97,12 +111,16 @@ class TopBarComponent extends React.Component<IPrivateProps> {
         ModalActionDispatchers.showModal(ModalEnum.createPackage);
         return;
       default:
-        ModalActionDispatchers.showCreateNewConfigModal(this.props.type);
+        ModalActionDispatchers.showCreateNewConfigModal(type);
         return;
     }
   };
 
-  getSearchName(page: pageEnum) {
+  const refreshConversationList = () => {
+    eddiApiActionDispatchers.fetchConversationsAction(LIMIT, 0, null, null);
+  };
+
+  const getSearchName = (page: pageEnum) => {
     if (page === pageEnum.httpCalls) {
       return 'HTTP calls';
     } else if (page === pageEnum.gitCalls) {
@@ -110,74 +128,78 @@ class TopBarComponent extends React.Component<IPrivateProps> {
     } else {
       return pageEnum[page];
     }
-  }
-
-  logout = () => {
-    historyPush('/');
-    authenticationActionDispatchers.signOutAction(this.props.keycloak);
   };
 
-  render() {
-    return (
-      <div>
-        {renderIf(this.props.readOnly)(() => (
-          <div style={styles.readOnly}>
-            <div style={styles.warning}>
-              <img src={warningIcon} style={styles.warningIcon} />
-              <div style={styles.warningText}>
-                <span style={styles.bold}>
-                  {'This is a read-only demo Instance of EDDI.'}
-                </span>
-                {
-                  '\nCreate your own bot today by launching EDDI with one-click on Google Marketplace. '
-                }
-                <a
-                  style={styles.link}
-                  onClick={() =>
-                    window.open(
-                      'https://console.cloud.google.com/marketplace/details/labsai-public/labsai-eddi-dev',
-                      '_blank',
-                    )
-                  }>
-                  {'Learn more.'}
-                </a>
-              </div>
+  const logout = () => {
+    historyPush('/');
+    authenticationActionDispatchers.signOutAction(keycloak);
+  };
+
+  return (
+    <div>
+      {readOnly && (
+        <div className={classes.readOnly}>
+          <div className={classes.warning}>
+            <WarningRoundedIcon className={classes.warningIcon} />
+            <div className={classes.warningText}>
+              <span className={classes.bold}>
+                {'This is a read-only demo Instance of EDDI.'}
+              </span>
+              {
+                '\nCreate your own bot today by launching EDDI with one-click on Google Marketplace. '
+              }
+              <a
+                className={classes.link}
+                onClick={() =>
+                  window.open(
+                    'https://console.cloud.google.com/marketplace/details/labsai-public/labsai-eddi-dev',
+                    '_blank',
+                  )
+                }>
+                {'Learn more.'}
+              </a>
             </div>
           </div>
-        ))}
-        {renderIf(!!this.props.keycloak)(() => (
-          <WhiteButton
-            text={'Logout'}
-            customStyles={styles.logoutButton}
-            onClick={this.logout}
-          />
-        ))}
-        <div style={styles.topBarComponent}>
-          <NavigationComponent page={this.props.page} />
-          <div style={styles.topBarCenter} />
-          <FilterComponent page={this.props.page} filter={this.props.filter} />
-          {renderIf(this.props.page !== pageEnum.conversation)(() => (
-            <BlueButton
-              text={`Create new ${this.getSearchName(this.props.page)}`}
-              customStyles={styles.createNewBotButton}
-              disabled={this.props.readOnly}
-              onClick={this.openModal}
-              style={styles.createNewBot}
-            />
-          ))}
         </div>
+      )}
+      {!!keycloak && (
+        <WhiteButton
+          text={'Logout'}
+          classes={{ button: classes.logoutButton }}
+          onClick={logout}
+        />
+      )}
+      <div className={classes.topBarComponent}>
+        <NavigationComponent page={page} />
+        <div className={classes.topBarCenter} />
+        <FilterComponent page={page} filter={filter} />
+        {page !== pageEnum.conversation && (
+          <BlueButton
+            text={`Create new ${getSearchName(page)}`}
+            classes={{ button: classes.createNewBotButton }}
+            disabled={readOnly}
+            onClick={openModal}
+          />
+        )}
+        {page === pageEnum.conversation && (
+          <BlueButton
+            text={'Refresh'}
+            classes={{ button: classes.createNewBotButton }}
+            onClick={refreshConversationList}
+          />
+        )}
       </div>
-    );
-  }
-}
+    </div>
+  );
+};
 
-const ComposedTopBarComponent: Component<IPrivateProps> = compose<
-  IPrivateProps
+const ComposedTopBarComponent: React.ComponentClass<IPublicProps> = compose<
+  IPrivateProps,
+  IPublicProps
 >(
   pure,
   connect(readOnlySelector),
   connect(authenticationSelector),
-  Radium,
   setDisplayName('TopBarComponent'),
 )(TopBarComponent);
 

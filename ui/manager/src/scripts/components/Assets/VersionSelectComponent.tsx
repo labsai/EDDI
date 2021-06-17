@@ -1,137 +1,146 @@
-import * as React from 'react';
-import * as Radium from 'radium';
-import * as renderIf from 'render-if';
-import { Component, compose, pure, setDisplayName } from 'recompose';
-import Select from 'react-select';
+import FormControl from '@material-ui/core/FormControl';
+import MenuItem from '@material-ui/core/MenuItem';
+import OutlinedInput from '@material-ui/core/OutlinedInput';
+import Select from '@material-ui/core/Select';
+import { makeStyles } from '@material-ui/core/styles';
 import * as _ from 'lodash';
-import { CSSProperties } from 'react';
+import * as React from 'react';
+import { compose, pure, setDisplayName } from 'recompose';
 import Parser from '../utils/Parser';
 
-const styles: CSSProperties = {
+const useStyles = makeStyles({
   selectContainer: {
-    width: '80px',
-  },
-};
+    width: 90,
+    marginTop: -1,
 
-const customStyles = {
-  indicatorsContainer: (base, state) => ({
-    position: 'relative',
-    borderLeft: '6px solid transparent',
-    borderRight: '6px solid transparent',
-    borderTop: '6px solid #16325C',
-    height: '0',
-    marginRight: '10px',
-    width: '0',
-  }),
-  input: (base, state) => ({
-    ...base,
-    maxWidth: '60px',
-    overflow: 'hidden',
-  }),
-  valueContainer: (base, state) => ({
-    ...base,
-    backgroundColor: '#FFF',
-    color: '#16325C',
-    fontSize: '12px',
-    overflow: 'hidden',
-    marginLeft: '1px',
-  }),
-  option: (base, state) => ({
-    ...base,
-    color: '#16325C',
-    fontSize: '12px',
-    overflow: 'hidden',
-  }),
-};
+    '& .MuiOutlinedInput-root': {
+      fontSize: '1.2rem',
+    },
+    '& .MuiSelect-iconOutlined': {
+      top: 'calc(50% - 8px)',
+    },
+    '& .MuiOutlinedInput-root.Mui-focused .MuiOutlinedInput-notchedOutline': {
+      borderColor: '#2684FF',
+    },
+  },
+  input: {
+    '& .MuiOutlinedInput-inputMarginDense': {
+      paddingTop: 11,
+      paddingBottom: 11,
+    },
+  },
+  success: {
+    '& .MuiOutlinedInput-root .MuiOutlinedInput-notchedOutline': {
+      borderColor: 'green',
+    },
+  },
+  error: {
+    '& .MuiOutlinedInput-root .MuiOutlinedInput-notchedOutline': {
+      borderColor: 'red',
+    },
+  },
+  select: {
+    '& li': {
+      fontSize: '1.2rem',
+    },
+    '& li:hover': {
+      backgroundColor: '#DAEAFF',
+    },
+    '& .Mui-selected': {
+      backgroundColor: '#2684FF',
+    },
+    '& .Mui-selected:hover': {
+      backgroundColor: '#2684FF',
+    },
+  },
+});
 
 interface IOption {
   value: number;
   label: string;
 }
-interface IState {
-  options: IOption[];
-  selectedOption: IOption;
-}
+
 interface IProps {
   currentVersion: number;
   selectedVersion: number;
   selectVersion(version: number): void;
 }
 
-class VersionSelectComponent extends React.Component<IProps, IState> {
-  constructor(props) {
-    super(props);
-    this.state = {
-      selectedOption: null,
-      options: [],
-    };
-  }
+const VersionSelectComponent = ({
+  selectedVersion,
+  currentVersion,
+  selectVersion,
+}: IProps) => {
+  const [selectedOption, setSelectedOption] = React.useState<IOption>(null);
+  const [options, setOptions] = React.useState<IOption[]>([]);
 
-  componentDidMount() {
-    this.setOptions();
-  }
+  const classes = useStyles();
 
-  componentDidUpdate(prevProps) {
-    if (prevProps !== this.props) {
-      this.setOptions();
-    }
-  }
-
-  setOptions(props = this.props): void {
-    const options = _.times(props.currentVersion, i => ({
+  const setDefaultOptions = () => {
+    const options = _.times(currentVersion, (i) => ({
       value: ++i,
       label: Parser.getVersionString(i),
     })).reverse();
-    this.setState({
-      options,
-      selectedOption: options[options.length - props.selectedVersion],
-    });
-  }
 
-  handleSelect = (option: IOption) => {
-    if (!_.isEmpty(option)) {
-      this.setState({ selectedOption: option });
-      this.props.selectVersion(option.value);
+    setOptions(options);
+    setSelectedOption(options[options.length - selectedVersion]);
+  };
+
+  React.useEffect(() => {
+    setDefaultOptions();
+  }, [currentVersion, selectedVersion]);
+
+  const handleSelect = (
+    event: React.ChangeEvent<{
+      name?: string;
+      value: number;
+    }>,
+  ) => {
+    if (event.target.value) {
+      const selectedOption = options.find(
+        (o) => o.value === event.target.value,
+      );
+      if (!selectedOption) {
+        return;
+      }
+      setSelectedOption({
+        value: selectedOption.value,
+        label: selectedOption.label,
+      });
+      selectVersion(selectedOption.value);
     }
   };
 
-  getStyles() {
-    if (this.props.selectedVersion === this.props.currentVersion) {
-      return {
-        ...customStyles,
-        control: styles => ({
-          ...styles,
-          backgroundColor: 'white',
-          border: '1px solid green',
-        }),
-      };
-    } else {
-      return {
-        ...customStyles,
-        control: styles => ({
-          ...styles,
-          backgroundColor: 'white',
-          border: '1px solid red',
-        }),
-      };
-    }
-  }
-
-  render() {
-    return (
-      <div style={styles.selectContainer}>
+  return (
+    !!selectedOption && (
+      <FormControl
+        variant="outlined"
+        size="small"
+        className={`${classes.selectContainer} ${
+          selectedVersion === currentVersion ? classes.success : classes.error
+        }`}>
         <Select
-          styles={this.getStyles()}
-          value={this.state.selectedOption}
-          options={this.state.options}
-          onChange={this.handleSelect}
-        />
-      </div>
-    );
-  }
-}
+          value={selectedOption?.value}
+          onChange={handleSelect}
+          input={<OutlinedInput className={classes.input} />}
+          MenuProps={{ classes: { paper: classes.select } }}>
+          {options.map((o, i) => {
+            return (
+              <MenuItem key={o.label + i} value={o.value}>
+                {o.label}
+              </MenuItem>
+            );
+          })}
+        </Select>
+      </FormControl>
+    )
+  );
+};
 
-const ComposedVersionSelectComponent: Component<IProps> = compose<IProps>(
+const ComposedVersionSelectComponent: React.ComponentClass<IProps> = compose<
+  IProps,
+  IProps
+>(
   pure,
   setDisplayName('VersionSelectComponent'),
 )(VersionSelectComponent);

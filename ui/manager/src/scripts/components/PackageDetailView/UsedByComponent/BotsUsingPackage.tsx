@@ -1,25 +1,20 @@
-import * as React from 'react';
-import { Component, compose, pure, setDisplayName } from 'recompose';
-import * as Radium from 'radium';
-import { CSSProperties } from 'react';
+import { makeStyles } from '@material-ui/core/styles';
 import * as _ from 'lodash';
-import Bot from './Bot';
+import * as React from 'react';
+import { compose, pure, setDisplayName } from 'recompose';
 import eddiApiActionDispatchers from '../../../actions/EddiApiActionDispatchers';
-import * as renderIf from 'render-if';
 import { IPackage } from '../../utils/AxiosFunctions';
-import { IUsedResource } from '../../utils/Parser';
-import Parser from '../../utils/Parser';
+import Parser, { IUsedResource } from '../../utils/Parser';
+import Bot from './Bot';
 
 interface IProps {
   packagePayload: IPackage;
-  isSmallName: boolean;
+  isSmallName?: boolean;
 }
 
-interface IState {
-  expandList: boolean;
-}
+const DELAY = 1000;
 
-const styles: CSSProperties = {
+const useStyles = makeStyles({
   content: {
     width: '100%',
   },
@@ -34,99 +29,80 @@ const styles: CSSProperties = {
     display: 'inline-block',
     minWidth: 'fit-content',
   },
-};
+});
 
-class BotsUsingPackage extends React.Component<IProps, IState> {
-  constructor(props) {
-    super(props);
-    this.state = {
-      expandList: false,
-    };
-  }
+const BotsUsingPackage = ({ packagePayload, isSmallName }: IProps) => {
+  const [expandList, setExpandList] = React.useState(false);
+  const classes = useStyles();
 
-  componentDidMount() {
-    if (!_.isEmpty(this.props.packagePayload)) {
-      eddiApiActionDispatchers.fetchBotsUsingPackageAction(
-        this.props.packagePayload.resource,
-        false,
-      );
+  React.useEffect(() => {
+    let timer: NodeJS.Timeout = null;
+    if (!_.isEmpty(packagePayload)) {
+      timer = setTimeout(() => {
+        eddiApiActionDispatchers.fetchBotsUsingPackageAction(
+          packagePayload.resource,
+          false,
+        );
+      }, DELAY);
     }
-  }
+    return () => clearTimeout(timer);
+  }, [packagePayload.resource, isSmallName]);
 
-  componentDidUpdate(prevProps) {
-    if (
-      _.isUndefined(this.props.packagePayload.usedByBots) &&
-      prevProps !== this.props
-    ) {
-      eddiApiActionDispatchers.fetchBotsUsingPackageAction(
-        this.props.packagePayload.resource,
-        false,
-      );
-    }
-  }
-
-  expandList = () => {
-    this.setState({ expandList: !this.state.expandList });
+  const handleExpandList = () => {
+    setExpandList(!expandList);
   };
 
-  render() {
-    let shortList: IUsedResource[];
-    if (!_.isEmpty(this.props.packagePayload.usedByBots)) {
-      shortList = Parser.shortenResourceList(
-        this.props.packagePayload.usedByBots,
-      );
-    }
-    return (
-      <div>
-        {renderIf(!_.isEmpty(this.props.packagePayload.usedByBots))(() => (
-          <div style={styles.content}>
-            {renderIf(this.state.expandList)(() => (
-              <div style={styles.list}>
-                {this.props.packagePayload.usedByBots.map(resource => (
-                  <Bot
-                    key={resource}
-                    botResource={resource}
-                    isSmallName={!!this.props.isSmallName}
-                  />
-                ))}
-              </div>
-            ))}
-            {renderIf(!this.state.expandList)(() => (
-              <div style={styles.list}>
-                {shortList.map(r => (
-                  <Bot
-                    key={r.resource}
-                    botResource={r.resource}
-                    usedByOlderVersion={r.usedByOlderVersion}
-                    isSmallName={!!this.props.isSmallName}
-                  />
-                ))}
-              </div>
-            ))}
-            {renderIf(
-              _.size(this.props.packagePayload.usedByBots) >
-                _.size(shortList) && !this.state.expandList,
-            )(() => (
-              <div style={styles.seeMore} onClick={this.expandList}>
+  let shortList: IUsedResource[];
+  if (!_.isEmpty(packagePayload.usedByBots)) {
+    shortList = Parser.shortenResourceList(packagePayload.usedByBots);
+  }
+  return (
+    <div>
+      {!_.isEmpty(packagePayload.usedByBots) && (
+        <div className={classes.content}>
+          {expandList ? (
+            <div className={classes.list}>
+              {packagePayload.usedByBots.map((resource) => (
+                <Bot
+                  key={resource}
+                  botResource={resource}
+                  isSmallName={!!isSmallName}
+                />
+              ))}
+            </div>
+          ) : (
+            <div className={classes.list}>
+              {shortList.map((r) => (
+                <Bot
+                  key={r.resource}
+                  botResource={r.resource}
+                  usedByOlderVersion={r.usedByOlderVersion}
+                  isSmallName={!!isSmallName}
+                />
+              ))}
+            </div>
+          )}
+          {_.size(packagePayload.usedByBots) > _.size(shortList) &&
+            !expandList && (
+              <div className={classes.seeMore} onClick={handleExpandList}>
                 {'...See more'}
               </div>
-            ))}
-          </div>
-        ))}
-        {renderIf(
-          _.size(this.props.packagePayload.usedByBots) > _.size(shortList) &&
-            this.state.expandList,
-        )(() => (
-          <div style={styles.seeMore} onClick={this.expandList}>
-            {'See less'}
-          </div>
-        ))}
-      </div>
-    );
-  }
-}
+            )}
+        </div>
+      )}
+      {_.size(packagePayload.usedByBots) > _.size(shortList) && expandList && (
+        <div className={classes.seeMore} onClick={handleExpandList}>
+          {'See less'}
+        </div>
+      )}
+    </div>
+  );
+};
 
-const ComposedBotsUsingPackage: Component<IProps> = compose<IProps>(
+const ComposedBotsUsingPackage: React.ComponentClass<IProps> = compose<
+  IProps,
+  IProps
+>(
   pure,
   setDisplayName('BotsUsingPackage'),
 )(BotsUsingPackage);

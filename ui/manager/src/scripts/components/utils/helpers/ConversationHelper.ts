@@ -17,7 +17,7 @@ export const CONVERSATION_EXECUTION_INTERRUPTED = 'EXECUTION_INTERRUPTED';
 
 export default class ConversationHelper {
   static getAction(conversationStep: IConversationStep[]) {
-    let action = conversationStep.find(step => step.key.includes('actions'));
+    let action = conversationStep.find((step) => step.key.includes('actions'));
     if (!action) {
       return;
     }
@@ -25,7 +25,7 @@ export default class ConversationHelper {
   }
 
   static getInput(conversationStep: IConversationStep[]): string {
-    const input = conversationStep.find(step => step.key.includes('input'));
+    const input = conversationStep.find((step) => step.key.includes('input'));
     if (input) {
       return (input as IInput).value;
     }
@@ -53,13 +53,13 @@ export default class ConversationHelper {
 
   static getQuickReplies(converstionOutput: IConversationOutput): string[] {
     if (!_.isEmpty(converstionOutput.quickReplies)) {
-      return converstionOutput.quickReplies.map(qr => qr.value);
+      return converstionOutput.quickReplies.map((qr) => qr.value);
     }
   }
 
   static getTimespan(conversationStep: IConversationStep[]): number {
     let firstConversationStepIndex = conversationStep.findIndex(
-      step => !step.key.includes('properties'),
+      (step) => !step.key.includes('properties'),
     );
     if (conversationStep.length - firstConversationStepIndex < 2) {
       return;

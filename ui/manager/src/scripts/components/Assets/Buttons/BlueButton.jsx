@@ -23,7 +23,7 @@ var styles = {
     },
   },
 };
-var BlueButton = function(props) {
+var BlueButton = function (props) {
   return (
     <Button_1.default
       text={props.text}

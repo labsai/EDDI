@@ -6,27 +6,25 @@ import * as _ from 'lodash';
 import Parser from '../components/utils/Parser';
 import { BOT, PACKAGE } from '../components/utils/EddiTypes';
 
-export const BotStateSelector: (state: IAppState) => IBotState = state =>
+export const BotStateSelector: (state: IAppState) => IBotState = (state) =>
   state.botState;
 
-export const botsSelector: (
-  state: IAppState,
-) => {
+export const botsSelector: (state: IAppState) => {
   bots: IBot[];
   isLoading: boolean;
   allBotsLoaded: boolean;
   error: Error;
-} = createSelector(BotStateSelector, function(
-  botState: IBotState,
-): {
+} = createSelector(BotStateSelector, function (botState: IBotState): {
   bots: IBot[];
   isLoading: boolean;
   allBotsLoaded: boolean;
   error: Error;
   botsLoaded: number;
 } {
-  const bots = botState.bots.filter(bot => bot.version === bot.currentVersion);
-  const sortedBots = bots.sort(function(a, b) {
+  const bots = botState.bots.filter(
+    (bot) => bot.version === bot.currentVersion,
+  );
+  const sortedBots = bots.sort(function (a, b) {
     return b.lastModifiedOn - a.lastModifiedOn;
   });
   return {
@@ -44,7 +42,7 @@ export interface IBotSelectorProps {
 
 export function botSelector(state: IAppState, props: IBotSelectorProps) {
   const bot = state.botState.bots.find(
-    bot => bot.resource === props.botResource,
+    (bot) => bot.resource === props.botResource,
   );
   return {
     bot,
@@ -63,7 +61,7 @@ export function botsWithPackageSelector(
   const botLists = [];
   for (let i = 0; i < _.size(props.packageResources); i++) {
     const botlist = state.botState.bots.filter(
-      bot =>
+      (bot) =>
         bot.version === bot.currentVersion &&
         !_.isEmpty(bot.packages) &&
         JSON.stringify(bot.packages).includes(
@@ -98,12 +96,12 @@ export function specificBotSelector(
   let bot: IBot;
   if (!_.isEmpty(props.botVersion)) {
     bot = state.botState.bots.find(
-      bot =>
+      (bot) =>
         bot.id === props.botId && bot.version.toString() === props.botVersion,
     );
   } else {
     bot = state.botState.bots.find(
-      bot => bot.id === props.botId && bot.version === bot.currentVersion,
+      (bot) => bot.id === props.botId && bot.version === bot.currentVersion,
     );
   }
   return {

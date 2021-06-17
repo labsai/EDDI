@@ -1,12 +1,12 @@
-import { CSSProperties } from 'react';
+import { makeStyles } from '@material-ui/core/styles';
 
-const styles: CSSProperties = {
+const useStyles = makeStyles({
   close: {
-    ':focus': {
+    '&:focus': {
       color: '#000',
       cursor: 'pointer',
     },
-    ':hover': {
+    '&:hover': {
       color: '#000',
       cursor: 'pointer',
     },
@@ -51,5 +51,6 @@ const styles: CSSProperties = {
     marginLeft: 'auto',
     marginRight: 'auto',
   },
-};
-export default styles;
+});
+
+export default useStyles;

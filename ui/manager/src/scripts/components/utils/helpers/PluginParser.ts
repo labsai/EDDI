@@ -1,24 +1,23 @@
 import { IPluginExtensions, IPluginExtension } from '../AxiosFunctions';
 import * as _ from 'lodash';
 
-export const parsePlugins: (
-  externalPackages: IPluginExtensions[],
-) => string[] = (externalPackages: IPluginExtensions[]) => {
-  const plugins: string[] = [];
-  externalPackages.map(externalPackage => {
-    if (externalPackage.config.uri) {
-      plugins.push(externalPackage.config.uri);
-    }
-    for (let extensions of Object.values(externalPackage.extensions)) {
-      for (let extension of extensions) {
-        if (extension.config && extension.config.uri) {
-          plugins.push(extension.config.uri);
+export const parsePlugins: (externalPackages: IPluginExtensions[]) => string[] =
+  (externalPackages: IPluginExtensions[]) => {
+    const plugins: string[] = [];
+    externalPackages.map((externalPackage) => {
+      if (externalPackage.config.uri) {
+        plugins.push(externalPackage.config.uri);
+      }
+      for (let extensions of Object.values(externalPackage.extensions)) {
+        for (let extension of extensions) {
+          if (extension.config && extension.config.uri) {
+            plugins.push(extension.config.uri);
+          }
         }
       }
-    }
-  });
-  return plugins;
-};
+    });
+    return plugins;
+  };
 
 export const parsePluginExtensions: (
   externalPackages: IPluginExtensions[],

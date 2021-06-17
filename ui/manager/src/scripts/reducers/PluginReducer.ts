@@ -15,7 +15,7 @@ import {
   FETCH_PLUGIN_JSON_SCHEMA_SUCCESS,
   DUPLICATE_SUCCESS,
 } from '../actions/EddiApiActionTypes';
-import * as update from 'immutability-helper';
+import update from 'immutability-helper';
 import {
   IFetchPluginFailedAction,
   IFetchPluginSuccessAction,
@@ -143,9 +143,9 @@ const PluginReducer: IPluginReducer = (
     case FETCH_PLUGINS_SUCCESS:
       const lastPage =
         (action as IFetchPluginsSuccessAction).limit >
-        (action as IFetchPluginsSuccessAction).plugins.length;
+        (action as IFetchPluginsSuccessAction).plugins?.length;
       const newPluginsLoaded = (action as IFetchPluginsSuccessAction).plugins
-        .length;
+        ?.length;
       const pluginType = (action as IFetchPluginsSuccessAction).pluginType;
       return update(state, {
         isLoadingPlugins: {
@@ -156,7 +156,7 @@ const PluginReducer: IPluginReducer = (
             if (!_.isEmpty((action as IFetchPluginsSuccessAction).plugins)) {
               return _.uniqBy(
                 plugins.concat((action as IFetchPluginsSuccessAction).plugins),
-                plugin => plugin.resource,
+                (plugin) => plugin.resource,
               );
             } else {
               return plugins;
@@ -211,7 +211,7 @@ const PluginReducer: IPluginReducer = (
         allGitCallsLoaded: {
           $set: pluginType === GITCALLS ? lastPage : state.allHttpCallsLoaded,
         },
-        loadedPropertysetter: {
+        loadedPropertysetters: {
           $set:
             pluginType === PROPERTYSETTER
               ? state.loadedPropertysetters + newPluginsLoaded
@@ -244,7 +244,7 @@ const PluginReducer: IPluginReducer = (
 
     case FETCH_PLUGIN_SUCCESS:
       const pluginList = state.plugins.filter(
-        plugin =>
+        (plugin) =>
           plugin.resource !==
           (action as IFetchPluginSuccessAction).plugin.resource,
       );
@@ -274,7 +274,7 @@ const PluginReducer: IPluginReducer = (
       return update(state, {
         plugins: {
           $apply: (plugins: IPlugin[]) => {
-            return plugins.map(plugin => {
+            return plugins.map((plugin) => {
               if (
                 plugin.resource ===
                 (action as IFetchPackagesUsingPluginSuccessAction)
@@ -282,9 +282,9 @@ const PluginReducer: IPluginReducer = (
               ) {
                 return update(plugin, {
                   usedByPackages: {
-                    $set: (action as IFetchPackagesUsingPluginSuccessAction).packages.map(
-                      pkg => pkg.resource,
-                    ),
+                    $set: (
+                      action as IFetchPackagesUsingPluginSuccessAction
+                    ).packages.map((pkg) => pkg.resource),
                   },
                 });
               } else {
@@ -300,7 +300,7 @@ const PluginReducer: IPluginReducer = (
         plugins: {
           $apply: (plugins: IPlugin[]) => {
             const updatedPlugin = (action as IUpdatePluginSuccessAction).plugin;
-            const newPluginList = plugins.map(plugin => {
+            const newPluginList = plugins.map((plugin) => {
               if (plugin.id === updatedPlugin.id) {
                 return update(plugin, {
                   currentVersion: { $set: updatedPlugin.version },
@@ -352,7 +352,7 @@ const PluginReducer: IPluginReducer = (
           $set:
             type === GITCALLS ? state.loadedGitCalls + 1 : state.loadedGitCalls,
         },
-        loadedPropertysetter: {
+        loadedPropertysetters: {
           $set:
             type === PROPERTYSETTER
               ? state.loadedPropertysetters + 1
@@ -369,7 +369,7 @@ const PluginReducer: IPluginReducer = (
                 schemas.concat(
                   (action as IFetchJsonSchemaSuccessAction).schema,
                 ),
-                schema => schema.name,
+                (schema) => schema.name,
               );
             } else {
               return schemas;
@@ -384,7 +384,7 @@ const PluginReducer: IPluginReducer = (
           $apply: (plugins: IPlugin[]) => {
             return _.uniqBy(
               plugins.concat((action as IDuplicateSuccessAction).plugins),
-              plugin => plugin.resource,
+              (plugin) => plugin.resource,
             );
           },
         },

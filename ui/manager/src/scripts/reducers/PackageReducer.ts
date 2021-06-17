@@ -24,7 +24,7 @@ import {
   FETCH_PACKAGE_JSON_SCHEMA_SUCCESS,
   DUPLICATE_SUCCESS,
 } from '../actions/EddiApiActionTypes';
-import * as update from 'immutability-helper';
+import update from 'immutability-helper';
 import {
   IFetchPackageDataFailedAction,
   IFetchPackageDataSuccessAction,
@@ -111,7 +111,7 @@ const PackageReducer: IPackageReducer = (
                 packages.concat(
                   (action as IFetchPackagesSuccessAction).packages,
                 ),
-                pkg => pkg.resource,
+                (pkg) => pkg.resource,
               );
             } else {
               return packages;
@@ -148,7 +148,7 @@ const PackageReducer: IPackageReducer = (
 
     case FETCH_PACKAGE_SUCCESS:
       const newPackage = (action as IFetchPackageSuccessAction).package;
-      const packageList = state.packages.map(pkg => {
+      const packageList = state.packages.map((pkg) => {
         if (pkg.resource === newPackage.resource) {
           return {
             id: pkg.id,
@@ -167,7 +167,9 @@ const PackageReducer: IPackageReducer = (
         }
       });
       if (
-        _.isEmpty(packageList.find(pkg => pkg.resource === newPackage.resource))
+        _.isEmpty(
+          packageList.find((pkg) => pkg.resource === newPackage.resource),
+        )
       ) {
         packageList.push((action as IFetchPackageSuccessAction).package);
       }
@@ -214,7 +216,7 @@ const PackageReducer: IPackageReducer = (
         },
         packages: {
           $apply: (packages: IPackage[]) => {
-            return packages.map(pack => {
+            return packages.map((pack) => {
               if (
                 pack.resource ===
                 (action as IFetchPackageDataSuccessAction).packageResource
@@ -248,7 +250,7 @@ const PackageReducer: IPackageReducer = (
           $apply: (packages: IPackage[]) => {
             const updatedPackage = (action as IUpdatePackageSuccessAction)
               .package;
-            const newPackageList = packages.map(pack => {
+            const newPackageList = packages.map((pack) => {
               if (pack.id === updatedPackage.id) {
                 return update(pack, {
                   currentVersion: { $set: updatedPackage.version },
@@ -268,7 +270,7 @@ const PackageReducer: IPackageReducer = (
       return update(state, {
         packages: {
           $apply: (packages: IPackage[]) => {
-            return packages.map(pack => {
+            return packages.map((pack) => {
               if (
                 pack.resource ===
                 (action as IAddAvailableUpdateForPackageAction).packageResource
@@ -310,7 +312,7 @@ const PackageReducer: IPackageReducer = (
       return update(state, {
         packages: {
           $apply: (packages: IPackage[]) => {
-            return packages.map(pack => {
+            return packages.map((pack) => {
               if (
                 pack.resource ===
                 (action as IUpdateDescriptorSuccessAction).resource
@@ -339,7 +341,7 @@ const PackageReducer: IPackageReducer = (
         return update(state, {
           packages: {
             $apply: (packages: IPackage[]) => {
-              return packages.map(pack => {
+              return packages.map((pack) => {
                 if (
                   pack.resource ===
                   (action as IFetchBotsUsingPackageSuccessAction)
@@ -347,9 +349,9 @@ const PackageReducer: IPackageReducer = (
                 ) {
                   return update(pack, {
                     usedByBots: {
-                      $set: (action as IFetchBotsUsingPackageSuccessAction).bots.map(
-                        bot => bot.resource,
-                      ),
+                      $set: (
+                        action as IFetchBotsUsingPackageSuccessAction
+                      ).bots.map((bot) => bot.resource),
                     },
                   });
                 } else {
@@ -374,7 +376,7 @@ const PackageReducer: IPackageReducer = (
                 packages.concat(
                   (action as IFetchPackagesUsingPluginSuccessAction).packages,
                 ),
-                pkg => pkg.resource,
+                (pkg) => pkg.resource,
               );
             } else {
               return packages;
@@ -404,9 +406,10 @@ const PackageReducer: IPackageReducer = (
       return update(state, {
         packages: {
           $apply: (packages: IPackage[]) => {
-            const updatedPackages: IPackage[] = (action as IUpdatePackagesSuccessAction)
-              .packages;
-            const newPackageList = packages.map(pack => {
+            const updatedPackages: IPackage[] = (
+              action as IUpdatePackagesSuccessAction
+            ).packages;
+            const newPackageList = packages.map((pack) => {
               for (let i = 0; i < _.size(updatedPackages); i++) {
                 if (pack.id === updatedPackages[i].id) {
                   return update(pack, {
@@ -419,9 +422,9 @@ const PackageReducer: IPackageReducer = (
             });
             return newPackageList.concat(updatedPackages);
           },
-          isLoadingAllPackages: {
-            $set: false,
-          },
+        },
+        isLoadingAllPackages: {
+          $set: false,
         },
       });
 
@@ -443,16 +446,16 @@ const PackageReducer: IPackageReducer = (
       return update(state, {
         packages: {
           $apply: (packages: IPackage[]) => {
-            return packages.map(pkg => {
+            return packages.map((pkg) => {
               if (
                 pkg.resource ===
                 (action as IAddNewPackageToBotsSuccessAction).packageResource
               ) {
                 return update(pkg, {
                   usedByBots: {
-                    $set: (action as IAddNewPackageToBotsSuccessAction).bots.map(
-                      bot => bot.resource,
-                    ),
+                    $set: (
+                      action as IAddNewPackageToBotsSuccessAction
+                    ).bots.map((bot) => bot.resource),
                   },
                 });
               } else {
@@ -476,7 +479,7 @@ const PackageReducer: IPackageReducer = (
           $apply: (packages: IPackage[]) => {
             return _.uniqBy(
               packages.concat((action as IDuplicateSuccessAction).packages),
-              pkg => pkg.resource,
+              (pkg) => pkg.resource,
             );
           },
         },

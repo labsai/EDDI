@@ -1,6 +1,5 @@
 import * as React from 'react';
-import { Component, compose, pure, setDisplayName } from 'recompose';
-import * as Radium from 'radium';
+import { compose, pure, setDisplayName } from 'recompose';
 import { IPackage } from '../../utils/AxiosFunctions';
 import { connect } from 'react-redux';
 import NameAndVersion from './NameAndVersion';
@@ -9,8 +8,8 @@ import { historyPush } from '../../../history';
 
 interface IPublicProps {
   packageResource: string;
-  usedByOlderVersion: boolean;
   isSmallName: boolean;
+  usedByOlderVersion?: boolean;
 }
 
 interface IPrivateProps extends IPublicProps {
@@ -19,25 +18,27 @@ interface IPrivateProps extends IPublicProps {
   error: Error;
 }
 
-class Package extends React.Component<IPrivateProps> {
-  render() {
-    return (
-      <NameAndVersion
-        descriptor={this.props.packagePayload}
-        usedByOlderVersion={this.props.usedByOlderVersion}
-        isSmallName={this.props.isSmallName}
-        onClick={() =>
-          historyPush(`/packageview/${this.props.packagePayload.id}`)
-        }
-      />
-    );
-  }
-}
+const Package = ({
+  packagePayload,
+  usedByOlderVersion,
+  isSmallName,
+}: IPrivateProps) => {
+  return (
+    <NameAndVersion
+      descriptor={packagePayload}
+      usedByOlderVersion={usedByOlderVersion}
+      isSmallName={isSmallName}
+      onClick={() => historyPush(`/packageview/${packagePayload.id}`)}
+    />
+  );
+};
 
-const ComposedPackage: Component<IProps> = compose<IProps>(
+const ComposedPackage: React.ComponentClass<IPublicProps> = compose<
+  IPrivateProps,
+  IPublicProps
+>(
   pure,
   connect(packageSelector),
-  Radium,
   setDisplayName('Package'),
 )(Package);
 

@@ -1,9 +1,8 @@
 import * as React from 'react';
-import { Component, compose, pure, setDisplayName } from 'recompose';
+import { compose, pure, setDisplayName } from 'recompose';
 import ViewJsonContent from './ViewJsonContent';
 import { IPlugin } from '../../utils/AxiosFunctions';
 import { connect } from 'react-redux';
-import * as renderIf from 'render-if';
 import { pluginSelector } from '../../../selectors/PluginSelectors';
 import * as _ from 'lodash';
 
@@ -18,53 +17,34 @@ interface IPrivateProps extends IPublicProps {
   error: Error;
 }
 
-interface IState {
-  data: string;
-}
+const PluginContainer = (props: IPrivateProps) => {
+  const [data, setData] = React.useState('');
 
-class PluginContainer extends React.Component<IPrivateProps, IState> {
-  constructor(props) {
-    super(props);
-    this.state = {
-      data: '',
-    };
-  }
+  React.useEffect(() => {
+    setData(JSON.stringify(props.plugin.pluginData, null, '\t'));
+  }, [props.plugin, props.isLoading, props.error]);
 
-  componentDidMount() {
-    this.setState({
-      data: JSON.stringify(this.props.plugin.pluginData, null, '\t'),
-    });
-  }
+  return (
+    <div>
+      {!_.isEmpty(props.plugin) && (
+        <ViewJsonContent
+          descriptor={props.plugin}
+          data={data}
+          usedBy={props.plugin.usedByPackages}
+          selectVersion={props.selectVersion}
+        />
+      )}
+    </div>
+  );
+};
 
-  componentDidUpdate(prevProps) {
-    if (prevProps !== this.props) {
-      this.setState({
-        data: JSON.stringify(this.props.plugin.pluginData, null, '\t'),
-      });
-    }
-  }
-
-  render() {
-    return (
-      <div>
-        {renderIf(!_.isEmpty(this.props.plugin))(() => (
-          <ViewJsonContent
-            descriptor={this.props.plugin}
-            data={this.state.data}
-            usedBy={this.props.plugin.usedByPackages}
-            selectVersion={this.props.selectVersion}
-          />
-        ))}
-      </div>
-    );
-  }
-}
-
-const ComposedPluginContainer: Component<IPublicProps> = compose<
+const ComposedPluginContainer: React.ComponentClass<IPublicProps> = compose<
   IPrivateProps,
   IPublicProps
->(pure, setDisplayName('PluginContainer'), connect(pluginSelector))(
-  PluginContainer,
-);
+>(
+  pure,
+  setDisplayName('PluginContainer'),
+  connect(pluginSelector),
+)(PluginContainer);
 
 export default ComposedPluginContainer;

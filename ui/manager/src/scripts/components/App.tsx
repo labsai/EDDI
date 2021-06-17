@@ -1,47 +1,45 @@
-import * as React from 'react';
-import { Route } from 'react-router-dom';
-import SystemActionDispatchers from '../actions/SystemActionDispatchers';
-import { isAppReadySelector } from '../selectors/SystemSelectors';
-import ModalComponentFrame from './ModalComponent/ModalComponentFrame';
-import Dashboard from './pages/Dashboard';
-import BotViewPage from './pages/BotViewPage';
-import PackagePage from './pages/PackagePage';
-import { run as runSagaMiddleware } from '../sagas';
-import * as renderIf from 'render-if';
-import { connect } from 'react-redux';
-import PackageViewPage from './pages/PackageViewPage';
-import ExtensionsPage from './pages/ExtensionsPage';
-import * as Keycloak from 'keycloak-js';
-import * as kcHelper from './utils/keycloakFunctions';
-import { historyPush } from '../history';
-import WhiteButton from './Assets/Buttons/WhiteButton';
-import { CSSProperties } from 'react';
-import {
-  getAuthClientId,
-  getReadOnly,
-  setApiUrlQuery,
-  setReadOnlyQuery,
-} from './utils/ApiFunctions';
 import { library } from '@fortawesome/fontawesome-svg-core';
-import Parser from './utils/Parser';
 import {
   faCheck,
   faCheckCircle,
-  faCompress,
-  faExpand,
-  faRedo,
-  faUndo,
-  faEllipsisV,
-  faPlus,
-  faMinus,
   faComments,
+  faCompress,
+  faEllipsisV,
+  faExpand,
+  faMinus,
+  faPlus,
+  faRedo,
   faSync,
+  faUndo,
 } from '@fortawesome/free-solid-svg-icons';
-import BotConversationViewPage from './pages/BotConversationViewPage';
-import ConversationsPage from './pages/ConversationsPage';
-import { authenticationSelector } from '../selectors/AuthenticationSelectors';
-import { Component, compose, pure, setDisplayName } from 'recompose';
+import * as Keycloak from 'keycloak-js';
+import * as React from 'react';
+import { connect } from 'react-redux';
+import { Route } from 'react-router-dom';
+import { compose, pure, setDisplayName } from 'recompose';
 import authenticationActionDispatchers from '../actions/AuthenticationActionDispatchers';
+import SystemActionDispatchers from '../actions/SystemActionDispatchers';
+import { run as runSagaMiddleware } from '../sagas';
+import { authenticationSelector } from '../selectors/AuthenticationSelectors';
+import { isChatOpenedSelector } from '../selectors/ChatSelectors';
+import {
+  isAppReadySelector,
+  isLoadingSelector,
+} from '../selectors/SystemSelectors';
+import Chat from './Chat/Chat';
+import Loader from './Loader/Loader';
+import ModalComponentFrame from './ModalComponent/ModalComponentFrame';
+import BotConversationViewPage from './pages/BotConversationViewPage';
+import BotViewPage from './pages/BotViewPage';
+import ConversationsPage from './pages/ConversationsPage';
+import Dashboard from './pages/Dashboard';
+import ExtensionsPage from './pages/ExtensionsPage';
+import PackagePage from './pages/PackagePage';
+import PackageViewPage from './pages/PackageViewPage';
+import { setApiUrlQuery, setReadOnlyQuery } from './utils/ApiFunctions';
+import * as kcHelper from './utils/keycloakFunctions';
+import Parser from './utils/Parser';
+import useChangeBodyMaxWidth from './utils/useChangeBodyMaxWidth';
 
 library.add(faUndo);
 library.add(faRedo);
@@ -67,16 +65,27 @@ interface IPrivateProps extends IRouteProps {
   isBasicAuthEnabled: boolean;
   keycloakAuthenticated: boolean;
   basicAuthAuthenticated: boolean;
+  isOpened: boolean;
+  isLoading: boolean;
 }
 
-const sleep = milliseconds => {
-  return new Promise(resolve => setTimeout(resolve, milliseconds));
+const sleep = (milliseconds) => {
+  return new Promise((resolve) => setTimeout(resolve, milliseconds));
 };
 
-class App extends React.Component<IPrivateProps> {
-  async componentDidMount() {
-    await runSagaMiddleware();
-    const queryStrings = Parser.getQueryStrings(this.props.location.search);
+const App = ({
+  location,
+  keycloakAuthenticated,
+  isKeycloakEnabled,
+  keycloak,
+  isAppReady,
+  basicAuthAuthenticated,
+  isOpened: isChatOpened,
+  isLoading,
+}: IPrivateProps) => {
+  React.useEffect(() => {
+    runSagaMiddleware();
+    const queryStrings = Parser.getQueryStrings(location.search);
     if (queryStrings.apiUrl) {
       setApiUrlQuery(decodeURIComponent(queryStrings.apiUrl));
     }
@@ -85,39 +94,50 @@ class App extends React.Component<IPrivateProps> {
     }
     SystemActionDispatchers.appReady();
     authenticationActionDispatchers.checkAuthenticationAction();
-  }
+  }, []);
 
-  async componentDidUpdate(prevProps) {
-    if (this.props.isKeycloakEnabled && !this.props.keycloakAuthenticated) {
-      if (!this.props.keycloak.authenticated) {
-        await kcHelper.initKeycloak(this.props.keycloak);
+  const refreshToken = async () => {
+    if (!keycloak) {
+      return;
+    }
+    authenticationActionDispatchers.keycloakRefreshTokenAction(keycloak);
+    await sleep(240000).then(() => refreshToken());
+  };
+
+  const initKeycloak = async () => {
+    if (!keycloak) {
+      return;
+    }
+    await kcHelper.initKeycloak(keycloak);
+  };
+
+  React.useEffect(() => {
+    if (isKeycloakEnabled && !keycloakAuthenticated) {
+      if (!keycloak.authenticated) {
+        initKeycloak();
       }
     }
-    if (
-      this.props.isKeycloakEnabled &&
-      this.props.keycloakAuthenticated &&
-      !prevProps.keycloakAuthenticated
-    ) {
-      this.refreshToken();
+  }, [isKeycloakEnabled, keycloakAuthenticated, keycloak]);
+
+  React.useEffect(() => {
+    if (isKeycloakEnabled && keycloakAuthenticated) {
+      refreshToken();
     }
-  }
+  }, []);
 
-  async refreshToken(props = this.props) {
-    authenticationActionDispatchers.keycloakRefreshTokenAction(props.keycloak);
-    await sleep(240000).then(() => this.refreshToken());
-  }
+  const authenticated = keycloakAuthenticated && basicAuthAuthenticated;
 
-  render() {
-    const authenticated =
-      this.props.keycloakAuthenticated && this.props.basicAuthAuthenticated;
-    return (
-      <div className="ui container">
-        {renderIf(this.props.isAppReady)(() => (
-          <div>
-            {renderIf(!authenticated)(() => (
+  useChangeBodyMaxWidth(isChatOpened);
+
+  return (
+    <>
+      <div className={`ui container ${isChatOpened ? 'with-chat' : null}`}>
+        {isAppReady && (
+          <div className="inner-container">
+            {!authenticated && (
               <div>{'You need to login to see this page'}</div>
-            ))}
-            {renderIf(authenticated)(() => (
+            )}
+            {authenticated && (
               <div>
                 <Route path={'/'} exact component={Dashboard} />
                 <Route path={'/packages'} exact component={PackagePage} />
@@ -134,21 +154,26 @@ class App extends React.Component<IPrivateProps> {
                 />
                 <Route path={'/packageview/:id'} component={PackageViewPage} />
               </div>
-            ))}
-            {renderIf(this.props.keycloakAuthenticated)(() => (
-              <ModalComponentFrame />
-            ))}
+            )}
+            {keycloakAuthenticated && <ModalComponentFrame />}
           </div>
-        ))}
+        )}
       </div>
-    );
-  }
-}
+      {isChatOpened && <Chat />}
+      {isLoading && <Loader />}
+    </>
+  );
+};
 
-const ComposedApp: Component<IProps> = compose<IProps>(
+const ComposedApp: React.ComponentClass<IPrivateProps> = compose<
+  IPrivateProps,
+  IPrivateProps
+>(
   pure,
   connect(authenticationSelector),
   connect(isAppReadySelector),
+  connect(isChatOpenedSelector),
+  connect(isLoadingSelector),
   setDisplayName('App'),
 )(App);
 

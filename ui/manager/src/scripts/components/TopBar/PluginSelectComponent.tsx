@@ -1,40 +1,74 @@
+import FormControl from '@material-ui/core/FormControl';
+import MenuItem from '@material-ui/core/MenuItem';
+import OutlinedInput from '@material-ui/core/OutlinedInput';
+import Select from '@material-ui/core/Select';
+import { makeStyles } from '@material-ui/core/styles';
+import ArrowDropDownIcon from '@material-ui/icons/ArrowDropDown';
 import * as React from 'react';
-import * as Radium from 'radium';
-import * as renderIf from 'render-if';
-import { Component, compose, pure, setDisplayName } from 'recompose';
-import Select from 'react-select';
-import * as _ from 'lodash';
-import { CSSProperties } from 'react';
-import Parser from '../utils/Parser';
+import { compose, pure, setDisplayName } from 'recompose';
 import { historyPush } from '../../history';
-import styles from './PluginSelectComponent.styles';
 import { pageEnum } from '../pages/pageEnum';
 
-const customStyles = {
-  control: (base, state) => ({
-    ...base,
-    ...styles.control,
-  }),
-  indicatorsContainer: (base, state) => ({
-    ...styles.indicatorsContainer,
-  }),
-  input: (base, state) => ({
-    ...base,
-    ...styles.input,
-  }),
-  valueContainer: (base, state) => ({
-    ...base,
-    ...styles.valueContainer,
-  }),
-  option: (base, state) => ({
-    ...base,
-    ...styles.option,
-  }),
-  singleValue: (base, state) => ({
-    ...base,
-    ...styles.singleValue,
-  }),
-};
+const useStyles = makeStyles({
+  selectContainer: {
+    width: 170,
+    height: 39,
+    borderBottom: '3px solid #e0e5ee',
+
+    '&:hover': {
+      borderBottom: '3px solid #7a849e',
+      backgroundColor: '#f6f9fb',
+    },
+    '& .MuiOutlinedInput-root': {
+      fontSize: '1.4rem',
+      lineHeight: '2rem',
+      height: '100%',
+      display: 'flex',
+      alignItems: 'flex-end',
+      color: '#7a849e',
+    },
+    '& .MuiSelect-icon': {
+      top: 'calc(50% - 8px)',
+    },
+    '& .MuiOutlinedInput-root .MuiOutlinedInput-notchedOutline': {
+      borderColor: 'transparent',
+    },
+  },
+  active: {
+    '& .MuiOutlinedInput-root': {
+      color: '#16325c',
+    },
+    borderBottom: '3px solid #4a90e2',
+  },
+  input: {
+    '& .MuiOutlinedInput-inputMarginDense': {
+      paddingTop: 5,
+      paddingBottom: 5,
+      backgroundColor: 'transparent',
+    },
+  },
+  select: {
+    '& li': {
+      fontSize: '1.4rem',
+    },
+    '& li:hover': {
+      backgroundColor: '#DAEAFF',
+    },
+    '& .Mui-selected': {
+      backgroundColor: '#2684FF',
+    },
+    '& .Mui-disabled': {
+      backgroundColor: 'transparent',
+    },
+    '& .Mui-selected:hover': {
+      backgroundColor: '#2684FF',
+    },
+  },
+  arrowDropdown: {
+    marginTop: 'auto',
+    marginBottom: 'auto',
+  },
+});
 
 const pluginResourceOptions = [
   'Regular dictionaries',
@@ -45,38 +79,23 @@ const pluginResourceOptions = [
   'Properties',
 ];
 
-interface IOption {
-  value: number;
-  label: string;
-}
-interface IState {
-  options: IOption[];
-  selectedOption: IOption;
-}
 interface IProps {
   page: pageEnum;
 }
 
-class PluginSelectComponent extends React.Component<IProps, IState> {
-  constructor(props) {
-    super(props);
-    this.state = {
-      selectedOption: null,
-      options: [],
-    };
-  }
+interface IOption {
+  value: number;
+  label: string;
+}
 
-  componentDidMount() {
-    this.setOption();
-  }
+const PluginSelectComponent = ({ page }: IProps) => {
+  const classes = useStyles();
+  const [selectedOption, setSelectedOption] = React.useState<IOption>({
+    label: 'Resources',
+    value: -1,
+  });
 
-  componentDidUpdate(prevProps) {
-    if (prevProps !== this.props) {
-      this.setOption();
-    }
-  }
-
-  isPluginPage(props = this.props): boolean {
+  const isPluginPage = (): boolean => {
     return [
       pageEnum.dictionary,
       pageEnum.behavior,
@@ -84,69 +103,73 @@ class PluginSelectComponent extends React.Component<IProps, IState> {
       pageEnum.httpCalls,
       pageEnum.gitCalls,
       pageEnum.property,
-    ].includes(props.page);
-  }
+    ].includes(page);
+  };
 
-  setOption(props = this.props) {
-    if (this.isPluginPage(props)) {
-      this.setState({
-        selectedOption: {
-          value: props.page,
-          label: pluginResourceOptions[props.page],
-        },
-      });
+  const setOption = () => {
+    if (isPluginPage()) {
+      setSelectedOption({ label: pluginResourceOptions[page], value: page });
     } else {
-      this.setState({ selectedOption: { value: -1, label: 'Resources' } });
-    }
-  }
-
-  handleSelect = (option: IOption) => {
-    if (!_.isEmpty(option)) {
-      this.setState({ selectedOption: option });
-      historyPush('/resources', [`type=${pageEnum[option.value]}`]);
+      setSelectedOption({ label: 'Resources', value: -1 });
     }
   };
 
-  getStyles() {
-    if (this.isPluginPage()) {
-      return {
-        ...customStyles,
-        control: (base, state) => ({
-          ...base,
-          ...styles.control,
-          ...styles.controlSelected,
-        }),
-        singleValue: (base, state) => ({
-          ...base,
-          ...styles.singleValue,
-          ...styles.singleValueSelected,
-        }),
-      };
-    } else {
-      return {
-        ...customStyles,
-      };
+  React.useEffect(() => {
+    setOption();
+  }, [page]);
+
+  const handleSelect = (
+    event: React.ChangeEvent<{
+      value: number;
+    }>,
+  ) => {
+    const value = event?.target?.value;
+    if (typeof value === 'number') {
+      const selectedOption = pluginResourceOptions[value];
+      if (!selectedOption) {
+        return;
+      }
+      setSelectedOption({ label: selectedOption, value });
+      historyPush('/resources', [`type=${pageEnum[value]}`]);
     }
-  }
+  };
 
-  render() {
-    return (
-      <div style={styles.selectContainer}>
-        <Select
-          styles={this.getStyles()}
-          value={this.state.selectedOption}
-          options={pluginResourceOptions.map((pluginType, i) => {
-            return { value: i, label: pluginType };
-          })}
-          onChange={this.handleSelect}
-          isSearchable={false}
-        />
-      </div>
-    );
-  }
-}
+  return (
+    <FormControl
+      size="small"
+      className={`${classes.selectContainer} ${
+        isPluginPage() ? classes.active : undefined
+      }`}>
+      <Select
+        value={selectedOption.value}
+        onChange={handleSelect}
+        IconComponent={() => (
+          <ArrowDropDownIcon
+            className={classes.arrowDropdown}
+            fontSize={'large'}
+          />
+        )}
+        input={<OutlinedInput className={classes.input} />}
+        MenuProps={{ classes: { paper: classes.select } }}>
+        <MenuItem key={'Resources'} value={-1} disabled>
+          {'Resources'}
+        </MenuItem>
+        {pluginResourceOptions.map((p, i) => {
+          return (
+            <MenuItem key={p + i} value={i}>
+              {p}
+            </MenuItem>
+          );
+        })}
+      </Select>
+    </FormControl>
+  );
+};
 
-const ComposedPluginSelectComponent: Component<IProps> = compose<IProps>(
+const ComposedPluginSelectComponent: React.ComponentClass<IProps> = compose<
+  IProps,
+  IProps
+>(
   pure,
   setDisplayName('PluginSelectComponent'),
 )(PluginSelectComponent);

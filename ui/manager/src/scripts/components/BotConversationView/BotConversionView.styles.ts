@@ -1,4 +1,4 @@
-import { CSSProperties } from 'react';
+import { makeStyles } from '@material-ui/core/styles';
 import {
   BLUE_COLOR2,
   DARK_BLUE_COLOR,
@@ -13,7 +13,7 @@ import {
   SMALL_FONT2,
 } from '../../../styles/DefaultStylingProperties';
 
-const styles: CSSProperties = {
+const useStyles = makeStyles({
   content: {
     paddingBottom: '500px',
   },
@@ -22,7 +22,7 @@ const styles: CSSProperties = {
     marginTop: '30px',
   },
   tab: {
-    ':hover': {
+    '&:hover': {
       backgroundColor: LIGHT_GREY_COLOR3,
       borderBottom: `3px solid ${GREY_COLOR}`,
     },
@@ -33,7 +33,7 @@ const styles: CSSProperties = {
     fontSize: SMALL_FONT2,
     height: '39px',
     textAlign: 'center',
-    flex: '1',
+    flex: 1,
     lineHeight: '42px',
   },
   tabDisabled: {
@@ -58,7 +58,7 @@ const styles: CSSProperties = {
     display: 'flex',
   },
   botName: {
-    ':hover': {
+    '&:hover': {
       backgroundColor: LIGHT_BLUE_COLOR2,
     },
     color: DARK_BLUE_COLOR,
@@ -87,7 +87,7 @@ const styles: CSSProperties = {
     border: `1px solid ${RED_COLOR}`,
     width: '150px',
     marginLeft: 'auto',
-    disabled: {
+    '&:disabled': {
       border: LIGHT_GREY_BORDER,
     },
   },
@@ -98,5 +98,8 @@ const styles: CSSProperties = {
     height: '500px',
     justifyContent: 'center',
   },
-};
-export default styles;
+  title: {},
+  descriptorContent: {},
+});
+
+export default useStyles;

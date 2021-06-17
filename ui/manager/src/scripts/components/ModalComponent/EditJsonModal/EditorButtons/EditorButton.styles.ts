@@ -1,13 +1,13 @@
-import { CSSProperties } from 'react';
+import { makeStyles } from '@material-ui/core/styles';
 import {
   GREEN_COLOR,
   LIGHT_GREY_BORDER,
   LIGHT_GREY_COLOR,
 } from '../../../../../styles/DefaultStylingProperties';
 
-const styles: CSSProperties = {
+const useStyles = makeStyles({
   button: {
-    ':hover': {
+    '&:hover': {
       backgroundColor: '#666666',
     },
     position: 'relative',
@@ -22,7 +22,7 @@ const styles: CSSProperties = {
     cursor: 'pointer',
   },
   validateButton: {
-    ':hover': {
+    '&:hover': {
       backgroundColor: '#75d79f',
     },
     position: 'relative',
@@ -49,6 +49,6 @@ const styles: CSSProperties = {
     marginLeft: 'auto',
     marginRight: 'auto',
   },
-};
+});
 
-export default styles;
+export default useStyles;
