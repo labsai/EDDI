@@ -8,7 +8,7 @@ import { BLUE_COLOR } from '../../../styles/DefaultStylingProperties';
 import {
   closeChatAction,
   replyInChatAction,
-  startChatAction
+  startChatAction,
 } from '../../actions/ChatActions';
 import { chatDataSelector } from '../../selectors/ChatSelectors';
 import useStyles from './Chat.styles';
@@ -19,8 +19,11 @@ import ChatQuickReplies from './ChatQuickReplies/ChatQuickReplies';
 const Chat = () => {
   const chatRef = React.useRef<HTMLDivElement>(null);
   const classes = useStyles();
+  const isBotPage = location.pathname.includes('botview');
   const urlSearchParams = new URLSearchParams(location.search);
-  const botId = urlSearchParams.get('botId');
+  const botId = isBotPage
+    ? location.pathname.split('/')?.[2]
+    : urlSearchParams.get('botId');
 
   const { data, isLoading, error } = useSelector(chatDataSelector);
 
@@ -31,7 +34,9 @@ const Chat = () => {
   };
 
   React.useEffect(() => {
-    dispatch(startChatAction(botId));
+    if (botId) {
+      dispatch(startChatAction(botId));
+    }
   }, [botId]);
 
   const handleReplyInChat = (quickReply) => {

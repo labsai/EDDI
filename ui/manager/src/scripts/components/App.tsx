@@ -22,8 +22,12 @@ import SystemActionDispatchers from '../actions/SystemActionDispatchers';
 import { run as runSagaMiddleware } from '../sagas';
 import { authenticationSelector } from '../selectors/AuthenticationSelectors';
 import { isChatOpenedSelector } from '../selectors/ChatSelectors';
-import { isAppReadySelector } from '../selectors/SystemSelectors';
+import {
+  isAppReadySelector,
+  isLoadingSelector,
+} from '../selectors/SystemSelectors';
 import Chat from './Chat/Chat';
+import Loader from './Loader/Loader';
 import ModalComponentFrame from './ModalComponent/ModalComponentFrame';
 import BotConversationViewPage from './pages/BotConversationViewPage';
 import BotViewPage from './pages/BotViewPage';
@@ -62,6 +66,7 @@ interface IPrivateProps extends IRouteProps {
   keycloakAuthenticated: boolean;
   basicAuthAuthenticated: boolean;
   isOpened: boolean;
+  isLoading: boolean;
 }
 
 const sleep = (milliseconds) => {
@@ -76,6 +81,7 @@ const App = ({
   isAppReady,
   basicAuthAuthenticated,
   isOpened: isChatOpened,
+  isLoading,
 }: IPrivateProps) => {
   React.useEffect(() => {
     runSagaMiddleware();
@@ -154,6 +160,7 @@ const App = ({
         )}
       </div>
       {isChatOpened && <Chat />}
+      {isLoading && <Loader />}
     </>
   );
 };
@@ -166,6 +173,7 @@ const ComposedApp: React.ComponentClass<IPrivateProps> = compose<
   connect(authenticationSelector),
   connect(isAppReadySelector),
   connect(isChatOpenedSelector),
+  connect(isLoadingSelector),
   setDisplayName('App'),
 )(App);
 

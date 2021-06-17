@@ -1,5 +1,30 @@
 import update from 'immutability-helper';
 import { Action, Reducer } from 'redux';
+import { ICheckAuthenticationSuccessAction } from '../actions/AuthenticationActions';
+import {
+  BASIC_AUTH_SIGN_IN_SUCCESS,
+  CHECK_AUTHENTICATION_SUCCESS,
+} from '../actions/AuthenticationActionTypes';
+import {
+  ICreateNewPackageSuccessAction,
+  IDeployBotSuccessAction,
+  IUndeployBotFailedAction,
+  IUpdateDescriptorFailedAction,
+  IUpdateJsonDataFailedAction,
+  IUpdatePackagesSuccessAction,
+  IUpdatePackageSuccessAction,
+  IUpdatePluginSuccessAction,
+} from '../actions/EddiApiActions';
+import {
+  CREATE_NEW_PACKAGE_SUCCESS,
+  DEPLOY_BOT_SUCCESS,
+  UNDEPLOY_BOT_FAILED,
+  UPDATE_DESCRIPTOR_FAILED,
+  UPDATE_JSON_DATA_FAILED,
+  UPDATE_PACKAGES_SUCCESS,
+  UPDATE_PACKAGE_SUCCESS,
+  UPDATE_PLUGIN_SUCCESS,
+} from '../actions/EddiApiActionTypes';
 import {
   IShowAddPackagesModalAction,
   IShowAddPluginsModalAction,
@@ -33,33 +58,6 @@ import {
   IPackage,
 } from '../components/utils/AxiosFunctions';
 import { ModalEnum } from '../components/utils/ModalEnum';
-import {
-  CREATE_NEW_PACKAGE_SUCCESS,
-  DEPLOY_BOT_SUCCESS,
-  UNDEPLOY_BOT_FAILED,
-  UPDATE_DESCRIPTOR_FAILED,
-  UPDATE_JSON_DATA_FAILED,
-  UPDATE_PACKAGE_SUCCESS,
-  UPDATE_PACKAGES_SUCCESS,
-  UPDATE_PLUGIN_SUCCESS,
-} from '../actions/EddiApiActionTypes';
-import {
-  ICreateNewPackageSuccessAction,
-  IDeployBotSuccessAction,
-  IUndeployBotFailedAction,
-  IUpdateDescriptorFailedAction,
-  IUpdateJsonDataFailedAction,
-  IUpdatePackagesSuccessAction,
-  IUpdatePackageSuccessAction,
-  IUpdatePluginSuccessAction,
-} from '../actions/EddiApiActions';
-import {
-  BASIC_AUTH_SIGN_IN,
-  BASIC_AUTH_SIGN_IN_FAILED,
-  BASIC_AUTH_SIGN_IN_SUCCESS,
-  CHECK_AUTHENTICATION_SUCCESS,
-} from '../actions/AuthenticationActionTypes';
-import { ICheckAuthenticationSuccessAction } from '../actions/AuthenticationActions';
 
 export type IModalReducer = Reducer<IModalState>;
 
@@ -352,6 +350,7 @@ const ModalReducer: IModalReducer = (
       });
 
     case DEPLOY_BOT_SUCCESS:
+      return state;
       return update(state, {
         mode: {
           $set: ModalEnum.confirmation,
