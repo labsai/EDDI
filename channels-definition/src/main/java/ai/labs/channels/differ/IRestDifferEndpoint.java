@@ -11,6 +11,8 @@ import javax.ws.rs.Consumes;
 import javax.ws.rs.POST;
 import javax.ws.rs.Path;
 import javax.ws.rs.QueryParam;
+import javax.ws.rs.container.AsyncResponse;
+import javax.ws.rs.container.Suspended;
 import javax.ws.rs.core.MediaType;
 import javax.ws.rs.core.Response;
 
@@ -32,9 +34,10 @@ public interface IRestDifferEndpoint {
     @Path("/endBotConversation")
     @ApiResponse(code = 200, message = "End Bot Conversation in Differ Conversation.")
     @ApiOperation(value = "End Bot Conversation in Differ Conversation.")
-    Response endBotConversation(@QueryParam("intent") String intent,
+    void endBotConversation(@QueryParam("intent") String intent,
                             @QueryParam("botUserId") String botUserId,
-                            @QueryParam("differConversationId") String differConversationId);
+                            @QueryParam("differConversationId") String differConversationId,
+                            @Suspended AsyncResponse asyncResponse);
 }
 
 

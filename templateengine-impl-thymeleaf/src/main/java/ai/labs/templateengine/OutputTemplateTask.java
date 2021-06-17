@@ -11,7 +11,11 @@ import ai.labs.templateengine.ITemplatingEngine.TemplateMode;
 import lombok.extern.slf4j.Slf4j;
 
 import javax.inject.Inject;
-import java.util.*;
+import java.util.Collections;
+import java.util.LinkedHashMap;
+import java.util.LinkedList;
+import java.util.List;
+import java.util.Map;
 import java.util.stream.Collectors;
 
 import static ai.labs.memory.IConversationMemory.IWritableConversationStep;
@@ -44,6 +48,11 @@ public class OutputTemplateTask implements ILifecycleTask {
     @Override
     public String getId() {
         return "ai.labs.templating";
+    }
+
+    @Override
+    public String getType() {
+        return KEY_OUTPUT;
     }
 
     @Override

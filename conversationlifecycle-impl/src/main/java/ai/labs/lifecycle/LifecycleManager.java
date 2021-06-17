@@ -2,10 +2,12 @@ package ai.labs.lifecycle;
 
 import ai.labs.memory.IConversationMemory;
 import ai.labs.memory.IData;
-import ai.labs.utilities.RuntimeUtilities;
 
 import java.util.LinkedList;
 import java.util.List;
+
+import static ai.labs.utilities.RuntimeUtilities.checkNotNull;
+import static ai.labs.utilities.RuntimeUtilities.isNullOrEmpty;
 
 public class LifecycleManager implements ILifecycleManager {
     private static final String KEY_ACTIONS = "actions";
@@ -15,8 +17,17 @@ public class LifecycleManager implements ILifecycleManager {
         lifecycleTasks = new LinkedList<>();
     }
 
-    public void executeLifecycle(final IConversationMemory conversationMemory) throws LifecycleException, ConversationStopException {
-        RuntimeUtilities.checkNotNull(conversationMemory, "conversationMemory");
+    public void executeLifecycle(final IConversationMemory conversationMemory, List<String> lifecycleTaskTypes)
+            throws LifecycleException, ConversationStopException {
+
+        checkNotNull(conversationMemory, "conversationMemory");
+
+        List<ILifecycleTask> lifecycleTasks;
+        if (isNullOrEmpty(lifecycleTaskTypes)) {
+            lifecycleTasks = this.lifecycleTasks;
+        } else {
+            lifecycleTasks = getLifecycleTasks(lifecycleTaskTypes);
+        }
 
         for (ILifecycleTask task : lifecycleTasks) {
             if (Thread.currentThread().isInterrupted()) {
@@ -32,6 +43,19 @@ public class LifecycleManager implements ILifecycleManager {
         }
     }
 
+    private List<ILifecycleTask> getLifecycleTasks(List<String> lifecycleTaskTypes) {
+        List<ILifecycleTask> ret = new LinkedList<>();
+        for (int i = 0; i < this.lifecycleTasks.size(); i++) {
+            ILifecycleTask task = this.lifecycleTasks.get(i);
+            if (lifecycleTaskTypes.stream().anyMatch(type -> type.startsWith(task.getType()))) {
+                ret.addAll(this.lifecycleTasks.subList(i, this.lifecycleTasks.size()));
+                break;
+            }
+        }
+
+        return ret;
+    }
+
     private void checkIfStopConversationAction(IConversationMemory conversationMemory) throws ConversationStopException {
         IData<List<String>> actionData = conversationMemory.getCurrentStep().getLatestData(KEY_ACTIONS);
         if (actionData != null) {
@@ -44,7 +68,7 @@ public class LifecycleManager implements ILifecycleManager {
 
     @Override
     public void addLifecycleTask(ILifecycleTask lifecycleTask) {
-        RuntimeUtilities.checkNotNull(lifecycleTask, "lifecycleTask");
+        checkNotNull(lifecycleTask, "lifecycleTask");
         lifecycleTasks.add(lifecycleTask);
     }
 }

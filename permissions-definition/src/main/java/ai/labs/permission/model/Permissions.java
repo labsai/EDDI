@@ -13,7 +13,7 @@ public class Permissions implements IPermissions {
     private Map<IAuthorization.Type, AuthorizedSubjects> permissions;
 
     public Permissions() {
-        this.permissions = new HashMap<IAuthorization.Type, AuthorizedSubjects>();
+        this.permissions = new HashMap<>();
     }
 
     @Override

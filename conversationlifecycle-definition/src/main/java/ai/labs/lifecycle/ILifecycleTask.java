@@ -1,7 +1,7 @@
 package ai.labs.lifecycle;
 
-import ai.labs.resources.rest.extensions.model.ExtensionDescriptor;
 import ai.labs.memory.IConversationMemory;
+import ai.labs.resources.rest.extensions.model.ExtensionDescriptor;
 
 import java.util.Collections;
 import java.util.List;
@@ -18,6 +18,13 @@ public interface ILifecycleTask {
      * @return unique ID of this Task
      */
     String getId();
+
+    /**
+     * get type of lifecycle task.
+     *
+     * @return type of lifecycle task: input, input:normalized, behavior_rules,...,output
+     */
+    String getType();
 
     /**
      * @return the component (main algorithm) which this task is working with

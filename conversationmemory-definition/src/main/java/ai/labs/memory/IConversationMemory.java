@@ -84,6 +84,8 @@ public interface IConversationMemory extends Serializable {
     interface IWritableConversationStep extends IConversationStep {
         void storeData(IData element);
 
+        void removeData(String key);
+
         void resetConversationOutput(String rootKey);
 
         void addConversationOutputObject(String key, Object value);

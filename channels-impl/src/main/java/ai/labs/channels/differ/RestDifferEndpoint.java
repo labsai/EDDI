@@ -33,6 +33,7 @@ import lombok.extern.slf4j.Slf4j;
 import javax.inject.Inject;
 import javax.inject.Singleton;
 import javax.ws.rs.InternalServerErrorException;
+import javax.ws.rs.container.AsyncResponse;
 import javax.ws.rs.core.Response;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
@@ -389,21 +390,37 @@ public class RestDifferEndpoint implements IRestDifferEndpoint {
 
                         List actions = (List) memorySnapshot.getConversationOutputs().get(0).get("actions");
                         if (actions != null && actions.contains(CONVERSATION_END)) {
-                            memorySnapshot = restBotManagement.
-                                    loadConversationMemory(botIntent, conversationId,
-                                            false, true, Collections.emptyList());
-                            conversationOutputs.addAll(memorySnapshot.getConversationOutputs());
-                        }
+                            restBotManagement.
+                                    loadConversationMemory(botIntent, conversationId, null,
+                                            false, true, Collections.emptyList(),
+                                            new MockAsyncResponse() {
+                                                @Override
+                                                public boolean resume(Object response) {
+                                                    if (response instanceof SimpleConversationMemorySnapshot) {
+                                                        var memorySnapshot = (SimpleConversationMemorySnapshot) response;
+                                                        conversationOutputs.addAll(memorySnapshot.getConversationOutputs());
+                                                        sendBotOutputAndAcknowledge(timeOfLastMessageReceived,
+                                                                conversationOutputs, botUserId, conversationId, delivery);
 
-                        boolean success = sendBotOutputToConversation(
-                                conversationOutputs, timeOfLastMessageReceived, botUserId, conversationId);
+                                                        return true;
+                                                    } else if (response instanceof Exception) {
+                                                        log.warn(((Exception) response).getLocalizedMessage(), response);
+                                                    }
 
-                        log.debug("sendBotOutputToConversation operation was " + (success ? "" : "not ") + "successful.");
-                        if (success) {
-                            differPublisher.positiveDeliveryAck(delivery.getEnvelope().getDeliveryTag());
+                                                    return false;
+                                                }
+
+                                                @Override
+                                                public boolean resume(Throwable response) {
+                                                    differPublisher.negativeDeliveryAck(delivery);
+                                                    return false;
+                                                }
+                                            });
                         } else {
-                            differPublisher.negativeDeliveryAck(delivery);
+                            sendBotOutputAndAcknowledge(timeOfLastMessageReceived, conversationOutputs,
+                                    botUserId, conversationId, delivery);
                         }
+
 
                         return true;
                     }
@@ -414,6 +431,18 @@ public class RestDifferEndpoint implements IRestDifferEndpoint {
                         return false;
                     }
                 });
+    }
+
+    private void sendBotOutputAndAcknowledge(long timeOfLastMessageReceived, List<ConversationOutput> conversationOutputs, String botUserId, String conversationId, Delivery delivery) {
+        boolean success = sendBotOutputToConversation(
+                conversationOutputs, timeOfLastMessageReceived, botUserId, conversationId);
+
+        log.debug("sendBotOutputToConversation operation was " + (success ? "" : "not ") + "successful.");
+        if (success) {
+            differPublisher.positiveDeliveryAck(delivery.getEnvelope().getDeliveryTag());
+        } else {
+            differPublisher.negativeDeliveryAck(delivery);
+        }
     }
 
     private boolean sendBotOutputToConversation(List<ConversationOutput> conversationOutputs,
@@ -517,16 +546,25 @@ public class RestDifferEndpoint implements IRestDifferEndpoint {
     }
 
     @Override
-    public Response endBotConversation(String intent, String botUserId, String differConversationId) {
+    public void endBotConversation(String intent, String botUserId, String differConversationId, AsyncResponse asyncResponse) {
         restBotManagement.endCurrentConversation(intent, differConversationId);
 
-        var memorySnapshot = restBotManagement.
-                loadConversationMemory(intent, differConversationId,
-                        false, true, Collections.emptyList());
+        restBotManagement.
+                loadConversationMemory(intent, differConversationId, null,
+                        false, true, Collections.emptyList(), new MockAsyncResponse() {
+                            @Override
+                            public boolean resume(Object response) {
+                                if (response instanceof SimpleConversationMemorySnapshot) {
+                                    var memorySnapshot = (SimpleConversationMemorySnapshot) response;
+                                    sendBotOutputToConversation(memorySnapshot.getConversationOutputs(),
+                                            0, botUserId, differConversationId);
 
-        sendBotOutputToConversation(memorySnapshot.getConversationOutputs(), 0, botUserId, differConversationId);
-
-        return Response.ok().build();
+                                    asyncResponse.resume(Response.ok().build());
+                                    return true;
+                                }
+                                return false;
+                            }
+                        });
     }
 
     private void triggerCreateConversationCommand(CreateConversation createConversation) throws IOException {

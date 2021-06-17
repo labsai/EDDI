@@ -87,6 +87,19 @@ public interface IRestBotEngine {
     ConversationState getConversationState(@PathParam("environment") Deployment.Environment environment,
                                            @PathParam("conversationId") String conversationId);
 
+    @POST
+    @Path("/{environment}/{botId}/{conversationId}/rerun")
+    @Produces(MediaType.APPLICATION_JSON)
+    @ApiOperation(value = "Read conversation.")
+    void rerunLastConversationStep(@PathParam("environment") Deployment.Environment environment,
+                                   @PathParam("botId") String botId,
+                                   @PathParam("conversationId") String conversationId,
+                                   @QueryParam("language") String language,
+                                   @QueryParam("returnDetailed") @DefaultValue("false") Boolean returnDetailed,
+                                   @QueryParam("returnCurrentStepOnly") @DefaultValue("true") Boolean returnCurrentStepOnly,
+                                   @QueryParam("returningFields") List<String> returningFields,
+                                   @Suspended final AsyncResponse response);
+
     /**
      * talk to bot
      *

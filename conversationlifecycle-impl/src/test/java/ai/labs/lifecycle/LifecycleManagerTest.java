@@ -31,7 +31,7 @@ public class LifecycleManagerTest {
         lifecycleManager.addLifecycleTask(lifecycleTask);
 
         //test
-        lifecycleManager.executeLifecycle(memory);
+        lifecycleManager.executeLifecycle(memory, null);
 
         //assert
         Mockito.verify(lifecycleTask, Mockito.atMost(1)).executeTask(memory);
@@ -41,7 +41,7 @@ public class LifecycleManagerTest {
     public void testValidationWhenMemoryIsNull() {
         //test
         try {
-            lifecycleManager.executeLifecycle(null);
+            lifecycleManager.executeLifecycle(null, null);
             Assert.fail();
         } catch (Exception e) {
             if (!e.getClass().equals(IllegalArgumentException.class)) {

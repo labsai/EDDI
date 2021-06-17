@@ -31,9 +31,10 @@ import java.util.stream.Collectors;
 public class BehaviorRulesEvaluationTask implements ILifecycleTask {
     public static final String ID = "ai.labs.behavior";
     private static final String KEY_ACTIONS = "actions";
-    private static final String KEY_BEHAVIOR_RULES_SUCCESS = "behavior_rules:success";
-    private static final String KEY_BEHAVIOR_RULES_DROPPED_SUCCESS = "behavior_rules:droppedSuccess";
-    private static final String KEY_BEHAVIOR_RULES_FAIL = "behavior_rules:fail";
+    public static final String BEHAVIOR_RULES_TYPE = "behavior_rules";
+    private static final String KEY_BEHAVIOR_RULES_SUCCESS = BEHAVIOR_RULES_TYPE + ":success";
+    private static final String KEY_BEHAVIOR_RULES_DROPPED_SUCCESS = BEHAVIOR_RULES_TYPE + ":droppedSuccess";
+    private static final String KEY_BEHAVIOR_RULES_FAIL = BEHAVIOR_RULES_TYPE + ":fail";
     private static final String BEHAVIOR_CONFIG_URI = "uri";
     private static final String BEHAVIOR_CONFIG_APPEND_ACTIONS = "appendActions";
     private final IResourceClientLibrary resourceClientLibrary;
@@ -55,6 +56,11 @@ public class BehaviorRulesEvaluationTask implements ILifecycleTask {
     @Override
     public String getId() {
         return ID;
+    }
+
+    @Override
+    public String getType() {
+        return BEHAVIOR_RULES_TYPE;
     }
 
     @Override

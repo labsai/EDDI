@@ -93,6 +93,11 @@ public class InputParserTask implements ILifecycleTask {
     }
 
     @Override
+    public String getType() {
+        return KEY_EXPRESSIONS;
+    }
+
+    @Override
     public Object getComponent() {
         return sentenceParser;
     }

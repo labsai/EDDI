@@ -87,6 +87,11 @@ public class PropertySetterTask implements ILifecycleTask {
     }
 
     @Override
+    public String getType() {
+        return PROPERTIES_IDENTIFIER;
+    }
+
+    @Override
     public Object getComponent() {
         return propertySetter;
     }
