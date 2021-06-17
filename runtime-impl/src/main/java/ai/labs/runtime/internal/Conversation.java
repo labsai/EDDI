@@ -40,7 +40,6 @@ public class Conversation implements IConversation {
     private static final String KEY_INPUT = "input";
     private static final String KEY_CONTEXT = "context";
     private static final String KEY_ACTIONS = "actions";
-    public static final String LIFECYCLE_TASK_KEY = "lifecycleTaskKey";
     private final List<IExecutablePackage> executablePackages;
     private final IConversationMemory conversationMemory;
     private final IPropertiesHandler propertiesHandler;
@@ -296,6 +295,7 @@ public class Conversation implements IConversation {
 
     private void executePackages(List<IData> data, List<String> lifecycleTaskTypes) throws LifecycleException, ConversationStopException {
         for (IExecutablePackage executablePackage : executablePackages) {
+            conversationMemory.getCurrentStep().setCurrentPackageId(executablePackage.getPackageId());
             data.stream().filter(Objects::nonNull).
                     forEach(datum -> conversationMemory.getCurrentStep().storeData(datum));
             ILifecycleManager lifecycleManager = executablePackage.getLifecycleManager();

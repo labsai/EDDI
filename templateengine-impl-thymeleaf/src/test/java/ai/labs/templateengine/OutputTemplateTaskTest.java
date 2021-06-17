@@ -20,7 +20,14 @@ import java.util.LinkedList;
 import java.util.List;
 
 import static ai.labs.templateengine.ITemplatingEngine.TemplateMode.TEXT;
-import static org.mockito.Mockito.*;
+import static org.mockito.Mockito.any;
+import static org.mockito.Mockito.anyList;
+import static org.mockito.Mockito.anyMap;
+import static org.mockito.Mockito.eq;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.times;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
 
 /**
  * @author ginccc
@@ -185,6 +192,16 @@ public class OutputTemplateTaskTest {
         @Override
         public Date getTimestamp() {
             return null;
+        }
+
+        @Override
+        public String getOriginPackageId() {
+            return null;
+        }
+
+        @Override
+        public void setOriginPackageId(String packageId) {
+
         }
 
         @Override

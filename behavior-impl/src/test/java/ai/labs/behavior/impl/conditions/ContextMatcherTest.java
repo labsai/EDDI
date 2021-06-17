@@ -12,10 +12,18 @@ import org.junit.Assert;
 import org.junit.Before;
 import org.junit.Test;
 
-import java.util.*;
+import java.util.Date;
+import java.util.HashMap;
+import java.util.LinkedList;
+import java.util.List;
+import java.util.Map;
 
 import static org.mockito.ArgumentMatchers.eq;
-import static org.mockito.Mockito.*;
+import static org.mockito.Mockito.anyString;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.times;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
 
 /**
  * @author ginccc
@@ -336,6 +344,15 @@ public class ContextMatcherTest {
         @Override
         public Date getTimestamp() {
             return null;
+        }
+
+        @Override
+        public String getOriginPackageId() {
+            return null;
+        }
+
+        @Override
+        public void setOriginPackageId(String packageId) {
         }
 
         @Override

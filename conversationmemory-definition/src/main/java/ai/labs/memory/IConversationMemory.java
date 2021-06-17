@@ -86,6 +86,8 @@ public interface IConversationMemory extends Serializable {
 
         void removeData(String key);
 
+        void setCurrentPackageId(String packageId);
+
         void resetConversationOutput(String rootKey);
 
         void addConversationOutputObject(String key, Object value);

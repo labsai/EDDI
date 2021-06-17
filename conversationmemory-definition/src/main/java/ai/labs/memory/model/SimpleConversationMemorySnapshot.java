@@ -44,5 +44,6 @@ public class SimpleConversationMemorySnapshot {
         private String key;
         private Object value;
         private Date timestamp;
+        private String originPackageId;
     }
 }

@@ -17,6 +17,7 @@ public class ConversationStep implements IConversationMemory.IWritableConversati
     private Map<String, IData> store;
     private final ConversationOutput conversationOutput;
     int conversationStepNumber;
+    private String currentPackageId;
 
     ConversationStep(ConversationOutput conversationOutput) {
         store = new LinkedHashMap<>();
@@ -45,12 +46,18 @@ public class ConversationStep implements IConversationMemory.IWritableConversati
 
     @Override
     public void storeData(IData data) {
+        data.setOriginPackageId(this.currentPackageId);
         store.put(data.getKey(), data);
     }
 
     @Override
     public void removeData(String keyToBeRemoved) {
         store.entrySet().removeIf(dataEntry -> dataEntry.getValue().getKey().startsWith(keyToBeRemoved));
+    }
+
+    @Override
+    public void setCurrentPackageId(String packageId) {
+        this.currentPackageId = packageId;
     }
 
     public void resetConversationOutput(String rootKey) {

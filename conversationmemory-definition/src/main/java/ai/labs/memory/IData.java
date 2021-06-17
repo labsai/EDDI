@@ -15,6 +15,10 @@ public interface IData<T> {
 
     Date getTimestamp();
 
+    String getOriginPackageId();
+
+    void setOriginPackageId(String packageId);
+
     /**
      * Whether or not this data will be send to the client
      *

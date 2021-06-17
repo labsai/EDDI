@@ -131,6 +131,7 @@ public class ConversationMemorySnapshot {
         private Object result;
         private List possibleResults;
         private Date timestamp;
+        private String originPackageId;
         private boolean isPublic;
 
         @Override

@@ -10,5 +10,7 @@ public interface IExecutablePackage {
 
     String getDescription();
 
+    String getPackageId();
+
     ILifecycleManager getLifecycleManager();
 }

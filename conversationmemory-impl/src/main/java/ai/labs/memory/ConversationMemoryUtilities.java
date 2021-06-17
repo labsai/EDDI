@@ -65,7 +65,13 @@ public class ConversationMemoryUtilities {
             var packageRunSnapshot = new PackageRunSnapshot();
             conversationStepSnapshot.getPackages().add(packageRunSnapshot);
             for (IData data : conversationStep.getAllElements()) {
-                var resultSnapshot = new ResultSnapshot(data.getKey(), data.getResult(), data.getPossibleResults(), data.getTimestamp(), data.isPublic());
+                var resultSnapshot = new ResultSnapshot(
+                        data.getKey(),
+                        data.getResult(),
+                        data.getPossibleResults(),
+                        data.getTimestamp(),
+                        data.getOriginPackageId(),
+                        data.isPublic());
                 packageRunSnapshot.getLifecycleTasks().add(resultSnapshot);
             }
         }
@@ -151,7 +157,11 @@ public class ConversationMemoryUtilities {
                     if (returnDetailed || resultSnapshot.isPublic()) {
                         Object result = resultSnapshot.getResult();
                         simpleConversationStep.getConversationStep().add(
-                                new ConversationStepData(resultSnapshot.getKey(), result, resultSnapshot.getTimestamp()));
+                                new ConversationStepData(
+                                        resultSnapshot.getKey(),
+                                        result,
+                                        resultSnapshot.getTimestamp(),
+                                        resultSnapshot.getOriginPackageId()));
                     } else {
                         continue;
                     }

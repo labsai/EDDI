@@ -19,6 +19,7 @@ public class Data<T> implements IData<T> {
     private List<T> possibleResults;
     private T result;
     private final Date timestamp;
+    private String originPackageId;
     private boolean isPublic;
 
     public Data(String key, T result) {

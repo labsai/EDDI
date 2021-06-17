@@ -1,11 +1,17 @@
 package ai.labs.runtime.client.packages;
 
-import ai.labs.lifecycle.*;
+import ai.labs.lifecycle.ILifecycleManager;
+import ai.labs.lifecycle.ILifecycleTask;
+import ai.labs.lifecycle.IllegalExtensionConfigurationException;
+import ai.labs.lifecycle.LifecycleManager;
+import ai.labs.lifecycle.PackageConfigurationException;
+import ai.labs.lifecycle.UnrecognizedExtensionException;
 import ai.labs.models.DocumentDescriptor;
 import ai.labs.resources.rest.config.packages.model.PackageConfiguration;
 import ai.labs.runtime.IExecutablePackage;
 import ai.labs.runtime.service.IPackageStoreService;
 import ai.labs.runtime.service.ServiceException;
+import ai.labs.utilities.URIUtilities;
 
 import javax.inject.Inject;
 import javax.inject.Provider;
@@ -73,6 +79,11 @@ public class PackageStoreClientLibrary implements IPackageStoreClientLibrary {
             @Override
             public String getDescription() {
                 return documentDescriptor.getDescription();
+            }
+
+            @Override
+            public String getPackageId() {
+                return URIUtilities.extractResourceId(documentDescriptor.getResource()).getId();
             }
 
             @Override
