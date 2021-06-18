@@ -693,7 +693,7 @@ export interface IResponse {
 
 export async function createNewBot(name: string, description: string) {
   try {
-    const response: IResponse = await postJsonHelper('/botstore/bots', '{}');
+    const response: IResponse = await postJsonHelper('/botstore/bots');
     const resource = response.headers.location;
     await patchDescriptor(resource, name, description);
     return Parser.getId(response.headers.location);
@@ -711,7 +711,7 @@ export async function createNewPackage(
   try {
     const response: IResponse = await postJsonHelper(
       '/packagestore/packages/',
-      JSON.stringify({ packageExtensions: extensions }),
+      { packageExtensions: extensions },
     );
     const resource = response.headers.location;
     patchDescriptor(resource, name, description);
@@ -1000,7 +1000,6 @@ export async function duplicate(resource: string, deepCopy: boolean) {
       `${getTypePath(type)}/${Parser.getIdAndVersion(
         resource,
       )}&deepCopy=${deepCopy}`,
-      '{}',
     );
     return response.headers.location;
   } catch (err) {

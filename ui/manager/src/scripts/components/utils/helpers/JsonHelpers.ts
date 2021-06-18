@@ -21,7 +21,7 @@ const metaSchema = require('ajv/lib/refs/json-schema-draft-04.json');
 
 export async function postJsonHelper(
   url: string,
-  payload: string,
+  payload = {},
 ): Promise<IResponse> {
   const res = await axios.post(`${await getAPIUrl()}${url}`, payload, {
     headers: { 'Content-Type': 'application/json' },

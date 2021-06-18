@@ -59,11 +59,10 @@ const useStyles = makeStyles({
   },
 });
 
-const InputOptions = ({
+const ChatOptions = ({
   botResource,
   startNewConversation,
   setChatAnimation,
-  restartChat,
 }: {
   botResource: string;
   startNewConversation: () => void;
@@ -156,7 +155,7 @@ const InputOptions = ({
             />
           </MenuItem>
           <MenuItem
-            key={'Bot Info'}
+            key={'Info'}
             aria-describedby="info-popup"
             onClick={(e) => {
               handleClose();
@@ -165,7 +164,7 @@ const InputOptions = ({
             <ListItemIcon>
               <InfoIcon fontSize="small" />
             </ListItemIcon>
-            <Typography variant="inherit">{'Bot info'}</Typography>
+            <Typography variant="inherit">{'Info'}</Typography>
             <InfoPopup
               open={openedInfoPopup}
               popupEl={infoPopupEl}
@@ -202,4 +201,4 @@ const InputOptions = ({
   );
 };
 
-export default InputOptions;
+export default ChatOptions;

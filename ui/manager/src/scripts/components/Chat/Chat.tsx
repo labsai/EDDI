@@ -20,7 +20,7 @@ import {
 import { BOT, BOT_PATH } from '../utils/EddiTypes';
 import useStyles from './Chat.styles';
 import ChatInputField from './ChatInputField/ChatInputField';
-import InputOptions from './ChatInputField/InputOptions';
+import ChatOptions from './ChatInputField/ChatOptions';
 import ChatOutputs from './ChatOutputs/ChatOutputs';
 import ChatQuickReplies from './ChatQuickReplies/ChatQuickReplies';
 import Delayed from './Delay/Delay';
@@ -140,7 +140,7 @@ const Chat = () => {
           })}
         </div>
       )}
-      <InputOptions
+      <ChatOptions
         startNewConversation={startNewConversation}
         setChatAnimation={handleSetChatAnimation}
         restartChat={handleRestartChat}
