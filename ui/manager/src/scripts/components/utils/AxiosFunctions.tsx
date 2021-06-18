@@ -1,34 +1,27 @@
-import axios from './axiosInterseptor';
-
-import * as React from 'react';
+import * as _ from 'lodash';
 import {
   DEFAULT_LIMIT,
   getAPIUrl,
   getTypeFromResource,
   getTypePath,
 } from './ApiFunctions';
-import Parser from './Parser';
-import * as _ from 'lodash';
-import { postJsonHelper, putHelper } from './helpers/JsonHelpers';
+import axios from './axiosInterseptor';
 import {
   BEHAVIOR,
   BEHAVIOR_PATH,
-  BOT,
-  BOT_PATH,
-  OUTPUT,
-  OUTPUT_PATH,
-  PACKAGE,
-  PACKAGE_PATH,
-  REGULAR_DICTIONARY,
-  REGULAR_DICTIONARY_PATH,
-  HTTPCALLS,
-  HTTPCALLS_PATH,
-  PROPERTYSETTER,
-  PROPERTYSETTER_PATH,
   GITCALLS,
   GITCALLS_PATH,
+  HTTPCALLS,
+  HTTPCALLS_PATH,
+  OUTPUT,
+  OUTPUT_PATH,
+  PROPERTYSETTER,
+  PROPERTYSETTER_PATH,
+  REGULAR_DICTIONARY,
+  REGULAR_DICTIONARY_PATH,
 } from './EddiTypes';
-import { setAuthorizationHeader } from './keycloakFunctions';
+import { postJsonHelper, putHelper } from './helpers/JsonHelpers';
+import Parser from './Parser';
 
 export function setDefaultGlobalHeader(key: string, value: string): void {
   axios.defaults.headers.common[key] = value;
@@ -1178,22 +1171,43 @@ export async function deployExampleBots(): Promise<IBot[]> {
   }
 }
 
-export async function axiosStartChat(botId: string): Promise<any> {
+export async function axiosStartChat(
+  botId: string,
+  context?: any,
+): Promise<any> {
   try {
+    const apiUrl = await getAPIUrl();
     const getConversationId = await axios.post(
-      `${await getAPIUrl()}/bots/unrestricted/${botId}`,
+      `${apiUrl}/bots/unrestricted/${botId}`,
+      context,
     );
     const conversationId = getConversationId?.headers?.location
       ?.split('/')
       ?.pop();
-
     const response = await axios.get(
-      `${await getAPIUrl()}/bots/unrestricted/${botId}/${conversationId}`,
+      `${apiUrl}/bots/unrestricted/${botId}/${conversationId}`,
+    );
+    return Object.assign(response.data, { apiUrl });
+  } catch (err) {
+    console.error(
+      `Failed to start chat with bot ${botId}. Error: ${err.message}`,
+    );
+  }
+}
+
+export async function axiosRestartChat(
+  botId: string,
+  conversationId: string,
+): Promise<any> {
+  try {
+    const apiUrl = await getAPIUrl();
+    const response = await axios.get(
+      `${apiUrl}/bots/unrestricted/${botId}/${conversationId}`,
     );
     return response.data;
   } catch (err) {
     console.error(
-      `Failed to start chat with bot ${botId}. Error: ${err.message}`,
+      `Failed to restart chat with bot ${botId}. Error: ${err.message}`,
     );
   }
 }

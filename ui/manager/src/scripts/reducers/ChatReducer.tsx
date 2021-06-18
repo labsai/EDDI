@@ -5,13 +5,21 @@ import {
   IStartChatSuccessAction,
   IReplyInChatSuccesAction,
   IReplyInChatFailedAction,
+  ISetChatContextAction,
 } from '../actions/ChatActions';
 import {
+  CLEAR_CHAT,
   CLOSE_SIDE_CHAT,
+  DISABLE_ANIMATION,
+  ENABLE_ANIMATION,
   OPEN_SIDE_CHAT,
   REPLY_IN_CHAT,
   REPLY_IN_CHAT_FAILED,
   REPLY_IN_CHAT_SUCCESS,
+  RESTART_CHAT,
+  RESTART_CHAT_FAILED,
+  RESTART_CHAT_SUCCESS,
+  SET_CHAT_CONTEXT,
   START_CHAT,
   START_CHAT_FAILED,
   START_CHAT_SUCCESS,
@@ -22,8 +30,10 @@ export interface IChatState {
   isOpened: boolean;
   isLoading: boolean;
   error: string;
+  context: string;
   data: any;
   step: number;
+  animation: boolean;
 }
 
 export const initialState: IChatState = {
@@ -32,6 +42,8 @@ export const initialState: IChatState = {
   error: null,
   data: null,
   step: 0,
+  context: null,
+  animation: true,
 };
 
 export type IChatReducer = Reducer<IChatState>;
@@ -58,6 +70,7 @@ const ChatReducer: IChatReducer = (
         },
       });
     case START_CHAT:
+    case RESTART_CHAT:
       return update(state, {
         isLoading: {
           $set: true,
@@ -66,6 +79,7 @@ const ChatReducer: IChatReducer = (
           $set: null,
         },
       });
+    case RESTART_CHAT_SUCCESS:
     case START_CHAT_SUCCESS: {
       if (!(action as IStartChatSuccessAction).data) {
         return update(state, {
@@ -89,6 +103,7 @@ const ChatReducer: IChatReducer = (
         },
       });
     }
+    case RESTART_CHAT_FAILED:
     case START_CHAT_FAILED:
       return update(state, {
         isLoading: {
@@ -137,6 +152,39 @@ const ChatReducer: IChatReducer = (
         },
         error: {
           $set: (action as IReplyInChatFailedAction).error,
+        },
+      });
+    case SET_CHAT_CONTEXT:
+      return update(state, {
+        context: {
+          $set: (action as ISetChatContextAction).context,
+        },
+      });
+    case DISABLE_ANIMATION:
+      return update(state, {
+        animation: {
+          $set: false,
+        },
+      });
+    case ENABLE_ANIMATION:
+      return update(state, {
+        animation: {
+          $set: true,
+        },
+      });
+    case CLEAR_CHAT:
+      return update(state, {
+        data: {
+          $set: null,
+        },
+        step: {
+          $set: 0,
+        },
+        isLoading: {
+          $set: false,
+        },
+        error: {
+          $set: null,
         },
       });
 

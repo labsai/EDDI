@@ -7,20 +7,21 @@ import {
 const useStyles = makeStyles({
   chatContainer: {
     display: 'flex',
+    flexDirection: 'column',
     width: '30vw',
     top: 0,
     right: 0,
     height: '100vh',
     position: 'fixed',
     border: `1px solid ${GREY_COLOR}`,
-    paddingTop: '50px',
     overflow: 'auto',
     backgroundColor: WHITE_COLOR,
+    paddingTop: '50px',
   },
   closeChat: {
     position: 'absolute',
-    top: 25,
-    right: 25,
+    top: 15,
+    right: 15,
     cursor: 'pointer',
   },
   loader: {

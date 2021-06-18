@@ -1,5 +1,8 @@
 import { makeStyles } from '@material-ui/core/styles';
-import { LIGHT_BLUE_COLOR2 } from '../../../../styles/DefaultStylingProperties';
+import {
+  GREEN_COLOR,
+  LIGHT_BLUE_COLOR2,
+} from '../../../../styles/DefaultStylingProperties';
 
 const useStyles = makeStyles({
   chatInputContainer: {
@@ -7,8 +10,6 @@ const useStyles = makeStyles({
   },
   chatInput: {
     display: 'flex',
-    alignSelf: 'flex-end',
-    marginBottom: '20px',
 
     '& .MuiOutlinedInput-root': {
       borderRadius: '15px',
@@ -20,6 +21,15 @@ const useStyles = makeStyles({
     '& .MuiOutlinedInput-notchedOutline': {
       backgroundColor: LIGHT_BLUE_COLOR2,
     },
+  },
+  row: {
+    display: 'flex',
+    flexDirection: 'row',
+    justifyContent: 'flex-end',
+    alignItems: 'center',
+    marginBottom: '20px',
+    width: '100%',
+    position: 'relative',
   },
 });
 

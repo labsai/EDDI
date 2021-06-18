@@ -8,17 +8,30 @@ import { BLUE_COLOR } from '../../../styles/DefaultStylingProperties';
 import {
   closeChatAction,
   replyInChatAction,
+  restartChatAction,
+  setChatAnimation,
   startChatAction,
 } from '../../actions/ChatActions';
-import { chatDataSelector } from '../../selectors/ChatSelectors';
+import {
+  chatDataSelector,
+  currentChatIdSelector,
+  getChatContext,
+} from '../../selectors/ChatSelectors';
+import { BOT, BOT_PATH } from '../utils/EddiTypes';
 import useStyles from './Chat.styles';
 import ChatInputField from './ChatInputField/ChatInputField';
+import InputOptions from './ChatInputField/InputOptions';
 import ChatOutputs from './ChatOutputs/ChatOutputs';
 import ChatQuickReplies from './ChatQuickReplies/ChatQuickReplies';
+import Delayed from './Delay/Delay';
 
 const Chat = () => {
+  const context = useSelector(getChatContext);
+  const conversationId: string = useSelector(currentChatIdSelector);
   const chatRef = React.useRef<HTMLDivElement>(null);
   const classes = useStyles();
+
+  // need to get bot id
   const isBotPage = location.pathname.includes('botview');
   const urlSearchParams = new URLSearchParams(location.search);
   const botId = isBotPage
@@ -27,21 +40,51 @@ const Chat = () => {
 
   const { data, isLoading, error } = useSelector(chatDataSelector);
 
+  // need to get prev conversation id
+  const botVersion = data?.[0]?.botVersion;
+  const botResource = botVersion
+    ? `${BOT}${BOT_PATH}/${botId}?version=${botVersion}`
+    : null;
+
   const dispatch = useDispatch();
 
+  // close side chat window
   const handleCloseChat = () => {
     dispatch(closeChatAction());
   };
 
-  React.useEffect(() => {
-    if (botId) {
-      dispatch(startChatAction(botId));
-    }
-  }, [botId]);
+  // change animation delay (on/off)
+  const handleSetChatAnimation = (state: boolean) => {
+    dispatch(setChatAnimation(state));
+  };
 
+  React.useEffect(() => {
+    startNewConversation();
+  }, [botId, context]);
+
+  // create new conversation
+  const startNewConversation = () => {
+    if (botId) {
+      dispatch(
+        startChatAction(botId, !!context ? JSON.parse(context) : undefined),
+      );
+    }
+  };
+
+  // restart conversation
+  const handleRestartChat = () => {
+    dispatch(restartChatAction(botId, conversationId));
+  };
+
+  // send user reply
   const handleReplyInChat = (quickReply) => {
     dispatch(
-      replyInChatAction(botId, data?.[0].conversationId, quickReply.value),
+      replyInChatAction(
+        botId,
+        conversationId,
+        quickReply.value,
+        !!context ? JSON.parse(context) : undefined,
+      ),
     );
   };
 
@@ -57,10 +100,12 @@ const Chat = () => {
       )}
       {error && <div className={classes.error}>{error}</div>}
       {!data && !isLoading && (
-        <div className={classes.emptyState}>
-          <FindInPageIcon fontSize="large" />
-          <span className={classes.emptyText}>{'Bot not loaded'}</span>
-        </div>
+        <Delayed wait={500} ignoreAnimation>
+          <div className={classes.emptyState}>
+            <FindInPageIcon fontSize="large" />
+            <span className={classes.emptyText}>{'Bot not loaded'}</span>
+          </div>
+        </Delayed>
       )}
       {data && (
         <div className={classes.chat}>
@@ -95,6 +140,12 @@ const Chat = () => {
           })}
         </div>
       )}
+      <InputOptions
+        startNewConversation={startNewConversation}
+        setChatAnimation={handleSetChatAnimation}
+        restartChat={handleRestartChat}
+        botResource={botResource}
+      />
     </div>
   );
 };

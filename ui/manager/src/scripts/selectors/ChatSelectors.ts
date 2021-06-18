@@ -24,3 +24,30 @@ export const chatDataSelector: (state: IAppState) => {
     step: chatState.step,
   };
 });
+
+export const currentChatIdSelector: (state: IAppState) => string =
+  createSelector(ChatStateSelector, (chatState) => {
+    return chatState.data?.[0]?.conversationId;
+  });
+
+export const getBotId: (state: IAppState) => string = createSelector(
+  ChatStateSelector,
+  (chatState) => {
+    return chatState.data?.[0]?.botId;
+  },
+);
+
+export const getApiUrl: (state: IAppState) => string = createSelector(
+  ChatStateSelector,
+  (chatState) => {
+    return chatState.data?.[0]?.apiUrl;
+  },
+);
+
+export const getChatContext = (state: IAppState) => {
+  return state.chatState.context;
+};
+
+export const getChatAnimation = (state: IAppState) => {
+  return state.chatState.animation;
+};

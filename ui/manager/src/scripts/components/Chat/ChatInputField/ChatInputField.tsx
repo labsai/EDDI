@@ -14,11 +14,11 @@ const ChatInputField = ({ handleReplyInChat, delay }: IChatInputField) => {
   const classes = useStyles();
   const [value, setValue] = React.useState<string>('');
 
-  const handleSubmit = (e) => {
+  const handleSubmit = (e: React.MouseEvent<HTMLFormElement>) => {
     e.preventDefault();
     handleReplyInChat({ value });
   };
-  const handleChange = (e) => {
+  const handleChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
     setValue(e.target.value);
   };
 
@@ -26,22 +26,24 @@ const ChatInputField = ({ handleReplyInChat, delay }: IChatInputField) => {
 
   return (
     <Delayed wait={delay}>
-      <form
-        ref={chatInputRef}
-        className={classes.chatInputContainer}
-        noValidate
-        autoComplete="off"
-        onSubmit={handleSubmit}>
-        <TextField
-          size="small"
-          value={value}
-          onChange={handleChange}
-          className={classes.chatInput}
-          variant="outlined"
-          placeholder="Type your response..."
-          autoFocus
-        />
-      </form>
+      <div className={classes.row}>
+        <form
+          ref={chatInputRef}
+          className={classes.chatInputContainer}
+          noValidate
+          autoComplete="off"
+          onSubmit={handleSubmit}>
+          <TextField
+            size="small"
+            value={value}
+            onChange={handleChange}
+            className={classes.chatInput}
+            variant="outlined"
+            placeholder="Type your response..."
+            autoFocus
+          />
+        </form>
+      </div>
     </Delayed>
   );
 };
