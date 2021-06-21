@@ -1,7 +1,9 @@
 package ai.labs.runtime;
 
 import ai.labs.utilities.FileUtilities;
+import ch.qos.logback.classic.Logger;
 import lombok.extern.slf4j.Slf4j;
+import org.slf4j.LoggerFactory;
 
 import javax.inject.Inject;
 import javax.inject.Named;
@@ -23,16 +25,19 @@ public class BaseRuntime implements SystemRuntime.IRuntime {
     private final String LOG_DIR = FileUtilities.buildPath(System.getProperty("user.dir"), "logs");
 
     private final ScheduledThreadPoolExecutor executorService;
+    private final BotExecutionLogAppender botExecutionLogAppender;
     private final String projectName;
 
     private boolean isInit = false;
 
     @Inject
     public BaseRuntime(ScheduledThreadPoolExecutor executorService,
+                       BotExecutionLogAppender botExecutionLogAppender,
                        @Named("systemRuntime.projectName") String projectName,
                        @Named("systemRuntime.projectVersion") String projectVersion,
                        @Named("systemRuntime.configDir") String configDir) {
         this.executorService = executorService;
+        this.botExecutionLogAppender = botExecutionLogAppender;
         this.projectName = projectName;
         this.projectVersion = projectVersion;
         CONFIG_DIR = FileUtilities.buildPath(System.getProperty("user.dir"), configDir);
@@ -47,12 +52,19 @@ public class BaseRuntime implements SystemRuntime.IRuntime {
             }
 
             logVersion();
+            initLogging();
             initExecutorServiceShutdownHook();
             SystemRuntime.setRuntime(this);
             isInit = true;
         } else {
             log.warn("SystemRuntime has already been initialized!");
         }
+    }
+
+    private void initLogging() {
+        Logger logbackLogger = (Logger) LoggerFactory.getLogger(Logger.ROOT_LOGGER_NAME);
+        botExecutionLogAppender.start();
+        logbackLogger.addAppender(botExecutionLogAppender);
     }
 
     private void initProjectName(String projectName) {

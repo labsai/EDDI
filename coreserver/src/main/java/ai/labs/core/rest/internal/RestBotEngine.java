@@ -353,9 +353,9 @@ public class RestBotEngine implements IRestBotEngine {
             if (rerunOnly) {
                 executeConversation = () -> {
                     try {
+                        contextLogger.setLoggingContext(loggingContext);
                         conversation.rerun(inputData.getContext());
                     } catch (LifecycleException | IConversation.ConversationNotReadyException e) {
-                        contextLogger.setLoggingContext(loggingContext);
                         log.error(e.getLocalizedMessage(), e);
                     }
                     return null;
@@ -363,9 +363,9 @@ public class RestBotEngine implements IRestBotEngine {
             } else {
                 executeConversation = () -> {
                     try {
+                        contextLogger.setLoggingContext(loggingContext);
                         conversation.say(inputData.getInput(), inputData.getContext());
                     } catch (LifecycleException | IConversation.ConversationNotReadyException e) {
-                        contextLogger.setLoggingContext(loggingContext);
                         log.error(e.getLocalizedMessage(), e);
                     }
                     return null;

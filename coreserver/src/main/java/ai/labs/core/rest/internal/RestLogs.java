@@ -42,18 +42,16 @@ public class RestLogs implements IRestLogs {
         return databaseLogs.getLogs(skip, limit);
     }
 
-    @Override
-    public List<DatabaseLog> getLogs(Environment environment, String botId, Integer skip, Integer limit) {
-        return databaseLogs.getLogs(environment, botId, skip, limit);
-    }
 
     @Override
-    public List<DatabaseLog> getLogs(Environment environment, String botId, String conversationId, Integer skip, Integer limit) {
-        return databaseLogs.getLogs(environment, botId, conversationId, skip, limit);
-    }
+    public List<DatabaseLog> getLogs(Environment environment,
+                                     String botId,
+                                     Integer botVersion,
+                                     String conversationId,
+                                     String userId,
+                                     Integer skip,
+                                     Integer limit) {
 
-    @Override
-    public List<DatabaseLog> getLogs(Environment environment, String botId, String conversationId, String userId, Integer skip, Integer limit) {
-        return databaseLogs.getLogs(environment, botId, conversationId, userId, skip, limit);
+        return databaseLogs.getLogs(environment, botId, botVersion, conversationId, userId, skip, limit);
     }
 }

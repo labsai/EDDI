@@ -37,27 +37,10 @@ public interface IRestLogs {
     @ApiOperation(value = "Get error logs by bot.")
     List<DatabaseLog> getLogs(@PathParam("environment") Deployment.Environment environment,
                               @PathParam("botId") String botId,
+                              @QueryParam("botVersion") Integer botVersion,
+                              @QueryParam("conversationId") String conversationId,
+                              @QueryParam("userId") String userId,
                               @QueryParam("skip") @DefaultValue("0") Integer skip,
                               @QueryParam("limit") @DefaultValue("200") Integer limit);
 
-    @GET
-    @Produces(MediaType.APPLICATION_JSON)
-    @Path("/{environment}/{botId}/{conversationId}")
-    @ApiOperation(value = "Get error logs by conversationId.")
-    List<DatabaseLog> getLogs(@PathParam("environment") Deployment.Environment environment,
-                              @PathParam("botId") String botId,
-                              @PathParam("conversationId") String conversationId,
-                              @QueryParam("skip") @DefaultValue("0") Integer skip,
-                              @QueryParam("limit") @DefaultValue("200") Integer limit);
-
-    @GET
-    @Produces(MediaType.APPLICATION_JSON)
-    @Path("/{environment}/{botId}/{conversationId}/{userId}")
-    @ApiOperation(value = "Get error logs by userId.")
-    List<DatabaseLog> getLogs(@PathParam("environment") Deployment.Environment environment,
-                              @PathParam("botId") String botId,
-                              @PathParam("conversationId") String conversationId,
-                              @PathParam("userId") String userId,
-                              @QueryParam("skip") @DefaultValue("0") Integer skip,
-                              @QueryParam("limit") @DefaultValue("200") Integer limit);
 }

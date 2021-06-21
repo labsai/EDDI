@@ -196,8 +196,8 @@ public class HttpCallsTask implements ILifecycleTask {
         long duration = executionEnd - executionStart;
 
         log.info(call.getName() + " Response: " + response.toString());
-        log.info(call.getName() + " Execution time: Duration: {}ms Delay: {}ms Total: {}ms\n",
-                duration, delayInMillis, duration + delayInMillis);
+        log.info(call.getName() + String.format(" Execution time: Duration: %sms Delay: %sms Total: %sms\n",
+                duration, delayInMillis, duration + delayInMillis));
 
         return response;
     }
@@ -235,12 +235,12 @@ public class HttpCallsTask implements ILifecycleTask {
                     request = buildRequest(call.getRequest(), templateDataObjects);
                     if (batchRequest.getExecuteCallsSequentially()) {
                         request.send();
-                        log.info("Batch Request: " + request.toString());
+                        log.info("Batch Request: " + request);
                     } else {
                         request.send(r -> {
                             //ignore response
                         });
-                        log.info("Batch Request (f'n'f): " + request.toString());
+                        log.info("Batch Request (f'n'f): " + request);
                     }
                 }
                 return null;
@@ -252,7 +252,7 @@ public class HttpCallsTask implements ILifecycleTask {
             request.send(r -> {
                 //ignore response
             });
-            log.info("Request (f'n'f): " + request.toString());
+            log.info("Request (f'n'f): " + request);
         }
     }
 

@@ -28,7 +28,6 @@ public class LoggingModule extends AbstractBaseModule {
 
     interface ILoggerLoader {
     }
-
     public static class LoggerLoader implements ILoggerLoader {
         @Inject
         public LoggerLoader(Bugsnag ignored) {
