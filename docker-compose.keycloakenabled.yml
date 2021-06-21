@@ -10,7 +10,7 @@ services:
     depends_on:
       - mongodb
     environment:
-      EDDI_VERSION: 4.10.0
+      EDDI_VERSION: 4.10.2
       EDDI_ENV: production
       EDDI_MEMORY_MIN: 128m
       EDDI_MEMORY_MAX: 128m
