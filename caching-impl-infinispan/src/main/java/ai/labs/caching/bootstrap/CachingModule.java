@@ -9,9 +9,7 @@ import com.google.inject.Singleton;
 import org.infinispan.configuration.parsing.ParserRegistry;
 import org.infinispan.manager.DefaultCacheManager;
 import org.infinispan.manager.EmbeddedCacheManager;
-import org.infinispan.persistence.mongodb.configuration.MongoDBStoreConfigurationBuilder;
 
-import javax.inject.Named;
 import java.io.InputStream;
 import java.util.Arrays;
 import java.util.stream.Collectors;
@@ -35,22 +33,8 @@ public class CachingModule extends AbstractBaseModule {
 
     @Provides
     @Singleton
-    private EmbeddedCacheManager provideEmbeddedCacheManager(@Named("mongodb.hosts") String hosts,
-                                                             @Named("mongodb.port") Integer port,
-                                                             @Named("mongodb.source") String source,
-                                                             @Named("mongodb.database") String database,
-                                                             @Named("mongodb.username") String username,
-                                                             @Named("mongodb.password") String password) {
-
-        var builder = new ParserRegistry().parse(cacheConfig);
-        var configurationBuilder = builder.getNamedConfigurationBuilders().get("differ.ackAwaitingCommands");
-
-        configurationBuilder.persistence().
-                addStore(MongoDBStoreConfigurationBuilder.class).
-                connectionURI(createConnectionString(hosts, port, database, username, password, source)).
-                collection("infinispan_cachestore_ackAwaitingCommands");
-
-        return new DefaultCacheManager(builder, true);
+    private EmbeddedCacheManager provideEmbeddedCacheManager() {
+        return new DefaultCacheManager(new ParserRegistry().parse(cacheConfig), true);
     }
 
     private String createConnectionString(String hosts, Integer port, String database, String username, String password, String source) {
