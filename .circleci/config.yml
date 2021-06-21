@@ -11,11 +11,6 @@ jobs:
       - checkout
       - setup_remote_docker
 
-      - restore_cache:
-          key: eddi
-          paths:
-            - /root/.m2
-
       - run: mvn clean package
 
       - run: mkdir -p $CIRCLE_TEST_REPORTS/junit/
