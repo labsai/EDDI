@@ -62,6 +62,10 @@ const useStyles = makeStyles(() =>
       minHeight: '5px',
       minWidth: '5px',
     },
+    pluginListColumn: {
+      display: 'flex',
+      flexDirection: 'column',
+    },
     discardChanges: {
       border: 'none',
       outline: 'none',

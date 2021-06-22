@@ -10,7 +10,7 @@ import {
   MEDIUM_FONT,
   RED_BORDER,
   RED_COLOR,
-  SMALL_FONT,
+  SMALL_FONT
 } from '../../../../styles/DefaultStylingProperties';
 
 const useStyles = makeStyles({
@@ -18,7 +18,8 @@ const useStyles = makeStyles({
     flex: 1,
   },
   pluginContainer: {
-    display: 'inline-block',
+    display: 'flex',
+    flexDirection: 'column',
     minWidth: '100%',
   },
   pluginWithExtensionsContainer: {
@@ -183,6 +184,18 @@ const useStyles = makeStyles({
     gridTemplateColumns: 'repeat(auto-fill, minmax(240px, 1fr))',
     minHeight: '5px',
     minWidth: '5px',
+  },
+  chatRelations: {
+    display: 'flex',
+    flexDirection: 'column',
+    paddingLeft: '10px',
+    marginTop: '10px',
+    borderLeft: '1px solid black',
+  },
+  chatRelation: {
+    display: 'flex',
+    fontSize: SMALL_FONT,
+    color: GREY_COLOR,
   },
 });
 

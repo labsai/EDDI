@@ -1,11 +1,16 @@
 import clsx from 'clsx';
 import * as _ from 'lodash';
 import * as React from 'react';
-import { connect } from 'react-redux';
+import { connect, useSelector } from 'react-redux';
 import { compose, pure, setDisplayName } from 'recompose';
-import { historyPush } from '../../../history';
 import eddiApiActionDispatchers from '../../../actions/EddiApiActionDispatchers';
 import ModalActionDispatchers from '../../../actions/ModalActionDispatchers';
+import { historyPush } from '../../../history';
+import { IAppState } from '../../../reducers';
+import {
+  getAllConversationSteps,
+  isChatOpenedSelector,
+} from '../../../selectors/ChatSelectors';
 import { pluginSelector } from '../../../selectors/PluginSelectors';
 import SquareXButton from '../../Assets/Buttons/SquareXButton';
 import WhiteButton from '../../Assets/Buttons/WhiteButton';
@@ -47,6 +52,17 @@ const Plugin = ({
       eddiApiActionDispatchers.fetchPluginAction(pluginResource);
     }
   }, [pluginResource]);
+
+  const type = pluginType.type.split('.').pop();
+  const { isOpened: isChatOpened } = useSelector(isChatOpenedSelector);
+  const allConversationSteps = useSelector((state) =>
+    getAllConversationSteps(state as IAppState, type),
+  );
+
+  const filteredConversationSteps = allConversationSteps.filter(
+    (c) => c.originPackageId === packageId,
+  );
+  console.log('filteredConversationSteps: ', filteredConversationSteps);
 
   const handleDeletePlugin = () => {
     deletePlugin(pluginType.extensionKey);
@@ -209,6 +225,19 @@ const Plugin = ({
           text={`Update to ${pluginCurrentVersion}`}
           classes={{ button: classes.updateAvailableButton }}
         />
+      )}
+      {!_.isEmpty(filteredConversationSteps) && isChatOpened && (
+        <div className={classes.chatRelations}>
+          {filteredConversationSteps.map((c, i) => {
+            return (
+              <div className={classes.chatRelation} key={c.key + i}>
+                {typeof c.value === 'string'
+                  ? JSON.stringify(c.value, null, '\t')
+                  : JSON.stringify(c.value, null, 4)}
+              </div>
+            );
+          })}
+        </div>
       )}
     </div>
   );

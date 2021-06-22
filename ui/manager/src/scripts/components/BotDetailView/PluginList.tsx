@@ -1,9 +1,12 @@
 import { makeStyles } from '@material-ui/core/styles';
 import * as _ from 'lodash';
 import * as React from 'react';
+import { useSelector } from 'react-redux';
 import { compose, pure, setDisplayName } from 'recompose';
+import { isChatOpenedSelector } from '../../selectors/ChatSelectors';
 import Plugin from '../PackageDetailView/PluginBoxes/Plugin';
 import { IPackage } from '../utils/AxiosFunctions';
+import clsx from 'clsx';
 
 const useStyles = makeStyles({
   pluginList: {
@@ -13,6 +16,10 @@ const useStyles = makeStyles({
     gridTemplateColumns: 'repeat(auto-fill, minmax(252px, 1fr))',
     minHeight: '5px',
     minWidth: '5px',
+  },
+  pluginListColumn: {
+    display: 'flex',
+    flexDirection: 'column',
   },
 });
 
@@ -24,11 +31,17 @@ interface IProps {
 
 const PluginList: React.StatelessComponent<IProps> = (props: IProps) => {
   const classes = useStyles();
+
+  const { isOpened: isChatOpened } = useSelector(isChatOpenedSelector);
   return (
     <div>
       {!!props.packagePayload.packageData &&
         !_.isEmpty(props.packagePayload.packageData.packageExtensions) && (
-          <div className={classes.pluginList}>
+          <div
+            className={clsx(
+              classes.pluginList,
+              isChatOpened ? classes.pluginListColumn : null,
+            )}>
             {props.packagePayload.packageData.packageExtensions.map(
               (plug, key) => (
                 <Plugin

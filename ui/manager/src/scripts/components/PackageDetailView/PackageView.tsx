@@ -1,11 +1,13 @@
+import clsx from 'clsx';
 import * as _ from 'lodash';
 import * as React from 'react';
-import { connect } from 'react-redux';
+import { connect, useSelector } from 'react-redux';
 import { compose, pure, setDisplayName } from 'recompose';
 import eddiApiActionDispatchers from '../../actions/EddiApiActionDispatchers';
 import ModalActionDispatchers from '../../actions/ModalActionDispatchers';
 import { historyPush } from '../../history';
 import { readOnlySelector } from '../../selectors/AuthenticationSelectors';
+import { isChatOpenedSelector } from '../../selectors/ChatSelectors';
 import { defaultPluginTypesSelector } from '../../selectors/PluginSelectors';
 import BlueButton from '../Assets/Buttons/BlueButton';
 import Options from '../Assets/Buttons/Options';
@@ -55,6 +57,8 @@ const PackageView = ({
     IDefaultPluginTypes[]
   >([]);
   const [extensionKey, setExtensionKey] = React.useState(0);
+
+  const { isOpened: isChatOpened } = useSelector(isChatOpenedSelector);
 
   React.useEffect(() => {
     eddiApiActionDispatchers.fetchPackageDataAction(packagePayload.resource);
@@ -263,7 +267,11 @@ const PackageView = ({
                 editDisabled={!isCurrentVersion || readOnly}
               />
             ))}
-          <div className={classes.pluginList}>
+          <div
+            className={clsx(
+              classes.pluginList,
+              isChatOpened ? classes.pluginListColumn : null,
+            )}>
             {selectedPlugins
               .filter((p) => !hasExtensions(p))
               .map((ext, key) => (

@@ -1,6 +1,14 @@
+import * as _ from 'lodash';
 import { createSelector } from 'reselect';
 import { IAppState } from '../reducers';
 import { IChatState } from '../reducers/ChatReducer';
+
+interface IConversationStep {
+  key: string;
+  value: any;
+  timestampt: Date;
+  originPackageId: string;
+}
 
 export const ChatStateSelector: (state: IAppState) => IChatState = (state) =>
   state.chatState;
@@ -72,3 +80,39 @@ export const getUserInput: (state: IAppState) => string = createSelector(
     return chatState.data?.[chatState.data.length - 1]?.userReply;
   },
 );
+
+const filterRules = {
+  parser: ['input', 'expressions'],
+  behavior: ['behavior_rules', 'actions'],
+  output: ['output', 'template', 'quickReplies'],
+  property: ['properties'],
+};
+
+const getFilteredConversationsSteps = (
+  allConversationSteps: IConversationStep[],
+  type: string,
+) => {
+  const filtered = allConversationSteps.filter((c: IConversationStep) => {
+    return filterRules[type]?.some((e: string) => {
+      return c.key.includes(e);
+    });
+  });
+  return filtered;
+};
+
+export const getAllConversationSteps = (
+  state: IAppState,
+  type: string = null,
+) => {
+  const allConversationSteps: IConversationStep[] = [];
+  state.chatState.data?.forEach((d) => {
+    const conversationStep = d.conversationSteps?.[0]?.conversationStep;
+    if (!_.isEmpty(conversationStep)) {
+      allConversationSteps.push.apply(allConversationSteps, conversationStep);
+    }
+  });
+  if (type) {
+    return getFilteredConversationsSteps(allConversationSteps, type);
+  }
+  return allConversationSteps;
+};

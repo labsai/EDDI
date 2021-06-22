@@ -22,6 +22,7 @@ const useStyles = makeStyles({
     display: 'flex',
     alignSelf: 'flex-end',
     marginBottom: '20px',
+    marginTop: '10px',
   },
   inputText: {
     backgroundColor: LIGHT_BLUE_COLOR2,
