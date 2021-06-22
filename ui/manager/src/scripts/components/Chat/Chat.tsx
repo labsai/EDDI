@@ -10,6 +10,7 @@ import {
   replyInChatAction,
   restartChatAction,
   setChatAnimation,
+  setUserReplyAction,
   startChatAction,
 } from '../../actions/ChatActions';
 import {
@@ -21,6 +22,7 @@ import { BOT, BOT_PATH } from '../utils/EddiTypes';
 import useStyles from './Chat.styles';
 import ChatInputField from './ChatInputField/ChatInputField';
 import ChatOptions from './ChatInputField/ChatOptions';
+import ChatOutput from './ChatOutput/ChatOutput';
 import ChatOutputs from './ChatOutputs/ChatOutputs';
 import ChatQuickReplies from './ChatQuickReplies/ChatQuickReplies';
 import Delayed from './Delay/Delay';
@@ -78,6 +80,7 @@ const Chat = () => {
 
   // send user reply
   const handleReplyInChat = (quickReply) => {
+    dispatch(setUserReplyAction(quickReply.value));
     dispatch(
       replyInChatAction(
         botId,
@@ -115,13 +118,17 @@ const Chat = () => {
             const count = outputs?.length + 2 + (input ? 1 : 0);
             const quickReplies = d.conversationOutputs?.[0]?.quickReplies;
             const lastStep = i === data?.length - 1;
+            const userReply = d.userReply;
             const noQuickReplies =
               _.isEmpty(quickReplies) || _.isUndefined(quickReplies);
 
             return (
               (outputs || input) && (
                 <div className={classes.step} key={d.conversationId + i}>
-                  <ChatOutputs outputs={outputs} input={input} />
+                  <ChatOutputs outputs={outputs} />
+                  {!!userReply && (
+                    <ChatOutput output={{ text: userReply }} input />
+                  )}
                   <ChatQuickReplies
                     delay={count * 400}
                     quickReplies={quickReplies}

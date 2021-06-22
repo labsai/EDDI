@@ -6,6 +6,7 @@ import {
   IReplyInChatSuccesAction,
   IReplyInChatFailedAction,
   ISetChatContextAction,
+  ISetUserReplyAction,
 } from '../actions/ChatActions';
 import {
   CLEAR_CHAT,
@@ -20,6 +21,7 @@ import {
   RESTART_CHAT_FAILED,
   RESTART_CHAT_SUCCESS,
   SET_CHAT_CONTEXT,
+  SET_USER_REPLY,
   START_CHAT,
   START_CHAT_FAILED,
   START_CHAT_SUCCESS,
@@ -113,6 +115,20 @@ const ChatReducer: IChatReducer = (
           $set: (action as IStartChatFailedAction).error,
         },
       });
+    case SET_USER_REPLY: {
+      return update(state, {
+        data: {
+          $apply: (data: any) => {
+            const newData = [...data];
+            const lastStepData = newData.pop();
+            Object.assign(lastStepData, {
+              userReply: (action as ISetUserReplyAction).userReply,
+            });
+            return [...newData, lastStepData];
+          },
+        },
+      });
+    }
     case REPLY_IN_CHAT:
       return update(state, {
         isLoading: {

@@ -4,17 +4,13 @@ import Delayed from '../Delay/Delay';
 import useStyles from './ChatOutputs.styles';
 
 interface IChatOutputs {
-  input: string;
   outputs: { text: string }[];
 }
 
-const ChatOutputs = ({ outputs, input }: IChatOutputs) => {
+const ChatOutputs = ({ outputs }: IChatOutputs) => {
   const classes = useStyles();
   return (
     <div className={classes.chatOutputs}>
-      <Delayed wait={500}>
-        {!!input && <ChatOutput output={{ text: input }} input />}
-      </Delayed>
       {outputs?.map((o, i) => {
         return (
           <Delayed

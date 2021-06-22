@@ -65,3 +65,10 @@ export const getChatContext = (state: IAppState) => {
 export const getChatAnimation = (state: IAppState) => {
   return state.chatState.animation;
 };
+
+export const getUserInput: (state: IAppState) => string = createSelector(
+  ChatStateSelector,
+  (chatState) => {
+    return chatState.data?.[chatState.data.length - 1]?.userReply;
+  },
+);

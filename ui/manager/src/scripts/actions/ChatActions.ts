@@ -12,6 +12,7 @@ import {
   RESTART_CHAT_FAILED,
   RESTART_CHAT_SUCCESS,
   SET_CHAT_CONTEXT,
+  SET_USER_REPLY,
   START_CHAT,
   START_CHAT_FAILED,
   START_CHAT_SUCCESS,
@@ -177,5 +178,16 @@ export function restartChatFailedAction(
 export function clearChatAction() {
   return {
     type: CLEAR_CHAT,
+  };
+}
+
+export interface ISetUserReplyAction extends Action {
+  userReply: string;
+}
+
+export function setUserReplyAction(userReply): ISetUserReplyAction {
+  return {
+    userReply,
+    type: SET_USER_REPLY,
   };
 }

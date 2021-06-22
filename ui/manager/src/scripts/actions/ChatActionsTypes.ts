@@ -13,3 +13,4 @@ export const RESTART_CHAT: string = 'RESTART_CHAT';
 export const RESTART_CHAT_SUCCESS: string = 'RESTART_CHAT_SUCCESS';
 export const RESTART_CHAT_FAILED: string = 'RESTART_CHAT_FAILED';
 export const CLEAR_CHAT: string = 'CLEAR_CHAT';
+export const SET_USER_REPLY: string = 'SET_USER_REPLY';
