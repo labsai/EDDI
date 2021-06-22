@@ -1184,7 +1184,7 @@ export async function axiosStartChat(
       ?.split('/')
       ?.pop();
     const response = await axios.get(
-      `${apiUrl}/bots/unrestricted/${botId}/${conversationId}`,
+      `${apiUrl}/bots/unrestricted/${botId}/${conversationId}?returnDetailed=true`,
     );
     return Object.assign(response.data, { apiUrl });
   } catch (err) {
@@ -1219,7 +1219,7 @@ export async function axiosReplyInChat(
 ): Promise<any> {
   try {
     const response = await axios.post(
-      `${await getAPIUrl()}/bots/unrestricted/${botId}/${conversationId}`,
+      `${await getAPIUrl()}/bots/unrestricted/${botId}/${conversationId}?returnDetailed=true`,
       { input, context },
     );
     return response.data;

@@ -86,6 +86,8 @@ const filterRules = {
   behavior: ['behavior_rules', 'actions'],
   output: ['output', 'template', 'quickReplies'],
   property: ['properties'],
+  httpcalls: ['httpCalls'],
+  templating: ['preTemplated', 'postTemplated'],
 };
 
 const getFilteredConversationsSteps = (
@@ -94,7 +96,11 @@ const getFilteredConversationsSteps = (
 ) => {
   const filtered = allConversationSteps.filter((c: IConversationStep) => {
     return filterRules[type]?.some((e: string) => {
-      return c.key.includes(e);
+      return (
+        c.key.includes(e) &&
+        !c.key.includes(filterRules.templating[0]) &&
+        !c.key.includes(filterRules.templating[1])
+      );
     });
   });
   return filtered;
@@ -104,13 +110,16 @@ export const getAllConversationSteps = (
   state: IAppState,
   type: string = null,
 ) => {
+  const currentStep = state.chatState.step;
   const allConversationSteps: IConversationStep[] = [];
-  state.chatState.data?.forEach((d) => {
-    const conversationStep = d.conversationSteps?.[0]?.conversationStep;
-    if (!_.isEmpty(conversationStep)) {
-      allConversationSteps.push.apply(allConversationSteps, conversationStep);
-    }
-  });
+  const data = state.chatState.data?.[currentStep];
+  const conversationStep = data?.conversationSteps?.map((c) => {
+    return c.conversationStep;
+  })?.[0];
+
+  if (!_.isEmpty(conversationStep)) {
+    allConversationSteps.push.apply(allConversationSteps, conversationStep);
+  }
   if (type) {
     return getFilteredConversationsSteps(allConversationSteps, type);
   }

@@ -151,7 +151,8 @@ const ChatReducer: IChatReducer = (
         },
         step: {
           $apply: (step: number) => {
-            return step++;
+            const newStep = step + 1;
+            return newStep;
           },
         },
         isLoading: {

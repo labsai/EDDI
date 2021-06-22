@@ -62,7 +62,6 @@ const Plugin = ({
   const filteredConversationSteps = allConversationSteps.filter(
     (c) => c.originPackageId === packageId,
   );
-  console.log('filteredConversationSteps: ', filteredConversationSteps);
 
   const handleDeletePlugin = () => {
     deletePlugin(pluginType.extensionKey);
@@ -171,6 +170,22 @@ const Plugin = ({
     }
   };
 
+  const getRelationLabel = (key: string) => {
+    switch (true) {
+      case key.includes('success'): {
+        return 'success: ';
+      }
+      case key.includes('fail'): {
+        return 'fail: ';
+      }
+      case key.includes('quickReplies'): {
+        return 'quick reply: ';
+      }
+      default:
+        return '';
+    }
+  };
+
   const isCurrentVersion: boolean =
     plugin && plugin.version === plugin.currentVersion;
   let pluginCurrentVersion = 'v01';
@@ -231,6 +246,7 @@ const Plugin = ({
           {filteredConversationSteps.map((c, i) => {
             return (
               <div className={classes.chatRelation} key={c.key + i}>
+                {getRelationLabel(c.key)}
                 {typeof c.value === 'string'
                   ? JSON.stringify(c.value, null, '\t')
                   : JSON.stringify(c.value, null, 4)}
