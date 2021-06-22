@@ -1,12 +1,13 @@
 import Popover from '@material-ui/core/Popover';
 import * as React from 'react';
 import { makeStyles } from '@material-ui/core/styles';
-import TextField from '@material-ui/core/TextField';
 import Button from '@material-ui/core/Button';
 import * as _ from 'lodash';
 import { getChatContext } from '../../../selectors/ChatSelectors';
 import { useDispatch, useSelector } from 'react-redux';
 import { setChatContext } from '../../../actions/ChatActions';
+import TextareaAutosize from '@material-ui/core/TextareaAutosize';
+import CONTEXT_EXAMPLE from '../enums/contextExample';
 
 const useStyles = makeStyles({
   popup: {
@@ -53,9 +54,14 @@ const TextareaPopup = ({ open, popupEl, handleClose }: ITextareaPopup) => {
     handleClose();
   };
 
-  const handleChangeContext = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleChangeContext = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
     setValue(e.target.value);
   };
+
+  const handleInsertExample = (e: React.MouseEvent<HTMLButtonElement>) => {
+    setValue(CONTEXT_EXAMPLE);
+  };
+
   return (
     <Popover
       id="textarea-popup"
@@ -71,13 +77,12 @@ const TextareaPopup = ({ open, popupEl, handleClose }: ITextareaPopup) => {
         horizontal: 'center',
       }}>
       <div className={classes.popup}>
-        <TextField
+        <TextareaAutosize
           className={classes.textarea}
-          variant="outlined"
-          multiline
           rows={4}
+          autoFocus
           value={value}
-          onChange={handleChangeContext}></TextField>
+          onChange={handleChangeContext}></TextareaAutosize>
         <div className={classes.actionButtons}>
           <Button
             size="small"
@@ -92,6 +97,12 @@ const TextareaPopup = ({ open, popupEl, handleClose }: ITextareaPopup) => {
             onClick={handleClosePopup}
             color="secondary">
             {'Close'}
+          </Button>
+          <Button
+            size="small"
+            variant="contained"
+            onClick={handleInsertExample}>
+            {'Insert Example'}
           </Button>
         </div>
       </div>

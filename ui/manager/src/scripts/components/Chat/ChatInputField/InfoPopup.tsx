@@ -3,10 +3,13 @@ import Popover from '@material-ui/core/Popover';
 import { makeStyles } from '@material-ui/core/styles';
 import * as React from 'react';
 import { useSelector } from 'react-redux';
+import OpenInNewIcon from '@material-ui/icons/OpenInNew';
 import {
   currentChatIdSelector,
   getApiUrl,
+  getBotEnvironment,
   getBotId,
+  getBotVersion,
 } from '../../../selectors/ChatSelectors';
 import {
   DARK_GREY_COLOR,
@@ -21,10 +24,19 @@ const useStyles = makeStyles({
     justifyContent: 'center',
     flexDirection: 'column',
   },
-  chatId: {
+  chatItem: {
     color: DARK_GREY_COLOR,
     fontSize: SMALL_FONT,
     textAlign: 'left',
+    display: 'flex',
+    alignItems: 'center',
+
+    '& strong': {
+      paddingRight: '3px',
+    },
+  },
+  icon: {
+    marginLeft: '3px',
   },
 });
 
@@ -38,6 +50,8 @@ interface IInfoPopup {
 const InfoPopup = ({ open, popupEl, handleClose, botResource }: IInfoPopup) => {
   const conversationId = useSelector(currentChatIdSelector);
   const botId = useSelector(getBotId);
+  const botVersion = useSelector(getBotVersion);
+  const botEnvironment = useSelector(getBotEnvironment);
   const apiUrl = useSelector(getApiUrl);
   const [prevConversation, setPreviousConversation] =
     React.useState<string>(null);
@@ -83,26 +97,46 @@ const InfoPopup = ({ open, popupEl, handleClose, botResource }: IInfoPopup) => {
       }}>
       {conversationId && (
         <div className={classes.chatInfo}>
-          <Typography className={classes.chatId}>
+          <Typography className={classes.chatItem}>
             <Link
               href={getLink(conversationId)}
               target="_blank"
               rel="noopener"
               color="inherit">
-              <strong>{'Current conversation: '}</strong>
+              <strong>{`Current conversation: `}</strong>
+              {conversationId}
+              <OpenInNewIcon className={classes.icon} fontSize="small" />
             </Link>
-            {conversationId}
           </Typography>
           {prevConversation && (
-            <Typography className={classes.chatId}>
+            <Typography className={classes.chatItem}>
               <Link
                 href={getLink(prevConversation)}
                 target="_blank"
                 rel="noopener"
                 color="inherit">
-                <strong>{'Previous conversation: '}</strong>
+                <strong>{`Previous conversation: `}</strong>
+                {prevConversation}
+                <OpenInNewIcon className={classes.icon} fontSize="small" />
               </Link>
-              {prevConversation}
+            </Typography>
+          )}
+          {botId && (
+            <Typography className={classes.chatItem}>
+              <strong>{`Bot ID: `}</strong>
+              {botId}
+            </Typography>
+          )}
+          {botVersion && (
+            <Typography className={classes.chatItem}>
+              <strong>{`Bot version: `}</strong>
+              {botVersion}
+            </Typography>
+          )}
+          {botEnvironment && (
+            <Typography className={classes.chatItem}>
+              <strong>{`Bot environment: `}</strong>
+              {botEnvironment}
             </Typography>
           )}
         </div>

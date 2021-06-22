@@ -37,6 +37,20 @@ export const getBotId: (state: IAppState) => string = createSelector(
   },
 );
 
+export const getBotVersion: (state: IAppState) => string = createSelector(
+  ChatStateSelector,
+  (chatState) => {
+    return chatState.data?.[0]?.botVersion;
+  },
+);
+
+export const getBotEnvironment: (state: IAppState) => string = createSelector(
+  ChatStateSelector,
+  (chatState) => {
+    return chatState.data?.[0]?.environment;
+  },
+);
+
 export const getApiUrl: (state: IAppState) => string = createSelector(
   ChatStateSelector,
   (chatState) => {
