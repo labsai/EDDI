@@ -44,6 +44,7 @@ import {
   watchSignOut,
 } from './AuthenticationSaga';
 import { watchChat } from './ChatSaga';
+import { watchBotLogs } from './BotSaga';
 
 function* root() {
   yield fork(watchFetchBot);
@@ -85,6 +86,7 @@ function* root() {
   yield fork(watchSignOut);
   yield fork(watchDeployExampleBots);
   yield fork(watchChat);
+  yield fork(watchBotLogs);
 }
 
 export const run: () => Task = () => sagaMiddleware.run(root);

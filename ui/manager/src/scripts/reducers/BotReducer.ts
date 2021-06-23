@@ -1,60 +1,67 @@
-import { Reducer, Action } from 'redux';
-import { IBot } from '../components/utils/AxiosFunctions';
-import {
-  FETCH_BOT,
-  FETCH_BOT_FAILED,
-  FETCH_BOT_SUCCESS,
-  FETCH_BOTS,
-  FETCH_BOTS_FAILED,
-  FETCH_BOTS_SUCCESS,
-  FETCH_BOTDATA_SUCCESS,
-  UPDATE_BOT_SUCCESS,
-  UPDATE_DESCRIPTOR_SUCCESS,
-  UPDATE_BOT_PACKAGES_SUCCESS,
-  FETCH_BOTS_USING_PACKAGE_SUCCESS,
-  UPDATE_BOTS_SUCCESS,
-  DEPLOY_BOT_SUCCESS,
-  UNDEPLOY_BOT_SUCCESS,
-  FETCH_BOT_DEPLOYMENT_STATUS_SUCCESS,
-  CREATE_NEW_BOT_SUCCESS,
-  ADD_NEW_PACKAGE_TO_BOTS_SUCCESS,
-  FETCH_BOT_JSON_SCHEMA_SUCCESS,
-  DUPLICATE_SUCCESS,
-  FETCH_CONVERSATIONS_SUCCESS,
-  DEPLOY_EXAMPLE_BOTS,
-  DEPLOY_EXAMPLE_BOTS_FAILED,
-  DEPLOY_EXAMPLE_BOTS_SUCCESS,
-} from '../actions/EddiApiActionTypes';
 import update from 'immutability-helper';
+import { JSONSchema4 } from 'json-schema';
+import * as _ from 'lodash';
+import { Action, Reducer } from 'redux';
 import {
+  IAddNewPackageToBotsSuccessAction,
+  ICreateNewBotSuccessAction,
+  IDeployBotSuccessAction,
+  IDeployExampleBotsFailedAction,
+  IDeployExampleBotsSuccessAction,
+  IDuplicateSuccessAction,
+  IFetchBotDataSuccessAction,
+  IFetchBotDeploymentStatusSuccessAction,
+  IFetchBotLogsFailedAction,
+  IFetchBotLogsSuccessAction,
   IFetchBotsFailedAction,
   IFetchBotsSuccessAction,
   IFetchBotSuccessAction,
-  IFetchBotDataSuccessAction,
+  IFetchBotsUsingPackageSuccessAction,
+  IFetchJsonSchemaSuccessAction,
+  IUndeployBotSuccessAction,
+  IUpdateBotPackagesSuccessAction,
+  IUpdateBotsSuccessAction,
   IUpdateBotSuccessAction,
   IUpdateDescriptorSuccessAction,
-  IUpdateBotPackagesSuccessAction,
-  IFetchBotsUsingPackageSuccessAction,
-  IUpdateBotsSuccessAction,
-  IDeployBotSuccessAction,
-  IUndeployBotSuccessAction,
-  IFetchBotDeploymentStatusSuccessAction,
-  ICreateNewBotSuccessAction,
-  IAddNewPackageToBotsSuccessAction,
-  IFetchJsonSchemaSuccessAction,
-  IDuplicateSuccessAction,
-  IFetchConversationsSuccessAction,
-  IDeployExampleBotsFailedAction,
-  IDeployExampleBotsSuccessAction,
 } from '../actions/EddiApiActions';
-import * as _ from 'lodash';
-import { JSONSchema4 } from 'json-schema';
+import {
+  ADD_NEW_PACKAGE_TO_BOTS_SUCCESS,
+  CREATE_NEW_BOT_SUCCESS,
+  DEPLOY_BOT_SUCCESS,
+  DEPLOY_EXAMPLE_BOTS,
+  DEPLOY_EXAMPLE_BOTS_FAILED,
+  DEPLOY_EXAMPLE_BOTS_SUCCESS,
+  DUPLICATE_SUCCESS,
+  FETCH_BOT,
+  FETCH_BOTDATA_SUCCESS,
+  FETCH_BOTS,
+  FETCH_BOTS_FAILED,
+  FETCH_BOTS_SUCCESS,
+  FETCH_BOTS_USING_PACKAGE_SUCCESS,
+  FETCH_BOT_DEPLOYMENT_STATUS_SUCCESS,
+  FETCH_BOT_FAILED,
+  FETCH_BOT_JSON_SCHEMA_SUCCESS,
+  FETCH_BOT_LOGS,
+  FETCH_BOT_LOGS_FAILED,
+  FETCH_BOT_LOGS_SUCCESS,
+  FETCH_BOT_SUCCESS,
+  RESET_BOT_LOGS,
+  UNDEPLOY_BOT_SUCCESS,
+  UPDATE_BOTS_SUCCESS,
+  UPDATE_BOT_PACKAGES_SUCCESS,
+  UPDATE_BOT_SUCCESS,
+  UPDATE_DESCRIPTOR_SUCCESS,
+} from '../actions/EddiApiActionTypes';
+import { IBot, IBotLogs } from '../components/utils/AxiosFunctions';
 export type IBotReducer = Reducer<IBotState>;
 
 export interface IBotState {
   bots: IBot[];
+  logs: IBotLogs[];
   error: Error;
+  logsError: Error;
   isLoadingAllBots: boolean;
+  isLoadingBotLogs: boolean;
   isLoadingBot: boolean;
   allBotsLoaded: boolean;
   botsLoaded: number;
@@ -63,8 +70,11 @@ export interface IBotState {
 
 export const initialState: IBotState = {
   bots: [],
+  logs: [],
   error: null,
+  logsError: null,
   isLoadingAllBots: false,
+  isLoadingBotLogs: false,
   isLoadingBot: false,
   allBotsLoaded: false,
   botsLoaded: 0,
@@ -470,6 +480,47 @@ const BotReducer: IBotReducer = (
         },
       });
     }
+
+    case FETCH_BOT_LOGS:
+      return update(state, {
+        isLoadingBotLogs: {
+          $set: true,
+        },
+        logsError: {
+          $set: null,
+        },
+      });
+
+    case FETCH_BOT_LOGS_SUCCESS: {
+      return update(state, {
+        logs: {
+          $set: (action as IFetchBotLogsSuccessAction).logs.reverse(),
+        },
+        isLoadingBotLogs: {
+          $set: false,
+        },
+        logsError: {
+          $set: null,
+        },
+      });
+    }
+
+    case FETCH_BOT_LOGS_FAILED:
+      return update(state, {
+        logsError: {
+          $set: (action as IFetchBotLogsFailedAction).error,
+        },
+        isLoadingBotLogs: {
+          $set: false,
+        },
+      });
+
+    case RESET_BOT_LOGS:
+      return update(state, {
+        logs: {
+          $set: [],
+        },
+      });
 
     default:
       return state;

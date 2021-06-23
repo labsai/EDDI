@@ -38,6 +38,8 @@ import {
   showConversationsModal,
   showBasicAuthModal,
   IShowBasicAuthModal,
+  showBotLogsModal,
+  IShowBotLogsModalAction,
 } from './ModalActions';
 
 export interface IModalActionDispatchers extends ActionCreatorsMapObject {
@@ -53,6 +55,7 @@ export interface IModalActionDispatchers extends ActionCreatorsMapObject {
     addPlugin?: (plugins: string[]) => void,
     onConfirm?: () => void,
   ) => IShowModalAction;
+  showBotLogsModal: (bot?: IBot) => IShowBotLogsModalAction;
   closeModal: () => ICloseModalAction;
   showViewJsonModal: (resource: string) => IShowViewJsonModalAction;
   showEditJsonModal: (resource: string, data: {}) => IShowEditJsonModalAction;
@@ -110,6 +113,7 @@ const actions: IModalActionDispatchers = {
   showEditDescriptorModalAction,
   showConversationsModal,
   showBasicAuthModal,
+  showBotLogsModal,
 };
 
 const modalActionDispatchers: IModalActionDispatchers = bindActionCreators(

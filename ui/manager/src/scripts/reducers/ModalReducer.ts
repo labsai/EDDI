@@ -28,6 +28,7 @@ import {
 import {
   IShowAddPackagesModalAction,
   IShowAddPluginsModalAction,
+  IShowBotLogsModalAction,
   IShowConfirmationModal,
   IShowConversationsModal,
   IShowCreateNewConfig2Modal,
@@ -42,6 +43,7 @@ import {
   SHOW_ADD_PACKAGES_MODAL,
   SHOW_ADD_PLUGINS_MODAL,
   SHOW_BASIC_AUTH_MODAL,
+  SHOW_BOT_LOGS_MODAL,
   SHOW_CONFIRMATION_MODAL,
   SHOW_CONVERSATIONS_MODAL,
   SHOW_CREATE_NEW_CONFIG_2_MODAL,
@@ -214,6 +216,20 @@ const ModalReducer: IModalReducer = (
         },
         descriptor: {
           $set: modalAction.descriptor,
+        },
+      });
+
+    case SHOW_BOT_LOGS_MODAL:
+      modalAction = action as IShowBotLogsModalAction;
+      return update(state, {
+        mode: {
+          $set: ModalEnum.showBotLogs,
+        },
+        bot: {
+          $set: modalAction.bot,
+        },
+        isModalOpen: {
+          $set: true,
         },
       });
 

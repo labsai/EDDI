@@ -76,6 +76,15 @@ export interface IBot extends IDetailedDescriptor {
   hasAvailableUpdates?: boolean;
   deploymentStatus?: string;
 }
+export interface IBotLogs {
+  message: string;
+  timestamp: Date;
+  environment: string;
+  botId: string;
+  botVersion: string;
+  conversationId: string;
+  userId: string;
+}
 
 export interface IDescriptorResponse {
   data: IDescriptor[];
@@ -1225,5 +1234,20 @@ export async function axiosReplyInChat(
     return response.data;
   } catch (err) {
     console.error(`Failed to reply to bot ${botId}. Error: ${err.message}`);
+  }
+}
+
+export async function axiosGetBotLogs(
+  botId: string,
+  environment: string,
+  botVersion: number,
+): Promise<any> {
+  try {
+    const response = await axios.get(
+      `${await getAPIUrl()}/logs/${environment}/${botId}?botVersion=${botVersion}`,
+    );
+    return response.data;
+  } catch (err) {
+    console.error(`Failed to get bot logs ${botId}. Error: ${err.message}`);
   }
 }

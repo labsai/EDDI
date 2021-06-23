@@ -10,6 +10,7 @@ import { ModalEnum } from '../utils/ModalEnum';
 import AddPackagesModal from './AddPackagesModal/AddPackagesModal';
 import AddPluginModal from './AddPluginModal/AddPluginModal';
 import BasicAuthModal from './BasicAuthModal/BasicAuthModal';
+import BotLogsModal from './BotLogsModal/BotLogsModal';
 import ConfirmModal from './ConfirmModal';
 import ConversationsModal from './ConversationsModal/ConversationsModal';
 import CreateBotModal from './CreateBotModal';
@@ -200,6 +201,8 @@ const ModalComponentFrame = (props: IPrivateProps) => {
         return <ConversationsModal bot={props.bot} />;
       case ModalEnum.basicAuth:
         return <BasicAuthModal />;
+      case ModalEnum.showBotLogs:
+        return <BotLogsModal bot={props.bot} />;
       default:
         return null;
     }

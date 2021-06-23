@@ -84,6 +84,14 @@ export function loadingBotSelector(state: IAppState) {
   };
 }
 
+export function botLogsSelector(state: IAppState) {
+  return {
+    isLoadingBotLogs: state.botState.isLoadingBotLogs,
+    logs: state.botState.logs,
+    error: state.botState.logsError,
+  };
+}
+
 export interface ISpecificBotSelectorProps {
   botId: string;
   botVersion: string;

@@ -22,6 +22,7 @@ import {
   SHOW_ERROR_MESSAGE_MODAL,
   SHOW_CONVERSATIONS_MODAL,
   SHOW_BASIC_AUTH_MODAL,
+  SHOW_BOT_LOGS_MODAL,
 } from './ModalActionTypes';
 
 export interface IShowModalAction extends Action {
@@ -107,6 +108,17 @@ export function showAddPackagesModal(bot: IBot): IShowAddPackagesModalAction {
   return {
     bot,
     type: SHOW_ADD_PACKAGES_MODAL,
+  };
+}
+
+export interface IShowBotLogsModalAction extends Action {
+  bot: IBot;
+}
+
+export function showBotLogsModal(bot: IBot): IShowBotLogsModalAction {
+  return {
+    bot,
+    type: SHOW_BOT_LOGS_MODAL,
   };
 }
 

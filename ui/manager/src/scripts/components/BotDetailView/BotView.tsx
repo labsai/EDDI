@@ -48,7 +48,7 @@ const BotView = ({ bot, readOnly }: IPrivateProps) => {
   };
 
   const openBotLogsModal = () => {
-    modalActionDispatchers.showEditDescriptorModalAction(bot);
+    modalActionDispatchers.showBotLogsModal(bot);
   };
 
   const openEditJsonModal = () => {
@@ -93,11 +93,11 @@ const BotView = ({ bot, readOnly }: IPrivateProps) => {
               classes={{ button: classes.button }}
               disabled={isCurrentVersion || readOnly}
             />
-            {/* <WhiteButton
+            <WhiteButton
               text={'Show logs'}
               onClick={openBotLogsModal}
               classes={{ button: classes.button }}
-            /> */}
+            />
             <WhiteButton
               text={'Edit JSON'}
               onClick={openEditJsonModal}
