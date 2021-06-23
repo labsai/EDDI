@@ -59,3 +59,45 @@ docker run -e  "EDDI_API_URL=localhost:7070" -p "7071:7071" name_of_container
 
 This image is suppose to work with [**EDDI**](https://github.com/labsai/EDDI).
 You will need it to be running in the background with bots added to it, in order for it to run properly
+
+### Deploy project to Google Cloud Storage (https://levelup.gitconnected.com/how-to-deploy-react-applications-to-google-cloud-storage-59ac226409d6)
+
+Install Google Cloud SDK (https://cloud.google.com/sdk/docs/install)
+Download .tar.gz, extract and run
+
+```
+./google-cloud-sdk/install.sh
+```
+
+Ask for google cloud json file project owner/manager (eddi-199312-55e1244b735f.json)
+
+This command will allow us to interact with our bucket
+without the need of authenticating with our personal credentials, using our previously generated service account key
+
+```
+gcloud auth activate-service-account --key-file eddi-199312-55e1244b735f.json
+```
+
+Build project (files will be generated to dist folder)
+
+```
+yarn build
+```
+
+Sync up (deploy) our local files to our bucket
+
+```
+gsutil cp -r dist/* gs://manager-labs-ai
+```
+
+To show bucket info
+
+```
+gsutil ls -L -b gs://manager-labs-ai
+```
+
+To get bucket size
+
+```
+gsutil du -s gs://
+```

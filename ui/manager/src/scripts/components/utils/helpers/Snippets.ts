@@ -148,8 +148,8 @@ export const behaviorSnippets: ISnippet[] = [
     content: `{
   "type": "occurrence",
   "configs": {
-  "minTimesOccurred": "\${1:minTimesOccurred}",
-  "maxTimesOccurred": "\${2:maxTimesOccurred}",
+  "minTimesOccurred": \${1:minTimesOccurred},
+  "maxTimesOccurred": \${2:maxTimesOccurred},
   "behaviorRuleName": "\${3:behaviorRuleName}"
   }
 }`,
