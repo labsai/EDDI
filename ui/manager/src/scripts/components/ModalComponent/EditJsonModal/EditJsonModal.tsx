@@ -9,6 +9,7 @@ import modalActionDispatchers from '../../../actions/ModalActionDispatchers';
 import { schemaSelector } from '../../../selectors/SystemSelectors';
 import BlueButton from '../../Assets/Buttons/BlueButton';
 import { getTypeFromResource } from '../../utils/ApiFunctions';
+import { IDetailedDescriptor } from '../../utils/AxiosFunctions';
 import { compileJsonSchema, IJsonError } from '../../utils/helpers/JsonHelpers';
 import useStyles from '../ModalComponent.styles';
 import '../ModalComponent.styles.scss';
@@ -25,9 +26,11 @@ enum TabEnum {
 }
 
 interface IPublicProps {
+  descriptor?: IDetailedDescriptor;
   resource: string;
   data: string;
   type: string;
+  showViewJson?: () => void;
 }
 
 interface IPrivateProps extends IPublicProps {
@@ -127,8 +130,25 @@ const EditJsonModal = (props: IPrivateProps) => {
     <div>
       <div className={classes.modalHeader}>
         <div className={classes.modalTopHeader}>
-          <div className={classes.botHeaderText}>{'Edit existing data'}</div>
+          {!props.descriptor ? (
+            <div className={classes.botHeaderText}>{'Edit existing data'}</div>
+          ) : (
+            <div
+              className={clsx(
+                classes.botHeaderText,
+                classes.botHeaderTextSmall,
+              )}>{`Edit existing data of '${
+              props.descriptor.name || props.descriptor.id
+            }'`}</div>
+          )}
           <div className={classes.modalTopHeaderCenter} />
+          {props.showViewJson && (
+            <BlueButton
+              classes={{ button: classes.showViewJson }}
+              onClick={() => props.showViewJson()}
+              text={'View JSON'}
+            />
+          )}
           {unsavedChanges() && (
             <button
               className={classes.discardChanges}

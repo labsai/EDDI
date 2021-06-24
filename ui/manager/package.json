@@ -159,6 +159,7 @@
     "react-redux": "^7.2.4",
     "react-router": "^5.0.0",
     "react-router-dom": "^5.0.0",
+    "react-slick": "^0.28.1",
     "react-spinners": "^0.11.0",
     "recompose": "0.30.0",
     "redux": "4.1.0",
@@ -167,6 +168,7 @@
     "render-if": "^0.1.1",
     "reselect": "4.0.0",
     "route-parser": "0.0.5",
-    "serve-static": "1.14.1"
+    "serve-static": "1.14.1",
+    "slick-carousel": "^1.8.1"
   }
 }

@@ -21,7 +21,8 @@ interface IPublicProps {
   descriptor: IDetailedDescriptor;
   data: string;
   usedBy: string[];
-  selectVersion(version: number): void;
+  selectVersion?: (version: number) => void;
+  showEditJson?: () => void;
 }
 
 interface IPrivateProps extends IPublicProps {
@@ -61,17 +62,23 @@ const ViewJsonContent = (props: IPrivateProps) => {
           <div className={classes.title}>
             {props.descriptor.name || props.descriptor.id}
           </div>
-          <VersionSelectComponent
-            selectedVersion={props.descriptor.version}
-            currentVersion={props.descriptor.currentVersion}
-            selectVersion={props.selectVersion}
-          />
+          {props.selectVersion ? (
+            <VersionSelectComponent
+              selectedVersion={props.descriptor.version}
+              currentVersion={props.descriptor.currentVersion}
+              selectVersion={props.selectVersion}
+            />
+          ) : (
+            <p>v{props.descriptor.currentVersion}</p>
+          )}
           <div className={classes.centerFlex} />
           <div className={classes.options} onClick={(e) => e.stopPropagation()}>
             <Options descriptor={props.descriptor} data={props.data} />
           </div>
           <BlueButton
-            onClick={openEditJsonModal}
+            onClick={
+              props.showEditJson ? props.showEditJson : openEditJsonModal
+            }
             classes={{ button: classes.button }}
             disabled={!isCurrentVersion || props.readOnly}
             text={`Edit JSON`}

@@ -36,6 +36,7 @@ import {
   IShowEditDescriptorModalAction,
   IShowEditJsonModalAction,
   IShowModalAction,
+  IShowParallelConfigModalAction,
   IShowViewJsonModalAction,
 } from '../actions/ModalActions';
 import {
@@ -51,6 +52,7 @@ import {
   SHOW_EDIT_DESCRIPTOR_MODAL,
   SHOW_EDIT_JSON_MODAL,
   SHOW_MODAL,
+  SHOW_PARALLEL_CONFIG_MODAL,
   SHOW_UPDATE_PACKAGES_MODAL,
   SHOW_VIEW_JSON_MODAL,
 } from '../actions/ModalActionTypes';
@@ -230,6 +232,20 @@ const ModalReducer: IModalReducer = (
         },
         isModalOpen: {
           $set: true,
+        },
+      });
+
+    case SHOW_PARALLEL_CONFIG_MODAL:
+      modalAction = action as IShowParallelConfigModalAction;
+      return update(state, {
+        mode: {
+          $set: ModalEnum.parallelConfig,
+        },
+        isModalOpen: {
+          $set: true,
+        },
+        packagePayload: {
+          $set: (action as IShowParallelConfigModalAction).pkg,
         },
       });
 

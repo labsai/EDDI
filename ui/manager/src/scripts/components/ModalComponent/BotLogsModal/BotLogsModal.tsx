@@ -57,7 +57,7 @@ const BotLogsModal = ({ bot }: IPublicProps) => {
           </div>
         )}
         {!!error && <p>{'Error: Could not load bot logs'}</p>}
-        {_.isEmpty(logs) && <p>{'Logs are empty'}</p>}
+        {_.isEmpty(logs) && !isLoadingBotLogs && <p>{'Logs are empty'}</p>}
         {!error && !isLoadingBotLogs && !_.isEmpty(logs) && (
           <div className={classes.content} ref={logsContainerRef}>
             <InfiniteScroll

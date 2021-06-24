@@ -21,6 +21,7 @@ import CreateNewConfigModal from './EditJsonModal/CreateNewConfigModal';
 import EditJsonModal from './EditJsonModal/EditJsonModal';
 import ErrorMessageModal from './ErrorMessageModal';
 import './ModalComponent.styles.scss';
+import ParallelConfigModal from './ParallelConfigModal/ParallelConfigModal';
 import AddNewPackageToBotModal from './UpdateConfigsModal/AddNewPackageToBotModal';
 import UpdateBotsModal from './UpdateConfigsModal/UpdateBotsModal';
 import UpdatePackagesModal from './UpdateConfigsModal/UpdatePackagesModal';
@@ -203,6 +204,8 @@ const ModalComponentFrame = (props: IPrivateProps) => {
         return <BasicAuthModal />;
       case ModalEnum.showBotLogs:
         return <BotLogsModal bot={props.bot} />;
+      case ModalEnum.parallelConfig:
+        return <ParallelConfigModal packagePayload={props.packagePayload} />;
       default:
         return null;
     }

@@ -17,4 +17,5 @@ export enum ModalEnum {
   'conversations',
   'basicAuth',
   'showBotLogs',
+  'parallelConfig',
 }

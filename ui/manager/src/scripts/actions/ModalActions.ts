@@ -23,6 +23,7 @@ import {
   SHOW_CONVERSATIONS_MODAL,
   SHOW_BASIC_AUTH_MODAL,
   SHOW_BOT_LOGS_MODAL,
+  SHOW_PARALLEL_CONFIG_MODAL,
 } from './ModalActionTypes';
 
 export interface IShowModalAction extends Action {
@@ -281,5 +282,18 @@ export interface IShowBasicAuthModal extends Action {}
 export function showBasicAuthModal(): IShowBasicAuthModal {
   return {
     type: SHOW_BASIC_AUTH_MODAL,
+  };
+}
+
+export interface IShowParallelConfigModalAction extends Action {
+  pkg: IPackage;
+}
+
+export function showParallelConfigModal(
+  pkg: IPackage,
+): IShowParallelConfigModalAction {
+  return {
+    pkg,
+    type: SHOW_PARALLEL_CONFIG_MODAL,
   };
 }

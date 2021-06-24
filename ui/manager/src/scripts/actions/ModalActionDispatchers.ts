@@ -40,6 +40,8 @@ import {
   IShowBasicAuthModal,
   showBotLogsModal,
   IShowBotLogsModalAction,
+  IShowParallelConfigModalAction,
+  showParallelConfigModal,
 } from './ModalActions';
 
 export interface IModalActionDispatchers extends ActionCreatorsMapObject {
@@ -95,6 +97,9 @@ export interface IModalActionDispatchers extends ActionCreatorsMapObject {
   ) => IShowErrorMessageModal;
   showConversationsModal: (bot) => IShowConversationsModal;
   showBasicAuthModal: () => IShowBasicAuthModal;
+  showParallelConfigModal: (
+    packagePayload: IPackage,
+  ) => IShowParallelConfigModalAction;
 }
 
 const actions: IModalActionDispatchers = {
@@ -114,6 +119,7 @@ const actions: IModalActionDispatchers = {
   showConversationsModal,
   showBasicAuthModal,
   showBotLogsModal,
+  showParallelConfigModal,
 };
 
 const modalActionDispatchers: IModalActionDispatchers = bindActionCreators(

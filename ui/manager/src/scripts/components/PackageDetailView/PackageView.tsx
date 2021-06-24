@@ -191,6 +191,10 @@ const PackageView = ({
   const isCurrentVersion =
     packagePayload.version === packagePayload.currentVersion;
 
+  const openParallelConfigModal = () => {
+    ModalActionDispatchers.showParallelConfigModal(packagePayload);
+  };
+
   return (
     <div>
       <div className={classes.packageHeader}>
@@ -211,6 +215,12 @@ const PackageView = ({
         <WhiteButton
           onClick={openEditJsonModal}
           text={'Edit JSON'}
+          classes={{ button: classes.editPackageButton }}
+          disabled={!isCurrentVersion || readOnly}
+        />
+        <WhiteButton
+          onClick={openParallelConfigModal}
+          text={'Parallel config'}
           classes={{ button: classes.editPackageButton }}
           disabled={!isCurrentVersion || readOnly}
         />

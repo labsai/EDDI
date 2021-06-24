@@ -1,5 +1,5 @@
-import { DARK_BLUE_COLOR } from '../../../styles/DefaultStylingProperties';
 import { makeStyles } from '@material-ui/core/styles';
+import { DARK_BLUE_COLOR } from '../../../styles/DefaultStylingProperties';
 
 const useStyles = makeStyles({
   close: {
@@ -136,6 +136,10 @@ const useStyles = makeStyles({
     height: '35px',
     fontSize: '28px',
   },
+  botHeaderTextSmall: {
+    fontSize: '20px',
+    paddingRight: '20px',
+  },
   createPackageHeaderText: {
     position: 'absolute',
     height: '35px',
@@ -266,6 +270,9 @@ const useStyles = makeStyles({
     '&:active': {
       backgroundColor: '#4BCA81',
     },
+  },
+  showViewJson: {
+    marginRight: '10px',
   },
 });
 

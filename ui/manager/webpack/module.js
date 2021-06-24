@@ -12,7 +12,7 @@ export const module = {
       exclude: [],
     },
     {
-      test: /\.scss$/,
+      test: /\.(sc|c)ss$/,
       use: [
         'style-loader',
         'css-loader',
@@ -31,5 +31,15 @@ export const module = {
         },
       ],
     },
+    {
+      test: /\.(woff(2)?|ttf|eot)(\?v=\d+\.\d+\.\d+)?$/,
+      use: [{
+          loader: 'file-loader',
+          options: {
+              name: '[name].[ext]',
+              outputPath: 'fonts/'
+          }
+      }]
+  }
   ],
 };
