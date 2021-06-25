@@ -1251,3 +1251,17 @@ export async function axiosGetBotLogs(
     console.error(`Failed to get bot logs ${botId}. Error: ${err.message}`);
   }
 }
+
+export async function axiosExportBot(
+  botId: string,
+  botVersion: number,
+): Promise<any> {
+  try {
+    const response = await axios.post(
+      `${await getAPIUrl()}/backup/export/${botId}?botVersion=${botVersion}`,
+    );
+    return response?.headers?.location;
+  } catch (err) {
+    console.error(`Failed to export ${botId}. Error: ${err.message}`);
+  }
+}
