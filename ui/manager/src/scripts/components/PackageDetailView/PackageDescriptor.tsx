@@ -1,12 +1,16 @@
 import { makeStyles } from '@material-ui/core/styles';
 import * as React from 'react';
 import { compose, pure, setDisplayName } from 'recompose';
+import {
+  DARK_GREY_COLOR,
+  GREY_COLOR,
+} from '../../../styles/DefaultStylingProperties';
 import { IPackage } from '../utils/AxiosFunctions';
 import { getDate } from '../utils/DateFormat';
 
 const useStyles = makeStyles({
   content: {
-    color: '#16325C',
+    color: DARK_GREY_COLOR,
     fontSize: '13px',
     maxWidth: '500px',
     textAlign: 'left',
@@ -21,7 +25,7 @@ const useStyles = makeStyles({
     width: '100%',
   },
   title: {
-    color: '#54698D',
+    color: GREY_COLOR,
     fontSize: '12px',
     height: '14px',
     textAlign: 'left',

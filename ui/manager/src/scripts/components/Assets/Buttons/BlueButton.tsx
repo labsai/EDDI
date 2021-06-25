@@ -3,23 +3,29 @@ import { ClassNameMap } from '@material-ui/styles/withStyles';
 import clsx from 'clsx';
 import * as React from 'react';
 import { compose, pure, setDisplayName } from 'recompose';
+import {
+  LIGHT_GREY_COLOR2,
+  WHITE_COLOR,
+} from '../../../../styles/DefaultStylingProperties';
 import Button from './Button';
 
 const useStyles = makeStyles({
   button: {
     border: '0px',
     color: '#FFFFFF',
-    backgroundColor: '#0070D2',
+    backgroundColor: '#007d9c',
 
     '&:disabled': {
-      backgroundColor: '#c4c9d2',
+      color: LIGHT_GREY_COLOR2,
       cursor: 'default',
+      border: `1px solid ${LIGHT_GREY_COLOR2}`,
+      backgroundColor: WHITE_COLOR,
     },
     '&:active': {
-      backgroundColor: '#4A90E2',
+      backgroundColor: '#26a3c2',
     },
     '&:hover': {
-      backgroundColor: '#0070D2',
+      backgroundColor: '#007d9c',
     },
   },
 });

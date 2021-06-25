@@ -1,13 +1,13 @@
 import { makeStyles } from '@material-ui/core/styles';
 import {
   BLUE_COLOR2,
-  DARK_BLUE_COLOR,
+  DARK_GREY_COLOR,
   GREY_COLOR,
   LARGE_FONT3,
   LIGHT_BLUE_COLOR2,
   LIGHT_GREY_BORDER,
   LIGHT_GREY_COLOR2,
-  LIGHT_GREY_COLOR3,
+  LIGHT_BLUE_COLOR3,
   MEDIUM_FONT2,
   RED_COLOR,
   SMALL_FONT2,
@@ -23,11 +23,11 @@ const useStyles = makeStyles({
   },
   tab: {
     '&:hover': {
-      backgroundColor: LIGHT_GREY_COLOR3,
+      backgroundColor: LIGHT_BLUE_COLOR3,
       borderBottom: `3px solid ${GREY_COLOR}`,
     },
     borderBottom: `3px solid ${BLUE_COLOR2}`,
-    color: DARK_BLUE_COLOR,
+    color: DARK_GREY_COLOR,
     cursor: 'pointer',
     display: 'inline-block',
     fontSize: SMALL_FONT2,
@@ -44,7 +44,7 @@ const useStyles = makeStyles({
     marginTop: '45px',
   },
   bottomHeader: {
-    color: DARK_BLUE_COLOR,
+    color: DARK_GREY_COLOR,
     fontSize: SMALL_FONT2,
     display: 'flex',
     marginTop: '40px',
@@ -61,7 +61,7 @@ const useStyles = makeStyles({
     '&:hover': {
       backgroundColor: LIGHT_BLUE_COLOR2,
     },
-    color: DARK_BLUE_COLOR,
+    color: DARK_GREY_COLOR,
     fontSize: LARGE_FONT3,
     textAlign: 'left',
     maxWidth: '350px',
@@ -72,7 +72,7 @@ const useStyles = makeStyles({
   botVersion: {
     backgroundColor: LIGHT_GREY_COLOR2,
     borderRadius: '100px',
-    color: DARK_BLUE_COLOR,
+    color: DARK_GREY_COLOR,
     fontSize: MEDIUM_FONT2,
     height: '22px',
     marginLeft: '15px',

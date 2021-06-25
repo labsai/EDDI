@@ -3,6 +3,7 @@ import * as moment from 'moment';
 import * as React from 'react';
 import { connect } from 'react-redux';
 import { compose, pure, setDisplayName } from 'recompose';
+import { DARK_GREY_COLOR } from '../../../../styles/DefaultStylingProperties';
 import { packageSelector } from '../../../selectors/PackageSelectors';
 import TruncateTextComponent from '../../Assets/TruncateTextComponent';
 import VersionSelectComponent from '../../Assets/VersionSelectComponent';
@@ -66,7 +67,9 @@ const Package = (props: IPrivateProps) => {
                   props.selected ? '\u2714' : '+'
                 }`}</button>
                 <div
-                  style={{ color: props.selected ? '#16325C' : undefined }}
+                  style={{
+                    color: props.selected ? DARK_GREY_COLOR : undefined,
+                  }}
                   className={classes.packageName}>
                   {props.packagePayload.name === ''
                     ? props.packagePayload.id

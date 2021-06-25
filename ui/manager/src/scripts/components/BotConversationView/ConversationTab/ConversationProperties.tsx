@@ -3,7 +3,6 @@ import { compose, pure, setDisplayName } from 'recompose';
 import { IConversationProperties } from '../../utils/AxiosFunctions';
 import {
   DARK_BLUE_BORDER,
-  DARK_BLUE_COLOR,
   DARK_GREY_COLOR,
   MEDIUM_FONT3,
   SMALL_FONT2,
@@ -14,7 +13,7 @@ import { makeStyles } from '@material-ui/core/styles';
 const useStyles = makeStyles({
   title: {
     fontSize: MEDIUM_FONT3,
-    color: DARK_BLUE_COLOR,
+    color: DARK_GREY_COLOR,
     textAlign: 'center',
     margin: '20px 0px 20px 0px',
     borderBottom: DARK_BLUE_BORDER,
@@ -35,7 +34,7 @@ const useStyles = makeStyles({
   },
   propertyName: {
     minWidth: '200px',
-    color: DARK_BLUE_COLOR,
+    color: DARK_GREY_COLOR,
     paddingBottom: '2px',
   },
   propertyValue: {

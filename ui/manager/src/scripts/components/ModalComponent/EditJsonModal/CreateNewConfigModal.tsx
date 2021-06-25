@@ -1,6 +1,7 @@
 import clsx from 'clsx';
 import * as React from 'react';
 import { compose, pure, setDisplayName } from 'recompose';
+import { BLUE_COLOR } from '../../../../styles/DefaultStylingProperties';
 import ModalActionDispatchers from '../../../actions/ModalActionDispatchers';
 import Parser from '../../utils/Parser';
 import useStyles from '../ModalComponent.styles';
@@ -24,7 +25,7 @@ const CreateNewConfigModal = (props: IProps) => {
       return { backgroundColor: '#c4c9d2' };
     } else {
       return {
-        backgroundColor: '#0070D2',
+        backgroundColor: BLUE_COLOR,
         cursor: 'pointer',
       };
     }

@@ -13,6 +13,7 @@ import { createNewPackage, IDefaultPluginTypes } from '../utils/AxiosFunctions';
 import useStyles from './ModalComponent.styles';
 import './ModalComponent.styles.scss';
 import clsx from 'clsx';
+import { BLUE_COLOR } from '../../../styles/DefaultStylingProperties';
 
 interface IPublicProps {
   packageName: string;
@@ -39,7 +40,7 @@ const UpdatePackageModal = (props: IPrivateProps) => {
       };
     } else {
       return {
-        backgroundColor: '#0070D2',
+        backgroundColor: BLUE_COLOR,
       };
     }
   };

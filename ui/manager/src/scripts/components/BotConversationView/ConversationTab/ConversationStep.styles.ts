@@ -1,6 +1,6 @@
 import {
   BLUE_COLOR,
-  DARK_BLUE_COLOR,
+  DARK_GREY_COLOR,
   GREY_BORDER,
   GREY_COLOR3,
   LIGHT_BLUE_COLOR2,
@@ -24,7 +24,7 @@ export const useStyles = makeStyles({
     width: '100%',
   },
   input: {
-    backgroundColor: DARK_BLUE_COLOR,
+    backgroundColor: DARK_GREY_COLOR,
     borderRadius: '18px',
     color: WHITE_COLOR,
     display: 'table',
@@ -76,7 +76,7 @@ export const useStyles = makeStyles({
     margin: 'auto 0 auto 2px',
     width: '30px',
     fontSize: SMALL_FONT,
-    color: DARK_BLUE_COLOR,
+    color: DARK_GREY_COLOR,
   },
   arrowLeft: {
     position: 'absolute',

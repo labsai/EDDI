@@ -1,14 +1,14 @@
+import { makeStyles } from '@material-ui/core/styles';
 import {
-  DARK_BLUE_COLOR,
   DARK_GREY_COLOR,
+  GREY_COLOR,
   LIGHT_GREY_COLOR2,
-  LIGHT_GREY_COLOR3,
+  LIGHT_BLUE_COLOR3,
   MEDIUM_FONT,
   MEDIUM_FONT3,
   RED_COLOR,
   SMALL_FONT,
 } from '../../../styles/DefaultStylingProperties';
-import { makeStyles } from '@material-ui/core/styles';
 
 const useStyles = makeStyles({
   botBox: {
@@ -22,7 +22,7 @@ const useStyles = makeStyles({
     paddingBottom: '10px',
   },
   botHeader: {
-    backgroundColor: LIGHT_GREY_COLOR3,
+    backgroundColor: LIGHT_BLUE_COLOR3,
     borderRadius: '4px 4px 0 0',
     display: 'flex',
     height: '65px',
@@ -51,7 +51,7 @@ const useStyles = makeStyles({
     maxWidth: '300px',
   },
   lastModified: {
-    color: DARK_GREY_COLOR,
+    color: GREY_COLOR,
     float: 'right',
     fontSize: SMALL_FONT,
     height: '20px',
@@ -95,7 +95,7 @@ const useStyles = makeStyles({
   versionName: {
     backgroundColor: LIGHT_GREY_COLOR2,
     borderRadius: '100px',
-    color: DARK_BLUE_COLOR,
+    color: DARK_GREY_COLOR,
     fontSize: MEDIUM_FONT,
     height: '21px',
     marginLeft: '15px',

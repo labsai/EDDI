@@ -1,5 +1,9 @@
 import { makeStyles } from '@material-ui/core/styles';
-import { DARK_BLUE_COLOR } from '../../../styles/DefaultStylingProperties';
+import {
+  BLUE_COLOR,
+  DARK_GREY_COLOR,
+  GREY_COLOR,
+} from '../../../styles/DefaultStylingProperties';
 
 const useStyles = makeStyles({
   close: {
@@ -19,7 +23,7 @@ const useStyles = makeStyles({
     top: '-40px',
   },
   content: {
-    color: '#54698D',
+    color: GREY_COLOR,
     fontSize: '12px',
     width: '100%',
     textAlign: 'left',
@@ -89,7 +93,7 @@ const useStyles = makeStyles({
     width: '100%',
   },
   modalTopButton: {
-    backgroundColor: '#0070D2',
+    backgroundColor: BLUE_COLOR,
     border: '0px',
     borderRadius: '4px',
     color: '#FFFFFF',
@@ -121,7 +125,7 @@ const useStyles = makeStyles({
     whiteSpace: 'pre-wrap',
   },
   title: {
-    color: '#54698D',
+    color: GREY_COLOR,
     fontSize: '12px',
     height: '14px',
     whiteSpace: 'nowrap',
@@ -132,7 +136,7 @@ const useStyles = makeStyles({
   },
   botHeaderText: {
     marginTop: '6px',
-    color: DARK_BLUE_COLOR,
+    color: DARK_GREY_COLOR,
     height: '35px',
     fontSize: '28px',
   },
@@ -186,7 +190,7 @@ const useStyles = makeStyles({
   discardChanges: {
     border: 'none',
     outline: 'none',
-    color: '#1589EE',
+    color: BLUE_COLOR,
     cursor: 'pointer',
     fontSize: '13px',
     whiteSpace: 'nowrap',
@@ -219,7 +223,7 @@ const useStyles = makeStyles({
     flex: 1,
   },
   exampleData: {
-    color: '#7A849E',
+    color: GREY_COLOR,
     fontSize: '14px',
     backgroundColor: '#fdf1bf',
     flex: 1,
@@ -228,7 +232,7 @@ const useStyles = makeStyles({
     padding: '5px 20px 5px 20px',
   },
   createNewBotButton: {
-    backgroundColor: '#0070D2',
+    backgroundColor: BLUE_COLOR,
     border: '0px',
     borderRadius: '4px',
     color: '#FFFFFF',

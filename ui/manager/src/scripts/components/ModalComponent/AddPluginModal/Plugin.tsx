@@ -3,6 +3,7 @@ import * as moment from 'moment';
 import * as React from 'react';
 import { connect } from 'react-redux';
 import { compose, pure, setDisplayName } from 'recompose';
+import { DARK_GREY_COLOR } from '../../../../styles/DefaultStylingProperties';
 import eddiApiActionDispatchers from '../../../actions/EddiApiActionDispatchers';
 import { pluginSelector } from '../../../selectors/PluginSelectors';
 import TruncateTextComponent from '../../Assets/TruncateTextComponent';
@@ -75,7 +76,9 @@ const Plugin = (props: IPrivateProps) => {
                   props.selected ? '\u2714' : '+'
                 }`}</button>
                 <div
-                  style={{ color: props.selected ? '#16325C' : undefined }}
+                  style={{
+                    color: props.selected ? DARK_GREY_COLOR : undefined,
+                  }}
                   className={classes.packageName}>
                   {props.plugin.name === ''
                     ? props.plugin.id

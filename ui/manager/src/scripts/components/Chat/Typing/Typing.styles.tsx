@@ -1,12 +1,12 @@
 import { makeStyles } from '@material-ui/core/styles';
 import {
   GREY_COLOR,
-  LIGHT_GREY_COLOR3,
+  LIGHT_BLUE_COLOR3,
 } from '../../../../styles/DefaultStylingProperties';
 
 const useStyles = makeStyles({
   ticontainer: {
-    backgroundColor: LIGHT_GREY_COLOR3,
+    backgroundColor: LIGHT_BLUE_COLOR3,
     borderRadius: '10px',
     padding: '5px',
     marginBottom: '10px',

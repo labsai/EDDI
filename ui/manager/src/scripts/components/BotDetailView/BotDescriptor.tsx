@@ -2,10 +2,14 @@ import * as React from 'react';
 import { compose, pure, setDisplayName } from 'recompose';
 import * as moment from 'moment';
 import { makeStyles } from '@material-ui/core/styles';
+import {
+  DARK_GREY_COLOR,
+  GREY_COLOR,
+} from '../../../styles/DefaultStylingProperties';
 
 const useStyles = makeStyles({
   content: {
-    color: '#16325C',
+    color: DARK_GREY_COLOR,
     fontSize: '13px',
     maxWidth: '300px',
     textAlign: 'left',
@@ -22,7 +26,7 @@ const useStyles = makeStyles({
     width: '100%',
   },
   title: {
-    color: '#54698D',
+    color: GREY_COLOR,
     fontSize: '12px',
     height: '14px',
     textAlign: 'left',

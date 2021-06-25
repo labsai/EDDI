@@ -4,6 +4,7 @@ import * as React from 'react';
 import { connect, useDispatch } from 'react-redux';
 import ClipLoader from 'react-spinners/ClipLoader';
 import { compose, pure, setDisplayName } from 'recompose';
+import { BLUE_COLOR } from '../../../styles/DefaultStylingProperties';
 import { openChatAction } from '../../actions/ChatActions';
 import eddiApiActionDispatchers from '../../actions/EddiApiActionDispatchers';
 import { historyPush } from '../../history';
@@ -104,7 +105,7 @@ const Bot = ({ bot, apiUrl, readOnly }: IPrivateProps) => {
           {_.isEmpty(bot.packages) && !_.isUndefined(bot.packages) && (
             <p>{`This bot has no packages yet`}</p>
           )}
-          {_.isUndefined(bot.packages) && <ClipLoader color={'#0070D2'} />}
+          {_.isUndefined(bot.packages) && <ClipLoader color={BLUE_COLOR} />}
           {!_.isEmpty(bot.packages) && (
             <Packages packages={bot.packages} bot={bot} />
           )}

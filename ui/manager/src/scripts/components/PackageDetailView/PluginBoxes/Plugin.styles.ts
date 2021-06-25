@@ -3,14 +3,12 @@ import {
   BLUE_COLOR,
   DARK_GREY_COLOR,
   GREY_COLOR,
-  GREY_COLOR2,
-  LIGHT_BLUE_COLOR,
   LIGHT_GREY_BORDER,
-  LIGHT_GREY_COLOR3,
+  LIGHT_BLUE_COLOR3,
   MEDIUM_FONT,
   RED_BORDER,
   RED_COLOR,
-  SMALL_FONT
+  SMALL_FONT,
 } from '../../../../styles/DefaultStylingProperties';
 
 const useStyles = makeStyles({
@@ -37,7 +35,7 @@ const useStyles = makeStyles({
     color: RED_COLOR,
   },
   pluginBox: {
-    backgroundColor: LIGHT_GREY_COLOR3,
+    backgroundColor: LIGHT_BLUE_COLOR3,
     border: LIGHT_GREY_BORDER,
     borderRadius: '4px',
     outline: 'none',
@@ -53,7 +51,7 @@ const useStyles = makeStyles({
     cursor: 'pointer',
   },
   pluginBoxWithExtensions: {
-    backgroundColor: LIGHT_GREY_COLOR3,
+    backgroundColor: LIGHT_BLUE_COLOR3,
     border: LIGHT_GREY_BORDER,
     borderRadius: '4px',
     outline: 'none',
@@ -110,7 +108,7 @@ const useStyles = makeStyles({
     marginRight: '5px',
   },
   pluginName: {
-    color: LIGHT_BLUE_COLOR,
+    color: BLUE_COLOR,
     fontSize: MEDIUM_FONT,
     overflow: 'hidden',
     textAlign: 'left',
@@ -118,7 +116,7 @@ const useStyles = makeStyles({
     whiteSpace: 'nowrap',
   },
   pluginVersion: {
-    color: GREY_COLOR2,
+    color: GREY_COLOR,
     fontSize: SMALL_FONT,
     lineHeight: '21px',
     marginLeft: '2px',

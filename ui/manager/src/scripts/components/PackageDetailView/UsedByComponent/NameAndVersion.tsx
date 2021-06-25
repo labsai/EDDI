@@ -4,6 +4,10 @@ import { compose, pure, setDisplayName } from 'recompose';
 import modalActionDispatchers from '../../../actions/ModalActionDispatchers';
 import { IDetailedDescriptor } from '../../utils/AxiosFunctions';
 import clsx from 'clsx';
+import {
+  DARK_GREY_COLOR,
+  GREY_COLOR,
+} from '../../../../styles/DefaultStylingProperties';
 
 const useStyles = makeStyles({
   content: {
@@ -18,16 +22,16 @@ const useStyles = makeStyles({
     cursor: 'pointer',
   },
   name: {
-    color: '#16325C',
+    color: DARK_GREY_COLOR,
     fontSize: '16px',
   },
   smallName: {
-    color: '#7A849E',
+    color: GREY_COLOR,
     marginTop: '3px',
     fontSize: '13px',
   },
   version: {
-    color: '#A8B7C7',
+    color: GREY_COLOR,
     fontSize: '12px',
     marginTop: '4px',
     marginLeft: '5px',

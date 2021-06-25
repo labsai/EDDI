@@ -24,6 +24,7 @@ export function getPlugins() {
 
     new HtmlWebpackPlugin({
       template: 'public/index.html',
+      favicon: 'public/favicon.ico'
     }),
 
     new webpack.EnvironmentPlugin(_.defaults({appVersion: appVersion}, {eddiApiUrl: process.env.EDDI_API_URL},

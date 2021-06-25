@@ -1,6 +1,7 @@
 import { makeStyles } from '@material-ui/core/styles';
 import {
   BLUE_COLOR2,
+  GREY_COLOR,
   MEDIUM_FONT,
   RED_COLOR,
 } from '../../../styles/DefaultStylingProperties';
@@ -19,7 +20,7 @@ const useStyles = makeStyles({
     width: '100%',
   },
   botPackageLastModifiedOn: {
-    color: 'black',
+    color: GREY_COLOR,
     float: 'left',
     fontFamily: 'Roboto',
     fontSize: '11px',

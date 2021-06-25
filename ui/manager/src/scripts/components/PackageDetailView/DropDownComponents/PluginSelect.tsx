@@ -6,6 +6,10 @@ import { makeStyles } from '@material-ui/core/styles';
 import * as React from 'react';
 import { compose, pure, setDisplayName } from 'recompose';
 import {
+  BLUE_COLOR_TRANSPARENT,
+  LIGHT_BLUE_COLOR,
+} from '../../../../styles/DefaultStylingProperties';
+import {
   IDefaultPluginTypes,
   IPluginExtensions,
 } from '../../utils/AxiosFunctions';
@@ -24,7 +28,7 @@ const useStyles = makeStyles({
       top: 'calc(50% - 8px)',
     },
     '& .MuiOutlinedInput-root.Mui-focused .MuiOutlinedInput-notchedOutline': {
-      borderColor: '#2684FF',
+      borderColor: LIGHT_BLUE_COLOR,
     },
   },
   inactive: {
@@ -43,16 +47,16 @@ const useStyles = makeStyles({
       fontSize: '1.4rem',
     },
     '& li:hover': {
-      backgroundColor: '#DAEAFF',
+      backgroundColor: BLUE_COLOR_TRANSPARENT,
     },
     '& .Mui-selected': {
-      backgroundColor: '#2684FF',
+      backgroundColor: LIGHT_BLUE_COLOR,
     },
     '& .Mui-disabled': {
       backgroundColor: 'transparent',
     },
     '& .Mui-selected:hover': {
-      backgroundColor: '#2684FF',
+      backgroundColor: LIGHT_BLUE_COLOR,
     },
   },
 });

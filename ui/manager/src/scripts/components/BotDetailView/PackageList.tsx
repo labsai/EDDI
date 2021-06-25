@@ -8,6 +8,7 @@ import { IBot } from '../utils/AxiosFunctions';
 import { ModalEnum } from '../utils/ModalEnum';
 import PackageContainer from './PackageContainer';
 import { makeStyles } from '@material-ui/core/styles';
+import { GREY_COLOR } from '../../../styles/DefaultStylingProperties';
 
 const useStyles = makeStyles({
   packagesHeader: {
@@ -18,7 +19,7 @@ const useStyles = makeStyles({
     flex: 1,
   },
   packagesTitle: {
-    color: '#54698D',
+    color: GREY_COLOR,
     fontSize: '12px',
     textAlign: 'left',
     marginTop: '10px',

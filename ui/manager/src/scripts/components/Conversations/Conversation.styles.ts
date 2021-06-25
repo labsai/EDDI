@@ -1,11 +1,10 @@
 import { makeStyles } from '@material-ui/core/styles';
 import {
   DARK_BLUE_BORDER,
-  DARK_BLUE_COLOR,
   DARK_GREY_COLOR,
   GREY_BORDER,
   LIGHT_GREY_COLOR2,
-  LIGHT_GREY_COLOR3,
+  LIGHT_BLUE_COLOR3,
   MEDIUM_FONT,
   MEDIUM_FONT3,
   SMALL_FONT,
@@ -14,12 +13,12 @@ import {
 const useStyles = makeStyles({
   conversation: {
     '&:hover': {
-      backgroundColor: LIGHT_GREY_COLOR3,
+      backgroundColor: LIGHT_BLUE_COLOR3,
     },
     display: 'flex',
     borderBottom: GREY_BORDER,
     paddingBottom: '2px',
-    marginTop: '8px',
+    paddingTop: '6px',
     cursor: 'pointer',
     width: '100%',
   },
@@ -34,7 +33,7 @@ const useStyles = makeStyles({
   conversationVersion: {
     backgroundColor: LIGHT_GREY_COLOR2,
     borderRadius: '100px',
-    color: DARK_BLUE_COLOR,
+    color: DARK_GREY_COLOR,
     fontSize: MEDIUM_FONT,
     height: '21px',
     marginLeft: '15px',
@@ -73,14 +72,16 @@ const useStyles = makeStyles({
     marginLeft: 'auto',
   },
   conversationStepSize: {
-    color: DARK_BLUE_COLOR,
+    color: DARK_GREY_COLOR,
     fontSize: MEDIUM_FONT,
     borderRadius: '100px',
     height: '21px',
-    padding: '2px 5px',
     border: DARK_BLUE_BORDER,
     lineHeight: '16px',
-    display: 'table',
+    display: 'flex',
+    justifyContent: 'center',
+    alignItems: 'center',
+    width: '21px',
     marginLeft: 'auto',
     marginRight: 'auto',
     marginTop: '2px',

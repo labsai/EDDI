@@ -6,6 +6,10 @@ import { makeStyles } from '@material-ui/core/styles';
 import * as _ from 'lodash';
 import * as React from 'react';
 import { compose, pure, setDisplayName } from 'recompose';
+import {
+  BLUE_COLOR_TRANSPARENT,
+  LIGHT_BLUE_COLOR,
+} from '../../../styles/DefaultStylingProperties';
 import Parser from '../utils/Parser';
 
 const useStyles = makeStyles({
@@ -20,7 +24,7 @@ const useStyles = makeStyles({
       top: 'calc(50% - 8px)',
     },
     '& .MuiOutlinedInput-root.Mui-focused .MuiOutlinedInput-notchedOutline': {
-      borderColor: '#2684FF',
+      borderColor: LIGHT_BLUE_COLOR,
     },
   },
   input: {
@@ -44,13 +48,13 @@ const useStyles = makeStyles({
       fontSize: '1.2rem',
     },
     '& li:hover': {
-      backgroundColor: '#DAEAFF',
+      backgroundColor: BLUE_COLOR_TRANSPARENT,
     },
     '& .Mui-selected': {
-      backgroundColor: '#2684FF',
+      backgroundColor: LIGHT_BLUE_COLOR,
     },
     '& .Mui-selected:hover': {
-      backgroundColor: '#2684FF',
+      backgroundColor: LIGHT_BLUE_COLOR,
     },
   },
 });

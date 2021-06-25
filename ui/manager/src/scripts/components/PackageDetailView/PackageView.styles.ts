@@ -1,7 +1,6 @@
 import { createStyles, makeStyles } from '@material-ui/core/styles';
 import {
   BLUE_COLOR,
-  DARK_BLUE_COLOR,
   DARK_GREY_COLOR,
   LARGE_FONT3,
   RED_COLOR,
@@ -21,7 +20,7 @@ const useStyles = makeStyles(() =>
       flexGrow: 1,
     },
     packageName: {
-      color: DARK_BLUE_COLOR,
+      color: DARK_GREY_COLOR,
       fontSize: LARGE_FONT3,
       marginRight: '20px',
       textAlign: 'left',

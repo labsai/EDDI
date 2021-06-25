@@ -1,6 +1,7 @@
 import * as moment from 'moment';
 import * as React from 'react';
 import { compose, pure, setDisplayName } from 'recompose';
+import { DARK_GREY_COLOR } from '../../../../styles/DefaultStylingProperties';
 import TruncateTextComponent from '../../Assets/TruncateTextComponent';
 import { IDetailedDescriptor } from '../../utils/AxiosFunctions';
 import useStyles from '../AddPackagesModal/Package.styles';
@@ -31,7 +32,7 @@ const SelectableConfig = (props: IProps) => {
             props.selected ? '\u2714' : '+'
           }`}</button>
           <div
-            style={{ color: props.selected ? '#16325C' : undefined }}
+            style={{ color: props.selected ? DARK_GREY_COLOR : undefined }}
             className={classes.packageName}>
             {props.descriptor.name}
           </div>

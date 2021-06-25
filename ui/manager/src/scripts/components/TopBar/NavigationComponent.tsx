@@ -2,10 +2,11 @@ import { makeStyles } from '@material-ui/core/styles';
 import clsx from 'clsx';
 import * as React from 'react';
 import {
-  DARK_BLUE_COLOR,
+  BLUE_COLOR2,
+  DARK_GREY_COLOR,
   GREY_COLOR,
   LIGHT_GREY_COLOR2,
-  LIGHT_GREY_COLOR3,
+  LIGHT_BLUE_COLOR3,
   SMALL_FONT2,
 } from '../../../styles/DefaultStylingProperties';
 import { historyPush } from '../../history';
@@ -18,17 +19,17 @@ const useStyles = makeStyles({
     display: 'flex',
   },
   navBarItem: {
-    borderBottom: '3px solid #4A90E2',
-    color: DARK_BLUE_COLOR,
+    borderBottom: `3px solid ${BLUE_COLOR2}`,
+    color: DARK_GREY_COLOR,
     cursor: 'pointer',
     display: 'inline-block',
     fontSize: SMALL_FONT2,
     height: '39px',
     textAlign: 'center',
-    width: '100px',
+    width: '110px',
     lineHeight: '42px',
     '&:hover': {
-      backgroundColor: LIGHT_GREY_COLOR3,
+      backgroundColor: LIGHT_BLUE_COLOR3,
       borderBottom: '3px solid ' + GREY_COLOR,
     },
   },

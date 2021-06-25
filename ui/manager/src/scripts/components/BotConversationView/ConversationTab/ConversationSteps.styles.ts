@@ -2,7 +2,7 @@ import { makeStyles } from '@material-ui/core/styles';
 import {
   BLUE_COLOR,
   DARK_BLUE_BORDER,
-  DARK_BLUE_COLOR,
+  DARK_GREY_COLOR,
   GREY_BORDER,
   LIGHT_BLUE_COLOR,
   LIGHT_GREY_COLOR,
@@ -62,7 +62,7 @@ const useStyles = makeStyles({
   },
   title: {
     fontSize: MEDIUM_FONT3,
-    color: DARK_BLUE_COLOR,
+    color: DARK_GREY_COLOR,
     textAlign: 'center',
     margin: '20px 0px 20px 0px',
     borderBottom: DARK_BLUE_BORDER,

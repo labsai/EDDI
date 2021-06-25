@@ -1,7 +1,7 @@
 import { makeStyles } from '@material-ui/core/styles';
 import {
   GREY_BORDER,
-  GREY_COLOR2,
+  GREY_COLOR,
   MEDIUM_FONT2,
   RED_COLOR,
   WHITE_COLOR,
@@ -19,7 +19,7 @@ const styles = makeStyles({
   },
 
   content: {
-    color: '#54698D',
+    color: GREY_COLOR,
     fontSize: '12px',
     textAlign: 'left',
     padding: '20px',
@@ -31,7 +31,7 @@ const styles = makeStyles({
   },
   message: {
     margin: '20px auto 20px auto',
-    color: '#54698D',
+    color: GREY_COLOR,
     fontSize: '25px',
     width: '500px',
     textAlign: 'center',
@@ -102,7 +102,7 @@ const styles = makeStyles({
       "'Monaco', 'Menlo', 'Ubuntu Mono', 'Consolas', 'source-code-pro', monospace",
 
     '& strong': {
-      color: GREY_COLOR2,
+      color: GREY_COLOR,
     },
   },
 });

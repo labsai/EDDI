@@ -1,6 +1,7 @@
 import { makeStyles } from '@material-ui/core/styles';
 import {
   GREY_BORDER,
+  GREY_COLOR,
   MEDIUM_FONT2,
   RED_COLOR,
 } from '../../../../styles/DefaultStylingProperties';
@@ -17,7 +18,7 @@ const styles = makeStyles({
   },
 
   parallelConfigContainer: {
-    color: '#54698D',
+    color: GREY_COLOR,
     fontSize: '12px',
     textAlign: 'left',
     padding: '20px',
@@ -38,7 +39,7 @@ const styles = makeStyles({
   },
   message: {
     margin: '20px auto 20px auto',
-    color: '#54698D',
+    color: GREY_COLOR,
     fontSize: '25px',
     width: '500px',
     textAlign: 'center',

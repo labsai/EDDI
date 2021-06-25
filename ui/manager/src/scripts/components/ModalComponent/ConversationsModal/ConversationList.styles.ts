@@ -41,7 +41,14 @@ const useStyles = makeStyles({
     height: '500px',
     justifyContent: 'center',
   },
-  loadMoreButton: {},
+  loadMoreButton: {
+    width: '150px',
+    height: '40px',
+    display: 'block',
+    marginTop: '20px',
+    marginLeft: 'auto',
+    marginRight: 'auto',
+  },
 });
 
 export default useStyles;

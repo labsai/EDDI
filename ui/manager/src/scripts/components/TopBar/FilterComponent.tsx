@@ -1,5 +1,6 @@
 import { makeStyles } from '@material-ui/core/styles';
 import * as React from 'react';
+import { LIGHT_GREY_COLOR2 } from '../../../styles/DefaultStylingProperties';
 import { pageEnum } from '../pages/pageEnum';
 
 const useStyles = makeStyles({
@@ -8,7 +9,7 @@ const useStyles = makeStyles({
   },
   searchBox: {
     backgroundColor: '#FFFFFF',
-    border: '1px solid #E0E5EE',
+    border: `1px solid ${LIGHT_GREY_COLOR2}`,
     borderRadius: '4px',
     display: 'flex',
     height: '34px',

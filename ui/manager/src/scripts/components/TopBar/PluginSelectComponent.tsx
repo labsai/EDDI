@@ -6,6 +6,14 @@ import { makeStyles } from '@material-ui/core/styles';
 import ArrowDropDownIcon from '@material-ui/icons/ArrowDropDown';
 import * as React from 'react';
 import { compose, pure, setDisplayName } from 'recompose';
+import {
+  BLUE_COLOR,
+  BLUE_COLOR_TRANSPARENT,
+  DARK_GREY_COLOR,
+  GREY_COLOR,
+  LIGHT_BLUE_COLOR,
+  LIGHT_GREY_COLOR2,
+} from '../../../styles/DefaultStylingProperties';
 import { historyPush } from '../../history';
 import { pageEnum } from '../pages/pageEnum';
 
@@ -13,10 +21,10 @@ const useStyles = makeStyles({
   selectContainer: {
     width: 170,
     height: 39,
-    borderBottom: '3px solid #e0e5ee',
+    borderBottom: `3px solid ${LIGHT_GREY_COLOR2}`,
 
     '&:hover': {
-      borderBottom: '3px solid #7a849e',
+      borderBottom: `3px solid ${GREY_COLOR}`,
       backgroundColor: '#f6f9fb',
     },
     '& .MuiOutlinedInput-root': {
@@ -25,7 +33,7 @@ const useStyles = makeStyles({
       height: '100%',
       display: 'flex',
       alignItems: 'flex-end',
-      color: '#7a849e',
+      color: GREY_COLOR,
     },
     '& .MuiSelect-icon': {
       top: 'calc(50% - 8px)',
@@ -36,9 +44,9 @@ const useStyles = makeStyles({
   },
   active: {
     '& .MuiOutlinedInput-root': {
-      color: '#16325c',
+      color: DARK_GREY_COLOR,
     },
-    borderBottom: '3px solid #4a90e2',
+    borderBottom: `3px solid ${BLUE_COLOR}`,
   },
   input: {
     '& .MuiOutlinedInput-inputMarginDense': {
@@ -52,16 +60,16 @@ const useStyles = makeStyles({
       fontSize: '1.4rem',
     },
     '& li:hover': {
-      backgroundColor: '#DAEAFF',
+      backgroundColor: BLUE_COLOR_TRANSPARENT,
     },
     '& .Mui-selected': {
-      backgroundColor: '#2684FF',
+      backgroundColor: LIGHT_BLUE_COLOR,
     },
     '& .Mui-disabled': {
       backgroundColor: 'transparent',
     },
     '& .Mui-selected:hover': {
-      backgroundColor: '#2684FF',
+      backgroundColor: LIGHT_BLUE_COLOR,
     },
   },
   arrowDropdown: {

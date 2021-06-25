@@ -1,11 +1,11 @@
 import { makeStyles } from '@material-ui/core/styles';
 import {
-  DARK_BLUE_COLOR,
+  DARK_GREY_COLOR,
   GREY_COLOR,
   LIGHT_BLUE_COLOR,
   LIGHT_GREY_COLOR,
   LIGHT_GREY_COLOR2,
-  LIGHT_GREY_COLOR3,
+  LIGHT_BLUE_COLOR3,
   SMALL_FONT2,
   WHITE_COLOR,
 } from '../../../styles/DefaultStylingProperties';
@@ -15,7 +15,7 @@ const useStyles = makeStyles({
     position: 'relative',
     borderLeft: '6px solid transparent',
     borderRight: '6px solid transparent',
-    borderTop: `6px solid ${DARK_BLUE_COLOR}`,
+    borderTop: `6px solid ${DARK_GREY_COLOR}`,
     height: '0',
     marginRight: '10px',
     marginTop: '6px',
@@ -35,7 +35,7 @@ const useStyles = makeStyles({
     marginTop: '6px',
   },
   option: {
-    color: DARK_BLUE_COLOR,
+    color: DARK_GREY_COLOR,
     fontSize: SMALL_FONT2,
     overflow: 'hidden',
     textAlign: 'left',
@@ -55,7 +55,7 @@ const useStyles = makeStyles({
     borderBottom: `3px solid ${LIGHT_GREY_COLOR2}`,
     '&:hover': {
       cursor: 'pointer',
-      backgroundColor: LIGHT_GREY_COLOR3,
+      backgroundColor: LIGHT_BLUE_COLOR3,
       borderBottom: `3px solid ${GREY_COLOR}`,
     },
   },
@@ -66,7 +66,7 @@ const useStyles = makeStyles({
     color: GREY_COLOR,
   },
   singleValueSelected: {
-    color: DARK_BLUE_COLOR,
+    color: DARK_GREY_COLOR,
   },
 });
 

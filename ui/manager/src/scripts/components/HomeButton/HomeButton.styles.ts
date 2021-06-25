@@ -1,9 +1,14 @@
 import { makeStyles } from '@material-ui/core/styles';
+import {
+  BLUE_COLOR,
+  DARK_GREY_COLOR,
+  GREY_COLOR,
+} from '../../../styles/DefaultStylingProperties';
 
 const useStyles = makeStyles({
   homeArrow: {
     borderBottom: '6px solid transparent',
-    borderRight: '6px solid #A8B7C7',
+    borderRight: `6px solid ${GREY_COLOR}`,
     borderTop: '6px solid transparent',
     height: '0',
     marginTop: '5px',
@@ -21,14 +26,14 @@ const useStyles = makeStyles({
     textDecoration: 'none',
   },
   homeSquare: {
-    backgroundColor: '#4A90E2',
+    backgroundColor: BLUE_COLOR,
     borderRadius: '7px',
     height: '23px',
     marginLeft: '7px',
     width: '23px',
   },
   homeText: {
-    color: '#16325C',
+    color: DARK_GREY_COLOR,
     fontSize: '13px',
     marginLeft: '7px',
     paddingRight: '10px',

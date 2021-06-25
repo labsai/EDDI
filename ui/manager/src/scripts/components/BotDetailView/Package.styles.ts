@@ -1,19 +1,24 @@
 import { createStyles, makeStyles } from '@material-ui/core/styles';
-import { LIGHT_GREY_COLOR3 } from '../../../styles/DefaultStylingProperties';
+import {
+  BLUE_COLOR,
+  DARK_GREY_COLOR,
+  LIGHT_GREY_COLOR2,
+  LIGHT_BLUE_COLOR3,
+} from '../../../styles/DefaultStylingProperties';
 
 const useStyles = makeStyles(() =>
   createStyles({
     editPackage: {
       border: 'none',
       outline: 'none',
-      color: '#1589EE',
+      color: BLUE_COLOR,
       cursor: 'pointer',
       fontSize: '13px',
       textAlign: 'right',
       backgroundColor: 'transparent',
     },
     editPackageDisabled: {
-      color: '#D8DDE6',
+      color: LIGHT_GREY_COLOR2,
       cursor: 'default',
     },
     centerFlex: {
@@ -25,18 +30,18 @@ const useStyles = makeStyles(() =>
     packageContent: {},
     packageHeader: {
       '&:hover': {
-        backgroundColor: LIGHT_GREY_COLOR3,
+        backgroundColor: LIGHT_BLUE_COLOR3,
       },
       cursor: 'pointer',
       display: 'flex',
+      alignItems: 'center',
       flex: 1,
     },
     packageName: {
-      color: '#16325C',
+      color: DARK_GREY_COLOR,
       fontSize: '20px',
       marginRight: '20px',
       textAlign: 'left',
-      marginTop: '6px',
     },
     warningIcon: {
       height: '14px',

@@ -2,6 +2,7 @@ import { makeStyles } from '@material-ui/core/styles';
 import * as _ from 'lodash';
 import * as React from 'react';
 import { compose, pure, setDisplayName } from 'recompose';
+import { DARK_GREY_COLOR } from '../../../../styles/DefaultStylingProperties';
 import eddiApiActionDispatchers from '../../../actions/EddiApiActionDispatchers';
 import { IPlugin } from '../../utils/AxiosFunctions';
 import Parser, { IUsedResource } from '../../utils/Parser';
@@ -13,7 +14,7 @@ const useStyles = makeStyles({
   },
   seeMore: {
     display: 'inline-block',
-    color: '#16325C',
+    color: DARK_GREY_COLOR,
     fontSize: '12px',
     marginTop: '12px',
     minWidth: 'fit-content',

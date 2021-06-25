@@ -1,5 +1,6 @@
 import * as React from 'react';
 import { compose, pure, setDisplayName } from 'recompose';
+import { BLUE_COLOR } from '../../../styles/DefaultStylingProperties';
 import eddiApiActionDispatchers from '../../actions/EddiApiActionDispatchers';
 import modalActionDispatchers from '../../actions/ModalActionDispatchers';
 import { historyPush } from '../../history';
@@ -18,7 +19,7 @@ const CreateBotModal = () => {
       return { backgroundColor: '#c4c9d2' };
     } else {
       return {
-        backgroundColor: '#0070D2',
+        backgroundColor: BLUE_COLOR,
         cursor: 'pointer',
       };
     }

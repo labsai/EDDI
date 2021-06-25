@@ -1,6 +1,6 @@
 import { makeStyles } from '@material-ui/core/styles';
 import {
-  DARK_BLUE_COLOR,
+  DARK_GREY_COLOR,
   GREEN_COLOR,
   GREY_COLOR,
   LARGE_FONT,
@@ -75,7 +75,7 @@ const useStyles = makeStyles({
   },
   descriptionButton: {
     fontSize: SMALL_FONT2,
-    color: DARK_BLUE_COLOR,
+    color: DARK_GREY_COLOR,
     whiteSpace: 'nowrap',
   },
   versionSelect: {
@@ -87,7 +87,7 @@ const useStyles = makeStyles({
   versionName: {
     backgroundColor: LIGHT_GREY_COLOR2,
     borderRadius: '100px',
-    color: DARK_BLUE_COLOR,
+    color: DARK_GREY_COLOR,
     fontSize: MEDIUM_FONT,
     height: '20px',
     marginTop: '6px',

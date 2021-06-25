@@ -1,4 +1,5 @@
 import { makeStyles } from '@material-ui/core/styles';
+import { GREY_COLOR } from '../../../styles/DefaultStylingProperties';
 
 const useStyles = makeStyles({
   close: {
@@ -18,14 +19,14 @@ const useStyles = makeStyles({
     top: '-40px',
   },
   content: {
-    color: '#54698D',
+    color: GREY_COLOR,
     fontSize: '12px',
     width: '100%',
     textAlign: 'left',
     paddingBottom: '25px',
   },
   message: {
-    color: '#54698D',
+    color: GREY_COLOR,
     fontSize: '18px',
     margin: '30px 20px 10px 20px',
     whiteSpace: 'pre-line',

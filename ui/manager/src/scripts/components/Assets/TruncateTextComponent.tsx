@@ -3,6 +3,10 @@ import * as React from 'react';
 import { makeStyles } from '@material-ui/core/styles';
 import { compose, pure, setDisplayName } from 'recompose';
 import clsx from 'clsx';
+import {
+  DARK_GREY_COLOR,
+  GREY_COLOR,
+} from '../../../styles/DefaultStylingProperties';
 
 const useStyles = makeStyles({
   truncate: {
@@ -13,13 +17,13 @@ const useStyles = makeStyles({
   },
   textContainer: {
     display: 'flex',
-    color: '#7A849E',
+    color: GREY_COLOR,
     fontSize: '13px',
     whiteSpace: 'pre-wrap',
   },
   textButton: {
     fontSize: '13px',
-    color: '#16325C',
+    color: DARK_GREY_COLOR,
     whiteSpace: 'nowrap',
   },
 });

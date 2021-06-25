@@ -1,4 +1,8 @@
 import { makeStyles } from '@material-ui/core/styles';
+import {
+  DARK_GREY_COLOR,
+  GREY_COLOR,
+} from '../../../../styles/DefaultStylingProperties';
 
 const styles = makeStyles({
   conversation: {
@@ -31,15 +35,15 @@ const styles = makeStyles({
     marginRight: '44px',
   },
   smallTitle: {
-    color: '#54698D',
+    color: GREY_COLOR,
     fontSize: '12px',
   },
   smallText: {
-    color: '#16325C',
+    color: DARK_GREY_COLOR,
     fontSize: '13px',
   },
   title: {
-    color: '#16325C',
+    color: DARK_GREY_COLOR,
     fontSize: '28px',
     height: '36px',
     marginLeft: '50px',
@@ -62,7 +66,7 @@ const styles = makeStyles({
     height: '40px',
   },
   data: {
-    color: '#7A849E',
+    color: GREY_COLOR,
     fontSize: '14px',
     backgroundColor: '#FFF',
     flex: 1,
@@ -76,7 +80,7 @@ const styles = makeStyles({
     paddingBottom: '50px',
   },
   usedInContainer: {
-    color: '#54698D',
+    color: GREY_COLOR,
     fontSize: '13px',
     marginTop: '15px',
     marginLeft: '50px',

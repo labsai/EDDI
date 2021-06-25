@@ -4,6 +4,7 @@ import './ModalComponent.styles.scss';
 import { compose, pure, setDisplayName } from 'recompose';
 import { ModalEnum } from '../utils/ModalEnum';
 import ModalActionDispatchers from '../../actions/ModalActionDispatchers';
+import { BLUE_COLOR } from '../../../styles/DefaultStylingProperties';
 
 interface IProps {
   setName: (name: string) => void;
@@ -21,7 +22,7 @@ const CreatePackageModal = ({ setName, setDescription }: IProps) => {
       return { backgroundColor: '#c4c9d2' };
     } else {
       return {
-        backgroundColor: '#0070D2',
+        backgroundColor: BLUE_COLOR,
         cursor: 'pointer',
       };
     }

@@ -1,15 +1,15 @@
 import { makeStyles } from '@material-ui/core/styles';
 import {
-  DARK_BLUE_COLOR,
+  DARK_GREY_COLOR,
   GREY_COLOR,
   LARGE_FONT,
   LIGHT_GREY_COLOR,
-  LIGHT_GREY_COLOR3,
+  LIGHT_BLUE_COLOR3,
 } from '../../../styles/DefaultStylingProperties';
 
 const useStyles = makeStyles({
   pluginName: {
-    color: DARK_BLUE_COLOR,
+    color: DARK_GREY_COLOR,
     fontSize: LARGE_FONT,
     marginRight: '10px',
     paddingTop: '6px',
@@ -33,7 +33,7 @@ const useStyles = makeStyles({
   },
   topContent: {
     '&:hover': {
-      backgroundColor: LIGHT_GREY_COLOR3,
+      backgroundColor: LIGHT_BLUE_COLOR3,
     },
     cursor: 'pointer',
     display: 'flex',
@@ -60,7 +60,7 @@ const useStyles = makeStyles({
   },
   descriptionButton: {
     fontSize: '13px',
-    color: DARK_BLUE_COLOR,
+    color: DARK_GREY_COLOR,
     whiteSpace: 'nowrap',
   },
   versionSelect: {

@@ -26,7 +26,6 @@ interface IPrivateProps extends IPublicProps {
 }
 
 const PluginList = ({ error, filterText, pluginType }: IPrivateProps) => {
-  console.log('pluginType: ', pluginType);
   const [loading, setLoading] = React.useState(false);
   const { isLoading, plugins, isAllPluginsLoaded, loadedPlugins } = useSelector(
     (state) => pluginsSelector(state, pluginType),

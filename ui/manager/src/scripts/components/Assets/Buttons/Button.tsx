@@ -4,6 +4,7 @@ import { ClassNameMap } from '@material-ui/styles/withStyles';
 import clsx from 'clsx';
 import * as React from 'react';
 import { compose, pure, setDisplayName } from 'recompose';
+import { LIGHT_GREY_COLOR2 } from '../../../../styles/DefaultStylingProperties';
 
 const useStyles = makeStyles({
   button: {
@@ -21,7 +22,7 @@ const useStyles = makeStyles({
 
     '&:disabled': {
       cursor: 'default',
-      color: '#d8dde6',
+      color: LIGHT_GREY_COLOR2,
     },
   },
 });
