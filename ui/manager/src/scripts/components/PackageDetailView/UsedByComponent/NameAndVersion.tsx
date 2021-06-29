@@ -5,15 +5,13 @@ import modalActionDispatchers from '../../../actions/ModalActionDispatchers';
 import { IDetailedDescriptor } from '../../utils/AxiosFunctions';
 import clsx from 'clsx';
 import {
-  DARK_GREY_COLOR,
+  WHITE_COLOR,
   GREY_COLOR,
+  BLUE_COLOR,
 } from '../../../../styles/DefaultStylingProperties';
 
 const useStyles = makeStyles({
   content: {
-    '&:hover': {
-      backgroundColor: '#F4F6F9',
-    },
     display: 'inline-flex',
     marginRight: '15px',
     marginTop: '5px',
@@ -22,8 +20,12 @@ const useStyles = makeStyles({
     cursor: 'pointer',
   },
   name: {
-    color: DARK_GREY_COLOR,
+    color: WHITE_COLOR,
     fontSize: '16px',
+
+    '&:hover': {
+      color: BLUE_COLOR,
+    },
   },
   smallName: {
     color: GREY_COLOR,

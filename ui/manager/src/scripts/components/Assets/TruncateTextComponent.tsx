@@ -4,7 +4,7 @@ import { makeStyles } from '@material-ui/core/styles';
 import { compose, pure, setDisplayName } from 'recompose';
 import clsx from 'clsx';
 import {
-  DARK_GREY_COLOR,
+  WHITE_COLOR,
   GREY_COLOR,
 } from '../../../styles/DefaultStylingProperties';
 
@@ -23,7 +23,7 @@ const useStyles = makeStyles({
   },
   textButton: {
     fontSize: '13px',
-    color: DARK_GREY_COLOR,
+    color: WHITE_COLOR,
     whiteSpace: 'nowrap',
   },
 });

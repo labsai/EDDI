@@ -1,7 +1,7 @@
 import { createStyles, makeStyles } from '@material-ui/core/styles';
 import {
   BLUE_COLOR,
-  DARK_GREY_COLOR,
+  WHITE_COLOR,
   LIGHT_GREY_COLOR2,
   LIGHT_BLUE_COLOR3,
 } from '../../../styles/DefaultStylingProperties';
@@ -38,7 +38,7 @@ const useStyles = makeStyles(() =>
       flex: 1,
     },
     packageName: {
-      color: DARK_GREY_COLOR,
+      color: WHITE_COLOR,
       fontSize: '20px',
       marginRight: '20px',
       textAlign: 'left',

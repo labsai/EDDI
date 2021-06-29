@@ -14,6 +14,10 @@ import MoreVertIcon from '@material-ui/icons/MoreVert';
 import * as React from 'react';
 import { connect } from 'react-redux';
 import { compose, pure, setDisplayName } from 'recompose';
+import {
+  BLUE_COLOR,
+  WHITE_COLOR,
+} from '../../../../styles/DefaultStylingProperties';
 import eddiApiActionDispatchers from '../../../actions/EddiApiActionDispatchers';
 import modalActionDispatchers from '../../../actions/ModalActionDispatchers';
 import { readOnlySelector } from '../../../selectors/AuthenticationSelectors';
@@ -46,6 +50,14 @@ const useStyles = makeStyles({
   },
   optionButton: {
     alignContent: 'center',
+
+    '&:hover svg': {
+      color: BLUE_COLOR,
+    },
+
+    '& svg': {
+      color: WHITE_COLOR,
+    },
   },
 });
 

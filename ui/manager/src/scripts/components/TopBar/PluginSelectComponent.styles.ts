@@ -1,6 +1,5 @@
 import { makeStyles } from '@material-ui/core/styles';
 import {
-  DARK_GREY_COLOR,
   GREY_COLOR,
   LIGHT_BLUE_COLOR,
   LIGHT_GREY_COLOR,
@@ -15,7 +14,7 @@ const useStyles = makeStyles({
     position: 'relative',
     borderLeft: '6px solid transparent',
     borderRight: '6px solid transparent',
-    borderTop: `6px solid ${DARK_GREY_COLOR}`,
+    borderTop: `6px solid ${WHITE_COLOR}`,
     height: '0',
     marginRight: '10px',
     marginTop: '6px',
@@ -35,7 +34,7 @@ const useStyles = makeStyles({
     marginTop: '6px',
   },
   option: {
-    color: DARK_GREY_COLOR,
+    color: WHITE_COLOR,
     fontSize: SMALL_FONT2,
     overflow: 'hidden',
     textAlign: 'left',
@@ -66,7 +65,7 @@ const useStyles = makeStyles({
     color: GREY_COLOR,
   },
   singleValueSelected: {
-    color: DARK_GREY_COLOR,
+    color: WHITE_COLOR,
   },
 });
 

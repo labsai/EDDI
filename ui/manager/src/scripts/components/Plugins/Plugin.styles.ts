@@ -1,6 +1,6 @@
 import { makeStyles } from '@material-ui/core/styles';
 import {
-  DARK_GREY_COLOR,
+  WHITE_COLOR,
   GREY_COLOR,
   LARGE_FONT,
   LIGHT_GREY_COLOR,
@@ -9,7 +9,7 @@ import {
 
 const useStyles = makeStyles({
   pluginName: {
-    color: DARK_GREY_COLOR,
+    color: WHITE_COLOR,
     fontSize: LARGE_FONT,
     marginRight: '10px',
     paddingTop: '6px',
@@ -60,7 +60,7 @@ const useStyles = makeStyles({
   },
   descriptionButton: {
     fontSize: '13px',
-    color: DARK_GREY_COLOR,
+    color: WHITE_COLOR,
     whiteSpace: 'nowrap',
   },
   versionSelect: {

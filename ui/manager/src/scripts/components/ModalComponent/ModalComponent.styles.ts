@@ -1,8 +1,9 @@
 import { makeStyles } from '@material-ui/core/styles';
 import {
   BLUE_COLOR,
-  DARK_GREY_COLOR,
+  WHITE_COLOR,
   GREY_COLOR,
+  DARK_GREY_COLOR,
 } from '../../../styles/DefaultStylingProperties';
 
 const useStyles = makeStyles({
@@ -83,12 +84,16 @@ const useStyles = makeStyles({
     marginLeft: '50px',
   },
   modalHeader: {
-    backgroundColor: '#F7F9FB',
+    backgroundColor: DARK_GREY_COLOR,
+    borderTopLeftRadius: '4px',
+    borderTopRightRadius: '4px',
     height: '156px',
     width: '100%',
   },
   tallModalHeader: {
-    backgroundColor: '#F7F9FB',
+    backgroundColor: DARK_GREY_COLOR,
+    borderTopLeftRadius: '4px',
+    borderTopRightRadius: '4px',
     height: '176px',
     width: '100%',
   },
@@ -106,6 +111,7 @@ const useStyles = makeStyles({
     width: '137px',
   },
   modalTopHeader: {
+    color: WHITE_COLOR,
     display: 'flex',
     marginLeft: '50px',
     marginRight: '40px',
@@ -136,7 +142,7 @@ const useStyles = makeStyles({
   },
   botHeaderText: {
     marginTop: '6px',
-    color: DARK_GREY_COLOR,
+    color: WHITE_COLOR,
     height: '35px',
     fontSize: '28px',
   },
@@ -190,13 +196,18 @@ const useStyles = makeStyles({
   discardChanges: {
     border: 'none',
     outline: 'none',
-    color: BLUE_COLOR,
+    color: WHITE_COLOR,
     cursor: 'pointer',
     fontSize: '13px',
     whiteSpace: 'nowrap',
     textAlign: 'right',
+    marginLeft: '10px',
     backgroundColor: 'transparent',
     marginRight: '5px',
+
+    '&:hover': {
+      color: BLUE_COLOR,
+    },
   },
   backButton: {
     marginRight: '5px',
@@ -269,7 +280,9 @@ const useStyles = makeStyles({
     marginLeft: '10px',
 
     '&:hover': {
-      backgroundColor: '#4BCA81',
+      backgroundColor: 'transparent',
+      color: '#4BCA81',
+      border: '2px solid #4BCA81',
     },
     '&:active': {
       backgroundColor: '#4BCA81',

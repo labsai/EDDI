@@ -5,10 +5,11 @@ import {
   GREY_COLOR,
   LARGE_FONT,
   LIGHT_GREY_COLOR,
-  LIGHT_GREY_COLOR2,
   MEDIUM_FONT,
   MEDIUM_FONT2,
   SMALL_FONT2,
+  WHITE_COLOR,
+  YELLOW_COLOR,
 } from '../../../../styles/DefaultStylingProperties';
 
 const useStyles = makeStyles({
@@ -75,7 +76,7 @@ const useStyles = makeStyles({
   },
   descriptionButton: {
     fontSize: SMALL_FONT2,
-    color: DARK_GREY_COLOR,
+    color: WHITE_COLOR,
     whiteSpace: 'nowrap',
   },
   versionSelect: {
@@ -85,15 +86,18 @@ const useStyles = makeStyles({
     marginBottom: 'auto',
   },
   versionName: {
-    backgroundColor: LIGHT_GREY_COLOR2,
+    backgroundColor: YELLOW_COLOR,
     borderRadius: '100px',
-    color: DARK_GREY_COLOR,
+    color: WHITE_COLOR,
     fontSize: MEDIUM_FONT,
     height: '20px',
     marginTop: '6px',
     padding: '2px 10px',
     textAlign: 'center',
     width: '40px',
+  },
+  versionInput: {
+    color: DARK_GREY_COLOR,
   },
   loading: {
     marginLeft: '50px',

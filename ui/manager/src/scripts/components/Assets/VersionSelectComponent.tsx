@@ -3,12 +3,15 @@ import MenuItem from '@material-ui/core/MenuItem';
 import OutlinedInput from '@material-ui/core/OutlinedInput';
 import Select from '@material-ui/core/Select';
 import { makeStyles } from '@material-ui/core/styles';
+import { ClassNameMap } from '@material-ui/core/styles/withStyles';
 import * as _ from 'lodash';
 import * as React from 'react';
 import { compose, pure, setDisplayName } from 'recompose';
+import clsx from 'clsx';
 import {
   BLUE_COLOR_TRANSPARENT,
   LIGHT_BLUE_COLOR,
+  WHITE_COLOR,
 } from '../../../styles/DefaultStylingProperties';
 import Parser from '../utils/Parser';
 
@@ -26,12 +29,17 @@ const useStyles = makeStyles({
     '& .MuiOutlinedInput-root.Mui-focused .MuiOutlinedInput-notchedOutline': {
       borderColor: LIGHT_BLUE_COLOR,
     },
+
+    '& svg': {
+      color: WHITE_COLOR,
+    },
   },
   input: {
     '& .MuiOutlinedInput-inputMarginDense': {
       paddingTop: 11,
       paddingBottom: 11,
     },
+    color: WHITE_COLOR,
   },
   success: {
     '& .MuiOutlinedInput-root .MuiOutlinedInput-notchedOutline': {
@@ -67,6 +75,7 @@ interface IOption {
 interface IProps {
   currentVersion: number;
   selectedVersion: number;
+  classes?: ClassNameMap;
   selectVersion(version: number): void;
 }
 
@@ -74,6 +83,7 @@ const VersionSelectComponent = ({
   selectedVersion,
   currentVersion,
   selectVersion,
+  classes: externalClasses,
 }: IProps) => {
   const [selectedOption, setSelectedOption] = React.useState<IOption>(null);
   const [options, setOptions] = React.useState<IOption[]>([]);
@@ -126,7 +136,11 @@ const VersionSelectComponent = ({
         <Select
           value={selectedOption?.value}
           onChange={handleSelect}
-          input={<OutlinedInput className={classes.input} />}
+          input={
+            <OutlinedInput
+              className={clsx(classes.input, externalClasses?.input)}
+            />
+          }
           MenuProps={{ classes: { paper: classes.select } }}>
           {options.map((o, i) => {
             return (

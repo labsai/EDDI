@@ -1,13 +1,15 @@
 import { makeStyles } from '@material-ui/core/styles';
 import {
+  BLUE_COLOR,
   DARK_GREY_COLOR,
   GREY_COLOR,
   LIGHT_GREY_COLOR2,
-  LIGHT_BLUE_COLOR3,
   MEDIUM_FONT,
   MEDIUM_FONT3,
   RED_COLOR,
   SMALL_FONT,
+  WHITE_COLOR,
+  YELLOW_COLOR,
 } from '../../../styles/DefaultStylingProperties';
 
 const useStyles = makeStyles({
@@ -22,7 +24,7 @@ const useStyles = makeStyles({
     paddingBottom: '10px',
   },
   botHeader: {
-    backgroundColor: LIGHT_BLUE_COLOR3,
+    backgroundColor: DARK_GREY_COLOR,
     borderRadius: '4px 4px 0 0',
     display: 'flex',
     height: '65px',
@@ -32,7 +34,7 @@ const useStyles = makeStyles({
     flex: 1,
   },
   botHeaderName: {
-    color: DARK_GREY_COLOR,
+    color: WHITE_COLOR,
     fontSize: MEDIUM_FONT3,
     height: '25px',
     marginLeft: '25px',
@@ -70,20 +72,22 @@ const useStyles = makeStyles({
     cursor: 'pointer',
     '&:hover': {
       textDecoration: 'underline',
+      textDecorationColor: WHITE_COLOR,
     },
+  },
+  buttonsContainer: {
+    display: 'flex',
+    alignItems: 'center',
   },
   deployButton: {
     height: '35px',
     width: '108px',
     marginRight: '15px',
-    marginTop: '17px',
   },
   chatButton: {
     height: '35px',
     width: '108px',
-    marginLeft: '0',
     marginRight: '10px',
-    marginTop: '17px',
   },
   updateAvailable: {
     color: RED_COLOR,
@@ -93,9 +97,9 @@ const useStyles = makeStyles({
     marginTop: '27px',
   },
   versionName: {
-    backgroundColor: LIGHT_GREY_COLOR2,
+    backgroundColor: YELLOW_COLOR,
     borderRadius: '100px',
-    color: DARK_GREY_COLOR,
+    color: WHITE_COLOR,
     fontSize: MEDIUM_FONT,
     height: '21px',
     marginLeft: '15px',
@@ -119,6 +123,14 @@ const useStyles = makeStyles({
     marginBottom: 'auto',
     marginRight: '5px',
     height: 'fit-content',
+
+    '& svg': {
+      color: WHITE_COLOR,
+    },
+
+    '&:hover svg': {
+      color: BLUE_COLOR,
+    },
   },
 });
 

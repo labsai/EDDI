@@ -5,7 +5,9 @@ export const RED_COLOR: string = '#FF5976';
 export const DARK_RED_COLOR: string = '#ff2448';
 export const GREEN_COLOR: string = '#4BCA81';
 export const DARK_GREEN_COLOR: string = '#32ae68';
-export const YELLOW_COLOR: string = '#FADA5E';
+export const YELLOW_COLOR: string = '#e8ad16';
+export const LIGHT_YELLOW_COLOR: string = '#f6dea2';
+export const LIGHTER_YELLOW_COLOR: string = '#faeed1';
 export const DARK_YELLOW_COLOR: string = '#FFDC00';
 export const ORANGE_COLOR: string = '#FF851B';
 
@@ -23,7 +25,7 @@ export const GREY_COLOR3: string = '#7194c9';
 export const DARK_GREY_COLOR: string = '#262626';
 export const LIGHT_GREY_COLOR: string = '#D8DDE6';
 export const LIGHT_GREY_COLOR2: string = '#cce5eb';
-export const LIGHT_GREY_COLOR3: string = '#F7F9FB';
+export const LIGHT_GREY_COLOR3: string = '#b3b3b3';
 
 // --------------- BORDERS ----------------------------
 export const RED_BORDER: string = `1px solid ${RED_COLOR}`;

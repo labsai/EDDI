@@ -14,7 +14,7 @@ import {
 import Parser from '../utils/Parser';
 import { pageEnum } from './pageEnum';
 
-const eddiLogo = require('../../../public/images/eddi-logo.png');
+const eddiLogo = require('../../../public/images/eddi-logo-white.svg');
 
 interface IRouteProps {
   location: { search: string };

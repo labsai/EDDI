@@ -1,7 +1,7 @@
 import { makeStyles } from '@material-ui/core/styles';
 import {
   BLUE_COLOR,
-  DARK_GREY_COLOR,
+  WHITE_COLOR,
   GREY_COLOR,
 } from '../../../styles/DefaultStylingProperties';
 
@@ -15,8 +15,9 @@ const useStyles = makeStyles({
     width: '0',
   },
   homeButton: {
-    '&:hover': {
-      backgroundColor: '#F7F9FB',
+    '&:hover div': {
+      color: BLUE_COLOR,
+      transition: 'color 0.3s ease',
     },
     borderRadius: '3px',
     cursor: 'pointer',
@@ -33,12 +34,13 @@ const useStyles = makeStyles({
     width: '23px',
   },
   homeText: {
-    color: DARK_GREY_COLOR,
+    color: WHITE_COLOR,
     fontSize: '13px',
     marginLeft: '7px',
     paddingRight: '10px',
     marginTop: '4px',
     textAlign: 'left',
+    transition: 'color 0.3s ease',
   },
   link: {
     display: 'flex',

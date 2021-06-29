@@ -2,6 +2,7 @@ import { makeStyles } from '@material-ui/core/styles';
 import * as React from 'react';
 import { connect } from 'react-redux';
 import { compose, pure, setDisplayName } from 'recompose';
+import { DARK_GREY_COLOR } from '../../../styles/DefaultStylingProperties';
 import ModalActionDispatchers from '../../actions/ModalActionDispatchers';
 import { modalSelector } from '../../selectors/ModalSelectors';
 import { getTypeFromResource } from '../utils/ApiFunctions';
@@ -31,7 +32,7 @@ import ViewJsonModal from './ViewJsonModal/ViewJsonModal';
 const useStyles = makeStyles({
   content: {
     background: '#fff',
-    border: '1px solid #ccc',
+    boxShadow: `0 0 20px ${DARK_GREY_COLOR}`,
     borderRadius: '4px',
     left: '0px',
     top: '0px',

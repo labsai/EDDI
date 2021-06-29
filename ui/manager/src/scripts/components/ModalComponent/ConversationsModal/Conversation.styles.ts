@@ -1,7 +1,7 @@
 import { makeStyles } from '@material-ui/core/styles';
 import {
   DARK_BLUE_BORDER,
-  DARK_GREY_COLOR,
+  WHITE_COLOR,
   GREY_BORDER,
   LIGHT_GREY_COLOR2,
   LIGHT_BLUE_COLOR3,
@@ -23,7 +23,7 @@ const useStyles = makeStyles({
     width: '100%',
   },
   conversationName: {
-    color: DARK_GREY_COLOR,
+    color: WHITE_COLOR,
     fontSize: MEDIUM_FONT3,
     display: 'block',
     textOverflow: 'ellipsis',
@@ -33,7 +33,7 @@ const useStyles = makeStyles({
   conversationVersion: {
     backgroundColor: LIGHT_GREY_COLOR2,
     borderRadius: '100px',
-    color: DARK_GREY_COLOR,
+    color: WHITE_COLOR,
     fontSize: MEDIUM_FONT,
     height: '21px',
     marginLeft: '15px',
@@ -48,7 +48,7 @@ const useStyles = makeStyles({
     maxWidth: '300px',
   },
   environment: {
-    color: DARK_GREY_COLOR,
+    color: WHITE_COLOR,
     fontSize: SMALL_FONT,
     height: '20px',
     marginTop: '5px',
@@ -58,7 +58,7 @@ const useStyles = makeStyles({
     marginRight: '15px',
   },
   conversationState: {
-    color: DARK_GREY_COLOR,
+    color: WHITE_COLOR,
     fontSize: SMALL_FONT,
     height: '20px',
     marginTop: '5px',
@@ -72,7 +72,7 @@ const useStyles = makeStyles({
     marginLeft: 'auto',
   },
   conversationStepSize: {
-    color: DARK_GREY_COLOR,
+    color: WHITE_COLOR,
     fontSize: MEDIUM_FONT,
     borderRadius: '100px',
     height: '21px',
@@ -85,7 +85,7 @@ const useStyles = makeStyles({
     marginTop: '3px',
   },
   createdOn: {
-    color: DARK_GREY_COLOR,
+    color: WHITE_COLOR,
     textAlign: 'right',
     fontSize: SMALL_FONT,
     height: '20px',
@@ -93,7 +93,7 @@ const useStyles = makeStyles({
     whiteSpace: 'nowrap',
   },
   lastModifiedOn: {
-    color: DARK_GREY_COLOR,
+    color: WHITE_COLOR,
     textAlign: 'left',
     fontSize: SMALL_FONT,
     height: '20px',

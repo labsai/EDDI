@@ -1,7 +1,7 @@
 import { makeStyles } from '@material-ui/core/styles';
 import {
   BLUE_COLOR,
-  DARK_GREY_COLOR,
+  WHITE_COLOR,
   GREY_COLOR,
   LIGHT_GREY_BORDER,
   LIGHT_BLUE_COLOR3,
@@ -35,7 +35,7 @@ const useStyles = makeStyles({
     color: RED_COLOR,
   },
   pluginBox: {
-    backgroundColor: LIGHT_BLUE_COLOR3,
+    backgroundColor: 'transparent',
     border: LIGHT_GREY_BORDER,
     borderRadius: '4px',
     outline: 'none',
@@ -60,7 +60,7 @@ const useStyles = makeStyles({
     marginTop: '-5px',
   },
   extensionBox: {
-    backgroundColor: '#FFF',
+    backgroundColor: 'transparent',
     border: LIGHT_GREY_BORDER,
     borderRadius: '4px',
     cursor: 'pointer',
@@ -124,7 +124,7 @@ const useStyles = makeStyles({
     marginRight: '5px',
   },
   pluginDate: {
-    color: DARK_GREY_COLOR,
+    color: WHITE_COLOR,
     fontSize: SMALL_FONT,
     marginLeft: '5px',
     marginTop: '5px',

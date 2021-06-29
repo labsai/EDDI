@@ -1,22 +1,25 @@
 import {
   BLUE_COLOR,
-  DARK_GREY_COLOR,
+  BLUE_COLOR_TRANSPARENT,
   GREY_BORDER,
   GREY_COLOR3,
+  LIGHTER_YELLOW_COLOR,
   LIGHT_BLUE_COLOR2,
   LIGHT_GREY_COLOR2,
+  LIGHT_GREY_COLOR3,
   MEDIUM_FONT,
   MEDIUM_FONT3,
   SMALL_FONT,
   SMALL_FONT2,
   WHITE_COLOR,
+  YELLOW_COLOR,
 } from '../../../../styles/DefaultStylingProperties';
 import { makeStyles } from '@material-ui/core/styles';
 
 export const useStyles = makeStyles({
   content: {
     '&:hover': {
-      backgroundColor: LIGHT_GREY_COLOR2,
+      backgroundColor: YELLOW_COLOR,
     },
     flex: 1,
     fontSize: MEDIUM_FONT,
@@ -24,7 +27,7 @@ export const useStyles = makeStyles({
     width: '100%',
   },
   input: {
-    backgroundColor: DARK_GREY_COLOR,
+    backgroundColor: WHITE_COLOR,
     borderRadius: '18px',
     color: WHITE_COLOR,
     display: 'table',
@@ -34,14 +37,16 @@ export const useStyles = makeStyles({
     wordWrap: 'break-word',
     maxWidth: '100%',
   },
-  quickReplies: {},
+  quickReplies: {
+    marginLeft: '10px',
+  },
   quickReply: {
     backgroundColor: GREY_COLOR3,
     borderRadius: '18px',
     color: WHITE_COLOR,
     display: 'inline-block',
     whiteSpace: 'pre',
-    padding: '14px 28px',
+    padding: '8px 18px',
     marginTop: '12px',
     marginRight: '10px',
   },
@@ -49,8 +54,9 @@ export const useStyles = makeStyles({
     backgroundColor: LIGHT_BLUE_COLOR2,
     borderRadius: '18px',
     display: 'table',
-    padding: '14px 28px',
+    padding: '8px 18px',
     marginTop: '12px',
+    marginLeft: '10px',
     wordWrap: 'break-word',
     maxWidth: '100%',
   },
@@ -76,7 +82,7 @@ export const useStyles = makeStyles({
     margin: 'auto 0 auto 2px',
     width: '30px',
     fontSize: SMALL_FONT,
-    color: DARK_GREY_COLOR,
+    color: WHITE_COLOR,
   },
   arrowLeft: {
     position: 'absolute',
@@ -94,7 +100,8 @@ export const useStyles = makeStyles({
   chatStep: {
     flex: 1,
     cursor: 'pointer',
-    paddingBottom: '5px',
+    paddingBottom: '10px',
+    paddingTop: '10px',
     minWidth: 0,
   },
   titleContainer: {
@@ -122,8 +129,11 @@ export const useStyles = makeStyles({
   },
   actionTitle: {
     textDecoration: 'underline',
+    color: BLUE_COLOR,
   },
-  action: {},
+  action: {
+    color: BLUE_COLOR,
+  },
   jsonView: {},
   icon: {},
 });

@@ -9,6 +9,12 @@ body {
   margin-right: auto;
   max-width: 1080px;
   min-width: 790px;
+  background-color: black;
+}
+
+body * {
+  transition-duration: 0.3s;
+  transition-property: color, border, background-color, border-color;
 }
 
 img {

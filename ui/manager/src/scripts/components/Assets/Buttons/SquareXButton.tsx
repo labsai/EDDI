@@ -4,6 +4,7 @@ import clsx from 'clsx';
 import * as React from 'react';
 import { compose, pure, setDisplayName } from 'recompose';
 import {
+  BLUE_COLOR,
   LARGE_FONT2,
   LIGHT_GREY_BORDER,
   LIGHT_GREY_COLOR,
@@ -23,7 +24,7 @@ const useStyles = makeStyles({
       border: RED_BORDER,
     },
     backgroundColor: WHITE_COLOR,
-    color: LIGHT_GREY_COLOR,
+    color: BLUE_COLOR,
     cursor: 'pointer',
     fontSize: LARGE_FONT2,
     position: 'relative',

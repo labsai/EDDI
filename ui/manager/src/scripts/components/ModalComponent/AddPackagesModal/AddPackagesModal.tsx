@@ -6,6 +6,7 @@ import { compose, pure, setDisplayName } from 'recompose';
 import eddiApiActionDispatchers from '../../../actions/EddiApiActionDispatchers';
 import ModalActionDispatchers from '../../../actions/ModalActionDispatchers';
 import { packagesSelector } from '../../../selectors/PackageSelectors';
+import WhiteButton from '../../Assets/Buttons/WhiteButton';
 import BlueButton from '../../Assets/Buttons/BlueButton';
 import { DEFAULT_LIMIT } from '../../utils/ApiFunctions';
 import { IBot, IPackage } from '../../utils/AxiosFunctions';
@@ -108,7 +109,7 @@ const AddPackagesModal = (props: IPrivateProps) => {
               classes.title
             }>{`Select packages for <${props.bot.name}>`}</div>
           <div className={classes.centerFlex} />
-          <BlueButton
+          <WhiteButton
             classes={{ button: classes.button }}
             disabled={unsavedChanges()}
             onClick={updateBot}

@@ -5,25 +5,31 @@ import * as React from 'react';
 import { compose, pure, setDisplayName } from 'recompose';
 import {
   BLUE_COLOR,
-  LIGHT_GREY_COLOR2,
+  WHITE_COLOR,
+  YELLOW_COLOR,
 } from '../../../../styles/DefaultStylingProperties';
 import Button from './Button';
 
 const useStyles = makeStyles({
   button: {
-    border: `1px solid ${LIGHT_GREY_COLOR2}`,
-    backgroundColor: '#FFFFFF',
-    color: BLUE_COLOR,
+    border: `1px solid transparent`,
+    backgroundColor: YELLOW_COLOR,
+    color: WHITE_COLOR,
+    transition: 'background-color 0.3s ease, color 0.3s ease',
 
     '&:disabled': {
       cursor: 'default',
-      color: LIGHT_GREY_COLOR2,
+      color: WHITE_COLOR,
+      opacity: 0.6,
     },
     '&:hover': {
-      backgroundColor: LIGHT_GREY_COLOR2,
+      backgroundColor: 'transparent',
+      border: `2px solid ${YELLOW_COLOR}`,
+      color: YELLOW_COLOR,
+      transition: 'background-color 0.3s ease, color 0.3s ease',
     },
     '&:active': {
-      backgroundColor: '#FFFFFF',
+      backgroundColor: 'transparent',
     },
   },
 });

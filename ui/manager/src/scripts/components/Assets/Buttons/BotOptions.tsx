@@ -24,6 +24,7 @@ import modalActionDispatchers from '../../../actions/ModalActionDispatchers';
 import { readOnlySelector } from '../../../selectors/AuthenticationSelectors';
 import { IBot } from '../../utils/AxiosFunctions';
 import { NOT_FOUND, READY } from '../../utils/helpers/BotHelper';
+import { WHITE_COLOR } from '../../../../styles/DefaultStylingProperties';
 
 interface IPublicProps {
   bot: IBot;
@@ -47,6 +48,11 @@ const useStyles = makeStyles({
 
     '& .MuiListItemIcon-root': {
       justifyContent: 'flex-end',
+    },
+  },
+  moreIcon: {
+    '& svg': {
+      color: WHITE_COLOR,
     },
   },
 });
@@ -84,6 +90,7 @@ const BotOptions = ({ bot, readOnly, apiUrl }: IPrivateProps) => {
         aria-label="more"
         aria-controls="long-menu"
         aria-haspopup="true"
+        className={classes.moreIcon}
         onClick={handleClick}>
         <MoreVertIcon fontSize="large" />
       </IconButton>

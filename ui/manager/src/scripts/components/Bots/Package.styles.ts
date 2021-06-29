@@ -27,7 +27,7 @@ const useStyles = makeStyles({
     whiteSpace: 'nowrap',
   },
   botPackageButton: {
-    backgroundColor: 'white',
+    backgroundColor: 'transparent',
     border: 'none',
     color: BLUE_COLOR2,
     display: 'inline-block',

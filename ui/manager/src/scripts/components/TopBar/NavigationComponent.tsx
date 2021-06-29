@@ -3,11 +3,12 @@ import clsx from 'clsx';
 import * as React from 'react';
 import {
   BLUE_COLOR2,
-  DARK_GREY_COLOR,
+  WHITE_COLOR,
   GREY_COLOR,
   LIGHT_GREY_COLOR2,
   LIGHT_BLUE_COLOR3,
   SMALL_FONT2,
+  BLUE_COLOR,
 } from '../../../styles/DefaultStylingProperties';
 import { historyPush } from '../../history';
 import { pageEnum } from '../pages/pageEnum';
@@ -20,7 +21,7 @@ const useStyles = makeStyles({
   },
   navBarItem: {
     borderBottom: `3px solid ${BLUE_COLOR2}`,
-    color: DARK_GREY_COLOR,
+    color: WHITE_COLOR,
     cursor: 'pointer',
     display: 'inline-block',
     fontSize: SMALL_FONT2,
@@ -28,9 +29,10 @@ const useStyles = makeStyles({
     textAlign: 'center',
     width: '110px',
     lineHeight: '42px',
+
     '&:hover': {
-      backgroundColor: LIGHT_BLUE_COLOR3,
-      borderBottom: '3px solid ' + GREY_COLOR,
+      color: BLUE_COLOR,
+      borderBottom: '3px solid ' + BLUE_COLOR,
     },
   },
   navBarItemDisabled: {

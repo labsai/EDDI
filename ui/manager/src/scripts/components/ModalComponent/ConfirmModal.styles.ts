@@ -1,5 +1,9 @@
 import { makeStyles } from '@material-ui/core/styles';
-import { GREY_COLOR } from '../../../styles/DefaultStylingProperties';
+import {
+  DARK_GREY_COLOR,
+  LIGHT_GREY_COLOR,
+  WHITE_COLOR,
+} from '../../../styles/DefaultStylingProperties';
 
 const useStyles = makeStyles({
   close: {
@@ -19,14 +23,14 @@ const useStyles = makeStyles({
     top: '-40px',
   },
   content: {
-    color: GREY_COLOR,
+    color: LIGHT_GREY_COLOR,
     fontSize: '12px',
     width: '100%',
     textAlign: 'left',
     paddingBottom: '25px',
   },
   message: {
-    color: GREY_COLOR,
+    color: LIGHT_GREY_COLOR,
     fontSize: '18px',
     margin: '30px 20px 10px 20px',
     whiteSpace: 'pre-line',
@@ -37,13 +41,16 @@ const useStyles = makeStyles({
     margin: '80px auto auto auto',
   },
   modalHeader: {
-    backgroundColor: '#F7F9FB',
+    backgroundColor: DARK_GREY_COLOR,
+    borderTopLeftRadius: '4px',
+    borderTopRightRadius: '4px',
     width: '100%',
   },
   buttonMargin: {
     marginRight: '30px',
   },
   modalTopHeader: {
+    color: WHITE_COLOR,
     display: 'table',
     fontSize: '20px',
     height: '32px',

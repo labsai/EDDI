@@ -5,7 +5,7 @@ import ConversationList from '../Conversations/ConversationList';
 import TopBarComponent from '../TopBar/TopBarComponent';
 import { pageEnum } from './pageEnum';
 
-const eddiLogo = require('../../../public/images/eddi-logo.png');
+const eddiLogo = require('../../../public/images/eddi-logo-white.svg');
 
 const ConversationsPage = () => {
   const [filterText, setFilterText] = React.useState('');

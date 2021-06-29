@@ -9,7 +9,7 @@ import { compose, pure, setDisplayName } from 'recompose';
 import {
   BLUE_COLOR,
   BLUE_COLOR_TRANSPARENT,
-  DARK_GREY_COLOR,
+  WHITE_COLOR,
   GREY_COLOR,
   LIGHT_BLUE_COLOR,
   LIGHT_GREY_COLOR2,
@@ -24,8 +24,11 @@ const useStyles = makeStyles({
     borderBottom: `3px solid ${LIGHT_GREY_COLOR2}`,
 
     '&:hover': {
-      borderBottom: `3px solid ${GREY_COLOR}`,
-      backgroundColor: '#f6f9fb',
+      borderBottom: `3px solid ${BLUE_COLOR}`,
+
+      '& .MuiOutlinedInput-root': {
+        color: BLUE_COLOR,
+      },
     },
     '& .MuiOutlinedInput-root': {
       fontSize: '1.4rem',
@@ -44,7 +47,7 @@ const useStyles = makeStyles({
   },
   active: {
     '& .MuiOutlinedInput-root': {
-      color: DARK_GREY_COLOR,
+      color: WHITE_COLOR,
     },
     borderBottom: `3px solid ${BLUE_COLOR}`,
   },

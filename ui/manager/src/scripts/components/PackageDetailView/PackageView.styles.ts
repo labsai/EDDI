@@ -1,11 +1,12 @@
 import { createStyles, makeStyles } from '@material-ui/core/styles';
 import {
   BLUE_COLOR,
-  DARK_GREY_COLOR,
+  WHITE_COLOR,
   LARGE_FONT3,
   RED_COLOR,
   SMALL_FONT,
   SMALL_FONT2,
+  GREY_COLOR2,
 } from '../../../styles/DefaultStylingProperties';
 
 const useStyles = makeStyles(() =>
@@ -20,7 +21,7 @@ const useStyles = makeStyles(() =>
       flexGrow: 1,
     },
     packageName: {
-      color: DARK_GREY_COLOR,
+      color: WHITE_COLOR,
       fontSize: LARGE_FONT3,
       marginRight: '20px',
       textAlign: 'left',
@@ -32,6 +33,7 @@ const useStyles = makeStyles(() =>
     pluginAddTitle: {
       marginBottom: '20px',
       fontSize: SMALL_FONT,
+      color: GREY_COLOR2,
     },
     pluginDropdown: {
       paddingBottom: '450px',
@@ -68,16 +70,21 @@ const useStyles = makeStyles(() =>
     discardChanges: {
       border: 'none',
       outline: 'none',
-      color: BLUE_COLOR,
+      color: WHITE_COLOR,
       cursor: 'pointer',
       fontSize: SMALL_FONT2,
       whiteSpace: 'nowrap',
       textAlign: 'right',
-      backgroundColor: '#FFF',
       marginRight: '5px',
+      marginLeft: '10px',
+      backgroundColor: 'transparent',
+
+      '&:hover': {
+        color: BLUE_COLOR,
+      },
     },
     usedInBotsTitle: {
-      color: DARK_GREY_COLOR,
+      color: WHITE_COLOR,
       fontSize: SMALL_FONT,
       marginTop: '20px',
     },
@@ -91,7 +98,14 @@ const useStyles = makeStyles(() =>
       marginLeft: '10px',
 
       '&:hover': {
+        backgroundColor: 'transparent',
+        color: '#4BCA81',
+        border: '2px solid #4BCA81',
+      },
+      '&:disabled': {
         backgroundColor: '#4BCA81',
+        opacity: 0.6,
+        border: 'none',
       },
       '&:active': {
         backgroundColor: '#4BCA81',

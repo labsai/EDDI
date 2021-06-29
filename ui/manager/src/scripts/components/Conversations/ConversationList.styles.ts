@@ -1,5 +1,5 @@
 import {
-  DARK_GREY_COLOR,
+  WHITE_COLOR,
   SMALL_FONT,
 } from '../../../styles/DefaultStylingProperties';
 import { makeStyles } from '@material-ui/core/styles';
@@ -7,7 +7,7 @@ import { makeStyles } from '@material-ui/core/styles';
 const useStyles = makeStyles({
   title: {
     display: 'flex',
-    color: DARK_GREY_COLOR,
+    color: WHITE_COLOR,
     fontSize: SMALL_FONT,
     marginBottom: '2px',
   },

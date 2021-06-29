@@ -1,7 +1,7 @@
 import { makeStyles } from '@material-ui/core/styles';
 import {
   BLUE_COLOR2,
-  DARK_GREY_COLOR,
+  WHITE_COLOR,
   GREY_COLOR,
   LARGE_FONT3,
   LIGHT_BLUE_COLOR2,
@@ -11,6 +11,10 @@ import {
   MEDIUM_FONT2,
   RED_COLOR,
   SMALL_FONT2,
+  YELLOW_COLOR,
+  BLUE_COLOR,
+  DARK_GREY_COLOR,
+  BLACK_COLOR,
 } from '../../../styles/DefaultStylingProperties';
 
 const useStyles = makeStyles({
@@ -19,15 +23,17 @@ const useStyles = makeStyles({
   },
   tabs: {
     display: 'flex',
-    marginTop: '30px',
+    backgroundColor: BLACK_COLOR,
   },
   tab: {
     '&:hover': {
-      backgroundColor: LIGHT_BLUE_COLOR3,
-      borderBottom: `3px solid ${GREY_COLOR}`,
+      color: BLUE_COLOR,
+      borderBottom: `3px solid ${BLUE_COLOR}`,
     },
+    backgroundColor: DARK_GREY_COLOR,
+    marginTop: '30px',
     borderBottom: `3px solid ${BLUE_COLOR2}`,
-    color: DARK_GREY_COLOR,
+    color: WHITE_COLOR,
     cursor: 'pointer',
     display: 'inline-block',
     fontSize: SMALL_FONT2,
@@ -44,7 +50,7 @@ const useStyles = makeStyles({
     marginTop: '45px',
   },
   bottomHeader: {
-    color: DARK_GREY_COLOR,
+    color: WHITE_COLOR,
     fontSize: SMALL_FONT2,
     display: 'flex',
     marginTop: '40px',
@@ -59,9 +65,9 @@ const useStyles = makeStyles({
   },
   botName: {
     '&:hover': {
-      backgroundColor: LIGHT_BLUE_COLOR2,
+      color: BLUE_COLOR,
     },
-    color: DARK_GREY_COLOR,
+    color: WHITE_COLOR,
     fontSize: LARGE_FONT3,
     textAlign: 'left',
     maxWidth: '350px',
@@ -70,9 +76,9 @@ const useStyles = makeStyles({
     cursor: 'pointer',
   },
   botVersion: {
-    backgroundColor: LIGHT_GREY_COLOR2,
+    backgroundColor: YELLOW_COLOR,
     borderRadius: '100px',
-    color: DARK_GREY_COLOR,
+    color: WHITE_COLOR,
     fontSize: MEDIUM_FONT2,
     height: '22px',
     marginLeft: '15px',
@@ -83,14 +89,23 @@ const useStyles = makeStyles({
     marginTop: '9px',
   },
   endConversationButton: {
-    color: RED_COLOR,
-    border: `1px solid ${RED_COLOR}`,
+    color: WHITE_COLOR,
+    backgroundColor: RED_COLOR,
     width: '150px',
     marginLeft: 'auto',
+
     '&:disabled': {
-      border: LIGHT_GREY_BORDER,
+      border: 'none',
+      color: WHITE_COLOR,
+    },
+    '&:hover': {
+      backgroundColor: 'transparent',
+      border: `2px solid ${RED_COLOR}`,
+      color: RED_COLOR,
+      transition: 'background-color 0.3s ease, color 0.3s ease',
     },
   },
+
   loadingWrapper: {
     alignItems: 'center',
     display: 'flex',

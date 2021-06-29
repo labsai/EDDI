@@ -4,6 +4,7 @@ import clsx from 'clsx';
 import * as React from 'react';
 import { compose, pure, setDisplayName } from 'recompose';
 import {
+  BLUE_COLOR,
   LIGHT_GREY_COLOR2,
   WHITE_COLOR,
 } from '../../../../styles/DefaultStylingProperties';
@@ -11,21 +12,26 @@ import Button from './Button';
 
 const useStyles = makeStyles({
   button: {
-    border: '0px',
+    border: 'none',
     color: '#FFFFFF',
     backgroundColor: '#007d9c',
+    transition: 'background-color 0.3s ease',
 
     '&:disabled': {
-      color: LIGHT_GREY_COLOR2,
+      color: WHITE_COLOR,
       cursor: 'default',
-      border: `1px solid ${LIGHT_GREY_COLOR2}`,
-      backgroundColor: WHITE_COLOR,
+      border: 'none',
+      backgroundColor: BLUE_COLOR,
+      opacity: 0.6,
     },
     '&:active': {
-      backgroundColor: '#26a3c2',
+      backgroundColor: BLUE_COLOR,
     },
     '&:hover': {
-      backgroundColor: '#007d9c',
+      backgroundColor: 'transparent',
+      border: `2px solid ${BLUE_COLOR}`,
+      color: BLUE_COLOR,
+      transition: 'background-color 0.3s ease',
     },
   },
 });

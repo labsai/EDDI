@@ -3,7 +3,10 @@ import * as moment from 'moment';
 import * as React from 'react';
 import { connect } from 'react-redux';
 import { compose, pure, setDisplayName } from 'recompose';
-import { DARK_GREY_COLOR } from '../../../../styles/DefaultStylingProperties';
+import {
+  BLUE_COLOR,
+  WHITE_COLOR,
+} from '../../../../styles/DefaultStylingProperties';
 import { packageSelector } from '../../../selectors/PackageSelectors';
 import TruncateTextComponent from '../../Assets/TruncateTextComponent';
 import VersionSelectComponent from '../../Assets/VersionSelectComponent';
@@ -68,7 +71,7 @@ const Package = (props: IPrivateProps) => {
                 }`}</button>
                 <div
                   style={{
-                    color: props.selected ? DARK_GREY_COLOR : undefined,
+                    color: props.selected ? BLUE_COLOR : undefined,
                   }}
                   className={classes.packageName}>
                   {props.packagePayload.name === ''
@@ -80,6 +83,7 @@ const Package = (props: IPrivateProps) => {
                     currentVersion={props.packagePayload.currentVersion}
                     selectedVersion={props.packagePayload.version}
                     selectVersion={selectVersion}
+                    classes={{ input: classes.versionInput }}
                   />
                 </div>
                 <div className={classes.centerFlex} />

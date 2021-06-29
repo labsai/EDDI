@@ -1,25 +1,26 @@
 import {
-  BLUE_COLOR2,
-  DARK_GREY_COLOR,
+  WHITE_COLOR,
   GREY_COLOR,
   LIGHT_GREY_COLOR2,
-  LIGHT_BLUE_COLOR3,
   SMALL_FONT2,
+  DARK_GREY_COLOR,
+  BLUE_COLOR,
+  BLACK_COLOR,
 } from '../../../../styles/DefaultStylingProperties';
 import { makeStyles } from '@material-ui/core/styles';
 
 const editStyles = makeStyles({
   tabs: {
     display: 'flex',
-    marginTop: '30px',
   },
   tab: {
+    backgroundColor: DARK_GREY_COLOR,
     '&:hover': {
-      backgroundColor: LIGHT_BLUE_COLOR3,
-      borderBottom: `3px solid ${GREY_COLOR}`,
+      color: BLUE_COLOR,
+      borderBottom: `3px solid ${BLUE_COLOR}`,
     },
-    borderBottom: `3px solid ${BLUE_COLOR2}`,
-    color: DARK_GREY_COLOR,
+    borderBottom: `3px solid ${BLUE_COLOR}`,
+    color: WHITE_COLOR,
     cursor: 'pointer',
     display: 'inline-block',
     fontSize: SMALL_FONT2,

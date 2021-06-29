@@ -1,23 +1,24 @@
 import { makeStyles } from '@material-ui/core/styles';
 import {
-  DARK_GREY_COLOR,
+  WHITE_COLOR,
   GREY_COLOR,
   LARGE_FONT3,
   LIGHT_BLUE_COLOR3,
   SMALL_FONT,
+  DARK_GREY_COLOR,
 } from '../../../../styles/DefaultStylingProperties';
 
 const useStyles = makeStyles({
   header: {
     height: '156px',
-    backgroundColor: LIGHT_BLUE_COLOR3,
+    backgroundColor: DARK_GREY_COLOR,
   },
   topHeader: {
     paddingTop: '55px',
     display: 'flex',
   },
   title: {
-    color: DARK_GREY_COLOR,
+    color: WHITE_COLOR,
     fontSize: LARGE_FONT3,
     height: '36px',
     marginLeft: '50px',

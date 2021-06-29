@@ -6,9 +6,9 @@ const useStyles = makeStyles({
   },
   eddiLogo: {
     display: 'block',
-    marginLeft: 'auto',
-    marginRight: 'auto',
-    width: '50px',
+    marginTop: '20px',
+    marginBottom: '20px',
+    width: '100px',
   },
 });
 

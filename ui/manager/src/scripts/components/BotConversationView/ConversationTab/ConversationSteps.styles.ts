@@ -2,11 +2,13 @@ import { makeStyles } from '@material-ui/core/styles';
 import {
   BLUE_COLOR,
   DARK_BLUE_BORDER,
-  DARK_GREY_COLOR,
+  WHITE_COLOR,
   GREY_BORDER,
   LIGHT_BLUE_COLOR,
   LIGHT_GREY_COLOR,
   MEDIUM_FONT3,
+  BLUE_BORDER,
+  YELLOW_COLOR,
 } from '../../../../styles/DefaultStylingProperties';
 
 const useStyles = makeStyles({
@@ -15,21 +17,26 @@ const useStyles = makeStyles({
   },
   button: {
     '&:hover': {
-      backgroundColor: LIGHT_GREY_COLOR,
+      backgroundColor: YELLOW_COLOR,
     },
     position: 'relative',
     top: '2px',
-    border: GREY_BORDER,
+    border: BLUE_BORDER,
     width: '21px',
     height: '21px',
     borderRadius: '3px',
     marginLeft: '4px',
-    color: GREY_BORDER,
+    color: BLUE_BORDER,
     cursor: 'pointer',
+
+    '& svg': {
+      color: BLUE_COLOR,
+    },
   },
   toggleText: {
     marginTop: '3px',
     marginLeft: '2px',
+    color: BLUE_COLOR,
   },
   icon: {
     display: 'table',
@@ -62,7 +69,7 @@ const useStyles = makeStyles({
   },
   title: {
     fontSize: MEDIUM_FONT3,
-    color: DARK_GREY_COLOR,
+    color: WHITE_COLOR,
     textAlign: 'center',
     margin: '20px 0px 20px 0px',
     borderBottom: DARK_BLUE_BORDER,

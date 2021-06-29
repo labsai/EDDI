@@ -1,6 +1,6 @@
 import {
   BLUE_COLOR,
-  DARK_GREY_COLOR,
+  WHITE_COLOR,
   LARGE_FONT3,
   RED_COLOR,
   SMALL_FONT,
@@ -18,7 +18,7 @@ const styles = makeStyles({
     flexGrow: 1,
   },
   botName: {
-    color: DARK_GREY_COLOR,
+    color: WHITE_COLOR,
     fontSize: LARGE_FONT3,
     marginRight: '20px',
     textAlign: 'left',
@@ -43,7 +43,7 @@ const styles = makeStyles({
   button: {
     height: '35px',
     marginLeft: '10px',
-    color: BLUE_COLOR,
+    color: WHITE_COLOR,
     fontSize: SMALL_FONT,
     textAlign: 'center',
   },

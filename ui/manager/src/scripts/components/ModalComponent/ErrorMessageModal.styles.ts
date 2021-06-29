@@ -1,5 +1,9 @@
 import { makeStyles } from '@material-ui/core/styles';
-import { GREY_COLOR } from '../../../styles/DefaultStylingProperties';
+import {
+  DARK_GREY_COLOR,
+  GREY_COLOR,
+  WHITE_COLOR,
+} from '../../../styles/DefaultStylingProperties';
 
 const useStyles = makeStyles({
   close: {
@@ -40,10 +44,13 @@ const useStyles = makeStyles({
     margin: '60px auto auto auto',
   },
   modalHeader: {
-    backgroundColor: '#F7F9FB',
+    backgroundColor: DARK_GREY_COLOR,
+    borderTopLeftRadius: '4px',
+    borderTopRightRadius: '4px',
     width: '100%',
   },
   modalTopHeader: {
+    color: WHITE_COLOR,
     display: 'flex',
     fontSize: '18px',
     height: '32px',

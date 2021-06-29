@@ -1,6 +1,6 @@
 import { makeStyles } from '@material-ui/core/styles';
 import {
-  DARK_GREY_COLOR,
+  WHITE_COLOR,
   GREY_COLOR,
   LARGE_FONT3,
   SMALL_FONT,
@@ -18,7 +18,7 @@ const useStyles = makeStyles({
     display: 'flex',
   },
   title: {
-    color: DARK_GREY_COLOR,
+    color: WHITE_COLOR,
     fontSize: LARGE_FONT3,
   },
   lastModified: {

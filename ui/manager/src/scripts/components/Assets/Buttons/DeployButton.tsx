@@ -2,6 +2,7 @@ import { makeStyles } from '@material-ui/core/styles';
 import * as React from 'react';
 import { compose, pure, setDisplayName } from 'recompose';
 import {
+  BLUE_COLOR,
   DARK_GREEN_COLOR,
   DARK_RED_COLOR,
   GREEN_BORDER,
@@ -29,10 +30,14 @@ const useStyles = makeStyles({
   undeployStyle: {
     color: 'white',
     backgroundColor: RED_COLOR,
-    border: RED_BORDER,
+    border: 'transparent',
+    transition: 'background-color 0.3s ease',
 
     '&:hover': {
-      backgroundColor: DARK_RED_COLOR,
+      backgroundColor: 'transparent',
+      border: `2px solid ${RED_COLOR}`,
+      color: RED_COLOR,
+      transition: 'background-color 0.3s ease',
     },
     '&:disabled': {
       cursor: 'not-allowed',
@@ -41,9 +46,12 @@ const useStyles = makeStyles({
   deployStyle: {
     color: 'white',
     backgroundColor: GREEN_COLOR,
-    border: GREEN_BORDER,
+    border: 'transparent',
     '&:hover': {
-      backgroundColor: DARK_GREEN_COLOR,
+      backgroundColor: 'transparent',
+      border: `2px solid ${GREEN_COLOR}`,
+      color: GREEN_COLOR,
+      transition: 'background-color 0.3s ease',
     },
     '&:disabled': {
       cursor: 'not-allowed',

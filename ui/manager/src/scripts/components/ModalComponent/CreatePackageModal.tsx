@@ -5,6 +5,7 @@ import { compose, pure, setDisplayName } from 'recompose';
 import { ModalEnum } from '../utils/ModalEnum';
 import ModalActionDispatchers from '../../actions/ModalActionDispatchers';
 import { BLUE_COLOR } from '../../../styles/DefaultStylingProperties';
+import WhiteButton from '../Assets/Buttons/WhiteButton';
 
 interface IProps {
   setName: (name: string) => void;
@@ -16,17 +17,6 @@ const CreatePackageModal = ({ setName, setDescription }: IProps) => {
   const [packageDescription, setPackageDescription] = React.useState('');
 
   const classes = useStyles();
-
-  const getButtonStyle = () => {
-    if (!packageName) {
-      return { backgroundColor: '#c4c9d2' };
-    } else {
-      return {
-        backgroundColor: BLUE_COLOR,
-        cursor: 'pointer',
-      };
-    }
-  };
 
   const openModal = () => {
     setName(packageName);
@@ -42,13 +32,11 @@ const CreatePackageModal = ({ setName, setDescription }: IProps) => {
             {'Create new Package'}
           </h2>
           <div className={classes.modalTopHeaderCenter} />
-          <button
+          <WhiteButton
             disabled={!packageName}
             onClick={openModal}
-            style={getButtonStyle()}
-            className={classes.createNewBotButton}>
-            {'Create Package'}
-          </button>
+            text="Create Package"
+          />
         </div>
       </div>
       <div className={classes.content}>

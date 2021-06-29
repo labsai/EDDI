@@ -12,7 +12,7 @@ import {
   getBotVersion,
 } from '../../../selectors/ChatSelectors';
 import {
-  DARK_GREY_COLOR,
+  WHITE_COLOR,
   SMALL_FONT,
 } from '../../../../styles/DefaultStylingProperties';
 import { getConversations } from '../../utils/AxiosFunctions';
@@ -25,7 +25,7 @@ const useStyles = makeStyles({
     flexDirection: 'column',
   },
   chatItem: {
-    color: DARK_GREY_COLOR,
+    color: WHITE_COLOR,
     fontSize: SMALL_FONT,
     textAlign: 'left',
     display: 'flex',

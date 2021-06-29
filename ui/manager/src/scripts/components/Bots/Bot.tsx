@@ -79,7 +79,9 @@ const Bot = ({ bot, apiUrl, readOnly }: IPrivateProps) => {
             onClick={(e) => e.stopPropagation()}>
             <Options bot={bot} apiUrl={apiUrl} />
           </div>
-          <div onClick={(e) => e.stopPropagation()}>
+          <div
+            onClick={(e) => e.stopPropagation()}
+            className={classes.buttonsContainer}>
             <WhiteButton
               text={'Open Chat'}
               classes={{ button: classes.chatButton }}

@@ -2,7 +2,7 @@ import * as React from 'react';
 import { compose, pure, setDisplayName } from 'recompose';
 import eddiApiActionDispatchers from '../../actions/EddiApiActionDispatchers';
 import ModalActionDispatchers from '../../actions/ModalActionDispatchers';
-import BlueButton from '../Assets/Buttons/BlueButton';
+import WhiteButton from '../Assets/Buttons/WhiteButton';
 import { IDescriptor } from '../utils/AxiosFunctions';
 import useStyles from './ModalComponent.styles';
 import './ModalComponent.styles.scss';
@@ -26,7 +26,7 @@ const EditDescriptorModal = ({ descriptor }: IProps) => {
           <div className={classes.botHeaderText}>
             {'Edit name and description'}
           </div>
-          <BlueButton
+          <WhiteButton
             text={'Save'}
             classes={{ button: classes.button }}
             disabled={
