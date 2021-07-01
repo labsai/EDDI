@@ -31,7 +31,7 @@ const useStyles = makeStyles(() =>
       textOverflow: 'ellipsis',
     },
     pluginAddTitle: {
-      marginBottom: '20px',
+      marginBottom: '10px',
       fontSize: SMALL_FONT,
       color: GREY_COLOR2,
     },

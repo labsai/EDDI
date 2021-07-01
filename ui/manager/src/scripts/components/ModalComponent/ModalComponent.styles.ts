@@ -28,6 +28,8 @@ const useStyles = makeStyles({
     fontSize: '12px',
     width: '100%',
     textAlign: 'left',
+    display: 'flex',
+    flexDirection: 'column',
   },
   updateModalContent: {
     display: 'block',
@@ -158,7 +160,7 @@ const useStyles = makeStyles({
   },
   botText: {
     paddingTop: '5px',
-    margin: '50px',
+    margin: '20px 50px',
     fontSize: '24px',
     fontStyle: 'Bold',
   },

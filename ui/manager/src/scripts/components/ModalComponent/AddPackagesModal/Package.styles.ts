@@ -104,6 +104,9 @@ const useStyles = makeStyles({
     marginTop: '20px',
     marginBottom: '20px',
   },
+  selectInput: {
+    color: DARK_GREY_COLOR,
+  },
 });
 
 export default useStyles;

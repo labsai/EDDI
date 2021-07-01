@@ -1,12 +1,18 @@
-import Popover from '@material-ui/core/Popover';
-import * as React from 'react';
-import { makeStyles } from '@material-ui/core/styles';
 import Button from '@material-ui/core/Button';
-import * as _ from 'lodash';
-import { getChatContext } from '../../../selectors/ChatSelectors';
-import { useDispatch, useSelector } from 'react-redux';
-import { setChatContext } from '../../../actions/ChatActions';
+import Popover from '@material-ui/core/Popover';
+import { makeStyles } from '@material-ui/core/styles';
 import TextareaAutosize from '@material-ui/core/TextareaAutosize';
+import * as React from 'react';
+import { useDispatch, useSelector } from 'react-redux';
+import {
+  BLUE_COLOR,
+  DARK_GREY_COLOR,
+  RED_COLOR,
+  WHITE_COLOR,
+  YELLOW_COLOR,
+} from '../../../../styles/DefaultStylingProperties';
+import { setChatContext } from '../../../actions/ChatActions';
+import { getChatContext } from '../../../selectors/ChatSelectors';
 import CONTEXT_EXAMPLE from '../enums/contextExample';
 
 const useStyles = makeStyles({
@@ -22,12 +28,61 @@ const useStyles = makeStyles({
     justifyContent: 'center',
 
     '& button': {
-      borderRadius: '10px',
+      borderRadius: '15px',
       margin: '0 5px',
+      boxSizing: 'border-box',
+      transition: 'border 0s ease',
+
+      '&:hover': {
+        padding: '2px 8px',
+        transition: 'border 0s ease',
+      },
     },
   },
   textarea: {
-    minWidth: '200px',
+    minWidth: '247px',
+    backgroundColor: DARK_GREY_COLOR,
+    color: WHITE_COLOR,
+    transition: 'border 0s ease',
+
+    '&:focus': {
+      border: `2px solid ${BLUE_COLOR}`,
+      borderRadius: '3px',
+      transition: 'border 0s ease',
+    },
+    '&:focus-visible': {
+      outline: 'none',
+    },
+  },
+  setButton: {
+    backgroundColor: BLUE_COLOR,
+    color: WHITE_COLOR,
+
+    '&:hover': {
+      border: `2px solid ${BLUE_COLOR}`,
+      backgroundColor: 'transparent',
+      color: BLUE_COLOR,
+    },
+  },
+  closeButton: {
+    backgroundColor: RED_COLOR,
+    color: WHITE_COLOR,
+
+    '&:hover': {
+      border: `2px solid ${RED_COLOR}`,
+      backgroundColor: 'transparent',
+      color: RED_COLOR,
+    },
+  },
+  insertButton: {
+    backgroundColor: YELLOW_COLOR,
+    color: WHITE_COLOR,
+
+    '&:hover': {
+      border: `2px solid ${YELLOW_COLOR}`,
+      backgroundColor: 'transparent',
+      color: YELLOW_COLOR,
+    },
   },
 });
 
@@ -88,6 +143,7 @@ const TextareaPopup = ({ open, popupEl, handleClose }: ITextareaPopup) => {
             size="small"
             variant="contained"
             onClick={handleSetContext}
+            className={classes.setButton}
             color="primary">
             {'Set'}
           </Button>
@@ -95,12 +151,14 @@ const TextareaPopup = ({ open, popupEl, handleClose }: ITextareaPopup) => {
             size="small"
             variant="contained"
             onClick={handleClosePopup}
+            className={classes.closeButton}
             color="secondary">
             {'Close'}
           </Button>
           <Button
             size="small"
             variant="contained"
+            className={classes.insertButton}
             onClick={handleInsertExample}>
             {'Insert Example'}
           </Button>

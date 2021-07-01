@@ -1,5 +1,7 @@
 import { makeStyles } from '@material-ui/core/styles';
 import {
+  BLACK_COLOR,
+  BLUE_COLOR,
   GREY_COLOR,
   WHITE_COLOR,
 } from '../../../styles/DefaultStylingProperties';
@@ -15,7 +17,7 @@ const useStyles = makeStyles({
     position: 'fixed',
     border: `1px solid ${GREY_COLOR}`,
     overflow: 'auto',
-    backgroundColor: WHITE_COLOR,
+    backgroundColor: BLACK_COLOR,
     paddingTop: '50px',
   },
   closeChat: {
@@ -23,6 +25,14 @@ const useStyles = makeStyles({
     top: 15,
     right: 15,
     cursor: 'pointer',
+
+    '&:hover svg': {
+      color: BLUE_COLOR,
+    },
+
+    '& svg': {
+      color: WHITE_COLOR,
+    },
   },
   loader: {
     position: 'absolute',

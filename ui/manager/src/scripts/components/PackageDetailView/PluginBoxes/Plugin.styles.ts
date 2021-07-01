@@ -1,14 +1,16 @@
 import { makeStyles } from '@material-ui/core/styles';
 import {
   BLUE_COLOR,
-  WHITE_COLOR,
   GREY_COLOR,
-  LIGHT_GREY_BORDER,
   LIGHT_BLUE_COLOR3,
+  LIGHT_GREY_BORDER,
+  LIGHT_GREY_COLOR,
   MEDIUM_FONT,
   RED_BORDER,
   RED_COLOR,
   SMALL_FONT,
+  WHITE_COLOR,
+  YELLOW_COLOR,
 } from '../../../../styles/DefaultStylingProperties';
 
 const useStyles = makeStyles({
@@ -88,7 +90,7 @@ const useStyles = makeStyles({
   },
   addResourceButton: {
     '&:hover': {
-      color: GREY_COLOR,
+      color: YELLOW_COLOR,
     },
     cursor: 'pointer',
     whiteSpace: 'nowrap',
@@ -193,7 +195,7 @@ const useStyles = makeStyles({
   chatRelation: {
     display: 'flex',
     fontSize: SMALL_FONT,
-    color: GREY_COLOR,
+    color: LIGHT_GREY_COLOR,
   },
 });
 

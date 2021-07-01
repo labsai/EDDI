@@ -1,6 +1,12 @@
 import { makeStyles } from '@material-ui/core/styles';
 import * as React from 'react';
-import { LIGHT_GREY_COLOR2 } from '../../../styles/DefaultStylingProperties';
+import {
+  GREY_COLOR,
+  LIGHT_GREY_COLOR,
+  LIGHT_GREY_COLOR2,
+  WHITE_COLOR,
+} from '../../../styles/DefaultStylingProperties';
+import SearchIcon from '@material-ui/icons/Search';
 import { pageEnum } from '../pages/pageEnum';
 
 const useStyles = makeStyles({
@@ -8,34 +14,36 @@ const useStyles = makeStyles({
     display: 'flex',
   },
   searchBox: {
-    backgroundColor: '#FFFFFF',
-    border: `1px solid ${LIGHT_GREY_COLOR2}`,
+    backgroundColor: 'transparent',
+    border: `1px solid ${WHITE_COLOR}`,
     borderRadius: '4px',
     display: 'flex',
     height: '34px',
     marginTop: '7px',
     paddingLeft: '5px',
     width: '200px',
+    alignItems: 'center',
   },
   searchBoxIcon: {
-    height: '15px',
-    marginLeft: '15px',
-    marginTop: '9px',
-    width: '15px',
+    height: '20px',
+    marginLeft: '5px',
+    color: WHITE_COLOR,
   },
   searchBoxInput: {
     '&:focus': {
       outline: 'none',
     },
-    backgroundColor: '#FFFFFF',
+    backgroundColor: 'transparent',
     border: 'none',
     fontSize: '13px',
     marginLeft: '10px',
     width: '150px',
+    color: WHITE_COLOR,
+    '&::placeholder': {
+      color: LIGHT_GREY_COLOR,
+    },
   },
 });
-
-const SearchIcon = require('../../../public/images/searchIcon.png');
 
 interface IProps {
   page: pageEnum;
@@ -57,7 +65,7 @@ const FilterComponent = (props: IProps) => {
   return (
     <div className={classes.filter}>
       <div className={classes.searchBox}>
-        <img src={SearchIcon} className={classes.searchBoxIcon} />
+        <SearchIcon fontSize="large" className={classes.searchBoxIcon} />
         <input
           type={'text'}
           placeholder={`Find ${getSearchName(props.page)}`}

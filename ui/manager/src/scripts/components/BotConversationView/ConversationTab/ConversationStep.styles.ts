@@ -1,6 +1,7 @@
 import {
   BLUE_COLOR,
   BLUE_COLOR_TRANSPARENT,
+  DARK_GREY_COLOR,
   GREY_BORDER,
   GREY_COLOR3,
   LIGHTER_YELLOW_COLOR,
@@ -29,9 +30,9 @@ export const useStyles = makeStyles({
   input: {
     backgroundColor: WHITE_COLOR,
     borderRadius: '18px',
-    color: WHITE_COLOR,
+    color: DARK_GREY_COLOR,
     display: 'table',
-    padding: '14px 28px',
+    padding: '8px 18px',
     marginLeft: 'auto',
     marginTop: '12px',
     wordWrap: 'break-word',

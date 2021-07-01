@@ -13,9 +13,12 @@ import { readOnlySelector } from '../../selectors/AuthenticationSelectors';
 import { conversationSelector } from '../../selectors/ConversationSelectors';
 import WhiteButton from '../Assets/Buttons/WhiteButton';
 import HomeButtonComponent from '../HomeButton/HomeButtonComponent';
-import { IConversation } from '../utils/AxiosFunctions';
+import {
+  getConversation,
+  IConversation,
+  IConversationData,
+} from '../utils/AxiosFunctions';
 import { CONVERSATION_READY } from '../utils/helpers/ConversationHelper';
-import Parser from '../utils/Parser';
 import useStyles from './BotConversionView.styles';
 import ConversationProperties from './ConversationTab/ConversationProperties';
 import ConversationSteps from './ConversationTab/ConversationSteps';
@@ -36,33 +39,31 @@ enum TabEnum {
 }
 
 const BotConversationView = ({
-  conversation,
-  isLoading,
   readOnly,
   conversationId,
+  conversation: conversationProps,
 }: IPrivateProps) => {
   const [selectedTab, setSelectedTab] = React.useState<TabEnum>(
     TabEnum.conversationSteps,
   );
 
+  const [conversation, setConversation] =
+    React.useState<IConversationData>(null);
+  const [isLoading, setIsLoading] = React.useState<boolean>(false);
+
   const classes = useStyles();
 
   React.useEffect(() => {
-    if (conversation) {
-      fetchConversation();
-    } else {
-      eddiApiActionDispatchers.fetchConversationsAction(
-        1,
-        0,
-        conversationId,
-        null,
-      );
-    }
-  }, [conversation]);
-
-  const fetchConversation = () => {
-    eddiApiActionDispatchers.fetchConversationAction(conversationId);
-  };
+    setIsLoading(true);
+    getConversation(conversationId)
+      .then((res: any) => {
+        setConversation(res);
+        setIsLoading(false);
+      })
+      .catch(() => {
+        setIsLoading(false);
+      });
+  }, [conversationId]);
 
   const endConversation = () => {
     modalActionDispatchers.showConfirmationModal(
@@ -71,6 +72,13 @@ const BotConversationView = ({
       () => eddiApiActionDispatchers.endConversationAction(conversationId),
     );
   };
+
+  const lastModifiedOn =
+    conversation?.conversationSteps?.[
+      conversation?.conversationSteps?.length - 1
+    ]?.timestamp;
+  const createdOn =
+    conversation?.conversationSteps?.[0]?.conversationStep?.[0].timestamp;
 
   return (
     <div className={classes.content}>
@@ -87,16 +95,16 @@ const BotConversationView = ({
               <div
                 className={classes.botName}
                 onClick={() =>
-                  historyPush(
-                    `/botview/${Parser.getId(conversation.botResource)}`,
-                    [`version=${Parser.getVersion(conversation.botResource)}`],
-                  )
+                  historyPush(`/botview/${conversation.botId}`, [
+                    `version=${conversation.botVersion}`,
+                  ])
                 }>
-                {conversation.botName}
+                {conversationProps?.botName || conversation.botId}
               </div>
-              <div className={classes.botVersion}>{`V${Parser.getVersion(
-                conversation.botResource,
-              )}`}</div>
+              <div
+                className={
+                  classes.botVersion
+                }>{`V${conversation.botVersion}`}</div>
               <WhiteButton
                 text={'End Conversation'}
                 classes={{ button: classes.endConversationButton }}
@@ -123,20 +131,20 @@ const BotConversationView = ({
               <div className={classes.descriptor}>
                 <div className={classes.title}>{'Last message'}</div>
                 <div className={classes.descriptorContent}>
-                  {moment(conversation.lastModifiedOn).fromNow()}
+                  {!!lastModifiedOn && moment(lastModifiedOn).fromNow()}
                 </div>
               </div>
               <div className={classes.descriptor}>
                 <div className={classes.title}>{'Created on'}</div>
                 <div className={classes.descriptorContent}>
-                  {moment(conversation.createdOn).format('DD.MM.YYYY')}
+                  {!!createdOn && moment(createdOn).format('DD.MM.YYYY')}
                 </div>
               </div>
               <div className={classes.descriptor}>
                 <div className={classes.title}>{'User id'}</div>
-                {!!conversation.data && (
+                {!!conversation && (
                   <div className={classes.descriptorContent}>
-                    {conversation.data.userId}
+                    {conversation.userId}
                   </div>
                 )}
               </div>
@@ -159,31 +167,29 @@ const BotConversationView = ({
               {'Raw JSON'}
             </div>
           </div>
-          {!conversation.data && (
+          {!conversation && (
             <div className={classes.loadingWrapper}>
               <ClipLoader color={BLUE_COLOR} />
             </div>
           )}
-          {!!conversation.data && (
+          {!!conversation && (
             <div>
               {selectedTab === TabEnum.conversationSteps && (
                 <div>
                   <ConversationProperties
-                    conversationProperties={
-                      conversation.data.conversationProperties
-                    }
+                    conversationProperties={conversation.conversationProperties}
                   />
                   <ConversationSteps
                     isLoading={isLoading}
                     conversationId={conversationId}
-                    conversationSteps={conversation.data.conversationSteps}
-                    conversationOutputs={conversation.data.conversationOutputs}
+                    conversationSteps={conversation.conversationSteps}
+                    conversationOutputs={conversation.conversationOutputs}
                   />
                 </div>
               )}
               {selectedTab === TabEnum.json && (
                 <ReactJson
-                  src={conversation.data}
+                  src={conversation}
                   theme={'monokai'}
                   collapsed={2}
                   displayDataTypes={false}

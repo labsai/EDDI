@@ -1,7 +1,7 @@
 import { makeStyles } from '@material-ui/core/styles';
 import {
-  GREY_COLOR,
   LIGHT_BLUE_COLOR3,
+  WHITE_COLOR,
 } from '../../../../styles/DefaultStylingProperties';
 
 const useStyles = makeStyles({
@@ -23,7 +23,7 @@ const useStyles = makeStyles({
     height: '4px',
     marginRight: '2px',
     width: '4px',
-    backgroundColor: GREY_COLOR,
+    backgroundColor: WHITE_COLOR,
 
     '&:nth-child(1)': {
       animationDelay: '200ms',

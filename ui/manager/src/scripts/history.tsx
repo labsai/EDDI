@@ -4,7 +4,11 @@ import * as _ from 'lodash';
 
 export const history = createBrowserHistory();
 
-export function historyPush(path: string, queryParams?: string[]) {
+export function historyPush(
+  path: string,
+  queryParams?: string[],
+  blank?: boolean,
+) {
   const apiUrlQuery = getApiUrlQuery();
   let queryParameterList = [];
   if (!_.isEmpty(apiUrlQuery)) {
@@ -16,5 +20,10 @@ export function historyPush(path: string, queryParams?: string[]) {
   const queryParameterString = `${
     _.isEmpty(queryParameterList) ? '' : `?${queryParameterList.join('&')}`
   }`;
-  history.push(path + queryParameterString);
+
+  if (blank) {
+    window.open(path + queryParameterString, '_blank');
+  } else {
+    history.push(path + queryParameterString);
+  }
 }

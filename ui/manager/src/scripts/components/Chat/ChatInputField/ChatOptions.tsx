@@ -11,7 +11,11 @@ import LaunchIcon from '@material-ui/icons/Launch';
 import MoreVertIcon from '@material-ui/icons/MoreVert';
 import * as React from 'react';
 import { useSelector } from 'react-redux';
-import { GREEN_COLOR } from '../../../../styles/DefaultStylingProperties';
+import {
+  BLUE_COLOR,
+  GREEN_COLOR,
+  WHITE_COLOR,
+} from '../../../../styles/DefaultStylingProperties';
 import {
   getChatAnimation,
   getChatContext,
@@ -41,6 +45,14 @@ const useStyles = makeStyles({
 
     '& .MuiButtonBase-root': {
       padding: '3px',
+    },
+
+    '&:hover svg': {
+      color: BLUE_COLOR,
+    },
+
+    '& svg': {
+      color: WHITE_COLOR,
     },
   },
   contextIndicator: {

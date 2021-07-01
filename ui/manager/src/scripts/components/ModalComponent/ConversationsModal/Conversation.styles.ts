@@ -8,6 +8,8 @@ import {
   MEDIUM_FONT,
   MEDIUM_FONT3,
   SMALL_FONT,
+  YELLOW_COLOR,
+  DARK_GREY_COLOR,
 } from '../../../../styles/DefaultStylingProperties';
 
 const useStyles = makeStyles({
@@ -23,7 +25,7 @@ const useStyles = makeStyles({
     width: '100%',
   },
   conversationName: {
-    color: WHITE_COLOR,
+    color: DARK_GREY_COLOR,
     fontSize: MEDIUM_FONT3,
     display: 'block',
     textOverflow: 'ellipsis',
@@ -31,9 +33,9 @@ const useStyles = makeStyles({
     overflow: 'hidden',
   },
   conversationVersion: {
-    backgroundColor: LIGHT_GREY_COLOR2,
+    backgroundColor: YELLOW_COLOR,
     borderRadius: '100px',
-    color: WHITE_COLOR,
+    color: DARK_GREY_COLOR,
     fontSize: MEDIUM_FONT,
     height: '21px',
     marginLeft: '15px',
@@ -48,7 +50,7 @@ const useStyles = makeStyles({
     maxWidth: '300px',
   },
   environment: {
-    color: WHITE_COLOR,
+    color: DARK_GREY_COLOR,
     fontSize: SMALL_FONT,
     height: '20px',
     marginTop: '5px',
@@ -58,7 +60,7 @@ const useStyles = makeStyles({
     marginRight: '15px',
   },
   conversationState: {
-    color: WHITE_COLOR,
+    color: DARK_GREY_COLOR,
     fontSize: SMALL_FONT,
     height: '20px',
     marginTop: '5px',
@@ -72,7 +74,7 @@ const useStyles = makeStyles({
     marginLeft: 'auto',
   },
   conversationStepSize: {
-    color: WHITE_COLOR,
+    color: DARK_GREY_COLOR,
     fontSize: MEDIUM_FONT,
     borderRadius: '100px',
     height: '21px',
@@ -85,7 +87,7 @@ const useStyles = makeStyles({
     marginTop: '3px',
   },
   createdOn: {
-    color: WHITE_COLOR,
+    color: DARK_GREY_COLOR,
     textAlign: 'right',
     fontSize: SMALL_FONT,
     height: '20px',
@@ -93,7 +95,7 @@ const useStyles = makeStyles({
     whiteSpace: 'nowrap',
   },
   lastModifiedOn: {
-    color: WHITE_COLOR,
+    color: DARK_GREY_COLOR,
     textAlign: 'left',
     fontSize: SMALL_FONT,
     height: '20px',

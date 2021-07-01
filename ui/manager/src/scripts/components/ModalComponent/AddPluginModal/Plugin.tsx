@@ -92,6 +92,7 @@ const Plugin = (props: IPrivateProps) => {
                     currentVersion={props.plugin.currentVersion}
                     selectedVersion={props.plugin.version}
                     selectVersion={selectVersion}
+                    classes={{ input: classes.selectInput }}
                   />
                 </div>
                 <div className={classes.centerFlex} />

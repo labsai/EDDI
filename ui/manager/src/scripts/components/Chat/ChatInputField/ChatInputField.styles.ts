@@ -1,7 +1,9 @@
 import { makeStyles } from '@material-ui/core/styles';
 import {
+  BLUE_COLOR,
   GREEN_COLOR,
   LIGHT_BLUE_COLOR2,
+  WHITE_COLOR,
 } from '../../../../styles/DefaultStylingProperties';
 
 const useStyles = makeStyles({
@@ -19,7 +21,11 @@ const useStyles = makeStyles({
       zIndex: 1,
     },
     '& .MuiOutlinedInput-notchedOutline': {
-      backgroundColor: LIGHT_BLUE_COLOR2,
+      backgroundColor: WHITE_COLOR,
+      border: 'none',
+    },
+    '& .MuiOutlinedInput-root.Mui-focused .MuiOutlinedInput-notchedOutline': {
+      border: 'none',
     },
   },
   row: {

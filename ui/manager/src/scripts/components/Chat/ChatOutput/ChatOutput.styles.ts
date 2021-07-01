@@ -3,6 +3,8 @@ import {
   GREY_COLOR,
   LIGHT_BLUE_COLOR2,
   LIGHT_BLUE_COLOR3,
+  WHITE_COLOR,
+  YELLOW_COLOR,
 } from '../../../../styles/DefaultStylingProperties';
 
 const useStyles = makeStyles({
@@ -11,7 +13,7 @@ const useStyles = makeStyles({
     margin: '0 0 10px',
   },
   outputText: {
-    color: GREY_COLOR,
+    color: WHITE_COLOR,
     padding: '5px 10px',
     margin: 0,
     backgroundColor: LIGHT_BLUE_COLOR3,
@@ -25,7 +27,7 @@ const useStyles = makeStyles({
     marginTop: '10px',
   },
   inputText: {
-    backgroundColor: LIGHT_BLUE_COLOR2,
+    backgroundColor: YELLOW_COLOR,
   },
 });
 

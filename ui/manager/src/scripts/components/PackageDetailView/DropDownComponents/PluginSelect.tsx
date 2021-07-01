@@ -8,6 +8,7 @@ import { compose, pure, setDisplayName } from 'recompose';
 import {
   BLUE_COLOR_TRANSPARENT,
   LIGHT_BLUE_COLOR,
+  WHITE_COLOR,
 } from '../../../../styles/DefaultStylingProperties';
 import {
   IDefaultPluginTypes,
@@ -20,12 +21,18 @@ const useStyles = makeStyles({
     maxWidth: '40%',
     minWidth: '200px',
 
+    '& .MuiInputBase-root': {
+      color: WHITE_COLOR,
+    },
     '& .MuiOutlinedInput-root': {
       fontSize: '1.4rem',
       lineHeight: '2rem',
     },
     '& .MuiSelect-iconOutlined': {
       top: 'calc(50% - 8px)',
+    },
+    '& .MuiOutlinedInput-notchedOutline': {
+      borderColor: WHITE_COLOR,
     },
     '& .MuiOutlinedInput-root.Mui-focused .MuiOutlinedInput-notchedOutline': {
       borderColor: LIGHT_BLUE_COLOR,

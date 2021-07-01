@@ -1,9 +1,15 @@
-import { Typography, Link } from '@material-ui/core';
+import { Link, Typography } from '@material-ui/core';
 import Popover from '@material-ui/core/Popover';
 import { makeStyles } from '@material-ui/core/styles';
+import OpenInNewIcon from '@material-ui/icons/OpenInNew';
 import * as React from 'react';
 import { useSelector } from 'react-redux';
-import OpenInNewIcon from '@material-ui/icons/OpenInNew';
+import { historyPush } from '../../../../scripts/history';
+import {
+  DARK_GREY_COLOR,
+  GREY_COLOR,
+  SMALL_FONT,
+} from '../../../../styles/DefaultStylingProperties';
 import {
   currentChatIdSelector,
   getApiUrl,
@@ -11,10 +17,6 @@ import {
   getBotId,
   getBotVersion,
 } from '../../../selectors/ChatSelectors';
-import {
-  WHITE_COLOR,
-  SMALL_FONT,
-} from '../../../../styles/DefaultStylingProperties';
 import { getConversations } from '../../utils/AxiosFunctions';
 
 const useStyles = makeStyles({
@@ -25,7 +27,7 @@ const useStyles = makeStyles({
     flexDirection: 'column',
   },
   chatItem: {
-    color: WHITE_COLOR,
+    color: GREY_COLOR,
     fontSize: SMALL_FONT,
     textAlign: 'left',
     display: 'flex',
@@ -33,6 +35,7 @@ const useStyles = makeStyles({
 
     '& strong': {
       paddingRight: '3px',
+      color: DARK_GREY_COLOR,
     },
   },
   icon: {
@@ -52,13 +55,17 @@ const InfoPopup = ({ open, popupEl, handleClose, botResource }: IInfoPopup) => {
   const botId = useSelector(getBotId);
   const botVersion = useSelector(getBotVersion);
   const botEnvironment = useSelector(getBotEnvironment);
-  const apiUrl = useSelector(getApiUrl);
   const [prevConversation, setPreviousConversation] =
     React.useState<string>(null);
   const classes = useStyles();
 
-  const getLink = (conversationId: string) =>
-    `${apiUrl}/bots/unrestricted/${botId}/${conversationId}?returnCurrentStepOnly=false&returnDetailed=true`;
+  const handleLinkClick = (conversationId: string) => {
+    historyPush(
+      `${location.origin}/conversationview/${conversationId}`,
+      [],
+      true,
+    );
+  };
 
   // fetching previous conversation id from api
   React.useEffect(() => {
@@ -99,9 +106,9 @@ const InfoPopup = ({ open, popupEl, handleClose, botResource }: IInfoPopup) => {
         <div className={classes.chatInfo}>
           <Typography className={classes.chatItem}>
             <Link
-              href={getLink(conversationId)}
               target="_blank"
               rel="noopener"
+              onClick={() => handleLinkClick(conversationId)}
               color="inherit">
               <strong>{`Current conversation: `}</strong>
               {conversationId}
@@ -111,8 +118,8 @@ const InfoPopup = ({ open, popupEl, handleClose, botResource }: IInfoPopup) => {
           {prevConversation && (
             <Typography className={classes.chatItem}>
               <Link
-                href={getLink(prevConversation)}
                 target="_blank"
+                onClick={() => handleLinkClick(prevConversation)}
                 rel="noopener"
                 color="inherit">
                 <strong>{`Previous conversation: `}</strong>
