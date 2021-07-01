@@ -1,6 +1,6 @@
 import { makeStyles } from '@material-ui/core/styles';
 import {
-  DARK_GREY_COLOR,
+  BLACK_COLOR,
   GREY_COLOR,
   WHITE_COLOR,
 } from '../../../styles/DefaultStylingProperties';
@@ -44,7 +44,7 @@ const useStyles = makeStyles({
     margin: '60px auto auto auto',
   },
   modalHeader: {
-    backgroundColor: DARK_GREY_COLOR,
+    backgroundColor: BLACK_COLOR,
     borderTopLeftRadius: '4px',
     borderTopRightRadius: '4px',
     width: '100%',

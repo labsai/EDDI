@@ -1,6 +1,7 @@
 import { makeStyles } from '@material-ui/core/styles';
 import {
   BLUE_COLOR,
+  GREY_BORDER,
   GREY_COLOR,
   LIGHT_BLUE_COLOR3,
   LIGHT_GREY_BORDER,
@@ -9,6 +10,7 @@ import {
   RED_BORDER,
   RED_COLOR,
   SMALL_FONT,
+  SMALL_FONT2,
   WHITE_COLOR,
   YELLOW_COLOR,
 } from '../../../../styles/DefaultStylingProperties';
@@ -196,6 +198,19 @@ const useStyles = makeStyles({
     fontSize: SMALL_FONT,
     color: LIGHT_GREY_COLOR,
   },
+  rjv: {
+    border: GREY_BORDER,
+    borderRadius: '5px',
+    fontSize: SMALL_FONT2,
+  },
 });
+
+export const rjvStyles = {
+  rjv: {
+    border: GREY_BORDER,
+    borderRadius: '5px',
+    fontSize: SMALL_FONT2,
+  },
+};
 
 export default useStyles;

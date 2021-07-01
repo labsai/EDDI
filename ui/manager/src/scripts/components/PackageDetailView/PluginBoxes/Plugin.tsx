@@ -1,6 +1,7 @@
 import clsx from 'clsx';
 import * as _ from 'lodash';
 import * as React from 'react';
+import ReactJson from 'react-json-view';
 import { connect, useSelector } from 'react-redux';
 import { compose, pure, setDisplayName } from 'recompose';
 import eddiApiActionDispatchers from '../../../actions/EddiApiActionDispatchers';
@@ -20,7 +21,7 @@ import { REGULAR_DICTIONARY } from '../../utils/EddiTypes';
 import PluginHelper from '../../utils/helpers/PluginHelper';
 import Parser from '../../utils/Parser';
 import { IOptions } from '../PackageView';
-import useStyles from './Plugin.styles';
+import useStyles, { rjvStyles } from './Plugin.styles';
 
 interface IPublicProps {
   pluginType: IOptions;
@@ -243,16 +244,14 @@ const Plugin = ({
       )}
       {!_.isEmpty(filteredConversationSteps) && isChatOpened && (
         <div className={classes.chatRelations}>
-          {filteredConversationSteps.map((c, i) => {
-            return (
-              <div className={classes.chatRelation} key={c.key + i}>
-                {getRelationLabel(c.key)}
-                {typeof c.value === 'string'
-                  ? JSON.stringify(c.value, null, '\t')
-                  : JSON.stringify(c.value, null, 4)}
-              </div>
-            );
-          })}
+          <ReactJson
+            style={rjvStyles.rjv}
+            src={filteredConversationSteps}
+            theme={'monokai'}
+            collapsed={4}
+            displayDataTypes={false}
+            enableClipboard={false}
+          />
         </div>
       )}
     </div>
