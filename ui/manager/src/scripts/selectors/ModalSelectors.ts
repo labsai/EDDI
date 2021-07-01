@@ -13,3 +13,7 @@ export const modalSelector: (state: IAppState) => IModalState = createSelector(
     };
   },
 );
+
+export const isModalOpenSelector = (state: IAppState) => {
+  return state.modalState.isModalOpen;
+};

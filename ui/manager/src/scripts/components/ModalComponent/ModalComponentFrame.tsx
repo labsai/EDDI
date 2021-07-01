@@ -44,7 +44,7 @@ const useStyles = makeStyles({
     overflow: 'visible',
   },
   overlay: {
-    backgroundColor: 'rgba(159, 170, 181, 0.90)',
+    backgroundColor: 'rgba(98, 104, 111, 0.90)',
     overflow: 'auto',
     paddingBottom: '300px',
     position: 'fixed',

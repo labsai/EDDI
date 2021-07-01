@@ -1,9 +1,11 @@
 import CloseIcon from '@material-ui/icons/Close';
 import FindInPageIcon from '@material-ui/icons/FindInPage';
+import clsx from 'clsx';
 import * as _ from 'lodash';
 import * as React from 'react';
 import { useDispatch, useSelector } from 'react-redux';
 import ClipLoader from 'react-spinners/ClipLoader';
+import { isModalOpenSelector } from '../../../scripts/selectors/ModalSelectors';
 import { BLUE_COLOR } from '../../../styles/DefaultStylingProperties';
 import {
   closeChatAction,
@@ -17,8 +19,10 @@ import {
   chatDataSelector,
   currentChatIdSelector,
   getChatContext,
+  isChatOpenedSelector,
 } from '../../selectors/ChatSelectors';
 import { BOT, BOT_PATH } from '../utils/EddiTypes';
+import isElementVisible from '../utils/helpers/isElementVisible';
 import useStyles from './Chat.styles';
 import ChatInputField from './ChatInputField/ChatInputField';
 import ChatOptions from './ChatInputField/ChatOptions';
@@ -29,9 +33,12 @@ import Delayed from './Delay/Delay';
 
 const Chat = () => {
   const context = useSelector(getChatContext);
+  const isModalOpen = useSelector(isModalOpenSelector);
   const conversationId: string = useSelector(currentChatIdSelector);
+  const { isOpened: isChatOpened } = useSelector(isChatOpenedSelector);
   const chatRef = React.useRef<HTMLDivElement>(null);
   const classes = useStyles();
+  const [chatVisible, setChatVisible] = React.useState(false);
 
   // need to get bot id
   const isBotPage = location.pathname.includes('botview');
@@ -55,14 +62,32 @@ const Chat = () => {
     dispatch(closeChatAction());
   };
 
+  React.useLayoutEffect(() => {
+    setTimeout(() => {
+      const isChatVisible = isElementVisible('chat-options');
+      if (chatVisible !== isChatVisible) {
+        setChatVisible(isChatVisible);
+      }
+    }, 500);
+  });
+
   // change animation delay (on/off)
   const handleSetChatAnimation = (state: boolean) => {
     dispatch(setChatAnimation(state));
   };
 
+  // close chat if any modal is opened
   React.useEffect(() => {
-    startNewConversation();
-  }, [botId, context]);
+    if (isModalOpen) {
+      handleCloseChat();
+    }
+  }, [isModalOpen]);
+
+  React.useEffect(() => {
+    if (chatVisible) {
+      startNewConversation();
+    }
+  }, [botId, context, chatVisible]);
 
   // create new conversation
   const startNewConversation = () => {
@@ -92,7 +117,12 @@ const Chat = () => {
   };
 
   return (
-    <div className={classes.chatContainer} ref={chatRef}>
+    <div
+      className={clsx(
+        classes.chatContainer,
+        !isChatOpened ? classes.hiddenChat : null,
+      )}
+      ref={chatRef}>
       <div className={classes.closeChat} onClick={handleCloseChat}>
         <CloseIcon fontSize="large" />
       </div>

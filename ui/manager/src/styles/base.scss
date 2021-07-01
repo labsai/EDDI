@@ -32,10 +32,12 @@ img {
 
 .ui.container {
   max-width: 100%;
+  transition: all 0.5s ease;
 }
 .ui.container.with-chat {
   width: 70vw;
   margin-left: 0;
+  transition: all 0.5s ease;
 }
 
 #root {

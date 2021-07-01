@@ -12,6 +12,7 @@ import {
   startChatSuccessAction,
 } from '../actions/ChatActions';
 import {
+  CLOSE_SIDE_CHAT,
   REPLY_IN_CHAT,
   RESTART_CHAT,
   START_CHAT,
@@ -65,9 +66,13 @@ export function* replyInChat(action: IReplyInChatAction): Iterator<{}> {
     yield put(replyInChatFailedAction(err));
   }
 }
+export function* closeChat(): Iterator<{}> {
+  yield put(clearChatAction());
+}
 
 export function* watchChat(): Iterator<{}> {
   yield takeEvery(START_CHAT, startChat);
   yield takeEvery(RESTART_CHAT, restartChat);
   yield takeEvery(REPLY_IN_CHAT, replyInChat);
+  yield takeEvery(CLOSE_SIDE_CHAT, closeChat);
 }

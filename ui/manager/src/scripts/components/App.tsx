@@ -159,7 +159,7 @@ const App = ({
           </div>
         )}
       </div>
-      {isChatOpened && <Chat />}
+      <Chat />
       {isLoading && <Loader />}
     </>
   );

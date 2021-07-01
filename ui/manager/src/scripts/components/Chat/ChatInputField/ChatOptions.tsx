@@ -128,7 +128,7 @@ const ChatOptions = ({
 
   return (
     <div className={classes.absoluteContainer}>
-      <div className={classes.optionButton}>
+      <div className={classes.optionButton} id="chat-options">
         <IconButton
           aria-label="more"
           aria-controls="long-menu"

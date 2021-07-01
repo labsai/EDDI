@@ -19,6 +19,11 @@ const useStyles = makeStyles({
     overflow: 'auto',
     backgroundColor: BLACK_COLOR,
     paddingTop: '50px',
+    transition: 'right 0.5s ease',
+  },
+  hiddenChat: {
+    right: '-30vw',
+    transition: 'right 0.5s ease',
   },
   closeChat: {
     position: 'absolute',
