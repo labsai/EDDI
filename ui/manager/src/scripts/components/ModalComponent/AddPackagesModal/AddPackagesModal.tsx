@@ -134,7 +134,7 @@ const AddPackagesModal = (props: IPrivateProps) => {
         </div>
         {props.isLoading && (
           <div className={classes.loadingWrapper}>
-            <ClimbingBoxLoader loading />
+            <ClimbingBoxLoader loading color="white" />
           </div>
         )}
         {!props.allPackagesLoaded && !props.isLoading && !loading && (

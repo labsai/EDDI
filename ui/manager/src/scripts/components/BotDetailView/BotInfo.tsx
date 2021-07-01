@@ -45,7 +45,7 @@ const BotInfo = ({
       <HomeButtonComponent />
       {isLoading ? (
         <div className={classes.loadingWrapper}>
-          <ClimbingBoxLoader loading />
+          <ClimbingBoxLoader loading color="white" />
         </div>
       ) : (
         <div>

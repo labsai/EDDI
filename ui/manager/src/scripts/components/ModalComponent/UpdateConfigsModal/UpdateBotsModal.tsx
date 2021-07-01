@@ -158,7 +158,7 @@ const UpdateBotsModal = ({ isLoading, packageResources }: IPrivateProps) => {
         )}
         {isLoading && (
           <div className={classes.loadingWrapper}>
-            <ClimbingBoxLoader loading />
+            <ClimbingBoxLoader loading color="white" />
           </div>
         )}
         {!isLoading && _.isEmpty(bots) && (

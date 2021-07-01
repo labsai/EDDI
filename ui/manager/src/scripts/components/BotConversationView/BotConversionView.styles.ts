@@ -56,9 +56,11 @@ const useStyles = makeStyles({
     marginTop: '40px',
     overflow: 'hidden',
     width: '100%',
+    justifyContent: 'space-between',
   },
   descriptor: {
-    marginRight: '65px',
+    marginRight: '10px',
+    flex: 1,
   },
   topHeader: {
     display: 'flex',

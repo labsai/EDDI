@@ -46,7 +46,7 @@ const PackageInfo = ({
       <HomeButtonComponent />
       {isLoading && (
         <div className={classes.loadingWrapper}>
-          <ClimbingBoxLoader loading />
+          <ClimbingBoxLoader loading color="white" />
         </div>
       )}
       {!isLoading && (

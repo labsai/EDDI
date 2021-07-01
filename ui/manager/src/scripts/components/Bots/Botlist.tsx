@@ -90,7 +90,7 @@ const BotList = ({
     <div>
       {isLoading && _.isEmpty(bots) && (
         <div className={classes.loadingWrapper}>
-          <ClimbingBoxLoader loading />
+          <ClimbingBoxLoader loading color="white" />
         </div>
       )}
       <div>

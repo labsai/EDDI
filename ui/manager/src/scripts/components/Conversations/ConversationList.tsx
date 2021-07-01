@@ -107,7 +107,7 @@ const ConversationList = ({
       </div>
       {isLoading && _.isEmpty(conversations) && (
         <div className={classes.loadingWrapper}>
-          <ClimbingBoxLoader loading />
+          <ClimbingBoxLoader loading color="white" />
         </div>
       )}
       {!!error && !isLoading && <p>{'Error: Could not load conversations'}</p>}

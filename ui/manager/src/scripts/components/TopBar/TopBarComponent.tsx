@@ -43,9 +43,9 @@ const useStyles = makeStyles({
   },
   topBarComponent: {
     display: 'flex',
-    height: '50px',
     marginBottom: '15px',
     width: '100%',
+    flexWrap: 'wrap',
   },
   readOnly: {
     border: RED_BORDER,

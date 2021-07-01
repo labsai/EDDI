@@ -6,7 +6,7 @@ const Loader = () => {
   const classes = useStyles();
   return (
     <div className={classes.loaderContainer}>
-      <ClimbingBoxLoader loading />
+      <ClimbingBoxLoader loading color="white" />
     </div>
   );
 };

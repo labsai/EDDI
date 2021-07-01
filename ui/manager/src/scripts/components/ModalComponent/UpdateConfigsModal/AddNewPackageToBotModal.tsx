@@ -106,7 +106,7 @@ const AddNewPackageToBotModal = (props: IPrivateProps) => {
         </div>
         {props.isLoading && (
           <div className={classes.loadingWrapper}>
-            <ClimbingBoxLoader loading />
+            <ClimbingBoxLoader loading color="white" />
           </div>
         )}
         {!props.allBotsLoaded && !props.isLoading && (

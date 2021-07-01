@@ -81,7 +81,7 @@ const PackageList = ({
     <div>
       {isLoading && _.isEmpty(packages) && (
         <div className={classes.loadingWrapper}>
-          <ClimbingBoxLoader loading />
+          <ClimbingBoxLoader loading color="white" />
         </div>
       )}
       {!!error && !isLoading && <p>{'Error: Could not load packages'}</p>}

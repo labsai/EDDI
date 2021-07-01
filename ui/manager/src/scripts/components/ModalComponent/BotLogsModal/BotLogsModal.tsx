@@ -53,7 +53,7 @@ const BotLogsModal = ({ bot }: IPublicProps) => {
       <div className={classes.logsContainer}>
         {isLoadingBotLogs && (
           <div className={classes.loadingWrapper}>
-            <ClimbingBoxLoader loading />
+            <ClimbingBoxLoader loading color="white" />
           </div>
         )}
         {!!error && <p>{'Error: Could not load bot logs'}</p>}

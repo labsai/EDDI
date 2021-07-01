@@ -34,9 +34,16 @@ img {
   max-width: 100%;
   transition: all 0.5s ease;
 }
+.inner-container {
+  flex: 1;
+  max-width: 100%;
+}
 .ui.container.with-chat {
+  justify-content: stretch;
+  display: flex;
   width: 70vw;
   margin-left: 0;
+  overflow: auto;
   transition: all 0.5s ease;
 }
 

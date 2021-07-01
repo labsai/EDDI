@@ -109,7 +109,7 @@ const UpdatePackagesModal = ({ pluginResource }: IPrivateProps) => {
         )}
         {!packages && (
           <div className={classes.loadingWrapper}>
-            <ClimbingBoxLoader loading />
+            <ClimbingBoxLoader loading color="white" />
           </div>
         )}
         {!!packages && _.isEmpty(packages) && (

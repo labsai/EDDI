@@ -27,8 +27,9 @@ const useStyles = makeStyles({
     backgroundColor: DARK_GREY_COLOR,
     borderRadius: '4px 4px 0 0',
     display: 'flex',
-    height: '65px',
+    minHeight: '65px',
     width: '100%',
+    flexWrap: 'wrap',
   },
   botHeaderCenter: {
     flex: 1,
