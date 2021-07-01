@@ -42,3 +42,8 @@ img {
   display: flex;
   flex-direction: row;
 }
+
+textarea,
+input {
+  outline: none;
+}

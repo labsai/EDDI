@@ -18,6 +18,10 @@ const useStyles = makeStyles({
   editorUI: {
     width: '100%',
     height: '100%',
+
+    '& *': {
+      transition: 'none',
+    },
   },
   editorButtons: {
     display: 'flex',

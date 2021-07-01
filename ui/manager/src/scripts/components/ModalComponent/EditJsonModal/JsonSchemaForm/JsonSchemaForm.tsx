@@ -7,24 +7,76 @@ import { connect } from 'react-redux';
 import { compose, pure, setDisplayName } from 'recompose';
 import { schemaSelector } from '../../../../selectors/SystemSelectors';
 import Button from '../../../../components/Assets/Buttons/Button';
+import {
+  BLUE_COLOR,
+  GREEN_COLOR,
+  GREY_COLOR,
+  RED_COLOR,
+  WHITE_COLOR,
+} from '../../../../../styles/DefaultStylingProperties';
 
 const useStyles = makeStyles({
   form: {
     margin: '20px',
+    color: WHITE_COLOR,
+
+    '& legend': {
+      color: WHITE_COLOR,
+    },
+
+    '& input': {
+      backgroundColor: GREY_COLOR,
+      color: WHITE_COLOR,
+    },
+
+    '& .btn-danger': {
+      backgroundColor: RED_COLOR,
+      color: WHITE_COLOR,
+      border: 'none',
+      transition: 'border 0s ease, padding 0s ease',
+      padding: '6px 6px',
+
+      '&:hover': {
+        backgroundColor: 'transparent',
+        color: RED_COLOR,
+        border: `2px solid ${RED_COLOR}!important`,
+        padding: '4px 4px!important',
+        transition: 'border 0s ease, padding 0s ease',
+      },
+    },
+    '& .btn-info': {
+      backgroundColor: BLUE_COLOR,
+      color: WHITE_COLOR,
+      border: 'none',
+      transition: 'border 0s ease, padding 0s ease',
+
+      '&:hover': {
+        backgroundColor: 'transparent',
+        color: BLUE_COLOR,
+        border: `2px solid ${BLUE_COLOR}!important`,
+        padding: '4px 11px',
+        transition: 'border 0s ease, padding 0s ease',
+      },
+    },
   },
   validateButton: {
-    backgroundColor: '#4BCA81',
-    color: '#fff',
-    border: 'none',
+    backgroundColor: GREEN_COLOR,
     textTransform: 'none',
     padding: '6px 12px',
     marginBottom: '10px',
+    color: WHITE_COLOR,
+    border: 'none',
+    transition: 'border 0s ease, padding 0s ease',
 
     '& .MuiButton-label': {
       fontSize: '1rem',
     },
     '&:hover': {
-      backgroundColor: '#4BCA81',
+      backgroundColor: 'transparent',
+      color: GREEN_COLOR,
+      border: `2px solid ${GREEN_COLOR}!important`,
+      padding: '4px 11px',
+      transition: 'border 0s ease, padding 0s ease',
     },
   },
 });

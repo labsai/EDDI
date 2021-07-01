@@ -53,7 +53,6 @@ const useStyles = makeStyles({
     cursor: 'pointer',
   },
   pluginBoxWithExtensions: {
-    backgroundColor: LIGHT_BLUE_COLOR3,
     border: LIGHT_GREY_BORDER,
     borderRadius: '4px',
     outline: 'none',

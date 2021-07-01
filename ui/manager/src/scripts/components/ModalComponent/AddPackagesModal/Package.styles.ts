@@ -7,6 +7,7 @@ import {
   LIGHT_GREY_COLOR,
   MEDIUM_FONT,
   MEDIUM_FONT2,
+  MEDIUM_FONT3,
   SMALL_FONT2,
   WHITE_COLOR,
   YELLOW_COLOR,
@@ -14,8 +15,8 @@ import {
 
 const useStyles = makeStyles({
   packageName: {
-    color: GREY_COLOR,
-    fontSize: LARGE_FONT,
+    color: WHITE_COLOR,
+    fontSize: MEDIUM_FONT3,
     marginLeft: '18px',
     marginRight: '10px',
     marginTop: '6px',
@@ -27,7 +28,7 @@ const useStyles = makeStyles({
     flex: 1,
   },
   modifiedDate: {
-    color: GREY_COLOR,
+    color: LIGHT_GREY_COLOR,
     fontSize: SMALL_FONT2,
     marginTop: '2px',
   },
@@ -44,7 +45,7 @@ const useStyles = makeStyles({
     width: '36px',
     minHeight: '36px',
     minWidth: '36px',
-    backgroundColor: LIGHT_GREY_COLOR,
+    backgroundColor: GREY_COLOR,
     border: '0px',
     borderRadius: '4px',
     color: '#FFFFFF',
@@ -64,6 +65,7 @@ const useStyles = makeStyles({
     maxWidth: '600px',
   },
   truncate: {
+    color: LIGHT_GREY_COLOR,
     overflow: 'hidden',
     textOverflow: 'ellipsis',
     whiteSpace: 'nowrap',
@@ -95,9 +97,6 @@ const useStyles = makeStyles({
     padding: '2px 10px',
     textAlign: 'center',
     width: '40px',
-  },
-  versionInput: {
-    color: DARK_GREY_COLOR,
   },
   loading: {
     marginLeft: '50px',

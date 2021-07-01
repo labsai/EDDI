@@ -3,6 +3,7 @@ import * as React from 'react';
 import { compose, pure, setDisplayName } from 'recompose';
 import { BLUE_COLOR } from '../../../../styles/DefaultStylingProperties';
 import ModalActionDispatchers from '../../../actions/ModalActionDispatchers';
+import BlueButton from '../../Assets/Buttons/BlueButton';
 import Parser from '../../utils/Parser';
 import useStyles from '../ModalComponent.styles';
 import '../ModalComponent.styles.scss';
@@ -19,17 +20,6 @@ const CreateNewConfigModal = (props: IProps) => {
   const [name, setName] = React.useState(props.name || '');
   const [description, setDescription] = React.useState(props.description || '');
   const classes = useStyles();
-
-  const getButtonStyle = () => {
-    if (!name) {
-      return { backgroundColor: '#c4c9d2' };
-    } else {
-      return {
-        backgroundColor: BLUE_COLOR,
-        cursor: 'pointer',
-      };
-    }
-  };
 
   const nextButton = () => {
     ModalActionDispatchers.showCreateNewConfig2Modal(
@@ -50,18 +40,19 @@ const CreateNewConfigModal = (props: IProps) => {
             {`Create new ${typeName}`}
           </h2>
           <div className={classes.modalTopHeaderCenter} />
-          <button
+          <BlueButton
             disabled={!name}
             onClick={() => {
               nextButton();
             }}
-            style={getButtonStyle()}
-            className={clsx(
-              classes.createNewBotButton,
-              classes.createNewConfigModalButton,
-            )}>
-            {`Next`}
-          </button>
+            text="Next"
+            classes={{
+              button: clsx(
+                classes.createNewBotButton,
+                classes.createNewConfigModalButton,
+              ),
+            }}
+          />
         </div>
       </div>
       <div className={classes.content}>

@@ -1,17 +1,17 @@
 import { makeStyles } from '@material-ui/core/styles';
 import {
-  WHITE_COLOR,
+  BLACK_COLOR,
   GREY_COLOR,
   LARGE_FONT3,
-  LIGHT_BLUE_COLOR3,
+  LIGHT_GREY_COLOR,
   SMALL_FONT,
-  DARK_GREY_COLOR,
+  WHITE_COLOR,
 } from '../../../../styles/DefaultStylingProperties';
 
 const useStyles = makeStyles({
   header: {
     height: '156px',
-    backgroundColor: DARK_GREY_COLOR,
+    backgroundColor: BLACK_COLOR,
   },
   topHeader: {
     paddingTop: '55px',
@@ -44,7 +44,7 @@ const useStyles = makeStyles({
   },
   lastModified: {
     marginRight: '50px',
-    color: GREY_COLOR,
+    color: LIGHT_GREY_COLOR,
     fontSize: SMALL_FONT,
   },
   packageList: {

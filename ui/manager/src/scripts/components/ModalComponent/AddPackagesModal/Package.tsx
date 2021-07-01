@@ -83,7 +83,6 @@ const Package = (props: IPrivateProps) => {
                     currentVersion={props.packagePayload.currentVersion}
                     selectedVersion={props.packagePayload.version}
                     selectVersion={selectVersion}
-                    classes={{ input: classes.versionInput }}
                   />
                 </div>
                 <div className={classes.centerFlex} />

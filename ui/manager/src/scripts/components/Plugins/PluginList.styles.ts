@@ -4,6 +4,7 @@ import {
   GREY_COLOR,
   LARGE_FONT3,
   SMALL_FONT,
+  LIGHT_GREY_COLOR,
 } from '../../../styles/DefaultStylingProperties';
 
 const useStyles = makeStyles({
@@ -22,7 +23,7 @@ const useStyles = makeStyles({
     fontSize: LARGE_FONT3,
   },
   lastModified: {
-    color: GREY_COLOR,
+    color: LIGHT_GREY_COLOR,
     fontSize: SMALL_FONT,
     marginLeft: 'auto',
     marginRight: '0',

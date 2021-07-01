@@ -4,6 +4,8 @@ import {
   WHITE_COLOR,
   GREY_COLOR,
   DARK_GREY_COLOR,
+  BLACK_COLOR,
+  LIGHT_GREY_COLOR,
 } from '../../../styles/DefaultStylingProperties';
 
 const useStyles = makeStyles({
@@ -25,6 +27,7 @@ const useStyles = makeStyles({
   },
   content: {
     color: GREY_COLOR,
+    backgroundColor: DARK_GREY_COLOR,
     fontSize: '12px',
     width: '100%',
     textAlign: 'left',
@@ -86,14 +89,14 @@ const useStyles = makeStyles({
     marginLeft: '50px',
   },
   modalHeader: {
-    backgroundColor: DARK_GREY_COLOR,
+    backgroundColor: BLACK_COLOR,
     borderTopLeftRadius: '4px',
     borderTopRightRadius: '4px',
     height: '156px',
     width: '100%',
   },
   tallModalHeader: {
-    backgroundColor: DARK_GREY_COLOR,
+    backgroundColor: BLACK_COLOR,
     borderTopLeftRadius: '4px',
     borderTopRightRadius: '4px',
     height: '176px',
@@ -161,8 +164,9 @@ const useStyles = makeStyles({
   botText: {
     paddingTop: '5px',
     margin: '20px 50px',
-    fontSize: '24px',
+    fontSize: '20px',
     fontStyle: 'Bold',
+    color: LIGHT_GREY_COLOR,
   },
   inputBox: {
     marginTop: '5px',
@@ -186,6 +190,15 @@ const useStyles = makeStyles({
   },
   inputBoxContent: {
     paddingTop: '5px',
+    color: WHITE_COLOR,
+
+    '& textarea': {
+      backgroundColor: GREY_COLOR,
+
+      '&::placeholder': {
+        color: LIGHT_GREY_COLOR,
+      },
+    },
   },
   pluginText: {
     marginLeft: '50px',

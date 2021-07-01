@@ -22,7 +22,7 @@ const useStyles = makeStyles({
     flex: 1,
   },
   modifiedDate: {
-    color: GREY_COLOR,
+    color: LIGHT_GREY_COLOR,
     fontSize: '13px',
     marginTop: 'auto',
     marginBottom: 'auto',
@@ -48,6 +48,7 @@ const useStyles = makeStyles({
     maxWidth: '600px',
   },
   truncate: {
+    color: LIGHT_GREY_COLOR,
     overflow: 'hidden',
     textOverflow: 'ellipsis',
     whiteSpace: 'nowrap',

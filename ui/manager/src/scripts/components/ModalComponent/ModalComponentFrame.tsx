@@ -31,7 +31,7 @@ import ViewJsonModal from './ViewJsonModal/ViewJsonModal';
 
 const useStyles = makeStyles({
   content: {
-    background: '#fff',
+    background: DARK_GREY_COLOR,
     boxShadow: `0 0 20px ${DARK_GREY_COLOR}`,
     borderRadius: '4px',
     left: '0px',

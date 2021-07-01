@@ -8,6 +8,7 @@ import {
   WHITE_COLOR,
   GREY_COLOR,
   BLUE_COLOR,
+  LIGHT_GREY_COLOR,
 } from '../../../../styles/DefaultStylingProperties';
 
 const useStyles = makeStyles({
@@ -28,12 +29,12 @@ const useStyles = makeStyles({
     },
   },
   smallName: {
-    color: GREY_COLOR,
+    color: LIGHT_GREY_COLOR,
     marginTop: '3px',
     fontSize: '13px',
   },
   version: {
-    color: GREY_COLOR,
+    color: LIGHT_GREY_COLOR,
     fontSize: '12px',
     marginTop: '4px',
     marginLeft: '5px',

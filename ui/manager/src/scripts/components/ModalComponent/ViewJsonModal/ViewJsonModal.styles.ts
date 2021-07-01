@@ -1,8 +1,9 @@
 import { makeStyles } from '@material-ui/core/styles';
 import {
-  WHITE_COLOR,
-  GREY_COLOR,
+  BLACK_COLOR,
   DARK_GREY_COLOR,
+  GREY_COLOR,
+  WHITE_COLOR,
 } from '../../../../styles/DefaultStylingProperties';
 
 const styles = makeStyles({
@@ -14,7 +15,7 @@ const styles = makeStyles({
   },
   header: {
     minHeight: '146px',
-    backgroundColor: DARK_GREY_COLOR,
+    backgroundColor: BLACK_COLOR,
     paddingBottom: '10px',
     borderTopLeftRadius: '4px',
     borderTopRightRadius: '4px',
@@ -69,9 +70,9 @@ const styles = makeStyles({
     height: '40px',
   },
   data: {
-    color: GREY_COLOR,
+    color: WHITE_COLOR,
     fontSize: '14px',
-    backgroundColor: '#FFF',
+    backgroundColor: DARK_GREY_COLOR,
     flex: 1,
     minHeight: '200px',
     minWidth: '500px',

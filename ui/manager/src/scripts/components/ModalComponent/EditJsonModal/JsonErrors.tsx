@@ -1,10 +1,10 @@
 import * as React from 'react';
 import { compose, pure, setDisplayName } from 'recompose';
 import {
-  BLACK_COLOR,
   MEDIUM_FONT,
   MEDIUM_FONT2,
   RED_COLOR,
+  WHITE_COLOR,
 } from '../../../../styles/DefaultStylingProperties';
 import { IJsonError } from '../../utils/helpers/JsonHelpers';
 import { makeStyles } from '@material-ui/core/styles';
@@ -30,7 +30,7 @@ const useStyles = makeStyles({
     fontSize: MEDIUM_FONT,
   },
   key: {
-    color: BLACK_COLOR,
+    color: WHITE_COLOR,
     minWidth: '120px',
   },
   errorMessage: {

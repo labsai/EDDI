@@ -6,6 +6,7 @@ import clsx from 'clsx';
 import {
   WHITE_COLOR,
   GREY_COLOR,
+  LIGHT_GREY_COLOR,
 } from '../../../styles/DefaultStylingProperties';
 
 const useStyles = makeStyles({
@@ -17,7 +18,7 @@ const useStyles = makeStyles({
   },
   textContainer: {
     display: 'flex',
-    color: GREY_COLOR,
+    color: LIGHT_GREY_COLOR,
     fontSize: '13px',
     whiteSpace: 'pre-wrap',
   },
