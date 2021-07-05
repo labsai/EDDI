@@ -22,11 +22,50 @@ const useStyles = makeStyles({
 
     '& legend': {
       color: WHITE_COLOR,
+      fontSize: '14px',
+      fontWeight: 'bold',
+      padding: '10px 5px',
+    },
+
+    '& fieldset': {
+      flexDirection: 'column!important',
+    },
+    '& label': {
+      color: WHITE_COLOR,
+      fontSize: '14px',
+      fontWeight: 'bold',
+    },
+
+    '& .form-group': {
+      padding: '5px',
+      // border: `1px dotted ${GREY_COLOR}`,
+      borderBottom: `1px dashed ${GREY_COLOR}`,
+      borderLeft: `1px dashed ${GREY_COLOR}`,
+    },
+
+    '& .field-array > div': {
+      paddingLeft: '10px',
+    },
+
+    '& #root_outputSet__title': {
+      color: WHITE_COLOR,
+      fontSize: '18px',
     },
 
     '& input': {
       backgroundColor: GREY_COLOR,
       color: WHITE_COLOR,
+    },
+
+    '& .col-xs-9': {
+      width: '85%',
+    },
+    '& .col-xs-offset-9': {
+      marginLeft: '85%',
+    },
+    '& .col-xs-3': {
+      width: '10%',
+      padding: 0,
     },
 
     '& .btn-danger': {
@@ -92,6 +131,8 @@ let yourForm;
 
 const JsonSchemaForm: React.StatelessComponent<IProps> = (props: IProps) => {
   const classes = useStyles();
+  console.log('props.schema: ', props.schema);
+  console.log('props.data: ', props.data);
   return (
     <div className={classes.form}>
       <Button

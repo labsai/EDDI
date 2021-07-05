@@ -28,6 +28,7 @@ import UpdateBotsModal from './UpdateConfigsModal/UpdateBotsModal';
 import UpdatePackagesModal from './UpdateConfigsModal/UpdatePackagesModal';
 import UpdatePackageModal from './UpdatePackageModal';
 import ViewJsonModal from './ViewJsonModal/ViewJsonModal';
+import clsx from 'clsx';
 
 const useStyles = makeStyles({
   content: {
@@ -76,6 +77,9 @@ const useStyles = makeStyles({
     minWidth: '600px',
     position: 'relative',
     margin: '100px auto 100px',
+  },
+  wideBox: {
+    maxWidth: '90vw',
   },
 });
 
@@ -220,7 +224,11 @@ const ModalComponentFrame = (props: IPrivateProps) => {
     document.body.className = 'modal-body-open';
     return (
       <div className={classes.overlay}>
-        <div className={classes.box}>
+        <div
+          className={clsx(
+            classes.box,
+            props.mode === ModalEnum.editJson ? classes.wideBox : null,
+          )}>
           <div onClick={closeModal} className={classes.close}>
             &times;
           </div>
