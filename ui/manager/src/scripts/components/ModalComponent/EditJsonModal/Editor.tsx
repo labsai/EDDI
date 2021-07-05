@@ -14,6 +14,7 @@ import { JSONSchema4 } from 'json-schema';
 import useStyles from './Editor.styles';
 import ExpandButton from './EditorButtons/ExpandButton';
 import ValidateButton from './EditorButtons/ValidateButton';
+import { Ace } from 'ace-builds';
 
 interface IPublicProps {
   type: string;
@@ -53,6 +54,13 @@ const CreateNewConfig2Modal = ({
   const discardChanges = () => {
     const editorText = _.isEmpty(data) ? '{\n\t\n}' : data;
     setEditorText(editorText);
+  };
+
+  const handleUndo = (editor: Ace.Editor) => {
+    const cursor = editor.getCursorPosition();
+    editor.undo();
+    editor.getSelection().clearSelection();
+    editor.moveCursorTo(cursor.row, cursor.column);
   };
 
   return (
@@ -98,6 +106,13 @@ const CreateNewConfig2Modal = ({
             onChange={handleOnChange}
             value={editorText}
             editorProps={{ $blockScrolling: true }}
+            commands={[
+              {
+                name: 'annotateCommand',
+                bindKey: { win: 'ctrl-z', mac: 'Command-z' },
+                exec: (editor) => handleUndo(editor),
+              },
+            ]}
           />
         </div>
       </div>

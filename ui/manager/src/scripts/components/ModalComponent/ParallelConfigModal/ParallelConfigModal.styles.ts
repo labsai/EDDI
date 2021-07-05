@@ -28,17 +28,6 @@ const styles = makeStyles({
     maxWidth: '100%',
     height: '70vh',
     overflow: 'auto',
-
-    '& .slick-arrow': {
-      top: '-15px',
-      zIndex: 1,
-    },
-    '& .slick-prev': {
-      left: '10px',
-    },
-    '& .slick-next': {
-      right: '100px',
-    },
   },
   message: {
     margin: '20px auto 20px auto',

@@ -131,8 +131,6 @@ let yourForm;
 
 const JsonSchemaForm: React.StatelessComponent<IProps> = (props: IProps) => {
   const classes = useStyles();
-  console.log('props.schema: ', props.schema);
-  console.log('props.data: ', props.data);
   return (
     <div className={classes.form}>
       <Button
