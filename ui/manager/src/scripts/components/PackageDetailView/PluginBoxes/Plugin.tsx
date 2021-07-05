@@ -251,6 +251,7 @@ const Plugin = ({
             collapsed={4}
             displayDataTypes={false}
             enableClipboard={false}
+            name={'conversationMemory'}
           />
         </div>
       )}
