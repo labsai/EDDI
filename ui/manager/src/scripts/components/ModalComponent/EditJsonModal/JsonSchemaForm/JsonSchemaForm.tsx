@@ -1,12 +1,11 @@
+import { makeStyles } from '@material-ui/core/styles';
 import * as metaSchema4 from 'ajv/lib/refs/json-schema-draft-04.json';
 import { JSONSchema4 } from 'json-schema';
 import * as React from 'react';
-import { makeStyles } from '@material-ui/core/styles';
 import Form from 'react-jsonschema-form';
 import { connect } from 'react-redux';
 import { compose, pure, setDisplayName } from 'recompose';
-import { schemaSelector } from '../../../../selectors/SystemSelectors';
-import Button from '../../../../components/Assets/Buttons/Button';
+import * as uuid from 'uuid';
 import {
   BLUE_COLOR,
   GREEN_COLOR,
@@ -14,11 +13,27 @@ import {
   RED_COLOR,
   WHITE_COLOR,
 } from '../../../../../styles/DefaultStylingProperties';
+import Button from '../../../../components/Assets/Buttons/Button';
+import { schemaSelector } from '../../../../selectors/SystemSelectors';
+import RecursiveTreeView from './RecursiveTreeView';
 
 const useStyles = makeStyles({
+  formContainer: {
+    display: 'flex',
+    flexDirection: 'row',
+  },
+  formTree: {
+    flex: 1,
+    paddingLeft: '10px',
+    maxHeight: '70vh',
+    overflow: 'auto',
+  },
   form: {
+    flex: 4,
     margin: '20px',
     color: WHITE_COLOR,
+    maxHeight: '70vh',
+    overflow: 'auto',
 
     '& legend': {
       color: WHITE_COLOR,
@@ -38,7 +53,6 @@ const useStyles = makeStyles({
 
     '& .form-group': {
       padding: '5px',
-      // border: `1px dotted ${GREY_COLOR}`,
       borderBottom: `1px dashed ${GREY_COLOR}`,
       borderLeft: `1px dashed ${GREY_COLOR}`,
     },
@@ -131,29 +145,86 @@ let yourForm;
 
 const JsonSchemaForm: React.StatelessComponent<IProps> = (props: IProps) => {
   const classes = useStyles();
+  const data = JSON.parse(props.data);
+
+  const getDataWithIds = (data) => {
+    if (typeof data === 'object') {
+      Object.assign(data, { id: uuid() });
+      for (const property in data) {
+        if (typeof property === 'object') {
+          Object.assign(data[property], { id: uuid() });
+          getDataWithIds(data[property]);
+        } else if (Array.isArray(data[property])) {
+          data[property].map((p) => {
+            getDataWithIds(p);
+          });
+        }
+      }
+    } else if (Array.isArray(data)) {
+      data.map((d) => {
+        getDataWithIds(d);
+      });
+    } else {
+      return;
+    }
+  };
+
+  getDataWithIds(data);
+
+  function ObjectFieldTemplate(props) {
+    return (
+      <div id={props.formData.id}>
+        {props.title}
+        {props.description}
+        {props.properties.map((element) => (
+          <div className="property-wrapper">{element.content}</div>
+        ))}
+      </div>
+    );
+  }
+
+  React.useEffect(() => {
+    const overlay = document.getElementById('modal-overlay');
+    if (!overlay) {
+      return;
+    }
+    overlay.style.maxHeight = '100vh';
+    overlay.style.paddingBottom = '0';
+    return () => {
+      overlay.style.maxHeight = 'auto';
+      overlay.style.paddingBottom = '300px';
+    };
+  }, []);
+
   return (
-    <div className={classes.form}>
-      <Button
-        text={'Validate form'}
-        onClick={() => yourForm.submit()}
-        classes={{ button: classes.validateButton }}
-      />
-      {!!props.schema && !!props.data && (
-        <Form
-          ref={(form) => {
-            yourForm = form;
-          }}
-          additionalMetaSchemas={[metaSchema4]}
-          schema={props.schema}
-          formData={JSON.parse(props.data)}
-          onChange={(data) =>
-            props.onChange(JSON.stringify(data.formData, null, '\t'))
-          }
-          onSubmit={() => props.validate()}
-          onError={() => console.log('errors')}>
-          <br />
-        </Form>
-      )}
+    <div className={classes.formContainer}>
+      <div className={classes.formTree}>
+        <RecursiveTreeView data={data} />
+      </div>
+      <div className={classes.form}>
+        <Button
+          text={'Validate form'}
+          onClick={() => yourForm.submit()}
+          classes={{ button: classes.validateButton }}
+        />
+        {!!props.schema && !!props.data && (
+          <Form
+            ref={(form) => {
+              yourForm = form;
+            }}
+            additionalMetaSchemas={[metaSchema4]}
+            schema={props.schema}
+            formData={data}
+            onChange={(data) =>
+              props.onChange(JSON.stringify(data.formData, null, '\t'))
+            }
+            onSubmit={() => props.validate()}
+            ObjectFieldTemplate={ObjectFieldTemplate}
+            onError={() => console.log('errors')}>
+            <br />
+          </Form>
+        )}
+      </div>
     </div>
   );
 };

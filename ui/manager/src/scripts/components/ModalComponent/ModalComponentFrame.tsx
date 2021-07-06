@@ -223,11 +223,14 @@ const ModalComponentFrame = (props: IPrivateProps) => {
   if (props.isModalOpen) {
     document.body.className = 'modal-body-open';
     return (
-      <div className={classes.overlay}>
+      <div className={classes.overlay} id="modal-overlay">
         <div
           className={clsx(
             classes.box,
-            props.mode === ModalEnum.editJson ? classes.wideBox : null,
+            props.mode === ModalEnum.editJson ||
+              props.mode === ModalEnum.parallelConfig
+              ? classes.wideBox
+              : null,
           )}>
           <div onClick={closeModal} className={classes.close}>
             &times;
