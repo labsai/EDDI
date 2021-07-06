@@ -213,14 +213,8 @@ const PackageView = ({
           disabled={!isCurrentVersion || readOnly}
         />
         <WhiteButton
-          onClick={openEditJsonModal}
-          text={'Edit JSON'}
-          classes={{ button: classes.editPackageButton }}
-          disabled={!isCurrentVersion || readOnly}
-        />
-        <WhiteButton
           onClick={openParallelConfigModal}
-          text={'Parallel config'}
+          text={'Edit JSON'}
           classes={{ button: classes.editPackageButton }}
           disabled={!isCurrentVersion || readOnly}
         />

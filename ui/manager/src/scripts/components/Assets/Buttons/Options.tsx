@@ -136,7 +136,7 @@ const Options = ({ descriptor, readOnly, data }: IPrivateProps) => {
           disabled={!isCurrentVersion || readOnly}
           onClick={() => {
             handleClose();
-            modalActionDispatchers.showEditJsonModal(descriptor.resource, data);
+            modalActionDispatchers.showParallelConfigModal(descriptor);
           }}>
           <ListItemIcon>
             <CreateOutlinedIcon fontSize="small" />

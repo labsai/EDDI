@@ -1,11 +1,29 @@
 import * as _ from 'lodash';
 import * as React from 'react';
 import { useSelector } from 'react-redux';
+import eddiApiActionDispatchers from '../../../../scripts/actions/EddiApiActionDispatchers';
 import { IAppState } from 'src/scripts/reducers';
 import { pluginSelector } from '../../../selectors/PluginSelectors';
-import { IPlugin } from '../../utils/AxiosFunctions';
+import { getPlugin, IPlugin } from '../../utils/AxiosFunctions';
 import EditJsonModal from '../EditJsonModal/EditJsonModal';
 import ViewJsonContent from '../ViewJsonModal/ViewJsonContent';
+import ClimbingBoxLoader from 'react-spinners/ClimbingBoxLoader';
+
+import { makeStyles } from '@material-ui/core/styles';
+
+const useStyles = makeStyles({
+  loadingWrapper: {
+    alignItems: 'center',
+    display: 'flex',
+    flex: 1,
+    height: '500px',
+    justifyContent: 'center',
+  },
+  deployExampleBotsButton: {
+    marginTop: '5px',
+    width: '160px',
+  },
+});
 
 interface IPublicProps {
   pluginResource: string;
@@ -13,38 +31,60 @@ interface IPublicProps {
 }
 
 const PluginContainer = (props: IPublicProps) => {
-  const [isEdit, setIsEdit] = React.useState(false);
-  const { plugin } = useSelector((state: IAppState) =>
-    pluginSelector(state, { pluginResource: props.pluginResource }),
-  );
-  const [data, setData] = React.useState('');
+  const classes = useStyles();
+  const [isEdit, setIsEdit] = React.useState(true);
+
+  const [plugin, setPlugin] = React.useState<IPlugin>();
+  console.log('plugin: ', plugin);
+
+  const [loading, setLoading] = React.useState(false);
+  const [error, setError] = React.useState(null);
 
   React.useEffect(() => {
-    setData(JSON.stringify((plugin as IPlugin).pluginData, null, '\t'));
-  }, [plugin]);
-
-  if (_.isEmpty(plugin)) {
-    return <></>;
-  }
+    setLoading(true);
+    getPlugin(props.pluginResource)
+      .then((res) => {
+        setLoading(false);
+        setPlugin(res);
+        setError(null);
+      })
+      .catch((error) => {
+        setError(error);
+        setLoading(false);
+      });
+  }, []);
 
   return (
     <div>
-      {!isEdit ? (
-        <ViewJsonContent
-          descriptor={plugin as IPlugin}
-          data={data}
-          usedBy={(plugin as IPlugin).usedByPackages}
-          showEditJson={() => setIsEdit(true)}
-        />
+      {loading ? (
+        <div className={classes.loadingWrapper}>
+          <ClimbingBoxLoader loading color="white" />
+        </div>
       ) : (
-        <EditJsonModal
-          type={props.type}
-          descriptor={plugin as IPlugin}
-          resource={(plugin as IPlugin).resource}
-          data={data}
-          showViewJson={() => setIsEdit(false)}
-        />
+        <div>
+          {!!error && <p>{'Error: Could not load plugin'}</p>}
+          {!error && !plugin && <p>{'Plugin not found'}</p>}
+          {!error &&
+            plugin &&
+            (!isEdit ? (
+              <ViewJsonContent
+                descriptor={plugin as IPlugin}
+                data={JSON.stringify(plugin.pluginData, null, '\t')}
+                usedBy={(plugin as IPlugin).usedByPackages}
+                showEditJson={() => setIsEdit(true)}
+              />
+            ) : (
+              <EditJsonModal
+                type={props.type}
+                descriptor={plugin as IPlugin}
+                resource={(plugin as IPlugin).resource}
+                data={JSON.stringify(plugin.pluginData, null, '\t')}
+                showViewJson={() => setIsEdit(false)}
+              />
+            ))}
+        </div>
       )}
+      {}
     </div>
   );
 };

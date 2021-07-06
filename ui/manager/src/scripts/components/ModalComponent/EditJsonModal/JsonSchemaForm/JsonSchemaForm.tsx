@@ -25,6 +25,7 @@ const useStyles = makeStyles({
   formTree: {
     flex: 1,
     paddingLeft: '10px',
+    paddingTop: '15px',
     maxHeight: '70vh',
     overflow: 'auto',
   },
@@ -145,6 +146,23 @@ let yourForm;
 
 const JsonSchemaForm: React.StatelessComponent<IProps> = (props: IProps) => {
   const classes = useStyles();
+
+  React.useEffect(() => {
+    const overlay = document.getElementById('modal-overlay');
+    if (!overlay) {
+      return;
+    }
+    overlay.style.maxHeight = '100vh';
+    overlay.style.paddingBottom = '0';
+    return () => {
+      overlay.style.maxHeight = 'auto';
+      overlay.style.paddingBottom = '300px';
+    };
+  }, []);
+
+  if (!props.data) {
+    return null;
+  }
   const data = JSON.parse(props.data);
 
   const getDataWithIds = (data) => {
@@ -176,25 +194,14 @@ const JsonSchemaForm: React.StatelessComponent<IProps> = (props: IProps) => {
       <div id={props.formData.id}>
         {props.title}
         {props.description}
-        {props.properties.map((element) => (
-          <div className="property-wrapper">{element.content}</div>
+        {props.properties.map((element, i) => (
+          <div key={element.content + i} className="property-wrapper">
+            {element.content}
+          </div>
         ))}
       </div>
     );
   }
-
-  React.useEffect(() => {
-    const overlay = document.getElementById('modal-overlay');
-    if (!overlay) {
-      return;
-    }
-    overlay.style.maxHeight = '100vh';
-    overlay.style.paddingBottom = '0';
-    return () => {
-      overlay.style.maxHeight = 'auto';
-      overlay.style.paddingBottom = '300px';
-    };
-  }, []);
 
   return (
     <div className={classes.formContainer}>

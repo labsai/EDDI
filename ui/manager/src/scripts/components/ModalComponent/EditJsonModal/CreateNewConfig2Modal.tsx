@@ -43,7 +43,7 @@ const CreateNewConfig2Modal = (props: IPrivateProps) => {
   const [editorText, setEditorText] = React.useState('');
   const [isValidJson, setIsValidJson] = React.useState(false);
   const [errors, setErrors] = React.useState<IJsonError[]>([]);
-  const [selectedTab, setSelectedTab] = React.useState<TabEnum>(TabEnum.editor);
+  const [selectedTab, setSelectedTab] = React.useState<TabEnum>(TabEnum.form);
   const classes = useStyles();
   const editClasses = useEditStyles();
 
@@ -158,19 +158,19 @@ const CreateNewConfig2Modal = (props: IPrivateProps) => {
       <div className={editClasses.tabs}>
         <div
           className={clsx(editClasses.tab, {
-            [editClasses.tabDisabled]: selectedTab !== TabEnum.editor,
-          })}
-          onClick={() => setSelectedTab(TabEnum.editor)}>
-          {'Editor'}
-        </div>
-        <div
-          className={clsx(editClasses.tab, {
             [editClasses.tabDisabled]: selectedTab !== TabEnum.form,
           })}
           onClick={() =>
             validateJson() ? setSelectedTab(TabEnum.form) : validateJson()
           }>
           {'Form'}
+        </div>
+        <div
+          className={clsx(editClasses.tab, {
+            [editClasses.tabDisabled]: selectedTab !== TabEnum.editor,
+          })}
+          onClick={() => setSelectedTab(TabEnum.editor)}>
+          {'Editor'}
         </div>
       </div>
       {isValidJson && <JsonIsValid />}
