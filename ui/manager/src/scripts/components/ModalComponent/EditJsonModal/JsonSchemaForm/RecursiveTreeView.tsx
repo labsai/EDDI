@@ -6,6 +6,7 @@ import {
   WHITE_COLOR,
   YELLOW_COLOR,
 } from '../../../../../styles/DefaultStylingProperties';
+import * as _ from 'lodash';
 
 const useStyles = makeStyles({
   treeContainer: {
@@ -58,31 +59,58 @@ const useStyles = makeStyles({
       },
     },
 
+    '& .dots': {
+      display: 'block',
+      color: YELLOW_COLOR,
+      fontWeight: 'bold',
+    },
+
     /* Hide the nested list */
     '& .nested': {
-      display: 'none',
+      display: 'inline-flex',
+      paddingLeft: '0',
+
+      '& > div': {
+        display: 'none',
+      },
+      '& > li': {
+        display: 'none',
+      },
+      '& > span': {
+        display: 'block',
+      },
+    },
+
+    /* Show the nested list when the user clicks on the caret/arrow (with JavaScript) */
+    '& .active': {
+      display: 'block',
+      paddingLeft: '10px!important',
+
+      '& > div': {
+        display: 'block!important',
+      },
+      '& > li': {
+        display: 'block!important',
+      },
+      '& > .dots': {
+        display: 'none!important',
+      },
+      '& > .brackets': {
+        marginLeft: '-10px',
+      },
     },
 
     '& .leaf': {
       color: YELLOW_COLOR,
-    },
-
-    '& .dots': {
-      display: 'block',
-      color: YELLOW_COLOR,
-    },
-    '& .hidden': {
-      display: 'none',
-    },
-    /* Show the nested list when the user clicks on the caret/arrow (with JavaScript) */
-    '& .active': {
-      display: 'block',
     },
   },
   toggle: {
     display: 'flex',
     flexDirection: 'row',
     alignItems: 'center',
+  },
+  empty: {
+    opacity: 0.6,
   },
 });
 
@@ -102,22 +130,50 @@ const RecursiveTreeView = ({ data }) => {
       if (key === 'id') {
         return;
       }
+      if (isPrimative(object[key])) {
+        return (
+          <li key={key + reactKey}>
+            {buildNodeNoToggle(key, `"${object[key]}"`, object.id)}
+          </li>
+        );
+      }
+      if (isArray(object[key]) && _.isEmpty(object[key])) {
+        return (
+          <li key={key + reactKey}>
+            {buildNodeNoToggleObject(key, '[]', object.id)}
+          </li>
+        );
+      }
+      if (isObject(object[key]) && !Object.keys(object[key]).length) {
+        return (
+          <li key={key + reactKey}>
+            {buildNodeNoToggleObject(key, '{}', object.id)}
+          </li>
+        );
+      }
       return (
         <li key={key + reactKey}>
           {buildNode(key, object.id)}{' '}
-          <strong>{`${
-            isArray(object[key]) ? '[' : isObject(object[key]) ? '{' : ''
-          }`}</strong>
           <ul className="nested">
+            <strong className="brackets">{`${
+              isArray(object[key]) ? '[' : isObject(object[key]) ? '{' : ''
+            }`}</strong>
             {isPrimative(object[key])
               ? buildLeaf(object[key])
               : isArray(object[key])
               ? loopArray(object[key])
               : processObject(object[key])}
+            <strong className="dots">{`${
+              isArray(object[key]) && !_.isEmpty(object[key])
+                ? '...'
+                : isObject(object[key]) && Object.keys(object[key]).length
+                ? '...'
+                : ''
+            }`}</strong>
+            <strong className="brackets">{`${
+              isArray(object[key]) ? ']' : isObject(object[key]) ? '}' : ''
+            }`}</strong>
           </ul>
-          <strong>{`${
-            isArray(object[key]) ? ']' : isObject(object[key]) ? '}' : ''
-          }`}</strong>
         </li>
       );
     });
@@ -168,6 +224,26 @@ const RecursiveTreeView = ({ data }) => {
         {key}:
       </span>
     </>
+  );
+
+  const buildNodeNoToggle = (key: string, value: string, id?: string) => (
+    <span
+      className="node"
+      onClick={() => {
+        handleScrollToElement(id);
+      }}>
+      {key}: <span className="leaf">{value}</span>
+    </span>
+  );
+
+  const buildNodeNoToggleObject = (key: string, value: string, id?: string) => (
+    <span
+      className="node"
+      onClick={() => {
+        handleScrollToElement(id);
+      }}>
+      {key}: <span className={classes.empty}>{value}</span>
+    </span>
   );
 
   const buildLeaf = (value: string) => <li className="leaf">"{value}"</li>;

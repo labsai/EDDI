@@ -195,9 +195,7 @@ const JsonSchemaForm: React.StatelessComponent<IProps> = (props: IProps) => {
         {props.title}
         {props.description}
         {props.properties.map((element, i) => (
-          <div key={element.content + i} className="property-wrapper">
-            {element.content}
-          </div>
+          <div key={element.content + i}>{element.content}</div>
         ))}
       </div>
     );
