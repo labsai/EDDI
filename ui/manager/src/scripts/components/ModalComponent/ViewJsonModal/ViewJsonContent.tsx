@@ -1,8 +1,11 @@
+import { JSONSchema4 } from 'json-schema';
 import * as _ from 'lodash';
 import * as moment from 'moment';
 import * as React from 'react';
-import { connect } from 'react-redux';
+import { connect, useSelector } from 'react-redux';
 import { compose, pure, setDisplayName } from 'recompose';
+import { IAppState } from '../../../../scripts/reducers';
+import { schemaSelector } from '../../../../scripts/selectors/SystemSelectors';
 import eddiApiActionDispatchers from '../../../actions/EddiApiActionDispatchers';
 import ModalActionDispatchers from '../../../actions/ModalActionDispatchers';
 import { readOnlySelector } from '../../../selectors/AuthenticationSelectors';
@@ -14,6 +17,7 @@ import PackagesUsingPlugin from '../../PackageDetailView/UsedByComponent/Package
 import { getTypeFromResource } from '../../utils/ApiFunctions';
 import { IDetailedDescriptor } from '../../utils/AxiosFunctions';
 import { PACKAGE } from '../../utils/EddiTypes';
+import JsonSchemaForm from '../EditJsonModal/JsonSchemaForm/JsonSchemaForm';
 import '../ModalComponent.styles.scss';
 import useStyles from './ViewJsonModal.styles';
 
@@ -27,15 +31,34 @@ interface IPublicProps {
 
 interface IPrivateProps extends IPublicProps {
   readOnly: boolean;
+  schema?: JSONSchema4;
 }
 
 const ViewJsonContent = (props: IPrivateProps) => {
   const [jsonText, setJsonText] = React.useState('');
   const classes = useStyles();
 
+  const { schema } = useSelector((state: IAppState) =>
+    schemaSelector(state, {
+      type: getTypeFromResource(props.descriptor.resource),
+    }),
+  );
+
   React.useEffect(() => {
     handleSetJsonText();
   }, [props.descriptor, props.data, props.usedBy, props.readOnly]);
+
+  React.useEffect(() => {
+    if (!schema) {
+      eddiApiActionDispatchers.fetchJsonSchemaAction(
+        getTypeFromResource(props.descriptor.resource),
+      );
+    }
+  }, [schema, props.descriptor.resource]);
+
+  const plug = (value?: string) => {
+    return;
+  };
 
   const handleSetJsonText = () => {
     setJsonText(props.data);
@@ -118,7 +141,13 @@ const ViewJsonContent = (props: IPrivateProps) => {
         )}
       </div>
       <div className={classes.data}>
-        {!_.isEmpty(props.data) && <div>{jsonText}</div>}
+        <JsonSchemaForm
+          schema={schema}
+          data={props.data}
+          onChange={plug}
+          validate={plug}
+          readOnly
+        />
       </div>
     </div>
   );

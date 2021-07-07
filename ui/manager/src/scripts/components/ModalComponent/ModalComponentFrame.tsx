@@ -227,8 +227,11 @@ const ModalComponentFrame = (props: IPrivateProps) => {
         <div
           className={clsx(
             classes.box,
-            props.mode === ModalEnum.editJson ||
-              props.mode === ModalEnum.parallelConfig
+            [
+              ModalEnum.editJson,
+              ModalEnum.parallelConfig,
+              ModalEnum.viewJson,
+            ].includes(props.mode)
               ? classes.wideBox
               : null,
           )}>

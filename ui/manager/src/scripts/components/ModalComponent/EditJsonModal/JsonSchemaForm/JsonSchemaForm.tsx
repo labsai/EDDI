@@ -8,6 +8,7 @@ import { compose, pure, setDisplayName } from 'recompose';
 import * as uuid from 'uuid';
 import {
   BLUE_COLOR,
+  DARK_GREY_COLOR,
   GREEN_COLOR,
   GREY_COLOR,
   RED_COLOR,
@@ -16,11 +17,34 @@ import {
 import Button from '../../../../components/Assets/Buttons/Button';
 import { schemaSelector } from '../../../../selectors/SystemSelectors';
 import RecursiveTreeView from './RecursiveTreeView';
+import clsx from 'clsx';
+
+const notVerticalSpacing = {
+  marginBottom: 0,
+  marginTop: 0,
+  paddingBottom: 0,
+  paddingTop: 0,
+};
 
 const useStyles = makeStyles({
   formContainer: {
     display: 'flex',
     flexDirection: 'row',
+  },
+  readOnly: {
+    '& button': {
+      display: 'none',
+    },
+    '& input, & select': {
+      '&:disabled': {
+        backgroundColor: DARK_GREY_COLOR,
+        opacity: 0.6,
+        color: WHITE_COLOR,
+      },
+    },
+    '& *': {
+      ...notVerticalSpacing,
+    },
   },
   formTree: {
     flex: 1,
@@ -138,6 +162,7 @@ const useStyles = makeStyles({
 interface IProps {
   schema?: JSONSchema4;
   data: string;
+  readOnly?: boolean;
   onChange(data): void;
   validate(): void;
 }
@@ -146,6 +171,7 @@ let yourForm;
 
 const JsonSchemaForm: React.StatelessComponent<IProps> = (props: IProps) => {
   const classes = useStyles();
+  const readOnly = props.readOnly;
 
   React.useEffect(() => {
     const overlay = document.getElementById('modal-overlay');
@@ -158,6 +184,38 @@ const JsonSchemaForm: React.StatelessComponent<IProps> = (props: IProps) => {
       overlay.style.maxHeight = 'auto';
       overlay.style.paddingBottom = '300px';
     };
+  }, []);
+
+  const disableInputs = (disabled = true) => {
+    const inputs = document
+      .getElementById('json-form')
+      .querySelectorAll('input');
+    const selects = document
+      .getElementById('json-form')
+      .querySelectorAll('select');
+    if (inputs) {
+      const inputsArray = Array.from(inputs);
+      inputsArray?.forEach?.((e) => {
+        e.disabled = disabled;
+      });
+    }
+    if (selects) {
+      const selectsArray = Array.from(selects);
+      selectsArray?.forEach?.((e) => {
+        e.disabled = disabled;
+      });
+    }
+  };
+
+  React.useEffect(() => {
+    if (!readOnly) {
+      return;
+    }
+    setTimeout(() => {
+      disableInputs();
+    }, 800);
+
+    return () => disableInputs(false);
   }, []);
 
   if (!props.data) {
@@ -202,11 +260,15 @@ const JsonSchemaForm: React.StatelessComponent<IProps> = (props: IProps) => {
   }
 
   return (
-    <div className={classes.formContainer}>
+    <div
+      className={clsx(
+        classes.formContainer,
+        readOnly ? classes.readOnly : null,
+      )}>
       <div className={classes.formTree}>
         <RecursiveTreeView data={data} />
       </div>
-      <div className={classes.form}>
+      <div className={classes.form} id="json-form">
         <Button
           text={'Validate form'}
           onClick={() => yourForm.submit()}
