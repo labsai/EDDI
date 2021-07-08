@@ -143,28 +143,24 @@ const RecursiveTreeView = ({ data }) => {
       if (isPrimative(object[key])) {
         return (
           <li key={key + reactKey}>
-            {buildNodeNoToggle(key, `"${object[key]}"`, object.id)}
+            {buildNodeNoToggle(key, `"${object[key]}"`)}
           </li>
         );
       }
       if (isArray(object[key]) && _.isEmpty(object[key])) {
         return (
-          <li key={key + reactKey}>
-            {buildNodeNoToggleObject(key, '[]', object.id)}
-          </li>
+          <li key={key + reactKey}>{buildNodeNoToggleObject(key, '[]')}</li>
         );
       }
       if (isObject(object[key]) && !Object.keys(object[key]).length) {
         return (
-          <li key={key + reactKey}>
-            {buildNodeNoToggleObject(key, '{}', object.id)}
-          </li>
+          <li key={key + reactKey}>{buildNodeNoToggleObject(key, '{}')}</li>
         );
       }
       return (
         <li key={key + reactKey}>
-          {buildNode(key, object.id)}{' '}
-          <ul className="nested">
+          {buildNode(key)}{' '}
+          <ul className="nested" data-arrayelement={`${key}`}>
             <strong className="brackets">{`${
               isArray(object[key]) ? '[' : isObject(object[key]) ? '{' : ''
             }`}</strong>
@@ -216,68 +212,62 @@ const RecursiveTreeView = ({ data }) => {
     );
   };
 
-  let parentName: string;
-  let elementIndex: number;
-
   // find parent element name to navigate to right element in case of nodes with the same name
-  const findParentUlElement = (element) => {
-    const target = element;
-    if (
-      target?.parentElement?.localName === 'div' &&
-      target?.parentElement?.dataset.elemenindex
-    ) {
-      elementIndex = target?.parentElement?.dataset.elemenindex;
-    }
-    if (target?.parentElement?.localName === 'ul') {
-      const parent =
-        target.parentElement.parentElement.childNodes[1]?.outerText;
-      if (parent) {
-        parentName = parent;
-        return parentName?.replace?.(':', '');
+  const findParentUlElement = async (element) => {
+    const getParent = (target, name = null) => {
+      const index = target?.dataset.elemenindex;
+      const root = target?.dataset.rootelement;
+      if (root) {
+        return name;
       }
-    } else {
-      if (target?.parentElement) {
-        findParentUlElement(target?.parentElement);
+      if (target?.localName === 'div') {
+        if (index) {
+          return getParent(
+            target?.parentElement,
+            index + (name ? '_' + name : ''),
+          );
+        }
+        return getParent(target?.parentElement, name);
+      } else if (target?.localName === 'ul') {
+        const parent = target?.dataset.arrayelement;
+        if (parent) {
+          return getParent(
+            target?.parentElement,
+            parent + (name ? '_' + name : ''),
+          );
+        }
+        return getParent(target?.parentElement, name);
       } else {
-        parentName = null;
-        elementIndex = null;
-        return;
+        return getParent(target?.parentElement, name);
       }
-    }
+    };
+
+    return await getParent(element);
   };
 
   // scroll to element with specific id or key
-  const handleScrollToElement = (
+  const handleScrollToElement = async (
     e: React.MouseEvent<HTMLSpanElement>,
-    id?: string,
     key?: string,
   ) => {
-    if (!id && !key) {
+    if (!key) {
       return;
     }
 
-    findParentUlElement(e.target);
-
-    const parent = parentName?.replace(':', '');
-    const element = document.getElementById(id);
-    const elements = document.querySelectorAll(`[id$='${key}']`);
-    if (element) {
-      element.scrollIntoView({ behavior: 'smooth' });
-      return;
-    } else if (elements.length) {
+    const parent = await findParentUlElement(e.target);
+    const elements = document.querySelectorAll(`[id*='${key}']`);
+    if (elements.length) {
       const elementsArray = Array.from(elements);
       const directElement = elementsArray.find((e) =>
-        e.id.includes(`${parent}_${elementIndex}`),
+        e.id.includes(`${parent}_${key}`),
       );
       if (directElement) {
         directElement.scrollIntoView({ behavior: 'smooth' });
-      } else {
-        elementsArray[0].scrollIntoView({ behavior: 'smooth' });
       }
     }
   };
 
-  const buildNode = (key: string, id?: string) => (
+  const buildNode = (key: string) => (
     <>
       <span
         className="toggler"
@@ -287,28 +277,28 @@ const RecursiveTreeView = ({ data }) => {
       <span
         className="node"
         onClick={(e) => {
-          handleScrollToElement(e, id, key);
+          handleScrollToElement(e, key);
         }}>
         {key}:
       </span>
     </>
   );
 
-  const buildNodeNoToggle = (key: string, value: string, id?: string) => (
+  const buildNodeNoToggle = (key: string, value: string) => (
     <span
       className="node"
       onClick={(e) => {
-        handleScrollToElement(e, id, key);
+        handleScrollToElement(e, key);
       }}>
       {key}: <span className="leaf">{value}</span>
     </span>
   );
 
-  const buildNodeNoToggleObject = (key: string, value: string, id?: string) => (
+  const buildNodeNoToggleObject = (key: string, value: string) => (
     <span
       className="node"
       onClick={(e) => {
-        handleScrollToElement(e, id, key);
+        handleScrollToElement(e, key);
       }}>
       {key}: <span className={classes.empty}>{value}</span>
     </span>
@@ -325,7 +315,7 @@ const RecursiveTreeView = ({ data }) => {
 
   return (
     <div className={classes.treeContainer}>
-      <ul>{processObject(data)}</ul>
+      <ul data-rootelement="true">{processObject(data)}</ul>
     </div>
   );
 };

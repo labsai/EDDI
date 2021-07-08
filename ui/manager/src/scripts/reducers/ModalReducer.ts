@@ -71,6 +71,7 @@ export interface IModalState {
   bot: IBot;
   packagePayload: IPackage;
   pluginType?: string;
+  pluginResource?: string;
   selectedResources?: string[];
   descriptor: IDetailedDescriptor;
   resource: string;
@@ -88,6 +89,7 @@ export const initialState: IModalState = {
   mode: null,
   bot: null,
   packagePayload: null,
+  pluginResource: null,
   pluginType: null,
   selectedResources: [],
   descriptor: null,
@@ -246,6 +248,9 @@ const ModalReducer: IModalReducer = (
         },
         packagePayload: {
           $set: (action as IShowParallelConfigModalAction).pkg,
+        },
+        pluginResource: {
+          $set: (action as IShowParallelConfigModalAction).pluginResource,
         },
       });
 
@@ -532,6 +537,9 @@ const ModalReducer: IModalReducer = (
           $set: null,
         },
         packagePayload: {
+          $set: null,
+        },
+        pluginResource: {
           $set: null,
         },
         mode: {

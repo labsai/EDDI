@@ -287,13 +287,16 @@ export function showBasicAuthModal(): IShowBasicAuthModal {
 
 export interface IShowParallelConfigModalAction extends Action {
   pkg: IPackage;
+  pluginResource?: string;
 }
 
 export function showParallelConfigModal(
   pkg: IPackage,
+  pluginResource?: string,
 ): IShowParallelConfigModalAction {
   return {
     pkg,
+    pluginResource,
     type: SHOW_PARALLEL_CONFIG_MODAL,
   };
 }

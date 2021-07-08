@@ -99,6 +99,7 @@ export interface IModalActionDispatchers extends ActionCreatorsMapObject {
   showBasicAuthModal: () => IShowBasicAuthModal;
   showParallelConfigModal: (
     packagePayload: IPackage,
+    pluginResource?: string,
   ) => IShowParallelConfigModalAction;
 }
 

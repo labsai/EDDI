@@ -8,6 +8,8 @@ import '../ModalComponent.styles.scss';
 import useStyles from './ParallelConfigModal.styles';
 import PluginContainer from './PluginContainer';
 import * as _ from 'lodash';
+import { pluginResourceSelector } from '../../../../scripts/selectors/ModalSelectors';
+import { useSelector } from 'react-redux';
 
 interface IPublicProps {
   packagePayload: IPackage;
@@ -15,6 +17,7 @@ interface IPublicProps {
 
 const ParallelConfigModal = ({ packagePayload }: IPublicProps) => {
   const sliderRef = React.useRef(null);
+  const pluginResource = useSelector(pluginResourceSelector);
   const plugins = [];
   packagePayload.packageData.packageExtensions.forEach((p) => {
     const isParser = p.type.includes('parser');
@@ -27,6 +30,11 @@ const ParallelConfigModal = ({ packagePayload }: IPublicProps) => {
     }
   });
   const classes = useStyles();
+
+  const initialSlide =
+    (plugins &&
+      plugins?.findIndex?.((p) => p.config?.uri === pluginResource)) ||
+    0;
 
   const settings = {
     dots: false,
@@ -46,7 +54,7 @@ const ParallelConfigModal = ({ packagePayload }: IPublicProps) => {
   };
 
   return (
-    <form className={classes.modalContainer}>
+    <div className={classes.modalContainer}>
       <div className={classes.modalHeader}>
         <WhiteButton onClick={handlePrev} text={'Prev Config'} />
         <div className={classes.modalTopHeader}>
@@ -58,19 +66,22 @@ const ParallelConfigModal = ({ packagePayload }: IPublicProps) => {
         {_.isEmpty(plugins) && (
           <div className={classes.empty}>All resources are empty</div>
         )}
-        <Slider ref={sliderRef} {...settings}>
+        <Slider
+          ref={sliderRef}
+          {...settings}
+          initialSlide={initialSlide === -1 ? 0 : initialSlide}>
           {plugins.map((p, i) => {
             return (
               <PluginContainer
-                key={p.config.uri + i}
-                pluginResource={p.config.uri}
+                key={p.config?.uri + i}
+                pluginResource={p.config?.uri}
                 type={p.type}
               />
             );
           })}
         </Slider>
       </div>
-    </form>
+    </div>
   );
 };
 

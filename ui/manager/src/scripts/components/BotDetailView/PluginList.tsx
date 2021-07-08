@@ -35,8 +35,11 @@ const PluginList: React.StatelessComponent<IProps> = (props: IProps) => {
 
   const { isOpened: isChatOpened } = useSelector(isChatOpenedSelector);
 
-  const openParallelConfigModal = () => {
-    modalActionDispatchers.showParallelConfigModal(props.packagePayload);
+  const openParallelConfigModal = (pluginResource?: string) => {
+    modalActionDispatchers.showParallelConfigModal(
+      props.packagePayload,
+      pluginResource,
+    );
   };
 
   return (
@@ -57,7 +60,9 @@ const PluginList: React.StatelessComponent<IProps> = (props: IProps) => {
                   editDisabled={true}
                   packageId={props.packageId}
                   botId={props.botId}
-                  openParallelConfigModal={openParallelConfigModal}
+                  openParallelConfigModal={() =>
+                    openParallelConfigModal(plug.config.uri)
+                  }
                 />
               ),
             )}

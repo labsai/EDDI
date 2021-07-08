@@ -191,8 +191,11 @@ const PackageView = ({
   const isCurrentVersion =
     packagePayload.version === packagePayload.currentVersion;
 
-  const openParallelConfigModal = () => {
-    ModalActionDispatchers.showParallelConfigModal(packagePayload);
+  const openParallelConfigModal = (pluginResource?: string) => {
+    ModalActionDispatchers.showParallelConfigModal(
+      packagePayload,
+      pluginResource,
+    );
   };
 
   return (
@@ -286,7 +289,9 @@ const PackageView = ({
                   deletePlugin={deletePlugin}
                   pluginResource={PluginHelper.getResource(ext)}
                   updatePlugin={updatePlugin}
-                  openParallelConfigModal={openParallelConfigModal}
+                  openParallelConfigModal={() =>
+                    openParallelConfigModal(PluginHelper.getResource(ext))
+                  }
                   editDisabled={!isCurrentVersion || readOnly}
                 />
               ))}

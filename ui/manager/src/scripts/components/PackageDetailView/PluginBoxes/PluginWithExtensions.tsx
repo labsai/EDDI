@@ -21,7 +21,7 @@ interface IPublicProps {
   pluginType: IOptions;
   pluginResource: string;
   editDisabled: boolean;
-  openParallelConfigModal: () => void;
+  openParallelConfigModal: (pluginResource?: string) => void;
   deletePlugin(extensionKey: number): void;
   updatePlugin(extensionKey: number, newPlugin: IPluginExtensions): void;
 }
@@ -225,7 +225,9 @@ const PluginWithExtensions = ({
                     pluginResource={getResource(ext)}
                     updateExtension={updateExtension}
                     editDisabled={editDisabled}
-                    openParallelConfigModal={openParallelConfigModal}
+                    openParallelConfigModal={() =>
+                      openParallelConfigModal(getResource(ext))
+                    }
                   />
                 ))}
               {pluginType.extensions.corrections &&
@@ -238,7 +240,9 @@ const PluginWithExtensions = ({
                     pluginResource={getResource(ext)}
                     updateExtension={updateExtension}
                     editDisabled={editDisabled}
-                    openParallelConfigModal={openParallelConfigModal}
+                    openParallelConfigModal={() =>
+                      openParallelConfigModal(getResource(ext))
+                    }
                   />
                 ))}
             </div>
