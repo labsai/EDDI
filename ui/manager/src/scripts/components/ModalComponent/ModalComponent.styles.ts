@@ -36,7 +36,7 @@ const useStyles = makeStyles({
   },
   updateModalContent: {
     display: 'block',
-    background: '#fff',
+    background: DARK_GREY_COLOR,
     borderRadius: '4px',
     fontSize: '10px',
     fontStyle: 'arial',

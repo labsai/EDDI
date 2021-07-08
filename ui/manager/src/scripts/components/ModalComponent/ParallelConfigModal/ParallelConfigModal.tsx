@@ -7,6 +7,7 @@ import { IPackage } from '../../utils/AxiosFunctions';
 import '../ModalComponent.styles.scss';
 import useStyles from './ParallelConfigModal.styles';
 import PluginContainer from './PluginContainer';
+import * as _ from 'lodash';
 
 interface IPublicProps {
   packagePayload: IPackage;
@@ -54,6 +55,9 @@ const ParallelConfigModal = ({ packagePayload }: IPublicProps) => {
         <WhiteButton onClick={handleNext} text={'Next Config'} />
       </div>
       <div className={classes.parallelConfigContainer}>
+        {_.isEmpty(plugins) && (
+          <div className={classes.empty}>All resources are empty</div>
+        )}
         <Slider ref={sliderRef} {...settings}>
           {plugins.map((p, i) => {
             return (

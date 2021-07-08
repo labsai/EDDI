@@ -1,11 +1,11 @@
 import { makeStyles } from '@material-ui/core/styles';
 import {
   BLACK_COLOR,
-  DARK_GREY_COLOR,
   GREY_BORDER,
   GREY_COLOR,
   MEDIUM_FONT2,
   RED_COLOR,
+  SMALL_FONT2,
   WHITE_COLOR,
 } from '../../../../styles/DefaultStylingProperties';
 
@@ -101,6 +101,11 @@ const styles = makeStyles({
     flex: 1,
     height: '400px',
     justifyContent: 'center',
+  },
+  empty: {
+    color: WHITE_COLOR,
+    textAlign: 'center',
+    fontSize: SMALL_FONT2,
   },
 });
 export default styles;

@@ -17,11 +17,13 @@ import Parser from '../utils/Parser';
 
 const useStyles = makeStyles({
   selectContainer: {
+    color: WHITE_COLOR,
     width: 90,
     marginTop: -1,
 
     '& .MuiOutlinedInput-root': {
       fontSize: '1.2rem',
+      color: WHITE_COLOR,
     },
     '& .MuiSelect-iconOutlined': {
       top: 'calc(50% - 8px)',
