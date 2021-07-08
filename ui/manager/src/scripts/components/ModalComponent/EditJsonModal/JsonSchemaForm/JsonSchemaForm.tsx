@@ -223,42 +223,6 @@ const JsonSchemaForm: React.StatelessComponent<IProps> = (props: IProps) => {
   }
   const data = JSON.parse(props.data);
 
-  const getDataWithIds = (data) => {
-    if (typeof data === 'object') {
-      Object.assign(data, { id: uuid() });
-      for (const property in data) {
-        if (typeof property === 'object') {
-          Object.assign(data[property], { id: uuid() });
-          getDataWithIds(data[property]);
-        } else if (Array.isArray(data[property])) {
-          data[property].map((p) => {
-            getDataWithIds(p);
-          });
-        }
-      }
-    } else if (Array.isArray(data)) {
-      data.map((d) => {
-        getDataWithIds(d);
-      });
-    } else {
-      return;
-    }
-  };
-
-  getDataWithIds(data);
-
-  function ObjectFieldTemplate(props) {
-    return (
-      <div id={props.formData.id}>
-        {props.title}
-        {props.description}
-        {props.properties.map((element, i) => (
-          <div key={element.content + i}>{element.content}</div>
-        ))}
-      </div>
-    );
-  }
-
   return (
     <div
       className={clsx(
@@ -286,7 +250,6 @@ const JsonSchemaForm: React.StatelessComponent<IProps> = (props: IProps) => {
               props.onChange(JSON.stringify(data.formData, null, '\t'))
             }
             onSubmit={() => props.validate()}
-            ObjectFieldTemplate={ObjectFieldTemplate}
             onError={() => console.log('errors')}>
             <br />
           </Form>

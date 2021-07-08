@@ -18,6 +18,7 @@ interface IPublicProps {
   index: number;
   pluginResource: string;
   editDisabled: boolean;
+  openParallelConfigModal: () => void;
   deleteExtension(extensionKey: number, type: string): void;
   updateExtension(extensionResource: string): void;
 }
@@ -31,6 +32,7 @@ const Extension = ({
   index,
   pluginResource,
   editDisabled,
+  openParallelConfigModal,
   deleteExtension,
   updateExtension,
   plugin,
@@ -83,7 +85,7 @@ const Extension = ({
         />
       )}
       <button
-        onClick={openViewJsonModal}
+        onClick={openParallelConfigModal}
         className={clsx(classes.extensionBox, {
           [classes.clickablePluginBox]:
             plugin.version === plugin.currentVersion && !_.isEmpty(plugin),

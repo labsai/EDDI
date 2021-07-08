@@ -133,6 +133,9 @@ const RecursiveTreeView = ({ data }) => {
   const classes = useStyles();
 
   const processObject = (object) => {
+    if (!object) {
+      return;
+    }
     return Object.keys(object).map((key, reactKey) => {
       if (key === 'id') {
         return;
@@ -187,8 +190,8 @@ const RecursiveTreeView = ({ data }) => {
   };
 
   const loopArray = (array) =>
-    array.map((value, key) => (
-      <div key={key}>
+    array.map((value, key: number) => (
+      <div key={key} data-elemenindex={key}>
         {isPrimative(value) ? (
           buildLeaf(value)
         ) : isArray(value) ? (
@@ -214,10 +217,17 @@ const RecursiveTreeView = ({ data }) => {
   };
 
   let parentName: string;
+  let elementIndex: number;
 
   // find parent element name to navigate to right element in case of nodes with the same name
   const findParentUlElement = (element) => {
     const target = element;
+    if (
+      target?.parentElement?.localName === 'div' &&
+      target?.parentElement?.dataset.elemenindex
+    ) {
+      elementIndex = target?.parentElement?.dataset.elemenindex;
+    }
     if (target?.parentElement?.localName === 'ul') {
       const parent =
         target.parentElement.parentElement.childNodes[1]?.outerText;
@@ -230,6 +240,7 @@ const RecursiveTreeView = ({ data }) => {
         findParentUlElement(target?.parentElement);
       } else {
         parentName = null;
+        elementIndex = null;
         return;
       }
     }
@@ -255,7 +266,9 @@ const RecursiveTreeView = ({ data }) => {
       return;
     } else if (elements.length) {
       const elementsArray = Array.from(elements);
-      const directElement = elementsArray.find((e) => e.id.includes(parent));
+      const directElement = elementsArray.find((e) =>
+        e.id.includes(`${parent}_${elementIndex}`),
+      );
       if (directElement) {
         directElement.scrollIntoView({ behavior: 'smooth' });
       } else {

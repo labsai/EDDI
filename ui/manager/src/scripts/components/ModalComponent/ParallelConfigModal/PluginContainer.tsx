@@ -35,7 +35,6 @@ const PluginContainer = (props: IPublicProps) => {
   const [isEdit, setIsEdit] = React.useState(true);
 
   const [plugin, setPlugin] = React.useState<IPlugin>();
-  console.log('plugin: ', plugin);
 
   const [loading, setLoading] = React.useState(false);
   const [error, setError] = React.useState(null);

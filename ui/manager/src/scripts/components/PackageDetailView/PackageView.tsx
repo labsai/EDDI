@@ -268,6 +268,7 @@ const PackageView = ({
                 pluginResource={PluginHelper.getResource(ext)}
                 deletePlugin={deletePlugin}
                 updatePlugin={updatePlugin}
+                openParallelConfigModal={openParallelConfigModal}
                 editDisabled={!isCurrentVersion || readOnly}
               />
             ))}
@@ -285,6 +286,7 @@ const PackageView = ({
                   deletePlugin={deletePlugin}
                   pluginResource={PluginHelper.getResource(ext)}
                   updatePlugin={updatePlugin}
+                  openParallelConfigModal={openParallelConfigModal}
                   editDisabled={!isCurrentVersion || readOnly}
                 />
               ))}

@@ -7,6 +7,7 @@ import { isChatOpenedSelector } from '../../selectors/ChatSelectors';
 import Plugin from '../PackageDetailView/PluginBoxes/Plugin';
 import { IPackage } from '../utils/AxiosFunctions';
 import clsx from 'clsx';
+import modalActionDispatchers from '../../../scripts/actions/ModalActionDispatchers';
 
 const useStyles = makeStyles({
   pluginList: {
@@ -33,6 +34,11 @@ const PluginList: React.StatelessComponent<IProps> = (props: IProps) => {
   const classes = useStyles();
 
   const { isOpened: isChatOpened } = useSelector(isChatOpenedSelector);
+
+  const openParallelConfigModal = () => {
+    modalActionDispatchers.showParallelConfigModal(props.packagePayload);
+  };
+
   return (
     <div>
       {!!props.packagePayload.packageData &&
@@ -51,6 +57,7 @@ const PluginList: React.StatelessComponent<IProps> = (props: IProps) => {
                   editDisabled={true}
                   packageId={props.packageId}
                   botId={props.botId}
+                  openParallelConfigModal={openParallelConfigModal}
                 />
               ),
             )}

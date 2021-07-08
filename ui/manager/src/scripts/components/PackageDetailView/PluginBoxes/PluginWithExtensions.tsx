@@ -21,6 +21,7 @@ interface IPublicProps {
   pluginType: IOptions;
   pluginResource: string;
   editDisabled: boolean;
+  openParallelConfigModal: () => void;
   deletePlugin(extensionKey: number): void;
   updatePlugin(extensionKey: number, newPlugin: IPluginExtensions): void;
 }
@@ -35,6 +36,7 @@ const PluginWithExtensions = ({
   editDisabled,
   deletePlugin,
   updatePlugin,
+  openParallelConfigModal,
   plugin,
 }: IPrivateProps) => {
   const classes = useStyles();
@@ -223,6 +225,7 @@ const PluginWithExtensions = ({
                     pluginResource={getResource(ext)}
                     updateExtension={updateExtension}
                     editDisabled={editDisabled}
+                    openParallelConfigModal={openParallelConfigModal}
                   />
                 ))}
               {pluginType.extensions.corrections &&
@@ -235,6 +238,7 @@ const PluginWithExtensions = ({
                     pluginResource={getResource(ext)}
                     updateExtension={updateExtension}
                     editDisabled={editDisabled}
+                    openParallelConfigModal={openParallelConfigModal}
                   />
                 ))}
             </div>

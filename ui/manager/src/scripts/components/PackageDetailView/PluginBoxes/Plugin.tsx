@@ -29,6 +29,7 @@ interface IPublicProps {
   botId?: string;
   pluginResource?: string;
   editDisabled: boolean;
+  openParallelConfigModal?: () => void;
   deletePlugin?: (extensionKey: number) => void;
   updatePlugin?: (extensionKey: number, newPlugin: IPluginExtensions) => void;
 }
@@ -45,6 +46,7 @@ const Plugin = ({
   plugin,
   packageId,
   botId,
+  openParallelConfigModal,
 }: IPrivateProps) => {
   const classes = useStyles();
   const isBotPage = location.pathname.includes('botview');
@@ -208,7 +210,7 @@ const Plugin = ({
           [classes.updateAvailableBorderColor]:
             plugin.version !== plugin.currentVersion,
         })}
-        onClick={openViewJsonModal}>
+        onClick={openParallelConfigModal || openViewJsonModal}>
         <div className={classes.pluginHeader}>
           <div
             key={'pluginBox'}
