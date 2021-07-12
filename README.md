@@ -12,6 +12,7 @@ For professional support, check out: [here](https://www.labs.ai/)
 
 Check out the full documentation [here](http://docs.labs.ai/).
 
+[![Codacy Badge](https://api.codacy.com/project/badge/Grade/b10f01e9af804e70aedaceb0dd77756d)](https://app.codacy.com/gh/labsai/EDDI?utm_source=github.com&utm_medium=referral&utm_content=labsai/EDDI&utm_campaign=Badge_Grade_Settings)
 [![Codacy Badge](https://api.codacy.com/project/badge/Grade/17f0bf1c32b346fc9232e7601327d212)](https://app.codacy.com/app/ginccc/EDDI?utm_source=github.com&utm_medium=referral&utm_content=labsai/EDDI&utm_campaign=Badge_Grade_Dashboard) [![CircleCI](https://circleci.com/gh/labsai/EDDI/tree/master.svg?style=svg)](https://circleci.com/gh/labsai/EDDI/tree/master)
 
 ## Why choose E.D.D.I over other technologies
