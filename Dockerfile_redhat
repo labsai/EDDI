@@ -21,7 +21,7 @@ RUN groupadd -f appuser && \
 RUN mkdir -p /apiserver/ && \
     mkdir /apiserver/logs && \
     mkdir /apiserver/install
-RUN chown -R appuser:appuser /apiserver
+RUN chown -R appuser /apiserver
 
 COPY /licenses/ /licenses
 COPY /apiserver/target/apiserver-$EDDI_VERSION-package.zip /apiserver/install
