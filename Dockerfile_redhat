@@ -10,6 +10,10 @@ ARG EDDI_ENV
 ARG EDDI_MEMORY_MIN
 ARG EDDI_MEMORY_MAX
 
+#set envs temporary, because of https://issues.redhat.com/browse/OPENJDK-335
+ENV NSS_WRAPPER_PASSWD=
+ENV NSS_WRAPPER_GROUP=
+
 EXPOSE 7070
 EXPOSE 7443
 EXPOSE 9001
@@ -21,7 +25,7 @@ RUN groupadd -f appuser && \
 RUN mkdir -p /apiserver/ && \
     mkdir /apiserver/logs && \
     mkdir /apiserver/install
-RUN chown -R appuser /apiserver
+RUN chown -R appuser:appuser /apiserver
 
 COPY /licenses/ /licenses
 COPY /apiserver/target/apiserver-$EDDI_VERSION-package.zip /apiserver/install
