@@ -45,7 +45,7 @@
         <dependency>
             <groupId>org.igniterealtime.smack</groupId>
             <artifactId>smack-java7</artifactId>
-            <version>4.2.3</version>
+            <version>4.3.5</version>
         </dependency>
         <!-- XMPP end -->
         <dependency>
