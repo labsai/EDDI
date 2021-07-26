@@ -48,7 +48,6 @@ const Chat = () => {
     : urlSearchParams.get('botId');
 
   const { data, isLoading, error } = useSelector(chatDataSelector);
-  console.log('data: ', data);
 
   // need to get prev conversation id
   const botVersion = data?.[0]?.botVersion;

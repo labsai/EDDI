@@ -5,7 +5,6 @@ import * as React from 'react';
 import { compose, pure, setDisplayName } from 'recompose';
 import {
   BLUE_COLOR,
-  LIGHT_GREY_COLOR2,
   WHITE_COLOR,
 } from '../../../../styles/DefaultStylingProperties';
 import Button from './Button';
@@ -39,6 +38,7 @@ const useStyles = makeStyles({
 interface IProps {
   text: string;
   disabled?: boolean;
+  noTabIndex?: boolean;
   customStyles?: {};
   classes?: ClassNameMap;
   onClick(event: React.MouseEvent): void;
@@ -49,6 +49,7 @@ const BlueButton: React.StatelessComponent<IProps> = (props: IProps) => {
   return (
     <Button
       text={props.text}
+      noTabIndex
       onClick={props.onClick}
       disabled={props.disabled}
       customStyles={props.customStyles}

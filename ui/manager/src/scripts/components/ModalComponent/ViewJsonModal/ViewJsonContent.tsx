@@ -104,7 +104,8 @@ const ViewJsonContent = (props: IPrivateProps) => {
             }
             classes={{ button: classes.button }}
             disabled={!isCurrentVersion || props.readOnly}
-            text={`Edit JSON`}
+            text={`Edit`}
+            noTabIndex
           />
         </div>
         <div className={classes.bottomHeader}>

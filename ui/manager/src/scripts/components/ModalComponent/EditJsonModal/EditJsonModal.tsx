@@ -146,7 +146,7 @@ const EditJsonModal = (props: IPrivateProps) => {
             <BlueButton
               classes={{ button: classes.showViewJson }}
               onClick={() => props.showViewJson()}
-              text={'View JSON'}
+              text={'View'}
             />
           )}
           {unsavedChanges() && (
@@ -184,7 +184,7 @@ const EditJsonModal = (props: IPrivateProps) => {
             [editClasses.tabDisabled]: selectedTab !== TabEnum.editor,
           })}
           onClick={() => setSelectedTab(TabEnum.editor)}>
-          {'Editor'}
+          {'JSON Editor'}
         </div>
       </div>
       {isValidJson && <JsonIsValid />}

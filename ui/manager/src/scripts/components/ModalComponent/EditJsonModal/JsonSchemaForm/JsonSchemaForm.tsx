@@ -145,6 +145,7 @@ const useStyles = makeStyles({
   readOnly: {
     '& button': {
       display: 'none',
+      pointerEvents: 'none',
     },
     '& input, & select': {
       '&:disabled': {
@@ -155,6 +156,7 @@ const useStyles = makeStyles({
       backgroundColor: DARK_GREY_COLOR,
       opacity: 0.6,
       color: WHITE_COLOR,
+      pointerEvents: 'none',
     },
     '& *': {
       ...notVerticalSpacing,
@@ -171,11 +173,10 @@ interface IProps {
   validate(): void;
 }
 
-let yourForm;
-
 const JsonSchemaForm: React.StatelessComponent<IProps> = (props: IProps) => {
   const classes = useStyles();
   const readOnly = props.readOnly;
+  const formRef = React.useRef(null);
 
   React.useEffect(() => {
     const overlay = document.getElementById('modal-overlay');
@@ -213,7 +214,7 @@ const JsonSchemaForm: React.StatelessComponent<IProps> = (props: IProps) => {
     }
     setTimeout(() => {
       disableInputs();
-    }, 2000);
+    }, 800);
 
     return () => disableInputs(false);
   }, []);
@@ -222,6 +223,10 @@ const JsonSchemaForm: React.StatelessComponent<IProps> = (props: IProps) => {
     return null;
   }
   const data = JSON.parse(props.data);
+
+  const handleSubmit = () => {
+    props.validate();
+  };
 
   return (
     <div
@@ -235,14 +240,12 @@ const JsonSchemaForm: React.StatelessComponent<IProps> = (props: IProps) => {
       <div className={clsx(classes.form, 'json-form')}>
         <Button
           text={'Validate form'}
-          onClick={() => yourForm.submit()}
+          onClick={handleSubmit}
           classes={{ button: classes.validateButton }}
         />
         {!!props.schema && !!props.data && (
           <Form
-            ref={(form) => {
-              yourForm = form;
-            }}
+            ref={formRef}
             className={readOnly ? classes.readOnly : null}
             additionalMetaSchemas={[metaSchema4]}
             schema={props.schema}
@@ -251,6 +254,7 @@ const JsonSchemaForm: React.StatelessComponent<IProps> = (props: IProps) => {
               props.onChange(JSON.stringify(data.formData, null, '\t'))
             }
             onSubmit={() => props.validate()}
+            liveValidate
             onError={() => console.log('errors')}>
             <br />
           </Form>
