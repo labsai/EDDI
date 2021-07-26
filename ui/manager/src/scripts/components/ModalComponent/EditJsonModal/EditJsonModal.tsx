@@ -165,7 +165,7 @@ const EditJsonModal = (props: IPrivateProps) => {
             onClick={() => updateJson(true)}
             disabled={!unsavedChanges || !isJsonString()}
             classes={{ button: classes.greenButton }}
-            text={'Save & test'}
+            text={'Save & Run'}
           />
         </div>
       </div>

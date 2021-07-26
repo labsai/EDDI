@@ -86,6 +86,7 @@ const Extension = ({
       )}
       <button
         onClick={openParallelConfigModal}
+        disabled={_.isEmpty(pluginResource)}
         className={clsx(classes.extensionBox, {
           [classes.clickablePluginBox]:
             plugin.version === plugin.currentVersion && !_.isEmpty(plugin),

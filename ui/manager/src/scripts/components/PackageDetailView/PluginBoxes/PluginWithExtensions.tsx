@@ -216,35 +216,41 @@ const PluginWithExtensions = ({
           <div>
             <div className={classes.extensionList}>
               {pluginType.extensions.dictionaries &&
-                pluginType.extensions.dictionaries.map((ext, i) => (
-                  <Extension
-                    key={i}
-                    index={i}
-                    pluginType={ext}
-                    deleteExtension={deleteExtension}
-                    pluginResource={getResource(ext)}
-                    updateExtension={updateExtension}
-                    editDisabled={editDisabled}
-                    openParallelConfigModal={() =>
-                      openParallelConfigModal(getResource(ext))
-                    }
-                  />
-                ))}
+                pluginType.extensions.dictionaries.map((ext, i) => {
+                  const pluginResource = getResource(ext);
+                  return (
+                    <Extension
+                      key={i}
+                      index={i}
+                      pluginType={ext}
+                      deleteExtension={deleteExtension}
+                      pluginResource={pluginResource}
+                      updateExtension={updateExtension}
+                      editDisabled={!pluginResource || editDisabled}
+                      openParallelConfigModal={() =>
+                        openParallelConfigModal(pluginResource)
+                      }
+                    />
+                  );
+                })}
               {pluginType.extensions.corrections &&
-                pluginType.extensions.corrections.map((ext, i) => (
-                  <Extension
-                    key={i}
-                    index={i}
-                    pluginType={ext}
-                    deleteExtension={deleteExtension}
-                    pluginResource={getResource(ext)}
-                    updateExtension={updateExtension}
-                    editDisabled={editDisabled}
-                    openParallelConfigModal={() =>
-                      openParallelConfigModal(getResource(ext))
-                    }
-                  />
-                ))}
+                pluginType.extensions.corrections.map((ext, i) => {
+                  const pluginResource = getResource(ext);
+                  return (
+                    <Extension
+                      key={i}
+                      index={i}
+                      pluginType={ext}
+                      deleteExtension={deleteExtension}
+                      pluginResource={pluginResource}
+                      updateExtension={updateExtension}
+                      editDisabled={!pluginResource || editDisabled}
+                      openParallelConfigModal={() =>
+                        openParallelConfigModal(pluginResource)
+                      }
+                    />
+                  );
+                })}
             </div>
           </div>
         )}

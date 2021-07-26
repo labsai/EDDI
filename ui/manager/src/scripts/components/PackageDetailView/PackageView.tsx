@@ -249,7 +249,7 @@ const PackageView = ({
           onClick={() => saveChanges()}
         />
         <BlueButton
-          text={'Save & test'}
+          text={'Save & Run'}
           disabled={!unsavedChanges()}
           onClick={() => saveChanges(true)}
           classes={{ button: classes.greenButton }}

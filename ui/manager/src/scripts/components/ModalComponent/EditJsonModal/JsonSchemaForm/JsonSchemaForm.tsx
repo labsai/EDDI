@@ -31,21 +31,6 @@ const useStyles = makeStyles({
     display: 'flex',
     flexDirection: 'row',
   },
-  readOnly: {
-    '& button': {
-      display: 'none',
-    },
-    '& input, & select': {
-      '&:disabled': {
-        backgroundColor: DARK_GREY_COLOR,
-        opacity: 0.6,
-        color: WHITE_COLOR,
-      },
-    },
-    '& *': {
-      ...notVerticalSpacing,
-    },
-  },
   formTree: {
     flex: 1,
     paddingLeft: '10px',
@@ -157,6 +142,25 @@ const useStyles = makeStyles({
       transition: 'border 0s ease, padding 0s ease',
     },
   },
+  readOnly: {
+    '& button': {
+      display: 'none',
+    },
+    '& input, & select': {
+      '&:disabled': {
+        backgroundColor: DARK_GREY_COLOR,
+        opacity: 0.6,
+        color: WHITE_COLOR,
+      },
+      backgroundColor: DARK_GREY_COLOR,
+      opacity: 0.6,
+      color: WHITE_COLOR,
+    },
+    '& *': {
+      ...notVerticalSpacing,
+    },
+  },
+  jsonForm: {},
 });
 
 interface IProps {
@@ -187,21 +191,17 @@ const JsonSchemaForm: React.StatelessComponent<IProps> = (props: IProps) => {
   }, []);
 
   const disableInputs = (disabled = true) => {
-    const inputs = document
-      .getElementById('json-form')
-      .querySelectorAll('input');
-    const selects = document
-      .getElementById('json-form')
-      .querySelectorAll('select');
+    const inputs = document.querySelectorAll('.json-form input');
+    const selects = document.querySelectorAll('.json-form select');
     if (inputs) {
       const inputsArray = Array.from(inputs);
-      inputsArray?.forEach?.((e) => {
+      inputsArray?.forEach?.((e: HTMLInputElement) => {
         e.disabled = disabled;
       });
     }
     if (selects) {
       const selectsArray = Array.from(selects);
-      selectsArray?.forEach?.((e) => {
+      selectsArray?.forEach?.((e: HTMLSelectElement) => {
         e.disabled = disabled;
       });
     }
@@ -213,7 +213,7 @@ const JsonSchemaForm: React.StatelessComponent<IProps> = (props: IProps) => {
     }
     setTimeout(() => {
       disableInputs();
-    }, 800);
+    }, 2000);
 
     return () => disableInputs(false);
   }, []);
@@ -232,7 +232,7 @@ const JsonSchemaForm: React.StatelessComponent<IProps> = (props: IProps) => {
       <div className={classes.formTree}>
         <RecursiveTreeView data={data} />
       </div>
-      <div className={classes.form} id="json-form">
+      <div className={clsx(classes.form, 'json-form')}>
         <Button
           text={'Validate form'}
           onClick={() => yourForm.submit()}
@@ -243,6 +243,7 @@ const JsonSchemaForm: React.StatelessComponent<IProps> = (props: IProps) => {
             ref={(form) => {
               yourForm = form;
             }}
+            className={readOnly ? classes.readOnly : null}
             additionalMetaSchemas={[metaSchema4]}
             schema={props.schema}
             formData={data}

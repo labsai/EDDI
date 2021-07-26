@@ -210,6 +210,7 @@ const Plugin = ({
           [classes.updateAvailableBorderColor]:
             plugin.version !== plugin.currentVersion,
         })}
+        disabled={_.isEmpty(pluginResource)}
         onClick={openParallelConfigModal || openViewJsonModal}>
         <div className={classes.pluginHeader}>
           <div

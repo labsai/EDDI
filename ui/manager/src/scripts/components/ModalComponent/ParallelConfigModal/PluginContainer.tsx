@@ -32,7 +32,7 @@ interface IPublicProps {
 
 const PluginContainer = (props: IPublicProps) => {
   const classes = useStyles();
-  const [isEdit, setIsEdit] = React.useState(true);
+  const [isEdit, setIsEdit] = React.useState(false);
 
   const [plugin, setPlugin] = React.useState<IPlugin>();
 

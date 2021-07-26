@@ -19,10 +19,12 @@ const ParallelConfigModal = ({ packagePayload }: IPublicProps) => {
   const sliderRef = React.useRef(null);
   const pluginResource = useSelector(pluginResourceSelector);
   const plugins = [];
+
   packagePayload.packageData.packageExtensions.forEach((p) => {
     const isParser = p.type.includes('parser');
     if (isParser) {
       plugins.push.apply(plugins, p.extensions.dictionaries);
+      plugins.push.apply(plugins, p.extensions.corrections);
     } else {
       if (p.config?.uri) {
         plugins.push({ type: p.type, config: p.config });
@@ -31,9 +33,11 @@ const ParallelConfigModal = ({ packagePayload }: IPublicProps) => {
   });
   const classes = useStyles();
 
+  const filteredPlugins = plugins?.filter((p) => !!p?.config?.uri);
+
   const initialSlide =
-    (plugins &&
-      plugins?.findIndex?.((p) => p.config?.uri === pluginResource)) ||
+    (filteredPlugins &&
+      filteredPlugins?.findIndex?.((p) => p.config?.uri === pluginResource)) ||
     0;
 
   const settings = {
@@ -63,14 +67,14 @@ const ParallelConfigModal = ({ packagePayload }: IPublicProps) => {
         <WhiteButton onClick={handleNext} text={'Next Config'} />
       </div>
       <div className={classes.parallelConfigContainer}>
-        {_.isEmpty(plugins) && (
+        {_.isEmpty(filteredPlugins) && (
           <div className={classes.empty}>All resources are empty</div>
         )}
         <Slider
           ref={sliderRef}
           {...settings}
           initialSlide={initialSlide === -1 ? 0 : initialSlide}>
-          {plugins.map((p, i) => {
+          {filteredPlugins.map((p, i) => {
             return (
               <PluginContainer
                 key={p.config?.uri + i}
