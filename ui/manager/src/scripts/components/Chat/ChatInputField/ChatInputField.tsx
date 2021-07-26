@@ -17,6 +17,7 @@ const ChatInputField = ({ handleReplyInChat, delay }: IChatInputField) => {
   const handleSubmit = (e: React.MouseEvent<HTMLFormElement>) => {
     e.preventDefault();
     handleReplyInChat({ value });
+    setValue('');
   };
   const handleChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
     setValue(e.target.value);

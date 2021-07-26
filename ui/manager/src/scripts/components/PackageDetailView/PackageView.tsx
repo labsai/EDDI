@@ -286,6 +286,7 @@ const PackageView = ({
                 <Plugin
                   key={key}
                   pluginType={ext}
+                  packageId={packagePayload.id}
                   deletePlugin={deletePlugin}
                   pluginResource={PluginHelper.getResource(ext)}
                   updatePlugin={updatePlugin}
