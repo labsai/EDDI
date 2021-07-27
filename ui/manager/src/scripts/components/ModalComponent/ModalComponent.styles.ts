@@ -306,6 +306,10 @@ const useStyles = makeStyles({
   showViewJson: {
     marginRight: '10px',
   },
+  createBotButton: {
+    float: 'right',
+    marginLeft: 'auto',
+  },
 });
 
 export default useStyles;

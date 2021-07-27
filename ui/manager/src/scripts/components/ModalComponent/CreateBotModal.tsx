@@ -1,9 +1,9 @@
 import * as React from 'react';
 import { compose, pure, setDisplayName } from 'recompose';
-import { BLUE_COLOR } from '../../../styles/DefaultStylingProperties';
 import eddiApiActionDispatchers from '../../actions/EddiApiActionDispatchers';
 import modalActionDispatchers from '../../actions/ModalActionDispatchers';
 import { historyPush } from '../../history';
+import WhiteButton from '../Assets/Buttons/WhiteButton';
 import { createNewBot } from '../utils/AxiosFunctions';
 import useStyles from './ModalComponent.styles';
 import './ModalComponent.styles.scss';
@@ -13,17 +13,6 @@ const CreateBotModal = () => {
   const [description, setDescription] = React.useState('');
 
   const classes = useStyles();
-
-  const getButtonStyle = () => {
-    if (!name) {
-      return { backgroundColor: '#c4c9d2' };
-    } else {
-      return {
-        backgroundColor: BLUE_COLOR,
-        cursor: 'pointer',
-      };
-    }
-  };
 
   const createBot = async () => {
     const botID = await createNewBot(name, description);
@@ -37,13 +26,12 @@ const CreateBotModal = () => {
       <div className={classes.modalHeader}>
         <div className={classes.modalTopHeader}>
           <h2 className={classes.botHeaderText}>{'Create new bot'}</h2>
-          <button
+          <WhiteButton
             disabled={!name}
-            style={getButtonStyle()}
-            className={classes.createNewBotButton}
-            onClick={() => createBot()}>
-            {'Create bot'}
-          </button>
+            text={'Create bot'}
+            onClick={createBot}
+            classes={{ button: classes.createBotButton }}
+          />
         </div>
       </div>
       <div className={classes.content}>
