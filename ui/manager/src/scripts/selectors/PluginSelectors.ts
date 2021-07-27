@@ -30,6 +30,9 @@ export function pluginSelector(state: IAppState, props: IPluginSelectorProps) {
     error: state.pluginState.error,
   };
 }
+export function pluginTempDataSelector(state: IAppState) {
+  return state.pluginState.tempPluginsData;
+}
 
 export const PluginStateSelector: (state: IAppState) => IPluginState = (
   state,

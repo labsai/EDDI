@@ -1,3 +1,4 @@
+import { JSONSchema4 } from 'json-schema';
 import { Action } from 'redux';
 import {
   IBot,
@@ -114,6 +115,9 @@ import {
   UPDATE_PACKAGE_FAILED,
   UPDATE_PACKAGE_SUCCESS,
   UPDATE_PLUGIN_SUCCESS,
+  EDIT_PLUGIN_DATA,
+  MASS_UPDATE_JSON_DATA,
+  CLEAR_EDITED_PLUGIN_DATA,
 } from './EddiApiActionTypes';
 
 export interface IFetchBotsAction extends Action {
@@ -798,6 +802,21 @@ export function updateJsonDataAction(
     resource,
     data,
     type: UPDATE_JSON_DATA,
+  };
+}
+
+export interface IMassUpdateJsonDataAction extends Action {
+  plugins: { resource: string; data: any }[];
+  deploy: boolean;
+}
+export function massUpdateJsonDataAction(
+  plugins: { resource: string; data: any }[],
+  deploy: boolean = false,
+): IMassUpdateJsonDataAction {
+  return {
+    plugins,
+    deploy,
+    type: MASS_UPDATE_JSON_DATA,
   };
 }
 
@@ -1542,5 +1561,33 @@ export function fetchBotLogsFailedAction(error: Error): IFetchBotsFailedAction {
 export function resetBotLogs() {
   return {
     type: RESET_BOT_LOGS,
+  };
+}
+
+export interface IEditPluginDataAction extends Action {
+  pluginId: string;
+  data: string;
+  resource: string;
+  schema: JSONSchema4;
+}
+
+export function editPluginDataAction(
+  pluginId: string,
+  data: string,
+  resource: string,
+  schema: JSONSchema4,
+): IEditPluginDataAction {
+  return {
+    pluginId,
+    data,
+    resource,
+    schema,
+    type: EDIT_PLUGIN_DATA,
+  };
+}
+
+export function clearEditedPluginDataAction() {
+  return {
+    type: CLEAR_EDITED_PLUGIN_DATA,
   };
 }

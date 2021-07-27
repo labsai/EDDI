@@ -1,9 +1,10 @@
 import * as _ from 'lodash';
-import { call, put, takeEvery } from 'redux-saga/effects';
+import { all, call, put, takeEvery } from 'redux-saga/effects';
 import { openChatAction } from '../actions/ChatActions';
 import {
   addNewPackageToBotsFailedAction,
   addNewPackageToBotsSuccessAction,
+  clearEditedPluginDataAction,
   createNewBotFailedAction,
   createNewBotSuccessAction,
   createNewConfigFailedAction,
@@ -74,6 +75,7 @@ import {
   IFetchPackagesUsingPluginAction,
   IFetchPluginAction,
   IFetchPluginsAction,
+  IMassUpdateJsonDataAction,
   IUndeployBotAction,
   IUpdateBotAction,
   IUpdateBotPackagesAction,
@@ -123,6 +125,7 @@ import {
   FETCH_PACKAGES_USING_PLUGIN,
   FETCH_PLUGIN,
   FETCH_PLUGINS,
+  MASS_UPDATE_JSON_DATA,
   UNDEPLOY_BOT,
   UPDATE_BOT,
   UPDATE_BOTS,
@@ -181,6 +184,7 @@ import {
 } from '../components/utils/AxiosFunctions';
 import * as Edditypes from '../components/utils/EddiTypes';
 import { BOT, PACKAGE } from '../components/utils/EddiTypes';
+import getIdsFromPath from '../components/utils/helpers/getIdsFromPath';
 import { parsePlugins } from '../components/utils/helpers/PluginParser';
 import Parser from '../components/utils/Parser';
 
@@ -627,6 +631,62 @@ export function* updateJsonData(action: IUpdateJsonDataAction): Iterator<{}> {
 
 export function* watchUpdateJsonData(): Iterator<{}> {
   yield takeEvery(UPDATE_JSON_DATA, updateJsonData);
+}
+
+function* iterateResources(resource: string, data: any) {
+  const { packageId } = getIdsFromPath();
+  yield call(axiosUpdateJsonData, resource, JSON.parse(data));
+  const updatedPlugin: IPlugin = yield call(getCurrentPlugin, resource);
+  yield put(updatePluginSuccessAction(updatedPlugin, true));
+  const currentPackage: IPackage = yield call(getCurrentPackage, packageId);
+  const updatedPackage: IPackage = yield call(
+    axiosUpdatePackage,
+    currentPackage,
+    updatedPlugin.resource,
+  );
+  yield put(updatePackageSuccessAction(updatedPackage, true));
+  return updatedPackage.resource;
+}
+
+export function* massUpdateJsonData(
+  action: IMassUpdateJsonDataAction,
+): Iterator<{}> {
+  try {
+    const { botId } = getIdsFromPath();
+    yield put(showLoader());
+
+    let updatedPackage: string;
+
+    for (let p of action.plugins) {
+      const newPackage = yield call(iterateResources, p.resource, p.data);
+      updatedPackage = newPackage;
+    }
+
+    const currentBot: IBot = yield call(getCurrentBot, botId);
+    const botToUpdate = {
+      botResource: currentBot?.resource as string,
+      packageResources: [updatedPackage],
+    };
+
+    const updatedBots: IBot[] = yield call(axiosUpdateBots, [botToUpdate]);
+    yield put(updateBotsSuccessAction(updatedBots));
+
+    if (action.deploy && !_.isEmpty(updatedBots)) {
+      yield call(deployBot, {
+        botResource: updatedBots[0].resource,
+      } as IDeployBotAction);
+      yield put(openChatAction());
+    }
+    yield put(clearEditedPluginDataAction());
+    yield put(hideLoader());
+  } catch (err) {
+    yield put(updateJsonDataFailedAction(err));
+    yield put(hideLoader());
+  }
+}
+
+export function* watchMassUpdateJsonData(): Iterator<{}> {
+  yield takeEvery(MASS_UPDATE_JSON_DATA, massUpdateJsonData);
 }
 
 export function* updatePackages(action: IUpdatePackagesAction): Iterator<{}> {

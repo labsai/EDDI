@@ -8,8 +8,13 @@ import '../ModalComponent.styles.scss';
 import useStyles from './ParallelConfigModal.styles';
 import PluginContainer from './PluginContainer';
 import * as _ from 'lodash';
-import { pluginResourceSelector } from '../../../../scripts/selectors/ModalSelectors';
+import { pluginResourceSelector } from '../../../selectors/ModalSelectors';
 import { useSelector } from 'react-redux';
+import BlueButton from '../../Assets/Buttons/BlueButton';
+import { pluginTempDataSelector } from '../../../selectors/PluginSelectors';
+import validateJson from '../../utils/helpers/ValidateJson';
+import eddiApiActionDispatchers from '../../../actions/EddiApiActionDispatchers';
+import modalActionDispatchers from '../../../actions/ModalActionDispatchers';
 
 interface IPublicProps {
   packagePayload: IPackage;
@@ -57,6 +62,32 @@ const ParallelConfigModal = ({ packagePayload }: IPublicProps) => {
     sliderRef?.current?.slickPrev();
   };
 
+  const pluginTempData = useSelector(pluginTempDataSelector);
+
+  const packageHasChanges = !_.isEmpty(pluginTempData);
+
+  const massUpdateJson = (deploy: boolean = false) => {
+    Promise.all(
+      pluginTempData.map((d) => {
+        if (!validateJson(d.schema, d.data)) {
+          return d;
+        }
+      }),
+    )
+      .then(() => {
+        eddiApiActionDispatchers.massUpdateJsonDataAction(
+          pluginTempData,
+          deploy,
+        );
+        if (deploy) {
+          modalActionDispatchers.closeModal();
+        }
+      })
+      .catch((e) => {
+        console.log('Some errors in JSON: ', e);
+      });
+  };
+
   return (
     <div className={classes.modalContainer}>
       <div className={classes.modalHeader}>
@@ -65,6 +96,19 @@ const ParallelConfigModal = ({ packagePayload }: IPublicProps) => {
           {'Parallel config editing'}
         </div>
         <WhiteButton onClick={handleNext} text={'Next Config'} />
+      </div>
+      <div className={classes.actionButtons}>
+        <BlueButton
+          onClick={() => massUpdateJson()}
+          text={'Save changes'}
+          disabled={!packageHasChanges}
+        />
+        <BlueButton
+          onClick={() => massUpdateJson(true)}
+          classes={{ button: classes.greenButton }}
+          text={'Save & Run'}
+          disabled={!packageHasChanges}
+        />
       </div>
       <div className={classes.parallelConfigContainer}>
         {_.isEmpty(filteredPlugins) && (

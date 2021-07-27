@@ -2,14 +2,16 @@ import clsx from 'clsx';
 import { JSONSchema4 } from 'json-schema';
 import * as _ from 'lodash';
 import * as React from 'react';
-import { connect } from 'react-redux';
+import { connect, useDispatch } from 'react-redux';
 import { compose, pure, setDisplayName } from 'recompose';
 import eddiApiActionDispatchers from '../../../actions/EddiApiActionDispatchers';
+import { editPluginDataAction } from '../../../actions/EddiApiActions';
 import modalActionDispatchers from '../../../actions/ModalActionDispatchers';
 import { schemaSelector } from '../../../selectors/SystemSelectors';
 import BlueButton from '../../Assets/Buttons/BlueButton';
 import { getTypeFromResource } from '../../utils/ApiFunctions';
 import { IDetailedDescriptor } from '../../utils/AxiosFunctions';
+import getIdsFromPath from '../../utils/helpers/getIdsFromPath';
 import { compileJsonSchema, IJsonError } from '../../utils/helpers/JsonHelpers';
 import useStyles from '../ModalComponent.styles';
 import '../ModalComponent.styles.scss';
@@ -38,15 +40,9 @@ interface IPrivateProps extends IPublicProps {
 }
 
 const EditJsonModal = (props: IPrivateProps) => {
-  const isPackagePage = location.pathname.includes('packageview');
-  const isBotPage = location.pathname.includes('botview');
-  const urlSearchParams = new URLSearchParams(location.search);
-  const botId = isBotPage
-    ? location.pathname.split('/')?.[2]
-    : urlSearchParams.get('botId');
-  const packageId = isPackagePage
-    ? location.pathname.split('/')?.[2]
-    : urlSearchParams.get('packageId');
+  const dispatch = useDispatch();
+
+  const { botId, packageId } = getIdsFromPath();
   // todo: reduxify this component and editor
 
   const [editorText, setEditorText] = React.useState('');
@@ -69,6 +65,14 @@ const EditJsonModal = (props: IPrivateProps) => {
 
   const onChange = (value) => {
     setEditorText(value);
+    dispatch(
+      editPluginDataAction(
+        props.descriptor.id,
+        value,
+        props.resource,
+        props.schema,
+      ),
+    );
     setIsValidJson(false);
   };
 
@@ -156,17 +160,6 @@ const EditJsonModal = (props: IPrivateProps) => {
               {'Discard changes'}
             </button>
           )}
-          <BlueButton
-            onClick={() => updateJson()}
-            disabled={!unsavedChanges || !isJsonString()}
-            text={'Save changes'}
-          />
-          <BlueButton
-            onClick={() => updateJson(true)}
-            disabled={!unsavedChanges || !isJsonString()}
-            classes={{ button: classes.greenButton }}
-            text={'Save & Run'}
-          />
         </div>
       </div>
       <div className={editClasses.tabs}>

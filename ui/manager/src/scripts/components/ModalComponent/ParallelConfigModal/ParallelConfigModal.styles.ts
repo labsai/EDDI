@@ -51,6 +51,15 @@ const styles = makeStyles({
     alignItems: 'center',
     padding: '0 20px',
   },
+  actionButtons: {
+    backgroundColor: BLACK_COLOR,
+    width: '100%',
+    display: 'flex',
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'flex-end',
+    padding: '20px',
+  },
   buttonMargin: {
     marginRight: '30px',
   },
@@ -106,6 +115,22 @@ const styles = makeStyles({
     color: WHITE_COLOR,
     textAlign: 'center',
     fontSize: SMALL_FONT2,
+  },
+  greenButton: {
+    backgroundColor: '#4BCA81',
+    marginLeft: '10px',
+
+    '&:hover': {
+      backgroundColor: 'transparent',
+      color: '#4BCA81',
+      border: '2px solid #4BCA81',
+    },
+    '&:active': {
+      backgroundColor: '#4BCA81',
+    },
+    '&:disabled': {
+      backgroundColor: '#4BCA81',
+    },
   },
 });
 export default styles;

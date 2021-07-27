@@ -35,6 +35,7 @@ import {
   watchFetchConversation,
   watchEndConversation,
   watchDeployExampleBots,
+  watchMassUpdateJsonData,
 } from './EddiApiSaga';
 import {
   watchBasicAuthSignIn,
@@ -87,6 +88,7 @@ function* root() {
   yield fork(watchDeployExampleBots);
   yield fork(watchChat);
   yield fork(watchBotLogs);
+  yield fork(watchMassUpdateJsonData);
 }
 
 export const run: () => Task = () => sagaMiddleware.run(root);

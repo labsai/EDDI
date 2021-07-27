@@ -1,9 +1,5 @@
 import * as _ from 'lodash';
 import * as React from 'react';
-import { useSelector } from 'react-redux';
-import eddiApiActionDispatchers from '../../../../scripts/actions/EddiApiActionDispatchers';
-import { IAppState } from 'src/scripts/reducers';
-import { pluginSelector } from '../../../selectors/PluginSelectors';
 import { getPlugin, IPlugin } from '../../utils/AxiosFunctions';
 import EditJsonModal from '../EditJsonModal/EditJsonModal';
 import ViewJsonContent from '../ViewJsonModal/ViewJsonContent';

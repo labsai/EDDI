@@ -158,3 +158,6 @@ export const FETCH_BOT_LOGS: string = 'FETCH_BOT_LOGS';
 export const FETCH_BOT_LOGS_SUCCESS: string = 'FETCH_BOT_LOGS_SUCCESS';
 export const FETCH_BOT_LOGS_FAILED: string = 'FETCH_BOT_LOGS_FAILED';
 export const RESET_BOT_LOGS: string = 'RESET_BOT_LOGS';
+export const EDIT_PLUGIN_DATA: string = 'EDIT_PLUGIN_DATA';
+export const CLEAR_EDITED_PLUGIN_DATA: string = 'CLEAR_EDITED_PLUGIN_DATA';
+export const MASS_UPDATE_JSON_DATA: string = 'MASS_UPDATE_JSON_DATA';
