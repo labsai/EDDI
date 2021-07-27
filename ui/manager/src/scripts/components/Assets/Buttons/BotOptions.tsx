@@ -5,6 +5,8 @@ import MenuItem from '@material-ui/core/MenuItem';
 import { makeStyles } from '@material-ui/core/styles';
 import Typography from '@material-ui/core/Typography';
 import ArrowRightOutlinedIcon from '@material-ui/icons/ArrowRightOutlined';
+import LogsIcon from '@material-ui/icons/Dns';
+import ImportExportIcon from '@material-ui/icons/ImportExport';
 import ChatBubbleIcon from '@material-ui/icons/ChatBubble';
 import CloudDownloadOutlinedIcon from '@material-ui/icons/CloudDownloadOutlined';
 import CreateIcon from '@material-ui/icons/Create';
@@ -29,6 +31,8 @@ import { WHITE_COLOR } from '../../../../styles/DefaultStylingProperties';
 interface IPublicProps {
   bot: IBot;
   apiUrl: string;
+  openBotLogs?: () => void;
+  exportBot?: () => void;
 }
 
 interface IPrivateProps extends IPublicProps {
@@ -57,7 +61,13 @@ const useStyles = makeStyles({
   },
 });
 
-const BotOptions = ({ bot, readOnly, apiUrl }: IPrivateProps) => {
+const BotOptions = ({
+  bot,
+  readOnly,
+  apiUrl,
+  openBotLogs,
+  exportBot,
+}: IPrivateProps) => {
   const classes = useStyles();
   const [anchorEl, setAnchorEl] = React.useState<null | HTMLElement>(null);
   const [anchorSubEl, setAnchorSubEl] =
@@ -139,6 +149,28 @@ const BotOptions = ({ bot, readOnly, apiUrl }: IPrivateProps) => {
             <ForumOutlinedIcon fontSize="small" />
           </ListItemIcon>
           <Typography variant="inherit">{'View Conversations'}</Typography>
+        </MenuItem>
+        <MenuItem
+          key={'View Logs'}
+          onClick={() => {
+            openBotLogs();
+            handleClose();
+          }}>
+          <ListItemIcon>
+            <LogsIcon fontSize="small" />
+          </ListItemIcon>
+          <Typography variant="inherit">{'View Logs'}</Typography>
+        </MenuItem>
+        <MenuItem
+          key={'Export Bot'}
+          onClick={() => {
+            exportBot();
+            handleClose();
+          }}>
+          <ListItemIcon>
+            <ImportExportIcon fontSize="small" />
+          </ListItemIcon>
+          <Typography variant="inherit">{'Export Bot'}</Typography>
         </MenuItem>
         <MenuItem
           key={'Deploy'}
