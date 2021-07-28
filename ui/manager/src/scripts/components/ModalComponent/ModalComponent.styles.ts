@@ -37,6 +37,10 @@ const useStyles = makeStyles({
     textAlign: 'left',
     display: 'flex',
     flexDirection: 'column',
+
+    '& textarea, input': {
+      caretColor: 'white',
+    },
   },
   updateModalContent: {
     display: 'block',
@@ -96,7 +100,6 @@ const useStyles = makeStyles({
     backgroundColor: BLACK_COLOR,
     borderTopLeftRadius: '4px',
     borderTopRightRadius: '4px',
-    height: '156px',
     width: '100%',
   },
   tallModalHeader: {
@@ -124,7 +127,8 @@ const useStyles = makeStyles({
     display: 'flex',
     marginLeft: '50px',
     marginRight: '40px',
-    paddingTop: '50px',
+    padding: '20px 0',
+    alignItems: 'center',
   },
   modalTopHeaderCenter: {
     flex: 1,
@@ -217,6 +221,7 @@ const useStyles = makeStyles({
     backgroundColor: RED_COLOR,
     border: 'transparent',
     transition: 'background-color 0.3s ease',
+    marginRight: '10px',
 
     '&:hover': {
       backgroundColor: 'transparent',
@@ -304,6 +309,9 @@ const useStyles = makeStyles({
       border: '2px solid #4BCA81',
     },
     '&:active': {
+      backgroundColor: '#4BCA81',
+    },
+    '&:disabled': {
       backgroundColor: '#4BCA81',
     },
   },

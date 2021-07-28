@@ -1,6 +1,6 @@
 import { makeStyles } from '@material-ui/core/styles';
 import * as React from 'react';
-import { connect } from 'react-redux';
+import { connect, useDispatch } from 'react-redux';
 import { compose, pure, setDisplayName } from 'recompose';
 import { DARK_GREY_COLOR } from '../../../styles/DefaultStylingProperties';
 import ModalActionDispatchers from '../../actions/ModalActionDispatchers';
@@ -29,6 +29,7 @@ import UpdatePackagesModal from './UpdateConfigsModal/UpdatePackagesModal';
 import UpdatePackageModal from './UpdatePackageModal';
 import ViewJsonModal from './ViewJsonModal/ViewJsonModal';
 import clsx from 'clsx';
+import { clearEditedPluginDataAction } from '../../actions/EddiApiActions';
 
 const useStyles = makeStyles({
   content: {
@@ -109,6 +110,7 @@ interface IPrivateProps {
 interface IPublicProps {}
 
 const ModalComponentFrame = (props: IPrivateProps) => {
+  const dispatch = useDispatch();
   const [packageName, setPackageName] = React.useState('');
   const [packageDescription, setPackageDescription] = React.useState('');
 
@@ -222,6 +224,7 @@ const ModalComponentFrame = (props: IPrivateProps) => {
 
   const closeModal = () => {
     ModalActionDispatchers.closeModal();
+    dispatch(clearEditedPluginDataAction());
   };
 
   if (props.isModalOpen) {

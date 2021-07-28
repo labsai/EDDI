@@ -3,8 +3,9 @@ import clsx from 'clsx';
 import { JSONSchema4 } from 'json-schema';
 import * as _ from 'lodash';
 import * as React from 'react';
-import { connect, useDispatch } from 'react-redux';
+import { connect, useDispatch, useSelector } from 'react-redux';
 import { compose, pure, setDisplayName } from 'recompose';
+import { modalModeSelector } from '../../../selectors/ModalSelectors';
 import eddiApiActionDispatchers from '../../../actions/EddiApiActionDispatchers';
 import { editPluginDataAction } from '../../../actions/EddiApiActions';
 import modalActionDispatchers from '../../../actions/ModalActionDispatchers';
@@ -14,6 +15,7 @@ import { getTypeFromResource } from '../../utils/ApiFunctions';
 import { IDetailedDescriptor } from '../../utils/AxiosFunctions';
 import getIdsFromPath from '../../utils/helpers/getIdsFromPath';
 import { compileJsonSchema, IJsonError } from '../../utils/helpers/JsonHelpers';
+import { ModalEnum } from '../../utils/ModalEnum';
 import useStyles from '../ModalComponent.styles';
 import '../ModalComponent.styles.scss';
 import useEditStyles from './EditJsonModal.styles';
@@ -42,6 +44,8 @@ interface IPrivateProps extends IPublicProps {
 
 const EditJsonModal = (props: IPrivateProps) => {
   const dispatch = useDispatch();
+  const modalMode = useSelector(modalModeSelector);
+  const isParallelConfig = modalMode === ModalEnum.parallelConfig;
 
   const { botId, packageId } = getIdsFromPath();
   // todo: reduxify this component and editor
@@ -163,6 +167,21 @@ const EditJsonModal = (props: IPrivateProps) => {
               onClick={handleDiscardChanges}
               text={'Discard changes'}
             />
+          )}
+          {!isParallelConfig && (
+            <>
+              <BlueButton
+                onClick={() => updateJson()}
+                disabled={!unsavedChanges() || !isJsonString()}
+                text={'Save changes'}
+              />
+              <BlueButton
+                onClick={() => updateJson(true)}
+                disabled={!unsavedChanges() || !isJsonString()}
+                classes={{ button: classes.greenButton }}
+                text={'Save & test'}
+              />
+            </>
           )}
         </div>
       </div>

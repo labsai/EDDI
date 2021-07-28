@@ -684,6 +684,17 @@ export function* massUpdateJsonData(
           botResource: updatedBots[0].resource,
         } as IDeployBotAction);
         yield put(openChatAction());
+      } else {
+        const currentPackage: IPackage = yield call(
+          getCurrentPackage,
+          packageId,
+        );
+        yield put(
+          showParallelConfigModal(currentPackage, currentPackage.resource),
+        );
+        yield call(historyPush, `${location.pathname}`, [
+          !isPackagePage() ? `packageId=${packageId}` : `botId=${botId}`,
+        ]);
       }
     } else {
       const currentPackage: IPackage = yield call(getCurrentPackage, packageId);
