@@ -54,7 +54,7 @@ export function packagesWithPluginSelector(
 
 export function packageSelector(
   state: IAppState,
-  props: IPackageSelectorProps,
+  props: Omit<IPackageSelectorProps, 'packagePayload' | 'pack'>,
 ) {
   const pkg = state.packageState.packages.find(
     (pkg) => pkg.resource === props.packageResource,

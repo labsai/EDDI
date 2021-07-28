@@ -24,6 +24,7 @@ const useStyles = makeStyles({
 interface IPublicProps {
   pluginResource: string;
   type: string;
+  currentVersion?: number;
 }
 
 const PluginContainer = (props: IPublicProps) => {
@@ -47,7 +48,7 @@ const PluginContainer = (props: IPublicProps) => {
         setError(error);
         setLoading(false);
       });
-  }, []);
+  }, [props.currentVersion]);
 
   return (
     <div>

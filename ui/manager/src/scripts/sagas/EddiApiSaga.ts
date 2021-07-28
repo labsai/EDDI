@@ -1,5 +1,5 @@
 import * as _ from 'lodash';
-import { all, call, put, takeEvery } from 'redux-saga/effects';
+import { call, put, takeEvery } from 'redux-saga/effects';
 import { openChatAction } from '../actions/ChatActions';
 import {
   addNewPackageToBotsFailedAction,
@@ -135,6 +135,7 @@ import {
   UPDATE_PACKAGE,
   UPDATE_PACKAGES,
 } from '../actions/EddiApiActionTypes';
+import { closeModal, showParallelConfigModal } from '../actions/ModalActions';
 import { hideLoader, showLoader } from '../actions/SystemActions';
 import {
   getAPIUrl,
@@ -184,9 +185,12 @@ import {
 } from '../components/utils/AxiosFunctions';
 import * as Edditypes from '../components/utils/EddiTypes';
 import { BOT, PACKAGE } from '../components/utils/EddiTypes';
-import getIdsFromPath from '../components/utils/helpers/getIdsFromPath';
+import getIdsFromPath, {
+  isPackagePage,
+} from '../components/utils/helpers/getIdsFromPath';
 import { parsePlugins } from '../components/utils/helpers/PluginParser';
 import Parser from '../components/utils/Parser';
+import { historyPush } from '../history';
 
 export function* FetchBots(action: IFetchBotsAction) {
   try {
@@ -652,8 +656,9 @@ export function* massUpdateJsonData(
   action: IMassUpdateJsonDataAction,
 ): Iterator<{}> {
   try {
-    const { botId } = getIdsFromPath();
+    const { packageId, botId } = getIdsFromPath();
     yield put(showLoader());
+    yield put(closeModal());
 
     let updatedPackage: string;
 
@@ -676,6 +681,14 @@ export function* massUpdateJsonData(
         botResource: updatedBots[0].resource,
       } as IDeployBotAction);
       yield put(openChatAction());
+    } else {
+      const currentPackage: IPackage = yield call(getCurrentPackage, packageId);
+      yield put(
+        showParallelConfigModal(currentPackage, currentPackage.resource),
+      );
+      yield call(historyPush, `${location.pathname}`, [
+        !isPackagePage ? `packageId=${packageId}` : `botId=${botId}`,
+      ]);
     }
     yield put(clearEditedPluginDataAction());
     yield put(hideLoader());

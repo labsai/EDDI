@@ -210,7 +210,11 @@ const ModalComponentFrame = (props: IPrivateProps) => {
       case ModalEnum.showBotLogs:
         return <BotLogsModal bot={props.bot} />;
       case ModalEnum.parallelConfig:
-        return <ParallelConfigModal packagePayload={props.packagePayload} />;
+        return (
+          <ParallelConfigModal
+            packageResource={props.packagePayload.resource}
+          />
+        );
       default:
         return null;
     }

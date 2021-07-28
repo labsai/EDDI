@@ -15,17 +15,22 @@ import { pluginTempDataSelector } from '../../../selectors/PluginSelectors';
 import validateJson from '../../utils/helpers/ValidateJson';
 import eddiApiActionDispatchers from '../../../actions/EddiApiActionDispatchers';
 import modalActionDispatchers from '../../../actions/ModalActionDispatchers';
+import { packageSelector } from '../../../selectors/PackageSelectors';
+import { IAppState } from '../../../reducers';
 
 interface IPublicProps {
-  packagePayload: IPackage;
+  packageResource: string;
 }
 
-const ParallelConfigModal = ({ packagePayload }: IPublicProps) => {
+const ParallelConfigModal = ({ packageResource }: IPublicProps) => {
   const sliderRef = React.useRef(null);
   const pluginResource = useSelector(pluginResourceSelector);
+  const { packagePayload } = useSelector((state: IAppState) =>
+    packageSelector(state, { packageResource }),
+  );
   const plugins = [];
 
-  packagePayload.packageData.packageExtensions.forEach((p) => {
+  packagePayload?.packageData?.packageExtensions?.forEach?.((p) => {
     const isParser = p.type.includes('parser');
     if (isParser) {
       plugins.push.apply(plugins, p.extensions.dictionaries);
@@ -124,6 +129,7 @@ const ParallelConfigModal = ({ packagePayload }: IPublicProps) => {
                 key={p.config?.uri + i}
                 pluginResource={p.config?.uri}
                 type={p.type}
+                currentVersion={packagePayload.currentVersion}
               />
             );
           })}
