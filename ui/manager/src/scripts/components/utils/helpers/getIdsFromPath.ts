@@ -12,7 +12,7 @@ const getIdsFromPath = () => {
   return { botId, packageId };
 };
 
-export const isBotPage = location.pathname.includes('botview');
-export const isPackagePage = location.pathname.includes('packageview');
+export const isBotPage = () => location.pathname.includes('botview');
+export const isPackagePage = () => location.pathname.includes('packageview');
 
 export default getIdsFromPath;

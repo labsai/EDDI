@@ -637,8 +637,8 @@ export function* watchUpdateJsonData(): Iterator<{}> {
   yield takeEvery(UPDATE_JSON_DATA, updateJsonData);
 }
 
-function* iterateResources(resource: string, data: any) {
-  const { packageId } = getIdsFromPath();
+function* iterateResources(resource: string, data: any, last: boolean) {
+  const { packageId, botId } = getIdsFromPath();
   yield call(axiosUpdateJsonData, resource, JSON.parse(data));
   const updatedPlugin: IPlugin = yield call(getCurrentPlugin, resource);
   yield put(updatePluginSuccessAction(updatedPlugin, true));
@@ -648,7 +648,9 @@ function* iterateResources(resource: string, data: any) {
     currentPackage,
     updatedPlugin.resource,
   );
-  yield put(updatePackageSuccessAction(updatedPackage, true));
+  yield put(
+    updatePackageSuccessAction(updatedPackage, last && !botId ? false : true),
+  );
   return updatedPackage.resource;
 }
 
@@ -662,25 +664,27 @@ export function* massUpdateJsonData(
 
     let updatedPackage: string;
 
-    for (let p of action.plugins) {
-      const newPackage = yield call(iterateResources, p.resource, p.data);
+    for (let [i, p] of action.plugins.entries()) {
+      const last = action.plugins.length - 1 === i;
+      const newPackage = yield call(iterateResources, p.resource, p.data, last);
       updatedPackage = newPackage;
     }
 
-    const currentBot: IBot = yield call(getCurrentBot, botId);
-    const botToUpdate = {
-      botResource: currentBot?.resource as string,
-      packageResources: [updatedPackage],
-    };
+    if (botId) {
+      const currentBot: IBot = yield call(getCurrentBot, botId);
+      const botToUpdate = {
+        botResource: currentBot?.resource as string,
+        packageResources: [updatedPackage],
+      };
+      const updatedBots: IBot[] = yield call(axiosUpdateBots, [botToUpdate]);
+      yield put(updateBotsSuccessAction(updatedBots));
 
-    const updatedBots: IBot[] = yield call(axiosUpdateBots, [botToUpdate]);
-    yield put(updateBotsSuccessAction(updatedBots));
-
-    if (action.deploy && !_.isEmpty(updatedBots)) {
-      yield call(deployBot, {
-        botResource: updatedBots[0].resource,
-      } as IDeployBotAction);
-      yield put(openChatAction());
+      if (action.deploy && !_.isEmpty(updatedBots)) {
+        yield call(deployBot, {
+          botResource: updatedBots[0].resource,
+        } as IDeployBotAction);
+        yield put(openChatAction());
+      }
     } else {
       const currentPackage: IPackage = yield call(getCurrentPackage, packageId);
       yield put(

@@ -17,6 +17,7 @@ import eddiApiActionDispatchers from '../../../actions/EddiApiActionDispatchers'
 import modalActionDispatchers from '../../../actions/ModalActionDispatchers';
 import { packageSelector } from '../../../selectors/PackageSelectors';
 import { IAppState } from '../../../reducers';
+import { isBotPage, isPackagePage } from '../../utils/helpers/getIdsFromPath';
 
 interface IPublicProps {
   packageResource: string;
@@ -29,6 +30,8 @@ const ParallelConfigModal = ({ packageResource }: IPublicProps) => {
     packageSelector(state, { packageResource }),
   );
   const plugins = [];
+
+  const botOrPackagePage = isPackagePage() || isBotPage();
 
   packagePayload?.packageData?.packageExtensions?.forEach?.((p) => {
     const isParser = p.type.includes('parser');
@@ -108,12 +111,14 @@ const ParallelConfigModal = ({ packageResource }: IPublicProps) => {
           text={'Save changes'}
           disabled={!packageHasChanges}
         />
-        <BlueButton
-          onClick={() => massUpdateJson(true)}
-          classes={{ button: classes.greenButton }}
-          text={'Save & Run'}
-          disabled={!packageHasChanges}
-        />
+        {botOrPackagePage && (
+          <BlueButton
+            onClick={() => massUpdateJson(true)}
+            classes={{ button: classes.greenButton }}
+            text={'Save & Run'}
+            disabled={!packageHasChanges}
+          />
+        )}
       </div>
       <div className={classes.parallelConfigContainer}>
         {_.isEmpty(filteredPlugins) && (
