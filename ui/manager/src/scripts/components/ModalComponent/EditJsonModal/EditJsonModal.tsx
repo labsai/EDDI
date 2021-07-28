@@ -1,3 +1,4 @@
+import Modal from '@material-ui/core/Modal';
 import clsx from 'clsx';
 import { JSONSchema4 } from 'json-schema';
 import * as _ from 'lodash';
@@ -48,6 +49,7 @@ const EditJsonModal = (props: IPrivateProps) => {
   const [editorText, setEditorText] = React.useState('');
   const [errors, setErrors] = React.useState<IJsonError[]>([]);
   const [isValidJson, setIsValidJson] = React.useState(false);
+  const [discardOpened, setDiscardOpened] = React.useState(false);
   const [selectedTab, setSelectedTab] = React.useState<TabEnum>(TabEnum.form);
   const classes = useStyles();
   const editClasses = useEditStyles();
@@ -80,13 +82,15 @@ const EditJsonModal = (props: IPrivateProps) => {
     setEditorText(props.data);
   };
 
-  const unsavedChanges = () => {
-    // todo: reduxify and refactor editor
-    return false;
-    /*
-    return editorText !== props.data;
-    */
+  const handleDiscardChanges = () => {
+    setDiscardOpened(true);
   };
+
+  const handleClose = () => {
+    setDiscardOpened(false);
+  };
+
+  const unsavedChanges = () => editorText !== props.data;
 
   const updateJson = (deploy: boolean = false) => {
     if (validateJson()) {
@@ -154,11 +158,11 @@ const EditJsonModal = (props: IPrivateProps) => {
             />
           )}
           {unsavedChanges() && (
-            <button
-              className={classes.discardChanges}
-              onClick={() => validateJson()}>
-              {'Discard changes'}
-            </button>
+            <BlueButton
+              classes={{ button: classes.discardChanges }}
+              onClick={handleDiscardChanges}
+              text={'Discard changes'}
+            />
           )}
         </div>
       </div>
@@ -203,6 +207,26 @@ const EditJsonModal = (props: IPrivateProps) => {
           validate={validateSchemaForm}
         />
       )}
+      <Modal open={discardOpened} onClose={handleClose}>
+        <div className={classes.paper}>
+          <p>Are you sure?</p>
+          <div>
+            <BlueButton
+              classes={{ button: classes.showViewJson }}
+              onClick={() => {
+                discardChanges();
+                handleClose();
+              }}
+              text={'Discard'}
+            />
+            <BlueButton
+              classes={{ button: classes.discardChanges }}
+              onClick={handleClose}
+              text={'Cancel'}
+            />
+          </div>
+        </div>
+      </Modal>
     </div>
   );
 };
