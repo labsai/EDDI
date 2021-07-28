@@ -35,7 +35,6 @@ interface IPrivateProps extends IPublicProps {
 }
 
 const ViewJsonContent = (props: IPrivateProps) => {
-  const [jsonText, setJsonText] = React.useState('');
   const classes = useStyles();
 
   const { schema } = useSelector((state: IAppState) =>
@@ -43,10 +42,6 @@ const ViewJsonContent = (props: IPrivateProps) => {
       type: getTypeFromResource(props.descriptor.resource),
     }),
   );
-
-  React.useEffect(() => {
-    handleSetJsonText();
-  }, [props.descriptor, props.data, props.usedBy, props.readOnly]);
 
   React.useEffect(() => {
     if (!schema) {
@@ -58,10 +53,6 @@ const ViewJsonContent = (props: IPrivateProps) => {
 
   const plug = (value?: string) => {
     return;
-  };
-
-  const handleSetJsonText = () => {
-    setJsonText(props.data);
   };
 
   const openEditJsonModal = () => {

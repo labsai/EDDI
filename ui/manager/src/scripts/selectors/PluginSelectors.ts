@@ -26,6 +26,7 @@ export function pluginSelector(state: IAppState, props: IPluginSelectorProps) {
   );
   return {
     plugin: plugin || [],
+    usedByPackages: plugin?.usedByPackages,
     isLoading: state.pluginState.isLoading,
     error: state.pluginState.error,
   };
