@@ -48,12 +48,14 @@ const useStyles = makeStyles({
   overlay: {
     backgroundColor: 'rgba(98, 104, 111, 0.90)',
     overflow: 'auto',
-    paddingBottom: '300px',
     position: 'fixed',
     top: 0,
     left: 0,
     right: 0,
     bottom: 0,
+    display: 'flex',
+    justifyContent: 'center',
+    alignItems: 'center',
   },
   close: {
     '&:focus': {
@@ -75,12 +77,12 @@ const useStyles = makeStyles({
   },
   box: {
     maxWidth: '960px',
-    minWidth: '600px',
+    minWidth: '90vw',
     position: 'relative',
-    margin: '100px auto 100px',
+    margin: 'auto',
   },
   wideBox: {
-    maxWidth: '90vw',
+    maxWidth: '95vw',
   },
 });
 
@@ -230,7 +232,7 @@ const ModalComponentFrame = (props: IPrivateProps) => {
   if (props.isModalOpen) {
     document.body.className = 'modal-body-open';
     return (
-      <div className={classes.overlay} id="modal-overlay">
+      <div className={classes.overlay}>
         <div
           className={clsx(
             classes.box,

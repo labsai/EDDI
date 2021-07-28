@@ -178,19 +178,6 @@ const JsonSchemaForm: React.StatelessComponent<IProps> = (props: IProps) => {
   const readOnly = props.readOnly;
   const formRef = React.useRef(null);
 
-  React.useEffect(() => {
-    const overlay = document.getElementById('modal-overlay');
-    if (!overlay) {
-      return;
-    }
-    overlay.style.maxHeight = '100vh';
-    overlay.style.paddingBottom = '0';
-    return () => {
-      overlay.style.maxHeight = 'auto';
-      overlay.style.paddingBottom = '300px';
-    };
-  }, []);
-
   const disableInputs = (disabled = true) => {
     const inputs = document.querySelectorAll('.json-form input');
     const selects = document.querySelectorAll('.json-form select');
