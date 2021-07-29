@@ -10,6 +10,13 @@ const useStyles = makeStyles({
     marginBottom: '20px',
     width: '100px',
   },
+  loadingWrapper: {
+    alignItems: 'center',
+    display: 'flex',
+    flex: 1,
+    height: '100vh',
+    justifyContent: 'center',
+  },
 });
 
 export default useStyles;
