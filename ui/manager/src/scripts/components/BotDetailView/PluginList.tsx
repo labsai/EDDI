@@ -13,10 +13,10 @@ import {
 } from '../../../styles/DefaultStylingProperties';
 import { isChatOpenedSelector } from '../../selectors/ChatSelectors';
 import Plugin from '../PackageDetailView/PluginBoxes/Plugin';
-import { IPackage, IPluginExtensions, IPlugins } from '../utils/AxiosFunctions';
-import { isBotPage } from '../utils/helpers/getIdsFromPath';
+import { IPackage, IPluginExtensions } from '../utils/AxiosFunctions';
+import reorder from '../utils/helpers/PluginsReordering';
 
-const useStyles = makeStyles({
+export const useStyles = makeStyles({
   pluginList: {
     display: 'grid',
     marginTop: '20px',
@@ -68,6 +68,11 @@ const useStyles = makeStyles({
       marginBottom: 'auto',
     },
   },
+  draggableItemCloseButton: {
+    '&:before': {
+      marginTop: '30px',
+    },
+  },
 });
 
 const getItemStyle = (draggableStyle, isDragging: boolean) => ({
@@ -108,19 +113,6 @@ const PluginList: React.StatelessComponent<IProps> = (props: IProps) => {
     );
 
     props.setPlugins(reorderedItems);
-  };
-
-  // reordering the result
-  const reorder = (
-    list: IPluginExtensions[],
-    startIndex: number,
-    endIndex: number,
-  ) => {
-    const result = Array.from(list);
-    const [removed] = result.splice(startIndex, 1);
-    result.splice(endIndex, 0, removed);
-
-    return result;
   };
 
   if (props.isChangingOrdering) {
