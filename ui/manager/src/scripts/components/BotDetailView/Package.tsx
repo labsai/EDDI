@@ -8,9 +8,10 @@ import { BLUE_COLOR } from '../../../styles/DefaultStylingProperties';
 import eddiApiActionDispatchers from '../../actions/EddiApiActionDispatchers';
 import { historyPush } from '../../history';
 import { packageSelector } from '../../selectors/PackageSelectors';
+import BlueButton from '../Assets/Buttons/BlueButton';
 import Options from '../Assets/Buttons/Options';
 import VersionSelectComponent from '../Assets/VersionSelectComponent';
-import { IPackage } from '../utils/AxiosFunctions';
+import { IPackage, IPlugins } from '../utils/AxiosFunctions';
 import useStyles from './Package.styles';
 import PluginList from './PluginList';
 
@@ -48,6 +49,18 @@ const Package = ({
     }
   };
 
+  const [isChangingOrdering, setIsChangingOrdering] = React.useState(false);
+  const [packageExtensionsOrder, setPackageExtensionsOrder] =
+    React.useState(null);
+
+  const extensions = packagePayload?.packageData?.packageExtensions;
+
+  React.useEffect(() => {
+    if (extensions) {
+      setPackageExtensionsOrder(extensions);
+    }
+  }, [extensions]);
+
   React.useEffect(() => {
     fetchPlugins();
   }, [
@@ -61,6 +74,27 @@ const Package = ({
 
   const handleSelectVersion = (newVersion: number) => {
     selectVersion(newVersion);
+  };
+
+  const handleChangeOrdering = () => {
+    setIsChangingOrdering(true);
+  };
+
+  const handleCloseChangeOrdering = (
+    e: React.MouseEvent<Element, MouseEvent>,
+  ) => {
+    e.stopPropagation();
+    setIsChangingOrdering(false);
+    setPackageExtensionsOrder(extensions);
+  };
+
+  const handleSaveOrdering = (e: React.MouseEvent<Element, MouseEvent>) => {
+    e.stopPropagation();
+    eddiApiActionDispatchers.updateExtensionsOrderAction(
+      packagePayload,
+      packageExtensionsOrder,
+    );
+    setIsChangingOrdering(false);
   };
 
   const isCurrentVersion: boolean =
@@ -113,12 +147,29 @@ const Package = ({
                 </div>
               )}
               <div className={classes.centerFlex} />
+              {isChangingOrdering && (
+                <>
+                  <BlueButton
+                    classes={{ button: classes.saveOrdering }}
+                    onClick={handleSaveOrdering}
+                    text={'Save Order'}
+                  />
+                  <BlueButton
+                    classes={{ button: classes.closeChangeOrdering }}
+                    onClick={handleCloseChangeOrdering}
+                    text={'Cancel'}
+                  />
+                </>
+              )}
               <div
                 className={classes.options}
                 onClick={(e) => e.stopPropagation()}>
                 <Options
                   descriptor={packagePayload}
                   data={JSON.stringify(packagePayload.packageData, null, '\t')}
+                  changeOrdering={
+                    !isChangingOrdering ? handleChangeOrdering : undefined
+                  }
                 />
               </div>
               <button
@@ -138,9 +189,12 @@ const Package = ({
             )}
             <div className={classes.packageContent}>
               <PluginList
+                plugins={packageExtensionsOrder}
+                setPlugins={setPackageExtensionsOrder}
                 packagePayload={packagePayload}
                 packageId={packagePayload.id}
                 botId={botId}
+                isChangingOrdering={isChangingOrdering}
               />
             </div>
           </div>

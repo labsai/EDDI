@@ -667,6 +667,24 @@ export async function updatePackage(
   }
 }
 
+export async function updateExtensionsOrder(
+  currentPackage: IPackage,
+  packageExtensions: IPlugins,
+): Promise<IPackage> {
+  try {
+    const currentPackageUri = `${await getAPIUrl()}/packagestore/packages/${
+      currentPackage.id
+    }?version=${currentPackage.version}`;
+    await axios.put(currentPackageUri, {
+      packageExtensions,
+    });
+    return await getCurrentPackage(currentPackage.id);
+  } catch (err) {
+    console.error(`Failed to update extensions order. Error: ${err.message}`);
+    throw err;
+  }
+}
+
 export async function patchDescriptor(
   resource: string,
   name: string,

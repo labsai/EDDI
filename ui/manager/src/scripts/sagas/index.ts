@@ -1,42 +1,6 @@
+import { Task } from 'redux-saga';
 import { fork } from 'redux-saga/effects';
 import { sagaMiddleware } from '../store/store';
-import { Task } from 'redux-saga';
-import {
-  watchFetchBot,
-  watchFetchBots,
-  watchFetchPackages,
-  watchFetchPackageData,
-  watchFetchBotData,
-  watchFetchPackage,
-  watchFetchPlugins,
-  watchFetchPlugin,
-  watchFetchDefaultPluginTypes,
-  watchUpdateBot,
-  watchUpdateBotPackages,
-  watchUpdatePackage,
-  watchUpdateDescriptor,
-  watchFetchCurrentPackage,
-  watchFetchBotsUsingPackage,
-  watchFetchPackagesUsingPlugin,
-  watchUpdateJsonData,
-  watchCreateNewConfig,
-  watchUpdatePackages,
-  watchUpdateBots,
-  watchDeployBot,
-  watchUndeployBot,
-  watchFetchBotDeploymentStatus,
-  watchFetchCurrentBot,
-  watchCreateNewBot,
-  watchCreateNewPackage,
-  watchAddNewPackageToBots,
-  watchFetchJsonSchema,
-  watchDuplicateResource,
-  watchFetchConversations,
-  watchFetchConversation,
-  watchEndConversation,
-  watchDeployExampleBots,
-  watchMassUpdateJsonData,
-} from './EddiApiSaga';
 import {
   watchBasicAuthSignIn,
   watchCheckAuthentication,
@@ -44,8 +8,45 @@ import {
   watchKeycloakSignIn,
   watchSignOut,
 } from './AuthenticationSaga';
-import { watchChat } from './ChatSaga';
 import { watchBotLogs } from './BotSaga';
+import { watchChat } from './ChatSaga';
+import {
+  watchAddNewPackageToBots,
+  watchCreateNewBot,
+  watchCreateNewConfig,
+  watchCreateNewPackage,
+  watchDeployBot,
+  watchDeployExampleBots,
+  watchDuplicateResource,
+  watchEndConversation,
+  watchFetchBot,
+  watchFetchBotData,
+  watchFetchBotDeploymentStatus,
+  watchFetchBots,
+  watchFetchBotsUsingPackage,
+  watchFetchConversation,
+  watchFetchConversations,
+  watchFetchCurrentBot,
+  watchFetchCurrentPackage,
+  watchFetchDefaultPluginTypes,
+  watchFetchJsonSchema,
+  watchFetchPackage,
+  watchFetchPackageData,
+  watchFetchPackages,
+  watchFetchPackagesUsingPlugin,
+  watchFetchPlugin,
+  watchFetchPlugins,
+  watchMassUpdateJsonData,
+  watchUndeployBot,
+  watchUpdateBot,
+  watchUpdateBotPackages,
+  watchUpdateBots,
+  watchUpdateDescriptor,
+  watchUpdateJsonData,
+  watchUpdatePackage,
+  watchUpdatePackages,
+  watchUpdateExtensionsOrder,
+} from './EddiApiSaga';
 
 function* root() {
   yield fork(watchFetchBot);
@@ -89,6 +90,7 @@ function* root() {
   yield fork(watchChat);
   yield fork(watchBotLogs);
   yield fork(watchMassUpdateJsonData);
+  yield fork(watchUpdateExtensionsOrder);
 }
 
 export const run: () => Task = () => sagaMiddleware.run(root);

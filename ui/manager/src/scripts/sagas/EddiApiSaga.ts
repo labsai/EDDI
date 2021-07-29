@@ -81,6 +81,7 @@ import {
   IUpdateBotPackagesAction,
   IUpdateBotsAction,
   IUpdateDescriptorAction,
+  IUpdateExtensionsOrderAction,
   IUpdateJsonDataAction,
   IUpdatePackageAction,
   IUpdatePackagesAction,
@@ -92,6 +93,8 @@ import {
   updateBotSuccessAction,
   updateDescriptorFailedAction,
   updateDescriptorSuccessAction,
+  updateExtensionsOrderFailedAction,
+  updateExtensionsOrderSuccessAction,
   updateJsonDataFailedAction,
   updatePackageFailedAction,
   updatePackagesFailedAction,
@@ -131,6 +134,7 @@ import {
   UPDATE_BOTS,
   UPDATE_BOT_PACKAGES,
   UPDATE_DESCRIPTOR,
+  UPDATE_EXTENSIONS_ORDER,
   UPDATE_JSON_DATA,
   UPDATE_PACKAGE,
   UPDATE_PACKAGES,
@@ -179,6 +183,7 @@ import {
   updateBot as axiosUpdateBot,
   updateBotPackages as axiosUpdateBotPackages,
   updateBots as axiosUpdateBots,
+  updateExtensionsOrder as axiosUpdateExtensionsOrder,
   updateJsonData as axiosUpdateJsonData,
   updatePackage as axiosUpdatePackage,
   updatePackages as axiosUpdatePackages,
@@ -417,6 +422,42 @@ export function* updatePackage(action: IUpdatePackageAction) {
 
 export function* watchUpdatePackage(): Iterator<{}> {
   yield takeEvery(UPDATE_PACKAGE, updatePackage);
+}
+
+export function* updateExtensionsOrder(action: IUpdateExtensionsOrderAction) {
+  try {
+    yield put(showLoader());
+    const { botId } = getIdsFromPath();
+    const pack: IPackage = yield call(
+      axiosUpdateExtensionsOrder,
+      action.package,
+      action.packageExtensions,
+    );
+    yield put(updateExtensionsOrderSuccessAction(pack));
+    yield put(updatePackageSuccessAction(pack, !botId ? false : true));
+
+    if (botId) {
+      const currentBot: IBot = yield getCurrentBot(botId);
+      const updatedBot = yield call(axiosUpdateBotPackages, currentBot, [
+        pack.resource,
+      ]);
+      yield put(updateBotsSuccessAction([updatedBot]));
+
+      if (updatedBot) {
+        yield call(deployBot, {
+          botResource: updatedBot.resource,
+        } as IDeployBotAction);
+      }
+    }
+    yield put(hideLoader());
+  } catch (err) {
+    yield put(updateExtensionsOrderFailedAction(err));
+    yield put(hideLoader());
+  }
+}
+
+export function* watchUpdateExtensionsOrder(): Iterator<{}> {
+  yield takeEvery(UPDATE_EXTENSIONS_ORDER, updateExtensionsOrder);
 }
 
 export function* FetchPackageData(action: IFetchPackageDataAction) {

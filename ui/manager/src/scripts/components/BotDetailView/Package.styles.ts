@@ -4,6 +4,7 @@ import {
   WHITE_COLOR,
   LIGHT_GREY_COLOR2,
   LIGHT_BLUE_COLOR3,
+  RED_COLOR,
 } from '../../../styles/DefaultStylingProperties';
 
 const useStyles = makeStyles(() =>
@@ -69,6 +70,24 @@ const useStyles = makeStyles(() =>
     },
     red: {
       color: 'red',
+    },
+    saveOrdering: { marginRight: '10px' },
+    closeChangeOrdering: {
+      color: 'white',
+      backgroundColor: RED_COLOR,
+      border: 'transparent',
+      transition: 'background-color 0.3s ease',
+      marginRight: '10px',
+
+      '&:hover': {
+        backgroundColor: 'transparent',
+        border: `2px solid ${RED_COLOR}`,
+        color: RED_COLOR,
+        transition: 'background-color 0.3s ease',
+      },
+      '&:disabled': {
+        cursor: 'not-allowed',
+      },
     },
   }),
 );

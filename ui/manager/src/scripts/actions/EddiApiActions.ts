@@ -118,6 +118,9 @@ import {
   EDIT_PLUGIN_DATA,
   MASS_UPDATE_JSON_DATA,
   CLEAR_EDITED_PLUGIN_DATA,
+  UPDATE_EXTENSIONS_ORDER,
+  UPDATE_EXTENSIONS_ORDER_SUCCESS,
+  UPDATE_EXTENSIONS_ORDER_FAILED,
 } from './EddiApiActionTypes';
 
 export interface IFetchBotsAction extends Action {
@@ -615,6 +618,22 @@ export function updatePackageAction(
     type: UPDATE_PACKAGE,
   };
 }
+
+export interface IUpdateExtensionsOrderAction extends Action {
+  package: IPackage;
+  packageExtensions: IPlugins;
+}
+
+export function updateExtensionsOrderAction(
+  pkg: IPackage,
+  packageExtensions: IPlugins,
+): IUpdateExtensionsOrderAction {
+  return {
+    package: pkg,
+    packageExtensions,
+    type: UPDATE_EXTENSIONS_ORDER,
+  };
+}
 export interface IUpdatePackageSuccessAction extends Action {
   package: IPackage;
   noModal: boolean;
@@ -638,6 +657,28 @@ export function updatePackageFailedAction(
   return {
     error,
     type: UPDATE_PACKAGE_FAILED,
+  };
+}
+export interface IUpdateExtensionsOrderSuccessAction extends Action {
+  package: IPackage;
+}
+export function updateExtensionsOrderSuccessAction(
+  pkg: IPackage,
+): IUpdateExtensionsOrderSuccessAction {
+  return {
+    package: pkg,
+    type: UPDATE_EXTENSIONS_ORDER_SUCCESS,
+  };
+}
+export interface IUpdateExtensionsOrderFailedAction extends Action {
+  error: Error;
+}
+export function updateExtensionsOrderFailedAction(
+  error: Error,
+): IUpdateExtensionsOrderFailedAction {
+  return {
+    error,
+    type: UPDATE_EXTENSIONS_ORDER_FAILED,
   };
 }
 export function addAvailableUpdateForPackageAction(

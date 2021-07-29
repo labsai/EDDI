@@ -1,9 +1,9 @@
 import { makeStyles } from '@material-ui/core/styles';
 import {
+  BLACK_COLOR,
   BLUE_COLOR,
   GREY_BORDER,
   GREY_COLOR,
-  LIGHT_BLUE_COLOR3,
   LIGHT_GREY_BORDER,
   LIGHT_GREY_COLOR,
   MEDIUM_FONT,
@@ -22,7 +22,8 @@ const useStyles = makeStyles({
   pluginContainer: {
     display: 'flex',
     flexDirection: 'column',
-    minWidth: '100%',
+    flex: 1,
+    alignItems: 'flex-end',
   },
   pluginWithExtensionsContainer: {
     display: 'inline-block',
@@ -31,6 +32,10 @@ const useStyles = makeStyles({
   },
   extensionContainer: {
     display: 'inline-block',
+
+    '& > div': {
+      marginBottom: 0,
+    },
   },
   updateAvailableBorderColor: {
     border: RED_BORDER,
@@ -39,14 +44,14 @@ const useStyles = makeStyles({
     color: RED_COLOR,
   },
   pluginBox: {
-    backgroundColor: 'transparent',
+    backgroundColor: BLACK_COLOR,
     border: LIGHT_GREY_BORDER,
     borderRadius: '4px',
     outline: 'none',
     padding: '0px',
     width: '100%',
     height: '80px',
-    marginTop: '-5px',
+    // marginTop: '-5px',
   },
   clickablePluginBox: {
     '&:hover': {
@@ -170,6 +175,7 @@ const useStyles = makeStyles({
   closeButton: {
     float: 'right',
     marginRight: '10px',
+    marginBottom: '-5px',
   },
   packageWithExtensionCloseButton: {
     marginRight: '10px',
@@ -192,6 +198,7 @@ const useStyles = makeStyles({
     paddingLeft: '10px',
     marginTop: '10px',
     borderLeft: '1px solid black',
+    alignSelf: 'stretch',
   },
   chatRelation: {
     display: 'flex',

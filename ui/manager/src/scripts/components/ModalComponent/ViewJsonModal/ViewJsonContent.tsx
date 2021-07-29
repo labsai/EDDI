@@ -87,7 +87,11 @@ const ViewJsonContent = (props: IPrivateProps) => {
           )}
           <div className={classes.centerFlex} />
           <div className={classes.options} onClick={(e) => e.stopPropagation()}>
-            <Options descriptor={props.descriptor} data={props.data} />
+            <Options
+              descriptor={props.descriptor}
+              data={props.data}
+              noEditJson
+            />
           </div>
           <BlueButton
             onClick={
@@ -95,7 +99,7 @@ const ViewJsonContent = (props: IPrivateProps) => {
             }
             classes={{ button: classes.button }}
             disabled={!isCurrentVersion || props.readOnly}
-            text={`Edit`}
+            text={'Edit'}
             noTabIndex
           />
         </div>

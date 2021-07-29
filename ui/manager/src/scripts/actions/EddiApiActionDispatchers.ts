@@ -123,6 +123,8 @@ import {
   updatePackagesFailedAction,
   updatePackagesSuccessAction,
   clearEditedPluginDataAction,
+  updateExtensionsOrderAction,
+  IUpdateExtensionsOrderAction,
 } from './EddiApiActions';
 
 export interface IEddiApiActionDispatchers extends ActionCreatorsMapObject {
@@ -244,6 +246,10 @@ export interface IEddiApiActionDispatchers extends ActionCreatorsMapObject {
   deployExampleBotsSuccessAction: (bots) => IDeployExampleBotsSuccessAction;
   deployExampleBotsFailedAction: (error) => IDeployExampleBotsFailedAction;
   clearEditedPluginDataAction: () => void;
+  updateExtensionsOrderAction: (
+    pkg,
+    packageExtensions,
+  ) => IUpdateExtensionsOrderAction;
 }
 
 const actions: IEddiApiActionDispatchers = {
@@ -313,6 +319,7 @@ const actions: IEddiApiActionDispatchers = {
   deployExampleBotsSuccessAction,
   massUpdateJsonDataAction,
   clearEditedPluginDataAction,
+  updateExtensionsOrderAction,
 };
 
 const eddiApiActionDispatchers: IEddiApiActionDispatchers = bindActionCreators(

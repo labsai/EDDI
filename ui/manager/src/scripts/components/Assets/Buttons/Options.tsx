@@ -6,6 +6,7 @@ import { makeStyles } from '@material-ui/core/styles';
 import Typography from '@material-ui/core/Typography';
 import ArrowRightOutlinedIcon from '@material-ui/icons/ArrowRightOutlined';
 import CreateIcon from '@material-ui/icons/Create';
+import SortIcon from '@material-ui/icons/Sort';
 import CreateOutlinedIcon from '@material-ui/icons/CreateOutlined';
 import FileCopyIcon from '@material-ui/icons/FileCopy';
 import FileCopyOutlinedIcon from '@material-ui/icons/FileCopyOutlined';
@@ -28,6 +29,8 @@ import { PACKAGE } from '../../utils/EddiTypes';
 interface IPublicProps {
   descriptor: IDetailedDescriptor;
   data: string | string[];
+  noEditJson?: boolean;
+  changeOrdering?: () => void;
 }
 interface IPrivateProps extends IPublicProps {
   readOnly: boolean;
@@ -61,7 +64,12 @@ const useStyles = makeStyles({
   },
 });
 
-const Options = ({ descriptor, readOnly, data }: IPrivateProps) => {
+const Options = ({
+  descriptor,
+  readOnly,
+  noEditJson,
+  changeOrdering,
+}: IPrivateProps) => {
   const classes = useStyles();
   const [anchorEl, setAnchorEl] = React.useState<null | HTMLElement>(null);
   const [anchorSubEl, setAnchorSubEl] =
@@ -131,18 +139,33 @@ const Options = ({ descriptor, readOnly, data }: IPrivateProps) => {
           </ListItemIcon>
           <Typography variant="inherit">{'Rename'}</Typography>
         </MenuItem>
-        <MenuItem
-          key={'Edit JSON'}
-          disabled={!isCurrentVersion || readOnly}
-          onClick={() => {
-            handleClose();
-            modalActionDispatchers.showParallelConfigModal(descriptor);
-          }}>
-          <ListItemIcon>
-            <CreateOutlinedIcon fontSize="small" />
-          </ListItemIcon>
-          <Typography variant="inherit">{'Edit JSON'}</Typography>
-        </MenuItem>
+        {!noEditJson && (
+          <MenuItem
+            key={'Edit JSON'}
+            disabled={!isCurrentVersion || readOnly}
+            onClick={() => {
+              handleClose();
+              modalActionDispatchers.showParallelConfigModal(descriptor);
+            }}>
+            <ListItemIcon>
+              <CreateOutlinedIcon fontSize="small" />
+            </ListItemIcon>
+            <Typography variant="inherit">{'Edit JSON'}</Typography>
+          </MenuItem>
+        )}
+        {!!changeOrdering && (
+          <MenuItem
+            key={'Change Ordering'}
+            onClick={() => {
+              handleClose();
+              changeOrdering();
+            }}>
+            <ListItemIcon>
+              <SortIcon fontSize="small" />
+            </ListItemIcon>
+            <Typography variant="inherit">{'Change Ordering'}</Typography>
+          </MenuItem>
+        )}
         {isPackage ? (
           <MenuItem
             key={'Duplicate'}

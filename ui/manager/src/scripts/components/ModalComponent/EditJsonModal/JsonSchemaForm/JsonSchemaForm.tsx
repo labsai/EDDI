@@ -76,8 +76,12 @@ const useStyles = makeStyles({
       fontSize: '18px',
     },
 
-    '& input': {
+    '& input, select': {
       backgroundColor: GREY_COLOR,
+      color: WHITE_COLOR,
+    },
+    '& .panel-default': {
+      backgroundColor: DARK_GREY_COLOR,
       color: WHITE_COLOR,
     },
 
