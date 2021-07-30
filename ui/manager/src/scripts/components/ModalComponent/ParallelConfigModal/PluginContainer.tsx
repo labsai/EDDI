@@ -25,6 +25,7 @@ interface IPublicProps {
   pluginResource: string;
   type: string;
   currentVersion?: number;
+  sliderRef: React.MutableRefObject<any>;
 }
 
 const PluginContainer = (props: IPublicProps) => {
@@ -76,6 +77,7 @@ const PluginContainer = (props: IPublicProps) => {
                 resource={(plugin as IPlugin).resource}
                 data={JSON.stringify(plugin.pluginData, null, '\t')}
                 showViewJson={() => setIsEdit(false)}
+                sliderRef={props.sliderRef}
               />
             ))}
         </div>

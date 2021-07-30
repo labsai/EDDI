@@ -35,6 +35,7 @@ interface IPublicProps {
   resource: string;
   data: string;
   type: string;
+  sliderRef?: React.MutableRefObject<any>;
   showViewJson?: () => void;
 }
 
@@ -215,6 +216,7 @@ const EditJsonModal = (props: IPrivateProps) => {
             onConfirm={updateJson}
             onChange={onChange}
             validate={validateJson}
+            sliderRef={props.sliderRef}
           />
         </div>
       )}

@@ -135,6 +135,7 @@ const ParallelConfigModal = ({ packageResource }: IPublicProps) => {
                 pluginResource={p.config?.uri}
                 type={p.type}
                 currentVersion={packagePayload.currentVersion}
+                sliderRef={sliderRef}
               />
             );
           })}
