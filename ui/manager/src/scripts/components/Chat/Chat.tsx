@@ -152,27 +152,34 @@ const Chat = () => {
             const noQuickReplies =
               _.isEmpty(quickReplies) || _.isUndefined(quickReplies);
 
-            return (
-              (outputs || input) && (
-                <div className={classes.step} key={d.conversationId + i}>
-                  <ChatOutputs outputs={outputs} />
-                  {!!userReply && (
-                    <ChatOutput output={{ text: userReply }} input />
-                  )}
-                  <ChatQuickReplies
-                    delay={count * 400}
-                    quickReplies={quickReplies}
+            return outputs || input || userReply ? (
+              <div className={classes.step} key={d.conversationId + i}>
+                <ChatOutputs outputs={outputs} />
+                {!!userReply && (
+                  <ChatOutput output={{ text: userReply }} input />
+                )}
+                <ChatQuickReplies
+                  delay={count * 400}
+                  quickReplies={quickReplies}
+                  handleReplyInChat={handleReplyInChat}
+                  hidden={!lastStep}
+                />
+                {lastStep && noQuickReplies && (
+                  <ChatInputField
+                    delay={count * 500}
                     handleReplyInChat={handleReplyInChat}
-                    hidden={!lastStep}
                   />
-                  {lastStep && noQuickReplies && (
-                    <ChatInputField
-                      delay={count * 500}
-                      handleReplyInChat={handleReplyInChat}
-                    />
-                  )}
-                </div>
-              )
+                )}
+              </div>
+            ) : (
+              <div className={classes.step} key={d.conversationId + i}>
+                {lastStep && noQuickReplies && (
+                  <ChatInputField
+                    delay={count * 500}
+                    handleReplyInChat={handleReplyInChat}
+                  />
+                )}
+              </div>
             );
           })}
         </div>

@@ -1,6 +1,6 @@
 import { makeStyles } from '@material-ui/core/styles';
 import * as React from 'react';
-import { connect } from 'react-redux';
+import { connect, useDispatch } from 'react-redux';
 import { compose, pure, setDisplayName } from 'recompose';
 import { DARK_GREY_COLOR } from '../../../styles/DefaultStylingProperties';
 import ModalActionDispatchers from '../../actions/ModalActionDispatchers';
@@ -29,6 +29,7 @@ import UpdatePackagesModal from './UpdateConfigsModal/UpdatePackagesModal';
 import UpdatePackageModal from './UpdatePackageModal';
 import ViewJsonModal from './ViewJsonModal/ViewJsonModal';
 import clsx from 'clsx';
+import { clearEditedPluginDataAction } from '../../actions/EddiApiActions';
 
 const useStyles = makeStyles({
   content: {
@@ -47,12 +48,14 @@ const useStyles = makeStyles({
   overlay: {
     backgroundColor: 'rgba(98, 104, 111, 0.90)',
     overflow: 'auto',
-    paddingBottom: '300px',
     position: 'fixed',
     top: 0,
     left: 0,
     right: 0,
     bottom: 0,
+    display: 'flex',
+    justifyContent: 'center',
+    alignItems: 'center',
   },
   close: {
     '&:focus': {
@@ -74,12 +77,12 @@ const useStyles = makeStyles({
   },
   box: {
     maxWidth: '960px',
-    minWidth: '600px',
+    minWidth: '90vw',
     position: 'relative',
-    margin: '100px auto 100px',
+    margin: 'auto',
   },
   wideBox: {
-    maxWidth: '90vw',
+    maxWidth: '95vw',
   },
 });
 
@@ -109,6 +112,7 @@ interface IPrivateProps {
 interface IPublicProps {}
 
 const ModalComponentFrame = (props: IPrivateProps) => {
+  const dispatch = useDispatch();
   const [packageName, setPackageName] = React.useState('');
   const [packageDescription, setPackageDescription] = React.useState('');
 
@@ -210,7 +214,11 @@ const ModalComponentFrame = (props: IPrivateProps) => {
       case ModalEnum.showBotLogs:
         return <BotLogsModal bot={props.bot} />;
       case ModalEnum.parallelConfig:
-        return <ParallelConfigModal packagePayload={props.packagePayload} />;
+        return (
+          <ParallelConfigModal
+            packageResource={props.packagePayload.resource}
+          />
+        );
       default:
         return null;
     }
@@ -218,12 +226,13 @@ const ModalComponentFrame = (props: IPrivateProps) => {
 
   const closeModal = () => {
     ModalActionDispatchers.closeModal();
+    dispatch(clearEditedPluginDataAction());
   };
 
   if (props.isModalOpen) {
     document.body.className = 'modal-body-open';
     return (
-      <div className={classes.overlay} id="modal-overlay">
+      <div className={classes.overlay}>
         <div
           className={clsx(
             classes.box,

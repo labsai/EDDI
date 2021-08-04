@@ -23,7 +23,7 @@ const styles = makeStyles({
   topHeader: {
     display: 'flex',
     flex: 1,
-    paddingTop: '44px',
+    paddingTop: '15px',
     alignItems: 'center',
   },
   bottomHeader: {
@@ -81,7 +81,6 @@ const styles = makeStyles({
     marginLeft: '49px',
     marginRight: '29px',
     whiteSpace: 'pre-wrap',
-    paddingBottom: '50px',
   },
   usedInContainer: {
     color: GREY_COLOR,

@@ -1,32 +1,27 @@
-import clsx from 'clsx';
 import * as _ from 'lodash';
 import * as React from 'react';
-import { connect, useSelector } from 'react-redux';
+import { connect } from 'react-redux';
 import { compose, pure, setDisplayName } from 'recompose';
 import eddiApiActionDispatchers from '../../actions/EddiApiActionDispatchers';
 import ModalActionDispatchers from '../../actions/ModalActionDispatchers';
 import { historyPush } from '../../history';
 import { readOnlySelector } from '../../selectors/AuthenticationSelectors';
-import { isChatOpenedSelector } from '../../selectors/ChatSelectors';
 import { defaultPluginTypesSelector } from '../../selectors/PluginSelectors';
 import BlueButton from '../Assets/Buttons/BlueButton';
 import Options from '../Assets/Buttons/Options';
 import WhiteButton from '../Assets/Buttons/WhiteButton';
 import VersionSelectComponent from '../Assets/VersionSelectComponent';
+import { useStyles as useDragableStyles } from '../BotDetailView/PluginList';
 import {
   IDefaultPluginTypes,
   IPackage,
   IPluginExtensions,
 } from '../utils/AxiosFunctions';
-import { PACKAGE } from '../utils/EddiTypes';
-import PluginHelper from '../utils/helpers/PluginHelper';
-import { hasExtensions } from '../utils/helpers/PluginParser';
 import Parser from '../utils/Parser';
 import PluginSelect from './DropDownComponents/PluginSelect';
 import PackageDescriptor from './PackageDescriptor';
+import PackagePluginList from './PackagePluginList';
 import useStyles from './PackageView.styles';
-import Plugin from './PluginBoxes/Plugin';
-import PluginWithExtension from './PluginBoxes/PluginWithExtensions';
 import BotsUsingPackage from './UsedByComponent/BotsUsingPackage';
 
 export interface IOptions extends IPluginExtensions {
@@ -58,7 +53,7 @@ const PackageView = ({
   >([]);
   const [extensionKey, setExtensionKey] = React.useState(0);
 
-  const { isOpened: isChatOpened } = useSelector(isChatOpenedSelector);
+  const [isChangingOrdering, setIsChangingOrdering] = React.useState(false);
 
   React.useEffect(() => {
     eddiApiActionDispatchers.fetchPackageDataAction(packagePayload.resource);
@@ -85,22 +80,6 @@ const PackageView = ({
   const getBotIdFromQueryString = () => {
     const botId = Parser.getQueryStrings(location.search).botId;
     return botId;
-  };
-
-  const replacer = (key, value) => {
-    if (key === 'extensionKey') {
-      return undefined;
-    } else {
-      return value;
-    }
-  };
-
-  const openEditJsonModal = () => {
-    eddiApiActionDispatchers.fetchJsonSchemaAction(PACKAGE);
-    ModalActionDispatchers.showEditJsonModal(
-      packagePayload.resource,
-      JSON.stringify({ packageExtensions: selectedPlugins }, replacer, '\t'),
-    );
   };
 
   const discardChanges = () => {
@@ -198,6 +177,10 @@ const PackageView = ({
     );
   };
 
+  const handleChangeOrdering = () => {
+    setIsChangingOrdering(true);
+  };
+
   return (
     <div>
       <div className={classes.packageHeader}>
@@ -241,6 +224,9 @@ const PackageView = ({
           <Options
             descriptor={packagePayload}
             data={JSON.stringify(packagePayload.packageData, null, '\t')}
+            changeOrdering={
+              !isChangingOrdering ? handleChangeOrdering : undefined
+            }
           />
         </div>
         <BlueButton
@@ -249,7 +235,7 @@ const PackageView = ({
           onClick={() => saveChanges()}
         />
         <BlueButton
-          text={'Save & test'}
+          text={'Save & Run'}
           disabled={!unsavedChanges()}
           onClick={() => saveChanges(true)}
           classes={{ button: classes.greenButton }}
@@ -260,44 +246,16 @@ const PackageView = ({
         {'Used in bots'}
         <BotsUsingPackage packagePayload={packagePayload} />
       </div>
-      {!!selectedPlugins && !_.isEmpty(selectedPlugins) && (
-        <div>
-          {selectedPlugins
-            .filter((p) => hasExtensions(p))
-            .map((ext, key) => (
-              <PluginWithExtension
-                key={key}
-                pluginType={ext}
-                pluginResource={PluginHelper.getResource(ext)}
-                deletePlugin={deletePlugin}
-                updatePlugin={updatePlugin}
-                openParallelConfigModal={openParallelConfigModal}
-                editDisabled={!isCurrentVersion || readOnly}
-              />
-            ))}
-          <div
-            className={clsx(
-              classes.pluginList,
-              isChatOpened ? classes.pluginListColumn : null,
-            )}>
-            {selectedPlugins
-              .filter((p) => !hasExtensions(p))
-              .map((ext, key) => (
-                <Plugin
-                  key={key}
-                  pluginType={ext}
-                  deletePlugin={deletePlugin}
-                  pluginResource={PluginHelper.getResource(ext)}
-                  updatePlugin={updatePlugin}
-                  openParallelConfigModal={() =>
-                    openParallelConfigModal(PluginHelper.getResource(ext))
-                  }
-                  editDisabled={!isCurrentVersion || readOnly}
-                />
-              ))}
-          </div>
-        </div>
-      )}
+      <PackagePluginList
+        packagePayload={packagePayload}
+        plugins={selectedPlugins}
+        isChangingOrdering={isChangingOrdering}
+        readOnly={readOnly}
+        setPlugins={setSelectedPlugins}
+        deletePlugin={deletePlugin}
+        updatePlugin={updatePlugin}
+        openParallelConfigModal={openParallelConfigModal}
+      />
       {isCurrentVersion && !readOnly && (
         <div>
           <div className={classes.pluginAddTitle}>{'Add plugins'}</div>

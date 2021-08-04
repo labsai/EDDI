@@ -1,12 +1,16 @@
 import { makeStyles } from '@material-ui/core/styles';
 import {
-  BLUE_COLOR,
-  WHITE_COLOR,
-  GREY_COLOR,
-  DARK_GREY_COLOR,
   BLACK_COLOR,
+  BLUE_COLOR,
+  DARK_GREY_COLOR,
+  GREY_COLOR,
   LIGHT_GREY_COLOR,
+  RED_COLOR,
+  WHITE_COLOR,
 } from '../../../styles/DefaultStylingProperties';
+
+const DISCARD_MODAL_HEIGHT = 110;
+const DISCARD_MODAL_WIDTH = 300;
 
 const useStyles = makeStyles({
   close: {
@@ -33,6 +37,10 @@ const useStyles = makeStyles({
     textAlign: 'left',
     display: 'flex',
     flexDirection: 'column',
+
+    '& textarea, input': {
+      caretColor: 'white',
+    },
   },
   updateModalContent: {
     display: 'block',
@@ -92,7 +100,6 @@ const useStyles = makeStyles({
     backgroundColor: BLACK_COLOR,
     borderTopLeftRadius: '4px',
     borderTopRightRadius: '4px',
-    height: '156px',
     width: '100%',
   },
   tallModalHeader: {
@@ -120,7 +127,8 @@ const useStyles = makeStyles({
     display: 'flex',
     marginLeft: '50px',
     marginRight: '40px',
-    paddingTop: '50px',
+    padding: '20px 0',
+    alignItems: 'center',
   },
   modalTopHeaderCenter: {
     flex: 1,
@@ -209,19 +217,20 @@ const useStyles = makeStyles({
     width: '100%',
   },
   discardChanges: {
-    border: 'none',
-    outline: 'none',
-    color: WHITE_COLOR,
-    cursor: 'pointer',
-    fontSize: '13px',
-    whiteSpace: 'nowrap',
-    textAlign: 'right',
-    marginLeft: '10px',
-    backgroundColor: 'transparent',
-    marginRight: '5px',
+    color: 'white',
+    backgroundColor: RED_COLOR,
+    border: 'transparent',
+    transition: 'background-color 0.3s ease',
+    marginRight: '10px',
 
     '&:hover': {
-      color: BLUE_COLOR,
+      backgroundColor: 'transparent',
+      border: `2px solid ${RED_COLOR}`,
+      color: RED_COLOR,
+      transition: 'background-color 0.3s ease',
+    },
+    '&:disabled': {
+      cursor: 'not-allowed',
     },
   },
   backButton: {
@@ -302,9 +311,38 @@ const useStyles = makeStyles({
     '&:active': {
       backgroundColor: '#4BCA81',
     },
+    '&:disabled': {
+      backgroundColor: '#4BCA81',
+    },
   },
   showViewJson: {
     marginRight: '10px',
+  },
+  createBotButton: {
+    float: 'right',
+    marginLeft: 'auto',
+  },
+  paper: {
+    position: 'fixed',
+    top: `calc(50% - ${DISCARD_MODAL_HEIGHT / 2}px)`,
+    left: `calc(50% - ${DISCARD_MODAL_WIDTH / 2}px)`,
+    width: `${DISCARD_MODAL_WIDTH}px`,
+    height: `${DISCARD_MODAL_HEIGHT}px`,
+    display: 'flex',
+    flexDirection: 'column',
+    justifyContent: 'center',
+    alignItems: 'center',
+    background: DARK_GREY_COLOR,
+    boxShadow: `0 0 20px ${GREY_COLOR}`,
+    padding: '20px',
+    borderRadius: '4px',
+    color: WHITE_COLOR,
+
+    '& > div': {
+      display: 'flex',
+      flexDirection: 'row',
+      justifyContent: 'space-between',
+    },
   },
 });
 

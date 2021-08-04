@@ -170,7 +170,7 @@ const CreateNewConfig2Modal = (props: IPrivateProps) => {
             [editClasses.tabDisabled]: selectedTab !== TabEnum.editor,
           })}
           onClick={() => setSelectedTab(TabEnum.editor)}>
-          {'Editor'}
+          {'JSON Editor'}
         </div>
       </div>
       {isValidJson && <JsonIsValid />}

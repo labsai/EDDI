@@ -31,21 +31,6 @@ const useStyles = makeStyles({
     display: 'flex',
     flexDirection: 'row',
   },
-  readOnly: {
-    '& button': {
-      display: 'none',
-    },
-    '& input, & select': {
-      '&:disabled': {
-        backgroundColor: DARK_GREY_COLOR,
-        opacity: 0.6,
-        color: WHITE_COLOR,
-      },
-    },
-    '& *': {
-      ...notVerticalSpacing,
-    },
-  },
   formTree: {
     flex: 1,
     paddingLeft: '10px',
@@ -91,8 +76,12 @@ const useStyles = makeStyles({
       fontSize: '18px',
     },
 
-    '& input': {
+    '& input, select': {
       backgroundColor: GREY_COLOR,
+      color: WHITE_COLOR,
+    },
+    '& .panel-default': {
+      backgroundColor: DARK_GREY_COLOR,
       color: WHITE_COLOR,
     },
 
@@ -157,6 +146,27 @@ const useStyles = makeStyles({
       transition: 'border 0s ease, padding 0s ease',
     },
   },
+  readOnly: {
+    '& button': {
+      display: 'none',
+      pointerEvents: 'none',
+    },
+    '& input, & select': {
+      '&:disabled': {
+        backgroundColor: DARK_GREY_COLOR,
+        opacity: 0.6,
+        color: WHITE_COLOR,
+      },
+      backgroundColor: DARK_GREY_COLOR,
+      opacity: 0.6,
+      color: WHITE_COLOR,
+      pointerEvents: 'none',
+    },
+    '& *': {
+      ...notVerticalSpacing,
+    },
+  },
+  jsonForm: {},
 });
 
 interface IProps {
@@ -167,41 +177,23 @@ interface IProps {
   validate(): void;
 }
 
-let yourForm;
-
 const JsonSchemaForm: React.StatelessComponent<IProps> = (props: IProps) => {
   const classes = useStyles();
   const readOnly = props.readOnly;
-
-  React.useEffect(() => {
-    const overlay = document.getElementById('modal-overlay');
-    if (!overlay) {
-      return;
-    }
-    overlay.style.maxHeight = '100vh';
-    overlay.style.paddingBottom = '0';
-    return () => {
-      overlay.style.maxHeight = 'auto';
-      overlay.style.paddingBottom = '300px';
-    };
-  }, []);
+  const formRef = React.useRef(null);
 
   const disableInputs = (disabled = true) => {
-    const inputs = document
-      .getElementById('json-form')
-      .querySelectorAll('input');
-    const selects = document
-      .getElementById('json-form')
-      .querySelectorAll('select');
+    const inputs = document.querySelectorAll('.json-form input');
+    const selects = document.querySelectorAll('.json-form select');
     if (inputs) {
       const inputsArray = Array.from(inputs);
-      inputsArray?.forEach?.((e) => {
+      inputsArray?.forEach?.((e: HTMLInputElement) => {
         e.disabled = disabled;
       });
     }
     if (selects) {
       const selectsArray = Array.from(selects);
-      selectsArray?.forEach?.((e) => {
+      selectsArray?.forEach?.((e: HTMLSelectElement) => {
         e.disabled = disabled;
       });
     }
@@ -223,6 +215,10 @@ const JsonSchemaForm: React.StatelessComponent<IProps> = (props: IProps) => {
   }
   const data = JSON.parse(props.data);
 
+  const handleSubmit = () => {
+    props.validate();
+  };
+
   return (
     <div
       className={clsx(
@@ -232,17 +228,16 @@ const JsonSchemaForm: React.StatelessComponent<IProps> = (props: IProps) => {
       <div className={classes.formTree}>
         <RecursiveTreeView data={data} />
       </div>
-      <div className={classes.form} id="json-form">
+      <div className={clsx(classes.form, 'json-form')}>
         <Button
           text={'Validate form'}
-          onClick={() => yourForm.submit()}
+          onClick={handleSubmit}
           classes={{ button: classes.validateButton }}
         />
         {!!props.schema && !!props.data && (
           <Form
-            ref={(form) => {
-              yourForm = form;
-            }}
+            ref={formRef}
+            className={readOnly ? classes.readOnly : null}
             additionalMetaSchemas={[metaSchema4]}
             schema={props.schema}
             formData={data}
@@ -250,6 +245,7 @@ const JsonSchemaForm: React.StatelessComponent<IProps> = (props: IProps) => {
               props.onChange(JSON.stringify(data.formData, null, '\t'))
             }
             onSubmit={() => props.validate()}
+            liveValidate
             onError={() => console.log('errors')}>
             <br />
           </Form>

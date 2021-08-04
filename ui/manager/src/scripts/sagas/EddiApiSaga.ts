@@ -4,6 +4,7 @@ import { openChatAction } from '../actions/ChatActions';
 import {
   addNewPackageToBotsFailedAction,
   addNewPackageToBotsSuccessAction,
+  clearEditedPluginDataAction,
   createNewBotFailedAction,
   createNewBotSuccessAction,
   createNewConfigFailedAction,
@@ -74,11 +75,13 @@ import {
   IFetchPackagesUsingPluginAction,
   IFetchPluginAction,
   IFetchPluginsAction,
+  IMassUpdateJsonDataAction,
   IUndeployBotAction,
   IUpdateBotAction,
   IUpdateBotPackagesAction,
   IUpdateBotsAction,
   IUpdateDescriptorAction,
+  IUpdateExtensionsOrderAction,
   IUpdateJsonDataAction,
   IUpdatePackageAction,
   IUpdatePackagesAction,
@@ -90,6 +93,8 @@ import {
   updateBotSuccessAction,
   updateDescriptorFailedAction,
   updateDescriptorSuccessAction,
+  updateExtensionsOrderFailedAction,
+  updateExtensionsOrderSuccessAction,
   updateJsonDataFailedAction,
   updatePackageFailedAction,
   updatePackagesFailedAction,
@@ -123,15 +128,18 @@ import {
   FETCH_PACKAGES_USING_PLUGIN,
   FETCH_PLUGIN,
   FETCH_PLUGINS,
+  MASS_UPDATE_JSON_DATA,
   UNDEPLOY_BOT,
   UPDATE_BOT,
   UPDATE_BOTS,
   UPDATE_BOT_PACKAGES,
   UPDATE_DESCRIPTOR,
+  UPDATE_EXTENSIONS_ORDER,
   UPDATE_JSON_DATA,
   UPDATE_PACKAGE,
   UPDATE_PACKAGES,
 } from '../actions/EddiApiActionTypes';
+import { closeModal, showParallelConfigModal } from '../actions/ModalActions';
 import { hideLoader, showLoader } from '../actions/SystemActions';
 import {
   getAPIUrl,
@@ -175,14 +183,19 @@ import {
   updateBot as axiosUpdateBot,
   updateBotPackages as axiosUpdateBotPackages,
   updateBots as axiosUpdateBots,
+  updateExtensionsOrder as axiosUpdateExtensionsOrder,
   updateJsonData as axiosUpdateJsonData,
   updatePackage as axiosUpdatePackage,
   updatePackages as axiosUpdatePackages,
 } from '../components/utils/AxiosFunctions';
 import * as Edditypes from '../components/utils/EddiTypes';
 import { BOT, PACKAGE } from '../components/utils/EddiTypes';
+import getIdsFromPath, {
+  isPackagePage,
+} from '../components/utils/helpers/getIdsFromPath';
 import { parsePlugins } from '../components/utils/helpers/PluginParser';
 import Parser from '../components/utils/Parser';
+import { historyPush } from '../history';
 
 export function* FetchBots(action: IFetchBotsAction) {
   try {
@@ -411,6 +424,42 @@ export function* watchUpdatePackage(): Iterator<{}> {
   yield takeEvery(UPDATE_PACKAGE, updatePackage);
 }
 
+export function* updateExtensionsOrder(action: IUpdateExtensionsOrderAction) {
+  try {
+    yield put(showLoader());
+    const { botId } = getIdsFromPath();
+    const pack: IPackage = yield call(
+      axiosUpdateExtensionsOrder,
+      action.package,
+      action.packageExtensions,
+    );
+    yield put(updateExtensionsOrderSuccessAction(pack));
+    yield put(updatePackageSuccessAction(pack, !botId ? false : true));
+
+    if (botId) {
+      const currentBot: IBot = yield getCurrentBot(botId);
+      const updatedBot = yield call(axiosUpdateBotPackages, currentBot, [
+        pack.resource,
+      ]);
+      yield put(updateBotsSuccessAction([updatedBot]));
+
+      if (updatedBot) {
+        yield call(deployBot, {
+          botResource: updatedBot.resource,
+        } as IDeployBotAction);
+      }
+    }
+    yield put(hideLoader());
+  } catch (err) {
+    yield put(updateExtensionsOrderFailedAction(err));
+    yield put(hideLoader());
+  }
+}
+
+export function* watchUpdateExtensionsOrder(): Iterator<{}> {
+  yield takeEvery(UPDATE_EXTENSIONS_ORDER, updateExtensionsOrder);
+}
+
 export function* FetchPackageData(action: IFetchPackageDataAction) {
   try {
     const packageData: IPlugins = yield call(
@@ -627,6 +676,86 @@ export function* updateJsonData(action: IUpdateJsonDataAction): Iterator<{}> {
 
 export function* watchUpdateJsonData(): Iterator<{}> {
   yield takeEvery(UPDATE_JSON_DATA, updateJsonData);
+}
+
+function* iterateResources(resource: string, data: any, last: boolean) {
+  const { packageId, botId } = getIdsFromPath();
+  yield call(axiosUpdateJsonData, resource, JSON.parse(data));
+  const updatedPlugin: IPlugin = yield call(getCurrentPlugin, resource);
+  yield put(updatePluginSuccessAction(updatedPlugin, true));
+  const currentPackage: IPackage = yield call(getCurrentPackage, packageId);
+  const updatedPackage: IPackage = yield call(
+    axiosUpdatePackage,
+    currentPackage,
+    updatedPlugin.resource,
+  );
+  yield put(
+    updatePackageSuccessAction(updatedPackage, last && !botId ? false : true),
+  );
+  return updatedPackage.resource;
+}
+
+export function* massUpdateJsonData(
+  action: IMassUpdateJsonDataAction,
+): Iterator<{}> {
+  try {
+    const { packageId, botId } = getIdsFromPath();
+    yield put(showLoader());
+    yield put(closeModal());
+
+    let updatedPackage: string;
+
+    for (let [i, p] of action.plugins.entries()) {
+      const last = action.plugins.length - 1 === i;
+      const newPackage = yield call(iterateResources, p.resource, p.data, last);
+      updatedPackage = newPackage;
+    }
+
+    if (botId) {
+      const currentBot: IBot = yield call(getCurrentBot, botId);
+      const botToUpdate = {
+        botResource: currentBot?.resource as string,
+        packageResources: [updatedPackage],
+      };
+      const updatedBots: IBot[] = yield call(axiosUpdateBots, [botToUpdate]);
+      yield put(updateBotsSuccessAction(updatedBots));
+
+      if (action.deploy && !_.isEmpty(updatedBots)) {
+        yield call(deployBot, {
+          botResource: updatedBots[0].resource,
+        } as IDeployBotAction);
+        yield put(openChatAction());
+      } else {
+        const currentPackage: IPackage = yield call(
+          getCurrentPackage,
+          packageId,
+        );
+        yield put(
+          showParallelConfigModal(currentPackage, currentPackage.resource),
+        );
+        yield call(historyPush, `${location.pathname}`, [
+          !isPackagePage() ? `packageId=${packageId}` : `botId=${botId}`,
+        ]);
+      }
+    } else {
+      const currentPackage: IPackage = yield call(getCurrentPackage, packageId);
+      yield put(
+        showParallelConfigModal(currentPackage, currentPackage.resource),
+      );
+      yield call(historyPush, `${location.pathname}`, [
+        !isPackagePage ? `packageId=${packageId}` : `botId=${botId}`,
+      ]);
+    }
+    yield put(clearEditedPluginDataAction());
+    yield put(hideLoader());
+  } catch (err) {
+    yield put(updateJsonDataFailedAction(err));
+    yield put(hideLoader());
+  }
+}
+
+export function* watchMassUpdateJsonData(): Iterator<{}> {
+  yield takeEvery(MASS_UPDATE_JSON_DATA, massUpdateJsonData);
 }
 
 export function* updatePackages(action: IUpdatePackagesAction): Iterator<{}> {

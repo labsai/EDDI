@@ -18,6 +18,7 @@ import WhiteButton from '../../Assets/Buttons/WhiteButton';
 import { IPlugin, IPluginExtensions } from '../../utils/AxiosFunctions';
 import * as PluginType from '../../utils/EddiTypes';
 import { REGULAR_DICTIONARY } from '../../utils/EddiTypes';
+import { isBotPage } from '../../utils/helpers/getIdsFromPath';
 import PluginHelper from '../../utils/helpers/PluginHelper';
 import Parser from '../../utils/Parser';
 import { IOptions } from '../PackageView';
@@ -49,7 +50,6 @@ const Plugin = ({
   openParallelConfigModal,
 }: IPrivateProps) => {
   const classes = useStyles();
-  const isBotPage = location.pathname.includes('botview');
   React.useEffect(() => {
     if (pluginResource) {
       eddiApiActionDispatchers.fetchPluginAction(pluginResource);
@@ -157,7 +157,7 @@ const Plugin = ({
       ModalActionDispatchers.showViewJsonModal(pluginResource);
 
       const query = [];
-      if (botId && !isBotPage) {
+      if (botId && !isBotPage()) {
         query.push(`botId=${botId}`);
       }
       if (packageId) {
@@ -210,6 +210,7 @@ const Plugin = ({
           [classes.updateAvailableBorderColor]:
             plugin.version !== plugin.currentVersion,
         })}
+        disabled={_.isEmpty(pluginResource)}
         onClick={openParallelConfigModal || openViewJsonModal}>
         <div className={classes.pluginHeader}>
           <div

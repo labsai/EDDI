@@ -74,7 +74,7 @@ const InfoPopup = ({ open, popupEl, handleClose, botResource }: IInfoPopup) => {
         if (!responce) {
           return;
         }
-        const conversationResource = responce?.[1].resource;
+        const conversationResource = responce?.[1]?.resource;
         const prevConversationId = conversationResource?.split('/')?.pop();
         if (prevConversationId) {
           setPreviousConversation(prevConversationId);

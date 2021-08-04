@@ -35,7 +35,6 @@ interface IPrivateProps extends IPublicProps {
 }
 
 const ViewJsonContent = (props: IPrivateProps) => {
-  const [jsonText, setJsonText] = React.useState('');
   const classes = useStyles();
 
   const { schema } = useSelector((state: IAppState) =>
@@ -43,10 +42,6 @@ const ViewJsonContent = (props: IPrivateProps) => {
       type: getTypeFromResource(props.descriptor.resource),
     }),
   );
-
-  React.useEffect(() => {
-    handleSetJsonText();
-  }, [props.descriptor, props.data, props.usedBy, props.readOnly]);
 
   React.useEffect(() => {
     if (!schema) {
@@ -58,10 +53,6 @@ const ViewJsonContent = (props: IPrivateProps) => {
 
   const plug = (value?: string) => {
     return;
-  };
-
-  const handleSetJsonText = () => {
-    setJsonText(props.data);
   };
 
   const openEditJsonModal = () => {
@@ -96,7 +87,11 @@ const ViewJsonContent = (props: IPrivateProps) => {
           )}
           <div className={classes.centerFlex} />
           <div className={classes.options} onClick={(e) => e.stopPropagation()}>
-            <Options descriptor={props.descriptor} data={props.data} />
+            <Options
+              descriptor={props.descriptor}
+              data={props.data}
+              noEditJson
+            />
           </div>
           <BlueButton
             onClick={
@@ -104,7 +99,8 @@ const ViewJsonContent = (props: IPrivateProps) => {
             }
             classes={{ button: classes.button }}
             disabled={!isCurrentVersion || props.readOnly}
-            text={`Edit JSON`}
+            text={'Edit'}
+            noTabIndex
           />
         </div>
         <div className={classes.bottomHeader}>

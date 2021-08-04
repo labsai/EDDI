@@ -14,6 +14,8 @@ import {
   CREATE_NEW_PLUGIN_SUCCESS,
   FETCH_PLUGIN_JSON_SCHEMA_SUCCESS,
   DUPLICATE_SUCCESS,
+  EDIT_PLUGIN_DATA,
+  CLEAR_EDITED_PLUGIN_DATA,
 } from '../actions/EddiApiActionTypes';
 import update from 'immutability-helper';
 import {
@@ -28,6 +30,7 @@ import {
   ICreateNewPluginSuccessAction,
   IFetchJsonSchemaSuccessAction,
   IDuplicateSuccessAction,
+  IEditPluginDataAction,
 } from '../actions/EddiApiActions';
 import {
   IDefaultPluginTypes,
@@ -46,8 +49,15 @@ import {
 } from '../components/utils/EddiTypes';
 import Parser from '../components/utils/Parser';
 import PluginHelper from '../components/utils/helpers/PluginHelper';
+import { JSONSchema4 } from 'json-schema';
 
 export type IPluginReducer = Reducer<IPluginState>;
+export type ITempPluginData = {
+  pluginId: string;
+  data: string;
+  resource: string;
+  schema: JSONSchema4;
+};
 
 export interface IPluginState {
   error: Error;
@@ -57,7 +67,7 @@ export interface IPluginState {
   defaultPluginTypes: IDefaultPluginTypes[];
   plugins: IPlugin[];
   schemas: IEddiSchema[];
-
+  tempPluginsData: ITempPluginData[];
   allDictionariesLoaded: boolean;
   allBehaviorsLoaded: boolean;
   allOutputsLoaded: boolean;
@@ -81,7 +91,7 @@ export const initialState: IPluginState = {
   defaultPluginTypes: [],
   plugins: [],
   schemas: [],
-
+  tempPluginsData: [],
   allDictionariesLoaded: false,
   allBehaviorsLoaded: false,
   allOutputsLoaded: false,
@@ -436,6 +446,35 @@ const PluginReducer: IPluginReducer = (
               (action as IDuplicateSuccessAction).plugins,
             ),
         },
+      });
+    }
+    case EDIT_PLUGIN_DATA: {
+      return update(state, {
+        tempPluginsData: {
+          $apply: (tempPluginsData: ITempPluginData[]) => {
+            const pluginIndex = tempPluginsData.findIndex((d) => {
+              return d.pluginId === (action as IEditPluginDataAction).pluginId;
+            });
+            const newData = {
+              pluginId: (action as IEditPluginDataAction).pluginId,
+              data: (action as IEditPluginDataAction).data,
+              resource: (action as IEditPluginDataAction).resource,
+              schema: (action as IEditPluginDataAction).schema,
+            };
+            if (pluginIndex !== -1) {
+              let pluginData = [...tempPluginsData];
+              pluginData[pluginIndex] = newData;
+              return pluginData;
+            } else {
+              return [...tempPluginsData, newData];
+            }
+          },
+        },
+      });
+    }
+    case CLEAR_EDITED_PLUGIN_DATA: {
+      return update(state, {
+        tempPluginsData: { $set: [] },
       });
     }
     default:

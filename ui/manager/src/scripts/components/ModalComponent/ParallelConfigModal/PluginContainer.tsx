@@ -1,9 +1,5 @@
 import * as _ from 'lodash';
 import * as React from 'react';
-import { useSelector } from 'react-redux';
-import eddiApiActionDispatchers from '../../../../scripts/actions/EddiApiActionDispatchers';
-import { IAppState } from 'src/scripts/reducers';
-import { pluginSelector } from '../../../selectors/PluginSelectors';
 import { getPlugin, IPlugin } from '../../utils/AxiosFunctions';
 import EditJsonModal from '../EditJsonModal/EditJsonModal';
 import ViewJsonContent from '../ViewJsonModal/ViewJsonContent';
@@ -28,11 +24,13 @@ const useStyles = makeStyles({
 interface IPublicProps {
   pluginResource: string;
   type: string;
+  currentVersion?: number;
+  sliderRef: React.MutableRefObject<any>;
 }
 
 const PluginContainer = (props: IPublicProps) => {
   const classes = useStyles();
-  const [isEdit, setIsEdit] = React.useState(true);
+  const [isEdit, setIsEdit] = React.useState(false);
 
   const [plugin, setPlugin] = React.useState<IPlugin>();
 
@@ -51,7 +49,7 @@ const PluginContainer = (props: IPublicProps) => {
         setError(error);
         setLoading(false);
       });
-  }, []);
+  }, [props.currentVersion]);
 
   return (
     <div>
@@ -79,6 +77,7 @@ const PluginContainer = (props: IPublicProps) => {
                 resource={(plugin as IPlugin).resource}
                 data={JSON.stringify(plugin.pluginData, null, '\t')}
                 showViewJson={() => setIsEdit(false)}
+                sliderRef={props.sliderRef}
               />
             ))}
         </div>

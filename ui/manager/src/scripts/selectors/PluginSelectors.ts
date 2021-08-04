@@ -26,9 +26,13 @@ export function pluginSelector(state: IAppState, props: IPluginSelectorProps) {
   );
   return {
     plugin: plugin || [],
+    usedByPackages: plugin?.usedByPackages,
     isLoading: state.pluginState.isLoading,
     error: state.pluginState.error,
   };
+}
+export function pluginTempDataSelector(state: IAppState) {
+  return state.pluginState.tempPluginsData;
 }
 
 export const PluginStateSelector: (state: IAppState) => IPluginState = (

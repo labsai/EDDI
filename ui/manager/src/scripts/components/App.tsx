@@ -16,6 +16,7 @@ import * as Keycloak from 'keycloak-js';
 import * as React from 'react';
 import { connect } from 'react-redux';
 import { Route } from 'react-router-dom';
+import ClimbingBoxLoader from 'react-spinners/ClimbingBoxLoader';
 import { compose, pure, setDisplayName } from 'recompose';
 import authenticationActionDispatchers from '../actions/AuthenticationActionDispatchers';
 import SystemActionDispatchers from '../actions/SystemActionDispatchers';
@@ -26,6 +27,7 @@ import {
   isAppReadySelector,
   isLoadingSelector,
 } from '../selectors/SystemSelectors';
+import useStyles from './App.style';
 import Chat from './Chat/Chat';
 import Loader from './Loader/Loader';
 import ModalComponentFrame from './ModalComponent/ModalComponentFrame';
@@ -83,6 +85,8 @@ const App = ({
   isOpened: isChatOpened,
   isLoading,
 }: IPrivateProps) => {
+  const classes = useStyles();
+  const [authChecked, setAuthChecked] = React.useState(false);
   React.useEffect(() => {
     runSagaMiddleware();
     const queryStrings = Parser.getQueryStrings(location.search);
@@ -115,6 +119,7 @@ const App = ({
     if (isKeycloakEnabled && !keycloakAuthenticated) {
       if (!keycloak.authenticated) {
         initKeycloak();
+        setAuthChecked(true);
       }
     }
   }, [isKeycloakEnabled, keycloakAuthenticated, keycloak]);
@@ -122,12 +127,21 @@ const App = ({
   React.useEffect(() => {
     if (isKeycloakEnabled && keycloakAuthenticated) {
       refreshToken();
+      setAuthChecked(true);
     }
   }, []);
 
   const authenticated = keycloakAuthenticated && basicAuthAuthenticated;
 
   useChangeBodyMaxWidth(isChatOpened);
+
+  if (isKeycloakEnabled && !authChecked) {
+    return (
+      <div className={classes.loadingWrapper}>
+        <ClimbingBoxLoader loading color="white" />
+      </div>
+    );
+  }
 
   return (
     <>

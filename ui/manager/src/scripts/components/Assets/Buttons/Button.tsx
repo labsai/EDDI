@@ -54,6 +54,7 @@ function getButtonStyling(props: IProps) {
 interface IProps {
   text: string;
   disabled?: boolean;
+  noTabIndex?: boolean;
   styles?: { [key: string]: IExtendedCSSProperties };
   customStyles?: { [key: string]: IExtendedCSSProperties };
   onClick?: (event: React.MouseEvent) => void;
@@ -64,6 +65,7 @@ const DefaultButton: React.StatelessComponent<IProps> = (props: IProps) => {
   const classes = useStyles();
   return (
     <Button
+      tabIndex={props.noTabIndex ? '-1' : undefined}
       onClick={props.onClick}
       disabled={props.disabled}
       className={clsx(classes.button, props.classes?.button)}

@@ -1,7 +1,10 @@
 import { makeStyles } from '@material-ui/core/styles';
 import * as _ from 'lodash';
 import * as React from 'react';
+import { useSelector } from 'react-redux';
 import { compose, pure, setDisplayName } from 'recompose';
+import { IAppState } from '../../../reducers';
+import { pluginSelector } from '../../../selectors/PluginSelectors';
 import { WHITE_COLOR } from '../../../../styles/DefaultStylingProperties';
 import eddiApiActionDispatchers from '../../../actions/EddiApiActionDispatchers';
 import { IPlugin } from '../../utils/AxiosFunctions';
@@ -32,9 +35,13 @@ interface IProps {
 
 const PackagesUsingPlugin = ({ plugin, isSmallName }: IProps) => {
   const [expandList, setExpandList] = React.useState(false);
-  const [usedByPackagesShort, setUsedByPackagesShort] =
-    React.useState<IUsedResource[]>(null);
-  const [usedByPackages, setUsedByPackages] = React.useState<string[]>(null);
+  const plg = useSelector((state: IAppState) =>
+    pluginSelector(state, { pluginResource: plugin.resource }),
+  );
+  const usedByPackages = plg.usedByPackages;
+  const [usedByPackagesShort, setUsedByPackagesShort] = React.useState<
+    IUsedResource[]
+  >([]);
 
   const classes = useStyles();
 
@@ -46,11 +53,10 @@ const PackagesUsingPlugin = ({ plugin, isSmallName }: IProps) => {
   }, []);
 
   React.useEffect(() => {
-    if (!_.isEmpty(plugin.usedByPackages)) {
-      setUsedByPackagesShort(Parser.shortenResourceList(plugin.usedByPackages));
-      setUsedByPackages(plugin.usedByPackages);
+    if (!_.isEmpty(usedByPackages)) {
+      setUsedByPackagesShort(Parser.shortenResourceList(usedByPackages));
     }
-  }, [plugin.usedByPackages]);
+  }, [usedByPackages]);
 
   const handleExpandList = () => {
     setExpandList(!expandList);

@@ -1,16 +1,21 @@
+import Modal from '@material-ui/core/Modal';
 import clsx from 'clsx';
 import { JSONSchema4 } from 'json-schema';
 import * as _ from 'lodash';
 import * as React from 'react';
-import { connect } from 'react-redux';
+import { connect, useDispatch, useSelector } from 'react-redux';
 import { compose, pure, setDisplayName } from 'recompose';
+import { modalModeSelector } from '../../../selectors/ModalSelectors';
 import eddiApiActionDispatchers from '../../../actions/EddiApiActionDispatchers';
+import { editPluginDataAction } from '../../../actions/EddiApiActions';
 import modalActionDispatchers from '../../../actions/ModalActionDispatchers';
 import { schemaSelector } from '../../../selectors/SystemSelectors';
 import BlueButton from '../../Assets/Buttons/BlueButton';
 import { getTypeFromResource } from '../../utils/ApiFunctions';
 import { IDetailedDescriptor } from '../../utils/AxiosFunctions';
+import getIdsFromPath from '../../utils/helpers/getIdsFromPath';
 import { compileJsonSchema, IJsonError } from '../../utils/helpers/JsonHelpers';
+import { ModalEnum } from '../../utils/ModalEnum';
 import useStyles from '../ModalComponent.styles';
 import '../ModalComponent.styles.scss';
 import useEditStyles from './EditJsonModal.styles';
@@ -30,6 +35,7 @@ interface IPublicProps {
   resource: string;
   data: string;
   type: string;
+  sliderRef?: React.MutableRefObject<any>;
   showViewJson?: () => void;
 }
 
@@ -38,20 +44,17 @@ interface IPrivateProps extends IPublicProps {
 }
 
 const EditJsonModal = (props: IPrivateProps) => {
-  const isPackagePage = location.pathname.includes('packageview');
-  const isBotPage = location.pathname.includes('botview');
-  const urlSearchParams = new URLSearchParams(location.search);
-  const botId = isBotPage
-    ? location.pathname.split('/')?.[2]
-    : urlSearchParams.get('botId');
-  const packageId = isPackagePage
-    ? location.pathname.split('/')?.[2]
-    : urlSearchParams.get('packageId');
+  const dispatch = useDispatch();
+  const modalMode = useSelector(modalModeSelector);
+  const isParallelConfig = modalMode === ModalEnum.parallelConfig;
+
+  const { botId, packageId } = getIdsFromPath();
   // todo: reduxify this component and editor
 
   const [editorText, setEditorText] = React.useState('');
   const [errors, setErrors] = React.useState<IJsonError[]>([]);
   const [isValidJson, setIsValidJson] = React.useState(false);
+  const [discardOpened, setDiscardOpened] = React.useState(false);
   const [selectedTab, setSelectedTab] = React.useState<TabEnum>(TabEnum.form);
   const classes = useStyles();
   const editClasses = useEditStyles();
@@ -69,6 +72,14 @@ const EditJsonModal = (props: IPrivateProps) => {
 
   const onChange = (value) => {
     setEditorText(value);
+    dispatch(
+      editPluginDataAction(
+        props.descriptor.id,
+        value,
+        props.resource,
+        props.schema,
+      ),
+    );
     setIsValidJson(false);
   };
 
@@ -76,13 +87,15 @@ const EditJsonModal = (props: IPrivateProps) => {
     setEditorText(props.data);
   };
 
-  const unsavedChanges = () => {
-    // todo: reduxify and refactor editor
-    return false;
-    /*
-    return editorText !== props.data;
-    */
+  const handleDiscardChanges = () => {
+    setDiscardOpened(true);
   };
+
+  const handleClose = () => {
+    setDiscardOpened(false);
+  };
+
+  const unsavedChanges = () => editorText !== props.data;
 
   const updateJson = (deploy: boolean = false) => {
     if (validateJson()) {
@@ -146,27 +159,31 @@ const EditJsonModal = (props: IPrivateProps) => {
             <BlueButton
               classes={{ button: classes.showViewJson }}
               onClick={() => props.showViewJson()}
-              text={'View JSON'}
+              text={'View'}
             />
           )}
           {unsavedChanges() && (
-            <button
-              className={classes.discardChanges}
-              onClick={() => validateJson()}>
-              {'Discard changes'}
-            </button>
+            <BlueButton
+              classes={{ button: classes.discardChanges }}
+              onClick={handleDiscardChanges}
+              text={'Discard changes'}
+            />
           )}
-          <BlueButton
-            onClick={() => updateJson()}
-            disabled={!unsavedChanges || !isJsonString()}
-            text={'Save changes'}
-          />
-          <BlueButton
-            onClick={() => updateJson(true)}
-            disabled={!unsavedChanges || !isJsonString()}
-            classes={{ button: classes.greenButton }}
-            text={'Save & test'}
-          />
+          {!isParallelConfig && (
+            <>
+              <BlueButton
+                onClick={() => updateJson()}
+                disabled={!unsavedChanges() || !isJsonString()}
+                text={'Save changes'}
+              />
+              <BlueButton
+                onClick={() => updateJson(true)}
+                disabled={!unsavedChanges() || !isJsonString()}
+                classes={{ button: classes.greenButton }}
+                text={'Save & test'}
+              />
+            </>
+          )}
         </div>
       </div>
       <div className={editClasses.tabs}>
@@ -184,7 +201,7 @@ const EditJsonModal = (props: IPrivateProps) => {
             [editClasses.tabDisabled]: selectedTab !== TabEnum.editor,
           })}
           onClick={() => setSelectedTab(TabEnum.editor)}>
-          {'Editor'}
+          {'JSON Editor'}
         </div>
       </div>
       {isValidJson && <JsonIsValid />}
@@ -199,6 +216,7 @@ const EditJsonModal = (props: IPrivateProps) => {
             onConfirm={updateJson}
             onChange={onChange}
             validate={validateJson}
+            sliderRef={props.sliderRef}
           />
         </div>
       )}
@@ -210,6 +228,26 @@ const EditJsonModal = (props: IPrivateProps) => {
           validate={validateSchemaForm}
         />
       )}
+      <Modal open={discardOpened} onClose={handleClose}>
+        <div className={classes.paper}>
+          <p>Are you sure?</p>
+          <div>
+            <BlueButton
+              classes={{ button: classes.showViewJson }}
+              onClick={() => {
+                discardChanges();
+                handleClose();
+              }}
+              text={'Discard'}
+            />
+            <BlueButton
+              classes={{ button: classes.discardChanges }}
+              onClick={handleClose}
+              text={'Cancel'}
+            />
+          </div>
+        </div>
+      </Modal>
     </div>
   );
 };

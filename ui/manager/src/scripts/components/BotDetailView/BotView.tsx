@@ -4,7 +4,6 @@ import { compose, pure, setDisplayName } from 'recompose';
 import { openChatAction } from '../../actions/ChatActions';
 import eddiApiActionDispatchers from '../../actions/EddiApiActionDispatchers';
 import modalActionDispatchers from '../../actions/ModalActionDispatchers';
-import { hideLoader, showLoader } from '../../actions/SystemActions';
 import { historyPush } from '../../history';
 import { readOnlySelector } from '../../selectors/AuthenticationSelectors';
 import Options from '../Assets/Buttons/BotOptions';
@@ -12,9 +11,10 @@ import DeployButton from '../Assets/Buttons/DeployButton';
 import WhiteButton from '../Assets/Buttons/WhiteButton';
 import VersionSelectComponent from '../Assets/VersionSelectComponent';
 import { getAPIUrl } from '../utils/ApiFunctions';
-import { axiosExportBot, IBot } from '../utils/AxiosFunctions';
+import { IBot } from '../utils/AxiosFunctions';
 import { BOT } from '../utils/EddiTypes';
 import { READY } from '../utils/helpers/BotHelper';
+import exportBot from '../utils/helpers/ExportBot';
 import Parser from '../utils/Parser';
 import BotDescriptor from './BotDescriptor';
 import useStyles from './BotView.styles';
@@ -53,13 +53,7 @@ const BotView = ({ bot, readOnly }: IPrivateProps) => {
   };
 
   const handleExportBot = () => {
-    dispatch(showLoader());
-    axiosExportBot(bot.id, bot.version).then((link) => {
-      dispatch(hideLoader());
-      if (link) {
-        window?.open(link, '_blank');
-      }
-    });
+    exportBot(bot, dispatch);
   };
 
   const openEditJsonModal = () => {
@@ -130,7 +124,12 @@ const BotView = ({ bot, readOnly }: IPrivateProps) => {
             )}
             <div className={classes.botHeaderSpacing} />
             <div className={classes.options}>
-              <Options bot={bot} apiUrl={apiUrl} />
+              <Options
+                bot={bot}
+                apiUrl={apiUrl}
+                openBotLogs={openBotLogsModal}
+                exportBot={handleExportBot}
+              />
             </div>
             <WhiteButton
               text={'Open Chat'}

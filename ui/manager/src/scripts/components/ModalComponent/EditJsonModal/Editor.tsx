@@ -15,11 +15,13 @@ import useStyles from './Editor.styles';
 import ExpandButton from './EditorButtons/ExpandButton';
 import ValidateButton from './EditorButtons/ValidateButton';
 import { Ace } from 'ace-builds';
+import useGlobalStyle from '../../utils/useGlobalStyle';
 
 interface IPublicProps {
   type: string;
   data: string;
   errors: IJsonError[];
+  sliderRef?: React.MutableRefObject<any>;
   onConfirm(): void;
   onChange(value): void;
   validate(): void;
@@ -33,6 +35,7 @@ const CreateNewConfig2Modal = ({
   type,
   data,
   errors,
+  sliderRef,
   onConfirm,
   onChange,
   validate,
@@ -63,6 +66,22 @@ const CreateNewConfig2Modal = ({
     editor.moveCursorTo(cursor.row, cursor.column);
   };
 
+  const css = `
+    .slick-slider .slick-track, .slick-slider .slick-list {
+      transform: none !important;
+    }
+  `;
+
+  useGlobalStyle(expanded ? css : undefined);
+
+  const handleExpand = () => {
+    setExpanded(!expanded);
+    if (expanded) {
+      // need to fix full screen editor in slider
+      sliderRef?.current?.slickPause?.();
+    }
+  };
+
   return (
     <div>
       <div className={expanded ? classes.expand : undefined}>
@@ -72,7 +91,7 @@ const CreateNewConfig2Modal = ({
             <ExpandButton
               classes={{ button: classes.expandButton }}
               expanded={expanded}
-              onClick={() => setExpanded(!expanded)}
+              onClick={handleExpand}
             />
           </div>
           <AceEditor

@@ -4,6 +4,7 @@ import * as React from 'react';
 import { connect, useDispatch } from 'react-redux';
 import ClipLoader from 'react-spinners/ClipLoader';
 import { compose, pure, setDisplayName } from 'recompose';
+import modalActionDispatchers from '../../../scripts/actions/ModalActionDispatchers';
 import { BLUE_COLOR } from '../../../styles/DefaultStylingProperties';
 import { openChatAction } from '../../actions/ChatActions';
 import eddiApiActionDispatchers from '../../actions/EddiApiActionDispatchers';
@@ -12,10 +13,11 @@ import { readOnlySelector } from '../../selectors/AuthenticationSelectors';
 import Options from '../Assets/Buttons/BotOptions';
 import DeployButton from '../Assets/Buttons/DeployButton';
 import WhiteButton from '../Assets/Buttons/WhiteButton';
-import { IBot } from '../utils/AxiosFunctions';
+import { axiosExportBot, IBot } from '../utils/AxiosFunctions';
 import { READY } from '../utils/helpers/BotHelper';
 import useStyles from './Bot.styles';
 import Packages from './Packages';
+import exportBot from '../utils/helpers/ExportBot';
 
 interface IPublicProps {
   bot: IBot;
@@ -41,6 +43,14 @@ const Bot = ({ bot, apiUrl, readOnly }: IPrivateProps) => {
   }, [bot, apiUrl, readOnly]);
 
   const dispatch = useDispatch();
+
+  const openBotLogsModal = () => {
+    modalActionDispatchers.showBotLogsModal(bot);
+  };
+
+  const handleExportBot = () => {
+    exportBot(bot, dispatch);
+  };
 
   return (
     <div>
@@ -77,7 +87,12 @@ const Bot = ({ bot, apiUrl, readOnly }: IPrivateProps) => {
           <div
             className={classes.optionsMenu}
             onClick={(e) => e.stopPropagation()}>
-            <Options bot={bot} apiUrl={apiUrl} />
+            <Options
+              bot={bot}
+              apiUrl={apiUrl}
+              openBotLogs={openBotLogsModal}
+              exportBot={handleExportBot}
+            />
           </div>
           <div
             onClick={(e) => e.stopPropagation()}
