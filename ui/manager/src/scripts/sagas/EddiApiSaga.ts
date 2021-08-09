@@ -562,6 +562,7 @@ export function* watchCreateNewConfig(): Iterator<{}> {
 
 export function* createNewConfig(action: ICreateNewConfigAction): Iterator<{}> {
   try {
+    yield put(showLoader());
     const newResource = yield call(
       postNewConfig,
       action.eddiType,
@@ -585,7 +586,9 @@ export function* createNewConfig(action: ICreateNewConfigAction): Iterator<{}> {
         const plugin = yield call(getCurrentPlugin, newResource);
         yield put(createNewPluginSuccessAction(plugin));
     }
+    yield put(hideLoader());
   } catch (err) {
+    yield put(hideLoader());
     yield put(createNewConfigFailedAction(err));
   }
 }

@@ -8,6 +8,7 @@ import ModalActionDispatchers from '../../../actions/ModalActionDispatchers';
 import { pluginsSelector } from '../../../selectors/PluginSelectors';
 import BlueButton from '../../Assets/Buttons/BlueButton';
 import WhiteButton from '../../Assets/Buttons/WhiteButton';
+import FilterComponent from '../../TopBar/FilterComponent';
 import { DEFAULT_LIMIT } from '../../utils/ApiFunctions';
 import { REGULAR_DICTIONARY } from '../../utils/EddiTypes';
 import Parser from '../../utils/Parser';
@@ -32,6 +33,12 @@ const AddPluginModal = (props: IPrivateProps) => {
   const [limitedToOneSelect, setLimitedToOneSelect] = React.useState(true);
   const [loading, setLoading] = React.useState(false);
   const classes = useStyles();
+
+  const [filterText, setFilterText] = React.useState('');
+
+  const filter = (text: string) => {
+    setFilterText(text);
+  };
 
   React.useEffect(() => {
     if (props.pluginType === REGULAR_DICTIONARY) {
@@ -179,6 +186,7 @@ const AddPluginModal = (props: IPrivateProps) => {
           />
         </div>
         <div className={classes.bottomHeader}>
+          <FilterComponent placeholder={'Search'} filter={filter} />
           <div className={classes.centerFlex} />
           <div className={classes.lastModified}>{'Last modified'}</div>
         </div>
@@ -196,6 +204,7 @@ const AddPluginModal = (props: IPrivateProps) => {
           isPluginSelected={isPluginSelected}
           selectPlugin={selectPlugin}
           selectVersion={selectVersion}
+          filterText={filterText}
         />
         {isLoading && (
           <div className={classes.loadingWrapper}>

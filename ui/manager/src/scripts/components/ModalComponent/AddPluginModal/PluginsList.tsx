@@ -4,6 +4,7 @@ import * as _ from 'lodash';
 
 interface IPluginsList {
   availablePlugins: string[];
+  filterText?: string;
   isPluginSelected: (pluginResource: string) => boolean;
   selectPlugin: (pluginResource: string) => void;
   selectVersion: (resource: string, version: number) => void;
@@ -11,6 +12,7 @@ interface IPluginsList {
 
 const PluginsList: React.FunctionComponent<IPluginsList> = ({
   availablePlugins,
+  filterText,
   selectPlugin,
   selectVersion,
   isPluginSelected,
@@ -25,6 +27,7 @@ const PluginsList: React.FunctionComponent<IPluginsList> = ({
             pluginResource={p}
             handleClick={selectPlugin}
             selectVersion={selectVersion}
+            filterText={filterText}
           />
         ))}
       </div>
