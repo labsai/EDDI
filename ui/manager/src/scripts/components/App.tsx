@@ -109,9 +109,10 @@ const App = ({
   };
 
   const initKeycloak = async () => {
-    if (!keycloak) {
+    if (!keycloak || !keycloak?.init) {
       return;
     }
+
     await kcHelper.initKeycloak(keycloak);
   };
 

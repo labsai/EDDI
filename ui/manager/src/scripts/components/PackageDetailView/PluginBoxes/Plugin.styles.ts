@@ -210,6 +210,9 @@ const useStyles = makeStyles({
     borderRadius: '5px',
     fontSize: SMALL_FONT2,
   },
+  containerDisabled: {
+    cursor: 'default',
+  },
 });
 
 export const rjvStyles = {
