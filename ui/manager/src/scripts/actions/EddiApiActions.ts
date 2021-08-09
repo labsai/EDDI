@@ -849,14 +849,17 @@ export function updateJsonDataAction(
 export interface IMassUpdateJsonDataAction extends Action {
   plugins: { resource: string; data: any }[];
   deploy: boolean;
+  openedResource?: string;
 }
 export function massUpdateJsonDataAction(
   plugins: { resource: string; data: any }[],
   deploy: boolean = false,
+  openedResource?: string,
 ): IMassUpdateJsonDataAction {
   return {
     plugins,
     deploy,
+    openedResource,
     type: MASS_UPDATE_JSON_DATA,
   };
 }

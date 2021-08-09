@@ -26,6 +26,7 @@ interface IPublicProps {
 const ParallelConfigModal = ({ packageResource }: IPublicProps) => {
   const sliderRef = React.useRef(null);
   const pluginResource = useSelector(pluginResourceSelector);
+  const [currentResource, setCurrentResource] = React.useState(pluginResource);
   const { packagePayload } = useSelector((state: IAppState) =>
     packageSelector(state, { packageResource }),
   );
@@ -61,6 +62,9 @@ const ParallelConfigModal = ({ packageResource }: IPublicProps) => {
     arrows: false,
     slidesToShow: 1,
     slidesToScroll: 1,
+    afterChange: (index: number) => {
+      setCurrentResource(filteredPlugins[index]?.config?.uri);
+    },
   };
 
   const handleNext = () => {
@@ -86,6 +90,7 @@ const ParallelConfigModal = ({ packageResource }: IPublicProps) => {
         eddiApiActionDispatchers.massUpdateJsonDataAction(
           pluginTempData,
           deploy,
+          currentResource,
         );
         if (deploy) {
           modalActionDispatchers.closeModal();

@@ -702,6 +702,7 @@ export function* massUpdateJsonData(
   action: IMassUpdateJsonDataAction,
 ): Iterator<{}> {
   try {
+    const openedResource = action.openedResource;
     const { packageId, botId } = getIdsFromPath();
     yield put(showLoader());
     yield put(closeModal());
@@ -733,8 +734,15 @@ export function* massUpdateJsonData(
           getCurrentPackage,
           packageId,
         );
+        const updatedPlugin: IPlugin = yield call(
+          getCurrentPlugin,
+          openedResource,
+        );
         yield put(
-          showParallelConfigModal(currentPackage, currentPackage.resource),
+          showParallelConfigModal(
+            currentPackage,
+            updatedPlugin?.resource || currentPackage.resource,
+          ),
         );
         yield call(historyPush, `${location.pathname}`, [
           !isPackagePage() ? `packageId=${packageId}` : `botId=${botId}`,
