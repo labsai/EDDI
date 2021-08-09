@@ -176,6 +176,7 @@ const useStyles = makeStyles({
     float: 'right',
     marginRight: '10px',
     marginBottom: '-5px',
+    marginTop: '3px',
   },
   packageWithExtensionCloseButton: {
     marginRight: '10px',
