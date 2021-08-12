@@ -3,9 +3,11 @@ package ai.labs.schema;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.kjetland.jackson.jsonSchema.JsonSchemaConfig;
+import com.kjetland.jackson.jsonSchema.JsonSchemaDraft;
 import com.kjetland.jackson.jsonSchema.JsonSchemaGenerator;
 
 import javax.inject.Inject;
+import java.util.LinkedList;
 
 public class JsonSchemaCreator implements IJsonSchemaCreator {
     private final ObjectMapper objectMapper;
@@ -34,7 +36,9 @@ public class JsonSchemaCreator implements IJsonSchemaCreator {
                 config.classTypeReMapping(),
                 config.jsonSuppliers(),
                 config.subclassesResolver(),
-                config.failOnUnknownProperties());
+                config.failOnUnknownProperties(),
+                new LinkedList<Class<?>>().toArray(new Class[0]),
+                JsonSchemaDraft.DRAFT_04);
         JsonSchemaGenerator jsonSchemaGenerator = new JsonSchemaGenerator(objectMapper, eddiJsonSchemaConfig);
 
         return jsonSchemaGenerator.generateJsonSchema(clazz);
