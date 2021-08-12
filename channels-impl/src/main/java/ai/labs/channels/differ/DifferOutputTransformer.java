@@ -12,6 +12,7 @@ import lombok.extern.slf4j.Slf4j;
 import javax.ws.rs.core.MediaType;
 import java.util.Collections;
 import java.util.List;
+import java.util.Objects;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 
@@ -20,7 +21,10 @@ import static ai.labs.channels.differ.model.commands.CreateActionsCommand.CREATE
 import static ai.labs.channels.differ.model.commands.CreateConversationCommand.CONVERSATION_EXCHANGE;
 import static ai.labs.channels.differ.model.commands.CreateMessageCommand.CREATE_MESSAGE_ROUTING_KEY;
 import static ai.labs.channels.differ.model.commands.CreateMessageCommand.Payload;
-import static ai.labs.channels.differ.utilities.DifferUtilities.*;
+import static ai.labs.channels.differ.utilities.DifferUtilities.calculateTypingDelay;
+import static ai.labs.channels.differ.utilities.DifferUtilities.getCurrentTime;
+import static ai.labs.channels.differ.utilities.DifferUtilities.getOutputParts;
+import static ai.labs.channels.differ.utilities.DifferUtilities.getQuickReplies;
 
 @Slf4j
 public class DifferOutputTransformer implements IDifferOutputTransformer {
@@ -76,9 +80,9 @@ public class DifferOutputTransformer implements IDifferOutputTransformer {
     private static List<CreateActionsCommand.Payload.Action> convertQuickRepliesToActions(
             String conversationId, String messageId, List<QuickReply> quickReplies) {
 
-        return quickReplies.stream().map(quickReply -> {
+        return quickReplies.stream().filter(Objects::nonNull).map(quickReply -> {
                     Boolean isDefault = quickReply.isDefault();
-            return new CreateActionsCommand.Payload.Action(conversationId, messageId, isDefault, quickReply.getValue());
+                    return new CreateActionsCommand.Payload.Action(conversationId, messageId, isDefault, quickReply.getValue());
                 }
         ).collect(Collectors.toList());
     }
