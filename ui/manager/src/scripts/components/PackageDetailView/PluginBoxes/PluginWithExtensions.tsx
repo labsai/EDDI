@@ -76,18 +76,12 @@ const PluginWithExtensions = ({
     let corrections = [];
     if (type.includes(CORRECTION)) {
       dictionaries = pluginType.extensions.dictionaries;
-      corrections = pluginType.extensions.corrrections.splice(
-        pluginType.extensions.corrections.findIndex(
-          (c, i) => i === extensionKey,
-        ),
-        1,
+      corrections = pluginType.extensions.corrrections.filter(
+        (_e, i) => i !== extensionKey,
       );
     } else if (type.includes(DICTIONARY)) {
-      dictionaries = pluginType.extensions.dictionaries.splice(
-        pluginType.extensions.dictionaries.findIndex(
-          (d, i) => i === extensionKey,
-        ),
-        1,
+      dictionaries = pluginType.extensions.dictionaries.filter(
+        (_e, i) => i !== extensionKey,
       );
       corrections = pluginType.extensions.corrections;
     }

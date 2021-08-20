@@ -70,13 +70,7 @@ const PackagePluginList = ({
             !_.isEmpty(plugins) && (
               <div>
                 {!isChangingOrdering ? (
-                  <div
-                    className={clsx(
-                      classes.pluginList,
-                      isChatOpened || isChangingOrdering
-                        ? classes.pluginListColumn
-                        : null,
-                    )}>
+                  <>
                     {plugins
                       .filter((p) => hasExtensions(p))
                       .map((ext, key) => (
@@ -90,25 +84,33 @@ const PackagePluginList = ({
                           editDisabled={!isCurrentVersion || readOnly}
                         />
                       ))}
-                    {plugins
-                      .filter((p) => !hasExtensions(p))
-                      .map((ext, key) => (
-                        <Plugin
-                          key={key}
-                          pluginType={ext}
-                          packageId={packagePayload.id}
-                          deletePlugin={deletePlugin}
-                          pluginResource={PluginHelper.getResource(ext)}
-                          updatePlugin={updatePlugin}
-                          openParallelConfigModal={() =>
-                            openParallelConfigModal(
-                              PluginHelper.getResource(ext),
-                            )
-                          }
-                          editDisabled={!isCurrentVersion || readOnly}
-                        />
-                      ))}
-                  </div>
+                    <div
+                      className={clsx(
+                        classes.pluginList,
+                        isChatOpened || isChangingOrdering
+                          ? classes.pluginListColumn
+                          : null,
+                      )}>
+                      {plugins
+                        .filter((p) => !hasExtensions(p))
+                        .map((ext, key) => (
+                          <Plugin
+                            key={key}
+                            pluginType={ext}
+                            packageId={packagePayload.id}
+                            deletePlugin={deletePlugin}
+                            pluginResource={PluginHelper.getResource(ext)}
+                            updatePlugin={updatePlugin}
+                            openParallelConfigModal={() =>
+                              openParallelConfigModal(
+                                PluginHelper.getResource(ext),
+                              )
+                            }
+                            editDisabled={!isCurrentVersion || readOnly}
+                          />
+                        ))}
+                    </div>
+                  </>
                 ) : (
                   <div
                     className={clsx(
