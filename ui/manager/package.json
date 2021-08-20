@@ -64,7 +64,7 @@
     "@babel/preset-env": "^7.14.4",
     "@babel/preset-react": "^7.13.13",
     "@babel/preset-typescript": "^7.13.0",
-    "@babel/runtime": "^7.14.0",
+    "@babel/runtime": "7.15.3",
     "@types/ace": "^0.0.46",
     "@types/chai": "4.2.18",
     "@types/enzyme": "3.10.8",
