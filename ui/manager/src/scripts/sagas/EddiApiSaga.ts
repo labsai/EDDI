@@ -562,6 +562,7 @@ export function* watchCreateNewConfig(): Iterator<{}> {
 
 export function* createNewConfig(action: ICreateNewConfigAction): Iterator<{}> {
   try {
+    yield put(showLoader());
     const newResource = yield call(
       postNewConfig,
       action.eddiType,
@@ -585,7 +586,9 @@ export function* createNewConfig(action: ICreateNewConfigAction): Iterator<{}> {
         const plugin = yield call(getCurrentPlugin, newResource);
         yield put(createNewPluginSuccessAction(plugin));
     }
+    yield put(hideLoader());
   } catch (err) {
+    yield put(hideLoader());
     yield put(createNewConfigFailedAction(err));
   }
 }
@@ -699,6 +702,7 @@ export function* massUpdateJsonData(
   action: IMassUpdateJsonDataAction,
 ): Iterator<{}> {
   try {
+    const openedResource = action.openedResource;
     const { packageId, botId } = getIdsFromPath();
     yield put(showLoader());
     yield put(closeModal());
@@ -730,8 +734,15 @@ export function* massUpdateJsonData(
           getCurrentPackage,
           packageId,
         );
+        const updatedPlugin: IPlugin = yield call(
+          getCurrentPlugin,
+          openedResource,
+        );
         yield put(
-          showParallelConfigModal(currentPackage, currentPackage.resource),
+          showParallelConfigModal(
+            currentPackage,
+            updatedPlugin?.resource || currentPackage.resource,
+          ),
         );
         yield call(historyPush, `${location.pathname}`, [
           !isPackagePage() ? `packageId=${packageId}` : `botId=${botId}`,

@@ -16,6 +16,7 @@ import {
   DUPLICATE_SUCCESS,
   EDIT_PLUGIN_DATA,
   CLEAR_EDITED_PLUGIN_DATA,
+  UPDATE_DESCRIPTOR_SUCCESS,
 } from '../actions/EddiApiActionTypes';
 import update from 'immutability-helper';
 import {
@@ -31,6 +32,7 @@ import {
   IFetchJsonSchemaSuccessAction,
   IDuplicateSuccessAction,
   IEditPluginDataAction,
+  IUpdateDescriptorSuccessAction,
 } from '../actions/EddiApiActions';
 import {
   IDefaultPluginTypes,
@@ -475,6 +477,34 @@ const PluginReducer: IPluginReducer = (
     case CLEAR_EDITED_PLUGIN_DATA: {
       return update(state, {
         tempPluginsData: { $set: [] },
+      });
+    }
+    case UPDATE_DESCRIPTOR_SUCCESS: {
+      console.log('state: ', state);
+      console.log('action: ', action);
+      return update(state, {
+        plugins: {
+          $apply: (plugins: IPlugin[]) => {
+            return plugins.map((plugin) => {
+              if (
+                plugin.resource ===
+                (action as IUpdateDescriptorSuccessAction).resource
+              ) {
+                return update(plugin, {
+                  description: {
+                    $set: (action as IUpdateDescriptorSuccessAction)
+                      .description,
+                  },
+                  name: {
+                    $set: (action as IUpdateDescriptorSuccessAction).name,
+                  },
+                });
+              } else {
+                return plugin;
+              }
+            });
+          },
+        },
       });
     }
     default:

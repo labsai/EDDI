@@ -160,7 +160,11 @@ export interface IEddiApiActionDispatchers extends ActionCreatorsMapObject {
     anyVersion,
   ) => IFetchPackagesUsingPluginAction;
   updateJsonDataAction: (resource, data) => IUpdateJsonDataAction;
-  massUpdateJsonDataAction: (plugins, deploy) => IMassUpdateJsonDataAction;
+  massUpdateJsonDataAction: (
+    plugins,
+    deploy,
+    openedResource?: string,
+  ) => IMassUpdateJsonDataAction;
   createNewConfigAction: (
     eddiType,
     name,

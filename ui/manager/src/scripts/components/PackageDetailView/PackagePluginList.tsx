@@ -69,31 +69,57 @@ const PackagePluginList = ({
             !!plugins &&
             !_.isEmpty(plugins) && (
               <div>
-                {plugins
-                  .filter((p) => hasExtensions(p))
-                  .map((ext, key) => (
-                    <PluginWithExtension
-                      key={key}
-                      pluginType={ext}
-                      pluginResource={PluginHelper.getResource(ext)}
-                      deletePlugin={deletePlugin}
-                      updatePlugin={updatePlugin}
-                      openParallelConfigModal={openParallelConfigModal}
-                      editDisabled={!isCurrentVersion || readOnly}
-                    />
-                  ))}
-                <div
-                  className={clsx(
-                    classes.pluginList,
-                    isChatOpened || isChangingOrdering
-                      ? classes.pluginListColumn
-                      : null,
-                  )}
-                  ref={provided.innerRef}
-                  {...provided.droppableProps}>
-                  {plugins
-                    .filter((p) => !hasExtensions(p))
-                    .map((ext, key) => (
+                {!isChangingOrdering ? (
+                  <div
+                    className={clsx(
+                      classes.pluginList,
+                      isChatOpened || isChangingOrdering
+                        ? classes.pluginListColumn
+                        : null,
+                    )}>
+                    {plugins
+                      .filter((p) => hasExtensions(p))
+                      .map((ext, key) => (
+                        <PluginWithExtension
+                          key={key}
+                          pluginType={ext}
+                          pluginResource={PluginHelper.getResource(ext)}
+                          deletePlugin={deletePlugin}
+                          updatePlugin={updatePlugin}
+                          openParallelConfigModal={openParallelConfigModal}
+                          editDisabled={!isCurrentVersion || readOnly}
+                        />
+                      ))}
+                    {plugins
+                      .filter((p) => !hasExtensions(p))
+                      .map((ext, key) => (
+                        <Plugin
+                          key={key}
+                          pluginType={ext}
+                          packageId={packagePayload.id}
+                          deletePlugin={deletePlugin}
+                          pluginResource={PluginHelper.getResource(ext)}
+                          updatePlugin={updatePlugin}
+                          openParallelConfigModal={() =>
+                            openParallelConfigModal(
+                              PluginHelper.getResource(ext),
+                            )
+                          }
+                          editDisabled={!isCurrentVersion || readOnly}
+                        />
+                      ))}
+                  </div>
+                ) : (
+                  <div
+                    className={clsx(
+                      classes.pluginList,
+                      isChatOpened || isChangingOrdering
+                        ? classes.pluginListColumn
+                        : null,
+                    )}
+                    ref={provided.innerRef}
+                    {...provided.droppableProps}>
+                    {plugins.map((ext, key) => (
                       <Draggable
                         key={ext.type + key}
                         draggableId={ext.type + key}
@@ -135,8 +161,9 @@ const PackagePluginList = ({
                         )}
                       </Draggable>
                     ))}
-                  {provided.placeholder}
-                </div>
+                    {provided.placeholder}
+                  </div>
+                )}
               </div>
             )
           );

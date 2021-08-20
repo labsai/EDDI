@@ -56,6 +56,15 @@ const styles = makeStyles({
     whiteSpace: 'nowrap',
     overflow: 'hidden',
   },
+  descriptorId: {
+    color: GREY_COLOR,
+    fontSize: '12px',
+    height: '14px',
+    marginLeft: '50px',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+    overflow: 'hidden',
+  },
   centerFlex: {
     flex: 1,
   },

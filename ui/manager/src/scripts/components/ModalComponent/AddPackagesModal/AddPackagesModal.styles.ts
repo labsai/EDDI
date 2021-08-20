@@ -39,8 +39,16 @@ const useStyles = makeStyles({
     marginRight: '10px',
   },
   bottomHeader: {
-    marginTop: '42px',
+    marginTop: '15px',
     display: 'flex',
+    alignItems: 'center',
+
+    '& > div:first-child > div': {
+      marginTop: 0,
+    },
+    '& > div:first-child': {
+      marginLeft: '50px',
+    },
   },
   lastModified: {
     marginRight: '50px',

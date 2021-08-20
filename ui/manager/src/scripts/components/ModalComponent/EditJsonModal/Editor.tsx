@@ -36,34 +36,20 @@ const CreateNewConfig2Modal = ({
   data,
   errors,
   sliderRef,
-  onConfirm,
   onChange,
   validate,
   schema,
 }: IPrivateProps) => {
   const classes = useStyles();
-  const [editorText, setEditorText] = React.useState<string>('{}');
   const [expanded, setExpanded] = React.useState<boolean>(false);
   const aceEditorRef = React.useRef(null);
-  React.useEffect(() => {
-    discardChanges();
-  }, [type, data, errors, schema, onConfirm, onChange, validate]);
 
   const handleOnChange = (value) => {
     onChange(value);
-    setEditorText(value);
-  };
-
-  const discardChanges = () => {
-    const editorText = _.isEmpty(data) ? '{\n\t\n}' : data;
-    setEditorText(editorText);
   };
 
   const handleUndo = (editor: Ace.Editor) => {
-    const cursor = editor.getCursorPosition();
     editor.undo();
-    editor.getSelection().clearSelection();
-    editor.moveCursorTo(cursor.row, cursor.column);
   };
 
   const css = `
@@ -123,7 +109,12 @@ const CreateNewConfig2Modal = ({
             showPrintMargin={false}
             focus={true}
             onChange={handleOnChange}
-            value={editorText}
+            onLoad={(editor) => {
+              editor.once('change', function () {
+                editor.session.getUndoManager().reset();
+              });
+            }}
+            value={data}
             editorProps={{ $blockScrolling: true }}
             commands={[
               {

@@ -46,7 +46,8 @@ const useStyles = makeStyles({
 });
 
 interface IProps {
-  page: pageEnum;
+  page?: pageEnum;
+  placeholder?: string;
   filter(text: string): void;
 }
 
@@ -68,7 +69,9 @@ const FilterComponent = (props: IProps) => {
         <SearchIcon fontSize="large" className={classes.searchBoxIcon} />
         <input
           type={'text'}
-          placeholder={`Find ${getSearchName(props.page)}`}
+          placeholder={
+            props.page ? `Find ${getSearchName(props.page)}` : props.placeholder
+          }
           className={classes.searchBoxInput}
           onChange={(f) => props.filter(f.target.value)}
         />

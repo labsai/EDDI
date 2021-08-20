@@ -18,6 +18,7 @@ import useStyles from '../AddPackagesModal/Package.styles';
 interface IPublicProps {
   pluginResource: string;
   selected: boolean;
+  filterText?: string;
   handleClick(resource: string): void;
   selectVersion(resource: string, newVersion): void;
 }
@@ -47,6 +48,13 @@ const Plugin = (props: IPrivateProps) => {
     props.selectVersion(props.plugin.resource, newVersion);
   };
 
+  const filterOut =
+    props.filterText &&
+    !props.plugin.name.toLowerCase().includes(props.filterText.toLowerCase()) &&
+    !props.plugin.description
+      .toLowerCase()
+      .includes(props.filterText.toLowerCase());
+
   return (
     <div>
       {!props.plugin && (
@@ -67,7 +75,7 @@ const Plugin = (props: IPrivateProps) => {
           {!props.error && _.isEmpty(props.plugin) && !props.isLoading && (
             <p>{'This plugin does not exist'}</p>
           )}
-          {!props.error && !_.isEmpty(props.plugin) && (
+          {!props.error && !_.isEmpty(props.plugin) && !filterOut && (
             <div className={classes.content}>
               <div className={classes.topContent}>
                 <button

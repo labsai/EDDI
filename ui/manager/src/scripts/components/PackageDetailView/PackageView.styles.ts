@@ -31,6 +31,7 @@ const useStyles = makeStyles({
   },
   pluginAddTitle: {
     marginBottom: '10px',
+    marginTop: '20px',
     fontSize: SMALL_FONT,
     color: GREY_COLOR2,
   },

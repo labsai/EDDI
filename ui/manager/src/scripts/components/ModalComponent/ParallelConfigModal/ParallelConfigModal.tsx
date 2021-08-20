@@ -1,23 +1,24 @@
+import Modal from '@material-ui/core/Modal';
+import * as _ from 'lodash';
 import * as React from 'react';
+import { useSelector } from 'react-redux';
 import Slider from 'react-slick';
 import 'slick-carousel/slick/slick-theme.css';
 import 'slick-carousel/slick/slick.css';
+import eddiApiActionDispatchers from '../../../actions/EddiApiActionDispatchers';
+import modalActionDispatchers from '../../../actions/ModalActionDispatchers';
+import { IAppState } from '../../../reducers';
+import { pluginResourceSelector } from '../../../selectors/ModalSelectors';
+import { packageSelector } from '../../../selectors/PackageSelectors';
+import { pluginTempDataSelector } from '../../../selectors/PluginSelectors';
+import BlueButton from '../../Assets/Buttons/BlueButton';
 import WhiteButton from '../../Assets/Buttons/WhiteButton';
-import { IPackage } from '../../utils/AxiosFunctions';
+import { isBotPage, isPackagePage } from '../../utils/helpers/getIdsFromPath';
+import validateJson from '../../utils/helpers/ValidateJson';
+import useModalStyles from '../ModalComponent.styles';
 import '../ModalComponent.styles.scss';
 import useStyles from './ParallelConfigModal.styles';
 import PluginContainer from './PluginContainer';
-import * as _ from 'lodash';
-import { pluginResourceSelector } from '../../../selectors/ModalSelectors';
-import { useSelector } from 'react-redux';
-import BlueButton from '../../Assets/Buttons/BlueButton';
-import { pluginTempDataSelector } from '../../../selectors/PluginSelectors';
-import validateJson from '../../utils/helpers/ValidateJson';
-import eddiApiActionDispatchers from '../../../actions/EddiApiActionDispatchers';
-import modalActionDispatchers from '../../../actions/ModalActionDispatchers';
-import { packageSelector } from '../../../selectors/PackageSelectors';
-import { IAppState } from '../../../reducers';
-import { isBotPage, isPackagePage } from '../../utils/helpers/getIdsFromPath';
 
 interface IPublicProps {
   packageResource: string;
@@ -26,6 +27,8 @@ interface IPublicProps {
 const ParallelConfigModal = ({ packageResource }: IPublicProps) => {
   const sliderRef = React.useRef(null);
   const pluginResource = useSelector(pluginResourceSelector);
+  const [currentResource, setCurrentResource] = React.useState(pluginResource);
+  const [alertOpened, setAlertOpened] = React.useState(false);
   const { packagePayload } = useSelector((state: IAppState) =>
     packageSelector(state, { packageResource }),
   );
@@ -45,6 +48,7 @@ const ParallelConfigModal = ({ packageResource }: IPublicProps) => {
     }
   });
   const classes = useStyles();
+  const modalClasses = useModalStyles();
 
   const filteredPlugins = plugins?.filter((p) => !!p?.config?.uri);
 
@@ -59,8 +63,12 @@ const ParallelConfigModal = ({ packageResource }: IPublicProps) => {
     adaptiveHeight: true,
     speed: 500,
     arrows: false,
+    swipe: false,
     slidesToShow: 1,
     slidesToScroll: 1,
+    afterChange: (index: number) => {
+      setCurrentResource(filteredPlugins[index]?.config?.uri);
+    },
   };
 
   const handleNext = () => {
@@ -77,8 +85,11 @@ const ParallelConfigModal = ({ packageResource }: IPublicProps) => {
   const massUpdateJson = (deploy: boolean = false) => {
     Promise.all(
       pluginTempData.map((d) => {
-        if (!validateJson(d.schema, d.data)) {
+        if (validateJson(d.schema, d.data)) {
           return d;
+        } else {
+          setAlertOpened(true);
+          throw new Error('JSON is not valid');
         }
       }),
     )
@@ -86,6 +97,7 @@ const ParallelConfigModal = ({ packageResource }: IPublicProps) => {
         eddiApiActionDispatchers.massUpdateJsonDataAction(
           pluginTempData,
           deploy,
+          currentResource,
         );
         if (deploy) {
           modalActionDispatchers.closeModal();
@@ -94,6 +106,10 @@ const ParallelConfigModal = ({ packageResource }: IPublicProps) => {
       .catch((e) => {
         console.log('Some errors in JSON: ', e);
       });
+  };
+
+  const closeAlert = () => {
+    setAlertOpened(false);
   };
 
   return (
@@ -141,6 +157,14 @@ const ParallelConfigModal = ({ packageResource }: IPublicProps) => {
           })}
         </Slider>
       </div>
+      <Modal open={alertOpened} onClose={closeAlert}>
+        <div className={modalClasses.paper}>
+          <p>JSON is not valid</p>
+          <div>
+            <BlueButton onClick={closeAlert} text={'OK'} />
+          </div>
+        </div>
+      </Modal>
     </div>
   );
 };

@@ -176,6 +176,7 @@ const useStyles = makeStyles({
     float: 'right',
     marginRight: '10px',
     marginBottom: '-5px',
+    marginTop: '3px',
   },
   packageWithExtensionCloseButton: {
     marginRight: '10px',
@@ -209,6 +210,9 @@ const useStyles = makeStyles({
     border: GREY_BORDER,
     borderRadius: '5px',
     fontSize: SMALL_FONT2,
+  },
+  containerDisabled: {
+    cursor: 'default',
   },
 });
 

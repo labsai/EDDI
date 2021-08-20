@@ -173,19 +173,13 @@ const Plugin = ({
     }
   };
 
-  const getRelationLabel = (key: string) => {
-    switch (true) {
-      case key.includes('success'): {
-        return 'success: ';
+  const handleResourceClick = () => {
+    if (!_.isEmpty(pluginResource)) {
+      if (openParallelConfigModal) {
+        openParallelConfigModal();
+      } else {
+        openViewJsonModal();
       }
-      case key.includes('fail'): {
-        return 'fail: ';
-      }
-      case key.includes('quickReplies'): {
-        return 'quick reply: ';
-      }
-      default:
-        return '';
     }
   };
 
@@ -209,9 +203,9 @@ const Plugin = ({
             plugin.version === plugin.currentVersion && !_.isEmpty(plugin),
           [classes.updateAvailableBorderColor]:
             plugin.version !== plugin.currentVersion,
+          [classes.containerDisabled]: _.isEmpty(pluginResource),
         })}
-        disabled={_.isEmpty(pluginResource)}
-        onClick={openParallelConfigModal || openViewJsonModal}>
+        onClick={handleResourceClick}>
         <div className={classes.pluginHeader}>
           <div
             key={'pluginBox'}
