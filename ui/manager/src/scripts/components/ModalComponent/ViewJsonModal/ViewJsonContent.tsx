@@ -103,6 +103,9 @@ const ViewJsonContent = (props: IPrivateProps) => {
             noTabIndex
           />
         </div>
+        {props.descriptor.name && (
+          <p className={classes.descriptorId}>{props.descriptor.id}</p>
+        )}
         <div className={classes.bottomHeader}>
           <div className={classes.descriptionContainer}>
             <div className={classes.smallTitle}>{'Description'}</div>
