@@ -3,7 +3,7 @@ name: CI/CD
 on:
   # Triggers the workflow on push or pull request events but only for the master branch
   push:
-    branches: [dev]
+    branches: [master]
 
   # Allows you to run this workflow manually from the Actions tab
   workflow_dispatch:
@@ -28,5 +28,5 @@ jobs:
 
       - name: Build Project
         run: yarn webpack --env NODE_ENV=production --progress --config webpack.config.babel.js
-#      - name: Deploy Site
-#        run: gsutil cp -r dist/* gs://manager-labs-ai
+      - name: Deploy Site
+        run: gsutil cp -r dist/* gs://manager-labs-ai
