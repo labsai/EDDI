@@ -158,6 +158,7 @@ const useStyles = makeStyles({
     color: WHITE_COLOR,
     height: '35px',
     fontSize: '28px',
+    userSelect: 'text',
   },
   botHeaderTextSmall: {
     fontSize: '20px',

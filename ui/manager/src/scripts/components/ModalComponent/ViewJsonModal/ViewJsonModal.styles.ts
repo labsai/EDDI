@@ -19,6 +19,7 @@ const styles = makeStyles({
     paddingBottom: '10px',
     borderTopLeftRadius: '4px',
     borderTopRightRadius: '4px',
+    userSelect: 'text',
   },
   topHeader: {
     display: 'flex',

@@ -65,6 +65,12 @@ const ViewJsonContent = (props: IPrivateProps) => {
     );
   };
 
+  const copyText = (event) => {
+    const cb = navigator.clipboard;
+    const text = event.target.innerText;
+    cb.writeText(text);
+  };
+
   const isCurrentVersion =
     props.descriptor.currentVersion === props.descriptor.version;
   const isPackage =
@@ -73,7 +79,7 @@ const ViewJsonContent = (props: IPrivateProps) => {
     <div>
       <div className={classes.header}>
         <div className={classes.topHeader}>
-          <div className={classes.title}>
+          <div className={classes.title} onClick={copyText}>
             {props.descriptor.name || props.descriptor.id}
           </div>
           {props.selectVersion ? (
@@ -104,7 +110,9 @@ const ViewJsonContent = (props: IPrivateProps) => {
           />
         </div>
         {props.descriptor.name && (
-          <p className={classes.descriptorId}>{props.descriptor.id}</p>
+          <p className={classes.descriptorId} onClick={copyText}>
+            {props.descriptor.id}
+          </p>
         )}
         <div className={classes.bottomHeader}>
           <div className={classes.descriptionContainer}>
