@@ -7,13 +7,16 @@ import ai.labs.resources.rest.config.output.IOutputStore;
 import ai.labs.resources.rest.config.output.model.OutputConfiguration;
 import ai.labs.resources.rest.config.output.model.OutputConfigurationSet;
 import ai.labs.serialization.IDocumentBuilder;
-import ai.labs.utilities.RuntimeUtilities;
 import com.mongodb.client.MongoDatabase;
 
 import javax.inject.Inject;
 import java.util.Comparator;
 import java.util.List;
 import java.util.stream.Collectors;
+
+import static ai.labs.utilities.RuntimeUtilities.checkCollectionNoNullElements;
+import static ai.labs.utilities.RuntimeUtilities.checkNotNull;
+import static ai.labs.utilities.RuntimeUtilities.isNullOrEmpty;
 
 /**
  * @author ginccc
@@ -24,7 +27,7 @@ public class OutputStore implements IOutputStore {
 
     @Inject
     public OutputStore(MongoDatabase database, IDocumentBuilder documentBuilder) {
-        RuntimeUtilities.checkNotNull(database, "database");
+        checkNotNull(database, "database");
         final String collectionName = "outputs";
         MongoResourceStorage<OutputConfigurationSet> resourceStorage =
                 new MongoResourceStorage<>(database, collectionName, documentBuilder, OutputConfigurationSet.class);
@@ -40,7 +43,7 @@ public class OutputStore implements IOutputStore {
 
     @Override
     public IResourceId create(OutputConfigurationSet outputConfigurationSet) throws ResourceStoreException {
-        RuntimeUtilities.checkCollectionNoNullElements(outputConfigurationSet.getOutputSet(), "outputSets");
+        checkCollectionNoNullElements(outputConfigurationSet.getOutputSet(), "outputSets");
         return outputResourceStore.create(outputConfigurationSet);
     }
 
@@ -50,11 +53,8 @@ public class OutputStore implements IOutputStore {
     }
 
     @Override
-    public OutputConfigurationSet read(String id, Integer version, String filter, String order, Integer index, Integer limit) throws ResourceNotFoundException, ResourceStoreException {
-        RuntimeUtilities.checkNotNull(filter, "filter");
-        RuntimeUtilities.checkNotNull(order, "order");
-        RuntimeUtilities.checkNotNull(index, "index");
-        RuntimeUtilities.checkNotNull(limit, "limit");
+    public OutputConfigurationSet read(String id, Integer version, String filter, String order, Integer index, Integer limit)
+            throws ResourceNotFoundException, ResourceStoreException {
 
         OutputConfigurationSet outputConfigurationSet = outputResourceStore.read(id, version);
 
@@ -62,13 +62,19 @@ public class OutputStore implements IOutputStore {
         outputManipulator = new ResultManipulator<>(outputConfigurationSet.getOutputSet(), OutputConfiguration.class);
 
         try {
-            outputManipulator.filterEntities(filter);
+            if (!isNullOrEmpty(filter)) {
+                outputManipulator.filterEntities(filter);
+            }
         } catch (ResultManipulator.FilterEntriesException e) {
             throw new ResourceStoreException(e.getLocalizedMessage(), e);
         }
 
-        outputManipulator.sortEntities(OUTPUT_COMPARATOR, order);
-        outputManipulator.limitEntities(index, limit);
+        if (!isNullOrEmpty(order)) {
+            outputManipulator.sortEntities(OUTPUT_COMPARATOR, order);
+        }
+        if (!isNullOrEmpty(index) && !isNullOrEmpty(limit)) {
+            outputManipulator.limitEntities(index, limit);
+        }
 
         return outputConfigurationSet;
     }
@@ -90,7 +96,7 @@ public class OutputStore implements IOutputStore {
     public Integer update(String id, Integer version, OutputConfigurationSet outputConfigurationSet)
             throws ResourceStoreException, ResourceModifiedException, ResourceNotFoundException {
 
-        RuntimeUtilities.checkCollectionNoNullElements(outputConfigurationSet.getOutputSet(), "outputSets");
+        checkCollectionNoNullElements(outputConfigurationSet.getOutputSet(), "outputSets");
         return outputResourceStore.update(id, version, outputConfigurationSet);
     }
 
