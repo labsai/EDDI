@@ -44,24 +44,28 @@ public class OutputConfiguration {
     @Setter
     public static class OutputType {
         private String type;
-        @JsonSchemaInject(json = "{\"oneOf\": [" +
-                "            {\n" +
-                " \"type\": \"array\"," +
-                " \"items\": {" +
-                "           \"type\": \"string\"" +
-                "          }" +
-                "}," +
-                "{\n" +
-                " \"type\": \"array\"," +
-                " \"items\": {" +
-                "              \"type\": \"object\"," +
-                "              \"properties\": {" +
-                "                \"text\":{" +
-                "                  \"type\":\"string\"" +
-                "                }" +
-                "              }" +
-                "}}" +
-                "          ]}")
+        @JsonSchemaInject(json =
+                "{\"anyOf\": " +
+                        "[" +
+                        "{" +
+                        " \"type\": \"array\"," +
+                        " \"items\": {" +
+                        "               \"type\": \"string\"" +
+                        "            }" +
+                        "}," +
+                        "{" +
+                        " \"type\": \"array\"," +
+                        " \"items\": {" +
+                        "                \"type\": \"object\"," +
+                        "                \"properties\": {" +
+                        "                    \"text\":{" +
+                        "                        \"type\":\"string\"" +
+                        "                    }" +
+                        "                }, " +
+                        "                \"additionalProperties\":true" +
+                        "            }" +
+                        "} " +
+                        "]}")
         private List<Object> valueAlternatives = new LinkedList<>();
     }
 
