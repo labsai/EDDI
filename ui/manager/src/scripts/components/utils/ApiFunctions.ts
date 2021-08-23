@@ -104,9 +104,10 @@ export async function getReadOnly(): Promise<boolean> {
     return readOnlyQuery === 'true';
   }
   const readOnlyDomain = appConfig.readOnlyDomain;
+  const apiUrl = await getAPIUrl();
 
   if (readOnlyDomain) {
-    return readOnlyDomain;
+    return readOnlyDomain?.includes(apiUrl);
   } else {
     console.error(`Failed to get readOnlyDomain. `);
     throw new Error();
