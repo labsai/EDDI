@@ -71,6 +71,10 @@ const ParallelConfigModal = ({ packageResource }: IPublicProps) => {
     },
   };
 
+  React.useEffect(() => {
+    sliderRef?.current?.slickGoTo(initialSlide === -1 ? 0 : initialSlide);
+  }, []);
+
   const handleNext = () => {
     sliderRef?.current?.slickNext();
   };
