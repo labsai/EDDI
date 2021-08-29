@@ -1,6 +1,7 @@
 package ai.labs.memory;
 
 import ai.labs.memory.model.ConversationMemorySnapshot;
+import ai.labs.models.Context;
 import ai.labs.models.ConversationState;
 import ai.labs.persistence.IResourceStore;
 import com.mongodb.client.MongoCollection;
@@ -13,6 +14,7 @@ import org.bson.types.ObjectId;
 
 import javax.inject.Inject;
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
 
 import static ai.labs.models.ConversationState.ENDED;
@@ -56,7 +58,25 @@ public class ConversationMemoryStore implements IConversationMemoryStore, IResou
     public ConversationMemorySnapshot loadConversationMemorySnapshot(String conversationId)
             throws IResourceStore.ResourceNotFoundException {
 
-        var memorySnapshot = conversationCollectionObject.find(new Document(OBJECT_ID, new ObjectId(conversationId))).first();
+        var memorySnapshot = conversationCollectionObject.find(
+                new Document(OBJECT_ID, new ObjectId(conversationId))).first();
+
+        for (ConversationMemorySnapshot.ConversationStepSnapshot conversationStep : memorySnapshot.getConversationSteps()) {
+            for (ConversationMemorySnapshot.PackageRunSnapshot aPackage : conversationStep.getPackages()) {
+                for (ConversationMemorySnapshot.ResultSnapshot lifecycleTask : aPackage.getLifecycleTasks()) {
+                    if (lifecycleTask.getKey().startsWith("context")) {
+                        Object result = lifecycleTask.getResult();
+                        if (result instanceof LinkedHashMap) {
+                            LinkedHashMap<String, Object> map = (LinkedHashMap<String, Object>) result;
+                            Context context = new Context(
+                                    Context.ContextType.valueOf(map.get("type").toString()),
+                                    map.get("value"));
+                            lifecycleTask.setResult(context);
+                        }
+                    }
+                }
+            }
+        }
 
         if (memorySnapshot == null) {
             String message = "Could not find ConversationMemorySnapshot (conversationId=%s)";
@@ -104,7 +124,7 @@ public class ConversationMemoryStore implements IConversationMemoryStore, IResou
     @Override
     public ConversationState getConversationState(String conversationId) {
         Document conversationMemoryDocument = conversationCollectionDocument.find(
-                new Document(OBJECT_ID, new ObjectId(conversationId))).
+                        new Document(OBJECT_ID, new ObjectId(conversationId))).
                 projection(new Document(CONVERSATION_STATE_FIELD, 1).append(OBJECT_ID, 0)).
                 first();
         if (conversationMemoryDocument != null && conversationMemoryDocument.containsKey(CONVERSATION_STATE_FIELD)) {
