@@ -136,7 +136,7 @@ public class RestBotEngine implements IRestBotEngine {
                 return Response.status(Response.Status.NOT_FOUND).type(MediaType.TEXT_PLAIN).entity(message).build();
             }
 
-            userId = conversationSetup.computeAnonymousUserIdIfEmpty(userId);
+            userId = conversationSetup.computeAnonymousUserIdIfEmpty(userId, context.get(USER_ID));
             IConversation conversation = latestBot.startConversation(userId, context,
                     createPropertiesHandler(userId), null);
 

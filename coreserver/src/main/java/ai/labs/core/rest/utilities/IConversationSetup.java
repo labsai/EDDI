@@ -1,5 +1,6 @@
 package ai.labs.core.rest.utilities;
 
+import ai.labs.models.Context;
 import ai.labs.persistence.IResourceStore;
 import ai.labs.runtime.IBot;
 
@@ -11,5 +12,5 @@ public interface IConversationSetup {
 
     void createPermissions(String conversationId, URI userURI) throws IResourceStore.ResourceStoreException;
 
-    String computeAnonymousUserIdIfEmpty(String userId);
+    String computeAnonymousUserIdIfEmpty(String userId, Context userIdContext);
 }

@@ -2,6 +2,7 @@ package ai.labs.core.rest.utilities;
 
 import ai.labs.memory.descriptor.IConversationDescriptorStore;
 import ai.labs.memory.descriptor.model.ConversationDescriptor;
+import ai.labs.models.Context;
 import ai.labs.permission.IAuthorization;
 import ai.labs.permission.IPermissionStore;
 import ai.labs.permission.model.AuthorizedUser;
@@ -62,8 +63,11 @@ public class ConversationSetup implements IConversationSetup {
     }
 
     @Override
-    public String computeAnonymousUserIdIfEmpty(String userId) {
+    public String computeAnonymousUserIdIfEmpty(String userId, Context userIdContext) {
         return isNullOrEmpty(userId) ?
-                "anonymous-" + RandomStringUtils.randomAlphanumeric(10) : userId;
+                (userIdContext != null && userIdContext.getValue() instanceof String ?
+                        userIdContext.getValue().toString() :
+                        "anonymous-" + RandomStringUtils.randomAlphanumeric(10))
+                : userId;
     }
 }
