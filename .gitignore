@@ -1,9 +1,0 @@
-/*/logs/
-/*/target/
-/**/web/
-
-# ignore intellij files
-*.iml
-/.idea/
-tmp
-/apiserver/gitcalls/**/
