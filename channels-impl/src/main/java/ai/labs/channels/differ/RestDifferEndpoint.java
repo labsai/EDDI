@@ -14,6 +14,7 @@ import ai.labs.channels.differ.model.events.ActionTriggeredEvent;
 import ai.labs.channels.differ.model.events.ConversationCreatedEvent;
 import ai.labs.channels.differ.model.events.Event;
 import ai.labs.channels.differ.model.events.MessageCreatedEvent;
+import ai.labs.channels.differ.model.events.MessageCreatedEvent.MessageCreatedPayload;
 import ai.labs.channels.differ.storage.IDifferBotMappingStore;
 import ai.labs.channels.differ.storage.IDifferConversationStore;
 import ai.labs.memory.model.ConversationOutput;
@@ -189,11 +190,18 @@ public class RestDifferEndpoint implements IRestDifferEndpoint {
             log.trace("Received Raw Message Created Message: {}", receivedMessage);
 
             try {
-                var messageCreatedEvent = jsonSerialization.deserialize(receivedMessage, MessageCreatedEvent.class);
-                var messageCreatedPayload = messageCreatedEvent.getPayload();
-                var messageCreatedConversation = messageCreatedPayload.getConversation();
-                final String conversationId;
-                conversationId = messageCreatedConversation.getId();
+                String conversationId = null;
+                var messageCreatedEvent =
+                        jsonSerialization.deserialize(receivedMessage, MessageCreatedEvent.class);
+
+                MessageCreatedPayload messageCreatedPayload = null;
+                if (messageCreatedEvent != null) {
+                    messageCreatedPayload = messageCreatedEvent.getPayload();
+                    var messageCreatedConversation = messageCreatedPayload.getConversation();
+                    if (messageCreatedConversation != null) {
+                        conversationId = messageCreatedConversation.getId();
+                    }
+                }
                 if (conversationId == null || !availableConversationIds.containsKey(conversationId)) {
                     log.debug("Ignored message because conversationId" +
                             (conversationId == null ?
@@ -204,8 +212,8 @@ public class RestDifferEndpoint implements IRestDifferEndpoint {
                     return;
                 }
 
-                //we have confirmed that we are part of this conversation
-                // next step: see if there are any bot messages waiting for this message to arrive to be send out
+                // we have confirmed that we are part of this conversation
+                // next step: see if there are any bot messages waiting for this message to arrive to be sent out
                 var messageSentAtTime = messageCreatedEvent.getCreatedAt().getTime();
                 var message = messageCreatedPayload.getMessage();
                 if (message == null) {
@@ -250,9 +258,10 @@ public class RestDifferEndpoint implements IRestDifferEndpoint {
 
                 log.info(" [x] Received and accepted amqp event: '" + receivedMessage + "'");
 
-                String userInput = messageCreatedPayload.getMessage().getParts().get(0).getBody();
+                var userInput = messageCreatedPayload.getMessage().getParts().get(0).getBody();
+                var finalConversationId = conversationId;
                 conversationInfo.getBotParticipantIds().forEach(botUserId ->
-                        processUserMessage(delivery, botUserId, conversationId,
+                        processUserMessage(delivery, botUserId, finalConversationId,
                                 userInput, messageCreatedEvent, getBotIntent(botUserId), Collections.emptyMap()));
 
             } catch (Exception e) {
