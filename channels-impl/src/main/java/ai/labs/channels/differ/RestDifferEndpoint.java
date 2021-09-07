@@ -190,10 +190,15 @@ public class RestDifferEndpoint implements IRestDifferEndpoint {
 
             try {
                 var messageCreatedEvent = jsonSerialization.deserialize(receivedMessage, MessageCreatedEvent.class);
-                final var conversationId = messageCreatedEvent.getPayload().getConversation().getId();
-                if (!availableConversationIds.containsKey(conversationId)) {
-                    log.debug("Ignored message because " +
-                            "conversationId is not part of any known conversations " +
+                var messageCreatedPayload = messageCreatedEvent.getPayload();
+                var messageCreatedConversation = messageCreatedPayload.getConversation();
+                final String conversationId;
+                conversationId = messageCreatedConversation.getId();
+                if (conversationId == null || !availableConversationIds.containsKey(conversationId)) {
+                    log.debug("Ignored message because conversationId" +
+                            (conversationId == null ?
+                                    "is null " :
+                                    "is not part of any known conversations ") +
                             "(conversationId={}).", conversationId);
                     differPublisher.positiveDeliveryAck(deliveryTag);
                     return;
@@ -202,7 +207,7 @@ public class RestDifferEndpoint implements IRestDifferEndpoint {
                 //we have confirmed that we are part of this conversation
                 // next step: see if there are any bot messages waiting for this message to arrive to be send out
                 var messageSentAtTime = messageCreatedEvent.getCreatedAt().getTime();
-                var message = messageCreatedEvent.getPayload().getMessage();
+                var message = messageCreatedPayload.getMessage();
                 if (message == null) {
                     log.error("Received a conversation.created event in the message.created queue. {}", receivedMessage);
                     differPublisher.negativeDeliveryAck(delivery);
@@ -210,8 +215,7 @@ public class RestDifferEndpoint implements IRestDifferEndpoint {
                 }
                 executeConfirmationSeekingCommands(message.getId(), messageSentAtTime);
 
-                var payload = messageCreatedEvent.getPayload();
-                String senderId = payload.getMessage().getSenderId();
+                var senderId = messageCreatedPayload.getMessage().getSenderId();
                 if (availableBotUserIds.containsKey(senderId)) {
                     //this message has been created by a bot user, likely us, therefore skip processing
                     differPublisher.positiveDeliveryAck(deliveryTag);
@@ -246,7 +250,7 @@ public class RestDifferEndpoint implements IRestDifferEndpoint {
 
                 log.info(" [x] Received and accepted amqp event: '" + receivedMessage + "'");
 
-                String userInput = payload.getMessage().getParts().get(0).getBody();
+                String userInput = messageCreatedPayload.getMessage().getParts().get(0).getBody();
                 conversationInfo.getBotParticipantIds().forEach(botUserId ->
                         processUserMessage(delivery, botUserId, conversationId,
                                 userInput, messageCreatedEvent, getBotIntent(botUserId), Collections.emptyMap()));
@@ -328,7 +332,7 @@ public class RestDifferEndpoint implements IRestDifferEndpoint {
     private List<String> filterBotUserParticipantIds(List<String> allParticipantIds) {
         return allParticipantIds.stream().
                 filter(availableBotUserIds::containsKey). //if true, this participant is a defined bot user
-                collect(Collectors.toList());
+                        collect(Collectors.toList());
     }
 
     private void startConversationWithUser(Delivery delivery, String botUserId, String conversationId,
