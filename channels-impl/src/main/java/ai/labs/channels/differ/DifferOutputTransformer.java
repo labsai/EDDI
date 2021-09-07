@@ -80,7 +80,13 @@ public class DifferOutputTransformer implements IDifferOutputTransformer {
     private static List<CreateActionsCommand.Payload.Action> convertQuickRepliesToActions(
             String conversationId, String messageId, List<QuickReply> quickReplies) {
 
-        return quickReplies.stream().filter(Objects::nonNull).map(quickReply -> {
+        return quickReplies.stream().filter(obj -> {
+            boolean nonNull = Objects.nonNull(obj);
+            if (!nonNull) {
+                log.warn("QuickReply was null, therefore creation of CreateActionsCommand has been skipped!");
+            }
+            return nonNull;
+        }).map(quickReply -> {
                     Boolean isDefault = quickReply.isDefault();
                     return new CreateActionsCommand.Payload.Action(conversationId, messageId, isDefault, quickReply.getValue());
                 }
