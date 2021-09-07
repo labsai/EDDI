@@ -10,7 +10,7 @@ services:
     depends_on:
       - mongodb
     environment:
-      EDDI_VERSION: 4.10.2
+      EDDI_VERSION: 4.10.3
       EDDI_JVM_OPTIONS: "-verbose:class -Xlog:gc*=debug:stdout:time,uptime,level -XX:+HeapDumpOnOutOfMemoryError -XX:HeapDumpPath=/dumps/oom.bin -XX:+UseContainerSupport"
       EDDI_ENV: production
       # configure memory as percentage (usefull for cgrouped envs like docker/k8s so you don't need to configure memory 2 times)
