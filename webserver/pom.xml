@@ -105,7 +105,7 @@
         <dependency>
             <groupId>ro.isdc.wro4j</groupId>
             <artifactId>wro4j-core</artifactId>
-            <version>1.8.0</version>
+            <version>1.10.1</version>
             <exclusions>
                 <exclusion>
                     <groupId>commons-io</groupId>
