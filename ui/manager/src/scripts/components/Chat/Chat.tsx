@@ -87,7 +87,7 @@ const Chat = () => {
     if (chatVisible) {
       startNewConversation();
     }
-  }, [botId, context, chatVisible]);
+  }, [botId, chatVisible]);
 
   // create new conversation
   const startNewConversation = () => {
