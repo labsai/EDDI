@@ -947,6 +947,7 @@ export function* fetchConversations(
       action.index,
       action.conversationId,
       action.botResource,
+      action.filter,
     );
     yield put(
       fetchConversationsSuccessAction(
@@ -955,6 +956,7 @@ export function* fetchConversations(
         action.conversationId,
         action.botResource,
         conversations,
+        action.filter,
       ),
     );
   } catch (err) {

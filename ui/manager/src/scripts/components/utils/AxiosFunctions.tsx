@@ -1127,10 +1127,12 @@ export async function getConversations(
   index: number,
   conversationId = '',
   botResource = '',
+  filter?: string,
 ) {
+  const filterQuery = filter?.length ? `&filter=${filter}` : '';
   try {
     const res: IResponse = await axios.get(
-      `${await getAPIUrl()}/conversationstore/conversations?limit=${limit}&index=${index}${
+      `${await getAPIUrl()}/conversationstore/conversations?limit=${limit}${filterQuery}&index=${index}${
         _.isEmpty(conversationId) ? '' : `&conversationId=${conversationId}`
       }${
         _.isEmpty(botResource)

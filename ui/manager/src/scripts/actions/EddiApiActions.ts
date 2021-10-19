@@ -1389,6 +1389,7 @@ export interface IFetchConversationsAction extends Action {
   index: number;
   conversationId: string;
   botResource: string;
+  filter?: string;
 }
 
 export function fetchConversationsAction(
@@ -1396,12 +1397,14 @@ export function fetchConversationsAction(
   index: number,
   conversationId: string,
   botResource: string,
+  filter?: string,
 ): IFetchConversationsAction {
   return {
     limit,
     index,
     conversationId,
     botResource,
+    filter,
     type: FETCH_CONVERSATIONS,
   };
 }
@@ -1411,6 +1414,7 @@ export interface IFetchConversationsSuccessAction extends Action {
   index: number;
   conversationId: string;
   botResource: string;
+  filter?: string;
   conversations: IConversation[];
 }
 
@@ -1420,6 +1424,7 @@ export function fetchConversationsSuccessAction(
   conversationId: string,
   botResource: string,
   conversations: IConversation[],
+  filter?: string,
 ): IFetchConversationsSuccessAction {
   return {
     limit,
@@ -1427,6 +1432,7 @@ export function fetchConversationsSuccessAction(
     conversationId,
     botResource,
     conversations,
+    filter,
     type: FETCH_CONVERSATIONS_SUCCESS,
   };
 }

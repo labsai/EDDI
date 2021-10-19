@@ -226,6 +226,7 @@ export interface IEddiApiActionDispatchers extends ActionCreatorsMapObject {
     index,
     conversationId,
     botResource,
+    filter?: string,
   ) => IFetchConversationsAction;
   fetchConversationsSuccessAction: (
     limit,
@@ -233,6 +234,7 @@ export interface IEddiApiActionDispatchers extends ActionCreatorsMapObject {
     conversationId,
     botResource,
     conversations,
+    filter?: string,
   ) => IFetchConversationsSuccessAction;
   fetchConversationsFailedAction: (error) => IFetchConversationsFailedAction;
   fetchConversationAction: (conversationId) => IFetchConversationAction;
