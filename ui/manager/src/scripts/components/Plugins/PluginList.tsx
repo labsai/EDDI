@@ -82,14 +82,14 @@ const PluginList = ({ error, filterText, pluginType }: IPrivateProps) => {
         <div className={classes.title}>{pluginName}</div>
         <div className={classes.lastModified}>{'Last Modified'}</div>
       </div>
-      {error && <p>{`Error: Could not load ${pluginName.toLowerCase()}`}</p>}
+      {error && <p>{`Error: Could not load ${pluginName?.toLowerCase()}`}</p>}
       {!isLoading && !error && _.isEmpty(plugins) && (
-        <p>{`There are no ${pluginName.toLowerCase()} yet`}</p>
+        <p>{`There are no ${pluginName?.toLowerCase()} yet`}</p>
       )}
       {!error && !_.isEmpty(plugins) && (
         <div className={classes.pluginList}>
           {_.isEmpty(pluginList) && (
-            <p>{`Found no ${pluginName.toLowerCase()} matching: "${filterText}"`}</p>
+            <p>{`Found no ${pluginName?.toLowerCase()} matching: "${filterText}"`}</p>
           )}
           <InfiniteScroll
             pageStart={0}

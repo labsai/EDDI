@@ -66,15 +66,27 @@ const ConversationList = ({
 
   React.useEffect(() => {
     const interval = setInterval(() => {
-      eddiApiActionDispatchers.fetchConversationsAction(LIMIT, 0, null, null);
+      eddiApiActionDispatchers.fetchConversationsAction(
+        LIMIT,
+        0,
+        null,
+        null,
+        filterText,
+      );
     }, REFRESH_INTERVAL);
 
     return () => clearInterval(interval);
   }, []);
 
   React.useEffect(() => {
-    eddiApiActionDispatchers.fetchConversationsAction(LIMIT, 0, null, null);
-  }, []);
+    eddiApiActionDispatchers.fetchConversationsAction(
+      LIMIT,
+      0,
+      null,
+      null,
+      filterText,
+    );
+  }, [filterText]);
 
   const loadMore = () => {
     if (loading) {
@@ -83,13 +95,20 @@ const ConversationList = ({
     setLoading(true);
     const limit = 20;
     if (conversations.length < limit && !allConversationsLoaded) {
-      eddiApiActionDispatchers.fetchConversationsAction(limit, 0, null, null);
+      eddiApiActionDispatchers.fetchConversationsAction(
+        limit,
+        0,
+        null,
+        null,
+        filterText,
+      );
     } else {
       eddiApiActionDispatchers.fetchConversationsAction(
         limit,
         Math.floor(conversationsLoaded / limit),
         null,
         null,
+        filterText,
       );
     }
   };

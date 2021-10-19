@@ -8,6 +8,7 @@ import {
 } from '../../../styles/DefaultStylingProperties';
 import SearchIcon from '@material-ui/icons/Search';
 import { pageEnum } from '../pages/pageEnum';
+import { historyPush } from '../../../scripts/history';
 
 const useStyles = makeStyles({
   filter: {
@@ -28,6 +29,7 @@ const useStyles = makeStyles({
     height: '20px',
     marginLeft: '5px',
     color: WHITE_COLOR,
+    cursor: 'pointer',
   },
   searchBoxInput: {
     '&:focus': {
@@ -63,17 +65,62 @@ function getSearchName(page: pageEnum) {
 
 const FilterComponent = (props: IProps) => {
   const classes = useStyles();
+
+  const urlSearchParams = new URLSearchParams(location.search);
+  const searchValue = urlSearchParams.get('search');
+  const pluginType = urlSearchParams.get('type');
+
+  const [value, setValue] = React.useState(searchValue || '');
+
+  const getQueryParams = () => {
+    const params = [];
+    const typeQuery = pluginType ? `type=${pluginType}` : undefined;
+    const searchQuery = value.length ? `search=${value}` : undefined;
+    if (typeQuery) {
+      params.push(typeQuery);
+    }
+    if (searchQuery) {
+      params.push(searchQuery);
+    }
+
+    return params;
+  };
+
+  const handleEnter = (e) => {
+    if (e.key === 'Enter') {
+      historyPush(location.pathname, getQueryParams());
+      props.filter(value);
+    }
+  };
+
+  const handleFilter = () => {
+    historyPush(location.pathname, getQueryParams());
+    props.filter(value);
+  };
+
+  React.useEffect(() => {
+    if (value?.length) {
+      props.filter(value);
+    }
+  }, []);
+
   return (
     <div className={classes.filter}>
       <div className={classes.searchBox}>
-        <SearchIcon fontSize="large" className={classes.searchBoxIcon} />
+        <SearchIcon
+          fontSize="large"
+          className={classes.searchBoxIcon}
+          onClick={handleFilter}
+        />
         <input
           type={'text'}
           placeholder={
             props.page ? `Find ${getSearchName(props.page)}` : props.placeholder
           }
+          value={value}
           className={classes.searchBoxInput}
-          onChange={(f) => props.filter(f.target.value)}
+          onChange={(f) => setValue(f.target.value)}
+          onKeyUp={handleEnter}
         />
       </div>
     </div>
