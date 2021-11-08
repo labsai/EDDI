@@ -8,8 +8,8 @@ services:
         READ_ONLY_DOMAIN: 'https://app.labs.ai'
         PORT: 7071
         AUTH_METHOD: 'keycloak'
-        AUTH_URL: 'https://auth.labs.ai/auth'
-        AUTH_REALM: 'EDDI'
+        AUTH_URL: 'https://sso.labs.ai/auth'
+        AUTH_REALM: 'labsai'
         AUTH_CLIENT_ID: 'eddi-config-ui'
     image: labsai/eddi-config-ui:local
     environment:
@@ -17,6 +17,6 @@ services:
       READ_ONLY_DOMAIN: 'https://app.labs.ai'
       PORT: 7071
       AUTH_METHOD: 'keycloak'
-      AUTH_URL: 'https://auth.labs.ai/auth'
-      AUTH_REALM: 'EDDI'
+      AUTH_URL: 'https://sso.labs.ai/auth'
+      AUTH_REALM: 'labsai'
       AUTH_CLIENT_ID: 'eddi-config-ui'

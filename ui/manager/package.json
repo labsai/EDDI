@@ -124,7 +124,7 @@
     "uglifyjs-webpack-plugin": "2.2.0",
     "url-loader": "^4.1.1",
     "wait-on": "5.3.0",
-    "webpack": "^5.38.1",
+    "webpack": "^5.39.1",
     "webpack-cli": "^4.7.0",
     "webpack-dev-server": "^3.11.2"
   },
