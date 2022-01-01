@@ -1,50 +1,54 @@
-# repository Project
+# Multi-Maven-Quarkus
+Project to reproduce Multi module maven project based on Quarkus
 
-This project uses Quarkus, the Supersonic Subatomic Java Framework.
+## See proposal on https://github.com/quarkusio/quarkus/issues/6266
 
-If you want to learn more about Quarkus, please visit its website: https://quarkus.io/ .
+## Modules
 
-## Running the application in dev mode
+### quarkus-root
+This module contains the quarkus maven plugin, all the required dependencies, and all the @quarkusTest
 
-You can run your application in dev mode that enables live coding using:
-```shell script
+This of it as a EAR or WAR, that packages all dependencies required to run the project.
+
+Tests are located on this modules for not having to deal with dependency inheritance... this way we're testing using the same dependencies available in runtime.
+
+The only logic for organizing tests, is to maintain them on the same package as the access class they propose to test. 
+
+### repository
+Handles data access. 
+
+Database management (flyway or something...)
+
+Contains JPA entities and DAOs
+
+### service
+Incorporates business logic, and handles unit of work (transactions)
+
+Maps JPA entities to business entities
+
+### resource
+Delivers RESTful endpoints for dealing with business entities (resources).
+
+
+## How to run the project
+
+ On a terminal, under project root folder, run  the following command:
+```
 ./mvnw compile quarkus:dev
 ```
 
-> **_NOTE:_**  Quarkus now ships with a Dev UI, which is available in dev mode only at http://localhost:8080/q/dev/.
-
-## Packaging and running the application
-
-The application can be packaged using:
-```shell script
-./mvnw package
+Open a browser and navigate to:
+ 
 ```
-It produces the `quarkus-run.jar` file in the `target/quarkus-app/` directory.
-Be aware that it’s not an _über-jar_ as the dependencies are copied into the `target/quarkus-app/lib/` directory.
-
-If you want to build an _über-jar_, execute the following command:
-```shell script
-./mvnw package -Dquarkus.package.type=uber-jar
+http://0.0.0.0:8080/swagger-ui
 ```
 
-The application is now runnable using `java -jar target/quarkus-app/quarkus-run.jar`.
+Use the interactive swagger interface to execute the web service.
 
-## Creating a native executable
 
-You can create a native executable using: 
-```shell script
-./mvnw package -Pnative
-```
+## How to test the project
 
-Or, if you don't have GraalVM installed, you can run the native executable build in a container using: 
-```shell script
-./mvnw package -Pnative -Dquarkus.native.container-build=true
-```
+Simply use the IDE to run a test, or don't maven skip them.
 
-You can then execute your native executable with: `./target/repository-5.0.0-SNAPSHOT-runner`
-
-If you want to learn more about building native executables, please consult https://quarkus.io/guides/maven-tooling.html.
-
-## Related Guides
-
-- RESTEasy JAX-RS ([guide](https://quarkus.io/guides/rest-json)): REST endpoint framework implementing JAX-RS and more
+Notice that tests are re-testing things just for noticing that environment is fully set on every layer.
+Real life tests should implement mocking.
