@@ -121,7 +121,7 @@
         <dependency>
             <groupId>org.keycloak</groupId>
             <artifactId>keycloak-core</artifactId>
-            <version>12.0.4</version>
+            <version>16.1.1</version>
             <exclusions>
                 <exclusion>
                     <groupId>org.apache.httpcomponents</groupId>
@@ -144,7 +144,7 @@
         <dependency>
             <groupId>org.keycloak</groupId>
             <artifactId>keycloak-jetty94-adapter</artifactId>
-            <version>12.0.4</version>
+            <version>16.1.1</version>
             <exclusions>
                 <exclusion>
                     <groupId>commons-codec</groupId>
@@ -172,7 +172,7 @@
         <dependency>
             <groupId>org.keycloak</groupId>
             <artifactId>keycloak-servlet-filter-adapter</artifactId>
-            <version>12.0.4</version>
+            <version>16.1.1</version>
             <exclusions>
                 <exclusion>
                     <groupId>org.apache.httpcomponents</groupId>
