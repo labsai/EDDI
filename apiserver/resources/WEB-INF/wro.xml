@@ -15,7 +15,7 @@
 
     <group name="swagger">
         <group-ref>jquery3</group-ref>
-        <js>classpath:js/handlebars-4.0.13.js</js>
+        <js>classpath:js/handlebars-4.3.0.js</js>
         <js>classpath:js/lodash.min.js</js>
         <js>classpath:js/backbone-min.js</js>
         <js>classpath:js/swagger-ui.min.js</js>
