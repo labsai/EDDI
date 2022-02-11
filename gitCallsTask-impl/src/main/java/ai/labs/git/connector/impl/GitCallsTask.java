@@ -152,7 +152,7 @@ public class GitCallsTask implements ILifecycleTask {
 
     public void gitInit(GitCall gitCall, Map<String, Object> templateDataObjects) {
         try {
-            String repositoryLocalDirectory = getRepositoryNameFromUrl(templateDataObjects);
+            String repositoryLocalDirectory = getRepositoryNameFromUrl(templateDataObjects, gitCall.getBranch());
             if (!Paths.get(tmpPath + "/" + repositoryLocalDirectory).toFile().exists()) {
                 Path gitPath = Files.createDirectories(Paths.get(tmpPath + "/" + repositoryLocalDirectory));
                 Git git = Git.cloneRepository()
@@ -175,7 +175,7 @@ public class GitCallsTask implements ILifecycleTask {
     public void gitPull(GitCall gitCall, Map<String, Object> templateDataObjects, IConversationMemory.IWritableConversationStep currentStep) {
         try {
             if (this.repositoryUrl != null) {
-                String repositoryLocalDirectory = getRepositoryNameFromUrl(templateDataObjects);
+                String repositoryLocalDirectory = getRepositoryNameFromUrl(templateDataObjects, gitCall.getBranch());
                 Path gitPath = Paths.get(tmpPath + "/" + repositoryLocalDirectory);
                 PullResult pullResult = Git.open(gitPath.toFile())
                         .pull()
@@ -220,7 +220,7 @@ public class GitCallsTask implements ILifecycleTask {
     public void gitCommit(GitCall gitCall, Map<String, Object> templatingDataObjects) {
         try {
             if (this.repositoryUrl != null) {
-                String repositoryLocalDirectory = getRepositoryNameFromUrl(templatingDataObjects);
+                String repositoryLocalDirectory = getRepositoryNameFromUrl(templatingDataObjects, gitCall.getBranch());
                 var filename = template(gitCall.getFilename(), templatingDataObjects);
                 var directory = template(gitCall.getDirectory(), templatingDataObjects);
                 var content = template(gitCall.getContent(), templatingDataObjects);
@@ -251,7 +251,7 @@ public class GitCallsTask implements ILifecycleTask {
 
     public void gitPush(GitCall gitCall, Map<String, Object> templatingDataObjects) {
         try {
-            String repositoryLocalDirectory = getRepositoryNameFromUrl(templatingDataObjects);
+            String repositoryLocalDirectory = getRepositoryNameFromUrl(templatingDataObjects, gitCall.getBranch());
             Path gitPath = Paths.get(tmpPath + "/" + repositoryLocalDirectory);
 
             if (this.repositoryUrl != null) {
@@ -290,10 +290,10 @@ public class GitCallsTask implements ILifecycleTask {
         }
     }
 
-    private String getRepositoryNameFromUrl(Map<String, Object> templatingDataObjects) throws URISyntaxException, ITemplatingEngine.TemplateEngineException {
+    private String getRepositoryNameFromUrl(Map<String, Object> templatingDataObjects, String branch) throws URISyntaxException, ITemplatingEngine.TemplateEngineException {
         URI uri = new URI(template(this.repositoryUrl, templatingDataObjects));
         String path = uri.getPath();
-        return path.substring(path.lastIndexOf('/') + 1);
+        return path.substring(path.lastIndexOf('/') + 1) + "/" + branch;
     }
 
 }
