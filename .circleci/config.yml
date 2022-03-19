@@ -54,42 +54,42 @@ jobs:
                 docker push labsai/eddi:${VERSION}
             fi
 
-      # Install GraalVM and native-image, needed for a native Quarkus build
-      # ########################
-      - run:
-          name: Install GraalVM
-          command: |
-            if [ "${CIRCLE_BRANCH}" == "master" ]; then
-                curl https://github.com/oracle/graal/releases/download/vm-19.1.1/graalvm-ce-linux-amd64-19.1.1.tar.gz -O -J -L && tar xfz graalvm-ce-linux-amd64-19.1.1.tar.gz && mv graalvm-ce-19.1.1 .graalvm && rm graalvm-ce-linux-amd64-19.1.1.tar.gz
-            fi
-      - run:
-          name: Install native-image
-          command: |
-            if [ "${CIRCLE_BRANCH}" == "master" ]; then
-              $GRAALVM_HOME/bin/gu install native-image
-            fi
-
-      # Perform a native Quarkus build and verify
-      # set the max heap size to prevent OOM
-      # ########################
-      - run:
-          name: Build (Native)
-          command: |
-            if [ "${CIRCLE_BRANCH}" == "master" ]; then
-              mvn clean package -Pnative -DskipTests -Dquarkus.native.native-image-xmx=8g -Dquarkus.container-image.tag=${VERSION}-native
-            fi
-          no_output_timeout: 30m
-      - run:
-          name: Verify (Native)
-          command: |
-            if [ "${CIRCLE_BRANCH}" == "master" ]; then
-              mvn verify -Pnative
-            fi
-          no_output_timeout: 30m
-      ## Push native image to docker registry
-      - run:
-          name: Docker Push (Native)
-          command: |
-            if [ "${CIRCLE_BRANCH}" == "master" ]; then
-                docker push labsai/eddi:${VERSION}-native
-            fi
+#      # Install GraalVM and native-image, needed for a native Quarkus build
+#      # ########################
+#      - run:
+#          name: Install GraalVM
+#          command: |
+#            if [ "${CIRCLE_BRANCH}" == "master" ]; then
+#                curl https://github.com/oracle/graal/releases/download/vm-19.1.1/graalvm-ce-linux-amd64-19.1.1.tar.gz -O -J -L && tar xfz graalvm-ce-linux-amd64-19.1.1.tar.gz && mv graalvm-ce-19.1.1 .graalvm && rm graalvm-ce-linux-amd64-19.1.1.tar.gz
+#            fi
+#      - run:
+#          name: Install native-image
+#          command: |
+#            if [ "${CIRCLE_BRANCH}" == "master" ]; then
+#              $GRAALVM_HOME/bin/gu install native-image
+#            fi
+#
+#      # Perform a native Quarkus build and verify
+#      # set the max heap size to prevent OOM
+#      # ########################
+#      - run:
+#          name: Build (Native)
+#          command: |
+#            if [ "${CIRCLE_BRANCH}" == "master" ]; then
+#              mvn clean package -Pnative -DskipTests -Dquarkus.native.native-image-xmx=8g -Dquarkus.container-image.tag=${VERSION}-native
+#            fi
+#          no_output_timeout: 30m
+#      - run:
+#          name: Verify (Native)
+#          command: |
+#            if [ "${CIRCLE_BRANCH}" == "master" ]; then
+#              mvn verify -Pnative
+#            fi
+#          no_output_timeout: 30m
+#      ## Push native image to docker registry
+#      - run:
+#          name: Docker Push (Native)
+#          command: |
+#            if [ "${CIRCLE_BRANCH}" == "master" ]; then
+#                docker push labsai/eddi:${VERSION}-native
+#            fi
