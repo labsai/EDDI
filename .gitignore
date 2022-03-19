@@ -78,3 +78,6 @@ fabric.properties
 # Docker Volumes
 docker/data/
 
+# Gradle
+.gradle
+
