@@ -1,0 +1,95 @@
+version: 2
+jobs:
+  build:
+    ## Use preconfigured circleci image that has JDK 11 by default See https://discuss.circleci.com/t/early-preview-new-ubuntu-20-04-linux-machine-executor-image/37281
+    ## has JDK 11, docker and maven
+    machine:
+      image: ubuntu-2004:202008-01
+    ## Uses a "medium" sized machine (this is the default) - maybe increase this to "large" if you pay for CircleCI
+    resource_class: medium
+    working_directory: ~/repo
+    environment:
+      MAVEN_OPTS: -Xmx6400m
+      # Set the GRAALVM_HOME env variable to the location where we will be installing GraalVM
+      GRAALVM_HOME: /home/circleci/repo/.graalvm
+    steps:
+      ## Checkout the source code
+      - checkout
+
+      ## set the version
+      - run:
+          name: Set Version
+          command: |
+            echo 'export VERSION=$(mvn help:evaluate -Dexpression=project.version -q -DforceStdout)' >> $BASH_ENV
+
+      ## Restore any files that may have been cached from previous jobs
+      - restore_cache:
+          keys:
+            - v1-dependencies-{{ checksum "pom.xml" }}
+            # fallback to using the latest cache if no exact match is found
+            - v1-dependencies-
+
+      ## Build the project
+      ## This will cache the multi module jars in the local m2 repo and build the docker images
+      ## Note. we can't just run mvn dependency:go-offline as the jars in the sub modules won't have been built yet
+      - run:
+          name: Build
+          command: mvn clean install -DskipTests
+
+      ## cache the dependencies
+      - save_cache:
+          paths:
+            - ~/.m2
+          key: v1-dependencies-{{ checksum "pom.xml" }}
+      - run:
+          name: Test
+          command: mvn test
+
+      ## Push docker image if master build
+      - run:
+          name: Docker Push
+          command: |
+            if [ "${CIRCLE_BRANCH}" == "master" ]; then
+                echo "$DOCKER_PASS" | docker login --username $DOCKER_USER --password-stdin
+                docker push labsai/eddi:${VERSION}
+            fi
+
+      # Install GraalVM and native-image, needed for a native Quarkus build
+      # ########################
+      - run:
+          name: Install GraalVM
+          command: |
+            if [ "${CIRCLE_BRANCH}" == "master" ]; then
+                curl https://github.com/oracle/graal/releases/download/vm-19.1.1/graalvm-ce-linux-amd64-19.1.1.tar.gz -O -J -L && tar xfz graalvm-ce-linux-amd64-19.1.1.tar.gz && mv graalvm-ce-19.1.1 .graalvm && rm graalvm-ce-linux-amd64-19.1.1.tar.gz
+            fi
+      - run:
+          name: Install native-image
+          command: |
+            if [ "${CIRCLE_BRANCH}" == "master" ]; then
+              $GRAALVM_HOME/bin/gu install native-image
+            fi
+
+      # Perform a native Quarkus build and verify
+      # set the max heap size to prevent OOM
+      # ########################
+      - run:
+          name: Build (Native)
+          command: |
+            if [ "${CIRCLE_BRANCH}" == "master" ]; then
+              mvn clean package -Pnative -DskipTests -Dquarkus.native.native-image-xmx=8g -Dquarkus.container-image.tag=${VERSION}-native
+            fi
+          no_output_timeout: 30m
+      - run:
+          name: Verify (Native)
+          command: |
+            if [ "${CIRCLE_BRANCH}" == "master" ]; then
+              mvn verify -Pnative
+            fi
+          no_output_timeout: 30m
+      ## Push native image to docker registry
+      - run:
+          name: Docker Push (Native)
+          command: |
+            if [ "${CIRCLE_BRANCH}" == "master" ]; then
+                docker push labsai/eddi:${VERSION}-native
+            fi
