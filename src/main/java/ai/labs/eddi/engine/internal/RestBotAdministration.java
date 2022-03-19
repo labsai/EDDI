@@ -39,7 +39,8 @@ public class RestBotAdministration implements IRestBotAdministration {
     private final IRestConversationStore restConversationStore;
     private final IDocumentDescriptorStore documentDescriptorStore;
 
-    private final Logger log = Logger.getLogger(RestBotAdministration.class);
+    @Inject
+    Logger log;
 
     @Inject
     public RestBotAdministration(IBotFactory botFactory,
@@ -160,7 +161,7 @@ public class RestBotAdministration implements IRestBotAdministration {
         String message = "Bot deployment is currently in progress! (botId=%s , version=%s)";
         message = String.format(message, botId, version);
         log.error(message, e);
-        throw new NoLogWebApplicationException(new Throwable(message), Response.Status.FORBIDDEN);
+        throw new NoLogWebApplicationException(new Throwable(message), Response.Status.FORBIDDEN.getStatusCode());
     }
 
     @Override

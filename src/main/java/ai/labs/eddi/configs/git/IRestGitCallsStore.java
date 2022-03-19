@@ -3,7 +3,9 @@ package ai.labs.eddi.configs.git;
 import ai.labs.eddi.configs.IRestVersionInfo;
 import ai.labs.eddi.configs.git.model.GitCallsConfiguration;
 import ai.labs.eddi.models.DocumentDescriptor;
-import io.swagger.annotations.*;
+import org.eclipse.microprofile.openapi.annotations.Operation;
+import org.eclipse.microprofile.openapi.annotations.parameters.Parameter;
+import org.eclipse.microprofile.openapi.annotations.responses.APIResponse;
 
 import javax.ws.rs.*;
 import javax.ws.rs.core.MediaType;
@@ -22,7 +24,7 @@ public interface IRestGitCallsStore extends IRestVersionInfo {
     @GET
     @Path("/jsonSchema")
     @Produces(MediaType.APPLICATION_JSON)
-    @APIResponse(reponseCode = "200", description = "JSON Schema (for validation).")
+    @APIResponse(responseCode = "200", description = "JSON Schema (for validation).")
     @Operation(description = "Read JSON Schema for regular gitCalls definition.")
     Response readJsonSchema();
 

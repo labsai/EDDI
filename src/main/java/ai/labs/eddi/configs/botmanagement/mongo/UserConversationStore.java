@@ -1,26 +1,28 @@
 package ai.labs.eddi.configs.botmanagement.mongo;
 
 import ai.labs.eddi.configs.botmanagement.IUserConversationStore;
-import ai.labs.eddi.datastore.IJsonSerialization;
 import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.datastore.IResourceStore.ResourceAlreadyExistsException;
 import ai.labs.eddi.datastore.serialization.IDocumentBuilder;
+import ai.labs.eddi.datastore.serialization.IJsonSerialization;
 import ai.labs.eddi.models.UserConversation;
 import ai.labs.eddi.utils.RuntimeUtilities;
 import com.mongodb.client.MongoCollection;
 import com.mongodb.client.MongoDatabase;
 import com.mongodb.client.model.IndexOptions;
 import com.mongodb.client.model.Indexes;
-import lombok.extern.slf4j.Slf4j;
 import org.bson.Document;
+import org.jboss.logging.Logger;
 
+import javax.enterprise.context.ApplicationScoped;
 import javax.inject.Inject;
 import java.io.IOException;
 
 /**
  * @author ginccc
  */
-@Slf4j
+
+@ApplicationScoped
 public class UserConversationStore implements IUserConversationStore {
     private static final String COLLECTION_USER_CONVERSATIONS = "userconversations";
     private static final String INTENT_FIELD = "intent";
@@ -29,6 +31,9 @@ public class UserConversationStore implements IUserConversationStore {
     private final IDocumentBuilder documentBuilder;
     private final IJsonSerialization jsonSerialization;
     private UserConversationResourceStore userConversationStore;
+
+    @Inject
+    Logger log;
 
     @Inject
     public UserConversationStore(MongoDatabase database,

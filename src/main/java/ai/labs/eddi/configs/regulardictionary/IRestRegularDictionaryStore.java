@@ -5,7 +5,9 @@ import ai.labs.eddi.configs.method.PATCH;
 import ai.labs.eddi.configs.patch.PatchInstruction;
 import ai.labs.eddi.configs.regulardictionary.model.RegularDictionaryConfiguration;
 import ai.labs.eddi.models.DocumentDescriptor;
-import io.swagger.annotations.*;
+import org.eclipse.microprofile.openapi.annotations.Operation;
+import org.eclipse.microprofile.openapi.annotations.parameters.Parameter;
+import org.eclipse.microprofile.openapi.annotations.responses.APIResponse;
 
 import javax.ws.rs.*;
 import javax.ws.rs.core.MediaType;
@@ -23,19 +25,14 @@ public interface IRestRegularDictionaryStore extends IRestVersionInfo {
     @GET
     @Path("/jsonSchema")
     @Produces(MediaType.APPLICATION_JSON)
-    @APIResponse(reponseCode = "200", description = "JSON Schema (for validation).")
+    @APIResponse(responseCode = "200", description = "JSON Schema (for validation).")
     @Operation(description = "Read JSON Schema for regular dictionary definition.")
     Response readJsonSchema();
 
     @GET
     @Path("/descriptors")
     @Produces(MediaType.APPLICATION_JSON)
-    @ApiImplicitParams({
-            @ApiImplicitParam(name = "filter", paramType = "query", dataType = "string", example = "<name_of_regular_dictionary>"),
-            @ApiImplicitParam(name = "index", paramType = "query", dataType = "integer", example = "0"),
-            @ApiImplicitParam(name = "limit", paramType = "query", dataType = "integer", example = "20")})
-    @APIResponse(reponseCode = "200", response = DocumentDescriptor.class, responseContainer = "List",
-            message = "Array of DocumentDescriptors")
+    @APIResponse(responseCode = "200", description = "Array of DocumentDescriptors")
     @Operation(description = "Read list of regular dictionary descriptors.")
     List<DocumentDescriptor> readRegularDictionaryDescriptors(@QueryParam("filter") @DefaultValue("") String filter,
                                                               @QueryParam("index") @DefaultValue("0") Integer index,
@@ -44,7 +41,7 @@ public interface IRestRegularDictionaryStore extends IRestVersionInfo {
     @GET
     @Path("/{id}")
     @Produces(MediaType.APPLICATION_JSON)
-    @APIResponse(reponseCode = "200", response = RegularDictionaryConfiguration.class, message = "configuration of regular dictionary")
+    @APIResponse(responseCode = "200", description = "configuration of regular dictionary")
     @Operation(description = "Read regular dictionary.")
     RegularDictionaryConfiguration readRegularDictionary(@PathParam("id") String id,
                                                          @Parameter(name = "version", required = true, example = "1")

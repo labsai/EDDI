@@ -3,12 +3,14 @@ package ai.labs.eddi.configs.output.mongo;
 import ai.labs.eddi.configs.output.IOutputStore;
 import ai.labs.eddi.configs.output.model.OutputConfiguration;
 import ai.labs.eddi.configs.output.model.OutputConfigurationSet;
-import ai.labs.eddi.datastore.ResultManipulator;
+import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.datastore.mongo.HistorizedResourceStore;
 import ai.labs.eddi.datastore.mongo.MongoResourceStorage;
+import ai.labs.eddi.datastore.mongo.ResultManipulator;
 import ai.labs.eddi.datastore.serialization.IDocumentBuilder;
 import com.mongodb.client.MongoDatabase;
 
+import javax.enterprise.context.ApplicationScoped;
 import javax.inject.Inject;
 import java.util.Comparator;
 import java.util.List;
@@ -19,6 +21,7 @@ import static ai.labs.eddi.utils.RuntimeUtilities.*;
 /**
  * @author ginccc
  */
+@ApplicationScoped
 public class OutputStore implements IOutputStore {
     private HistorizedResourceStore<OutputConfigurationSet> outputResourceStore;
     private static final OutputComparator OUTPUT_COMPARATOR = new OutputComparator();

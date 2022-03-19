@@ -10,6 +10,7 @@ import ai.labs.eddi.models.Context;
 import ai.labs.eddi.utils.SecurityUtilities;
 import org.apache.commons.lang3.RandomStringUtils;
 
+import javax.enterprise.context.ApplicationScoped;
 import javax.inject.Inject;
 import java.net.URI;
 import java.security.Principal;
@@ -17,6 +18,7 @@ import java.security.Principal;
 import static ai.labs.eddi.utils.RestUtilities.createURI;
 import static ai.labs.eddi.utils.RuntimeUtilities.isNullOrEmpty;
 
+@ApplicationScoped
 public class ConversationSetup implements IConversationSetup {
     private IConversationDescriptorStore conversationDescriptorStore;
 
@@ -26,7 +28,7 @@ public class ConversationSetup implements IConversationSetup {
     }
 
     @Override
-    public URI createConversationDescriptor(String botId, IBot latestBot, String conversationId, URI conversationUri)
+    public void createConversationDescriptor(String botId, IBot latestBot, String conversationId, URI conversationUri)
             throws IResourceStore.ResourceStoreException {
 
         var botVersion = latestBot.getBotVersion();
@@ -34,7 +36,6 @@ public class ConversationSetup implements IConversationSetup {
         Principal userPrincipal = SecurityUtilities.getPrincipal(ThreadContext.getSubject());
         conversationDescriptorStore.createDescriptor(conversationId, 0,
                 ResourceUtilities.createConversationDescriptor(conversationUri, botResourceUri));
-        return userUri;
     }
 
     @Override

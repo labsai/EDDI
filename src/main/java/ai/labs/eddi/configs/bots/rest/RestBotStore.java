@@ -5,6 +5,7 @@ import ai.labs.eddi.configs.bots.IRestBotStore;
 import ai.labs.eddi.configs.bots.model.BotConfiguration;
 import ai.labs.eddi.configs.documentdescriptor.IDocumentDescriptorStore;
 import ai.labs.eddi.configs.packages.IRestPackageStore;
+import ai.labs.eddi.configs.packages.rest.RestPackageStore;
 import ai.labs.eddi.configs.rest.RestVersionInfo;
 import ai.labs.eddi.configs.schema.IJsonSchemaCreator;
 import ai.labs.eddi.datastore.IResourceStore;
@@ -14,9 +15,9 @@ import ai.labs.eddi.engine.RestInterfaceFactory;
 import ai.labs.eddi.engine.utilities.URIUtilities;
 import ai.labs.eddi.models.DocumentDescriptor;
 import ai.labs.eddi.utils.RestUtilities;
-import ai.labs.resources.impl.config.packages.rest.RestPackageStore;
-import lombok.extern.slf4j.Slf4j;
+import org.jboss.logging.Logger;
 
+import javax.enterprise.context.ApplicationScoped;
 import javax.inject.Inject;
 import javax.ws.rs.InternalServerErrorException;
 import javax.ws.rs.core.MediaType;
@@ -30,13 +31,17 @@ import static javax.ws.rs.core.Response.Status.BAD_REQUEST;
 /**
  * @author ginccc
  */
-@Slf4j
+
+@ApplicationScoped
 public class RestBotStore extends RestVersionInfo<BotConfiguration> implements IRestBotStore {
     private static final String PACKAGE_URI = IRestPackageStore.resourceURI;
     private final IBotStore botStore;
     private final IRestPackageStore restPackageStore;
     private final IJsonSchemaCreator jsonSchemaCreator;
     private IRestBotStore restBotStore;
+
+    @Inject
+    Logger log;
 
     @Inject
     public RestBotStore(IBotStore botStore,

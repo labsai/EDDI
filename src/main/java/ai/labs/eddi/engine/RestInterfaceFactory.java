@@ -1,6 +1,7 @@
 package ai.labs.eddi.engine;
 
 import ai.labs.eddi.engine.runtime.ThreadContext;
+import jakarta.ws.rs.client.ClientBuilder;
 import org.eclipse.jetty.client.HttpClient;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.jboss.resteasy.client.jaxrs.ResteasyClient;
@@ -8,9 +9,8 @@ import org.jboss.resteasy.client.jaxrs.ResteasyClientBuilder;
 import org.jboss.resteasy.client.jaxrs.ResteasyWebTarget;
 import org.jboss.resteasy.client.jaxrs.engines.jetty.JettyClientEngine;
 
+import javax.enterprise.context.ApplicationScoped;
 import javax.inject.Inject;
-import javax.inject.Singleton;
-import javax.ws.rs.client.ClientBuilder;
 import javax.ws.rs.client.ClientRequestFilter;
 import java.util.HashMap;
 import java.util.Map;
@@ -18,7 +18,7 @@ import java.util.Map;
 /**
  * @author ginccc
  */
-@Singleton
+@ApplicationScoped
 public class RestInterfaceFactory implements IRestInterfaceFactory {
     private final Map<String, ResteasyClient> clients = new HashMap<>();
     private final HttpClient httpClient;

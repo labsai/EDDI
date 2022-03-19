@@ -10,6 +10,7 @@ import com.mongodb.client.MongoCollection;
 import com.mongodb.client.MongoDatabase;
 import org.bson.Document;
 
+import javax.enterprise.context.ApplicationScoped;
 import javax.inject.Inject;
 import java.io.IOException;
 import java.util.LinkedList;
@@ -18,6 +19,7 @@ import java.util.List;
 /**
  * @author ginccc
  */
+@ApplicationScoped
 public class DeploymentStore implements IDeploymentStore {
     private static final String COLLECTION_DEPLOYMENTS = "deployments";
     private final MongoCollection<Document> collection;

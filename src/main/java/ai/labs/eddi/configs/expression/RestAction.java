@@ -9,9 +9,10 @@ import ai.labs.eddi.configs.regulardictionary.IRestAction;
 import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.utils.CollectionUtilities;
 import ai.labs.eddi.utils.RestUtilities;
-import lombok.extern.slf4j.Slf4j;
+import org.jboss.logging.Logger;
 import org.jboss.resteasy.spi.NoLogWebApplicationException;
 
+import javax.enterprise.context.ApplicationScoped;
 import javax.inject.Inject;
 import javax.ws.rs.InternalServerErrorException;
 import javax.ws.rs.core.Response;
@@ -23,12 +24,16 @@ import java.util.List;
 /**
  * @author ginccc
  */
-@Slf4j
+
+@ApplicationScoped
 public class RestAction implements IRestAction {
     private final IPackageStore packageStore;
     private final IBehaviorStore behaviorStore;
     private final IHttpCallsStore httpCallsStore;
     private final IOutputStore outputStore;
+
+    @Inject
+    Logger log;
 
     @Inject
     public RestAction(IPackageStore packageStore,
@@ -70,7 +75,7 @@ public class RestAction implements IRestAction {
 
             return retActions;
         } catch (IResourceStore.ResourceNotFoundException e) {
-            throw new NoLogWebApplicationException(Response.Status.NOT_FOUND);
+            throw new NoLogWebApplicationException(Response.Status.NOT_FOUND.getStatusCode());
         } catch (IResourceStore.ResourceStoreException e) {
             log.error(e.getLocalizedMessage(), e);
             throw new InternalServerErrorException(e);

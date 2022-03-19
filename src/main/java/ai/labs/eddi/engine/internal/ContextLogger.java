@@ -2,9 +2,11 @@ package ai.labs.eddi.engine.internal;
 
 import ai.labs.eddi.models.Deployment;
 
+import javax.enterprise.context.ApplicationScoped;
 import java.util.HashMap;
 import java.util.Map;
 
+@ApplicationScoped
 public class ContextLogger implements IContextLogger {
 
     @Override

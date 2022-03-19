@@ -1,10 +1,11 @@
 package ai.labs.eddi.engine.runtime.internal;
 
 import ai.labs.eddi.engine.runtime.IConversationCoordinator;
-import lombok.extern.slf4j.Slf4j;
+import ai.labs.eddi.engine.runtime.SystemRuntime.IRuntime;
+import org.jboss.logging.Logger;
 
+import javax.enterprise.context.ApplicationScoped;
 import javax.inject.Inject;
-import javax.inject.Singleton;
 import java.util.Collections;
 import java.util.Map;
 import java.util.concurrent.BlockingQueue;
@@ -12,13 +13,13 @@ import java.util.concurrent.Callable;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.LinkedTransferQueue;
 
-import static ai.labs.runtime.SystemRuntime.IRuntime;
-
-@Singleton
-@Slf4j
+@ApplicationScoped
 public class ConversationCoordinator implements IConversationCoordinator {
     private final Map<String, BlockingQueue<Callable<Void>>> conversationQueues = new ConcurrentHashMap<>();
     private final IRuntime runtime;
+
+    @Inject
+    Logger log;
 
     @Inject
     public ConversationCoordinator(IRuntime runtime) {

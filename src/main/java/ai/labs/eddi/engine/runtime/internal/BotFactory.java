@@ -12,8 +12,9 @@ import ai.labs.eddi.engine.runtime.service.ServiceException;
 import ai.labs.eddi.models.Context;
 import ai.labs.eddi.models.Deployment;
 import lombok.*;
-import lombok.extern.slf4j.Slf4j;
+import org.jboss.logging.Logger;
 
+import javax.enterprise.context.ApplicationScoped;
 import javax.inject.Inject;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
@@ -22,10 +23,14 @@ import java.util.stream.Collectors;
 /**
  * @author ginccc
  */
-@Slf4j
+
+@ApplicationScoped
 public class BotFactory implements IBotFactory {
     private final Map<Deployment.Environment, ConcurrentHashMap<BotId, IBot>> environments;
     private final IBotStoreClientLibrary botStoreClientLibrary;
+
+    @Inject
+    Logger log;
 
     @Inject
     public BotFactory(IBotStoreClientLibrary botStoreClientLibrary) {

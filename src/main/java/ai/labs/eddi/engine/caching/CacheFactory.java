@@ -1,13 +1,14 @@
 package ai.labs.eddi.engine.caching;
 
 import lombok.Getter;
-import lombok.extern.slf4j.Slf4j;
 import org.infinispan.Cache;
 import org.infinispan.manager.EmbeddedCacheManager;
 
+import javax.enterprise.context.ApplicationScoped;
 import javax.inject.Inject;
 
-@Slf4j
+
+@ApplicationScoped
 public class CacheFactory implements ICacheFactory {
     @Getter
     private final EmbeddedCacheManager cacheManager;

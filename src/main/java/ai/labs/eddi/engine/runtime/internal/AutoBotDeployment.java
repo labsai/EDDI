@@ -7,17 +7,22 @@ import ai.labs.eddi.engine.runtime.IAutoBotDeployment;
 import ai.labs.eddi.engine.runtime.IBotFactory;
 import ai.labs.eddi.engine.runtime.service.ServiceException;
 import ai.labs.eddi.models.Deployment.Environment;
-import lombok.extern.slf4j.Slf4j;
+import org.jboss.logging.Logger;
 
+import javax.enterprise.context.ApplicationScoped;
 import javax.inject.Inject;
 
 /**
  * @author ginccc
  */
-@Slf4j
+
+@ApplicationScoped
 public class AutoBotDeployment implements IAutoBotDeployment {
     private final IDeploymentStore deploymentStore;
     private final IBotFactory botFactory;
+
+    @Inject
+    Logger log;
 
     @Inject
     public AutoBotDeployment(IDeploymentStore deploymentStore, IBotFactory botFactory) {

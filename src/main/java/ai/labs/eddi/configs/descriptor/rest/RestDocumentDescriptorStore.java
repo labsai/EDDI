@@ -6,8 +6,10 @@ import ai.labs.eddi.configs.patch.PatchInstruction;
 import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.models.DocumentDescriptor;
 import ai.labs.eddi.models.SimpleDocumentDescriptor;
-import lombok.extern.slf4j.Slf4j;
+import org.eclipse.microprofile.openapi.annotations.parameters.Parameter;
+import org.jboss.logging.Logger;
 
+import javax.enterprise.context.ApplicationScoped;
 import javax.inject.Inject;
 import javax.ws.rs.InternalServerErrorException;
 import javax.ws.rs.NotFoundException;
@@ -16,9 +18,13 @@ import java.util.List;
 /**
  * @author ginccc
  */
-@Slf4j
+
+@ApplicationScoped
 public class RestDocumentDescriptorStore implements IRestDocumentDescriptorStore {
     private final IDocumentDescriptorStore documentDescriptorStore;
+
+    @Inject
+    Logger log;
 
     @Inject
     public RestDocumentDescriptorStore(IDocumentDescriptorStore documentDescriptorStore) {
@@ -50,7 +56,7 @@ public class RestDocumentDescriptorStore implements IRestDocumentDescriptorStore
     }
 
     @Override
-    public SimpleDocumentDescriptor readSimpleDescriptor(String id, Integer version) {
+    public SimpleDocumentDescriptor readSimpleDescriptor(String id, @Parameter(name = "version", required = true, example = "1") Integer version) {
         DocumentDescriptor documentDescriptor = readDescriptor(id, version);
         return new SimpleDocumentDescriptor(documentDescriptor.getName(), documentDescriptor.getDescription());
     }

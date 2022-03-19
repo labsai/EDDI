@@ -1,6 +1,6 @@
 package ai.labs.eddi.engine.runtime;
 
-import lombok.extern.slf4j.Slf4j;
+import org.jboss.logging.Logger;
 
 import javax.security.auth.Subject;
 import java.util.HashMap;
@@ -40,12 +40,14 @@ import java.util.Map;
  * @see #remove()
  * @since 0.1
  */
-@Slf4j
+
 public abstract class ThreadContext {
     private static final String SECURITY_MANAGER_KEY = ThreadContext.class.getName() + "_SECURITY_MANAGER_KEY";
     private static final String SUBJECT_KEY = ThreadContext.class.getName() + "_SUBJECT_KEY";
 
     private static final ThreadLocal<Map<Object, Object>> resources = new InheritableThreadLocalMap<>();
+
+    private final static Logger log = Logger.getLogger(ThreadContext.class);
 
     /**
      * Default no-argument constructor.

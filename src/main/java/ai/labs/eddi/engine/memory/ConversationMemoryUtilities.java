@@ -11,8 +11,8 @@ import ai.labs.eddi.engine.memory.model.Data;
 import ai.labs.eddi.engine.memory.model.SimpleConversationMemorySnapshot;
 import ai.labs.eddi.models.Context;
 import ai.labs.eddi.models.Context.ContextType;
-import lombok.extern.slf4j.Slf4j;
 
+import javax.enterprise.context.ApplicationScoped;
 import java.util.HashMap;
 import java.util.LinkedList;
 import java.util.List;
@@ -25,7 +25,8 @@ import static ai.labs.eddi.utils.RuntimeUtilities.isNullOrEmpty;
 /**
  * @author ginccc
  */
-@Slf4j
+
+@ApplicationScoped
 public class ConversationMemoryUtilities {
     public static ConversationMemorySnapshot convertConversationMemory(IConversationMemory conversationMemory) {
         ConversationMemorySnapshot snapshot = new ConversationMemorySnapshot();

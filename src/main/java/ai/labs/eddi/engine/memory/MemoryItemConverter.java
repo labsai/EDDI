@@ -2,8 +2,8 @@ package ai.labs.eddi.engine.memory;
 
 import ai.labs.eddi.engine.memory.model.ConversationOutput;
 import ai.labs.eddi.models.Context;
-import lombok.extern.slf4j.Slf4j;
 
+import javax.enterprise.context.ApplicationScoped;
 import java.util.*;
 
 import static ai.labs.eddi.engine.memory.ConversationMemoryUtilities.prepareContext;
@@ -11,7 +11,7 @@ import static ai.labs.eddi.engine.memory.IConversationMemory.IConversationStep;
 import static ai.labs.eddi.engine.memory.IConversationMemory.IWritableConversationStep;
 import static ai.labs.eddi.utils.RuntimeUtilities.isNullOrEmpty;
 
-@Slf4j
+@ApplicationScoped
 public class MemoryItemConverter implements IMemoryItemConverter {
     private static final String KEY_MEMORY = "memory";
     private static final String KEY_CONTEXT = "context";

@@ -11,8 +11,9 @@ import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.engine.IRestInterfaceFactory;
 import ai.labs.eddi.engine.RestInterfaceFactory;
 import ai.labs.eddi.models.DocumentDescriptor;
-import lombok.extern.slf4j.Slf4j;
+import org.jboss.logging.Logger;
 
+import javax.enterprise.context.ApplicationScoped;
 import javax.inject.Inject;
 import javax.ws.rs.InternalServerErrorException;
 import javax.ws.rs.NotFoundException;
@@ -22,11 +23,15 @@ import java.util.List;
 /**
  * @author ginccc
  */
-@Slf4j
+
+@ApplicationScoped
 public class RestOutputStore extends RestVersionInfo<OutputConfigurationSet> implements IRestOutputStore {
     private final IOutputStore outputStore;
     private final IJsonSchemaCreator jsonSchemaCreator;
     private IRestOutputStore restOutputStore;
+
+    @Inject
+    Logger log;
 
     @Inject
     public RestOutputStore(IOutputStore outputStore,

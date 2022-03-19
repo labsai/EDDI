@@ -10,11 +10,10 @@ import ai.labs.eddi.engine.memory.model.SimpleConversationMemorySnapshot;
 import ai.labs.eddi.engine.memory.rest.IRestConversationStore;
 import ai.labs.eddi.models.ConversationState;
 import ai.labs.eddi.models.ConversationStatus;
-import ai.labs.user.IUserStore;
-import ai.labs.user.model.User;
-import lombok.extern.slf4j.Slf4j;
+import org.jboss.logging.Logger;
 import org.jboss.resteasy.spi.NoLogWebApplicationException;
 
+import javax.enterprise.context.ApplicationScoped;
 import javax.inject.Inject;
 import javax.ws.rs.InternalServerErrorException;
 import javax.ws.rs.NotFoundException;
@@ -32,19 +31,20 @@ import static ai.labs.eddi.utils.RuntimeUtilities.isNullOrEmpty;
 /**
  * @author ginccc
  */
-@Slf4j
+
+@ApplicationScoped
 public class RestConversationStore implements IRestConversationStore {
-    private final IUserStore userStore;
     private final IDocumentDescriptorStore documentDescriptorStore;
     private final IConversationDescriptorStore conversationDescriptorStore;
     private final IConversationMemoryStore conversationMemoryStore;
 
     @Inject
-    public RestConversationStore(IUserStore userStore,
-                                 IDocumentDescriptorStore documentDescriptorStore,
+    Logger log;
+
+    @Inject
+    public RestConversationStore(IDocumentDescriptorStore documentDescriptorStore,
                                  IConversationDescriptorStore conversationDescriptorStore,
                                  IConversationMemoryStore conversationMemoryStore) {
-        this.userStore = userStore;
         this.documentDescriptorStore = documentDescriptorStore;
         this.conversationDescriptorStore = conversationDescriptorStore;
         this.conversationMemoryStore = conversationMemoryStore;
@@ -110,10 +110,6 @@ public class RestConversationStore implements IRestConversationStore {
                     conversationDescriptor.setEnvironment(memorySnapshot.getEnvironment());
                     conversationDescriptor.setConversationStepSize(memorySnapshot.getConversationSteps().size());
                     URI createdBy = conversationDescriptor.getCreatedBy();
-                    if (createdBy != null) {
-                        User user = userStore.readUser(extractResourceId(createdBy).getId());
-                        conversationDescriptor.setCreatedByUserName(user.getDisplayName());
-                    }
                     conversationDescriptor.setBotName(documentDescriptorStore.readDescriptor(memorySnapshot.getBotId(), memorySnapshot.getBotVersion()).getName());
                     conversationDescriptor.setConversationState(memorySnapshot.getConversationState());
 

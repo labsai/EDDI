@@ -11,9 +11,10 @@ import ai.labs.eddi.configs.packages.model.PackageConfiguration;
 import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.utils.CollectionUtilities;
 import ai.labs.eddi.utils.RestUtilities;
-import lombok.extern.slf4j.Slf4j;
+import org.jboss.logging.Logger;
 import org.jboss.resteasy.spi.NoLogWebApplicationException;
 
+import javax.enterprise.context.ApplicationScoped;
 import javax.inject.Inject;
 import javax.ws.rs.InternalServerErrorException;
 import javax.ws.rs.core.Response;
@@ -23,11 +24,15 @@ import java.util.*;
 /**
  * @author ginccc
  */
-@Slf4j
+
+@ApplicationScoped
 public class RestOutputActions implements IRestOutputActions {
     private final IPackageStore packageStore;
     private final IBehaviorStore behaviorStore;
     private final IOutputStore outputStore;
+
+    @Inject
+    Logger log;
 
     @Inject
     public RestOutputActions(IPackageStore packageStore,
@@ -72,7 +77,7 @@ public class RestOutputActions implements IRestOutputActions {
 
             return sortedOutputKeys(retOutputKeys);
         } catch (IResourceStore.ResourceNotFoundException e) {
-            throw new NoLogWebApplicationException(Response.Status.NOT_FOUND);
+            throw new NoLogWebApplicationException(Response.Status.NOT_FOUND.getStatusCode());
         } catch (IResourceStore.ResourceStoreException e) {
             log.error(e.getLocalizedMessage(), e);
             throw new InternalServerErrorException(e);

@@ -5,6 +5,7 @@ import ai.labs.eddi.configs.patch.PatchInstruction;
 import ai.labs.eddi.models.DocumentDescriptor;
 import ai.labs.eddi.models.SimpleDocumentDescriptor;
 import org.eclipse.microprofile.openapi.annotations.Operation;
+import org.eclipse.microprofile.openapi.annotations.parameters.Parameter;
 
 import javax.ws.rs.*;
 import javax.ws.rs.core.MediaType;

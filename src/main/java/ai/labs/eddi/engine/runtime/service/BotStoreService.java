@@ -3,12 +3,14 @@ package ai.labs.eddi.engine.runtime.service;
 import ai.labs.eddi.configs.bots.IRestBotStore;
 import ai.labs.eddi.configs.bots.model.BotConfiguration;
 
+import javax.enterprise.context.ApplicationScoped;
 import javax.inject.Inject;
 
 
 /**
  * @author ginccc
  */
+@ApplicationScoped
 public class BotStoreService implements IBotStoreService {
 
     private final IRestBotStore restBotStore;

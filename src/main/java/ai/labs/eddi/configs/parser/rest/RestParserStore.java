@@ -9,8 +9,9 @@ import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.engine.IRestInterfaceFactory;
 import ai.labs.eddi.engine.RestInterfaceFactory;
 import ai.labs.eddi.models.DocumentDescriptor;
-import lombok.extern.slf4j.Slf4j;
+import org.jboss.logging.Logger;
 
+import javax.enterprise.context.ApplicationScoped;
 import javax.inject.Inject;
 import javax.ws.rs.core.Response;
 import java.util.List;
@@ -18,10 +19,13 @@ import java.util.List;
 /**
  * @author ginccc
  */
-@Slf4j
+@ApplicationScoped
 public class RestParserStore extends RestVersionInfo<ParserConfiguration> implements IRestParserStore {
     private final IParserStore parserStore;
     private IRestParserStore restParserStore;
+
+    @Inject
+    Logger log;
 
     @Inject
     public RestParserStore(IParserStore parserStore,

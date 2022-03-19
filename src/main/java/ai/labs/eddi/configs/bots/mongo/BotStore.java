@@ -7,13 +7,15 @@ import ai.labs.eddi.configs.documentdescriptor.IDocumentDescriptorStore;
 import ai.labs.eddi.configs.utilities.ResourceUtilities;
 import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.datastore.mongo.HistorizedResourceStore;
+import ai.labs.eddi.datastore.mongo.MongoResourceStorage;
 import ai.labs.eddi.datastore.serialization.IDocumentBuilder;
+import ai.labs.eddi.engine.utilities.URIUtilities;
 import ai.labs.eddi.models.DocumentDescriptor;
 import ai.labs.eddi.utils.RuntimeUtilities;
 import com.mongodb.client.MongoDatabase;
-import lombok.extern.slf4j.Slf4j;
 import org.bson.Document;
 
+import javax.enterprise.context.ApplicationScoped;
 import javax.inject.Inject;
 import java.util.Collections;
 import java.util.LinkedList;
@@ -22,7 +24,8 @@ import java.util.List;
 /**
  * @author ginccc
  */
-@Slf4j
+
+@ApplicationScoped
 public class BotStore implements IBotStore {
     private final IDocumentDescriptorStore documentDescriptorStore;
     private final BotHistorizedResourceStore botResourceStore;

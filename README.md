@@ -29,22 +29,35 @@ Maps JPA entities to business entities
 ### resource
 Delivers RESTful endpoints for dealing with business entities (resources).
 
-
 ## How to run the project
 
- On a terminal, under project root folder, run  the following command:
+On a terminal, under project root folder, run the following command:
+
 ```
 ./mvnw compile quarkus:dev
 ```
 
+If you want to build an _über-jar_, execute the following command:
+
+```shell script
+./mvnw package '-Dquarkus.package.type=uber-jar'
+```
+
+The application is now runnable using `java -jar target/quarkus-app/quarkus-run.jar`.
+
+## Build Docker image
+
+```shell script
+./mvnw clean package '-Dquarkus.container-image.build=true'
+```
+
 Open a browser and navigate to:
- 
+
 ```
 http://0.0.0.0:8080/swagger-ui
 ```
 
 Use the interactive swagger interface to execute the web service.
-
 
 ## How to test the project
 

@@ -10,12 +10,14 @@ import ai.labs.eddi.engine.runtime.service.IBotStoreService;
 import ai.labs.eddi.engine.runtime.service.ServiceException;
 import ai.labs.eddi.engine.utilities.URIUtilities;
 
+import javax.enterprise.context.ApplicationScoped;
 import javax.inject.Inject;
 import java.net.URI;
 
 /**
  * @author ginccc
  */
+@ApplicationScoped
 public class BotStoreClientLibrary implements IBotStoreClientLibrary {
     private final IBotStoreService botStoreService;
     private final IPackageFactory packageFactory;

@@ -11,8 +11,9 @@ import lombok.AllArgsConstructor;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
 import lombok.Setter;
-import lombok.extern.slf4j.Slf4j;
+import org.jboss.logging.Logger;
 
+import javax.enterprise.context.ApplicationScoped;
 import javax.inject.Inject;
 import javax.ws.rs.InternalServerErrorException;
 import javax.ws.rs.NotFoundException;
@@ -25,12 +26,15 @@ import java.util.List;
 import java.util.Map;
 import java.util.Random;
 
-@Slf4j
+@ApplicationScoped
 public class RestBotManagement implements IRestBotManagement {
     public static final String KEY_LANG = "lang";
     private final IRestBotEngine restBotEngine;
     private final IRestUserConversationStore restUserConversationStore;
     private final IRestBotTriggerStore restBotManagementStore;
+
+    @Inject
+    Logger log;
 
     @Inject
     public RestBotManagement(IRestBotEngine restBotEngine,

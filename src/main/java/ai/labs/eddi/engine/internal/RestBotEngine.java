@@ -26,17 +26,17 @@ import ai.labs.eddi.models.ConversationState;
 import ai.labs.eddi.models.Deployment;
 import ai.labs.eddi.models.Deployment.Environment;
 import ai.labs.eddi.models.InputData;
-import lombok.extern.slf4j.Slf4j;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
+import org.jboss.logging.Logger;
 import org.jboss.resteasy.spi.NoLogWebApplicationException;
 
+import javax.enterprise.context.ApplicationScoped;
 import javax.inject.Inject;
 import javax.ws.rs.InternalServerErrorException;
 import javax.ws.rs.NotFoundException;
 import javax.ws.rs.container.AsyncResponse;
 import javax.ws.rs.core.MediaType;
 import javax.ws.rs.core.Response;
-import java.net.URI;
 import java.util.*;
 import java.util.concurrent.*;
 
@@ -49,7 +49,8 @@ import static ai.labs.eddi.utils.RuntimeUtilities.*;
 /**
  * @author ginccc
  */
-@Slf4j
+
+@ApplicationScoped
 public class RestBotEngine implements IRestBotEngine {
     private static final String resourceURI = "eddi://ai.labs.conversation/conversationstore/conversations/";
     private static final String CACHE_NAME_CONVERSATION_STATE = "conversationState";
@@ -64,6 +65,9 @@ public class RestBotEngine implements IRestBotEngine {
     private final int botTimeout;
     private final IConversationSetup conversationSetup;
     private final ICache<String, ConversationState> conversationStateCache;
+
+    @Inject
+    Logger log;
 
     @Inject
     public RestBotEngine(IBotFactory botFactory,
@@ -121,8 +125,7 @@ public class RestBotEngine implements IRestBotEngine {
             cacheConversationState(conversationId, conversationMemory.getConversationState());
             var conversationUri = createURI(resourceURI, conversationId);
 
-            URI userUri = conversationSetup.createConversationDescriptor(botId, latestBot, conversationId, conversationUri);
-            conversationSetup.createPermissions(conversationId, userUri);
+            conversationSetup.createConversationDescriptor(botId, latestBot, conversationId, conversationUri);
 
             return Response.created(conversationUri).build();
         } catch (ServiceException |
@@ -199,7 +202,7 @@ public class RestBotEngine implements IRestBotEngine {
             log.error(e.getLocalizedMessage(), e);
             throw new InternalServerErrorException(e.getLocalizedMessage(), e);
         } catch (ResourceNotFoundException e) {
-            throw new NoLogWebApplicationException(Response.Status.NOT_FOUND);
+            throw new NoLogWebApplicationException(Response.Status.NOT_FOUND.getStatusCode());
         }
     }
 
@@ -217,7 +220,7 @@ public class RestBotEngine implements IRestBotEngine {
         if (conversationState == null) {
             String message = "No conversation found! (conversationId=%s)";
             message = String.format(message, conversationId);
-            throw new NoLogWebApplicationException(new Throwable(message), Response.Status.NOT_FOUND);
+            throw new NoLogWebApplicationException(new Throwable(message), Response.Status.NOT_FOUND.getStatusCode());
         }
 
         return conversationState;
@@ -275,7 +278,6 @@ public class RestBotEngine implements IRestBotEngine {
         response.setTimeoutHandler((asyncResp) ->
                 asyncResp.resume(Response.status(Response.Status.REQUEST_TIMEOUT).build()));
 
-        long startTime = System.nanoTime();
         try {
             final IConversationMemory conversationMemory = loadConversationMemory(conversationId);
             checkConversationMemoryNotNull(conversationMemory, conversationId);
@@ -353,7 +355,7 @@ public class RestBotEngine implements IRestBotEngine {
             log.error(errorMsg, e);
             throw new InternalServerErrorException(errorMsg, e);
         } catch (ResourceNotFoundException e) {
-            throw new NoLogWebApplicationException(Response.Status.NOT_FOUND);
+            throw new NoLogWebApplicationException(Response.Status.NOT_FOUND.getStatusCode());
         } catch (Exception e) {
             log.error(e.getLocalizedMessage(), e);
             throw new InternalServerErrorException(e.getLocalizedMessage(), e);
@@ -437,7 +439,7 @@ public class RestBotEngine implements IRestBotEngine {
             log.error(e.getLocalizedMessage(), e);
             throw new InternalServerErrorException();
         } catch (ResourceNotFoundException e) {
-            throw new NoLogWebApplicationException(Response.Status.NOT_FOUND);
+            throw new NoLogWebApplicationException(Response.Status.NOT_FOUND.getStatusCode());
         }
     }
 
@@ -463,7 +465,7 @@ public class RestBotEngine implements IRestBotEngine {
             log.error(errorMsg, e);
             throw new InternalServerErrorException(errorMsg, e);
         } catch (ResourceNotFoundException e) {
-            throw new NoLogWebApplicationException(Response.Status.NOT_FOUND);
+            throw new NoLogWebApplicationException(Response.Status.NOT_FOUND.getStatusCode());
         } catch (Exception e) {
             contextLogger.setLoggingContext(loggingContext);
             log.error(e.getLocalizedMessage(), e);
@@ -493,7 +495,7 @@ public class RestBotEngine implements IRestBotEngine {
             loggingContext.put(USER_ID, conversationMemory.getUserId());
             return conversationMemory.isRedoAvailable();
         } catch (ResourceStoreException e) {
-            throw new NoLogWebApplicationException(Response.Status.NOT_FOUND);
+            throw new NoLogWebApplicationException(Response.Status.NOT_FOUND.getStatusCode());
         } catch (ResourceNotFoundException e) {
             contextLogger.setLoggingContext(loggingContext);
             log.error(e.getLocalizedMessage(), e);
@@ -521,7 +523,7 @@ public class RestBotEngine implements IRestBotEngine {
             log.error(errorMsg, e);
             throw new InternalServerErrorException(errorMsg, e);
         } catch (ResourceNotFoundException e) {
-            throw new NoLogWebApplicationException(Response.Status.NOT_FOUND);
+            throw new NoLogWebApplicationException(Response.Status.NOT_FOUND.getStatusCode());
         } catch (Exception e) {
             log.error(e.getLocalizedMessage(), e);
             throw new InternalServerErrorException(e.getLocalizedMessage(), e);

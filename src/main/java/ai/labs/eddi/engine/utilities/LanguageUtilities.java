@@ -2,13 +2,11 @@ package ai.labs.eddi.engine.utilities;
 
 import lombok.AccessLevel;
 import lombok.NoArgsConstructor;
-import lombok.extern.slf4j.Slf4j;
 
 import java.sql.Time;
 import java.util.Date;
 import java.util.regex.Pattern;
 
-@Slf4j
 @NoArgsConstructor(access = AccessLevel.PRIVATE)
 public class LanguageUtilities {
     private interface TimeRecognition {
@@ -55,7 +53,6 @@ public class LanguageUtilities {
                     //if(i > 0 && i < 24)
                     return String.valueOf(i);
                 } catch (NumberFormatException nfe) {
-                    log.error(nfe.getLocalizedMessage(), nfe);
                     return null;
                 }
             }

@@ -7,20 +7,24 @@ import com.mongodb.client.MongoCollection;
 import com.mongodb.client.MongoDatabase;
 import com.mongodb.client.model.IndexOptions;
 import com.mongodb.client.model.Indexes;
-import lombok.extern.slf4j.Slf4j;
 import org.bson.Document;
+import org.jboss.logging.Logger;
 
+import javax.enterprise.context.ApplicationScoped;
 import javax.inject.Inject;
 
 /**
  * @author ginccc
  */
-@Slf4j
+@ApplicationScoped
 public class PropertiesStore implements IPropertiesStore {
     private static final String COLLECTION_PROPERTIES = "properties";
     private static final String USER_ID = "userId";
     private final MongoCollection<Document> collection;
     private PropertiesResourceStore propertiesStore;
+
+    @Inject
+    Logger log;
 
     @Inject
     public PropertiesStore(MongoDatabase database) {

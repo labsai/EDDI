@@ -1,14 +1,12 @@
 package ai.labs.eddi.engine.utilities;
 
 import ai.labs.eddi.datastore.model.ResourceId;
-import lombok.extern.slf4j.Slf4j;
 
 import java.net.URI;
 
 /**
  * @author ginccc
  */
-@Slf4j
 public class URIUtilities {
 
     public static ResourceId extractResourceId(URI uri) {

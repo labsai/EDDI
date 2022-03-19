@@ -10,6 +10,7 @@ import ai.labs.eddi.datastore.serialization.IDocumentBuilder;
 import ai.labs.eddi.utils.RuntimeUtilities;
 import com.mongodb.client.MongoDatabase;
 
+import javax.enterprise.context.ApplicationScoped;
 import javax.inject.Inject;
 import java.util.Collection;
 import java.util.List;
@@ -18,6 +19,7 @@ import java.util.stream.Collectors;
 /**
  * @author ginccc
  */
+@ApplicationScoped
 public class HttpCallsStore implements IHttpCallsStore {
     private HistorizedResourceStore<HttpCallsConfiguration> httpCallsResourceStore;
 

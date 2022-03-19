@@ -1,9 +1,9 @@
 package ai.labs.eddi.engine.runtime;
 
-import ai.labs.eddi.utils.FileUtilities;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.jboss.logging.Logger;
 
+import javax.enterprise.context.ApplicationScoped;
 import javax.inject.Inject;
 import java.util.Map;
 import java.util.concurrent.*;
@@ -11,30 +11,29 @@ import java.util.concurrent.*;
 /**
  * @author ginccc
  */
+@ApplicationScoped
 public class BaseRuntime implements SystemRuntime.IRuntime {
     private final String projectVersion;
-    private final String CONFIG_DIR;
-    private final String LOG_DIR = FileUtilities.buildPath(System.getProperty("user.dir"), "logs");
 
-    private final ScheduledThreadPoolExecutor executorService;
-    private final BotExecutionLogAppender botExecutionLogAppender;
+    private final ScheduledExecutorService executorService;
     private final String projectName;
 
     private boolean isInit = false;
 
-    private final Logger log = Logger.getLogger(BaseRuntime.class);
+    @Inject
+    Logger log;
 
     @Inject
-    public BaseRuntime(ScheduledThreadPoolExecutor executorService,
-                       BotExecutionLogAppender botExecutionLogAppender,
-                       @ConfigProperty(name = "systemRuntime.projectName") String projectName,
+    public BaseRuntime(@ConfigProperty(name = "systemRuntime.projectName") String projectName,
                        @ConfigProperty(name = "systemRuntime.projectVersion") String projectVersion,
-                       @ConfigProperty(name = "systemRuntime.configDir") String configDir) {
-        this.executorService = executorService;
-        this.botExecutionLogAppender = botExecutionLogAppender;
+                       ScheduledExecutorService scheduledExecutorService) {
+
+        this.executorService = scheduledExecutorService;
+
         this.projectName = projectName;
         this.projectVersion = projectVersion;
-        CONFIG_DIR = FileUtilities.buildPath(System.getProperty("user.dir"), configDir);
+
+        init();
     }
 
     public void init() {
@@ -66,16 +65,6 @@ public class BaseRuntime implements SystemRuntime.IRuntime {
     @Override
     public String getVersion() {
         return projectVersion;
-    }
-
-    @Override
-    public String getConfigDir() {
-        return CONFIG_DIR;
-    }
-
-    @Override
-    public String getLogDir() {
-        return LOG_DIR;
     }
 
     private static String lowerCaseFirstLetter(String value) {
@@ -114,7 +103,10 @@ public class BaseRuntime implements SystemRuntime.IRuntime {
     }
 
     @Override
-    public <T> Future<T> submitCallable(final Callable<T> callable, final IFinishedExecution<T> callback, final Map<Object, Object> threadBindings) {
+    public <T> Future<T> submitCallable(final Callable<T> callable,
+                                        final IFinishedExecution<T> callback,
+                                        final Map<Object, Object> threadBindings) {
+
         return getExecutorService().submit(() -> {
             try {
                 if (threadBindings != null) {

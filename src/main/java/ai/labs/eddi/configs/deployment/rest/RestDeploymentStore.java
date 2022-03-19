@@ -4,8 +4,9 @@ import ai.labs.eddi.configs.deployment.IDeploymentStore;
 import ai.labs.eddi.configs.deployment.IRestDeploymentStore;
 import ai.labs.eddi.configs.deployment.model.DeploymentInfo;
 import ai.labs.eddi.datastore.IResourceStore;
-import lombok.extern.slf4j.Slf4j;
+import org.jboss.logging.Logger;
 
+import javax.enterprise.context.ApplicationScoped;
 import javax.inject.Inject;
 import javax.ws.rs.InternalServerErrorException;
 import java.util.List;
@@ -13,9 +14,13 @@ import java.util.List;
 /**
  * @author ginccc
  */
-@Slf4j
+
+@ApplicationScoped
 public class RestDeploymentStore implements IRestDeploymentStore {
     private final IDeploymentStore deploymentStore;
+
+    @Inject
+    Logger log;
 
     @Inject
     public RestDeploymentStore(IDeploymentStore deploymentStore) {

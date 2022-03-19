@@ -7,9 +7,10 @@ import ai.labs.eddi.configs.regulardictionary.IRestExpression;
 import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.utils.CollectionUtilities;
 import ai.labs.eddi.utils.RestUtilities;
-import lombok.extern.slf4j.Slf4j;
+import org.jboss.logging.Logger;
 import org.jboss.resteasy.spi.NoLogWebApplicationException;
 
+import javax.enterprise.context.ApplicationScoped;
 import javax.inject.Inject;
 import javax.ws.rs.InternalServerErrorException;
 import javax.ws.rs.core.Response;
@@ -21,10 +22,14 @@ import java.util.Map;
 /**
  * @author ginccc
  */
-@Slf4j
+
+@ApplicationScoped
 public class RestExpression implements IRestExpression {
     private final IPackageStore packageStore;
     private final IRegularDictionaryStore regularDictionaryStore;
+
+    @Inject
+    Logger log;
 
     @Inject
     public RestExpression(IPackageStore packageStore,
@@ -45,7 +50,7 @@ public class RestExpression implements IRestExpression {
             }
             return retExpressions;
         } catch (IResourceStore.ResourceNotFoundException e) {
-            throw new NoLogWebApplicationException(Response.Status.NOT_FOUND);
+            throw new NoLogWebApplicationException(Response.Status.NOT_FOUND.getStatusCode());
         } catch (IResourceStore.ResourceStoreException e) {
             log.error(e.getLocalizedMessage(), e);
             throw new InternalServerErrorException(e);

@@ -4,8 +4,9 @@ import ai.labs.eddi.configs.properties.IPropertiesStore;
 import ai.labs.eddi.configs.properties.IRestPropertiesStore;
 import ai.labs.eddi.configs.properties.model.Properties;
 import ai.labs.eddi.datastore.IResourceStore;
-import lombok.extern.slf4j.Slf4j;
+import org.jboss.logging.Logger;
 
+import javax.enterprise.context.ApplicationScoped;
 import javax.inject.Inject;
 import javax.ws.rs.InternalServerErrorException;
 import javax.ws.rs.core.Response;
@@ -13,9 +14,12 @@ import javax.ws.rs.core.Response;
 /**
  * @author ginccc
  */
-@Slf4j
+@ApplicationScoped
 public class RestPropertiesStore implements IRestPropertiesStore {
     private final IPropertiesStore propertiesStore;
+
+    @Inject
+    Logger log;
 
     @Inject
     public RestPropertiesStore(IPropertiesStore propertiesStore) {

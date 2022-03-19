@@ -5,6 +5,7 @@ import ai.labs.eddi.configs.behavior.model.BehaviorConfiguration;
 import ai.labs.eddi.models.DocumentDescriptor;
 import io.swagger.v3.oas.annotations.Operation;
 import org.eclipse.microprofile.openapi.annotations.parameters.Parameter;
+import org.eclipse.microprofile.openapi.annotations.responses.APIResponse;
 
 import javax.ws.rs.*;
 import javax.ws.rs.core.MediaType;

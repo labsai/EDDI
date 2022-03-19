@@ -4,12 +4,14 @@ import ai.labs.eddi.configs.extensions.model.ExtensionDescriptor;
 import ai.labs.eddi.configs.packages.IRestPackageExtensionStore;
 import ai.labs.eddi.engine.lifecycle.ILifecycleTask;
 
+import javax.enterprise.context.ApplicationScoped;
 import javax.inject.Inject;
 import javax.inject.Provider;
 import java.util.List;
 import java.util.Map;
 import java.util.stream.Collectors;
 
+@ApplicationScoped
 public class RestPackageExtensionStore implements IRestPackageExtensionStore {
     private final Map<String, Provider<ILifecycleTask>> lifecycleExtensionsProvider;
 

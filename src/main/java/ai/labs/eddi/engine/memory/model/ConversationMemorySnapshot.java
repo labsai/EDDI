@@ -1,7 +1,6 @@
 package ai.labs.eddi.engine.memory.model;
 
-
-import ai.labs.eddi.datastore.Id;
+import ai.labs.eddi.datastore.serialization.Id;
 import ai.labs.eddi.models.ConversationState;
 import ai.labs.eddi.models.Deployment;
 import ai.labs.eddi.models.Property;

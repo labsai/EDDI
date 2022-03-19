@@ -2,15 +2,16 @@ package ai.labs.eddi.configs.extensions;
 
 import ai.labs.eddi.configs.extensions.model.ExtensionDescriptor;
 import ai.labs.eddi.configs.packages.IRestPackageExtensionStore;
-import lombok.extern.slf4j.Slf4j;
 
+import javax.enterprise.context.ApplicationScoped;
 import javax.inject.Inject;
 import java.util.List;
 
 /**
  * @author ginccc
  */
-@Slf4j
+
+@ApplicationScoped
 public class RestExtensionStore implements IRestExtensionStore {
     private final IRestPackageExtensionStore restExtensionStore;
 

@@ -1,6 +1,8 @@
 package ai.labs.eddi.engine.utilities;
 
 
+import ai.labs.eddi.utils.CharacterUtilities;
+
 /**
  * @author ginccc
  */

@@ -9,6 +9,7 @@ import ai.labs.eddi.datastore.serialization.IDocumentBuilder;
 import ai.labs.eddi.utils.RuntimeUtilities;
 import com.mongodb.client.MongoDatabase;
 
+import javax.enterprise.context.ApplicationScoped;
 import javax.inject.Inject;
 
 
@@ -16,6 +17,7 @@ import javax.inject.Inject;
  * @author rpi
  */
 
+@ApplicationScoped
 public class GitCallsStore implements IGitCallsStore {
     private HistorizedResourceStore<GitCallsConfiguration> gitCallsResourceStore;
 

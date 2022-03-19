@@ -6,8 +6,9 @@ import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.engine.caching.ICache;
 import ai.labs.eddi.engine.caching.ICacheFactory;
 import ai.labs.eddi.models.BotTriggerConfiguration;
-import lombok.extern.slf4j.Slf4j;
+import org.jboss.logging.Logger;
 
+import javax.enterprise.context.ApplicationScoped;
 import javax.inject.Inject;
 import javax.ws.rs.InternalServerErrorException;
 import javax.ws.rs.NotFoundException;
@@ -17,11 +18,15 @@ import javax.ws.rs.core.Response;
 /**
  * @author ginccc
  */
-@Slf4j
+
+@ApplicationScoped
 public class RestBotTriggerStore implements IRestBotTriggerStore {
     private static final String CACHE_NAME = "botTriggers";
     private final IBotTriggerStore botTriggerStore;
     private final ICache<String, BotTriggerConfiguration> botTriggersCache;
+
+    @Inject
+    Logger log;
 
     @Inject
     public RestBotTriggerStore(IBotTriggerStore botTriggerStore,

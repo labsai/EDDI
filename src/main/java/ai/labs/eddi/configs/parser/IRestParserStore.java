@@ -3,7 +3,9 @@ package ai.labs.eddi.configs.parser;
 import ai.labs.eddi.configs.IRestVersionInfo;
 import ai.labs.eddi.configs.parser.model.ParserConfiguration;
 import ai.labs.eddi.models.DocumentDescriptor;
-import io.swagger.annotations.*;
+import org.eclipse.microprofile.openapi.annotations.Operation;
+import org.eclipse.microprofile.openapi.annotations.parameters.Parameter;
+import org.eclipse.microprofile.openapi.annotations.responses.APIResponse;
 
 import javax.ws.rs.*;
 import javax.ws.rs.core.MediaType;
@@ -22,12 +24,7 @@ public interface IRestParserStore extends IRestVersionInfo {
     @GET
     @Path("/descriptors")
     @Produces(MediaType.APPLICATION_JSON)
-    @ApiImplicitParams({
-            @ApiImplicitParam(name = "filter", paramType = "query", dataType = "string", example = "<name_of_parser>"),
-            @ApiImplicitParam(name = "index", paramType = "query", dataType = "integer", example = "0"),
-            @ApiImplicitParam(name = "limit", paramType = "query", dataType = "integer", example = "20")})
-    @APIResponse(reponseCode = "200", response = DocumentDescriptor.class, responseContainer = "List",
-            message = "Array of DocumentDescriptors")
+    @APIResponse(responseCode = "200", description = "Array of DocumentDescriptors")
     @Operation(description = "Read list of parser descriptors.")
     List<DocumentDescriptor> readParserDescriptors(@QueryParam("filter") @DefaultValue("") String filter,
                                                    @QueryParam("index") @DefaultValue("0") Integer index,
@@ -37,7 +34,7 @@ public interface IRestParserStore extends IRestVersionInfo {
     @GET
     @Path("/{id}")
     @Produces(MediaType.APPLICATION_JSON)
-    @APIResponse(reponseCode = "200", response = ParserConfiguration.class, message = "configuration of parser")
+    @APIResponse(responseCode = "200", description = "configuration of parser")
     @Operation(description = "Read parser.")
     ParserConfiguration readParser(@PathParam("id") String id,
                                    @Parameter(name = "version", required = true, example = "1")

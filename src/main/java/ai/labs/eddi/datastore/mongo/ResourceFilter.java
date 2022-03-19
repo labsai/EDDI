@@ -7,9 +7,11 @@ import com.mongodb.DBObject;
 import com.mongodb.QueryBuilder;
 import com.mongodb.client.FindIterable;
 import com.mongodb.client.MongoCollection;
-import lombok.extern.slf4j.Slf4j;
 import org.bson.Document;
+import org.jboss.logging.Logger;
 
+import javax.enterprise.context.ApplicationScoped;
+import javax.inject.Inject;
 import java.io.IOException;
 import java.util.HashMap;
 import java.util.LinkedList;
@@ -20,10 +22,14 @@ import java.util.regex.Pattern;
 /**
  * @author ginccc
  */
-@Slf4j
+
+@ApplicationScoped
 public class ResourceFilter<T> implements IResourceFilter<T> {
     private static final String FIELD_ID = "_id";
     private static final String FIELD_VERSION = "_version";
+
+    @Inject
+    Logger log;
 
     private MongoCollection<Document> collection;
     private IResourceStore<T> resourceStore;

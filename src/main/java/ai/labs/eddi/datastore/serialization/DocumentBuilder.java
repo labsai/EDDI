@@ -1,8 +1,9 @@
 package ai.labs.eddi.datastore.serialization;
 
-import lombok.extern.slf4j.Slf4j;
 import org.bson.Document;
+import org.jboss.logging.Logger;
 
+import javax.enterprise.context.ApplicationScoped;
 import javax.inject.Inject;
 import java.io.IOException;
 import java.util.Map;
@@ -10,9 +11,13 @@ import java.util.Map;
 /**
  * @author ginccc
  */
-@Slf4j
+
+@ApplicationScoped
 public class DocumentBuilder implements IDocumentBuilder {
     private IJsonSerialization jsonSerialization;
+
+    @Inject
+    Logger log;
 
     @Inject
     public DocumentBuilder(IJsonSerialization jsonSerialization) {

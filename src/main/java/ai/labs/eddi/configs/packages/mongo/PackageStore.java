@@ -14,6 +14,7 @@ import ai.labs.eddi.utils.RuntimeUtilities;
 import com.mongodb.client.MongoDatabase;
 import org.bson.Document;
 
+import javax.enterprise.context.ApplicationScoped;
 import javax.inject.Inject;
 import java.util.LinkedList;
 import java.util.List;
@@ -21,6 +22,7 @@ import java.util.List;
 /**
  * @author ginccc
  */
+@ApplicationScoped
 public class PackageStore implements IPackageStore {
     private final IDocumentDescriptorStore documentDescriptorStore;
     private final PackageHistorizedResourceStore packageResourceStore;

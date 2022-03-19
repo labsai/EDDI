@@ -5,6 +5,7 @@ import ai.labs.eddi.engine.runtime.IPackageFactory;
 import ai.labs.eddi.engine.runtime.client.packages.IPackageStoreClientLibrary;
 import ai.labs.eddi.engine.runtime.service.ServiceException;
 
+import javax.enterprise.context.ApplicationScoped;
 import javax.inject.Inject;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
@@ -12,6 +13,7 @@ import java.util.concurrent.ConcurrentHashMap;
 /**
  * @author ginccc
  */
+@ApplicationScoped
 public class PackageFactory implements IPackageFactory {
     private final Map<PackageId, IExecutablePackage> executablePackages = new ConcurrentHashMap<>();
     private final IPackageStoreClientLibrary packageStoreClientLibrary;

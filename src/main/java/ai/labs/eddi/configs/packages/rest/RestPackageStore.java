@@ -15,8 +15,9 @@ import ai.labs.eddi.engine.runtime.service.ServiceException;
 import ai.labs.eddi.engine.utilities.URIUtilities;
 import ai.labs.eddi.models.DocumentDescriptor;
 import ai.labs.eddi.utils.RestUtilities;
-import lombok.extern.slf4j.Slf4j;
+import org.jboss.logging.Logger;
 
+import javax.enterprise.context.ApplicationScoped;
 import javax.inject.Inject;
 import javax.ws.rs.InternalServerErrorException;
 import javax.ws.rs.core.MediaType;
@@ -29,7 +30,7 @@ import static ai.labs.eddi.configs.utilities.ResourceUtilities.*;
 import static ai.labs.eddi.utils.RuntimeUtilities.isNullOrEmpty;
 import static javax.ws.rs.core.Response.Status.BAD_REQUEST;
 
-@Slf4j
+@ApplicationScoped
 public class RestPackageStore extends RestVersionInfo<PackageConfiguration> implements IRestPackageStore {
     private static final String KEY_CONFIG = "config";
     private static final String KEY_URI = "uri";
@@ -37,6 +38,9 @@ public class RestPackageStore extends RestVersionInfo<PackageConfiguration> impl
     private final ResourceClientLibrary resourceClientLibrary;
     private final IJsonSchemaCreator jsonSchemaCreator;
     private IRestPackageStore restPackageStore;
+
+    @Inject
+    Logger log;
 
     @Inject
     public RestPackageStore(IPackageStore packageStore,

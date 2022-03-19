@@ -6,6 +6,7 @@ import ai.labs.eddi.engine.memory.model.ConversationMemorySnapshot;
 import ai.labs.eddi.engine.memory.model.SimpleConversationMemorySnapshot;
 import ai.labs.eddi.models.ConversationState;
 import ai.labs.eddi.models.ConversationStatus;
+import org.eclipse.microprofile.openapi.annotations.parameters.Parameter;
 
 import javax.ws.rs.*;
 import javax.ws.rs.core.MediaType;

@@ -2,13 +2,15 @@ package ai.labs.eddi.configs.regulardictionary.mongo;
 
 import ai.labs.eddi.configs.regulardictionary.IRegularDictionaryStore;
 import ai.labs.eddi.configs.regulardictionary.model.RegularDictionaryConfiguration;
-import ai.labs.eddi.datastore.ResultManipulator;
+import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.datastore.mongo.HistorizedResourceStore;
 import ai.labs.eddi.datastore.mongo.MongoResourceStorage;
+import ai.labs.eddi.datastore.mongo.ResultManipulator;
 import ai.labs.eddi.datastore.serialization.IDocumentBuilder;
 import ai.labs.eddi.utils.RuntimeUtilities;
 import com.mongodb.client.MongoDatabase;
 
+import javax.enterprise.context.ApplicationScoped;
 import javax.inject.Inject;
 import java.util.Comparator;
 import java.util.LinkedList;
@@ -17,6 +19,7 @@ import java.util.List;
 /**
  * @author ginccc
  */
+@ApplicationScoped
 public class RegularDictionaryStore implements IRegularDictionaryStore {
     private HistorizedResourceStore<RegularDictionaryConfiguration> regularDictionaryResourceStore;
 

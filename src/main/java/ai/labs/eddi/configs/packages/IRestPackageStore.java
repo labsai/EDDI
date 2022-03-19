@@ -3,7 +3,9 @@ package ai.labs.eddi.configs.packages;
 import ai.labs.eddi.configs.IRestVersionInfo;
 import ai.labs.eddi.configs.packages.model.PackageConfiguration;
 import ai.labs.eddi.models.DocumentDescriptor;
-import io.swagger.annotations.*;
+import org.eclipse.microprofile.openapi.annotations.Operation;
+import org.eclipse.microprofile.openapi.annotations.parameters.Parameter;
+import org.eclipse.microprofile.openapi.annotations.responses.APIResponse;
 
 import javax.ws.rs.*;
 import javax.ws.rs.core.MediaType;
@@ -22,7 +24,7 @@ public interface IRestPackageStore extends IRestVersionInfo {
     @GET
     @Path("/jsonSchema")
     @Produces(MediaType.APPLICATION_JSON)
-    @APIResponse(reponseCode = "200", description = "JSON Schema (for validation).")
+    @APIResponse(responseCode = "200", description = "JSON Schema (for validation).")
     @Operation(description = "Read JSON Schema for package definition.")
     Response readJsonSchema();
 
@@ -43,7 +45,7 @@ public interface IRestPackageStore extends IRestVersionInfo {
             @QueryParam("filter") @DefaultValue("") String filter,
             @QueryParam("index") @DefaultValue("0") Integer index,
             @QueryParam("limit") @DefaultValue("20") Integer limit,
-            @Parameter(name = "body", value = "eddi://ai.labs.TYPE/PATH/ID?version=VERSION")
+            @Parameter(name = "body", description = "eddi://ai.labs.TYPE/PATH/ID?version=VERSION")
             @DefaultValue("") String containingResourceUri,
             @QueryParam("includePreviousVersions") @DefaultValue("false") Boolean includePreviousVersions);
 

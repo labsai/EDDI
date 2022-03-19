@@ -22,10 +22,6 @@ public final class SystemRuntime {
 
         String getVersion();
 
-        String getConfigDir();
-
-        String getLogDir();
-
         ExecutorService getExecutorService();
 
         void logVersion();
