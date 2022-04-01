@@ -1,7 +1,6 @@
 package ai.labs.eddi.modules.behavior.impl;
 
 import ai.labs.eddi.configs.behavior.model.BehaviorConfiguration;
-import ai.labs.eddi.configs.extensions.model.ExtensionDescriptor;
 import ai.labs.eddi.datastore.serialization.DeserializationException;
 import ai.labs.eddi.datastore.serialization.IJsonSerialization;
 import ai.labs.eddi.engine.lifecycle.ILifecycleTask;
@@ -12,9 +11,10 @@ import ai.labs.eddi.engine.memory.IData;
 import ai.labs.eddi.engine.memory.model.Data;
 import ai.labs.eddi.engine.runtime.client.configuration.IResourceClientLibrary;
 import ai.labs.eddi.engine.runtime.service.ServiceException;
+import ai.labs.eddi.models.ExtensionDescriptor;
 import org.jboss.logging.Logger;
 
-import javax.enterprise.context.ApplicationScoped;
+import javax.enterprise.context.RequestScoped;
 import javax.inject.Inject;
 import java.io.IOException;
 import java.net.URI;
@@ -23,13 +23,13 @@ import java.util.List;
 import java.util.Map;
 import java.util.stream.Collectors;
 
-import static ai.labs.eddi.configs.extensions.model.ExtensionDescriptor.ConfigValue;
-import static ai.labs.eddi.configs.extensions.model.ExtensionDescriptor.FieldType;
+import static ai.labs.eddi.models.ExtensionDescriptor.ConfigValue;
+import static ai.labs.eddi.models.ExtensionDescriptor.FieldType;
 
 /**
  * @author ginccc
  */
-@ApplicationScoped
+@RequestScoped
 public class BehaviorRulesEvaluationTask implements ILifecycleTask {
     public static final String ID = "ai.labs.behavior";
     private static final String KEY_ACTIONS = "actions";

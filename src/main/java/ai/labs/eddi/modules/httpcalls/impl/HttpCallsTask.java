@@ -1,9 +1,6 @@
 package ai.labs.eddi.modules.httpcalls.impl;
 
 
-import ai.labs.eddi.configs.extensions.model.ExtensionDescriptor;
-import ai.labs.eddi.configs.extensions.model.ExtensionDescriptor.ConfigValue;
-import ai.labs.eddi.configs.extensions.model.ExtensionDescriptor.FieldType;
 import ai.labs.eddi.configs.http.model.*;
 import ai.labs.eddi.datastore.serialization.IJsonSerialization;
 import ai.labs.eddi.engine.lifecycle.ILifecycleTask;
@@ -20,14 +17,14 @@ import ai.labs.eddi.httpclient.IHttpClient;
 import ai.labs.eddi.httpclient.IHttpClient.Method;
 import ai.labs.eddi.httpclient.IRequest;
 import ai.labs.eddi.httpclient.IResponse;
-import ai.labs.eddi.models.Context;
-import ai.labs.eddi.models.HttpCodeValidator;
-import ai.labs.eddi.models.Property;
-import ai.labs.eddi.models.PropertyInstruction;
+import ai.labs.eddi.models.*;
+import ai.labs.eddi.models.ExtensionDescriptor.ConfigValue;
+import ai.labs.eddi.models.ExtensionDescriptor.FieldType;
 import ai.labs.eddi.modules.templating.ITemplatingEngine;
 import com.jayway.jsonpath.JsonPath;
 import org.jboss.logging.Logger;
 
+import javax.enterprise.context.RequestScoped;
 import javax.inject.Inject;
 import java.io.IOException;
 import java.net.URI;
@@ -43,6 +40,7 @@ import static ai.labs.eddi.utils.MatchingUtilities.executeValuePath;
 import static ai.labs.eddi.utils.RuntimeUtilities.checkNotNull;
 import static ai.labs.eddi.utils.RuntimeUtilities.isNullOrEmpty;
 
+@RequestScoped
 public class HttpCallsTask implements ILifecycleTask {
     public static final String ID = "ai.labs.httpcalls";
     private static final String UTF_8 = "utf-8";

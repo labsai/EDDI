@@ -5,7 +5,7 @@ import ai.labs.eddi.engine.lifecycle.IllegalExtensionConfigurationException;
 import java.util.Collections;
 import java.util.Map;
 
-import static ai.labs.eddi.configs.extensions.model.ExtensionDescriptor.ConfigValue;
+import static ai.labs.eddi.models.ExtensionDescriptor.ConfigValue;
 
 public interface IParserExtensionProvider<T> {
     String KEY_LOOKUP_IF_KNOWN = "lookupIfKnown";

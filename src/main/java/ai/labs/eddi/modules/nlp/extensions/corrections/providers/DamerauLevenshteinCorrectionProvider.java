@@ -1,14 +1,14 @@
 package ai.labs.eddi.modules.nlp.extensions.corrections.providers;
 
 
-import ai.labs.eddi.configs.extensions.model.ExtensionDescriptor.ConfigValue;
+import ai.labs.eddi.models.ExtensionDescriptor.ConfigValue;
 import ai.labs.eddi.modules.nlp.extensions.corrections.DamerauLevenshteinCorrection;
 import ai.labs.eddi.modules.nlp.extensions.corrections.ICorrection;
 
 import java.util.HashMap;
 import java.util.Map;
 
-import static ai.labs.eddi.configs.extensions.model.ExtensionDescriptor.FieldType.INT;
+import static ai.labs.eddi.models.ExtensionDescriptor.FieldType.INT;
 
 /**
  * @author ginccc
