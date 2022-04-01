@@ -8,10 +8,7 @@ import com.mongodb.QueryBuilder;
 import com.mongodb.client.FindIterable;
 import com.mongodb.client.MongoCollection;
 import org.bson.Document;
-import org.jboss.logging.Logger;
 
-import javax.enterprise.context.ApplicationScoped;
-import javax.inject.Inject;
 import java.io.IOException;
 import java.util.HashMap;
 import java.util.LinkedList;
@@ -23,18 +20,14 @@ import java.util.regex.Pattern;
  * @author ginccc
  */
 
-@ApplicationScoped
 public class ResourceFilter<T> implements IResourceFilter<T> {
     private static final String FIELD_ID = "_id";
     private static final String FIELD_VERSION = "_version";
 
-    @Inject
-    Logger log;
-
-    private MongoCollection<Document> collection;
-    private IResourceStore<T> resourceStore;
-    private Class<T> documentType;
-    private Map<String, Pattern> regexCache;
+    private final MongoCollection<Document> collection;
+    private final IResourceStore<T> resourceStore;
+    private final Class<T> documentType;
+    private final Map<String, Pattern> regexCache;
     private final IDocumentBuilder documentBuilder;
 
     public ResourceFilter(MongoCollection<Document> collection, IResourceStore<T> resourceStore,
@@ -105,7 +98,7 @@ public class ResourceFilter<T> implements IResourceFilter<T> {
                 }
             }
 
-            DBObject[] dbObjectArray = dbObjects.toArray(new DBObject[dbObjects.size()]);
+            DBObject[] dbObjectArray = dbObjects.toArray(new DBObject[0]);
 
             DBObject filterQuery;
             if (dbObjectArray.length > 0) {
