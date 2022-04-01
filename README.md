@@ -1,17 +1,15 @@
 # E.D.D.I
 
 Scalable Open Source Chatbot Platform. Build multiple Chatbots with NLP, Behavior Rules, API Connector, Templating.
-Developed in Java, provided with Docker, orchestrated with Kubernetes or Openshift.
+Developed in Java (with Quarkus), provided with Docker, orchestrated with Kubernetes or Openshift.
 
 v5.0.0 - Alpha
 
 License: Apache License 2.0
 
-Visit [here](https://eddi.labs.ai/) for further references about the project.
+Project website: [here](https://eddi.labs.ai/)
 
-For professional support, check out: [here](https://www.labs.ai/)
-
-Check out the full documentation [here](http://docs.labs.ai/).
+Documentation: [here](http://docs.labs.ai/)
 
 [![Codacy Badge](https://app.codacy.com/project/badge/Grade/2c5d183d4bd24dbaa77427cfbf5d4074)](https://www.codacy.com/gh/labsai/EDDI/dashboard?utm_source=github.com&amp;utm_medium=referral&amp;utm_content=labsai/EDDI&amp;utm_campaign=Badge_Grade) [![CircleCI](https://circleci.com/gh/labsai/EDDI/tree/master.svg?style=svg)](https://circleci.com/gh/labsai/EDDI/tree/master)
 
