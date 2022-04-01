@@ -1,8 +1,9 @@
 package ai.labs.eddi.configs.packages.rest;
 
-import ai.labs.eddi.configs.extensions.model.ExtensionDescriptor;
 import ai.labs.eddi.configs.packages.IRestPackageExtensionStore;
 import ai.labs.eddi.engine.lifecycle.ILifecycleTask;
+import ai.labs.eddi.engine.lifecycle.bootstrap.LifecycleExtensions;
+import ai.labs.eddi.models.ExtensionDescriptor;
 
 import javax.enterprise.context.ApplicationScoped;
 import javax.inject.Inject;
@@ -16,7 +17,9 @@ public class RestPackageExtensionStore implements IRestPackageExtensionStore {
     private final Map<String, Provider<ILifecycleTask>> lifecycleExtensionsProvider;
 
     @Inject
-    public RestPackageExtensionStore(Map<String, Provider<ILifecycleTask>> lifecycleExtensionsProvider) {
+    public RestPackageExtensionStore(
+            @LifecycleExtensions Map<String, Provider<ILifecycleTask>> lifecycleExtensionsProvider) {
+
         this.lifecycleExtensionsProvider = lifecycleExtensionsProvider;
     }
 

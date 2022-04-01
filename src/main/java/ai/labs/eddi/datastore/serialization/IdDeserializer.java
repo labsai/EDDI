@@ -40,7 +40,7 @@ public class IdDeserializer extends JsonDeserializer<String> {
     public String deserialize(BsonParser bsonParser, DeserializationContext ctxt) throws IOException {
         if (bsonParser.getCurrentToken() != JsonToken.VALUE_EMBEDDED_OBJECT ||
                 bsonParser.getCurrentBsonType() != BsonConstants.TYPE_OBJECTID) {
-            throw ctxt.mappingException(ObjectId.class);
+            ctxt.handleUnexpectedToken(ObjectId.class, bsonParser.enable(null));
         }
 
         ObjectId parsedObjectId = (ObjectId) bsonParser.getEmbeddedObject();

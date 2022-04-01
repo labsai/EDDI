@@ -28,9 +28,9 @@ public class DescriptorStore<T> implements IDescriptorStore<T> {
     private static final String FIELD_DELETED = "deleted";
 
     private static final String collectionName = "descriptors";
-    private ModifiableHistorizedResourceStore<T> descriptorResourceStore;
+    private final ModifiableHistorizedResourceStore<T> descriptorResourceStore;
 
-    private IResourceFilter<T> resourceFilter;
+    private final IResourceFilter<T> resourceFilter;
 
     public DescriptorStore(MongoDatabase database, IDocumentBuilder documentBuilder, Class<T> documentType) {
         RuntimeUtilities.checkNotNull(database, "database");

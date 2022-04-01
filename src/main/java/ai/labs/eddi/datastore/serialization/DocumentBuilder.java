@@ -14,7 +14,7 @@ import java.util.Map;
 
 @ApplicationScoped
 public class DocumentBuilder implements IDocumentBuilder {
-    private IJsonSerialization jsonSerialization;
+    private final IJsonSerialization jsonSerialization;
 
     @Inject
     Logger log;

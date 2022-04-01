@@ -1,7 +1,7 @@
 package ai.labs.eddi.engine.lifecycle;
 
-import ai.labs.eddi.configs.extensions.model.ExtensionDescriptor;
 import ai.labs.eddi.engine.memory.IConversationMemory;
+import ai.labs.eddi.models.ExtensionDescriptor;
 
 import java.util.Collections;
 import java.util.List;

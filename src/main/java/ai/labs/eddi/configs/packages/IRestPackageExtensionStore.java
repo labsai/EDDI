@@ -1,6 +1,6 @@
 package ai.labs.eddi.configs.packages;
 
-import ai.labs.eddi.configs.extensions.model.ExtensionDescriptor;
+import ai.labs.eddi.models.ExtensionDescriptor;
 
 import javax.ws.rs.*;
 import javax.ws.rs.core.MediaType;
