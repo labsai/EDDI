@@ -4,7 +4,7 @@ jobs:
     ## Use preconfigured circleci image that has JDK 11 by default See https://discuss.circleci.com/t/early-preview-new-ubuntu-20-04-linux-machine-executor-image/37281
     ## has JDK 11, docker and maven
     machine:
-      image: cimg/openjdk:11.0
+      image: ubuntu-2004:202111-02
     ## Uses a "medium" sized machine (this is the default) - maybe increase this to "large" if you pay for CircleCI
     resource_class: medium
     working_directory: ~/repo
