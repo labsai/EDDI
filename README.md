@@ -1,39 +1,25 @@
-# Multi-Maven-Quarkus
-Project to reproduce Multi module maven project based on Quarkus
+# E.D.D.I
 
-## See proposal on https://github.com/quarkusio/quarkus/issues/6266
+Scalable Open Source Chatbot Platform. Build multiple Chatbots with NLP, Behavior Rules, API Connector, Templating.
+Developed in Java, provided with Docker, orchestrated with Kubernetes or Openshift.
 
-## Modules
+v5.0.0 - Alpha
 
-### quarkus-root
-This module contains the quarkus maven plugin, all the required dependencies, and all the @quarkusTest
+License: Apache License 2.0
 
-This of it as a EAR or WAR, that packages all dependencies required to run the project.
+Visit [here](https://eddi.labs.ai/) for further references about the project.
 
-Tests are located on this modules for not having to deal with dependency inheritance... this way we're testing using the same dependencies available in runtime.
+For professional support, check out: [here](https://www.labs.ai/)
 
-The only logic for organizing tests, is to maintain them on the same package as the access class they propose to test. 
+Check out the full documentation [here](http://docs.labs.ai/).
 
-### repository
-Handles data access. 
-
-Database management (flyway or something...)
-
-Contains JPA entities and DAOs
-
-### service
-Incorporates business logic, and handles unit of work (transactions)
-
-Maps JPA entities to business entities
-
-### resource
-Delivers RESTful endpoints for dealing with business entities (resources).
+[![Codacy Badge](https://app.codacy.com/project/badge/Grade/2c5d183d4bd24dbaa77427cfbf5d4074)](https://www.codacy.com/gh/labsai/EDDI/dashboard?utm_source=github.com&amp;utm_medium=referral&amp;utm_content=labsai/EDDI&amp;utm_campaign=Badge_Grade) [![CircleCI](https://circleci.com/gh/labsai/EDDI/tree/master.svg?style=svg)](https://circleci.com/gh/labsai/EDDI/tree/master)
 
 ## How to run the project
 
 On a terminal, under project root folder, run the following command:
 
-```
+```shell script
 ./mvnw compile quarkus:dev
 ```
 
@@ -53,8 +39,8 @@ The application is now runnable using `java -jar target/quarkus-app/quarkus-run.
 
 Open a browser and navigate to:
 
-```
-http://0.0.0.0:8080/swagger-ui
+```text
+http://0.0.0.0:7070/
 ```
 
 Use the interactive swagger interface to execute the web service.
