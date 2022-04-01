@@ -40,12 +40,3 @@ Open a browser and navigate to:
 ```text
 http://0.0.0.0:7070/
 ```
-
-Use the interactive swagger interface to execute the web service.
-
-## How to test the project
-
-Simply use the IDE to run a test, or don't maven skip them.
-
-Notice that tests are re-testing things just for noticing that environment is fully set on every layer.
-Real life tests should implement mocking.
