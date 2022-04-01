@@ -4,7 +4,7 @@ jobs:
     ## Use preconfigured circleci image that has JDK 11 by default See https://discuss.circleci.com/t/early-preview-new-ubuntu-20-04-linux-machine-executor-image/37281
     ## has JDK 11, docker and maven
     machine:
-      image: ubuntu-2004:202008-01
+      image: cimg/openjdk:11.0
     ## Uses a "medium" sized machine (this is the default) - maybe increase this to "large" if you pay for CircleCI
     resource_class: medium
     working_directory: ~/repo
@@ -15,12 +15,6 @@ jobs:
     steps:
       ## Checkout the source code
       - checkout
-
-      ## set the version
-      - run:
-          name: Set Version
-          command: |
-            echo 'export VERSION=$(mvn help:evaluate -Dexpression=project.version -q -DforceStdout)' >> $BASH_ENV
 
       ## Restore any files that may have been cached from previous jobs
       - restore_cache:
@@ -49,9 +43,9 @@ jobs:
       - run:
           name: Docker Push
           command: |
-            if [ "${CIRCLE_BRANCH}" == "master" ]; then
+            if [ "${CIRCLE_BRANCH}" == "version-5" ]; then
                 echo "$DOCKER_PASS" | docker login --username $DOCKER_USER --password-stdin
-                docker push labsai/eddi:${VERSION}
+                docker push labsai/eddi:${quarkus.container-image.tag}
             fi
 
 #      # Install GraalVM and native-image, needed for a native Quarkus build
@@ -76,7 +70,7 @@ jobs:
 #          name: Build (Native)
 #          command: |
 #            if [ "${CIRCLE_BRANCH}" == "master" ]; then
-#              mvn clean package -Pnative -DskipTests -Dquarkus.native.native-image-xmx=8g -Dquarkus.container-image.tag=${VERSION}-native
+#              mvn clean package -Pnative -DskipTests -Dquarkus.native.native-image-xmx=8g -Dquarkus.container-image.tag=${quarkus.container-image.tagquarkus.container-image.tag}-native
 #            fi
 #          no_output_timeout: 30m
 #      - run:
@@ -91,5 +85,5 @@ jobs:
 #          name: Docker Push (Native)
 #          command: |
 #            if [ "${CIRCLE_BRANCH}" == "master" ]; then
-#                docker push labsai/eddi:${VERSION}-native
+#                docker push labsai/eddi:${quarkus.container-image.tag}-native
 #            fi
