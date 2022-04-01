@@ -3,7 +3,6 @@ package ai.labs.eddi.modules.templating.impl;
 
 import ai.labs.eddi.datastore.serialization.IJsonSerialization;
 import ai.labs.eddi.datastore.serialization.JsonSerialization;
-import com.fasterxml.jackson.core.JsonFactory;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.thymeleaf.context.IExpressionContext;
 import org.thymeleaf.dialect.AbstractDialect;
@@ -13,17 +12,15 @@ import org.thymeleaf.expression.IExpressionObjectFactory;
 import java.util.Collections;
 import java.util.Set;
 
-import static ai.labs.eddi.datastore.serialization.SerializationUtilities.configureObjectMapper;
+import static com.fasterxml.jackson.databind.SerializationFeature.INDENT_OUTPUT;
 
 public class JsonSerializationThymeleafDialect extends AbstractDialect implements IExpressionObjectDialect {
 
     private final IJsonSerialization jsonSerialization;
 
-    public JsonSerializationThymeleafDialect(JsonFactory jsonFactory) {
+    public JsonSerializationThymeleafDialect(ObjectMapper objectMapper) {
         super("Json Converter");
-        ObjectMapper objectMapper = new ObjectMapper(jsonFactory);
-
-        configureObjectMapper(true, objectMapper);
+        objectMapper.configure(INDENT_OUTPUT, true);
         this.jsonSerialization = new JsonSerialization(objectMapper);
     }
 

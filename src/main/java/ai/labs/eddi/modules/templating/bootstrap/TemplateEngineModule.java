@@ -7,7 +7,7 @@ import ai.labs.eddi.modules.templating.impl.HtmlTemplateEngine;
 import ai.labs.eddi.modules.templating.impl.JavaScriptTemplateEngine;
 import ai.labs.eddi.modules.templating.impl.JsonSerializationThymeleafDialect;
 import ai.labs.eddi.modules.templating.impl.TextTemplateEngine;
-import com.fasterxml.jackson.core.JsonFactory;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.annotation.PostConstruct;
 import org.thymeleaf.TemplateEngine;
 import org.thymeleaf.templatemode.TemplateMode;
@@ -35,25 +35,25 @@ public class TemplateEngineModule {
 
     @Produces
     @ApplicationScoped
-    public TextTemplateEngine provideTextTemplateEngine(JsonFactory jsonFactory) {
-        return new TextTemplateEngine(createTemplateEngine(TemplateMode.TEXT, jsonFactory));
+    public TextTemplateEngine provideTextTemplateEngine(ObjectMapper objectMapper) {
+        return new TextTemplateEngine(createTemplateEngine(TemplateMode.TEXT, objectMapper));
     }
 
     @Produces
     @ApplicationScoped
-    public HtmlTemplateEngine provideHtmlTemplateEngine(JsonFactory jsonFactory) {
-        return new HtmlTemplateEngine(createTemplateEngine(TemplateMode.HTML, jsonFactory));
+    public HtmlTemplateEngine provideHtmlTemplateEngine(ObjectMapper objectMapper) {
+        return new HtmlTemplateEngine(createTemplateEngine(TemplateMode.HTML, objectMapper));
     }
 
     @Produces
     @ApplicationScoped
-    public JavaScriptTemplateEngine provideJavaScriptTemplateEngine(JsonFactory jsonFactory) {
-        return new JavaScriptTemplateEngine(createTemplateEngine(TemplateMode.JAVASCRIPT, jsonFactory));
+    public JavaScriptTemplateEngine provideJavaScriptTemplateEngine(ObjectMapper objectMapper) {
+        return new JavaScriptTemplateEngine(createTemplateEngine(TemplateMode.JAVASCRIPT, objectMapper));
     }
 
-    private TemplateEngine createTemplateEngine(TemplateMode templateMode, JsonFactory jsonFactory) {
+    private TemplateEngine createTemplateEngine(TemplateMode templateMode, ObjectMapper objectMapper) {
         TemplateEngine templateEngine = new TemplateEngine();
-        templateEngine.addDialect(new JsonSerializationThymeleafDialect(jsonFactory));
+        templateEngine.addDialect(new JsonSerializationThymeleafDialect(objectMapper));
         StringTemplateResolver templateResolver = new StringTemplateResolver();
         templateResolver.setTemplateMode(templateMode);
         templateEngine.addTemplateResolver(templateResolver);

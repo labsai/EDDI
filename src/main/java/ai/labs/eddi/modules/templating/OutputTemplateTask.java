@@ -1,6 +1,5 @@
 package ai.labs.eddi.modules.templating;
 
-import ai.labs.eddi.configs.extensions.model.ExtensionDescriptor;
 import ai.labs.eddi.configs.output.model.OutputConfiguration.QuickReply;
 import ai.labs.eddi.engine.lifecycle.ILifecycleTask;
 import ai.labs.eddi.engine.memory.IConversationMemory;
@@ -8,9 +7,13 @@ import ai.labs.eddi.engine.memory.IConversationMemory.IWritableConversationStep;
 import ai.labs.eddi.engine.memory.IData;
 import ai.labs.eddi.engine.memory.IDataFactory;
 import ai.labs.eddi.engine.memory.IMemoryItemConverter;
+import ai.labs.eddi.models.ExtensionDescriptor;
 import ai.labs.eddi.modules.templating.ITemplatingEngine.TemplateMode;
+import com.fasterxml.jackson.core.type.TypeReference;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import org.jboss.logging.Logger;
 
+import javax.enterprise.context.RequestScoped;
 import javax.inject.Inject;
 import java.util.*;
 import java.util.stream.Collectors;
@@ -20,7 +23,7 @@ import static ai.labs.eddi.utils.StringUtilities.joinStrings;
 /**
  * @author ginccc
  */
-
+@RequestScoped
 public class OutputTemplateTask implements ILifecycleTask {
     public static final String ID = "ai.labs.templating";
     private static final String OUTPUT_HTML = "output:html";
@@ -31,6 +34,7 @@ public class OutputTemplateTask implements ILifecycleTask {
     private final ITemplatingEngine templatingEngine;
     private final IMemoryItemConverter memoryItemConverter;
     private final IDataFactory dataFactory;
+    private final ObjectMapper objectMapper;
 
     @Inject
     Logger log;
@@ -38,10 +42,12 @@ public class OutputTemplateTask implements ILifecycleTask {
     @Inject
     public OutputTemplateTask(ITemplatingEngine templatingEngine,
                               IMemoryItemConverter memoryItemConverter,
-                              IDataFactory dataFactory) {
+                              IDataFactory dataFactory,
+                              ObjectMapper objectMapper) {
         this.templatingEngine = templatingEngine;
         this.memoryItemConverter = memoryItemConverter;
         this.dataFactory = dataFactory;
+        this.objectMapper = objectMapper;
     }
 
     @Override
@@ -99,7 +105,7 @@ public class OutputTemplateTask implements ILifecycleTask {
                         postTemplated = templatingEngine.processTemplate(preTemplated.toString(), contextMap, templateMode);
 
                     } else if (preTemplated instanceof Map) {
-                        var tmpMap = new LinkedHashMap<>((Map<String, Object>) preTemplated);
+                        var tmpMap = new LinkedHashMap<>(convertObjectToMap(preTemplated));
 
                         for (String key : tmpMap.keySet()) {
                             Object valueObj = tmpMap.get(key);
@@ -123,6 +129,10 @@ public class OutputTemplateTask implements ILifecycleTask {
                 }
             }
         });
+    }
+
+    private Map<String, Object> convertObjectToMap(Object preTemplated) {
+        return objectMapper.convertValue(preTemplated, new TypeReference<>() {});
     }
 
     private void templatingQuickReplies(IConversationMemory memory,
@@ -158,7 +168,7 @@ public class OutputTemplateTask implements ILifecycleTask {
     }
 
     private void templateData(IConversationMemory memory,
-                              IData dataText,
+                              IData<?> dataText,
                               String dataKey,
                               Object preTemplated,
                               Object postTemplated) {
@@ -174,7 +184,7 @@ public class OutputTemplateTask implements ILifecycleTask {
                                     Object dataValue) {
 
         String newOutputKey = joinStrings(":", originalKey, templateAppendix);
-        IData processedData = dataFactory.createData(newOutputKey, dataValue);
+        IData<Object> processedData = dataFactory.createData(newOutputKey, dataValue);
         memory.getCurrentStep().storeData(processedData);
     }
 
