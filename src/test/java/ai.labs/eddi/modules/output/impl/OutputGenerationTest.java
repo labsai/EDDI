@@ -4,8 +4,9 @@ import ai.labs.eddi.modules.output.IOutputFilter;
 import ai.labs.eddi.modules.output.model.OutputEntry;
 import ai.labs.eddi.modules.output.model.OutputValue;
 import ai.labs.eddi.modules.output.model.QuickReply;
+import io.quarkus.test.junit.QuarkusTest;
 import org.junit.jupiter.api.Assertions;
-import org.junit.jupiter.api.BeforeAll;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 import java.util.Arrays;
@@ -16,6 +17,7 @@ import java.util.Map;
 /**
  * @author ginccc
  */
+@QuarkusTest
 public class OutputGenerationTest {
     private static final String ACTION_1 = "action1";
     private static final String ACTION_2 = "action2";
@@ -23,8 +25,8 @@ public class OutputGenerationTest {
     public static final String OUTPUT_TYPE_TEXT = "text";
     private static OutputGeneration outputGeneration;
 
-    @BeforeAll
-    public static void setUp() {
+    @BeforeEach
+    public void setUp() {
         outputGeneration = new OutputGeneration();
     }
 

@@ -11,7 +11,7 @@ import ai.labs.eddi.modules.nlp.model.Phrase;
 import ai.labs.eddi.modules.nlp.model.Word;
 import ai.labs.eddi.utils.StringUtilities;
 import lombok.extern.slf4j.Slf4j;
-import org.junit.jupiter.api.BeforeAll;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 import java.util.Collections;
@@ -27,8 +27,8 @@ import static org.junit.jupiter.api.Assertions.assertNotSame;
 public class InputParserTest {
     private static IExpressionProvider expressionProvider;
 
-    @BeforeAll
-    public static void setup() {
+    @BeforeEach
+    public void setUp() {
         expressionProvider = new ExpressionProvider(new ExpressionFactory());
     }
 

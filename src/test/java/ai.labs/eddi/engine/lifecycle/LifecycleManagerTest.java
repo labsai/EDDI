@@ -3,7 +3,7 @@ package ai.labs.eddi.engine.lifecycle;
 import ai.labs.eddi.engine.memory.IConversationMemory;
 import ai.labs.eddi.engine.memory.IConversationMemory.IWritableConversationStep;
 import org.junit.jupiter.api.Assertions;
-import org.junit.jupiter.api.BeforeAll;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.Mockito;
 
@@ -16,8 +16,8 @@ public class LifecycleManagerTest {
     private static ILifecycleManager lifecycleManager;
     private static IConversationMemory memory;
 
-    @BeforeAll
-    public static void setUp() {
+    @BeforeEach
+    public void setUp() {
         lifecycleManager = new LifecycleManager();
         memory = mock(IConversationMemory.class);
         IWritableConversationStep currentConversationStep = mock(IWritableConversationStep.class);

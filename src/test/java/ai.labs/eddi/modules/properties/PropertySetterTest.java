@@ -6,8 +6,9 @@ import ai.labs.eddi.modules.nlp.expressions.Expressions;
 import ai.labs.eddi.modules.nlp.expressions.utilities.IExpressionProvider;
 import ai.labs.eddi.modules.nlp.expressions.value.Value;
 import ai.labs.eddi.modules.properties.impl.PropertySetter;
+import io.quarkus.test.junit.QuarkusTest;
 import org.junit.jupiter.api.Assertions;
-import org.junit.jupiter.api.BeforeAll;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 import java.util.Arrays;
@@ -20,11 +21,12 @@ import static org.mockito.Mockito.*;
 /**
  * @author ginccc
  */
+@QuarkusTest
 public class PropertySetterTest {
     private static IExpressionProvider expressionProvider;
 
-    @BeforeAll
-    public static void setUp() {
+    @BeforeEach
+    public void setUp() {
         expressionProvider = mock(IExpressionProvider.class);
     }
 

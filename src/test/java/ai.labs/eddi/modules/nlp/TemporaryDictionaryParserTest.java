@@ -7,7 +7,7 @@ import ai.labs.eddi.modules.nlp.internal.InputParser;
 import ai.labs.eddi.modules.nlp.internal.matches.RawSolution;
 import ai.labs.eddi.modules.nlp.model.Phrase;
 import ai.labs.eddi.modules.nlp.model.Word;
-import org.junit.jupiter.api.BeforeAll;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 import java.util.Collections;
@@ -24,8 +24,8 @@ public class TemporaryDictionaryParserTest {
     private static ExpressionProvider expressionProvider;
     private static InputParser inputParser;
 
-    @BeforeAll
-    public static void setup() {
+    @BeforeEach
+    public void setUp() {
         expressionProvider = new ExpressionProvider(new ExpressionFactory());
 
         //setup

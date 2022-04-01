@@ -3,7 +3,7 @@ package ai.labs.eddi.engine.memory;
 import ai.labs.eddi.engine.memory.model.ConversationOutput;
 import ai.labs.eddi.engine.memory.model.Data;
 import org.junit.jupiter.api.Assertions;
-import org.junit.jupiter.api.BeforeAll;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 import java.util.LinkedList;
@@ -16,8 +16,8 @@ import java.util.Set;
 public class ConversationStepTest {
     private static IConversationMemory.IWritableConversationStep conversationStep;
 
-    @BeforeAll
-    public static void setUp() {
+    @BeforeEach
+    public void setUp() {
         conversationStep = new ConversationStep(new ConversationOutput());
     }
 

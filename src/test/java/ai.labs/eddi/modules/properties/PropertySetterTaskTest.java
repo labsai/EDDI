@@ -1,22 +1,25 @@
 package ai.labs.eddi.modules.properties;
 
-import ai.labs.expressions.Expression;
-import ai.labs.expressions.Expressions;
-import ai.labs.expressions.utilities.IExpressionProvider;
-import ai.labs.expressions.value.Value;
-import ai.labs.lifecycle.LifecycleException;
-import ai.labs.memory.IConversationMemory;
-import ai.labs.memory.IData;
-import ai.labs.memory.IDataFactory;
-import ai.labs.memory.IMemoryItemConverter;
-import ai.labs.memory.model.ConversationProperties;
-import ai.labs.memory.model.Data;
-import ai.labs.models.Context;
-import ai.labs.models.Property;
-import ai.labs.runtime.client.configuration.IResourceClientLibrary;
-import ai.labs.templateengine.ITemplatingEngine;
-import org.junit.Before;
-import org.junit.Test;
+import ai.labs.eddi.engine.lifecycle.LifecycleException;
+import ai.labs.eddi.engine.memory.IConversationMemory;
+import ai.labs.eddi.engine.memory.IData;
+import ai.labs.eddi.engine.memory.IDataFactory;
+import ai.labs.eddi.engine.memory.IMemoryItemConverter;
+import ai.labs.eddi.engine.memory.model.ConversationProperties;
+import ai.labs.eddi.engine.memory.model.Data;
+import ai.labs.eddi.engine.runtime.client.configuration.IResourceClientLibrary;
+import ai.labs.eddi.models.Context;
+import ai.labs.eddi.models.Property;
+import ai.labs.eddi.modules.nlp.expressions.Expression;
+import ai.labs.eddi.modules.nlp.expressions.Expressions;
+import ai.labs.eddi.modules.nlp.expressions.utilities.IExpressionProvider;
+import ai.labs.eddi.modules.nlp.expressions.value.Value;
+import ai.labs.eddi.modules.properties.impl.PropertySetterTask;
+import ai.labs.eddi.modules.templating.ITemplatingEngine;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import io.quarkus.test.junit.QuarkusTest;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentMatchers;
 
 import java.util.Arrays;
@@ -24,27 +27,28 @@ import java.util.Collections;
 import java.util.LinkedList;
 import java.util.List;
 
-import static ai.labs.models.Property.Scope.conversation;
+import static ai.labs.eddi.models.Property.Scope.conversation;
 import static org.mockito.AdditionalMatchers.not;
 import static org.mockito.Mockito.*;
 
 /**
  * @author ginccc
  */
+@QuarkusTest
 public class PropertySetterTaskTest {
     private static final String KEY_EXPRESSIONS_PARSED = "expressions:parsed";
     private static final String KEY_ACTIONS = "actions";
     private static final String KEY_CONTEXT = "context";
     private static final String KEY_INPUT_INITIAL = "input:initial";
-    private PropertySetterTask propertySetterTask;
-    private IConversationMemory conversationMemory;
-    private IConversationMemory.IWritableConversationStep currentStep;
-    private IConversationMemory.IConversationStep previousStep;
-    private IPropertySetter propertySetter;
-    private IDataFactory dataFactory;
-    private Expressions expressions;
+    private static PropertySetterTask propertySetterTask;
+    private static IConversationMemory conversationMemory;
+    private static IConversationMemory.IWritableConversationStep currentStep;
+    private static IConversationMemory.IConversationStep previousStep;
+    private static IPropertySetter propertySetter;
+    private static IDataFactory dataFactory;
+    private static Expressions expressions;
 
-    @Before
+    @BeforeEach
     public void setUp() {
         propertySetter = mock(IPropertySetter.class);
         dataFactory = mock(IDataFactory.class);
@@ -71,7 +75,8 @@ public class PropertySetterTaskTest {
         ITemplatingEngine templateEngine = mock(ITemplatingEngine.class);
         IResourceClientLibrary resourceClientLibrary = mock(IResourceClientLibrary.class);
         propertySetterTask = new PropertySetterTask(propertySetter,
-                expressionProvider, memoryItemConverter, templateEngine, dataFactory, resourceClientLibrary);
+                expressionProvider, memoryItemConverter, templateEngine,
+                dataFactory, resourceClientLibrary, new ObjectMapper());
     }
 
     @Test

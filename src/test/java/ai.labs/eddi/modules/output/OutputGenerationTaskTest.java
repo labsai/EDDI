@@ -13,7 +13,8 @@ import ai.labs.eddi.modules.output.model.OutputEntry;
 import ai.labs.eddi.modules.output.model.OutputValue;
 import ai.labs.eddi.modules.output.model.QuickReply;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import org.junit.jupiter.api.BeforeAll;
+import io.quarkus.test.junit.QuarkusTest;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 import java.net.URI;
@@ -24,6 +25,7 @@ import static org.mockito.Mockito.*;
 /**
  * @author ginccc
  */
+@QuarkusTest
 public class OutputGenerationTaskTest {
     private static final String ACTION_1 = "action1";
     private static final String ACTION_2 = "action2";
@@ -46,8 +48,8 @@ public class OutputGenerationTaskTest {
     private static IOutputGeneration outputGeneration;
     private static IDataFactory dataFactory;
 
-    @BeforeAll
-    public static void setUp() {
+    @BeforeEach
+    public void setUp() {
         resourceClientLibrary = mock(IResourceClientLibrary.class);
         dataFactory = mock(IDataFactory.class);
         outputGeneration = mock(IOutputGeneration.class);

@@ -7,7 +7,7 @@ import ai.labs.eddi.modules.nlp.expressions.utilities.IExpressionProvider;
 import ai.labs.eddi.modules.nlp.extensions.dictionaries.IDictionary;
 import ai.labs.eddi.modules.nlp.model.Phrase;
 import ai.labs.eddi.modules.nlp.model.Word;
-import org.junit.jupiter.api.BeforeAll;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 import java.util.Arrays;
@@ -23,7 +23,7 @@ public class DamerauLevenshteinCorrectionTest {
     private static final String DEFAULT_LANGUAGE = "en";
     private IExpressionProvider expressionUtilities;
 
-    @BeforeAll
+    @BeforeEach
     public void setup() {
         expressionUtilities = new ExpressionProvider(new ExpressionFactory());
     }

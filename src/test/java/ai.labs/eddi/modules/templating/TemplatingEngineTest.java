@@ -2,11 +2,12 @@ package ai.labs.eddi.modules.templating;
 
 import ai.labs.eddi.modules.templating.bootstrap.TemplateEngineModule;
 import ai.labs.eddi.modules.templating.impl.TemplatingEngine;
+import io.quarkus.test.junit.QuarkusTest;
 import lombok.AllArgsConstructor;
 import lombok.Getter;
 import lombok.Setter;
 import org.junit.jupiter.api.Assertions;
-import org.junit.jupiter.api.BeforeAll;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 import java.util.HashMap;
@@ -14,11 +15,12 @@ import java.util.HashMap;
 /**
  * @author ginccc
  */
+@QuarkusTest
 public class TemplatingEngineTest {
     private static ITemplatingEngine templatingEngine;
 
-    @BeforeAll
-    public static void setup() {
+    @BeforeEach
+    public void setUp() {
         TemplateEngineModule engineModule = new TemplateEngineModule();
         templatingEngine = new TemplatingEngine(
                 engineModule.provideTextTemplateEngine(null),

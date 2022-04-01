@@ -8,11 +8,12 @@ import ai.labs.eddi.engine.memory.model.Data;
 import ai.labs.eddi.models.Context;
 import ai.labs.eddi.modules.output.model.QuickReply;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import io.quarkus.test.junit.QuarkusTest;
 import lombok.AllArgsConstructor;
 import lombok.EqualsAndHashCode;
 import lombok.Getter;
 import lombok.Setter;
-import org.junit.jupiter.api.BeforeAll;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 import java.util.Date;
@@ -26,6 +27,7 @@ import static org.mockito.Mockito.*;
 /**
  * @author ginccc
  */
+@QuarkusTest
 public class OutputTemplateTaskTest {
     private static final String KEY_QUICK_REPLY_SOME_ACTION = "quickReplies:someAction";
     private static final String KEY_QUICK_REPLY_SOME_ACTION_PRE_TEMPLATED = "quickReplies:someAction:preTemplated";
@@ -40,8 +42,8 @@ public class OutputTemplateTaskTest {
     private static final String expectedOutputString = "This is some output with context such as someContextValue";
     private static ITemplatingEngine templatingEngine;
 
-    @BeforeAll
-    public static void setUp() {
+    @BeforeEach
+    public void setUp() {
         templatingEngine = mock(ITemplatingEngine.class);
         dataFactory = mock(IDataFactory.class);
         conversationMemory = mock(IConversationMemory.class);

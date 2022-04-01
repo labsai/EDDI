@@ -2,7 +2,7 @@ package ai.labs.eddi.engine.memory;
 
 import ai.labs.eddi.engine.memory.model.Data;
 import org.junit.jupiter.api.Assertions;
-import org.junit.jupiter.api.BeforeAll;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 import java.util.LinkedList;
@@ -13,8 +13,8 @@ import java.util.LinkedList;
 public class ConversationMemoryTest {
     private static ConversationMemory memory;
 
-    @BeforeAll
-    public static void setUp() {
+    @BeforeEach
+    public void setUp() {
         memory = new ConversationMemory("", 0);
     }
 
