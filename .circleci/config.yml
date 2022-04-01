@@ -28,12 +28,17 @@ jobs:
           paths:
             - ~/.m2
           key: v1-dependencies-{{ checksum "pom.xml" }}
+
+      - run:
+          name: Permission
+          command: chmod +x mvnw
+
       - run:
           name: Test
           command: ./mvnw test
 
       - run:
-          name: Test
+          name: Docker Build
           command: ./mvnw package '-Dquarkus.container-image.build=true'
 
       ## Push docker image if master build
