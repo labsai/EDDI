@@ -23,13 +23,6 @@ jobs:
             # fallback to using the latest cache if no exact match is found
             - v1-dependencies-
 
-      ## Build the project
-      ## This will cache the multi module jars in the local m2 repo and build the docker images
-      ## Note. we can't just run mvn dependency:go-offline as the jars in the sub modules won't have been built yet
-      - run:
-          name: Build
-          command: mvn clean install -DskipTests
-
       ## cache the dependencies
       - save_cache:
           paths:
@@ -37,7 +30,11 @@ jobs:
           key: v1-dependencies-{{ checksum "pom.xml" }}
       - run:
           name: Test
-          command: mvn test
+          command: ./mvnw test
+
+      - run:
+          name: Test
+          command: ./mvnw package '-Dquarkus.container-image.build=true'
 
       ## Push docker image if master build
       - run:
