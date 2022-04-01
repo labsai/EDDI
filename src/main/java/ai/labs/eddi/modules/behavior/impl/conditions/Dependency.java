@@ -6,6 +6,7 @@ import ai.labs.eddi.modules.behavior.impl.BehaviorRule;
 import ai.labs.eddi.modules.behavior.impl.BehaviorSet;
 import lombok.NoArgsConstructor;
 
+import javax.enterprise.context.RequestScoped;
 import java.util.HashMap;
 import java.util.LinkedList;
 import java.util.List;
@@ -15,6 +16,7 @@ import java.util.Map;
  * @author ginccc
  */
 
+@RequestScoped
 @NoArgsConstructor
 public class Dependency implements IBehaviorCondition {
     private static final String ID = "dependency";

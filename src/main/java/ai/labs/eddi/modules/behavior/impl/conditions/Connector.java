@@ -5,6 +5,7 @@ import ai.labs.eddi.modules.behavior.impl.BehaviorRule;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
 
+import javax.enterprise.context.RequestScoped;
 import java.util.HashMap;
 import java.util.LinkedList;
 import java.util.List;
@@ -15,6 +16,7 @@ import java.util.Map;
  * @author ginccc
  */
 @NoArgsConstructor
+@RequestScoped
 public class Connector implements IBehaviorCondition {
     private static final String ID = "connector";
     private final String operatorQualifier = "operator";

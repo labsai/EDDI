@@ -12,6 +12,7 @@ import ai.labs.eddi.engine.runtime.service.ServiceException;
 import ai.labs.eddi.engine.utilities.URIUtilities;
 import ai.labs.eddi.utils.RuntimeUtilities;
 
+import javax.enterprise.context.ApplicationScoped;
 import javax.inject.Inject;
 import javax.ws.rs.core.Response;
 import java.net.URI;
@@ -21,6 +22,7 @@ import java.util.Map;
 /**
  * @author ginccc
  */
+@ApplicationScoped
 public class ResourceClientLibrary implements IResourceClientLibrary {
     private final IRestParserStore restParserStore;
     private final IRestRegularDictionaryStore restRegularDictionaryStore;

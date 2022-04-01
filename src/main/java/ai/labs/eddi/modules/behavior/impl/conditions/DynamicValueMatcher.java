@@ -4,6 +4,7 @@ import ai.labs.eddi.engine.memory.IConversationMemory;
 import ai.labs.eddi.engine.memory.IMemoryItemConverter;
 import ai.labs.eddi.modules.behavior.impl.BehaviorRule;
 
+import javax.enterprise.context.RequestScoped;
 import javax.inject.Inject;
 import java.util.HashMap;
 import java.util.List;
@@ -12,7 +13,7 @@ import java.util.Map;
 import static ai.labs.eddi.utils.MatchingUtilities.executeValuePath;
 import static ai.labs.eddi.utils.RuntimeUtilities.isNullOrEmpty;
 
-
+@RequestScoped
 public class DynamicValueMatcher implements IBehaviorCondition {
     private static final String ID = "dynamicvaluematcher";
     private final IMemoryItemConverter memoryItemConverter;

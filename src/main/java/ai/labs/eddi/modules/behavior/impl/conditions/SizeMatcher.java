@@ -5,6 +5,7 @@ import ai.labs.eddi.engine.memory.IMemoryItemConverter;
 import ai.labs.eddi.modules.behavior.impl.BehaviorRule;
 import com.jayway.jsonpath.JsonPath;
 
+import javax.enterprise.context.RequestScoped;
 import javax.inject.Inject;
 import java.util.HashMap;
 import java.util.List;
@@ -14,6 +15,7 @@ import java.util.Map;
  * @author ginccc
  */
 
+@RequestScoped
 public class SizeMatcher implements IBehaviorCondition {
     private static final String ID = "sizematcher";
     private static final String valuePathQualifier = "valuePath";

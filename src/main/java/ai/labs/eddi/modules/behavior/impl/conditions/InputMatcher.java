@@ -9,6 +9,7 @@ import ai.labs.eddi.utils.StringUtilities;
 import lombok.Getter;
 import lombok.Setter;
 
+import javax.enterprise.context.RequestScoped;
 import javax.inject.Inject;
 import java.util.Collections;
 import java.util.HashMap;
@@ -21,6 +22,8 @@ import static ai.labs.eddi.modules.behavior.impl.conditions.IBehaviorCondition.E
 /**
  * @author ginccc
  */
+
+@RequestScoped
 public class InputMatcher extends BaseMatcher implements IBehaviorCondition {
     private static final String ID = "inputmatcher";
     private static final String KEY_EXPRESSIONS = "expressions";

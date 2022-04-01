@@ -14,8 +14,9 @@ import lombok.AllArgsConstructor;
 import lombok.EqualsAndHashCode;
 import lombok.Getter;
 import lombok.Setter;
-import lombok.extern.slf4j.Slf4j;
+import org.jboss.logging.Logger;
 
+import javax.enterprise.context.RequestScoped;
 import javax.inject.Inject;
 import java.io.IOException;
 import java.util.Collections;
@@ -26,7 +27,7 @@ import java.util.Map;
 /**
  * @author ginccc
  */
-@Slf4j
+@RequestScoped
 public class ContextMatcher implements IBehaviorCondition {
     private static final String ID = "contextmatcher";
     private static final String CONTEXT = "context";
@@ -51,6 +52,9 @@ public class ContextMatcher implements IBehaviorCondition {
     private final String stringQualifier = ContextType.string.toString();
     private final IExpressionProvider expressionProvider;
     private final IJsonSerialization jsonSerialization;
+
+    @Inject
+    Logger log;
 
     @Inject
     ContextMatcher(IExpressionProvider expressionProvider,

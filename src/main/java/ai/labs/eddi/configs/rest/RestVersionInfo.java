@@ -8,7 +8,6 @@ import ai.labs.eddi.utils.RestUtilities;
 import ai.labs.eddi.utils.RuntimeUtilities;
 import org.jboss.logging.Logger;
 
-import javax.enterprise.context.ApplicationScoped;
 import javax.inject.Inject;
 import javax.ws.rs.InternalServerErrorException;
 import javax.ws.rs.NotFoundException;
@@ -21,7 +20,6 @@ import java.util.List;
  * @author ginccc
  */
 
-@ApplicationScoped
 public abstract class RestVersionInfo<T> implements IRestVersionInfo {
     private final String resourceURI;
     private final IResourceStore<T> resourceStore;
