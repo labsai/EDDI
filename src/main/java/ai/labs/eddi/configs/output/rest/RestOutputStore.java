@@ -25,9 +25,10 @@ import java.util.List;
  */
 
 @ApplicationScoped
-public class RestOutputStore extends RestVersionInfo<OutputConfigurationSet> implements IRestOutputStore {
+public class RestOutputStore implements IRestOutputStore {
     private final IOutputStore outputStore;
     private final IJsonSchemaCreator jsonSchemaCreator;
+    private final RestVersionInfo<OutputConfigurationSet> restVersionInfo;
     private IRestOutputStore restOutputStore;
 
     @Inject
@@ -38,7 +39,7 @@ public class RestOutputStore extends RestVersionInfo<OutputConfigurationSet> imp
                            IRestInterfaceFactory restInterfaceFactory,
                            IDocumentDescriptorStore documentDescriptorStore,
                            IJsonSchemaCreator jsonSchemaCreator) {
-        super(resourceURI, outputStore, documentDescriptorStore);
+        restVersionInfo = new RestVersionInfo<>(resourceURI, outputStore, documentDescriptorStore);
         this.outputStore = outputStore;
         this.jsonSchemaCreator = jsonSchemaCreator;
         initRestClient(restInterfaceFactory);
@@ -60,11 +61,12 @@ public class RestOutputStore extends RestVersionInfo<OutputConfigurationSet> imp
 
     @Override
     public List<DocumentDescriptor> readOutputDescriptors(String filter, Integer index, Integer limit) {
-        return readDescriptors("ai.labs.output", filter, index, limit);
+        return restVersionInfo.readDescriptors("ai.labs.output", filter, index, limit);
     }
 
     @Override
-    public OutputConfigurationSet readOutputSet(String id, Integer version, String filter, String order, Integer index, Integer limit) {
+    public OutputConfigurationSet readOutputSet(String id, Integer version,
+                                                String filter, String order, Integer index, Integer limit) {
         try {
             return outputStore.read(id, version, filter, order, index, limit);
         } catch (IResourceStore.ResourceNotFoundException e) {
@@ -89,24 +91,26 @@ public class RestOutputStore extends RestVersionInfo<OutputConfigurationSet> imp
 
     @Override
     public Response updateOutputSet(String id, Integer version, OutputConfigurationSet outputConfigurationSet) {
-        return update(id, version, outputConfigurationSet);
+        return restVersionInfo.update(id, version, outputConfigurationSet);
     }
 
     @Override
     public Response createOutputSet(OutputConfigurationSet outputConfigurationSet) {
-        return create(outputConfigurationSet);
+        return restVersionInfo.create(outputConfigurationSet);
     }
 
     @Override
     public Response deleteOutputSet(String id, Integer version) {
-        return delete(id, version);
+        return restVersionInfo.delete(id, version);
     }
 
     @Override
-    public Response patchOutputSet(String id, Integer version, PatchInstruction<OutputConfigurationSet>[] patchInstructions) {
+    public Response patchOutputSet(String id, Integer version,
+                                   PatchInstruction<OutputConfigurationSet>[] patchInstructions) {
         try {
             OutputConfigurationSet currentOutputConfigurationSet = outputStore.read(id, version);
-            OutputConfigurationSet patchedOutputConfigurationSet = patchDocument(currentOutputConfigurationSet, patchInstructions);
+            OutputConfigurationSet patchedOutputConfigurationSet =
+                    patchDocument(currentOutputConfigurationSet, patchInstructions);
 
             return updateOutputSet(id, version, patchedOutputConfigurationSet);
 
@@ -118,7 +122,10 @@ public class RestOutputStore extends RestVersionInfo<OutputConfigurationSet> imp
         }
     }
 
-    private OutputConfigurationSet patchDocument(OutputConfigurationSet currentOutputConfigurationSet, PatchInstruction<OutputConfigurationSet>[] patchInstructions) throws IResourceStore.ResourceStoreException {
+    private OutputConfigurationSet patchDocument(OutputConfigurationSet currentOutputConfigurationSet,
+                                                 PatchInstruction<OutputConfigurationSet>[] patchInstructions)
+            throws IResourceStore.ResourceStoreException {
+
         for (PatchInstruction<OutputConfigurationSet> patchInstruction : patchInstructions) {
             OutputConfigurationSet outputConfigurationSetPatch = patchInstruction.getDocument();
             switch (patchInstruction.getOperation()) {
@@ -139,7 +146,7 @@ public class RestOutputStore extends RestVersionInfo<OutputConfigurationSet> imp
 
     @Override
     public Response duplicateOutputSet(String id, Integer version) {
-        validateParameters(id, version);
+        restVersionInfo.validateParameters(id, version);
         try {
             var outputConfigurationSet = outputStore.read(id, version);
             return restOutputStore.createOutputSet(outputConfigurationSet);
@@ -152,7 +159,12 @@ public class RestOutputStore extends RestVersionInfo<OutputConfigurationSet> imp
     }
 
     @Override
-    protected IResourceStore.IResourceId getCurrentResourceId(String id) throws IResourceStore.ResourceNotFoundException {
+    public String getResourceURI() {
+        return restVersionInfo.getResourceURI();
+    }
+
+    @Override
+    public IResourceStore.IResourceId getCurrentResourceId(String id) throws IResourceStore.ResourceNotFoundException {
         return outputStore.getCurrentResourceId(id);
     }
 }

@@ -22,9 +22,10 @@ import java.util.List;
  */
 
 @ApplicationScoped
-public class RestBehaviorStore extends RestVersionInfo<BehaviorConfiguration> implements IRestBehaviorStore {
+public class RestBehaviorStore implements IRestBehaviorStore {
     private final IBehaviorStore behaviorStore;
     private final IJsonSchemaCreator jsonSchemaCreator;
+    private final RestVersionInfo<BehaviorConfiguration> restVersionInfo;
     private IRestBehaviorStore restBehaviorStore;
 
     @Inject
@@ -35,7 +36,7 @@ public class RestBehaviorStore extends RestVersionInfo<BehaviorConfiguration> im
                              IRestInterfaceFactory restInterfaceFactory,
                              IDocumentDescriptorStore documentDescriptorStore,
                              IJsonSchemaCreator jsonSchemaCreator) {
-        super(resourceURI, behaviorStore, documentDescriptorStore);
+        restVersionInfo = new RestVersionInfo<>(resourceURI, behaviorStore, documentDescriptorStore);
         this.behaviorStore = behaviorStore;
         this.jsonSchemaCreator = jsonSchemaCreator;
         initRestClient(restInterfaceFactory);
@@ -57,38 +58,43 @@ public class RestBehaviorStore extends RestVersionInfo<BehaviorConfiguration> im
 
     @Override
     public List<DocumentDescriptor> readBehaviorDescriptors(String filter, Integer index, Integer limit) {
-        return readDescriptors("ai.labs.behavior", filter, index, limit);
+        return restVersionInfo.readDescriptors("ai.labs.behavior", filter, index, limit);
     }
 
     @Override
     public BehaviorConfiguration readBehaviorRuleSet(String id, Integer version) {
-        return read(id, version);
+        return restVersionInfo.read(id, version);
     }
 
     @Override
     public Response updateBehaviorRuleSet(String id, Integer version, BehaviorConfiguration behaviorConfiguration) {
-        return update(id, version, behaviorConfiguration);
+        return restVersionInfo.update(id, version, behaviorConfiguration);
     }
 
     @Override
     public Response createBehaviorRuleSet(BehaviorConfiguration behaviorConfiguration) {
-        return create(behaviorConfiguration);
+        return restVersionInfo.create(behaviorConfiguration);
     }
 
     @Override
     public Response deleteBehaviorRuleSet(String id, Integer version) {
-        return delete(id, version);
+        return restVersionInfo.delete(id, version);
     }
 
     @Override
     public Response duplicateBehaviorRuleSet(String id, Integer version) {
-        validateParameters(id, version);
+        restVersionInfo.validateParameters(id, version);
         var behaviorConfiguration = restBehaviorStore.readBehaviorRuleSet(id, version);
         return restBehaviorStore.createBehaviorRuleSet(behaviorConfiguration);
     }
 
     @Override
-    protected IResourceStore.IResourceId getCurrentResourceId(String id) throws IResourceStore.ResourceNotFoundException {
+    public String getResourceURI() {
+        return restVersionInfo.getResourceURI();
+    }
+
+    @Override
+    public IResourceStore.IResourceId getCurrentResourceId(String id) throws IResourceStore.ResourceNotFoundException {
         return behaviorStore.getCurrentResourceId(id);
     }
 }

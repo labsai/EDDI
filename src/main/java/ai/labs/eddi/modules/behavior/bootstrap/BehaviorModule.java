@@ -6,8 +6,8 @@ import ai.labs.eddi.engine.lifecycle.bootstrap.LifecycleExtensions;
 import ai.labs.eddi.modules.behavior.impl.BehaviorRulesEvaluationTask;
 import ai.labs.eddi.modules.behavior.impl.conditions.*;
 import ai.labs.eddi.modules.nlp.InputParserTask;
-import jakarta.annotation.PostConstruct;
 
+import javax.annotation.PostConstruct;
 import javax.enterprise.context.ApplicationScoped;
 import javax.enterprise.inject.Instance;
 import javax.inject.Inject;

@@ -20,11 +20,11 @@ import java.util.List;
  * @author ginccc
  */
 public class DescriptorStore<T> implements IDescriptorStore<T> {
-    protected static final String COLLECTION_DESCRIPTORS = "descriptors";
+    public static final String COLLECTION_DESCRIPTORS = "descriptors";
     private static final String FIELD_RESOURCE = "resource";
     private static final String FIELD_NAME = "name";
     private static final String FIELD_DESCRIPTION = "description";
-    protected static final String FIELD_LAST_MODIFIED = "lastModifiedOn";
+    public static final String FIELD_LAST_MODIFIED = "lastModifiedOn";
     private static final String FIELD_DELETED = "deleted";
 
     private static final String collectionName = "descriptors";

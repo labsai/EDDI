@@ -31,12 +31,14 @@ import static ai.labs.eddi.utils.RuntimeUtilities.isNullOrEmpty;
 import static javax.ws.rs.core.Response.Status.BAD_REQUEST;
 
 @ApplicationScoped
-public class RestPackageStore extends RestVersionInfo<PackageConfiguration> implements IRestPackageStore {
+public class RestPackageStore implements IRestPackageStore {
     private static final String KEY_CONFIG = "config";
     private static final String KEY_URI = "uri";
     private final IPackageStore packageStore;
     private final ResourceClientLibrary resourceClientLibrary;
     private final IJsonSchemaCreator jsonSchemaCreator;
+    private final RestVersionInfo<PackageConfiguration> restVersionInfo;
+    private final IDocumentDescriptorStore documentDescriptorStore;
     private IRestPackageStore restPackageStore;
 
     @Inject
@@ -48,7 +50,8 @@ public class RestPackageStore extends RestVersionInfo<PackageConfiguration> impl
                             ResourceClientLibrary resourceClientLibrary,
                             IDocumentDescriptorStore documentDescriptorStore,
                             IJsonSchemaCreator jsonSchemaCreator) {
-        super(resourceURI, packageStore, documentDescriptorStore);
+        restVersionInfo = new RestVersionInfo<>(resourceURI, packageStore, documentDescriptorStore);
+        this.documentDescriptorStore = documentDescriptorStore;
         this.packageStore = packageStore;
         this.resourceClientLibrary = resourceClientLibrary;
         this.jsonSchemaCreator = jsonSchemaCreator;
@@ -71,7 +74,7 @@ public class RestPackageStore extends RestVersionInfo<PackageConfiguration> impl
 
     @Override
     public List<DocumentDescriptor> readPackageDescriptors(String filter, Integer index, Integer limit) {
-        return readDescriptors("ai.labs.package", filter, index, limit);
+        return restVersionInfo.readDescriptors("ai.labs.package", filter, index, limit);
     }
 
     @Override
@@ -98,12 +101,12 @@ public class RestPackageStore extends RestVersionInfo<PackageConfiguration> impl
 
     @Override
     public PackageConfiguration readPackage(String id, Integer version) {
-        return read(id, version);
+        return restVersionInfo.read(id, version);
     }
 
     @Override
     public Response updatePackage(String id, Integer version, PackageConfiguration packageConfiguration) {
-        return update(id, version, packageConfiguration);
+        return restVersionInfo.update(id, version, packageConfiguration);
     }
 
     @Override
@@ -156,17 +159,17 @@ public class RestPackageStore extends RestVersionInfo<PackageConfiguration> impl
 
     @Override
     public Response createPackage(PackageConfiguration packageConfiguration) {
-        return create(packageConfiguration);
+        return restVersionInfo.create(packageConfiguration);
     }
 
     @Override
     public Response deletePackage(String id, Integer version) {
-        return delete(id, version);
+        return restVersionInfo.delete(id, version);
     }
 
     @Override
     public Response duplicatePackage(String id, Integer version, Boolean deepCopy) {
-        validateParameters(id, version);
+        restVersionInfo.validateParameters(id, version);
         try {
             PackageConfiguration packageConfiguration = restPackageStore.readPackage(id, version);
             if (deepCopy) {
@@ -250,7 +253,12 @@ public class RestPackageStore extends RestVersionInfo<PackageConfiguration> impl
     }
 
     @Override
-    protected IResourceStore.IResourceId getCurrentResourceId(String id) throws IResourceStore.ResourceNotFoundException {
+    public String getResourceURI() {
+        return restVersionInfo.getResourceURI();
+    }
+
+    @Override
+    public IResourceStore.IResourceId getCurrentResourceId(String id) throws IResourceStore.ResourceNotFoundException {
         return packageStore.getCurrentResourceId(id);
     }
 }

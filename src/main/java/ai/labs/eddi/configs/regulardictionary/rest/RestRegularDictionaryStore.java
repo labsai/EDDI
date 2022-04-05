@@ -25,9 +25,10 @@ import java.util.List;
  */
 
 @ApplicationScoped
-public class RestRegularDictionaryStore extends RestVersionInfo<RegularDictionaryConfiguration> implements IRestRegularDictionaryStore {
+public class RestRegularDictionaryStore implements IRestRegularDictionaryStore {
     private final IRegularDictionaryStore regularDictionaryStore;
     private final IJsonSchemaCreator jsonSchemaCreator;
+    private final RestVersionInfo<RegularDictionaryConfiguration> restVersionInfo;
     private IRestRegularDictionaryStore restRegularDictionaryStore;
 
     @Inject
@@ -38,7 +39,7 @@ public class RestRegularDictionaryStore extends RestVersionInfo<RegularDictionar
                                       IRestInterfaceFactory restInterfaceFactory,
                                       IDocumentDescriptorStore documentDescriptorStore,
                                       IJsonSchemaCreator jsonSchemaCreator) {
-        super(resourceURI, regularDictionaryStore, documentDescriptorStore);
+        restVersionInfo = new RestVersionInfo<>(resourceURI, regularDictionaryStore, documentDescriptorStore);
         this.regularDictionaryStore = regularDictionaryStore;
         this.jsonSchemaCreator = jsonSchemaCreator;
         initRestClient(restInterfaceFactory);
@@ -60,12 +61,13 @@ public class RestRegularDictionaryStore extends RestVersionInfo<RegularDictionar
 
     @Override
     public List<DocumentDescriptor> readRegularDictionaryDescriptors(String filter, Integer index, Integer limit) {
-        return readDescriptors("ai.labs.regulardictionary", filter, index, limit);
+        return restVersionInfo.readDescriptors("ai.labs.regulardictionary", filter, index, limit);
     }
 
     @Override
-    public RegularDictionaryConfiguration readRegularDictionary(String id, Integer version, String filter, String order, Integer index, Integer limit) {
-        return read(id, version);
+    public RegularDictionaryConfiguration readRegularDictionary(String id, Integer version, String filter,
+                                                                String order, Integer index, Integer limit) {
+        return restVersionInfo.read(id, version);
     }
 
     @Override
@@ -82,24 +84,26 @@ public class RestRegularDictionaryStore extends RestVersionInfo<RegularDictionar
 
     @Override
     public Response updateRegularDictionary(String id, Integer version, RegularDictionaryConfiguration regularDictionaryConfiguration) {
-        return update(id, version, regularDictionaryConfiguration);
+        return restVersionInfo.update(id, version, regularDictionaryConfiguration);
     }
 
     @Override
     public Response createRegularDictionary(RegularDictionaryConfiguration regularDictionaryConfiguration) {
-        return create(regularDictionaryConfiguration);
+        return restVersionInfo.create(regularDictionaryConfiguration);
     }
 
     @Override
     public Response deleteRegularDictionary(String id, Integer version) {
-        return delete(id, version);
+        return restVersionInfo.delete(id, version);
     }
 
     @Override
-    public Response patchRegularDictionary(String id, Integer version, PatchInstruction<RegularDictionaryConfiguration>[] patchInstructions) {
+    public Response patchRegularDictionary(String id, Integer version,
+                                           PatchInstruction<RegularDictionaryConfiguration>[] patchInstructions) {
         try {
-            RegularDictionaryConfiguration currentRegularDictionaryConfiguration = regularDictionaryStore.read(id, version);
-            RegularDictionaryConfiguration patchedRegularDictionaryConfiguration = patchDocument(currentRegularDictionaryConfiguration, patchInstructions);
+            var currentRegularDictionaryConfiguration = regularDictionaryStore.read(id, version);
+            var patchedRegularDictionaryConfiguration =
+                    patchDocument(currentRegularDictionaryConfiguration, patchInstructions);
 
             return updateRegularDictionary(id, version, patchedRegularDictionaryConfiguration);
 
@@ -111,7 +115,11 @@ public class RestRegularDictionaryStore extends RestVersionInfo<RegularDictionar
         }
     }
 
-    private RegularDictionaryConfiguration patchDocument(RegularDictionaryConfiguration currentRegularDictionaryConfiguration, PatchInstruction<RegularDictionaryConfiguration>[] patchInstructions) throws IResourceStore.ResourceStoreException {
+    private RegularDictionaryConfiguration patchDocument(
+            RegularDictionaryConfiguration currentRegularDictionaryConfiguration,
+            PatchInstruction<RegularDictionaryConfiguration>[] patchInstructions)
+            throws IResourceStore.ResourceStoreException {
+
         for (PatchInstruction<RegularDictionaryConfiguration> patchInstruction : patchInstructions) {
             RegularDictionaryConfiguration regularDictionaryConfigurationPatch = patchInstruction.getDocument();
             switch (patchInstruction.getOperation()) {
@@ -135,7 +143,7 @@ public class RestRegularDictionaryStore extends RestVersionInfo<RegularDictionar
 
     @Override
     public Response duplicateRegularDictionary(String id, Integer version) {
-        validateParameters(id, version);
+        restVersionInfo.validateParameters(id, version);
         try {
             var regularDictionaryConfiguration = regularDictionaryStore.read(id, version);
             return restRegularDictionaryStore.createRegularDictionary(regularDictionaryConfiguration);
@@ -148,7 +156,12 @@ public class RestRegularDictionaryStore extends RestVersionInfo<RegularDictionar
     }
 
     @Override
-    protected IResourceStore.IResourceId getCurrentResourceId(String id) throws IResourceStore.ResourceNotFoundException {
+    public String getResourceURI() {
+        return restVersionInfo.getResourceURI();
+    }
+
+    @Override
+    public IResourceStore.IResourceId getCurrentResourceId(String id) throws IResourceStore.ResourceNotFoundException {
         return regularDictionaryStore.getCurrentResourceId(id);
     }
 }

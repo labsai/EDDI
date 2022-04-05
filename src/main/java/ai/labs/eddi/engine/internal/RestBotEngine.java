@@ -79,7 +79,7 @@ public class RestBotEngine implements IRestBotEngine {
                          ICacheFactory cacheFactory,
                          SystemRuntime.IRuntime runtime,
                          IContextLogger contextLogger,
-                         @ConfigProperty(name = "system.botTimeoutInSeconds") int botTimeout) {
+                         @ConfigProperty(name = "systemRuntime.botTimeoutInSeconds") int botTimeout) {
         this.botFactory = botFactory;
         this.conversationMemoryStore = conversationMemoryStore;
         this.conversationDescriptorStore = conversationDescriptorStore;

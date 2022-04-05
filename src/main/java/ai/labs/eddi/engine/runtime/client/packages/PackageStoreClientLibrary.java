@@ -2,12 +2,14 @@ package ai.labs.eddi.engine.runtime.client.packages;
 
 import ai.labs.eddi.configs.packages.model.PackageConfiguration;
 import ai.labs.eddi.engine.lifecycle.*;
+import ai.labs.eddi.engine.lifecycle.bootstrap.LifecycleExtensions;
 import ai.labs.eddi.engine.runtime.IExecutablePackage;
 import ai.labs.eddi.engine.runtime.service.IPackageStoreService;
 import ai.labs.eddi.engine.runtime.service.ServiceException;
 import ai.labs.eddi.engine.utilities.URIUtilities;
 import ai.labs.eddi.models.DocumentDescriptor;
 
+import javax.enterprise.context.ApplicationScoped;
 import javax.inject.Inject;
 import javax.inject.Provider;
 import java.net.URI;
@@ -16,6 +18,7 @@ import java.util.Map;
 /**
  * @author ginccc
  */
+@ApplicationScoped
 public class PackageStoreClientLibrary implements IPackageStoreClientLibrary {
     private final IPackageStoreService packageStoreService;
     private final Map<String, Provider<ILifecycleTask>> lifecycleExtensionsProvider;
@@ -23,7 +26,7 @@ public class PackageStoreClientLibrary implements IPackageStoreClientLibrary {
 
     @Inject
     public PackageStoreClientLibrary(IPackageStoreService packageStoreService,
-                                     Map<String, Provider<ILifecycleTask>> lifecycleExtensionsProvider) {
+                                     @LifecycleExtensions Map<String, Provider<ILifecycleTask>> lifecycleExtensionsProvider) {
         this.packageStoreService = packageStoreService;
         this.lifecycleExtensionsProvider = lifecycleExtensionsProvider;
     }

@@ -19,8 +19,7 @@ import java.util.List;
 /**
  * @author ginccc
  */
-
-public abstract class RestVersionInfo<T> implements IRestVersionInfo {
+public class RestVersionInfo<T> implements IRestVersionInfo {
     private final String resourceURI;
     private final IResourceStore<T> resourceStore;
     protected final IDocumentDescriptorStore documentDescriptorStore;
@@ -35,7 +34,7 @@ public abstract class RestVersionInfo<T> implements IRestVersionInfo {
         this.documentDescriptorStore = documentDescriptorStore;
     }
 
-    protected List<DocumentDescriptor> readDescriptors(String type, String filter, Integer index, Integer limit) {
+    public List<DocumentDescriptor> readDescriptors(String type, String filter, Integer index, Integer limit) {
         try {
             return documentDescriptorStore.readDescriptors(type, filter, index, limit, false);
         } catch (IResourceStore.ResourceNotFoundException e) {
@@ -46,28 +45,7 @@ public abstract class RestVersionInfo<T> implements IRestVersionInfo {
         }
     }
 
-    @Override
-    public Integer getCurrentVersion(String id) {
-        try {
-            IResourceStore.IResourceId currentResourceId = getCurrentResourceId(id);
-            return currentResourceId.getVersion();
-        } catch (IResourceStore.ResourceNotFoundException e) {
-            throw new NotFoundException(e.getLocalizedMessage(), e);
-        }
-    }
-
-    @Override
-    public Response redirectToLatestVersion(String id) {
-        try {
-            IResourceStore.IResourceId currentResourceId = getCurrentResourceId(id);
-            String path = URI.create(resourceURI).getPath();
-            return Response.seeOther(URI.create(path + id + versionQueryParam + currentResourceId.getVersion())).build();
-        } catch (IResourceStore.ResourceNotFoundException e) {
-            throw new NotFoundException(e.getLocalizedMessage());
-        }
-    }
-
-    protected Response create(T document) {
+    public Response create(T document) {
         RuntimeUtilities.checkNotNull(document, "document");
 
         try {
@@ -80,7 +58,7 @@ public abstract class RestVersionInfo<T> implements IRestVersionInfo {
         }
     }
 
-    protected T read(String id, Integer version) {
+    public T read(String id, Integer version) {
         RuntimeUtilities.checkNotNull(id, "id");
         RuntimeUtilities.checkNotNull(version, "version");
         RuntimeUtilities.checkNotNegative(version, "version");
@@ -95,7 +73,7 @@ public abstract class RestVersionInfo<T> implements IRestVersionInfo {
         }
     }
 
-    protected Response update(String id, Integer version, T document) {
+    public Response update(String id, Integer version, T document) {
         version = validateParameters(id, version);
         RuntimeUtilities.checkNotNull(document, "document");
 
@@ -113,7 +91,7 @@ public abstract class RestVersionInfo<T> implements IRestVersionInfo {
         }
     }
 
-    protected Response delete(String id, Integer version) {
+    public Response delete(String id, Integer version) {
         version = validateParameters(id, version);
 
         try {
@@ -130,7 +108,7 @@ public abstract class RestVersionInfo<T> implements IRestVersionInfo {
         }
     }
 
-    protected Integer validateParameters(String id, Integer version) {
+    public Integer validateParameters(String id, Integer version) {
         RuntimeUtilities.checkNotNull(id, "id");
         RuntimeUtilities.checkNotNull(version, "version");
         RuntimeUtilities.checkNotNegative(version, "version");
@@ -150,5 +128,8 @@ public abstract class RestVersionInfo<T> implements IRestVersionInfo {
         }
     }
 
-    protected abstract IResourceStore.IResourceId getCurrentResourceId(String id) throws IResourceStore.ResourceNotFoundException;
+    @Override
+    public String getResourceURI() {
+        return resourceURI;
+    }
 }

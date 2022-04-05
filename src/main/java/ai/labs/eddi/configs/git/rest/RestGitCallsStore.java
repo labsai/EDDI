@@ -21,9 +21,10 @@ import java.util.List;
  * @author rpi
  */
 @ApplicationScoped
-public class RestGitCallsStore extends RestVersionInfo<GitCallsConfiguration> implements IRestGitCallsStore {
+public class RestGitCallsStore implements IRestGitCallsStore {
     private final IGitCallsStore gitCallsStore;
     private final IJsonSchemaCreator jsonSchemaCreator;
+    private final RestVersionInfo<GitCallsConfiguration> restVersionInfo;
     private IRestGitCallsStore restGitCallsStore;
 
     @Inject
@@ -34,7 +35,7 @@ public class RestGitCallsStore extends RestVersionInfo<GitCallsConfiguration> im
                              IRestInterfaceFactory restInterfaceFactory,
                              IDocumentDescriptorStore documentDescriptorStore,
                              IJsonSchemaCreator jsonSchemaCreator) {
-        super(resourceURI, gitCallsStore, documentDescriptorStore);
+        restVersionInfo = new RestVersionInfo<>(resourceURI, gitCallsStore, documentDescriptorStore);
         this.gitCallsStore = gitCallsStore;
         this.jsonSchemaCreator = jsonSchemaCreator;
         initRestClient(restInterfaceFactory);
@@ -56,38 +57,43 @@ public class RestGitCallsStore extends RestVersionInfo<GitCallsConfiguration> im
 
     @Override
     public List<DocumentDescriptor> readGitCallsDescriptors(String filter, Integer index, Integer limit) {
-        return readDescriptors("ai.labs.gitcalls", filter, index, limit);
+        return restVersionInfo.readDescriptors("ai.labs.gitcalls", filter, index, limit);
     }
 
     @Override
     public GitCallsConfiguration readGitCalls(String id, Integer version) {
-        return read(id, version);
+        return restVersionInfo.read(id, version);
     }
 
     @Override
     public Response updateGitCalls(String id, Integer version, GitCallsConfiguration gitCallsConfiguration) {
-        return update(id, version, gitCallsConfiguration);
+        return restVersionInfo.update(id, version, gitCallsConfiguration);
     }
 
     @Override
     public Response createGitCalls(GitCallsConfiguration gitCallsConfiguration) {
-        return create(gitCallsConfiguration);
+        return restVersionInfo.create(gitCallsConfiguration);
     }
 
     @Override
     public Response deleteGitCalls(String id, Integer version) {
-        return delete(id, version);
+        return restVersionInfo.delete(id, version);
     }
 
     @Override
     public Response duplicateGitCalls(String id, Integer version) {
-        validateParameters(id, version);
+        restVersionInfo.validateParameters(id, version);
         GitCallsConfiguration gitCallsConfiguration = restGitCallsStore.readGitCalls(id, version);
         return restGitCallsStore.createGitCalls(gitCallsConfiguration);
     }
 
     @Override
-    protected IResourceStore.IResourceId getCurrentResourceId(String id) throws IResourceStore.ResourceNotFoundException {
+    public String getResourceURI() {
+        return restVersionInfo.getResourceURI();
+    }
+
+    @Override
+    public IResourceStore.IResourceId getCurrentResourceId(String id) throws IResourceStore.ResourceNotFoundException {
         return gitCallsStore.getCurrentResourceId(id);
     }
 }

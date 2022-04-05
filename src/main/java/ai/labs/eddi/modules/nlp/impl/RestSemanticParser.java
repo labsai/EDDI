@@ -5,6 +5,7 @@ import ai.labs.eddi.configs.parser.model.ParserConfiguration;
 import ai.labs.eddi.engine.caching.ICache;
 import ai.labs.eddi.engine.caching.ICacheFactory;
 import ai.labs.eddi.engine.lifecycle.ILifecycleTask;
+import ai.labs.eddi.engine.lifecycle.bootstrap.LifecycleExtensions;
 import ai.labs.eddi.engine.runtime.SystemRuntime;
 import ai.labs.eddi.engine.runtime.client.configuration.IResourceClientLibrary;
 import ai.labs.eddi.engine.runtime.service.ServiceException;
@@ -48,7 +49,7 @@ public class RestSemanticParser implements IRestSemanticParser {
     public RestSemanticParser(SystemRuntime.IRuntime runtime,
                               IResourceClientLibrary resourceClientLibrary,
                               ICacheFactory cacheFactory,
-                              Map<String, Provider<ILifecycleTask>> lifecycleTasks) {
+                              @LifecycleExtensions Map<String, Provider<ILifecycleTask>> lifecycleTasks) {
         this.runtime = runtime;
         this.resourceClientLibrary = resourceClientLibrary;
         cache = cacheFactory.getCache("ai.labs.parser");

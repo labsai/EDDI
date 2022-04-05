@@ -22,9 +22,10 @@ import java.util.List;
  */
 
 @ApplicationScoped
-public class RestPropertySetterStore extends RestVersionInfo<PropertySetterConfiguration> implements IRestPropertySetterStore {
+public class RestPropertySetterStore implements IRestPropertySetterStore {
     private final IPropertySetterStore propertySetterStore;
     private final IJsonSchemaCreator jsonSchemaCreator;
+    private final RestVersionInfo<PropertySetterConfiguration> restVersionInfo;
     private IRestPropertySetterStore restPropertySetterStore;
 
     @Inject
@@ -35,7 +36,7 @@ public class RestPropertySetterStore extends RestVersionInfo<PropertySetterConfi
                                    IRestInterfaceFactory restInterfaceFactory,
                                    IDocumentDescriptorStore documentDescriptorStore,
                                    IJsonSchemaCreator jsonSchemaCreator) {
-        super(resourceURI, propertySetterStore, documentDescriptorStore);
+        restVersionInfo = new RestVersionInfo<>(resourceURI, propertySetterStore, documentDescriptorStore);
         this.propertySetterStore = propertySetterStore;
         this.jsonSchemaCreator = jsonSchemaCreator;
         initRestClient(restInterfaceFactory);
@@ -57,38 +58,43 @@ public class RestPropertySetterStore extends RestVersionInfo<PropertySetterConfi
 
     @Override
     public List<DocumentDescriptor> readPropertySetterDescriptors(String filter, Integer index, Integer limit) {
-        return readDescriptors("ai.labs.property", filter, index, limit);
+        return restVersionInfo.readDescriptors("ai.labs.property", filter, index, limit);
     }
 
     @Override
     public PropertySetterConfiguration readPropertySetter(String id, Integer version) {
-        return read(id, version);
+        return restVersionInfo.read(id, version);
     }
 
     @Override
     public Response updatePropertySetter(String id, Integer version, PropertySetterConfiguration propertySetterConfiguration) {
-        return update(id, version, propertySetterConfiguration);
+        return restVersionInfo.update(id, version, propertySetterConfiguration);
     }
 
     @Override
     public Response createPropertySetter(PropertySetterConfiguration propertySetterConfiguration) {
-        return create(propertySetterConfiguration);
+        return restVersionInfo.create(propertySetterConfiguration);
     }
 
     @Override
     public Response deletePropertySetter(String id, Integer version) {
-        return delete(id, version);
+        return restVersionInfo.delete(id, version);
     }
 
     @Override
     public Response duplicatePropertySetter(String id, Integer version) {
-        validateParameters(id, version);
+        restVersionInfo.validateParameters(id, version);
         PropertySetterConfiguration propertySetterConfiguration = restPropertySetterStore.readPropertySetter(id, version);
         return restPropertySetterStore.createPropertySetter(propertySetterConfiguration);
     }
 
     @Override
-    protected IResourceStore.IResourceId getCurrentResourceId(String id) throws IResourceStore.ResourceNotFoundException {
+    public String getResourceURI() {
+        return restVersionInfo.getResourceURI();
+    }
+
+    @Override
+    public IResourceStore.IResourceId getCurrentResourceId(String id) throws IResourceStore.ResourceNotFoundException {
         return propertySetterStore.getCurrentResourceId(id);
     }
 }

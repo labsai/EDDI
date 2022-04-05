@@ -3,8 +3,8 @@ package ai.labs.eddi.modules.gitcalls.bootstrap;
 import ai.labs.eddi.engine.lifecycle.ILifecycleTask;
 import ai.labs.eddi.engine.lifecycle.bootstrap.LifecycleExtensions;
 import ai.labs.eddi.modules.gitcalls.impl.GitCallsTask;
-import jakarta.annotation.PostConstruct;
 
+import javax.annotation.PostConstruct;
 import javax.enterprise.inject.Instance;
 import javax.inject.Inject;
 import javax.inject.Provider;

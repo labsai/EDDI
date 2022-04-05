@@ -21,9 +21,10 @@ import java.util.List;
  * @author ginccc
  */
 @ApplicationScoped
-public class RestHttpCallsStore extends RestVersionInfo<HttpCallsConfiguration> implements IRestHttpCallsStore {
+public class RestHttpCallsStore implements IRestHttpCallsStore {
     private final IHttpCallsStore httpCallsStore;
     private final IJsonSchemaCreator jsonSchemaCreator;
+    private final RestVersionInfo<HttpCallsConfiguration> restVersionInfo;
     private IRestHttpCallsStore restHttpCallsStore;
 
     @Inject
@@ -34,7 +35,7 @@ public class RestHttpCallsStore extends RestVersionInfo<HttpCallsConfiguration> 
                               IRestInterfaceFactory restInterfaceFactory,
                               IDocumentDescriptorStore documentDescriptorStore,
                               IJsonSchemaCreator jsonSchemaCreator) {
-        super(resourceURI, httpCallsStore, documentDescriptorStore);
+        restVersionInfo = new RestVersionInfo<>(resourceURI, httpCallsStore, documentDescriptorStore);
         this.httpCallsStore = httpCallsStore;
         this.jsonSchemaCreator = jsonSchemaCreator;
         initRestClient(restInterfaceFactory);
@@ -56,38 +57,43 @@ public class RestHttpCallsStore extends RestVersionInfo<HttpCallsConfiguration> 
 
     @Override
     public List<DocumentDescriptor> readHttpCallsDescriptors(String filter, Integer index, Integer limit) {
-        return readDescriptors("ai.labs.httpcalls", filter, index, limit);
+        return restVersionInfo.readDescriptors("ai.labs.httpcalls", filter, index, limit);
     }
 
     @Override
     public HttpCallsConfiguration readHttpCalls(String id, Integer version) {
-        return read(id, version);
+        return restVersionInfo.read(id, version);
     }
 
     @Override
     public Response updateHttpCalls(String id, Integer version, HttpCallsConfiguration httpCallsConfiguration) {
-        return update(id, version, httpCallsConfiguration);
+        return restVersionInfo.update(id, version, httpCallsConfiguration);
     }
 
     @Override
     public Response createHttpCalls(HttpCallsConfiguration httpCallsConfiguration) {
-        return create(httpCallsConfiguration);
+        return restVersionInfo.create(httpCallsConfiguration);
     }
 
     @Override
     public Response deleteHttpCalls(String id, Integer version) {
-        return delete(id, version);
+        return restVersionInfo.delete(id, version);
     }
 
     @Override
     public Response duplicateHttpCalls(String id, Integer version) {
-        validateParameters(id, version);
+        restVersionInfo.validateParameters(id, version);
         HttpCallsConfiguration httpCallsConfiguration = restHttpCallsStore.readHttpCalls(id, version);
         return restHttpCallsStore.createHttpCalls(httpCallsConfiguration);
     }
 
     @Override
-    protected IResourceStore.IResourceId getCurrentResourceId(String id) throws IResourceStore.ResourceNotFoundException {
+    public String getResourceURI() {
+        return restVersionInfo.getResourceURI();
+    }
+
+    @Override
+    public IResourceStore.IResourceId getCurrentResourceId(String id) throws IResourceStore.ResourceNotFoundException {
         return httpCallsStore.getCurrentResourceId(id);
     }
 }

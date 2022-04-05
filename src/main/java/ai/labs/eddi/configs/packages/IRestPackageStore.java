@@ -6,6 +6,7 @@ import ai.labs.eddi.models.DocumentDescriptor;
 import org.eclipse.microprofile.openapi.annotations.Operation;
 import org.eclipse.microprofile.openapi.annotations.parameters.Parameter;
 import org.eclipse.microprofile.openapi.annotations.responses.APIResponse;
+import org.eclipse.microprofile.openapi.annotations.tags.Tag;
 
 import javax.ws.rs.*;
 import javax.ws.rs.core.MediaType;
@@ -18,6 +19,7 @@ import java.util.List;
  */
 // @Api(value = "Configurations -> (3) Packages", authorizations = {@Authorization(value = "eddi_auth")})
 @Path("/packagestore/packages")
+@Tag(name = "packages", description = "packages for bots")
 public interface IRestPackageStore extends IRestVersionInfo {
     String resourceURI = "eddi://ai.labs.package/packagestore/packages/";
 

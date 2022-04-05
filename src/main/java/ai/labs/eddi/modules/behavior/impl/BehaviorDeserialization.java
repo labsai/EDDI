@@ -3,11 +3,13 @@ package ai.labs.eddi.modules.behavior.impl;
 import ai.labs.eddi.configs.behavior.model.BehaviorConfiguration;
 import ai.labs.eddi.configs.behavior.model.BehaviorRuleConditionConfiguration;
 import ai.labs.eddi.datastore.serialization.DeserializationException;
+import ai.labs.eddi.modules.behavior.bootstrap.BehaviorConditions;
 import ai.labs.eddi.modules.behavior.impl.BehaviorGroup.ExecutionStrategy;
 import ai.labs.eddi.modules.behavior.impl.conditions.IBehaviorCondition;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.jboss.logging.Logger;
 
+import javax.enterprise.context.ApplicationScoped;
 import javax.inject.Inject;
 import javax.inject.Provider;
 import java.io.IOException;
@@ -23,6 +25,7 @@ import static ai.labs.eddi.utils.RuntimeUtilities.isNullOrEmpty;
  * @author ginccc
  */
 
+@ApplicationScoped
 public class BehaviorDeserialization implements IBehaviorDeserialization {
     private final ObjectMapper objectMapper;
     private final Map<String, Provider<IBehaviorCondition>> conditionProvider;
@@ -32,7 +35,7 @@ public class BehaviorDeserialization implements IBehaviorDeserialization {
 
     @Inject
     public BehaviorDeserialization(ObjectMapper objectMapper,
-                                   Map<String, Provider<IBehaviorCondition>> conditionProvider) {
+                                   @BehaviorConditions Map<String, Provider<IBehaviorCondition>> conditionProvider) {
         this.objectMapper = objectMapper;
         this.conditionProvider = conditionProvider;
     }

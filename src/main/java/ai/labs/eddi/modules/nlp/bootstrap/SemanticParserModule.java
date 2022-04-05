@@ -7,8 +7,8 @@ import ai.labs.eddi.modules.nlp.InputParserTask;
 import ai.labs.eddi.modules.nlp.extensions.corrections.providers.*;
 import ai.labs.eddi.modules.nlp.extensions.dictionaries.providers.*;
 import ai.labs.eddi.modules.nlp.extensions.normalizers.providers.*;
-import jakarta.annotation.PostConstruct;
 
+import javax.annotation.PostConstruct;
 import javax.enterprise.context.ApplicationScoped;
 import javax.enterprise.inject.Instance;
 import javax.inject.Inject;

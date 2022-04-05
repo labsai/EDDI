@@ -8,11 +8,11 @@ import ai.labs.eddi.modules.templating.impl.JavaScriptTemplateEngine;
 import ai.labs.eddi.modules.templating.impl.JsonSerializationThymeleafDialect;
 import ai.labs.eddi.modules.templating.impl.TextTemplateEngine;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import jakarta.annotation.PostConstruct;
 import org.thymeleaf.TemplateEngine;
 import org.thymeleaf.templatemode.TemplateMode;
 import org.thymeleaf.templateresolver.StringTemplateResolver;
 
+import javax.annotation.PostConstruct;
 import javax.enterprise.context.ApplicationScoped;
 import javax.enterprise.inject.Instance;
 import javax.enterprise.inject.Produces;

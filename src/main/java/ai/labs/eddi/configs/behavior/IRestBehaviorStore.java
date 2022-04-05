@@ -6,6 +6,7 @@ import ai.labs.eddi.models.DocumentDescriptor;
 import io.swagger.v3.oas.annotations.Operation;
 import org.eclipse.microprofile.openapi.annotations.parameters.Parameter;
 import org.eclipse.microprofile.openapi.annotations.responses.APIResponse;
+import org.eclipse.microprofile.openapi.annotations.tags.Tag;
 
 import javax.ws.rs.*;
 import javax.ws.rs.core.MediaType;
@@ -17,6 +18,7 @@ import java.util.List;
  */
 // @Api(value = "Configurations -> (2) Conversation LifeCycle Tasks -> (2) Behavior Rules", authorizations = {@Authorization(value = "eddi_auth")})
 @Path("/behaviorstore/behaviorsets")
+@Tag(name = "behavior", description = "lifecycle extension for package")
 public interface IRestBehaviorStore extends IRestVersionInfo {
     String resourceURI = "eddi://ai.labs.behavior/behaviorstore/behaviorsets/";
     String versionQueryParam = "?version=";

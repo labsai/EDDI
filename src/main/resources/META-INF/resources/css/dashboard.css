@@ -1,0 +1,70 @@
+body {
+    padding-top: 56px;
+    overflow-y: scroll;
+    background-color: #000000;
+    color: white;
+}
+
+a {
+    color: #E8AC17;
+}
+
+.carousel-item {
+    height: 65vh;
+    min-height: 300px;
+    background: no-repeat center center scroll;
+    -webkit-background-size: cover;
+    -moz-background-size: cover;
+    -o-background-size: cover;
+    background-size: cover;
+}
+
+.portfolio-item {
+    margin-bottom: 30px;
+}
+
+.eddi-logo {
+    border: 0;
+    top: 5px;
+    left: 5px;
+    height: 30px;
+    padding-right: 15px;
+}
+
+.card-header {
+    background-color: #262626;
+    color: #ffffff;
+}
+
+.card-body {
+    max-height: 500px;
+    overflow-y: scroll;
+    background-color: #000000;
+}
+
+.text-color {
+    color: #E8AC17;
+}
+
+.btn-primary, .btn-primary:hover, .btn-primary:active, .btn-primary.disabled {
+    border-color: #E8AC17;
+    background-color: #E8AC17;
+    color: #ffffff;
+}
+
+.btn-primary.disabled {
+    cursor: not-allowed;
+}
+
+.botContainer {
+    width: 100%;
+    vertical-align: top;
+    border-bottom: 0.5px solid white;
+}
+
+.botCard {
+    display: inline-block;
+    vertical-align: text-top;
+    margin: 5px;
+    padding: 0 20px;
+}

@@ -1,7 +1,6 @@
 package ai.labs.eddi.engine;
 
 import ai.labs.eddi.engine.runtime.ThreadContext;
-import jakarta.ws.rs.client.ClientBuilder;
 import org.eclipse.jetty.client.HttpClient;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.jboss.resteasy.client.jaxrs.ResteasyClient;
@@ -11,6 +10,7 @@ import org.jboss.resteasy.client.jaxrs.engines.jetty.JettyClientEngine;
 
 import javax.enterprise.context.ApplicationScoped;
 import javax.inject.Inject;
+import javax.ws.rs.client.ClientBuilder;
 import javax.ws.rs.client.ClientRequestFilter;
 import java.util.HashMap;
 import java.util.Map;
@@ -27,7 +27,7 @@ public class RestInterfaceFactory implements IRestInterfaceFactory {
 
     @Inject
     public RestInterfaceFactory(HttpClient httpClient,
-                                @ConfigProperty(name = "system.apiServerURI") String apiServerURI,
+                                @ConfigProperty(name = "systemRuntime.apiServerURI") String apiServerURI,
                                 @ConfigProperty(name = "webServer.securityHandlerType") String securityHandlerType) {
         this.httpClient = httpClient;
         this.apiServerURI = apiServerURI;

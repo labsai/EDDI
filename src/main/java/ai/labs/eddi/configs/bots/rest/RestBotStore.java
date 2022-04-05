@@ -33,11 +33,13 @@ import static javax.ws.rs.core.Response.Status.BAD_REQUEST;
  */
 
 @ApplicationScoped
-public class RestBotStore extends RestVersionInfo<BotConfiguration> implements IRestBotStore {
+public class RestBotStore implements IRestBotStore {
     private static final String PACKAGE_URI = IRestPackageStore.resourceURI;
     private final IBotStore botStore;
     private final IRestPackageStore restPackageStore;
     private final IJsonSchemaCreator jsonSchemaCreator;
+    private final RestVersionInfo<BotConfiguration> restVersionInfo;
+    private final IDocumentDescriptorStore documentDescriptorStore;
     private IRestBotStore restBotStore;
 
     @Inject
@@ -49,7 +51,8 @@ public class RestBotStore extends RestVersionInfo<BotConfiguration> implements I
                         IRestInterfaceFactory restInterfaceFactory,
                         IDocumentDescriptorStore documentDescriptorStore,
                         IJsonSchemaCreator jsonSchemaCreator) {
-        super(resourceURI, botStore, documentDescriptorStore);
+        restVersionInfo = new RestVersionInfo<>(resourceURI, botStore, documentDescriptorStore);
+        this.documentDescriptorStore = documentDescriptorStore;
         this.botStore = botStore;
         this.restPackageStore = restPackageStore;
         this.jsonSchemaCreator = jsonSchemaCreator;
@@ -72,11 +75,13 @@ public class RestBotStore extends RestVersionInfo<BotConfiguration> implements I
 
     @Override
     public List<DocumentDescriptor> readBotDescriptors(String filter, Integer index, Integer limit) {
-        return readDescriptors("ai.labs.bot", filter, index, limit);
+        return restVersionInfo.readDescriptors("ai.labs.bot", filter, index, limit);
     }
 
     @Override
-    public List<DocumentDescriptor> readBotDescriptors(String filter, Integer index, Integer limit, String containingPackageUri, Boolean includePreviousVersions) {
+    public List<DocumentDescriptor> readBotDescriptors(String filter, Integer index, Integer limit,
+                                                       String containingPackageUri, Boolean includePreviousVersions) {
+
         IResourceStore.IResourceId validatedResourceId = validateUri(containingPackageUri);
         if (validatedResourceId == null || !containingPackageUri.startsWith(PACKAGE_URI)) {
             return createMalFormattedResourceUriException(containingPackageUri);
@@ -93,12 +98,12 @@ public class RestBotStore extends RestVersionInfo<BotConfiguration> implements I
 
     @Override
     public BotConfiguration readBot(String id, Integer version) {
-        return read(id, version);
+        return restVersionInfo.read(id, version);
     }
 
     @Override
     public Response updateBot(String id, Integer version, BotConfiguration botConfiguration) {
-        return update(id, version, botConfiguration);
+        return restVersionInfo.update(id, version, botConfiguration);
     }
 
     @Override
@@ -127,12 +132,12 @@ public class RestBotStore extends RestVersionInfo<BotConfiguration> implements I
 
     @Override
     public Response createBot(BotConfiguration botConfiguration) {
-        return create(botConfiguration);
+        return restVersionInfo.create(botConfiguration);
     }
 
     @Override
     public Response duplicateBot(String id, Integer version, Boolean deepCopy) {
-        validateParameters(id, version);
+        restVersionInfo.validateParameters(id, version);
         BotConfiguration botConfiguration = restBotStore.readBot(id, version);
         if (deepCopy) {
             List<URI> packages = botConfiguration.getPackages();
@@ -159,11 +164,16 @@ public class RestBotStore extends RestVersionInfo<BotConfiguration> implements I
 
     @Override
     public Response deleteBot(String id, Integer version) {
-        return delete(id, version);
+        return restVersionInfo.delete(id, version);
     }
 
     @Override
-    protected IResourceStore.IResourceId getCurrentResourceId(String id) throws IResourceStore.ResourceNotFoundException {
+    public String getResourceURI() {
+        return restVersionInfo.getResourceURI();
+    }
+
+    @Override
+    public IResourceStore.IResourceId getCurrentResourceId(String id) throws IResourceStore.ResourceNotFoundException {
         return botStore.getCurrentResourceId(id);
     }
 }
