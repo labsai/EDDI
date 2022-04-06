@@ -57,7 +57,7 @@ public interface IRestBehaviorStore extends IRestVersionInfo {
     @Operation(description = "Update behavior rule set.")
     Response updateBehaviorRuleSet(@PathParam("id") String id,
                                    @Parameter(name = "version", required = true, example = "1")
-                                   @QueryParam("verson") Integer version, BehaviorConfiguration behaviorConfiguration);
+                                   @QueryParam("version") Integer version, BehaviorConfiguration behaviorConfiguration);
 
     @POST
     @Consumes(MediaType.APPLICATION_JSON)

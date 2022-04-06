@@ -17,8 +17,7 @@ import ai.labs.eddi.engine.memory.model.SimpleConversationMemorySnapshot;
 import ai.labs.eddi.engine.runtime.IBot;
 import ai.labs.eddi.engine.runtime.IBotFactory;
 import ai.labs.eddi.engine.runtime.IConversationCoordinator;
-import ai.labs.eddi.engine.runtime.SystemRuntime;
-import ai.labs.eddi.engine.runtime.SystemRuntime.IRuntime.IFinishedExecution;
+import ai.labs.eddi.engine.runtime.IRuntime;
 import ai.labs.eddi.engine.runtime.service.ServiceException;
 import ai.labs.eddi.engine.utilities.IConversationSetup;
 import ai.labs.eddi.models.Context;
@@ -60,7 +59,7 @@ public class RestBotEngine implements IRestBotEngine {
     private final IConversationDescriptorStore conversationDescriptorStore;
     private final IPropertiesStore propertiesStore;
     private final IConversationCoordinator conversationCoordinator;
-    private final SystemRuntime.IRuntime runtime;
+    private final IRuntime runtime;
     private final IContextLogger contextLogger;
     private final int botTimeout;
     private final IConversationSetup conversationSetup;
@@ -77,7 +76,7 @@ public class RestBotEngine implements IRestBotEngine {
                          IConversationCoordinator conversationCoordinator,
                          IConversationSetup conversationSetup,
                          ICacheFactory cacheFactory,
-                         SystemRuntime.IRuntime runtime,
+                         IRuntime runtime,
                          IContextLogger contextLogger,
                          @ConfigProperty(name = "systemRuntime.botTimeoutInSeconds") int botTimeout) {
         this.botFactory = botFactory;
@@ -370,7 +369,7 @@ public class RestBotEngine implements IRestBotEngine {
         return () -> {
             waitForExecutionFinishOrTimeout(loggingContext, conversationId,
                     runtime.submitCallable(executeConversation,
-                            new IFinishedExecution<>() {
+                            new IRuntime.IFinishedExecution<>() {
                                 @Override
                                 public void onComplete(Void result) {
                                     try {

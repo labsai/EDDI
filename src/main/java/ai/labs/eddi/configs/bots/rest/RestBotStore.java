@@ -70,7 +70,12 @@ public class RestBotStore implements IRestBotStore {
 
     @Override
     public Response readJsonSchema() {
-        return Response.ok(jsonSchemaCreator.generateSchema(BotConfiguration.class)).build();
+        try {
+            return Response.ok(jsonSchemaCreator.generateSchema(BotConfiguration.class)).build();
+        } catch (Exception e) {
+            log.error(e.getLocalizedMessage(), e);
+            throw new InternalServerErrorException();
+        }
     }
 
     @Override

@@ -9,7 +9,7 @@ import ai.labs.eddi.engine.memory.IConversationMemoryStore;
 import ai.labs.eddi.engine.memory.rest.IRestConversationStore;
 import ai.labs.eddi.engine.runtime.IBot;
 import ai.labs.eddi.engine.runtime.IBotFactory;
-import ai.labs.eddi.engine.runtime.SystemRuntime;
+import ai.labs.eddi.engine.runtime.IRuntime;
 import ai.labs.eddi.engine.runtime.ThreadContext;
 import ai.labs.eddi.engine.runtime.service.ServiceException;
 import ai.labs.eddi.models.BotDeploymentStatus;
@@ -38,16 +38,19 @@ public class RestBotAdministration implements IRestBotAdministration {
     private final IConversationMemoryStore conversationMemoryStore;
     private final IRestConversationStore restConversationStore;
     private final IDocumentDescriptorStore documentDescriptorStore;
+    private final IRuntime runtime;
 
     @Inject
     Logger log;
 
     @Inject
-    public RestBotAdministration(IBotFactory botFactory,
+    public RestBotAdministration(IRuntime runtime,
+                                 IBotFactory botFactory,
                                  IDeploymentStore deploymentStore,
                                  IConversationMemoryStore conversationMemoryStore,
                                  IRestConversationStore restConversationStore,
                                  IDocumentDescriptorStore documentDescriptorStore) {
+        this.runtime = runtime;
         this.botFactory = botFactory;
         this.deploymentStore = deploymentStore;
         this.conversationMemoryStore = conversationMemoryStore;
@@ -96,7 +99,8 @@ public class RestBotAdministration implements IRestBotAdministration {
 
             return null;
         };
-        SystemRuntime.getRuntime().submitCallable(deployBot, ThreadContext.getResources());
+
+        runtime.submitCallable(deployBot, ThreadContext.getResources());
     }
 
     @Override
@@ -154,7 +158,8 @@ public class RestBotAdministration implements IRestBotAdministration {
 
             return null;
         };
-        SystemRuntime.getRuntime().submitCallable(undeployBot, ThreadContext.getResources());
+
+        runtime.submitCallable(undeployBot, ThreadContext.getResources());
     }
 
     private Void throwErrorForbidden(String botId, Integer version, IllegalAccessException e) {

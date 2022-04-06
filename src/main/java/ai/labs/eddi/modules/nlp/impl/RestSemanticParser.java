@@ -6,7 +6,7 @@ import ai.labs.eddi.engine.caching.ICache;
 import ai.labs.eddi.engine.caching.ICacheFactory;
 import ai.labs.eddi.engine.lifecycle.ILifecycleTask;
 import ai.labs.eddi.engine.lifecycle.bootstrap.LifecycleExtensions;
-import ai.labs.eddi.engine.runtime.SystemRuntime;
+import ai.labs.eddi.engine.runtime.IRuntime;
 import ai.labs.eddi.engine.runtime.client.configuration.IResourceClientLibrary;
 import ai.labs.eddi.engine.runtime.service.ServiceException;
 import ai.labs.eddi.modules.nlp.IInputParser;
@@ -18,8 +18,9 @@ import ai.labs.eddi.modules.nlp.internal.matches.RawSolution;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
 import lombok.Setter;
-import lombok.extern.slf4j.Slf4j;
+import org.jboss.logging.Logger;
 
+import javax.enterprise.context.ApplicationScoped;
 import javax.inject.Inject;
 import javax.inject.Provider;
 import javax.ws.rs.BadRequestException;
@@ -38,21 +39,24 @@ import static ai.labs.eddi.modules.nlp.DictionaryUtilities.extractExpressions;
 /**
  * @author ginccc
  */
-@Slf4j
+
+@ApplicationScoped
 public class RestSemanticParser implements IRestSemanticParser {
-    private final SystemRuntime.IRuntime runtime;
+    private final IRuntime runtime;
     private final IResourceClientLibrary resourceClientLibrary;
     private final Provider<ILifecycleTask> parserProvider;
     private final ICache<URI, InputParserTask> cache;
 
+    private final Logger log = Logger.getLogger(RestSemanticParser.class);
+
     @Inject
-    public RestSemanticParser(SystemRuntime.IRuntime runtime,
+    public RestSemanticParser(IRuntime runtime,
                               IResourceClientLibrary resourceClientLibrary,
                               ICacheFactory cacheFactory,
                               @LifecycleExtensions Map<String, Provider<ILifecycleTask>> lifecycleTasks) {
         this.runtime = runtime;
         this.resourceClientLibrary = resourceClientLibrary;
-        cache = cacheFactory.getCache("ai.labs.parser");
+        cache = cacheFactory.getCache("parser");
         parserProvider = lifecycleTasks.get("ai.labs.parser");
     }
 

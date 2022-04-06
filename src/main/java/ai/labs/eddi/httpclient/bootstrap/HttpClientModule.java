@@ -1,5 +1,6 @@
 package ai.labs.eddi.httpclient.bootstrap;
 
+import ai.labs.eddi.httpclient.impl.JettyHttpClient;
 import org.eclipse.jetty.client.HttpClient;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
 
@@ -13,13 +14,13 @@ public class HttpClientModule {
 
     @Produces
     @ApplicationScoped
-    public HttpClient provideHttpClient(ExecutorService executorService,
-                                        @ConfigProperty(name = "httpClient.maxConnectionsQueued") Integer maxConnectionsQueued,
-                                        @ConfigProperty(name = "httpClient.maxConnectionPerRoute") Integer maxConnectionPerRoute,
-                                        @ConfigProperty(name = "httpClient.requestBufferSize") Integer requestBufferSize,
-                                        @ConfigProperty(name = "httpClient.responseBufferSize") Integer responseBufferSize,
-                                        @ConfigProperty(name = "httpClient.maxRedirects") Integer maxRedirects,
-                                        @ConfigProperty(name = "httpClient.trustAllCertificates") Boolean trustAllCertificates) {
+    public JettyHttpClient provideHttpClient(ExecutorService executorService,
+                                             @ConfigProperty(name = "httpClient.maxConnectionsQueued") Integer maxConnectionsQueued,
+                                             @ConfigProperty(name = "httpClient.maxConnectionPerRoute") Integer maxConnectionPerRoute,
+                                             @ConfigProperty(name = "httpClient.requestBufferSize") Integer requestBufferSize,
+                                             @ConfigProperty(name = "httpClient.responseBufferSize") Integer responseBufferSize,
+                                             @ConfigProperty(name = "httpClient.maxRedirects") Integer maxRedirects,
+                                             @ConfigProperty(name = "httpClient.trustAllCertificates") Boolean trustAllCertificates) {
 
         try {
             HttpClient httpClient = new HttpClient();
@@ -33,7 +34,7 @@ public class HttpClientModule {
 
             registerHttpClientShutdownHook(httpClient);
 
-            return httpClient;
+            return new JettyHttpClient(httpClient);
         } catch (Exception e) {
             System.out.println(Arrays.toString(e.getStackTrace()));
             throw new RuntimeException(e.getLocalizedMessage(), e);

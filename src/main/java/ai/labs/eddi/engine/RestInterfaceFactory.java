@@ -1,7 +1,7 @@
 package ai.labs.eddi.engine;
 
 import ai.labs.eddi.engine.runtime.ThreadContext;
-import org.eclipse.jetty.client.HttpClient;
+import ai.labs.eddi.httpclient.impl.JettyHttpClient;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.jboss.resteasy.client.jaxrs.ResteasyClient;
 import org.jboss.resteasy.client.jaxrs.ResteasyClientBuilder;
@@ -21,15 +21,15 @@ import java.util.Map;
 @ApplicationScoped
 public class RestInterfaceFactory implements IRestInterfaceFactory {
     private final Map<String, ResteasyClient> clients = new HashMap<>();
-    private final HttpClient httpClient;
+    private final JettyHttpClient jettyHttpClient;
     private final String apiServerURI;
     private final String securityHandlerType;
 
     @Inject
-    public RestInterfaceFactory(HttpClient httpClient,
+    public RestInterfaceFactory(JettyHttpClient jettyHttpClient,
                                 @ConfigProperty(name = "systemRuntime.apiServerURI") String apiServerURI,
                                 @ConfigProperty(name = "webServer.securityHandlerType") String securityHandlerType) {
-        this.httpClient = httpClient;
+        this.jettyHttpClient = jettyHttpClient;
         this.apiServerURI = apiServerURI;
         this.securityHandlerType = securityHandlerType;
     }
@@ -63,7 +63,7 @@ public class RestInterfaceFactory implements IRestInterfaceFactory {
         ResteasyClient client = clients.get(targetServerUri);
         if (client == null) {
 
-            JettyClientEngine engine = new JettyClientEngine(httpClient);
+            JettyClientEngine engine = new JettyClientEngine(jettyHttpClient.getHttpClient());
             ResteasyClientBuilder clientBuilder = (ResteasyClientBuilder) ClientBuilder.newBuilder();
             clientBuilder.httpEngine(engine);
 

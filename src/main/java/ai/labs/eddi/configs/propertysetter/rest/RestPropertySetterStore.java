@@ -14,6 +14,7 @@ import org.jboss.logging.Logger;
 
 import javax.enterprise.context.ApplicationScoped;
 import javax.inject.Inject;
+import javax.ws.rs.InternalServerErrorException;
 import javax.ws.rs.core.Response;
 import java.util.List;
 
@@ -53,7 +54,12 @@ public class RestPropertySetterStore implements IRestPropertySetterStore {
 
     @Override
     public Response readJsonSchema() {
-        return Response.ok(jsonSchemaCreator.generateSchema(PropertySetterConfiguration.class)).build();
+        try {
+            return Response.ok(jsonSchemaCreator.generateSchema(PropertySetterConfiguration.class)).build();
+        } catch (Exception e) {
+            log.error(e.getLocalizedMessage(), e);
+            throw new InternalServerErrorException();
+        }
     }
 
     @Override

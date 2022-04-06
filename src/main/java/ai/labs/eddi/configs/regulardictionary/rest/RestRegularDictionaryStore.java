@@ -56,7 +56,12 @@ public class RestRegularDictionaryStore implements IRestRegularDictionaryStore {
 
     @Override
     public Response readJsonSchema() {
-        return Response.ok(jsonSchemaCreator.generateSchema(RegularDictionaryConfiguration.class)).build();
+        try {
+            return Response.ok(jsonSchemaCreator.generateSchema(RegularDictionaryConfiguration.class)).build();
+        } catch (Exception e) {
+            log.error(e.getLocalizedMessage(), e);
+            throw new InternalServerErrorException();
+        }
     }
 
     @Override

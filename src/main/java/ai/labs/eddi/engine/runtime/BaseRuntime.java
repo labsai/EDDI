@@ -12,7 +12,7 @@ import java.util.concurrent.*;
  * @author ginccc
  */
 @ApplicationScoped
-public class BaseRuntime implements SystemRuntime.IRuntime {
+public class BaseRuntime implements IRuntime {
     private final String projectVersion;
 
     private final ScheduledExecutorService executorService;
@@ -20,8 +20,7 @@ public class BaseRuntime implements SystemRuntime.IRuntime {
 
     private boolean isInit = false;
 
-    @Inject
-    Logger log;
+    private final Logger log = Logger.getLogger(BaseRuntime.class);
 
     @Inject
     public BaseRuntime(@ConfigProperty(name = "systemRuntime.projectName") String projectName,
@@ -46,7 +45,6 @@ public class BaseRuntime implements SystemRuntime.IRuntime {
 
             logVersion();
             initExecutorServiceShutdownHook();
-            SystemRuntime.setRuntime(this);
             isInit = true;
         } else {
             log.warn("SystemRuntime has already been initialized!");

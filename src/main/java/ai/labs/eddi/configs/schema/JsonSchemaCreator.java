@@ -1,6 +1,5 @@
 package ai.labs.eddi.configs.schema;
 
-import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.kjetland.jackson.jsonSchema.JsonSchemaConfig;
 import com.kjetland.jackson.jsonSchema.JsonSchemaDraft;
@@ -20,7 +19,7 @@ public class JsonSchemaCreator implements IJsonSchemaCreator {
     }
 
     @Override
-    public JsonNode generateSchema(Class<?> clazz) {
+    public String generateSchema(Class<?> clazz) throws Exception {
         JsonSchemaConfig config = JsonSchemaConfig.vanillaJsonSchemaDraft4();
         JsonSchemaConfig eddiJsonSchemaConfig = new JsonSchemaConfig(
                 config.autoGenerateTitleForProperties(),
@@ -43,6 +42,7 @@ public class JsonSchemaCreator implements IJsonSchemaCreator {
                 JsonSchemaDraft.DRAFT_04);
         JsonSchemaGenerator jsonSchemaGenerator = new JsonSchemaGenerator(objectMapper, eddiJsonSchemaConfig);
 
-        return jsonSchemaGenerator.generateJsonSchema(clazz);
+        var jsonSchema = jsonSchemaGenerator.generateJsonSchema(clazz);
+        return objectMapper.writeValueAsString(jsonSchema);
     }
 }

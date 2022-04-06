@@ -1,7 +1,7 @@
 package ai.labs.eddi.engine.runtime.internal;
 
 import ai.labs.eddi.engine.runtime.IConversationCoordinator;
-import ai.labs.eddi.engine.runtime.SystemRuntime.IRuntime;
+import ai.labs.eddi.engine.runtime.IRuntime;
 import org.jboss.logging.Logger;
 
 import javax.enterprise.context.ApplicationScoped;

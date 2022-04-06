@@ -16,10 +16,6 @@ public class CacheImpl<K, V> implements ICache<K, V> {
         this.cache = cache;
     }
 
-    public Cache<K, V> getInternalCache() {
-        return cache;
-    }
-
     @Override
     public String getCacheName() {
         return cacheName;

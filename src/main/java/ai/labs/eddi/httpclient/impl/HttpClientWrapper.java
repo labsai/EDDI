@@ -35,8 +35,8 @@ public class HttpClientWrapper implements IHttpClient {
     Logger log;
 
     @Inject
-    public HttpClientWrapper(HttpClient httpClient) {
-        this.httpClient = httpClient;
+    public HttpClientWrapper(JettyHttpClient httpClient) {
+        this.httpClient = httpClient.getHttpClient();
     }
 
     @Override

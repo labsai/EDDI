@@ -5,7 +5,6 @@ import ai.labs.eddi.engine.lifecycle.ILifecycleTask;
 import ai.labs.eddi.engine.lifecycle.bootstrap.LifecycleExtensions;
 import ai.labs.eddi.modules.behavior.impl.BehaviorRulesEvaluationTask;
 import ai.labs.eddi.modules.behavior.impl.conditions.*;
-import ai.labs.eddi.modules.nlp.InputParserTask;
 
 import javax.annotation.PostConstruct;
 import javax.enterprise.context.ApplicationScoped;
@@ -25,7 +24,7 @@ public class BehaviorModule {
     protected void configure(@LifecycleExtensions Map<String, Provider<ILifecycleTask>> lifecycleTaskProviders,
                              Instance<ILifecycleTask> instance) {
 
-        lifecycleTaskProviders.put(InputParserTask.ID, () -> instance.select(BehaviorRulesEvaluationTask.class).get());
+        lifecycleTaskProviders.put(BehaviorRulesEvaluationTask.ID, () -> instance.select(BehaviorRulesEvaluationTask.class).get());
     }
 
     @BehaviorConditions

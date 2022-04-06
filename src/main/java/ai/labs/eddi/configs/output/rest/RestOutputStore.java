@@ -56,7 +56,12 @@ public class RestOutputStore implements IRestOutputStore {
 
     @Override
     public Response readJsonSchema() {
-        return Response.ok(jsonSchemaCreator.generateSchema(OutputConfigurationSet.class)).build();
+        try {
+            return Response.ok(jsonSchemaCreator.generateSchema(OutputConfigurationSet.class)).build();
+        } catch (Exception e) {
+            log.error(e.getLocalizedMessage(), e);
+            throw new InternalServerErrorException();
+        }
     }
 
     @Override

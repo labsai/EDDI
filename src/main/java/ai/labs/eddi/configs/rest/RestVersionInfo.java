@@ -8,7 +8,6 @@ import ai.labs.eddi.utils.RestUtilities;
 import ai.labs.eddi.utils.RuntimeUtilities;
 import org.jboss.logging.Logger;
 
-import javax.inject.Inject;
 import javax.ws.rs.InternalServerErrorException;
 import javax.ws.rs.NotFoundException;
 import javax.ws.rs.WebApplicationException;
@@ -24,8 +23,7 @@ public class RestVersionInfo<T> implements IRestVersionInfo {
     private final IResourceStore<T> resourceStore;
     protected final IDocumentDescriptorStore documentDescriptorStore;
 
-    @Inject
-    Logger log;
+    private final Logger log = Logger.getLogger(RestVersionInfo.class);
 
     public RestVersionInfo(String resourceURI, IResourceStore<T> resourceStore,
                            IDocumentDescriptorStore documentDescriptorStore) {

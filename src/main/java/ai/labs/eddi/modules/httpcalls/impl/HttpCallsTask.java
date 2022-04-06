@@ -10,7 +10,7 @@ import ai.labs.eddi.engine.memory.IConversationMemory;
 import ai.labs.eddi.engine.memory.IData;
 import ai.labs.eddi.engine.memory.IDataFactory;
 import ai.labs.eddi.engine.memory.IMemoryItemConverter;
-import ai.labs.eddi.engine.runtime.SystemRuntime;
+import ai.labs.eddi.engine.runtime.IRuntime;
 import ai.labs.eddi.engine.runtime.client.configuration.IResourceClientLibrary;
 import ai.labs.eddi.engine.runtime.service.ServiceException;
 import ai.labs.eddi.httpclient.IHttpClient;
@@ -55,7 +55,7 @@ public class HttpCallsTask implements ILifecycleTask {
     private final IDataFactory dataFactory;
     private final ITemplatingEngine templatingEngine;
     private final IMemoryItemConverter memoryItemConverter;
-    private final SystemRuntime.IRuntime runtime;
+    private final IRuntime runtime;
     private String targetServerUri;
     private List<HttpCall> httpCalls;
 
@@ -66,7 +66,7 @@ public class HttpCallsTask implements ILifecycleTask {
     public HttpCallsTask(IHttpClient httpClient, IJsonSerialization jsonSerialization,
                          IResourceClientLibrary resourceClientLibrary, IDataFactory dataFactory,
                          ITemplatingEngine templatingEngine, IMemoryItemConverter memoryItemConverter,
-                         SystemRuntime.IRuntime runtime) {
+                         IRuntime runtime) {
         this.httpClient = httpClient;
         this.jsonSerialization = jsonSerialization;
         this.resourceClientLibrary = resourceClientLibrary;

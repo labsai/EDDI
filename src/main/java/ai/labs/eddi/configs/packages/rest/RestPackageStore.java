@@ -69,7 +69,12 @@ public class RestPackageStore implements IRestPackageStore {
 
     @Override
     public Response readJsonSchema() {
-        return Response.ok(jsonSchemaCreator.generateSchema(PackageConfiguration.class)).build();
+        try {
+            return Response.ok(jsonSchemaCreator.generateSchema(PackageConfiguration.class)).build();
+        } catch (Exception e) {
+            log.error(e.getLocalizedMessage(), e);
+            throw new InternalServerErrorException();
+        }
     }
 
     @Override
