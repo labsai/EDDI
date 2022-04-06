@@ -1,7 +1,9 @@
 package ai.labs.eddi.modules.templating;
 
+import ai.labs.eddi.datastore.serialization.SerializationCustomizer;
 import ai.labs.eddi.modules.templating.bootstrap.TemplateEngineModule;
 import ai.labs.eddi.modules.templating.impl.TemplatingEngine;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import io.quarkus.test.junit.QuarkusTest;
 import lombok.AllArgsConstructor;
 import lombok.Getter;
@@ -22,10 +24,12 @@ public class TemplatingEngineTest {
     @BeforeEach
     public void setUp() {
         TemplateEngineModule engineModule = new TemplateEngineModule();
+        var objectMapper = new ObjectMapper();
+        new SerializationCustomizer(true).customize(objectMapper);
         templatingEngine = new TemplatingEngine(
-                engineModule.provideTextTemplateEngine(null),
-                engineModule.provideHtmlTemplateEngine(null),
-                engineModule.provideJavaScriptTemplateEngine(null));
+                engineModule.provideTextTemplateEngine(objectMapper),
+                engineModule.provideHtmlTemplateEngine(objectMapper),
+                engineModule.provideJavaScriptTemplateEngine(objectMapper));
     }
 
     @Test

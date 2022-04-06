@@ -1,6 +1,5 @@
 package ai.labs.eddi.modules.templating;
 
-import ai.labs.eddi.configs.output.model.OutputConfiguration.QuickReply;
 import ai.labs.eddi.engine.lifecycle.ILifecycleTask;
 import ai.labs.eddi.engine.memory.IConversationMemory;
 import ai.labs.eddi.engine.memory.IConversationMemory.IWritableConversationStep;
@@ -8,6 +7,7 @@ import ai.labs.eddi.engine.memory.IData;
 import ai.labs.eddi.engine.memory.IDataFactory;
 import ai.labs.eddi.engine.memory.IMemoryItemConverter;
 import ai.labs.eddi.models.ExtensionDescriptor;
+import ai.labs.eddi.modules.output.model.QuickReply;
 import ai.labs.eddi.modules.templating.ITemplatingEngine.TemplateMode;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -163,7 +163,7 @@ public class OutputTemplateTask implements ILifecycleTask {
 
     private List<QuickReply> copyQuickReplies(List<QuickReply> source) {
         return source.stream().map(quickReply ->
-                        new QuickReply(quickReply.getValue(), quickReply.getExpressions(), quickReply.getIsDefault())).
+                        new QuickReply(quickReply.getValue(), quickReply.getExpressions(), quickReply.isDefault())).
                 collect(Collectors.toCollection(LinkedList::new));
     }
 

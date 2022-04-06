@@ -1,12 +1,12 @@
 package ai.labs.eddi.modules.nlp;
 
 
-import ai.labs.eddi.configs.output.model.OutputConfiguration.QuickReply;
 import ai.labs.eddi.modules.nlp.expressions.Expressions;
 import ai.labs.eddi.modules.nlp.expressions.utilities.IExpressionProvider;
 import ai.labs.eddi.modules.nlp.extensions.dictionaries.IDictionary;
 import ai.labs.eddi.modules.nlp.extensions.dictionaries.RegularDictionary;
 import ai.labs.eddi.modules.nlp.internal.matches.RawSolution;
+import ai.labs.eddi.modules.output.model.QuickReply;
 
 import java.util.ArrayList;
 import java.util.LinkedList;

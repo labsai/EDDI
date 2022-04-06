@@ -1,6 +1,5 @@
 package ai.labs.eddi.modules.nlp;
 
-import ai.labs.eddi.configs.output.model.OutputConfiguration.QuickReply;
 import ai.labs.eddi.engine.lifecycle.ILifecycleTask;
 import ai.labs.eddi.engine.lifecycle.IllegalExtensionConfigurationException;
 import ai.labs.eddi.engine.lifecycle.UnrecognizedExtensionException;
@@ -24,6 +23,7 @@ import ai.labs.eddi.modules.nlp.extensions.normalizers.INormalizer;
 import ai.labs.eddi.modules.nlp.extensions.normalizers.providers.INormalizerProvider;
 import ai.labs.eddi.modules.nlp.internal.InputParser;
 import ai.labs.eddi.modules.nlp.internal.matches.RawSolution;
+import ai.labs.eddi.modules.output.model.QuickReply;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.jboss.logging.Logger;

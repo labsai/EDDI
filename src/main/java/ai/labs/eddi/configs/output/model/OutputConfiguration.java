@@ -1,5 +1,6 @@
 package ai.labs.eddi.configs.output.model;
 
+import ai.labs.eddi.modules.output.model.QuickReply;
 import com.kjetland.jackson.jsonSchema.annotations.JsonSchemaInject;
 import lombok.AllArgsConstructor;
 import lombok.Getter;
@@ -67,15 +68,5 @@ public class OutputConfiguration {
                         "} " +
                         "]}")
         private List<Object> valueAlternatives = new LinkedList<>();
-    }
-
-    @Getter
-    @Setter
-    @NoArgsConstructor
-    @AllArgsConstructor
-    public static class QuickReply {
-        private String value;
-        private String expressions;
-        private Boolean isDefault;
     }
 }

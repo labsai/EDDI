@@ -145,15 +145,15 @@ public class OutputGenerationTaskTest {
         outputType.setValueAlternatives(valueAlternatives);
         outputs.add(outputType);
         outputConfiguration.setOutputs(outputs);
-        LinkedList<OutputConfiguration.QuickReply> quickReplies = new LinkedList<>();
+        LinkedList<QuickReply> quickReplies = new LinkedList<>();
         quickReplies.add(createConfigQuickReply(SOME_QUICK_REPLY, SOME_EXPRESSION));
         quickReplies.add(createConfigQuickReply(SOME_OTHER_QUICK_REPLY, SOME_OTHER_EXPRESSION));
         outputConfiguration.setQuickReplies(quickReplies);
         return outputConfiguration;
     }
 
-    private OutputConfiguration.QuickReply createConfigQuickReply(String value, String expression) {
-        OutputConfiguration.QuickReply quickReply = new OutputConfiguration.QuickReply();
+    private QuickReply createConfigQuickReply(String value, String expression) {
+        QuickReply quickReply = new QuickReply();
         quickReply.setValue(value);
         quickReply.setExpressions(expression);
         return quickReply;

@@ -308,7 +308,7 @@ public class OutputGenerationTask implements ILifecycleTask {
      * @param configQuickReplies List<OutputConfiguration.QuickReply> as it comes from the configuration repository
      * @return List<QuickReply> as it is used in the internal system
      */
-    private List<QuickReply> convertQuickRepliesConfig(List<OutputConfiguration.QuickReply> configQuickReplies) {
+    private List<QuickReply> convertQuickRepliesConfig(List<QuickReply> configQuickReplies) {
         return configQuickReplies.stream().map(configQuickReply -> {
             QuickReply quickReply = new QuickReply();
             quickReply.setValue(configQuickReply.getValue());

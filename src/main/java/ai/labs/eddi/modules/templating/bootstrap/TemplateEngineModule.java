@@ -15,7 +15,6 @@ import org.thymeleaf.templateresolver.StringTemplateResolver;
 import javax.annotation.PostConstruct;
 import javax.enterprise.context.ApplicationScoped;
 import javax.enterprise.inject.Instance;
-import javax.enterprise.inject.Produces;
 import javax.inject.Inject;
 import javax.inject.Provider;
 import java.util.Map;
@@ -33,19 +32,16 @@ public class TemplateEngineModule {
         lifecycleTaskProviders.put(OutputTemplateTask.ID, () -> instance.select(OutputTemplateTask.class).get());
     }
 
-    @Produces
     @ApplicationScoped
     public TextTemplateEngine provideTextTemplateEngine(ObjectMapper objectMapper) {
         return new TextTemplateEngine(createTemplateEngine(TemplateMode.TEXT, objectMapper));
     }
 
-    @Produces
     @ApplicationScoped
     public HtmlTemplateEngine provideHtmlTemplateEngine(ObjectMapper objectMapper) {
         return new HtmlTemplateEngine(createTemplateEngine(TemplateMode.HTML, objectMapper));
     }
 
-    @Produces
     @ApplicationScoped
     public JavaScriptTemplateEngine provideJavaScriptTemplateEngine(ObjectMapper objectMapper) {
         return new JavaScriptTemplateEngine(createTemplateEngine(TemplateMode.JAVASCRIPT, objectMapper));
