@@ -42,13 +42,13 @@ jobs:
           command: ./mvnw package '-Dquarkus.container-image.build=true'
 
       ## Push docker image if master build
-      - run:
-          name: Docker Push
-          command: |
-            if [ "${CIRCLE_BRANCH}" == "version-5" ]; then
-                echo "$DOCKER_PASS" | docker login --username $DOCKER_USER --password-stdin
-                docker push labsai/eddi:${quarkus.container-image.tag}
-            fi
+#      - run:
+#          name: Docker Push
+#          command: |
+#            if [ "${CIRCLE_BRANCH}" == "version-5" ]; then
+#                echo "$DOCKER_PASS" | docker login --username $DOCKER_USER --password-stdin
+#                docker push labsai/eddi:5.0.0-alpha-b$CIRCLE_BUILD_NUM
+#            fi
 
 #      # Install GraalVM and native-image, needed for a native Quarkus build
 #      # ########################
