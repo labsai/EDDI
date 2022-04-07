@@ -24,4 +24,7 @@ public class OutputGenerationModule {
 
         lifecycleTaskProviders.put(OutputGenerationTask.ID, () -> instance.select(OutputGenerationTask.class).get());
     }
+
+    public void start() {
+    }
 }

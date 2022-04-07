@@ -85,4 +85,7 @@ public class SemanticParserModule {
 
         return map;
     }
+
+    public void start() {
+    }
 }

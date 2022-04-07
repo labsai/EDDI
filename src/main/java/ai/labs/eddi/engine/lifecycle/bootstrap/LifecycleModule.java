@@ -10,9 +10,13 @@ import java.util.Map;
 @ApplicationScoped
 public class LifecycleModule {
 
+    private final Map<String, Provider<ILifecycleTask>> lifecycleTaskProviders = new HashMap<>();
+
     @LifecycleExtensions
     @ApplicationScoped
-    Map<String, Provider<ILifecycleTask>> getLifecycleTaskProviders() {
-        return new HashMap<>();
+    public Map<String, Provider<ILifecycleTask>> getLifecycleTaskProviders() {
+        return lifecycleTaskProviders;
     }
+
+    public void start() {}
 }

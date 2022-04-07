@@ -60,4 +60,7 @@ public class TemplateEngineModule {
 
         return templateEngine;
     }
+
+    public void start() {
+    }
 }

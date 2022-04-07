@@ -5,6 +5,7 @@ import ai.labs.eddi.engine.lifecycle.bootstrap.LifecycleExtensions;
 import ai.labs.eddi.modules.properties.impl.PropertySetterTask;
 
 import javax.annotation.PostConstruct;
+import javax.enterprise.context.ApplicationScoped;
 import javax.enterprise.inject.Instance;
 import javax.inject.Inject;
 import javax.inject.Provider;
@@ -13,6 +14,7 @@ import java.util.Map;
 /**
  * @author ginccc
  */
+@ApplicationScoped
 public class PropertySetterModule {
     @PostConstruct
     @Inject
@@ -20,5 +22,8 @@ public class PropertySetterModule {
                              Instance<ILifecycleTask> instance) {
 
         lifecycleTaskProviders.put(PropertySetterTask.ID, () -> instance.select(PropertySetterTask.class).get());
+    }
+
+    public void start() {
     }
 }

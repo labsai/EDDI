@@ -6,11 +6,13 @@ import ai.labs.eddi.engine.lifecycle.bootstrap.LifecycleExtensions;
 import ai.labs.eddi.modules.httpcalls.impl.HttpCallsTask;
 
 import javax.annotation.PostConstruct;
+import javax.enterprise.context.ApplicationScoped;
 import javax.enterprise.inject.Instance;
 import javax.inject.Inject;
 import javax.inject.Provider;
 import java.util.Map;
 
+@ApplicationScoped
 public class HttpCallsModule {
 
     @PostConstruct
@@ -19,5 +21,8 @@ public class HttpCallsModule {
                              Instance<ILifecycleTask> instance) {
 
         lifecycleTaskProviders.put(HttpCallsTask.ID, () -> instance.select(HttpCallsTask.class).get());
+    }
+
+    public void start() {
     }
 }

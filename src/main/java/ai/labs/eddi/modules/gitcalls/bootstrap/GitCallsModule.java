@@ -5,11 +5,13 @@ import ai.labs.eddi.engine.lifecycle.bootstrap.LifecycleExtensions;
 import ai.labs.eddi.modules.gitcalls.impl.GitCallsTask;
 
 import javax.annotation.PostConstruct;
+import javax.enterprise.context.ApplicationScoped;
 import javax.enterprise.inject.Instance;
 import javax.inject.Inject;
 import javax.inject.Provider;
 import java.util.Map;
 
+@ApplicationScoped
 public class GitCallsModule {
     @PostConstruct
     @Inject
@@ -17,5 +19,8 @@ public class GitCallsModule {
                              Instance<ILifecycleTask> instance) {
 
         lifecycleTaskProviders.put(GitCallsTask.ID, () -> instance.select(GitCallsTask.class).get());
+    }
+
+    public void start() {
     }
 }
