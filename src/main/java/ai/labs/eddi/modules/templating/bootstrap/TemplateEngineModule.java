@@ -8,6 +8,8 @@ import ai.labs.eddi.modules.templating.impl.JavaScriptTemplateEngine;
 import ai.labs.eddi.modules.templating.impl.JsonSerializationThymeleafDialect;
 import ai.labs.eddi.modules.templating.impl.TextTemplateEngine;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import io.quarkus.runtime.Startup;
+import org.jboss.logging.Logger;
 import org.thymeleaf.TemplateEngine;
 import org.thymeleaf.templatemode.TemplateMode;
 import org.thymeleaf.templateresolver.StringTemplateResolver;
@@ -23,14 +25,19 @@ import java.util.Map;
 /**
  * @author ginccc
  */
+@Startup
 @ApplicationScoped
 public class TemplateEngineModule {
+
+    private static final Logger LOGGER = Logger.getLogger("Startup");
+
     @PostConstruct
     @Inject
     protected void configure(@LifecycleExtensions Map<String, Provider<ILifecycleTask>> lifecycleTaskProviders,
                              Instance<ILifecycleTask> instance) {
 
         lifecycleTaskProviders.put(OutputTemplateTask.ID, () -> instance.select(OutputTemplateTask.class).get());
+        LOGGER.info("Added TemplateEnging Module, current size of lifecycle modules " + lifecycleTaskProviders.size());
     }
 
     @ApplicationScoped
@@ -59,8 +66,5 @@ public class TemplateEngineModule {
         templateEngine.addTemplateResolver(templateResolver);
 
         return templateEngine;
-    }
-
-    public void start() {
     }
 }

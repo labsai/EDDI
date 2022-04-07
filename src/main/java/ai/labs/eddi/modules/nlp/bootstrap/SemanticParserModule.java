@@ -7,6 +7,8 @@ import ai.labs.eddi.modules.nlp.InputParserTask;
 import ai.labs.eddi.modules.nlp.extensions.corrections.providers.*;
 import ai.labs.eddi.modules.nlp.extensions.dictionaries.providers.*;
 import ai.labs.eddi.modules.nlp.extensions.normalizers.providers.*;
+import io.quarkus.runtime.Startup;
+import org.jboss.logging.Logger;
 
 import javax.annotation.PostConstruct;
 import javax.enterprise.context.ApplicationScoped;
@@ -19,14 +21,19 @@ import java.util.Map;
 /**
  * @author ginccc
  */
+@Startup
 @ApplicationScoped
 public class SemanticParserModule {
+
+    private static final Logger LOGGER = Logger.getLogger("Startup");
+
     @PostConstruct
     @Inject
     protected void configure(@LifecycleExtensions Map<String, Provider<ILifecycleTask>> lifecycleTaskProviders,
                              Instance<ILifecycleTask> instance) {
 
         lifecycleTaskProviders.put(InputParserTask.ID, () -> instance.select(InputParserTask.class).get());
+        LOGGER.info("Added SemanticParser Module, current size of lifecycle modules " + lifecycleTaskProviders.size());
     }
 
     @ParserNormalizerExtensions
@@ -84,8 +91,5 @@ public class SemanticParserModule {
                 instance.select(MergedTermsCorrectionProvider.class).get());
 
         return map;
-    }
-
-    public void start() {
     }
 }

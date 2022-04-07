@@ -1,12 +1,14 @@
 package ai.labs.eddi.engine.lifecycle.bootstrap;
 
 import ai.labs.eddi.engine.lifecycle.ILifecycleTask;
+import io.quarkus.runtime.Startup;
 
 import javax.enterprise.context.ApplicationScoped;
 import javax.inject.Provider;
 import java.util.HashMap;
 import java.util.Map;
 
+@Startup
 @ApplicationScoped
 public class LifecycleModule {
 
@@ -18,5 +20,4 @@ public class LifecycleModule {
         return lifecycleTaskProviders;
     }
 
-    public void start() {}
 }

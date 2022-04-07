@@ -5,6 +5,7 @@ import ai.labs.eddi.engine.lifecycle.ILifecycleTask;
 import ai.labs.eddi.engine.lifecycle.bootstrap.LifecycleExtensions;
 import ai.labs.eddi.modules.behavior.impl.BehaviorRulesEvaluationTask;
 import ai.labs.eddi.modules.behavior.impl.conditions.*;
+import io.quarkus.runtime.Startup;
 import org.jboss.logging.Logger;
 
 import javax.annotation.PostConstruct;
@@ -18,6 +19,7 @@ import java.util.Map;
 /**
  * @author ginccc
  */
+@Startup
 @ApplicationScoped
 public class BehaviorModule {
 
@@ -29,6 +31,7 @@ public class BehaviorModule {
     protected void configure(@LifecycleExtensions Map<String, Provider<ILifecycleTask>> lifecycleTaskProviders,
                              Instance<ILifecycleTask> instance) {
         lifecycleTaskProviders.put(BehaviorRulesEvaluationTask.ID, () -> instance.select(BehaviorRulesEvaluationTask.class).get());
+        LOGGER.info("Added BehaviourModule, current size of lifecycle modules " + lifecycleTaskProviders.size());
     }
 
     @BehaviorConditions
@@ -57,6 +60,4 @@ public class BehaviorModule {
 
         return map;
     }
-
-    public void start() {}
 }
