@@ -30,8 +30,7 @@ public class BehaviorDeserialization implements IBehaviorDeserialization {
     private final ObjectMapper objectMapper;
     private final Map<String, Provider<IBehaviorCondition>> conditionProvider;
 
-    @Inject
-    Logger log;
+    private static final Logger log = Logger.getLogger(BehaviorDeserialization.class);
 
     @Inject
     public BehaviorDeserialization(ObjectMapper objectMapper,

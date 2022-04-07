@@ -8,8 +8,6 @@ import ai.labs.eddi.configs.regulardictionary.model.RegularDictionaryConfigurati
 import ai.labs.eddi.configs.rest.RestVersionInfo;
 import ai.labs.eddi.configs.schema.IJsonSchemaCreator;
 import ai.labs.eddi.datastore.IResourceStore;
-import ai.labs.eddi.engine.IRestInterfaceFactory;
-import ai.labs.eddi.engine.RestInterfaceFactory;
 import ai.labs.eddi.models.DocumentDescriptor;
 import org.jboss.logging.Logger;
 
@@ -29,29 +27,16 @@ public class RestRegularDictionaryStore implements IRestRegularDictionaryStore {
     private final IRegularDictionaryStore regularDictionaryStore;
     private final IJsonSchemaCreator jsonSchemaCreator;
     private final RestVersionInfo<RegularDictionaryConfiguration> restVersionInfo;
-    private IRestRegularDictionaryStore restRegularDictionaryStore;
 
-    @Inject
-    Logger log;
+    private static final Logger log = Logger.getLogger(RestRegularDictionaryStore.class);
 
     @Inject
     public RestRegularDictionaryStore(IRegularDictionaryStore regularDictionaryStore,
-                                      IRestInterfaceFactory restInterfaceFactory,
                                       IDocumentDescriptorStore documentDescriptorStore,
                                       IJsonSchemaCreator jsonSchemaCreator) {
         restVersionInfo = new RestVersionInfo<>(resourceURI, regularDictionaryStore, documentDescriptorStore);
         this.regularDictionaryStore = regularDictionaryStore;
         this.jsonSchemaCreator = jsonSchemaCreator;
-        initRestClient(restInterfaceFactory);
-    }
-
-    private void initRestClient(IRestInterfaceFactory restInterfaceFactory) {
-        try {
-            restRegularDictionaryStore = restInterfaceFactory.get(IRestRegularDictionaryStore.class);
-        } catch (RestInterfaceFactory.RestInterfaceFactoryException e) {
-            restRegularDictionaryStore = null;
-            log.error(e.getLocalizedMessage(), e);
-        }
     }
 
     @Override
@@ -151,7 +136,7 @@ public class RestRegularDictionaryStore implements IRestRegularDictionaryStore {
         restVersionInfo.validateParameters(id, version);
         try {
             var regularDictionaryConfiguration = regularDictionaryStore.read(id, version);
-            return restRegularDictionaryStore.createRegularDictionary(regularDictionaryConfiguration);
+            return restVersionInfo.create(regularDictionaryConfiguration);
         } catch (IResourceStore.ResourceNotFoundException e) {
             throw new NotFoundException();
         } catch (IResourceStore.ResourceStoreException e) {

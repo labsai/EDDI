@@ -36,8 +36,7 @@ public class OutputTemplateTask implements ILifecycleTask {
     private final IDataFactory dataFactory;
     private final ObjectMapper objectMapper;
 
-    @Inject
-    Logger log;
+    private static final Logger log = Logger.getLogger(OutputTemplateTask.class);
 
     @Inject
     public OutputTemplateTask(ITemplatingEngine templatingEngine,

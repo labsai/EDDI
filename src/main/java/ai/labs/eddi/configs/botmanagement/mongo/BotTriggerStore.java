@@ -29,10 +29,9 @@ public class BotTriggerStore implements IBotTriggerStore {
     private final MongoCollection<Document> collection;
     private final IDocumentBuilder documentBuilder;
     private final IJsonSerialization jsonSerialization;
-    private BotTriggerResourceStore botTriggerStore;
+    private final BotTriggerResourceStore botTriggerStore;
 
-    @Inject
-    Logger log;
+    private static final Logger log = Logger.getLogger(BotTriggerStore.class);
 
     @Inject
     public BotTriggerStore(MongoDatabase database,

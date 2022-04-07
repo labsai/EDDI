@@ -7,8 +7,6 @@ import ai.labs.eddi.configs.documentdescriptor.IDocumentDescriptorStore;
 import ai.labs.eddi.configs.rest.RestVersionInfo;
 import ai.labs.eddi.configs.schema.IJsonSchemaCreator;
 import ai.labs.eddi.datastore.IResourceStore;
-import ai.labs.eddi.engine.IRestInterfaceFactory;
-import ai.labs.eddi.engine.RestInterfaceFactory;
 import ai.labs.eddi.models.DocumentDescriptor;
 import org.jboss.logging.Logger;
 
@@ -27,29 +25,16 @@ public class RestBehaviorStore implements IRestBehaviorStore {
     private final IBehaviorStore behaviorStore;
     private final IJsonSchemaCreator jsonSchemaCreator;
     private final RestVersionInfo<BehaviorConfiguration> restVersionInfo;
-    private IRestBehaviorStore restBehaviorStore;
 
-    @Inject
-    Logger log;
+    private static final Logger log = Logger.getLogger(RestBehaviorStore.class);
 
     @Inject
     public RestBehaviorStore(IBehaviorStore behaviorStore,
-                             IRestInterfaceFactory restInterfaceFactory,
                              IDocumentDescriptorStore documentDescriptorStore,
                              IJsonSchemaCreator jsonSchemaCreator) {
         restVersionInfo = new RestVersionInfo<>(resourceURI, behaviorStore, documentDescriptorStore);
         this.behaviorStore = behaviorStore;
         this.jsonSchemaCreator = jsonSchemaCreator;
-        initRestClient(restInterfaceFactory);
-    }
-
-    private void initRestClient(IRestInterfaceFactory restInterfaceFactory) {
-        try {
-            restBehaviorStore = restInterfaceFactory.get(IRestBehaviorStore.class);
-        } catch (RestInterfaceFactory.RestInterfaceFactoryException e) {
-            restBehaviorStore = null;
-            log.error(e.getLocalizedMessage(), e);
-        }
     }
 
     @Override
@@ -90,8 +75,8 @@ public class RestBehaviorStore implements IRestBehaviorStore {
     @Override
     public Response duplicateBehaviorRuleSet(String id, Integer version) {
         restVersionInfo.validateParameters(id, version);
-        var behaviorConfiguration = restBehaviorStore.readBehaviorRuleSet(id, version);
-        return restBehaviorStore.createBehaviorRuleSet(behaviorConfiguration);
+        var behaviorConfiguration = restVersionInfo.read(id, version);
+        return restVersionInfo.create(behaviorConfiguration);
     }
 
     @Override

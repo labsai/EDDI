@@ -46,8 +46,7 @@ public class BehaviorRulesEvaluationTask implements ILifecycleTask {
     private BehaviorRulesEvaluator evaluator;
     private boolean appendActions = true;
 
-    @Inject
-    Logger log;
+    private static final Logger log = Logger.getLogger(BehaviorRulesEvaluationTask.class);
 
     @Inject
     public BehaviorRulesEvaluationTask(IResourceClientLibrary resourceClientLibrary,

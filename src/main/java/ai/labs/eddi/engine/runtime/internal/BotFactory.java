@@ -29,8 +29,7 @@ public class BotFactory implements IBotFactory {
     private final Map<Deployment.Environment, ConcurrentHashMap<BotId, IBot>> environments;
     private final IBotStoreClientLibrary botStoreClientLibrary;
 
-    @Inject
-    Logger log;
+    private static final Logger log = Logger.getLogger(BotFactory.class);
 
     @Inject
     public BotFactory(IBotStoreClientLibrary botStoreClientLibrary) {

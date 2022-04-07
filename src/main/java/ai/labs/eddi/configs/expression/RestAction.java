@@ -32,8 +32,7 @@ public class RestAction implements IRestAction {
     private final IHttpCallsStore httpCallsStore;
     private final IOutputStore outputStore;
 
-    @Inject
-    Logger log;
+    private static final Logger log = Logger.getLogger(RestAction.class);
 
     @Inject
     public RestAction(IPackageStore packageStore,

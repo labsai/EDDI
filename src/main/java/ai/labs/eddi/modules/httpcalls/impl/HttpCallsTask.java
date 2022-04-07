@@ -59,8 +59,7 @@ public class HttpCallsTask implements ILifecycleTask {
     private String targetServerUri;
     private List<HttpCall> httpCalls;
 
-    @Inject
-    Logger log;
+    private static final Logger log = Logger.getLogger(HttpCallsTask.class);
 
     @Inject
     public HttpCallsTask(IHttpClient httpClient, IJsonSerialization jsonSerialization,

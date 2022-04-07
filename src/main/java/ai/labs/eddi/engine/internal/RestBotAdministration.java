@@ -40,8 +40,7 @@ public class RestBotAdministration implements IRestBotAdministration {
     private final IDocumentDescriptorStore documentDescriptorStore;
     private final IRuntime runtime;
 
-    @Inject
-    Logger log;
+    private static final Logger log = Logger.getLogger(RestBotAdministration.class);
 
     @Inject
     public RestBotAdministration(IRuntime runtime,

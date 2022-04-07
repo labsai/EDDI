@@ -25,8 +25,7 @@ public class RestBotTriggerStore implements IRestBotTriggerStore {
     private final IBotTriggerStore botTriggerStore;
     private final ICache<String, BotTriggerConfiguration> botTriggersCache;
 
-    @Inject
-    Logger log;
+    private static final Logger log = Logger.getLogger(RestBotTriggerStore.class);
 
     @Inject
     public RestBotTriggerStore(IBotTriggerStore botTriggerStore,

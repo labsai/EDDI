@@ -1,6 +1,7 @@
 package ai.labs.eddi.configs.packages.rest;
 
 import ai.labs.eddi.configs.documentdescriptor.IDocumentDescriptorStore;
+import ai.labs.eddi.configs.output.rest.RestOutputStore;
 import ai.labs.eddi.configs.packages.IPackageStore;
 import ai.labs.eddi.configs.packages.IRestPackageStore;
 import ai.labs.eddi.configs.packages.model.PackageConfiguration;
@@ -8,8 +9,6 @@ import ai.labs.eddi.configs.packages.model.PackageConfiguration.PackageExtension
 import ai.labs.eddi.configs.rest.RestVersionInfo;
 import ai.labs.eddi.configs.schema.IJsonSchemaCreator;
 import ai.labs.eddi.datastore.IResourceStore;
-import ai.labs.eddi.engine.IRestInterfaceFactory;
-import ai.labs.eddi.engine.RestInterfaceFactory;
 import ai.labs.eddi.engine.runtime.client.configuration.ResourceClientLibrary;
 import ai.labs.eddi.engine.runtime.service.ServiceException;
 import ai.labs.eddi.engine.utilities.URIUtilities;
@@ -39,14 +38,11 @@ public class RestPackageStore implements IRestPackageStore {
     private final IJsonSchemaCreator jsonSchemaCreator;
     private final RestVersionInfo<PackageConfiguration> restVersionInfo;
     private final IDocumentDescriptorStore documentDescriptorStore;
-    private IRestPackageStore restPackageStore;
 
-    @Inject
-    Logger log;
+    private static final Logger log = Logger.getLogger(RestOutputStore.class);
 
     @Inject
     public RestPackageStore(IPackageStore packageStore,
-                            IRestInterfaceFactory restInterfaceFactory,
                             ResourceClientLibrary resourceClientLibrary,
                             IDocumentDescriptorStore documentDescriptorStore,
                             IJsonSchemaCreator jsonSchemaCreator) {
@@ -55,16 +51,6 @@ public class RestPackageStore implements IRestPackageStore {
         this.packageStore = packageStore;
         this.resourceClientLibrary = resourceClientLibrary;
         this.jsonSchemaCreator = jsonSchemaCreator;
-        initRestClient(restInterfaceFactory);
-    }
-
-    private void initRestClient(IRestInterfaceFactory restInterfaceFactory) {
-        try {
-            restPackageStore = restInterfaceFactory.get(IRestPackageStore.class);
-        } catch (RestInterfaceFactory.RestInterfaceFactoryException e) {
-            restPackageStore = null;
-            log.error(e.getLocalizedMessage(), e);
-        }
     }
 
     @Override
@@ -176,7 +162,7 @@ public class RestPackageStore implements IRestPackageStore {
     public Response duplicatePackage(String id, Integer version, Boolean deepCopy) {
         restVersionInfo.validateParameters(id, version);
         try {
-            PackageConfiguration packageConfiguration = restPackageStore.readPackage(id, version);
+            PackageConfiguration packageConfiguration = packageStore.read(id, version);
             if (deepCopy) {
                 for (var packageExtension : packageConfiguration.getPackageExtensions()) {
                     URI type = packageExtension.getType();
@@ -195,7 +181,7 @@ public class RestPackageStore implements IRestPackageStore {
                 }
             }
 
-            Response createPackageResponse = restPackageStore.createPackage(packageConfiguration);
+            Response createPackageResponse = restVersionInfo.create(packageConfiguration);
             createDocumentDescriptorForDuplicate(documentDescriptorStore, id, version, createPackageResponse.getLocation());
 
             return createPackageResponse;

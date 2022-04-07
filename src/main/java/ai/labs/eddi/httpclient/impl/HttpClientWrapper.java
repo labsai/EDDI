@@ -31,8 +31,7 @@ import java.util.concurrent.TimeUnit;
 public class HttpClientWrapper implements IHttpClient {
     private final HttpClient httpClient;
 
-    @Inject
-    Logger log;
+    private static final Logger log = Logger.getLogger(HttpClientWrapper.class);
 
     @Inject
     public HttpClientWrapper(JettyHttpClient httpClient) {

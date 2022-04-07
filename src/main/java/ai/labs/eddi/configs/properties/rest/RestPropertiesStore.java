@@ -18,8 +18,7 @@ import javax.ws.rs.core.Response;
 public class RestPropertiesStore implements IRestPropertiesStore {
     private final IPropertiesStore propertiesStore;
 
-    @Inject
-    Logger log;
+    private static final Logger log = Logger.getLogger(RestPropertiesStore.class);
 
     @Inject
     public RestPropertiesStore(IPropertiesStore propertiesStore) {

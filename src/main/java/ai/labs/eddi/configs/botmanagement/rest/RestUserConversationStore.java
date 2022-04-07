@@ -25,8 +25,7 @@ public class RestUserConversationStore implements IRestUserConversationStore {
     private final IUserConversationStore userConversationStore;
     private final ICache<String, UserConversation> userConversationCache;
 
-    @Inject
-    Logger log;
+    private static final Logger log = Logger.getLogger(RestUserConversationStore.class);
 
     @Inject
     public RestUserConversationStore(IUserConversationStore userConversationStore,

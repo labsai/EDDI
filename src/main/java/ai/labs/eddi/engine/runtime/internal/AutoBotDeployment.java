@@ -21,8 +21,7 @@ public class AutoBotDeployment implements IAutoBotDeployment {
     private final IDeploymentStore deploymentStore;
     private final IBotFactory botFactory;
 
-    @Inject
-    Logger log;
+    private static final Logger log = Logger.getLogger(AutoBotDeployment.class);
 
     @Inject
     public AutoBotDeployment(IDeploymentStore deploymentStore, IBotFactory botFactory) {

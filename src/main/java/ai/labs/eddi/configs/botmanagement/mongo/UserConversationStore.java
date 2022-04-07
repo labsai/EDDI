@@ -30,10 +30,9 @@ public class UserConversationStore implements IUserConversationStore {
     private final MongoCollection<Document> collection;
     private final IDocumentBuilder documentBuilder;
     private final IJsonSerialization jsonSerialization;
-    private UserConversationResourceStore userConversationStore;
+    private final UserConversationResourceStore userConversationStore;
 
-    @Inject
-    Logger log;
+    private static final Logger log = Logger.getLogger(UserConversationStore.class);
 
     @Inject
     public UserConversationStore(MongoDatabase database,

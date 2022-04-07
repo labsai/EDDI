@@ -33,8 +33,7 @@ public class RestBotManagement implements IRestBotManagement {
     private final IRestUserConversationStore restUserConversationStore;
     private final IRestBotTriggerStore restBotManagementStore;
 
-    @Inject
-    Logger log;
+    private static final Logger log = Logger.getLogger(RestBotManagement.class);
 
     @Inject
     public RestBotManagement(IRestBotEngine restBotEngine,

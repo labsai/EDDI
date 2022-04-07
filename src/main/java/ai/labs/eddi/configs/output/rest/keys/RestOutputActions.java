@@ -31,8 +31,7 @@ public class RestOutputActions implements IRestOutputActions {
     private final IBehaviorStore behaviorStore;
     private final IOutputStore outputStore;
 
-    @Inject
-    Logger log;
+    private static final Logger log = Logger.getLogger(RestOutputActions.class);
 
     @Inject
     public RestOutputActions(IPackageStore packageStore,

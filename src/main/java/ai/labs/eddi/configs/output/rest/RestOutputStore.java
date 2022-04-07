@@ -8,8 +8,6 @@ import ai.labs.eddi.configs.patch.PatchInstruction;
 import ai.labs.eddi.configs.rest.RestVersionInfo;
 import ai.labs.eddi.configs.schema.IJsonSchemaCreator;
 import ai.labs.eddi.datastore.IResourceStore;
-import ai.labs.eddi.engine.IRestInterfaceFactory;
-import ai.labs.eddi.engine.RestInterfaceFactory;
 import ai.labs.eddi.models.DocumentDescriptor;
 import org.jboss.logging.Logger;
 
@@ -29,29 +27,16 @@ public class RestOutputStore implements IRestOutputStore {
     private final IOutputStore outputStore;
     private final IJsonSchemaCreator jsonSchemaCreator;
     private final RestVersionInfo<OutputConfigurationSet> restVersionInfo;
-    private IRestOutputStore restOutputStore;
 
-    @Inject
-    Logger log;
+    private static final Logger log = Logger.getLogger(RestOutputStore.class);
 
     @Inject
     public RestOutputStore(IOutputStore outputStore,
-                           IRestInterfaceFactory restInterfaceFactory,
                            IDocumentDescriptorStore documentDescriptorStore,
                            IJsonSchemaCreator jsonSchemaCreator) {
         restVersionInfo = new RestVersionInfo<>(resourceURI, outputStore, documentDescriptorStore);
         this.outputStore = outputStore;
         this.jsonSchemaCreator = jsonSchemaCreator;
-        initRestClient(restInterfaceFactory);
-    }
-
-    private void initRestClient(IRestInterfaceFactory restInterfaceFactory) {
-        try {
-            restOutputStore = restInterfaceFactory.get(IRestOutputStore.class);
-        } catch (RestInterfaceFactory.RestInterfaceFactoryException e) {
-            restOutputStore = null;
-            log.error(e.getLocalizedMessage(), e);
-        }
     }
 
     @Override
@@ -154,7 +139,7 @@ public class RestOutputStore implements IRestOutputStore {
         restVersionInfo.validateParameters(id, version);
         try {
             var outputConfigurationSet = outputStore.read(id, version);
-            return restOutputStore.createOutputSet(outputConfigurationSet);
+            return restVersionInfo.create(outputConfigurationSet);
         } catch (IResourceStore.ResourceNotFoundException e) {
             throw new NotFoundException();
         } catch (IResourceStore.ResourceStoreException e) {

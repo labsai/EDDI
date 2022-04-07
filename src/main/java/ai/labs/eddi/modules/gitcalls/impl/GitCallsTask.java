@@ -50,8 +50,7 @@ public class GitCallsTask implements ILifecycleTask {
     private String username;
     private String password;
 
-    @Inject
-    Logger log;
+    private static final Logger log = Logger.getLogger(GitCallsTask.class);
 
     @Inject
     public GitCallsTask(IResourceClientLibrary resourceClientLibrary,

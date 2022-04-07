@@ -28,8 +28,7 @@ public class RestExpression implements IRestExpression {
     private final IPackageStore packageStore;
     private final IRegularDictionaryStore regularDictionaryStore;
 
-    @Inject
-    Logger log;
+    private static final Logger log = Logger.getLogger(RestExpression.class);
 
     @Inject
     public RestExpression(IPackageStore packageStore,

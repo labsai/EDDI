@@ -79,8 +79,7 @@ public class InputParserTask implements ILifecycleTask {
     private boolean includeUnused = true;
     private boolean includeUnknown = true;
 
-    @Inject
-    Logger log;
+    private static final Logger log = Logger.getLogger(InputParserTask.class);
 
     @Inject
     public InputParserTask(IExpressionProvider expressionProvider,

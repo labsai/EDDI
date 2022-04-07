@@ -38,8 +38,7 @@ public class RestConversationStore implements IRestConversationStore {
     private final IConversationDescriptorStore conversationDescriptorStore;
     private final IConversationMemoryStore conversationMemoryStore;
 
-    @Inject
-    Logger log;
+    private static final Logger log = Logger.getLogger(RestConversationStore.class);
 
     @Inject
     public RestConversationStore(IDocumentDescriptorStore documentDescriptorStore,

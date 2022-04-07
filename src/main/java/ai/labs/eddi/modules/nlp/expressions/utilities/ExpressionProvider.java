@@ -20,8 +20,7 @@ import static java.lang.String.format;
 public class ExpressionProvider implements IExpressionProvider {
     private final IExpressionFactory expressionFactory;
 
-    @Inject
-    Logger log;
+    private static final Logger log = Logger.getLogger(ExpressionProvider.class);
 
     @Inject
     public ExpressionProvider(IExpressionFactory expressionFactory) {

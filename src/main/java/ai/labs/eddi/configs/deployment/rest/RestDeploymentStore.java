@@ -19,8 +19,7 @@ import java.util.List;
 public class RestDeploymentStore implements IRestDeploymentStore {
     private final IDeploymentStore deploymentStore;
 
-    @Inject
-    Logger log;
+    private static final Logger log = Logger.getLogger(RestDeploymentStore.class);
 
     @Inject
     public RestDeploymentStore(IDeploymentStore deploymentStore) {

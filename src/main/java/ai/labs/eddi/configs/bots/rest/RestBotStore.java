@@ -10,8 +10,6 @@ import ai.labs.eddi.configs.rest.RestVersionInfo;
 import ai.labs.eddi.configs.schema.IJsonSchemaCreator;
 import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.datastore.model.ResourceId;
-import ai.labs.eddi.engine.IRestInterfaceFactory;
-import ai.labs.eddi.engine.RestInterfaceFactory;
 import ai.labs.eddi.engine.utilities.URIUtilities;
 import ai.labs.eddi.models.DocumentDescriptor;
 import ai.labs.eddi.utils.RestUtilities;
@@ -40,15 +38,12 @@ public class RestBotStore implements IRestBotStore {
     private final IJsonSchemaCreator jsonSchemaCreator;
     private final RestVersionInfo<BotConfiguration> restVersionInfo;
     private final IDocumentDescriptorStore documentDescriptorStore;
-    private IRestBotStore restBotStore;
 
-    @Inject
-    Logger log;
+    private static final Logger log = Logger.getLogger(RestBotStore.class);
 
     @Inject
     public RestBotStore(IBotStore botStore,
                         IRestPackageStore restPackageStore,
-                        IRestInterfaceFactory restInterfaceFactory,
                         IDocumentDescriptorStore documentDescriptorStore,
                         IJsonSchemaCreator jsonSchemaCreator) {
         restVersionInfo = new RestVersionInfo<>(resourceURI, botStore, documentDescriptorStore);
@@ -56,16 +51,6 @@ public class RestBotStore implements IRestBotStore {
         this.botStore = botStore;
         this.restPackageStore = restPackageStore;
         this.jsonSchemaCreator = jsonSchemaCreator;
-        initRestClient(restInterfaceFactory);
-    }
-
-    private void initRestClient(IRestInterfaceFactory restInterfaceFactory) {
-        try {
-            restBotStore = restInterfaceFactory.get(IRestBotStore.class);
-        } catch (RestInterfaceFactory.RestInterfaceFactoryException e) {
-            restBotStore = null;
-            log.error(e.getLocalizedMessage(), e);
-        }
     }
 
     @Override
@@ -143,21 +128,21 @@ public class RestBotStore implements IRestBotStore {
     @Override
     public Response duplicateBot(String id, Integer version, Boolean deepCopy) {
         restVersionInfo.validateParameters(id, version);
-        BotConfiguration botConfiguration = restBotStore.readBot(id, version);
-        if (deepCopy) {
-            List<URI> packages = botConfiguration.getPackages();
-            for (int i = 0; i < packages.size(); i++) {
-                URI packageUri = packages.get(i);
-                ResourceId resourceId = URIUtilities.extractResourceId(packageUri);
-                Response duplicateResourceResponse = restPackageStore.
-                        duplicatePackage(resourceId.getId(), resourceId.getVersion(), true);
-                URI newResourceLocation = duplicateResourceResponse.getLocation();
-                packages.set(i, newResourceLocation);
-            }
-        }
-
         try {
-            Response createBotResponse = restBotStore.createBot(botConfiguration);
+            BotConfiguration botConfiguration = botStore.read(id, version);
+            if (deepCopy) {
+                List<URI> packages = botConfiguration.getPackages();
+                for (int i = 0; i < packages.size(); i++) {
+                    URI packageUri = packages.get(i);
+                    ResourceId resourceId = URIUtilities.extractResourceId(packageUri);
+                    Response duplicateResourceResponse = restPackageStore.
+                            duplicatePackage(resourceId.getId(), resourceId.getVersion(), true);
+                    URI newResourceLocation = duplicateResourceResponse.getLocation();
+                    packages.set(i, newResourceLocation);
+                }
+            }
+
+            Response createBotResponse = restVersionInfo.create(botConfiguration);
             createDocumentDescriptorForDuplicate(documentDescriptorStore, id, version, createBotResponse.getLocation());
 
             return createBotResponse;

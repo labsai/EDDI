@@ -53,8 +53,7 @@ public class ContextMatcher implements IBehaviorCondition {
     private final IExpressionProvider expressionProvider;
     private final IJsonSerialization jsonSerialization;
 
-    @Inject
-    Logger log;
+    private static final Logger log = Logger.getLogger(ContextMatcher.class);
 
     @Inject
     ContextMatcher(IExpressionProvider expressionProvider,

@@ -65,8 +65,7 @@ public class RestBotEngine implements IRestBotEngine {
     private final IConversationSetup conversationSetup;
     private final ICache<String, ConversationState> conversationStateCache;
 
-    @Inject
-    Logger log;
+    private static final Logger log = Logger.getLogger(RestBotEngine.class);
 
     @Inject
     public RestBotEngine(IBotFactory botFactory,

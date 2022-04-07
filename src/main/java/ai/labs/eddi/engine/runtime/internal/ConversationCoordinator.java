@@ -18,8 +18,7 @@ public class ConversationCoordinator implements IConversationCoordinator {
     private final Map<String, BlockingQueue<Callable<Void>>> conversationQueues = new ConcurrentHashMap<>();
     private final IRuntime runtime;
 
-    @Inject
-    Logger log;
+    private static final Logger log = Logger.getLogger(ConversationCoordinator.class);
 
     @Inject
     public ConversationCoordinator(IRuntime runtime) {

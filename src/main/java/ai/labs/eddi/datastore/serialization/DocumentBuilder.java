@@ -1,7 +1,6 @@
 package ai.labs.eddi.datastore.serialization;
 
 import org.bson.Document;
-import org.jboss.logging.Logger;
 
 import javax.enterprise.context.ApplicationScoped;
 import javax.inject.Inject;
@@ -15,9 +14,6 @@ import java.util.Map;
 @ApplicationScoped
 public class DocumentBuilder implements IDocumentBuilder {
     private final IJsonSerialization jsonSerialization;
-
-    @Inject
-    Logger log;
 
     @Inject
     public DocumentBuilder(IJsonSerialization jsonSerialization) {

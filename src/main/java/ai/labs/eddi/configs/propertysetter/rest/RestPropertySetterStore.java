@@ -7,8 +7,6 @@ import ai.labs.eddi.configs.propertysetter.model.PropertySetterConfiguration;
 import ai.labs.eddi.configs.rest.RestVersionInfo;
 import ai.labs.eddi.configs.schema.IJsonSchemaCreator;
 import ai.labs.eddi.datastore.IResourceStore;
-import ai.labs.eddi.engine.IRestInterfaceFactory;
-import ai.labs.eddi.engine.RestInterfaceFactory;
 import ai.labs.eddi.models.DocumentDescriptor;
 import org.jboss.logging.Logger;
 
@@ -27,29 +25,16 @@ public class RestPropertySetterStore implements IRestPropertySetterStore {
     private final IPropertySetterStore propertySetterStore;
     private final IJsonSchemaCreator jsonSchemaCreator;
     private final RestVersionInfo<PropertySetterConfiguration> restVersionInfo;
-    private IRestPropertySetterStore restPropertySetterStore;
 
-    @Inject
-    Logger log;
+    private static final Logger log = Logger.getLogger(RestPropertySetterStore.class);
 
     @Inject
     public RestPropertySetterStore(IPropertySetterStore propertySetterStore,
-                                   IRestInterfaceFactory restInterfaceFactory,
                                    IDocumentDescriptorStore documentDescriptorStore,
                                    IJsonSchemaCreator jsonSchemaCreator) {
         restVersionInfo = new RestVersionInfo<>(resourceURI, propertySetterStore, documentDescriptorStore);
         this.propertySetterStore = propertySetterStore;
         this.jsonSchemaCreator = jsonSchemaCreator;
-        initRestClient(restInterfaceFactory);
-    }
-
-    private void initRestClient(IRestInterfaceFactory restInterfaceFactory) {
-        try {
-            restPropertySetterStore = restInterfaceFactory.get(IRestPropertySetterStore.class);
-        } catch (RestInterfaceFactory.RestInterfaceFactoryException e) {
-            restPropertySetterStore = null;
-            log.error(e.getLocalizedMessage(), e);
-        }
     }
 
     @Override
@@ -90,8 +75,8 @@ public class RestPropertySetterStore implements IRestPropertySetterStore {
     @Override
     public Response duplicatePropertySetter(String id, Integer version) {
         restVersionInfo.validateParameters(id, version);
-        PropertySetterConfiguration propertySetterConfiguration = restPropertySetterStore.readPropertySetter(id, version);
-        return restPropertySetterStore.createPropertySetter(propertySetterConfiguration);
+        PropertySetterConfiguration propertySetterConfiguration = restVersionInfo.read(id, version);
+        return restVersionInfo.create(propertySetterConfiguration);
     }
 
     @Override

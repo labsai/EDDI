@@ -6,10 +6,7 @@ import ai.labs.eddi.configs.parser.IRestParserStore;
 import ai.labs.eddi.configs.parser.model.ParserConfiguration;
 import ai.labs.eddi.configs.rest.RestVersionInfo;
 import ai.labs.eddi.datastore.IResourceStore;
-import ai.labs.eddi.engine.IRestInterfaceFactory;
-import ai.labs.eddi.engine.RestInterfaceFactory;
 import ai.labs.eddi.models.DocumentDescriptor;
-import org.jboss.logging.Logger;
 
 import javax.enterprise.context.ApplicationScoped;
 import javax.inject.Inject;
@@ -23,27 +20,12 @@ import java.util.List;
 public class RestParserStore implements IRestParserStore {
     private final IParserStore parserStore;
     private final RestVersionInfo<ParserConfiguration> restVersionInfo;
-    private IRestParserStore restParserStore;
-
-    @Inject
-    Logger log;
 
     @Inject
     public RestParserStore(IParserStore parserStore,
-                           IRestInterfaceFactory restInterfaceFactory,
                            IDocumentDescriptorStore documentDescriptorStore) {
         restVersionInfo = new RestVersionInfo<>(resourceURI, parserStore, documentDescriptorStore);
         this.parserStore = parserStore;
-        initRestClient(restInterfaceFactory);
-    }
-
-    private void initRestClient(IRestInterfaceFactory restInterfaceFactory) {
-        try {
-            restParserStore = restInterfaceFactory.get(IRestParserStore.class);
-        } catch (RestInterfaceFactory.RestInterfaceFactoryException e) {
-            restParserStore = null;
-            log.error(e.getLocalizedMessage(), e);
-        }
     }
 
     @Override
@@ -74,8 +56,8 @@ public class RestParserStore implements IRestParserStore {
     @Override
     public Response duplicateParser(String id, Integer version) {
         restVersionInfo.validateParameters(id, version);
-        ParserConfiguration parserConfiguration = restParserStore.readParser(id, version);
-        return restParserStore.createParser(parserConfiguration);
+        ParserConfiguration parserConfiguration = restVersionInfo.read(id, version);
+        return restVersionInfo.create(parserConfiguration);
     }
 
     @Override

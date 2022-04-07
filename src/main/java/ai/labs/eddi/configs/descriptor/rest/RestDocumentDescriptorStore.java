@@ -23,8 +23,7 @@ import java.util.List;
 public class RestDocumentDescriptorStore implements IRestDocumentDescriptorStore {
     private final IDocumentDescriptorStore documentDescriptorStore;
 
-    @Inject
-    Logger log;
+    private static final Logger log = Logger.getLogger(RestDocumentDescriptorStore.class);
 
     @Inject
     public RestDocumentDescriptorStore(IDocumentDescriptorStore documentDescriptorStore) {
