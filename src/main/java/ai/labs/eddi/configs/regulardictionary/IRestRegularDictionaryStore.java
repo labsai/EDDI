@@ -121,5 +121,6 @@ public interface IRestRegularDictionaryStore extends IRestVersionInfo {
     @Operation(description = "Partial update regular dictionary.")
     Response patchRegularDictionary(@PathParam("id") String id,
                                     @Parameter(name = "version", required = true, example = "1")
-                                    @QueryParam("version") Integer version, PatchInstruction<RegularDictionaryConfiguration>[] patchInstructions);
+                                    @QueryParam("version") Integer version,
+                                    List<PatchInstruction<RegularDictionaryConfiguration>> patchInstructions);
 }

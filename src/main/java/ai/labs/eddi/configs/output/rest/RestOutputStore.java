@@ -111,7 +111,7 @@ public class RestOutputStore implements IRestOutputStore {
 
     @Override
     public Response patchOutputSet(String id, Integer version,
-                                   PatchInstruction<OutputConfigurationSet>[] patchInstructions) {
+                                   List<PatchInstruction<OutputConfigurationSet>> patchInstructions) {
         try {
             OutputConfigurationSet currentOutputConfigurationSet = outputStore.read(id, version);
             OutputConfigurationSet patchedOutputConfigurationSet =
@@ -128,11 +128,11 @@ public class RestOutputStore implements IRestOutputStore {
     }
 
     private OutputConfigurationSet patchDocument(OutputConfigurationSet currentOutputConfigurationSet,
-                                                 PatchInstruction<OutputConfigurationSet>[] patchInstructions)
+                                                 List<PatchInstruction<OutputConfigurationSet>> patchInstructions)
             throws IResourceStore.ResourceStoreException {
 
-        for (PatchInstruction<OutputConfigurationSet> patchInstruction : patchInstructions) {
-            OutputConfigurationSet outputConfigurationSetPatch = patchInstruction.getDocument();
+        for (var patchInstruction : patchInstructions) {
+            var outputConfigurationSetPatch = patchInstruction.getDocument();
             switch (patchInstruction.getOperation()) {
                 case SET:
                     currentOutputConfigurationSet.getOutputSet().removeAll(outputConfigurationSetPatch.getOutputSet());

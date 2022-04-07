@@ -92,5 +92,5 @@ public interface IRestOutputStore extends IRestVersionInfo {
     @Consumes(MediaType.APPLICATION_JSON)
     Response patchOutputSet(@PathParam("id") String id,
                             @Parameter(name = "version", required = true, example = "1")
-                            @QueryParam("version") Integer version, PatchInstruction<OutputConfigurationSet>[] patchInstructions);
+                            @QueryParam("version") Integer version, List<PatchInstruction<OutputConfigurationSet>> patchInstructions);
 }
