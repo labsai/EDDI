@@ -161,6 +161,12 @@
             <version>13.0.8.Final</version>
         </dependency>
         <dependency>
+            <groupId>org.infinispan</groupId>
+            <artifactId>infinispan-component-annotations</artifactId>
+            <version>13.0.8.Final</version>
+            <scope>compile</scope>
+        </dependency>
+        <dependency>
             <groupId>org.apache.commons</groupId>
             <artifactId>commons-lang3</artifactId>
             <version>3.12.0</version>
