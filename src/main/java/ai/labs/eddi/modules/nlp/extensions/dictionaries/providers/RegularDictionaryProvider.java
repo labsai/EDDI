@@ -11,8 +11,10 @@ import ai.labs.eddi.modules.nlp.expressions.utilities.IExpressionProvider;
 import ai.labs.eddi.modules.nlp.extensions.dictionaries.IDictionary;
 import ai.labs.eddi.modules.nlp.extensions.dictionaries.RegularDictionary;
 import ai.labs.eddi.utils.RuntimeUtilities;
+import io.quarkus.runtime.Startup;
 import lombok.extern.slf4j.Slf4j;
 
+import javax.enterprise.context.ApplicationScoped;
 import javax.inject.Inject;
 import java.net.URI;
 import java.util.HashMap;
@@ -22,6 +24,8 @@ import java.util.Map;
  * @author ginccc
  */
 @Slf4j
+@Startup
+@ApplicationScoped
 public class RegularDictionaryProvider implements IDictionaryProvider {
     public static final String ID = "ai.labs.parser.dictionaries.regular";
 

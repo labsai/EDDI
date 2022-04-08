@@ -45,7 +45,9 @@ public class RestSemanticParser implements IRestSemanticParser {
     private final IRuntime runtime;
     private final IResourceClientLibrary resourceClientLibrary;
     private final Provider<ILifecycleTask> parserProvider;
-    private final ICache<URI, InputParserTask> cache;
+
+    // TODO: it seems those Task classes cannot be cached, if they are created by Quarkus
+    //private final ICache<URI, InputParserTask> cache;
 
     private final Logger log = Logger.getLogger(RestSemanticParser.class);
 
@@ -56,7 +58,7 @@ public class RestSemanticParser implements IRestSemanticParser {
                               @LifecycleExtensions Map<String, Provider<ILifecycleTask>> lifecycleTasks) {
         this.runtime = runtime;
         this.resourceClientLibrary = resourceClientLibrary;
-        cache = cacheFactory.getCache("parser");
+        //cache = cacheFactory.getCache("parser");
         parserProvider = lifecycleTasks.get("ai.labs.parser");
     }
 
@@ -87,12 +89,12 @@ public class RestSemanticParser implements IRestSemanticParser {
     }
 
     private InputParserTask getParser(URI resourceUri) throws Exception {
-        createParserIfAbsent(resourceUri);
-        return cache.get(resourceUri);
+        return createParserIfAbsent(resourceUri);
+        //return cache.get(resourceUri);
     }
 
-    private void createParserIfAbsent(URI resourceUri) throws Exception {
-        if (!cache.containsKey(resourceUri)) {
+    private InputParserTask createParserIfAbsent(URI resourceUri) throws Exception {
+        //if (!cache.containsKey(resourceUri)) {
             ILifecycleTask parserTask = parserProvider.get();
             ParserConfiguration parserConfiguration = fetchParserConfiguration(resourceUri);
             Map<String, Object> config = parserConfiguration.getConfig();
@@ -100,8 +102,9 @@ public class RestSemanticParser implements IRestSemanticParser {
             Map<String, Object> extensions = parserConfiguration.getExtensions();
             parserTask.setExtensions(extensions != null ? extensions : new HashMap<>());
             parserTask.init();
-            cache.put(resourceUri, (InputParserTask) parserTask);
-        }
+            return (InputParserTask) parserTask;
+            //cache.put(resourceUri, (InputParserTask) parserTask);
+        //}
     }
 
     private ParserConfiguration fetchParserConfiguration(URI resourceUri) throws ServiceException {

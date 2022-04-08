@@ -4,7 +4,9 @@ package ai.labs.eddi.modules.nlp.extensions.corrections.providers;
 import ai.labs.eddi.models.ExtensionDescriptor.ConfigValue;
 import ai.labs.eddi.modules.nlp.extensions.corrections.DamerauLevenshteinCorrection;
 import ai.labs.eddi.modules.nlp.extensions.corrections.ICorrection;
+import io.quarkus.runtime.Startup;
 
+import javax.enterprise.context.ApplicationScoped;
 import java.util.HashMap;
 import java.util.Map;
 
@@ -13,6 +15,8 @@ import static ai.labs.eddi.models.ExtensionDescriptor.FieldType.INT;
 /**
  * @author ginccc
  */
+@Startup
+@ApplicationScoped
 public class DamerauLevenshteinCorrectionProvider implements ICorrectionProvider {
     public static final String ID = "ai.labs.parser.corrections.levenshtein";
 

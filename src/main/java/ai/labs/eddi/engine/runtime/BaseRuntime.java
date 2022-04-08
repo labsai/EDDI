@@ -1,6 +1,7 @@
 package ai.labs.eddi.engine.runtime;
 
 import org.eclipse.microprofile.config.inject.ConfigProperty;
+import org.eclipse.microprofile.context.ManagedExecutor;
 import org.jboss.logging.Logger;
 
 import javax.enterprise.context.ApplicationScoped;
@@ -15,7 +16,8 @@ import java.util.concurrent.*;
 public class BaseRuntime implements IRuntime {
     private final String projectVersion;
 
-    private final ScheduledExecutorService executorService;
+    @Inject
+    ManagedExecutor executorService;
     private final String projectName;
 
     private boolean isInit = false;
@@ -24,10 +26,8 @@ public class BaseRuntime implements IRuntime {
 
     @Inject
     public BaseRuntime(@ConfigProperty(name = "systemRuntime.projectName") String projectName,
-                       @ConfigProperty(name = "systemRuntime.projectVersion") String projectVersion,
-                       ScheduledExecutorService scheduledExecutorService) {
+                       @ConfigProperty(name = "systemRuntime.projectVersion") String projectVersion) {
 
-        this.executorService = scheduledExecutorService;
 
         this.projectName = projectName;
         this.projectVersion = projectVersion;
@@ -75,11 +75,12 @@ public class BaseRuntime implements IRuntime {
         return executorService;
     }
 
+    // TODO: find another way to schedule
     @Override
     public <T> ScheduledFuture<T> submitScheduledCallable(final Callable<T> callable,
                                                           long delay, TimeUnit timeUnit,
                                                           final Map<Object, Object> threadBindings) {
-        return executorService.schedule(() -> {
+        /*return executorService.submit(() -> {
             try {
                 if (threadBindings != null) {
                     ThreadContext.setResources(threadBindings);
@@ -92,7 +93,8 @@ public class BaseRuntime implements IRuntime {
             } finally {
                 ThreadContext.remove();
             }
-        }, delay, timeUnit);
+        });*/
+        return null;
     }
 
     @Override
