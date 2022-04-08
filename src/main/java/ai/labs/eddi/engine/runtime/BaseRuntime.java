@@ -44,7 +44,6 @@ public class BaseRuntime implements IRuntime {
             }
 
             logVersion();
-            initExecutorServiceShutdownHook();
             isInit = true;
         } else {
             log.warn("SystemRuntime has already been initialized!");
@@ -120,31 +119,6 @@ public class BaseRuntime implements IRuntime {
                 return null;
             } finally {
                 ThreadContext.remove();
-            }
-        });
-    }
-
-    private void initExecutorServiceShutdownHook() {
-        Runtime.getRuntime().addShutdownHook(new Thread("ShutdownHook_ExecutorService") {
-            @Override
-            public void run() {
-                executorService.shutdown(); // Disable new tasks from being submitted
-                try {
-                    // Wait a while for existing tasks to terminate
-                    if (!executorService.awaitTermination(60, TimeUnit.SECONDS)) {
-                        executorService.shutdownNow(); // Cancel currently executing tasks
-                        // Wait a while for tasks to respond to being cancelled
-                        if (!executorService.awaitTermination(60, TimeUnit.SECONDS)) {
-                            log.error("Pool did not terminate");
-                        }
-                    }
-                } catch (InterruptedException e) {
-                    // (Re-)Cancel if current thread also interrupted
-                    executorService.shutdownNow();
-                    // Preserve interrupt status
-                    Thread.currentThread().interrupt();
-                    log.error(e.getLocalizedMessage(), e);
-                }
             }
         });
     }
