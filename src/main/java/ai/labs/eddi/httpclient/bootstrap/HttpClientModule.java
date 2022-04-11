@@ -3,19 +3,22 @@ package ai.labs.eddi.httpclient.bootstrap;
 import ai.labs.eddi.httpclient.impl.JettyHttpClient;
 import org.eclipse.jetty.client.HttpClient;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
+import org.eclipse.microprofile.context.ManagedExecutor;
 
 import javax.enterprise.context.ApplicationScoped;
+import javax.inject.Inject;
 import javax.ws.rs.Produces;
 import java.util.Arrays;
-import java.util.concurrent.ExecutorService;
 
 @ApplicationScoped
 public class HttpClientModule {
 
+    @Inject
+    ManagedExecutor executorService;
+
     @Produces
     @ApplicationScoped
-    public JettyHttpClient provideHttpClient(ExecutorService executorService,
-                                             @ConfigProperty(name = "httpClient.maxConnectionsQueued") Integer maxConnectionsQueued,
+    public JettyHttpClient provideHttpClient(@ConfigProperty(name = "httpClient.maxConnectionsQueued") Integer maxConnectionsQueued,
                                              @ConfigProperty(name = "httpClient.maxConnectionPerRoute") Integer maxConnectionPerRoute,
                                              @ConfigProperty(name = "httpClient.requestBufferSize") Integer requestBufferSize,
                                              @ConfigProperty(name = "httpClient.responseBufferSize") Integer responseBufferSize,
