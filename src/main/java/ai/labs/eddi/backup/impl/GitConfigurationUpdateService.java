@@ -1,40 +1,52 @@
 package ai.labs.eddi.backup.impl;
-/*
 
-import ai.labs.backupservice.IRestGitBackupService;
-import ai.labs.persistence.IResourceStore;
-import ai.labs.resources.rest.config.bots.IBotStore;
-import ai.labs.resources.rest.config.bots.model.BotConfiguration;
-import ai.labs.resources.rest.config.packages.IPackageStore;
-import ai.labs.resources.rest.config.packages.model.PackageConfiguration;
-import ai.labs.resources.rest.deployment.IDeploymentStore;
-import ai.labs.resources.rest.deployment.model.DeploymentInfo;
-import ai.labs.serialization.IJsonSerialization;
-import ai.labs.utilities.RestUtilities;
-import lombok.extern.slf4j.Slf4j;
-import org.aopalliance.intercept.MethodInterceptor;
-import org.aopalliance.intercept.MethodInvocation;
 
+import ai.labs.eddi.backup.IRestGitBackupService;
+import ai.labs.eddi.datastore.IResourceStore;
+import ai.labs.eddi.configs.bots.IBotStore;
+import ai.labs.eddi.configs.bots.model.BotConfiguration;
+import ai.labs.eddi.configs.packages.IPackageStore;
+import ai.labs.eddi.configs.packages.model.PackageConfiguration;
+import ai.labs.eddi.configs.deployment.IDeploymentStore;
+import ai.labs.eddi.configs.deployment.model.DeploymentInfo;
+import ai.labs.eddi.datastore.serialization.IJsonSerialization;
+import ai.labs.eddi.utils.RestUtilities;
+import io.quarkus.arc.Priority;
+import io.quarkus.runtime.Startup;
+import org.eclipse.microprofile.context.ManagedExecutor;
+import org.jboss.logging.Logger;
+
+import javax.enterprise.context.ApplicationScoped;
 import javax.inject.Inject;
 import javax.inject.Provider;
+import javax.interceptor.AroundInvoke;
+import javax.interceptor.Interceptor;
+import javax.interceptor.InvocationContext;
 import java.io.IOException;
 import java.net.URI;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
+
+@ApplicationScoped
+@Startup
+@Priority(2000)
+@IResourceStore.ConfigurationUpdate
+@Interceptor
+public class GitConfigurationUpdateService  {
+
+    final private Provider<IRestGitBackupService> backupService;
+    final private Provider<IBotStore> botStore;
+    final private Provider<IDeploymentStore> deploymentStore;
+    final private Provider<IPackageStore> packageStore;
+    final private Provider<IJsonSerialization> jsonSerialization;
 
 
-public class GitConfigurationUpdateService implements MethodInterceptor {
+    @Inject
+    ManagedExecutor managedExecutor;
 
-    private Provider<IRestGitBackupService> backupService;
-    private Provider<IBotStore> botStore;
-    private Provider<IDeploymentStore> deploymentStore;
-    private Provider<IPackageStore> packageStore;
-    private Provider<IJsonSerialization> jsonSerialization;
+    private static final Logger log = Logger.getLogger(RestExportService.class);
 
-    private ExecutorService gitSingleThreadedExecutor = Executors.newFixedThreadPool(1);
 
     @Inject
     public GitConfigurationUpdateService(Provider<IRestGitBackupService> backupService,
@@ -51,20 +63,19 @@ public class GitConfigurationUpdateService implements MethodInterceptor {
     }
 
 
-    @Override
-    public Object invoke(MethodInvocation methodInvocation) throws Throwable {
-        Object result = methodInvocation.proceed();
-        gitSingleThreadedExecutor.execute(() -> {
+    @AroundInvoke
+    public Object invoke(InvocationContext ctx) throws Throwable {
+        managedExecutor.execute(() -> {
             try {
-                if (backupService.get().isGitAutomatic() && (methodInvocation.getMethod().getName().startsWith("update") || methodInvocation.getMethod().getName().startsWith("delete"))) {
-                    performAutomaticUpdate((String) methodInvocation.getArguments()[0]);
+                if (backupService.get().isGitAutomatic() && (ctx.getMethod().getName().startsWith("update") || ctx.getMethod().getName().startsWith("delete"))) {
+                    performAutomaticUpdate((String) ctx.getParameters()[0]);
                 }
             } catch (Throwable th) {
                 log.error("there was an error on automatic git -> everything is still stored, but check git settings");
             }
         });
 
-        return result;
+        return ctx.proceed();
     }
 
     private void performAutomaticUpdate(String documentId) throws IResourceStore.ResourceStoreException, IResourceStore.ResourceNotFoundException, IOException {
@@ -109,4 +120,3 @@ public class GitConfigurationUpdateService implements MethodInterceptor {
     }
 
 }
-*/

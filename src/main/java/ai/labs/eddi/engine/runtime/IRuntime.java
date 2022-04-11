@@ -15,7 +15,7 @@ public interface IRuntime {
 
     void logVersion();
 
-    <T> ScheduledFuture<T> submitScheduledCallable(Callable<T> callable,
+    <T> Future<T> submitScheduledCallable(Callable<T> callable,
                                                    long delay, TimeUnit timeUnit,
                                                    Map<Object, Object> threadBindings);
 

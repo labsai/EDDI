@@ -1,5 +1,6 @@
 package ai.labs.eddi.datastore;
 
+import javax.interceptor.InterceptorBinding;
 import java.lang.annotation.ElementType;
 import java.lang.annotation.Retention;
 import java.lang.annotation.RetentionPolicy;
@@ -12,8 +13,9 @@ public interface IResourceStore<T> {
 
     T readIncludingDeleted(String id, Integer version) throws ResourceNotFoundException, ResourceStoreException;
 
+    @InterceptorBinding
     @Retention(RetentionPolicy.RUNTIME)
-    @Target(ElementType.METHOD)
+    @Target({ElementType.TYPE, ElementType.METHOD})
     @interface ConfigurationUpdate {
     }
 
