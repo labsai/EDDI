@@ -27,7 +27,7 @@ public class OutputGenerationTest {
 
     @BeforeEach
     public void setUp() {
-        outputGeneration = new OutputGeneration();
+        outputGeneration = new OutputGeneration("en");
     }
 
     @Test

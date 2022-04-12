@@ -54,7 +54,7 @@ public class OutputGenerationTaskTest {
         dataFactory = mock(IDataFactory.class);
         outputGeneration = mock(IOutputGeneration.class);
         ObjectMapper objectMapper = new ObjectMapper();
-        outputGenerationTask = new OutputGenerationTask(resourceClientLibrary, dataFactory, outputGeneration, objectMapper);
+        outputGenerationTask = new OutputGenerationTask(resourceClientLibrary, dataFactory, objectMapper);
     }
 
     @Test
@@ -90,7 +90,7 @@ public class OutputGenerationTaskTest {
                 thenAnswer(invocation -> new ConversationProperties(conversationMemory));
 
         //test
-        outputGenerationTask.executeTask(conversationMemory);
+        outputGenerationTask.executeTask(conversationMemory, outputGeneration);
 
         //assert
         verify(conversationMemory, times(1)).getCurrentStep();
@@ -109,7 +109,7 @@ public class OutputGenerationTaskTest {
                 thenAnswer(invocation -> createOutputConfigurationSet());
 
         //test
-        outputGenerationTask.configure(configuration);
+        outputGenerationTask.configure(configuration, null);
 
         //assert
         verify(outputGeneration, times(3)).addOutputEntry(any(OutputEntry.class));

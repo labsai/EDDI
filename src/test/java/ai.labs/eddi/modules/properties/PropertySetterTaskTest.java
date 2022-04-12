@@ -1,6 +1,6 @@
 package ai.labs.eddi.modules.properties;
 
-import ai.labs.eddi.engine.lifecycle.LifecycleException;
+import ai.labs.eddi.engine.lifecycle.exceptions.LifecycleException;
 import ai.labs.eddi.engine.memory.IConversationMemory;
 import ai.labs.eddi.engine.memory.IData;
 import ai.labs.eddi.engine.memory.IDataFactory;
@@ -74,8 +74,7 @@ public class PropertySetterTaskTest {
         IMemoryItemConverter memoryItemConverter = mock(IMemoryItemConverter.class);
         ITemplatingEngine templateEngine = mock(ITemplatingEngine.class);
         IResourceClientLibrary resourceClientLibrary = mock(IResourceClientLibrary.class);
-        propertySetterTask = new PropertySetterTask(propertySetter,
-                expressionProvider, memoryItemConverter, templateEngine,
+        propertySetterTask = new PropertySetterTask(expressionProvider, memoryItemConverter, templateEngine,
                 dataFactory, resourceClientLibrary, new ObjectMapper());
     }
 
@@ -118,7 +117,7 @@ public class PropertySetterTaskTest {
         when(conversationMemory.getConversationProperties()).thenAnswer(invocation -> new ConversationProperties(conversationMemory));
 
         //test
-        propertySetterTask.executeTask(conversationMemory);
+        propertySetterTask.executeTask(conversationMemory, propertySetter);
 
         //assert
         verify(currentStep, times(1)).getLatestData(KEY_EXPRESSIONS_PARSED);

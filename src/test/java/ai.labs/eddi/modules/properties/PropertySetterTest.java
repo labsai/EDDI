@@ -13,6 +13,7 @@ import org.junit.jupiter.api.Test;
 
 import java.util.Arrays;
 import java.util.Collections;
+import java.util.LinkedList;
 import java.util.List;
 
 import static ai.labs.eddi.models.Property.Scope.conversation;
@@ -42,7 +43,7 @@ public class PropertySetterTest {
                                 new Expression("someMeaning",
                                         new Value("someValue")))
                 ));
-        PropertySetter propertySetter = new PropertySetter();
+        PropertySetter propertySetter = new PropertySetter(new LinkedList<>());
         Property expectedPropertyEntry = new Property("someMeaning", "someValue", conversation);
 
         //test
@@ -67,7 +68,7 @@ public class PropertySetterTest {
                                 new Expression("someMeaning",
                                         new Value("someValue"), new Value("someOtherValue")))
                 ));
-        PropertySetter propertySetter = new PropertySetter();
+        PropertySetter propertySetter = new PropertySetter(new LinkedList<>());
         List<Property> expectedPropertyEntries = Arrays.asList(
                 new Property(String.join(".", "someMeaning", "someSubMeaning"), "someValue", conversation),
                 new Property("someMeaning", "someValue", conversation));

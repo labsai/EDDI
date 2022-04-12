@@ -1,5 +1,8 @@
 package ai.labs.eddi.engine.lifecycle;
 
+import ai.labs.eddi.datastore.model.ResourceId;
+import ai.labs.eddi.engine.lifecycle.internal.ComponentCache;
+import ai.labs.eddi.engine.lifecycle.internal.LifecycleManager;
 import ai.labs.eddi.engine.memory.IConversationMemory;
 import ai.labs.eddi.engine.memory.IConversationMemory.IWritableConversationStep;
 import org.junit.jupiter.api.Assertions;
@@ -18,7 +21,7 @@ public class LifecycleManagerTest {
 
     @BeforeEach
     public void setUp() {
-        lifecycleManager = new LifecycleManager();
+        lifecycleManager = new LifecycleManager(new ComponentCache(), new ResourceId("id", 1));
         memory = mock(IConversationMemory.class);
         IWritableConversationStep currentConversationStep = mock(IWritableConversationStep.class);
         Mockito.when(memory.getCurrentStep()).thenAnswer(invocation -> currentConversationStep);
@@ -34,7 +37,7 @@ public class LifecycleManagerTest {
         lifecycleManager.executeLifecycle(memory, null);
 
         //assert
-        Mockito.verify(lifecycleTask, Mockito.atMost(1)).executeTask(memory);
+        Mockito.verify(lifecycleTask, Mockito.atMost(1)).executeTask(memory, null);
     }
 
     @Test
