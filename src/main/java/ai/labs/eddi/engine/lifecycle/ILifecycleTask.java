@@ -1,10 +1,12 @@
 package ai.labs.eddi.engine.lifecycle;
 
+import ai.labs.eddi.engine.lifecycle.exceptions.IllegalExtensionConfigurationException;
+import ai.labs.eddi.engine.lifecycle.exceptions.LifecycleException;
+import ai.labs.eddi.engine.lifecycle.exceptions.PackageConfigurationException;
+import ai.labs.eddi.engine.lifecycle.exceptions.UnrecognizedExtensionException;
 import ai.labs.eddi.engine.memory.IConversationMemory;
 import ai.labs.eddi.models.ExtensionDescriptor;
 
-import java.util.Collections;
-import java.util.List;
 import java.util.Map;
 
 /**
@@ -26,45 +28,15 @@ public interface ILifecycleTask {
      */
     String getType();
 
-    /**
-     * @return the component (main algorithm) which this task is working with
-     */
-    Object getComponent();
+    void executeTask(IConversationMemory memory, Object component) throws LifecycleException;
 
-    /**
-     * Returns a List representing all Components of Tasks
-     * which this task requires on to be part of the lifecycle.
-     * This task will call getComponent() of all Tasks in this List
-     *
-     * @return a List of Task IDs
-     */
-    default List<String> getComponentDependencies() {
-        return Collections.emptyList();
-    }
+    default Object configure(Map<String, Object> configuration, Map<String, Object> extensions)
+            throws PackageConfigurationException,
+            IllegalExtensionConfigurationException,
+            UnrecognizedExtensionException {
 
-    /**
-     * Returns a List representing all Task which have to be executed in lifecycle
-     * BEFORE this Task will be executed!
-     * Reason: This task depends on the output of those Tasks.
-     *
-     * @return a List of Task IDs
-     */
-    default List<String> getOutputDependencies() {
-        return Collections.emptyList();
-    }
-
-    default void init() {
         //to be overridden if needed
-    }
-
-    void executeTask(IConversationMemory memory) throws LifecycleException;
-
-    default void configure(Map<String, Object> configuration) throws PackageConfigurationException {
-        //to be overridden if needed
-    }
-
-    default void setExtensions(Map<String, Object> extensions) throws UnrecognizedExtensionException, IllegalExtensionConfigurationException {
-        //to be overridden if needed
+        return null;
     }
 
     default ExtensionDescriptor getExtensionDescriptor() {

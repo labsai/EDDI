@@ -1,19 +1,33 @@
-package ai.labs.eddi.engine.lifecycle;
+package ai.labs.eddi.engine.lifecycle.internal;
 
+import ai.labs.eddi.datastore.IResourceStore;
+import ai.labs.eddi.engine.lifecycle.IComponentCache;
+import ai.labs.eddi.engine.lifecycle.IConversation;
+import ai.labs.eddi.engine.lifecycle.ILifecycleManager;
+import ai.labs.eddi.engine.lifecycle.ILifecycleTask;
+import ai.labs.eddi.engine.lifecycle.exceptions.ConversationStopException;
+import ai.labs.eddi.engine.lifecycle.exceptions.LifecycleException;
 import ai.labs.eddi.engine.memory.IConversationMemory;
 import ai.labs.eddi.engine.memory.IData;
 
 import java.util.LinkedList;
 import java.util.List;
 
+import static ai.labs.eddi.utils.LifecycleUtilities.createComponentKey;
 import static ai.labs.eddi.utils.RuntimeUtilities.checkNotNull;
 import static ai.labs.eddi.utils.RuntimeUtilities.isNullOrEmpty;
 
 public class LifecycleManager implements ILifecycleManager {
     private static final String KEY_ACTIONS = "actions";
-    private final List<ILifecycleTask> lifecycleTasks;
 
-    public LifecycleManager() {
+    private final List<ILifecycleTask> lifecycleTasks;
+    private final IComponentCache componentCache;
+    private final IResourceStore.IResourceId packageId;
+
+    public LifecycleManager(IComponentCache componentCache, IResourceStore.IResourceId packageId) {
+        this.componentCache = componentCache;
+        this.packageId = packageId;
+
         lifecycleTasks = new LinkedList<>();
     }
 
@@ -29,13 +43,18 @@ public class LifecycleManager implements ILifecycleManager {
             lifecycleTasks = getLifecycleTasks(lifecycleTaskTypes);
         }
 
-        for (ILifecycleTask task : lifecycleTasks) {
+        for (int index = 0; index < lifecycleTasks.size(); index++) {
+            ILifecycleTask task = lifecycleTasks.get(index);
             if (Thread.currentThread().isInterrupted()) {
                 throw new LifecycleException.LifecycleInterruptedException("Execution was interrupted!");
             }
 
             try {
-                task.executeTask(conversationMemory);
+                var components = componentCache.getComponent(task.getId());
+                var componentKey = createComponentKey(packageId.getId(), packageId.getVersion(), index);
+
+                task.executeTask(conversationMemory, components.get(componentKey));
+
                 checkIfStopConversationAction(conversationMemory);
             } catch (LifecycleException e) {
                 throw new LifecycleException("Error while executing lifecycle!", e);
