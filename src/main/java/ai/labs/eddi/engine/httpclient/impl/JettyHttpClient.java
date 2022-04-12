@@ -1,4 +1,4 @@
-package ai.labs.eddi.httpclient.impl;
+package ai.labs.eddi.engine.httpclient.impl;
 
 import lombok.AllArgsConstructor;
 import lombok.Getter;

@@ -1,4 +1,4 @@
-package ai.labs.eddi.engine.lifecycle;
+package ai.labs.eddi.engine.lifecycle.exceptions;
 
 /**
  * @author ginccc
@@ -14,7 +14,7 @@ public class LifecycleException extends Exception {
 
     public static class LifecycleInterruptedException extends LifecycleException {
 
-        LifecycleInterruptedException(String message) {
+        public LifecycleInterruptedException(String message) {
             super(message);
         }
 

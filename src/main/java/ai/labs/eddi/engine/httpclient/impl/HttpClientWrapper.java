@@ -1,9 +1,9 @@
-package ai.labs.eddi.httpclient.impl;
+package ai.labs.eddi.engine.httpclient.impl;
 
-import ai.labs.eddi.httpclient.ICompleteListener;
-import ai.labs.eddi.httpclient.IHttpClient;
-import ai.labs.eddi.httpclient.IRequest;
-import ai.labs.eddi.httpclient.IResponse;
+import ai.labs.eddi.engine.httpclient.ICompleteListener;
+import ai.labs.eddi.engine.httpclient.IHttpClient;
+import ai.labs.eddi.engine.httpclient.IRequest;
+import ai.labs.eddi.engine.httpclient.IResponse;
 import lombok.Getter;
 import lombok.Setter;
 import org.eclipse.jetty.client.HttpClient;

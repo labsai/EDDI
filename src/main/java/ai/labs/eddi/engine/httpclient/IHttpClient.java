@@ -1,4 +1,4 @@
-package ai.labs.eddi.httpclient;
+package ai.labs.eddi.engine.httpclient;
 
 import java.net.CookieStore;
 import java.net.URI;

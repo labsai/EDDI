@@ -1,6 +1,6 @@
-package ai.labs.eddi.httpclient.bootstrap;
+package ai.labs.eddi.engine.httpclient.bootstrap;
 
-import ai.labs.eddi.httpclient.impl.JettyHttpClient;
+import ai.labs.eddi.engine.httpclient.impl.JettyHttpClient;
 import org.eclipse.jetty.client.HttpClient;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.eclipse.microprofile.context.ManagedExecutor;

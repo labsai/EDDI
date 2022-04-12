@@ -8,7 +8,7 @@ import ai.labs.eddi.engine.IRestBotEngine;
 import ai.labs.eddi.engine.caching.ICache;
 import ai.labs.eddi.engine.caching.ICacheFactory;
 import ai.labs.eddi.engine.lifecycle.IConversation;
-import ai.labs.eddi.engine.lifecycle.LifecycleException;
+import ai.labs.eddi.engine.lifecycle.exceptions.LifecycleException;
 import ai.labs.eddi.engine.memory.IConversationMemory;
 import ai.labs.eddi.engine.memory.IConversationMemoryStore;
 import ai.labs.eddi.engine.memory.IPropertiesHandler;

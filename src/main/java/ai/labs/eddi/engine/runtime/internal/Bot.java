@@ -1,7 +1,7 @@
 package ai.labs.eddi.engine.runtime.internal;
 
 import ai.labs.eddi.engine.lifecycle.IConversation;
-import ai.labs.eddi.engine.lifecycle.LifecycleException;
+import ai.labs.eddi.engine.lifecycle.exceptions.LifecycleException;
 import ai.labs.eddi.engine.memory.ConversationMemory;
 import ai.labs.eddi.engine.memory.IConversationMemory;
 import ai.labs.eddi.engine.memory.IPropertiesHandler;

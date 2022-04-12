@@ -129,17 +129,17 @@ public class ResourceUtilities {
 
     }
 
-    public static DocumentDescriptor createDocumentDescriptor(URI resource, URI author) {
+    public static DocumentDescriptor createDocumentDescriptor(URI resource/*, URI author*/) {
         Date current = new Date(System.currentTimeMillis());
 
         DocumentDescriptor descriptor = new DocumentDescriptor();
         descriptor.setResource(resource);
         descriptor.setName("");
         descriptor.setDescription("");
-        descriptor.setCreatedBy(author);
         descriptor.setCreatedOn(current);
         descriptor.setLastModifiedOn(current);
-        descriptor.setLastModifiedBy(author);
+        /*descriptor.setCreatedBy(author);
+        descriptor.setLastModifiedBy(author);*/
 
         return descriptor;
     }

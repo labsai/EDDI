@@ -1,5 +1,6 @@
 package ai.labs.eddi.engine.lifecycle;
 
+import ai.labs.eddi.engine.lifecycle.exceptions.LifecycleException;
 import ai.labs.eddi.engine.memory.IConversationMemory;
 import ai.labs.eddi.models.Context;
 

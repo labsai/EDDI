@@ -1,4 +1,4 @@
-package ai.labs.eddi.engine.lifecycle;
+package ai.labs.eddi.engine.lifecycle.exceptions;
 
 /**
  * @author ginccc

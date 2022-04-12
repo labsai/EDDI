@@ -1,4 +1,4 @@
-package ai.labs.eddi.engine.lifecycle;
+package ai.labs.eddi.engine.lifecycle.exceptions;
 
 public class ConversationStopException extends Exception {
     public ConversationStopException() {

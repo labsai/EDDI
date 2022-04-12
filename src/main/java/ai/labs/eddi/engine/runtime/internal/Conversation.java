@@ -2,10 +2,10 @@ package ai.labs.eddi.engine.runtime.internal;
 
 import ai.labs.eddi.configs.properties.model.Properties;
 import ai.labs.eddi.datastore.IResourceStore;
-import ai.labs.eddi.engine.lifecycle.ConversationStopException;
 import ai.labs.eddi.engine.lifecycle.IConversation;
 import ai.labs.eddi.engine.lifecycle.ILifecycleManager;
-import ai.labs.eddi.engine.lifecycle.LifecycleException;
+import ai.labs.eddi.engine.lifecycle.exceptions.ConversationStopException;
+import ai.labs.eddi.engine.lifecycle.exceptions.LifecycleException;
 import ai.labs.eddi.engine.memory.*;
 import ai.labs.eddi.engine.memory.IConversationMemory.IConversationProperties;
 import ai.labs.eddi.engine.memory.model.Data;
