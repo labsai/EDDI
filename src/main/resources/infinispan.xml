@@ -1,4 +1,4 @@
-<infinispan>
+<infinispan xmlns="urn:infinispan:config:13.0">
     <cache-container default-cache="local" statistics="true">
         <metrics gauges="true" histograms="true"/>
 
@@ -13,7 +13,6 @@
             <memory>
                 <object size="10000"/>
             </memory>
-            <expiration interval="10000" max-idle="3600000"/>
         </local-cache-configuration>
 
         <!-- cache definitions -->
