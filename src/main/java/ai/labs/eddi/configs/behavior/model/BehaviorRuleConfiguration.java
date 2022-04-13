@@ -1,6 +1,5 @@
 package ai.labs.eddi.configs.behavior.model;
 
-import com.fasterxml.jackson.annotation.JsonAlias;
 import lombok.EqualsAndHashCode;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
@@ -20,6 +19,5 @@ import java.util.List;
 public class BehaviorRuleConfiguration {
     private String name = "";
     private List<String> actions = new LinkedList<>();
-    @JsonAlias("children")
     private List<BehaviorRuleConditionConfiguration> conditions = new LinkedList<>();
 }

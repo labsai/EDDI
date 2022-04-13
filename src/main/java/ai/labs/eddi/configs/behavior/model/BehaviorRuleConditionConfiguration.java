@@ -1,7 +1,6 @@
 package ai.labs.eddi.configs.behavior.model;
 
 
-import com.fasterxml.jackson.annotation.JsonAlias;
 import com.fasterxml.jackson.annotation.JsonInclude;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
@@ -19,8 +18,6 @@ import java.util.Map;
 @Setter
 public class BehaviorRuleConditionConfiguration {
     private String type;
-    @JsonAlias("values")
     private Map<String, String> configs;
-    @JsonAlias("children")
     private List<BehaviorRuleConditionConfiguration> conditions;
 }
