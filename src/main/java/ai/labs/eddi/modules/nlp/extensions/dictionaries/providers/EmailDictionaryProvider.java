@@ -7,6 +7,7 @@ import io.quarkus.runtime.Startup;
 
 import javax.enterprise.context.ApplicationScoped;
 import javax.inject.Inject;
+import java.util.Map;
 
 /**
  * @author ginccc
@@ -34,7 +35,7 @@ public class EmailDictionaryProvider implements IDictionaryProvider {
     }
 
     @Override
-    public IDictionary provide() {
+    public IDictionary provide(Map<String, Object> config) {
         return new EmailDictionary(expressionProvider);
     }
 }

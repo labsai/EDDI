@@ -1,6 +1,6 @@
 package ai.labs.eddi.modules.nlp.extensions;
 
-import ai.labs.eddi.engine.lifecycle.IllegalExtensionConfigurationException;
+import ai.labs.eddi.engine.lifecycle.exceptions.IllegalExtensionConfigurationException;
 
 import java.util.Collections;
 import java.util.Map;
@@ -21,11 +21,11 @@ public interface IParserExtensionProvider<T> {
         return lookupIfKnownObj != null && Boolean.parseBoolean((String) lookupIfKnownObj);
     }
 
-    default void setConfig(Map<String, Object> config) throws IllegalExtensionConfigurationException {
+    default T provide(Map<String, Object> config) throws IllegalExtensionConfigurationException {
         //to be overridden if needed
-    }
 
-    T provide();
+        return null;
+    }
 
     default Map<String, ConfigValue> getConfigs() {
         return Collections.emptyMap();

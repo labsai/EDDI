@@ -30,7 +30,7 @@ public class PunctuationNormalizerProvider implements INormalizerProvider {
     }
 
     @Override
-    public void setConfig(Map<String, Object> config) {
+    public INormalizer provide(Map<String, Object> config) {
         if (config.containsKey(KEY_REMOVE_PUNCTUATION)) {
             removePunctuation = Boolean.parseBoolean(config.get(KEY_REMOVE_PUNCTUATION).toString());
         }
@@ -38,10 +38,7 @@ public class PunctuationNormalizerProvider implements INormalizerProvider {
         if (config.containsKey(KEY_PUNCTUATION_REGEX_PATTERN)) {
             punctuationRegexPattern = config.get(KEY_PUNCTUATION_REGEX_PATTERN).toString();
         }
-    }
 
-    @Override
-    public INormalizer provide() {
         return new PunctuationNormalizer(toRegexPattern(punctuationRegexPattern), removePunctuation);
     }
 

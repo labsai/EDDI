@@ -1,8 +1,9 @@
 package ai.labs.eddi.modules.nlp;
 
 import ai.labs.eddi.engine.lifecycle.ILifecycleTask;
-import ai.labs.eddi.engine.lifecycle.IllegalExtensionConfigurationException;
-import ai.labs.eddi.engine.lifecycle.UnrecognizedExtensionException;
+import ai.labs.eddi.engine.lifecycle.exceptions.IllegalExtensionConfigurationException;
+import ai.labs.eddi.engine.lifecycle.exceptions.PackageConfigurationException;
+import ai.labs.eddi.engine.lifecycle.exceptions.UnrecognizedExtensionException;
 import ai.labs.eddi.engine.memory.IConversationMemory;
 import ai.labs.eddi.engine.memory.IData;
 import ai.labs.eddi.engine.memory.model.ConversationOutput;
@@ -28,7 +29,7 @@ import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.jboss.logging.Logger;
 
-import javax.enterprise.context.RequestScoped;
+import javax.enterprise.context.ApplicationScoped;
 import javax.inject.Inject;
 import javax.inject.Provider;
 import java.net.URI;
@@ -47,7 +48,7 @@ import static ai.labs.eddi.utils.StringUtilities.joinStrings;
  * @author ginccc
  */
 
-@RequestScoped
+@ApplicationScoped
 public class InputParserTask implements ILifecycleTask {
     public static final String ID = "ai.labs.parser";
     private static final String CONFIG_APPEND_EXPRESSIONS = "appendExpressions";
@@ -57,11 +58,6 @@ public class InputParserTask implements ILifecycleTask {
     private static final String EXTENSION_NAME_DICTIONARIES = "dictionaries";
     private static final String EXTENSION_NAME_CORRECTIONS = "corrections";
     private final ObjectMapper objectMapper;
-
-    private IInputParser sentenceParser;
-    private List<INormalizer> normalizers;
-    private List<IDictionary> dictionaries;
-    private List<ICorrection> corrections;
 
     private static final String KEY_INPUT = "input";
     private static final String KEY_INPUT_NORMALIZED = KEY_INPUT + ":normalized";
@@ -96,7 +92,7 @@ public class InputParserTask implements ILifecycleTask {
 
     @Override
     public String getId() {
-        return sentenceParser.getClass().toString();
+        return "ai.labs.parser";
     }
 
     @Override
@@ -105,17 +101,9 @@ public class InputParserTask implements ILifecycleTask {
     }
 
     @Override
-    public Object getComponent() {
-        return sentenceParser;
-    }
+    public void execute(IConversationMemory memory, Object component) {
+        final IInputParser parser = (IInputParser) component;
 
-    @Override
-    public void init() {
-        this.sentenceParser = new InputParser(normalizers, dictionaries, corrections);
-    }
-
-    @Override
-    public void executeTask(IConversationMemory memory) {
         //parse user input to meanings
         final IData<String> inputData = memory.getCurrentStep().getLatestData(KEY_INPUT);
         if (inputData == null) {
@@ -128,9 +116,9 @@ public class InputParserTask implements ILifecycleTask {
         List<RawSolution> parsedSolutions;
         try {
             String userInput = inputData.getResult();
-            String normalizedUserInput = sentenceParser.normalize(userInput, userLanguage);
+            String normalizedUserInput = parser.normalize(userInput, userLanguage);
             storeNormalizedResultInMemory(memory.getCurrentStep(), normalizedUserInput);
-            parsedSolutions = sentenceParser.parse(normalizedUserInput, userLanguage, temporaryDictionaries);
+            parsedSolutions = parser.parse(normalizedUserInput, userLanguage, temporaryDictionaries);
         } catch (InterruptedException e) {
             log.warn(e.getLocalizedMessage(), e);
             return;
@@ -207,7 +195,11 @@ public class InputParserTask implements ILifecycleTask {
     }
 
     @Override
-    public void configure(Map<String, Object> configuration) {
+    public Object configure(Map<String, Object> configuration, Map<String, Object> extensions)
+            throws PackageConfigurationException,
+            IllegalExtensionConfigurationException,
+            UnrecognizedExtensionException {
+
         Object appendExpressions = configuration.get(CONFIG_APPEND_EXPRESSIONS);
         if (!isNullOrEmpty(appendExpressions)) {
             this.appendExpressions = Boolean.parseBoolean(appendExpressions.toString());
@@ -222,30 +214,31 @@ public class InputParserTask implements ILifecycleTask {
         if (!isNullOrEmpty(includeUnknown)) {
             this.includeUnknown = Boolean.parseBoolean(includeUnknown.toString());
         }
+
+        List<INormalizer> normalizers = new LinkedList<>();
+        List<IDictionary> dictionaries = new LinkedList<>();
+        List<ICorrection> corrections = new LinkedList<>();
+
+        if (!isNullOrEmpty(extensions)) {
+            var normalizerList = convertObjectToListOfMaps(extensions.get(EXTENSION_NAME_NORMALIZER));
+            if (normalizerList != null) {
+                normalizers = convertNormalizers(normalizerList);
+            }
+
+            var dictionariesList = convertObjectToListOfMaps(extensions.get(EXTENSION_NAME_DICTIONARIES));
+            if (dictionariesList != null) {
+                dictionaries = convertDictionaries(dictionariesList);
+            }
+
+            var correctionsList = convertObjectToListOfMaps(extensions.get(EXTENSION_NAME_CORRECTIONS));
+            if (correctionsList != null) {
+                corrections = convertCorrections(correctionsList, dictionaries);
+            }
+        }
+
+        return new InputParser(normalizers, dictionaries, corrections);
     }
 
-    @Override
-    public void setExtensions(Map<String, Object> extensions) throws
-            UnrecognizedExtensionException, IllegalExtensionConfigurationException {
-
-        var normalizerList = convertObjectToListOfMaps(extensions.get(EXTENSION_NAME_NORMALIZER));
-        normalizers = new LinkedList<>();
-        if (normalizerList != null) {
-            convertNormalizers(normalizerList);
-        }
-
-        var dictionariesList = convertObjectToListOfMaps(extensions.get(EXTENSION_NAME_DICTIONARIES));
-        dictionaries = new LinkedList<>();
-        if (dictionariesList != null) {
-            convertDictionaries(dictionariesList);
-        }
-
-        corrections = new LinkedList<>();
-        var correctionsList = convertObjectToListOfMaps(extensions.get(EXTENSION_NAME_CORRECTIONS));
-        if (correctionsList != null) {
-            convertCorrections(correctionsList);
-        }
-    }
 
     private List<Map<String, Object>> convertObjectToListOfMaps(Object extension) {
         return objectMapper.convertValue(extension, new TypeReference<>() {});
@@ -292,58 +285,71 @@ public class InputParserTask implements ILifecycleTask {
         return extensionDescriptor;
     }
 
-    private void convertNormalizers(List<Map<String, Object>> normalizerList)
+    private List<INormalizer> convertNormalizers(List<Map<String, Object>> normalizerList)
             throws UnrecognizedExtensionException, IllegalExtensionConfigurationException {
+        List<INormalizer> normalizers = new LinkedList<>();
         for (Map<String, Object> normalizerMap : normalizerList) {
             String normalizerType = getResourceType(normalizerMap);
             Provider<INormalizerProvider> normalizerProvider = normalizerProviders.get(normalizerType);
             if (normalizerProvider != null) {
                 INormalizerProvider normalizer = normalizerProvider.get();
                 Object configObject = normalizerMap.get(KEY_CONFIG);
-                if (configObject instanceof Map) {
-                    normalizer.setConfig(convertObjectToMap(configObject));
-                }
-                normalizers.add(normalizer.provide());
+                var providedNormalizer =
+                        configObject instanceof Map ?
+                                normalizer.provide(convertObjectToMap(configObject)) :
+                                normalizer.provide(Collections.emptyMap());
+
+                normalizers.add(providedNormalizer);
             } else {
                 String message = "Normalizer type could not be recognized by Parser [type=%s]";
                 message = String.format(message, normalizerType);
                 throw new UnrecognizedExtensionException(message);
             }
         }
+
+        return normalizers;
     }
 
-    private void convertDictionaries(List<Map<String, Object>> dictionariesList)
+    private List<IDictionary> convertDictionaries(List<Map<String, Object>> dictionariesList)
             throws UnrecognizedExtensionException, IllegalExtensionConfigurationException {
+        List<IDictionary> dictionaries = new LinkedList<>();
         for (Map<String, Object> dictionaryMap : dictionariesList) {
             String dictionaryType = getResourceType(dictionaryMap);
             Provider<IDictionaryProvider> dictionaryProvider = dictionaryProviders.get(dictionaryType);
             if (dictionaryProvider != null) {
                 IDictionaryProvider dictionary = dictionaryProvider.get();
                 Object configObject = dictionaryMap.get(KEY_CONFIG);
-                if (configObject instanceof Map) {
-                    dictionary.setConfig(convertObjectToMap(configObject));
-                }
-                dictionaries.add(dictionary.provide());
+                var providedDictionary =
+                        configObject instanceof Map ?
+                                dictionary.provide(convertObjectToMap(configObject)) :
+                                dictionary.provide(Collections.emptyMap());
+
+                dictionaries.add(providedDictionary);
             } else {
                 String message = "Dictionary type could not be recognized by Parser [type=%s]";
                 message = String.format(message, dictionaryType);
                 throw new UnrecognizedExtensionException(message);
             }
         }
+
+        return dictionaries;
     }
 
-    private void convertCorrections(List<Map<String, Object>> correctionList)
+    private List<ICorrection> convertCorrections(List<Map<String, Object>> correctionList, List<IDictionary> dictionaries)
             throws UnrecognizedExtensionException, IllegalExtensionConfigurationException {
+
+        List<ICorrection> corrections = new LinkedList<>();
         for (Map<String, Object> correctionMap : correctionList) {
             String correctionType = getResourceType(correctionMap);
             Provider<ICorrectionProvider> correctionProviderCreator = correctionProviders.get(correctionType);
             if (correctionProviderCreator != null) {
                 ICorrectionProvider correctionProvider = correctionProviderCreator.get();
                 Object configObject = correctionMap.get(KEY_CONFIG);
-                if (configObject instanceof Map) {
-                    correctionProvider.setConfig(convertObjectToMap(configObject));
-                }
-                ICorrection correction = correctionProvider.provide();
+                var correction =
+                        configObject instanceof Map ?
+                                correctionProvider.provide(convertObjectToMap(configObject)) :
+                                correctionProvider.provide(Collections.emptyMap());
+
                 correction.init(dictionaries);
                 corrections.add(correction);
             } else {
@@ -352,6 +358,8 @@ public class InputParserTask implements ILifecycleTask {
                 throw new UnrecognizedExtensionException(message);
             }
         }
+
+        return corrections;
     }
 
     private Map<String, Object> convertObjectToMap(Object configObject) {

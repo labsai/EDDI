@@ -5,6 +5,7 @@ import ai.labs.eddi.modules.nlp.extensions.corrections.MergedTermsCorrection;
 import io.quarkus.runtime.Startup;
 
 import javax.enterprise.context.ApplicationScoped;
+import java.util.Map;
 
 /**
  * @author ginccc
@@ -25,7 +26,7 @@ public class MergedTermsCorrectionProvider implements ICorrectionProvider {
     }
 
     @Override
-    public ICorrection provide() {
+    public ICorrection provide(Map<String, Object> config) {
         return new MergedTermsCorrection();
     }
 }

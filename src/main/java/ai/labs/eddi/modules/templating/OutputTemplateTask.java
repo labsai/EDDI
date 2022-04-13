@@ -13,7 +13,7 @@ import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.jboss.logging.Logger;
 
-import javax.enterprise.context.RequestScoped;
+import javax.enterprise.context.ApplicationScoped;
 import javax.inject.Inject;
 import java.util.*;
 import java.util.stream.Collectors;
@@ -23,7 +23,7 @@ import static ai.labs.eddi.utils.StringUtilities.joinStrings;
 /**
  * @author ginccc
  */
-@RequestScoped
+@ApplicationScoped
 public class OutputTemplateTask implements ILifecycleTask {
     public static final String ID = "ai.labs.templating";
     private static final String OUTPUT_HTML = "output:html";
@@ -60,12 +60,7 @@ public class OutputTemplateTask implements ILifecycleTask {
     }
 
     @Override
-    public Object getComponent() {
-        return templatingEngine;
-    }
-
-    @Override
-    public void executeTask(IConversationMemory memory) {
+    public void execute(IConversationMemory memory, Object ignored) {
         IWritableConversationStep currentStep = memory.getCurrentStep();
         List<IData<Object>> outputDataList = currentStep.getAllData(KEY_OUTPUT);
         List<IData<List<QuickReply>>> quickReplyDataList = currentStep.getAllData(KEY_QUICK_REPLIES);

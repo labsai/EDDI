@@ -1,7 +1,7 @@
 package ai.labs.eddi.modules.nlp.extensions.dictionaries.providers;
 
 import ai.labs.eddi.configs.regulardictionary.model.RegularDictionaryConfiguration;
-import ai.labs.eddi.engine.lifecycle.IllegalExtensionConfigurationException;
+import ai.labs.eddi.engine.lifecycle.exceptions.IllegalExtensionConfigurationException;
 import ai.labs.eddi.engine.runtime.client.configuration.IResourceClientLibrary;
 import ai.labs.eddi.engine.runtime.service.ServiceException;
 import ai.labs.eddi.models.ExtensionDescriptor.ConfigValue;
@@ -33,18 +33,12 @@ public class RegularDictionaryProvider implements IDictionaryProvider {
 
     private final IResourceClientLibrary resourceClientLibrary;
     private final IExpressionProvider expressionProvider;
-    private RegularDictionary regularDictionary;
 
     @Inject
     public RegularDictionaryProvider(IResourceClientLibrary resourceClientLibrary,
                                      IExpressionProvider expressionProvider) {
         this.resourceClientLibrary = resourceClientLibrary;
         this.expressionProvider = expressionProvider;
-    }
-
-    @Override
-    public IDictionary provide() {
-        return regularDictionary != null ? regularDictionary : new RegularDictionary();
     }
 
     @Override
@@ -67,13 +61,13 @@ public class RegularDictionaryProvider implements IDictionaryProvider {
     }
 
     @Override
-    public void setConfig(Map<String, Object> config) throws IllegalExtensionConfigurationException {
+    public IDictionary provide(Map<String, Object> config) throws IllegalExtensionConfigurationException {
         try {
             Object uriObj = config.get(KEY_URI);
             if (!RuntimeUtilities.isNullOrEmpty(uriObj) && uriObj.toString().startsWith("eddi")) {
                 RegularDictionaryConfiguration regularDictionaryConfiguration =
                         fetchRegularDictionaryConfiguration(URI.create(uriObj.toString()));
-                addConfigsToDictionary(regularDictionaryConfiguration);
+                return addConfigsToDictionary(regularDictionaryConfiguration);
             } else {
                 throw new ServiceException("No resource URI has been defined! [RegularDictionaryConfiguration]");
             }
@@ -83,8 +77,8 @@ public class RegularDictionaryProvider implements IDictionaryProvider {
         }
     }
 
-    private void addConfigsToDictionary(RegularDictionaryConfiguration regularDictionaryConfiguration) {
-        regularDictionary = new RegularDictionary();
+    private RegularDictionary addConfigsToDictionary(RegularDictionaryConfiguration regularDictionaryConfiguration) {
+        var regularDictionary = new RegularDictionary();
         regularDictionary.setLanguageCode(regularDictionaryConfiguration.getLang());
         regularDictionary.setLookupIfKnown(true);
 
@@ -117,6 +111,8 @@ public class RegularDictionaryProvider implements IDictionaryProvider {
                 log.warn("Value of 'phrase' in dictionary was null. Skipped it.");
             }
         });
+
+        return regularDictionary;
     }
 
     private Expressions createDefaultExpressionIfNull(String value, String exp) {

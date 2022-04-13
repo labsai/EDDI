@@ -3,7 +3,7 @@ package ai.labs.eddi.modules.gitcalls.impl;
 import ai.labs.eddi.configs.git.model.GitCall;
 import ai.labs.eddi.configs.git.model.GitCallsConfiguration;
 import ai.labs.eddi.engine.lifecycle.ILifecycleTask;
-import ai.labs.eddi.engine.lifecycle.PackageConfigurationException;
+import ai.labs.eddi.engine.lifecycle.exceptions.PackageConfigurationException;
 import ai.labs.eddi.engine.memory.IConversationMemory;
 import ai.labs.eddi.engine.memory.IData;
 import ai.labs.eddi.engine.memory.IDataFactory;
@@ -21,7 +21,7 @@ import org.eclipse.jgit.transport.PushResult;
 import org.eclipse.jgit.transport.UsernamePasswordCredentialsProvider;
 import org.jboss.logging.Logger;
 
-import javax.enterprise.context.RequestScoped;
+import javax.enterprise.context.ApplicationScoped;
 import javax.inject.Inject;
 import java.io.IOException;
 import java.net.URI;
@@ -29,13 +29,16 @@ import java.net.URISyntaxException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.*;
 import java.nio.file.attribute.BasicFileAttributes;
-import java.util.*;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.List;
+import java.util.Map;
 import java.util.stream.Collectors;
 
 import static ai.labs.eddi.utils.RuntimeUtilities.isNullOrEmpty;
 import static org.eclipse.jgit.lib.ConfigConstants.CONFIG_BRANCH_SECTION;
 
-@RequestScoped
+@ApplicationScoped
 public class GitCallsTask implements ILifecycleTask {
     public static final String ID = "ai.labs.gitcalls";
     private static final String ACTION_KEY = "actions";
@@ -44,11 +47,7 @@ public class GitCallsTask implements ILifecycleTask {
     private final IDataFactory dataFactory;
     private final ITemplatingEngine templatingEngine;
     private final IMemoryItemConverter memoryItemConverter;
-    private String repositoryUrl;
-    private List<GitCall> gitCalls;
     private final String tmpPath = System.getProperty("user.dir") + "/gitcalls/";
-    private String username;
-    private String password;
 
     private static final Logger log = Logger.getLogger(GitCallsTask.class);
 
@@ -74,12 +73,9 @@ public class GitCallsTask implements ILifecycleTask {
     }
 
     @Override
-    public Object getComponent() {
-        return null;
-    }
+    public void execute(IConversationMemory memory, Object component) {
+        final var gitCallsConfig = (GitCallsConfiguration) component;
 
-    @Override
-    public void executeTask(IConversationMemory memory) {
         IConversationMemory.IWritableConversationStep currentStep = memory.getCurrentStep();
         IData<List<String>> latestData = currentStep.getLatestData(ACTION_KEY);
         if (latestData == null) {
@@ -90,24 +86,23 @@ public class GitCallsTask implements ILifecycleTask {
         List<String> actions = latestData.getResult();
 
         for (String action : actions) {
-            List<GitCall> gitCalls = this.gitCalls.stream().
+            var filteredGitCalls = gitCallsConfig.getGitCalls().stream().
                     filter(gitCall -> {
                         List<String> gitCallActions = gitCall.getActions();
                         return gitCallActions.contains(action) || gitCallActions.contains("*");
-                    }).collect(Collectors.toList());
+                    }).distinct().collect(Collectors.toList());
 
-            gitCalls = removeDuplicates(gitCalls);
-            for (GitCall gitCall : gitCalls) {
+            for (var gitCall : filteredGitCalls) {
                 switch (gitCall.getCommand()) {
                     case PUSH_TO_REPOSITORY:
-                        gitInit(gitCall, templateDataObjects);
-                        gitPull(gitCall, templateDataObjects, currentStep);
-                        gitCommit(gitCall, templateDataObjects);
-                        gitPush(gitCall, templateDataObjects);
+                        gitInit(gitCall, templateDataObjects, gitCallsConfig);
+                        gitPull(gitCall, templateDataObjects, currentStep, gitCallsConfig);
+                        gitCommit(gitCall, templateDataObjects, gitCallsConfig);
+                        gitPush(gitCall, templateDataObjects, gitCallsConfig);
                         break;
                     case PULL_FROM_REPOSITORY:
-                        gitInit(gitCall, templateDataObjects);
-                        gitPull(gitCall, templateDataObjects, currentStep);
+                        gitInit(gitCall, templateDataObjects, gitCallsConfig);
+                        gitPull(gitCall, templateDataObjects, currentStep, gitCallsConfig);
                         break;
                 }
             }
@@ -115,41 +110,37 @@ public class GitCallsTask implements ILifecycleTask {
     }
 
     @Override
-    public void configure(Map<String, Object> configuration) throws PackageConfigurationException {
-        Object uriObj = configuration.get("uri");
-        if (!isNullOrEmpty(uriObj)) {
-            URI uri = URI.create(uriObj.toString());
+    public Object configure(Map<String, Object> configuration, Map<String, Object> extensions)
+            throws PackageConfigurationException {
 
-            try {
-                GitCallsConfiguration gitCallsConfig = resourceClientLibrary.getResource(uri, GitCallsConfiguration.class);
-
-                this.repositoryUrl = gitCallsConfig.getUrl();
-                this.username = gitCallsConfig.getUsername();
-                this.password = gitCallsConfig.getPassword();
-                this.gitCalls = gitCallsConfig.getGitCalls();
-
-            } catch (ServiceException e) {
-                log.error(e.getLocalizedMessage(), e);
-                throw new PackageConfigurationException(e.getMessage(), e);
-            }
-        } else {
-            this.gitCalls = new LinkedList<>();
-        }
-    }
-
-    private List<GitCall> removeDuplicates(List<GitCall> gitCalls) {
-        return gitCalls.stream().distinct().collect(Collectors.toList());
-    }
-
-    public void gitInit(GitCall gitCall, Map<String, Object> templateDataObjects) {
         try {
-            String repositoryLocalDirectory = getRepositoryNameFromUrl(templateDataObjects, gitCall.getBranch());
+            Object uriObj = configuration.get("uri");
+            if (!isNullOrEmpty(uriObj)) {
+                URI uri = URI.create(uriObj.toString());
+                return resourceClientLibrary.getResource(uri, GitCallsConfiguration.class);
+            }
+        } catch (ServiceException e) {
+            log.error(e.getLocalizedMessage(), e);
+            throw new PackageConfigurationException(e.getMessage(), e);
+        }
+
+        throw new PackageConfigurationException("No resource URI has been defined! [GitCallsConfiguration]");
+    }
+
+    public void gitInit(GitCall gitCall, Map<String, Object> templateDataObjects, GitCallsConfiguration gitCallsConfig) {
+        try {
+            String repositoryLocalDirectory =
+                    getRepositoryNameFromUrl(templateDataObjects, gitCall.getBranch(), gitCallsConfig);
+
             if (!Paths.get(tmpPath + "/" + repositoryLocalDirectory).toFile().exists()) {
                 Path gitPath = Files.createDirectories(Paths.get(tmpPath + "/" + repositoryLocalDirectory));
                 Git git = Git.cloneRepository()
                         .setBranch(gitCall.getBranch())
-                        .setURI(template(this.repositoryUrl, templateDataObjects))
-                        .setCredentialsProvider(new UsernamePasswordCredentialsProvider(this.username, this.password))
+                        .setURI(template(gitCallsConfig.getUrl(), templateDataObjects))
+                        .setCredentialsProvider(
+                                new UsernamePasswordCredentialsProvider(
+                                        gitCallsConfig.getUsername(),
+                                        gitCallsConfig.getPassword()))
                         .setDirectory(gitPath.toFile())
                         .call();
                 StoredConfig config = git.getRepository().getConfig();
@@ -163,14 +154,21 @@ public class GitCallsTask implements ILifecycleTask {
         }
     }
 
-    public void gitPull(GitCall gitCall, Map<String, Object> templateDataObjects, IConversationMemory.IWritableConversationStep currentStep) {
+    public void gitPull(GitCall gitCall, Map<String, Object> templateDataObjects,
+                        IConversationMemory.IWritableConversationStep currentStep,
+                        GitCallsConfiguration gitCallsConfig) {
         try {
-            if (this.repositoryUrl != null) {
-                String repositoryLocalDirectory = getRepositoryNameFromUrl(templateDataObjects, gitCall.getBranch());
+            if (gitCallsConfig.getUrl() != null) {
+                String repositoryLocalDirectory =
+                        getRepositoryNameFromUrl(templateDataObjects, gitCall.getBranch(), gitCallsConfig);
+
                 Path gitPath = Paths.get(tmpPath + "/" + repositoryLocalDirectory);
                 PullResult pullResult = Git.open(gitPath.toFile())
                         .pull()
-                        .setCredentialsProvider(new UsernamePasswordCredentialsProvider(this.username, this.password))
+                        .setCredentialsProvider(
+                                new UsernamePasswordCredentialsProvider(
+                                        gitCallsConfig.getUsername(),
+                                        gitCallsConfig.getPassword()))
                         .call();
                 if (pullResult.isSuccessful()) {
                     List<GitFileEntry> fileEntries = new ArrayList<>();
@@ -208,10 +206,12 @@ public class GitCallsTask implements ILifecycleTask {
         }
     }
 
-    public void gitCommit(GitCall gitCall, Map<String, Object> templatingDataObjects) {
+    public void gitCommit(GitCall gitCall, Map<String, Object> templatingDataObjects, GitCallsConfiguration gitCallsConfig) {
         try {
-            if (this.repositoryUrl != null) {
-                String repositoryLocalDirectory = getRepositoryNameFromUrl(templatingDataObjects, gitCall.getBranch());
+            if (gitCallsConfig.getUrl() != null) {
+                String repositoryLocalDirectory =
+                        getRepositoryNameFromUrl(templatingDataObjects, gitCall.getBranch(), gitCallsConfig);
+
                 var filename = template(gitCall.getFilename(), templatingDataObjects);
                 var directory = template(gitCall.getDirectory(), templatingDataObjects);
                 var content = template(gitCall.getContent(), templatingDataObjects);
@@ -240,15 +240,20 @@ public class GitCallsTask implements ILifecycleTask {
 
     }
 
-    public void gitPush(GitCall gitCall, Map<String, Object> templatingDataObjects) {
+    public void gitPush(GitCall gitCall, Map<String, Object> templatingDataObjects, GitCallsConfiguration gitCallsConfig) {
         try {
-            String repositoryLocalDirectory = getRepositoryNameFromUrl(templatingDataObjects, gitCall.getBranch());
+            String repositoryLocalDirectory =
+                    getRepositoryNameFromUrl(templatingDataObjects, gitCall.getBranch(), gitCallsConfig);
+
             Path gitPath = Paths.get(tmpPath + "/" + repositoryLocalDirectory);
 
-            if (this.repositoryUrl != null) {
+            if (gitCallsConfig.getUrl() != null) {
                 Iterable<PushResult> pushResults = Git.open(gitPath.toFile())
                         .push()
-                        .setCredentialsProvider(new UsernamePasswordCredentialsProvider(this.username, this.password))
+                        .setCredentialsProvider(
+                                new UsernamePasswordCredentialsProvider(
+                                        gitCallsConfig.getUsername(),
+                                        gitCallsConfig.getPassword()))
                         .call();
                 StringBuilder pushResultMessage = new StringBuilder();
                 for (PushResult pushResult : pushResults) {
@@ -268,8 +273,12 @@ public class GitCallsTask implements ILifecycleTask {
         return templatingEngine.processTemplate(toBeTemplated, templatingDataObjects);
     }
 
-    private String getRepositoryNameFromUrl(Map<String, Object> templatingDataObjects, String branch) throws URISyntaxException, ITemplatingEngine.TemplateEngineException {
-        URI uri = new URI(template(this.repositoryUrl, templatingDataObjects));
+    private String getRepositoryNameFromUrl(Map<String, Object> templatingDataObjects,
+                                            String branch,
+                                            GitCallsConfiguration gitCallsConfig)
+            throws URISyntaxException, ITemplatingEngine.TemplateEngineException {
+
+        URI uri = new URI(template(gitCallsConfig.getUrl(), templatingDataObjects));
         String path = uri.getPath();
         return path.substring(path.lastIndexOf('/') + 1) + "/" + branch;
     }

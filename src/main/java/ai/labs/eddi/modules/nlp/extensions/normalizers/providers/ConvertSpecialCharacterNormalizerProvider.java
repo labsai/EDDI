@@ -4,6 +4,8 @@ package ai.labs.eddi.modules.nlp.extensions.normalizers.providers;
 import ai.labs.eddi.modules.nlp.extensions.normalizers.ConvertSpecialCharacterNormalizer;
 import ai.labs.eddi.modules.nlp.extensions.normalizers.INormalizer;
 
+import java.util.Map;
+
 public class ConvertSpecialCharacterNormalizerProvider implements INormalizerProvider {
     public static final String ID = "ai.labs.parser.normalizers.specialCharacter";
 
@@ -18,7 +20,7 @@ public class ConvertSpecialCharacterNormalizerProvider implements INormalizerPro
     }
 
     @Override
-    public INormalizer provide() {
+    public INormalizer provide(Map<String, Object> config) {
         return new ConvertSpecialCharacterNormalizer();
     }
 }

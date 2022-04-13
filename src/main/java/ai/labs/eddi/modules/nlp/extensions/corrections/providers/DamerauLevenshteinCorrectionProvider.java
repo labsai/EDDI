@@ -22,13 +22,6 @@ public class DamerauLevenshteinCorrectionProvider implements ICorrectionProvider
 
     private static final String KEY_DISTANCE = "distance";
     public static final int DEFAULT_DISTANCE = 2;
-    private DamerauLevenshteinCorrection damerauLevenshteinCorrection;
-
-    @Override
-    public ICorrection provide() {
-        return damerauLevenshteinCorrection != null ? damerauLevenshteinCorrection :
-                new DamerauLevenshteinCorrection();
-    }
 
     @Override
     public String getId() {
@@ -41,13 +34,13 @@ public class DamerauLevenshteinCorrectionProvider implements ICorrectionProvider
     }
 
     @Override
-    public void setConfig(Map<String, Object> config) {
+    public ICorrection provide(Map<String, Object> config) {
         Object distanceObj = config.get(KEY_DISTANCE);
-        int distance;
-        distance = distanceObj == null ? DEFAULT_DISTANCE : Integer.valueOf((String) distanceObj);
+        int distance = distanceObj == null ? DEFAULT_DISTANCE : Integer.parseInt((String) distanceObj);
 
         boolean lookupIfKnown = extractLookupIfKnownParam(config);
-        damerauLevenshteinCorrection = new DamerauLevenshteinCorrection(distance, lookupIfKnown);
+
+        return new DamerauLevenshteinCorrection(distance, lookupIfKnown);
     }
 
     @Override

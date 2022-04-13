@@ -11,7 +11,7 @@ import lombok.Setter;
  */
 @Setter
 @Getter
-@EqualsAndHashCode
+@EqualsAndHashCode(callSuper = true)
 public class FoundDictionaryEntry extends DictionaryEntry {
     protected boolean isCorrected;
     // 0.0 > and <= 1.0

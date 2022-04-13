@@ -1,6 +1,6 @@
 package ai.labs.eddi.modules.nlp.extensions.dictionaries;
 
-import ai.labs.eddi.engine.lifecycle.IllegalExtensionConfigurationException;
+import ai.labs.eddi.engine.lifecycle.exceptions.IllegalExtensionConfigurationException;
 import ai.labs.eddi.modules.nlp.expressions.Expressions;
 
 import java.util.Collections;

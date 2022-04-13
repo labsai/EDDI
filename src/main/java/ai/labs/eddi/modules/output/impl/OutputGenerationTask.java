@@ -3,7 +3,7 @@ package ai.labs.eddi.modules.output.impl;
 import ai.labs.eddi.configs.output.model.OutputConfiguration;
 import ai.labs.eddi.configs.output.model.OutputConfigurationSet;
 import ai.labs.eddi.engine.lifecycle.ILifecycleTask;
-import ai.labs.eddi.engine.lifecycle.PackageConfigurationException;
+import ai.labs.eddi.engine.lifecycle.exceptions.PackageConfigurationException;
 import ai.labs.eddi.engine.memory.IConversationMemory;
 import ai.labs.eddi.engine.memory.IConversationMemory.IConversationProperties;
 import ai.labs.eddi.engine.memory.IConversationMemory.IConversationStepStack;
@@ -25,7 +25,7 @@ import ai.labs.eddi.utils.StringUtilities;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 
-import javax.enterprise.context.RequestScoped;
+import javax.enterprise.context.ApplicationScoped;
 import javax.inject.Inject;
 import java.net.URI;
 import java.util.*;
@@ -33,12 +33,11 @@ import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 
 import static ai.labs.eddi.engine.memory.ContextUtilities.retrieveContextLanguageFromLongTermMemory;
-import static ai.labs.eddi.utils.RuntimeUtilities.isNullOrEmpty;
 
 /**
  * @author ginccc
  */
-@RequestScoped
+@ApplicationScoped
 public class OutputGenerationTask implements ILifecycleTask {
     public static final String ID = "ai.labs.output";
     private static final String KEY_ACTIONS = "actions";
@@ -56,18 +55,14 @@ public class OutputGenerationTask implements ILifecycleTask {
     public static final String OUTPUT_TYPE = "output";
     private final IResourceClientLibrary resourceClientLibrary;
     private final IDataFactory dataFactory;
-    private final IOutputGeneration outputGeneration;
     private final ObjectMapper objectMapper;
-    private String outputLanguage = null;
 
     @Inject
     public OutputGenerationTask(IResourceClientLibrary resourceClientLibrary,
                                 IDataFactory dataFactory,
-                                IOutputGeneration outputGeneration,
                                 ObjectMapper objectMapper) {
         this.resourceClientLibrary = resourceClientLibrary;
         this.dataFactory = dataFactory;
-        this.outputGeneration = outputGeneration;
         this.objectMapper = objectMapper;
     }
 
@@ -82,18 +77,15 @@ public class OutputGenerationTask implements ILifecycleTask {
     }
 
     @Override
-    public Object getComponent() {
-        return outputGeneration;
-    }
+    public void execute(IConversationMemory memory, Object component) {
+        final var outputGeneration = (IOutputGeneration) component;
 
-    @Override
-    public void executeTask(IConversationMemory memory) {
         var currentStep = memory.getCurrentStep();
         List<IData<Context>> contextDataList = currentStep.getAllData(CONTEXT_IDENTIFIER);
         storeContextOutput(currentStep, contextDataList);
         storeContextQuickReplies(currentStep, contextDataList);
 
-        if (checkLanguage(memory.getConversationProperties())) {
+        if (checkLanguage(outputGeneration.getLanguage(), memory.getConversationProperties())) {
 
             IData<List<String>> latestData = currentStep.getLatestData(KEY_ACTIONS);
             if (latestData == null) {
@@ -112,9 +104,9 @@ public class OutputGenerationTask implements ILifecycleTask {
         }
     }
 
-    private boolean checkLanguage(IConversationProperties conversationProperties) {
-        return this.outputLanguage == null ||
-                this.outputLanguage.equalsIgnoreCase(retrieveContextLanguageFromLongTermMemory(conversationProperties));
+    private boolean checkLanguage(String outputLanguage, IConversationProperties conversationProperties) {
+        return outputLanguage == null ||
+                outputLanguage.equalsIgnoreCase(retrieveContextLanguageFromLongTermMemory(conversationProperties));
     }
 
     private void storeContextOutput(IWritableConversationStep currentStep, List<IData<Context>> contextDataList) {
@@ -141,7 +133,7 @@ public class OutputGenerationTask implements ILifecycleTask {
                     quickRepliesKey = contextKey.substring(contextQuickReplyKey.length());
                 }
 
-                List<QuickReply> quickReplies = convertQuickReplyMap(convertObjectToListOfMapsWithStrings(context));
+                List<QuickReply> quickReplies = convertQuickReplyMap(convertObjectToListOfMapsWithStrings(context.getValue()));
                 storeQuickReplies(currentStep, quickReplies, quickRepliesKey);
             }
         });
@@ -227,14 +219,15 @@ public class OutputGenerationTask implements ILifecycleTask {
     }
 
     @Override
-    public void configure(Map<String, Object> configuration) throws PackageConfigurationException {
+    public Object configure(Map<String, Object> configuration, Map<String, Object> extensions)
+            throws PackageConfigurationException {
+
         Object uriObj = configuration.get(OUTPUT_SET_CONFIG_URI);
         URI uri = URI.create(uriObj.toString());
 
         try {
             var outputConfigurationSet = resourceClientLibrary.getResource(uri, OutputConfigurationSet.class);
             var outputLanguage = outputConfigurationSet.getLang();
-            this.outputLanguage = !isNullOrEmpty(outputLanguage) ? outputLanguage : null;
             var outputSet = outputConfigurationSet.getOutputSet();
             outputSet.sort((o1, o2) -> {
                 int comparisonOfKeys = o1.getAction().compareTo(o2.getAction());
@@ -245,11 +238,14 @@ public class OutputGenerationTask implements ILifecycleTask {
                 }
             });
 
+            var outputGeneration = new OutputGeneration(outputLanguage);
             outputSet.forEach(outputConfig -> outputGeneration.addOutputEntry(
                     new OutputEntry(outputConfig.getAction(),
                             outputConfig.getTimesOccurred(),
                             convertOutputTypesConfig(outputConfig.getOutputs()),
                             convertQuickRepliesConfig(outputConfig.getQuickReplies()))));
+
+            return outputGeneration;
         } catch (ServiceException e) {
             String message = "Error while fetching OutputConfigurationSet!\n" + e.getLocalizedMessage();
             throw new PackageConfigurationException(message, e);

@@ -4,6 +4,8 @@ package ai.labs.eddi.modules.nlp.extensions.normalizers.providers;
 import ai.labs.eddi.modules.nlp.extensions.normalizers.ContractedWordNormalizer;
 import ai.labs.eddi.modules.nlp.extensions.normalizers.INormalizer;
 
+import java.util.Map;
+
 public class ContractedWordNormalizerProvider implements INormalizerProvider {
     public static final String ID = "ai.labs.parser.normalizers.contractedWords";
 
@@ -18,7 +20,7 @@ public class ContractedWordNormalizerProvider implements INormalizerProvider {
     }
 
     @Override
-    public INormalizer provide() {
+    public INormalizer provide(Map<String, Object> config) {
         return new ContractedWordNormalizer();
     }
 }

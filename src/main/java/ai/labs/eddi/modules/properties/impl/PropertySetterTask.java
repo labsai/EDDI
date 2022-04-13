@@ -2,8 +2,8 @@ package ai.labs.eddi.modules.properties.impl;
 
 import ai.labs.eddi.configs.propertysetter.model.PropertySetterConfiguration;
 import ai.labs.eddi.engine.lifecycle.ILifecycleTask;
-import ai.labs.eddi.engine.lifecycle.LifecycleException;
-import ai.labs.eddi.engine.lifecycle.PackageConfigurationException;
+import ai.labs.eddi.engine.lifecycle.exceptions.LifecycleException;
+import ai.labs.eddi.engine.lifecycle.exceptions.PackageConfigurationException;
 import ai.labs.eddi.engine.memory.IConversationMemory;
 import ai.labs.eddi.engine.memory.IConversationMemory.IConversationStepStack;
 import ai.labs.eddi.engine.memory.IData;
@@ -21,7 +21,7 @@ import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import ognl.Ognl;
 
-import javax.enterprise.context.RequestScoped;
+import javax.enterprise.context.ApplicationScoped;
 import javax.inject.Inject;
 import java.net.URI;
 import java.util.Collections;
@@ -39,7 +39,7 @@ import static java.lang.Boolean.parseBoolean;
 /**
  * @author ginccc
  */
-@RequestScoped
+@ApplicationScoped
 public class PropertySetterTask implements ILifecycleTask {
     public static final String ID = "ai.labs.property";
     private static final String EXPRESSIONS_PARSED_IDENTIFIER = "expressions:parsed";
@@ -57,8 +57,6 @@ public class PropertySetterTask implements ILifecycleTask {
     private static final String SCOPE = "scope";
     private static final String OVERRIDE = "override";
     private static final String KEY_URI = "uri";
-    private final List<SetOnActions> setOnActionsList = new LinkedList<>();
-    private final IPropertySetter propertySetter;
     private final IExpressionProvider expressionProvider;
     private final IMemoryItemConverter memoryItemConverter;
     private final ITemplatingEngine templatingEngine;
@@ -67,14 +65,12 @@ public class PropertySetterTask implements ILifecycleTask {
     private final ObjectMapper objectMapper;
 
     @Inject
-    public PropertySetterTask(IPropertySetter propertySetter,
-                              IExpressionProvider expressionProvider,
+    public PropertySetterTask(IExpressionProvider expressionProvider,
                               IMemoryItemConverter memoryItemConverter,
                               ITemplatingEngine templatingEngine,
                               IDataFactory dataFactory,
                               IResourceClientLibrary resourceClientLibrary,
                               ObjectMapper objectMapper) {
-        this.propertySetter = propertySetter;
         this.expressionProvider = expressionProvider;
         this.memoryItemConverter = memoryItemConverter;
         this.templatingEngine = templatingEngine;
@@ -94,12 +90,9 @@ public class PropertySetterTask implements ILifecycleTask {
     }
 
     @Override
-    public Object getComponent() {
-        return propertySetter;
-    }
+    public void execute(IConversationMemory memory, Object component) throws LifecycleException {
+        final var propertySetter = (IPropertySetter) component;
 
-    @Override
-    public void executeTask(IConversationMemory memory) throws LifecycleException {
         IConversationMemory.IWritableConversationStep currentStep = memory.getCurrentStep();
         IData<String> expressionsData = currentStep.getLatestData(EXPRESSIONS_PARSED_IDENTIFIER);
         List<IData<Context>> contextDataList = currentStep.getAllData(CONTEXT_IDENTIFIER);
@@ -124,6 +117,7 @@ public class PropertySetterTask implements ILifecycleTask {
         var templateDataObjects = memoryItemConverter.convert(memory);
         var conversationProperties = memory.getConversationProperties();
         if (actionsData != null && !isNullOrEmpty(actionsData.getResult())) {
+            var setOnActionsList = propertySetter.getSetOnActionsList();
             for (String action : actionsData.getResult()) {
                 var propertyInstructions = new LinkedList<PropertyInstruction>();
                 setOnActionsList.forEach(setOnAction -> {
@@ -227,33 +221,38 @@ public class PropertySetterTask implements ILifecycleTask {
     }
 
     @Override
-    public void configure(Map<String, Object> configuration) throws PackageConfigurationException {
+    public Object configure(Map<String, Object> configuration, Map<String, Object> extensions)
+            throws PackageConfigurationException {
+
+        List<SetOnActions> setOnActionsList = new LinkedList<>();
+
         if (configuration.containsKey(KEY_SET_ON_ACTIONS)) {
-            parseRawConfig(configuration);
+            setOnActionsList.addAll(parseRawConfig(configuration));
         }
 
-        if (configuration.containsKey(KEY_URI)) {
-            try {
+        try {
+            if (configuration.containsKey(KEY_URI)) {
                 Object uriObj = configuration.get(KEY_URI);
                 if (!isNullOrEmpty(uriObj) && uriObj.toString().startsWith("eddi")) {
                     URI uri = URI.create(uriObj.toString());
                     var propertySetterConfig =
                             resourceClientLibrary.getResource(uri, PropertySetterConfiguration.class);
-                    var setOnActions = propertySetterConfig.getSetOnActions();
-                    this.setOnActionsList.addAll(setOnActions);
-                } else {
-                    throw new ServiceException("No resource URI has been defined! [PropertySetterConfiguration]");
+                    setOnActionsList.addAll(propertySetterConfig.getSetOnActions());
                 }
-            } catch (ServiceException e) {
-                String message = "Error while fetching PropertySetterConfiguration!\n" + e.getLocalizedMessage();
-                throw new PackageConfigurationException(message, e);
             }
+        } catch (ServiceException e) {
+            String message = "Error while fetching PropertySetterConfiguration!\n" + e.getLocalizedMessage();
+            throw new PackageConfigurationException(message, e);
         }
+
+        return new PropertySetter(new LinkedList<>(setOnActionsList));
     }
 
-    private void parseRawConfig(Map<String, Object> configuration) {
+
+    private List<SetOnActions> parseRawConfig(Map<String, Object> configuration) {
         var setOnActionsRaw = convertObjectToListOfMapsWithObjects(configuration.get(KEY_SET_ON_ACTIONS));
 
+        List<SetOnActions> setOnActionsList = new LinkedList<>();
         if (!isNullOrEmpty(setOnActionsRaw)) {
             for (Map<String, Object> setOnAction : setOnActionsRaw) {
                 Object actionsObj = setOnAction.get("actions");
@@ -274,9 +273,11 @@ public class PropertySetterTask implements ILifecycleTask {
                     }
                 }
 
-                this.setOnActionsList.add(setOnActions);
+                setOnActionsList.add(setOnActions);
             }
         }
+
+        return setOnActionsList;
     }
 
     private List<String> convertObjectToList(Object actionsObj) {

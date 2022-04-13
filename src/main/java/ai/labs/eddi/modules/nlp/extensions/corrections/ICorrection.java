@@ -17,9 +17,8 @@ public interface ICorrection {
         return correctWord(word, userLanguage, new LinkedList<>());
     }
 
-    ;
-
-    List<IDictionary.IFoundWord> correctWord(String word, String userLanguage, List<IDictionary> temporaryDictionaries);
+    List<IDictionary.IFoundWord> correctWord(String word, String userLanguage,
+                                             List<IDictionary> temporaryDictionaries);
 
     boolean lookupIfKnown();
 }

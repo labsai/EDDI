@@ -4,6 +4,8 @@ package ai.labs.eddi.modules.nlp.extensions.normalizers.providers;
 import ai.labs.eddi.modules.nlp.extensions.normalizers.INormalizer;
 import ai.labs.eddi.modules.nlp.extensions.normalizers.RemoveUndefinedCharacterNormalizer;
 
+import java.util.Map;
+
 public class RemoveUndefinedCharacterNormalizerProvider implements INormalizerProvider {
     public static final String ID = "ai.labs.parser.normalizers.allowedCharacter";
 
@@ -18,7 +20,7 @@ public class RemoveUndefinedCharacterNormalizerProvider implements INormalizerPr
     }
 
     @Override
-    public INormalizer provide() {
+    public INormalizer provide(Map<String, Object> config) {
         return new RemoveUndefinedCharacterNormalizer();
     }
 }

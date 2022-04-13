@@ -3,9 +3,13 @@ package ai.labs.eddi.modules.httpcalls.impl;
 
 import ai.labs.eddi.configs.http.model.*;
 import ai.labs.eddi.datastore.serialization.IJsonSerialization;
+import ai.labs.eddi.engine.httpclient.IHttpClient;
+import ai.labs.eddi.engine.httpclient.IHttpClient.Method;
+import ai.labs.eddi.engine.httpclient.IRequest;
+import ai.labs.eddi.engine.httpclient.IResponse;
 import ai.labs.eddi.engine.lifecycle.ILifecycleTask;
-import ai.labs.eddi.engine.lifecycle.LifecycleException;
-import ai.labs.eddi.engine.lifecycle.PackageConfigurationException;
+import ai.labs.eddi.engine.lifecycle.exceptions.LifecycleException;
+import ai.labs.eddi.engine.lifecycle.exceptions.PackageConfigurationException;
 import ai.labs.eddi.engine.memory.IConversationMemory;
 import ai.labs.eddi.engine.memory.IData;
 import ai.labs.eddi.engine.memory.IDataFactory;
@@ -13,10 +17,6 @@ import ai.labs.eddi.engine.memory.IMemoryItemConverter;
 import ai.labs.eddi.engine.runtime.IRuntime;
 import ai.labs.eddi.engine.runtime.client.configuration.IResourceClientLibrary;
 import ai.labs.eddi.engine.runtime.service.ServiceException;
-import ai.labs.eddi.httpclient.IHttpClient;
-import ai.labs.eddi.httpclient.IHttpClient.Method;
-import ai.labs.eddi.httpclient.IRequest;
-import ai.labs.eddi.httpclient.IResponse;
 import ai.labs.eddi.models.*;
 import ai.labs.eddi.models.ExtensionDescriptor.ConfigValue;
 import ai.labs.eddi.models.ExtensionDescriptor.FieldType;
@@ -24,7 +24,7 @@ import ai.labs.eddi.modules.templating.ITemplatingEngine;
 import com.jayway.jsonpath.JsonPath;
 import org.jboss.logging.Logger;
 
-import javax.enterprise.context.RequestScoped;
+import javax.enterprise.context.ApplicationScoped;
 import javax.inject.Inject;
 import java.io.IOException;
 import java.net.URI;
@@ -40,7 +40,7 @@ import static ai.labs.eddi.utils.MatchingUtilities.executeValuePath;
 import static ai.labs.eddi.utils.RuntimeUtilities.checkNotNull;
 import static ai.labs.eddi.utils.RuntimeUtilities.isNullOrEmpty;
 
-@RequestScoped
+@ApplicationScoped
 public class HttpCallsTask implements ILifecycleTask {
     public static final String ID = "ai.labs.httpcalls";
     private static final String UTF_8 = "utf-8";
@@ -56,8 +56,6 @@ public class HttpCallsTask implements ILifecycleTask {
     private final ITemplatingEngine templatingEngine;
     private final IMemoryItemConverter memoryItemConverter;
     private final IRuntime runtime;
-    private String targetServerUri;
-    private List<HttpCall> httpCalls;
 
     private static final Logger log = Logger.getLogger(HttpCallsTask.class);
 
@@ -86,12 +84,9 @@ public class HttpCallsTask implements ILifecycleTask {
     }
 
     @Override
-    public Object getComponent() {
-        return null;
-    }
+    public void execute(IConversationMemory memory, Object component) throws LifecycleException {
+        final var httpCallsConfig = (HttpCallsConfiguration) component;
 
-    @Override
-    public void executeTask(IConversationMemory memory) throws LifecycleException {
         IConversationMemory.IWritableConversationStep currentStep = memory.getCurrentStep();
         IData<List<String>> latestData = currentStep.getLatestData(ACTION_KEY);
         if (latestData == null) {
@@ -102,21 +97,21 @@ public class HttpCallsTask implements ILifecycleTask {
         List<String> actions = latestData.getResult();
 
         for (String action : actions) {
-            List<HttpCall> httpCalls = this.httpCalls.stream().
+            List<HttpCall> filteredHttpCalls = httpCallsConfig.getHttpCalls().stream().
                     filter(httpCall -> {
                         List<String> httpCallActions = httpCall.getActions();
                         return httpCallActions.contains(action) || httpCallActions.contains("*");
-                    }).collect(Collectors.toList());
+                    }).distinct().collect(Collectors.toList());
 
-            httpCalls = removeDuplicates(httpCalls);
-
-            for (HttpCall call : httpCalls) {
+            for (var call : filteredHttpCalls) {
                 try {
                     PreRequest preRequest = call.getPreRequest();
                     templateDataObjects = executePreRequestPropertyInstructions(memory, templateDataObjects, preRequest);
 
                     if (call.getFireAndForget()) {
-                        executeFireAndForgetCalls(call, preRequest, templateDataObjects);
+                        executeFireAndForgetCalls(
+                                httpCallsConfig.getTargetServerUrl(),
+                                call, preRequest, templateDataObjects);
                     } else {
                         IRequest request;
                         IResponse response = null;
@@ -125,7 +120,8 @@ public class HttpCallsTask implements ILifecycleTask {
                         boolean validationError = false;
                         try {
                             do {
-                                request = buildRequest(call.getRequest(), templateDataObjects);
+                                request = buildRequest(
+                                        httpCallsConfig.getTargetServerUrl(), call.getRequest(), templateDataObjects);
                                 response = executeAndMeasureRequest(call, request, retryCall, amountOfExecutions);
 
                                 if (response.getHttpCode() != 200) {
@@ -208,7 +204,10 @@ public class HttpCallsTask implements ILifecycleTask {
         return templateDataObjects;
     }
 
-    private void executeFireAndForgetCalls(HttpCall call, PreRequest preRequest, Map<String, Object> templateDataObjects)
+    private void executeFireAndForgetCalls(String targetServerUrl,
+                                           HttpCall call,
+                                           PreRequest preRequest,
+                                           Map<String, Object> templateDataObjects)
             throws ITemplatingEngine.TemplateEngineException, IRequest.HttpRequestException {
 
         if (preRequest != null && preRequest.getBatchRequests() != null) {
@@ -225,7 +224,7 @@ public class HttpCallsTask implements ILifecycleTask {
                 IRequest request;
                 for (Object iterationObject : batchIterationList) {
                     templateDataObjects.put(batchRequest.getIterationObjectName(), iterationObject);
-                    request = buildRequest(call.getRequest(), templateDataObjects);
+                    request = buildRequest(targetServerUrl, call.getRequest(), templateDataObjects);
                     if (batchRequest.getExecuteCallsSequentially()) {
                         request.send();
                         log.info("Batch Request: " + request);
@@ -241,7 +240,7 @@ public class HttpCallsTask implements ILifecycleTask {
 
 
         } else {
-            IRequest request = buildRequest(call.getRequest(), templateDataObjects);
+            IRequest request = buildRequest(targetServerUrl, call.getRequest(), templateDataObjects);
             request.send(r -> {
                 //ignore response
             });
@@ -322,11 +321,10 @@ public class HttpCallsTask implements ILifecycleTask {
         throw new HttpCallsValidationException();
     }
 
-    private List<HttpCall> removeDuplicates(List<HttpCall> httpCalls) {
-        return httpCalls.stream().distinct().collect(Collectors.toList());
-    }
-
-    private void runPostResponse(IConversationMemory memory, HttpCall call, Map<String, Object> templateDataObjects, int httpCode, boolean validationError)
+    private void runPostResponse(IConversationMemory memory,
+                                 HttpCall call,
+                                 Map<String, Object> templateDataObjects,
+                                 int httpCode, boolean validationError)
             throws IOException, ITemplatingEngine.TemplateEngineException {
 
         var postResponse = call.getPostResponse();
@@ -445,12 +443,15 @@ public class HttpCallsTask implements ILifecycleTask {
                 !httpCodeValidator.getSkipOnHttpCode().contains(httpCode);
     }
 
-    private IRequest buildRequest(Request requestConfig, Map<String, Object> templateDataObjects) throws ITemplatingEngine.TemplateEngineException {
+    private IRequest buildRequest(String targetServerUrl, Request requestConfig,
+                                  Map<String, Object> templateDataObjects)
+            throws ITemplatingEngine.TemplateEngineException {
+
         String path = requestConfig.getPath().trim();
         if (!path.startsWith(SLASH_CHAR) && !path.isEmpty() && !path.startsWith("http")) {
             path = SLASH_CHAR + path;
         }
-        URI targetUri = URI.create(templateValues(targetServerUri + path, templateDataObjects));
+        URI targetUri = URI.create(templateValues(targetServerUrl + path, templateDataObjects));
         String requestBody = templateValues(requestConfig.getBody(), templateDataObjects);
 
         var method = Method.valueOf(requestConfig.getMethod().toUpperCase());
@@ -545,7 +546,9 @@ public class HttpCallsTask implements ILifecycleTask {
     }
 
     @Override
-    public void configure(Map<String, Object> configuration) throws PackageConfigurationException {
+    public Object configure(Map<String, Object> configuration, Map<String, Object> extensions)
+            throws PackageConfigurationException {
+
         Object uriObj = configuration.get("uri");
         if (!isNullOrEmpty(uriObj)) {
             URI uri = URI.create(uriObj.toString());
@@ -557,16 +560,15 @@ public class HttpCallsTask implements ILifecycleTask {
                 if (targetServerUri.endsWith(SLASH_CHAR)) {
                     targetServerUri = targetServerUri.substring(0, targetServerUri.length() - 2);
                 }
-                this.targetServerUri = targetServerUri;
-                this.httpCalls = httpCallsConfig.getHttpCalls();
-
+                httpCallsConfig.setTargetServerUrl(targetServerUri);
+                return httpCallsConfig;
             } catch (ServiceException e) {
                 log.error(e.getLocalizedMessage(), e);
                 throw new PackageConfigurationException(e.getMessage(), e);
             }
-        } else {
-            this.httpCalls = new LinkedList<>();
         }
+
+        throw new PackageConfigurationException("No resource URI has been defined! [HttpCallsConfiguration]");
     }
 
     @Override

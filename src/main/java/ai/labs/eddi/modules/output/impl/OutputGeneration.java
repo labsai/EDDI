@@ -5,16 +5,21 @@ import ai.labs.eddi.modules.output.IOutputGeneration;
 import ai.labs.eddi.modules.output.model.OutputEntry;
 import lombok.Getter;
 
-import javax.enterprise.context.RequestScoped;
 import java.util.*;
 
 /**
  * @author ginccc
  */
-@RequestScoped
+
 public class OutputGeneration implements IOutputGeneration {
     @Getter
     private final Map<String, List<OutputEntry>> outputMapper = new LinkedHashMap<>();
+    @Getter
+    private final String language;
+
+    public OutputGeneration(String language) {
+        this.language = language;
+    }
 
     @Override
     public void addOutputEntry(OutputEntry outputEntry) {

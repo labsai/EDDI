@@ -4,8 +4,8 @@ import ai.labs.eddi.configs.behavior.model.BehaviorConfiguration;
 import ai.labs.eddi.datastore.serialization.DeserializationException;
 import ai.labs.eddi.datastore.serialization.IJsonSerialization;
 import ai.labs.eddi.engine.lifecycle.ILifecycleTask;
-import ai.labs.eddi.engine.lifecycle.LifecycleException;
-import ai.labs.eddi.engine.lifecycle.PackageConfigurationException;
+import ai.labs.eddi.engine.lifecycle.exceptions.LifecycleException;
+import ai.labs.eddi.engine.lifecycle.exceptions.PackageConfigurationException;
 import ai.labs.eddi.engine.memory.IConversationMemory;
 import ai.labs.eddi.engine.memory.IData;
 import ai.labs.eddi.engine.memory.model.Data;
@@ -14,7 +14,7 @@ import ai.labs.eddi.engine.runtime.service.ServiceException;
 import ai.labs.eddi.models.ExtensionDescriptor;
 import org.jboss.logging.Logger;
 
-import javax.enterprise.context.RequestScoped;
+import javax.enterprise.context.ApplicationScoped;
 import javax.inject.Inject;
 import java.io.IOException;
 import java.net.URI;
@@ -29,7 +29,7 @@ import static ai.labs.eddi.models.ExtensionDescriptor.FieldType;
 /**
  * @author ginccc
  */
-@RequestScoped
+@ApplicationScoped
 public class BehaviorRulesEvaluationTask implements ILifecycleTask {
     public static final String ID = "ai.labs.behavior";
     private static final String KEY_ACTIONS = "actions";
@@ -43,7 +43,6 @@ public class BehaviorRulesEvaluationTask implements ILifecycleTask {
     private final IJsonSerialization jsonSerialization;
     private final IBehaviorDeserialization behaviorSerialization;
 
-    private BehaviorRulesEvaluator evaluator;
     private boolean appendActions = true;
 
     private static final Logger log = Logger.getLogger(BehaviorRulesEvaluationTask.class);
@@ -68,12 +67,9 @@ public class BehaviorRulesEvaluationTask implements ILifecycleTask {
     }
 
     @Override
-    public Object getComponent() {
-        return evaluator;
-    }
+    public void execute(IConversationMemory memory, Object component) throws LifecycleException {
+        final var evaluator = (BehaviorRulesEvaluator) component;
 
-    @Override
-    public void executeTask(IConversationMemory memory) throws LifecycleException {
         BehaviorSetResult results;
         try {
             results = evaluator.evaluate(memory);
@@ -124,7 +120,7 @@ public class BehaviorRulesEvaluationTask implements ILifecycleTask {
         results.addAll(allCurrent.stream().
                 filter(result -> !results.contains(result)).collect(Collectors.toList()));
 
-        Data resultsData = new Data<>(key, results);
+        var resultsData = new Data<>(key, results);
         resultsData.setPublic(makePublic);
         currentStep.storeData(resultsData);
         if (addResultsToConversationMemory) {
@@ -134,22 +130,23 @@ public class BehaviorRulesEvaluationTask implements ILifecycleTask {
     }
 
     @Override
-    public void configure(Map<String, Object> configuration) throws PackageConfigurationException {
+    public Object configure(Map<String, Object> configuration, Map<String, Object> extensions)
+            throws PackageConfigurationException {
+
         Object uriObj = configuration.get(BEHAVIOR_CONFIG_URI);
         URI uri = URI.create(uriObj.toString());
 
-
         try {
-            BehaviorConfiguration behaviorConfiguration = resourceClientLibrary.getResource(uri, BehaviorConfiguration.class);
-            String behaviorConfigJson = jsonSerialization.serialize(behaviorConfiguration);
-            BehaviorSet behaviorSet = behaviorSerialization.deserialize(behaviorConfigJson);
-
-            evaluator = new BehaviorRulesEvaluator(behaviorSet);
             Object appendActionsObj = configuration.get(BEHAVIOR_CONFIG_APPEND_ACTIONS);
             if (appendActionsObj != null) {
                 appendActions = Boolean.parseBoolean(appendActionsObj.toString());
             }
 
+            var behaviorConfiguration = resourceClientLibrary.getResource(uri, BehaviorConfiguration.class);
+            var behaviorConfigJson = jsonSerialization.serialize(behaviorConfiguration);
+            var behaviorSet = behaviorSerialization.deserialize(behaviorConfigJson);
+
+            return new BehaviorRulesEvaluator(behaviorSet);
         } catch (IOException | DeserializationException e) {
             String message = "Error while configuring BehaviorRuleLifecycleTask!";
             log.debug(message, e);
@@ -163,14 +160,14 @@ public class BehaviorRulesEvaluationTask implements ILifecycleTask {
 
     @Override
     public ExtensionDescriptor getExtensionDescriptor() {
-        ExtensionDescriptor extensionDescriptor = new ExtensionDescriptor(ID);
+        var extensionDescriptor = new ExtensionDescriptor(ID);
         extensionDescriptor.setDisplayName("Behavior Rules");
 
-        ConfigValue configValue =
+        var configValue =
                 new ConfigValue("Resource URI", FieldType.URI, false, null);
         extensionDescriptor.getConfigs().put(BEHAVIOR_CONFIG_URI, configValue);
 
-        ConfigValue appendActionsConfig =
+        var appendActionsConfig =
                 new ConfigValue("Append Actions", FieldType.BOOLEAN, false, true);
         extensionDescriptor.getConfigs().put(BEHAVIOR_CONFIG_APPEND_ACTIONS, appendActionsConfig);
 

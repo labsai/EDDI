@@ -17,13 +17,6 @@ import java.util.Map;
 public class PhoneticCorrectionProvider implements ICorrectionProvider {
     public static final String ID = "ai.labs.parser.corrections.phonetic";
 
-    private PhoneticCorrection phoneticCorrection;
-
-    @Override
-    public ICorrection provide() {
-        return phoneticCorrection != null ? phoneticCorrection : new PhoneticCorrection(false);
-    }
-
     @Override
     public String getId() {
         return ID;
@@ -35,8 +28,8 @@ public class PhoneticCorrectionProvider implements ICorrectionProvider {
     }
 
     @Override
-    public void setConfig(Map<String, Object> config) {
+    public ICorrection provide(Map<String, Object> config) {
         boolean lookupIfKnownParam = extractLookupIfKnownParam(config);
-        phoneticCorrection = new PhoneticCorrection(lookupIfKnownParam);
+        return new PhoneticCorrection(lookupIfKnownParam);
     }
 }
