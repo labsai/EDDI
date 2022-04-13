@@ -97,7 +97,7 @@ public class DocumentDescriptorInterceptor implements ContainerResponseFilter {
                             return;
                         }
 
-                        if ((isPUT(resourceMethod) || isPATCH(resourceMethod)) && !isUpdateDescriptor(resourceMethod) && !isUpdatePermissions(resourceMethod)) {
+                        if ((isPUT(resourceMethod) || isPATCH(resourceMethod)) && !isUpdateDescriptor(resourceMethod)) {
                             var descriptorStore = getDescriptorStore(resourceLocationUri);
                             ResourceDescriptor resourceDescriptor = (ResourceDescriptor) descriptorStore.readDescriptor(resourceId.getId(), resourceId.getVersion() - 1);
                             resourceDescriptor.setLastModifiedOn(new Date(System.currentTimeMillis()));
@@ -119,23 +119,23 @@ public class DocumentDescriptorInterceptor implements ContainerResponseFilter {
                     }
                 }
             }
-        } catch (IResourceStore.ResourceStoreException e) {
-            log.error(e.getLocalizedMessage(), e);
-            throw new InternalServerErrorException();
         } catch (IResourceStore.ResourceNotFoundException e) {
             log.debug(e.getLocalizedMessage(), e);
             throw new NotFoundException(e.getLocalizedMessage());
         } catch (IResourceStore.ResourceModifiedException e) {
             log.debug(e.getLocalizedMessage(), e);
             throw new BadRequestException(e.getLocalizedMessage());
+        } catch (Exception e) {
+            log.error(e.getLocalizedMessage(), e);
+            throw new InternalServerErrorException();
         }
     }
 
     private IDescriptorStore getDescriptorStore(String createdResourceURIString) {
         IDescriptorStore descriptorStore;
-        if (createdResourceURIString.startsWith("eddi://ai.labs.testcases")) {
+        if (createdResourceURIString.contains("testcases")) {
             descriptorStore = testCaseDescriptorStore;
-        } else if (createdResourceURIString.startsWith("eddi://ai.labs.conversation")) {
+        } else if (createdResourceURIString.contains("conversation")) {
             descriptorStore = conversationDescriptorStore;
         } else {
             descriptorStore = documentDescriptorStore;
@@ -168,10 +168,6 @@ public class DocumentDescriptorInterceptor implements ContainerResponseFilter {
         }
 
         return URI.create(resourceURIString);
-    }
-
-    private static boolean isUpdatePermissions(Method resourceMethod) {
-        return resourceMethod.getName().equals(METHOD_NAME_UPDATE_PERMISSIONS);
     }
 
     private static boolean isUpdateDescriptor(Method resourceMethod) {
