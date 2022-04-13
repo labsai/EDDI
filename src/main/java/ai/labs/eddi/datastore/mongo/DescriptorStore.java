@@ -69,7 +69,9 @@ public class DescriptorStore<T> implements IDescriptorStore<T> {
     }
 
     @Override
-    public T readDescriptor(String resourceId, Integer version) throws IResourceStore.ResourceStoreException, IResourceStore.ResourceNotFoundException {
+    public T readDescriptor(String resourceId, Integer version)
+            throws IResourceStore.ResourceStoreException, IResourceStore.ResourceNotFoundException {
+
         return descriptorResourceStore.read(resourceId, version);
     }
 
