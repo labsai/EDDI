@@ -5,7 +5,6 @@ import ai.labs.eddi.modules.behavior.impl.BehaviorRule;
 import lombok.NoArgsConstructor;
 import lombok.Setter;
 
-import javax.enterprise.context.RequestScoped;
 import java.util.Collections;
 import java.util.List;
 
@@ -16,10 +15,10 @@ import static ai.labs.eddi.modules.behavior.impl.conditions.IBehaviorCondition.E
  * @author ginccc
  */
 
-@RequestScoped
+
 @NoArgsConstructor
 public class Negation implements IBehaviorCondition {
-    private static final String ID = "negation";
+    public static final String ID = "negation";
     @Setter
     private IBehaviorCondition condition;
 

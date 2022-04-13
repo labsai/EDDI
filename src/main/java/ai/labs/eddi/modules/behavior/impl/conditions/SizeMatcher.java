@@ -5,8 +5,6 @@ import ai.labs.eddi.engine.memory.IMemoryItemConverter;
 import ai.labs.eddi.modules.behavior.impl.BehaviorRule;
 import com.jayway.jsonpath.JsonPath;
 
-import javax.enterprise.context.RequestScoped;
-import javax.inject.Inject;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -15,9 +13,8 @@ import java.util.Map;
  * @author ginccc
  */
 
-@RequestScoped
 public class SizeMatcher implements IBehaviorCondition {
-    private static final String ID = "sizematcher";
+    public static final String ID = "sizematcher";
     private static final String valuePathQualifier = "valuePath";
     private final String minQualifier = "min";
     private final String maxQualifier = "max";
@@ -30,7 +27,6 @@ public class SizeMatcher implements IBehaviorCondition {
 
     private final IMemoryItemConverter memoryItemConverter;
 
-    @Inject
     public SizeMatcher(IMemoryItemConverter memoryItemConverter) {
         this.memoryItemConverter = memoryItemConverter;
     }

@@ -16,8 +16,6 @@ import lombok.Getter;
 import lombok.Setter;
 import org.jboss.logging.Logger;
 
-import javax.enterprise.context.RequestScoped;
-import javax.inject.Inject;
 import java.io.IOException;
 import java.util.Collections;
 import java.util.HashMap;
@@ -27,9 +25,9 @@ import java.util.Map;
 /**
  * @author ginccc
  */
-@RequestScoped
+
 public class ContextMatcher implements IBehaviorCondition {
-    private static final String ID = "contextmatcher";
+    public static final String ID = "contextmatcher";
     private static final String CONTEXT = "context";
 
     enum ContextType {
@@ -55,9 +53,8 @@ public class ContextMatcher implements IBehaviorCondition {
 
     private static final Logger log = Logger.getLogger(ContextMatcher.class);
 
-    @Inject
-    ContextMatcher(IExpressionProvider expressionProvider,
-                   IJsonSerialization jsonSerialization) {
+    public ContextMatcher(IExpressionProvider expressionProvider,
+                          IJsonSerialization jsonSerialization) {
         this.expressionProvider = expressionProvider;
         this.jsonSerialization = jsonSerialization;
     }

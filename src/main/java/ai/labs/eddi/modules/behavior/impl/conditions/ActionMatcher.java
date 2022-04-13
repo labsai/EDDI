@@ -7,7 +7,6 @@ import ai.labs.eddi.utils.StringUtilities;
 import lombok.Getter;
 import lombok.Setter;
 
-import javax.enterprise.context.RequestScoped;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
@@ -20,9 +19,8 @@ import static ai.labs.eddi.modules.behavior.impl.conditions.IBehaviorCondition.E
 /**
  * @author ginccc
  */
-@RequestScoped
 public class ActionMatcher extends BaseMatcher implements IBehaviorCondition {
-    private static final String ID = "actionmatcher";
+    public static final String ID = "actionmatcher";
     private static final String KEY_ACTIONS = "actions";
 
     @Getter

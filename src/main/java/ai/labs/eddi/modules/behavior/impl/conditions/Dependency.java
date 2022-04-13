@@ -6,29 +6,24 @@ import ai.labs.eddi.modules.behavior.impl.BehaviorRule;
 import ai.labs.eddi.modules.behavior.impl.BehaviorSet;
 import lombok.NoArgsConstructor;
 
-import javax.enterprise.context.RequestScoped;
 import java.util.HashMap;
 import java.util.LinkedList;
 import java.util.List;
 import java.util.Map;
 
+
 /**
  * @author ginccc
  */
 
-@RequestScoped
 @NoArgsConstructor
 public class Dependency implements IBehaviorCondition {
-    private static final String ID = "dependency";
+    public static final String ID = "dependency";
 
     private String reference;
 
     private final String referenceQualifier = "reference";
     private BehaviorSet behaviorSet;
-
-    private Dependency(String referencedRuleName) {
-        this.reference = referencedRuleName;
-    }
 
     @Override
     public String getId() {
@@ -87,7 +82,7 @@ public class Dependency implements IBehaviorCondition {
 
     @Override
     public IBehaviorCondition clone() {
-        Dependency clone = new Dependency(reference);
+        Dependency clone = new Dependency();
         clone.setConfigs(getConfigs());
         clone.setContainingBehaviorRuleSet(behaviorSet);
         return clone;

@@ -6,7 +6,6 @@ import ai.labs.eddi.modules.behavior.impl.BehaviorRule;
 import lombok.NoArgsConstructor;
 import lombok.Setter;
 
-import javax.enterprise.context.RequestScoped;
 import java.util.HashMap;
 import java.util.LinkedList;
 import java.util.List;
@@ -16,10 +15,9 @@ import java.util.Map;
  * @author ginccc
  */
 
-@RequestScoped
 @NoArgsConstructor
 public class Occurrence implements IBehaviorCondition {
-    private static final String ID = "occurrence";
+    public static final String ID = "occurrence";
     private static final String BEHAVIOR_RULES_SUCCESS = "behavior_rules:success";
 
     private final String behaviorRuleNameQualifier = "behaviorRuleName";

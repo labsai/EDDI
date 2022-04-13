@@ -4,6 +4,9 @@ import ai.labs.eddi.engine.memory.IConversationMemory;
 import ai.labs.eddi.modules.behavior.impl.conditions.IBehaviorCondition;
 import ai.labs.eddi.utils.RuntimeUtilities;
 import lombok.AllArgsConstructor;
+import lombok.Getter;
+import lombok.NoArgsConstructor;
+import lombok.Setter;
 
 import java.util.LinkedList;
 
@@ -11,7 +14,10 @@ import java.util.LinkedList;
  * @author ginccc
  */
 
+@NoArgsConstructor
 @AllArgsConstructor
+@Getter
+@Setter
 class BehaviorRulesEvaluator {
     private BehaviorSet behaviorSet;
 
@@ -69,7 +75,7 @@ class BehaviorRulesEvaluator {
         }
     }
 
-    class BehaviorRuleExecutionException extends Exception {
+    static class BehaviorRuleExecutionException extends Exception {
         private BehaviorRuleExecutionException(String message) {
             super(message);
         }
