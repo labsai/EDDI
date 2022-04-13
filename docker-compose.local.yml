@@ -3,6 +3,7 @@ services:
   eddi:
     build:
       context: ./src/main/docker
+      dockerfile: Dockerfile.jvm
       args:
         EDDI_VERSION: 5.0.0
         EDDI_ENV: production
