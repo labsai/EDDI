@@ -1,7 +1,6 @@
 package ai.labs.eddi.configs.regulardictionary;
 
 import ai.labs.eddi.configs.IRestVersionInfo;
-import ai.labs.eddi.configs.method.PATCH;
 import ai.labs.eddi.configs.patch.PatchInstruction;
 import ai.labs.eddi.configs.regulardictionary.model.RegularDictionaryConfiguration;
 import ai.labs.eddi.models.DocumentDescriptor;

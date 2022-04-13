@@ -1,6 +1,5 @@
 package ai.labs.eddi.configs.documentdescriptor;
 
-import ai.labs.eddi.configs.method.PATCH;
 import ai.labs.eddi.configs.patch.PatchInstruction;
 import ai.labs.eddi.models.DocumentDescriptor;
 import ai.labs.eddi.models.SimpleDocumentDescriptor;
