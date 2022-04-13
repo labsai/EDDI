@@ -28,12 +28,10 @@ public interface ILifecycleTask {
      */
     String getType();
 
-    void executeTask(IConversationMemory memory, Object component) throws LifecycleException;
+    void execute(IConversationMemory memory, Object component) throws LifecycleException;
 
     default Object configure(Map<String, Object> configuration, Map<String, Object> extensions)
-            throws PackageConfigurationException,
-            IllegalExtensionConfigurationException,
-            UnrecognizedExtensionException {
+            throws PackageConfigurationException, IllegalExtensionConfigurationException, UnrecognizedExtensionException {
 
         //to be overridden if needed
         return null;

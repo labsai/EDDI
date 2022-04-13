@@ -50,10 +50,11 @@ public class LifecycleManager implements ILifecycleManager {
             }
 
             try {
-                var components = componentCache.getComponent(task.getId());
+                var components = componentCache.getComponentMap(task.getId());
                 var componentKey = createComponentKey(packageId.getId(), packageId.getVersion(), index);
+                var component = components.getOrDefault(componentKey, null);
 
-                task.executeTask(conversationMemory, components.get(componentKey));
+                task.execute(conversationMemory, component);
 
                 checkIfStopConversationAction(conversationMemory);
             } catch (LifecycleException e) {

@@ -11,12 +11,12 @@ public class ComponentCache implements IComponentCache {
     private final Map<String, Map<String, Object>> componentMaps = new HashMap<>();
 
     @Override
-    public Map<String, Object> getComponent(String type) {
-        return componentMaps.get(type);
+    public Map<String, Object> getComponentMap(String componentType) {
+        return componentMaps.computeIfAbsent(componentType, k -> new HashMap<>());
     }
 
     @Override
-    public void put(String type, String key, Object component) {
-        componentMaps.computeIfAbsent(type, k -> new HashMap<>()).put(key, component);
+    public void put(String componentType, String key, Object component) {
+        componentMaps.computeIfAbsent(componentType, k -> new HashMap<>()).put(key, component);
     }
 }
