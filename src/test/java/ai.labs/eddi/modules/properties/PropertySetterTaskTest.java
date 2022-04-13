@@ -117,7 +117,7 @@ public class PropertySetterTaskTest {
         when(conversationMemory.getConversationProperties()).thenAnswer(invocation -> new ConversationProperties(conversationMemory));
 
         //test
-        propertySetterTask.executeTask(conversationMemory, propertySetter);
+        propertySetterTask.execute(conversationMemory, propertySetter);
 
         //assert
         verify(currentStep, times(1)).getLatestData(KEY_EXPRESSIONS_PARSED);

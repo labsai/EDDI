@@ -37,7 +37,7 @@ public class LifecycleManagerTest {
         lifecycleManager.executeLifecycle(memory, null);
 
         //assert
-        Mockito.verify(lifecycleTask, Mockito.atMost(1)).executeTask(memory, null);
+        Mockito.verify(lifecycleTask, Mockito.atMost(1)).execute(memory, null);
     }
 
     @Test

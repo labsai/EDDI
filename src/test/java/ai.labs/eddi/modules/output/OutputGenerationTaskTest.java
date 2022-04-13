@@ -90,7 +90,7 @@ public class OutputGenerationTaskTest {
                 thenAnswer(invocation -> new ConversationProperties(conversationMemory));
 
         //test
-        outputGenerationTask.executeTask(conversationMemory, outputGeneration);
+        outputGenerationTask.execute(conversationMemory, outputGeneration);
 
         //assert
         verify(conversationMemory, times(1)).getCurrentStep();

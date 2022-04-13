@@ -68,7 +68,7 @@ public class OutputTemplateTaskTest {
         List<QuickReply> expectedPostQuickReplies = setupTask();
 
         //test
-        outputTemplateTask.executeTask(conversationMemory, null);
+        outputTemplateTask.execute(conversationMemory, null);
 
         //assert
         verifyTask(expectedPostQuickReplies);
@@ -87,7 +87,7 @@ public class OutputTemplateTaskTest {
         List<QuickReply> expectedPostQuickReplies = setupTask();
 
         //test
-        outputTemplateTask.executeTask(conversationMemory, null);
+        outputTemplateTask.execute(conversationMemory, null);
 
         //assert
         verifyTask(expectedPostQuickReplies);
