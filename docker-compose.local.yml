@@ -1,0 +1,16 @@
+version: '3'
+services:
+  eddi:
+    build:
+      context: ./src/main/docker/Dockerfile.jvm
+      args:
+        EDDI_VERSION: 5.0.0
+        EDDI_ENV: production
+        EDDI_MEMORY_MIN: 512m
+        EDDI_MEMORY_MAX: 512m
+    image: labsai/eddi:local
+    environment:
+      EDDI_VERSION: 5.0.0
+      EDDI_ENV: production
+      EDDI_MEMORY_MIN: 512m
+      EDDI_MEMORY_MAX: 512m
