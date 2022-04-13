@@ -4,15 +4,11 @@
 
         <!-- template configurations -->
         <local-cache-configuration name="base-template-config">
-            <memory>
-                <object size="1000"/>
-            </memory>
+            <memory max-count="1000"/>
         </local-cache-configuration>
 
         <local-cache-configuration name="user-conversations-config">
-            <memory>
-                <object size="10000"/>
-            </memory>
+            <memory max-count="10000"/>
         </local-cache-configuration>
 
         <!-- cache definitions -->
