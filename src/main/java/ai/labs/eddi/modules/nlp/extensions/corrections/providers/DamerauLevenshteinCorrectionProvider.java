@@ -15,7 +15,7 @@ import static ai.labs.eddi.models.ExtensionDescriptor.FieldType.INT;
 /**
  * @author ginccc
  */
-@Startup
+@Startup(1000)
 @ApplicationScoped
 public class DamerauLevenshteinCorrectionProvider implements ICorrectionProvider {
     public static final String ID = "ai.labs.parser.corrections.levenshtein";

@@ -13,7 +13,7 @@ import javax.inject.Inject;
 import javax.inject.Provider;
 import java.util.Map;
 
-@Startup
+@Startup(1000)
 @ApplicationScoped
 public class GitCallsModule {
 

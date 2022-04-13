@@ -12,6 +12,7 @@ import javax.inject.Inject;
 import javax.inject.Provider;
 import java.util.Map;
 
+@io.quarkus.runtime.Startup(4000)
 @ApplicationScoped
 public class Startup {
     private static final Logger LOGGER = Logger.getLogger(Startup.class);
@@ -29,11 +30,11 @@ public class Startup {
         LOGGER.info("The application is starting...");
 
         //TODO: run auto deploy after all lifecycle tasks have been initialized
-        /*try {
+        try {
             autoBotDeployment.autoDeployBots();
         } catch (IAutoBotDeployment.AutoDeploymentException e) {
             LOGGER.error(e.getLocalizedMessage(), e);
-        }*/
+        }
     }
 
     void onStop(@Observes ShutdownEvent ev) {

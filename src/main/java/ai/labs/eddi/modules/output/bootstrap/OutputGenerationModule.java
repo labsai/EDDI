@@ -16,7 +16,7 @@ import java.util.Map;
 /**
  * @author ginccc
  */
-@Startup
+@Startup(1000)
 @ApplicationScoped
 public class OutputGenerationModule {
 

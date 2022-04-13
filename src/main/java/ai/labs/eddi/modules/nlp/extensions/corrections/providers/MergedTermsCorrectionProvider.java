@@ -10,7 +10,7 @@ import java.util.Map;
 /**
  * @author ginccc
  */
-@Startup
+@Startup(1000)
 @ApplicationScoped
 public class MergedTermsCorrectionProvider implements ICorrectionProvider {
     public static final String ID = "ai.labs.parser.corrections.mergedTerms";

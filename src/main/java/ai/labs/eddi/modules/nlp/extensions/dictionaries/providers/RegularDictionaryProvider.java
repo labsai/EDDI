@@ -24,7 +24,7 @@ import java.util.Map;
  * @author ginccc
  */
 @Slf4j
-@Startup
+@Startup(1000)
 @ApplicationScoped
 public class RegularDictionaryProvider implements IDictionaryProvider {
     public static final String ID = "ai.labs.parser.dictionaries.regular";

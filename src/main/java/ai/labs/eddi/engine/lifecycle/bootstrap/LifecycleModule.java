@@ -8,7 +8,7 @@ import javax.inject.Provider;
 import java.util.HashMap;
 import java.util.Map;
 
-@Startup
+@Startup(1000)
 @ApplicationScoped
 public class LifecycleModule {
 
