@@ -38,15 +38,15 @@ jobs:
           command: ./mvnw test
 
       - run:
-          name: Docker Build
-          command: ./mvnw package '-Dquarkus.container-image.build=true'
-
-      - run:
           name: Start container and verify it's working
           command: |
             set -x
             chmod +x integration-tests.sh
             ./integration-tests.sh
+
+      - run:
+          name: Docker Build
+          command: ./mvnw package '-Dquarkus.container-image.build=true'
 
       ## Push docker image if master build
 #      - run:
