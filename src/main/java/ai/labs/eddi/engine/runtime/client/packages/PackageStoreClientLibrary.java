@@ -81,7 +81,9 @@ public class PackageStoreClientLibrary implements IPackageStoreClientLibrary {
                     var component = lifecycleTask.
                             configure(packageExtension.getConfig(), packageExtension.getExtensions());
 
-                    componentCache.put(type, componentKey, component);
+                    if (component != null) {
+                        componentCache.put(type, componentKey, component);
+                    }
                     lifecycleManager.addLifecycleTask(lifecycleTask);
                 }
             }
