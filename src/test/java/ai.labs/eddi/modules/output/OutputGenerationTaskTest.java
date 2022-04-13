@@ -8,12 +8,14 @@ import ai.labs.eddi.engine.memory.IDataFactory;
 import ai.labs.eddi.engine.memory.model.ConversationProperties;
 import ai.labs.eddi.engine.memory.model.Data;
 import ai.labs.eddi.engine.runtime.client.configuration.IResourceClientLibrary;
+import ai.labs.eddi.modules.output.impl.OutputGeneration;
 import ai.labs.eddi.modules.output.impl.OutputGenerationTask;
 import ai.labs.eddi.modules.output.model.OutputEntry;
 import ai.labs.eddi.modules.output.model.OutputValue;
 import ai.labs.eddi.modules.output.model.QuickReply;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.quarkus.test.junit.QuarkusTest;
+import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
@@ -109,10 +111,13 @@ public class OutputGenerationTaskTest {
                 thenAnswer(invocation -> createOutputConfigurationSet());
 
         //test
-        outputGenerationTask.configure(configuration, null);
+        var outputGeneration = (OutputGeneration) outputGenerationTask.configure(configuration, null);
 
         //assert
-        verify(outputGeneration, times(3)).addOutputEntry(any(OutputEntry.class));
+        var outputEntry = outputGeneration.getOutputMapper().get(ACTION_1).get(0);
+        Assertions.assertEquals(1, outputGeneration.getOutputMapper().keySet().size());
+        Assertions.assertEquals(2, outputEntry.getOutputs().get(0).getValueAlternatives().size());
+        Assertions.assertEquals(2, outputEntry.getQuickReplies().size());
     }
 
     private OutputEntry createOutputEntry() {
