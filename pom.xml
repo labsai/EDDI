@@ -190,7 +190,7 @@
         <dependency>
             <groupId>org.eclipse.jetty</groupId>
             <artifactId>jetty-client</artifactId>
-            <version>11.0.7</version>
+            <version>11.0.9</version>
         </dependency>
 
         <dependency>
