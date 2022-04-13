@@ -30,12 +30,16 @@ jobs:
           key: v1-dependencies-{{ checksum "pom.xml" }}
 
       - run:
-          name: Permission
+          name: Set permissions
           command: chmod +x mvnw
 
       - run:
-          name: Test
+          name: Run unit tests
           command: ./mvnw test
+
+      - run:
+          name: Build docker image
+          command: ./mvnw package '-Dquarkus.container-image.build=true'
 
       - run:
           name: Start container and verify it's working
@@ -43,10 +47,6 @@ jobs:
             set -x
             chmod +x integration-tests.sh
             ./integration-tests.sh
-
-      - run:
-          name: Docker Build
-          command: ./mvnw package '-Dquarkus.container-image.build=true'
 
       ## Push docker image if master build
 #      - run:
