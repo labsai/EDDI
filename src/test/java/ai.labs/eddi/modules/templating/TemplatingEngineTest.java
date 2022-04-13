@@ -4,7 +4,6 @@ import ai.labs.eddi.datastore.serialization.SerializationCustomizer;
 import ai.labs.eddi.modules.templating.bootstrap.TemplateEngineModule;
 import ai.labs.eddi.modules.templating.impl.TemplatingEngine;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import io.quarkus.test.junit.QuarkusTest;
 import lombok.AllArgsConstructor;
 import lombok.Getter;
 import lombok.Setter;
@@ -17,7 +16,7 @@ import java.util.HashMap;
 /**
  * @author ginccc
  */
-@QuarkusTest
+
 public class TemplatingEngineTest {
     private static ITemplatingEngine templatingEngine;
 

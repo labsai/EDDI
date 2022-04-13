@@ -14,7 +14,6 @@ import ai.labs.eddi.modules.output.model.OutputEntry;
 import ai.labs.eddi.modules.output.model.OutputValue;
 import ai.labs.eddi.modules.output.model.QuickReply;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import io.quarkus.test.junit.QuarkusTest;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -27,7 +26,7 @@ import static org.mockito.Mockito.*;
 /**
  * @author ginccc
  */
-@QuarkusTest
+
 public class OutputGenerationTaskTest {
     private static final String ACTION_1 = "action1";
     private static final String ACTION_2 = "action2";

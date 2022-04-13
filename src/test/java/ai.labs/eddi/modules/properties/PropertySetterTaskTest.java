@@ -17,7 +17,6 @@ import ai.labs.eddi.modules.nlp.expressions.value.Value;
 import ai.labs.eddi.modules.properties.impl.PropertySetterTask;
 import ai.labs.eddi.modules.templating.ITemplatingEngine;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import io.quarkus.test.junit.QuarkusTest;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentMatchers;
@@ -34,7 +33,6 @@ import static org.mockito.Mockito.*;
 /**
  * @author ginccc
  */
-@QuarkusTest
 public class PropertySetterTaskTest {
     private static final String KEY_EXPRESSIONS_PARSED = "expressions:parsed";
     private static final String KEY_ACTIONS = "actions";
