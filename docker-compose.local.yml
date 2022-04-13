@@ -2,7 +2,7 @@ version: '3'
 services:
   eddi:
     build:
-      context: ./src/main/docker/Dockerfile.jvm
+      context: ./src/main/docker
       args:
         EDDI_VERSION: 5.0.0
         EDDI_ENV: production
