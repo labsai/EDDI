@@ -1,7 +1,7 @@
 package ai.labs.eddi.engine.runtime.internal;
 
 import ai.labs.eddi.configs.deployment.IDeploymentStore;
-import ai.labs.eddi.configs.deployment.model.DeploymentInfo;
+import ai.labs.eddi.configs.deployment.model.DeploymentInfo.DeploymentStatus;
 import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.engine.runtime.IAutoBotDeployment;
 import ai.labs.eddi.engine.runtime.IBotFactory;
@@ -34,7 +34,7 @@ public class AutoBotDeployment implements IAutoBotDeployment {
         try {
             log.info("Starting auto deployment of bots...");
             deploymentStore.readDeploymentInfos().stream().filter(
-                            deploymentInfo -> deploymentInfo.getDeploymentStatus() == DeploymentInfo.DeploymentStatus.deployed).
+                            deploymentInfo -> deploymentInfo.getDeploymentStatus() == DeploymentStatus.deployed).
                     forEach(deploymentInfo -> {
                         Environment environment = Environment.valueOf(deploymentInfo.getEnvironment().toString());
                         String botId = deploymentInfo.getBotId();
