@@ -9,7 +9,6 @@ import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.datastore.mongo.HistorizedResourceStore;
 import ai.labs.eddi.datastore.mongo.MongoResourceStorage;
 import ai.labs.eddi.datastore.serialization.IDocumentBuilder;
-import ai.labs.eddi.engine.utilities.URIUtilities;
 import ai.labs.eddi.models.DocumentDescriptor;
 import ai.labs.eddi.utils.RuntimeUtilities;
 import com.mongodb.client.MongoDatabase;
@@ -20,6 +19,8 @@ import javax.inject.Inject;
 import java.util.Collections;
 import java.util.LinkedList;
 import java.util.List;
+
+import static ai.labs.eddi.utils.RestUtilities.extractResourceId;
 
 /**
  * @author ginccc
@@ -95,7 +96,7 @@ public class BotStore implements IBotStore {
 
                 boolean alreadyContainsResource = ret.stream().anyMatch(
                         descriptor ->
-                                URIUtilities.extractResourceId(descriptor.getResource()).getId().equals(botId.getId()));
+                                extractResourceId(descriptor.getResource()).getId().equals(botId.getId()));
 
                 if (alreadyContainsResource) {
                     continue;

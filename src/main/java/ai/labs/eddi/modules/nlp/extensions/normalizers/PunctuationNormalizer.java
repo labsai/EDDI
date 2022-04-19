@@ -1,6 +1,6 @@
 package ai.labs.eddi.modules.nlp.extensions.normalizers;
 
-import ai.labs.eddi.engine.utilities.LanguageUtilities;
+import ai.labs.eddi.utils.LanguageUtilities;
 import lombok.AllArgsConstructor;
 import lombok.NoArgsConstructor;
 import lombok.Setter;

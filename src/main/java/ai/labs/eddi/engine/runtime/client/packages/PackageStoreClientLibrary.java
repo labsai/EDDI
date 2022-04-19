@@ -12,8 +12,8 @@ import ai.labs.eddi.engine.lifecycle.internal.LifecycleManager;
 import ai.labs.eddi.engine.runtime.IExecutablePackage;
 import ai.labs.eddi.engine.runtime.service.IPackageStoreService;
 import ai.labs.eddi.engine.runtime.service.ServiceException;
-import ai.labs.eddi.engine.utilities.URIUtilities;
 import ai.labs.eddi.models.DocumentDescriptor;
+import ai.labs.eddi.utils.RestUtilities;
 
 import javax.enterprise.context.ApplicationScoped;
 import javax.inject.Inject;
@@ -104,7 +104,7 @@ public class PackageStoreClientLibrary implements IPackageStoreClientLibrary {
 
             @Override
             public String getPackageId() {
-                return URIUtilities.extractResourceId(documentDescriptor.getResource()).getId();
+                return RestUtilities.extractResourceId(documentDescriptor.getResource()).getId();
             }
 
             @Override

@@ -11,7 +11,6 @@ import ai.labs.eddi.configs.schema.IJsonSchemaCreator;
 import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.engine.runtime.client.configuration.ResourceClientLibrary;
 import ai.labs.eddi.engine.runtime.service.ServiceException;
-import ai.labs.eddi.engine.utilities.URIUtilities;
 import ai.labs.eddi.models.DocumentDescriptor;
 import ai.labs.eddi.utils.RestUtilities;
 import org.jboss.logging.Logger;
@@ -222,7 +221,7 @@ public class RestPackageStore implements IRestPackageStore {
 
                 newResourceLocation = duplicateResourceResponse.getLocation();
 
-                var oldResourceId = URIUtilities.extractResourceId(oldResourceUri);
+                var oldResourceId = RestUtilities.extractResourceId(oldResourceUri);
                 createDocumentDescriptorForDuplicate(
                         documentDescriptorStore,
                         oldResourceId.getId(),

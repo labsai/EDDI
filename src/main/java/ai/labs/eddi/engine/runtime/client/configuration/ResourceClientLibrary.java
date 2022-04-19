@@ -7,9 +7,8 @@ import ai.labs.eddi.configs.output.IRestOutputStore;
 import ai.labs.eddi.configs.parser.IRestParserStore;
 import ai.labs.eddi.configs.propertysetter.IRestPropertySetterStore;
 import ai.labs.eddi.configs.regulardictionary.IRestRegularDictionaryStore;
-import ai.labs.eddi.datastore.model.ResourceId;
 import ai.labs.eddi.engine.runtime.service.ServiceException;
-import ai.labs.eddi.engine.utilities.URIUtilities;
+import ai.labs.eddi.utils.RestUtilities;
 import ai.labs.eddi.utils.RuntimeUtilities;
 
 import javax.enterprise.context.ApplicationScoped;
@@ -18,6 +17,8 @@ import javax.ws.rs.core.Response;
 import java.net.URI;
 import java.util.HashMap;
 import java.util.Map;
+
+import static ai.labs.eddi.datastore.IResourceStore.IResourceId;
 
 /**
  * @author ginccc
@@ -147,7 +148,7 @@ public class ResourceClientLibrary implements IResourceClientLibrary {
         IResourceService proxy = restInterfaces.get(type);
 
         if (proxy != null) {
-            ResourceId resourceId = URIUtilities.extractResourceId(uri);
+            IResourceId resourceId = RestUtilities.extractResourceId(uri);
             Object resource = proxy.read(resourceId.getId(), resourceId.getVersion());
             return (T) resource;
         }
@@ -163,7 +164,7 @@ public class ResourceClientLibrary implements IResourceClientLibrary {
             throw new ServiceException(String.format("Could not find proxy for type '%s' in uri '%s'", type, uri));
         }
 
-        ResourceId resourceId = URIUtilities.extractResourceId(uri);
+        IResourceId resourceId = RestUtilities.extractResourceId(uri);
         return proxy.duplicate(resourceId.getId(), resourceId.getVersion());
     }
 

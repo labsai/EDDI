@@ -2,6 +2,7 @@ package ai.labs.eddi.engine.utilities;
 
 
 import ai.labs.eddi.utils.CharacterUtilities;
+import ai.labs.eddi.utils.LanguageUtilities;
 
 /**
  * @author ginccc

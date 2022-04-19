@@ -1,4 +1,4 @@
-package ai.labs.eddi.engine.utilities;
+package ai.labs.eddi.utils;
 
 import lombok.AccessLevel;
 import lombok.NoArgsConstructor;

@@ -1,11 +1,11 @@
 package ai.labs.eddi.modules.nlp.extensions.dictionaries;
 
-import ai.labs.eddi.engine.utilities.LanguageUtilities;
 import ai.labs.eddi.modules.nlp.expressions.Expression;
 import ai.labs.eddi.modules.nlp.expressions.Expressions;
 import ai.labs.eddi.modules.nlp.expressions.utilities.IExpressionProvider;
 import ai.labs.eddi.modules.nlp.model.FoundWord;
 import ai.labs.eddi.modules.nlp.model.Word;
+import ai.labs.eddi.utils.LanguageUtilities;
 
 import java.util.Collections;
 import java.util.Date;

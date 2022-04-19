@@ -3,7 +3,6 @@ package ai.labs.eddi.configs.utilities;
 import ai.labs.eddi.configs.documentdescriptor.IDocumentDescriptorStore;
 import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.engine.memory.descriptor.model.ConversationDescriptor;
-import ai.labs.eddi.engine.utilities.URIUtilities;
 import ai.labs.eddi.models.DocumentDescriptor;
 import ai.labs.eddi.utils.RestUtilities;
 import com.mongodb.client.FindIterable;
@@ -111,7 +110,7 @@ public class ResourceUtilities {
 
         var oldDescriptor = documentDescriptorStore.readDescriptor(oldId, oldVersion);
 
-        var newResourceId = URIUtilities.extractResourceId(newResourceLocation);
+        var newResourceId = RestUtilities.extractResourceId(newResourceLocation);
 
         if (!isNullOrEmpty(oldDescriptor.getName())) {
             oldDescriptor.setName(oldDescriptor.getName() + COPY_APPENDIX);

@@ -59,7 +59,7 @@ public class RestImportService extends AbstractBackupService implements IRestImp
     private static final Pattern EDDI_URI_PATTERN = Pattern.compile("\"eddi://ai.labs..*?\"");
     private static final String BOT_FILE_ENDING = ".bot.json";
     private final Path tmpPath = Paths.get(FileUtilities.buildPath(System.getProperty("user.dir"), "tmp", "import"));
-    private final Path examplePath = Paths.get(FileUtilities.buildPath(System.getProperty("user.dir"), "resources", "examples"));
+    private final Path examplePath = Paths.get("src", "main", "resources", "examples");
     private final IZipArchive zipArchive;
     private final IJsonSerialization jsonSerialization;
     private final IRestInterfaceFactory restInterfaceFactory;

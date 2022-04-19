@@ -1,14 +1,14 @@
 package ai.labs.eddi.engine.runtime.client.bots;
 
 import ai.labs.eddi.configs.bots.model.BotConfiguration;
-import ai.labs.eddi.datastore.model.ResourceId;
+import ai.labs.eddi.datastore.IResourceStore.IResourceId;
 import ai.labs.eddi.engine.runtime.IBot;
 import ai.labs.eddi.engine.runtime.IExecutablePackage;
 import ai.labs.eddi.engine.runtime.IPackageFactory;
 import ai.labs.eddi.engine.runtime.internal.Bot;
 import ai.labs.eddi.engine.runtime.service.IBotStoreService;
 import ai.labs.eddi.engine.runtime.service.ServiceException;
-import ai.labs.eddi.engine.utilities.URIUtilities;
+import ai.labs.eddi.utils.RestUtilities;
 
 import javax.enterprise.context.ApplicationScoped;
 import javax.inject.Inject;
@@ -34,7 +34,7 @@ public class BotStoreClientLibrary implements IBotStoreClientLibrary {
         final IBot bot = new Bot(botId, version);
         final BotConfiguration botConfiguration = botStoreService.getBotConfiguration(botId, version);
         for (final URI packageURI : botConfiguration.getPackages()) {
-            ResourceId resourceId = URIUtilities.extractResourceId(packageURI);
+            IResourceId resourceId = RestUtilities.extractResourceId(packageURI);
             IExecutablePackage thePackage = packageFactory.getExecutablePackage(resourceId.getId(), resourceId.getVersion());
             bot.addPackage(thePackage);
         }

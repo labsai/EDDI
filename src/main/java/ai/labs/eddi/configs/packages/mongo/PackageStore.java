@@ -8,8 +8,8 @@ import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.datastore.mongo.HistorizedResourceStore;
 import ai.labs.eddi.datastore.mongo.MongoResourceStorage;
 import ai.labs.eddi.datastore.serialization.IDocumentBuilder;
-import ai.labs.eddi.engine.utilities.URIUtilities;
 import ai.labs.eddi.models.DocumentDescriptor;
+import ai.labs.eddi.utils.RestUtilities;
 import ai.labs.eddi.utils.RuntimeUtilities;
 import com.mongodb.client.MongoDatabase;
 import org.bson.Document;
@@ -101,7 +101,7 @@ public class PackageStore implements IPackageStore {
                 boolean alreadyContainsResource = ret.stream().anyMatch(
                         resource ->
                         {
-                            String id = URIUtilities.extractResourceId(resource.getResource()).getId();
+                            String id = RestUtilities.extractResourceId(resource.getResource()).getId();
                             return id.equals(packageId.getId());
                         });
 
