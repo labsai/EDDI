@@ -1,12 +1,24 @@
-REST.apiURL = '';
 let eddi = {};
 eddi.environments = ['unrestricted', 'restricted', 'test'];
+
+eddi.importBotExamples = function () {
+    $.ajax({
+        method: 'POST',
+        url: '/backup/import/examples', statusCode: {
+            200: function (response) {
+                if (typeof response !== 'undefined' && response.length !== 0) {
+                    eddi.addBotDeployments(eddi.environments[0], response);
+                }
+            }
+        }
+    });
+};
 
 eddi.deployExampleBots = function () {
     $('#btnDeployExampleBots').hide();
     $('#no-bots-deployed').html('Deploying Bots...');
-    let deploymentStatuses = IRestImportService.importBotExamples();
-    eddi.addBotDeployments(eddi.environments[0], deploymentStatuses);
+    eddi.importBotExamples();
+
 };
 
 eddi.addBotDeployments = function (environment, deploymentStatuses) {
@@ -15,7 +27,7 @@ eddi.addBotDeployments = function (environment, deploymentStatuses) {
     for (let i = 0; i < deploymentStatuses.length; i++) {
         $('#no-bots-deployed').remove();
         let deploymentStatus = deploymentStatuses[i];
-        let link = REST.apiURL + '/chat' + '/' + environment + '/' + deploymentStatus.botId;
+        let link = '/chat' + '/' + environment + '/' + deploymentStatus.botId;
 
         let description = deploymentStatus.descriptor.description;
         let name = deploymentStatus.descriptor.name;
@@ -37,52 +49,21 @@ eddi.addBotDeployments = function (environment, deploymentStatuses) {
     }
 };
 
-eddi.logout = function () {
-    eddi.keycloak.logout();
-};
-
-$(function () {
+eddi.fetchDeployedBots = function (environment) {
     $.ajax({
-        url: '/user/securityType', statusCode: {
+        url: '/administration/' + environment + '/deploymentstatus', statusCode: {
             200: function (response) {
-                if (response === 'keycloak') {
-                    console.log('securityType is ' + response);
-
-                    eddi.keycloak = Keycloak(
-                        {
-                            "realm": "EDDI",
-                            "auth-server-url": "https://auth.labs.ai/auth",
-                            "ssl-required": "external",
-                            "resource": "eddi-engine",
-                            "clientId": "eddi-engine",
-                            "public-client": true,
-                            "confidential-port": 0
-                        });
-
-                    eddi.keycloak.init({onLoad: 'login-required'});
-
-                    $('#logoutBtn').prop('href', eddi.keycloak.createLogoutUrl());
+                if (typeof response !== 'undefined' && response.length !== 0) {
+                    eddi.addBotDeployments(environment, response);
                 }
             }
         }
     });
+};
 
-    eddi.baseUri = window.location.protocol + "//" + window.location.host;
-    $('#botBuilderUrl').prop('href', '//manager.labs.ai?apiUrl=' + encodeURIComponent(eddi.baseUri));
-
-    $.ajax({
-        url: '/user/isAuthenticated', statusCode: {
-            204: function () {
-                $('#logoutBtn').prop('disabled', false);
-                $('#logoutBtn').prop('onclick', 'eddi.logout()');
-                $('#logoutBtn').removeClass('disabled');
-            }
-        }
-    });
-
+$(function () {
     for (let n = 0; n < eddi.environments.length; n++) {
         let environment = eddi.environments[n];
-        let deploymentStatuses = IRestBotAdministration.getDeploymentStatuses({environment: environment});
-        eddi.addBotDeployments(environment, deploymentStatuses);
+        eddi.fetchDeployedBots(environment);
     }
 });
