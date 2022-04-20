@@ -11,7 +11,7 @@ import ai.labs.eddi.datastore.serialization.IDocumentBuilder;
 import ai.labs.eddi.models.DocumentDescriptor;
 import ai.labs.eddi.utils.RestUtilities;
 import ai.labs.eddi.utils.RuntimeUtilities;
-import com.mongodb.client.MongoDatabase;
+import com.mongodb.reactivestreams.client.MongoDatabase;
 import org.bson.Document;
 
 import javax.enterprise.context.ApplicationScoped;

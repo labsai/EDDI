@@ -6,8 +6,8 @@ import ai.labs.eddi.datastore.serialization.IDescriptorStore;
 import ai.labs.eddi.datastore.serialization.IDocumentBuilder;
 import ai.labs.eddi.utils.RuntimeUtilities;
 import ai.labs.eddi.utils.StringUtilities;
-import com.mongodb.client.MongoCollection;
-import com.mongodb.client.MongoDatabase;
+import com.mongodb.reactivestreams.client.MongoCollection;
+import com.mongodb.reactivestreams.client.MongoDatabase;
 import com.mongodb.client.model.IndexOptions;
 import com.mongodb.client.model.Indexes;
 import org.bson.Document;
@@ -93,7 +93,7 @@ public class DescriptorStore<T> implements IDescriptorStore<T> {
 
     @Override
     public void createDescriptor(String resourceId, Integer version, T documentDescriptor) throws IResourceStore.ResourceStoreException {
-        descriptorResourceStore.create(resourceId, version, documentDescriptor);
+        descriptorResourceStore.createNew(resourceId, version, documentDescriptor);
     }
 
     @Override

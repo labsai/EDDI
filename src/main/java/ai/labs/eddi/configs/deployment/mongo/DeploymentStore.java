@@ -5,9 +5,9 @@ import ai.labs.eddi.configs.deployment.model.DeploymentInfo;
 import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.datastore.serialization.IDocumentBuilder;
 import ai.labs.eddi.utils.RuntimeUtilities;
-import com.mongodb.client.FindIterable;
-import com.mongodb.client.MongoCollection;
-import com.mongodb.client.MongoDatabase;
+import com.mongodb.reactivestreams.client.MongoCollection;
+import com.mongodb.reactivestreams.client.MongoDatabase;
+import io.reactivex.rxjava3.core.Observable;
 import org.bson.Document;
 
 import javax.enterprise.context.ApplicationScoped;
@@ -15,6 +15,7 @@ import javax.inject.Inject;
 import java.io.IOException;
 import java.util.LinkedList;
 import java.util.List;
+import java.util.NoSuchElementException;
 
 /**
  * @author ginccc
@@ -54,10 +55,10 @@ public class DeploymentStore implements IDeploymentStore {
             filter.put("botVersion", botVersion);
             Document newDeploymentInfo = new Document(filter);
             newDeploymentInfo.put("deploymentStatus", deploymentStatus.toString());
-            Document replacedDocument = collection.findOneAndReplace(filter, newDeploymentInfo);
-
-            if (replacedDocument == null) {
-                collection.insertOne(newDeploymentInfo);
+            try {
+                Document replacedDocument = Observable.fromPublisher(collection.findOneAndReplace(filter, newDeploymentInfo)).blockingFirst();
+            } catch (NoSuchElementException ne) {
+                Observable.fromPublisher(collection.insertOne(newDeploymentInfo)).blockingFirst();
             }
         }
 
@@ -65,7 +66,7 @@ public class DeploymentStore implements IDeploymentStore {
             List<DeploymentInfo> deploymentInfos = new LinkedList<>();
 
             try {
-                FindIterable<Document> documents = collection.find();
+                Iterable<Document> documents = Observable.fromPublisher(collection.find()).blockingIterable();
                 for (Document document : documents) {
                     deploymentInfos.add(documentBuilder.build(document, DeploymentInfo.class));
                 }

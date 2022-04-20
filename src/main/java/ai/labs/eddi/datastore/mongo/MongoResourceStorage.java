@@ -3,15 +3,16 @@ package ai.labs.eddi.datastore.mongo;
 import ai.labs.eddi.datastore.IResourceStorage;
 import ai.labs.eddi.datastore.serialization.IDocumentBuilder;
 import ai.labs.eddi.utils.RuntimeUtilities;
-import com.mongodb.client.FindIterable;
-import com.mongodb.client.MongoCollection;
-import com.mongodb.client.MongoDatabase;
+import com.mongodb.reactivestreams.client.MongoCollection;
+import com.mongodb.reactivestreams.client.MongoDatabase;
 import com.mongodb.client.model.Filters;
 import com.mongodb.client.model.UpdateOptions;
+import io.reactivex.rxjava3.core.Observable;
 import org.bson.Document;
 import org.bson.types.ObjectId;
 
 import java.io.IOException;
+import java.util.NoSuchElementException;
 
 /**
  * @author ginccc
@@ -62,27 +63,34 @@ public class MongoResourceStorage<T> implements IResourceStorage<T> {
     public void store(IResource currentResource) {
         Resource resource = checkInternalResource(currentResource);
         if (resource.getId() == null) {
-            currentCollection.insertOne(resource.getMongoDocument());
+            Observable.fromPublisher(currentCollection.insertOne(resource.getMongoDocument())).blockingFirst();
         } else {
-            currentCollection.updateOne(
+            Observable.fromPublisher(currentCollection.updateOne(
                     Filters.eq("_id", new ObjectId(resource.getId())),
                     new Document("$set", resource.getMongoDocument()),
-                    new UpdateOptions().upsert(true));
+                    new UpdateOptions().upsert(true))).blockingFirst();
         }
     }
+
+    @Override
+    public void createNew(IResource currentResource) {
+        Resource resource = checkInternalResource(currentResource);
+        Observable.fromPublisher(currentCollection.insertOne(resource.getMongoDocument())).blockingFirst();
+    }
+
 
     @Override
     public IResource<T> read(String id, Integer version) {
         Document query = new Document(ID_FIELD, new ObjectId(id));
         query.put(VERSION_FIELD, version);
 
-        Document document = currentCollection.find(query).first();
-
-        if (document == null) {
+        try {
+            Observable<Document> observable = Observable.fromPublisher(currentCollection.find(query).first());
+            Document document = observable.blockingFirst();
+            return new Resource(document);
+        } catch (NoSuchElementException ne) {
             return null;
         }
-
-        return new Resource(document);
     }
 
     @Override
@@ -115,13 +123,13 @@ public class MongoResourceStorage<T> implements IResourceStorage<T> {
         Document objectId = new Document(ID_FIELD, new ObjectId(id));
         objectId.put(VERSION_FIELD, version);
 
-        Document doc = historyCollection.find(Filters.eq(ID_FIELD, objectId)).first();
-
-        if (doc == null) {
+        try {
+            Observable<Document> observable = Observable.fromPublisher(historyCollection.find(Filters.eq(ID_FIELD, objectId)).first());
+            Document doc = observable.blockingFirst();
+            return new HistoryResource(doc);
+        } catch (NoSuchElementException ne) {
             return null;
         }
-
-        return new HistoryResource(doc);
     }
 
     @Override
@@ -140,12 +148,13 @@ public class MongoResourceStorage<T> implements IResourceStorage<T> {
         Document object = new Document();
         object.put(ID_FIELD, query);
 
-        if (historyCollection.countDocuments(object) == 0) {
+        if (Observable.fromPublisher(historyCollection.countDocuments(object)).blockingFirst() == 0) {
             return null;
         }
 
-        FindIterable<Document> documents = historyCollection.find(object).sort(new Document(ID_FIELD, -1)).limit(1);
-        return new HistoryResource(documents.iterator().next());
+
+        Document doc = Observable.fromPublisher(historyCollection.find(object).sort(new Document(ID_FIELD, -1)).limit(1)).blockingFirst();
+        return new HistoryResource(doc);
     }
 
     @Override
@@ -167,10 +176,10 @@ public class MongoResourceStorage<T> implements IResourceStorage<T> {
     @Override
     public Integer getCurrentVersion(String id) {
         Document query = new Document(ID_FIELD, new ObjectId(id));
-        Document one = currentCollection.find(query).first();
-        if (one != null) {
+        try {
+            Document one = Observable.fromPublisher(currentCollection.find(query).first()).blockingFirst();
             return (Integer) one.get(VERSION_FIELD);
-        } else {
+        } catch (NoSuchElementException ne) {
             return -1;
         }
     }

@@ -13,6 +13,8 @@ public interface IResourceStorage<T> {
 
     void store(IResource<T> resource);
 
+    void createNew(IResource<T> resource);
+
     IResource<T> read(String id, Integer version);
 
     void remove(String id);

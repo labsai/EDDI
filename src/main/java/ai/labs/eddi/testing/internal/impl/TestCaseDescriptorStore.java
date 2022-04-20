@@ -5,7 +5,7 @@ import ai.labs.eddi.datastore.mongo.DescriptorStore;
 import ai.labs.eddi.datastore.serialization.IDocumentBuilder;
 import ai.labs.eddi.testing.descriptor.ITestCaseDescriptorStore;
 import ai.labs.eddi.testing.descriptor.model.TestCaseDescriptor;
-import com.mongodb.client.MongoDatabase;
+import com.mongodb.reactivestreams.client.MongoDatabase;
 
 import javax.enterprise.context.ApplicationScoped;
 import javax.inject.Inject;

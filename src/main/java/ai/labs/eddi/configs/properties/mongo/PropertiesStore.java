@@ -3,14 +3,16 @@ package ai.labs.eddi.configs.properties.mongo;
 import ai.labs.eddi.configs.properties.IPropertiesStore;
 import ai.labs.eddi.configs.properties.model.Properties;
 import ai.labs.eddi.utils.RuntimeUtilities;
-import com.mongodb.client.MongoCollection;
-import com.mongodb.client.MongoDatabase;
+import com.mongodb.reactivestreams.client.MongoCollection;
+import com.mongodb.reactivestreams.client.MongoDatabase;
 import com.mongodb.client.model.IndexOptions;
 import com.mongodb.client.model.Indexes;
+import io.reactivex.rxjava3.core.Observable;
 import org.bson.Document;
 
 import javax.enterprise.context.ApplicationScoped;
 import javax.inject.Inject;
+import java.util.NoSuchElementException;
 
 /**
  * @author ginccc
@@ -60,12 +62,12 @@ public class PropertiesStore implements IPropertiesStore {
             Document filter = new Document();
             filter.put(USER_ID, userId);
 
-            Document document = collection.find(filter).first();
-            if (document != null) {
+            try {
+                Document document = Observable.fromPublisher(collection.find(filter).first()).blockingFirst();
                 return new Properties(document);
+            } catch (NoSuchElementException ne) {
+                return null;
             }
-
-            return null;
         }
 
         void mergeProperties(String userId, Properties newProperties) {
@@ -82,15 +84,15 @@ public class PropertiesStore implements IPropertiesStore {
 
             if (!propertiesDocument.isEmpty()) {
                 if (create) {
-                    collection.insertOne(propertiesDocument);
+                    Observable.fromPublisher(collection.insertOne(propertiesDocument)).blockingFirst();
                 } else {
-                    collection.replaceOne(new Document(USER_ID, userId), propertiesDocument);
+                    Observable.fromPublisher(collection.replaceOne(new Document(USER_ID, userId), propertiesDocument)).blockingFirst();
                 }
             }
         }
 
         void deleteProperties(String userId) {
-            collection.deleteOne(new Document(USER_ID, userId));
+            Observable.fromPublisher(collection.deleteOne(new Document(USER_ID, userId))).blockingFirst();
         }
     }
 }

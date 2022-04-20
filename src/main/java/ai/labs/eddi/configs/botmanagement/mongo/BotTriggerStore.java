@@ -7,16 +7,18 @@ import ai.labs.eddi.datastore.serialization.IDocumentBuilder;
 import ai.labs.eddi.datastore.serialization.IJsonSerialization;
 import ai.labs.eddi.models.BotTriggerConfiguration;
 import ai.labs.eddi.utils.RuntimeUtilities;
-import com.mongodb.client.MongoCollection;
-import com.mongodb.client.MongoDatabase;
+import com.mongodb.reactivestreams.client.MongoCollection;
+import com.mongodb.reactivestreams.client.MongoDatabase;
 import com.mongodb.client.model.IndexOptions;
 import com.mongodb.client.model.Indexes;
+import io.reactivex.rxjava3.core.Observable;
 import org.bson.Document;
 import org.jboss.logging.Logger;
 
 import javax.enterprise.context.ApplicationScoped;
 import javax.inject.Inject;
 import java.io.IOException;
+import java.util.NoSuchElementException;
 
 /**
  * @author ginccc
@@ -85,16 +87,14 @@ public class BotTriggerStore implements IBotTriggerStore {
             filter.put(INTENT_FIELD, intent);
 
             try {
-                Document document = collection.find(filter).first();
-                if (document != null) {
-                    return documentBuilder.build(document, BotTriggerConfiguration.class);
-                } else {
-                    String message = "BotTriggerConfiguration with intent=%s does not exist";
-                    message = String.format(message, intent);
-                    throw new IResourceStore.ResourceNotFoundException(message);
-                }
+                Document document = Observable.fromPublisher(collection.find(filter).first()).blockingFirst();
+                return documentBuilder.build(document, BotTriggerConfiguration.class);
             } catch (IOException e) {
                 throw new IResourceStore.ResourceStoreException(e.getLocalizedMessage(), e);
+            } catch (NoSuchElementException ne) {
+                String message = "BotTriggerConfiguration with intent=%s does not exist";
+                message = String.format(message, intent);
+                throw new IResourceStore.ResourceNotFoundException(message);
             }
         }
 
@@ -102,23 +102,21 @@ public class BotTriggerStore implements IBotTriggerStore {
                 throws IResourceStore.ResourceStoreException {
 
             Document document = createDocument(botTriggerConfiguration);
-            collection.replaceOne(new Document(INTENT_FIELD, intent), document);
+            Observable.fromPublisher(collection.replaceOne(new Document(INTENT_FIELD, intent), document)).blockingFirst();
         }
 
         void createBotTrigger(BotTriggerConfiguration botTriggerConfiguration)
                 throws IResourceStore.ResourceStoreException, ResourceAlreadyExistsException {
 
-            if (collection.find(new Document(INTENT_FIELD, botTriggerConfiguration.getIntent())).first() != null) {
-                String message = "BotTriggerConfiguration with intent=%s already exists";
-                message = String.format(message, botTriggerConfiguration.getIntent());
-                throw new ResourceAlreadyExistsException(message);
-            }
+            Observable.fromPublisher(collection.find(new Document(INTENT_FIELD, botTriggerConfiguration.getIntent()))).blockingFirst();
+            String message = "BotTriggerConfiguration with intent=%s already exists";
+            message = String.format(message, botTriggerConfiguration.getIntent());
+            throw new ResourceAlreadyExistsException(message);
 
-            collection.insertOne(createDocument(botTriggerConfiguration));
         }
 
         void deleteBotTrigger(String intent) {
-            collection.deleteOne(new Document(INTENT_FIELD, intent));
+            Observable.fromPublisher(collection.deleteOne(new Document(INTENT_FIELD, intent))).blockingFirst();
         }
 
         private Document createDocument(BotTriggerConfiguration botTriggerConfiguration)

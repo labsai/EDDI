@@ -3,8 +3,9 @@ package ai.labs.eddi.engine.runtime;
 import ai.labs.eddi.models.DatabaseLog;
 import ai.labs.eddi.models.Deployment.Environment;
 import ai.labs.eddi.utils.RuntimeUtilities;
-import com.mongodb.client.MongoCollection;
-import com.mongodb.client.MongoDatabase;
+import com.mongodb.reactivestreams.client.MongoCollection;
+import com.mongodb.reactivestreams.client.MongoDatabase;
+import io.reactivex.rxjava3.core.Observable;
 import org.bson.Document;
 
 import javax.enterprise.context.ApplicationScoped;
@@ -62,7 +63,7 @@ public class DatabaseLogs implements IDatabaseLogs {
         if (userId != null) {
             document.put(CONTEXT_MAP_USER_ID, userId);
         }
-        logsCollection.insertOne(document);
+        Observable.fromPublisher(logsCollection.insertOne(document)).blockingFirst();
     }
 
     private Document createFilter(Environment environment, String botId, Integer botVersion, String conversationId, String userId) {
@@ -85,13 +86,14 @@ public class DatabaseLogs implements IDatabaseLogs {
 
     private List<DatabaseLog> getLogs(Document filter, Integer skip, Integer limit) {
         List<DatabaseLog> ret = new ArrayList<>();
-        var documents = logsCollection.find(filter).sort(new Document(TIMESTAMP, 1));
+        Observable<Document> observable = limit > 0 ? Observable.fromPublisher(logsCollection.find(filter).limit(limit).sort(new Document(TIMESTAMP, 1))) :
+                                                        Observable.fromPublisher(logsCollection.find(filter).sort(new Document(TIMESTAMP, 1)))  ;
         if (skip > 0) {
-            documents = documents.skip(skip);
+            observable = observable.skip(skip);
         }
-        if (limit > 0) {
-            documents = documents.limit(limit);
-        }
+
+        Iterable<Document> documents = observable.blockingIterable();
+
         for (Document document : documents) {
             var databaseLog = new DatabaseLog();
             document.keySet().forEach(key -> databaseLog.put(key, document.get(key)));

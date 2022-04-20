@@ -4,7 +4,7 @@ import ai.labs.eddi.configs.documentdescriptor.IDocumentDescriptorStore;
 import ai.labs.eddi.datastore.mongo.DescriptorStore;
 import ai.labs.eddi.datastore.serialization.IDocumentBuilder;
 import ai.labs.eddi.models.DocumentDescriptor;
-import com.mongodb.client.MongoDatabase;
+import com.mongodb.reactivestreams.client.MongoDatabase;
 
 import javax.enterprise.context.ApplicationScoped;
 import javax.inject.Inject;

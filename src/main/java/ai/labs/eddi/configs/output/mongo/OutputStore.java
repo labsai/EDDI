@@ -8,7 +8,7 @@ import ai.labs.eddi.datastore.mongo.HistorizedResourceStore;
 import ai.labs.eddi.datastore.mongo.MongoResourceStorage;
 import ai.labs.eddi.datastore.mongo.ResultManipulator;
 import ai.labs.eddi.datastore.serialization.IDocumentBuilder;
-import com.mongodb.client.MongoDatabase;
+import com.mongodb.reactivestreams.client.MongoDatabase;
 
 import javax.enterprise.context.ApplicationScoped;
 import javax.inject.Inject;

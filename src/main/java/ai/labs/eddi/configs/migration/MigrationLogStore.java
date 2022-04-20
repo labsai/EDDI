@@ -2,8 +2,9 @@ package ai.labs.eddi.configs.migration;
 
 import ai.labs.eddi.configs.migration.model.MigrationLog;
 import ai.labs.eddi.utils.RuntimeUtilities;
-import com.mongodb.client.MongoCollection;
-import com.mongodb.client.MongoDatabase;
+import com.mongodb.reactivestreams.client.MongoCollection;
+import com.mongodb.reactivestreams.client.MongoDatabase;
+import io.reactivex.rxjava3.core.Observable;
 import org.bson.Document;
 
 import javax.enterprise.context.ApplicationScoped;
@@ -22,11 +23,11 @@ public class MigrationLogStore implements IMigrationLogStore {
 
     @Override
     public MigrationLog readMigrationLog(String name) {
-        return collection.find(new Document("name", name)).first();
+        return Observable.fromPublisher(collection.find(new Document("name", name)).first()).blockingFirst();
     }
 
     @Override
     public void createMigrationLog(MigrationLog migrationLog) {
-        collection.insertOne(migrationLog);
+        Observable.fromPublisher(collection.insertOne(migrationLog)).blockingFirst();
     }
 }

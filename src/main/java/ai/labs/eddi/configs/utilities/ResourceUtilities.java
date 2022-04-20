@@ -5,8 +5,9 @@ import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.engine.memory.descriptor.model.ConversationDescriptor;
 import ai.labs.eddi.models.DocumentDescriptor;
 import ai.labs.eddi.utils.RestUtilities;
-import com.mongodb.client.FindIterable;
-import com.mongodb.client.MongoCollection;
+import com.mongodb.reactivestreams.client.FindPublisher;
+import com.mongodb.reactivestreams.client.MongoCollection;
+import io.reactivex.rxjava3.core.Observable;
 import org.bson.Document;
 
 import javax.ws.rs.BadRequestException;
@@ -33,7 +34,7 @@ public class ResourceUtilities {
                                                                                     IDocumentDescriptorStore documentDescriptorStore)
             throws IResourceStore.ResourceNotFoundException {
         List<String> currentResourceIds = new LinkedList<>();
-        FindIterable<Document> documentIterable;
+        FindPublisher<Document> documentIterable;
 
         List<IResourceStore.IResourceId> allConfigsContainingResource = new LinkedList<>();
 
@@ -55,16 +56,17 @@ public class ResourceUtilities {
         return allConfigsContainingResource.stream().sorted(comparator).collect(Collectors.toList());
     }
 
-    private static void extractIds(List<String> ids, FindIterable<Document> documentIterable) {
-        for (Document document : documentIterable) {
+    private static void extractIds(List<String> ids, FindPublisher<Document> documentIterable) {
+        Observable.fromPublisher(documentIterable).subscribe(document -> {
             ids.add(document.getObjectId(MONGO_OBJECT_ID).toString());
-        }
+        });
+
     }
 
     private static void extractVersionedIds(List<IResourceStore.IResourceId> versionedIds,
-                                            FindIterable<Document> documentIterable) {
+                                            FindPublisher<Document> documentIterable) {
 
-        for (Document document : documentIterable) {
+        Observable.fromPublisher(documentIterable).subscribe(document -> {
             Object idObject = document.get(MONGO_OBJECT_ID);
             String objectId = ((Document) idObject).getObjectId(MONGO_OBJECT_ID).toString();
             Integer objectVersion = ((Document) idObject).getInteger(MONGO_OBJECT_VERSION);
@@ -79,7 +81,7 @@ public class ResourceUtilities {
                     return objectVersion;
                 }
             });
-        }
+        });
     }
 
     public static List<DocumentDescriptor> createMalFormattedResourceUriException(String containingResourceUri) {

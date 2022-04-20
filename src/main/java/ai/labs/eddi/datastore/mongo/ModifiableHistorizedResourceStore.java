@@ -58,4 +58,20 @@ public class ModifiableHistorizedResourceStore<T> extends HistorizedResourceStor
             throw new IResourceStore.ResourceStoreException(e.getLocalizedMessage(), e);
         }
     }
+
+    public IResourceStore.IResourceId createNew(final String id, final Integer version, T content) throws IResourceStore.ResourceStoreException {
+        RuntimeUtilities.checkNotNull(id, "id");
+        RuntimeUtilities.checkNotNull(version, "version");
+        RuntimeUtilities.checkNotNull(content, "content");
+
+        try {
+            IResourceStorage.IResource currentResource = resourceStorage.newResource(id, version, content);
+            resourceStorage.createNew(currentResource);
+            return currentResource;
+        } catch (IOException e) {
+            throw new IResourceStore.ResourceStoreException(e.getLocalizedMessage(), e);
+        }
+    }
+
+
 }

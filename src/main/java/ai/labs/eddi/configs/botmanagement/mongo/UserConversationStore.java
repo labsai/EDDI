@@ -7,16 +7,18 @@ import ai.labs.eddi.datastore.serialization.IDocumentBuilder;
 import ai.labs.eddi.datastore.serialization.IJsonSerialization;
 import ai.labs.eddi.models.UserConversation;
 import ai.labs.eddi.utils.RuntimeUtilities;
-import com.mongodb.client.MongoCollection;
-import com.mongodb.client.MongoDatabase;
+import com.mongodb.reactivestreams.client.MongoCollection;
+import com.mongodb.reactivestreams.client.MongoDatabase;
 import com.mongodb.client.model.IndexOptions;
 import com.mongodb.client.model.Indexes;
+import io.reactivex.rxjava3.core.Observable;
 import org.bson.Document;
 import org.jboss.logging.Logger;
 
 import javax.enterprise.context.ApplicationScoped;
 import javax.inject.Inject;
 import java.io.IOException;
+import java.util.NoSuchElementException;
 
 /**
  * @author ginccc
@@ -88,9 +90,9 @@ public class UserConversationStore implements IUserConversationStore {
             filter.put(USER_ID_FIELD, userId);
 
             try {
-                Document document = collection.find(filter).first();
-                return document != null ? documentBuilder.build(document, UserConversation.class) : null;
-            } catch (IOException e) {
+                Document document = Observable.fromPublisher(collection.find(filter).first()).blockingFirst();
+                return documentBuilder.build(document, UserConversation.class);
+            } catch (NoSuchElementException | IOException e) {
                 throw new IResourceStore.ResourceStoreException(e.getLocalizedMessage(), e);
             }
         }
@@ -108,11 +110,11 @@ public class UserConversationStore implements IUserConversationStore {
                 throw new ResourceAlreadyExistsException(message);
             }
 
-            collection.insertOne(createDocument(userConversation));
+            Observable.fromPublisher(collection.insertOne(createDocument(userConversation))).blockingFirst();
         }
 
         void deleteUserConversation(String intent, String userId) {
-            collection.deleteOne(new Document(INTENT_FIELD, intent).append(USER_ID_FIELD, userId));
+            Observable.fromPublisher(collection.deleteOne(new Document(INTENT_FIELD, intent).append(USER_ID_FIELD, userId))).blockingFirst();
         }
 
         private Document createDocument(UserConversation userConversation)
