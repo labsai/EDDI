@@ -17,12 +17,12 @@
         <maven.compiler.target>11</maven.compiler.target>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
         <project.reporting.outputEncoding>UTF-8</project.reporting.outputEncoding>
-        <quarkus-plugin.version>2.8.0.Final</quarkus-plugin.version>
+        <quarkus-plugin.version>2.8.1.Final</quarkus-plugin.version>
         <quarkus.jgit.version>1.2.0</quarkus.jgit.version>
         <quarkus.microprofile.version>2.7.2.Final</quarkus.microprofile.version>
         <quarkus.platform.artifact-id>quarkus-bom</quarkus.platform.artifact-id>
         <quarkus.platform.group-id>io.quarkus.platform</quarkus.platform.group-id>
-        <quarkus.platform.version>2.8.0.Final</quarkus.platform.version>
+        <quarkus.platform.version>2.8.1.Final</quarkus.platform.version>
         <resteasy.version>6.0.0.Final</resteasy.version>
         <surefire-plugin.version>3.0.0-M5</surefire-plugin.version>
         <war-plugin.version>3.3.2</war-plugin.version>
