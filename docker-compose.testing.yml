@@ -5,5 +5,5 @@ services:
     depends_on:
       - eddi
     environment:
-          EDDI_BASEURI: http://eddi
-          EDDI_PORT: 7070
+      EDDI_BASEURI: http://eddi
+      EDDI_PORT: 7070

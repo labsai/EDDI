@@ -1,71 +1,98 @@
 version: 2
-branches:
-  ignore:
-    - gh-pages
 jobs:
   build:
-    docker:
-      - image: labsai/ci-build
-    working_directory: ~/eddi
+    ## Use preconfigured circleci image that has JDK 11 by default See https://discuss.circleci.com/t/early-preview-new-ubuntu-20-04-linux-machine-executor-image/37281
+    ## has JDK 11, docker and maven
+    machine:
+      image: ubuntu-2004:202111-02
+    ## Uses a "medium" sized machine (this is the default) - maybe increase this to "large" if you pay for CircleCI
+    resource_class: medium
+    working_directory: ~/repo
+    environment:
+      MAVEN_OPTS: -Xmx6400m
+      # Set the GRAALVM_HOME env variable to the location where we will be installing GraalVM
+      GRAALVM_HOME: /home/circleci/repo/.graalvm
     steps:
+      ## Checkout the source code
       - checkout
-      - setup_remote_docker
 
+      ## Restore any files that may have been cached from previous jobs
       - restore_cache:
-          key: eddi
-          paths:
-            - /root/.m2
+          keys:
+            - v1-dependencies-{{ checksum "pom.xml" }}
+            # fallback to using the latest cache if no exact match is found
+            - v1-dependencies-
 
-      - run: mvn clean package
-
-      - run: mkdir -p $CIRCLE_TEST_REPORTS/junit/
-      - run: find . -type f -regex ".*/target/surefire-reports/.*xml" -exec cp {} $CIRCLE_TEST_REPORTS/junit/ \;
-
+      ## cache the dependencies
       - save_cache:
-          key: eddi
           paths:
-            - /root/.m2
+            - ~/.m2
+          key: v1-dependencies-{{ checksum "pom.xml" }}
 
       - run:
-          name: Start container and verify it's working
-          command: |
-            set -x
-            chmod +x integration-tests.sh
-            ./integration-tests.sh
+          name: Set permissions
+          command: chmod +x mvnw
 
-      - deploy:
-          name: Build and push Docker image
-          command: |
-            if [ "${CIRCLE_BRANCH}" == "master" ]; then
-            docker login -u $DOCKER_USER -p $DOCKER_PASS
+      - run:
+          name: Run unit tests
+          command: ./mvnw test
 
-              docker build --label "version=4.10.3" --label "release=4.10.3-b$CIRCLE_BUILD_NUM" --build-arg EDDI_VERSION=4.10.3 --build-arg EDDI_ENV=production -t labsai/eddi:4.10.3-b$CIRCLE_BUILD_NUM .
-            docker push labsai/eddi:4.10.3-b$CIRCLE_BUILD_NUM
+      - run:
+          name: Build docker image
+          command: ./mvnw package '-Dquarkus.container-image.build=true'
 
-            docker build --label "version=4.10.3" --label "release=4.10.3-b$CIRCLE_BUILD_NUM" --build-arg EDDI_VERSION=4.10.3 --build-arg EDDI_ENV=production -t labsai/eddi:latest .
-            docker push labsai/eddi:latest
+      #      - run:
+      #          name: Start container and verify it's working
+      #          command: |
+      #            set -x
+      #            chmod +x integration-tests.sh
+      #            ./integration-tests.sh
 
-            docker build --label "version=4.10.3" --label "release=4.10.3-redhat-b$CIRCLE_BUILD_NUM" -f Dockerfile_redhat --build-arg EDDI_VERSION=4.10.3 --build-arg EDDI_ENV=production -t labsai/eddi:4.10.3-redhat-b$CIRCLE_BUILD_NUM .
-            docker push labsai/eddi:4.10.3-redhat-b$CIRCLE_BUILD_NUM
+      ## Push docker image if master build
+#      - run:
+#          name: Docker Push
+#          command: |
+#            if [ "${CIRCLE_BRANCH}" == "version-5" ]; then
+#                echo "$DOCKER_PASS" | docker login --username $DOCKER_USER --password-stdin
+#                docker push labsai/eddi:5.0.0-alpha-b$CIRCLE_BUILD_NUM
+#            fi
 
-            docker build --label "version=4.10.3" --label "release=4.10.3-redhat-b$CIRCLE_BUILD_NUM" -f Dockerfile_redhat --build-arg EDDI_VERSION=4.10.3 --build-arg EDDI_ENV=production -t labsai/eddi:latest-redhat .
-            docker push labsai/eddi:latest-redhat
-
-            # docker build --label "version=4.10.3" --label "release=4.10.3-redhat-b$CIRCLE_BUILD_NUM" -f Dockerfile_redhat --build-arg EDDI_VERSION=4.10.3 --build-arg EDDI_ENV=production -t labsai/eddi:4.10.3-redhat .
-            # docker push labsai/eddi:4.10.3-redhat
-
-            # docker build --label "version=4.10.3" --label "release=4.10.3-redhat-b$CIRCLE_BUILD_NUM" -f Dockerfile_redhat --build-arg EDDI_VERSION=4.10.3 --build-arg EDDI_ENV=production -t labsai/eddi:4.10-redhat .
-            # docker push labsai/eddi:4.10-redhat
-
-            # docker build --label "version=4.10.3" --label "release=4.10.3-redhat-b$CIRCLE_BUILD_NUM" -f Dockerfile_redhat --build-arg EDDI_VERSION=4.10.3 --build-arg EDDI_ENV=production -t labsai/eddi:4-redhat .
-            # docker push labsai/eddi:4-redhat            
-
-            # docker build --build-arg EDDI_VERSION=4.10.3 --build-arg EDDI_ENV=production -t labsai/eddi:4.10.3 .
-            # docker push labsai/eddi:4.10.3
-
-            # docker build --build-arg EDDI_VERSION=4.10.3 --build-arg EDDI_ENV=production -t labsai/eddi:4.10 .
-            # docker push labsai/eddi:4.10
-
-            # docker build --build-arg EDDI_VERSION=4.10.3 --build-arg EDDI_ENV=production -t labsai/eddi:4 .
-            # docker push labsai/eddi:4
-            fi
+#      # Install GraalVM and native-image, needed for a native Quarkus build
+#      # ########################
+#      - run:
+#          name: Install GraalVM
+#          command: |
+#            if [ "${CIRCLE_BRANCH}" == "master" ]; then
+#                curl https://github.com/oracle/graal/releases/download/vm-19.1.1/graalvm-ce-linux-amd64-19.1.1.tar.gz -O -J -L && tar xfz graalvm-ce-linux-amd64-19.1.1.tar.gz && mv graalvm-ce-19.1.1 .graalvm && rm graalvm-ce-linux-amd64-19.1.1.tar.gz
+#            fi
+#      - run:
+#          name: Install native-image
+#          command: |
+#            if [ "${CIRCLE_BRANCH}" == "master" ]; then
+#              $GRAALVM_HOME/bin/gu install native-image
+#            fi
+#
+#      # Perform a native Quarkus build and verify
+#      # set the max heap size to prevent OOM
+#      # ########################
+#      - run:
+#          name: Build (Native)
+#          command: |
+#            if [ "${CIRCLE_BRANCH}" == "master" ]; then
+#              mvn clean package -Pnative -DskipTests -Dquarkus.native.native-image-xmx=8g -Dquarkus.container-image.tag=${quarkus.container-image.tagquarkus.container-image.tag}-native
+#            fi
+#          no_output_timeout: 30m
+#      - run:
+#          name: Verify (Native)
+#          command: |
+#            if [ "${CIRCLE_BRANCH}" == "master" ]; then
+#              mvn verify -Pnative
+#            fi
+#          no_output_timeout: 30m
+#      ## Push native image to docker registry
+#      - run:
+#          name: Docker Push (Native)
+#          command: |
+#            if [ "${CIRCLE_BRANCH}" == "master" ]; then
+#                docker push labsai/eddi:${quarkus.container-image.tag}-native
+#            fi

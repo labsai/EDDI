@@ -1,7 +1,0 @@
-Manifest-Version: 1.0
-Class-Path: jackson-core-asl-1.8.5.jar jackson-jaxrs-1.8.5.jar jackson
- -mapper-asl-1.8.5.jar jackson-xc-1.8.5.jar jaxrs-api-2.3.4.Final.jar 
- resteasy-atom-provider-2.3.4.Final.jar resteasy-jackson2-provider-2.3.
- 4.Final.jar resteasy-jaxb-provider-2.3.4.Final.jar resteasy-jaxrs-2.3
- .4.Final.jar resteasy-jsapi-2.3.4.Final.jar scannotation-1.0.3.jar
-
