@@ -65,13 +65,8 @@ public class PersistenceModule {
                 )
         );
 
-        ServerApi serverApi = ServerApi.builder().version(ServerApiVersion.V1).build();
-
-
-
         return MongoClientSettings.builder()
                 .applyConnectionString(new ConnectionString(connectionString))
-                .serverApi(serverApi)
                 .codecRegistry(codecRegistry)
                 .writeConcern(WriteConcern.MAJORITY)
                 .readPreference(readPreference).build();
