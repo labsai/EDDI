@@ -7,10 +7,10 @@ import ai.labs.eddi.datastore.serialization.IDocumentBuilder;
 import ai.labs.eddi.datastore.serialization.IJsonSerialization;
 import ai.labs.eddi.models.UserConversation;
 import ai.labs.eddi.utils.RuntimeUtilities;
-import com.mongodb.reactivestreams.client.MongoCollection;
-import com.mongodb.reactivestreams.client.MongoDatabase;
 import com.mongodb.client.model.IndexOptions;
 import com.mongodb.client.model.Indexes;
+import com.mongodb.reactivestreams.client.MongoCollection;
+import com.mongodb.reactivestreams.client.MongoDatabase;
 import io.reactivex.rxjava3.core.Observable;
 import org.bson.Document;
 import org.jboss.logging.Logger;
@@ -92,7 +92,9 @@ public class UserConversationStore implements IUserConversationStore {
             try {
                 Document document = Observable.fromPublisher(collection.find(filter).first()).blockingFirst();
                 return documentBuilder.build(document, UserConversation.class);
-            } catch (NoSuchElementException | IOException e) {
+            } catch (NoSuchElementException e) {
+                return null;
+            } catch (IOException e) {
                 throw new IResourceStore.ResourceStoreException(e.getLocalizedMessage(), e);
             }
         }
@@ -104,13 +106,21 @@ public class UserConversationStore implements IUserConversationStore {
             filter.put(INTENT_FIELD, userConversation.getIntent());
             filter.put(USER_ID_FIELD, userConversation.getUserId());
 
-            if (collection.find(filter).first() != null) {
+
+            try {
+                Observable.fromPublisher(collection.find(filter).first()).blockingFirst();
+
+                // a user conversation with the given intent was found, so we throw an error
                 String message = "UserConversation with intent=%s does already exist";
                 message = String.format(message, userConversation.getIntent());
                 throw new ResourceAlreadyExistsException(message);
+            } catch (NoSuchElementException e) {
+                //no user conversation with the given intent has been found, so we create a new one
+                Observable.fromPublisher(collection.insertOne(createDocument(userConversation))).blockingFirst();
+            } catch (ResourceAlreadyExistsException e) {
+                throw new RuntimeException(e);
             }
 
-            Observable.fromPublisher(collection.insertOne(createDocument(userConversation))).blockingFirst();
         }
 
         void deleteUserConversation(String intent, String userId) {
