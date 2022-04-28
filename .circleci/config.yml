@@ -1,17 +1,11 @@
 version: 2
 jobs:
   build:
-    ## Use preconfigured circleci image that has JDK 11 by default See https://discuss.circleci.com/t/early-preview-new-ubuntu-20-04-linux-machine-executor-image/37281
-    ## has JDK 11, docker and maven
-    machine:
-      image: ubuntu-2004:202111-02
-    ## Uses a "medium" sized machine (this is the default) - maybe increase this to "large" if you pay for CircleCI
-    resource_class: medium
+    docker:
+      - image: cimg/openjdk:17.0
     working_directory: ~/repo
     environment:
       MAVEN_OPTS: -Xmx6400m
-      # Set the GRAALVM_HOME env variable to the location where we will be installing GraalVM
-      GRAALVM_HOME: /home/circleci/repo/.graalvm
     steps:
       ## Checkout the source code
       - checkout
@@ -57,42 +51,3 @@ jobs:
 #                docker push labsai/eddi:5.0.0-alpha-b$CIRCLE_BUILD_NUM
 #            fi
 
-#      # Install GraalVM and native-image, needed for a native Quarkus build
-#      # ########################
-#      - run:
-#          name: Install GraalVM
-#          command: |
-#            if [ "${CIRCLE_BRANCH}" == "master" ]; then
-#                curl https://github.com/oracle/graal/releases/download/vm-19.1.1/graalvm-ce-linux-amd64-19.1.1.tar.gz -O -J -L && tar xfz graalvm-ce-linux-amd64-19.1.1.tar.gz && mv graalvm-ce-19.1.1 .graalvm && rm graalvm-ce-linux-amd64-19.1.1.tar.gz
-#            fi
-#      - run:
-#          name: Install native-image
-#          command: |
-#            if [ "${CIRCLE_BRANCH}" == "master" ]; then
-#              $GRAALVM_HOME/bin/gu install native-image
-#            fi
-#
-#      # Perform a native Quarkus build and verify
-#      # set the max heap size to prevent OOM
-#      # ########################
-#      - run:
-#          name: Build (Native)
-#          command: |
-#            if [ "${CIRCLE_BRANCH}" == "master" ]; then
-#              mvn clean package -Pnative -DskipTests -Dquarkus.native.native-image-xmx=8g -Dquarkus.container-image.tag=${quarkus.container-image.tagquarkus.container-image.tag}-native
-#            fi
-#          no_output_timeout: 30m
-#      - run:
-#          name: Verify (Native)
-#          command: |
-#            if [ "${CIRCLE_BRANCH}" == "master" ]; then
-#              mvn verify -Pnative
-#            fi
-#          no_output_timeout: 30m
-#      ## Push native image to docker registry
-#      - run:
-#          name: Docker Push (Native)
-#          command: |
-#            if [ "${CIRCLE_BRANCH}" == "master" ]; then
-#                docker push labsai/eddi:${quarkus.container-image.tag}-native
-#            fi
