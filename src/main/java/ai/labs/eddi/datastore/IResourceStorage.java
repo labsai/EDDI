@@ -1,6 +1,8 @@
 package ai.labs.eddi.datastore;
 
 
+import io.smallrye.mutiny.Uni;
+
 import java.io.IOException;
 
 /**
@@ -15,17 +17,17 @@ public interface IResourceStorage<T> {
 
     void createNew(IResource<T> resource);
 
-    IResource<T> read(String id, Integer version);
+    Uni<IResource<T>> read(String id, Integer version);
 
     void remove(String id);
 
     void removeAllPermanently(String id);
 
-    IHistoryResource<T> readHistory(String id, Integer version);
+    Uni<IHistoryResource<T>> readHistory(String id, Integer version);
 
-    IHistoryResource<T> readHistoryLatest(String id);
+    Uni<IHistoryResource<T>> readHistoryLatest(String id);
 
-    IHistoryResource<T> newHistoryResourceFor(IResource resource, boolean deleted);
+    Uni<IHistoryResource<T>> newHistoryResourceFor(Uni<IResource<T>> resource, boolean deleted);
 
     void store(IHistoryResource<T> history);
 

@@ -5,6 +5,7 @@ import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.utils.RuntimeUtilities;
 
 import java.io.IOException;
+import java.time.Duration;
 
 /**
  * @author ginccc
@@ -20,20 +21,20 @@ public class ModifiableHistorizedResourceStore<T> extends HistorizedResourceStor
         RuntimeUtilities.checkNotNull(version, "version");
         RuntimeUtilities.checkNotNull(content, "content");
 
-        IResourceStorage.IResource<T> resource = resourceStorage.read(id, version);
+        var resource = resourceStorage.read(id, version);
         try {
-            if (resource == null) {
-                IResourceStorage.IHistoryResource historyLatest = resourceStorage.readHistoryLatest(id);
+            resource.onItem().invoke(res -> {
+                var historyLatest = resourceStorage.readHistoryLatest(id);
 
-                if (historyLatest == null || historyLatest.isDeleted() || version > historyLatest.getVersion()) {
-                    throw createResourceNotFoundException(id, version);
-                }
+                historyLatest.ifNoItem().after(Duration.ofMillis(1000)).failWith(createResourceNotFoundException(id, version)).await().indefinitely();
 
                 //it's a update request for a historized resource, so we update the history resource
                 IResourceStorage.IResource<T> updatedResource = resourceStorage.newResource(id, version, content);
                 IResourceStorage.IHistoryResource<T> updatedHistorizedResource = resourceStorage.newHistoryResourceFor(updatedResource, false);
                 resourceStorage.store(updatedHistorizedResource);
                 return version;
+            }).ifNoItem().after(Duration.ofMillis(1000)).recoverWithItem(resourceStorage.newResource(id, version, content)).onItem().transform()
+            if (resource == null) {
             } else {
                 //it's a update request for the current resource, so we update the current resource
                 IResourceStorage.IResource<T> updatedResource = resourceStorage.newResource(id, version, content);

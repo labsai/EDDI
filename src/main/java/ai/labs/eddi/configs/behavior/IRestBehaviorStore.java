@@ -3,6 +3,7 @@ package ai.labs.eddi.configs.behavior;
 import ai.labs.eddi.configs.IRestVersionInfo;
 import ai.labs.eddi.configs.behavior.model.BehaviorConfiguration;
 import ai.labs.eddi.models.DocumentDescriptor;
+import io.smallrye.mutiny.Uni;
 import io.swagger.v3.oas.annotations.Operation;
 import org.eclipse.microprofile.openapi.annotations.parameters.Parameter;
 import org.eclipse.microprofile.openapi.annotations.responses.APIResponse;
@@ -47,8 +48,8 @@ public interface IRestBehaviorStore extends IRestVersionInfo {
     @Path("/{id}")
     @Produces(MediaType.APPLICATION_JSON)
     @Operation(description = "Read behavior rule set.")
-    BehaviorConfiguration readBehaviorRuleSet(@PathParam("id") String id,
-                                              @Parameter(name = "version", required = true, example = "1")
+    Uni<BehaviorConfiguration> readBehaviorRuleSet(@PathParam("id") String id,
+                                                   @Parameter(name = "version", required = true, example = "1")
                                               @QueryParam("version") Integer version);
 
     @PUT

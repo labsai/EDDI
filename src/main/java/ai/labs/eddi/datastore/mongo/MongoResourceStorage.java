@@ -8,10 +8,12 @@ import com.mongodb.reactivestreams.client.MongoDatabase;
 import com.mongodb.client.model.Filters;
 import com.mongodb.client.model.UpdateOptions;
 import io.reactivex.rxjava3.core.Observable;
+import io.smallrye.mutiny.Uni;
 import org.bson.Document;
 import org.bson.types.ObjectId;
 
 import java.io.IOException;
+import java.time.Duration;
 import java.util.NoSuchElementException;
 
 /**
@@ -80,22 +82,16 @@ public class MongoResourceStorage<T> implements IResourceStorage<T> {
 
 
     @Override
-    public IResource<T> read(String id, Integer version) {
+    public Uni<IResource<T>> read(String id, Integer version) {
         Document query = new Document(ID_FIELD, new ObjectId(id));
         query.put(VERSION_FIELD, version);
-
-        try {
-            Observable<Document> observable = Observable.fromPublisher(currentCollection.find(query).first());
-            Document document = observable.blockingFirst();
-            return new Resource(document);
-        } catch (NoSuchElementException ne) {
-            return null;
-        }
+        return Uni.createFrom().publisher(currentCollection.find(query)).map(document -> (IResource<T>) new Resource(document))
+                .ifNoItem().after(Duration.ofMillis(1000)).failWith(NoSuchElementException::new);
     }
 
     @Override
     public void remove(String id) {
-        currentCollection.deleteOne(new Document(ID_FIELD, new ObjectId(id)));
+        Observable.fromPublisher(currentCollection.deleteOne(new Document(ID_FIELD, new ObjectId(id)))).blockingFirst().wasAcknowledged();
     }
 
     @Override
@@ -115,25 +111,19 @@ public class MongoResourceStorage<T> implements IResourceStorage<T> {
         query.put("$lt", endId);
         Document object = new Document();
         object.put(ID_FIELD, query);
-        historyCollection.deleteOne(object);
+        Observable.fromPublisher(historyCollection.deleteOne(object)).blockingFirst().wasAcknowledged();
     }
 
     @Override
-    public IHistoryResource<T> readHistory(String id, Integer version) {
+    public Uni<IHistoryResource<T>> readHistory(String id, Integer version) {
         Document objectId = new Document(ID_FIELD, new ObjectId(id));
         objectId.put(VERSION_FIELD, version);
 
-        try {
-            Observable<Document> observable = Observable.fromPublisher(historyCollection.find(Filters.eq(ID_FIELD, objectId)).first());
-            Document doc = observable.blockingFirst();
-            return new HistoryResource(doc);
-        } catch (NoSuchElementException ne) {
-            return null;
-        }
+        return Uni.createFrom().publisher(historyCollection.find(Filters.eq(ID_FIELD, objectId)).first()).map(HistoryResource::new);
     }
 
     @Override
-    public IHistoryResource<T> readHistoryLatest(String id) {
+    public Uni<IHistoryResource<T>> readHistoryLatest(String id) {
         Document beginId = new Document();
         beginId.put(ID_FIELD, new ObjectId(id));
         beginId.put(VERSION_FIELD, 0);
@@ -148,31 +138,25 @@ public class MongoResourceStorage<T> implements IResourceStorage<T> {
         Document object = new Document();
         object.put(ID_FIELD, query);
 
-        if (Observable.fromPublisher(historyCollection.countDocuments(object)).blockingFirst() == 0) {
-            return null;
-        }
-
-
-        Document doc = Observable.fromPublisher(historyCollection.find(object).sort(new Document(ID_FIELD, -1)).limit(1)).blockingFirst();
-        return new HistoryResource(doc);
+        return Uni.createFrom().publisher(historyCollection.find(object).sort(new Document(ID_FIELD, -1)).limit(1)).map(HistoryResource::new);
     }
 
     @Override
-    public IHistoryResource<T> newHistoryResourceFor(IResource resource, boolean deleted) {
-        Resource mongoResource = checkInternalResource(resource);
-        Document historyObject = new Document(mongoResource.getMongoDocument());
+    public Uni<IHistoryResource<T>> newHistoryResourceFor(Uni<IResource<T>> resource, boolean deleted) {
 
-        Document idObject = new Document();
-        idObject.put(ID_FIELD, new ObjectId(resource.getId()));
-        idObject.put(VERSION_FIELD, resource.getVersion());
-        historyObject.put(ID_FIELD, idObject);
-        if (deleted) {
-            historyObject.put(DELETED_FIELD, true);
-        }
-
-        return new HistoryResource(historyObject);
+        return resource.onItem().transform(res -> {
+            Resource mongoResource = checkInternalResource(res);
+            Document historyObject = new Document(mongoResource.getMongoDocument());
+            Document idObject = new Document();
+            idObject.put(ID_FIELD, new ObjectId(res.getId()));
+            idObject.put(VERSION_FIELD, res.getVersion());
+            historyObject.put(ID_FIELD, idObject);
+            if (deleted) {
+                historyObject.put(DELETED_FIELD, true);
+            }
+            return new HistoryResource(historyObject);
+        });
     }
-
     @Override
     public Integer getCurrentVersion(String id) {
         Document query = new Document(ID_FIELD, new ObjectId(id));

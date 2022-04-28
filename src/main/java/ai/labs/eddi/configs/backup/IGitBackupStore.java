@@ -2,6 +2,7 @@ package ai.labs.eddi.configs.backup;
 
 
 import ai.labs.eddi.configs.backup.model.GitBackupSettings;
+import io.smallrye.mutiny.Uni;
 import io.swagger.v3.oas.annotations.Operation;
 
 import javax.ws.rs.GET;

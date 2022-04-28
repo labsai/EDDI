@@ -6,6 +6,7 @@ import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.models.DocumentDescriptor;
 import ai.labs.eddi.utils.RestUtilities;
 import ai.labs.eddi.utils.RuntimeUtilities;
+import io.smallrye.mutiny.Uni;
 import org.jboss.logging.Logger;
 
 import javax.ws.rs.InternalServerErrorException;
@@ -56,7 +57,7 @@ public class RestVersionInfo<T> implements IRestVersionInfo {
         }
     }
 
-    public T read(String id, Integer version) {
+    public Uni<T> read(String id, Integer version) {
         RuntimeUtilities.checkNotNull(id, "id");
         RuntimeUtilities.checkNotNull(version, "version");
         RuntimeUtilities.checkNotNegative(version, "version");

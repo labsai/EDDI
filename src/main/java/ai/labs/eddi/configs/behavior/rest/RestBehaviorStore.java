@@ -8,6 +8,7 @@ import ai.labs.eddi.configs.rest.RestVersionInfo;
 import ai.labs.eddi.configs.schema.IJsonSchemaCreator;
 import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.models.DocumentDescriptor;
+import io.smallrye.mutiny.Uni;
 import org.jboss.logging.Logger;
 
 import javax.enterprise.context.ApplicationScoped;
@@ -53,7 +54,7 @@ public class RestBehaviorStore implements IRestBehaviorStore {
     }
 
     @Override
-    public BehaviorConfiguration readBehaviorRuleSet(String id, Integer version) {
+    public Uni<BehaviorConfiguration> readBehaviorRuleSet(String id, Integer version) {
         return restVersionInfo.read(id, version);
     }
 

@@ -2,6 +2,9 @@ package ai.labs.eddi.datastore.mongo;
 
 import ai.labs.eddi.datastore.IResourceStorage;
 import ai.labs.eddi.datastore.IResourceStore;
+import io.reactivex.rxjava3.core.Observable;
+import io.smallrye.mutiny.Uni;
+import io.smallrye.mutiny.unchecked.Unchecked;
 
 import java.io.IOException;
 
@@ -31,7 +34,7 @@ public class HistorizedResourceStore<T> implements IResourceStore<T> {
     }
 
     @Override
-    public Integer update(String id, Integer version, T content)
+    public Uni<Integer> update(String id, Integer version, T content)
             throws ResourceStoreException, ResourceModifiedException, ResourceNotFoundException {
 
         checkNotNull(id, "id");
@@ -40,20 +43,25 @@ public class HistorizedResourceStore<T> implements IResourceStore<T> {
 
         var resource = resourceStorage.read(id, version);
 
-        checkIfFoundAndLatest(id, version, resource);
+        return resource.onItem().transform(Unchecked.function(res -> {
+            try {
+                checkIfFoundAndLatest(id, version, res);
+                var history = resourceStorage.newHistoryResourceFor(resource, false);
+                history.onItem().invoke(hist -> {
+                    resourceStorage.store(hist);
+                }).await().indefinitely();
+                Integer newVersion = res.getVersion() + 1;
+                var newResource =
+                        resourceStorage.newResource(res.getId(), newVersion, content);
+                resourceStorage.store(newResource);
+                return newVersion;
+            } catch (IOException | ResourceNotFoundException | ResourceModifiedException e) {
+                throw new RuntimeException(e);
+            }
+        }));
 
-        var history = resourceStorage.newHistoryResourceFor(resource, false);
-        resourceStorage.store(history);
 
-        try {
-            Integer newVersion = resource.getVersion() + 1;
-            var newResource =
-                    resourceStorage.newResource(resource.getId(), newVersion, content);
-            resourceStorage.store(newResource);
-            return newVersion;
-        } catch (IOException e) {
-            throw new ResourceStoreException(e.getLocalizedMessage(), e);
-        }
+
 
     }
 
@@ -79,13 +87,17 @@ public class HistorizedResourceStore<T> implements IResourceStore<T> {
 
         var resource = resourceStorage.read(id, version);
 
-        checkIfFoundAndLatest(id, version, resource);
-
-        var historyResource =
-                resourceStorage.newHistoryResourceFor(resource, true);
-        resourceStorage.store(historyResource);
-
-        resourceStorage.remove(id);
+        resource.onItem().invoke(Unchecked.consumer(res -> {
+            try {
+                checkIfFoundAndLatest(id, version, res);
+                var historyResource =
+                        resourceStorage.newHistoryResourceFor(resource, true);
+                historyResource.onItem().invoke(resourceStorage::store).await().indefinitely();
+            } catch (ResourceNotFoundException | ResourceModifiedException e) {
+                throw new RuntimeException(e);
+            }
+            resourceStorage.remove(id);
+        })).await().indefinitely();
     }
 
     private void checkIfFoundAndLatest(String id, Integer version, IResourceStorage.IResource<?> resource)
@@ -133,7 +145,7 @@ public class HistorizedResourceStore<T> implements IResourceStore<T> {
     }
 
     @Override
-    public T read(String id, Integer version)
+    public Uni<T> read(String id, Integer version)
             throws ResourceNotFoundException, ResourceStoreException {
 
         checkNotNull(id, "id");

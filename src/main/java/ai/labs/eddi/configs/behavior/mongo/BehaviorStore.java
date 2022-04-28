@@ -10,6 +10,7 @@ import ai.labs.eddi.datastore.mongo.MongoResourceStorage;
 import ai.labs.eddi.datastore.serialization.IDocumentBuilder;
 import ai.labs.eddi.utils.RuntimeUtilities;
 import com.mongodb.reactivestreams.client.MongoDatabase;
+import io.smallrye.mutiny.Uni;
 
 import javax.enterprise.context.ApplicationScoped;
 import javax.inject.Inject;
@@ -50,7 +51,7 @@ public class BehaviorStore implements IBehaviorStore {
     }
 
     @Override
-    public BehaviorConfiguration read(String id, Integer version) throws IResourceStore.ResourceStoreException, IResourceStore.ResourceNotFoundException {
+    public Uni<BehaviorConfiguration> read(String id, Integer version) throws IResourceStore.ResourceStoreException, IResourceStore.ResourceNotFoundException {
         return behaviorResourceStore.read(id, version);
     }
 

@@ -1,5 +1,7 @@
 package ai.labs.eddi.datastore;
 
+import io.smallrye.mutiny.Uni;
+
 import javax.interceptor.InterceptorBinding;
 import java.lang.annotation.ElementType;
 import java.lang.annotation.Retention;
@@ -63,9 +65,9 @@ public interface IResourceStore<T> {
 
     IResourceStore.IResourceId create(T content) throws IResourceStore.ResourceStoreException;
 
-    T read(String id, Integer version) throws IResourceStore.ResourceNotFoundException, IResourceStore.ResourceStoreException;
+    Uni<T> read(String id, Integer version) throws IResourceStore.ResourceNotFoundException, IResourceStore.ResourceStoreException;
 
-    Integer update(String id, Integer version, T content) throws IResourceStore.ResourceStoreException, IResourceStore.ResourceModifiedException, IResourceStore.ResourceNotFoundException;
+    Uni<Integer> update(String id, Integer version, T content) throws IResourceStore.ResourceStoreException, IResourceStore.ResourceModifiedException, IResourceStore.ResourceNotFoundException;
 
     void delete(String id, Integer version) throws IResourceStore.ResourceStoreException, IResourceStore.ResourceModifiedException, IResourceStore.ResourceNotFoundException;
 
