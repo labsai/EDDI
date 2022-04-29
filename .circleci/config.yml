@@ -29,8 +29,8 @@ jobs:
           command: ./mvnw test
 
       - run:
-          name: Build docker image
-          command: ./mvnw package '-Dquarkus.container-image.build=true'
+          name: Build app & container
+          command: ./mvnw package '-Dquarkus.container-image.build=true -Dquarkus.container-image.tag=5.0.0-beta-b$CIRCLE_BUILD_NUM'
 
       ## cache the dependencies
       - save_cache:
