@@ -17,15 +17,12 @@ jobs:
             # fallback to using the latest cache if no exact match is found
             - v1-dependencies-
 
-      ## cache the dependencies
-      - save_cache:
-          paths:
-            - ~/.m2
-          key: v1-dependencies-{{ checksum "pom.xml" }}
-
       - run:
           name: Set permissions
           command: chmod +x mvnw
+
+      - setup_remote_docker:
+          version: 20.10.12
 
       - run:
           name: Run unit tests
@@ -34,6 +31,12 @@ jobs:
       - run:
           name: Build docker image
           command: ./mvnw package '-Dquarkus.container-image.build=true'
+
+      ## cache the dependencies
+      - save_cache:
+          paths:
+            - ~/.m2
+          key: v1-dependencies-{{ checksum "pom.xml" }}
 
       #      - run:
       #          name: Start container and verify it's working
@@ -46,8 +49,8 @@ jobs:
 #      - run:
 #          name: Docker Push
 #          command: |
-#            if [ "${CIRCLE_BRANCH}" == "version-5" ]; then
+#            if [ "${CIRCLE_BRANCH}" == "master" ]; then
 #                echo "$DOCKER_PASS" | docker login --username $DOCKER_USER --password-stdin
-#                docker push labsai/eddi:5.0.0-alpha-b$CIRCLE_BUILD_NUM
+#                docker push labsai/eddi:5.0.0-b$CIRCLE_BUILD_NUM
 #            fi
 
