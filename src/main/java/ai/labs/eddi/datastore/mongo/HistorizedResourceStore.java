@@ -7,6 +7,7 @@ import io.smallrye.mutiny.Uni;
 import io.smallrye.mutiny.unchecked.Unchecked;
 
 import java.io.IOException;
+import java.time.Duration;
 
 import static ai.labs.eddi.utils.RuntimeUtilities.checkNotNull;
 
@@ -106,11 +107,9 @@ public class HistorizedResourceStore<T> implements IResourceStore<T> {
         if (resource == null) {
             var historyLatest = resourceStorage.readHistoryLatest(id);
 
-            if (historyLatest == null || historyLatest.isDeleted() || version > historyLatest.getVersion()) {
-                throw createResourceNotFoundException(id, version);
-            }
-
-            throw createResourceAlreadyModifiedException(id, version);
+            historyLatest.onItem().invoke(Unchecked.consumer(res -> {
+                if (res.isDeleted() || version > res.getVersion()) throw createResourceAlreadyModifiedException(id, version);
+            })).ifNoItem().after(Duration.ZERO).failWith(createResourceNotFoundException(id, version)).await().indefinitely();
         }
     }
 
@@ -150,6 +149,8 @@ public class HistorizedResourceStore<T> implements IResourceStore<T> {
 
         checkNotNull(id, "id");
         checkNotNull(version, "version");
+
+
 
         IResourceStorage.IResource<T> current = resourceStorage.read(id, version);
 

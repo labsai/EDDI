@@ -65,6 +65,7 @@ public class MongoResourceStorage<T> implements IResourceStorage<T> {
     public void store(IResource currentResource) {
         Resource resource = checkInternalResource(currentResource);
         if (resource.getId() == null) {
+            //noinspection ResultOfMethodCallIgnored
             Observable.fromPublisher(currentCollection.insertOne(resource.getMongoDocument())).blockingFirst();
         } else {
             Observable.fromPublisher(currentCollection.updateOne(

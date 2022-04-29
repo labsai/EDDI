@@ -3,6 +3,7 @@ package ai.labs.eddi.datastore.mongo;
 import ai.labs.eddi.datastore.IResourceStorage;
 import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.utils.RuntimeUtilities;
+import io.smallrye.mutiny.Uni;
 
 import java.io.IOException;
 import java.time.Duration;
@@ -16,34 +17,28 @@ public class ModifiableHistorizedResourceStore<T> extends HistorizedResourceStor
         this.resourceStorage = resourceStore;
     }
 
-    public Integer set(String id, Integer version, T content) throws IResourceStore.ResourceStoreException, IResourceStore.ResourceNotFoundException {
+    public Uni<Integer> set(String id, Integer version, T content) throws IResourceStore.ResourceStoreException, IResourceStore.ResourceNotFoundException {
         RuntimeUtilities.checkNotNull(id, "id");
         RuntimeUtilities.checkNotNull(version, "version");
         RuntimeUtilities.checkNotNull(content, "content");
 
         var resource = resourceStorage.read(id, version);
-        try {
-            resource.onItem().invoke(res -> {
-                var historyLatest = resourceStorage.readHistoryLatest(id);
+        return Uni.createFrom().publisher(resource.onItem().invoke(res -> {
+            var historyLatest = resourceStorage.readHistoryLatest(id);
 
-                historyLatest.ifNoItem().after(Duration.ofMillis(1000)).failWith(createResourceNotFoundException(id, version)).await().indefinitely();
+            historyLatest.ifNoItem().after(Duration.ofMillis(1000)).failWith(createResourceNotFoundException(id, version)).await().indefinitely();
 
-                //it's a update request for a historized resource, so we update the history resource
-                IResourceStorage.IResource<T> updatedResource = resourceStorage.newResource(id, version, content);
-                IResourceStorage.IHistoryResource<T> updatedHistorizedResource = resourceStorage.newHistoryResourceFor(updatedResource, false);
-                resourceStorage.store(updatedHistorizedResource);
-                return version;
-            }).ifNoItem().after(Duration.ofMillis(1000)).recoverWithItem(resourceStorage.newResource(id, version, content)).onItem().transform()
-            if (resource == null) {
-            } else {
-                //it's a update request for the current resource, so we update the current resource
-                IResourceStorage.IResource<T> updatedResource = resourceStorage.newResource(id, version, content);
-                resourceStorage.store(updatedResource);
-                return version;
-            }
-        } catch (IOException e) {
-            throw new IResourceStore.ResourceStoreException(e.getLocalizedMessage(), e);
-        }
+            //it's a update request for a historized resource, so we update the history resource
+            IResourceStorage.IResource<T> updatedResource = resourceStorage.newResource(id, version, content);
+            IResourceStorage.IHistoryResource<T> updatedHistorizedResource = resourceStorage.newHistoryResourceFor(updatedResource, false);
+            resourceStorage.store(updatedHistorizedResource);
+            return version;
+        }).ifNoItem().after(Duration.ofMillis(1000))
+                .recoverWithItem(resourceStorage.newResource(id, version, content)).onItem().transform(res -> {
+                    IResourceStorage.IResource<T> updatedResource = resourceStorage.newResource(id, version, content);
+                    resourceStorage.store(updatedResource);
+                    return version;
+                }));
     }
 
     public IResourceStore.IResourceId create(final String id, final Integer version, T content) throws IResourceStore.ResourceStoreException {
