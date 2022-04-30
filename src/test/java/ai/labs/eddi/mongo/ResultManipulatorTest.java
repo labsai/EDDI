@@ -1,5 +1,6 @@
-package ai.labs.eddi.datastore.mongo;
+package ai.labs.eddi.mongo;
 
+import ai.labs.eddi.datastore.mongo.ResultManipulator;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;

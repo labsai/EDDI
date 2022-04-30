@@ -1,0 +1,35 @@
+{
+  "language": "en",
+  "words": [
+    {
+      "word": "hello",
+      "expressions": "greeting(hello)",
+      "frequency": 0
+    },
+    {
+      "word": "bye",
+      "expressions": "goodbye(bye)",
+      "frequency": 0
+    },
+    {
+      "word": "question",
+      "expressions": "two_options_question(question)",
+      "frequency": 0
+    },
+    {
+      "word": "property",
+      "expressions": "property(someMeaning(someValue))",
+      "frequency": 0
+    }
+  ],
+  "phrases": [
+    {
+      "phrase": "good afternoon",
+      "expressions": "greeting(good_afternoon)"
+    },
+    {
+      "phrase": "see you",
+      "expressions": "goodbye(see_you)"
+    }
+  ]
+}

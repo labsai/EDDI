@@ -1,0 +1,15 @@
+{
+  "words": [
+    {
+      "word": "testword",
+      "expressions": "test_exp",
+      "frequency": 0
+    }
+  ],
+  "phrases": [
+    {
+      "phrase": "Test Phrase",
+      "expressions": "phrase_exp"
+    }
+  ]
+}

@@ -1,0 +1,98 @@
+{
+  "packageExtensions": [
+    {
+      "type": "eddi://ai.labs.parser",
+      "extensions": {
+        "dictionaries": [
+          {
+            "type": "eddi://ai.labs.parser.dictionaries.regular",
+            "config": {
+              "uri": "eddi://ai.labs.regulardictionary/regulardictionarystore/regulardictionaries/5af59e769bcb0f31b4b3b934?version=1"
+            }
+          }
+        ]
+      },
+      "config": {}
+    },
+    {
+      "type": "eddi://ai.labs.behavior",
+      "extensions": {},
+      "config": {
+        "uri": "eddi://ai.labs.behavior/behaviorstore/behaviorsets/5af59e929bcb0f31b4b3b935?version=1"
+      }
+    },
+    {
+      "type": "eddi://ai.labs.httpcalls",
+      "extensions": {},
+      "config": {
+        "uri": "eddi://ai.labs.httpcalls/httpcallsstore/httpcalls/5af59eac9bcb0f31b4b3b936?version=1"
+      }
+    },
+    {
+      "type": "eddi://ai.labs.property",
+      "config": {
+        "setOnActions": [
+          {
+            "actions": [
+              "CONVERSATION_START"
+            ],
+            "setProperties": [
+              {
+                "override": false,
+                "name": "count",
+                "value": 0,
+                "scope": "longTerm"
+              }
+            ]
+          },
+          {
+            "actions": [
+              "*"
+            ],
+            "setProperties": [
+              {
+                "name": "count",
+                "fromObjectPath": "properties.count+1",
+                "scope": "longTerm"
+              }
+            ]
+          },
+          {
+            "actions": [
+              "current_weather_in_city"
+            ],
+            "setProperties": [
+              {
+                "name": "chosenCity",
+                "fromObjectPath": "memory.current.input",
+                "scope": "conversation"
+              },
+              {
+                "name": "currentWeatherDescription",
+                "fromObjectPath": "memory.current.httpCalls.currentWeather.weather[0].description",
+                "scope": "step"
+              },
+              {
+                "name": "currentTemperature",
+                "fromObjectPath": "memory.current.httpCalls.currentWeather.main.temp",
+                "scope": "step"
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "type": "eddi://ai.labs.output",
+      "extensions": {},
+      "config": {
+        "uri": "eddi://ai.labs.output/outputstore/outputsets/5af59ebd9bcb0f31b4b3b937?version=1"
+      }
+    },
+    {
+      "type": "eddi://ai.labs.templating",
+      "extensions": {},
+      "config": {}
+    }
+  ]
+}

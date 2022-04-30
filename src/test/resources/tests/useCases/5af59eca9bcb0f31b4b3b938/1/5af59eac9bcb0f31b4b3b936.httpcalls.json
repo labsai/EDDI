@@ -1,0 +1,25 @@
+{
+  "targetServer": "https://api.openweathermap.org/data/2.5/weather",
+  "httpCalls": [
+    {
+      "name": "currentWeather",
+      "saveResponse": true,
+      "responseObjectName": "currentWeather",
+      "actions": [
+        "current_weather_in_city"
+      ],
+      "request": {
+        "path": "",
+        "headers": {},
+        "queryParams": {
+          "APPID": "c3366d78c7c0f76d63eb4cdf1384ddbf",
+          "units": "metric",
+          "q": "[[${memory.current.input}]]"
+        },
+        "method": "get",
+        "contentType": "",
+        "body": ""
+      }
+    }
+  ]
+}

@@ -1,0 +1,96 @@
+{
+  "outputSet": [
+    {
+      "action": "welcome",
+      "timesOccurred": 0,
+      "outputs": [
+        {
+          "type": "text",
+          "valueAlternatives": [
+            "Welcome! I am E.D.D.I."
+          ]
+        }
+      ]
+    },
+    {
+      "action": "greet",
+      "timesOccurred": 0,
+      "outputs": [
+        {
+          "type": "text",
+          "valueAlternatives": [
+            "Hi there! Nice to meet up! :-)"
+          ]
+        }
+      ]
+    },
+    {
+      "action": "greet",
+      "timesOccurred": 1,
+      "outputs": [
+        {
+          "type": "text",
+          "valueAlternatives": [
+            "Did we already say hi ?! Well, twice is better than not at all! ;-)"
+          ]
+        }
+      ]
+    },
+    {
+      "action": "greet_personally",
+      "timesOccurred": 0,
+      "outputs": [
+        {
+          "type": "text",
+          "valueAlternatives": [
+            "Hello [[${userInfo.username}]]! Nice to meet you! :-)"
+          ]
+        }
+      ]
+    },
+    {
+      "action": "say_goodbye",
+      "timesOccurred": 0,
+      "outputs": [
+        {
+          "type": "text",
+          "valueAlternatives": [
+            "See you soon!"
+          ]
+        }
+      ],
+      "quickReplies": [
+        {
+          "value": "Bye, bye [[${userInfo.username}]]!!",
+          "expressions": "goodbye(bye_bye), operation(quick_reply)"
+        },
+        {
+          "value": "See you!",
+          "expressions": "goodbye(see_you), operation(quick_reply)"
+        }
+      ]
+    },
+    {
+      "action": "giving_two_options",
+      "timesOccurred": 0,
+      "outputs": [
+        {
+          "type": "text",
+          "valueAlternatives": [
+            "Here is your multiple choice question..."
+          ]
+        }
+      ],
+      "quickReplies": [
+        {
+          "value": "Option 1",
+          "expressions": "quickReply(option1)"
+        },
+        {
+          "value": "Option 2",
+          "expressions": "quickReply(option2)"
+        }
+      ]
+    }
+  ]
+}

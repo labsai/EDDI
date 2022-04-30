@@ -1,0 +1,58 @@
+{
+  "behaviorGroups": [
+    {
+      "name": "Smalltalk",
+      "behaviorRules": [
+        {
+          "name": "Welcome",
+          "actions": [
+            "welcome2"
+          ],
+          "conditions": [
+            {
+              "type": "occurrence",
+              "configs": {
+                "maxTimesOccurred": "0",
+                "behaviorRuleName": "Welcome"
+              },
+              "conditions": []
+            }
+          ]
+        },
+        {
+          "name": "Greeting",
+          "actions": [
+            "greet2"
+          ],
+          "conditions": [
+            {
+              "type": "inputmatcher",
+              "configs": {
+                "expressions": "greeting(*)",
+                "occurrence": "currentStep"
+              },
+              "conditions": []
+            }
+          ]
+        },
+        {
+          "name": "Goodbye",
+          "actions": [
+            "say_goodbye2",
+            "CONVERSATION_END"
+          ],
+          "conditions": [
+            {
+              "type": "inputmatcher",
+              "configs": {
+                "expressions": "goodbye(*)",
+                "occurrence": "currentStep"
+              },
+              "conditions": []
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,74 @@
+{
+  "outputSet": [
+    {
+      "action": "welcome2",
+      "timesOccurred": 0,
+      "outputs": [
+        {
+          "type": "text",
+          "valueAlternatives": [
+            "Welcome! I am E.D.D.I."
+          ]
+        }
+      ]
+    },
+    {
+      "action": "greet2",
+      "timesOccurred": 0,
+      "outputs": [
+        {
+          "type": "text",
+          "valueAlternatives": [
+            "Hi there! Nice to meet up! :-)"
+          ]
+        }
+      ]
+    },
+    {
+      "action": "greet2",
+      "timesOccurred": 1,
+      "outputs": [
+        {
+          "type": "text",
+          "valueAlternatives": [
+            "Did we already say hi ?! Well, twice is better than not at all! ;-)"
+          ]
+        }
+      ]
+    },
+    {
+      "action": "say_goodbye2",
+      "timesOccurred": 0,
+      "outputs": [
+        {
+          "type": "text",
+          "valueAlternatives": [
+            "See you soon!"
+          ]
+        }
+      ],
+      "quickReplies": [
+        {
+          "value": "Bye, bye!",
+          "expressions": "goodbye(bye_bye), operation(quick_reply)"
+        },
+        {
+          "value": "See you!",
+          "expressions": "goodbye(see_you), operation(quick_reply)"
+        }
+      ]
+    },
+    {
+      "action": "say_goodbye2",
+      "timesOccurred": 1,
+      "outputs": [
+        {
+          "type": "text",
+          "valueAlternatives": [
+            ":-)"
+          ]
+        }
+      ]
+    }
+  ]
+}

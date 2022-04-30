@@ -1,0 +1,19 @@
+{
+  "words": [
+    {
+      "word": "weather",
+      "expressions": "trigger(current_weather)",
+      "frequency": 0
+    }
+  ],
+  "phrases": [
+    {
+      "phrase": "what is the weather",
+      "expressions": "trigger(current_weather)"
+    },
+    {
+      "phrase": "whats the weather",
+      "expressions": "trigger(current_weather)"
+    }
+  ]
+}

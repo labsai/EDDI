@@ -1,0 +1,16 @@
+{
+  "language": "en",
+  "words": [
+    {
+      "word": "hello",
+      "expressions": "greeting(hello)",
+      "frequency": 0
+    }
+  ],
+  "phrases": [
+    {
+      "phrase": "good afternoon",
+      "expressions": "greeting(good_afternoon)"
+    }
+  ]
+}

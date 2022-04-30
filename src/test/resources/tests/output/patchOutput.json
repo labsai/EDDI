@@ -1,0 +1,21 @@
+[
+  {
+    "operation": "SET",
+    "document": {
+      "outputSet": [
+        {
+          "action": "welcome",
+          "timesOccurred": 0,
+          "outputs": [
+            {
+              "type": "text",
+              "valueAlternatives": [
+                "Welcome! I am E.D.D.I.--changed-again!"
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  }
+]

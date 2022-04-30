@@ -1,0 +1,48 @@
+{
+  "behaviorGroups": [
+    {
+      "name": "",
+      "behaviorRules": [
+        {
+          "name": "Ask for City",
+          "actions": [
+            "ask_for_city"
+          ],
+          "conditions": [
+            {
+              "type": "inputmatcher",
+              "configs": {
+                "expressions": "trigger(current_weather)"
+              },
+              "conditions": []
+            }
+          ]
+        },
+        {
+          "name": "Current Weather in City",
+          "actions": [
+            "current_weather_in_city"
+          ],
+          "conditions": [
+            {
+              "type": "inputmatcher",
+              "configs": {
+                "expressions": "trigger(current_weather)",
+                "occurrence": "lastStep"
+              },
+              "conditions": []
+            },
+            {
+              "type": "dynamicvaluematcher",
+              "configs": {
+                "valuePath": "memory.current.input",
+                "equals": "Vienna"
+              },
+              "conditions": []
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

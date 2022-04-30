@@ -1,0 +1,20 @@
+[
+  {
+    "operation": "SET",
+    "document": {
+      "words": [
+        {
+          "word": "testword2",
+          "expressions": "test_exp3",
+          "frequency": 2
+        }
+      ],
+      "phrases": [
+        {
+          "phrase": "Test Phrase2",
+          "expressions": "phrase_exp3"
+        }
+      ]
+    }
+  }
+]

@@ -1,0 +1,30 @@
+{
+  "outputSet": [
+    {
+      "action": "ask_for_city",
+      "timesOccurred": 0,
+      "outputs": [
+        {
+          "type": "text",
+          "valueAlternatives": [
+            "Which City would you like to know the weather of?"
+          ]
+        }
+      ],
+      "quickReplies": []
+    },
+    {
+      "action": "current_weather_in_city",
+      "timesOccurred": 0,
+      "outputs": [
+        {
+          "type": "text",
+          "valueAlternatives": [
+            "The current weather situation of [[${properties.chosenCity}]] is [[${properties.currentWeatherDescription}]] at [[${properties.currentTemperature}]] °C"
+          ]
+        }
+      ],
+      "quickReplies": []
+    }
+  ]
+}
