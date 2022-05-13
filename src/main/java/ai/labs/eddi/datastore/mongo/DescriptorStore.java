@@ -10,6 +10,7 @@ import com.mongodb.reactivestreams.client.MongoCollection;
 import com.mongodb.reactivestreams.client.MongoDatabase;
 import com.mongodb.client.model.IndexOptions;
 import com.mongodb.client.model.Indexes;
+import io.reactivex.rxjava3.core.Observable;
 import org.bson.Document;
 
 import java.util.LinkedList;
@@ -41,11 +42,11 @@ public class DescriptorStore<T> implements IDescriptorStore<T> {
         this.descriptorResourceStore = new ModifiableHistorizedResourceStore<>(resourceStorage);
         this.resourceFilter = new ResourceFilter<>(descriptorCollection, descriptorResourceStore, documentBuilder, documentType);
 
-        descriptorCollection.createIndex(Indexes.ascending(FIELD_RESOURCE), new IndexOptions().unique(true));
-        descriptorCollection.createIndex(Indexes.ascending(FIELD_NAME), new IndexOptions().unique(false));
-        descriptorCollection.createIndex(Indexes.ascending(FIELD_DESCRIPTION), new IndexOptions().unique(false));
-        descriptorCollection.createIndex(Indexes.ascending(FIELD_LAST_MODIFIED), new IndexOptions().unique(false));
-        descriptorCollection.createIndex(Indexes.ascending(FIELD_DELETED), new IndexOptions().unique(false));
+        Observable.fromPublisher(descriptorCollection.createIndex(Indexes.ascending(FIELD_RESOURCE), new IndexOptions().unique(true))).blockingFirst();
+        Observable.fromPublisher(descriptorCollection.createIndex(Indexes.ascending(FIELD_NAME), new IndexOptions().unique(false))).blockingFirst();
+        Observable.fromPublisher(descriptorCollection.createIndex(Indexes.ascending(FIELD_DESCRIPTION), new IndexOptions().unique(false))).blockingFirst();
+        Observable.fromPublisher(descriptorCollection.createIndex(Indexes.ascending(FIELD_LAST_MODIFIED), new IndexOptions().unique(false))).blockingFirst();
+        Observable.fromPublisher(descriptorCollection.createIndex(Indexes.ascending(FIELD_DELETED), new IndexOptions().unique(false))).blockingFirst();
     }
 
     @Override

@@ -23,7 +23,7 @@ public class ModifiableHistorizedResourceStore<T> extends HistorizedResourceStor
         IResourceStorage.IResource<T> resource = resourceStorage.read(id, version);
         try {
             if (resource == null) {
-                IResourceStorage.IHistoryResource historyLatest = resourceStorage.readHistoryLatest(id);
+                IResourceStorage.IHistoryResource<T> historyLatest = resourceStorage.readHistoryLatest(id);
 
                 if (historyLatest == null || historyLatest.isDeleted() || version > historyLatest.getVersion()) {
                     throw createResourceNotFoundException(id, version);
@@ -51,7 +51,7 @@ public class ModifiableHistorizedResourceStore<T> extends HistorizedResourceStor
         RuntimeUtilities.checkNotNull(content, "content");
 
         try {
-            IResourceStorage.IResource currentResource = resourceStorage.newResource(id, version, content);
+            IResourceStorage.IResource<T> currentResource = resourceStorage.newResource(id, version, content);
             resourceStorage.store(currentResource);
             return currentResource;
         } catch (IOException e) {
@@ -65,7 +65,7 @@ public class ModifiableHistorizedResourceStore<T> extends HistorizedResourceStor
         RuntimeUtilities.checkNotNull(content, "content");
 
         try {
-            IResourceStorage.IResource currentResource = resourceStorage.newResource(id, version, content);
+            IResourceStorage.IResource<T> currentResource = resourceStorage.newResource(id, version, content);
             resourceStorage.createNew(currentResource);
             return currentResource;
         } catch (IOException e) {

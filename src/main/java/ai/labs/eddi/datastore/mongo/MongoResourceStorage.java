@@ -95,7 +95,7 @@ public class MongoResourceStorage<T> implements IResourceStorage<T> {
 
     @Override
     public void remove(String id) {
-        currentCollection.deleteOne(new Document(ID_FIELD, new ObjectId(id)));
+        Observable.fromPublisher(currentCollection.deleteOne(new Document(ID_FIELD, new ObjectId(id)))).blockingFirst();
     }
 
     @Override
@@ -115,7 +115,7 @@ public class MongoResourceStorage<T> implements IResourceStorage<T> {
         query.put("$lt", endId);
         Document object = new Document();
         object.put(ID_FIELD, query);
-        historyCollection.deleteOne(object);
+        Observable.fromPublisher(historyCollection.deleteOne(object)).blockingFirst();
     }
 
     @Override
@@ -187,7 +187,7 @@ public class MongoResourceStorage<T> implements IResourceStorage<T> {
     @Override
     public void store(IHistoryResource resource) {
         HistoryResource historyResource = checkInternalHistoryResource(resource);
-        historyCollection.insertOne(historyResource.getMongoDocument());
+        Observable.fromPublisher(historyCollection.insertOne(historyResource.getMongoDocument())).blockingFirst();
     }
 
     private Resource checkInternalResource(IResource currentResource) {
