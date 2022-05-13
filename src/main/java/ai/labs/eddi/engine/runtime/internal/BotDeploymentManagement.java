@@ -83,6 +83,7 @@ public class BotDeploymentManagement implements IAutoBotDeployment {
         try {
             var oneHourAgo = Instant.now().minus(1, ChronoUnit.HOURS);
             if (lastDeploymentCheck == null || lastDeploymentCheck.isBefore(oneHourAgo)) {
+                lastDeploymentCheck = Instant.now();
                 LOGGER.info("Starting deployment management of bots...");
                 deploymentStore.readDeploymentInfos().stream().filter(
                                 deploymentInfo -> deploymentInfo.getDeploymentStatus() == DeploymentStatus.deployed).
@@ -133,7 +134,6 @@ public class BotDeploymentManagement implements IAutoBotDeployment {
                             }
                         });
 
-                lastDeploymentCheck = Instant.now();
                 LOGGER.info("Finished managing the deployment of bots.");
             }
         } catch (ResourceStoreException e) {
