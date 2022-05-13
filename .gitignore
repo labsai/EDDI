@@ -81,3 +81,4 @@ docker/data/
 # Gradle
 .gradle
 
+/tmp/import/
