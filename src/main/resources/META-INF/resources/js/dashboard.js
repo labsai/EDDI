@@ -62,6 +62,9 @@ eddi.fetchDeployedBots = function (environment) {
 };
 
 $(function () {
+    eddi.baseUri = window.location.protocol + "//" + window.location.host;
+    $('#botBuilderUrl').prop('href', '//manager.labs.ai?apiUrl=' + encodeURIComponent(eddi.baseUri));
+
     for (let n = 0; n < eddi.environments.length; n++) {
         let environment = eddi.environments[n];
         eddi.fetchDeployedBots(environment);
