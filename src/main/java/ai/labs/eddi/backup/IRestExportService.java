@@ -1,5 +1,7 @@
 package ai.labs.eddi.backup;
 
+import org.eclipse.microprofile.openapi.annotations.tags.Tag;
+
 import javax.ws.rs.*;
 import javax.ws.rs.core.Response;
 
@@ -7,6 +9,7 @@ import javax.ws.rs.core.Response;
  * @author ginccc
  */
 @Path("/backup/export")
+@Tag(name = "10. Backup Bots", description = "Import & Export Bots as Zip Files")
 public interface IRestExportService {
     @GET
     @Produces("application/zip")

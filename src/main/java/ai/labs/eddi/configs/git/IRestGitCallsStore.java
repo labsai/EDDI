@@ -19,7 +19,7 @@ import java.util.List;
 
 // @Api(value = "Configurations -> (2) Conversation LifeCycle Tasks -> (3) GitCalls", authorizations = {@Authorization(value = "eddi_auth")})
 @Path("/gitcallsstore/gitcalls")
-@Tag(name = "gitcalls", description = "lifecycle extension for package")
+@Tag(name = "04. Gitcalls", description = "lifecycle extension for package")
 public interface IRestGitCallsStore extends IRestVersionInfo {
     String resourceURI = "eddi://ai.labs.gitcalls/gitcallsstore/gitcalls/";
 

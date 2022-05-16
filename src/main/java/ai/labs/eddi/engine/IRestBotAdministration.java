@@ -3,6 +3,7 @@ package ai.labs.eddi.engine;
 import ai.labs.eddi.models.BotDeploymentStatus;
 import io.swagger.v3.oas.annotations.Operation;
 import org.eclipse.microprofile.openapi.annotations.parameters.Parameter;
+import org.eclipse.microprofile.openapi.annotations.tags.Tag;
 import org.jboss.resteasy.annotations.cache.NoCache;
 
 import javax.ws.rs.*;
@@ -17,6 +18,7 @@ import static ai.labs.eddi.models.Deployment.Environment;
  */
 // @Api(value = "Bot Administration", authorizations = {@Authorization(value = "eddi_auth")})
 @Path("/administration")
+@Tag(name = "08. Bot Administration", description = "Deploy & Undeploy Bots")
 public interface IRestBotAdministration {
     @POST
     @Path("/{environment}/deploy/{botId}")

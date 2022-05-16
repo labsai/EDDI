@@ -1,6 +1,7 @@
 package ai.labs.eddi.configs.botmanagement;
 
 import ai.labs.eddi.models.UserConversation;
+import org.eclipse.microprofile.openapi.annotations.tags.Tag;
 
 import javax.ws.rs.*;
 import javax.ws.rs.core.MediaType;
@@ -8,6 +9,7 @@ import javax.ws.rs.core.Response;
 
 //@Api(value = "Configurations -> (5) Bot Management", authorizations = {@Authorization(value = "eddi_auth")})
 @Path("/userconversationstore/userconversations")
+@Tag(name = "09. Talk to Bots", description = "Communicate with bots")
 public interface IRestUserConversationStore {
     String resourceURI = "eddi://ai.labs.userconversation/userconversationstore/userconversations/";
 

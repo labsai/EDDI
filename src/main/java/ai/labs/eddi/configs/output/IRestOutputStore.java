@@ -19,9 +19,10 @@ import java.util.List;
  */
 // @Api(value = "Configurations -> (2) Conversation LifeCycle Tasks -> (3) Output", authorizations = {@Authorization(value = "eddi_auth")})
 @Path("/outputstore/outputsets")
-@Tag(name = "output", description = "lifecycle extension for package")
+@Tag(name = "05. Output", description = "lifecycle extension for package")
 public interface IRestOutputStore extends IRestVersionInfo {
-    String resourceURI = "eddi://ai.labs.output/outputstore/outputsets/";
+    String resourceBaseType = "eddi://ai.labs.output";
+    String resourceURI = resourceBaseType + "/outputstore/outputsets/";
     String versionQueryParam = "?version=";
 
     @GET

@@ -4,6 +4,7 @@ import ai.labs.eddi.configs.patch.PatchInstruction;
 import ai.labs.eddi.testing.descriptor.model.SimpleTestCaseDescriptor;
 import ai.labs.eddi.testing.descriptor.model.TestCaseDescriptor;
 import ai.labs.eddi.testing.model.TestCase;
+import org.eclipse.microprofile.openapi.annotations.tags.Tag;
 
 import javax.ws.rs.*;
 import javax.ws.rs.core.MediaType;
@@ -15,6 +16,7 @@ import java.util.List;
  * @author ginccc
  */
 @Path("/testcasestore/testcases")
+@Tag(name = "11. Conversation Testing", description = "Test bots automatically")
 public interface IRestTestCaseStore {
     String resourceURI = "eddi://ai.labs.testcases/testcasestore/testcases/";
     String versionQueryParam = "?version=";

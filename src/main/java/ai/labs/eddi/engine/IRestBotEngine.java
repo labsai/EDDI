@@ -7,6 +7,7 @@ import ai.labs.eddi.models.ConversationState;
 import ai.labs.eddi.models.Deployment;
 import ai.labs.eddi.models.InputData;
 import org.eclipse.microprofile.openapi.annotations.Operation;
+import org.eclipse.microprofile.openapi.annotations.tags.Tag;
 import org.jboss.resteasy.annotations.cache.NoCache;
 
 import javax.ws.rs.*;
@@ -22,6 +23,7 @@ import java.util.Map;
  */
 //@Api(value = "Bot Engine", authorizations = {@Authorization(value = "eddi_auth")})
 @Path("/bots")
+@Tag(name = "09. Talk to Bots", description = "Communicate with bots")
 public interface IRestBotEngine {
 
     /**

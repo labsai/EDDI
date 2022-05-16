@@ -19,7 +19,7 @@ import java.util.List;
  */
 // @Api(value = "Configurations -> (3) Packages", authorizations = {@Authorization(value = "eddi_auth")})
 @Path("/packagestore/packages")
-@Tag(name = "packages", description = "packages for bots")
+@Tag(name = "06. Packages", description = "packages for bots")
 public interface IRestPackageStore extends IRestVersionInfo {
     String resourceURI = "eddi://ai.labs.package/packagestore/packages/";
 
@@ -50,6 +50,16 @@ public interface IRestPackageStore extends IRestVersionInfo {
             @Parameter(name = "body", description = "eddi://ai.labs.TYPE/PATH/ID?version=VERSION")
             @DefaultValue("") String containingResourceUri,
             @QueryParam("includePreviousVersions") @DefaultValue("false") Boolean includePreviousVersions);
+
+
+    @GET
+    @Path("/{id}/eml")
+    @Produces(MediaType.TEXT_PLAIN)
+    @APIResponse(responseCode = "200", description = "EML of this package")
+    @Operation(description = "Read EDDI Markup Language (EML) for package configuration.")
+    Response readEMLFromPackage(@PathParam("id") String id,
+                                @Parameter(name = "version", required = true, example = "1")
+                                @QueryParam("version") Integer version);
 
     @GET
     @Path("/{id}")

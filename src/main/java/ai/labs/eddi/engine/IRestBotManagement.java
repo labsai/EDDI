@@ -3,6 +3,7 @@ package ai.labs.eddi.engine;
 import ai.labs.eddi.models.InputData;
 import org.eclipse.microprofile.openapi.annotations.Operation;
 import org.eclipse.microprofile.openapi.annotations.parameters.Parameter;
+import org.eclipse.microprofile.openapi.annotations.tags.Tag;
 
 import javax.ws.rs.*;
 import javax.ws.rs.container.AsyncResponse;
@@ -13,6 +14,7 @@ import java.util.List;
 
 // @Api(value = "Bot Management", authorizations = {@Authorization(value = "eddi_auth")})
 @Path("/managedbots")
+@Tag(name = "09. Talk to Bots", description = "Communicate with bots")
 public interface IRestBotManagement {
 
     @GET

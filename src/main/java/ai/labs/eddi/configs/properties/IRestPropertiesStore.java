@@ -2,6 +2,7 @@ package ai.labs.eddi.configs.properties;
 
 import ai.labs.eddi.configs.properties.model.Properties;
 import org.eclipse.microprofile.openapi.annotations.Operation;
+import org.eclipse.microprofile.openapi.annotations.tags.Tag;
 
 import javax.ws.rs.*;
 import javax.ws.rs.core.MediaType;
@@ -9,6 +10,7 @@ import javax.ws.rs.core.Response;
 
 // @Api(value = "Bot Engine -> Properties", authorizations = {@Authorization(value = "eddi_auth")})
 @Path("/propertiesstore/properties")
+@Tag(name = "03. Properties", description = "lifecycle extension for package")
 public interface IRestPropertiesStore {
     String resourceURI = "eddi://ai.labs.properties/propertiesstore/properties/";
 

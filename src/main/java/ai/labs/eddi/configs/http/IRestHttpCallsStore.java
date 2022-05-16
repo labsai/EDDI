@@ -18,7 +18,7 @@ import java.util.List;
  */
 // @Api(value = "Configurations -> (2) Conversation LifeCycle Tasks -> (3) HttpCalls", authorizations = {@Authorization(value = "eddi_auth")})
 @Path("/httpcallsstore/httpcalls")
-@Tag(name = "httpcalls", description = "lifecycle extension for package")
+@Tag(name = "03. Httpcalls", description = "lifecycle extension for package")
 public interface IRestHttpCallsStore extends IRestVersionInfo {
     String resourceURI = "eddi://ai.labs.httpcalls/httpcallsstore/httpcalls/";
 

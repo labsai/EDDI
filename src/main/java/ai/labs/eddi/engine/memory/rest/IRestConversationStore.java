@@ -7,6 +7,7 @@ import ai.labs.eddi.engine.memory.model.SimpleConversationMemorySnapshot;
 import ai.labs.eddi.models.ConversationState;
 import ai.labs.eddi.models.ConversationStatus;
 import org.eclipse.microprofile.openapi.annotations.parameters.Parameter;
+import org.eclipse.microprofile.openapi.annotations.tags.Tag;
 
 import javax.ws.rs.*;
 import javax.ws.rs.core.MediaType;
@@ -18,6 +19,7 @@ import java.util.List;
  */
 // @Api(value = "Bot Engine -> Conversations", authorizations = {@Authorization(value = "eddi_auth")})
 @Path("/conversationstore/conversations")
+@Tag(name = "09. Talk to Bots", description = "Communicate with bots")
 public interface IRestConversationStore {
     @GET
     @Produces(MediaType.APPLICATION_JSON)

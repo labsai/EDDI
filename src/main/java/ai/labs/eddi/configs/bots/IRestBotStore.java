@@ -19,7 +19,7 @@ import java.util.List;
  */
 // @Api(value = "Configurations -> (4) Bots", authorizations = {@Authorization(value = "eddi_auth")})
 @Path("/botstore/bots")
-@Tag(name = "bot", description = "bot configuration")
+@Tag(name = "07. Bots", description = "bot configuration")
 public interface IRestBotStore extends IRestVersionInfo {
     String resourceURI = "eddi://ai.labs.bot/botstore/bots/";
 

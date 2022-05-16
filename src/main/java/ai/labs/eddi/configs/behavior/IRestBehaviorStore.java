@@ -18,9 +18,10 @@ import java.util.List;
  */
 // @Api(value = "Configurations -> (2) Conversation LifeCycle Tasks -> (2) Behavior Rules", authorizations = {@Authorization(value = "eddi_auth")})
 @Path("/behaviorstore/behaviorsets")
-@Tag(name = "behavior", description = "lifecycle extension for package")
+@Tag(name = "02. Behavior Rules", description = "lifecycle extension for package")
 public interface IRestBehaviorStore extends IRestVersionInfo {
-    String resourceURI = "eddi://ai.labs.behavior/behaviorstore/behaviorsets/";
+    String resourceBaseType = "eddi://ai.labs.behavior";
+    String resourceURI = resourceBaseType + "/behaviorstore/behaviorsets/";
     String versionQueryParam = "?version=";
 
     @GET

@@ -1,6 +1,7 @@
 package ai.labs.eddi.backup;
 
 import ai.labs.eddi.models.BotDeploymentStatus;
+import org.eclipse.microprofile.openapi.annotations.tags.Tag;
 
 import javax.ws.rs.Consumes;
 import javax.ws.rs.POST;
@@ -16,6 +17,7 @@ import java.util.List;
  * @author ginccc
  */
 @Path("backup/import")
+@Tag(name = "10. Backup Bots", description = "Import & Export Bots as Zip Files")
 public interface IRestImportService {
     @POST
     @Path("/examples")

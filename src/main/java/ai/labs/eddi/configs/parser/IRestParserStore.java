@@ -19,7 +19,7 @@ import java.util.List;
 
 // @Api(value = "Configurations -> Endpoint Parser Only", authorizations = {@Authorization(value = "eddi_auth")})
 @Path("/parserstore/parsers")
-@Tag(name = "nlp", description = "lifecycle extension for package")
+@Tag(name = "12. Standalone NLP", description = "lifecycle extension for package")
 public interface IRestParserStore extends IRestVersionInfo {
     String resourceURI = "eddi://ai.labs.parser/parserstore/parsers/";
 

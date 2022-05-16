@@ -3,6 +3,7 @@ package ai.labs.eddi.modules.nlp;
 import io.swagger.v3.oas.annotations.responses.ApiResponse;
 import io.swagger.v3.oas.annotations.responses.ApiResponses;
 import org.eclipse.microprofile.openapi.annotations.parameters.Parameter;
+import org.eclipse.microprofile.openapi.annotations.tags.Tag;
 
 import javax.ws.rs.*;
 import javax.ws.rs.container.AsyncResponse;
@@ -14,6 +15,7 @@ import javax.ws.rs.core.MediaType;
  */
 
 @Path("/parser")
+@Tag(name = "12. Standalone NLP", description = "lifecycle extension for package")
 public interface IRestSemanticParser {
 
     @Parameter(name = "parserId", example = "507f1f77bcf86cd799439011", required = true)

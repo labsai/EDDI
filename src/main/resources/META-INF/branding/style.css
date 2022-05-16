@@ -1,0 +1,150 @@
+html {
+    box-sizing: border-box;
+    overflow: -moz-scrollbars-vertical;
+    overflow-y: scroll;
+}
+
+*,
+*:before,
+*:after {
+    box-sizing: inherit;
+}
+
+body {
+    margin: 0;
+    background: #000;
+}
+
+.swagger-ui {
+    color: #fff;
+}
+
+.swagger-ui .topbar {
+    background-color: #000;
+}
+
+#footer {
+    background-color: #000;
+    font-family: sans-serif;
+    color: #fff;
+    font-size: 70%;
+    text-align: center;
+}
+
+#swaggerUiLogoLink {
+    max-width: none;
+}
+
+#swaggerUiTitleLink {
+    display: none;
+}
+
+.swagger-ui .info {
+    background-color: black;
+    padding: 50px;
+    border-bottom: 5px solid white;
+    color: white;
+}
+
+.swagger-ui .info .description p {
+    color: white;
+}
+
+.swagger-ui .info .description .markdown {
+    color: white;
+}
+
+.swagger-ui .scheme-container {
+    background-color: rgba(1, 1, 1, 0);
+    box-shadow: 0 0 0 0;
+}
+
+.swagger-ui .info .title {
+    color: white;
+    letter-spacing: .1em;
+}
+
+.swagger-ui .url {
+    color: white;
+    letter-spacing: .1em;
+}
+
+.swagger-ui .info a {
+    color: white;
+    text-decoration: underline;
+    letter-spacing: .1em;
+}
+
+.swagger-ui .schemes-title {
+    color: white;
+    letter-spacing: .1em;
+}
+
+.swagger-ui .opblock-tag {
+    color: white;
+    text-transform: uppercase;
+    letter-spacing: .1em;
+    border-bottom: 1px solid #D4BE7D;
+}
+
+.swagger-ui .opblock-tag small {
+    color: white;
+}
+
+.swagger-ui .op-block {
+    border-radius: 0;
+}
+
+.swagger-ui .opblock .opblock-summary-path {
+    color: white;
+}
+
+.swagger-ui .opblock .opblock-summary-description {
+    color: white;
+}
+
+.swagger-ui .markdown {
+    color: white;
+}
+
+.swagger-ui .markdown p {
+    color: white;
+}
+
+.swagger-ui .table-container {
+    color: white;
+}
+
+.swagger-ui .response-col_status {
+    color: white;
+}
+
+.swagger-ui .responses-header td {
+    color: white;
+}
+
+.swagger-ui .table-container th {
+    color: white;
+}
+
+.swagger-ui .table-container .parameter__name {
+    color: white;
+}
+
+.swagger-ui section.models {
+    border: 1px solid #D4BE7D;
+    border-radius: 0;
+}
+
+.swagger-ui section.models h4 {
+    color: white;
+}
+
+.swagger-ui section.models .model-container {
+    background-color: white;
+    border-radius: 0;
+}
+
+.swagger-ui section.models .model-container:hover {
+    background-color: whitesmoke;
+}

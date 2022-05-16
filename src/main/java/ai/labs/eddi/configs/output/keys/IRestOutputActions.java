@@ -1,5 +1,7 @@
 package ai.labs.eddi.configs.output.keys;
 
+import org.eclipse.microprofile.openapi.annotations.tags.Tag;
+
 import javax.ws.rs.*;
 import javax.ws.rs.core.MediaType;
 import java.util.List;
@@ -9,6 +11,7 @@ import java.util.List;
  */
 // @Api(value = "Configurations -> (2) Conversation LifeCycle Tasks -> (3) Output", authorizations = {@Authorization(value = "eddi_auth")})
 @Path("/outputstore/actions")
+@Tag(name = "05. Output", description = "lifecycle extension for package")
 public interface IRestOutputActions {
     @GET
     @Produces(MediaType.APPLICATION_JSON)
