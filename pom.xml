@@ -5,29 +5,29 @@
     <modelVersion>4.0.0</modelVersion>
     <groupId>ai.labs</groupId>
     <artifactId>eddi</artifactId>
-    <version>5.0.0-SNAPSHOT</version>
+    <version>5.0.0</version>
     <properties>
         <maven.compiler.source>17</maven.compiler.source>
         <maven.compiler.target>17</maven.compiler.target>
         <maven.compiler.release>17</maven.compiler.release>
-        <compiler-plugin.version>3.8.1</compiler-plugin.version>
-        <dependency.version.lombok>1.18.24</dependency.version.lombok>
-        <jandex-maven-plugin.version>1.2.2</jandex-maven-plugin.version>
-        <maven.compiler.parameters>true</maven.compiler.parameters>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
         <project.reporting.outputEncoding>UTF-8</project.reporting.outputEncoding>
-        <quarkus-plugin.version>2.9.0.Final</quarkus-plugin.version>
-        <quarkus.jgit.version>1.2.0</quarkus.jgit.version>
         <quarkus.microprofile.version>2.7.2.Final</quarkus.microprofile.version>
         <quarkus.platform.artifact-id>quarkus-bom</quarkus.platform.artifact-id>
         <quarkus.platform.group-id>io.quarkus.platform</quarkus.platform.group-id>
         <quarkus.platform.version>2.9.0.Final</quarkus.platform.version>
-        <resteasy.version>6.0.1.Final</resteasy.version>
+        <quarkus-plugin.version>2.9.0.Final</quarkus-plugin.version>
+        <compiler-plugin.version>3.8.1</compiler-plugin.version>
+        <jandex-maven-plugin.version>1.2.2</jandex-maven-plugin.version>
+        <maven.compiler.parameters>true</maven.compiler.parameters>
         <surefire-plugin.version>3.0.0-M5</surefire-plugin.version>
         <failsafe-plugin.version>3.0.0-M5</failsafe-plugin.version>
         <failsafe.useModulePath>false</failsafe.useModulePath>
         <war-plugin.version>3.3.2</war-plugin.version>
+        <dependency.version.lombok>1.18.24</dependency.version.lombok>
+        <resteasy.version>6.0.1.Final</resteasy.version>
         <mongodb.driver.version>4.5.1</mongodb.driver.version>
+        <quarkus.jgit.version>1.2.0</quarkus.jgit.version>
     </properties>
     <dependencyManagement>
         <dependencies>
@@ -158,12 +158,12 @@
         <dependency>
             <groupId>org.infinispan</groupId>
             <artifactId>infinispan-core</artifactId>
-            <version>13.0.8.Final</version>
+            <version>13.0.10.Final</version>
         </dependency>
         <dependency>
             <groupId>org.infinispan</groupId>
             <artifactId>infinispan-component-annotations</artifactId>
-            <version>13.0.8.Final</version>
+            <version>13.0.10.Final</version>
             <scope>compile</scope>
         </dependency>
         <dependency>
