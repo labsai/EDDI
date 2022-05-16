@@ -53,15 +53,6 @@ public interface IRestPackageStore extends IRestVersionInfo {
 
 
     @GET
-    @Path("/{id}/eml")
-    @Produces(MediaType.TEXT_PLAIN)
-    @APIResponse(responseCode = "200", description = "EML of this package")
-    @Operation(description = "Read EDDI Markup Language (EML) for package configuration.")
-    Response readEMLFromPackage(@PathParam("id") String id,
-                                @Parameter(name = "version", required = true, example = "1")
-                                @QueryParam("version") Integer version);
-
-    @GET
     @Path("/{id}")
     @Produces(MediaType.APPLICATION_JSON)
     @Operation(description = "Read package.")
