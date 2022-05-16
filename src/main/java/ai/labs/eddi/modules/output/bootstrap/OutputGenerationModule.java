@@ -28,7 +28,7 @@ public class OutputGenerationModule {
                              Instance<ILifecycleTask> instance) {
 
         lifecycleTaskProviders.put(OutputGenerationTask.ID, () -> instance.select(OutputGenerationTask.class).get());
-        LOGGER.info("Added OutputGeneration Module, current size of lifecycle modules " + lifecycleTaskProviders.size());
+        LOGGER.debug("Added OutputGeneration Module, current size of lifecycle modules " + lifecycleTaskProviders.size());
     }
 
 }

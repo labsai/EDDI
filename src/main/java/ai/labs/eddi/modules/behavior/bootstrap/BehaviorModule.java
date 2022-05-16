@@ -31,7 +31,7 @@ public class BehaviorModule {
     protected void configure(@LifecycleExtensions Map<String, Provider<ILifecycleTask>> lifecycleTaskProviders,
                              Instance<ILifecycleTask> instance) {
         lifecycleTaskProviders.put(BehaviorRulesEvaluationTask.ID, () -> instance.select(BehaviorRulesEvaluationTask.class).get());
-        LOGGER.info("Added BehaviourModule, current size of lifecycle modules " + lifecycleTaskProviders.size());
+        LOGGER.debug("Added Behaviour Module, current size of lifecycle modules " + lifecycleTaskProviders.size());
     }
 
     @BehaviorConditions

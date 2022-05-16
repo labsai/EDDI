@@ -33,7 +33,7 @@ public class SemanticParserModule {
                              Instance<ILifecycleTask> instance) {
 
         lifecycleTaskProviders.put(InputParserTask.ID, () -> instance.select(InputParserTask.class).get());
-        LOGGER.info("Added SemanticParser Module, current size of lifecycle modules " + lifecycleTaskProviders.size());
+        LOGGER.debug("Added SemanticParser Module, current size of lifecycle modules " + lifecycleTaskProviders.size());
     }
 
     @ParserNormalizerExtensions

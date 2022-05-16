@@ -37,7 +37,7 @@ public class TemplateEngineModule {
                              Instance<ILifecycleTask> instance) {
 
         lifecycleTaskProviders.put(OutputTemplateTask.ID, () -> instance.select(OutputTemplateTask.class).get());
-        LOGGER.info("Added TemplateEnging Module, current size of lifecycle modules " + lifecycleTaskProviders.size());
+        LOGGER.debug("Added TemplateEngine Module, current size of lifecycle modules " + lifecycleTaskProviders.size());
     }
 
     @ApplicationScoped

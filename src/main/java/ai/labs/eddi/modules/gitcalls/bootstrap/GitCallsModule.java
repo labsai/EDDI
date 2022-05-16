@@ -25,5 +25,6 @@ public class GitCallsModule {
                              Instance<ILifecycleTask> instance) {
 
         lifecycleTaskProviders.put(GitCallsTask.ID, () -> instance.select(GitCallsTask.class).get());
+        LOGGER.debug("Added GitCalls Module, current size of lifecycle modules " + lifecycleTaskProviders.size());
     }
 }

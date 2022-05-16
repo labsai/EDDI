@@ -26,9 +26,7 @@ public class HttpCallsModule {
                              Instance<ILifecycleTask> instance) {
 
         lifecycleTaskProviders.put(HttpCallsTask.ID, () -> instance.select(HttpCallsTask.class).get());
-        LOGGER.info("Added HttpCalls Module, current size of lifecycle modules " + lifecycleTaskProviders.size());
-
-
+        LOGGER.debug("Added HttpCalls Module, current size of lifecycle modules " + lifecycleTaskProviders.size());
     }
 
 }

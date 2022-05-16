@@ -28,7 +28,7 @@ public class PropertySetterModule {
                              Instance<ILifecycleTask> instance) {
 
         lifecycleTaskProviders.put(PropertySetterTask.ID, () -> instance.select(PropertySetterTask.class).get());
-        LOGGER.info("Added PropertySetter Module, current size of lifecycle modules " + lifecycleTaskProviders.size());
+        LOGGER.debug("Added PropertySetter Module, current size of lifecycle modules " + lifecycleTaskProviders.size());
     }
 
 }
