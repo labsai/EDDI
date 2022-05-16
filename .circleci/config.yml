@@ -30,7 +30,7 @@ jobs:
 
       - run:
           name: Build app & container
-          command: ./mvnw package '-Dquarkus.container-image.build=true -Dquarkus.container-image.tag=5.0.0-beta-b$CIRCLE_BUILD_NUM'
+          command: ./mvnw package '-Dquarkus.container-image.build=true -Dquarkus.container-image.tag=5.0.0-b$CIRCLE_BUILD_NUM'
 
       ## cache the dependencies
       - save_cache:
@@ -38,12 +38,12 @@ jobs:
             - ~/.m2
           key: v1-dependencies-{{ checksum "pom.xml" }}
 
-      #      - run:
-      #          name: Start container and verify it's working
-      #          command: |
-      #            set -x
-      #            chmod +x integration-tests.sh
-      #            ./integration-tests.sh
+      - run:
+          name: Start container and verify it's working
+          command: |
+            set -x
+            chmod +x integration-tests.sh
+            ./integration-tests.sh
 
       ## Push docker image if master build
 #      - run:
