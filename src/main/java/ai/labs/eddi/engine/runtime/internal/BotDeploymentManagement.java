@@ -2,6 +2,7 @@ package ai.labs.eddi.engine.runtime.internal;
 
 import ai.labs.eddi.configs.bots.IBotStore;
 import ai.labs.eddi.configs.deployment.IDeploymentStore;
+import ai.labs.eddi.configs.deployment.model.DeploymentInfo;
 import ai.labs.eddi.configs.deployment.model.DeploymentInfo.DeploymentStatus;
 import ai.labs.eddi.configs.documentdescriptor.IDocumentDescriptorStore;
 import ai.labs.eddi.datastore.IResourceStore.IResourceId;
@@ -115,6 +116,8 @@ public class BotDeploymentManagement implements IAutoBotDeployment {
                                         // this old bot version has no more active conversations connected to it,
                                         // so we undeploy it
                                         botFactory.undeployBot(environment, botId, botVersion);
+                                        deploymentStore.setDeploymentInfo(environment.toString(),
+                                                botId, botVersion, DeploymentInfo.DeploymentStatus.undeployed);
                                         LOGGER.info(format("Successfully undeployed bot (id: %s, version: %d)",
                                                 botId, botVersion));
                                     } else {
