@@ -25,7 +25,7 @@ public abstract class BaseMatcher implements IBehaviorCondition {
     private final String conversationOccurrenceQualifier = KEY_OCCURRENCE;
 
 
-    enum ConversationStepOccurrence {
+    public enum ConversationStepOccurrence {
         currentStep,
         lastStep,
         anyStep,

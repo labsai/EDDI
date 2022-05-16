@@ -9,11 +9,13 @@ import ai.labs.eddi.configs.packages.model.PackageConfiguration.PackageExtension
 import ai.labs.eddi.configs.rest.RestVersionInfo;
 import ai.labs.eddi.configs.schema.IJsonSchemaCreator;
 import ai.labs.eddi.datastore.IResourceStore;
+import ai.labs.eddi.eml.IEMLProducer;
 import ai.labs.eddi.engine.runtime.client.configuration.ResourceClientLibrary;
 import ai.labs.eddi.engine.runtime.service.ServiceException;
 import ai.labs.eddi.models.DocumentDescriptor;
 import ai.labs.eddi.utils.RestUtilities;
 import org.jboss.logging.Logger;
+import org.jboss.resteasy.spi.NoLogWebApplicationException;
 
 import javax.enterprise.context.ApplicationScoped;
 import javax.inject.Inject;
@@ -27,6 +29,7 @@ import java.util.Map;
 import static ai.labs.eddi.configs.utilities.ResourceUtilities.*;
 import static ai.labs.eddi.utils.RuntimeUtilities.isNullOrEmpty;
 import static javax.ws.rs.core.Response.Status.BAD_REQUEST;
+import static javax.ws.rs.core.Response.Status.NOT_FOUND;
 
 @ApplicationScoped
 public class RestPackageStore implements IRestPackageStore {
@@ -39,12 +42,16 @@ public class RestPackageStore implements IRestPackageStore {
     private final IDocumentDescriptorStore documentDescriptorStore;
 
     private static final Logger log = Logger.getLogger(RestOutputStore.class);
+    private final IEMLProducer emlProducer;
+    private static final Logger LOGGER = Logger.getLogger(RestPackageStore.class);
 
     @Inject
     public RestPackageStore(IPackageStore packageStore,
                             ResourceClientLibrary resourceClientLibrary,
                             IDocumentDescriptorStore documentDescriptorStore,
-                            IJsonSchemaCreator jsonSchemaCreator) {
+                            IJsonSchemaCreator jsonSchemaCreator,
+                            IEMLProducer emlProducer) {
+        this.emlProducer = emlProducer;
         restVersionInfo = new RestVersionInfo<>(resourceURI, packageStore, documentDescriptorStore);
         this.documentDescriptorStore = documentDescriptorStore;
         this.packageStore = packageStore;
@@ -88,6 +95,17 @@ public class RestPackageStore implements IRestPackageStore {
         }
     }
 
+    @Override
+    public Response readEMLFromPackage(String id, Integer version) {
+        try {
+            return Response.ok(emlProducer.produceMarkup(id, version)).build();
+        } catch (IResourceStore.ResourceStoreException e) {
+            LOGGER.error(e.getLocalizedMessage(), e);
+            throw new InternalServerErrorException();
+        } catch (IResourceStore.ResourceNotFoundException e) {
+            throw new NoLogWebApplicationException(NOT_FOUND);
+        }
+    }
 
     @Override
     public PackageConfiguration readPackage(String id, Integer version) {

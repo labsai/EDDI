@@ -39,6 +39,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.stream.Collectors;
 
+import static ai.labs.eddi.backup.impl.LifecycleTaskUriExtractor.*;
 import static ai.labs.eddi.utils.RuntimeUtilities.isNullOrEmpty;
 
 /**
@@ -46,7 +47,7 @@ import static ai.labs.eddi.utils.RuntimeUtilities.isNullOrEmpty;
  */
 
 @ApplicationScoped
-public class RestExportService extends AbstractBackupService implements IRestExportService {
+public class RestExportService implements IRestExportService {
     private final IDocumentDescriptorStore documentDescriptorStore;
     private final IBotStore botStore;
     private final IPackageStore packageStore;

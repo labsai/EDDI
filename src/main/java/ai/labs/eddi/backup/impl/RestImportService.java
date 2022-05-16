@@ -55,7 +55,7 @@ import static ai.labs.eddi.models.Deployment.Environment.unrestricted;
  * @author ginccc
  */
 @ApplicationScoped
-public class RestImportService extends AbstractBackupService implements IRestImportService {
+public class RestImportService extends LifecycleTaskUriExtractor implements IRestImportService {
     private static final Pattern EDDI_URI_PATTERN = Pattern.compile("\"eddi://ai.labs..*?\"");
     private static final String BOT_FILE_ENDING = ".bot.json";
     private final Path tmpPath = Paths.get(FileUtilities.buildPath(System.getProperty("user.dir"), "tmp", "import"));
