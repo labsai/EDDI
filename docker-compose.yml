@@ -12,11 +12,10 @@ services:
     environment:
       EDDI_VERSION: 5.0.0
       EDDI_ENV: production
-      # configure memory as percentage (useful for cgrouped envs like docker/k8s so you don't need to configure memory 2 times)
       EDDI_MEMORY_PERCENTAGE_MIN: 50
-      # 70-80% as a good starting point
       EDDI_MEMORY_PERCENTAGE_MAX: 80
-      #EDDI_JAVA_ENV_MONGODB_HOST: mongodb.hosts=mongodb
+      EDDI_JAVA_ENV_TUNE_BUFFER: "jdk.nio.MaxCachedBufferSize=1048576"
+      # EDDI_JAVA_ENV_MONGODB_HOST: mongodb.hosts=mongodb
   mongodb:
     image: mongo:4.2
     restart: always
