@@ -1,3 +1,7 @@
+<div align="center">
+<img src="https://repository-images.githubusercontent.com/70809374/dda376bd-774b-49cf-8b8e-f29378133b42" align="center" style="width: 100%" />
+</div>  
+
 # E.D.D.I
 
 Scalable Open Source Chatbot Platform. Build multiple Chatbots with NLP, Behavior Rules, API Connector, Templating.
