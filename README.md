@@ -63,17 +63,25 @@ here [https://projectlombok.org/](https://projectlombok.org/
 
 ## Build App & Docker image
 
-```shell script
+```bash
 ./mvnw clean package '-Dquarkus.container-image.build=true'
 ```
 
-Open a browser and navigate to:
+## Download from Docker hub registry
 
-```text
-http://0.0.0.0:7070/
+```bash
+docker pull labsai/eddi
 ```
 
+[https://hub.docker.com/r/labsai/eddi](https://hub.docker.com/r/labsai/eddi)
+
 ## Run Docker image
+
+For production, launch standalone mongodb and then start an eddi instance as defined in the docker-compose file
+
+```bash
+docker-compose up
+```
 
 For development, use
 
@@ -92,6 +100,3 @@ or
 ```bash
 docker-compose -f docker-compose.yml -f docker-compose.local.yml -f docker-compose.testing.yml -p ci up -d
 ```
-
-For running in cloud \(with authentication\),
-check: [https://hub.docker.com/r/labsai/eddi](https://hub.docker.com/r/labsai/eddi)
