@@ -4,17 +4,17 @@ import ai.labs.eddi.datastore.IResourceFilter;
 import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.datastore.serialization.IDocumentBuilder;
 import com.mongodb.DBObject;
+import com.mongodb.client.model.Filters;
 import com.mongodb.reactivestreams.client.MongoCollection;
 import io.reactivex.rxjava3.core.Observable;
+import org.bson.BsonDocument;
 import org.bson.Document;
+import org.bson.conversions.Bson;
 import org.reactivestreams.Subscriber;
 import org.reactivestreams.Subscription;
 
 import java.io.IOException;
-import java.util.HashMap;
-import java.util.LinkedList;
-import java.util.List;
-import java.util.Map;
+import java.util.*;
 import java.util.regex.Pattern;
 
 /**
@@ -45,7 +45,7 @@ public class ResourceFilter<T> implements IResourceFilter<T> {
             throws IResourceStore.ResourceStoreException, IResourceStore.ResourceNotFoundException {
         List<T> ret = new LinkedList<>();
 
-        Document query = createQuery(queryFilters);
+        BsonDocument query = createQuery(queryFilters);
         Document sort = createSortQuery(sortTypes);
         Observable<Document> observable = Observable.fromPublisher(collection.find(query).sort(sort).skip(index).limit(limit));
         Iterable<Document> iterable = observable.blockingIterable();
@@ -60,33 +60,24 @@ public class ResourceFilter<T> implements IResourceFilter<T> {
         return ret;
     }
 
-    private Document createQuery(QueryFilters[] allQueryFilters) {
-        Document filter = new Document();
+    private BsonDocument createQuery(QueryFilters[] allQueryFilters) {
+        BsonDocument filter = new BsonDocument();
 
         for (QueryFilters queryFilters : allQueryFilters) {
-            List<DBObject> dbObjects = new LinkedList<>();
+            List<Bson> filters = new ArrayList<>();
             for (QueryFilter queryFilter : queryFilters.getQueryFilters()) {
                 if (queryFilter.getFilter() instanceof String) {
-                    Pattern resourcePattern = getPatternForRegex((String) queryFilter.getFilter());
-                    //dbObjects.add(new QueryBuilder().put(queryFilter.getField()).regex(resourcePattern).get());
+                    filters.add(Filters.regex(queryFilter.getField(), queryFilter.getFilter().toString()));
                 } else {
-                    //dbObjects.add(new QueryBuilder().put(queryFilter.getField()).is(queryFilter.getFilter()).get());
+                    filters.add(Filters.eq(queryFilter.getField(), queryFilter.getFilter()));
                 }
             }
 
-            DBObject[] dbObjectArray = dbObjects.toArray(new DBObject[0]);
-
-            DBObject filterQuery;
-            if (dbObjectArray.length > 0) {
-                if (queryFilters.getConnectingType() == QueryFilters.ConnectingType.AND) {
-                    //filterQuery = new QueryBuilder().and(dbObjectArray).get();
-                } else {
-                    //filterQuery = new QueryBuilder().or(dbObjectArray).get();
-                }
-
-                //retQuery.and(filterQuery);
+            if (queryFilters.getConnectingType() == QueryFilters.ConnectingType.AND) {
+                filter = Filters.and(filters).toBsonDocument();
+            } else {
+                filter = Filters.or(filters).toBsonDocument();
             }
-
         }
 
         return filter;
