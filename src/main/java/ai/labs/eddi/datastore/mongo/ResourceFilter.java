@@ -63,6 +63,7 @@ public class ResourceFilter<T> implements IResourceFilter<T> {
     private BsonDocument createQuery(QueryFilters[] allQueryFilters) {
         BsonDocument filter = new BsonDocument();
 
+        List<Bson> connectedFilters = new ArrayList<>();
         for (QueryFilters queryFilters : allQueryFilters) {
             List<Bson> filters = new ArrayList<>();
             for (QueryFilter queryFilter : queryFilters.getQueryFilters()) {
@@ -74,13 +75,13 @@ public class ResourceFilter<T> implements IResourceFilter<T> {
             }
 
             if (queryFilters.getConnectingType() == QueryFilters.ConnectingType.AND) {
-                filter = Filters.and(filters).toBsonDocument();
+                connectedFilters.add(Filters.and(filters));
             } else {
-                filter = Filters.or(filters).toBsonDocument();
+                connectedFilters.add(Filters.or(filters));
             }
         }
 
-        return filter;
+        return Filters.and(connectedFilters).toBsonDocument();
     }
 
     private Document createSortQuery(String... sortTypes) {
