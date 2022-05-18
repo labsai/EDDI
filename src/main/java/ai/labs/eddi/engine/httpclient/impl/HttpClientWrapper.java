@@ -57,7 +57,7 @@ public class HttpClientWrapper implements IHttpClient {
     private class RequestWrapper implements IRequest {
         private final URI uri;
         private final Request request;
-        private int maxLength = 2 * 1024 * 1024;
+        private int maxLength = 16 * 1024 * 1024;
         private String requestBody;
 
         RequestWrapper(URI uri, Request request) {
