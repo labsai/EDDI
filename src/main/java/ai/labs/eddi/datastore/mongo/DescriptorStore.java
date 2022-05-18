@@ -64,9 +64,13 @@ public class DescriptorStore<T> implements IDescriptorStore<T> {
             queryFiltersOptional.add(new IResourceFilter.QueryFilter(FIELD_NAME, filter));
             queryFiltersOptional.add(new IResourceFilter.QueryFilter(FIELD_DESCRIPTION, filter));
         }
-        IResourceFilter.QueryFilters optional = new IResourceFilter.QueryFilters(IResourceFilter.QueryFilters.ConnectingType.OR, queryFiltersOptional);
+        if (!queryFiltersOptional.isEmpty()) {
+            IResourceFilter.QueryFilters optional = new IResourceFilter.QueryFilters(IResourceFilter.QueryFilters.ConnectingType.OR, queryFiltersOptional);
+            return resourceFilter.readResources(new IResourceFilter.QueryFilters[]{required, optional}, index, limit, FIELD_LAST_MODIFIED);
+        } else {
+            return resourceFilter.readResources(new IResourceFilter.QueryFilters[]{required}, index, limit, FIELD_LAST_MODIFIED);
+        }
 
-        return resourceFilter.readResources(new IResourceFilter.QueryFilters[]{required, optional}, index, limit, FIELD_LAST_MODIFIED);
     }
 
     @Override
