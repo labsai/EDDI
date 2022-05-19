@@ -47,7 +47,6 @@ import java.util.concurrent.TimeUnit;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
-import java.util.stream.Stream;
 
 import static ai.labs.eddi.models.Deployment.Environment.unrestricted;
 
@@ -59,7 +58,6 @@ public class RestImportService extends AbstractBackupService implements IRestImp
     private static final Pattern EDDI_URI_PATTERN = Pattern.compile("\"eddi://ai.labs..*?\"");
     private static final String BOT_FILE_ENDING = ".bot.json";
     private final Path tmpPath = Paths.get(FileUtilities.buildPath(System.getProperty("user.dir"), "tmp", "import"));
-    private final Path examplePath = Paths.get("src", "main", "resources", "examples");
     private final IZipArchive zipArchive;
     private final IJsonSerialization jsonSerialization;
     private final IRestInterfaceFactory restInterfaceFactory;
@@ -80,39 +78,67 @@ public class RestImportService extends AbstractBackupService implements IRestImp
 
     @Override
     public List<BotDeploymentStatus> importBotExamples() {
-        try (Stream<Path> walk = Files.walk(examplePath)) {
-            walk.filter(file -> file.getFileName().toString().endsWith(".zip")).
-                    forEach(path -> {
-                        try {
-                            importBot(new FileInputStream(path.toFile()), new MockAsyncResponse() {
-                                @Override
-                                public boolean resume(Object responseObj) {
-                                    if (responseObj instanceof Response) {
-                                        Response response = (Response) responseObj;
-                                        IResourceId botId = RestUtilities.extractResourceId(response.getLocation());
-                                        restBotAdministration.
-                                                deployBot(
-                                                        unrestricted,
-                                                        botId.getId(),
-                                                        botId.getVersion(),
-                                                        true);
-                                        return true;
-                                    }
+        try {
+            List<String> resourceFiles = getResourceFiles("/examples");
 
-                                    return false;
-                                }
-                            });
-                        } catch (FileNotFoundException e) {
-                            log.error(e.getLocalizedMessage(), e);
+            resourceFiles.forEach(fileName ->
+            {
+                importBot(getClass().getResourceAsStream("/examples/" + fileName), new MockAsyncResponse() {
+                    @Override
+                    public boolean resume(Object responseObj) {
+                        if (responseObj instanceof Response) {
+                            Response response = (Response) responseObj;
+                            IResourceId botId = RestUtilities.extractResourceId(response.getLocation());
+                            restBotAdministration.
+                                    deployBot(
+                                            unrestricted,
+                                            botId.getId(),
+                                            botId.getVersion(),
+                                            true);
+                            return true;
                         }
-                    });
+
+                        return false;
+                    }
+                });
+            });
+
             Thread.sleep(500);
             log.info("Imported & Deployed Example Bots");
             return restBotAdministration.getDeploymentStatuses(unrestricted);
-        } catch (IOException | InterruptedException e) {
+
+        } catch (InterruptedException |
+                 IOException e) {
             log.error(e.getLocalizedMessage(), e);
             throw new InternalServerErrorException();
         }
+    }
+
+    private List<String> getResourceFiles(String path) throws IOException {
+        List<String> filenames = new ArrayList<>();
+
+        try (
+                InputStream in = getResourceAsStream(path);
+                BufferedReader br = new BufferedReader(new InputStreamReader(in))) {
+            String resource;
+
+            while ((resource = br.readLine()) != null) {
+                filenames.add(resource);
+            }
+        }
+
+        return filenames;
+    }
+
+    private InputStream getResourceAsStream(String resource) {
+        final InputStream in
+                = getContextClassLoader().getResourceAsStream(resource);
+
+        return in == null ? getClass().getResourceAsStream(resource) : in;
+    }
+
+    private ClassLoader getContextClassLoader() {
+        return Thread.currentThread().getContextClassLoader();
     }
 
     @Override
@@ -127,7 +153,8 @@ public class RestImportService extends AbstractBackupService implements IRestImp
         }
     }
 
-    private void importBotZipFile(InputStream zippedBotConfigFiles, File targetDir, AsyncResponse response) throws IOException {
+    private void importBotZipFile(InputStream zippedBotConfigFiles, File targetDir, AsyncResponse response) throws
+            IOException {
         this.zipArchive.unzip(zippedBotConfigFiles, targetDir);
 
         String targetDirPath = targetDir.getPath();
@@ -159,7 +186,8 @@ public class RestImportService extends AbstractBackupService implements IRestImp
         return URI.create(IRestBotStore.resourceURI + oldBotId + IRestBotStore.versionQueryParam + "1");
     }
 
-    private void parsePackage(String targetDirPath, URI packageUri, BotConfiguration botConfiguration, AsyncResponse response) {
+    private void parsePackage(String targetDirPath, URI packageUri, BotConfiguration
+            botConfiguration, AsyncResponse response) {
         try {
             IResourceId packageResourceId = RestUtilities.extractResourceId(packageUri);
             String packageId = packageResourceId.getId();
@@ -237,7 +265,7 @@ public class RestImportService extends AbstractBackupService implements IRestImp
                                     collect(Collectors.toList()));
 
                         } catch (IOException | RestInterfaceFactory.RestInterfaceFactoryException |
-                                CallbackMatcher.CallbackMatcherException e) {
+                                 CallbackMatcher.CallbackMatcherException e) {
                             log.error(e.getLocalizedMessage(), e);
                             response.resume(new InternalServerErrorException());
                         }
