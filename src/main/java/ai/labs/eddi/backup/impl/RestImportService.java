@@ -47,9 +47,9 @@ import java.util.concurrent.TimeUnit;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
-import java.util.stream.Stream;
 
 import static ai.labs.eddi.models.Deployment.Environment.unrestricted;
+import static ai.labs.eddi.utils.RuntimeUtilities.getResourceAsStream;
 
 /**
  * @author ginccc
@@ -80,32 +80,30 @@ public class RestImportService extends AbstractBackupService implements IRestImp
 
     @Override
     public List<BotDeploymentStatus> importBotExamples() {
-        try (Stream<Path> walk = Files.walk(examplePath)) {
-            walk.filter(file -> file.getFileName().toString().endsWith(".zip")).
-                    forEach(path -> {
-                        try {
-                            importBot(new FileInputStream(path.toFile()), new MockAsyncResponse() {
-                                @Override
-                                public boolean resume(Object responseObj) {
-                                    if (responseObj instanceof Response) {
-                                        Response response = (Response) responseObj;
-                                        IResourceId botId = RestUtilities.extractResourceId(response.getLocation());
-                                        restBotAdministration.
-                                                deployBot(
-                                                        unrestricted,
-                                                        botId.getId(),
-                                                        botId.getVersion(),
-                                                        true);
-                                        return true;
-                                    }
-
-                                    return false;
+        try {
+            var botExampleFiles = getResourceFiles("/examples/available_examples.txt");
+            for (var botExampleFileName : botExampleFiles) {
+                importBot(getResourceAsStream("/examples/" + botExampleFileName),
+                        new MockAsyncResponse() {
+                            @Override
+                            public boolean resume(Object responseObj) {
+                                if (responseObj instanceof Response) {
+                                    Response response = (Response) responseObj;
+                                    IResourceId botId = RestUtilities.extractResourceId(response.getLocation());
+                                    restBotAdministration.
+                                            deployBot(
+                                                    unrestricted,
+                                                    botId.getId(),
+                                                    botId.getVersion(),
+                                                    true);
+                                    return true;
                                 }
-                            });
-                        } catch (FileNotFoundException e) {
-                            log.error(e.getLocalizedMessage(), e);
-                        }
-                    });
+
+                                return false;
+                            }
+                        });
+            }
+
             Thread.sleep(500);
             log.info("Imported & Deployed Example Bots");
             return restBotAdministration.getDeploymentStatuses(unrestricted);
@@ -113,6 +111,21 @@ public class RestImportService extends AbstractBackupService implements IRestImp
             log.error(e.getLocalizedMessage(), e);
             throw new InternalServerErrorException();
         }
+    }
+
+    private List<String> getResourceFiles(String path) throws IOException {
+        List<String> filenames = new ArrayList<>();
+
+        try (var in = getResourceAsStream(path);
+             var br = new BufferedReader(new InputStreamReader(in))) {
+
+            String resource;
+            while ((resource = br.readLine()) != null) {
+                filenames.add(resource);
+            }
+        }
+
+        return filenames;
     }
 
     @Override
@@ -127,7 +140,8 @@ public class RestImportService extends AbstractBackupService implements IRestImp
         }
     }
 
-    private void importBotZipFile(InputStream zippedBotConfigFiles, File targetDir, AsyncResponse response) throws IOException {
+    private void importBotZipFile(InputStream zippedBotConfigFiles, File targetDir, AsyncResponse response) throws
+            IOException {
         this.zipArchive.unzip(zippedBotConfigFiles, targetDir);
 
         String targetDirPath = targetDir.getPath();
@@ -159,7 +173,8 @@ public class RestImportService extends AbstractBackupService implements IRestImp
         return URI.create(IRestBotStore.resourceURI + oldBotId + IRestBotStore.versionQueryParam + "1");
     }
 
-    private void parsePackage(String targetDirPath, URI packageUri, BotConfiguration botConfiguration, AsyncResponse response) {
+    private void parsePackage(String targetDirPath, URI packageUri, BotConfiguration
+            botConfiguration, AsyncResponse response) {
         try {
             IResourceId packageResourceId = RestUtilities.extractResourceId(packageUri);
             String packageId = packageResourceId.getId();
@@ -381,11 +396,13 @@ public class RestImportService extends AbstractBackupService implements IRestImp
         return ret;
     }
 
-    private <T> T getRestResourceStore(Class<T> clazz) throws RestInterfaceFactory.RestInterfaceFactoryException {
+    private <T> T getRestResourceStore(Class<T> clazz) throws
+            RestInterfaceFactory.RestInterfaceFactoryException {
         return restInterfaceFactory.get(clazz);
     }
 
-    private <T> List<T> readResources(List<URI> uris, Path packagePath, String extension, Class<T> clazz) {
+    private <
+            T> List<T> readResources(List<URI> uris, Path packagePath, String extension, Class<T> clazz) {
         return uris.stream().map(uri -> {
             Path resourcePath = null;
             String resourceContent = null;
