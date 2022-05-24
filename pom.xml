@@ -87,6 +87,12 @@
             <artifactId>quarkus-jgit</artifactId>
             <version>${quarkus.jgit.version}</version>
         </dependency>
+        <!--<dependency>
+            <groupId>io.quarkiverse.microprofile</groupId>
+            <artifactId>quarkus-microprofile</artifactId>
+            <version>${quarkus.microprofile.version}</version>
+        </dependency>-->
+
         <dependency>
             <groupId>org.scala-lang</groupId>
             <artifactId>scala-library</artifactId>
