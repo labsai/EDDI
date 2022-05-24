@@ -17,7 +17,6 @@ import java.nio.file.Paths;
 public class CachingModule {
     @Produces
     @ApplicationScoped
-    @DefaultBean
     EmbeddedCacheManager provideEmbeddedCacheManager() throws IOException {
         Path path = Paths.get("infinispan.xml");
         return new DefaultCacheManager(path.toString(), true);
