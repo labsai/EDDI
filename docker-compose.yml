@@ -5,6 +5,7 @@ services:
     ports:
       - "7070:7070"
       - "7443:7443"
+#      - "5005:5005"
     links:
       - mongodb
     depends_on:
