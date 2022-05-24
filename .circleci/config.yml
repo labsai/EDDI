@@ -4,6 +4,7 @@ jobs:
     docker:
       - image: cimg/openjdk:17.0
     working_directory: ~/repo
+    resource_class: large
     environment:
       MAVEN_OPTS: -Xmx6400m
     steps:
