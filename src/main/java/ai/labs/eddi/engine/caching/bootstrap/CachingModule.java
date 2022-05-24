@@ -1,5 +1,6 @@
 package ai.labs.eddi.engine.caching.bootstrap;
 
+import io.quarkus.arc.DefaultBean;
 import org.infinispan.manager.DefaultCacheManager;
 import org.infinispan.manager.EmbeddedCacheManager;
 
@@ -16,8 +17,9 @@ import java.nio.file.Paths;
 public class CachingModule {
     @Produces
     @ApplicationScoped
+    @DefaultBean
     EmbeddedCacheManager provideEmbeddedCacheManager() throws IOException {
-        Path path = Paths.get("src", "main", "resources", "infinispan.xml");
+        Path path = Paths.get("infinispan.xml");
         return new DefaultCacheManager(path.toString(), true);
     }
 }
