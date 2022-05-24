@@ -1,6 +1,5 @@
 package ai.labs.eddi.engine.caching.bootstrap;
 
-import io.quarkus.arc.DefaultBean;
 import org.infinispan.manager.DefaultCacheManager;
 import org.infinispan.manager.EmbeddedCacheManager;
 

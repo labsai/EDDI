@@ -1,7 +1,7 @@
 version: '3'
 services:
   eddi:
-    image: labsai/eddi:5.0.0-CR1
+    image: labsai/eddi:latest
     ports:
       - "7070:7070"
       - "7443:7443"
@@ -9,13 +9,6 @@ services:
       - mongodb
     depends_on:
       - mongodb
-    environment:
-      EDDI_VERSION: 5.0.0
-      EDDI_ENV: production
-      EDDI_MEMORY_PERCENTAGE_MIN: 50
-      EDDI_MEMORY_PERCENTAGE_MAX: 80
-      EDDI_JAVA_ENV_TUNE_BUFFER: "jdk.nio.MaxCachedBufferSize=1048576"
-      # EDDI_JAVA_ENV_MONGODB_STRING: "mongodb.connectionString=mongodb://mongodb:27017/eddi"
   mongodb:
     image: mongo:4.2
     restart: always
