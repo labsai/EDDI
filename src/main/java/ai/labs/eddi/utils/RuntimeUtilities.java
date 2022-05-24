@@ -1,5 +1,6 @@
 package ai.labs.eddi.utils;
 
+import java.io.InputStream;
 import java.util.Collection;
 import java.util.Map;
 
@@ -59,5 +60,9 @@ public class RuntimeUtilities {
         }
 
         return obj instanceof Map && ((Map) obj).isEmpty();
+    }
+
+    public static InputStream getResourceAsStream(String path) {
+        return Thread.currentThread().getContextClassLoader().getResourceAsStream(path);
     }
 }
