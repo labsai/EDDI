@@ -34,7 +34,7 @@ jobs:
 
       - run:
           name: Build app & container
-          command: ./mvnw package "-DskipTests -Dquarkus.container-image.build=true -Dquarkus.container-image.tag=5.0.0-RC-b$CIRCLE_BUILD_NUM"
+          command: ./mvnw package -DskipTests "-Dquarkus.container-image.build=true" "-Dquarkus.container-image.tag=5.0.0-RC-b$CIRCLE_BUILD_NUM"
 
       ## cache the dependencies
       - save_cache:
