@@ -23,15 +23,15 @@ jobs:
           command: chmod +x mvnw
 
       - setup_remote_docker:
-          version: 20.10.12
+          version: 20.10.14
 
       - run:
           name: Run unit tests
-          command: ./mvnw test
+          command: ./mvnw clean test
 
       - run:
           name: Build app & container
-          command: ./mvnw package '-Dquarkus.container-image.build=true -Dquarkus.container-image.tag=5.0.0-b$CIRCLE_BUILD_NUM'
+          command: ./mvnw package '-DskipTests -Dquarkus.container-image.build=true -Dquarkus.container-image.tag=5.0.0-RC-b$CIRCLE_BUILD_NUM'
 
       ## cache the dependencies
       - save_cache:
@@ -47,11 +47,11 @@ jobs:
             ./integration-tests.sh
 
       ## Push docker image if master build
-#      - run:
-#          name: Docker Push
-#          command: |
-#            if [ "${CIRCLE_BRANCH}" == "master" ]; then
-#                echo "$DOCKER_PASS" | docker login --username $DOCKER_USER --password-stdin
-#                docker push labsai/eddi:5.0.0-b$CIRCLE_BUILD_NUM
-#            fi
+      - run:
+          name: Docker Push
+          command: |
+            if [ "${CIRCLE_BRANCH}" == "main" ]; then
+                echo "$DOCKER_PASS" | docker login --username $DOCKER_USER --password-stdin
+                docker push labsai/eddi:5.0.0-RC-b$CIRCLE_BUILD_NUM
+            fi
 
