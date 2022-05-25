@@ -107,7 +107,7 @@ public class BaseRuntime implements IRuntime {
 
         return executorService.submit(() -> {
             try {
-                Thread.currentThread().wait(finalMultipliedDelay);
+                Thread.sleep(finalMultipliedDelay);
                 if (threadBindings != null) {
                     ThreadContext.setResources(threadBindings);
                 }
