@@ -1,3 +1,4 @@
+#!/bin/bash
 ####
 # This Dockerfile is used in order to build a container that runs the Quarkus application in JVM mode
 #
