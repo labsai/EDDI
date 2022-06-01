@@ -29,11 +29,15 @@ jobs:
           version: 20.10.14
 
       - run:
-          name: Run unit tests
-          command: ./mvnw clean test
+          name: Compile app
+          command: ./mvnw clean compile
 
       - run:
-          name: Build app & container
+          name: Run unit tests
+          command: ./mvnw test
+
+      - run:
+          name: Package app & build docker image
           command: ./mvnw package -DskipTests "-Dquarkus.container-image.build=true" "-Dquarkus.container-image.tag=5.0.0-RC-b$CIRCLE_BUILD_NUM"
 
       ## cache the dependencies
@@ -49,12 +53,10 @@ jobs:
             chmod +x integration-tests.sh
             ./integration-tests.sh
 
-      ## Push docker image if master build
       - run:
-          name: Docker Push
+          name: Push docker image to Docker Hub Registry
           command: |
             if [ "${CIRCLE_BRANCH}" == "main" ]; then
                 echo "$DOCKER_PASS" | docker login --username $DOCKER_USER --password-stdin
                 docker push labsai/eddi:5.0.0-RC-b$CIRCLE_BUILD_NUM
             fi
-
