@@ -1,6 +1,6 @@
 package ai.labs.eddi.utils;
 
-import com.jayway.jsonpath.JsonPath;
+import ognl.Ognl;
 
 import java.util.List;
 import java.util.Map;
@@ -15,7 +15,7 @@ public class MatchingUtilities {
 
         Object value = null;
         try {
-            value = JsonPath.parse(conversationValues).read(valuePath);
+            value = Ognl.getValue(valuePath, conversationValues);
         } catch (Exception e) {
             //no value was found, which is an expected case, so silent exception here
         }

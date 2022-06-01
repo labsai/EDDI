@@ -3,7 +3,9 @@ package ai.labs.eddi.modules.behavior.impl.conditions;
 import ai.labs.eddi.engine.memory.IConversationMemory;
 import ai.labs.eddi.engine.memory.IMemoryItemConverter;
 import ai.labs.eddi.modules.behavior.impl.BehaviorRule;
-import com.jayway.jsonpath.JsonPath;
+import ognl.Ognl;
+import ognl.OgnlException;
+import org.jboss.logging.Logger;
 
 import java.util.HashMap;
 import java.util.List;
@@ -26,6 +28,8 @@ public class SizeMatcher implements IBehaviorCondition {
     private int equal = -1;
 
     private final IMemoryItemConverter memoryItemConverter;
+
+    private static final Logger LOGGER = Logger.getLogger(SizeMatcher.class);
 
     public SizeMatcher(IMemoryItemConverter memoryItemConverter) {
         this.memoryItemConverter = memoryItemConverter;
@@ -76,7 +80,12 @@ public class SizeMatcher implements IBehaviorCondition {
             return ExecutionState.NOT_EXECUTED;
         }
 
-        int size = Integer.parseInt(JsonPath.parse(memoryItemConverter.convert(memory)).read(valuePath).toString());
+        int size = 0;
+        try {
+            size = Integer.parseInt(Ognl.getValue(valuePath, memoryItemConverter.convert(memory)).toString());
+        } catch (OgnlException e) {
+            LOGGER.error(e.getLocalizedMessage(), e);
+        }
 
         boolean isMin = true;
         boolean isMax = true;

@@ -21,7 +21,8 @@ import ai.labs.eddi.models.*;
 import ai.labs.eddi.models.ExtensionDescriptor.ConfigValue;
 import ai.labs.eddi.models.ExtensionDescriptor.FieldType;
 import ai.labs.eddi.modules.templating.ITemplatingEngine;
-import com.jayway.jsonpath.JsonPath;
+import ognl.Ognl;
+import ognl.OgnlException;
 import org.jboss.logging.Logger;
 
 import javax.enterprise.context.ApplicationScoped;
@@ -39,6 +40,7 @@ import java.util.stream.Collectors;
 import static ai.labs.eddi.utils.MatchingUtilities.executeValuePath;
 import static ai.labs.eddi.utils.RuntimeUtilities.checkNotNull;
 import static ai.labs.eddi.utils.RuntimeUtilities.isNullOrEmpty;
+import static java.lang.String.format;
 
 @ApplicationScoped
 public class HttpCallsTask implements ILifecycleTask {
@@ -57,7 +59,7 @@ public class HttpCallsTask implements ILifecycleTask {
     private final IMemoryItemConverter memoryItemConverter;
     private final IRuntime runtime;
 
-    private static final Logger log = Logger.getLogger(HttpCallsTask.class);
+    private static final Logger LOGGER = Logger.getLogger(HttpCallsTask.class);
 
     @Inject
     public HttpCallsTask(IHttpClient httpClient, IJsonSerialization jsonSerialization,
@@ -126,8 +128,8 @@ public class HttpCallsTask implements ILifecycleTask {
 
                                 if (response.getHttpCode() != 200) {
                                     String message = "HttpCall (%s) didn't return http code 200, instead %s.";
-                                    log.warn(String.format(message, call.getName(), response.getHttpCode()));
-                                    log.warn("Error Msg:" + response.getHttpCodeMessage());
+                                    LOGGER.warn(format(message, call.getName(), response.getHttpCode()));
+                                    LOGGER.warn("Error Msg:" + response.getHttpCodeMessage());
                                 }
 
                                 if (response.getHttpCode() == 200 && call.getSaveResponse()) {
@@ -141,7 +143,7 @@ public class HttpCallsTask implements ILifecycleTask {
 
                                     if (!CONTENT_TYPE_APPLICATION_JSON.startsWith(actualContentType)) {
                                         String message = "HttpCall (%s) didn't return application/json as content-type, instead was (%s)";
-                                        log.warn(String.format(message, call.getName(), actualContentType));
+                                        LOGGER.warn(format(message, call.getName(), actualContentType));
                                     }
 
                                     Object responseObject = jsonSerialization.deserialize(responseBody, Object.class);
@@ -166,7 +168,7 @@ public class HttpCallsTask implements ILifecycleTask {
                         runPostResponse(memory, call, templateDataObjects, response.getHttpCode(), validationError);
                     }
                 } catch (Exception e) {
-                    log.error(e.getLocalizedMessage(), e);
+                    LOGGER.error(e.getLocalizedMessage(), e);
                     throw new LifecycleException(e.getLocalizedMessage(), e);
                 }
             }
@@ -176,7 +178,7 @@ public class HttpCallsTask implements ILifecycleTask {
     private IResponse executeAndMeasureRequest(HttpCall call, IRequest request, boolean retryCall, int amountOfExecutions)
             throws IRequest.HttpRequestException, ExecutionException, InterruptedException {
 
-        log.info(call.getName() + " Request:  " + (amountOfExecutions > 0 ? amountOfExecutions + ". retry - " : "") + request.toString());
+        LOGGER.info(call.getName() + " Request:  " + (amountOfExecutions > 0 ? amountOfExecutions + ". retry - " : "") + request.toString());
         int delayInMillis = getDelayInMillis(call, retryCall, amountOfExecutions);
 
         long executionStart = System.currentTimeMillis();
@@ -184,8 +186,8 @@ public class HttpCallsTask implements ILifecycleTask {
         long executionEnd = System.currentTimeMillis();
         long duration = executionEnd - executionStart;
 
-        log.info(call.getName() + " Response: " + response.toString());
-        log.info(call.getName() + String.format(" Execution time: Duration: %sms Delay: %sms Total: %sms\n",
+        LOGGER.info(call.getName() + " Response: " + response.toString());
+        LOGGER.info(call.getName() + format(" Execution time: Duration: %sms Delay: %sms Total: %sms\n",
                 duration, delayInMillis, duration + delayInMillis));
 
         return response;
@@ -227,12 +229,12 @@ public class HttpCallsTask implements ILifecycleTask {
                     request = buildRequest(targetServerUrl, call.getRequest(), templateDataObjects);
                     if (batchRequest.getExecuteCallsSequentially()) {
                         request.send();
-                        log.info("Batch Request: " + request);
+                        LOGGER.info("Batch Request: " + request);
                     } else {
                         request.send(r -> {
                             //ignore response
                         });
-                        log.info("Batch Request (f'n'f): " + request);
+                        LOGGER.info("Batch Request (f'n'f): " + request);
                     }
                 }
                 return null;
@@ -244,7 +246,7 @@ public class HttpCallsTask implements ILifecycleTask {
             request.send(r -> {
                 //ignore response
             });
-            log.info("Request (f'n'f): " + request);
+            LOGGER.info("Request (f'n'f): " + request);
         }
     }
 
@@ -408,20 +410,24 @@ public class HttpCallsTask implements ILifecycleTask {
 
                     Property.Scope scope = propertyInstruction.getScope();
                     Object propertyValue;
-                    if (!isNullOrEmpty(path)) {
-                        propertyValue = JsonPath.parse(templateDataObjects).read(path);
-                    } else {
-                        Object value = propertyInstruction.getValue();
+                    try {
+                        if (!isNullOrEmpty(path)) {
+                            propertyValue = Ognl.getValue(path, templateDataObjects);
+                        } else {
+                            Object value = propertyInstruction.getValue();
 
-                        if (!isNullOrEmpty(value) && value instanceof String) {
-                            value = templateValues((String) value, templateDataObjects);
+                            if (!isNullOrEmpty(value) && value instanceof String) {
+                                value = templateValues((String) value, templateDataObjects);
+                            }
+
+                            propertyValue = value;
                         }
-
-                        propertyValue = value;
+                        memory.getConversationProperties().put(propertyName,
+                                new Property(propertyName, propertyValue, scope));
+                        templateDataObjects.put("properties", memory.getConversationProperties().toMap());
+                    } catch (OgnlException e) {
+                        LOGGER.error(e.getLocalizedMessage(), e);
                     }
-                    memory.getConversationProperties().put(propertyName,
-                            new Property(propertyName, propertyValue, scope));
-                    templateDataObjects.put("properties", memory.getConversationProperties().toMap());
                 }
             }
         }
@@ -556,14 +562,18 @@ public class HttpCallsTask implements ILifecycleTask {
             try {
                 HttpCallsConfiguration httpCallsConfig = resourceClientLibrary.getResource(uri, HttpCallsConfiguration.class);
 
-                String targetServerUri = httpCallsConfig.getTargetServerUrl();
-                if (targetServerUri.endsWith(SLASH_CHAR)) {
-                    targetServerUri = targetServerUri.substring(0, targetServerUri.length() - 2);
+                String targetServerUrl = httpCallsConfig.getTargetServerUrl();
+                if (isNullOrEmpty(targetServerUrl)) {
+                    String message = format("Property \"targetServerUrl\" in HttpCalls cannot be null or empty! (uri:%s)", uriObj);
+                    throw new ServiceException(message);
                 }
-                httpCallsConfig.setTargetServerUrl(targetServerUri);
+                if (targetServerUrl.endsWith(SLASH_CHAR)) {
+                    targetServerUrl = targetServerUrl.substring(0, targetServerUrl.length() - 2);
+                }
+                httpCallsConfig.setTargetServerUrl(targetServerUrl);
                 return httpCallsConfig;
             } catch (ServiceException e) {
-                log.error(e.getLocalizedMessage(), e);
+                LOGGER.error(e.getLocalizedMessage(), e);
                 throw new PackageConfigurationException(e.getMessage(), e);
             }
         }
