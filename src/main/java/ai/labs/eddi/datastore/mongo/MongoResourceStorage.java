@@ -3,10 +3,10 @@ package ai.labs.eddi.datastore.mongo;
 import ai.labs.eddi.datastore.IResourceStorage;
 import ai.labs.eddi.datastore.serialization.IDocumentBuilder;
 import ai.labs.eddi.utils.RuntimeUtilities;
-import com.mongodb.reactivestreams.client.MongoCollection;
-import com.mongodb.reactivestreams.client.MongoDatabase;
 import com.mongodb.client.model.Filters;
 import com.mongodb.client.model.UpdateOptions;
+import com.mongodb.reactivestreams.client.MongoCollection;
+import com.mongodb.reactivestreams.client.MongoDatabase;
 import io.reactivex.rxjava3.core.Observable;
 import org.bson.Document;
 import org.bson.types.ObjectId;
@@ -18,8 +18,8 @@ import java.util.NoSuchElementException;
  * @author ginccc
  */
 public class MongoResourceStorage<T> implements IResourceStorage<T> {
-    private static final String VERSION_FIELD = "_version";
-    private static final String ID_FIELD = "_id";
+    public static final String VERSION_FIELD = "_version";
+    public static final String ID_FIELD = "_id";
     private static final String DELETED_FIELD = "_deleted";
 
     private static final String HISTORY_POSTFIX = ".history";

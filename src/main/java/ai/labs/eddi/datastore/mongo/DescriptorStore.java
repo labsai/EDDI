@@ -6,10 +6,10 @@ import ai.labs.eddi.datastore.serialization.IDescriptorStore;
 import ai.labs.eddi.datastore.serialization.IDocumentBuilder;
 import ai.labs.eddi.utils.RuntimeUtilities;
 import ai.labs.eddi.utils.StringUtilities;
-import com.mongodb.reactivestreams.client.MongoCollection;
-import com.mongodb.reactivestreams.client.MongoDatabase;
 import com.mongodb.client.model.IndexOptions;
 import com.mongodb.client.model.Indexes;
+import com.mongodb.reactivestreams.client.MongoCollection;
+import com.mongodb.reactivestreams.client.MongoDatabase;
 import io.reactivex.rxjava3.core.Observable;
 import org.bson.Document;
 
@@ -40,7 +40,7 @@ public class DescriptorStore<T> implements IDescriptorStore<T> {
         MongoResourceStorage<T> resourceStorage =
                 new MongoResourceStorage<>(database, collectionName, documentBuilder, documentType);
         this.descriptorResourceStore = new ModifiableHistorizedResourceStore<>(resourceStorage);
-        this.resourceFilter = new ResourceFilter<>(descriptorCollection, descriptorResourceStore, documentBuilder, documentType);
+        this.resourceFilter = new ResourceFilter<>(descriptorCollection, descriptorResourceStore);
 
         Observable.fromPublisher(descriptorCollection.createIndex(Indexes.ascending(FIELD_RESOURCE), new IndexOptions().unique(true))).blockingFirst();
         Observable.fromPublisher(descriptorCollection.createIndex(Indexes.ascending(FIELD_NAME), new IndexOptions().unique(false))).blockingFirst();

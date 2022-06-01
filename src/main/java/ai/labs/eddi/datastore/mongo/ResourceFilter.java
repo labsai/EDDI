@@ -2,20 +2,16 @@ package ai.labs.eddi.datastore.mongo;
 
 import ai.labs.eddi.datastore.IResourceFilter;
 import ai.labs.eddi.datastore.IResourceStore;
-import ai.labs.eddi.datastore.serialization.IDocumentBuilder;
-import com.mongodb.DBObject;
 import com.mongodb.client.model.Filters;
 import com.mongodb.reactivestreams.client.MongoCollection;
 import io.reactivex.rxjava3.core.Observable;
 import org.bson.BsonDocument;
 import org.bson.Document;
 import org.bson.conversions.Bson;
-import org.reactivestreams.Subscriber;
-import org.reactivestreams.Subscription;
 
-import java.io.IOException;
-import java.util.*;
-import java.util.regex.Pattern;
+import java.util.ArrayList;
+import java.util.LinkedList;
+import java.util.List;
 
 /**
  * @author ginccc
@@ -27,17 +23,10 @@ public class ResourceFilter<T> implements IResourceFilter<T> {
 
     private final MongoCollection<Document> collection;
     private final IResourceStore<T> resourceStore;
-    private final Class<T> documentType;
-    private final Map<String, Pattern> regexCache;
-    private final IDocumentBuilder documentBuilder;
 
-    public ResourceFilter(MongoCollection<Document> collection, IResourceStore<T> resourceStore,
-                          IDocumentBuilder documentBuilder, Class<T> documentType) {
+    public ResourceFilter(MongoCollection<Document> collection, IResourceStore<T> resourceStore) {
         this.collection = collection;
         this.resourceStore = resourceStore;
-        this.documentType = documentType;
-        this.documentBuilder = documentBuilder;
-        this.regexCache = new HashMap<>();
     }
 
     @Override
@@ -47,7 +36,17 @@ public class ResourceFilter<T> implements IResourceFilter<T> {
 
         BsonDocument query = createQuery(queryFilters);
         Document sort = createSortQuery(sortTypes);
-        Observable<Document> observable = Observable.fromPublisher(collection.find(query).sort(sort).skip(index).limit(limit));
+        var publisher = collection.find(query).sort(sort);
+        if (limit == null || limit < 1) {
+            limit = 20;
+        }
+        publisher.limit(limit);
+
+        if (index != null) {
+            publisher.skip(index > 0 ? (index * limit) : 0);
+        }
+
+        Observable<Document> observable = Observable.fromPublisher(publisher);
         Iterable<Document> iterable = observable.blockingIterable();
 
         for (Document result : iterable) {
@@ -91,14 +90,5 @@ public class ResourceFilter<T> implements IResourceFilter<T> {
         }
 
         return document;
-    }
-
-    private T buildDocument(Document descriptor) throws IOException {
-        descriptor.remove("_id");
-        return documentBuilder.build(descriptor, documentType);
-    }
-
-    private Pattern getPatternForRegex(String regex) {
-        return regexCache.computeIfAbsent(regex, k -> Pattern.compile(regex));
     }
 }
