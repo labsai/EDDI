@@ -13,6 +13,5 @@ import java.util.List;
 @Setter
 @EqualsAndHashCode
 public class OutputValue {
-    private String type;
-    private List<Object> valueAlternatives;
+    private List<OutputItem> valueAlternatives;
 }

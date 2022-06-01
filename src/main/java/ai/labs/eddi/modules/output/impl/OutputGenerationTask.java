@@ -19,8 +19,10 @@ import ai.labs.eddi.models.ExtensionDescriptor.FieldType;
 import ai.labs.eddi.modules.output.IOutputFilter;
 import ai.labs.eddi.modules.output.IOutputGeneration;
 import ai.labs.eddi.modules.output.model.OutputEntry;
+import ai.labs.eddi.modules.output.model.OutputItem;
 import ai.labs.eddi.modules.output.model.OutputValue;
 import ai.labs.eddi.modules.output.model.QuickReply;
+import ai.labs.eddi.modules.output.model.types.QuickReplyOutputItem;
 import ai.labs.eddi.utils.StringUtilities;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -48,7 +50,6 @@ public class OutputGenerationTask implements ILifecycleTask {
     private static final String OUTPUT_SET_CONFIG_URI = "uri";
     private static final String KEY_VALUE = "value";
     private static final String KEY_VALUE_ALTERNATIVES = "valueAlternatives";
-    private static final String KEY_TYPE = "type";
     private static final String KEY_EXPRESSIONS = "expressions";
     private static final String KEY_IS_DEFAULT = "isDefault";
     private static final String OUTPUT_TYPE_QUICK_REPLY = "quickReply";
@@ -149,8 +150,7 @@ public class OutputGenerationTask implements ILifecycleTask {
 
     private List<OutputValue> convertOutputMap(List<Map<String, Object>> outputMapList) {
         return outputMapList.stream().map(map ->
-                        new OutputValue(map.get(KEY_TYPE).toString(),
-                                objectMapper.convertValue(map.get(KEY_VALUE_ALTERNATIVES), new TypeReference<>() {}))).
+                        new OutputValue(objectMapper.convertValue(map.get(KEY_VALUE_ALTERNATIVES), new TypeReference<>() {}))).
                 collect(Collectors.toList());
     }
 
@@ -165,40 +165,27 @@ public class OutputGenerationTask implements ILifecycleTask {
         List<QuickReply> quickReplies = new LinkedList<>();
         IntStream.range(0, outputValues.size()).forEach(index -> {
             OutputValue outputValue = outputValues.get(index);
-            List<Object> possibleValueAlternatives = outputValue.getValueAlternatives();
-            Object randomValue;
+            List<OutputItem> possibleValueAlternatives = outputValue.getValueAlternatives();
+            OutputItem randomValue;
             if (!possibleValueAlternatives.isEmpty()) {
                 randomValue = chooseRandomly(possibleValueAlternatives);
-                if (randomValue instanceof Map) {
-                    Map<String, String> randomValueMap = convertObjectToMap(randomValue);
-                    randomValueMap.put("type", outputValue.getType());
-                    if (OUTPUT_TYPE_QUICK_REPLY.equals(outputValue.getType())) {
-                        quickReplies.add(new QuickReply(randomValueMap.get(KEY_VALUE), randomValueMap.get(KEY_EXPRESSIONS),
-                                Boolean.parseBoolean(randomValueMap.getOrDefault(KEY_IS_DEFAULT, "false"))));
-                    }
 
-                    randomValue = randomValueMap;
+                if (OUTPUT_TYPE_QUICK_REPLY.equals(randomValue.getType())) {
+                    var qr = (QuickReplyOutputItem) randomValue;
+                    quickReplies.add(new QuickReply(qr.getValue(), qr.getExpressions(), qr.getIsDefault()));
+                } else {
+                    var outputKey = createOutputKey(action, outputValues, randomValue.getType(), index);
+                    var outputData = dataFactory.createData(outputKey, randomValue, possibleValueAlternatives);
+                    outputData.setPublic(true);
+                    currentStep.storeData(outputData);
+                    currentStep.addConversationOutputList(MEMORY_OUTPUT_IDENTIFIER, Collections.singletonList(randomValue));
                 }
-            } else {
-                var tmpValueHolder = new LinkedHashMap<>();
-                tmpValueHolder.put("type", outputValue.getType());
-                randomValue = tmpValueHolder;
             }
-
-            String outputKey = createOutputKey(action, outputValues, outputValue, index);
-            IData<Object> outputData = dataFactory.createData(outputKey, randomValue, possibleValueAlternatives);
-            outputData.setPublic(true);
-            currentStep.storeData(outputData);
-            currentStep.addConversationOutputList(MEMORY_OUTPUT_IDENTIFIER, Collections.singletonList(randomValue));
         });
 
         if (!quickReplies.isEmpty()) {
             storeQuickReplies(currentStep, quickReplies, action);
         }
-    }
-
-    private Map<String, String> convertObjectToMap(Object randomValue) {
-        return objectMapper.convertValue(randomValue, new TypeReference<>() {});
     }
 
     private void storeQuickReplies(IWritableConversationStep currentStep, List<QuickReply> quickReplies, String action) {
@@ -252,17 +239,17 @@ public class OutputGenerationTask implements ILifecycleTask {
         }
     }
 
-    private String createOutputKey(String action, List<OutputValue> outputValues, OutputValue outputValue, int idx) {
+    private String createOutputKey(String action, List<OutputValue> outputValues, String outputType, int idx) {
         if (outputValues.size() > 1) {
             return StringUtilities.joinStrings(":", MEMORY_OUTPUT_IDENTIFIER,
-                    outputValue.getType(), action, idx);
+                    outputType, action, idx);
         } else {
             return StringUtilities.joinStrings(":", MEMORY_OUTPUT_IDENTIFIER,
-                    outputValue.getType(), action);
+                    outputType, action);
         }
     }
 
-    private Object chooseRandomly(List<Object> possibleValues) {
+    private OutputItem chooseRandomly(List<OutputItem> possibleValues) {
         return possibleValues.get(new Random().nextInt(possibleValues.size()));
     }
 
@@ -289,10 +276,9 @@ public class OutputGenerationTask implements ILifecycleTask {
      * @param configOutputs List<OutputConfiguration.OutputType> as it comes from the configuration repository
      * @return List<OutputValue> as it is used in the internal system
      */
-    private List<OutputValue> convertOutputTypesConfig(List<OutputConfiguration.OutputType> configOutputs) {
+    private List<OutputValue> convertOutputTypesConfig(List<OutputConfiguration.Output> configOutputs) {
         return configOutputs.stream().map(configOutput -> {
             OutputValue outputValue = new OutputValue();
-            outputValue.setType(configOutput.getType());
             outputValue.setValueAlternatives(configOutput.getValueAlternatives());
             return outputValue;
         }).collect(Collectors.toCollection(LinkedList::new));

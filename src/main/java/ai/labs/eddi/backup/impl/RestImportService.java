@@ -11,8 +11,10 @@ import ai.labs.eddi.configs.git.IRestGitCallsStore;
 import ai.labs.eddi.configs.git.model.GitCallsConfiguration;
 import ai.labs.eddi.configs.http.IRestHttpCallsStore;
 import ai.labs.eddi.configs.http.model.HttpCallsConfiguration;
+import ai.labs.eddi.configs.migration.IMigrationManager;
 import ai.labs.eddi.configs.output.IRestOutputStore;
 import ai.labs.eddi.configs.output.model.OutputConfigurationSet;
+import ai.labs.eddi.configs.output.rest.RestOutputStore;
 import ai.labs.eddi.configs.packages.IRestPackageStore;
 import ai.labs.eddi.configs.packages.model.PackageConfiguration;
 import ai.labs.eddi.configs.patch.PatchInstruction;
@@ -64,6 +66,7 @@ public class RestImportService extends AbstractBackupService implements IRestImp
     private final IJsonSerialization jsonSerialization;
     private final IRestInterfaceFactory restInterfaceFactory;
     private final IRestBotAdministration restBotAdministration;
+    private final IMigrationManager migrationManager;
 
     private static final Logger log = Logger.getLogger(RestImportService.class);
 
@@ -71,11 +74,13 @@ public class RestImportService extends AbstractBackupService implements IRestImp
     public RestImportService(IZipArchive zipArchive,
                              IJsonSerialization jsonSerialization,
                              IRestInterfaceFactory restInterfaceFactory,
-                             IRestBotAdministration restBotAdministration) {
+                             IRestBotAdministration restBotAdministration,
+                             IMigrationManager migrationManager) {
         this.zipArchive = zipArchive;
         this.jsonSerialization = jsonSerialization;
         this.restInterfaceFactory = restInterfaceFactory;
         this.restBotAdministration = restBotAdministration;
+        this.migrationManager = migrationManager;
     }
 
     @Override
@@ -401,8 +406,8 @@ public class RestImportService extends AbstractBackupService implements IRestImp
         return restInterfaceFactory.get(clazz);
     }
 
-    private <
-            T> List<T> readResources(List<URI> uris, Path packagePath, String extension, Class<T> clazz) {
+    @SuppressWarnings("unchecked")
+    private <T> List<T> readResources(List<URI> uris, Path packagePath, String extension, Class<T> clazz) {
         return uris.stream().map(uri -> {
             Path resourcePath = null;
             String resourceContent = null;
@@ -410,6 +415,13 @@ public class RestImportService extends AbstractBackupService implements IRestImp
                 IResourceId resourceId = RestUtilities.extractResourceId(uri);
                 resourcePath = createResourcePath(packagePath, resourceId.getId(), extension);
                 resourceContent = readFile(resourcePath);
+                if (uri.toString().startsWith(RestOutputStore.resourceBaseType)) {
+                    var resourceAsMap = jsonSerialization.deserialize(resourceContent, Map.class);
+                    var migratedOutputDocument = migrationManager.migrateOutput(resourceAsMap);
+                    if (migratedOutputDocument != null) {
+                        resourceContent = jsonSerialization.serialize(migratedOutputDocument);
+                    }
+                }
                 return jsonSerialization.deserialize(resourceContent, clazz);
             } catch (IOException e) {
                 log.error(e.getLocalizedMessage(), e);

@@ -8,6 +8,9 @@ import ai.labs.eddi.engine.memory.IDataFactory;
 import ai.labs.eddi.engine.memory.IMemoryItemConverter;
 import ai.labs.eddi.models.ExtensionDescriptor;
 import ai.labs.eddi.modules.output.model.QuickReply;
+import ai.labs.eddi.modules.output.model.types.ImageOutputItem;
+import ai.labs.eddi.modules.output.model.types.QuickReplyOutputItem;
+import ai.labs.eddi.modules.output.model.types.TextOutputItem;
 import ai.labs.eddi.modules.templating.ITemplatingEngine.TemplateMode;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -94,10 +97,20 @@ public class OutputTemplateTask implements ILifecycleTask {
                     Object preTemplated = output.getResult();
                     Object postTemplated = null;
 
-                    if (preTemplated instanceof String) { // keep supporting string for backwards compatibility
-
-                        postTemplated = templatingEngine.processTemplate(preTemplated.toString(), contextMap, templateMode);
-
+                    if (preTemplated instanceof TextOutputItem textOutput) {
+                        textOutput = new TextOutputItem(textOutput.getText(), textOutput.getDelay());
+                        textOutput.setText(templatingEngine.processTemplate(textOutput.getText(), contextMap, templateMode));
+                        postTemplated = textOutput;
+                    } else if (preTemplated instanceof ImageOutputItem imageOutput) {
+                        imageOutput = new ImageOutputItem(imageOutput.getUri(), imageOutput.getAlt());
+                        imageOutput.setUri(templatingEngine.processTemplate(imageOutput.getUri(), contextMap, templateMode));
+                        imageOutput.setAlt(templatingEngine.processTemplate(imageOutput.getAlt(), contextMap, templateMode));
+                        postTemplated = imageOutput;
+                    } else if (preTemplated instanceof QuickReplyOutputItem qrOutput) {
+                        qrOutput = new QuickReplyOutputItem(qrOutput.getValue(), qrOutput.getExpressions(), qrOutput.getIsDefault());
+                        qrOutput.setValue(templatingEngine.processTemplate(qrOutput.getValue(), contextMap, templateMode));
+                        qrOutput.setExpressions(templatingEngine.processTemplate(qrOutput.getExpressions(), contextMap, templateMode));
+                        postTemplated = qrOutput;
                     } else if (preTemplated instanceof Map) {
                         var tmpMap = new LinkedHashMap<>(convertObjectToMap(preTemplated));
 

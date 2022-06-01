@@ -1,7 +1,7 @@
 package ai.labs.eddi.configs.output.model;
 
+import ai.labs.eddi.modules.output.model.OutputItem;
 import ai.labs.eddi.modules.output.model.QuickReply;
-import com.kjetland.jackson.jsonSchema.annotations.JsonSchemaInject;
 import lombok.AllArgsConstructor;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
@@ -21,7 +21,7 @@ import java.util.List;
 public class OutputConfiguration {
     private String action;
     private int timesOccurred;
-    private List<OutputType> outputs = new LinkedList<>();
+    private List<Output> outputs = new LinkedList<>();
     private List<QuickReply> quickReplies = new LinkedList<>();
 
     @Override
@@ -43,30 +43,7 @@ public class OutputConfiguration {
 
     @Getter
     @Setter
-    public static class OutputType {
-        private String type;
-        @JsonSchemaInject(json =
-                "{\"anyOf\": " +
-                        "[" +
-                        "{" +
-                        " \"type\": \"array\"," +
-                        " \"items\": {" +
-                        "               \"type\": \"string\"" +
-                        "            }" +
-                        "}," +
-                        "{" +
-                        " \"type\": \"array\"," +
-                        " \"items\": {" +
-                        "                \"type\": \"object\"," +
-                        "                \"properties\": {" +
-                        "                    \"text\":{" +
-                        "                        \"type\":\"string\"" +
-                        "                    }" +
-                        "                }, " +
-                        "                \"additionalProperties\":true" +
-                        "            }" +
-                        "} " +
-                        "]}")
-        private List<Object> valueAlternatives = new LinkedList<>();
+    public static class Output {
+        private List<OutputItem> valueAlternatives = new LinkedList<>();
     }
 }

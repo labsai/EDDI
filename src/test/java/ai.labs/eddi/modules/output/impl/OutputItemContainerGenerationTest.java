@@ -2,8 +2,10 @@ package ai.labs.eddi.modules.output.impl;
 
 import ai.labs.eddi.modules.output.IOutputFilter;
 import ai.labs.eddi.modules.output.model.OutputEntry;
+import ai.labs.eddi.modules.output.model.OutputItem;
 import ai.labs.eddi.modules.output.model.OutputValue;
 import ai.labs.eddi.modules.output.model.QuickReply;
+import ai.labs.eddi.modules.output.model.types.TextOutputItem;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -16,7 +18,7 @@ import java.util.Map;
 /**
  * @author ginccc
  */
-public class OutputGenerationTest {
+public class OutputItemContainerGenerationTest {
     private static final String ACTION_1 = "action1";
     private static final String ACTION_2 = "action2";
     private static final String ACTION_3 = "action3";
@@ -108,10 +110,9 @@ public class OutputGenerationTest {
 
     private List<OutputEntry> setupOutputEntries() {
         List<OutputEntry> outputEntries = new LinkedList<>();
-        List<Object> valueAlternatives1 = Arrays.asList("Text1 Alternative 1", "Text1 Alternative 2");
-        List<Object> valueAlternatives2 = Arrays.asList("Text2 Alternative 1", "Text2 Alternative 2");
-        List<OutputValue> outputValues = Arrays.asList(new OutputValue(OUTPUT_TYPE_TEXT, valueAlternatives1),
-                new OutputValue(OUTPUT_TYPE_TEXT, valueAlternatives2));
+        List<OutputItem> valueAlternatives1 = Arrays.asList(new TextOutputItem("Text1 Alternative 1"), new TextOutputItem("Text1 Alternative 2"));
+        List<OutputItem> valueAlternatives2 = Arrays.asList(new TextOutputItem("Text2 Alternative 1"), new TextOutputItem("Text2 Alternative 2"));
+        List<OutputValue> outputValues = Arrays.asList(new OutputValue(valueAlternatives1), new OutputValue(valueAlternatives2));
         List<QuickReply> quickReply = Arrays.asList(new QuickReply("Some QuickReply", "some(Expression)", false),
                 new QuickReply("Some Other QuickReply", "someOther(Expression", false));
 

@@ -11,8 +11,10 @@ import ai.labs.eddi.engine.runtime.client.configuration.IResourceClientLibrary;
 import ai.labs.eddi.modules.output.impl.OutputGeneration;
 import ai.labs.eddi.modules.output.impl.OutputGenerationTask;
 import ai.labs.eddi.modules.output.model.OutputEntry;
+import ai.labs.eddi.modules.output.model.OutputItem;
 import ai.labs.eddi.modules.output.model.OutputValue;
 import ai.labs.eddi.modules.output.model.QuickReply;
+import ai.labs.eddi.modules.output.model.types.TextOutputItem;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.BeforeEach;
@@ -27,7 +29,7 @@ import static org.mockito.Mockito.*;
  * @author ginccc
  */
 
-public class OutputGenerationTaskTest {
+public class OutputItemContainerGenerationTaskTest {
     private static final String ACTION_1 = "action1";
     private static final String ACTION_2 = "action2";
     private static final String ACTION = "actions";
@@ -121,7 +123,11 @@ public class OutputGenerationTaskTest {
 
     private OutputEntry createOutputEntry() {
         List<OutputValue> outputs = new LinkedList<>();
-        outputs.add(new OutputValue(OUTPUT_TYPE_TEXT, Arrays.asList(ANSWER_ALTERNATIVE_1, ANSWER_ALTERNATIVE_2)));
+        outputs.add(
+                new OutputValue(
+                        Arrays.asList(
+                                new TextOutputItem(ANSWER_ALTERNATIVE_1),
+                                new TextOutputItem(ANSWER_ALTERNATIVE_2))));
         List<QuickReply> quickReplies = new LinkedList<>();
         quickReplies.add(new QuickReply(SOME_QUICK_REPLY, SOME_EXPRESSION, false));
         quickReplies.add(new QuickReply(SOME_OTHER_QUICK_REPLY, SOME_OTHER_EXPRESSION, false));
@@ -140,14 +146,13 @@ public class OutputGenerationTaskTest {
         OutputConfiguration outputConfiguration = new OutputConfiguration();
         outputConfiguration.setAction(ACTION_1);
         outputConfiguration.setTimesOccurred(0);
-        LinkedList<OutputConfiguration.OutputType> outputs = new LinkedList<>();
-        OutputConfiguration.OutputType outputType = new OutputConfiguration.OutputType();
-        outputType.setType(OUTPUT_TYPE_TEXT);
-        LinkedList<Object> valueAlternatives = new LinkedList<>();
-        valueAlternatives.add(ANSWER_ALTERNATIVE_1);
-        valueAlternatives.add(ANSWER_ALTERNATIVE_2);
-        outputType.setValueAlternatives(valueAlternatives);
-        outputs.add(outputType);
+        LinkedList<OutputConfiguration.Output> outputs = new LinkedList<>();
+        OutputConfiguration.Output output = new OutputConfiguration.Output();
+        LinkedList<OutputItem> valueAlternatives = new LinkedList<>();
+        valueAlternatives.add(new TextOutputItem(ANSWER_ALTERNATIVE_1));
+        valueAlternatives.add(new TextOutputItem(ANSWER_ALTERNATIVE_2));
+        output.setValueAlternatives(valueAlternatives);
+        outputs.add(output);
         outputConfiguration.setOutputs(outputs);
         LinkedList<QuickReply> quickReplies = new LinkedList<>();
         quickReplies.add(createConfigQuickReply(SOME_QUICK_REPLY, SOME_EXPRESSION));

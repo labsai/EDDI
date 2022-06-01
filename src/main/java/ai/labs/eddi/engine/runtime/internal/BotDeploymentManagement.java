@@ -5,6 +5,7 @@ import ai.labs.eddi.configs.deployment.IDeploymentStore;
 import ai.labs.eddi.configs.deployment.model.DeploymentInfo;
 import ai.labs.eddi.configs.deployment.model.DeploymentInfo.DeploymentStatus;
 import ai.labs.eddi.configs.documentdescriptor.IDocumentDescriptorStore;
+import ai.labs.eddi.configs.migration.IMigrationManager;
 import ai.labs.eddi.datastore.IResourceStore.IResourceId;
 import ai.labs.eddi.engine.memory.IConversationMemoryStore;
 import ai.labs.eddi.engine.runtime.IAutoBotDeployment;
@@ -12,6 +13,7 @@ import ai.labs.eddi.engine.runtime.IBotFactory;
 import ai.labs.eddi.engine.runtime.service.ServiceException;
 import ai.labs.eddi.models.ConversationState;
 import ai.labs.eddi.models.Deployment.Environment;
+import io.quarkus.arc.Priority;
 import io.quarkus.runtime.Startup;
 import io.quarkus.runtime.StartupEvent;
 import io.quarkus.scheduler.Scheduled;
@@ -36,7 +38,8 @@ import static java.time.temporal.ChronoUnit.DAYS;
  * @author ginccc
  */
 
-@Startup(4000)
+@Startup
+@Priority(4000)
 @ApplicationScoped
 public class BotDeploymentManagement implements IAutoBotDeployment {
     private final IDeploymentStore deploymentStore;
@@ -44,6 +47,7 @@ public class BotDeploymentManagement implements IAutoBotDeployment {
     private final IBotStore botStore;
     private final IConversationMemoryStore conversationMemoryStore;
     private final IDocumentDescriptorStore documentDescriptorStore;
+    private final IMigrationManager migrationManager;
     private final int maximumLifeTimeOfIdleConversationsInDays;
 
     private Instant lastDeploymentCheck = null;
@@ -56,6 +60,7 @@ public class BotDeploymentManagement implements IAutoBotDeployment {
                                    IBotStore botStore,
                                    IConversationMemoryStore conversationMemoryStore,
                                    IDocumentDescriptorStore documentDescriptorStore,
+                                   IMigrationManager migrationManager,
                                    @ConfigProperty(name = "eddi.conversations.maximumLifeTimeOfIdleConversationsInDays")
                                    int maximumLifeTimeOfIdleConversationsInDays) {
         this.deploymentStore = deploymentStore;
@@ -63,6 +68,7 @@ public class BotDeploymentManagement implements IAutoBotDeployment {
         this.botStore = botStore;
         this.conversationMemoryStore = conversationMemoryStore;
         this.documentDescriptorStore = documentDescriptorStore;
+        this.migrationManager = migrationManager;
         this.maximumLifeTimeOfIdleConversationsInDays = maximumLifeTimeOfIdleConversationsInDays;
     }
 
@@ -82,6 +88,9 @@ public class BotDeploymentManagement implements IAutoBotDeployment {
     @Scheduled(every = "24h")
     public void manageBotDeployments() throws AutoDeploymentException {
         try {
+            if (isMigrationNeeded()) {
+                migrationManager.startMigration();
+            }
             var oneHourAgo = Instant.now().minus(1, ChronoUnit.HOURS);
             if (lastDeploymentCheck == null || lastDeploymentCheck.isBefore(oneHourAgo)) {
                 lastDeploymentCheck = Instant.now();
@@ -142,6 +151,12 @@ public class BotDeploymentManagement implements IAutoBotDeployment {
         } catch (ResourceStoreException e) {
             throw new AutoDeploymentException(e.getLocalizedMessage(), e);
         }
+    }
+
+    private boolean isMigrationNeeded() {
+
+
+        return true;
     }
 
     private void endOldConversationsWithOldBots(String botId, Integer botVersion)
