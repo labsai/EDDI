@@ -85,7 +85,7 @@ public class OutputItemContainerGenerationTaskTest {
         var expectedOutputData = new Data<>(OUTPUT_TEXT + ACTION_1, new TextOutputItem(ANSWER_ALTERNATIVE_1),
                 asList(new TextOutputItem(ANSWER_ALTERNATIVE_1), new TextOutputItem(ANSWER_ALTERNATIVE_2)));
 
-        when(dataFactory.createData(eq(OUTPUT_TEXT + ACTION_1), eq(new TextOutputItem(ANSWER_ALTERNATIVE_1)),
+        when(dataFactory.createData(eq(OUTPUT_TEXT + ACTION_1), any(TextOutputItem.class),
                 eq(asList(new TextOutputItem(ANSWER_ALTERNATIVE_1), new TextOutputItem(ANSWER_ALTERNATIVE_2)))))
                 .thenAnswer(invocation -> expectedOutputData);
 
