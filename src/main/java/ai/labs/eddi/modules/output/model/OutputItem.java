@@ -20,4 +20,6 @@ import lombok.Setter;
 @Setter
 public abstract class OutputItem {
     protected String type;
+
+    protected abstract void initType();
 }
