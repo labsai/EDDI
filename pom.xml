@@ -26,7 +26,7 @@
         <war-plugin.version>3.3.2</war-plugin.version>
         <dependency.version.lombok>1.18.24</dependency.version.lombok>
         <mongodb.driver.version>4.5.1</mongodb.driver.version>
-        <quarkus.jgit.version>1.2.0</quarkus.jgit.version>
+        <quarkus.jgit.version>2.0.0</quarkus.jgit.version>
     </properties>
     <dependencyManagement>
         <dependencies>
