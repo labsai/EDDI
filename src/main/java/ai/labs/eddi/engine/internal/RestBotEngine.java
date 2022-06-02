@@ -25,6 +25,8 @@ import ai.labs.eddi.models.ConversationState;
 import ai.labs.eddi.models.Deployment;
 import ai.labs.eddi.models.Deployment.Environment;
 import ai.labs.eddi.models.InputData;
+import io.micrometer.core.instrument.MeterRegistry;
+import io.micrometer.core.instrument.Timer;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.jboss.logging.Logger;
 import org.jboss.resteasy.spi.NoLogWebApplicationException;
@@ -64,6 +66,9 @@ public class RestBotEngine implements IRestBotEngine {
     private final int botTimeout;
     private final IConversationSetup conversationSetup;
     private final ICache<String, ConversationState> conversationStateCache;
+    private final Timer timerConversationStart;
+    private final Timer timerConversationRead;
+    private final Timer timerConversationSay;
 
     private static final Logger log = Logger.getLogger(RestBotEngine.class);
 
@@ -77,6 +82,7 @@ public class RestBotEngine implements IRestBotEngine {
                          ICacheFactory cacheFactory,
                          IRuntime runtime,
                          IContextLogger contextLogger,
+                         MeterRegistry meterRegistry,
                          @ConfigProperty(name = "systemRuntime.botTimeoutInSeconds") int botTimeout) {
         this.botFactory = botFactory;
         this.conversationMemoryStore = conversationMemoryStore;
@@ -88,6 +94,10 @@ public class RestBotEngine implements IRestBotEngine {
         this.runtime = runtime;
         this.contextLogger = contextLogger;
         this.botTimeout = botTimeout;
+
+        this.timerConversationStart = meterRegistry.timer("conversation.start");
+        this.timerConversationRead = meterRegistry.timer("conversation.load");
+        this.timerConversationSay = meterRegistry.timer("conversation.processing");
     }
 
     @Override
@@ -100,6 +110,9 @@ public class RestBotEngine implements IRestBotEngine {
                                                  String botId,
                                                  String userId,
                                                  Map<String, Context> context) {
+
+        long startTime = System.nanoTime();
+
         checkNotNull(environment, "environment");
         checkNotNull(botId, "botId");
         if (context == null) {
@@ -127,14 +140,16 @@ public class RestBotEngine implements IRestBotEngine {
 
             return Response.created(conversationUri).build();
         } catch (ServiceException |
-                ResourceStoreException |
-                ResourceNotFoundException |
-                InstantiationException |
-                LifecycleException |
-                IllegalAccessException e) {
+                 ResourceStoreException |
+                 ResourceNotFoundException |
+                 InstantiationException |
+                 LifecycleException |
+                 IllegalAccessException e) {
             contextLogger.setLoggingContext(contextLogger.createLoggingContext(environment, botId, null, userId));
             log.error(e.getLocalizedMessage(), e);
             throw new InternalServerErrorException(e.getLocalizedMessage(), e);
+        } finally {
+            record(startTime, timerConversationStart);
         }
     }
 
@@ -177,6 +192,8 @@ public class RestBotEngine implements IRestBotEngine {
                                                              Boolean returnCurrentStepOnly,
                                                              List<String> returningFields) {
 
+        long startTime = System.nanoTime();
+
         validateParams(environment, botId, conversationId);
         Map<String, String> loggingContext = contextLogger.createLoggingContext(environment, botId, conversationId, null);
         contextLogger.setLoggingContext(loggingContext);
@@ -201,6 +218,8 @@ public class RestBotEngine implements IRestBotEngine {
             throw new InternalServerErrorException(e.getLocalizedMessage(), e);
         } catch (ResourceNotFoundException e) {
             throw new NoLogWebApplicationException(Response.Status.NOT_FOUND.getStatusCode());
+        } finally {
+            record(startTime, timerConversationRead);
         }
     }
 
@@ -276,6 +295,7 @@ public class RestBotEngine implements IRestBotEngine {
         response.setTimeoutHandler((asyncResp) ->
                 asyncResp.resume(Response.status(Response.Status.REQUEST_TIMEOUT).build()));
 
+        long startTime = System.nanoTime();
         try {
             final IConversationMemory conversationMemory = loadConversationMemory(conversationId);
             checkConversationMemoryNotNull(conversationMemory, conversationId);
@@ -311,6 +331,7 @@ public class RestBotEngine implements IRestBotEngine {
                         cacheConversationState(conversationId, memorySnapshot.getConversationState());
                         conversationDescriptorStore.updateTimeStamp(conversationId);
                         response.resume(memorySnapshot);
+                        record(startTime, timerConversationSay);
                     });
 
             if (conversation.isEnded()) {
@@ -563,5 +584,9 @@ public class RestBotEngine implements IRestBotEngine {
             message = String.format(message, conversationId);
             throw new IllegalAccessException(message);
         }
+    }
+
+    private static void record(long startTime, Timer timer) {
+        timer.record(System.nanoTime() - startTime, TimeUnit.NANOSECONDS);
     }
 }
