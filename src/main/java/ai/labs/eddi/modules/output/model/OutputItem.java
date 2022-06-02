@@ -6,7 +6,12 @@ import com.fasterxml.jackson.annotation.JsonTypeInfo;
 import lombok.Getter;
 import lombok.Setter;
 
-@JsonTypeInfo(use = JsonTypeInfo.Id.NAME, property = "type", visible = true)
+@JsonTypeInfo(
+        visible = true,
+        property = "type",
+        use = JsonTypeInfo.Id.NAME,
+        include = JsonTypeInfo.As.EXISTING_PROPERTY
+)
 @JsonSubTypes({
         @JsonSubTypes.Type(value = TextOutputItem.class, name = "text"),
         @JsonSubTypes.Type(value = ImageOutputItem.class, name = "image"),
