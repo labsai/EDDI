@@ -23,6 +23,7 @@ import org.junit.jupiter.api.Test;
 import java.net.URI;
 import java.util.*;
 
+import static java.util.Arrays.asList;
 import static org.mockito.Mockito.*;
 
 /**
@@ -73,18 +74,22 @@ public class OutputItemContainerGenerationTaskTest {
         var currentStep = mock(IConversationMemory.IWritableConversationStep.class);
         when(conversationMemory.getCurrentStep()).thenAnswer(invocation -> currentStep);
         when(currentStep.getLatestData(eq(ACTION))).thenAnswer(invocation ->
-                new Data<>(ACTION_1, Arrays.asList(SOME_ACTION_1, SOME_OTHER_ACTION_1)));
+                new Data<>(ACTION_1, asList(SOME_ACTION_1, SOME_OTHER_ACTION_1)));
         var conversationStepStack = mock(IConversationMemory.IConversationStepStack.class);
         when(conversationMemory.getPreviousSteps()).then(invocation -> conversationStepStack);
         var conversationStep = mock(IConversationMemory.IConversationStep.class);
         when(conversationStepStack.get(anyInt())).then(invocation -> conversationStep);
         when(conversationStep.getLatestData(eq(ACTION))).then(invocation ->
-                new Data<>(ACTION_2, Arrays.asList(SOME_ACTION_2, SOME_OTHER_ACTION_2)));
-        IData<String> expectedOutputData = new Data<>(OUTPUT_TEXT + ACTION_1, ANSWER_ALTERNATIVE_1,
-                Arrays.asList(SOME_ACTION_2, SOME_OTHER_ACTION_2));
-        when(dataFactory.createData(eq(OUTPUT_TEXT + ACTION_1), anyString(),
-                eq(Arrays.asList(ANSWER_ALTERNATIVE_1, ANSWER_ALTERNATIVE_2)))).thenAnswer(invocation -> expectedOutputData);
-        List<QuickReply> quickReplies = Arrays.asList(new QuickReply(SOME_QUICK_REPLY, SOME_EXPRESSION, false),
+                new Data<>(ACTION_2, asList(SOME_ACTION_2, SOME_OTHER_ACTION_2)));
+
+        var expectedOutputData = new Data<>(OUTPUT_TEXT + ACTION_1, new TextOutputItem(ANSWER_ALTERNATIVE_1),
+                asList(new TextOutputItem(ANSWER_ALTERNATIVE_1), new TextOutputItem(ANSWER_ALTERNATIVE_2)));
+
+        when(dataFactory.createData(eq(OUTPUT_TEXT + ACTION_1), eq(new TextOutputItem(ANSWER_ALTERNATIVE_1)),
+                eq(asList(new TextOutputItem(ANSWER_ALTERNATIVE_1), new TextOutputItem(ANSWER_ALTERNATIVE_2)))))
+                .thenAnswer(invocation -> expectedOutputData);
+
+        List<QuickReply> quickReplies = asList(new QuickReply(SOME_QUICK_REPLY, SOME_EXPRESSION, false),
                 new QuickReply(SOME_OTHER_QUICK_REPLY, SOME_OTHER_EXPRESSION, false));
         IData<List<QuickReply>> expectedQuickReplyData = new Data<>(QUICK_REPLIES + ACTION_1, quickReplies);
         when(dataFactory.createData(eq(QUICK_REPLIES + ACTION_1), anyList())).
@@ -125,7 +130,7 @@ public class OutputItemContainerGenerationTaskTest {
         List<OutputValue> outputs = new LinkedList<>();
         outputs.add(
                 new OutputValue(
-                        Arrays.asList(
+                        asList(
                                 new TextOutputItem(ANSWER_ALTERNATIVE_1),
                                 new TextOutputItem(ANSWER_ALTERNATIVE_2))));
         List<QuickReply> quickReplies = new LinkedList<>();

@@ -94,7 +94,7 @@ public class OutputTemplateTask implements ILifecycleTask {
 
             if (templateMode != null) {
                 try {
-                    Object preTemplated = output.getResult();
+                    final var preTemplated = output.getResult();
                     Object postTemplated = null;
 
                     if (preTemplated instanceof TextOutputItem textOutput) {
@@ -125,12 +125,12 @@ public class OutputTemplateTask implements ILifecycleTask {
                         postTemplated = tmpMap;
                     }
 
-                    output.setResult(postTemplated);
-                    templateData(memory, output, outputKey, preTemplated, postTemplated);
-
-                    IWritableConversationStep currentStep = memory.getCurrentStep();
-                    currentStep.addConversationOutputList(KEY_OUTPUT, Collections.singletonList(output.getResult()));
-
+                    if (postTemplated != null) {
+                        output.setResult(postTemplated);
+                        templateData(memory, output, outputKey, preTemplated, postTemplated);
+                        IWritableConversationStep currentStep = memory.getCurrentStep();
+                        currentStep.addConversationOutputList(KEY_OUTPUT, Collections.singletonList(output.getResult()));
+                    }
                 } catch (ITemplatingEngine.TemplateEngineException e) {
                     log.error(e.getLocalizedMessage(), e);
                 }

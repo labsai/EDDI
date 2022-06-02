@@ -7,6 +7,7 @@ import ai.labs.eddi.engine.memory.IMemoryItemConverter;
 import ai.labs.eddi.engine.memory.model.Data;
 import ai.labs.eddi.models.Context;
 import ai.labs.eddi.modules.output.model.QuickReply;
+import ai.labs.eddi.modules.output.model.types.TextOutputItem;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.AllArgsConstructor;
 import lombok.EqualsAndHashCode;
@@ -93,8 +94,8 @@ public class OutputTemplateTaskTest {
 
     private List<QuickReply> setupTask() throws ITemplatingEngine.TemplateEngineException {
         when(currentStep.getAllData(eq("output"))).then(invocation -> {
-            LinkedList<IData<String>> ret = new LinkedList<>();
-            ret.add(new MockData<>("output:text:someAction", templateString));
+            LinkedList<IData<TextOutputItem>> ret = new LinkedList<>();
+            ret.add(new MockData<>("output:text:someAction", new TextOutputItem(templateString)));
             return ret;
         });
         List<QuickReply> expectedPreQuickReplies = new LinkedList<>();
@@ -113,11 +114,11 @@ public class OutputTemplateTaskTest {
             ret.add(new MockData<>(KEY_QUICK_REPLY_SOME_ACTION, expectedPostQuickReplies));
             return ret;
         });
-        when(dataFactory.createData(eq(KEY_OUTPUT_TEXT_SOME_ACTION_PRE_TEMPLATED), eq(templateString)))
-                .then(invocation -> new Data<>(KEY_OUTPUT_TEXT_SOME_ACTION_PRE_TEMPLATED, templateString));
+        when(dataFactory.createData(eq(KEY_OUTPUT_TEXT_SOME_ACTION_PRE_TEMPLATED), eq(new TextOutputItem(templateString))))
+                .then(invocation -> new Data<>(KEY_OUTPUT_TEXT_SOME_ACTION_PRE_TEMPLATED, new TextOutputItem(templateString)));
 
-        when(dataFactory.createData(eq(KEY_OUTPUT_TEXT_SOME_ACTION_POST_TEMPLATED), eq(expectedOutputString)))
-                .then(invocation -> new Data<>(KEY_OUTPUT_TEXT_SOME_ACTION_POST_TEMPLATED, expectedOutputString));
+        when(dataFactory.createData(eq(KEY_OUTPUT_TEXT_SOME_ACTION_POST_TEMPLATED), eq(new TextOutputItem(expectedOutputString))))
+                .then(invocation -> new Data<>(KEY_OUTPUT_TEXT_SOME_ACTION_POST_TEMPLATED, new TextOutputItem(expectedOutputString)));
 
         when(dataFactory.createData(eq(KEY_QUICK_REPLY_SOME_ACTION_PRE_TEMPLATED), anyList()))
                 .then(invocation -> new Data<>(KEY_QUICK_REPLY_SOME_ACTION_PRE_TEMPLATED, expectedPreQuickReplies));
@@ -151,8 +152,8 @@ public class OutputTemplateTaskTest {
     private void verifyTask(List<QuickReply> expectedPostQuickReplies) {
         verify(currentStep).getAllData("output");
         verify(currentStep).getAllData("quickReplies");
-        verify(dataFactory).createData(eq(KEY_OUTPUT_TEXT_SOME_ACTION_PRE_TEMPLATED), eq(templateString));
-        verify(dataFactory).createData(eq(KEY_OUTPUT_TEXT_SOME_ACTION_POST_TEMPLATED), eq(expectedOutputString));
+        verify(dataFactory).createData(eq(KEY_OUTPUT_TEXT_SOME_ACTION_PRE_TEMPLATED), eq(new TextOutputItem(templateString)));
+        verify(dataFactory).createData(eq(KEY_OUTPUT_TEXT_SOME_ACTION_POST_TEMPLATED), eq(new TextOutputItem(expectedOutputString)));
         verify(dataFactory, times(2)).createData(eq(KEY_QUICK_REPLY_SOME_ACTION_PRE_TEMPLATED), any());
         verify(dataFactory, times(2)).createData(eq(KEY_QUICK_REPLY_SOME_ACTION_POST_TEMPLATED), eq(expectedPostQuickReplies));
         verify(currentStep, times(9)).storeData(any(IData.class));
