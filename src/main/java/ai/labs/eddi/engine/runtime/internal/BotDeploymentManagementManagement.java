@@ -8,7 +8,7 @@ import ai.labs.eddi.configs.documentdescriptor.IDocumentDescriptorStore;
 import ai.labs.eddi.configs.migration.IMigrationManager;
 import ai.labs.eddi.datastore.IResourceStore.IResourceId;
 import ai.labs.eddi.engine.memory.IConversationMemoryStore;
-import ai.labs.eddi.engine.runtime.IAutoBotDeployment;
+import ai.labs.eddi.engine.runtime.IBotDeploymentManagement;
 import ai.labs.eddi.engine.runtime.IBotFactory;
 import ai.labs.eddi.engine.runtime.service.ServiceException;
 import ai.labs.eddi.models.ConversationState;
@@ -18,6 +18,9 @@ import io.quarkus.runtime.Startup;
 import io.quarkus.runtime.StartupEvent;
 import io.quarkus.scheduler.Scheduled;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
+import org.eclipse.microprofile.health.HealthCheck;
+import org.eclipse.microprofile.health.HealthCheckResponse;
+import org.eclipse.microprofile.health.Readiness;
 import org.jboss.logging.Logger;
 
 import javax.enterprise.context.ApplicationScoped;
@@ -40,8 +43,9 @@ import static java.time.temporal.ChronoUnit.DAYS;
 
 @Startup
 @Priority(4000)
+@Readiness
 @ApplicationScoped
-public class BotDeploymentManagement implements IAutoBotDeployment {
+public class BotDeploymentManagementManagement implements IBotDeploymentManagement, HealthCheck {
     private final IDeploymentStore deploymentStore;
     private final IBotFactory botFactory;
     private final IBotStore botStore;
@@ -51,18 +55,19 @@ public class BotDeploymentManagement implements IAutoBotDeployment {
     private final int maximumLifeTimeOfIdleConversationsInDays;
 
     private Instant lastDeploymentCheck = null;
+    private boolean botsAreReady = false;
 
-    private static final Logger LOGGER = Logger.getLogger(BotDeploymentManagement.class);
+    private static final Logger LOGGER = Logger.getLogger(BotDeploymentManagementManagement.class);
 
     @Inject
-    public BotDeploymentManagement(IDeploymentStore deploymentStore,
-                                   IBotFactory botFactory,
-                                   IBotStore botStore,
-                                   IConversationMemoryStore conversationMemoryStore,
-                                   IDocumentDescriptorStore documentDescriptorStore,
-                                   IMigrationManager migrationManager,
-                                   @ConfigProperty(name = "eddi.conversations.maximumLifeTimeOfIdleConversationsInDays")
-                                   int maximumLifeTimeOfIdleConversationsInDays) {
+    public BotDeploymentManagementManagement(IDeploymentStore deploymentStore,
+                                             IBotFactory botFactory,
+                                             IBotStore botStore,
+                                             IConversationMemoryStore conversationMemoryStore,
+                                             IDocumentDescriptorStore documentDescriptorStore,
+                                             IMigrationManager migrationManager,
+                                             @ConfigProperty(name = "eddi.conversations.maximumLifeTimeOfIdleConversationsInDays")
+                                             int maximumLifeTimeOfIdleConversationsInDays) {
         this.deploymentStore = deploymentStore;
         this.botFactory = botFactory;
         this.botStore = botStore;
@@ -75,7 +80,8 @@ public class BotDeploymentManagement implements IAutoBotDeployment {
     void onStart(@Observes StartupEvent ev) {
         try {
             autoDeployBots();
-        } catch (IAutoBotDeployment.AutoDeploymentException e) {
+            botsAreReady = true;
+        } catch (IBotDeploymentManagement.AutoDeploymentException e) {
             LOGGER.error(e.getLocalizedMessage(), e);
         }
     }
@@ -209,5 +215,11 @@ public class BotDeploymentManagement implements IAutoBotDeployment {
         }
 
         return result;
+    }
+
+    @Override
+    public HealthCheckResponse call() {
+        var responseBuilder = HealthCheckResponse.named("Bots are ready health check");
+        return botsAreReady ? responseBuilder.up().build() : responseBuilder.down().build();
     }
 }

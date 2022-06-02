@@ -3,7 +3,7 @@ package ai.labs.eddi.engine.runtime;
 /**
  * @author ginccc
  */
-public interface IAutoBotDeployment {
+public interface IBotDeploymentManagement {
     void autoDeployBots() throws AutoDeploymentException;
 
 
