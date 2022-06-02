@@ -20,7 +20,7 @@ public class JsonSchemaCreator implements IJsonSchemaCreator {
 
     @Override
     public String generateSchema(Class<?> clazz) throws Exception {
-        JsonSchemaConfig config = JsonSchemaConfig.nullableJsonSchemaDraft4();
+        JsonSchemaConfig config = JsonSchemaConfig.vanillaJsonSchemaDraft4();
         JsonSchemaConfig eddiJsonSchemaConfig = new JsonSchemaConfig(
                 config.autoGenerateTitleForProperties(),
                 config.defaultArrayFormat(),

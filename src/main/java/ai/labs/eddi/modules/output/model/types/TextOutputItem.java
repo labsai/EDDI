@@ -1,7 +1,6 @@
 package ai.labs.eddi.modules.output.model.types;
 
 import ai.labs.eddi.modules.output.model.OutputItem;
-import com.fasterxml.jackson.annotation.JsonProperty;
 import lombok.Getter;
 import lombok.Setter;
 
@@ -10,10 +9,8 @@ import java.util.Objects;
 @Getter
 @Setter
 public class TextOutputItem extends OutputItem {
-
-    @JsonProperty(required = true)
     private String text;
-    private Integer delay;
+    private int delay;
 
     public TextOutputItem() {
         initType();
@@ -24,7 +21,7 @@ public class TextOutputItem extends OutputItem {
         this.text = text;
     }
 
-    public TextOutputItem(String text, Integer delay) {
+    public TextOutputItem(String text, int delay) {
         initType();
         this.text = text;
         this.delay = delay;
@@ -40,7 +37,7 @@ public class TextOutputItem extends OutputItem {
         if (this == o) return true;
         if (o == null || getClass() != o.getClass()) return false;
         TextOutputItem that = (TextOutputItem) o;
-        return Objects.equals(text, that.text) && Objects.equals(delay, that.delay);
+        return Objects.equals(text, that.text) && delay == that.delay;
     }
 
     @Override
