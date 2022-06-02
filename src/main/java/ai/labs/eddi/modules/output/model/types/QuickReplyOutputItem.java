@@ -1,6 +1,7 @@
 package ai.labs.eddi.modules.output.model.types;
 
 import ai.labs.eddi.modules.output.model.OutputItem;
+import com.fasterxml.jackson.annotation.JsonProperty;
 import lombok.Getter;
 import lombok.Setter;
 
@@ -9,6 +10,7 @@ import java.util.Objects;
 @Getter
 @Setter
 public class QuickReplyOutputItem extends OutputItem {
+    @JsonProperty(required = true)
     private String value;
     private String expressions;
     private Boolean isDefault;
