@@ -45,7 +45,7 @@ import static java.time.temporal.ChronoUnit.DAYS;
 @Priority(4000)
 @Readiness
 @ApplicationScoped
-public class BotDeploymentManagementManagement implements IBotDeploymentManagement, HealthCheck {
+public class BotDeploymentManagement implements IBotDeploymentManagement, HealthCheck {
     private final IDeploymentStore deploymentStore;
     private final IBotFactory botFactory;
     private final IBotStore botStore;
@@ -57,17 +57,17 @@ public class BotDeploymentManagementManagement implements IBotDeploymentManageme
     private Instant lastDeploymentCheck = null;
     private boolean botsAreReady = false;
 
-    private static final Logger LOGGER = Logger.getLogger(BotDeploymentManagementManagement.class);
+    private static final Logger LOGGER = Logger.getLogger(BotDeploymentManagement.class);
 
     @Inject
-    public BotDeploymentManagementManagement(IDeploymentStore deploymentStore,
-                                             IBotFactory botFactory,
-                                             IBotStore botStore,
-                                             IConversationMemoryStore conversationMemoryStore,
-                                             IDocumentDescriptorStore documentDescriptorStore,
-                                             IMigrationManager migrationManager,
-                                             @ConfigProperty(name = "eddi.conversations.maximumLifeTimeOfIdleConversationsInDays")
-                                             int maximumLifeTimeOfIdleConversationsInDays) {
+    public BotDeploymentManagement(IDeploymentStore deploymentStore,
+                                   IBotFactory botFactory,
+                                   IBotStore botStore,
+                                   IConversationMemoryStore conversationMemoryStore,
+                                   IDocumentDescriptorStore documentDescriptorStore,
+                                   IMigrationManager migrationManager,
+                                   @ConfigProperty(name = "eddi.conversations.maximumLifeTimeOfIdleConversationsInDays")
+                                   int maximumLifeTimeOfIdleConversationsInDays) {
         this.deploymentStore = deploymentStore;
         this.botFactory = botFactory;
         this.botStore = botStore;
