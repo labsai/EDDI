@@ -91,9 +91,9 @@ public class Conversation implements IConversation {
 
             if (properties.containsKey(KEY_USER_INFO)) {
                 Object userInfo = properties.get(KEY_USER_INFO);
-                if (userInfo instanceof Map) {
+                if (userInfo instanceof Map userInfoMap) {
                     conversationMemory.getConversationProperties().
-                            put(KEY_USER_INFO, new Property(KEY_USER_INFO, userInfo, Scope.conversation));
+                            put(KEY_USER_INFO, new Property(KEY_USER_INFO, userInfoMap, Scope.conversation));
                 }
             }
 
@@ -245,7 +245,16 @@ public class Conversation implements IConversation {
     private Map<String, Property> convertProperties(Properties properties) {
         return properties.keySet().stream().collect(
                 Collectors.toMap(name -> name,
-                        name -> new Property(name, properties.get(name), Scope.longTerm),
+                        name -> {
+                            Object value = properties.get(name);
+                            if (value instanceof String) {
+                                return new Property(name, value.toString(), Scope.longTerm);
+                            } else if (value instanceof Map valueMap) {
+                                return new Property(name, valueMap, Scope.longTerm);
+                            } else {
+                                return new Property(name, (String) null, Scope.longTerm);
+                            }
+                        },
                         (a, b) -> b, LinkedHashMap::new));
 
     }
@@ -264,10 +273,18 @@ public class Conversation implements IConversation {
     private void storePropertiesPermanently()
             throws IResourceStore.ResourceStoreException {
 
-        Properties longTermConversationProperties = conversationMemory.getConversationProperties().values().stream()
-                .filter(property -> property.getScope() == Scope.longTerm)
-                .filter(property -> property.getValue() != null)
-                .collect(Collectors.toMap(Property::getName, Property::getValue, (a, b) -> b, Properties::new));
+        Properties longTermConversationProperties = new Properties();
+        for (Property property : conversationMemory.getConversationProperties().values()) {
+            if (property.getScope() == Scope.longTerm) {
+                var valueString = property.getValueString();
+                var valueObject = property.getValueObject();
+                if (!isNullOrEmpty(valueString)) {
+                    longTermConversationProperties.put(property.getName(), valueString);
+                } else if (!isNullOrEmpty(valueObject)) {
+                    longTermConversationProperties.put(property.getName(), valueObject);
+                }
+            }
+        }
 
         propertiesHandler.mergeProperties(longTermConversationProperties);
     }

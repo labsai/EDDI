@@ -39,14 +39,17 @@ public class PropertySetter implements IPropertySetter {
                     Value value = new Value();
                     extractMeanings(meanings, value, expression.getSubExpressions()[0]);
 
-                    Object propertyValue;
+                    var propertyName = String.join(".", meanings);
                     if (value.isNumeric()) {
-                        propertyValue = value.isDouble() ? value.toDouble() : value.toInteger();
+                        if (value.isDouble()) {
+                            return new Property(propertyName, value.toFloat(), conversation);
+                        } else {
+                            return new Property(propertyName, value.toInteger(), conversation);
+                        }
                     } else {
-                        propertyValue = value.getExpressionName();
+                        return new Property(propertyName, value.getExpressionName(), conversation);
                     }
 
-                    return new Property(String.join(".", meanings), propertyValue, conversation);
                 }).collect(Collectors.toCollection(LinkedList::new));
     }
 

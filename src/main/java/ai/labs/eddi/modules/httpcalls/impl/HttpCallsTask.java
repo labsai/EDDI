@@ -414,16 +414,21 @@ public class HttpCallsTask implements ILifecycleTask {
                         if (!isNullOrEmpty(path)) {
                             propertyValue = Ognl.getValue(path, templateDataObjects);
                         } else {
-                            Object value = propertyInstruction.getValue();
+                            Object value = propertyInstruction.getValueString();
 
-                            if (!isNullOrEmpty(value) && value instanceof String) {
+                            if (!isNullOrEmpty(value)) {
                                 value = templateValues((String) value, templateDataObjects);
                             }
 
                             propertyValue = value;
                         }
-                        memory.getConversationProperties().put(propertyName,
-                                new Property(propertyName, propertyValue, scope));
+                        if (propertyValue instanceof String s) {
+                            memory.getConversationProperties().put(propertyName,
+                                    new Property(propertyName, s, scope));
+                        } else if (propertyValue instanceof Map m) {
+                            memory.getConversationProperties().put(propertyName,
+                                    new Property(propertyName, m, scope));
+                        }
                         templateDataObjects.put("properties", memory.getConversationProperties().toMap());
                     } catch (OgnlException e) {
                         LOGGER.error(e.getLocalizedMessage(), e);

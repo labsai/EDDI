@@ -30,8 +30,8 @@ public class ContextUtilities {
         String lang = null;
 
         Property languageProperty = properties.get(KEY_LANG);
-        if (languageProperty != null && languageProperty.getValue() != null) {
-            lang = languageProperty.getValue().toString();
+        if (languageProperty != null && languageProperty.getValueString() != null) {
+            lang = languageProperty.getValueString();
         }
 
         return lang;

@@ -9,6 +9,8 @@ import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.Map;
 
+import static ai.labs.eddi.utils.RuntimeUtilities.isNullOrEmpty;
+
 public class ConversationProperties
         extends HashMap<String, Property>
         implements IConversationMemory.IConversationProperties {
@@ -30,7 +32,15 @@ public class ConversationProperties
             IConversationMemory.IWritableConversationStep currentStep = conversationMemory.getCurrentStep();
             currentStep.storeData(new Data<>(propertiesKey, Collections.singletonList(property)));
             Map<String, Object> propertyMap = new LinkedHashMap<>();
-            propertyMap.put(property.getName(), property.getValue());
+            var valueString = property.getValueString();
+            if (!isNullOrEmpty(valueString)) {
+                propertyMap.put(property.getName(), valueString);
+            } else {
+                var valueObject = property.getValueObject();
+                if (!isNullOrEmpty(valueObject)) {
+                    propertyMap.put(property.getName(), valueObject);
+                }
+            }
 
             propertiesMap.putAll(propertyMap);
             currentStep.addConversationOutputMap(KEY_PROPERTIES, propertyMap);

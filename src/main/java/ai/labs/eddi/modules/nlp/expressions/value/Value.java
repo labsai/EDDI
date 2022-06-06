@@ -42,8 +42,8 @@ public class Value extends Expression {
         return Integer.parseInt(expressionName);
     }
 
-    public Double toDouble() {
-        return Double.parseDouble(expressionName);
+    public Float toFloat() {
+        return Float.parseFloat(expressionName);
     }
 
     @Override
@@ -52,7 +52,7 @@ public class Value extends Expression {
 
         if (o instanceof Value && isNumeric()) {
             Value value = (Value) o;
-            return value.toDouble().equals(this.toDouble());
+            return value.toFloat().equals(this.toFloat());
         }
 
         return super.equals(o);

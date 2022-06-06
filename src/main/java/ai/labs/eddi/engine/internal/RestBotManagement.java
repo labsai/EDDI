@@ -65,7 +65,7 @@ public class RestBotManagement implements IRestBotManagement {
 
             Property languageProperty = memorySnapshot.getConversationProperties().get("lang");
             if (!userConversationResult.isNewlyCreatedConversation() &&
-                    (languageProperty != null && !languageProperty.getValue().equals(language))) {
+                    (languageProperty != null && !languageProperty.getValueString().equals(language))) {
                 restBotEngine.rerunLastConversationStep(userConversation.getEnvironment(),
                         userConversation.getBotId(),
                         userConversation.getConversationId(),

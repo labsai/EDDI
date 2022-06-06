@@ -31,7 +31,6 @@ import java.util.Map;
 import java.util.stream.Collectors;
 
 import static ai.labs.eddi.models.Property.Scope.conversation;
-import static ai.labs.eddi.utils.CharacterUtilities.isNumber;
 import static ai.labs.eddi.utils.RuntimeUtilities.checkNotNull;
 import static ai.labs.eddi.utils.RuntimeUtilities.isNullOrEmpty;
 import static java.lang.Boolean.parseBoolean;
@@ -139,34 +138,42 @@ public class PropertySetterTask implements ILifecycleTask {
                             var scope = property.getScope();
                             name = templatingEngine.processTemplate(name, templateDataObjects);
 
-                            Object templatedObj = null;
-                            if (!isNullOrEmpty(fromObjectPath)) {
-                                templatedObj = Ognl.getValue(fromObjectPath, templateDataObjects);
-                                if (!isNullOrEmpty(templatedObj) && !isNullOrEmpty(toObjectPath)) {
-                                    Ognl.setValue(toObjectPath, templateDataObjects, templatedObj);
-                                }
-                            } else {
-                                var value = property.getValue();
-                                if (!isNullOrEmpty(value) && value instanceof String) {
-                                    value = templatingEngine.processTemplate((String) value, templateDataObjects);
-                                }
+                            String templateString;
+                            Object templatedObj;
+                            if (!conversationProperties.containsKey(name) || property.getOverride()) {
+                                if (!isNullOrEmpty(fromObjectPath)) {
+                                    templatedObj = Ognl.getValue(fromObjectPath, templateDataObjects);
+                                    if (templatedObj instanceof String) {
+                                        templateString = templatingEngine.processTemplate(templatedObj.toString(), templateDataObjects);
+                                        conversationProperties.put(name, new Property(name, templateString, scope));
+                                    }
 
-                                if (value != null) {
-                                    var valueString = value.toString();
-                                    if (isNumber(valueString, false)) {
-                                        if (isNumber(valueString, true)) {
-                                            templatedObj = Double.parseDouble(valueString);
-                                        } else {
-                                            templatedObj = Integer.parseInt(valueString);
-                                        }
-                                    } else {
-                                        templatedObj = value;
+                                    if (!isNullOrEmpty(templatedObj) && !isNullOrEmpty(toObjectPath)) {
+                                        Ognl.setValue(toObjectPath, templateDataObjects, templatedObj);
+                                    }
+                                } else {
+                                    var valueString = property.getValueString();
+                                    if (!isNullOrEmpty(valueString)) {
+                                        templateString = templatingEngine.processTemplate(valueString, templateDataObjects);
+                                        conversationProperties.put(name, new Property(name, templateString, scope));
+                                    }
+
+                                    var valueObject = property.getValueObject();
+                                    if (!isNullOrEmpty(valueObject)) {
+                                        conversationProperties.put(name, new Property(name, valueObject, scope));
+                                    }
+
+                                    var valueInt = property.getValueInt();
+                                    if (!isNullOrEmpty(valueInt)) {
+                                        conversationProperties.put(name, new Property(name, valueInt, scope));
+                                    }
+
+                                    var valueFloat = property.getValueFloat();
+                                    if (!isNullOrEmpty(valueFloat)) {
+                                        conversationProperties.put(name, new Property(name, valueFloat, scope));
                                     }
                                 }
-                            }
 
-                            if (!conversationProperties.containsKey(name) || property.getOverride()) {
-                                conversationProperties.put(name, new Property(name, templatedObj, scope));
                                 templateDataObjects.put(PROPERTIES_IDENTIFIER, conversationProperties.toMap());
                             }
                         }
@@ -295,7 +302,16 @@ public class PropertySetterTask implements ILifecycleTask {
                 propertyInstruction.setName(property.get(NAME).toString());
             }
             if (property.containsKey(VALUE)) {
-                propertyInstruction.setValue(property.get(VALUE));
+                var o = property.get(VALUE);
+                if (o instanceof String s) {
+                    propertyInstruction.setValueString(s);
+                } else if (o instanceof Map m) {
+                    propertyInstruction.setValueObject(m);
+                } else if (o instanceof Integer i) {
+                    propertyInstruction.setValueInt(i);
+                } else if (o instanceof Float f) {
+                    propertyInstruction.setValueFloat(f);
+                }
             }
             if (property.containsKey(FROM_OBJECT_PATH)) {
                 propertyInstruction.setFromObjectPath(property.get(FROM_OBJECT_PATH).toString());
