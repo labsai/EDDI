@@ -7,14 +7,19 @@ import ai.labs.eddi.engine.IRestBotEngine;
 import ai.labs.eddi.engine.IRestBotManagement;
 import ai.labs.eddi.models.*;
 import ai.labs.eddi.utils.RestUtilities;
+import io.quarkus.security.ForbiddenException;
+import io.quarkus.security.identity.SecurityIdentity;
+import io.smallrye.mutiny.unchecked.Unchecked;
 import lombok.AllArgsConstructor;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
 import lombok.Setter;
+import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.jboss.logging.Logger;
 
 import javax.enterprise.context.ApplicationScoped;
 import javax.inject.Inject;
+import javax.security.auth.AuthPermission;
 import javax.ws.rs.InternalServerErrorException;
 import javax.ws.rs.NotFoundException;
 import javax.ws.rs.WebApplicationException;
@@ -26,22 +31,30 @@ import java.util.List;
 import java.util.Map;
 import java.util.Random;
 
+import static ai.labs.eddi.models.Deployment.Environment.unrestricted;
+
 @ApplicationScoped
 public class RestBotManagement implements IRestBotManagement {
     public static final String KEY_LANG = "lang";
     private final IRestBotEngine restBotEngine;
     private final IRestUserConversationStore restUserConversationStore;
     private final IRestBotTriggerStore restBotManagementStore;
+    private final boolean checkForUserAuthentication;
+
+    @Inject
+    SecurityIdentity identity;
 
     private static final Logger log = Logger.getLogger(RestBotManagement.class);
 
     @Inject
     public RestBotManagement(IRestBotEngine restBotEngine,
                              IRestUserConversationStore restUserConversationStore,
-                             IRestBotTriggerStore restBotManagementStore) {
+                             IRestBotTriggerStore restBotManagementStore,
+                             @ConfigProperty(name = "quarkus.oidc.enabled") boolean checkForUserAuthentication) {
         this.restBotEngine = restBotEngine;
         this.restUserConversationStore = restUserConversationStore;
         this.restBotManagementStore = restBotManagementStore;
+        this.checkForUserAuthentication = checkForUserAuthentication;
     }
 
     @Override
@@ -53,8 +66,9 @@ public class RestBotManagement implements IRestBotManagement {
 
         try {
             var userConversationResult = initUserConversation(intent, userId, language);
-
             var userConversation = userConversationResult.getUserConversation();
+
+            checkUserAuthIfApplicable(userConversation);
 
             var memorySnapshot =
                     restBotEngine.readConversation(userConversation.getEnvironment(),
@@ -93,6 +107,8 @@ public class RestBotManagement implements IRestBotManagement {
             var userConversation =
                     initUserConversation(intent, userId, extractLanguage(inputData)).getUserConversation();
 
+            checkUserAuthIfApplicable(userConversation);
+
             restBotEngine.sayWithinContext(userConversation.getEnvironment(), userConversation.getBotId(),
                     userConversation.getConversationId(), returnDetailed, returnCurrentStepOnly, returningFields, inputData, response);
 
@@ -109,7 +125,9 @@ public class RestBotManagement implements IRestBotManagement {
         }
     }
 
-    private UserConversationResult initUserConversation(String intent, String userId, String language) throws CannotCreateConversationException {
+    private UserConversationResult initUserConversation(String intent, String userId, String language)
+            throws CannotCreateConversationException {
+
         UserConversation userConversation;
         boolean newlyCreatedConversation = false;
         try {
@@ -130,6 +148,7 @@ public class RestBotManagement implements IRestBotManagement {
     @Override
     public Response endCurrentConversation(String intent, String userId) {
         UserConversation userConversation = restUserConversationStore.readUserConversation(intent, userId);
+        checkUserAuthIfApplicable(userConversation);
         restBotEngine.endConversation(userConversation.getConversationId());
         return Response.ok().build();
     }
@@ -137,6 +156,7 @@ public class RestBotManagement implements IRestBotManagement {
     @Override
     public Boolean isUndoAvailable(String intent, String userId) {
         var userConversation = getUserConversation(intent, userId);
+        checkUserAuthIfApplicable(userConversation);
         return restBotEngine.isUndoAvailable(
                 userConversation.getEnvironment(),
                 userConversation.getBotId(),
@@ -146,6 +166,7 @@ public class RestBotManagement implements IRestBotManagement {
     @Override
     public Response undo(String intent, String userId) {
         var userConversation = getUserConversation(intent, userId);
+        checkUserAuthIfApplicable(userConversation);
         return restBotEngine.undo(
                 userConversation.getEnvironment(),
                 userConversation.getBotId(),
@@ -155,6 +176,7 @@ public class RestBotManagement implements IRestBotManagement {
     @Override
     public Boolean isRedoAvailable(String intent, String userId) {
         var userConversation = getUserConversation(intent, userId);
+        checkUserAuthIfApplicable(userConversation);
         return restBotEngine.isRedoAvailable(
                 userConversation.getEnvironment(),
                 userConversation.getBotId(),
@@ -164,6 +186,7 @@ public class RestBotManagement implements IRestBotManagement {
     @Override
     public Response redo(String intent, String userId) {
         var userConversation = getUserConversation(intent, userId);
+        checkUserAuthIfApplicable(userConversation);
         return restBotEngine.redo(
                 userConversation.getEnvironment(),
                 userConversation.getBotId(),
@@ -251,6 +274,18 @@ public class RestBotManagement implements IRestBotManagement {
 
     private void storeUserConversation(String intent, String userId, UserConversation userConversation) {
         restUserConversationStore.createUserConversation(intent, userId, userConversation);
+    }
+
+    private void checkUserAuthIfApplicable(UserConversation userConversation) throws ForbiddenException {
+        if (checkForUserAuthentication && !unrestricted.equals(userConversation.getEnvironment())) {
+            identity.checkPermission(new AuthPermission("{resource_name}")).onItem()
+                    .transform(Unchecked.function(granted -> {
+                        if (granted) {
+                            return identity.getAttribute("permissions");
+                        }
+                        throw new ForbiddenException();
+                    }));
+        }
     }
 
     private static class CannotCreateConversationException extends Exception {
