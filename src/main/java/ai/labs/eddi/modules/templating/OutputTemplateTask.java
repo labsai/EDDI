@@ -21,6 +21,7 @@ import javax.inject.Inject;
 import java.util.*;
 import java.util.stream.Collectors;
 
+import static ai.labs.eddi.utils.RuntimeUtilities.isNullOrEmpty;
 import static ai.labs.eddi.utils.StringUtilities.joinStrings;
 
 /**
@@ -98,18 +99,33 @@ public class OutputTemplateTask implements ILifecycleTask {
                     Object postTemplated = null;
 
                     if (preTemplated instanceof TextOutputItem textOutput) {
-                        textOutput = new TextOutputItem(textOutput.getText(), textOutput.getDelay());
-                        textOutput.setText(templatingEngine.processTemplate(textOutput.getText(), contextMap, templateMode));
+                        var textProperty = textOutput.getText();
+                        textOutput = new TextOutputItem(textProperty, textOutput.getDelay());
+                        if (!isNullOrEmpty(textProperty)) {
+                            textOutput.setText(templatingEngine.processTemplate(textProperty, contextMap, templateMode));
+                        }
                         postTemplated = textOutput;
                     } else if (preTemplated instanceof ImageOutputItem imageOutput) {
-                        imageOutput = new ImageOutputItem(imageOutput.getUri(), imageOutput.getAlt());
-                        imageOutput.setUri(templatingEngine.processTemplate(imageOutput.getUri(), contextMap, templateMode));
-                        imageOutput.setAlt(templatingEngine.processTemplate(imageOutput.getAlt(), contextMap, templateMode));
+                        var uriProperty = imageOutput.getUri();
+                        var altProperty = imageOutput.getAlt();
+                        imageOutput = new ImageOutputItem(uriProperty, altProperty);
+                        if (!isNullOrEmpty(uriProperty)) {
+                            imageOutput.setUri(templatingEngine.processTemplate(uriProperty, contextMap, templateMode));
+                        }
+                        if (!isNullOrEmpty(altProperty)) {
+                            imageOutput.setAlt(templatingEngine.processTemplate(altProperty, contextMap, templateMode));
+                        }
                         postTemplated = imageOutput;
                     } else if (preTemplated instanceof QuickReplyOutputItem qrOutput) {
-                        qrOutput = new QuickReplyOutputItem(qrOutput.getValue(), qrOutput.getExpressions(), qrOutput.getIsDefault());
-                        qrOutput.setValue(templatingEngine.processTemplate(qrOutput.getValue(), contextMap, templateMode));
-                        qrOutput.setExpressions(templatingEngine.processTemplate(qrOutput.getExpressions(), contextMap, templateMode));
+                        var valueProperty = qrOutput.getValue();
+                        var expressionsProperty = qrOutput.getExpressions();
+                        qrOutput = new QuickReplyOutputItem(valueProperty, expressionsProperty, qrOutput.getIsDefault());
+                        if (!isNullOrEmpty(valueProperty)) {
+                            qrOutput.setValue(templatingEngine.processTemplate(valueProperty, contextMap, templateMode));
+                        }
+                        if (!isNullOrEmpty(expressionsProperty)) {
+                            qrOutput.setExpressions(templatingEngine.processTemplate(expressionsProperty, contextMap, templateMode));
+                        }
                         postTemplated = qrOutput;
                     } else if (preTemplated instanceof Map) {
                         var tmpMap = new LinkedHashMap<>(convertObjectToMap(preTemplated));
@@ -117,7 +133,11 @@ public class OutputTemplateTask implements ILifecycleTask {
                         for (String key : tmpMap.keySet()) {
                             Object valueObj = tmpMap.get(key);
                             if (valueObj instanceof String) {
-                                String post = templatingEngine.processTemplate(valueObj.toString(), contextMap, templateMode);
+                                String post = null;
+                                var valueAsString = valueObj.toString();
+                                if (!isNullOrEmpty(valueAsString)) {
+                                    post = templatingEngine.processTemplate(valueAsString, contextMap, templateMode);
+                                }
                                 tmpMap.put(key, post);
                             }
                         }
