@@ -13,7 +13,7 @@ License: Apache License 2.0
 
 Project website: [here](https://eddi.labs.ai/)
 
-Documentation: [here](http://docs.labs.ai/)
+Documentation: [here](https://docs.labs.ai/)
 
 [![Codacy Badge](https://app.codacy.com/project/badge/Grade/2c5d183d4bd24dbaa77427cfbf5d4074)](https://www.codacy.com/gh/labsai/EDDI/dashboard?utm_source=github.com&amp;utm_medium=referral&amp;utm_content=labsai/EDDI&amp;utm_campaign=Badge_Grade) [![CircleCI](https://circleci.com/gh/labsai/EDDI/tree/main.svg?style=svg)](https://circleci.com/gh/labsai/EDDI/tree/main)
 
@@ -33,12 +33,14 @@ The most outstanding features are:
 technical spec:
 
 * Resource- / REST-oriented architecture
-* OAuth 2.0 / Basic Authentication (Keycloak)
 * Java Quarkus
 * JAX-RS
 * Dependency Injection
-* NoSQL (MongoDB)
-* HTML, CSS, Javascript, JSON
+* Prometheus integration (Metrics endpoint)
+* Kubernetes integration (Liveness/Readyness endpoint)
+* MongoDB for storing bot configurations and conversation memories
+* OAuth 2.0 (Keycloak)
+* HTML, CSS, Javascript (Dashboard & Basic Chat UI)
 
 ## Prerequirements
 
@@ -99,4 +101,23 @@ or
 
 ```bash
 docker-compose -f docker-compose.yml -f docker-compose.local.yml -f docker-compose.testing.yml -p ci up -d
+```
+
+## prometheus/metrics integration
+
+
+```bash
+<eddi-instance>/q/metrics
+```
+
+## kubernetes integration
+
+Liveness endpoint:
+```bash
+<eddi-instance>/q/health/liveness
+```
+
+Readyness endpoint:
+```bash
+<eddi-instance>/q/health/readyness
 ```
