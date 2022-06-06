@@ -35,11 +35,12 @@ public class ConversationProperties
             var valueString = property.getValueString();
             if (!isNullOrEmpty(valueString)) {
                 propertyMap.put(property.getName(), valueString);
-            } else {
-                var valueObject = property.getValueObject();
-                if (!isNullOrEmpty(valueObject)) {
-                    propertyMap.put(property.getName(), valueObject);
-                }
+            } else if (!isNullOrEmpty(property.getValueObject())) {
+                propertyMap.put(property.getName(), property.getValueObject());
+            } else if (!isNullOrEmpty(property.getValueInt())) {
+                propertyMap.put(property.getName(), property.getValueInt());
+            } else if (!isNullOrEmpty(property.getValueFloat())) {
+                propertyMap.put(property.getName(), property.getValueFloat());
             }
 
             propertiesMap.putAll(propertyMap);

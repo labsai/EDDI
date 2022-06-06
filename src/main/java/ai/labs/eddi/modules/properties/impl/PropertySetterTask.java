@@ -51,7 +51,10 @@ public class PropertySetterTask implements ILifecycleTask {
     private static final String PROPERTIES_IDENTIFIER = "properties";
     private static final String KEY_SET_ON_ACTIONS = "setOnActions";
     private static final String NAME = "name";
-    private static final String VALUE = "value";
+    private static final String VALUE_STRING = "valueString";
+    private static final String VALUE_OBJECT = "valueObject";
+    private static final String VALUE_INT = "valueInt";
+    private static final String VALUE_FLOAT = "valueFloat";
     private static final String FROM_OBJECT_PATH = "fromObjectPath";
     private static final String SCOPE = "scope";
     private static final String OVERRIDE = "override";
@@ -146,6 +149,12 @@ public class PropertySetterTask implements ILifecycleTask {
                                     if (templatedObj instanceof String) {
                                         templateString = templatingEngine.processTemplate(templatedObj.toString(), templateDataObjects);
                                         conversationProperties.put(name, new Property(name, templateString, scope));
+                                    } else if (templatedObj instanceof Map valueMap) {
+                                        conversationProperties.put(name, new Property(name, valueMap, scope));
+                                    } else if (templatedObj instanceof Integer valueInt) {
+                                        conversationProperties.put(name, new Property(name, valueInt, scope));
+                                    } else if (templatedObj instanceof Float valueFloat) {
+                                        conversationProperties.put(name, new Property(name, valueFloat, scope));
                                     }
 
                                     if (!isNullOrEmpty(templatedObj) && !isNullOrEmpty(toObjectPath)) {
@@ -301,18 +310,17 @@ public class PropertySetterTask implements ILifecycleTask {
             if (property.containsKey(NAME)) {
                 propertyInstruction.setName(property.get(NAME).toString());
             }
-            if (property.containsKey(VALUE)) {
-                var o = property.get(VALUE);
-                if (o instanceof String s) {
-                    propertyInstruction.setValueString(s);
-                } else if (o instanceof Map m) {
-                    propertyInstruction.setValueObject(m);
-                } else if (o instanceof Integer i) {
-                    propertyInstruction.setValueInt(i);
-                } else if (o instanceof Float f) {
-                    propertyInstruction.setValueFloat(f);
-                }
+            if (property.containsKey(VALUE_STRING)) {
+                var o = property.get(VALUE_STRING);
+                propertyInstruction.setValueString(o.toString());
+            } else if (property.containsKey(VALUE_OBJECT) && property.get(VALUE_OBJECT) instanceof Map m) {
+                propertyInstruction.setValueObject(m);
+            } else if (property.containsKey(VALUE_INT) && property.get(VALUE_INT) instanceof Integer i) {
+                propertyInstruction.setValueInt(i);
+            } else if (property.containsKey(VALUE_FLOAT) && property.get(VALUE_FLOAT) instanceof Float f) {
+                propertyInstruction.setValueFloat(f);
             }
+
             if (property.containsKey(FROM_OBJECT_PATH)) {
                 propertyInstruction.setFromObjectPath(property.get(FROM_OBJECT_PATH).toString());
             }

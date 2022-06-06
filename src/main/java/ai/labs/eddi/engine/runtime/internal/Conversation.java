@@ -251,6 +251,10 @@ public class Conversation implements IConversation {
                                 return new Property(name, value.toString(), Scope.longTerm);
                             } else if (value instanceof Map valueMap) {
                                 return new Property(name, valueMap, Scope.longTerm);
+                            } else if (value instanceof Integer valueInt) {
+                                return new Property(name, valueInt, Scope.longTerm);
+                            } else if (value instanceof Float valueFloat) {
+                                return new Property(name, valueFloat, Scope.longTerm);
                             } else {
                                 return new Property(name, (String) null, Scope.longTerm);
                             }
@@ -278,10 +282,16 @@ public class Conversation implements IConversation {
             if (property.getScope() == Scope.longTerm) {
                 var valueString = property.getValueString();
                 var valueObject = property.getValueObject();
+                var valueInt = property.getValueInt();
+                var valueFloat = property.getValueFloat();
                 if (!isNullOrEmpty(valueString)) {
                     longTermConversationProperties.put(property.getName(), valueString);
                 } else if (!isNullOrEmpty(valueObject)) {
                     longTermConversationProperties.put(property.getName(), valueObject);
+                } else if (!isNullOrEmpty(valueInt)) {
+                    longTermConversationProperties.put(property.getName(), valueInt);
+                } else if (!isNullOrEmpty(valueFloat)) {
+                    longTermConversationProperties.put(property.getName(), valueFloat);
                 }
             }
         }
