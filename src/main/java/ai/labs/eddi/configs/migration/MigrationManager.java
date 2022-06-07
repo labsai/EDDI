@@ -178,28 +178,27 @@ public class MigrationManager implements IMigrationManager {
 
         Observable<Document> observable = Observable.fromPublisher(collection.find());
         Iterable<Document> documents = observable.blockingIterable();
-        var migrationHasExecuted = migrateDocuments(documentType, documents, migration,
-                collection, collectionHistory, false);
+        var migrationHasExecuted = migrateDocuments(documentType, documents, migration, collection, false);
 
         if (collectionHistory != null) {
             observable = Observable.fromPublisher(collectionHistory.find());
             Iterable<Document> historyDocuments = observable.blockingIterable();
-            migrationHasExecuted = migrateDocuments(documentType, historyDocuments, migration,
-                    collection, collectionHistory, true) || migrationHasExecuted;
+            migrationHasExecuted =
+                    migrateDocuments(documentType, historyDocuments, migration, collectionHistory, true)
+                            || migrationHasExecuted;
         }
         return migrationHasExecuted;
     }
 
     private boolean migrateDocuments(String documentType, Iterable<Document> documents, IDocumentMigration migration,
                                      MongoCollection<Document> collection,
-                                     MongoCollection<Document> collectionHistory,
                                      boolean isHistory) {
 
         boolean migrationHasExecuted = false;
         for (var document : documents) {
             var migratedDocument = migration.migrate(document);
             if (migratedDocument != null) {
-                saveToPersistence(documentType, migratedDocument, isHistory, collection, collectionHistory);
+                saveToPersistence(documentType, migratedDocument, isHistory, collection);
                 migrationHasExecuted = true;
             }
         }
@@ -390,11 +389,8 @@ public class MigrationManager implements IMigrationManager {
         };
     }
 
-    private void saveToPersistence(String documentType,
-                                   Document document,
-                                   boolean isHistory,
-                                   MongoCollection<Document> collection,
-                                   MongoCollection<Document> collectionHistory) {
+    private void saveToPersistence(String documentType, Document document, boolean isHistory,
+                                   MongoCollection<Document> collection) {
 
         String id;
         int version = -1;
@@ -403,11 +399,16 @@ public class MigrationManager implements IMigrationManager {
             version = Integer.parseInt(versionFieldObj.toString());
         }
 
-        if (isHistory && collectionHistory != null) {
+        if (isHistory) {
             var idObj = (Map<String, Object>) document.get(ID_FIELD);
             id = idObj.get(ID_FIELD).toString();
-            var query = eq(ID_FIELD, new Document(Map.of(ID_FIELD, new ObjectId(id), VERSION_FIELD, version)));
-            Observable.fromPublisher(collectionHistory.replaceOne(query, document)).blockingFirst();
+
+            var idObject = new Document();
+            idObject.put(ID_FIELD, new ObjectId(id));
+            idObject.put(VERSION_FIELD, version);
+
+            var query = eq(ID_FIELD, idObject);
+            Observable.fromPublisher(collection.replaceOne(query, document)).blockingFirst();
         } else {
             id = document.get(ID_FIELD).toString();
             var query = eq(ID_FIELD, new ObjectId(id));
