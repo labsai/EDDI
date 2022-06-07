@@ -11,6 +11,7 @@ import org.jboss.logging.Logger;
 
 import javax.enterprise.context.ApplicationScoped;
 import javax.inject.Inject;
+import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
 
@@ -47,6 +48,8 @@ public class MigrationManager implements IMigrationManager {
     public static final String FIELD_NAME_VALUE = "value";
     public static final String FIELD_NAME_SET_ON_ACTIONS = "setOnActions";
     public static final String FIELD_NAME_CONVERSATION_PROPERTIES = "conversationProperties";
+    public static final String FIELD_NAME_ALT = "alt";
+    public static final String FIELD_NAME_DELAY = "delay";
     public static final String FIELD_NAME_TARGET_SERVER_URL = "targetServerUrl";
     public static final String OLD_FIELD_NAME_TARGET_SERVER = "targetServer";
 
@@ -337,8 +340,10 @@ public class MigrationManager implements IMigrationManager {
                                             if (isNullOrEmpty(outputValue.get(FIELD_NAME_TYPE))) {
                                                 if (!isNullOrEmpty(outputValue.get(FIELD_NAME_TEXT))) {
                                                     outputValue.put(FIELD_NAME_TYPE, FIELD_NAME_TEXT);
+                                                    removeNonSupportedProperties(outputValue, FIELD_NAME_TEXT, FIELD_NAME_DELAY);
                                                 } else if (!isNullOrEmpty(((Map) valueAlternative).get(FIELD_NAME_URI))) {
                                                     outputValue.put(FIELD_NAME_TYPE, FIELD_NAME_IMAGE);
+                                                    removeNonSupportedProperties(outputValue, FIELD_NAME_URI, FIELD_NAME_ALT);
                                                 } else if (!isNullOrEmpty(((Map) valueAlternative).get(FIELD_NAME_EXPRESSIONS))) {
                                                     outputValue.put(FIELD_NAME_TYPE, FIELD_NAME_QUICK_REPLY);
                                                 } else {
@@ -363,6 +368,14 @@ public class MigrationManager implements IMigrationManager {
                 return null;
             }
         };
+    }
+
+    private void removeNonSupportedProperties(Map<String, Object> outputValue, String... fieldNames) {
+        for (String outputKey : outputValue.keySet()) {
+            if (!outputKey.equals(FIELD_NAME_TYPE) && !Arrays.asList(fieldNames).contains(outputKey)) {
+                outputValue.remove(outputKey);
+            }
+        }
     }
 
     private IDocumentMigration migrateConversationMemory() {
