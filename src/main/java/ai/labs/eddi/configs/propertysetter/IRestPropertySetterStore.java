@@ -20,7 +20,8 @@ import java.util.List;
 @Path("/propertysetterstore/propertysetters")
 @Tag(name = "03. Properties", description = "lifecycle extension for package")
 public interface IRestPropertySetterStore extends IRestVersionInfo {
-    String resourceURI = "eddi://ai.labs.property/propertysetterstore/propertysetters/";
+    String resourceBaseType = "eddi://ai.labs.property";
+    String resourceURI = resourceBaseType + "/propertysetterstore/propertysetters/";
 
     @GET
     @Path("/jsonSchema")

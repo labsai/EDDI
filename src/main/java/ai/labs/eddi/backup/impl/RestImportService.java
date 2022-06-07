@@ -14,7 +14,6 @@ import ai.labs.eddi.configs.http.model.HttpCallsConfiguration;
 import ai.labs.eddi.configs.migration.IMigrationManager;
 import ai.labs.eddi.configs.output.IRestOutputStore;
 import ai.labs.eddi.configs.output.model.OutputConfigurationSet;
-import ai.labs.eddi.configs.output.rest.RestOutputStore;
 import ai.labs.eddi.configs.packages.IRestPackageStore;
 import ai.labs.eddi.configs.packages.model.PackageConfiguration;
 import ai.labs.eddi.configs.patch.PatchInstruction;
@@ -31,6 +30,7 @@ import ai.labs.eddi.models.BotDeploymentStatus;
 import ai.labs.eddi.models.DocumentDescriptor;
 import ai.labs.eddi.utils.FileUtilities;
 import ai.labs.eddi.utils.RestUtilities;
+import org.bson.Document;
 import org.jboss.logging.Logger;
 
 import javax.enterprise.context.ApplicationScoped;
@@ -415,9 +415,30 @@ public class RestImportService extends AbstractBackupService implements IRestImp
                 IResourceId resourceId = RestUtilities.extractResourceId(uri);
                 resourcePath = createResourcePath(packagePath, resourceId.getId(), extension);
                 resourceContent = readFile(resourcePath);
-                if (uri.toString().startsWith(RestOutputStore.resourceBaseType)) {
+                if (uri.toString().startsWith(IRestPropertySetterStore.resourceBaseType)) {
                     var resourceAsMap = jsonSerialization.deserialize(resourceContent, Map.class);
-                    var migratedOutputDocument = migrationManager.migrateOutput(resourceAsMap);
+                    var migratedPropertySetterDocument =
+                            migrationManager.migratePropertySetter().
+                                    migrate(new Document(resourceAsMap));
+
+                    if (migratedPropertySetterDocument != null) {
+                        resourceContent = jsonSerialization.serialize(migratedPropertySetterDocument);
+                    }
+                } else if (uri.toString().startsWith(IRestHttpCallsStore.resourceBaseType)) {
+                    var resourceAsMap = jsonSerialization.deserialize(resourceContent, Map.class);
+                    var migratedHttpCallsDocument =
+                            migrationManager.migrateHttpCalls().
+                                    migrate(new Document(resourceAsMap));
+
+                    if (migratedHttpCallsDocument != null) {
+                        resourceContent = jsonSerialization.serialize(migratedHttpCallsDocument);
+                    }
+                } else if (uri.toString().startsWith(IRestOutputStore.resourceBaseType)) {
+                    var resourceAsMap = jsonSerialization.deserialize(resourceContent, Map.class);
+                    var migratedOutputDocument =
+                            migrationManager.migrateOutput().
+                                    migrate(new Document(resourceAsMap));
+
                     if (migratedOutputDocument != null) {
                         resourceContent = jsonSerialization.serialize(migratedOutputDocument);
                     }

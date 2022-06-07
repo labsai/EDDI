@@ -1,11 +1,15 @@
 package ai.labs.eddi.configs.migration;
 
-import org.bson.Document;
-
-import java.util.Map;
-
 public interface IMigrationManager {
-    void startMigration();
+    void startMigrationIfFirstTimeRun(IMigrationFinished migrationFinished);
 
-    Document migrateOutput(Map<String, Object> outputMap);
+    IDocumentMigration migratePropertySetter();
+
+    IDocumentMigration migrateHttpCalls();
+
+    IDocumentMigration migrateOutput();
+
+    interface IMigrationFinished {
+        void onComplete();
+    }
 }

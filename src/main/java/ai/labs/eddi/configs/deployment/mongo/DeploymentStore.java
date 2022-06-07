@@ -13,7 +13,7 @@ import org.bson.Document;
 import javax.enterprise.context.ApplicationScoped;
 import javax.inject.Inject;
 import java.io.IOException;
-import java.util.LinkedList;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.NoSuchElementException;
 
@@ -23,14 +23,14 @@ import java.util.NoSuchElementException;
 @ApplicationScoped
 public class DeploymentStore implements IDeploymentStore {
     private static final String COLLECTION_DEPLOYMENTS = "deployments";
-    private final MongoCollection<Document> collection;
+    private final MongoCollection<Document> deploymentsCollection;
     private final IDocumentBuilder documentBuilder;
     private DeploymentResourceStore deploymentResourceStore;
 
     @Inject
     public DeploymentStore(MongoDatabase database, IDocumentBuilder documentBuilder) {
         RuntimeUtilities.checkNotNull(database, "database");
-        this.collection = database.getCollection(COLLECTION_DEPLOYMENTS);
+        this.deploymentsCollection = database.getCollection(COLLECTION_DEPLOYMENTS);
         this.documentBuilder = documentBuilder;
         this.deploymentResourceStore = new DeploymentResourceStore();
     }
@@ -56,17 +56,17 @@ public class DeploymentStore implements IDeploymentStore {
             Document newDeploymentInfo = new Document(filter);
             newDeploymentInfo.put("deploymentStatus", deploymentStatus.toString());
             try {
-                Document replacedDocument = Observable.fromPublisher(collection.findOneAndReplace(filter, newDeploymentInfo)).blockingFirst();
+                Observable.fromPublisher(deploymentsCollection.findOneAndReplace(filter, newDeploymentInfo)).blockingFirst();
             } catch (NoSuchElementException ne) {
-                Observable.fromPublisher(collection.insertOne(newDeploymentInfo)).blockingFirst();
+                Observable.fromPublisher(deploymentsCollection.insertOne(newDeploymentInfo)).blockingFirst();
             }
         }
 
         List<DeploymentInfo> readDeploymentInfos() throws IResourceStore.ResourceStoreException {
-            List<DeploymentInfo> deploymentInfos = new LinkedList<>();
+            List<DeploymentInfo> deploymentInfos = new ArrayList<>();
 
             try {
-                Iterable<Document> documents = Observable.fromPublisher(collection.find()).blockingIterable();
+                Iterable<Document> documents = Observable.fromPublisher(deploymentsCollection.find()).blockingIterable();
                 for (Document document : documents) {
                     deploymentInfos.add(documentBuilder.build(document, DeploymentInfo.class));
                 }

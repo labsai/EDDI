@@ -168,17 +168,17 @@ public class PropertySetterTask implements ILifecycleTask {
                                     }
 
                                     var valueObject = property.getValueObject();
-                                    if (!isNullOrEmpty(valueObject)) {
+                                    if (valueObject != null) {
                                         conversationProperties.put(name, new Property(name, valueObject, scope));
                                     }
 
                                     var valueInt = property.getValueInt();
-                                    if (!isNullOrEmpty(valueInt)) {
+                                    if (valueInt != null) {
                                         conversationProperties.put(name, new Property(name, valueInt, scope));
                                     }
 
                                     var valueFloat = property.getValueFloat();
-                                    if (!isNullOrEmpty(valueFloat)) {
+                                    if (valueFloat != null) {
                                         conversationProperties.put(name, new Property(name, valueFloat, scope));
                                     }
                                 }

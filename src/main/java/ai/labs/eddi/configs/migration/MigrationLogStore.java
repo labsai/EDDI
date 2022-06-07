@@ -9,6 +9,7 @@ import org.bson.Document;
 
 import javax.enterprise.context.ApplicationScoped;
 import javax.inject.Inject;
+import java.util.NoSuchElementException;
 
 @ApplicationScoped
 public class MigrationLogStore implements IMigrationLogStore {
@@ -23,7 +24,11 @@ public class MigrationLogStore implements IMigrationLogStore {
 
     @Override
     public MigrationLog readMigrationLog(String name) {
-        return Observable.fromPublisher(collection.find(new Document("name", name)).first()).blockingFirst();
+        try {
+            return Observable.fromPublisher(collection.find(new Document("name", name)).first()).blockingFirst();
+        } catch (NoSuchElementException e) {
+            return null;
+        }
     }
 
     @Override

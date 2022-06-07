@@ -284,13 +284,13 @@ public class Conversation implements IConversation {
                 var valueObject = property.getValueObject();
                 var valueInt = property.getValueInt();
                 var valueFloat = property.getValueFloat();
-                if (!isNullOrEmpty(valueString)) {
+                if (valueString != null) {
                     longTermConversationProperties.put(property.getName(), valueString);
-                } else if (!isNullOrEmpty(valueObject)) {
+                } else if (valueObject != null) {
                     longTermConversationProperties.put(property.getName(), valueObject);
-                } else if (!isNullOrEmpty(valueInt)) {
+                } else if (valueInt != null) {
                     longTermConversationProperties.put(property.getName(), valueInt);
-                } else if (!isNullOrEmpty(valueFloat)) {
+                } else if (valueFloat != null) {
                     longTermConversationProperties.put(property.getName(), valueFloat);
                 }
             }

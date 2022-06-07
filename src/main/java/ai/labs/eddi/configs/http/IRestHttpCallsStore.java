@@ -20,7 +20,8 @@ import java.util.List;
 @Path("/httpcallsstore/httpcalls")
 @Tag(name = "03. Httpcalls", description = "lifecycle extension for package")
 public interface IRestHttpCallsStore extends IRestVersionInfo {
-    String resourceURI = "eddi://ai.labs.httpcalls/httpcallsstore/httpcalls/";
+    String resourceBaseType = "eddi://ai.labs.httpcalls";
+    String resourceURI = resourceBaseType + "/httpcallsstore/httpcalls/";
 
     @GET
     @Path("/jsonSchema")
