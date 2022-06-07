@@ -111,6 +111,8 @@ public class MigrationManager implements IMigrationManager {
 
             if (migrationHasExecuted) {
                 LOGGER.info("Migration of propertysetter document has finished!");
+            } else {
+                LOGGER.info("No migration of propertysetter document was needed!");
             }
         } catch (Exception e) {
             LOGGER.error(e.getLocalizedMessage(), e);
@@ -127,6 +129,8 @@ public class MigrationManager implements IMigrationManager {
 
             if (migrationHasExecuted) {
                 LOGGER.info("Migration of httpcalls document has finished!");
+            } else {
+                LOGGER.info("No migration of httpcalls document was needed!");
             }
         } catch (Exception e) {
             LOGGER.error(e.getLocalizedMessage(), e);
@@ -142,6 +146,8 @@ public class MigrationManager implements IMigrationManager {
 
             if (migrationHasExecuted) {
                 LOGGER.info("Migration of output document has finished!");
+            } else {
+                LOGGER.info("No migration of output document was needed!");
             }
         } catch (Exception e) {
             LOGGER.error(e.getLocalizedMessage(), e);
@@ -156,7 +162,9 @@ public class MigrationManager implements IMigrationManager {
                             conversationMemoryCollection, null);
 
             if (migrationHasExecuted) {
-                LOGGER.info("Migration of output document has finished!");
+                LOGGER.info("Migration of conversation memory document has finished!");
+            } else {
+                LOGGER.info("No migration of conversation memory document was needed!");
             }
         } catch (Exception e) {
             LOGGER.error(e.getLocalizedMessage(), e);
@@ -204,53 +212,65 @@ public class MigrationManager implements IMigrationManager {
     @Override
     public IDocumentMigration migratePropertySetter() {
         return document -> {
-            boolean convertedPropertySetter = false;
-            if (document.containsKey(FIELD_NAME_SET_ON_ACTIONS)) {
-                var setOnActions = (List<Map<String, Object>>) document.get(FIELD_NAME_SET_ON_ACTIONS);
-                for (var setOnActionContainer : setOnActions) {
-                    if (setOnActionContainer.containsKey(FIELD_NAME_SET_PROPERTIES)) {
-                        var setProperties = (List<Map<String, Object>>) setOnActionContainer.get(FIELD_NAME_SET_PROPERTIES);
-                        for (var setProperty : setProperties) {
-                            convertedPropertySetter =
-                                    convertPropertyInstructions(setProperty) || convertedPropertySetter;
+            try {
+                boolean convertedPropertySetter = false;
+                if (document.containsKey(FIELD_NAME_SET_ON_ACTIONS)) {
+                    var setOnActions = (List<Map<String, Object>>) document.get(FIELD_NAME_SET_ON_ACTIONS);
+                    for (var setOnActionContainer : setOnActions) {
+                        if (setOnActionContainer.containsKey(FIELD_NAME_SET_PROPERTIES)) {
+                            var setProperties = (List<Map<String, Object>>) setOnActionContainer.get(FIELD_NAME_SET_PROPERTIES);
+                            for (var setProperty : setProperties) {
+                                convertedPropertySetter =
+                                        convertPropertyInstructions(setProperty) || convertedPropertySetter;
+                            }
                         }
                     }
                 }
-            }
 
-            return convertedPropertySetter ? document : null;
+                return convertedPropertySetter ? document : null;
+            } catch (Exception e) {
+                LOGGER.error(e.getLocalizedMessage(), e);
+                return null;
+            }
         };
     }
 
     @Override
     public IDocumentMigration migrateHttpCalls() {
         return document -> {
-            boolean convertedHttpCalls = false;
-            if (document.containsKey(OLD_FIELD_NAME_TARGET_SERVER)) {
-                document.put(FIELD_NAME_TARGET_SERVER_URL, document.get(OLD_FIELD_NAME_TARGET_SERVER));
-                convertedHttpCalls = true;
-            }
-            String differentOldFieldName = OLD_FIELD_NAME_TARGET_SERVER + "Uri";
-            if (document.containsKey(differentOldFieldName)) {
-                document.put(FIELD_NAME_TARGET_SERVER_URL, document.get(differentOldFieldName));
-                convertedHttpCalls = true;
-            }
-            if (document.containsKey(FIELD_NAME_HTTP_CALLS)) {
-                var httpCalls = (List<Map<String, Object>>) document.get(FIELD_NAME_HTTP_CALLS);
-                for (var httpCall : httpCalls) {
-                    if (httpCall.containsKey(FIELD_NAME_PRE_REQUEST)) {
-                        var preRequest = (Map<String, List<Map<String, Object>>>) httpCall.get(FIELD_NAME_PRE_REQUEST);
-                        convertedHttpCalls = convertPreAndPostProcessing(preRequest) || convertedHttpCalls;
-                    }
+            try {
+                boolean convertedHttpCalls = false;
+                if (document.containsKey(OLD_FIELD_NAME_TARGET_SERVER)) {
+                    document.put(FIELD_NAME_TARGET_SERVER_URL, document.get(OLD_FIELD_NAME_TARGET_SERVER));
+                    document.remove(OLD_FIELD_NAME_TARGET_SERVER);
+                    convertedHttpCalls = true;
+                }
+                String differentOldFieldName = OLD_FIELD_NAME_TARGET_SERVER + "Uri";
+                if (document.containsKey(differentOldFieldName)) {
+                    document.put(FIELD_NAME_TARGET_SERVER_URL, document.get(differentOldFieldName));
+                    document.remove(differentOldFieldName);
+                    convertedHttpCalls = true;
+                }
+                if (document.containsKey(FIELD_NAME_HTTP_CALLS)) {
+                    var httpCalls = (List<Map<String, Object>>) document.get(FIELD_NAME_HTTP_CALLS);
+                    for (var httpCall : httpCalls) {
+                        if (httpCall.containsKey(FIELD_NAME_PRE_REQUEST)) {
+                            var preRequest = (Map<String, List<Map<String, Object>>>) httpCall.get(FIELD_NAME_PRE_REQUEST);
+                            convertedHttpCalls = convertPreAndPostProcessing(preRequest) || convertedHttpCalls;
+                        }
 
-                    if (httpCall.containsKey(FIELD_NAME_POST_RESPONSE)) {
-                        var postResponse = (Map<String, List<Map<String, Object>>>) httpCall.get(FIELD_NAME_POST_RESPONSE);
-                        convertedHttpCalls = convertPreAndPostProcessing(postResponse) || convertedHttpCalls;
+                        if (httpCall.containsKey(FIELD_NAME_POST_RESPONSE)) {
+                            var postResponse = (Map<String, List<Map<String, Object>>>) httpCall.get(FIELD_NAME_POST_RESPONSE);
+                            convertedHttpCalls = convertPreAndPostProcessing(postResponse) || convertedHttpCalls;
+                        }
                     }
                 }
-            }
 
-            return convertedHttpCalls ? document : null;
+                return convertedHttpCalls ? document : null;
+            } catch (Exception e) {
+                LOGGER.error(e.getLocalizedMessage(), e);
+                return null;
+            }
         };
     }
 
@@ -295,66 +315,76 @@ public class MigrationManager implements IMigrationManager {
     @Override
     public IDocumentMigration migrateOutput() {
         return document -> {
-            boolean convertedOutput = false;
-            if (document.containsKey(FIELD_NAME_OUTPUT_SET)) {
-                var outputSet = (List<Map<String, Object>>) document.get(FIELD_NAME_OUTPUT_SET);
-                for (var outputContainer : outputSet) {
-                    if (outputContainer.containsKey(FIELD_NAME_OUTPUTS)) {
-                        var outputs = (List<Map<String, Object>>) outputContainer.get(FIELD_NAME_OUTPUTS);
-                        for (var output : outputs) {
-                            output.remove(FIELD_NAME_TYPE);
-                            if (output.containsKey(FIELD_NAME_VALUE_ALTERNATIVES)) {
-                                var valueAlternatives = (List<Object>) output.get(FIELD_NAME_VALUE_ALTERNATIVES);
-                                for (int i = 0; i < valueAlternatives.size(); i++) {
-                                    Object valueAlternative = valueAlternatives.get(i);
-                                    if (valueAlternative instanceof String) {
-                                        var textOutput = new TextOutputItem(valueAlternative.toString());
-                                        valueAlternatives.set(i, textOutput);
-                                        convertedOutput = true;
-                                    } else if (valueAlternative instanceof Map outputValue) {
-                                        if (isNullOrEmpty(outputValue.get(FIELD_NAME_TYPE))) {
-                                            if (!isNullOrEmpty(outputValue.get(FIELD_NAME_TEXT))) {
-                                                outputValue.put(FIELD_NAME_TYPE, FIELD_NAME_TEXT);
-                                            } else if (!isNullOrEmpty(((Map) valueAlternative).get(FIELD_NAME_URI))) {
-                                                outputValue.put(FIELD_NAME_TYPE, FIELD_NAME_IMAGE);
-                                            } else if (!isNullOrEmpty(((Map) valueAlternative).get(FIELD_NAME_EXPRESSIONS))) {
-                                                outputValue.put(FIELD_NAME_TYPE, FIELD_NAME_QUICK_REPLY);
-                                            } else {
-                                                outputValue.put(FIELD_NAME_TYPE, FIELD_NAME_OTHER);
-                                            }
-
+            try {
+                boolean convertedOutput = false;
+                if (document.containsKey(FIELD_NAME_OUTPUT_SET)) {
+                    var outputSet = (List<Map<String, Object>>) document.get(FIELD_NAME_OUTPUT_SET);
+                    for (var outputContainer : outputSet) {
+                        if (outputContainer.containsKey(FIELD_NAME_OUTPUTS)) {
+                            var outputs = (List<Map<String, Object>>) outputContainer.get(FIELD_NAME_OUTPUTS);
+                            for (var output : outputs) {
+                                output.remove(FIELD_NAME_TYPE);
+                                if (output.containsKey(FIELD_NAME_VALUE_ALTERNATIVES)) {
+                                    var valueAlternatives = (List<Object>) output.get(FIELD_NAME_VALUE_ALTERNATIVES);
+                                    for (int i = 0; i < valueAlternatives.size(); i++) {
+                                        Object valueAlternative = valueAlternatives.get(i);
+                                        if (valueAlternative instanceof String) {
+                                            var textOutput = new TextOutputItem(valueAlternative.toString());
+                                            valueAlternatives.set(i, textOutput);
                                             convertedOutput = true;
+                                        } else if (valueAlternative instanceof Map outputValue) {
+                                            if (isNullOrEmpty(outputValue.get(FIELD_NAME_TYPE))) {
+                                                if (!isNullOrEmpty(outputValue.get(FIELD_NAME_TEXT))) {
+                                                    outputValue.put(FIELD_NAME_TYPE, FIELD_NAME_TEXT);
+                                                } else if (!isNullOrEmpty(((Map) valueAlternative).get(FIELD_NAME_URI))) {
+                                                    outputValue.put(FIELD_NAME_TYPE, FIELD_NAME_IMAGE);
+                                                } else if (!isNullOrEmpty(((Map) valueAlternative).get(FIELD_NAME_EXPRESSIONS))) {
+                                                    outputValue.put(FIELD_NAME_TYPE, FIELD_NAME_QUICK_REPLY);
+                                                } else {
+                                                    outputValue.put(FIELD_NAME_TYPE, FIELD_NAME_OTHER);
+                                                }
+
+                                                convertedOutput = true;
+                                            }
                                         }
                                     }
-                                }
 
-                                output.put(FIELD_NAME_TYPE, null);
+                                    output.put(FIELD_NAME_TYPE, null);
+                                }
                             }
                         }
                     }
                 }
-            }
 
-            return convertedOutput ? document : null;
+                return convertedOutput ? document : null;
+            } catch (Exception e) {
+                LOGGER.error(e.getLocalizedMessage(), e);
+                return null;
+            }
         };
     }
 
     private IDocumentMigration migrateConversationMemory() {
         return document -> {
-            boolean convertedConversationMemory = false;
+            try {
+                boolean convertedConversationMemory = false;
 
-            if (document.containsKey(FIELD_NAME_CONVERSATION_PROPERTIES)) {
-                var conversationProperties =
-                        (Map<String, Map<String, Object>>) document.get(FIELD_NAME_CONVERSATION_PROPERTIES);
+                if (document.containsKey(FIELD_NAME_CONVERSATION_PROPERTIES)) {
+                    var conversationProperties =
+                            (Map<String, Map<String, Object>>) document.get(FIELD_NAME_CONVERSATION_PROPERTIES);
 
-                for (var propertyKey : conversationProperties.keySet()) {
-                    var conversationProperty = conversationProperties.get(propertyKey);
-                    convertedConversationMemory =
-                            convertPropertyInstructions(conversationProperty) || convertedConversationMemory;
+                    for (var propertyKey : conversationProperties.keySet()) {
+                        var conversationProperty = conversationProperties.get(propertyKey);
+                        convertedConversationMemory =
+                                convertPropertyInstructions(conversationProperty) || convertedConversationMemory;
+                    }
                 }
-            }
 
-            return convertedConversationMemory ? document : null;
+                return convertedConversationMemory ? document : null;
+            } catch (Exception e) {
+                LOGGER.error(e.getLocalizedMessage(), e);
+                return null;
+            }
         };
     }
 
