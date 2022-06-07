@@ -337,13 +337,12 @@ public class MigrationManager implements IMigrationManager {
                                             valueAlternatives.set(i, textOutput);
                                             convertedOutput = true;
                                         } else if (valueAlternative instanceof Map outputValue) {
-                                            if (isNullOrEmpty(outputValue.get(FIELD_NAME_TYPE))) {
+                                            var type = outputValue.get(FIELD_NAME_TYPE);
+                                            if (isNullOrEmpty(type)) {
                                                 if (!isNullOrEmpty(outputValue.get(FIELD_NAME_TEXT))) {
                                                     outputValue.put(FIELD_NAME_TYPE, FIELD_NAME_TEXT);
-                                                    removeNonSupportedProperties(outputValue, FIELD_NAME_TEXT, FIELD_NAME_DELAY);
                                                 } else if (!isNullOrEmpty(((Map) valueAlternative).get(FIELD_NAME_URI))) {
                                                     outputValue.put(FIELD_NAME_TYPE, FIELD_NAME_IMAGE);
-                                                    removeNonSupportedProperties(outputValue, FIELD_NAME_URI, FIELD_NAME_ALT);
                                                 } else if (!isNullOrEmpty(((Map) valueAlternative).get(FIELD_NAME_EXPRESSIONS))) {
                                                     outputValue.put(FIELD_NAME_TYPE, FIELD_NAME_QUICK_REPLY);
                                                 } else {
@@ -351,6 +350,14 @@ public class MigrationManager implements IMigrationManager {
                                                 }
 
                                                 convertedOutput = true;
+                                            }
+
+                                            if (type.equals(FIELD_NAME_TEXT)) {
+                                                removeNonSupportedProperties(outputValue, FIELD_NAME_TEXT, FIELD_NAME_DELAY);
+                                            }
+
+                                            if (type.equals(FIELD_NAME_IMAGE)) {
+                                                removeNonSupportedProperties(outputValue, FIELD_NAME_URI, FIELD_NAME_ALT);
                                             }
                                         }
                                     }
