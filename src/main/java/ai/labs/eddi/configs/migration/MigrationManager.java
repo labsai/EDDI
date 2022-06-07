@@ -193,7 +193,7 @@ public class MigrationManager implements IMigrationManager {
             var migratedDocument = migration.migrate(document);
             if (migratedDocument != null) {
                 saveToPersistence(documentType, migratedDocument, fieldNameToMigrate, isHistory,
-                        outputCollection, outputCollectionHistory);
+                        COLLECTION_CONVERSATION_MEMORY.equals(documentType), outputCollection, outputCollectionHistory);
                 migrationHasExecuted = true;
             }
         }
@@ -362,33 +362,42 @@ public class MigrationManager implements IMigrationManager {
                                    Document document,
                                    String fieldNameToMigrate,
                                    boolean isHistory,
+                                   boolean isConversationMemoryCollection,
                                    MongoCollection<Document> outputCollection,
                                    MongoCollection<Document> outputCollectionHistory) {
 
-        String id;
-        int version;
-        if (isHistory) {
-            var idObj = (Map<String, Object>) document.get(ID_FIELD);
-            id = idObj.get(ID_FIELD).toString();
-            version = Integer.parseInt(idObj.get(VERSION_FIELD).toString());
-            var query = Filters.eq(ID_FIELD,
-                    new Document(Map.of(ID_FIELD, new ObjectId(id), VERSION_FIELD, version)));
 
-            Observable.fromPublisher(
-                    outputCollectionHistory.updateOne(query,
-                            set(fieldNameToMigrate, document.get(fieldNameToMigrate)))).blockingFirst();
-        } else {
-            id = document.get(ID_FIELD).toString();
-            version = Integer.parseInt(document.get(VERSION_FIELD).toString());
-            Bson query = Filters.eq(ID_FIELD, new ObjectId(id));
+        if (isConversationMemoryCollection) {
+            var query = Filters.eq(ID_FIELD, new ObjectId(document.get(ID_FIELD).toString()));
             Observable.fromPublisher(
                     outputCollection.updateOne(query,
                             set(fieldNameToMigrate, document.get(fieldNameToMigrate)))).blockingFirst();
-        }
+        } else {
+            String id;
+            int version;
+            if (isHistory) {
+                var idObj = (Map<String, Object>) document.get(ID_FIELD);
+                id = idObj.get(ID_FIELD).toString();
+                version = Integer.parseInt(idObj.get(VERSION_FIELD).toString());
+                var query = Filters.eq(ID_FIELD,
+                        new Document(Map.of(ID_FIELD, new ObjectId(id), VERSION_FIELD, version)));
 
-        var message =
-                format("Successfully migrated %s document with id: %s, version: %d to new format.",
-                        documentType, id, version);
-        LOGGER.info(message);
+                Observable.fromPublisher(
+                        outputCollectionHistory.updateOne(query,
+                                set(fieldNameToMigrate, document.get(fieldNameToMigrate)))).blockingFirst();
+            } else {
+                id = document.get(ID_FIELD).toString();
+                version = Integer.parseInt(document.get(VERSION_FIELD).toString());
+                Bson query = Filters.eq(ID_FIELD, new ObjectId(id));
+                Observable.fromPublisher(
+                        outputCollection.updateOne(query,
+                                set(fieldNameToMigrate, document.get(fieldNameToMigrate)))).blockingFirst();
+            }
+
+            var message =
+                    format("Successfully migrated %s document with id: %s, version: %d to new format.",
+                            documentType, id, version);
+            LOGGER.info(message);
+        }
     }
 }
