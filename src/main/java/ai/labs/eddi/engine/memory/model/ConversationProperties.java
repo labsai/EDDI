@@ -14,7 +14,7 @@ public class ConversationProperties
         implements IConversationMemory.IConversationProperties {
 
     private static final String KEY_PROPERTIES = "properties";
-    private Map<String, Object> propertiesMap = new LinkedHashMap<>();
+    private final Map<String, Object> propertiesMap = new LinkedHashMap<>();
 
     @JsonIgnore
     private final IConversationMemory conversationMemory;

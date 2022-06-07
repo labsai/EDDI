@@ -18,7 +18,6 @@ public class ConversationMemory implements IConversationMemory {
     private final String botId;
     private final Integer botVersion;
     private String userId;
-
     private IWritableConversationStep currentStep;
     private final Stack<IConversationStep> previousSteps;
     private final Stack<IConversationStep> redoCache = new Stack<>();
@@ -39,7 +38,7 @@ public class ConversationMemory implements IConversationMemory {
     public ConversationMemory(String botId, Integer botVersion) {
         this.botId = botId;
         this.botVersion = botVersion;
-        ConversationOutput conversationOutput = new ConversationOutput();
+        var conversationOutput = new ConversationOutput();
         this.conversationOutputs.add(conversationOutput);
         this.currentStep = new ConversationStep(conversationOutput);
         this.previousSteps = new Stack<>();

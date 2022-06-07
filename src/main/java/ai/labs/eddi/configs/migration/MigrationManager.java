@@ -50,14 +50,17 @@ public class MigrationManager implements IMigrationManager {
     public static final String COLLECTION_OUTPUTS = "outputs";
     public static final String COLLECTION_HTTPCALLS = "httpcalls";
     public static final String COLLECTION_PROPERTYSETTER = "propertysetter";
+    public static final String COLLECTION_CONVERSATION_MEMORY = "conversationmemories";
     public static final String OLD_FIELD_NAME_TARGET_SERVER = "targetServer";
     public static final String FIELD_NAME_TARGET_SERVER_URL = "targetServerUrl";
+    public static final String FIELD_NAME_CONVERSATION_PROPERTIES = "conversationProperties";
     private final MongoCollection<Document> propertySetterCollection;
     private final MongoCollection<Document> propertySetterCollectionHistory;
     private final MongoCollection<Document> httpCallsCollection;
     private final MongoCollection<Document> httpCallsCollectionHistory;
     private final MongoCollection<Document> outputCollection;
     private final MongoCollection<Document> outputCollectionHistory;
+    private final MongoCollection<Document> conversationMemoryCollection;
     private final MigrationLogStore migrationLogStore;
     private boolean isCurrentlyRunning = false;
 
@@ -72,6 +75,8 @@ public class MigrationManager implements IMigrationManager {
         this.outputCollection = database.getCollection(COLLECTION_OUTPUTS);
         this.outputCollectionHistory = database.getCollection(COLLECTION_OUTPUTS + ".history");
 
+        this.conversationMemoryCollection = database.getCollection(COLLECTION_CONVERSATION_MEMORY);
+
         this.migrationLogStore = migrationLogStore;
     }
 
@@ -83,6 +88,7 @@ public class MigrationManager implements IMigrationManager {
                 startPropertyMigration();
                 startHttpCallsMigration();
                 startOutputMigration();
+                startConversationMemoryMigration();
 
                 migrationLogStore.createMigrationLog(new MigrationLog(MIGRATION_CONFIRMATION));
             }
@@ -122,8 +128,7 @@ public class MigrationManager implements IMigrationManager {
             if (migrationHasExecuted) {
                 LOGGER.info("Migration of httpcalls document has finished!");
             }
-        } catch (
-                Exception e) {
+        } catch (Exception e) {
             LOGGER.error(e.getLocalizedMessage(), e);
         }
     }
@@ -138,25 +143,41 @@ public class MigrationManager implements IMigrationManager {
             if (migrationHasExecuted) {
                 LOGGER.info("Migration of output document has finished!");
             }
-        } catch (
-                Exception e) {
+        } catch (Exception e) {
             LOGGER.error(e.getLocalizedMessage(), e);
         }
     }
 
-    private boolean iterateMigration(String fieldName, String fieldName1,
-                                     IDocumentMigration migration, MongoCollection<Document> httpCallsCollection,
-                                     MongoCollection<Document> httpCallsCollectionHistory) {
+    private void startConversationMemoryMigration() {
+        try {
+            IDocumentMigration migration = migrateConversationMemory();
+            boolean migrationHasExecuted =
+                    iterateMigration(COLLECTION_CONVERSATION_MEMORY, FIELD_NAME_CONVERSATION_PROPERTIES, migration,
+                            conversationMemoryCollection, null);
 
-        Observable<Document> observable = Observable.fromPublisher(httpCallsCollection.find());
-        Iterable<Document> httpCallsDocuments = observable.blockingIterable();
-        var migrationHasExecuted = migrateDocuments(fieldName, httpCallsDocuments, migration,
-                fieldName1, httpCallsCollection, httpCallsCollectionHistory, false);
+            if (migrationHasExecuted) {
+                LOGGER.info("Migration of output document has finished!");
+            }
+        } catch (Exception e) {
+            LOGGER.error(e.getLocalizedMessage(), e);
+        }
+    }
 
-        observable = Observable.fromPublisher(httpCallsCollectionHistory.find());
-        Iterable<Document> httpCallsHistoryDocuments = observable.blockingIterable();
-        migrationHasExecuted = migrateDocuments(fieldName, httpCallsHistoryDocuments, migration,
-                fieldName1, httpCallsCollection, httpCallsCollectionHistory, true) || migrationHasExecuted;
+    private boolean iterateMigration(String documentType, String fieldNameToMigrate,
+                                     IDocumentMigration migration, MongoCollection<Document> collection,
+                                     MongoCollection<Document> collectionHistory) {
+
+        Observable<Document> observable = Observable.fromPublisher(collection.find());
+        Iterable<Document> documents = observable.blockingIterable();
+        var migrationHasExecuted = migrateDocuments(documentType, documents, migration,
+                fieldNameToMigrate, collection, collectionHistory, false);
+
+        if (collectionHistory != null) {
+            observable = Observable.fromPublisher(collectionHistory.find());
+            Iterable<Document> historyDocuments = observable.blockingIterable();
+            migrationHasExecuted = migrateDocuments(documentType, historyDocuments, migration,
+                    fieldNameToMigrate, collection, collectionHistory, true) || migrationHasExecuted;
+        }
         return migrationHasExecuted;
     }
 
@@ -191,8 +212,7 @@ public class MigrationManager implements IMigrationManager {
                         var setProperties = (List<Map<String, Object>>) setOnActionContainer.get(FIELD_NAME_SET_PROPERTIES);
                         for (var setProperty : setProperties) {
                             convertedPropertySetter =
-                                    convertPropertyInstructions(convertedPropertySetter, setProperty) ||
-                                            convertedPropertySetter;
+                                    convertPropertyInstructions(setProperty) || convertedPropertySetter;
                         }
                     }
                 }
@@ -210,17 +230,22 @@ public class MigrationManager implements IMigrationManager {
                 document.put(FIELD_NAME_TARGET_SERVER_URL, document.get(OLD_FIELD_NAME_TARGET_SERVER));
                 convertedHttpCalls = true;
             }
+            String differentOldFieldName = OLD_FIELD_NAME_TARGET_SERVER + "Uri";
+            if (document.containsKey(differentOldFieldName)) {
+                document.put(FIELD_NAME_TARGET_SERVER_URL, document.get(differentOldFieldName));
+                convertedHttpCalls = true;
+            }
             if (document.containsKey(FIELD_NAME_HTTP_CALLS)) {
                 var httpCalls = (List<Map<String, Object>>) document.get(FIELD_NAME_HTTP_CALLS);
                 for (var httpCall : httpCalls) {
                     if (httpCall.containsKey(FIELD_NAME_PRE_REQUEST)) {
                         var preRequest = (Map<String, List<Map<String, Object>>>) httpCall.get(FIELD_NAME_PRE_REQUEST);
-                        convertedHttpCalls = convertPreAndPostProcessing(convertedHttpCalls, preRequest) || convertedHttpCalls;
+                        convertedHttpCalls = convertPreAndPostProcessing(preRequest) || convertedHttpCalls;
                     }
 
                     if (httpCall.containsKey(FIELD_NAME_POST_RESPONSE)) {
                         var postResponse = (Map<String, List<Map<String, Object>>>) httpCall.get(FIELD_NAME_POST_RESPONSE);
-                        convertedHttpCalls = convertPreAndPostProcessing(convertedHttpCalls, postResponse) || convertedHttpCalls;
+                        convertedHttpCalls = convertPreAndPostProcessing(postResponse) || convertedHttpCalls;
                     }
                 }
             }
@@ -229,16 +254,18 @@ public class MigrationManager implements IMigrationManager {
         };
     }
 
-    private boolean convertPreAndPostProcessing(boolean convertedHttpCalls, Map<String, List<Map<String, Object>>> preRequest) {
+    private boolean convertPreAndPostProcessing(Map<String, List<Map<String, Object>>> preRequest) {
+        boolean converted = false;
         if (preRequest.containsKey(FIELD_NAME_PROPERTY_INSTRUCTIONS)) {
             for (var propertyInstruction : preRequest.get(FIELD_NAME_PROPERTY_INSTRUCTIONS)) {
-                convertedHttpCalls = convertPropertyInstructions(convertedHttpCalls, propertyInstruction);
+                converted = convertPropertyInstructions(propertyInstruction) || converted;
             }
         }
-        return convertedHttpCalls;
+        return converted;
     }
 
-    private boolean convertPropertyInstructions(boolean convertedHttpCalls, Map<String, Object> propertyInstruction) {
+    private boolean convertPropertyInstructions(Map<String, Object> propertyInstruction) {
+        boolean converted = false;
         Object value = propertyInstruction.get(FIELD_NAME_VALUE);
         if (value != null) {
             if (value instanceof String) {
@@ -256,13 +283,13 @@ public class MigrationManager implements IMigrationManager {
 
             propertyInstruction.remove(FIELD_NAME_VALUE);
 
-            convertedHttpCalls = true;
+            converted = true;
         } else if (propertyInstruction.containsKey(FIELD_NAME_VALUE)) {
             propertyInstruction.put(FIELD_NAME_VALUE_STRING, null);
-            convertedHttpCalls = true;
+            converted = true;
         }
 
-        return convertedHttpCalls;
+        return converted;
     }
 
     @Override
@@ -309,6 +336,25 @@ public class MigrationManager implements IMigrationManager {
             }
 
             return convertedOutput ? document : null;
+        };
+    }
+
+    private IDocumentMigration migrateConversationMemory() {
+        return document -> {
+            boolean convertedConversationMemory = false;
+
+            if (document.containsKey(FIELD_NAME_CONVERSATION_PROPERTIES)) {
+                var conversationProperties =
+                        (Map<String, Map<String, Object>>) document.get(FIELD_NAME_CONVERSATION_PROPERTIES);
+
+                for (var propertyKey : conversationProperties.keySet()) {
+                    var conversationProperty = conversationProperties.get(propertyKey);
+                    convertedConversationMemory =
+                            convertPropertyInstructions(conversationProperty) || convertedConversationMemory;
+                }
+            }
+
+            return convertedConversationMemory ? document : null;
         };
     }
 

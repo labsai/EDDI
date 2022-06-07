@@ -1,6 +1,5 @@
 package ai.labs.eddi.models;
 
-import com.fasterxml.jackson.annotation.JsonAlias;
 import lombok.*;
 
 import java.util.Map;
@@ -12,7 +11,6 @@ import java.util.Map;
 @EqualsAndHashCode
 public class Property {
     private String name;
-    @JsonAlias(value = "value")
     private String valueString;
     private Map<String, Object> valueObject;
     private Integer valueInt;
