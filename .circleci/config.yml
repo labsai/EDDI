@@ -58,13 +58,13 @@ jobs:
           command: |
             if [ "${CIRCLE_BRANCH}" == "main" ]; then
                 echo "$DOCKER_PASS" | docker login --username $DOCKER_USER --password-stdin
-                docker push labsai/eddi:5.0.0-b$CIRCLE_BUILD_NUM
+                # docker push labsai/eddi:5.0.0-b$CIRCLE_BUILD_NUM
             
-                # docker push labsai/eddi:5.0.0
+                docker push labsai/eddi:5.0.0
             
-                # docker push labsai/eddi:5.0
+                docker push labsai/eddi:5.0
             
-                # docker push labsai/eddi:5
+                docker push labsai/eddi:5
             
-                # docker push labsai/eddi:latest
+                docker push labsai/eddi:latest
             fi
