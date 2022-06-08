@@ -395,6 +395,10 @@ public class MigrationManager implements IMigrationManager {
                                                 removeNonSupportedProperties(outputValue,
                                                         FIELD_NAME_BUTTON_TYPE, FIELD_NAME_LABEL, FIELD_NAME_ON_PRESS);
                                             }
+
+                                            if (type.equals(FIELD_NAME_OTHER)) {
+                                                removeNonStringProperties(outputValue);
+                                            }
                                         }
                                     }
 
@@ -411,6 +415,18 @@ public class MigrationManager implements IMigrationManager {
                 return null;
             }
         };
+    }
+
+    private void removeNonStringProperties(Map<String, Object> outputValue) {
+        var toBeRemoved = new LinkedList<String>();
+        for (String outputKey : outputValue.keySet()) {
+            var value = outputValue.get(outputKey);
+            if (value != null && !(value instanceof String)) {
+                toBeRemoved.add(outputKey);
+            }
+        }
+
+        toBeRemoved.forEach(outputValue::remove);
     }
 
     private void removeNonSupportedProperties(Map<String, Object> outputValue, String... fieldNames) {
