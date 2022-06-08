@@ -56,7 +56,7 @@ jobs:
       - run:
           name: Push docker image to Docker Hub Registry
           command: |
-            if [ "${CIRCLE_BRANCH}" == "main" ]; then
+            if [ "${CIRCLE_BRANCH}" == "release/5.0.0" ]; then
                 echo "$DOCKER_PASS" | docker login --username $DOCKER_USER --password-stdin
                 # docker push labsai/eddi:5.0.0-b$CIRCLE_BUILD_NUM
             
