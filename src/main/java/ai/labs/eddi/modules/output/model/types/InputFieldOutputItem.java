@@ -9,6 +9,7 @@ import java.util.Objects;
 @Getter
 @Setter
 public class InputFieldOutputItem extends OutputItem {
+    private String subType;
     private String placeholder;
     private String label;
     private String defaultValue;
@@ -18,12 +19,13 @@ public class InputFieldOutputItem extends OutputItem {
         initType();
     }
 
-    public InputFieldOutputItem(String placeholder, String label, String defaultValue, Validation validation) {
+    public InputFieldOutputItem(String subType, String placeholder, String label, String defaultValue, Validation validation) {
         initType();
         this.placeholder = placeholder;
         this.label = label;
         this.defaultValue = defaultValue;
         this.validation = validation;
+        this.subType = subType;
     }
 
     @Override
@@ -36,14 +38,14 @@ public class InputFieldOutputItem extends OutputItem {
         if (this == o) return true;
         if (o == null || getClass() != o.getClass()) return false;
         InputFieldOutputItem that = (InputFieldOutputItem) o;
-        return Objects.equals(placeholder, that.placeholder) &&
+        return Objects.equals(subType, that.subType) && Objects.equals(placeholder, that.placeholder) &&
                 Objects.equals(label, that.label) && Objects.equals(defaultValue, that.defaultValue) &&
                 Objects.equals(validation, that.validation);
     }
 
     @Override
     public int hashCode() {
-        return Objects.hash(placeholder, label, defaultValue, validation);
+        return Objects.hash(subType, placeholder, label, defaultValue, validation);
     }
 
     @Getter

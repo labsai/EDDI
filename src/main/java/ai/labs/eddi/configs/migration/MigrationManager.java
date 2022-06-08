@@ -12,6 +12,7 @@ import org.jboss.logging.Logger;
 import javax.enterprise.context.ApplicationScoped;
 import javax.inject.Inject;
 import java.util.Arrays;
+import java.util.LinkedList;
 import java.util.List;
 import java.util.Map;
 
@@ -19,6 +20,7 @@ import static ai.labs.eddi.datastore.mongo.MongoResourceStorage.ID_FIELD;
 import static ai.labs.eddi.datastore.mongo.MongoResourceStorage.VERSION_FIELD;
 import static ai.labs.eddi.utils.RuntimeUtilities.isNullOrEmpty;
 import static com.mongodb.client.model.Filters.eq;
+import static java.lang.Boolean.parseBoolean;
 import static java.lang.String.format;
 
 @ApplicationScoped
@@ -51,7 +53,7 @@ public class MigrationManager implements IMigrationManager {
     public static final String FIELD_NAME_BUTTON = "button";
     public static final String FIELD_NAME_LABEL = "label";
     public static final String FIELD_NAME_DEFAULT_VALUE = "defaultValue";
-    public static final String FIELD_NAME_VALIDATION = "validation";
+    public static final String FIELD_NAME_PLACEHOLDER = "placeholder";
     public static final String FIELD_NAME_BUTTON_TYPE = "buttonType";
     public static final String FIELD_NAME_ON_PRESS = "onPress";
     public static final String FIELD_NAME_INPUT_FIELD = "inputField";
@@ -63,6 +65,9 @@ public class MigrationManager implements IMigrationManager {
     public static final String COLLECTION_HTTPCALLS = "httpcalls";
     public static final String COLLECTION_PROPERTYSETTER = "propertysetter";
     public static final String COLLECTION_CONVERSATION_MEMORY = "conversationmemories";
+    public static final String FIELD_NAME_VALIDATION = "validation";
+    public static final String FIELD_NAME_SUB_TYPE = "subType";
+    public static final String OLD_FIELD_NAME_IS_PASSWORD = "isPassword";
 
     private final MongoCollection<Document> propertySetterCollection;
     private final MongoCollection<Document> propertySetterCollectionHistory;
@@ -351,8 +356,15 @@ public class MigrationManager implements IMigrationManager {
                                                     outputValue.put(FIELD_NAME_TYPE, FIELD_NAME_IMAGE);
                                                 } else if (!isNullOrEmpty(((Map) valueAlternative).get(FIELD_NAME_EXPRESSIONS))) {
                                                     outputValue.put(FIELD_NAME_TYPE, FIELD_NAME_QUICK_REPLY);
-                                                } else if (!isNullOrEmpty(((Map) valueAlternative).get(FIELD_NAME_VALIDATION))) {
+                                                } else if (!isNullOrEmpty(((Map) valueAlternative).get(FIELD_NAME_PLACEHOLDER))) {
                                                     outputValue.put(FIELD_NAME_TYPE, FIELD_NAME_INPUT_FIELD);
+                                                    if (outputValue.containsKey(OLD_FIELD_NAME_IS_PASSWORD)) {
+                                                        var isPassword =
+                                                                parseBoolean(outputValue.get(OLD_FIELD_NAME_IS_PASSWORD).toString());
+                                                        if (isPassword) {
+                                                            outputValue.put(FIELD_NAME_SUB_TYPE, "password");
+                                                        }
+                                                    }
                                                 } else if (!isNullOrEmpty(((Map) valueAlternative).get(FIELD_NAME_ON_PRESS))) {
                                                     outputValue.put(FIELD_NAME_TYPE, FIELD_NAME_BUTTON);
                                                 } else {
@@ -361,6 +373,9 @@ public class MigrationManager implements IMigrationManager {
 
                                                 convertedOutput = true;
                                             }
+
+                                            type = outputValue.get(FIELD_NAME_TYPE);
+
 
                                             if (type.equals(FIELD_NAME_TEXT)) {
                                                 removeNonSupportedProperties(outputValue, FIELD_NAME_TEXT, FIELD_NAME_DELAY);
@@ -371,8 +386,9 @@ public class MigrationManager implements IMigrationManager {
                                             }
 
                                             if (type.equals(FIELD_NAME_INPUT_FIELD)) {
-                                                removeNonSupportedProperties(outputValue,
-                                                        FIELD_NAME_LABEL, FIELD_NAME_DEFAULT_VALUE, FIELD_NAME_VALIDATION);
+                                                removeNonSupportedProperties(outputValue, FIELD_NAME_SUB_TYPE,
+                                                        FIELD_NAME_LABEL, FIELD_NAME_DEFAULT_VALUE, FIELD_NAME_PLACEHOLDER,
+                                                        FIELD_NAME_VALIDATION);
                                             }
 
                                             if (type.equals(FIELD_NAME_BUTTON)) {
@@ -398,11 +414,14 @@ public class MigrationManager implements IMigrationManager {
     }
 
     private void removeNonSupportedProperties(Map<String, Object> outputValue, String... fieldNames) {
+        var toBeRemoved = new LinkedList<String>();
         for (String outputKey : outputValue.keySet()) {
             if (!outputKey.equals(FIELD_NAME_TYPE) && !Arrays.asList(fieldNames).contains(outputKey)) {
-                outputValue.remove(outputKey);
+                toBeRemoved.add(outputKey);
             }
         }
+
+        toBeRemoved.forEach(outputValue::remove);
     }
 
     private IDocumentMigration migrateConversationMemory() {
