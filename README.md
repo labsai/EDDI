@@ -4,7 +4,8 @@
 
 # E.D.D.I
 
-Scalable Open Source Chatbot Platform. Build multiple Chatbots with NLP, Behavior Rules, API Connector, Templating.
+Scalable Open Source Chatbot Platform. Build multiple conversational bots with NLP, Behavior Rules, API Connector,
+Templating.
 Developed in Java (with Quarkus), provided with Docker, orchestrated with Kubernetes or Openshift.
 
 v5.0.0 - Stable
@@ -20,8 +21,7 @@ Documentation: [here](https://docs.labs.ai/)
 ## Intro
 
 The Chatbot System - E.D.D.I \(Enhanced Dialog Driven Intelligence\),
-has been developed with the focus on the use in enterprise applications as well as the ease of connecting it
-to other resources \(such as databases or other Services\).
+has been developed with the focus on running it in cloud environments such as plain docker, kubernetes or openshift
 
 The most outstanding features are:
 
@@ -37,7 +37,7 @@ technical spec:
 * JAX-RS
 * Dependency Injection
 * Prometheus integration (Metrics endpoint)
-* Kubernetes integration (Liveness/Readyness endpoint)
+* Kubernetes integration (Liveness/Readiness endpoint)
 * MongoDB for storing bot configurations and conversation memories
 * OAuth 2.0 (Keycloak)
 * HTML, CSS, Javascript (Dashboard & Basic Chat UI)
