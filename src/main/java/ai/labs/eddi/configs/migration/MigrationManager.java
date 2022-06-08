@@ -48,11 +48,17 @@ public class MigrationManager implements IMigrationManager {
     public static final String FIELD_NAME_VALUE = "value";
     public static final String FIELD_NAME_SET_ON_ACTIONS = "setOnActions";
     public static final String FIELD_NAME_CONVERSATION_PROPERTIES = "conversationProperties";
+    public static final String FIELD_NAME_BUTTON = "button";
+    public static final String FIELD_NAME_LABEL = "label";
+    public static final String FIELD_NAME_DEFAULT_VALUE = "defaultValue";
+    public static final String FIELD_NAME_VALIDATION = "validation";
+    public static final String FIELD_NAME_BUTTON_TYPE = "buttonType";
+    public static final String FIELD_NAME_ON_PRESS = "onPress";
+    public static final String FIELD_NAME_INPUT_FIELD = "inputField";
     public static final String FIELD_NAME_ALT = "alt";
     public static final String FIELD_NAME_DELAY = "delay";
     public static final String FIELD_NAME_TARGET_SERVER_URL = "targetServerUrl";
     public static final String OLD_FIELD_NAME_TARGET_SERVER = "targetServer";
-
     public static final String COLLECTION_OUTPUTS = "outputs";
     public static final String COLLECTION_HTTPCALLS = "httpcalls";
     public static final String COLLECTION_PROPERTYSETTER = "propertysetter";
@@ -338,13 +344,17 @@ public class MigrationManager implements IMigrationManager {
                                             convertedOutput = true;
                                         } else if (valueAlternative instanceof Map outputValue) {
                                             var type = outputValue.get(FIELD_NAME_TYPE);
-                                            if (isNullOrEmpty(type)) {
+                                            if (isNullOrEmpty(type) || type.equals(FIELD_NAME_OTHER)) {
                                                 if (!isNullOrEmpty(outputValue.get(FIELD_NAME_TEXT))) {
                                                     outputValue.put(FIELD_NAME_TYPE, FIELD_NAME_TEXT);
                                                 } else if (!isNullOrEmpty(((Map) valueAlternative).get(FIELD_NAME_URI))) {
                                                     outputValue.put(FIELD_NAME_TYPE, FIELD_NAME_IMAGE);
                                                 } else if (!isNullOrEmpty(((Map) valueAlternative).get(FIELD_NAME_EXPRESSIONS))) {
                                                     outputValue.put(FIELD_NAME_TYPE, FIELD_NAME_QUICK_REPLY);
+                                                } else if (!isNullOrEmpty(((Map) valueAlternative).get(FIELD_NAME_VALIDATION))) {
+                                                    outputValue.put(FIELD_NAME_TYPE, FIELD_NAME_INPUT_FIELD);
+                                                } else if (!isNullOrEmpty(((Map) valueAlternative).get(FIELD_NAME_ON_PRESS))) {
+                                                    outputValue.put(FIELD_NAME_TYPE, FIELD_NAME_BUTTON);
                                                 } else {
                                                     outputValue.put(FIELD_NAME_TYPE, FIELD_NAME_OTHER);
                                                 }
@@ -358,6 +368,16 @@ public class MigrationManager implements IMigrationManager {
 
                                             if (type.equals(FIELD_NAME_IMAGE)) {
                                                 removeNonSupportedProperties(outputValue, FIELD_NAME_URI, FIELD_NAME_ALT);
+                                            }
+
+                                            if (type.equals(FIELD_NAME_INPUT_FIELD)) {
+                                                removeNonSupportedProperties(outputValue,
+                                                        FIELD_NAME_LABEL, FIELD_NAME_DEFAULT_VALUE, FIELD_NAME_VALIDATION);
+                                            }
+
+                                            if (type.equals(FIELD_NAME_BUTTON)) {
+                                                removeNonSupportedProperties(outputValue,
+                                                        FIELD_NAME_BUTTON_TYPE, FIELD_NAME_LABEL, FIELD_NAME_ON_PRESS);
                                             }
                                         }
                                     }

@@ -17,6 +17,8 @@ import lombok.Setter;
         @JsonSubTypes.Type(value = ImageOutputItem.class, name = "image"),
         @JsonSubTypes.Type(value = BotFaceOutputItem.class, name = "botFace"),
         @JsonSubTypes.Type(value = QuickReplyOutputItem.class, name = "quickReply"),
+        @JsonSubTypes.Type(value = InputFieldOutputItem.class, name = "inputField"),
+        @JsonSubTypes.Type(value = ButtonOutputItem.class, name = "button"),
         @JsonSubTypes.Type(value = OtherOutputItem.class, name = "other")
 })
 @Getter
