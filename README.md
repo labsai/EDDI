@@ -114,10 +114,10 @@ docker-compose -f docker-compose.yml -f docker-compose.local.yml -f docker-compo
 
 Liveness endpoint:
 ```bash
-<eddi-instance>/q/health/liveness
+<eddi-instance>/q/health/live
 ```
 
-Readyness endpoint:
+Readiness endpoint:
 ```bash
-<eddi-instance>/q/health/readyness
+<eddi-instance>/q/health/ready
 ```
