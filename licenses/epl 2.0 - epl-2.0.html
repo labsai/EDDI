@@ -1,0 +1,1159 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta http-equiv="X-UA-Compatible" content="IE=edge">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <!-- Google Tag Manager -->
+    <script>(function (w, d, s, l, i) {
+        w[l] = w[l] || [];
+        w[l].push({
+            'gtm.start':
+                new Date().getTime(), event: 'gtm.js'
+        });
+        var f = d.getElementsByTagName(s)[0],
+            j = d.createElement(s), dl = l != 'dataLayer' ? '&l=' + l : '';
+        j.async = true;
+        j.src =
+            'https://www.googletagmanager.com/gtm.js?id=' + i + dl;
+        f.parentNode.insertBefore(j, f);
+    })(window, document, 'script', 'dataLayer', 'GTM-5WLCZXC');</script>
+    <!-- End Google Tag Manager -->
+    <meta name="author" content="Wayne Beaton"/>
+    <meta name="keywords"
+          content="eclipse,project,plug-ins,plugins,java,ide,swt,refactoring,free java ide,tools,platform,open source,development environment,development,ide"/>
+    <link rel="shortcut icon" href="/eclipse.org-common/themes/solstice/public/images/favicon.ico"/>
+    <title>Eclipse Public License 2.0 | The Eclipse Foundation</title>
+    <link rel="preconnect stylesheet"
+          href="/eclipse.org-common/themes/solstice/public/stylesheets/quicksilver.min.css?v0.180"/>
+    <meta name="description"
+          content="The Eclipse Foundation - home to a global community, the Eclipse IDE, Jakarta EE and over 415 open source projects, including runtimes, tools and frameworks."/>
+    <meta property="og:description"
+          content="The Eclipse Foundation - home to a global community, the Eclipse IDE, Jakarta EE and over 415 open source projects, including runtimes, tools and frameworks."/>
+    <meta property="og:image"
+          content="https://www.eclipse.org/eclipse.org-common/themes/solstice/public/images/logo/eclipse-foundation-200x200.png"/>
+    <meta property="og:title" content="Eclipse Public License 2.0 | The Eclipse Foundation"/>
+    <meta property="og:image:width" content="200"/>
+    <meta property="og:image:height" content="200"/>
+    <meta itemprop="name" content="Eclipse Public License 2.0 | The Eclipse Foundation"/>
+    <meta itemprop="description"
+          content="The Eclipse Foundation - home to a global community, the Eclipse IDE, Jakarta EE and over 415 open source projects, including runtimes, tools and frameworks."/>
+    <meta itemprop="image"
+          content="https://www.eclipse.org/eclipse.org-common/themes/solstice/public/images/logo/eclipse-foundation-400x400.png"/>
+    <meta name="twitter:site" content="@EclipseFdn"/>
+    <meta name="twitter:card" content="summary"/>
+    <meta name="twitter:title" content="Eclipse Public License 2.0 | The Eclipse Foundation"/>
+    <meta name="twitter:url" content="http://www.eclipse.org/legal/epl-2.0/"/>
+    <meta name="twitter:description"
+          content="The Eclipse Foundation - home to a global community, the Eclipse IDE, Jakarta EE and over 415 open source projects, including runtimes, tools and frameworks."/>
+    <meta name="twitter:image"
+          content="https://www.eclipse.org/eclipse.org-common/themes/solstice/public/images/logo/eclipse-foundation-400x400.png"/>
+    <link href="https://fonts.googleapis.com/css2?family=Libre+Franklin:ital,wght@0,100;0,200;0,300;0,400;0,500;0,600;0,700;0,800;0,900;1,100;1,200;1,300;1,400;1,500;1,600;1,700;1,800;1,900&family=Roboto:ital,wght@0,100;0,300;0,400;0,500;0,700;0,900;1,100;1,300;1,400;1,500;1,700;1,900&display=swap"
+          rel="preconnect stylesheet" type="text/css"/>
+    <script> var eclipse_org_common = {
+        "settings": {
+            "cookies_class": {
+                "name": "eclipse_settings",
+                "enabled": 1
+            }
+        }
+    }</script>
+</head>
+<body id="body_solstice">
+<!-- Google Tag Manager (noscript) -->
+<noscript>
+    <iframe src="https://www.googletagmanager.com/ns.html?id=GTM-5WLCZXC"
+            height="0" width="0" style="display:none;visibility:hidden"></iframe>
+</noscript>
+<!-- End Google Tag Manager (noscript) --> <a class="sr-only" href="#content">Skip to main content</a>
+<header class="header-wrapper" id="header-wrapper">
+    <div class="clearfix toolbar-container-wrapper">
+        <div class="container">
+            <div class="text-right toolbar-row row hidden-print">
+                <div class="col-md-24 row-toolbar-col">
+                    <ul class="list-inline">
+                        <li><a class="toolbar-link"
+                               href="https://accounts.eclipse.org/user/login/?takemeback=http%3A%2F%2Fwww.eclipse.org%2Flegal%2Fepl-2.0%2F"><i
+                                class="fa fa-sign-in"></i> Log in</a></li>
+                        <li><a class="toolbar-link toolbar-manage-cookies dropdown-toggle"><i class="fa fa-wrench"></i>
+                            Manage Cookies</a></li>
+                    </ul>
+                </div>
+
+            </div>
+        </div>
+    </div>
+    <div class="container">
+        <div class="row" id="header-row">
+            <div class="col-sm-5 col-md-4" id="header-left">
+                <div class="wrapper-logo-default"><a href="http://www.eclipse.org/"><img
+                        class="logo-eclipse-default hidden-xs" alt="Eclipse.org logo" width="160"
+                        src="//www.eclipse.org/eclipse.org-common/themes/solstice/public/images/logo/eclipse-foundation-white-orange.svg"/></a>
+                </div>
+            </div>
+            <div class="col-sm-19 col-md-20 margin-top-10" id="main-menu-wrapper">
+                <div class="float-right hidden-xs" id="btn-call-for-action"><a href="/downloads/"
+                                                                               class="btn btn-huge btn-warning"><i
+                        class="fa fa-download"></i> Download</a></div>
+                <div class="navbar yamm float-sm-right" id="main-menu">
+                    <div class="navbar-collapse collapse" id="navbar-main-menu">
+                        <ul class="nav navbar-nav">
+                            <li><a href="http://www.eclipse.org/projects/" target="_self">Projects</a></li>
+                            <li><a href="http://www.eclipse.org/org/workinggroups/" target="_self">Working Groups</a>
+                            </li>
+                            <li><a href="http://www.eclipse.org/membership/" target="_self">Members</a></li>
+                            <li class="dropdown visible-xs"><a href="#" data-toggle="dropdown" class="dropdown-toggle">Community
+                                <b class="caret"></b></a>
+                                <ul class="dropdown-menu">
+                                    <li><a href="http://marketplace.eclipse.org">Marketplace</a></li>
+                                    <li><a href="http://events.eclipse.org">Events</a></li>
+                                    <li><a href="http://www.planeteclipse.org/">Planet Eclipse</a></li>
+                                    <li><a href="http://www.eclipse.org/community/eclipse_newsletter/">Newsletter</a>
+                                    </li>
+                                    <li><a href="https://www.youtube.com/user/EclipseFdn">Videos</a></li>
+                                    <li><a href="https://blogs.eclipse.org">Blogs</a></li>
+                                </ul>
+                            </li>
+                            <li class="dropdown visible-xs"><a href="#" data-toggle="dropdown" class="dropdown-toggle">Participate
+                                <b class="caret"></b></a>
+                                <ul class="dropdown-menu">
+                                    <li><a href="https://bugs.eclipse.org/bugs/">Report a Bug</a></li>
+                                    <li><a href="http://www.eclipse.org/forums/">Forums</a></li>
+                                    <li><a href="http://www.eclipse.org/mail/">Mailing Lists</a></li>
+                                    <li><a href="https://wiki.eclipse.org/">Wiki</a></li>
+                                    <li><a href="https://wiki.eclipse.org/IRC">IRC</a></li>
+                                    <li><a href="https://www.eclipse.org/org/research/">Research</a></li>
+                                </ul>
+                            </li>
+                            <li class="dropdown visible-xs"><a href="#" data-toggle="dropdown" class="dropdown-toggle">Eclipse
+                                IDE <b class="caret"></b></a>
+                                <ul class="dropdown-menu">
+                                    <li><a href="http://www.eclipse.org/downloads">Download</a></li>
+                                    <li><a href="http://www.eclipse.org/eclipseide">Learn More</a></li>
+                                    <li><a href="https://help.eclipse.org">Documentation</a></li>
+                                    <li><a href="http://www.eclipse.org/getting_started">Getting Started / Support</a>
+                                    </li>
+                                    <li><a href="http://www.eclipse.org/contribute/">How to Contribute</a></li>
+                                    <li><a href="http://www.eclipse.org/ide/">IDE and Tools</a></li>
+                                    <li><a href="https://www.eclipse.org/forums/index.php/f/89/">Newcomer Forum</a></li>
+                                </ul>
+                            </li>          <!-- More -->
+                            <li class="dropdown eclipse-more hidden-xs">
+                                <a data-toggle="dropdown" class="dropdown-toggle" role="button">More<b
+                                        class="caret"></b></a>
+                                <ul class="dropdown-menu">
+                                    <li>
+                                        <!-- Content container to add padding -->
+                                        <div class="yamm-content">
+                                            <div class="row">
+                                                <ul class="col-sm-8 list-unstyled">
+                                                    <li><p><strong>Community</strong></p></li>
+                                                    <li><a href="http://marketplace.eclipse.org">Marketplace</a></li>
+                                                    <li><a href="http://events.eclipse.org">Events</a></li>
+                                                    <li><a href="http://www.planeteclipse.org/">Planet Eclipse</a></li>
+                                                    <li><a href="http://www.eclipse.org/community/eclipse_newsletter/">Newsletter</a>
+                                                    </li>
+                                                    <li><a href="https://www.youtube.com/user/EclipseFdn">Videos</a>
+                                                    </li>
+                                                    <li><a href="https://blogs.eclipse.org">Blogs</a></li>
+                                                </ul>
+                                                <ul class="col-sm-8 list-unstyled">
+                                                    <li><p><strong>Participate</strong></p></li>
+                                                    <li><a href="https://bugs.eclipse.org/bugs/">Report a Bug</a></li>
+                                                    <li><a href="http://www.eclipse.org/forums/">Forums</a></li>
+                                                    <li><a href="http://www.eclipse.org/mail/">Mailing Lists</a></li>
+                                                    <li><a href="https://wiki.eclipse.org/">Wiki</a></li>
+                                                    <li><a href="https://wiki.eclipse.org/IRC">IRC</a></li>
+                                                    <li><a href="https://www.eclipse.org/org/research/">Research</a>
+                                                    </li>
+                                                </ul>
+                                                <ul class="col-sm-8 list-unstyled">
+                                                    <li><p><strong>Eclipse IDE</strong></p></li>
+                                                    <li><a href="http://www.eclipse.org/downloads">Download</a></li>
+                                                    <li><a href="http://www.eclipse.org/eclipseide">Learn More</a></li>
+                                                    <li><a href="https://help.eclipse.org">Documentation</a></li>
+                                                    <li><a href="http://www.eclipse.org/getting_started">Getting Started
+                                                        / Support</a></li>
+                                                    <li><a href="http://www.eclipse.org/contribute/">How to
+                                                        Contribute</a></li>
+                                                    <li><a href="http://www.eclipse.org/ide/">IDE and Tools</a></li>
+                                                    <li><a href="https://www.eclipse.org/forums/index.php/f/89/">Newcomer
+                                                        Forum</a></li>
+                                                </ul>
+                                            </div>
+                                        </div>
+                                    </li>
+                                </ul>
+                            </li>
+
+                        </ul>
+                    </div>
+                    <div class="navbar-header">
+                        <button type="button" class="navbar-toggle" data-toggle="collapse"
+                                data-target="#navbar-main-menu">
+                            <span class="sr-only">Toggle navigation</span>
+                            <span class="icon-bar"></span>
+                            <span class="icon-bar"></span>
+                            <span class="icon-bar"></span>
+                            <span class="icon-bar"></span>
+                        </button>
+                        <div class="wrapper-logo-mobile"><a class="navbar-brand visible-xs"
+                                                            href="http://www.eclipse.org/"><img
+                                class="logo-eclipse-default-mobile img-responsive" alt="Eclipse.org logo" width="160"
+                                src="//www.eclipse.org/eclipse.org-common/themes/solstice/public/images/logo/eclipse-foundation-white-orange.svg"/></a>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</header>
+<section class="default-breadcrumbs hidden-print breadcrumbs-default-margin" id="breadcrumb">
+    <div class="container">
+        <h3 class="sr-only">Breadcrumbs</h3>
+        <div class="row">
+            <div class="col-sm-24">
+                <ol class="breadcrumb">
+                    <li><a href="/">Home</a></li>
+                    <li><a href="http://www.eclipse.org/legal">Legal</a></li>
+                    <li class="active">Eclipse Public License 2.0</li>
+                </ol>
+            </div>
+        </div>
+    </div>
+</section> <!-- /#breadcrumb -->
+<main id="content">
+    <div class="novaContent container" id="novaContent">
+        <div class="row">
+            <div class="col-md-18 main-col-content">
+                <style type="text/css">
+                    #midcolumn h2 {
+                        font-size: 18px;
+                    }
+
+                    #midcolumn ul,
+                    #midcolumn ol {
+                        list-style-type: none;
+                    }
+                </style>
+                <div id="maincontent">
+                    <div id="midcolumn">
+
+                        <h1>Eclipse Public License - v 2.0</h1>
+                        <p>THE ACCOMPANYING PROGRAM IS PROVIDED UNDER THE TERMS OF THIS ECLIPSE
+                            PUBLIC LICENSE (“AGREEMENT”). ANY USE, REPRODUCTION OR DISTRIBUTION
+                            OF THE PROGRAM CONSTITUTES RECIPIENT'S ACCEPTANCE OF THIS AGREEMENT.
+                        </p>
+                        <h2 id="definitions">1. DEFINITIONS</h2>
+                        <p>“Contribution” means:</p>
+                        <ul>
+                            <li>a) in the case of the initial Contributor, the initial content
+                                Distributed under this Agreement, and
+                            </li>
+                            <li>
+                                b) in the case of each subsequent Contributor:
+                                <ul>
+                                    <li>i) changes to the Program, and</li>
+                                    <li>ii) additions to the Program;</li>
+                                </ul>
+                                where such changes and/or additions to the Program originate from
+                                and are Distributed by that particular Contributor. A Contribution
+                                “originates” from a Contributor if it was added to the Program by such
+                                Contributor itself or anyone acting on such Contributor's behalf.
+                                Contributions do not include changes or additions to the Program that
+                                are not Modified Works.
+                            </li>
+                        </ul>
+                        <p>“Contributor” means any person or entity that Distributes the Program.</p>
+                        <p>“Licensed Patents” mean patent claims licensable by a Contributor which
+                            are necessarily infringed by the use or sale of its Contribution alone
+                            or when combined with the Program.
+                        </p>
+                        <p>“Program” means the Contributions Distributed in accordance with this
+                            Agreement.
+                        </p>
+                        <p>“Recipient” means anyone who receives the Program under this Agreement
+                            or any Secondary License (as applicable), including Contributors.
+                        </p>
+                        <p>“Derivative Works” shall mean any work, whether in Source Code or other
+                            form, that is based on (or derived from) the Program and for which the
+                            editorial revisions, annotations, elaborations, or other modifications
+                            represent, as a whole, an original work of authorship.
+                        </p>
+                        <p>“Modified Works” shall mean any work in Source Code or other form that
+                            results from an addition to, deletion from, or modification of the
+                            contents of the Program, including, for purposes of clarity any new file
+                            in Source Code form that contains any contents of the Program. Modified
+                            Works shall not include works that contain only declarations, interfaces,
+                            types, classes, structures, or files of the Program solely in each case
+                            in order to link to, bind by name, or subclass the Program or Modified
+                            Works thereof.
+                        </p>
+                        <p>“Distribute” means the acts of a) distributing or b) making available
+                            in any manner that enables the transfer of a copy.
+                        </p>
+                        <p>“Source Code” means the form of a Program preferred for making
+                            modifications, including but not limited to software source code,
+                            documentation source, and configuration files.
+                        </p>
+                        <p>“Secondary License” means either the GNU General Public License,
+                            Version 2.0, or any later versions of that license, including any
+                            exceptions or additional permissions as identified by the initial
+                            Contributor.
+                        </p>
+                        <h2 id="grant-of-rights">2. GRANT OF RIGHTS</h2>
+                        <ul>
+                            <li>a) Subject to the terms of this Agreement, each Contributor hereby
+                                grants Recipient a non-exclusive, worldwide, royalty-free copyright
+                                license to reproduce, prepare Derivative Works of, publicly display,
+                                publicly perform, Distribute and sublicense the Contribution of such
+                                Contributor, if any, and such Derivative Works.
+                            </li>
+                            <li>b) Subject to the terms of this Agreement, each Contributor hereby
+                                grants Recipient a non-exclusive, worldwide, royalty-free patent
+                                license under Licensed Patents to make, use, sell, offer to sell,
+                                import and otherwise transfer the Contribution of such Contributor,
+                                if any, in Source Code or other form. This patent license shall
+                                apply to the combination of the Contribution and the Program if,
+                                at the time the Contribution is added by the Contributor, such
+                                addition of the Contribution causes such combination to be covered
+                                by the Licensed Patents. The patent license shall not apply to any
+                                other combinations which include the Contribution. No hardware per
+                                se is licensed hereunder.
+                            </li>
+                            <li>c) Recipient understands that although each Contributor grants the
+                                licenses to its Contributions set forth herein, no assurances are
+                                provided by any Contributor that the Program does not infringe the
+                                patent or other intellectual property rights of any other entity.
+                                Each Contributor disclaims any liability to Recipient for claims
+                                brought by any other entity based on infringement of intellectual
+                                property rights or otherwise. As a condition to exercising the rights
+                                and licenses granted hereunder, each Recipient hereby assumes sole
+                                responsibility to secure any other intellectual property rights needed,
+                                if any. For example, if a third party patent license is required to
+                                allow Recipient to Distribute the Program, it is Recipient's
+                                responsibility to acquire that license before distributing the Program.
+                            </li>
+                            <li>d) Each Contributor represents that to its knowledge it has sufficient
+                                copyright rights in its Contribution, if any, to grant the copyright
+                                license set forth in this Agreement.
+                            </li>
+                            <li>e) Notwithstanding the terms of any Secondary License, no Contributor
+                                makes additional grants to any Recipient (other than those set forth
+                                in this Agreement) as a result of such Recipient's receipt of the
+                                Program under the terms of a Secondary License (if permitted under
+                                the terms of Section 3).
+                            </li>
+                        </ul>
+                        <h2 id="requirements">3. REQUIREMENTS</h2>
+                        <p>3.1 If a Contributor Distributes the Program in any form, then:</p>
+                        <ul>
+                            <li>a) the Program must also be made available as Source Code, in
+                                accordance with section 3.2, and the Contributor must accompany
+                                the Program with a statement that the Source Code for the Program
+                                is available under this Agreement, and informs Recipients how to
+                                obtain it in a reasonable manner on or through a medium customarily
+                                used for software exchange; and
+                            </li>
+                            <li>
+                                b) the Contributor may Distribute the Program under a license
+                                different than this Agreement, provided that such license:
+                                <ul>
+                                    <li>i) effectively disclaims on behalf of all other Contributors all
+                                        warranties and conditions, express and implied, including warranties
+                                        or conditions of title and non-infringement, and implied warranties
+                                        or conditions of merchantability and fitness for a particular purpose;
+                                    </li>
+                                    <li>ii) effectively excludes on behalf of all other Contributors all
+                                        liability for damages, including direct, indirect, special, incidental
+                                        and consequential damages, such as lost profits;
+                                    </li>
+                                    <li>iii) does not attempt to limit or alter the recipients' rights in the
+                                        Source Code under section 3.2; and
+                                    </li>
+                                    <li>iv) requires any subsequent distribution of the Program by any party
+                                        to be under a license that satisfies the requirements of this section 3.
+                                    </li>
+                                </ul>
+                            </li>
+                        </ul>
+                        <p>3.2 When the Program is Distributed as Source Code:</p>
+                        <ul>
+                            <li>a) it must be made available under this Agreement, or if the Program (i)
+                                is combined with other material in a separate file or files made available
+                                under a Secondary License, and (ii) the initial Contributor attached to
+                                the Source Code the notice described in Exhibit A of this Agreement,
+                                then the Program may be made available under the terms of such
+                                Secondary Licenses, and
+                            </li>
+                            <li>b) a copy of this Agreement must be included with each copy of the Program.</li>
+                        </ul>
+                        <p>3.3 Contributors may not remove or alter any copyright, patent, trademark,
+                            attribution notices, disclaimers of warranty, or limitations of liability
+                            (‘notices’) contained within the Program from any copy of the Program which
+                            they Distribute, provided that Contributors may add their own appropriate
+                            notices.
+                        </p>
+                        <h2 id="commercial-distribution">4. COMMERCIAL DISTRIBUTION</h2>
+                        <p>Commercial distributors of software may accept certain responsibilities
+                            with respect to end users, business partners and the like. While this
+                            license is intended to facilitate the commercial use of the Program, the
+                            Contributor who includes the Program in a commercial product offering should
+                            do so in a manner which does not create potential liability for other
+                            Contributors. Therefore, if a Contributor includes the Program in a
+                            commercial product offering, such Contributor (“Commercial Contributor”)
+                            hereby agrees to defend and indemnify every other Contributor
+                            (“Indemnified Contributor”) against any losses, damages and costs
+                            (collectively “Losses”) arising from claims, lawsuits and other legal actions
+                            brought by a third party against the Indemnified Contributor to the extent
+                            caused by the acts or omissions of such Commercial Contributor in connection
+                            with its distribution of the Program in a commercial product offering.
+                            The obligations in this section do not apply to any claims or Losses relating
+                            to any actual or alleged intellectual property infringement. In order to
+                            qualify, an Indemnified Contributor must: a) promptly notify the
+                            Commercial Contributor in writing of such claim, and b) allow the Commercial
+                            Contributor to control, and cooperate with the Commercial Contributor in,
+                            the defense and any related settlement negotiations. The Indemnified
+                            Contributor may participate in any such claim at its own expense.
+                        </p>
+                        <p>For example, a Contributor might include the Program
+                            in a commercial product offering, Product X. That Contributor is then a
+                            Commercial Contributor. If that Commercial Contributor then makes performance
+                            claims, or offers warranties related to Product X, those performance claims
+                            and warranties are such Commercial Contributor's responsibility alone.
+                            Under this section, the Commercial Contributor would have to defend claims
+                            against the other Contributors related to those performance claims and
+                            warranties, and if a court requires any other Contributor to pay any damages
+                            as a result, the Commercial Contributor must pay those damages.
+                        </p>
+                        <h2 id="warranty">5. NO WARRANTY</h2>
+                        <p>EXCEPT AS EXPRESSLY SET FORTH IN THIS AGREEMENT, AND TO THE EXTENT PERMITTED
+                            BY APPLICABLE LAW, THE PROGRAM IS PROVIDED ON AN “AS IS” BASIS, WITHOUT
+                            WARRANTIES OR CONDITIONS OF ANY KIND, EITHER EXPRESS OR IMPLIED INCLUDING,
+                            WITHOUT LIMITATION, ANY WARRANTIES OR CONDITIONS OF TITLE, NON-INFRINGEMENT,
+                            MERCHANTABILITY OR FITNESS FOR A PARTICULAR PURPOSE. Each Recipient is
+                            solely responsible for determining the appropriateness of using and
+                            distributing the Program and assumes all risks associated with its
+                            exercise of rights under this Agreement, including but not limited to the
+                            risks and costs of program errors, compliance with applicable laws, damage
+                            to or loss of data, programs or equipment, and unavailability or
+                            interruption of operations.
+                        </p>
+                        <h2 id="disclaimer">6. DISCLAIMER OF LIABILITY</h2>
+                        <p>EXCEPT AS EXPRESSLY SET FORTH IN THIS AGREEMENT, AND TO THE EXTENT PERMITTED
+                            BY APPLICABLE LAW, NEITHER RECIPIENT NOR ANY CONTRIBUTORS SHALL HAVE ANY
+                            LIABILITY FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY,
+                            OR CONSEQUENTIAL DAMAGES (INCLUDING WITHOUT LIMITATION LOST PROFITS),
+                            HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+                            LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY
+                            OUT OF THE USE OR DISTRIBUTION OF THE PROGRAM OR THE EXERCISE OF ANY RIGHTS
+                            GRANTED HEREUNDER, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGES.
+                        </p>
+                        <h2 id="general">7. GENERAL</h2>
+                        <p>If any provision of this Agreement is invalid or unenforceable under
+                            applicable law, it shall not affect the validity or enforceability of the
+                            remainder of the terms of this Agreement, and without further action by the
+                            parties hereto, such provision shall be reformed to the minimum extent
+                            necessary to make such provision valid and enforceable.
+                        </p>
+                        <p>If Recipient institutes patent litigation against any entity (including a
+                            cross-claim or counterclaim in a lawsuit) alleging that the Program itself
+                            (excluding combinations of the Program with other software or hardware)
+                            infringes such Recipient's patent(s), then such Recipient's rights granted
+                            under Section 2(b) shall terminate as of the date such litigation is filed.
+                        </p>
+                        <p>All Recipient's rights under this Agreement shall terminate if it fails to
+                            comply with any of the material terms or conditions of this Agreement and
+                            does not cure such failure in a reasonable period of time after becoming
+                            aware of such noncompliance. If all Recipient's rights under this Agreement
+                            terminate, Recipient agrees to cease use and distribution of the Program
+                            as soon as reasonably practicable. However, Recipient's obligations under
+                            this Agreement and any licenses granted by Recipient relating to the
+                            Program shall continue and survive.
+                        </p>
+                        <p>Everyone is permitted to copy and distribute copies of this Agreement,
+                            but in order to avoid inconsistency the Agreement is copyrighted and may
+                            only be modified in the following manner. The Agreement Steward reserves
+                            the right to publish new versions (including revisions) of this Agreement
+                            from time to time. No one other than the Agreement Steward has the right
+                            to modify this Agreement. The Eclipse Foundation is the initial Agreement
+                            Steward. The Eclipse Foundation may assign the responsibility to serve as
+                            the Agreement Steward to a suitable separate entity. Each new version of
+                            the Agreement will be given a distinguishing version number. The Program
+                            (including Contributions) may always be Distributed subject to the version
+                            of the Agreement under which it was received. In addition, after a new
+                            version of the Agreement is published, Contributor may elect to Distribute
+                            the Program (including its Contributions) under the new version.
+                        </p>
+                        <p>Except as expressly stated in Sections 2(a) and 2(b) above, Recipient
+                            receives no rights or licenses to the intellectual property of any
+                            Contributor under this Agreement, whether expressly, by implication,
+                            estoppel or otherwise. All rights in the Program not expressly granted
+                            under this Agreement are reserved. Nothing in this Agreement is intended
+                            to be enforceable by any entity that is not a Contributor or Recipient.
+                            No third-party beneficiary rights are created under this Agreement.
+                        </p>
+                        <h2 id="exhibit-a">Exhibit A – Form of Secondary Licenses Notice</h2>
+                        <p>“This Source Code may also be made available under the following
+                            Secondary Licenses when the conditions for such availability set forth
+                            in the Eclipse Public License, v. 2.0 are satisfied: {name license(s),
+                            version(s), and exceptions or additional permissions here}.”
+                        </p>
+                        <blockquote>
+                            <p>Simply including a copy of this Agreement, including this Exhibit A
+                                is not sufficient to license the Source Code under Secondary Licenses.
+                            </p>
+                            <p>If it is not possible or desirable to put the notice in a particular file,
+                                then You may include the notice in a location (such as a LICENSE file in a
+                                relevant directory) where a recipient would be likely to look for
+                                such a notice.
+                            </p>
+                            <p>You may add additional accurate notices of copyright ownership.</p>
+                        </blockquote>
+                    </div>
+                    <div id="rightcolumn">
+                        <div class="sideitem">
+                            <h6>Eclipse Projects that Use EPL 2.0</h6>
+                            <ul>
+                                <li><a href="https://projects.eclipse.org/projects/adoptium">Eclipse Adoptium</a></li>
+                                <li><a href="https://projects.eclipse.org/projects/adoptium.aqavit">Eclipse AQAvit</a>
+                                </li>
+                                <li><a href="https://projects.eclipse.org/projects/adoptium.incubator">Eclipse Adoptium
+                                    Incubator</a></li>
+                                <li><a href="https://projects.eclipse.org/projects/adoptium.temurin">Eclipse Temurin</a>
+                                </li>
+                                <li><a href="https://projects.eclipse.org/projects/adoptium.temurin-compliance">Eclipse
+                                    Temurin Compliance</a></li>
+                                <li><a href="https://projects.eclipse.org/projects/asciidoc">Eclipse AsciiDoc</a></li>
+                                <li><a href="https://projects.eclipse.org/projects/asciidoc.asciidoc-lang">Eclipse
+                                    AsciiDoc Language</a></li>
+                                <li><a href="https://projects.eclipse.org/projects/asciidoc.austen">Eclipse Austen</a>
+                                </li>
+                                <li><a href="https://projects.eclipse.org/projects/automotive">Eclipse Automotive</a>
+                                </li>
+                                <li><a href="https://projects.eclipse.org/projects/automotive.adore">Eclipse Adore</a>
+                                </li>
+                                <li><a href="https://projects.eclipse.org/projects/automotive.app4mc">Eclipse APP4MC</a>
+                                </li>
+                                <li><a href="https://projects.eclipse.org/projects/automotive.kuksa">Eclipse Kuksa</a>
+                                </li>
+                                <li><a href="https://projects.eclipse.org/projects/automotive.mdmbl">Eclipse MDM|BL</a>
+                                </li>
+                                <li><a href="https://projects.eclipse.org/projects/automotive.mosaic">Eclipse MOSAIC</a>
+                                </li>
+                                <li><a href="https://projects.eclipse.org/projects/automotive.simopenpass">Eclipse
+                                    sim@openPASS</a></li>
+                                <li><a href="https://projects.eclipse.org/projects/automotive.sumo">Eclipse Sumo</a>
+                                </li>
+                                <li><a href="https://projects.eclipse.org/projects/ecd">Eclipse Cloud Development</a>
+                                </li>
+                                <li><a href="https://projects.eclipse.org/projects/ecd.cdt-cloud">Eclipse CDT.cloud</a>
+                                </li>
+                                <li><a href="https://projects.eclipse.org/projects/ecd.che">Eclipse Che</a></li>
+                                <li><a href="https://projects.eclipse.org/projects/ecd.che.che4z">Eclipse Che4z</a></li>
+                                <li><a href="https://projects.eclipse.org/projects/ecd.codewind">Eclipse Codewind</a>
+                                </li>
+                                <li><a href="https://projects.eclipse.org/projects/ecd.dirigible">Eclipse Dirigible</a>
+                                </li>
+                                <li><a href="https://projects.eclipse.org/projects/ecd.emfcloud">Eclipse EMF Cloud</a>
+                                </li>
+                                <li><a href="https://projects.eclipse.org/projects/ecd.glsp">Eclipse GLSP</a></li>
+                                <li><a href="https://projects.eclipse.org/projects/ecd.jkube">Eclipse JKube</a></li>
+                                <li><a href="https://projects.eclipse.org/projects/ecd.novamoon">Eclipse NovaMoon</a>
+                                </li>
+                                <li><a href="https://projects.eclipse.org/projects/ecd.openvsx">Eclipse Open VSX</a>
+                                </li>
+                                <li><a href="https://projects.eclipse.org/projects/ecd.sprotty">Eclipse Sprotty</a></li>
+                                <li><a href="https://projects.eclipse.org/projects/ecd.theia">Eclipse Theia</a></li>
+                                <li><a href="https://projects.eclipse.org/projects/eclipse">Eclipse Project</a></li>
+                                <li><a href="https://projects.eclipse.org/projects/eclipse.equinox">Eclipse Equinox</a>
+                                </li>
+                                <li><a href="https://projects.eclipse.org/projects/eclipse.jdt">Eclipse JDT</a></li>
+                                <li><a href="https://projects.eclipse.org/projects/eclipse.jdt.ls">Eclipse JDT LS</a>
+                                </li>
+                                <li><a href="https://projects.eclipse.org/projects/eclipse.pde">Eclipse Plug-in
+                                    Development Environment</a></li>
+                                <li><a href="https://projects.eclipse.org/projects/eclipse.platform">Eclipse
+                                    Platform</a></li>
+                                <li><a href="https://projects.eclipse.org/projects/ee4j">Eclipse Enterprise for Java</a>
+                                </li>
+                                <li><a href="https://projects.eclipse.org/projects/ee4j.angus">Eclipse Angus</a></li>
+                                <li><a href="https://projects.eclipse.org/projects/ee4j.authentication">Jakarta
+                                    Authentication</a></li>
+                                <li><a href="https://projects.eclipse.org/projects/ee4j.authorization">Jakarta
+                                    Authorization</a></li>
+                                <li><a href="https://projects.eclipse.org/projects/ee4j.ca">Jakarta Annotations</a></li>
+                                <li><a href="https://projects.eclipse.org/projects/ee4j.cu">Jakarta Concurrency</a></li>
+                                <li><a href="https://projects.eclipse.org/projects/ee4j.eclipselink">EclipseLink</a>
+                                </li>
+                                <li><a href="https://projects.eclipse.org/projects/ee4j.ejb">Jakarta Enterprise
+                                    Beans</a></li>
+                                <li><a href="https://projects.eclipse.org/projects/ee4j.el">Jakarta Expression
+                                    Language</a></li>
+                                <li><a href="https://projects.eclipse.org/projects/ee4j.es">Jakarta Security</a></li>
+                                <li><a href="https://projects.eclipse.org/projects/ee4j.exousia">Eclipse Exousia</a>
+                                </li>
+                                <li><a href="https://projects.eclipse.org/projects/ee4j.expressly">Eclipse ExpressLy</a>
+                                </li>
+                                <li><a href="https://projects.eclipse.org/projects/ee4j.faces">Jakarta Faces</a></li>
+                                <li><a href="https://projects.eclipse.org/projects/ee4j.glassfish">Eclipse GlassFish</a>
+                                </li>
+                                <li><a href="https://projects.eclipse.org/projects/ee4j.gransasso">Eclipse Gran
+                                    Sasso</a></li>
+                                <li><a href="https://projects.eclipse.org/projects/ee4j.grizzly">Eclipse Grizzly</a>
+                                </li>
+                                <li><a href="https://projects.eclipse.org/projects/ee4j.interceptors">Jakarta
+                                    Interceptors</a></li>
+                                <li><a href="https://projects.eclipse.org/projects/ee4j.jaf">Jakarta Activation</a></li>
+                                <li><a href="https://projects.eclipse.org/projects/ee4j.jakartaconfig">Jakarta
+                                    Config</a></li>
+                                <li><a href="https://projects.eclipse.org/projects/ee4j.jakartaee-platform">Jakarta EE
+                                    Platform</a></li>
+                                <li><a href="https://projects.eclipse.org/projects/ee4j.jakartaee-stable">Jakarta Stable
+                                    APIs</a></li>
+                                <li><a href="https://projects.eclipse.org/projects/ee4j.jakartaee-tck">Jakarta EE
+                                    TCK</a></li>
+                                <li><a href="https://projects.eclipse.org/projects/ee4j.jca">Jakarta Connectors</a></li>
+                                <li><a href="https://projects.eclipse.org/projects/ee4j.jersey">Eclipse Jersey</a></li>
+                                <li><a href="https://projects.eclipse.org/projects/ee4j.jpa">Jakarta Persistence</a>
+                                </li>
+                                <li><a href="https://projects.eclipse.org/projects/ee4j.jsonb">Jakarta JSON Binding</a>
+                                </li>
+                                <li><a href="https://projects.eclipse.org/projects/ee4j.jsonp">Jakarta JSON
+                                    Processing</a></li>
+                                <li><a href="https://projects.eclipse.org/projects/ee4j.jsp">Jakarta Server Pages</a>
+                                </li>
+                                <li><a href="https://projects.eclipse.org/projects/ee4j.jstl">Jakarta Standard Tag
+                                    Library</a></li>
+                                <li><a href="https://projects.eclipse.org/projects/ee4j.jta">Jakarta Transactions</a>
+                                </li>
+                                <li><a href="https://projects.eclipse.org/projects/ee4j.mail">Jakarta Mail</a></li>
+                                <li><a href="https://projects.eclipse.org/projects/ee4j.messaging">Jakarta Messaging</a>
+                                </li>
+                                <li><a href="https://projects.eclipse.org/projects/ee4j.mojarra">Eclipse Mojarra</a>
+                                </li>
+                                <li><a href="https://projects.eclipse.org/projects/ee4j.mvc">Jakarta MVC</a></li>
+                                <li><a href="https://projects.eclipse.org/projects/ee4j.nosql">Jakarta NoSQL</a></li>
+                                <li><a href="https://projects.eclipse.org/projects/ee4j.openmq">Eclipse OpenMQ</a></li>
+                                <li><a href="https://projects.eclipse.org/projects/ee4j.orb">Eclipse ORB</a></li>
+                                <li><a href="https://projects.eclipse.org/projects/ee4j.parsson">Eclipse Parsson</a>
+                                </li>
+                                <li><a href="https://projects.eclipse.org/projects/ee4j.rest">Jakarta RESTful Web
+                                    Services</a></li>
+                                <li><a href="https://projects.eclipse.org/projects/ee4j.servlet">Jakarta Servlet</a>
+                                </li>
+                                <li><a href="https://projects.eclipse.org/projects/ee4j.soteria">Eclipse Soteria</a>
+                                </li>
+                                <li><a href="https://projects.eclipse.org/projects/ee4j.starter">Eclipse Starter for
+                                    Jakarta EE</a></li>
+                                <li><a href="https://projects.eclipse.org/projects/ee4j.tyrus">Eclipse Tyrus</a></li>
+                                <li><a href="https://projects.eclipse.org/projects/ee4j.wasp">Eclipse WaSP</a></li>
+                                <li><a href="https://projects.eclipse.org/projects/ee4j.websocket">Jakarta WebSocket</a>
+                                </li>
+                                <li><a href="https://projects.eclipse.org/projects/ee4j.yasson">Eclipse Yasson</a></li>
+                                <li><a href="https://projects.eclipse.org/projects/iot">Eclipse IoT</a></li>
+                                <li><a href="https://projects.eclipse.org/projects/iot.4diac">Eclipse 4DIAC</a></li>
+                                <li><a href="https://projects.eclipse.org/projects/iot.amlen">Eclipse Amlen</a></li>
+                                <li><a href="https://projects.eclipse.org/projects/iot.arrowhead">Eclipse Arrowhead</a>
+                                </li>
+                                <li><a href="https://projects.eclipse.org/projects/iot.californium">Eclipse
+                                    Californium</a></li>
+                                <li><a href="https://projects.eclipse.org/projects/iot.cyclonedds">Eclipse Cyclone
+                                    DDS</a></li>
+                                <li><a href="https://projects.eclipse.org/projects/iot.diafanis">Eclipse Diafanis</a>
+                                </li>
+                                <li><a href="https://projects.eclipse.org/projects/iot.ditto">Eclipse Ditto</a></li>
+                                <li><a href="https://projects.eclipse.org/projects/iot.editdor">Eclipse EdiTDor</a></li>
+                                <li><a href="https://projects.eclipse.org/projects/iot.embed-cdt">Eclipse Embedded
+                                    CDT</a></li>
+                                <li><a href="https://projects.eclipse.org/projects/iot.fog05">Eclipse fog05</a></li>
+                                <li><a href="https://projects.eclipse.org/projects/iot.hawkbit.hara">Eclipse Hara</a>
+                                </li>
+                                <li><a href="https://projects.eclipse.org/projects/iot.hono">Eclipse Hono</a></li>
+                                <li><a href="https://projects.eclipse.org/projects/iot.iofog">Eclipse ioFog</a></li>
+                                <li><a href="https://projects.eclipse.org/projects/iot.kanto">Eclipse Kanto</a></li>
+                                <li><a href="https://projects.eclipse.org/projects/iot.kapua">Eclipse Kapua</a></li>
+                                <li><a href="https://projects.eclipse.org/projects/iot.keyple">Eclipse Keyple</a></li>
+                                <li><a href="https://projects.eclipse.org/projects/iot.kiso-testing">Eclipse
+                                    Kiso-testing</a></li>
+                                <li><a href="https://projects.eclipse.org/projects/iot.milo">Eclipse Milo</a></li>
+                                <li><a href="https://projects.eclipse.org/projects/iot.mita">Eclipse Mita</a></li>
+                                <li><a href="https://projects.eclipse.org/projects/iot.mosquitto">Eclipse Mosquitto</a>
+                                </li>
+                                <li><a href="https://projects.eclipse.org/projects/iot.om2m">Eclipse OM2M</a></li>
+                                <li><a href="https://projects.eclipse.org/projects/iot.oneofour">Eclipse OneOFour</a>
+                                </li>
+                                <li><a href="https://projects.eclipse.org/projects/iot.packages">Eclipse IoT
+                                    Packages</a></li>
+                                <li><a href="https://projects.eclipse.org/projects/iot.sparkplug">Sparkplug
+                                    Specification Project</a></li>
+                                <li><a href="https://projects.eclipse.org/projects/iot.streamsheets">Eclipse
+                                    Streamsheets</a></li>
+                                <li><a href="https://projects.eclipse.org/projects/iot.tahu">Eclipse Tahu</a></li>
+                                <li><a href="https://projects.eclipse.org/projects/iot.thingweb">Eclipse Thingweb</a>
+                                </li>
+                                <li><a href="https://projects.eclipse.org/projects/iot.wakaama">Eclipse Wakaama</a></li>
+                                <li><a href="https://projects.eclipse.org/projects/iot.zenoh">Eclipse zenoh</a></li>
+                                <li><a href="https://projects.eclipse.org/projects/locationtech">LocationTech</a></li>
+                                <li><a href="https://projects.eclipse.org/projects/locationtech.jts">LocationTech JTS
+                                    Topology Suite</a></li>
+                                <li><a href="https://projects.eclipse.org/projects/modeling">Eclipse Modeling
+                                    Project</a></li>
+                                <li><a href="https://projects.eclipse.org/projects/modeling.agileuml">Eclipse Agile
+                                    UML</a></li>
+                                <li><a href="https://projects.eclipse.org/projects/modeling.capra">Eclipse Capra</a>
+                                </li>
+                                <li><a href="https://projects.eclipse.org/projects/modeling.edapt">Eclipse Edapt</a>
+                                </li>
+                                <li><a href="https://projects.eclipse.org/projects/modeling.elk">Eclipse Layout
+                                    Kernel</a></li>
+                                <li><a href="https://projects.eclipse.org/projects/modeling.emf.emf">Eclipse EMF</a>
+                                </li>
+                                <li><a href="https://projects.eclipse.org/projects/modeling.emf.mwe">Eclipse Modeling
+                                    Workflow Engine</a></li>
+                                <li><a href="https://projects.eclipse.org/projects/modeling.emft">Eclipse Model
+                                    Framework Technology</a></li>
+                                <li><a href="https://projects.eclipse.org/projects/modeling.emft.emfatic">Eclipse
+                                    emfatic</a></li>
+                                <li><a href="https://projects.eclipse.org/projects/modeling.epsilon">Eclipse Epsilon</a>
+                                </li>
+                                <li><a href="https://projects.eclipse.org/projects/modeling.graphiti">Eclipse
+                                    Graphiti</a></li>
+                                <li><a href="https://projects.eclipse.org/projects/modeling.hawk">Eclipse Hawk</a></li>
+                                <li><a href="https://projects.eclipse.org/projects/modeling.mdt.etrice">Eclipse
+                                    eTrice</a></li>
+                                <li><a href="https://projects.eclipse.org/projects/modeling.mdt.ocl">Eclipse OCL</a>
+                                </li>
+                                <li><a href="https://projects.eclipse.org/projects/modeling.mdt.papyrus">Eclipse
+                                    Papyrus</a></li>
+                                <li><a href="https://projects.eclipse.org/projects/modeling.mdt.uml2">Eclipse UML2</a>
+                                </li>
+                                <li><a href="https://projects.eclipse.org/projects/modeling.mdt.xsd">Eclipse XSD</a>
+                                </li>
+                                <li><a href="https://projects.eclipse.org/projects/modeling.mmt.atl">Eclipse ATL</a>
+                                </li>
+                                <li><a href="https://projects.eclipse.org/projects/modeling.mmt.qvt-oml">Eclipse
+                                    QVT-OML</a></li>
+                                <li><a href="https://projects.eclipse.org/projects/modeling.mmt.qvtd">Eclipse QVTd</a>
+                                </li>
+                                <li><a href="https://projects.eclipse.org/projects/modeling.modisco">Eclipse MoDisco</a>
+                                </li>
+                                <li><a href="https://projects.eclipse.org/projects/modeling.poosl">Eclipse POOSL</a>
+                                </li>
+                                <li><a href="https://projects.eclipse.org/projects/modeling.sirius">Eclipse Sirius</a>
+                                </li>
+                                <li><a href="https://projects.eclipse.org/projects/modeling.smartmdsd">Eclipse
+                                    SmartMDSD</a></li>
+                                <li><a href="https://projects.eclipse.org/projects/modeling.tmf.xtext">Eclipse Xtext</a>
+                                </li>
+                                <li><a href="https://projects.eclipse.org/projects/modeling.viatra">Eclipse VIATRA</a>
+                                </li>
+                                <li><a href="https://projects.eclipse.org/projects/mylyn.docs">Eclipse Mylyn Docs</a>
+                                </li>
+                                <li><a href="https://projects.eclipse.org/projects/openhw">OpenHW Group</a></li>
+                                <li><a href="https://projects.eclipse.org/projects/polarsys.b612">Eclipse B612</a></li>
+                                <li><a href="https://projects.eclipse.org/projects/polarsys.capella">Eclipse Capella</a>
+                                </li>
+                                <li><a href="https://projects.eclipse.org/projects/polarsys.chess">Eclipse CHESS</a>
+                                </li>
+                                <li><a href="https://projects.eclipse.org/projects/polarsys.esf">Eclipse Safety
+                                    Framework</a></li>
+                                <li><a href="https://projects.eclipse.org/projects/polarsys.libims">Eclipse PolarSys
+                                    LibIMS</a></li>
+                                <li><a href="https://projects.eclipse.org/projects/polarsys.opencert">Eclipse
+                                    OpenCert</a></li>
+                                <li><a href="https://projects.eclipse.org/projects/polarsys.time4sys">Eclipse PolarSys
+                                    Time4Sys</a></li>
+                                <li><a href="https://projects.eclipse.org/projects/rt">Eclipse Runtime Project</a></li>
+                                <li><a href="https://projects.eclipse.org/projects/rt.jetty">Eclipse Jetty</a></li>
+                                <li><a href="https://projects.eclipse.org/projects/rt.vertx">Eclipse Vert.x</a></li>
+                                <li><a href="https://projects.eclipse.org/projects/science">Eclipse Science</a></li>
+                                <li><a href="https://projects.eclipse.org/projects/science.statet">Eclipse StatET</a>
+                                </li>
+                                <li><a href="https://projects.eclipse.org/projects/science.swtchart">Eclipse
+                                    SWTChart</a></li>
+                                <li><a href="https://projects.eclipse.org/projects/soa">Eclipse Service Oriented
+                                    Architecture</a></li>
+                                <li><a href="https://projects.eclipse.org/projects/soa.bpel">Eclipse BPEL Designer</a>
+                                </li>
+                                <li><a href="https://projects.eclipse.org/projects/soa.winery">Eclipse Winery</a></li>
+                                <li><a href="https://projects.eclipse.org/projects/technology">Eclipse Technology</a>
+                                </li>
+                                <li><a href="https://projects.eclipse.org/projects/technology.birt">Eclipse Business
+                                    Intelligence and Reporting Tools</a></li>
+                                <li><a href="https://projects.eclipse.org/projects/technology.cognicrypt">Eclipse
+                                    CogniCrypt</a></li>
+                                <li><a href="https://projects.eclipse.org/projects/technology.comma">Eclipse
+                                    CommaSuite</a></li>
+                                <li><a href="https://projects.eclipse.org/projects/technology.dash">Eclipse Dash</a>
+                                </li>
+                                <li><a href="https://projects.eclipse.org/projects/technology.dataeggs">Eclipse
+                                    DataEggs</a></li>
+                                <li><a href="https://projects.eclipse.org/projects/technology.dltk">Eclipse Dynamic
+                                    Languages Toolkit</a></li>
+                                <li><a href="https://projects.eclipse.org/projects/technology.ease">Eclipse Advanced
+                                    Scripting Environment</a></li>
+                                <li><a href="https://projects.eclipse.org/projects/technology.eclemma">Eclipse
+                                    EclEmma</a></li>
+                                <li><a href="https://projects.eclipse.org/projects/technology.efbt">Eclipse Free BIRD
+                                    Tools</a></li>
+                                <li><a href="https://projects.eclipse.org/projects/technology.egit">Eclipse Git Team
+                                    Provider</a></li>
+                                <li><a href="https://projects.eclipse.org/projects/technology.golo">Eclipse Golo</a>
+                                </li>
+                                <li><a href="https://projects.eclipse.org/projects/technology.handly">Eclipse Handly</a>
+                                </li>
+                                <li><a href="https://projects.eclipse.org/projects/technology.jemo">Eclipse Jemo</a>
+                                </li>
+                                <li><a href="https://projects.eclipse.org/projects/technology.jifa">Eclipse Jifa</a>
+                                </li>
+                                <li><a href="https://projects.eclipse.org/projects/technology.justj">Eclipse JustJ</a>
+                                </li>
+                                <li><a href="https://projects.eclipse.org/projects/technology.lemminx">Eclipse
+                                    LemMinX</a></li>
+                                <li><a href="https://projects.eclipse.org/projects/technology.lsat">Eclipse LSAT</a>
+                                </li>
+                                <li><a href="https://projects.eclipse.org/projects/technology.lsp4j">Eclipse LSP4J</a>
+                                </li>
+                                <li><a href="https://projects.eclipse.org/projects/technology.lsp4jakarta">Eclipse
+                                    LSP4Jakarta</a></li>
+                                <li><a href="https://projects.eclipse.org/projects/technology.lsp4mp">Eclipse LSP4MP</a>
+                                </li>
+                                <li><a href="https://projects.eclipse.org/projects/technology.m2e">Eclipse m2eclipse</a>
+                                </li>
+                                <li><a href="https://projects.eclipse.org/projects/technology.nebula">Eclipse Nebula</a>
+                                </li>
+                                <li><a href="https://projects.eclipse.org/projects/technology.nebula.nattable">Eclipse
+                                    NatTable</a></li>
+                                <li><a href="https://projects.eclipse.org/projects/technology.omr">Eclipse OMR</a></li>
+                                <li><a href="https://projects.eclipse.org/projects/technology.openj9">Eclipse OpenJ9</a>
+                                </li>
+                                <li><a href="https://projects.eclipse.org/projects/technology.openk-coremodules">Eclipse
+                                    OpenK Core Modules</a></li>
+                                <li><a href="https://projects.eclipse.org/projects/technology.openk-usermodules">Eclipse
+                                    openK User Modules</a></li>
+                                <li><a href="https://projects.eclipse.org/projects/technology.osee">Eclipse Open System
+                                    Engineering Environment</a></li>
+                                <li><a href="https://projects.eclipse.org/projects/technology.packager">Eclipse
+                                    Packager</a></li>
+                                <li><a href="https://projects.eclipse.org/projects/technology.packaging">Eclipse
+                                    Packaging Project</a></li>
+                                <li><a href="https://projects.eclipse.org/projects/technology.packaging.mpc">Eclipse
+                                    Marketplace Client Project</a></li>
+                                <li><a href="https://projects.eclipse.org/projects/technology.passage">Eclipse
+                                    Passage</a></li>
+                                <li><a href="https://projects.eclipse.org/projects/technology.reddeer">Eclipse
+                                    RedDeer</a></li>
+                                <li><a href="https://projects.eclipse.org/projects/technology.repairnator">Eclipse
+                                    Repairnator</a></li>
+                                <li><a href="https://projects.eclipse.org/projects/technology.scava">Eclipse SCAVA</a>
+                                </li>
+                                <li><a href="https://projects.eclipse.org/projects/technology.set">Eclipse Signalling
+                                    Engineering Toolbox</a></li>
+                                <li><a href="https://projects.eclipse.org/projects/technology.skills">Eclipse Skills</a>
+                                </li>
+                                <li><a href="https://projects.eclipse.org/projects/technology.swtbot">Eclipse SWTBot</a>
+                                </li>
+                                <li><a href="https://projects.eclipse.org/projects/technology.tm4e">Eclipse TM4E</a>
+                                </li>
+                                <li><a href="https://projects.eclipse.org/projects/technology.trace4cps">Eclipse
+                                    TRACE4CPS</a></li>
+                                <li><a href="https://projects.eclipse.org/projects/technology.transformer">Eclipse
+                                    Transformer</a></li>
+                                <li><a href="https://projects.eclipse.org/projects/technology.tycho">Eclipse Tycho</a>
+                                </li>
+                                <li><a href="https://projects.eclipse.org/projects/technology.usssdk">Eclipse USS
+                                    SDK</a></li>
+                                <li><a href="https://projects.eclipse.org/projects/technology.xwt">Eclipse XWT</a></li>
+                                <li><a href="https://projects.eclipse.org/projects/tools">Eclipse Tools Project</a></li>
+                                <li><a href="https://projects.eclipse.org/projects/tools.buildship">Eclipse
+                                    Buildship</a></li>
+                                <li><a href="https://projects.eclipse.org/projects/tools.cdt">Eclipse C/C++ Development
+                                    Tools</a></li>
+                                <li><a href="https://projects.eclipse.org/projects/tools.corrosion">Eclipse
+                                    Corrosion</a></li>
+                                <li><a href="https://projects.eclipse.org/projects/tools.dartboard">Eclipse
+                                    Dartboard</a></li>
+                                <li><a href="https://projects.eclipse.org/projects/tools.datatools">Eclipse Data Tools
+                                    Platform</a></li>
+                                <li><a href="https://projects.eclipse.org/projects/tools.gef">Eclipse Graphical Editing
+                                    Framework</a></li>
+                                <li><a href="https://projects.eclipse.org/projects/tools.linuxtools">Eclipse Linux
+                                    Tools</a></li>
+                                <li><a href="https://projects.eclipse.org/projects/tools.mat">Eclipse Memory
+                                    Analyzer</a></li>
+                                <li><a href="https://projects.eclipse.org/projects/tools.objectteams">Eclipse Object
+                                    Teams</a></li>
+                                <li><a href="https://projects.eclipse.org/projects/tools.oomph">Eclipse Oomph</a></li>
+                                <li><a href="https://projects.eclipse.org/projects/tools.orbit">Eclipse Orbit</a></li>
+                                <li><a href="https://projects.eclipse.org/projects/tools.pdt">Eclipse PHP Development
+                                    Tools</a></li>
+                                <li><a href="https://projects.eclipse.org/projects/tools.ptp">Eclipse Parallel Tools
+                                    Platform</a></li>
+                                <li><a href="https://projects.eclipse.org/projects/tools.ptp.photran">Eclipse
+                                    Photran</a></li>
+                                <li><a href="https://projects.eclipse.org/projects/tools.secoblocks">Eclipse SeCo
+                                    Blocks</a></li>
+                                <li><a href="https://projects.eclipse.org/projects/tools.shellwax">Eclipse Shellwax</a>
+                                </li>
+                                <li><a href="https://projects.eclipse.org/projects/tools.titan">Eclipse Titan</a></li>
+                                <li><a href="https://projects.eclipse.org/projects/tools.tm">Eclipse Target
+                                    Management</a></li>
+                                <li><a href="https://projects.eclipse.org/projects/tools.tracecompass">Eclipse Trace
+                                    Compass</a></li>
+                                <li><a href="https://projects.eclipse.org/projects/tools.tracecompass.incubator">Eclipse
+                                    Trace Compass Incubator</a></li>
+                                <li><a href="https://projects.eclipse.org/projects/tools.wildwebdeveloper">Eclipse Wild
+                                    Web Developer</a></li>
+                                <li><a href="https://projects.eclipse.org/projects/webtools">Eclipse Web Tools Platform
+                                    Project</a></li>
+                                <li><a href="https://projects.eclipse.org/projects/webtools.common">Eclipse Web Tools
+                                    Common</a></li>
+                                <li><a href="https://projects.eclipse.org/projects/webtools.dali">Eclipse Dali-ORM</a>
+                                </li>
+                                <li><a href="https://projects.eclipse.org/projects/webtools.jeetools">Eclipse Tools for
+                                    Java EE</a></li>
+                                <li><a href="https://projects.eclipse.org/projects/webtools.jsdt">Eclipse Tools for
+                                    JavaScript</a></li>
+                                <li><a href="https://projects.eclipse.org/projects/webtools.jsf">Eclipse Tools for
+                                    JavaServer Faces</a></li>
+                                <li><a href="https://projects.eclipse.org/projects/webtools.releng">Eclipse Web Tools
+                                    Releng</a></li>
+                                <li><a href="https://projects.eclipse.org/projects/webtools.servertools">Eclipse Server
+                                    Tools</a></li>
+                                <li><a href="https://projects.eclipse.org/projects/webtools.sourceediting">Eclipse WTP
+                                    Source Editing</a></li>
+                                <li><a href="https://projects.eclipse.org/projects/webtools.webservices">Eclipse Tools
+                                    for Web Services</a></li>
+                            </ul>
+                        </div>
+                    </div>
+                </div>
+
+            </div>
+            <div class="col-md-6 main-col-sidebar-nav">  <!-- nav -->
+                <aside class="main-sidebar-default-margin" id="main-sidebar">
+
+                    <ul class="ul-left-nav fa-ul hidden-print" id="leftnav" role="tablist" aria-multiselectable="true">
+                        <li class="separator">
+                            <a class="separator" href="/org/">
+                                About Us </a>
+                        </li>
+
+                        <li>
+                            <i class="fa fa-caret-right fa-fw"></i>
+                            <a href="/org/foundation/reports/annual_report.php">Annual Report</a>
+                        </li>
+
+                        <li>
+                            <i class="fa fa-caret-right fa-fw"></i>
+                            <a href="/org/foundation/">Foundation</a>
+                        </li>
+
+                        <li>
+                            <i class="fa fa-caret-right fa-fw"></i>
+                            <a href="/org/documents/">Governance</a>
+                        </li>
+
+                        <li>
+                            <i class="fa fa-caret-right fa-fw"></i>
+                            <a href="/legal/">Legal Resources</a>
+                        </li>
+
+                        <li>
+                            <i class="fa fa-caret-right fa-fw"></i>
+                            <a href="/org/foundation/contact.php">Contact Us</a>
+                        </li>
+
+                        <li class="separator">
+                            <a class="separator" href="/legal/ECA.php">
+                                ECA </a>
+                        </li>
+
+                        <li>
+                            <i class="fa fa-caret-right fa-fw"></i>
+                            <a href="https://accounts.eclipse.org/user/eca">Sign</a>
+                        </li>
+
+                        <li>
+                            <i class="fa fa-caret-right fa-fw"></i>
+                            <a href="/contribute/cla">Validation Tool</a>
+                        </li>
+
+                        <li class="separator">
+                            <a class="separator" href="/legal/epl-2.0">
+                                EPL-2.0 </a>
+                        </li>
+
+                        <li>
+                            <i class="fa fa-caret-right fa-fw"></i>
+                            <a href="/org/documents/epl-2.0/EPL-2.0.html">Plain HTML</a>
+                        </li>
+
+                        <li>
+                            <i class="fa fa-caret-right fa-fw"></i>
+                            <a href="/org/documents/epl-2.0/EPL-2.0.txt">Plain Text</a>
+                        </li>
+
+                        <li>
+                            <i class="fa fa-caret-right fa-fw"></i>
+                            <a href="/org/documents/epl-2.0/EPL-2.0.pdf">PDF</a>
+                        </li>
+
+                        <li>
+                            <i class="fa fa-caret-right fa-fw"></i>
+                            <a href="/legal/epl-2.0/faq.php">FAQ</a>
+                        </li>
+
+                        <li class="separator">
+                            <a class="separator" href="/org/documents/epl-v10.php">
+                                EPL-1.0 </a>
+                        </li>
+
+                        <li>
+                            <i class="fa fa-caret-right fa-fw"></i>
+                            <a href="/org/documents/epl-v10.html">Plain HTML</a>
+                        </li>
+
+                        <li>
+                            <i class="fa fa-caret-right fa-fw"></i>
+                            <a href="/org/documents/epl-1.0/EPL-1.0.txt">Plain Text</a>
+                        </li>
+
+                        <li>
+                            <i class="fa fa-caret-right fa-fw"></i>
+                            <a href="/legal/eplfaq.php">FAQ</a>
+                        </li>
+
+                        <li class="separator">
+                            <a class="separator" href="/legal/licenses.php">
+                                Licenses </a>
+                        </li>
+
+                        <li>
+                            <i class="fa fa-caret-right fa-fw"></i>
+                            <a href="/legal/licenses.php#approved">Approved 3rd Party</a>
+                        </li>
+
+                        <li>
+                            <i class="fa fa-caret-right fa-fw"></i>
+                            <a href="/legal/licenses.php#nonapproved">Non Approved</a>
+                        </li>
+
+                        <li>
+                            <i class="fa fa-caret-right fa-fw"></i>
+                            <a href="/legal/noncodelicenses.php">Docs &amp; examples</a>
+                        </li>
+
+                    </ul>
+                </aside>
+            </div>
+        </div>
+    </div>
+</main>
+<p id="back-to-top">
+    <a class="visible-xs" href="#top">Back to the top</a>
+</p>
+<div class="eclipsefdn-featured-story featured-footer" data-publish-target="eclipse_org">
+    <div class="container featured-container"></div>
+</div>
+<footer id="solstice-footer">
+    <div class="container">
+        <div class="row">
+            <section class="col-sm-6 hidden-print" id="footer-eclipse-foundation">
+                <h2 class="section-title">Eclipse Foundation</h2>
+                <ul class="nav">
+                    <li><a href="http://www.eclipse.org/org/">About Us</a></li>
+                    <li><a href="http://www.eclipse.org/org/foundation/contact.php">Contact Us</a></li>
+                    <li><a href="http://www.eclipse.org/sponsor">Sponsor</a></li>
+                    <li><a href="http://www.eclipse.org/membership/">Members</a></li>
+                    <li><a href="http://www.eclipse.org/org/documents/">Governance</a></li>
+                    <li><a href="http://www.eclipse.org/org/documents/Community_Code_of_Conduct.php">Code of Conduct</a>
+                    </li>
+                    <li><a href="http://www.eclipse.org/artwork/">Logo and Artwork</a></li>
+                    <li><a href="http://www.eclipse.org/org/foundation/directors.php">Board of Directors</a></li>
+                    <li><a href="http://www.eclipse.org/careers">Careers</a></li>
+                </ul>
+            </section>
+            <section class="col-sm-6 hidden-print" id="footer-legal">
+                <h2 class="section-title">Legal</h2>
+                <ul class="nav">
+                    <li><a href="http://www.eclipse.org/legal/privacy.php">Privacy Policy</a></li>
+                    <li><a href="http://www.eclipse.org/legal/termsofuse.php">Terms of Use</a></li>
+                    <li><a href="http://www.eclipse.org/legal/copyright.php">Copyright Agent</a></li>
+                    <li><a href="http://www.eclipse.org/legal/epl-2.0/">Eclipse Public License</a></li>
+                    <li><a href="http://www.eclipse.org/legal/">Legal Resources</a></li>
+                </ul>
+            </section>
+            <section class="col-sm-6 hidden-print" id="footer-useful-links">
+                <h2 class="section-title">Useful Links</h2>
+                <ul class="nav">
+                    <li><a href="https://bugs.eclipse.org/bugs/">Report a Bug</a></li>
+                    <li><a href="//help.eclipse.org/">Documentation</a></li>
+                    <li><a href="http://www.eclipse.org/contribute/">How to Contribute</a></li>
+                    <li><a href="http://www.eclipse.org/mail/">Mailing Lists</a></li>
+                    <li><a href="http://www.eclipse.org/forums/">Forums</a></li>
+                    <li><a href="//marketplace.eclipse.org">Marketplace</a></li>
+                </ul>
+            </section>
+            <section class="col-sm-6 hidden-print" id="footer-other">
+                <h2 class="section-title">Other</h2>
+                <ul class="nav">
+                    <li><a href="http://www.eclipse.org/ide/">IDE and Tools</a></li>
+                    <li><a href="http://www.eclipse.org/projects">Projects</a></li>
+                    <li><a href="http://www.eclipse.org/org/workinggroups/">Working Groups</a></li>
+                    <li><a href="http://www.eclipse.org/org/research/">Research@Eclipse</a></li>
+                    <li><a href="http://www.eclipse.org/security/">Report a Vulnerability</a></li>
+                    <li><a href="https://status.eclipse.org">Service Status</a></li>
+                </ul>
+            </section>
+            <div class="col-sm-24 margin-top-20">
+                <div class="row">
+                    <div id="copyright" class="col-md-16">
+                        <p id="copyright-text">Copyright &copy; Eclipse Foundation. All Rights Reserved.</p>
+                    </div>
+                    <div class="col-md-8 social-media">
+                        <ul class="list-inline">
+                            <li>
+                                <a class="social-media-link fa-stack fa-lg" href="https://twitter.com/EclipseFdn"
+                                   aria-label="Eclipse Foundation Twitter profile">
+                                    <i class="fa fa-circle-thin fa-stack-2x"></i>
+                                    <i class="fa fa-twitter fa-stack-1x"></i>
+                                </a>
+                            </li>
+                            <li>
+                                <a class="social-media-link fa-stack fa-lg" href="https://www.facebook.com/eclipse.org"
+                                   aria-label="Eclipse Foundation Facebook page">
+                                    <i class="fa fa-circle-thin fa-stack-2x"></i>
+                                    <i class="fa fa-facebook fa-stack-1x"></i>
+                                </a>
+                            </li>
+                            <li>
+                                <a class="social-media-link fa-stack fa-lg"
+                                   href="https://www.youtube.com/user/EclipseFdn"
+                                   aria-label="Eclipse Foundation YouTube channel">
+                                    <i class="fa fa-circle-thin fa-stack-2x"></i>
+                                    <i class="fa fa-youtube fa-stack-1x"></i>
+                                </a>
+                            </li>
+                            <li>
+                                <a class="social-media-link fa-stack fa-lg"
+                                   href="https://www.linkedin.com/company/eclipse-foundation"
+                                   aria-label="Eclipse Foundation Linkedin profile">
+                                    <i class="fa fa-circle-thin fa-stack-2x"></i>
+                                    <i class="fa fa-linkedin fa-stack-1x"></i>
+                                </a>
+                            </li>
+                        </ul>
+                    </div>
+                </div>
+            </div>
+            <a href="#" class="scrollup">Back to the top</a>
+        </div>
+    </div>
+</footer>
+<!-- Placed at the end of the document so the pages load faster -->
+<script src="/eclipse.org-common/themes/solstice/public/javascript/main.min.js?var=0.0.178"></script>
+
+</body>
+</html>
