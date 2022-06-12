@@ -86,7 +86,7 @@ COPY --chown=185 target/quarkus-app/lib/ /deployments/lib/
 COPY --chown=185 target/quarkus-app/*.jar /deployments/
 COPY --chown=185 target/quarkus-app/app/ /deployments/app/
 COPY --chown=185 target/quarkus-app/quarkus/ /deployments/quarkus/
-COPY --chown=185 licenses/ /deployments/licenses/
+COPY --chown=185 licenses/ /licenses/
 
 EXPOSE 8080
 USER 185

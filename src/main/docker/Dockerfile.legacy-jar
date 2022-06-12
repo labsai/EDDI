@@ -82,7 +82,7 @@ ENV LANG='en_US.UTF-8' LANGUAGE='en_US:en'
 
 COPY target/lib/* /deployments/lib/
 COPY target/*-runner.jar /deployments/quarkus-run.jar
-COPY licenses/ /deployments/licenses/
+COPY licenses/ /licenses/
 
 EXPOSE 8080
 USER 185
