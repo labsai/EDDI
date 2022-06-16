@@ -4,6 +4,7 @@ import ai.labs.eddi.models.ExtensionDescriptor.ConfigValue;
 import ai.labs.eddi.modules.nlp.extensions.normalizers.INormalizer;
 import ai.labs.eddi.modules.nlp.extensions.normalizers.PunctuationNormalizer;
 
+import javax.enterprise.context.ApplicationScoped;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.regex.Pattern;
@@ -11,12 +12,12 @@ import java.util.regex.Pattern;
 import static ai.labs.eddi.models.ExtensionDescriptor.FieldType.BOOLEAN;
 import static ai.labs.eddi.models.ExtensionDescriptor.FieldType.STRING;
 
+@ApplicationScoped
 public class PunctuationNormalizerProvider implements INormalizerProvider {
     public static final String ID = "ai.labs.parser.normalizers.punctuation";
 
     private static final String KEY_REMOVE_PUNCTUATION = "removePunctuation";
     private static final String KEY_PUNCTUATION_REGEX_PATTERN = "punctuationRegexPattern";
-    private boolean removePunctuation;
     private String punctuationRegexPattern = PunctuationNormalizer.PUNCTUATION;
 
     @Override
@@ -31,6 +32,8 @@ public class PunctuationNormalizerProvider implements INormalizerProvider {
 
     @Override
     public INormalizer provide(Map<String, Object> config) {
+        boolean removePunctuation = false;
+
         if (config.containsKey(KEY_REMOVE_PUNCTUATION)) {
             removePunctuation = Boolean.parseBoolean(config.get(KEY_REMOVE_PUNCTUATION).toString());
         }
