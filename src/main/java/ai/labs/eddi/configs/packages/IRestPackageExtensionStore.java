@@ -11,7 +11,7 @@ import java.util.List;
  * @author ginccc
  */
 // @Api(value = "Configurations -> (3) Packages", authorizations = {@Authorization(value = "eddi_auth")})
-@Path("/packagestore/extensions")
+@Path("/extensionstore/extensions")
 @Tag(name = "06. Packages", description = "packages for bots")
 public interface IRestPackageExtensionStore {
     @GET
