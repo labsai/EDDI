@@ -66,11 +66,11 @@ public class InputMatcher extends BaseMatcher implements IBehaviorCondition {
         IData<String> data;
         ExecutionState state = NOT_EXECUTED;
         switch (occurrence) {
-            case currentStep:
+            case currentStep -> {
                 data = memory.getCurrentStep().getLatestData(KEY_EXPRESSIONS);
                 state = evaluateInputExpressions(data);
-                break;
-            case lastStep:
+            }
+            case lastStep -> {
                 IConversationStepStack previousSteps = memory.getPreviousSteps();
                 if (previousSteps.size() > 0) {
                     data = previousSteps.get(0).getLatestData(KEY_EXPRESSIONS);
@@ -78,13 +78,11 @@ public class InputMatcher extends BaseMatcher implements IBehaviorCondition {
                 } else {
                     state = FAIL;
                 }
-                break;
-            case anyStep:
-                state = occurredInAnyStep(memory, KEY_EXPRESSIONS, this::evaluateInputExpressions) ? SUCCESS : FAIL;
-                break;
-            case never:
-                state = occurredInAnyStep(memory, KEY_EXPRESSIONS, this::evaluateInputExpressions) ? FAIL : SUCCESS;
-                break;
+            }
+            case anyStep ->
+                    state = occurredInAnyStep(memory, KEY_EXPRESSIONS, this::evaluateInputExpressions) ? SUCCESS : FAIL;
+            case never ->
+                    state = occurredInAnyStep(memory, KEY_EXPRESSIONS, this::evaluateInputExpressions) ? FAIL : SUCCESS;
         }
 
         return state;
