@@ -21,6 +21,9 @@ import java.util.LinkedList;
 class BehaviorRulesEvaluator {
     private BehaviorSet behaviorSet;
 
+    boolean appendActions;
+    boolean expressionsAsActions;
+
     BehaviorSetResult evaluate(IConversationMemory memory) throws BehaviorRuleExecutionException, InterruptedException {
         RuntimeUtilities.checkNotNull(behaviorSet, "behaviorSet");
 

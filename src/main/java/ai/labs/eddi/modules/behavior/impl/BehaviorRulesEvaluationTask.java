@@ -12,6 +12,9 @@ import ai.labs.eddi.engine.memory.model.Data;
 import ai.labs.eddi.engine.runtime.client.configuration.IResourceClientLibrary;
 import ai.labs.eddi.engine.runtime.service.ServiceException;
 import ai.labs.eddi.models.ExtensionDescriptor;
+import ai.labs.eddi.modules.nlp.expressions.Expression;
+import ai.labs.eddi.modules.nlp.expressions.Expressions;
+import ai.labs.eddi.modules.nlp.expressions.utilities.IExpressionProvider;
 import org.jboss.logging.Logger;
 
 import javax.enterprise.context.ApplicationScoped;
@@ -37,23 +40,29 @@ public class BehaviorRulesEvaluationTask implements ILifecycleTask {
     private static final String KEY_BEHAVIOR_RULES_SUCCESS = BEHAVIOR_RULES_TYPE + ":success";
     private static final String KEY_BEHAVIOR_RULES_DROPPED_SUCCESS = BEHAVIOR_RULES_TYPE + ":droppedSuccess";
     private static final String KEY_BEHAVIOR_RULES_FAIL = BEHAVIOR_RULES_TYPE + ":fail";
+    private static final String KEY_EXPRESSIONS = "expressions";
     private static final String BEHAVIOR_CONFIG_URI = "uri";
     private static final String BEHAVIOR_CONFIG_APPEND_ACTIONS = "appendActions";
+    private static final String BEHAVIOR_CONFIG_EXPRESSIONS_AS_ACTIONS = "expressionsAsActions";
     private final IResourceClientLibrary resourceClientLibrary;
     private final IJsonSerialization jsonSerialization;
     private final IBehaviorDeserialization behaviorSerialization;
+    private final IExpressionProvider expressionProvider;
 
-    private boolean appendActions = true;
+    private final static boolean appendActionsDefault = true;
+    private final static boolean expressionsAsActionsDefault = false;
 
     private static final Logger log = Logger.getLogger(BehaviorRulesEvaluationTask.class);
 
     @Inject
     public BehaviorRulesEvaluationTask(IResourceClientLibrary resourceClientLibrary,
                                        IJsonSerialization jsonSerialization,
-                                       IBehaviorDeserialization behaviorSerialization) {
+                                       IBehaviorDeserialization behaviorSerialization,
+                                       IExpressionProvider expressionProvider) {
         this.resourceClientLibrary = resourceClientLibrary;
         this.jsonSerialization = jsonSerialization;
         this.behaviorSerialization = behaviorSerialization;
+        this.expressionProvider = expressionProvider;
     }
 
     @Override
@@ -68,16 +77,16 @@ public class BehaviorRulesEvaluationTask implements ILifecycleTask {
 
     @Override
     public void execute(IConversationMemory memory, Object component) throws LifecycleException {
-        final var evaluator = (BehaviorRulesEvaluator) component;
-
-        BehaviorSetResult results;
         try {
-            results = evaluator.evaluate(memory);
-            addResultsToConversationMemory(memory, KEY_BEHAVIOR_RULES_SUCCESS, results.getSuccessRules());
-            addResultsToConversationMemory(memory, KEY_BEHAVIOR_RULES_DROPPED_SUCCESS, results.getDroppedSuccessRules());
-            addResultsToConversationMemory(memory, KEY_BEHAVIOR_RULES_FAIL, results.getFailRules());
+            final var evaluator = (BehaviorRulesEvaluator) component;
+            var results = evaluator.evaluate(memory);
+            var appendActions = evaluator.isAppendActions();
+            addResultsToConversationMemory(memory, KEY_BEHAVIOR_RULES_SUCCESS, results.getSuccessRules(), appendActions);
+            addResultsToConversationMemory(memory, KEY_BEHAVIOR_RULES_DROPPED_SUCCESS, results.getDroppedSuccessRules(), appendActions);
+            addResultsToConversationMemory(memory, KEY_BEHAVIOR_RULES_FAIL, results.getFailRules(), appendActions);
 
-            addActionsToConversationMemory(memory, results.getSuccessRules());
+            addActionsToConversationMemory(memory, results.getSuccessRules(),
+                    appendActions, evaluator.isExpressionsAsActions());
 
         } catch (BehaviorRulesEvaluator.BehaviorRuleExecutionException e) {
             String msg = "Error while evaluating behavior rules!";
@@ -88,37 +97,56 @@ public class BehaviorRulesEvaluationTask implements ILifecycleTask {
         }
     }
 
-    private void addResultsToConversationMemory(IConversationMemory memory, String key, List<BehaviorRule> rules) {
+    private void addResultsToConversationMemory(IConversationMemory memory, String key,
+                                                List<BehaviorRule> rules, boolean appendActions) {
+
         if (!rules.isEmpty()) {
-            var allCurrentBehaviorRuleNames = rules.stream().map(BehaviorRule::getName).collect(Collectors.toList());
-            saveResults(memory, allCurrentBehaviorRuleNames, key, false, false);
+            var allCurrentBehaviorRuleNames = rules.stream().
+                    map(BehaviorRule::getName).collect(Collectors.toList());
+            saveResults(memory, allCurrentBehaviorRuleNames, key,
+                    false, false, appendActions);
         }
     }
 
-    private void addActionsToConversationMemory(IConversationMemory memory, List<BehaviorRule> successRules) {
-        if (!successRules.isEmpty()) {
-            List<String> allCurrentActions = new LinkedList<>();
-            successRules.forEach(successRule -> successRule.getActions().stream().
-                    filter(action -> !allCurrentActions.contains(action)).forEach(allCurrentActions::add));
+    private void addActionsToConversationMemory(IConversationMemory memory, List<BehaviorRule> successRules,
+                                                boolean appendActions, boolean expressionsAsActions) {
+        List<String> allCurrentActions = new LinkedList<>();
+        successRules.forEach(successRule -> successRule.getActions().stream().
+                filter(action -> !allCurrentActions.contains(action)).forEach(allCurrentActions::add));
 
-            saveResults(memory, allCurrentActions, KEY_ACTIONS, true, true);
+        if (expressionsAsActions) {
+            allCurrentActions.addAll(extractExpressionsAsActions(memory));
+        }
+
+        if (!allCurrentActions.isEmpty()) {
+            saveResults(memory, allCurrentActions, KEY_ACTIONS, true, true, appendActions);
         }
     }
 
-    private void saveResults(IConversationMemory memory, List<String> allCurrent, String key,
-                             boolean addResultsToConversationMemory, boolean makePublic) {
+    private List<String> extractExpressionsAsActions(IConversationMemory memory) {
+        IData<String> data = memory.getCurrentStep().getLatestData(KEY_EXPRESSIONS);
+
+        Expressions inputExpressions = new Expressions();
+        if (data != null && data.getResult() != null) {
+            inputExpressions = expressionProvider.parseExpressions(data.getResult());
+        }
+
+        return inputExpressions.stream().map(Expression::getExpressionName).collect(Collectors.toList());
+    }
+
+    private void saveResults(IConversationMemory memory, List<String> allCurrentActions, String key,
+                             boolean addResultsToConversationMemory, boolean makePublic, boolean appendActions) {
         var currentStep = memory.getCurrentStep();
 
         List<String> results = new LinkedList<>();
-        if (appendActions || allCurrent.isEmpty()) {
+        if (appendActions || allCurrentActions.isEmpty()) {
             IData<List<String>> latestResults = currentStep.getLatestData(key);
             if (latestResults != null && latestResults.getResult() != null) {
                 results.addAll(latestResults.getResult());
             }
         }
 
-        results.addAll(allCurrent.stream().
-                filter(result -> !results.contains(result)).collect(Collectors.toList()));
+        results.addAll(allCurrentActions.stream().filter(result -> !results.contains(result)).toList());
 
         var resultsData = new Data<>(key, results);
         resultsData.setPublic(makePublic);
@@ -137,16 +165,26 @@ public class BehaviorRulesEvaluationTask implements ILifecycleTask {
         URI uri = URI.create(uriObj.toString());
 
         try {
-            Object appendActionsObj = configuration.get(BEHAVIOR_CONFIG_APPEND_ACTIONS);
-            if (appendActionsObj != null) {
-                appendActions = Boolean.parseBoolean(appendActionsObj.toString());
-            }
+            var appendActions = appendActionsDefault;
+            var expressionsAsActions = expressionsAsActionsDefault;
 
             var behaviorConfiguration = resourceClientLibrary.getResource(uri, BehaviorConfiguration.class);
             var behaviorConfigJson = jsonSerialization.serialize(behaviorConfiguration);
             var behaviorSet = behaviorSerialization.deserialize(behaviorConfigJson);
 
-            return new BehaviorRulesEvaluator(behaviorSet);
+            Object appendActionsObj = configuration.getOrDefault(
+                    BEHAVIOR_CONFIG_APPEND_ACTIONS, behaviorConfiguration.getAppendActions());
+            if (appendActionsObj != null) {
+                appendActions = Boolean.parseBoolean(appendActionsObj.toString());
+            }
+
+            Object expressionsAsActionsObj = configuration.getOrDefault(
+                    BEHAVIOR_CONFIG_EXPRESSIONS_AS_ACTIONS, behaviorConfiguration.getExpressionsAsActions());
+            if (expressionsAsActionsObj != null) {
+                expressionsAsActions = Boolean.parseBoolean(expressionsAsActionsObj.toString());
+            }
+
+            return new BehaviorRulesEvaluator(behaviorSet, appendActions, expressionsAsActions);
         } catch (IOException | DeserializationException e) {
             String message = "Error while configuring BehaviorRuleLifecycleTask!";
             log.debug(message, e);
@@ -168,8 +206,12 @@ public class BehaviorRulesEvaluationTask implements ILifecycleTask {
         extensionDescriptor.getConfigs().put(BEHAVIOR_CONFIG_URI, configValue);
 
         var appendActionsConfig =
-                new ConfigValue("Append Actions", FieldType.BOOLEAN, false, true);
+                new ConfigValue("Append Actions", FieldType.BOOLEAN, true, true);
         extensionDescriptor.getConfigs().put(BEHAVIOR_CONFIG_APPEND_ACTIONS, appendActionsConfig);
+
+        var expressionsAsActionsConfig =
+                new ConfigValue("Expressions as Actions", FieldType.BOOLEAN, true, false);
+        extensionDescriptor.getConfigs().put(BEHAVIOR_CONFIG_EXPRESSIONS_AS_ACTIONS, expressionsAsActionsConfig);
 
         return extensionDescriptor;
     }

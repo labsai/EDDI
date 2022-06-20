@@ -15,5 +15,7 @@ import java.util.List;
 @Getter
 @Setter
 public class BehaviorConfiguration {
+    private Boolean appendActions;
+    private Boolean expressionsAsActions;
     private List<BehaviorGroupConfiguration> behaviorGroups = new LinkedList<>();
 }
