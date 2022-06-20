@@ -190,7 +190,7 @@ public class OutputTemplateTask implements ILifecycleTask {
 
     private List<QuickReply> copyQuickReplies(List<QuickReply> source) {
         return source.stream().map(quickReply ->
-                        new QuickReply(quickReply.getValue(), quickReply.getExpressions(), quickReply.isDefault())).
+                        new QuickReply(quickReply.getValue(), quickReply.getExpressions(), quickReply.getIsDefault())).
                 collect(Collectors.toCollection(LinkedList::new));
     }
 

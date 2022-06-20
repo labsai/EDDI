@@ -13,7 +13,7 @@ import lombok.*;
 public class QuickReply {
     private String value;
     private String expressions;
-    private boolean isDefault;
+    private Boolean isDefault;
 
     @Override
     public String toString() {
