@@ -17,7 +17,6 @@ import io.quarkus.runtime.Startup;
 import io.quarkus.runtime.StartupEvent;
 import io.quarkus.scheduler.Scheduled;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
-import org.eclipse.microprofile.context.ManagedExecutor;
 import org.eclipse.microprofile.health.HealthCheck;
 import org.eclipse.microprofile.health.HealthCheckResponse;
 import org.eclipse.microprofile.health.Readiness;
@@ -63,8 +62,6 @@ public class BotDeploymentManagement implements IBotDeploymentManagement, Health
     private boolean botsAreReady = false;
 
     private static final Logger LOGGER = Logger.getLogger(BotDeploymentManagement.class);
-    @Inject
-    ManagedExecutor managedExecutor;
 
     @Inject
     public BotDeploymentManagement(IDeploymentStore deploymentStore,
@@ -162,6 +159,7 @@ public class BotDeploymentManagement implements IBotDeploymentManagement, Health
                         // if we can undeploy bot version if we end old conversations
                         postUndeloymentAttempts.forEach(UndeploymentExecutor::attemptUndeploy);
                         LOGGER.info("Finished managing the deployment of bots.");
+                        LOGGER.info("E.D.D.I is ready!");
                     }
                 } catch (ResourceStoreException e) {
                     LOGGER.error(e.getLocalizedMessage(), e);
