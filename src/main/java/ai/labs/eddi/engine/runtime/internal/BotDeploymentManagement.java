@@ -8,6 +8,7 @@ import ai.labs.eddi.datastore.IResourceStore.IResourceId;
 import ai.labs.eddi.engine.memory.IConversationMemoryStore;
 import ai.labs.eddi.engine.runtime.IBotDeploymentManagement;
 import ai.labs.eddi.engine.runtime.IBotFactory;
+import ai.labs.eddi.engine.runtime.IRuntime;
 import ai.labs.eddi.engine.runtime.service.ServiceException;
 import ai.labs.eddi.models.ConversationState;
 import ai.labs.eddi.models.Deployment.Environment;
@@ -16,6 +17,7 @@ import io.quarkus.runtime.Startup;
 import io.quarkus.runtime.StartupEvent;
 import io.quarkus.scheduler.Scheduled;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
+import org.eclipse.microprofile.context.ManagedExecutor;
 import org.eclipse.microprofile.health.HealthCheck;
 import org.eclipse.microprofile.health.HealthCheckResponse;
 import org.eclipse.microprofile.health.Readiness;
@@ -29,6 +31,8 @@ import java.time.LocalDate;
 import java.time.Period;
 import java.time.ZoneId;
 import java.time.temporal.ChronoUnit;
+import java.util.Collections;
+import java.util.concurrent.TimeUnit;
 
 import static ai.labs.eddi.configs.deployment.model.DeploymentInfo.DeploymentStatus.deployed;
 import static ai.labs.eddi.configs.deployment.model.DeploymentInfo.DeploymentStatus.undeployed;
@@ -52,12 +56,15 @@ public class BotDeploymentManagement implements IBotDeploymentManagement, Health
     private final IConversationMemoryStore conversationMemoryStore;
     private final IDocumentDescriptorStore documentDescriptorStore;
     private final IMigrationManager migrationManager;
+    private final IRuntime runtime;
     private final int maximumLifeTimeOfIdleConversationsInDays;
 
     private Instant lastDeploymentCheck = null;
     private boolean botsAreReady = false;
 
     private static final Logger LOGGER = Logger.getLogger(BotDeploymentManagement.class);
+    @Inject
+    ManagedExecutor managedExecutor;
 
     @Inject
     public BotDeploymentManagement(IDeploymentStore deploymentStore,
@@ -66,6 +73,7 @@ public class BotDeploymentManagement implements IBotDeploymentManagement, Health
                                    IConversationMemoryStore conversationMemoryStore,
                                    IDocumentDescriptorStore documentDescriptorStore,
                                    IMigrationManager migrationManager,
+                                   IRuntime runtime,
                                    @ConfigProperty(name = "eddi.conversations.maximumLifeTimeOfIdleConversationsInDays")
                                    int maximumLifeTimeOfIdleConversationsInDays) {
         this.deploymentStore = deploymentStore;
@@ -74,6 +82,7 @@ public class BotDeploymentManagement implements IBotDeploymentManagement, Health
         this.conversationMemoryStore = conversationMemoryStore;
         this.documentDescriptorStore = documentDescriptorStore;
         this.migrationManager = migrationManager;
+        this.runtime = runtime;
         this.maximumLifeTimeOfIdleConversationsInDays = maximumLifeTimeOfIdleConversationsInDays;
     }
 
@@ -88,75 +97,79 @@ public class BotDeploymentManagement implements IBotDeploymentManagement, Health
 
     @Scheduled(every = "24h")
     public void manageBotDeployments() {
-        migrationManager.startMigrationIfFirstTimeRun(() -> {
-            try {
-                var oneHourAgo = Instant.now().minus(1, ChronoUnit.HOURS);
-                if (lastDeploymentCheck == null || lastDeploymentCheck.isBefore(oneHourAgo)) {
-                    lastDeploymentCheck = Instant.now();
-                    LOGGER.info("Starting deployment management of bots...");
-                    var postUndeloymentAttempts =
-                            deploymentStore.readDeploymentInfos().stream().filter(
-                                            deploymentInfo -> deploymentInfo.getDeploymentStatus() == deployed).
-                                    map(deploymentInfo -> {
-                                        var environmentName = deploymentInfo.getEnvironment().toString();
-                                        var environment = Environment.valueOf(environmentName);
-                                        var botId = deploymentInfo.getBotId();
-                                        var botVersion = deploymentInfo.getBotVersion();
-                                        try {
-                                            IResourceId latestBot;
+        runtime.submitScheduledCallable(() -> {
+            migrationManager.startMigrationIfFirstTimeRun(() -> {
+                try {
+                    var oneHourAgo = Instant.now().minus(1, ChronoUnit.HOURS);
+                    if (lastDeploymentCheck == null || lastDeploymentCheck.isBefore(oneHourAgo)) {
+                        lastDeploymentCheck = Instant.now();
+                        LOGGER.info("Starting deployment management of bots...");
+                        var postUndeloymentAttempts =
+                                deploymentStore.readDeploymentInfos().stream().filter(
+                                                deploymentInfo -> deploymentInfo.getDeploymentStatus() == deployed).
+                                        map(deploymentInfo -> {
+                                            var environmentName = deploymentInfo.getEnvironment().toString();
+                                            var environment = Environment.valueOf(environmentName);
+                                            var botId = deploymentInfo.getBotId();
+                                            var botVersion = deploymentInfo.getBotVersion();
                                             try {
-                                                latestBot = botStore.getCurrentResourceId(botId);
-                                            } catch (ResourceNotFoundException e) {
-                                                // there is no latest bot version found, so this bot was very likely deleted,
-                                                // therefore we will treat it like an older bot version and try to undeploy
-                                                // if no longer in use
-                                                latestBot = null;
+                                                IResourceId latestBot;
+                                                try {
+                                                    latestBot = botStore.getCurrentResourceId(botId);
+                                                } catch (ResourceNotFoundException e) {
+                                                    // there is no latest bot version found, so this bot was very likely deleted,
+                                                    // therefore we will treat it like an older bot version and try to undeploy
+                                                    // if no longer in use
+                                                    latestBot = null;
+                                                }
+
+                                                if (latestBot != null && latestBot.getVersion() <= botVersion) {
+                                                    // we deploy a bot if it is the latest
+                                                    botFactory.deployBot(environment, botId, botVersion, null);
+                                                } else {
+                                                    manageDeploymentOfOldBot(environment, botId, botVersion);
+
+                                                    return (UndeploymentExecutor) () -> {
+                                                        try {
+                                                            // attempt to undeploy bot if this bot version is no longer in use
+                                                            endOldConversationsWithOldBots(botId, botVersion);
+
+                                                            manageDeploymentOfOldBot(environment, botId, botVersion);
+                                                        } catch (ResourceStoreException |
+                                                                 ResourceNotFoundException |
+                                                                 ServiceException |
+                                                                 IllegalAccessException e) {
+                                                            LOGGER.error(e.getLocalizedMessage(), e);
+                                                        }
+                                                    };
+                                                }
+                                            } catch (ServiceException | IllegalAccessException |
+                                                     IllegalArgumentException e) {
+                                                var message =
+                                                        "Error while deployment management of bot " +
+                                                                "(environment=%s, botId=%s, version=%s)!\n";
+
+                                                LOGGER.error(format(message, environment, botId, botVersion));
+                                                LOGGER.error(e.getLocalizedMessage(), e);
                                             }
 
-                                            if (latestBot != null && latestBot.getVersion() <= botVersion) {
-                                                // we deploy a bot if it is the latest
-                                                botFactory.deployBot(environment, botId, botVersion, null);
-                                            } else {
-                                                manageDeploymentOfOldBot(environment, botId, botVersion);
+                                            return (UndeploymentExecutor) () -> {};
+                                        }).toList();
 
-                                                return (UndeploymentExecutor) () -> {
-                                                    try {
-                                                        // attempt to undeploy bot if this bot version is no longer in use
-                                                        endOldConversationsWithOldBots(botId, botVersion);
+                        botsAreReady = true;
 
-                                                        manageDeploymentOfOldBot(environment, botId, botVersion);
-                                                    } catch (ResourceStoreException | ResourceNotFoundException |
-                                                             ServiceException |
-                                                             IllegalAccessException e) {
-                                                        LOGGER.error(e.getLocalizedMessage(), e);
-                                                    }
-                                                };
-                                            }
-                                        } catch (ServiceException | IllegalAccessException |
-                                                 IllegalArgumentException e) {
-                                            var message =
-                                                    "Error while deployment management of bot " +
-                                                            "(environment=%s, botId=%s, version=%s)!\n";
-
-                                            LOGGER.error(format(message, environment, botId, botVersion));
-                                            LOGGER.error(e.getLocalizedMessage(), e);
-                                        }
-
-                                        return (UndeploymentExecutor) () -> {};
-                                    }).toList();
-
-                    botsAreReady = true;
-
-                    // run all undeploy attempts of old bots after all current bots have been deployed and see
-                    // if we can undeploy bot version if we end old conversations
-                    postUndeloymentAttempts.forEach(UndeploymentExecutor::attemptUndeploy);
-
-                    LOGGER.info("Finished managing the deployment of bots.");
+                        // run all undeploy attempts of old bots after all current bots have been deployed and see
+                        // if we can undeploy bot version if we end old conversations
+                        postUndeloymentAttempts.forEach(UndeploymentExecutor::attemptUndeploy);
+                        LOGGER.info("Finished managing the deployment of bots.");
+                    }
+                } catch (ResourceStoreException e) {
+                    LOGGER.error(e.getLocalizedMessage(), e);
                 }
-            } catch (ResourceStoreException e) {
-                LOGGER.error(e.getLocalizedMessage(), e);
-            }
-        });
+            });
+
+            return null;
+        }, 1000L, TimeUnit.MILLISECONDS, Collections.emptyMap());
     }
 
     private void manageDeploymentOfOldBot(Environment environment, String botId, Integer botVersion)
