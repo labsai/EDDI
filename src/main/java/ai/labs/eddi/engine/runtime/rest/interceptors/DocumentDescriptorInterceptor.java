@@ -36,7 +36,6 @@ import static ai.labs.eddi.configs.utilities.ResourceUtilities.createDocumentDes
 @Provider
 public class DocumentDescriptorInterceptor implements ContainerResponseFilter {
     private static final String METHOD_NAME_UPDATE_DESCRIPTOR = "updateDescriptor";
-    private static final String METHOD_NAME_UPDATE_PERMISSIONS = "updatePermissions";
     private final IDocumentDescriptorStore documentDescriptorStore;
     private final IConversationDescriptorStore conversationDescriptorStore;
     private final ITestCaseDescriptorStore testCaseDescriptorStore;
