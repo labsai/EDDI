@@ -126,7 +126,7 @@ public class BotTriggerStore implements IBotTriggerStore {
                 throw new ResourceAlreadyExistsException(message);
 
             } catch (NoSuchElementException e) {
-                collection.insertOne(createDocument(botTriggerConfiguration));
+                Observable.fromPublisher(collection.insertOne(createDocument(botTriggerConfiguration))).blockingFirst();
             }
         }
 
