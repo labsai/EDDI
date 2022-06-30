@@ -12,7 +12,7 @@ import java.util.LinkedList;
 import java.util.List;
 import java.util.stream.Collectors;
 
-import static ai.labs.eddi.models.Property.Scope.conversation;
+import static ai.labs.eddi.models.Property.Scope.*;
 
 /**
  * @author ginccc
@@ -35,30 +35,44 @@ public class PropertySetter implements IPropertySetter {
                         PROPERTY_EXPRESSION.equals(expression.getExpressionName()) &&
                                 expression.getSubExpressions().length > 0).
                 map(expression -> {
-                    List<String> meanings = new LinkedList<>();
-                    Value value = new Value();
-                    extractMeanings(meanings, value, expression.getSubExpressions()[0]);
+                    var meanings = new LinkedList<String>();
+                    var propertyValue = new Value();
+                    extractMeanings(meanings, propertyValue, expression.getSubExpressions()[0]);
 
+                    var propertyScope = extractScopeOrDefault(expression.getSubExpressions());
                     var propertyName = String.join(".", meanings);
-                    if (value.isNumeric()) {
-                        if (value.isDouble()) {
-                            return new Property(propertyName, value.toFloat(), conversation);
+
+                    if (propertyValue.isNumeric()) {
+                        if (propertyValue.isDouble()) {
+                            return new Property(propertyName, propertyValue.toFloat(), propertyScope);
                         } else {
-                            return new Property(propertyName, value.toInteger(), conversation);
+                            return new Property(propertyName, propertyValue.toInteger(), propertyScope);
                         }
                     } else {
-                        return new Property(propertyName, value.getExpressionName(), conversation);
+                        return new Property(propertyName, propertyValue.getExpressionName(), propertyScope);
                     }
 
                 }).collect(Collectors.toCollection(LinkedList::new));
     }
 
-    private void extractMeanings(List<String> meanings, Value value, Expression expression) {
+    private static void extractMeanings(List<String> meanings, Value value, Expression expression) {
         if (expression.getSubExpressions().length > 0) {
             meanings.add(expression.getExpressionName());
             extractMeanings(meanings, value, expression.getSubExpressions()[0]);
         } else {
             value.setExpressionName(expression.getExpressionName());
         }
+    }
+
+    private static Property.Scope extractScopeOrDefault(Expression[] subExpressions) {
+        Property.Scope propertyScope = conversation;
+        if (subExpressions.length > 1 && subExpressions[1] != null) {
+            switch (subExpressions[1].getExpressionName()) {
+                case "step" -> propertyScope = step;
+                // case "conversation" -> propertyScope = conversation;
+                case "longTerm" -> propertyScope = longTerm;
+            }
+        }
+        return propertyScope;
     }
 }
