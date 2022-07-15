@@ -212,7 +212,9 @@ const JsonSchemaForm: React.StatelessComponent<IProps> = (props: IProps) => {
   }, []);
 
   const updateDefinitions = (definitions) => {
-    if (!definitions) return;
+    if (!definitions) {
+      return;
+    }
     Object.keys(definitions).forEach((key) => {
       definitions[key] = {
         ...(definitions[key] || {}),

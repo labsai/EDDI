@@ -6,6 +6,7 @@ import { makeStyles } from '@material-ui/core/styles';
 import ArrowDropDownIcon from '@material-ui/icons/ArrowDropDown';
 import * as React from 'react';
 import { compose, pure, setDisplayName } from 'recompose';
+import { RESOURCES } from '../../constants/paths';
 import {
   BLUE_COLOR,
   BLUE_COLOR_TRANSPARENT,
@@ -141,7 +142,7 @@ const PluginSelectComponent = ({ page }: IProps) => {
         return;
       }
       setSelectedOption({ label: selectedOption, value });
-      historyPush('/resources', [`type=${pageEnum[value]}`]);
+      historyPush(RESOURCES, [`type=${pageEnum[value]}`]);
     }
   };
 

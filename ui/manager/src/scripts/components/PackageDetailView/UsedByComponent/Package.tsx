@@ -5,6 +5,7 @@ import { connect } from 'react-redux';
 import NameAndVersion from './NameAndVersion';
 import { packageSelector } from '../../../selectors/PackageSelectors';
 import { historyPush } from '../../../history';
+import { PACKAGE_VIEW } from '../../../constants/paths';
 
 interface IPublicProps {
   packageResource: string;
@@ -28,7 +29,9 @@ const Package = ({
       descriptor={packagePayload}
       usedByOlderVersion={usedByOlderVersion}
       isSmallName={isSmallName}
-      onClick={() => historyPush(`/packageview/${packagePayload.id}`)}
+      onClick={() =>
+        historyPush(`${PACKAGE_VIEW.replace(':id', packagePayload.id)}/`)
+      }
     />
   );
 };

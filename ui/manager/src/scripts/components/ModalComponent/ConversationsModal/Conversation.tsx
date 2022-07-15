@@ -1,6 +1,7 @@
 import * as moment from 'moment';
 import * as React from 'react';
 import { compose, pure, setDisplayName } from 'recompose';
+import { CONVERSATION_VIEW } from '../../../constants/paths';
 import modalActionDispatchers from '../../../actions/ModalActionDispatchers';
 import { historyPush } from '../../../history';
 import { IConversation } from '../../utils/AxiosFunctions';
@@ -17,7 +18,10 @@ const Conversation: React.StatelessComponent<IProps> = (props: IProps) => {
   const handleClick = () => {
     modalActionDispatchers.closeModal();
     historyPush(
-      `/conversationview/${Parser.getId(props.conversation.resource)}`,
+      `${CONVERSATION_VIEW.replace(
+        ':id',
+        Parser.getId(props.conversation.resource),
+      )}/`,
     );
   };
 

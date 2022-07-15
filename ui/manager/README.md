@@ -88,12 +88,20 @@ Sync up (deploy) our local files to our bucket
 
 ```
 gsutil cp -r dist/* gs://manager-labs-ai
+gsutil cp -p differ-140008 -r dist/* gs://bot-manager-differ
 ```
 
 To show bucket info
 
 ```
 gsutil ls -L -b gs://manager-labs-ai
+```
+
+To create a new bucket (gsutil mb -p PROJECT_ID gs://BUCKET_NAME)
+
+```
+gsutil mb -p differ-140008 gs://bot-manager-differ
+
 ```
 
 To get bucket size

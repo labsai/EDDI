@@ -18,6 +18,7 @@ import { READY } from '../utils/helpers/BotHelper';
 import useStyles from './Bot.styles';
 import Packages from './Packages';
 import exportBot from '../utils/helpers/ExportBot';
+import { BOT_VIEW } from '../../constants/paths';
 
 interface IPublicProps {
   bot: IBot;
@@ -57,7 +58,7 @@ const Bot = ({ bot, apiUrl, readOnly }: IPrivateProps) => {
       <div className={classes.botBox}>
         <div
           className={classes.botHeader}
-          onClick={() => historyPush(`/botview/${bot.id}`)}>
+          onClick={() => historyPush(`${BOT_VIEW.replace(':id', bot.id)}/`)}>
           <div className={classes.link}>
             <div className={classes.botHeaderName}>{bot.name || bot.id}</div>
             <div className={classes.versionName}>
