@@ -2,10 +2,12 @@ package ai.labs.eddi.modules.output.model.types;
 
 import ai.labs.eddi.modules.output.model.OutputItem;
 import com.kjetland.jackson.jsonSchema.annotations.JsonSchemaInject;
+import com.kjetland.jackson.jsonSchema.annotations.JsonSchemaTitle;
 
 import java.util.*;
 
 @JsonSchemaInject(json = "{\"additionalProperties\" : true}")
+@JsonSchemaTitle("other")
 public class OtherOutputItem extends OutputItem implements Map<String, String> {
     private final LinkedHashMap<String, String> internalMap = new LinkedHashMap<>();
 
