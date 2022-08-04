@@ -64,6 +64,8 @@ public class InputParserTask implements ILifecycleTask {
     private static final String KEY_EXPRESSIONS = "expressions";
     private static final String KEY_EXPRESSIONS_PARSED = KEY_EXPRESSIONS + ":parsed";
     private static final String KEY_INTENT = "intents";
+
+    private static final String KEY_EXPRESSIONS_WITH_INPUT = "nobehaviour:" + KEY_EXPRESSIONS + ":withinput";
     private static final String KEY_TYPE = "type";
     private static final String KEY_CONFIG = "config";
 
@@ -179,7 +181,7 @@ public class InputParserTask implements ILifecycleTask {
                 }
 
                 String expressionString = joinStrings(", ", newExpressions);
-                IData<String> expressionsData = new Data<>(KEY_EXPRESSIONS_PARSED, expressionString);
+                IData<Expressions> expressionsData = new Data<>(KEY_EXPRESSIONS_PARSED, newExpressions);
                 currentStep.storeData(expressionsData);
                 currentStep.addConversationOutputString(KEY_EXPRESSIONS, expressionString);
 
@@ -190,6 +192,7 @@ public class InputParserTask implements ILifecycleTask {
                 Data<List<String>> intentData = new Data<>(KEY_INTENT, intents);
                 currentStep.storeData(intentData);
                 currentStep.addConversationOutputList(KEY_INTENT, intents);
+
             }
         }
     }

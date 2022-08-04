@@ -16,6 +16,7 @@ import java.util.Map;
 
 import static ai.labs.eddi.engine.memory.IConversationMemory.IConversationStepStack;
 import static ai.labs.eddi.modules.behavior.impl.conditions.IBehaviorCondition.ExecutionState.*;
+import static ai.labs.eddi.utils.StringUtilities.joinStrings;
 
 /**
  * @author ginccc
@@ -63,7 +64,7 @@ public class InputMatcher extends BaseMatcher implements IBehaviorCondition {
 
     @Override
     public ExecutionState execute(IConversationMemory memory, List<BehaviorRule> trace) {
-        IData<String> data;
+        IData<Expressions> data;
         ExecutionState state = NOT_EXECUTED;
         switch (occurrence) {
             case currentStep -> {
@@ -88,10 +89,11 @@ public class InputMatcher extends BaseMatcher implements IBehaviorCondition {
         return state;
     }
 
-    private ExecutionState evaluateInputExpressions(IData<String> data) {
+    private ExecutionState evaluateInputExpressions(IData<Expressions> data) {
         Expressions inputExpressions = new Expressions();
         if (data != null && data.getResult() != null) {
-            inputExpressions = expressionProvider.parseExpressions(data.getResult());
+            String expressionString = joinStrings(", ", data.getResult());
+            inputExpressions = expressionProvider.parseExpressions(expressionString);
         }
 
         if (isInputEmpty(inputExpressions) ||

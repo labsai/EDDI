@@ -13,6 +13,9 @@ import java.util.Collections;
 public class Expression implements Cloneable {
     protected String domain;
     protected String expressionName;
+
+    protected String inputValue;
+
     protected Expressions subExpressions = new Expressions();
 
     protected Expression() {
@@ -134,6 +137,14 @@ public class Expression implements Cloneable {
 
     public Boolean containsExpressionWithName(String expressionName) {
         return getAllExpressionsWithNames(expressionName).size() > 0;
+    }
+
+    public String getInputValue() {
+        return inputValue;
+    }
+
+    public void setInputValue(String inputValue) {
+        this.inputValue = inputValue;
     }
 
     /**
