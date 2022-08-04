@@ -181,7 +181,7 @@ public class InputParserTask implements ILifecycleTask {
                 }
 
                 String expressionString = joinStrings(", ", newExpressions);
-                IData<Expressions> expressionsData = new Data<>(KEY_EXPRESSIONS_PARSED, newExpressions);
+                IData<String> expressionsData = new Data<>(KEY_EXPRESSIONS_PARSED, expressionString);
                 currentStep.storeData(expressionsData);
                 currentStep.addConversationOutputString(KEY_EXPRESSIONS, expressionString);
 
