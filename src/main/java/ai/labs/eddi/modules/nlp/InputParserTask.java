@@ -193,9 +193,14 @@ public class InputParserTask implements ILifecycleTask {
                 currentStep.storeData(intentData);
                 currentStep.addConversationOutputList(KEY_INTENT, intents);
 
+                currentStep.addConversationOutputObject("withinputexpression", convertObjectToListOfMaps(newExpressions));
+
             }
         }
     }
+
+
+
 
     @Override
     public Object configure(Map<String, Object> configuration, Map<String, Object> extensions)
@@ -373,4 +378,5 @@ public class InputParserTask implements ILifecycleTask {
         URI normalizerUri = URI.create(resourceMap.get(KEY_TYPE).toString());
         return normalizerUri.getHost();
     }
+
 }
