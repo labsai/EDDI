@@ -64,7 +64,7 @@ public class InputMatcher extends BaseMatcher implements IBehaviorCondition {
 
     @Override
     public ExecutionState execute(IConversationMemory memory, List<BehaviorRule> trace) {
-        IData<Expressions> data;
+        IData<String> data;
         ExecutionState state = NOT_EXECUTED;
         switch (occurrence) {
             case currentStep -> {
@@ -89,11 +89,10 @@ public class InputMatcher extends BaseMatcher implements IBehaviorCondition {
         return state;
     }
 
-    private ExecutionState evaluateInputExpressions(IData<Expressions> data) {
+    private ExecutionState evaluateInputExpressions(IData<String> data) {
         Expressions inputExpressions = new Expressions();
         if (data != null && data.getResult() != null) {
-            String expressionString = joinStrings(", ", data.getResult());
-            inputExpressions = expressionProvider.parseExpressions(expressionString);
+            inputExpressions = expressionProvider.parseExpressions(data.getResult());
         }
 
         if (isInputEmpty(inputExpressions) ||
