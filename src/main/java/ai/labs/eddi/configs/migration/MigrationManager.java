@@ -7,6 +7,7 @@ import com.mongodb.reactivestreams.client.MongoDatabase;
 import io.reactivex.rxjava3.core.Observable;
 import org.bson.Document;
 import org.bson.types.ObjectId;
+import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.jboss.logging.Logger;
 
 import javax.enterprise.context.ApplicationScoped;
@@ -77,10 +78,12 @@ public class MigrationManager implements IMigrationManager {
     private final MongoCollection<Document> outputCollectionHistory;
     private final MongoCollection<Document> conversationMemoryCollection;
     private final MigrationLogStore migrationLogStore;
+    private final Boolean skipConversationMemories;
     private boolean isCurrentlyRunning = false;
 
     @Inject
-    public MigrationManager(MongoDatabase database, MigrationLogStore migrationLogStore) {
+    public MigrationManager(MongoDatabase database, MigrationLogStore migrationLogStore,
+                            @ConfigProperty(name = "eddi.migration.skipConversationMemories") Boolean skipConversationMemories) {
         this.propertySetterCollection = database.getCollection(COLLECTION_PROPERTYSETTER);
         this.propertySetterCollectionHistory = database.getCollection(COLLECTION_PROPERTYSETTER + ".history");
 
@@ -93,6 +96,7 @@ public class MigrationManager implements IMigrationManager {
         this.conversationMemoryCollection = database.getCollection(COLLECTION_CONVERSATION_MEMORY);
 
         this.migrationLogStore = migrationLogStore;
+        this.skipConversationMemories = skipConversationMemories;
     }
 
     @Override
@@ -103,7 +107,9 @@ public class MigrationManager implements IMigrationManager {
                 startPropertyMigration();
                 startHttpCallsMigration();
                 startOutputMigration();
-                startConversationMemoryMigration();
+                if (!skipConversationMemories) {
+                    startConversationMemoryMigration();
+                }
 
                 migrationLogStore.createMigrationLog(new MigrationLog(MIGRATION_CONFIRMATION));
             }
