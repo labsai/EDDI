@@ -15,8 +15,8 @@
         <quarkus.microprofile.version>2.7.2.Final</quarkus.microprofile.version>
         <quarkus.platform.artifact-id>quarkus-bom</quarkus.platform.artifact-id>
         <quarkus.platform.group-id>io.quarkus.platform</quarkus.platform.group-id>
-        <quarkus.platform.version>2.11.1.Final</quarkus.platform.version>
-        <quarkus-plugin.version>2.11.1.Final</quarkus-plugin.version>
+        <quarkus.platform.version>2.11.2.Final</quarkus.platform.version>
+        <quarkus-plugin.version>2.11.2.Final</quarkus-plugin.version>
         <compiler-plugin.version>3.8.1</compiler-plugin.version>
         <jandex-maven-plugin.version>1.2.2</jandex-maven-plugin.version>
         <maven.compiler.parameters>true</maven.compiler.parameters>
@@ -111,7 +111,7 @@
         <dependency>
             <groupId>io.swagger.core.v3</groupId>
             <artifactId>swagger-annotations</artifactId>
-            <version>2.2.0</version>
+            <version>2.2.2</version>
         </dependency>
         <dependency>
             <groupId>de.undercouch</groupId>
@@ -199,12 +199,12 @@
         <dependency>
             <groupId>org.eclipse.jetty</groupId>
             <artifactId>jetty-client</artifactId>
-            <version>11.0.10</version>
+            <version>11.0.11</version>
         </dependency>
         <dependency>
             <groupId>org.junit.jupiter</groupId>
             <artifactId>junit-jupiter-engine</artifactId>
-            <version>5.8.2</version>
+            <version>5.9.0</version>
             <scope>test</scope>
         </dependency>
         <dependency>
