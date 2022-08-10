@@ -71,15 +71,7 @@ public class OutputTemplateTask implements ILifecycleTask {
 
         final Map<String, Object> contextMap = memoryItemConverter.convert(memory);
 
-        if (!outputDataList.isEmpty()) {
-            currentStep.resetConversationOutput(KEY_OUTPUT);
-        }
-
         templateOutputTexts(memory, outputDataList, contextMap);
-
-        if (!quickReplyDataList.isEmpty()) {
-            currentStep.resetConversationOutput(KEY_QUICK_REPLIES);
-        }
         templatingQuickReplies(memory, quickReplyDataList, contextMap);
     }
 
@@ -148,8 +140,6 @@ public class OutputTemplateTask implements ILifecycleTask {
                     if (postTemplated != null) {
                         output.setResult(postTemplated);
                         templateData(memory, output, outputKey, preTemplated, postTemplated);
-                        IWritableConversationStep currentStep = memory.getCurrentStep();
-                        currentStep.addConversationOutputList(KEY_OUTPUT, Collections.singletonList(output.getResult()));
                     }
                 } catch (ITemplatingEngine.TemplateEngineException e) {
                     log.error(e.getLocalizedMessage(), e);
@@ -184,7 +174,7 @@ public class OutputTemplateTask implements ILifecycleTask {
             }).collect(Collectors.toList());
 
             templateData(memory, quickReplyData, quickReplyData.getKey(), preTemplating, postTemplating);
-            memory.getCurrentStep().addConversationOutputList(KEY_QUICK_REPLIES, postTemplating);
+            quickReplyData.setResult(postTemplating);
         });
     }
 
