@@ -71,11 +71,11 @@ public class OutputTemplateTask implements ILifecycleTask {
 
         final Map<String, Object> contextMap = memoryItemConverter.convert(memory);
 
-        templateOutputTexts(memory, outputDataList, contextMap);
-        templatingQuickReplies(memory, quickReplyDataList, contextMap);
+        templateOutputTexts(currentStep, outputDataList, contextMap);
+        templatingQuickReplies(currentStep, quickReplyDataList, contextMap);
     }
 
-    private void templateOutputTexts(IConversationMemory memory,
+    private void templateOutputTexts(IWritableConversationStep currentStep,
                                      List<IData<Object>> outputDataList,
                                      Map<String, Object> contextMap) {
         outputDataList.forEach(output -> {
@@ -139,7 +139,8 @@ public class OutputTemplateTask implements ILifecycleTask {
 
                     if (postTemplated != null) {
                         output.setResult(postTemplated);
-                        templateData(memory, output, outputKey, preTemplated, postTemplated);
+                        templateData(currentStep, output, outputKey, preTemplated, postTemplated);
+                        currentStep.replaceConversationOutputObject(KEY_OUTPUT, preTemplated, postTemplated);
                     }
                 } catch (ITemplatingEngine.TemplateEngineException e) {
                     log.error(e.getLocalizedMessage(), e);
@@ -152,7 +153,7 @@ public class OutputTemplateTask implements ILifecycleTask {
         return objectMapper.convertValue(preTemplated, new TypeReference<>() {});
     }
 
-    private void templatingQuickReplies(IConversationMemory memory,
+    private void templatingQuickReplies(IWritableConversationStep currentStep,
                                         List<IData<List<QuickReply>>> quickReplyDataList,
                                         Map<String, Object> contextMap) {
         quickReplyDataList.forEach(quickReplyData -> {
@@ -173,7 +174,7 @@ public class OutputTemplateTask implements ILifecycleTask {
                 }
             }).collect(Collectors.toList());
 
-            templateData(memory, quickReplyData, quickReplyData.getKey(), preTemplating, postTemplating);
+            templateData(currentStep, quickReplyData, quickReplyData.getKey(), preTemplating, postTemplating);
             quickReplyData.setResult(postTemplating);
         });
     }
@@ -184,25 +185,25 @@ public class OutputTemplateTask implements ILifecycleTask {
                 collect(Collectors.toCollection(LinkedList::new));
     }
 
-    private void templateData(IConversationMemory memory,
+    private void templateData(IWritableConversationStep currentStep,
                               IData<?> dataText,
                               String dataKey,
                               Object preTemplated,
                               Object postTemplated) {
 
-        storeTemplatedData(memory, dataKey, PRE_TEMPLATED, preTemplated);
-        storeTemplatedData(memory, dataKey, POST_TEMPLATED, postTemplated);
-        memory.getCurrentStep().storeData(dataText);
+        storeTemplatedData(currentStep, dataKey, PRE_TEMPLATED, preTemplated);
+        storeTemplatedData(currentStep, dataKey, POST_TEMPLATED, postTemplated);
+        currentStep.storeData(dataText);
     }
 
-    private void storeTemplatedData(IConversationMemory memory,
+    private void storeTemplatedData(IWritableConversationStep currentStep,
                                     String originalKey,
                                     String templateAppendix,
                                     Object dataValue) {
 
         String newOutputKey = joinStrings(":", originalKey, templateAppendix);
         IData<Object> processedData = dataFactory.createData(newOutputKey, dataValue);
-        memory.getCurrentStep().storeData(processedData);
+        currentStep.storeData(processedData);
     }
 
     @Override

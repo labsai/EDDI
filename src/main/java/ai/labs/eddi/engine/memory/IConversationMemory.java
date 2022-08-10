@@ -92,6 +92,8 @@ public interface IConversationMemory extends Serializable {
 
         void addConversationOutputObject(String key, Object value);
 
+        void replaceConversationOutputObject(String key, Object value, Object replace);
+
         void addConversationOutputString(String key, String value);
 
         void addConversationOutputList(String key, List list);

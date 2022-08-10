@@ -4,6 +4,7 @@ import ai.labs.eddi.engine.memory.model.ConversationOutput;
 
 import java.util.*;
 import java.util.function.Function;
+import java.util.stream.IntStream;
 
 /**
  * @author ginccc
@@ -65,13 +66,26 @@ public class ConversationStep implements IConversationMemory.IWritableConversati
     }
 
     @Override
+    public void replaceConversationOutputObject(String key, Object valueToBeReplaced, Object replace) {
+        var outputs = (List<Object>) conversationOutput.
+                computeIfAbsent(key, (Function<String, List>) k -> new ArrayList());
+
+        IntStream.range(0, outputs.size()).forEach(i -> {
+            var currentValue = outputs.get(i);
+            if (currentValue.equals(valueToBeReplaced)) {
+                outputs.set(i, replace);
+            }
+        });
+    }
+
+    @Override
     public void addConversationOutputString(String key, String value) {
         conversationOutput.put(key, value);
     }
 
     @Override
     public void addConversationOutputList(String key, List list) {
-        List<Object> currentList = (List<Object>) conversationOutput.
+        var currentList = (List<Object>) conversationOutput.
                 computeIfAbsent(key, (Function<String, List>) k -> new ArrayList());
 
         currentList.addAll(list);
@@ -79,7 +93,7 @@ public class ConversationStep implements IConversationMemory.IWritableConversati
 
     @Override
     public void addConversationOutputMap(String key, Map<String, Object> map) {
-        Map<String, Object> currentMap = (Map<String, Object>) conversationOutput.
+        var currentMap = (Map<String, Object>) conversationOutput.
                 computeIfAbsent(key, (Function<String, Map>) k -> new LinkedHashMap<String, Object>());
 
         currentMap.putAll(map);
