@@ -32,7 +32,7 @@ public final class StringUtilities {
 
     public static String joinStrings(String delimiter, Object... values) {
         StringJoiner stringJoiner = new StringJoiner(delimiter);
-        Arrays.stream(values).map(Object::toString).forEach(stringJoiner::add);
+        Arrays.stream(values).filter(Objects::nonNull).map(Object::toString).forEach(stringJoiner::add);
         return stringJoiner.toString();
     }
 
