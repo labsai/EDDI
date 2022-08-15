@@ -2,8 +2,6 @@ package ai.labs.eddi.models;
 
 import lombok.*;
 
-import java.util.Map;
-
 @Getter
 @Setter
 @NoArgsConstructor
@@ -12,7 +10,7 @@ import java.util.Map;
 public class Property {
     private String name;
     private String valueString;
-    private Map<String, Object> valueObject;
+    private Object valueObject;
     private Integer valueInt;
     private Float valueFloat;
     private Scope scope = Scope.conversation;
@@ -23,7 +21,7 @@ public class Property {
         this.scope = scope;
     }
 
-    public Property(String name, Map<String, Object> valueObject, Scope scope) {
+    public Property(String name, Object valueObject, Scope scope) {
         this.name = name;
         this.valueObject = valueObject;
         this.scope = scope;
