@@ -17,6 +17,7 @@ public class Property {
     private List<Object> valueList;
     private Integer valueInt;
     private Float valueFloat;
+    private Boolean valueBoolean;
     private Scope scope = Scope.conversation;
 
     public Property(String name, String valueString, Scope scope) {
@@ -46,6 +47,12 @@ public class Property {
     public Property(String name, Float valueFloat, Scope scope) {
         this.name = name;
         this.valueFloat = valueFloat;
+        this.scope = scope;
+    }
+
+    public Property(String name, Boolean valueBoolean, Scope scope) {
+        this.name = name;
+        this.valueBoolean = valueBoolean;
         this.scope = scope;
     }
 

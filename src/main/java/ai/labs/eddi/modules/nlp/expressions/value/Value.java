@@ -46,6 +46,10 @@ public class Value extends Expression {
         return Float.parseFloat(expressionName);
     }
 
+    public Boolean toBoolean() {
+        return Boolean.parseBoolean(expressionName);
+    }
+
     @Override
     public boolean equals(Object o) {
         if (this == o) return true;

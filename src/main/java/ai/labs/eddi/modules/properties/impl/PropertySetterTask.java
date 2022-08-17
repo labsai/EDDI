@@ -53,8 +53,10 @@ public class PropertySetterTask implements ILifecycleTask {
     private static final String NAME = "name";
     private static final String VALUE_STRING = "valueString";
     private static final String VALUE_OBJECT = "valueObject";
+    private static final String VALUE_LIST = "valueList";
     private static final String VALUE_INT = "valueInt";
     private static final String VALUE_FLOAT = "valueFloat";
+    private static final String VALUE_BOOLEAN = "valueBoolean";
     private static final String FROM_OBJECT_PATH = "fromObjectPath";
     private static final String SCOPE = "scope";
     private static final String OVERRIDE = "override";
@@ -151,7 +153,7 @@ public class PropertySetterTask implements ILifecycleTask {
                                         conversationProperties.put(name, new Property(name, templateString, scope));
                                     } else if (templatedObj instanceof Map valueMap) {
                                         conversationProperties.put(name, new Property(name, valueMap, scope));
-                                    }else if (templatedObj instanceof List valueList) {
+                                    } else if (templatedObj instanceof List valueList) {
                                         conversationProperties.put(name, new Property(name, valueList, scope));
                                     } else if (templatedObj instanceof Integer valueInt) {
                                         conversationProperties.put(name, new Property(name, valueInt, scope));
@@ -174,6 +176,11 @@ public class PropertySetterTask implements ILifecycleTask {
                                         conversationProperties.put(name, new Property(name, valueObject, scope));
                                     }
 
+                                    var valueList = property.getValueList();
+                                    if (valueList != null) {
+                                        conversationProperties.put(name, new Property(name, valueList, scope));
+                                    }
+
                                     var valueInt = property.getValueInt();
                                     if (valueInt != null) {
                                         conversationProperties.put(name, new Property(name, valueInt, scope));
@@ -182,6 +189,11 @@ public class PropertySetterTask implements ILifecycleTask {
                                     var valueFloat = property.getValueFloat();
                                     if (valueFloat != null) {
                                         conversationProperties.put(name, new Property(name, valueFloat, scope));
+                                    }
+
+                                    var valueBoolean = property.getValueBoolean();
+                                    if (valueBoolean != null) {
+                                        conversationProperties.put(name, new Property(name, valueBoolean, scope));
                                     }
                                 }
 
@@ -299,11 +311,13 @@ public class PropertySetterTask implements ILifecycleTask {
     }
 
     private List<String> convertObjectToList(Object actionsObj) {
-        return objectMapper.convertValue(actionsObj, new TypeReference<>() {});
+        return objectMapper.convertValue(actionsObj, new TypeReference<>() {
+        });
     }
 
     private List<Map<String, Object>> convertObjectToListOfMapsWithObjects(Object object) {
-        return objectMapper.convertValue(object, new TypeReference<>() {});
+        return objectMapper.convertValue(object, new TypeReference<>() {
+        });
     }
 
     private List<PropertyInstruction> convertToProperties(List<Map<String, Object>> properties) {
@@ -317,10 +331,14 @@ public class PropertySetterTask implements ILifecycleTask {
                 propertyInstruction.setValueString(o.toString());
             } else if (property.containsKey(VALUE_OBJECT) && property.get(VALUE_OBJECT) instanceof Map m) {
                 propertyInstruction.setValueObject(m);
+            } else if (property.containsKey(VALUE_LIST) && property.get(VALUE_LIST) instanceof List l) {
+                propertyInstruction.setValueList(l);
             } else if (property.containsKey(VALUE_INT) && property.get(VALUE_INT) instanceof Integer i) {
                 propertyInstruction.setValueInt(i);
             } else if (property.containsKey(VALUE_FLOAT) && property.get(VALUE_FLOAT) instanceof Float f) {
                 propertyInstruction.setValueFloat(f);
+            }else if (property.containsKey(VALUE_BOOLEAN) && property.get(VALUE_BOOLEAN) instanceof Boolean b) {
+                propertyInstruction.setValueBoolean(b);
             }
 
             if (property.containsKey(FROM_OBJECT_PATH)) {

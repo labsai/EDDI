@@ -10,6 +10,7 @@ import lombok.Getter;
 
 import java.util.LinkedList;
 import java.util.List;
+import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
 import static ai.labs.eddi.models.Property.Scope.*;
@@ -19,6 +20,7 @@ import static ai.labs.eddi.models.Property.Scope.*;
  */
 
 public class PropertySetter implements IPropertySetter {
+    private static final Pattern BOOLEAN_MATCHER_PATTERN = Pattern.compile("true|false", Pattern.CASE_INSENSITIVE);
     private static final String PROPERTY_EXPRESSION = "property";
 
     @Getter
@@ -49,7 +51,11 @@ public class PropertySetter implements IPropertySetter {
                             return new Property(propertyName, propertyValue.toInteger(), propertyScope);
                         }
                     } else {
-                        return new Property(propertyName, propertyValue.getExpressionName(), propertyScope);
+                        var checkIfStringIsBoolean = BOOLEAN_MATCHER_PATTERN.matcher(propertyName);
+
+                        return checkIfStringIsBoolean.matches() ?
+                                new Property(propertyName, propertyValue.toBoolean(), propertyScope) :
+                                new Property(propertyName, propertyValue.getExpressionName(), propertyScope);
                     }
 
                 }).collect(Collectors.toCollection(LinkedList::new));
