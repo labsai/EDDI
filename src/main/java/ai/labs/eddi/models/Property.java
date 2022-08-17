@@ -2,6 +2,9 @@ package ai.labs.eddi.models;
 
 import lombok.*;
 
+import java.util.List;
+import java.util.Map;
+
 @Getter
 @Setter
 @NoArgsConstructor
@@ -10,7 +13,8 @@ import lombok.*;
 public class Property {
     private String name;
     private String valueString;
-    private Object valueObject;
+    private Map<String, Object> valueObject;
+    private List<Object> valueList;
     private Integer valueInt;
     private Float valueFloat;
     private Scope scope = Scope.conversation;
@@ -21,9 +25,15 @@ public class Property {
         this.scope = scope;
     }
 
-    public Property(String name, Object valueObject, Scope scope) {
+    public Property(String name, Map<String, Object> valueObject, Scope scope) {
         this.name = name;
         this.valueObject = valueObject;
+        this.scope = scope;
+    }
+
+    public Property(String name, List<Object> valueList, Scope scope) {
+        this.name = name;
+        this.valueList = valueList;
         this.scope = scope;
     }
 
@@ -40,8 +50,6 @@ public class Property {
     }
 
     public enum Scope {
-        step,
-        conversation,
-        longTerm
+        step, conversation, longTerm
     }
 }

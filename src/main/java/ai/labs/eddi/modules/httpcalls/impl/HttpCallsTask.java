@@ -425,9 +425,12 @@ public class HttpCallsTask implements ILifecycleTask {
                         if (propertyValue instanceof String s) {
                             memory.getConversationProperties().put(propertyName,
                                     new Property(propertyName, s, scope));
-                        } else if (propertyValue != null) {
+                        } else if (propertyValue instanceof Map m) {
                             memory.getConversationProperties().put(propertyName,
-                                    new Property(propertyName, propertyValue, scope));
+                                    new Property(propertyName, m, scope));
+                        } else if (propertyValue instanceof List l) {
+                            memory.getConversationProperties().put(propertyName,
+                                    new Property(propertyName, l, scope));
                         }
 
                         templateDataObjects.put("properties", memory.getConversationProperties().toMap());

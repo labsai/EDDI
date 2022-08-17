@@ -35,6 +35,8 @@ public class ConversationProperties
                 propertyMap.put(property.getName(), valueString);
             } else if (property.getValueObject() != null) {
                 propertyMap.put(property.getName(), property.getValueObject());
+            } else if (property.getValueList() != null) {
+                propertyMap.put(property.getName(), property.getValueList());
             } else if (property.getValueInt() != null) {
                 propertyMap.put(property.getName(), property.getValueInt());
             } else if (property.getValueFloat() != null) {

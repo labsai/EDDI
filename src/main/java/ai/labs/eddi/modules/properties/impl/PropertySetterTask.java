@@ -151,6 +151,8 @@ public class PropertySetterTask implements ILifecycleTask {
                                         conversationProperties.put(name, new Property(name, templateString, scope));
                                     } else if (templatedObj instanceof Map valueMap) {
                                         conversationProperties.put(name, new Property(name, valueMap, scope));
+                                    }else if (templatedObj instanceof List valueList) {
+                                        conversationProperties.put(name, new Property(name, valueList, scope));
                                     } else if (templatedObj instanceof Integer valueInt) {
                                         conversationProperties.put(name, new Property(name, valueInt, scope));
                                     } else if (templatedObj instanceof Float valueFloat) {
