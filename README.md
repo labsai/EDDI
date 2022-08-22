@@ -8,7 +8,7 @@ Scalable Open Source Chatbot Platform. Build multiple conversational bots with N
 Templating.
 Developed in Java (with Quarkus), provided with Docker, orchestrated with Kubernetes or Openshift.
 
-Latest stable version: 5.0.3
+Latest stable version: 5.0.4
 
 License: Apache License 2.0
 

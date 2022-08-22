@@ -30,9 +30,8 @@ public class ConversationProperties
             IConversationMemory.IWritableConversationStep currentStep = conversationMemory.getCurrentStep();
             currentStep.storeData(new Data<>(propertiesKey, Collections.singletonList(property)));
             Map<String, Object> propertyMap = new LinkedHashMap<>();
-            var valueString = property.getValueString();
-            if (valueString != null) {
-                propertyMap.put(property.getName(), valueString);
+            if (property.getValueString() != null) {
+                propertyMap.put(property.getName(), property.getValueString());
             } else if (property.getValueObject() != null) {
                 propertyMap.put(property.getName(), property.getValueObject());
             } else if (property.getValueList() != null) {
@@ -41,6 +40,8 @@ public class ConversationProperties
                 propertyMap.put(property.getName(), property.getValueInt());
             } else if (property.getValueFloat() != null) {
                 propertyMap.put(property.getName(), property.getValueFloat());
+            } else if (property.getValueBoolean() != null) {
+                propertyMap.put(property.getName(), property.getValueBoolean());
             }
 
             propertiesMap.putAll(propertyMap);
