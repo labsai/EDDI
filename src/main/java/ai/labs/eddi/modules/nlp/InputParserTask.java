@@ -71,9 +71,6 @@ public class InputParserTask implements ILifecycleTask {
     private final Map<String, Provider<INormalizerProvider>> normalizerProviders;
     private final Map<String, Provider<IDictionaryProvider>> dictionaryProviders;
     private final Map<String, Provider<ICorrectionProvider>> correctionProviders;
-    private boolean appendExpressions = true;
-    private boolean includeUnused = true;
-    private boolean includeUnknown = true;
 
     private static final Logger log = Logger.getLogger(InputParserTask.class);
 
@@ -124,7 +121,7 @@ public class InputParserTask implements ILifecycleTask {
             return;
         }
 
-        storeResultInMemory(memory.getCurrentStep(), parsedSolutions);
+        storeResultInMemory(memory.getCurrentStep(), parsedSolutions, parser.getConfig());
     }
 
 
@@ -165,12 +162,17 @@ public class InputParserTask implements ILifecycleTask {
         }
     }
 
-    private void storeResultInMemory(IConversationMemory.IWritableConversationStep currentStep, List<RawSolution> parsedSolutions) {
+    private void storeResultInMemory(IConversationMemory.IWritableConversationStep currentStep,
+                                     List<RawSolution> parsedSolutions,
+                                     IInputParser.Config parserConfig) {
         if (!parsedSolutions.isEmpty()) {
-            Solution solution = extractExpressions(parsedSolutions, includeUnused, includeUnknown).get(0);
+            Solution solution =
+                    extractExpressions(parsedSolutions,
+                            parserConfig.isIncludeUnused(),
+                            parserConfig.isIncludeUnknown()).get(0);
 
             Expressions newExpressions = solution.getExpressions();
-            if (appendExpressions && !newExpressions.isEmpty()) {
+            if (parserConfig.isAppendExpressions() && !newExpressions.isEmpty()) {
                 IData<String> latestExpressions = currentStep.getLatestData(KEY_EXPRESSIONS_PARSED);
                 if (latestExpressions != null) {
                     Expressions currentExpressions = expressionProvider.parseExpressions(latestExpressions.getResult());
@@ -200,19 +202,21 @@ public class InputParserTask implements ILifecycleTask {
             IllegalExtensionConfigurationException,
             UnrecognizedExtensionException {
 
+        var config = new IInputParser.Config();
+
         Object appendExpressions = configuration.get(CONFIG_APPEND_EXPRESSIONS);
         if (!isNullOrEmpty(appendExpressions)) {
-            this.appendExpressions = Boolean.parseBoolean(appendExpressions.toString());
+            config.setAppendExpressions(Boolean.parseBoolean(appendExpressions.toString()));
         }
 
         Object includeUnused = configuration.get(CONFIG_INCLUDE_UNUSED);
         if (!isNullOrEmpty(includeUnused)) {
-            this.includeUnused = Boolean.parseBoolean(includeUnused.toString());
+            config.setIncludeUnused(Boolean.parseBoolean(includeUnused.toString()));
         }
 
         Object includeUnknown = configuration.get(CONFIG_INCLUDE_UNKNOWN);
         if (!isNullOrEmpty(includeUnknown)) {
-            this.includeUnknown = Boolean.parseBoolean(includeUnknown.toString());
+            config.setIncludeUnknown(Boolean.parseBoolean(includeUnknown.toString()));
         }
 
         List<INormalizer> normalizers = new LinkedList<>();
@@ -236,7 +240,7 @@ public class InputParserTask implements ILifecycleTask {
             }
         }
 
-        return new InputParser(normalizers, dictionaries, corrections);
+        return new InputParser(normalizers, dictionaries, corrections, config);
     }
 
 

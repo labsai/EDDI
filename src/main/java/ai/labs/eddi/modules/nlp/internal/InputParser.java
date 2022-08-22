@@ -30,19 +30,21 @@ public class InputParser implements IInputParser {
     private final List<IDictionary> dictionaries;
     private final List<ICorrection> corrections;
     private final Map<IDictionary.IWord, List<IDictionary.IPhrase>> phrasesMap;
+    private final Config config;
 
     public InputParser(List<IDictionary> dictionaries) {
         this(dictionaries, Collections.emptyList());
     }
 
     public InputParser(List<IDictionary> dictionaries, List<ICorrection> corrections) {
-        this(Collections.emptyList(), dictionaries, corrections);
+        this(Collections.emptyList(), dictionaries, corrections, new Config());
     }
 
-    public InputParser(List<INormalizer> normalizers, List<IDictionary> dictionaries, List<ICorrection> corrections) {
+    public InputParser(List<INormalizer> normalizers, List<IDictionary> dictionaries, List<ICorrection> corrections, Config config) {
         this.normalizers = normalizers;
         this.dictionaries = dictionaries;
         this.corrections = corrections;
+        this.config = config;
         phrasesMap = preparePhrases(dictionaries);
     }
 
@@ -393,5 +395,10 @@ public class InputParser implements IInputParser {
 
     private static String getLanguageOrDefault(String languageCode) {
         return isNullOrEmpty(languageCode) ? DEFAULT_USER_LANGUAGE : languageCode;
+    }
+
+    @Override
+    public Config getConfig() {
+        return config;
     }
 }
