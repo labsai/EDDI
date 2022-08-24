@@ -3,6 +3,8 @@ package ai.labs.eddi.modules.nlp.expressions.value;
 import ai.labs.eddi.modules.nlp.expressions.Expression;
 import lombok.extern.slf4j.Slf4j;
 
+import java.util.regex.Pattern;
+
 import static ai.labs.eddi.utils.CharacterUtilities.isNumber;
 
 /**
@@ -10,6 +12,7 @@ import static ai.labs.eddi.utils.CharacterUtilities.isNumber;
  */
 @Slf4j
 public class Value extends Expression {
+    private static final Pattern BOOLEAN_MATCHER_PATTERN = Pattern.compile("true|false", Pattern.CASE_INSENSITIVE);
 
     public Value() {
     }
@@ -36,6 +39,9 @@ public class Value extends Expression {
 
     public Boolean isDouble() {
         return isNumber(expressionName, true);
+    }
+    public Boolean isBoolean() {
+        return BOOLEAN_MATCHER_PATTERN.matcher(expressionName).matches();
     }
 
     public Integer toInteger() {
