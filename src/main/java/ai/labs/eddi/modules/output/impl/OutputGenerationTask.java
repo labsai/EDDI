@@ -26,6 +26,7 @@ import ai.labs.eddi.modules.output.model.types.QuickReplyOutputItem;
 import ai.labs.eddi.utils.StringUtilities;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import org.jboss.logging.Logger;
 
 import javax.enterprise.context.ApplicationScoped;
 import javax.inject.Inject;
@@ -35,6 +36,7 @@ import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 
 import static ai.labs.eddi.engine.memory.ContextUtilities.retrieveContextLanguageFromLongTermMemory;
+import static java.lang.String.format;
 
 /**
  * @author ginccc
@@ -57,6 +59,8 @@ public class OutputGenerationTask implements ILifecycleTask {
     private final IResourceClientLibrary resourceClientLibrary;
     private final IDataFactory dataFactory;
     private final ObjectMapper objectMapper;
+
+    private static final Logger log = Logger.getLogger(OutputGenerationTask.class);
 
     @Inject
     public OutputGenerationTask(IResourceClientLibrary resourceClientLibrary,
@@ -86,22 +90,28 @@ public class OutputGenerationTask implements ILifecycleTask {
         storeContextOutput(currentStep, contextDataList);
         storeContextQuickReplies(currentStep, contextDataList);
 
-        if (checkLanguage(outputGeneration.getLanguage(), memory.getConversationProperties())) {
+        if (outputGeneration != null) {
+            if (checkLanguage(outputGeneration.getLanguage(), memory.getConversationProperties())) {
 
-            IData<List<String>> latestData = currentStep.getLatestData(KEY_ACTIONS);
-            if (latestData == null) {
-                return;
+                IData<List<String>> latestData = currentStep.getLatestData(KEY_ACTIONS);
+                if (latestData == null) {
+                    return;
+                }
+                List<String> actions = latestData.getResult();
+                List<IOutputFilter> outputFilters = createOutputFilters(memory, actions);
+
+                Map<String, List<OutputEntry>> outputs = outputGeneration.getOutputs(outputFilters);
+                outputs.forEach((action, outputEntries) ->
+                        outputEntries.forEach(outputEntry -> {
+                            List<OutputValue> outputValues = outputEntry.getOutputs();
+                            selectAndStoreOutput(currentStep, action, outputValues);
+                            storeQuickReplies(currentStep, outputEntry.getQuickReplies(), outputEntry.getAction());
+                        }));
             }
-            List<String> actions = latestData.getResult();
-            List<IOutputFilter> outputFilters = createOutputFilters(memory, actions);
-
-            Map<String, List<OutputEntry>> outputs = outputGeneration.getOutputs(outputFilters);
-            outputs.forEach((action, outputEntries) ->
-                    outputEntries.forEach(outputEntry -> {
-                        List<OutputValue> outputValues = outputEntry.getOutputs();
-                        selectAndStoreOutput(currentStep, action, outputValues);
-                        storeQuickReplies(currentStep, outputEntry.getQuickReplies(), outputEntry.getAction());
-                    }));
+        } else {
+            log.error(
+                    format("OutputGeneration component was unexpectedly null. (botId=%s, conversationId=%s).",
+                            memory.getBotId(), memory.getConversationId()));
         }
     }
 
@@ -141,16 +151,19 @@ public class OutputGenerationTask implements ILifecycleTask {
     }
 
     private List<Map<String, Object>> convertObjectToListOfMapsWithObjects(Object object) {
-        return objectMapper.convertValue(object, new TypeReference<>() {});
+        return objectMapper.convertValue(object, new TypeReference<>() {
+        });
     }
 
     private List<Map<String, String>> convertObjectToListOfMapsWithStrings(Object object) {
-        return objectMapper.convertValue(object, new TypeReference<>() {});
+        return objectMapper.convertValue(object, new TypeReference<>() {
+        });
     }
 
     private List<OutputValue> convertOutputMap(List<Map<String, Object>> outputMapList) {
         return outputMapList.stream().map(map ->
-                        new OutputValue(objectMapper.convertValue(map.get(KEY_VALUE_ALTERNATIVES), new TypeReference<>() {}))).
+                        new OutputValue(objectMapper.convertValue(map.get(KEY_VALUE_ALTERNATIVES), new TypeReference<>() {
+                        }))).
                 collect(Collectors.toList());
     }
 
