@@ -15,8 +15,8 @@
         <quarkus.microprofile.version>2.7.2.Final</quarkus.microprofile.version>
         <quarkus.platform.artifact-id>quarkus-bom</quarkus.platform.artifact-id>
         <quarkus.platform.group-id>io.quarkus.platform</quarkus.platform.group-id>
-        <quarkus.platform.version>2.11.2.Final</quarkus.platform.version>
-        <quarkus-plugin.version>2.11.2.Final</quarkus-plugin.version>
+        <quarkus.platform.version>2.11.3.Final</quarkus.platform.version>
+        <quarkus-plugin.version>2.11.3.Final</quarkus-plugin.version>
         <compiler-plugin.version>3.8.1</compiler-plugin.version>
         <jandex-maven-plugin.version>1.2.2</jandex-maven-plugin.version>
         <maven.compiler.parameters>true</maven.compiler.parameters>
@@ -204,7 +204,7 @@
         <dependency>
             <groupId>org.junit.jupiter</groupId>
             <artifactId>junit-jupiter-engine</artifactId>
-            <version>5.8.2</version>
+            <version>5.9.0</version>
             <scope>test</scope>
         </dependency>
         <dependency>
@@ -221,7 +221,7 @@
         <dependency>
             <groupId>org.mockito</groupId>
             <artifactId>mockito-core</artifactId>
-            <version>4.6.1</version>
+            <version>4.7.0</version>
             <scope>test</scope>
         </dependency>
     </dependencies>
