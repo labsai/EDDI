@@ -15,6 +15,7 @@ import ai.labs.eddi.engine.memory.IPropertiesHandler;
 import ai.labs.eddi.engine.memory.descriptor.IConversationDescriptorStore;
 import ai.labs.eddi.engine.memory.model.SimpleConversationMemorySnapshot;
 import ai.labs.eddi.engine.runtime.*;
+import ai.labs.eddi.engine.runtime.internal.BotDeploymentManagement;
 import ai.labs.eddi.engine.runtime.service.ServiceException;
 import ai.labs.eddi.engine.utilities.IConversationSetup;
 import ai.labs.eddi.models.Context;
@@ -81,7 +82,7 @@ public class RestBotEngine implements IRestBotEngine {
                          IRuntime runtime,
                          IContextLogger contextLogger,
                          MeterRegistry meterRegistry,
-                         IBotDeploymentManagement botDeploymentManagement,
+                         BotDeploymentManagement botDeploymentManagement,
                          @ConfigProperty(name = "systemRuntime.botTimeoutInSeconds") int botTimeout) {
         this.botFactory = botFactory;
         this.conversationMemoryStore = conversationMemoryStore;
