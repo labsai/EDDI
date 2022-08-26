@@ -14,10 +14,7 @@ import ai.labs.eddi.engine.memory.IConversationMemoryStore;
 import ai.labs.eddi.engine.memory.IPropertiesHandler;
 import ai.labs.eddi.engine.memory.descriptor.IConversationDescriptorStore;
 import ai.labs.eddi.engine.memory.model.SimpleConversationMemorySnapshot;
-import ai.labs.eddi.engine.runtime.IBot;
-import ai.labs.eddi.engine.runtime.IBotFactory;
-import ai.labs.eddi.engine.runtime.IConversationCoordinator;
-import ai.labs.eddi.engine.runtime.IRuntime;
+import ai.labs.eddi.engine.runtime.*;
 import ai.labs.eddi.engine.runtime.service.ServiceException;
 import ai.labs.eddi.engine.utilities.IConversationSetup;
 import ai.labs.eddi.models.Context;
@@ -63,6 +60,7 @@ public class RestBotEngine implements IRestBotEngine {
     private final IConversationCoordinator conversationCoordinator;
     private final IRuntime runtime;
     private final IContextLogger contextLogger;
+    private final IBotDeploymentManagement botDeploymentManagement;
     private final int botTimeout;
     private final IConversationSetup conversationSetup;
     private final ICache<String, ConversationState> conversationStateCache;
@@ -83,6 +81,7 @@ public class RestBotEngine implements IRestBotEngine {
                          IRuntime runtime,
                          IContextLogger contextLogger,
                          MeterRegistry meterRegistry,
+                         IBotDeploymentManagement botDeploymentManagement,
                          @ConfigProperty(name = "systemRuntime.botTimeoutInSeconds") int botTimeout) {
         this.botFactory = botFactory;
         this.conversationMemoryStore = conversationMemoryStore;
@@ -93,6 +92,7 @@ public class RestBotEngine implements IRestBotEngine {
         this.conversationStateCache = cacheFactory.getCache(CACHE_NAME_CONVERSATION_STATE);
         this.runtime = runtime;
         this.contextLogger = contextLogger;
+        this.botDeploymentManagement = botDeploymentManagement;
         this.botTimeout = botTimeout;
 
         this.timerConversationStart = meterRegistry.timer("conversation.start");
@@ -311,7 +311,7 @@ public class RestBotEngine implements IRestBotEngine {
                 return;
             }
 
-            IBot bot = botFactory.getBot(environment, conversationMemory.getBotId(), botVersion);
+            IBot bot = getBot(environment, botId, botVersion);
             if (bot == null) {
                 String msg = "Bot not deployed (environment=%s, conversationId=%s, version=%s)";
                 msg = String.format(msg, environment, conversationMemory.getBotId(), botVersion);
@@ -379,6 +379,17 @@ public class RestBotEngine implements IRestBotEngine {
             log.error(e.getLocalizedMessage(), e);
             throw new InternalServerErrorException(e.getLocalizedMessage(), e);
         }
+    }
+
+    private IBot getBot(Environment environment, String botId, Integer botVersion)
+            throws ServiceException, ResourceStoreException, IllegalAccessException {
+
+        IBot bot = botFactory.getBot(environment, botId, botVersion);
+        if (bot == null) {
+            bot = botDeploymentManagement.attemptBotDeployment(environment, botId, botVersion);
+        }
+
+        return bot;
     }
 
     private Callable<Void> processConversationStep(Environment environment,

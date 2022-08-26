@@ -1,5 +1,6 @@
 package ai.labs.eddi.configs.deployment.model;
 
+import ai.labs.eddi.models.Deployment.Environment;
 import lombok.Getter;
 import lombok.Setter;
 
@@ -17,11 +18,5 @@ public class DeploymentInfo {
     public enum DeploymentStatus {
         deployed,
         undeployed
-    }
-
-    public enum Environment {
-        test,
-        restricted,
-        unrestricted
     }
 }

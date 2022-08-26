@@ -2,10 +2,12 @@ package ai.labs.eddi.engine.runtime.internal;
 
 import ai.labs.eddi.configs.bots.IBotStore;
 import ai.labs.eddi.configs.deployment.IDeploymentStore;
+import ai.labs.eddi.configs.deployment.model.DeploymentInfo;
 import ai.labs.eddi.configs.documentdescriptor.IDocumentDescriptorStore;
 import ai.labs.eddi.configs.migration.IMigrationManager;
 import ai.labs.eddi.datastore.IResourceStore.IResourceId;
 import ai.labs.eddi.engine.memory.IConversationMemoryStore;
+import ai.labs.eddi.engine.runtime.IBot;
 import ai.labs.eddi.engine.runtime.IBotDeploymentManagement;
 import ai.labs.eddi.engine.runtime.IBotFactory;
 import ai.labs.eddi.engine.runtime.IRuntime;
@@ -31,6 +33,8 @@ import java.time.Period;
 import java.time.ZoneId;
 import java.time.temporal.ChronoUnit;
 import java.util.Collections;
+import java.util.LinkedList;
+import java.util.List;
 import java.util.concurrent.TimeUnit;
 
 import static ai.labs.eddi.configs.deployment.model.DeploymentInfo.DeploymentStatus.deployed;
@@ -62,6 +66,7 @@ public class BotDeploymentManagement implements IBotDeploymentManagement, Health
     private boolean botsAreReady = false;
 
     private static final Logger LOGGER = Logger.getLogger(BotDeploymentManagement.class);
+    private List<DeploymentInfo> deploymentInfos = new LinkedList<>();
 
     @Inject
     public BotDeploymentManagement(IDeploymentStore deploymentStore,
@@ -92,6 +97,41 @@ public class BotDeploymentManagement implements IBotDeploymentManagement, Health
         manageBotDeployments();
     }
 
+    @Override
+    public IBot attemptBotDeployment(Environment environment, String botId, Integer botVersion)
+            throws ResourceStoreException, ServiceException, IllegalAccessException {
+
+        var deploymentInfo = deploymentStore.getDeploymentInfo(environment.toString(), botId, botVersion);
+        if (deploymentInfo != null) {
+            botFactory.deployBot(environment, botId, botVersion, null);
+            return botFactory.getBot(environment, botId, botVersion);
+        }
+
+        return null;
+    }
+
+    @Scheduled(every = "10s")
+    public void checkDeployments() {
+        try {
+            var newDeploymentInfos = deploymentStore.readDeploymentInfos(deployed);
+            newDeploymentInfos.stream().filter(deploymentInfo ->
+                            !this.deploymentInfos.contains(deploymentInfo)).
+                    forEach(deploymentInfo -> {
+                        try {
+                            attemptBotDeployment(
+                                    deploymentInfo.getEnvironment(),
+                                    deploymentInfo.getBotId(),
+                                    deploymentInfo.getBotVersion());
+                        } catch (ResourceStoreException | ServiceException | IllegalAccessException e) {
+                            LOGGER.error(e.getLocalizedMessage(), e);
+                        }
+                    });
+            this.deploymentInfos = newDeploymentInfos;
+        } catch (ResourceStoreException e) {
+            LOGGER.error(e.getLocalizedMessage(), e);
+        }
+    }
+
     @Scheduled(every = "24h")
     public void manageBotDeployments() {
         runtime.submitScheduledCallable(() -> {
@@ -102,8 +142,7 @@ public class BotDeploymentManagement implements IBotDeploymentManagement, Health
                         lastDeploymentCheck = Instant.now();
                         LOGGER.info("Starting deployment management of bots...");
                         var postUndeloymentAttempts =
-                                deploymentStore.readDeploymentInfos().stream().filter(
-                                                deploymentInfo -> deploymentInfo.getDeploymentStatus() == deployed).
+                                deploymentStore.readDeploymentInfos(deployed).stream().
                                         map(deploymentInfo -> {
                                             var environmentName = deploymentInfo.getEnvironment().toString();
                                             var environment = Environment.valueOf(environmentName);
@@ -150,7 +189,8 @@ public class BotDeploymentManagement implements IBotDeploymentManagement, Health
                                                 LOGGER.error(e.getLocalizedMessage(), e);
                                             }
 
-                                            return (UndeploymentExecutor) () -> {};
+                                            return (UndeploymentExecutor) () -> {
+                                            };
                                         }).toList();
 
                         botsAreReady = true;
