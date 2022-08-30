@@ -4,10 +4,10 @@ import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.engine.memory.model.ConversationMemorySnapshot;
 import ai.labs.eddi.models.Context;
 import ai.labs.eddi.models.ConversationState;
-import com.mongodb.reactivestreams.client.MongoCollection;
-import com.mongodb.reactivestreams.client.MongoDatabase;
 import com.mongodb.client.model.Filters;
 import com.mongodb.client.model.Indexes;
+import com.mongodb.reactivestreams.client.MongoCollection;
+import com.mongodb.reactivestreams.client.MongoDatabase;
 import io.reactivex.rxjava3.core.Observable;
 import org.bson.Document;
 import org.bson.conversions.Bson;
@@ -19,11 +19,8 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.NoSuchElementException;
-import java.util.stream.Collector;
-import java.util.stream.Collectors;
 
 import static ai.labs.eddi.models.ConversationState.ENDED;
-import static java.util.stream.Collectors.toList;
 
 /**
  * @author ginccc
@@ -42,9 +39,15 @@ public class ConversationMemoryStore implements IConversationMemoryStore, IResou
     public ConversationMemoryStore(MongoDatabase database) {
         this.conversationCollectionDocument = database.getCollection(CONVERSATION_COLLECTION, Document.class);
         this.conversationCollectionObject = database.getCollection(CONVERSATION_COLLECTION, ConversationMemorySnapshot.class);
-        conversationCollectionDocument.createIndex(Indexes.ascending(CONVERSATION_STATE_FIELD));
-        conversationCollectionDocument.createIndex(Indexes.ascending(CONVERSATION_BOT_ID_FIELD));
-        conversationCollectionDocument.createIndex(Indexes.ascending(CONVERSATION_BOT_VERSION_FIELD));
+        Observable.fromPublisher(
+                conversationCollectionDocument.createIndex(Indexes.ascending(CONVERSATION_STATE_FIELD))
+        ).blockingFirst();
+        Observable.fromPublisher(
+                conversationCollectionDocument.createIndex(Indexes.ascending(CONVERSATION_BOT_ID_FIELD))
+        ).blockingFirst();
+        Observable.fromPublisher(
+                conversationCollectionDocument.createIndex(Indexes.ascending(CONVERSATION_BOT_VERSION_FIELD))
+        ).blockingFirst();
     }
 
     @Override
@@ -99,7 +102,7 @@ public class ConversationMemoryStore implements IConversationMemoryStore, IResou
             throws IResourceStore.ResourceStoreException {
 
         try {
-             ArrayList<ConversationMemorySnapshot> retRet = new ArrayList<>();
+            ArrayList<ConversationMemorySnapshot> retRet = new ArrayList<>();
 
             Document query = new Document();
             query.put("botId", botId);

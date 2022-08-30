@@ -13,7 +13,6 @@ import com.mongodb.reactivestreams.client.MongoCollection;
 import com.mongodb.reactivestreams.client.MongoDatabase;
 import io.reactivex.rxjava3.core.Observable;
 import org.bson.Document;
-import org.jboss.logging.Logger;
 
 import javax.enterprise.context.ApplicationScoped;
 import javax.inject.Inject;
@@ -33,8 +32,6 @@ public class BotTriggerStore implements IBotTriggerStore {
     private final IJsonSerialization jsonSerialization;
     private final BotTriggerResourceStore botTriggerStore;
 
-    private static final Logger log = Logger.getLogger(BotTriggerStore.class);
-
     @Inject
     public BotTriggerStore(MongoDatabase database,
                            IJsonSerialization jsonSerialization,
@@ -44,7 +41,9 @@ public class BotTriggerStore implements IBotTriggerStore {
         this.collection = database.getCollection(COLLECTION_BOT_TRIGGERS);
         this.documentBuilder = documentBuilder;
         this.botTriggerStore = new BotTriggerResourceStore();
-        collection.createIndex(Indexes.ascending(INTENT_FIELD), new IndexOptions().unique(true));
+        Observable.fromPublisher(
+                collection.createIndex(Indexes.ascending(INTENT_FIELD), new IndexOptions().unique(true))
+        ).blockingFirst();
     }
 
     @Override

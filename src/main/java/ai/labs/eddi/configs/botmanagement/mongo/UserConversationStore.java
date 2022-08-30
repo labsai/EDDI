@@ -45,11 +45,13 @@ public class UserConversationStore implements IUserConversationStore {
         this.collection = database.getCollection(COLLECTION_USER_CONVERSATIONS);
         this.documentBuilder = documentBuilder;
         this.userConversationStore = new UserConversationResourceStore();
-        collection.createIndex(
-                Indexes.compoundIndex(
-                        Indexes.ascending(INTENT_FIELD),
-                        Indexes.ascending(USER_ID_FIELD)),
-                new IndexOptions().unique(true));
+        Observable.fromPublisher(
+                collection.createIndex(
+                        Indexes.compoundIndex(
+                                Indexes.ascending(INTENT_FIELD),
+                                Indexes.ascending(USER_ID_FIELD)),
+                        new IndexOptions().unique(true))
+        ).blockingFirst();
     }
 
     @Override
