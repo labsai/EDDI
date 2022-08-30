@@ -12,6 +12,7 @@ import java.util.Objects;
 @JsonSchemaTitle("applicationLink")
 public class ApplicationLinkOutputItem extends OutputItem {
     private String path;
+    private String label;
     private int delay;
 
     public ApplicationLinkOutputItem() {
@@ -33,16 +34,16 @@ public class ApplicationLinkOutputItem extends OutputItem {
         if (this == o) return true;
         if (o == null || getClass() != o.getClass()) return false;
         ApplicationLinkOutputItem that = (ApplicationLinkOutputItem) o;
-        return Objects.equals(path, that.path) && delay == that.delay;
+        return Objects.equals(path, that.path) && Objects.equals(label, that.label) && delay == that.delay;
     }
 
     @Override
     public int hashCode() {
-        return Objects.hash(path, delay);
+        return Objects.hash(path, label, delay);
     }
 
     @Override
     public String toString() {
-        return path + ";" + delay;
+        return path + ";" + label + ";" + delay;
     }
 }
