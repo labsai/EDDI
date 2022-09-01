@@ -94,8 +94,36 @@ public class BotFactory implements IBotFactory {
 
     @Override
     public IBot getBot(Deployment.Environment environment, final String botId, final Integer version) {
-        Map<BotId, IBot> bots = getBotEnvironment(environment);
-        return bots.get(new BotId(botId, version));
+        var bots = getBotEnvironment(environment);
+        var botIdObj = new BotId(botId, version);
+        IBot bot;
+        bot = waitIfBotIsInDeployment(bots, botIdObj);
+        if (bot == null) return null;
+
+        return bot;
+    }
+
+    private static IBot waitIfBotIsInDeployment(ConcurrentHashMap<BotId, IBot> bots, BotId botIdObj) {
+        IBot bot;
+        int counter = 0;
+        while ((bot = bots.get(botIdObj)) != null &&
+                bot.getDeploymentStatus() == Deployment.Status.IN_PROGRESS) {
+            try {
+                Thread.sleep(1000);
+            } catch (InterruptedException e) {
+                log.error(e.getLocalizedMessage(), e);
+                return null;
+            }
+            counter++;
+
+            if (counter > 60) {
+                log.error("Waited too long for bot deployment to complete (timeout reached at 60s).");
+                bot = null;
+                break;
+            }
+        }
+
+        return bot;
     }
 
     @Override
