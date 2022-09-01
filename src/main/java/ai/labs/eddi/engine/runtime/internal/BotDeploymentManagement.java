@@ -11,6 +11,7 @@ import ai.labs.eddi.engine.runtime.IBot;
 import ai.labs.eddi.engine.runtime.IBotDeploymentManagement;
 import ai.labs.eddi.engine.runtime.IBotFactory;
 import ai.labs.eddi.engine.runtime.IRuntime;
+import ai.labs.eddi.engine.runtime.internal.readiness.IBotsReadiness;
 import ai.labs.eddi.engine.runtime.service.ServiceException;
 import ai.labs.eddi.models.ConversationState;
 import ai.labs.eddi.models.Deployment.Environment;
@@ -19,9 +20,6 @@ import io.quarkus.runtime.Startup;
 import io.quarkus.runtime.StartupEvent;
 import io.quarkus.scheduler.Scheduled;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
-import org.eclipse.microprofile.health.HealthCheck;
-import org.eclipse.microprofile.health.HealthCheckResponse;
-import org.eclipse.microprofile.health.Readiness;
 import org.jboss.logging.Logger;
 
 import javax.enterprise.context.ApplicationScoped;
@@ -50,21 +48,18 @@ import static java.time.temporal.ChronoUnit.DAYS;
 
 @Startup
 @Priority(4000)
-@Readiness
 @ApplicationScoped
-public class BotDeploymentManagement implements IBotDeploymentManagement, HealthCheck {
+public class BotDeploymentManagement implements IBotDeploymentManagement {
     private final IDeploymentStore deploymentStore;
     private final IBotFactory botFactory;
     private final IBotStore botStore;
     private final IConversationMemoryStore conversationMemoryStore;
     private final IDocumentDescriptorStore documentDescriptorStore;
     private final IMigrationManager migrationManager;
+    private final IBotsReadiness botsReadiness;
     private final IRuntime runtime;
     private final int maximumLifeTimeOfIdleConversationsInDays;
-
     private Instant lastDeploymentCheck = null;
-    private boolean botsAreReady = false;
-
     private static final Logger LOGGER = Logger.getLogger(BotDeploymentManagement.class);
     private List<DeploymentInfo> deploymentInfos = new LinkedList<>();
 
@@ -72,6 +67,7 @@ public class BotDeploymentManagement implements IBotDeploymentManagement, Health
     public BotDeploymentManagement(IDeploymentStore deploymentStore,
                                    IBotFactory botFactory,
                                    IBotStore botStore,
+                                   IBotsReadiness botsReadiness,
                                    IConversationMemoryStore conversationMemoryStore,
                                    IDocumentDescriptorStore documentDescriptorStore,
                                    IMigrationManager migrationManager,
@@ -81,6 +77,7 @@ public class BotDeploymentManagement implements IBotDeploymentManagement, Health
         this.deploymentStore = deploymentStore;
         this.botFactory = botFactory;
         this.botStore = botStore;
+        this.botsReadiness = botsReadiness;
         this.conversationMemoryStore = conversationMemoryStore;
         this.documentDescriptorStore = documentDescriptorStore;
         this.migrationManager = migrationManager;
@@ -193,7 +190,7 @@ public class BotDeploymentManagement implements IBotDeploymentManagement, Health
                                             };
                                         }).toList();
 
-                        botsAreReady = true;
+                        botsReadiness.setBotsReadiness(true);
 
                         // run all undeploy attempts of old bots after all current bots have been deployed and see
                         // if we can undeploy bot version if we end old conversations
@@ -277,12 +274,6 @@ public class BotDeploymentManagement implements IBotDeploymentManagement, Health
         }
 
         return result;
-    }
-
-    @Override
-    public HealthCheckResponse call() {
-        var responseBuilder = HealthCheckResponse.named("Bots are ready health check");
-        return botsAreReady ? responseBuilder.up().build() : responseBuilder.down().build();
     }
 
     private interface UndeploymentExecutor {

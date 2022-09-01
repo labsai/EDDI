@@ -15,7 +15,6 @@ import ai.labs.eddi.engine.memory.IPropertiesHandler;
 import ai.labs.eddi.engine.memory.descriptor.IConversationDescriptorStore;
 import ai.labs.eddi.engine.memory.model.SimpleConversationMemorySnapshot;
 import ai.labs.eddi.engine.runtime.*;
-import ai.labs.eddi.engine.runtime.internal.BotDeploymentManagement;
 import ai.labs.eddi.engine.runtime.service.ServiceException;
 import ai.labs.eddi.engine.utilities.IConversationSetup;
 import ai.labs.eddi.models.Context;
@@ -73,6 +72,7 @@ public class RestBotEngine implements IRestBotEngine {
 
     @Inject
     public RestBotEngine(IBotFactory botFactory,
+                         IBotDeploymentManagement botDeploymentManagement,
                          IConversationMemoryStore conversationMemoryStore,
                          IConversationDescriptorStore conversationDescriptorStore,
                          IPropertiesStore propertiesStore,
@@ -82,9 +82,9 @@ public class RestBotEngine implements IRestBotEngine {
                          IRuntime runtime,
                          IContextLogger contextLogger,
                          MeterRegistry meterRegistry,
-                         BotDeploymentManagement botDeploymentManagement,
                          @ConfigProperty(name = "systemRuntime.botTimeoutInSeconds") int botTimeout) {
         this.botFactory = botFactory;
+        this.botDeploymentManagement = botDeploymentManagement;
         this.conversationMemoryStore = conversationMemoryStore;
         this.conversationDescriptorStore = conversationDescriptorStore;
         this.propertiesStore = propertiesStore;
@@ -93,7 +93,6 @@ public class RestBotEngine implements IRestBotEngine {
         this.conversationStateCache = cacheFactory.getCache(CACHE_NAME_CONVERSATION_STATE);
         this.runtime = runtime;
         this.contextLogger = contextLogger;
-        this.botDeploymentManagement = botDeploymentManagement;
         this.botTimeout = botTimeout;
 
         this.timerConversationStart = meterRegistry.timer("conversation.start");
