@@ -15,8 +15,8 @@
         <quarkus.microprofile.version>2.7.2.Final</quarkus.microprofile.version>
         <quarkus.platform.artifact-id>quarkus-bom</quarkus.platform.artifact-id>
         <quarkus.platform.group-id>io.quarkus.platform</quarkus.platform.group-id>
-        <quarkus.platform.version>2.12.0.Final</quarkus.platform.version>
-        <quarkus-plugin.version>2.12.0.Final</quarkus-plugin.version>
+        <quarkus.platform.version>2.12.1.Final</quarkus.platform.version>
+        <quarkus-plugin.version>2.12.1.Final</quarkus-plugin.version>
         <compiler-plugin.version>3.8.1</compiler-plugin.version>
         <jandex-maven-plugin.version>1.2.2</jandex-maven-plugin.version>
         <maven.compiler.parameters>true</maven.compiler.parameters>
