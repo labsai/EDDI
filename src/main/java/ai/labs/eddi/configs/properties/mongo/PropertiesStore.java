@@ -29,7 +29,9 @@ public class PropertiesStore implements IPropertiesStore {
         RuntimeUtilities.checkNotNull(database, "database");
         this.collection = database.getCollection(COLLECTION_PROPERTIES);
         this.propertiesStore = new PropertiesResourceStore();
-        collection.createIndex(Indexes.ascending(USER_ID), new IndexOptions().unique(true));
+        Observable.fromPublisher(
+                collection.createIndex(Indexes.ascending(USER_ID), new IndexOptions().unique(true))
+        ).blockingFirst();
     }
 
     @Override
