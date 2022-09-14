@@ -25,7 +25,7 @@
         <failsafe.useModulePath>false</failsafe.useModulePath>
         <war-plugin.version>3.3.2</war-plugin.version>
         <dependency.version.lombok>1.18.24</dependency.version.lombok>
-        <mongodb.driver.version>4.5.1</mongodb.driver.version>
+        <mongodb.driver.version>4.7.1</mongodb.driver.version>
         <quarkus.jgit.version>2.1.0</quarkus.jgit.version>
         <skipITs>true</skipITs>
     </properties>
