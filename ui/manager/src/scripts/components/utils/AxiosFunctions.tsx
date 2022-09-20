@@ -1087,6 +1087,15 @@ export interface IInput extends IConversationStep {
   value: string;
 }
 
+export interface IInputField extends IConversationStep {
+  value?: IInputValue;
+}
+
+export interface IInputValue {
+  subType: string;
+  type: string;
+}
+
 export interface IOutputValue {
   type: string;
   delay?: number;
