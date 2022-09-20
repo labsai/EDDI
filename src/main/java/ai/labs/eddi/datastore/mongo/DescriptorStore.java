@@ -24,6 +24,7 @@ public class DescriptorStore<T> implements IDescriptorStore<T> {
     public static final String COLLECTION_DESCRIPTORS = "descriptors";
     private static final String FIELD_RESOURCE = "resource";
     private static final String FIELD_NAME = "name";
+    private static final String FIELD_BOT_NAME = "botName";
     private static final String FIELD_DESCRIPTION = "description";
     public static final String FIELD_LAST_MODIFIED = "lastModifiedOn";
     private static final String FIELD_DELETED = "deleted";
@@ -44,6 +45,7 @@ public class DescriptorStore<T> implements IDescriptorStore<T> {
 
         Observable.fromPublisher(descriptorCollection.createIndex(Indexes.ascending(FIELD_RESOURCE), new IndexOptions().unique(true))).blockingFirst();
         Observable.fromPublisher(descriptorCollection.createIndex(Indexes.ascending(FIELD_NAME), new IndexOptions().unique(false))).blockingFirst();
+        Observable.fromPublisher(descriptorCollection.createIndex(Indexes.ascending(FIELD_BOT_NAME), new IndexOptions().unique(false))).blockingFirst();
         Observable.fromPublisher(descriptorCollection.createIndex(Indexes.ascending(FIELD_DESCRIPTION), new IndexOptions().unique(false))).blockingFirst();
         Observable.fromPublisher(descriptorCollection.createIndex(Indexes.ascending(FIELD_LAST_MODIFIED), new IndexOptions().unique(false))).blockingFirst();
         Observable.fromPublisher(descriptorCollection.createIndex(Indexes.ascending(FIELD_DELETED), new IndexOptions().unique(false))).blockingFirst();
@@ -62,7 +64,9 @@ public class DescriptorStore<T> implements IDescriptorStore<T> {
         if (filter != null) {
             filter = StringUtilities.convertToSearchString(filter);
             queryFiltersOptional.add(new IResourceFilter.QueryFilter(FIELD_NAME, filter));
+            queryFiltersOptional.add(new IResourceFilter.QueryFilter(FIELD_BOT_NAME, filter));
             queryFiltersOptional.add(new IResourceFilter.QueryFilter(FIELD_DESCRIPTION, filter));
+            queryFiltersOptional.add(new IResourceFilter.QueryFilter(FIELD_RESOURCE, filter));
         }
         if (!queryFiltersOptional.isEmpty()) {
             IResourceFilter.QueryFilters optional = new IResourceFilter.QueryFilters(IResourceFilter.QueryFilters.ConnectingType.OR, queryFiltersOptional);

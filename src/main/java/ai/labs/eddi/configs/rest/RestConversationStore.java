@@ -65,6 +65,10 @@ public class RestConversationStore implements IRestConversationStore {
                         conversationDescriptorStore.
                                 readDescriptors(DESCRIPTOR_TYPE, filter, index, limit, false);
 
+                if (conversationDescriptors.isEmpty() && index == 0 && !isNullOrEmpty(filter)) {
+                    filter = null;
+                }
+
                 for (var conversationDescriptor : conversationDescriptors) {
                     URI resourceUri = conversationDescriptor.getResource();
                     var botResourceId = extractResourceId(resourceUri);
