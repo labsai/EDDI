@@ -3,6 +3,7 @@ import {
   IConversationOutput,
   IConversationStep,
   IInput,
+  IInputField,
   IOutput,
   IOutputValue,
   IQuickReplies,
@@ -24,8 +25,12 @@ export default class ConversationHelper {
     return (action as IAction).value.join(', ');
   }
 
-  static getInput(conversationStep: IConversationStep[]): string {
+  static getInput(conversationStep: (IInput | IInputField)[]): string {
     const input = conversationStep.find((step) => step.key.includes('input'));
+
+    if ((input as IInputField)?.value?.type === 'inputField') {
+      return (input as IInputField)?.value?.subType;
+    }
     if (input) {
       return (input as IInput).value;
     }
