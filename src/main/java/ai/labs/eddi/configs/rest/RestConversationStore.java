@@ -109,8 +109,8 @@ public class RestConversationStore implements IRestConversationStore {
                         }
                     }
 
-                    String name = documentDescriptor.getName();
-                    String description = documentDescriptor.getDescription();
+                    String name = documentDescriptor.getName().toLowerCase();
+                    String description = documentDescriptor.getDescription().toLowerCase();
                     if (!isNullOrEmpty(filter)) {
                         filter = filter.toLowerCase();
                         if (((!isNullOrEmpty(name) && !name.contains(filter)) ||
