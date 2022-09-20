@@ -10,6 +10,7 @@ import ai.labs.eddi.engine.memory.model.SimpleConversationMemorySnapshot;
 import ai.labs.eddi.engine.memory.rest.IRestConversationStore;
 import ai.labs.eddi.models.ConversationState;
 import ai.labs.eddi.models.ConversationStatus;
+import ai.labs.eddi.models.DocumentDescriptor;
 import org.jboss.logging.Logger;
 import org.jboss.resteasy.spi.NoLogWebApplicationException;
 
@@ -27,6 +28,7 @@ import static ai.labs.eddi.engine.memory.ConversationMemoryUtilities.convertSimp
 import static ai.labs.eddi.utils.RestUtilities.extractResourceId;
 import static ai.labs.eddi.utils.RuntimeUtilities.checkNotNull;
 import static ai.labs.eddi.utils.RuntimeUtilities.isNullOrEmpty;
+import static java.lang.String.format;
 
 /**
  * @author ginccc
@@ -50,9 +52,10 @@ public class RestConversationStore implements IRestConversationStore {
     }
 
     @Override
-    public List<ConversationDescriptor> readConversationDescriptors(Integer index, Integer limit,
+    public List<ConversationDescriptor> readConversationDescriptors(Integer index, Integer limit, String filter,
                                                                     String conversationId, String botId, Integer botVersion,
-                                                                    ConversationState conversationState, ConversationDescriptor.ViewState viewState) {
+                                                                    ConversationState conversationState,
+                                                                    ConversationDescriptor.ViewState viewState) {
         try {
             List<ConversationDescriptor> conversationDescriptors;
             List<ConversationDescriptor> retConversationDescriptors = new LinkedList<>();
@@ -60,19 +63,23 @@ public class RestConversationStore implements IRestConversationStore {
                 conversationDescriptors = conversationDescriptorStore.
                         readDescriptors("ai.labs.conversation", null, index, limit, false);
 
-                ConversationMemorySnapshot memorySnapshot;
-                for (ConversationDescriptor conversationDescriptor : conversationDescriptors) {
+                for (var conversationDescriptor : conversationDescriptors) {
                     URI resourceUri = conversationDescriptor.getResource();
                     var resourceId = extractResourceId(resourceUri);
+                    if (resourceId == null) {
+                        log.warn(format("resourceId was null, this should never happen. (%s)", resourceUri));
+                        continue;
+                    }
 
                     if (!isNullOrEmpty(conversationId) && resourceId.getId().equals(conversationId)) {
+                        populateDataToDescriptor(conversationDescriptor, resourceUri, resourceId);
                         return Collections.singletonList(conversationDescriptor);
                     }
 
                     var botResourceId = extractResourceId(conversationDescriptor.getBotResource());
 
                     if (isNullOrEmpty(botResourceId)) {
-                        log.warn(String.format("botResourceId was null, should have an uri! (resource=%s)", resourceUri));
+                        log.warn(format("botResourceId was null, should have an uri! (resource=%s)", resourceUri));
                         continue;
                     }
 
@@ -84,18 +91,14 @@ public class RestConversationStore implements IRestConversationStore {
                         continue;
                     }
 
-                    try {
-                        memorySnapshot = conversationMemoryStore.loadConversationMemorySnapshot(resourceId.getId());
-                    } catch (IResourceStore.ResourceNotFoundException e) {
-                        String message = "Resource referenced in descriptor does not exist (anymore) [%s]. ";
-                        message += "Ignoring this resource.";
-                        log.warn(String.format(message, resourceUri));
+                    var documentDescriptor =
+                            populateDataToDescriptor(conversationDescriptor, resourceUri, resourceId);
+                    if (documentDescriptor == null) {
                         continue;
                     }
 
-
                     if (!isNullOrEmpty(conversationState)) {
-                        if (!conversationState.equals(memorySnapshot.getConversationState())) {
+                        if (!conversationState.equals(conversationDescriptor.getConversationState())) {
                             continue;
                         }
                     }
@@ -106,11 +109,14 @@ public class RestConversationStore implements IRestConversationStore {
                         }
                     }
 
-                    conversationDescriptor.setEnvironment(memorySnapshot.getEnvironment());
-                    conversationDescriptor.setConversationStepSize(memorySnapshot.getConversationSteps().size());
-                    URI createdBy = conversationDescriptor.getCreatedBy();
-                    conversationDescriptor.setBotName(documentDescriptorStore.readDescriptor(memorySnapshot.getBotId(), memorySnapshot.getBotVersion()).getName());
-                    conversationDescriptor.setConversationState(memorySnapshot.getConversationState());
+                    String name = documentDescriptor.getName();
+                    String description = documentDescriptor.getDescription();
+                    filter = filter.toLowerCase();
+                    if (!isNullOrEmpty(filter) &&
+                            ((!isNullOrEmpty(name) && !name.contains(filter)) ||
+                                    (!isNullOrEmpty(description) && !description.contains(filter)))) {
+                        continue;
+                    }
 
                     retConversationDescriptors.add(conversationDescriptor);
                 }
@@ -127,6 +133,30 @@ public class RestConversationStore implements IRestConversationStore {
         }
     }
 
+    private DocumentDescriptor populateDataToDescriptor(ConversationDescriptor conversationDescriptor,
+                                                        URI resourceUri, IResourceStore.IResourceId resourceId)
+            throws IResourceStore.ResourceStoreException, IResourceStore.ResourceNotFoundException {
+
+        ConversationMemorySnapshot memorySnapshot;
+        try {
+            memorySnapshot = conversationMemoryStore.loadConversationMemorySnapshot(resourceId.getId());
+        } catch (IResourceStore.ResourceNotFoundException e) {
+            String message = "Resource referenced in descriptor does not exist (anymore) [%s]. ";
+            message += "Ignoring this resource.";
+            log.warn(format(message, resourceUri));
+            return null;
+        }
+
+        var documentDescriptor =
+                documentDescriptorStore.readDescriptor(memorySnapshot.getBotId(), memorySnapshot.getBotVersion());
+        conversationDescriptor.setEnvironment(memorySnapshot.getEnvironment());
+        conversationDescriptor.setConversationStepSize(memorySnapshot.getConversationSteps().size());
+        conversationDescriptor.setBotName(documentDescriptor.getName());
+        conversationDescriptor.setConversationState(memorySnapshot.getConversationState());
+
+        return documentDescriptor;
+    }
+
     @Override
     public ConversationMemorySnapshot readRawConversationLog(String conversationId) {
         checkNotNull(conversationId, "conversationId");
@@ -137,7 +167,7 @@ public class RestConversationStore implements IRestConversationStore {
             log.error(e.getMessage(), e);
             throw new InternalServerErrorException(e);
         } catch (IResourceStore.ResourceNotFoundException e) {
-            throw new NotFoundException(String.format("Conversation (%s) could not be found", conversationId));
+            throw new NotFoundException(format("Conversation (%s) could not be found", conversationId));
         }
     }
 
@@ -156,7 +186,7 @@ public class RestConversationStore implements IRestConversationStore {
             log.error(e.getMessage(), e);
             throw new InternalServerErrorException(e);
         } catch (IResourceStore.ResourceNotFoundException e) {
-            throw new NotFoundException(String.format("Conversation (%s) could not be found", conversationId));
+            throw new NotFoundException(format("Conversation (%s) could not be found", conversationId));
         }
     }
 
@@ -167,7 +197,7 @@ public class RestConversationStore implements IRestConversationStore {
 
         if (deletePermanently) {
             conversationMemoryStore.deleteConversationMemorySnapshot(conversationId);
-            log.info(String.format("Conversation has been permanently deleted (conversationId=%s)", conversationId));
+            log.info(format("Conversation has been permanently deleted (conversationId=%s)", conversationId));
         }
 
         // DocumentDescriptorInterceptor will mark the DocumentDescriptor of this resource as deleted,
@@ -213,7 +243,7 @@ public class RestConversationStore implements IRestConversationStore {
                 conversationDescriptor.setConversationState(ConversationState.ENDED);
                 conversationDescriptorStore.setDescriptor(conversationId, 0, conversationDescriptor);
 
-                log.info(String.format("conversation (%s) has been set to ENDED", conversationId));
+                log.info(format("conversation (%s) has been set to ENDED", conversationId));
             }
 
             return Response.ok().build();
