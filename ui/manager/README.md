@@ -88,6 +88,7 @@ Sync up (deploy) our local files to our bucket
 
 ```
 gsutil cp -r dist/* gs://manager-labs-ai
+gsutil cp -r dist/* gs://bot-manager-differ
 ```
 
 To show bucket info
