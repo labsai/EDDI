@@ -4,12 +4,10 @@ import ai.labs.eddi.configs.documentdescriptor.IDocumentDescriptorStore;
 import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.datastore.serialization.IDescriptorStore;
 import ai.labs.eddi.engine.memory.descriptor.IConversationDescriptorStore;
-import ai.labs.eddi.engine.runtime.ThreadContext;
 import ai.labs.eddi.models.ResourceDescriptor;
 import ai.labs.eddi.testing.descriptor.ITestCaseDescriptorStore;
 import ai.labs.eddi.testing.descriptor.model.TestCaseDescriptor;
 import ai.labs.eddi.utils.RestUtilities;
-import ai.labs.eddi.utils.SecurityUtilities;
 import org.jboss.logging.Logger;
 
 import javax.inject.Inject;
@@ -24,7 +22,6 @@ import javax.ws.rs.core.UriInfo;
 import javax.ws.rs.ext.Provider;
 import java.lang.reflect.Method;
 import java.net.URI;
-import java.security.Principal;
 import java.util.Date;
 
 import static ai.labs.eddi.configs.utilities.ResourceUtilities.createDocumentDescriptor;
@@ -67,18 +64,21 @@ public class DocumentDescriptorInterceptor implements ContainerResponseFilter {
             }
 
             Method resourceMethod = resourceInfo.getResourceMethod();
-            if (resourceMethod != null && (isPUT(resourceMethod) || isPATCH(resourceMethod) || isPOST(resourceMethod) || isDELETE(resourceMethod))) {
+            if (resourceMethod != null &&
+                    (isPUT(resourceMethod) || isPATCH(resourceMethod) ||
+                            isPOST(resourceMethod) || isDELETE(resourceMethod))) {
+
                 String resourceLocationUri = contextResponse.getHeaderString(HttpHeaders.LOCATION);
                 if (resourceLocationUri != null) {
                     if (resourceLocationUri.contains("://")) {
                         URI createdResourceURI = URI.create(resourceLocationUri);
                         IResourceStore.IResourceId resourceId = RestUtilities.extractResourceId(createdResourceURI);
-                        Principal userPrincipal = SecurityUtilities.getPrincipal(ThreadContext.getSubject());
 
                         if (isPOST(resourceMethod)) {
                             // the resource was created successfully
                             if (httpStatus == 201) {
-                                if (resourceLocationUri.startsWith("eddi://ai.labs.testcases")) {
+                                if (isResourceIdValid(resourceId) &&
+                                        resourceLocationUri.startsWith("eddi://ai.labs.testcases")) {
                                     testCaseDescriptorStore.createDescriptor(
                                             resourceId.getId(), resourceId.getVersion(),
                                             createTestCaseDescriptor(createdResourceURI));

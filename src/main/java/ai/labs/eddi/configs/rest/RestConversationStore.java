@@ -10,7 +10,6 @@ import ai.labs.eddi.engine.memory.model.SimpleConversationMemorySnapshot;
 import ai.labs.eddi.engine.memory.rest.IRestConversationStore;
 import ai.labs.eddi.models.ConversationState;
 import ai.labs.eddi.models.ConversationStatus;
-import ai.labs.eddi.models.DocumentDescriptor;
 import org.jboss.logging.Logger;
 import org.jboss.resteasy.spi.NoLogWebApplicationException;
 
@@ -20,7 +19,6 @@ import javax.ws.rs.InternalServerErrorException;
 import javax.ws.rs.NotFoundException;
 import javax.ws.rs.core.Response;
 import java.net.URI;
-import java.util.Collections;
 import java.util.LinkedList;
 import java.util.List;
 
@@ -36,6 +34,8 @@ import static java.lang.String.format;
 
 @ApplicationScoped
 public class RestConversationStore implements IRestConversationStore {
+    public static final String DESCRIPTOR_TYPE = "ai.labs.conversation";
+
     private final IDocumentDescriptorStore documentDescriptorStore;
     private final IConversationDescriptorStore conversationDescriptorStore;
     private final IConversationMemoryStore conversationMemoryStore;
@@ -59,41 +59,27 @@ public class RestConversationStore implements IRestConversationStore {
         try {
             List<ConversationDescriptor> conversationDescriptors;
             List<ConversationDescriptor> retConversationDescriptors = new LinkedList<>();
+
             do {
-                conversationDescriptors = conversationDescriptorStore.
-                        readDescriptors("ai.labs.conversation", null, index, limit, false);
+                conversationDescriptors =
+                        conversationDescriptorStore.
+                                readDescriptors(DESCRIPTOR_TYPE, filter, index, limit, false);
 
                 for (var conversationDescriptor : conversationDescriptors) {
                     URI resourceUri = conversationDescriptor.getResource();
-                    var resourceId = extractResourceId(resourceUri);
-                    if (resourceId == null) {
-                        log.warn(format("resourceId was null, this should never happen. (%s)", resourceUri));
+                    var botResourceId = extractResourceId(resourceUri);
+                    if (botResourceId == null) {
+                        log.warn(format("botResourceId was null, this should never happen. (%s)", resourceUri));
                         continue;
                     }
 
-                    if (!isNullOrEmpty(conversationId) && resourceId.getId().equals(conversationId)) {
-                        populateDataToDescriptor(conversationDescriptor, resourceUri, resourceId);
-                        return Collections.singletonList(conversationDescriptor);
-                    }
-
-                    var botResourceId = extractResourceId(conversationDescriptor.getBotResource());
-
-                    if (isNullOrEmpty(botResourceId)) {
-                        log.warn(format("botResourceId was null, should have an uri! (resource=%s)", resourceUri));
-                        continue;
-                    }
+                    populateDataToDescriptor(conversationDescriptor, botResourceId);
 
                     if (!isNullOrEmpty(botId) && !botId.equals(botResourceId.getId())) {
                         continue;
                     }
 
                     if (!isNullOrEmpty(botVersion) && !botVersion.equals(botResourceId.getVersion())) {
-                        continue;
-                    }
-
-                    var documentDescriptor =
-                            populateDataToDescriptor(conversationDescriptor, resourceUri, resourceId);
-                    if (documentDescriptor == null) {
                         continue;
                     }
 
@@ -109,18 +95,9 @@ public class RestConversationStore implements IRestConversationStore {
                         }
                     }
 
-                    String name = documentDescriptor.getName().toLowerCase();
-                    String description = documentDescriptor.getDescription().toLowerCase();
-                    if (!isNullOrEmpty(filter)) {
-                        filter = filter.toLowerCase();
-                        if (((!isNullOrEmpty(name) && !name.contains(filter)) ||
-                                (!isNullOrEmpty(description) && !description.contains(filter)))) {
-                            continue;
-                        }
-                    }
-
                     retConversationDescriptors.add(conversationDescriptor);
                 }
+
                 index++;
             } while (!conversationDescriptors.isEmpty() && retConversationDescriptors.size() < limit);
 
@@ -134,28 +111,29 @@ public class RestConversationStore implements IRestConversationStore {
         }
     }
 
-    private DocumentDescriptor populateDataToDescriptor(ConversationDescriptor conversationDescriptor,
-                                                        URI resourceUri, IResourceStore.IResourceId resourceId)
+    private void populateDataToDescriptor(ConversationDescriptor conversationDescriptor,
+                                          IResourceStore.IResourceId resourceId)
             throws IResourceStore.ResourceStoreException, IResourceStore.ResourceNotFoundException {
 
-        ConversationMemorySnapshot memorySnapshot;
         try {
-            memorySnapshot = conversationMemoryStore.loadConversationMemorySnapshot(resourceId.getId());
+            var memorySnapshot =
+                    conversationMemoryStore.loadConversationMemorySnapshot(resourceId.getId());
+
+            conversationDescriptor.setEnvironment(memorySnapshot.getEnvironment());
+            conversationDescriptor.setConversationStepSize(memorySnapshot.getConversationSteps().size());
+            conversationDescriptor.setConversationState(memorySnapshot.getConversationState());
+            if (isNullOrEmpty(conversationDescriptor.getBotName())) {
+                var documentDescriptor =
+                        documentDescriptorStore.readDescriptor(memorySnapshot.getBotId(), memorySnapshot.getBotVersion());
+
+                conversationDescriptor.setBotName(documentDescriptor.getName());
+            }
+
         } catch (IResourceStore.ResourceNotFoundException e) {
-            String message = "Resource referenced in descriptor does not exist (anymore) [%s]. ";
+            String message = "Resource referenced in descriptor does not exist (anymore) [%s, %s]. ";
             message += "Ignoring this resource.";
-            log.warn(format(message, resourceUri));
-            return null;
+            log.warn(format(message, resourceId.getId(), resourceId.getVersion()));
         }
-
-        var documentDescriptor =
-                documentDescriptorStore.readDescriptor(memorySnapshot.getBotId(), memorySnapshot.getBotVersion());
-        conversationDescriptor.setEnvironment(memorySnapshot.getEnvironment());
-        conversationDescriptor.setConversationStepSize(memorySnapshot.getConversationSteps().size());
-        conversationDescriptor.setBotName(documentDescriptor.getName());
-        conversationDescriptor.setConversationState(memorySnapshot.getConversationState());
-
-        return documentDescriptor;
     }
 
     @Override

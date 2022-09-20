@@ -145,7 +145,7 @@ public class ResourceUtilities {
         return descriptor;
     }
 
-    public static ConversationDescriptor createConversationDescriptor(URI resource, URI botResourceURI) {
+    public static ConversationDescriptor createConversationDescriptorDocument(URI resource, URI botResourceURI) {
         ConversationDescriptor conversationDescriptor = new ConversationDescriptor();
         conversationDescriptor.setResource(resource);
         conversationDescriptor.setBotResource(botResourceURI);
