@@ -111,11 +111,12 @@ public class RestConversationStore implements IRestConversationStore {
 
                     String name = documentDescriptor.getName();
                     String description = documentDescriptor.getDescription();
-                    filter = filter.toLowerCase();
-                    if (!isNullOrEmpty(filter) &&
-                            ((!isNullOrEmpty(name) && !name.contains(filter)) ||
-                                    (!isNullOrEmpty(description) && !description.contains(filter)))) {
-                        continue;
+                    if (!isNullOrEmpty(filter)) {
+                        filter = filter.toLowerCase();
+                        if (((!isNullOrEmpty(name) && !name.contains(filter)) ||
+                                (!isNullOrEmpty(description) && !description.contains(filter)))) {
+                            continue;
+                        }
                     }
 
                     retConversationDescriptors.add(conversationDescriptor);
