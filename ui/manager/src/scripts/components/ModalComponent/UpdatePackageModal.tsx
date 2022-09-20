@@ -14,6 +14,7 @@ import useStyles from './ModalComponent.styles';
 import './ModalComponent.styles.scss';
 import clsx from 'clsx';
 import { BLUE_COLOR } from '../../../styles/DefaultStylingProperties';
+import { PACKAGE_VIEW } from '../../constants/paths';
 
 interface IPublicProps {
   packageName: string;
@@ -49,14 +50,14 @@ const UpdatePackageModal = (props: IPrivateProps) => {
     const list = addedPlugins.map((a) => ({
       type: a.type,
     }));
-    const packageID = await createNewPackage(
+    const packageId = await createNewPackage(
       props.packageName,
       props.packageDescription,
       list,
     );
     modalActionDispatchers.closeModal();
-    eddiApiActionDispatchers.createNewPackageAction(packageID);
-    historyPush(`/packageview/${packageID}`);
+    eddiApiActionDispatchers.createNewPackageAction(packageId);
+    historyPush(`${PACKAGE_VIEW.replace(':id', packageId)}/`);
   };
 
   const addPluginsInModal = (addedPlugin: IOptions) => {

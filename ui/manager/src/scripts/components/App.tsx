@@ -15,11 +15,20 @@ import {
 import * as Keycloak from 'keycloak-js';
 import * as React from 'react';
 import { connect } from 'react-redux';
-import { Route } from 'react-router-dom';
+import { Redirect, Route } from 'react-router-dom';
 import ClimbingBoxLoader from 'react-spinners/ClimbingBoxLoader';
 import { compose, pure, setDisplayName } from 'recompose';
 import authenticationActionDispatchers from '../actions/AuthenticationActionDispatchers';
 import SystemActionDispatchers from '../actions/SystemActionDispatchers';
+import {
+  CONVERSATIONS,
+  PACKAGE_VIEW,
+  PACKAGES,
+  RESOURCES,
+  BOT_VIEW,
+  CONVERSATION_VIEW,
+  MANAGE,
+} from '../constants/paths';
 import { run as runSagaMiddleware } from '../sagas';
 import { authenticationSelector } from '../selectors/AuthenticationSelectors';
 import { isChatOpenedSelector } from '../selectors/ChatSelectors';
@@ -154,20 +163,25 @@ const App = ({
             )}
             {authenticated && (
               <div>
-                <Route path={'/'} exact component={Dashboard} />
-                <Route path={'/packages'} exact component={PackagePage} />
+                <Route path={MANAGE} exact component={Dashboard} />
+                <Route path={PACKAGES} exact component={PackagePage} />
                 <Route
-                  path={'/conversations'}
+                  path={CONVERSATIONS}
                   exact
                   component={ConversationsPage}
                 />
-                <Route path={'/resources'} component={ExtensionsPage} />
-                <Route path={'/botview/:id'} component={BotViewPage} />
+                <Route path={RESOURCES} exact component={ExtensionsPage} />
+                <Route path={BOT_VIEW} exact component={BotViewPage} />
                 <Route
-                  path={'/conversationview/:id'}
+                  path={CONVERSATION_VIEW}
+                  exact
                   component={BotConversationViewPage}
                 />
-                <Route path={'/packageview/:id'} component={PackageViewPage} />
+                <Route path={PACKAGE_VIEW} exact component={PackageViewPage} />
+                <Route path={MANAGE} />
+                <Route exact path="/">
+                  <Redirect to={MANAGE} />
+                </Route>
               </div>
             )}
             {keycloakAuthenticated && <ModalComponentFrame />}

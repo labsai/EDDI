@@ -2,6 +2,7 @@ import * as React from 'react';
 import { compose, pure, setDisplayName } from 'recompose';
 import useStyles from './HomeButton.styles';
 import { historyPush } from '../../history';
+import { MANAGE } from '../../constants/paths';
 
 interface IPublic {
   extraPath?: string;
@@ -14,7 +15,7 @@ const HomeButton = (props: IProps) => {
   return (
     <div className={classes.navigationBar}>
       <div
-        onClick={() => historyPush(`/${props.extraPath || ''}`)}
+        onClick={() => historyPush(`${MANAGE}/${props.extraPath || ''}`)}
         className={classes.homeButton}>
         <div className={classes.homeArrow}> </div>
         <div className={classes.homeSquare}> </div>

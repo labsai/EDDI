@@ -4,6 +4,7 @@ import { makeStyles } from '@material-ui/core/styles';
 import OpenInNewIcon from '@material-ui/icons/OpenInNew';
 import * as React from 'react';
 import { useSelector } from 'react-redux';
+import { CONVERSATION_VIEW } from '../../../constants/paths';
 import { historyPush } from '../../../../scripts/history';
 import {
   DARK_GREY_COLOR,
@@ -61,7 +62,7 @@ const InfoPopup = ({ open, popupEl, handleClose, botResource }: IInfoPopup) => {
 
   const handleLinkClick = (conversationId: string) => {
     historyPush(
-      `${location.origin}/conversationview/${conversationId}`,
+      `${location.origin}${CONVERSATION_VIEW.replace(':id', conversationId)}/`,
       [],
       true,
     );

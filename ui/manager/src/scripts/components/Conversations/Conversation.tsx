@@ -6,6 +6,7 @@ import useStyles from './Conversation.styles';
 import { IConversation } from '../utils/AxiosFunctions';
 import Parser from '../utils/Parser';
 import { historyPush } from '../../history';
+import { CONVERSATION_VIEW } from '../../constants/paths';
 
 interface IProps {
   conversation: IConversation;
@@ -18,7 +19,10 @@ const Conversation: React.StatelessComponent<IProps> = (props: IProps) => {
       className={classes.conversation}
       onClick={() =>
         historyPush(
-          `/conversationview/${Parser.getId(props.conversation.resource)}`,
+          `${CONVERSATION_VIEW.replace(
+            ':id',
+            Parser.getId(props.conversation.resource),
+          )}/`,
         )
       }>
       <div className={classes.conversationName}>

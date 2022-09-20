@@ -5,6 +5,7 @@ import ReactJson from 'react-json-view';
 import { connect } from 'react-redux';
 import ClipLoader from 'react-spinners/ClipLoader';
 import { compose, pure, setDisplayName } from 'recompose';
+import { BOT_VIEW } from '../../constants/paths';
 import { BLUE_COLOR } from '../../../styles/DefaultStylingProperties';
 import eddiApiActionDispatchers from '../../actions/EddiApiActionDispatchers';
 import modalActionDispatchers from '../../actions/ModalActionDispatchers';
@@ -95,9 +96,10 @@ const BotConversationView = ({
               <div
                 className={classes.botName}
                 onClick={() =>
-                  historyPush(`/botview/${conversation.botId}`, [
-                    `version=${conversation.botVersion}`,
-                  ])
+                  historyPush(
+                    `${BOT_VIEW.replace(':id', conversation.botId)}/`,
+                    [`version=${conversation.botVersion}`],
+                  )
                 }>
                 {conversationProps?.botName || conversation.botId}
               </div>

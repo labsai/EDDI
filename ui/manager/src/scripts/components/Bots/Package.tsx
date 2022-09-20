@@ -5,6 +5,7 @@ import * as React from 'react';
 import { connect } from 'react-redux';
 import ClipLoader from 'react-spinners/ClipLoader';
 import { compose, pure, setDisplayName } from 'recompose';
+import { PACKAGE_VIEW } from '../../constants/paths';
 import { BLUE_COLOR } from '../../../styles/DefaultStylingProperties';
 import eddiApiActionDispatchers from '../../actions/EddiApiActionDispatchers';
 import { historyPush } from '../../history';
@@ -66,7 +67,7 @@ const Package = ({
                     query.push(`botId=${bot.id}`);
                   }
                   historyPush(
-                    `/packageview/${packagePayload.id}`,
+                    `${PACKAGE_VIEW.replace(':id', packagePayload.id)}/`,
 
                     query,
                   );

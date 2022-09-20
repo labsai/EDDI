@@ -1,6 +1,7 @@
 import * as React from 'react';
 import { connect } from 'react-redux';
 import { compose, pure, setDisplayName } from 'recompose';
+import { BOT_VIEW } from '../../../constants/paths';
 import { historyPush } from '../../../history';
 import { botSelector } from '../../../selectors/BotSelectors';
 import { IBot } from '../../utils/AxiosFunctions';
@@ -23,7 +24,7 @@ const Bot = (props: IPrivateProps) => (
     descriptor={props.bot}
     usedByOlderVersion={props.usedByOlderVersion}
     isSmallName={props.isSmallName}
-    onClick={() => historyPush(`/botview/${props.bot.id}`)}
+    onClick={() => historyPush(`${BOT_VIEW.replace(':id', props.bot.id)}/`)}
   />
 );
 

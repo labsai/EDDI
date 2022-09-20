@@ -164,11 +164,7 @@ const Plugin = ({
         query.push(`packageId=${packageId}`);
       }
       if (!_.isEmpty(query)) {
-        historyPush(
-          location.pathname,
-
-          query,
-        );
+        historyPush(location.pathname, query);
       }
     }
   };

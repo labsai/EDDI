@@ -1,6 +1,7 @@
 import { makeStyles } from '@material-ui/core/styles';
 import clsx from 'clsx';
 import * as React from 'react';
+import { CONVERSATIONS, MANAGE, PACKAGES } from '../../constants/paths';
 import {
   BLUE_COLOR2,
   WHITE_COLOR,
@@ -51,7 +52,7 @@ const NavigationComponent = (props: IProps) => {
     <div className={classes.navBar}>
       <div
         key={'bots'}
-        onClick={() => historyPush('/')}
+        onClick={() => historyPush(MANAGE)}
         className={clsx(classes.navBarItem, {
           [classes.navBarItemDisabled]: props.page !== pageEnum.bot,
         })}>
@@ -59,7 +60,7 @@ const NavigationComponent = (props: IProps) => {
       </div>
       <div
         key={'packages'}
-        onClick={() => historyPush('/packages')}
+        onClick={() => historyPush(PACKAGES)}
         className={clsx(classes.navBarItem, {
           [classes.navBarItemDisabled]: props.page !== pageEnum.package,
         })}>
@@ -67,7 +68,7 @@ const NavigationComponent = (props: IProps) => {
       </div>
       <div
         key={'conversations'}
-        onClick={() => historyPush('/conversations')}
+        onClick={() => historyPush(CONVERSATIONS)}
         className={clsx(classes.navBarItem, {
           [classes.navBarItemDisabled]: props.page !== pageEnum.conversation,
         })}>

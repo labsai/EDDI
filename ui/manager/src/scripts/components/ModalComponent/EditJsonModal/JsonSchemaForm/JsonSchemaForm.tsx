@@ -18,6 +18,7 @@ import Button from '../../../../components/Assets/Buttons/Button';
 import { schemaSelector } from '../../../../selectors/SystemSelectors';
 import RecursiveTreeView from './RecursiveTreeView';
 import clsx from 'clsx';
+import { omit } from 'lodash';
 
 const notVerticalSpacing = {
   marginBottom: 0,
@@ -210,9 +211,44 @@ const JsonSchemaForm: React.StatelessComponent<IProps> = (props: IProps) => {
     return () => disableInputs(false);
   }, []);
 
+  const updateDefinitions = (definitions) => {
+    if (!definitions) {
+      return;
+    }
+    Object.keys(definitions).forEach((key) => {
+      definitions[key] = {
+        ...(definitions[key] || {}),
+        properties: definitions[key].properties
+          ? {
+              ...(definitions[key].properties || {}),
+              type: definitions[key]?.properties?.type
+                ? {
+                    ...omit(definitions[key].properties.type, ['default']),
+                  }
+                : {},
+            }
+          : {},
+      };
+    });
+
+    return definitions;
+  };
+
+  // schema without default values
+  const updatedSchema = React.useMemo(
+    () =>
+      props.schema?.definitions
+        ? Object.assign(props.schema, {
+            definitions: updateDefinitions(props.schema.definitions),
+          })
+        : props.schema,
+    [props.schema],
+  );
+
   if (!props.data) {
     return null;
   }
+
   const data = JSON.parse(props.data);
 
   const handleSubmit = () => {
@@ -239,7 +275,7 @@ const JsonSchemaForm: React.StatelessComponent<IProps> = (props: IProps) => {
             ref={formRef}
             className={readOnly ? classes.readOnly : null}
             additionalMetaSchemas={[metaSchema4]}
-            schema={props.schema}
+            schema={updatedSchema}
             formData={data}
             onChange={(data) =>
               props.onChange(JSON.stringify(data.formData, null, '\t'))

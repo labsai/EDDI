@@ -1,5 +1,6 @@
 import * as React from 'react';
 import { compose, pure, setDisplayName } from 'recompose';
+import { BOT_VIEW } from '../../constants/paths';
 import eddiApiActionDispatchers from '../../actions/EddiApiActionDispatchers';
 import modalActionDispatchers from '../../actions/ModalActionDispatchers';
 import { historyPush } from '../../history';
@@ -15,9 +16,9 @@ const CreateBotModal = () => {
   const classes = useStyles();
 
   const createBot = async () => {
-    const botID = await createNewBot(name, description);
-    eddiApiActionDispatchers.createNewBotAction(botID);
-    historyPush(`/botview/${botID}`);
+    const botId = await createNewBot(name, description);
+    eddiApiActionDispatchers.createNewBotAction(botId);
+    historyPush(`${BOT_VIEW.replace(':id', botId)}/`);
     modalActionDispatchers.closeModal();
   };
 

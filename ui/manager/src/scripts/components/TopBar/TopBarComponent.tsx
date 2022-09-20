@@ -24,6 +24,7 @@ import { pageEnum } from '../pages/pageEnum';
 import { ModalEnum } from '../utils/ModalEnum';
 import FilterComponent from './FilterComponent';
 import NavigationComponent from './NavigationComponent';
+import { MANAGE } from '../../constants/paths';
 
 const LIMIT = 10;
 
@@ -131,7 +132,7 @@ const TopBarComponent = ({
   };
 
   const logout = () => {
-    historyPush('/');
+    historyPush(MANAGE);
     authenticationActionDispatchers.signOutAction(keycloak);
   };
 

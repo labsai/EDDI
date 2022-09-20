@@ -2,6 +2,7 @@ import * as _ from 'lodash';
 import * as React from 'react';
 import { connect } from 'react-redux';
 import { compose, pure, setDisplayName } from 'recompose';
+import { PACKAGE_VIEW } from '../../constants/paths';
 import eddiApiActionDispatchers from '../../actions/EddiApiActionDispatchers';
 import ModalActionDispatchers from '../../actions/ModalActionDispatchers';
 import { historyPush } from '../../history';
@@ -159,9 +160,9 @@ const PackageView = ({
       Parser.replaceResourceVersion(packagePayload.resource, newVersion),
     );
     if (newVersion === packagePayload.currentVersion) {
-      historyPush(`/packageview/${packagePayload.id}`);
+      historyPush(`${PACKAGE_VIEW.replace(':id', packagePayload.id)}/`);
     } else {
-      historyPush(`/packageview/${packagePayload.id}`, [
+      historyPush(`${PACKAGE_VIEW.replace(':id', packagePayload.id)}`, [
         `version=${newVersion}`,
       ]);
     }
