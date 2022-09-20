@@ -61,12 +61,9 @@ public class RestConversationStore implements IRestConversationStore {
             List<ConversationDescriptor> retConversationDescriptors = new LinkedList<>();
 
             do {
-                conversationDescriptors =
-                        conversationDescriptorStore.
-                                readDescriptors(DESCRIPTOR_TYPE, filter, index, limit, false);
-
+                conversationDescriptors = readConversationDescriptors(index, limit, filter);
                 if (conversationDescriptors.isEmpty() && index == 0 && !isNullOrEmpty(filter)) {
-                    filter = null;
+                    conversationDescriptors = readConversationDescriptors(index, limit, null);
                 }
 
                 for (var conversationDescriptor : conversationDescriptors) {
@@ -113,6 +110,10 @@ public class RestConversationStore implements IRestConversationStore {
         } catch (IResourceStore.ResourceNotFoundException e) {
             throw new NoLogWebApplicationException(e);
         }
+    }
+
+    private List<ConversationDescriptor> readConversationDescriptors(Integer index, Integer limit, String filter) throws IResourceStore.ResourceStoreException, IResourceStore.ResourceNotFoundException {
+        return conversationDescriptorStore.readDescriptors(DESCRIPTOR_TYPE, filter, index, limit, false);
     }
 
     private void populateDataToDescriptor(ConversationDescriptor conversationDescriptor,
