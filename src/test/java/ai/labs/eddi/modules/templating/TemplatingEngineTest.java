@@ -22,7 +22,7 @@ public class TemplatingEngineTest {
 
     @BeforeEach
     public void setUp() {
-        TemplateEngineModule engineModule = new TemplateEngineModule();
+        TemplateEngineModule engineModule = new TemplateEngineModule(null, null);
         var objectMapper = new ObjectMapper();
         new SerializationCustomizer(true).customize(objectMapper);
         templatingEngine = new TemplatingEngine(

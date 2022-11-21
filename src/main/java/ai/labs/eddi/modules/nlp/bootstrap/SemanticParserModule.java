@@ -26,12 +26,18 @@ import java.util.Map;
 public class SemanticParserModule {
 
     private static final Logger LOGGER = Logger.getLogger("Startup");
+    private final Map<String, Provider<ILifecycleTask>> lifecycleTaskProviders;
+    private final Instance<ILifecycleTask> instance;
+
+    public SemanticParserModule(@LifecycleExtensions Map<String, Provider<ILifecycleTask>> lifecycleTaskProviders,
+                                Instance<ILifecycleTask> instance) {
+        this.lifecycleTaskProviders = lifecycleTaskProviders;
+        this.instance = instance;
+    }
 
     @PostConstruct
     @Inject
-    protected void configure(@LifecycleExtensions Map<String, Provider<ILifecycleTask>> lifecycleTaskProviders,
-                             Instance<ILifecycleTask> instance) {
-
+    protected void configure() {
         lifecycleTaskProviders.put(InputParserTask.ID, () -> instance.select(InputParserTask.class).get());
         LOGGER.debug("Added SemanticParser Module, current size of lifecycle modules " + lifecycleTaskProviders.size());
     }

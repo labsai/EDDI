@@ -24,12 +24,18 @@ import java.util.Map;
 public class BehaviorModule {
 
     private static final Logger LOGGER = Logger.getLogger("Startup");
+    private final Map<String, Provider<ILifecycleTask>> lifecycleTaskProviders;
+    private final Instance<ILifecycleTask> instance;
 
+    public BehaviorModule(@LifecycleExtensions Map<String, Provider<ILifecycleTask>> lifecycleTaskProviders,
+                          Instance<ILifecycleTask> instance) {
+        this.lifecycleTaskProviders = lifecycleTaskProviders;
+        this.instance = instance;
+    }
 
     @PostConstruct
     @Inject
-    protected void configure(@LifecycleExtensions Map<String, Provider<ILifecycleTask>> lifecycleTaskProviders,
-                             Instance<ILifecycleTask> instance) {
+    protected void configure() {
         lifecycleTaskProviders.put(BehaviorRulesEvaluationTask.ID, () -> instance.select(BehaviorRulesEvaluationTask.class).get());
         LOGGER.debug("Added Behaviour Module, current size of lifecycle modules " + lifecycleTaskProviders.size());
     }

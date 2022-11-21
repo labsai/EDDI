@@ -21,12 +21,18 @@ import java.util.Map;
 public class OutputGenerationModule {
 
     private static final Logger LOGGER = Logger.getLogger("Startup");
+    private final Map<String, Provider<ILifecycleTask>> lifecycleTaskProviders;
+    private final Instance<ILifecycleTask> instance;
+
+    public OutputGenerationModule(@LifecycleExtensions Map<String, Provider<ILifecycleTask>> lifecycleTaskProviders,
+                                  Instance<ILifecycleTask> instance) {
+        this.lifecycleTaskProviders = lifecycleTaskProviders;
+        this.instance = instance;
+    }
 
     @PostConstruct
     @Inject
-    protected void configure(@LifecycleExtensions Map<String, Provider<ILifecycleTask>> lifecycleTaskProviders,
-                             Instance<ILifecycleTask> instance) {
-
+    protected void configure() {
         lifecycleTaskProviders.put(OutputGenerationTask.ID, () -> instance.select(OutputGenerationTask.class).get());
         LOGGER.debug("Added OutputGeneration Module, current size of lifecycle modules " + lifecycleTaskProviders.size());
     }

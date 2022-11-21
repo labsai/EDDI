@@ -18,12 +18,18 @@ import java.util.Map;
 public class GitCallsModule {
 
     private static final Logger LOGGER = Logger.getLogger("Startup");
+    private final Map<String, Provider<ILifecycleTask>> lifecycleTaskProviders;
+    private final Instance<ILifecycleTask> instance;
+
+    public GitCallsModule(@LifecycleExtensions Map<String, Provider<ILifecycleTask>> lifecycleTaskProviders,
+                          Instance<ILifecycleTask> instance) {
+        this.lifecycleTaskProviders = lifecycleTaskProviders;
+        this.instance = instance;
+    }
 
     @PostConstruct
     @Inject
-    protected void configure(@LifecycleExtensions Map<String, Provider<ILifecycleTask>> lifecycleTaskProviders,
-                             Instance<ILifecycleTask> instance) {
-
+    protected void configure() {
         lifecycleTaskProviders.put(GitCallsTask.ID, () -> instance.select(GitCallsTask.class).get());
         LOGGER.debug("Added GitCalls Module, current size of lifecycle modules " + lifecycleTaskProviders.size());
     }

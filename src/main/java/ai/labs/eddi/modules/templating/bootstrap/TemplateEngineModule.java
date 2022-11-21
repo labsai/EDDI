@@ -30,12 +30,18 @@ import java.util.Map;
 public class TemplateEngineModule {
 
     private static final Logger LOGGER = Logger.getLogger("Startup");
+    private final Map<String, Provider<ILifecycleTask>> lifecycleTaskProviders;
+    private final Instance<ILifecycleTask> instance;
+
+    public TemplateEngineModule(@LifecycleExtensions Map<String, Provider<ILifecycleTask>> lifecycleTaskProviders,
+                                Instance<ILifecycleTask> instance) {
+        this.lifecycleTaskProviders = lifecycleTaskProviders;
+        this.instance = instance;
+    }
 
     @PostConstruct
     @Inject
-    protected void configure(@LifecycleExtensions Map<String, Provider<ILifecycleTask>> lifecycleTaskProviders,
-                             Instance<ILifecycleTask> instance) {
-
+    protected void configure() {
         lifecycleTaskProviders.put(OutputTemplateTask.ID, () -> instance.select(OutputTemplateTask.class).get());
         LOGGER.debug("Added TemplateEngine Module, current size of lifecycle modules " + lifecycleTaskProviders.size());
     }
