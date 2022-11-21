@@ -5,7 +5,7 @@
 }
 
 body {
-    font-family: Muli, "Helvetica Neue", Helvetica, Arial, sans-serif;
+    font-family: Helvetica, Arial, sans-serif;
     -webkit-font-smoothing: antialiased;
     -webkit-tap-highlight-color: transparent; /* Removes the blue highlight when button tapped on mobile */
     background-color: #000;
@@ -119,7 +119,7 @@ a:active {
 }
 
 .message {
-    font-family: Muli, "Helvetica Neue", Helvetica, Arial, sans-serif;
+    font-family: Helvetica, Arial, sans-serif;
 
     font-size: 20px;
     line-height: 36px;
@@ -240,7 +240,7 @@ a:active {
 }
 
 #about-container {
-    font-family: Muli, "Helvetica Neue", Helvetica, Arial, sans-serif;
+    font-family: Helvetica, Arial, sans-serif;
 
 }
 
@@ -436,7 +436,7 @@ a:active {
 
 @media screen and (max-width: 960px) {
     .container {
-        font-family: Muli, "Helvetica Neue", Helvetica, Arial, sans-serif;
+        font-family: Helvetica, Arial, sans-serif;
 
         padding: 0 30px;
     }
