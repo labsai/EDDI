@@ -7,11 +7,11 @@ import ai.labs.eddi.datastore.IResourceStore.ResourceStoreException;
 import ai.labs.eddi.engine.memory.descriptor.IConversationDescriptorStore;
 import ai.labs.eddi.engine.runtime.IBot;
 import ai.labs.eddi.models.Context;
-import org.apache.commons.lang3.RandomStringUtils;
 
 import javax.enterprise.context.ApplicationScoped;
 import javax.inject.Inject;
 import java.net.URI;
+import java.util.UUID;
 
 import static ai.labs.eddi.configs.utilities.ResourceUtilities.createConversationDescriptorDocument;
 import static ai.labs.eddi.utils.RestUtilities.createURI;
@@ -50,7 +50,7 @@ public class ConversationSetup implements IConversationSetup {
         return isNullOrEmpty(userId) ?
                 (userIdContext != null && userIdContext.getValue() instanceof String ?
                         userIdContext.getValue().toString() :
-                        "anonymous-" + RandomStringUtils.randomAlphanumeric(10))
+                        "anonymous-" + UUID.randomUUID().toString().replace("-", ""))
                 : userId;
     }
 }
