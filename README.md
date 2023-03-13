@@ -4,8 +4,9 @@
 
 # E.D.D.I
 
-Scalable Open Source Chatbot Platform. Build multiple conversational bots with NLP, Behavior Rules, API Connector,
-Templating.
+E.D.D.I (Enhanced Dialog Driven Interface) is an enterprise-certified chatbot middleware that offers configurable NLP,
+Behavior Rules, and API connectivity for seamless integration with various conversational services.
+
 Developed in Java (with Quarkus), provided with Docker, orchestrated with Kubernetes or Openshift.
 
 Latest stable version: 5.0.4
@@ -20,15 +21,18 @@ Documentation: [here](https://docs.labs.ai/)
 
 ## Intro
 
-The Chatbot System - E.D.D.I \(Enhanced Dialog Driven Intelligence\),
-has been developed with the focus on running it in cloud environments such as plain docker, kubernetes or openshift
+E.D.D.I is a highly scalable and enterprise-certified cloud-native chatbot middleware
+that serves as a trusted gatekeeper for various conversational services. Designed to run smoothly in cloud environments
+like Docker, Kubernetes, and Openshift, E.D.D.I offers configurable NLP and Behavior Rules that facilitate conversations
+and can act as watchdog for sensitive topics. Its API integration capabilities make it easy to connect
+with other conversational or classical REST APIs. Multiple bots can be easily integrated and run side by side,
+including multiple versions of the same bot for a smooth upgrading transition.
 
-The most outstanding features are:
+Features worth mentioning:
 
-* Flexible in NLP and Behavior
-* Fluently connect to REST APIs
-* Powerful Templating
-* Reuse Conversation Flows in multiple bots
+* Easily integrate other conversational or classical REST APIs
+* Configurable NLP and Behavior rules allow conversation facilitation as well as watch dog for sensitive topics
+* Multiple bots could be easily integrated and run side by side even multiple versions of the same bot 
 
 technical spec:
 
@@ -38,8 +42,8 @@ technical spec:
 * Dependency Injection
 * Prometheus integration (Metrics endpoint)
 * Kubernetes integration (Liveness/Readiness endpoint)
-* MongoDB for storing bot configurations and conversation memories
-* OAuth 2.0 (Keycloak)
+* MongoDB for storing bot configurations and conversation logs
+* OAuth 2.0 (Keycloak) for authentication and user management
 * HTML, CSS, Javascript (Dashboard & Basic Chat UI)
 
 ## Prerequirements
