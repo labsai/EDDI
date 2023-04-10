@@ -25,10 +25,13 @@ export const authenticationSelector: (state: IAppState) => {
   } {
     return {
       keycloak: authenticationState.keycloak,
-      isKeycloakEnabled: authenticationState.isKeycloakEnabled,
       isBasicAuthEnabled: authenticationState.isBasicAuthEnabled,
-      keycloakAuthenticated: authenticationState.keycloakAuthenticated,
-      basicAuthAuthenticated: authenticationState.basicAuthAuthenticated,
+      // isKeycloakEnabled: authenticationState.isKeycloakEnabled,
+      // keycloakAuthenticated: authenticationState.keycloakAuthenticated,
+      // basicAuthAuthenticated: authenticationState.basicAuthAuthenticated,
+      isKeycloakEnabled: true, // ! should be authenticationState.isKeycloakEnabled ^^^
+      keycloakAuthenticated: true, // ! should be authenticationState.keycloakAuthenticated ^^^
+      basicAuthAuthenticated: true, // ! should be authenticationState.basicAuthAuthenticated ^^^
       error: authenticationState.error,
     };
   },
