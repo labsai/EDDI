@@ -39,6 +39,7 @@ export const authenticationSelector: (state: IAppState) => {
 
 export function readOnlySelector(state: IAppState) {
   return {
-    readOnly: state.authenticationState.readOnly,
+    // readOnly: state.authenticationState.readOnly,
+    readOnly: false, // ! this should be like above ^^^
   };
 }
