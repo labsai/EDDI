@@ -59,6 +59,7 @@ public class BotDeploymentManagement implements IBotDeploymentManagement {
     private final IBotsReadiness botsReadiness;
     private final IRuntime runtime;
     private final int maximumLifeTimeOfIdleConversationsInDays;
+    private final int httpPort;
     private Instant lastDeploymentCheck = null;
     private static final Logger LOGGER = Logger.getLogger(BotDeploymentManagement.class);
     private List<DeploymentInfo> deploymentInfos = new LinkedList<>();
@@ -73,7 +74,9 @@ public class BotDeploymentManagement implements IBotDeploymentManagement {
                                    IMigrationManager migrationManager,
                                    IRuntime runtime,
                                    @ConfigProperty(name = "eddi.conversations.maximumLifeTimeOfIdleConversationsInDays")
-                                   int maximumLifeTimeOfIdleConversationsInDays) {
+                                   int maximumLifeTimeOfIdleConversationsInDays,
+                                   @ConfigProperty(name = "quarkus.http.port")
+                                   int httpPort) {
         this.deploymentStore = deploymentStore;
         this.botFactory = botFactory;
         this.botStore = botStore;
@@ -83,6 +86,7 @@ public class BotDeploymentManagement implements IBotDeploymentManagement {
         this.migrationManager = migrationManager;
         this.runtime = runtime;
         this.maximumLifeTimeOfIdleConversationsInDays = maximumLifeTimeOfIdleConversationsInDays;
+        this.httpPort = httpPort;
     }
 
     void onStart(@Observes StartupEvent ev) {
@@ -197,6 +201,7 @@ public class BotDeploymentManagement implements IBotDeploymentManagement {
                         postUndeloymentAttempts.forEach(UndeploymentExecutor::attemptUndeploy);
                         LOGGER.info("Finished managing the deployment of bots.");
                         LOGGER.info("E.D.D.I is ready!");
+                        LOGGER.info("Dashboard: http://localhost:" + httpPort);
                     }
                 } catch (ResourceStoreException e) {
                     LOGGER.error(e.getLocalizedMessage(), e);
