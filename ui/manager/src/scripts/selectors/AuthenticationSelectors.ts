@@ -26,12 +26,9 @@ export const authenticationSelector: (state: IAppState) => {
     return {
       keycloak: authenticationState.keycloak,
       isBasicAuthEnabled: authenticationState.isBasicAuthEnabled,
-      // isKeycloakEnabled: authenticationState.isKeycloakEnabled,
-      // keycloakAuthenticated: authenticationState.keycloakAuthenticated,
-      // basicAuthAuthenticated: authenticationState.basicAuthAuthenticated,
-      isKeycloakEnabled: true, // ! should be authenticationState.isKeycloakEnabled ^^^
-      keycloakAuthenticated: true, // ! should be authenticationState.keycloakAuthenticated ^^^
-      basicAuthAuthenticated: true, // ! should be authenticationState.basicAuthAuthenticated ^^^
+      isKeycloakEnabled: true,
+      keycloakAuthenticated: true,
+      basicAuthAuthenticated: true,
       error: authenticationState.error,
     };
   },
@@ -39,7 +36,6 @@ export const authenticationSelector: (state: IAppState) => {
 
 export function readOnlySelector(state: IAppState) {
   return {
-    // readOnly: state.authenticationState.readOnly,
-    readOnly: false, // ! this should be like above ^^^
+    readOnly: false,
   };
 }
