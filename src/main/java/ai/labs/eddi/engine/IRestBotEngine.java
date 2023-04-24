@@ -61,6 +61,13 @@ public interface IRestBotEngine {
     @Operation(description = "End conversation.")
     Response endConversation(@PathParam("conversationId") String conversationId);
 
+    @GET
+    @NoCache
+    @Path("/{conversationId}/log")
+    @Produces(MediaType.APPLICATION_JSON)
+    @Operation(description = "Read conversation. outputType=text || json")
+    Response readConversationLog(@PathParam("conversationId") String conversationId,
+                                 @QueryParam("outputType") String outputType);
 
     @GET
     @NoCache
@@ -73,6 +80,7 @@ public interface IRestBotEngine {
                                                       @QueryParam("returnDetailed") @DefaultValue("false") Boolean returnDetailed,
                                                       @QueryParam("returnCurrentStepOnly") @DefaultValue("true") Boolean returnCurrentStepOnly,
                                                       @QueryParam("returningFields") List<String> returningFields);
+
 
     @GET
     @Path("/{environment}/conversationstatus/{conversationId}")
