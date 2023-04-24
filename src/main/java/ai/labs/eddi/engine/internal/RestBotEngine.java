@@ -13,6 +13,8 @@ import ai.labs.eddi.engine.memory.IConversationMemory;
 import ai.labs.eddi.engine.memory.IConversationMemoryStore;
 import ai.labs.eddi.engine.memory.IPropertiesHandler;
 import ai.labs.eddi.engine.memory.descriptor.IConversationDescriptorStore;
+import ai.labs.eddi.engine.memory.model.ConversationLog;
+import ai.labs.eddi.engine.memory.model.ConversationLog.ConversationPart;
 import ai.labs.eddi.engine.memory.model.SimpleConversationMemorySnapshot;
 import ai.labs.eddi.engine.runtime.*;
 import ai.labs.eddi.engine.runtime.service.ServiceException;
@@ -37,6 +39,7 @@ import javax.ws.rs.core.MediaType;
 import javax.ws.rs.core.Response;
 import java.util.*;
 import java.util.concurrent.*;
+import java.util.stream.Collectors;
 
 import static ai.labs.eddi.engine.internal.RestBotManagement.KEY_LANG;
 import static ai.labs.eddi.engine.memory.ConversationMemoryUtilities.*;
@@ -68,7 +71,7 @@ public class RestBotEngine implements IRestBotEngine {
     private final Timer timerConversationRead;
     private final Timer timerConversationSay;
 
-    private static final Logger log = Logger.getLogger(RestBotEngine.class);
+    private static final Logger LOGGER = Logger.getLogger(RestBotEngine.class);
 
     @Inject
     public RestBotEngine(IBotFactory botFactory,
@@ -146,7 +149,7 @@ public class RestBotEngine implements IRestBotEngine {
                  LifecycleException |
                  IllegalAccessException e) {
             contextLogger.setLoggingContext(contextLogger.createLoggingContext(environment, botId, null, userId));
-            log.error(e.getLocalizedMessage(), e);
+            LOGGER.error(e.getLocalizedMessage(), e);
             throw new InternalServerErrorException(e.getLocalizedMessage(), e);
         } finally {
             record(startTime, timerConversationStart);
@@ -214,12 +217,47 @@ public class RestBotEngine implements IRestBotEngine {
                     returnCurrentStepOnly,
                     returningFields);
         } catch (ResourceStoreException | IllegalAccessException e) {
-            log.error(e.getLocalizedMessage(), e);
+            LOGGER.error(e.getLocalizedMessage(), e);
             throw new InternalServerErrorException(e.getLocalizedMessage(), e);
         } catch (ResourceNotFoundException e) {
             throw new NoLogWebApplicationException(Response.Status.NOT_FOUND.getStatusCode());
         } finally {
             record(startTime, timerConversationRead);
+        }
+    }
+
+    @Override
+    public Response readConversationLog(String conversationId, String outputType) {
+        try {
+            var memorySnapshot = conversationMemoryStore.loadConversationMemorySnapshot(conversationId);
+
+            ConversationLog conversationLog = new ConversationLog();
+            for (int i = 0; i < memorySnapshot.getConversationOutputs().size(); i++) {
+                var conversationOutput = memorySnapshot.getConversationOutputs().get(i);
+                String input = conversationOutput.get("input", String.class);
+                if (input != null) {
+                    conversationLog.getMessages().add(new ConversationPart("user", input));
+                }
+
+
+                List<Map<String,Object>> outputList = (List<Map<String, Object>>) conversationOutput.get("output");
+                if (outputList != null) {
+                    var output = outputList.
+                            stream().toList().stream().
+                            map(item -> item.get("text").toString()).collect(Collectors.joining(" "));
+                    conversationLog.getMessages().add(new ConversationPart("assistant", output));
+                }
+            }
+
+            outputType = outputType.toLowerCase();
+            if (isNullOrEmpty(outputType) || outputType.equals("string") || outputType.equals("text")) {
+                return Response.ok(conversationLog.getConversationLogAsString(), MediaType.TEXT_PLAIN).build();
+            } else {
+                return Response.ok(conversationLog.getConversationLogAsObject(), MediaType.APPLICATION_JSON).build();
+            }
+        } catch (ResourceStoreException | ResourceNotFoundException e) {
+            LOGGER.error(e.getLocalizedMessage(), e);
+            throw new InternalServerErrorException();
         }
     }
 
@@ -346,7 +384,7 @@ public class RestBotEngine implements IRestBotEngine {
                         contextLogger.setLoggingContext(loggingContext);
                         conversation.rerun(inputData.getContext());
                     } catch (LifecycleException | IConversation.ConversationNotReadyException e) {
-                        log.error(e.getLocalizedMessage(), e);
+                        LOGGER.error(e.getLocalizedMessage(), e);
                     }
                     return null;
                 };
@@ -356,7 +394,7 @@ public class RestBotEngine implements IRestBotEngine {
                         contextLogger.setLoggingContext(loggingContext);
                         conversation.say(inputData.getInput(), inputData.getContext());
                     } catch (LifecycleException | IConversation.ConversationNotReadyException e) {
-                        log.error(e.getLocalizedMessage(), e);
+                        LOGGER.error(e.getLocalizedMessage(), e);
                     }
                     return null;
                 };
@@ -371,12 +409,12 @@ public class RestBotEngine implements IRestBotEngine {
             conversationCoordinator.submitInOrder(conversationId, processUserInput);
         } catch (InstantiationException | IllegalAccessException e) {
             String errorMsg = "Error while processing message!";
-            log.error(errorMsg, e);
+            LOGGER.error(errorMsg, e);
             throw new InternalServerErrorException(errorMsg, e);
         } catch (ResourceNotFoundException e) {
             throw new NoLogWebApplicationException(Response.Status.NOT_FOUND.getStatusCode());
         } catch (Exception e) {
-            log.error(e.getLocalizedMessage(), e);
+            LOGGER.error(e.getLocalizedMessage(), e);
             throw new InternalServerErrorException(e.getLocalizedMessage(), e);
         }
     }
@@ -416,12 +454,12 @@ public class RestBotEngine implements IRestBotEngine {
                                         String errorMessage = "Conversation processing got interrupted! (conversationId=%s)";
                                         errorMessage = String.format(errorMessage, conversationId);
                                         contextLogger.setLoggingContext(loggingContext);
-                                        log.warn(errorMessage, t);
+                                        LOGGER.warn(errorMessage, t);
                                     } else if (t instanceof IConversation.ConversationNotReadyException) {
                                         String msg = "Conversation not ready! (conversationId=%s)";
                                         msg = String.format(msg, conversationId);
                                         contextLogger.setLoggingContext(loggingContext);
-                                        log.error(msg + "\n" + t.getLocalizedMessage(), t);
+                                        LOGGER.error(msg + "\n" + t.getLocalizedMessage(), t);
                                     } else {
                                         logConversationError(loggingContext, conversationId, t);
                                     }
@@ -440,7 +478,7 @@ public class RestBotEngine implements IRestBotEngine {
             setConversationState(conversationId, ConversationState.EXECUTION_INTERRUPTED);
             String errorMessage = "Execution of Packages interrupted or timed out.";
             contextLogger.setLoggingContext(loggingContext);
-            log.error(errorMessage, e);
+            LOGGER.error(errorMessage, e);
             future.cancel(true);
         } catch (ExecutionException e) {
             logConversationError(loggingContext, conversationId, e);
@@ -453,7 +491,7 @@ public class RestBotEngine implements IRestBotEngine {
         String msg = "Error while processing user input (conversationId=%s , conversationState=%s)";
         msg = String.format(msg, conversationId, ConversationState.ERROR);
         contextLogger.setLoggingContext(loggingContext);
-        log.error(msg, t);
+        LOGGER.error(msg, t);
     }
 
     @Override
@@ -466,7 +504,7 @@ public class RestBotEngine implements IRestBotEngine {
             return conversationMemory.isUndoAvailable();
         } catch (ResourceStoreException e) {
             contextLogger.setLoggingContext(loggingContext);
-            log.error(e.getLocalizedMessage(), e);
+            LOGGER.error(e.getLocalizedMessage(), e);
             throw new InternalServerErrorException();
         } catch (ResourceNotFoundException e) {
             throw new NoLogWebApplicationException(Response.Status.NOT_FOUND.getStatusCode());
@@ -492,13 +530,13 @@ public class RestBotEngine implements IRestBotEngine {
         } catch (IllegalAccessException e) {
             contextLogger.setLoggingContext(loggingContext);
             String errorMsg = "Error while processing message!";
-            log.error(errorMsg, e);
+            LOGGER.error(errorMsg, e);
             throw new InternalServerErrorException(errorMsg, e);
         } catch (ResourceNotFoundException e) {
             throw new NoLogWebApplicationException(Response.Status.NOT_FOUND.getStatusCode());
         } catch (Exception e) {
             contextLogger.setLoggingContext(loggingContext);
-            log.error(e.getLocalizedMessage(), e);
+            LOGGER.error(e.getLocalizedMessage(), e);
             throw new InternalServerErrorException(e.getLocalizedMessage(), e);
         }
     }
@@ -528,7 +566,7 @@ public class RestBotEngine implements IRestBotEngine {
             throw new NoLogWebApplicationException(Response.Status.NOT_FOUND.getStatusCode());
         } catch (ResourceNotFoundException e) {
             contextLogger.setLoggingContext(loggingContext);
-            log.error(e.getLocalizedMessage(), e);
+            LOGGER.error(e.getLocalizedMessage(), e);
             throw new InternalServerErrorException();
         }
     }
@@ -550,12 +588,12 @@ public class RestBotEngine implements IRestBotEngine {
 
         } catch (IllegalAccessException e) {
             String errorMsg = "Error while processing message!";
-            log.error(errorMsg, e);
+            LOGGER.error(errorMsg, e);
             throw new InternalServerErrorException(errorMsg, e);
         } catch (ResourceNotFoundException e) {
             throw new NoLogWebApplicationException(Response.Status.NOT_FOUND.getStatusCode());
         } catch (Exception e) {
-            log.error(e.getLocalizedMessage(), e);
+            LOGGER.error(e.getLocalizedMessage(), e);
             throw new InternalServerErrorException(e.getLocalizedMessage(), e);
         }
     }

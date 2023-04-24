@@ -11,6 +11,7 @@ import ai.labs.eddi.engine.lifecycle.ILifecycleTask;
 import ai.labs.eddi.engine.lifecycle.exceptions.LifecycleException;
 import ai.labs.eddi.engine.lifecycle.exceptions.PackageConfigurationException;
 import ai.labs.eddi.engine.memory.IConversationMemory;
+import ai.labs.eddi.engine.memory.IConversationMemory.IWritableConversationStep;
 import ai.labs.eddi.engine.memory.IData;
 import ai.labs.eddi.engine.memory.IDataFactory;
 import ai.labs.eddi.engine.memory.IMemoryItemConverter;
@@ -29,10 +30,7 @@ import javax.enterprise.context.ApplicationScoped;
 import javax.inject.Inject;
 import java.io.IOException;
 import java.net.URI;
-import java.util.Collections;
-import java.util.LinkedList;
-import java.util.List;
-import java.util.Map;
+import java.util.*;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
@@ -41,6 +39,7 @@ import static ai.labs.eddi.utils.MatchingUtilities.executeValuePath;
 import static ai.labs.eddi.utils.RuntimeUtilities.checkNotNull;
 import static ai.labs.eddi.utils.RuntimeUtilities.isNullOrEmpty;
 import static java.lang.String.format;
+import static java.util.Objects.requireNonNullElse;
 
 @ApplicationScoped
 public class HttpCallsTask implements ILifecycleTask {
@@ -89,7 +88,7 @@ public class HttpCallsTask implements ILifecycleTask {
     public void execute(IConversationMemory memory, Object component) throws LifecycleException {
         final var httpCallsConfig = (HttpCallsConfiguration) component;
 
-        IConversationMemory.IWritableConversationStep currentStep = memory.getCurrentStep();
+        IWritableConversationStep currentStep = memory.getCurrentStep();
         IData<List<String>> latestData = currentStep.getLatestData(ACTION_KEY);
         if (latestData == null) {
             return;
@@ -126,10 +125,17 @@ public class HttpCallsTask implements ILifecycleTask {
                                         httpCallsConfig.getTargetServerUrl(), call.getRequest(), templateDataObjects);
                                 response = executeAndMeasureRequest(call, request, retryCall, amountOfExecutions);
 
-                                if (response.getHttpCode() != 200) {
-                                    String message = "HttpCall (%s) didn't return http code 200, instead %s.";
+                                if (response.getHttpCode() < 200 || response.getHttpCode() >= 300) {
+                                    String message = "HttpCall (%s) didn't return http code 2xx, instead %s.";
                                     LOGGER.warn(format(message, call.getName(), response.getHttpCode()));
                                     LOGGER.warn("Error Msg:" + response.getHttpCodeMessage());
+                                }
+
+                                var responseHeaderObjectName = call.getResponseHeaderObjectName();
+                                if (!isNullOrEmpty(responseHeaderObjectName)) {
+                                    var responseObjectHeader = requireNonNullElse(response.getHttpHeader(), new HashMap<>());
+                                    templateDataObjects.put(responseHeaderObjectName, responseObjectHeader);
+                                    createHttpMemoryEntry(currentStep, responseObjectHeader, responseHeaderObjectName);
                                 }
 
                                 if (response.getHttpCode() == 200 && call.getSaveResponse()) {
@@ -142,18 +148,17 @@ public class HttpCallsTask implements ILifecycleTask {
                                     }
 
                                     if (!CONTENT_TYPE_APPLICATION_JSON.startsWith(actualContentType)) {
-                                        String message = "HttpCall (%s) didn't return application/json as content-type, instead was (%s)";
+                                        var message =
+                                                "HttpCall (%s) didn't return application/json " +
+                                                        "as content-type, instead was (%s)";
                                         LOGGER.warn(format(message, call.getName(), actualContentType));
                                     }
 
-                                    Object responseObject = jsonSerialization.deserialize(responseBody, Object.class);
-                                    String responseObjectName = call.getResponseObjectName();
+                                    var responseObject = jsonSerialization.deserialize(responseBody, Object.class);
+                                    var responseObjectName = call.getResponseObjectName();
                                     templateDataObjects.put(responseObjectName, responseObject);
 
-                                    String memoryDataName = "httpCalls:" + responseObjectName;
-                                    IData<Object> httpResponseData = dataFactory.createData(memoryDataName, responseObject);
-                                    currentStep.storeData(httpResponseData);
-                                    currentStep.addConversationOutputMap(KEY_HTTP_CALLS, Map.of(responseObjectName, responseObject));
+                                    createHttpMemoryEntry(currentStep, responseObject, responseObjectName);
                                 }
 
                                 amountOfExecutions++;
@@ -173,6 +178,16 @@ public class HttpCallsTask implements ILifecycleTask {
                 }
             }
         }
+    }
+
+    private void createHttpMemoryEntry(IWritableConversationStep currentStep,
+                                       Object responseObject,
+                                       String responseObjectName) {
+
+        var memoryDataName = "httpCalls:" + responseObjectName;
+        IData<Object> httpResponseData = dataFactory.createData(memoryDataName, responseObject);
+        currentStep.storeData(httpResponseData);
+        currentStep.addConversationOutputMap(KEY_HTTP_CALLS, Map.of(responseObjectName, responseObject));
     }
 
     private IResponse executeAndMeasureRequest(HttpCall call, IRequest request, boolean retryCall, int amountOfExecutions)
@@ -559,6 +574,8 @@ public class HttpCallsTask implements ILifecycleTask {
                 "]";
 
         String jsonList = templatingEngine.processTemplate(templateCode, templateDataObjects);
+
+        jsonList = jsonList.replace("\n", "\\\\n");
 
         //remove last comma of iterated array
         if (jsonList.contains(",")) {

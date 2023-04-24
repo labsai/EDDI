@@ -12,6 +12,7 @@ public class HttpCall {
     private List<String> actions;
     private Boolean saveResponse = false;
     private String responseObjectName;
+    private String responseHeaderObjectName;
     private Boolean fireAndForget = false;
     private Boolean isBatchCalls = false;
     private String iterationObjectName;
