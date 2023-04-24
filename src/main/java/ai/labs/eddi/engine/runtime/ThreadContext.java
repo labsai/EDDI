@@ -42,7 +42,6 @@ import java.util.Map;
  */
 
 public abstract class ThreadContext {
-    private static final String SECURITY_MANAGER_KEY = ThreadContext.class.getName() + "_SECURITY_MANAGER_KEY";
     private static final String SUBJECT_KEY = ThreadContext.class.getName() + "_SUBJECT_KEY";
 
     private static final ThreadLocal<Map<Object, Object>> resources = new InheritableThreadLocalMap<>();
@@ -223,27 +222,10 @@ public abstract class ThreadContext {
         }
     }
 
-    /**
-     * Convenience method that simplifies removal of a thread-local Subject from the thread.
-     * <p/>
-     * The implementation just helps reduce casting and remembering of the ThreadContext key name, i.e it is
-     * merely a conveient wrapper for the following:
-     * <p/>
-     * <code>return (Subject)remove( SUBJECT_KEY );</code>
-     * <p/>
-     * If you wish to just retrieve the object from the thread without removing it (so it can be retrieved later during
-     * thread execution), you should use the {@link #getSubject() getSubject()} method for that purpose.
-     *
-     * @return the Subject object previously bound to the thread, or <tt>null</tt> if there was none bound.
-     * @since 0.2
-     */
-    public static Subject unbindSubject() {
-        return (Subject) remove(SUBJECT_KEY);
-    }
 
     private static final class InheritableThreadLocalMap<T extends Map<Object, Object>> extends InheritableThreadLocal<Map<Object, Object>> {
         protected Map<Object, Object> initialValue() {
-            return new HashMap<Object, Object>();
+            return new HashMap<>();
         }
 
         /**
