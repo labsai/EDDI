@@ -183,66 +183,6 @@ public abstract class ThreadContext {
         resources.remove();
     }
 
-    /**
-     * Convenience method that simplifies retrieval of the application's SecurityManager instance from the current
-     * thread. If there is no SecurityManager bound to the thread (probably because framework code did not bind it
-     * to the thread), this method returns <tt>null</tt>.
-     * <p/>
-     * It is merely a convenient wrapper for the following:
-     * <p/>
-     * <code>return (SecurityManager)get( SECURITY_MANAGER_KEY );</code>
-     * <p/>
-     * This method only returns the bound value if it exists - it does not remove it
-     * from the thread.  To remove it, one must call {@link #unbindSecurityManager() unbindSecurityManager()} instead.
-     *
-     * @return the Subject object bound to the thread, or <tt>null</tt> if there isn't one bound.
-     * @since 0.9
-     */
-    public static SecurityManager getSecurityManager() {
-        return (SecurityManager) get(SECURITY_MANAGER_KEY);
-    }
-
-
-    /**
-     * Convenience method that simplifies binding the application's SecurityManager instance to the ThreadContext.
-     * <p/>
-     * <p>The method's existence is to help reduce casting in code and to simplify remembering of
-     * ThreadContext key names.  The implementation is simple in that, if the SecurityManager is not <tt>null</tt>,
-     * it binds it to the thread, i.e.:
-     * <p/>
-     * <pre>
-     * if (securityManager != null) {
-     *     put( SECURITY_MANAGER_KEY, securityManager);
-     * }</pre>
-     *
-     * @param securityManager the application's SecurityManager instance to bind to the thread.  If the argument is
-     *                        null, nothing will be done.
-     * @since 0.9
-     */
-    public static void bind(SecurityManager securityManager) {
-        if (securityManager != null) {
-            put(SECURITY_MANAGER_KEY, securityManager);
-        }
-    }
-
-    /**
-     * Convenience method that simplifies removal of the application's SecurityManager instance from the thread.
-     * <p/>
-     * The implementation just helps reduce casting and remembering of the ThreadContext key name, i.e it is
-     * merely a conveient wrapper for the following:
-     * <p/>
-     * <code>return (SecurityManager)remove( SECURITY_MANAGER_KEY );</code>
-     * <p/>
-     * If you wish to just retrieve the object from the thread without removing it (so it can be retrieved later
-     * during thread execution), use the {@link #getSecurityManager() getSecurityManager()} method instead.
-     *
-     * @return the application's SecurityManager instance previously bound to the thread, or <tt>null</tt> if there
-     * was none bound.
-     * @since 0.9
-     */
-    public static SecurityManager unbindSecurityManager() {
-        return (SecurityManager) remove(SECURITY_MANAGER_KEY);
-    }
 
     /**
      * Convenience method that simplifies retrieval of a thread-bound Subject.  If there is no

@@ -24,7 +24,6 @@ public interface ILogoutEndpoint {
     @Operation(description = "Read currently enabled security type.")
     Response getSecurityType();
 
-    @GET
     @POST
     @Path("/logout")
     @Operation(description = "Logout current authenticated user.")
