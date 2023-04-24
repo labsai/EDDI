@@ -182,25 +182,6 @@ public abstract class ThreadContext {
         resources.remove();
     }
 
-
-    /**
-     * Convenience method that simplifies retrieval of a thread-bound Subject.  If there is no
-     * Subject bound to the thread, this method returns <tt>null</tt>.  It is merely a convenient wrapper
-     * for the following:
-     * <p/>
-     * <code>return (Subject)get( SUBJECT_KEY );</code>
-     * <p/>
-     * This method only returns the bound value if it exists - it does not remove it
-     * from the thread.  To remove it, one must call {@link #unbindSubject() unbindSubject()} instead.
-     *
-     * @return the Subject object bound to the thread, or <tt>null</tt> if there isn't one bound.
-     * @since 0.2
-     */
-    public static Subject getSubject() {
-        return (Subject) get(SUBJECT_KEY);
-    }
-
-
     /**
      * Convenience method that simplifies binding a Subject to the ThreadContext.
      * <p/>
