@@ -523,7 +523,11 @@ public class HttpCallsTask implements ILifecycleTask {
                                      Map<String, Object> templateDataObjects)
             throws IOException, ITemplatingEngine.TemplateEngineException {
 
-        final String quickReplyTemplate = "    {" +
+        if (outputValue.startsWith("${") && outputValue.endsWith("}")) {
+            outputValue = "[(" + outputValue + ")]";
+        }
+
+        final String outputTemplate = "    {" +
                 "        \"type\":\"" + outputType + "\"," +
                 "        \"valueAlternatives\":[{" +
                 "               \"type\":\"" + outputType + "\"," +
@@ -532,7 +536,7 @@ public class HttpCallsTask implements ILifecycleTask {
                 "    },";
 
         return buildListFromJson(iterationObjectName,
-                pathToTargetArray, templateFilterExpression, quickReplyTemplate, templateDataObjects);
+                pathToTargetArray, templateFilterExpression, outputTemplate, templateDataObjects);
     }
 
     private List<Object> buildQuickReplies(String iterationObjectName,
