@@ -18,6 +18,7 @@ import ai.labs.eddi.models.Deployment.Environment;
 import io.quarkus.runtime.Startup;
 import io.quarkus.runtime.StartupEvent;
 import io.quarkus.scheduler.Scheduled;
+import jakarta.annotation.Priority;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.enterprise.event.Observes;
 import jakarta.inject.Inject;
@@ -46,6 +47,7 @@ import static java.time.temporal.ChronoUnit.DAYS;
  */
 
 @Startup
+@Priority(4000)
 @ApplicationScoped
 public class BotDeploymentManagement implements IBotDeploymentManagement {
     private final IDeploymentStore deploymentStore;

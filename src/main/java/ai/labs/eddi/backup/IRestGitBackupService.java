@@ -34,4 +34,8 @@ public interface IRestGitBackupService {
     @Path("/push/{botId}")
     @Produces(MediaType.TEXT_PLAIN)
     Response gitPush(@PathParam("botId") String botId);
+
+    boolean isGitAutomatic();
+
+    boolean isGitInitialised(String botId);
 }
