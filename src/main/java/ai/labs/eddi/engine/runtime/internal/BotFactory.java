@@ -98,7 +98,6 @@ public class BotFactory implements IBotFactory {
         var botIdObj = new BotId(botId, version);
         IBot bot;
         bot = waitIfBotIsInDeployment(bots, botIdObj);
-        if (bot == null) return null;
 
         return bot;
     }
@@ -226,7 +225,7 @@ public class BotFactory implements IBotFactory {
     @Setter
     @EqualsAndHashCode
     @ToString
-    private class BotId {
+    private static class BotId {
         private String id;
         private Integer version;
     }

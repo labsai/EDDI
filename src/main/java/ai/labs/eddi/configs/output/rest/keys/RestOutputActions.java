@@ -44,7 +44,7 @@ public class RestOutputActions implements IRestOutputActions {
 
     @Override
     public List<String> readOutputActions(String packageId, Integer packageVersion, String filter, Integer limit) {
-        List<String> retOutputKeys = new LinkedList<String>();
+        List<String> retOutputKeys = new LinkedList<>();
         try {
             PackageConfiguration packageConfiguration = packageStore.read(packageId, packageVersion);
             List<IResourceStore.IResourceId> resourceIds;
@@ -55,7 +55,7 @@ public class RestOutputActions implements IRestOutputActions {
                     for (BehaviorRuleConfiguration behaviorRuleConfiguration : groupConfiguration.getBehaviorRules()) {
                         for (String action : behaviorRuleConfiguration.getActions()) {
                             if (action.contains(filter)) {
-                                CollectionUtilities.addAllWithoutDuplicates(retOutputKeys, Arrays.asList(action));
+                                CollectionUtilities.addAllWithoutDuplicates(retOutputKeys, List.of(action));
                                 if (retOutputKeys.size() >= limit) {
                                     return sortedOutputKeys(retOutputKeys);
                                 }
@@ -89,7 +89,7 @@ public class RestOutputActions implements IRestOutputActions {
     }
 
     private List<IResourceStore.IResourceId> readBehaviorRuleSetResourceIds(PackageConfiguration packageConfiguration) {
-        List<IResourceStore.IResourceId> resourceIds = new LinkedList<IResourceStore.IResourceId>();
+        List<IResourceStore.IResourceId> resourceIds = new LinkedList<>();
 
         for (PackageConfiguration.PackageExtension packageExtension : packageConfiguration.getPackageExtensions()) {
             if (!packageExtension.getType().toString().startsWith("eddi://ai.labs.behavior")) {
@@ -106,7 +106,7 @@ public class RestOutputActions implements IRestOutputActions {
     }
 
     private List<IResourceStore.IResourceId> readOutputSetResourceIds(PackageConfiguration packageConfiguration) {
-        List<IResourceStore.IResourceId> resourceIds = new LinkedList<IResourceStore.IResourceId>();
+        List<IResourceStore.IResourceId> resourceIds = new LinkedList<>();
 
         for (PackageConfiguration.PackageExtension packageExtension : packageConfiguration.getPackageExtensions()) {
             if (!packageExtension.getType().toString().startsWith("eddi://ai.labs.output")) {

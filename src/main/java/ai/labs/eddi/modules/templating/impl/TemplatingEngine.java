@@ -62,14 +62,10 @@ public class TemplatingEngine implements ITemplatingEngine {
     }
 
     private TemplateEngine getTemplateEngine(TemplateMode templateMode) {
-        switch (templateMode) {
-            case HTML:
-                return htmlTemplateEngine.getTemplateEngine();
-            case JAVASCRIPT:
-                return javaScriptTemplateEngine.getTemplateEngine();
-            case TEXT:
-            default:
-                return textTemplateEngine.getTemplateEngine();
-        }
+        return switch (templateMode) {
+            case HTML -> htmlTemplateEngine.getTemplateEngine();
+            case JAVASCRIPT -> javaScriptTemplateEngine.getTemplateEngine();
+            default -> textTemplateEngine.getTemplateEngine();
+        };
     }
 }

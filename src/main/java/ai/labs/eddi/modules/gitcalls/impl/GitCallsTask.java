@@ -11,6 +11,8 @@ import ai.labs.eddi.engine.memory.IMemoryItemConverter;
 import ai.labs.eddi.engine.runtime.client.configuration.IResourceClientLibrary;
 import ai.labs.eddi.engine.runtime.service.ServiceException;
 import ai.labs.eddi.modules.templating.ITemplatingEngine;
+import jakarta.enterprise.context.ApplicationScoped;
+import jakarta.inject.Inject;
 import org.eclipse.jgit.api.Git;
 import org.eclipse.jgit.api.PullResult;
 import org.eclipse.jgit.api.errors.GitAPIException;
@@ -21,8 +23,6 @@ import org.eclipse.jgit.transport.PushResult;
 import org.eclipse.jgit.transport.UsernamePasswordCredentialsProvider;
 import org.jboss.logging.Logger;
 
-import jakarta.enterprise.context.ApplicationScoped;
-import jakarta.inject.Inject;
 import java.io.IOException;
 import java.net.URI;
 import java.net.URISyntaxException;
@@ -33,7 +33,6 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 import java.util.Map;
-import java.util.stream.Collectors;
 
 import static ai.labs.eddi.utils.RuntimeUtilities.isNullOrEmpty;
 import static org.eclipse.jgit.lib.ConfigConstants.CONFIG_BRANCH_SECTION;
@@ -90,7 +89,7 @@ public class GitCallsTask implements ILifecycleTask {
                     filter(gitCall -> {
                         List<String> gitCallActions = gitCall.getActions();
                         return gitCallActions.contains(action) || gitCallActions.contains("*");
-                    }).distinct().collect(Collectors.toList());
+                    }).distinct().toList();
 
             for (var gitCall : filteredGitCalls) {
                 switch (gitCall.getCommand()) {

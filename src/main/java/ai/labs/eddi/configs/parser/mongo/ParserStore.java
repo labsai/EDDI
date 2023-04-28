@@ -17,7 +17,7 @@ import jakarta.inject.Inject;
  */
 @ApplicationScoped
 public class ParserStore implements IParserStore {
-    private HistorizedResourceStore<ParserConfiguration> parserResourceStore;
+    private final HistorizedResourceStore<ParserConfiguration> parserResourceStore;
 
     @Inject
     public ParserStore(MongoDatabase database, IDocumentBuilder documentBuilder) {

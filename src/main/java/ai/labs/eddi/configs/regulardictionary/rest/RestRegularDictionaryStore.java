@@ -113,18 +113,18 @@ public class RestRegularDictionaryStore implements IRestRegularDictionaryStore {
         for (var patchInstruction : patchInstructions) {
             var regularConfigPatch = patchInstruction.getDocument();
             switch (patchInstruction.getOperation()) {
-                case SET:
+                case SET -> {
                     currentDictionaryConfig.getWords().removeAll(regularConfigPatch.getWords());
                     currentDictionaryConfig.getWords().addAll(regularConfigPatch.getWords());
                     currentDictionaryConfig.getPhrases().removeAll(regularConfigPatch.getPhrases());
                     currentDictionaryConfig.getPhrases().addAll(regularConfigPatch.getPhrases());
-                    break;
-                case DELETE:
+                }
+                case DELETE -> {
                     currentDictionaryConfig.getWords().removeAll(regularConfigPatch.getWords());
                     currentDictionaryConfig.getPhrases().removeAll(regularConfigPatch.getPhrases());
-                    break;
-                default:
-                    throw new IResourceStore.ResourceStoreException("Patch operation must be either SET or DELETE!");
+                }
+                default ->
+                        throw new IResourceStore.ResourceStoreException("Patch operation must be either SET or DELETE!");
             }
         }
 

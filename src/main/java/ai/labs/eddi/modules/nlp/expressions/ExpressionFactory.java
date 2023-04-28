@@ -35,7 +35,7 @@ public class ExpressionFactory implements IExpressionFactory {
         for (Expression exp : expressions)
             l.add(getExpression(exp));
 
-        return l.toArray(new Expression[l.size()]);
+        return l.toArray(new Expression[0]);
     }
 
     @Override

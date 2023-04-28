@@ -40,7 +40,7 @@ public class PackageStore implements IPackageStore {
 
     @Override
     public PackageConfiguration readIncludingDeleted(String id, Integer version) throws IResourceStore.ResourceNotFoundException, IResourceStore.ResourceStoreException {
-        return readIncludingDeleted(id, version);
+        return packageResourceStore.readIncludingDeleted(id, version);
     }
 
     @Override
@@ -85,8 +85,8 @@ public class PackageStore implements IPackageStore {
         List<DocumentDescriptor> ret = new LinkedList<>();
 
         int startIndexVersion = resourceURI.lastIndexOf("=") + 1;
-        Integer version = Integer.parseInt(resourceURI.substring(startIndexVersion));
-        String resourceURIPart = resourceURI.substring(0, startIndexVersion);
+        var version = Integer.parseInt(resourceURI.substring(startIndexVersion));
+        var resourceURIPart = resourceURI.substring(0, startIndexVersion);
 
         do {
             resourceURI = resourceURIPart + version;
@@ -101,7 +101,7 @@ public class PackageStore implements IPackageStore {
                 boolean alreadyContainsResource = ret.stream().anyMatch(
                         resource ->
                         {
-                            String id = RestUtilities.extractResourceId(resource.getResource()).getId();
+                            var id = RestUtilities.extractResourceId(resource.getResource()).getId();
                             return id.equals(packageId.getId());
                         });
 

@@ -22,8 +22,7 @@ public class HttpClientModule {
                                              @ConfigProperty(name = "httpClient.maxConnectionPerRoute") Integer maxConnectionPerRoute,
                                              @ConfigProperty(name = "httpClient.requestBufferSize") Integer requestBufferSize,
                                              @ConfigProperty(name = "httpClient.responseBufferSize") Integer responseBufferSize,
-                                             @ConfigProperty(name = "httpClient.maxRedirects") Integer maxRedirects,
-                                             @ConfigProperty(name = "httpClient.trustAllCertificates") Boolean trustAllCertificates) {
+                                             @ConfigProperty(name = "httpClient.maxRedirects") Integer maxRedirects) {
 
         try {
             HttpClient httpClient = new HttpClient();

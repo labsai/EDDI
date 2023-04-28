@@ -12,11 +12,10 @@ import com.mongodb.client.model.Indexes;
 import com.mongodb.reactivestreams.client.MongoCollection;
 import com.mongodb.reactivestreams.client.MongoDatabase;
 import io.reactivex.rxjava3.core.Observable;
-import org.bson.Document;
-import org.jboss.logging.Logger;
-
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
+import org.bson.Document;
+
 import java.io.IOException;
 import java.util.NoSuchElementException;
 
@@ -34,7 +33,6 @@ public class UserConversationStore implements IUserConversationStore {
     private final IJsonSerialization jsonSerialization;
     private final UserConversationResourceStore userConversationStore;
 
-    private static final Logger log = Logger.getLogger(UserConversationStore.class);
 
     @Inject
     public UserConversationStore(MongoDatabase database,
@@ -64,7 +62,7 @@ public class UserConversationStore implements IUserConversationStore {
 
     @Override
     public void createUserConversation(UserConversation userConversation)
-            throws ResourceAlreadyExistsException, IResourceStore.ResourceStoreException {
+            throws IResourceStore.ResourceStoreException {
         RuntimeUtilities.checkNotNull(userConversation, "userConversation");
         RuntimeUtilities.checkNotNull(userConversation.getIntent(), "userConversation.intent");
         RuntimeUtilities.checkNotNull(userConversation.getUserId(), "userConversation.userId");
@@ -102,7 +100,7 @@ public class UserConversationStore implements IUserConversationStore {
         }
 
         void createUserConversation(UserConversation userConversation)
-                throws IResourceStore.ResourceStoreException, ResourceAlreadyExistsException {
+                throws IResourceStore.ResourceStoreException {
 
             Document filter = new Document();
             filter.put(INTENT_FIELD, userConversation.getIntent());

@@ -4,9 +4,6 @@ import ai.labs.eddi.datastore.mongo.codec.JacksonProvider;
 import ai.labs.eddi.datastore.serialization.SerializationCustomizer;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.mongodb.ConnectionString;
-import com.mongodb.ServerApi;
-import com.mongodb.ServerApiVersion;
-import com.mongodb.reactivestreams.client.MongoClient;
 import com.mongodb.MongoClientSettings;
 import com.mongodb.ReadPreference;
 import com.mongodb.WriteConcern;
@@ -16,6 +13,8 @@ import de.undercouch.bson4jackson.BsonFactory;
 import de.undercouch.bson4jackson.BsonParser;
 import io.quarkus.mongodb.impl.ReactiveMongoClientImpl;
 import io.quarkus.mongodb.reactive.ReactiveMongoClient;
+import jakarta.enterprise.context.ApplicationScoped;
+import jakarta.ws.rs.Produces;
 import org.bson.BsonInvalidOperationException;
 import org.bson.BsonReader;
 import org.bson.BsonWriter;
@@ -23,8 +22,6 @@ import org.bson.codecs.*;
 import org.bson.codecs.configuration.CodecRegistry;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
 
-import jakarta.enterprise.context.ApplicationScoped;
-import jakarta.ws.rs.Produces;
 import java.net.URI;
 import java.net.URISyntaxException;
 

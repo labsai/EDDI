@@ -114,7 +114,7 @@ public class PackageStoreClientLibrary implements IPackageStoreClientLibrary {
         };
     }
 
-    public class PackageInitializationException extends Exception {
+    public static class PackageInitializationException extends Exception {
         PackageInitializationException(String message, Throwable e) {
             super(message, e);
         }

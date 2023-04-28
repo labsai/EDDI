@@ -15,16 +15,15 @@ import ai.labs.eddi.engine.runtime.internal.readiness.IBotsReadiness;
 import ai.labs.eddi.engine.runtime.service.ServiceException;
 import ai.labs.eddi.models.ConversationState;
 import ai.labs.eddi.models.Deployment.Environment;
-import io.quarkus.arc.Priority;
 import io.quarkus.runtime.Startup;
 import io.quarkus.runtime.StartupEvent;
 import io.quarkus.scheduler.Scheduled;
-import org.eclipse.microprofile.config.inject.ConfigProperty;
-import org.jboss.logging.Logger;
-
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.enterprise.event.Observes;
 import jakarta.inject.Inject;
+import org.eclipse.microprofile.config.inject.ConfigProperty;
+import org.jboss.logging.Logger;
+
 import java.time.Instant;
 import java.time.LocalDate;
 import java.time.Period;
@@ -47,7 +46,6 @@ import static java.time.temporal.ChronoUnit.DAYS;
  */
 
 @Startup
-@Priority(4000)
 @ApplicationScoped
 public class BotDeploymentManagement implements IBotDeploymentManagement {
     private final IDeploymentStore deploymentStore;

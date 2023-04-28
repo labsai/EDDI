@@ -119,15 +119,14 @@ public class RestOutputStore implements IRestOutputStore {
         for (var patchInstruction : patchInstructions) {
             var outputConfigurationSetPatch = patchInstruction.getDocument();
             switch (patchInstruction.getOperation()) {
-                case SET:
+                case SET -> {
                     currentOutputConfigurationSet.getOutputSet().removeAll(outputConfigurationSetPatch.getOutputSet());
                     currentOutputConfigurationSet.getOutputSet().addAll(outputConfigurationSetPatch.getOutputSet());
-                    break;
-                case DELETE:
-                    currentOutputConfigurationSet.getOutputSet().removeAll(outputConfigurationSetPatch.getOutputSet());
-                    break;
-                default:
-                    throw new IResourceStore.ResourceStoreException("Patch operation must be either SET or DELETE!");
+                }
+                case DELETE ->
+                        currentOutputConfigurationSet.getOutputSet().removeAll(outputConfigurationSetPatch.getOutputSet());
+                default ->
+                        throw new IResourceStore.ResourceStoreException("Patch operation must be either SET or DELETE!");
             }
         }
 

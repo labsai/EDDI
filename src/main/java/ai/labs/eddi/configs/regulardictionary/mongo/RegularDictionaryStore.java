@@ -21,7 +21,7 @@ import java.util.List;
  */
 @ApplicationScoped
 public class RegularDictionaryStore implements IRegularDictionaryStore {
-    private HistorizedResourceStore<RegularDictionaryConfiguration> regularDictionaryResourceStore;
+    private final HistorizedResourceStore<RegularDictionaryConfiguration> regularDictionaryResourceStore;
 
     private static final WordComparator WORD_COMPARATOR = new WordComparator();
     private static final PhraseComparator PHRASE_COMPARATOR = new PhraseComparator();

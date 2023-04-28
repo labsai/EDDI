@@ -198,7 +198,7 @@ public class RestExportService extends AbstractBackupService implements IRestExp
             throws UnsupportedEncodingException {
         String zipFilename = "";
         if (!isNullOrEmpty(botDocumentDescriptor.getName())) {
-            zipFilename = URLEncoder.encode(botDocumentDescriptor.getName() + "-", StandardCharsets.UTF_8.toString());
+            zipFilename = URLEncoder.encode(botDocumentDescriptor.getName() + "-", StandardCharsets.UTF_8);
         }
         zipFilename += botId + "-" + botVersion + ".zip";
         return zipFilename;

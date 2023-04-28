@@ -19,7 +19,7 @@ import jakarta.inject.Inject;
 
 @ApplicationScoped
 public class GitCallsStore implements IGitCallsStore {
-    private HistorizedResourceStore<GitCallsConfiguration> gitCallsResourceStore;
+    private final HistorizedResourceStore<GitCallsConfiguration> gitCallsResourceStore;
 
     @Inject
     public GitCallsStore(MongoDatabase database, IDocumentBuilder documentBuilder) {
