@@ -10,8 +10,8 @@ import ai.labs.eddi.datastore.mongo.ResultManipulator;
 import ai.labs.eddi.datastore.serialization.IDocumentBuilder;
 import com.mongodb.reactivestreams.client.MongoDatabase;
 
-import javax.enterprise.context.ApplicationScoped;
-import javax.inject.Inject;
+import jakarta.enterprise.context.ApplicationScoped;
+import jakarta.inject.Inject;
 import java.util.Comparator;
 import java.util.List;
 import java.util.stream.Collectors;
@@ -23,7 +23,7 @@ import static ai.labs.eddi.utils.RuntimeUtilities.*;
  */
 @ApplicationScoped
 public class OutputStore implements IOutputStore {
-    private HistorizedResourceStore<OutputConfigurationSet> outputResourceStore;
+    private final HistorizedResourceStore<OutputConfigurationSet> outputResourceStore;
     private static final OutputComparator OUTPUT_COMPARATOR = new OutputComparator();
 
     @Inject

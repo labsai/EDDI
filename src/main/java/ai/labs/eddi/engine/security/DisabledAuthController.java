@@ -1,12 +1,11 @@
 package ai.labs.eddi.engine.security;
 
-import io.quarkus.arc.Priority;
 import io.quarkus.security.spi.runtime.AuthorizationController;
+import jakarta.annotation.Priority;
+import jakarta.enterprise.context.ApplicationScoped;
+import jakarta.enterprise.inject.Alternative;
+import jakarta.interceptor.Interceptor;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
-
-import javax.enterprise.context.ApplicationScoped;
-import javax.enterprise.inject.Alternative;
-import javax.interceptor.Interceptor;
 
 @Alternative
 @Priority(Interceptor.Priority.LIBRARY_AFTER)

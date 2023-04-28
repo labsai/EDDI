@@ -5,7 +5,7 @@ import ai.labs.eddi.modules.nlp.extensions.corrections.ICorrection;
 import ai.labs.eddi.modules.nlp.extensions.corrections.PhoneticCorrection;
 import io.quarkus.runtime.Startup;
 
-import javax.enterprise.context.ApplicationScoped;
+import jakarta.enterprise.context.ApplicationScoped;
 import java.util.Map;
 
 

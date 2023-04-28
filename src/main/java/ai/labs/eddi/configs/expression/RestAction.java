@@ -12,10 +12,10 @@ import ai.labs.eddi.utils.RestUtilities;
 import org.jboss.logging.Logger;
 import org.jboss.resteasy.spi.NoLogWebApplicationException;
 
-import javax.enterprise.context.ApplicationScoped;
-import javax.inject.Inject;
-import javax.ws.rs.InternalServerErrorException;
-import javax.ws.rs.core.Response;
+import jakarta.enterprise.context.ApplicationScoped;
+import jakarta.inject.Inject;
+import jakarta.ws.rs.InternalServerErrorException;
+import jakarta.ws.rs.core.Response;
 import java.net.URI;
 import java.util.Collections;
 import java.util.LinkedList;

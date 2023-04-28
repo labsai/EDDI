@@ -12,7 +12,7 @@ import ai.labs.eddi.engine.memory.model.SimpleConversationMemorySnapshot;
 import ai.labs.eddi.models.Context;
 import ai.labs.eddi.models.Context.ContextType;
 
-import javax.enterprise.context.ApplicationScoped;
+import jakarta.enterprise.context.ApplicationScoped;
 import java.util.HashMap;
 import java.util.LinkedList;
 import java.util.List;

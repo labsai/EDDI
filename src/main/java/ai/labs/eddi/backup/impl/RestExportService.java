@@ -22,10 +22,10 @@ import ai.labs.eddi.utils.RestUtilities;
 import org.jboss.logging.Logger;
 import org.jboss.resteasy.spi.NoLogWebApplicationException;
 
-import javax.enterprise.context.ApplicationScoped;
-import javax.inject.Inject;
-import javax.ws.rs.InternalServerErrorException;
-import javax.ws.rs.core.Response;
+import jakarta.enterprise.context.ApplicationScoped;
+import jakarta.inject.Inject;
+import jakarta.ws.rs.InternalServerErrorException;
+import jakarta.ws.rs.core.Response;
 import java.io.*;
 import java.net.URI;
 import java.net.URLEncoder;
@@ -198,7 +198,7 @@ public class RestExportService extends AbstractBackupService implements IRestExp
             throws UnsupportedEncodingException {
         String zipFilename = "";
         if (!isNullOrEmpty(botDocumentDescriptor.getName())) {
-            zipFilename = URLEncoder.encode(botDocumentDescriptor.getName() + "-", StandardCharsets.UTF_8.toString());
+            zipFilename = URLEncoder.encode(botDocumentDescriptor.getName() + "-", StandardCharsets.UTF_8);
         }
         zipFilename += botId + "-" + botVersion + ".zip";
         return zipFilename;

@@ -6,11 +6,11 @@ import ai.labs.eddi.modules.properties.impl.PropertySetterTask;
 import io.quarkus.runtime.Startup;
 import org.jboss.logging.Logger;
 
-import javax.annotation.PostConstruct;
-import javax.enterprise.context.ApplicationScoped;
-import javax.enterprise.inject.Instance;
-import javax.inject.Inject;
-import javax.inject.Provider;
+import jakarta.annotation.PostConstruct;
+import jakarta.enterprise.context.ApplicationScoped;
+import jakarta.enterprise.inject.Instance;
+import jakarta.inject.Inject;
+import jakarta.inject.Provider;
 import java.util.Map;
 
 /**

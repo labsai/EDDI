@@ -6,8 +6,8 @@ import ai.labs.eddi.datastore.serialization.IDocumentBuilder;
 import ai.labs.eddi.models.DocumentDescriptor;
 import com.mongodb.reactivestreams.client.MongoDatabase;
 
-import javax.enterprise.context.ApplicationScoped;
-import javax.inject.Inject;
+import jakarta.enterprise.context.ApplicationScoped;
+import jakarta.inject.Inject;
 import java.util.List;
 
 import static ai.labs.eddi.datastore.IResourceStore.*;

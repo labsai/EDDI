@@ -4,8 +4,8 @@ import ai.labs.eddi.datastore.IResourceStore;
 import org.jboss.resteasy.specimpl.ResponseBuilderImpl;
 import org.jboss.resteasy.spi.NoLogWebApplicationException;
 
-import javax.ws.rs.core.MediaType;
-import javax.ws.rs.core.Response;
+import jakarta.ws.rs.core.MediaType;
+import jakarta.ws.rs.core.Response;
 import java.net.URI;
 import java.util.HashMap;
 import java.util.Map;

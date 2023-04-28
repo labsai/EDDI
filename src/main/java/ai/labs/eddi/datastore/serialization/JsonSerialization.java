@@ -2,8 +2,8 @@ package ai.labs.eddi.datastore.serialization;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 
-import javax.enterprise.context.ApplicationScoped;
-import javax.inject.Inject;
+import jakarta.enterprise.context.ApplicationScoped;
+import jakarta.inject.Inject;
 import java.io.IOException;
 import java.io.StringWriter;
 

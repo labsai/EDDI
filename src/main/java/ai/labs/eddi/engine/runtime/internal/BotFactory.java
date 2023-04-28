@@ -14,8 +14,8 @@ import ai.labs.eddi.models.Deployment;
 import lombok.*;
 import org.jboss.logging.Logger;
 
-import javax.enterprise.context.ApplicationScoped;
-import javax.inject.Inject;
+import jakarta.enterprise.context.ApplicationScoped;
+import jakarta.inject.Inject;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.stream.Collectors;
@@ -98,7 +98,6 @@ public class BotFactory implements IBotFactory {
         var botIdObj = new BotId(botId, version);
         IBot bot;
         bot = waitIfBotIsInDeployment(bots, botIdObj);
-        if (bot == null) return null;
 
         return bot;
     }
@@ -226,7 +225,7 @@ public class BotFactory implements IBotFactory {
     @Setter
     @EqualsAndHashCode
     @ToString
-    private class BotId {
+    private static class BotId {
         private String id;
         private Integer version;
     }

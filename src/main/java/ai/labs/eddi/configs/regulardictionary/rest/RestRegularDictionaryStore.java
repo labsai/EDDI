@@ -11,11 +11,11 @@ import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.models.DocumentDescriptor;
 import org.jboss.logging.Logger;
 
-import javax.enterprise.context.ApplicationScoped;
-import javax.inject.Inject;
-import javax.ws.rs.InternalServerErrorException;
-import javax.ws.rs.NotFoundException;
-import javax.ws.rs.core.Response;
+import jakarta.enterprise.context.ApplicationScoped;
+import jakarta.inject.Inject;
+import jakarta.ws.rs.InternalServerErrorException;
+import jakarta.ws.rs.NotFoundException;
+import jakarta.ws.rs.core.Response;
 import java.util.List;
 
 /**
@@ -113,18 +113,18 @@ public class RestRegularDictionaryStore implements IRestRegularDictionaryStore {
         for (var patchInstruction : patchInstructions) {
             var regularConfigPatch = patchInstruction.getDocument();
             switch (patchInstruction.getOperation()) {
-                case SET:
+                case SET -> {
                     currentDictionaryConfig.getWords().removeAll(regularConfigPatch.getWords());
                     currentDictionaryConfig.getWords().addAll(regularConfigPatch.getWords());
                     currentDictionaryConfig.getPhrases().removeAll(regularConfigPatch.getPhrases());
                     currentDictionaryConfig.getPhrases().addAll(regularConfigPatch.getPhrases());
-                    break;
-                case DELETE:
+                }
+                case DELETE -> {
                     currentDictionaryConfig.getWords().removeAll(regularConfigPatch.getWords());
                     currentDictionaryConfig.getPhrases().removeAll(regularConfigPatch.getPhrases());
-                    break;
-                default:
-                    throw new IResourceStore.ResourceStoreException("Patch operation must be either SET or DELETE!");
+                }
+                default ->
+                        throw new IResourceStore.ResourceStoreException("Patch operation must be either SET or DELETE!");
             }
         }
 

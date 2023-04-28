@@ -1,6 +1,6 @@
 package ai.labs.eddi.engine.runtime.internal.readiness;
 
-import javax.enterprise.context.ApplicationScoped;
+import jakarta.enterprise.context.ApplicationScoped;
 
 @ApplicationScoped
 public class BotsReadiness implements IBotsReadiness {

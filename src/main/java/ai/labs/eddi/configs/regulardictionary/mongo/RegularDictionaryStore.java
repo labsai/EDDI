@@ -10,8 +10,8 @@ import ai.labs.eddi.datastore.serialization.IDocumentBuilder;
 import ai.labs.eddi.utils.RuntimeUtilities;
 import com.mongodb.reactivestreams.client.MongoDatabase;
 
-import javax.enterprise.context.ApplicationScoped;
-import javax.inject.Inject;
+import jakarta.enterprise.context.ApplicationScoped;
+import jakarta.inject.Inject;
 import java.util.Comparator;
 import java.util.LinkedList;
 import java.util.List;
@@ -21,7 +21,7 @@ import java.util.List;
  */
 @ApplicationScoped
 public class RegularDictionaryStore implements IRegularDictionaryStore {
-    private HistorizedResourceStore<RegularDictionaryConfiguration> regularDictionaryResourceStore;
+    private final HistorizedResourceStore<RegularDictionaryConfiguration> regularDictionaryResourceStore;
 
     private static final WordComparator WORD_COMPARATOR = new WordComparator();
     private static final PhraseComparator PHRASE_COMPARATOR = new PhraseComparator();

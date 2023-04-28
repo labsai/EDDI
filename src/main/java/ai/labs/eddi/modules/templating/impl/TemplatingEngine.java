@@ -5,8 +5,8 @@ import org.thymeleaf.TemplateEngine;
 import org.thymeleaf.context.Context;
 import org.thymeleaf.exceptions.TemplateInputException;
 
-import javax.enterprise.context.ApplicationScoped;
-import javax.inject.Inject;
+import jakarta.enterprise.context.ApplicationScoped;
+import jakarta.inject.Inject;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Locale;
@@ -62,14 +62,10 @@ public class TemplatingEngine implements ITemplatingEngine {
     }
 
     private TemplateEngine getTemplateEngine(TemplateMode templateMode) {
-        switch (templateMode) {
-            case HTML:
-                return htmlTemplateEngine.getTemplateEngine();
-            case JAVASCRIPT:
-                return javaScriptTemplateEngine.getTemplateEngine();
-            case TEXT:
-            default:
-                return textTemplateEngine.getTemplateEngine();
-        }
+        return switch (templateMode) {
+            case HTML -> htmlTemplateEngine.getTemplateEngine();
+            case JAVASCRIPT -> javaScriptTemplateEngine.getTemplateEngine();
+            default -> textTemplateEngine.getTemplateEngine();
+        };
     }
 }

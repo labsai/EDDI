@@ -13,8 +13,8 @@ import org.bson.Document;
 import org.bson.types.ObjectId;
 import org.jboss.logging.Logger;
 
-import javax.enterprise.context.ApplicationScoped;
-import javax.inject.Inject;
+import jakarta.enterprise.context.ApplicationScoped;
+import jakarta.inject.Inject;
 import java.io.IOException;
 import java.util.Date;
 import java.util.NoSuchElementException;

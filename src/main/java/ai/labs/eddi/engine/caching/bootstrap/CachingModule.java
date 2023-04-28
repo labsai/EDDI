@@ -3,8 +3,8 @@ package ai.labs.eddi.engine.caching.bootstrap;
 import org.infinispan.manager.DefaultCacheManager;
 import org.infinispan.manager.EmbeddedCacheManager;
 
-import javax.enterprise.context.ApplicationScoped;
-import javax.ws.rs.Produces;
+import jakarta.enterprise.context.ApplicationScoped;
+import jakarta.ws.rs.Produces;
 import java.io.IOException;
 import java.nio.file.Path;
 import java.nio.file.Paths;

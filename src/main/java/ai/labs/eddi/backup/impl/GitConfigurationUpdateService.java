@@ -11,29 +11,29 @@ import ai.labs.eddi.configs.packages.model.PackageConfiguration;
 import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.datastore.serialization.IJsonSerialization;
 import ai.labs.eddi.utils.RestUtilities;
-import io.quarkus.arc.Priority;
 import io.quarkus.runtime.Startup;
+import jakarta.annotation.Priority;
+import jakarta.enterprise.context.Dependent;
+import jakarta.inject.Inject;
+import jakarta.inject.Provider;
+import jakarta.interceptor.AroundInvoke;
+import jakarta.interceptor.Interceptor;
+import jakarta.interceptor.InvocationContext;
 import org.eclipse.microprofile.context.ManagedExecutor;
 import org.jboss.logging.Logger;
 
-import javax.enterprise.context.ApplicationScoped;
-import javax.inject.Inject;
-import javax.inject.Provider;
-import javax.interceptor.AroundInvoke;
-import javax.interceptor.Interceptor;
-import javax.interceptor.InvocationContext;
 import java.io.IOException;
 import java.net.URI;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
-@ApplicationScoped
 @Startup
 @Priority(2000)
 @IResourceStore.ConfigurationUpdate
 @Interceptor
-public class GitConfigurationUpdateService  {
+@Dependent
+public class GitConfigurationUpdateService {
 
     final private Provider<IRestGitBackupService> backupService;
     final private Provider<IBotStore> botStore;
@@ -85,7 +85,7 @@ public class GitConfigurationUpdateService  {
             if (!backupService.get().isGitInitialised(botId)) {
                 backupService.get().gitInit(botId);
             }
-            backupService.get().gitCommit(botId, "automatic commit on change, timestamp of commit " + System.currentTimeMillis() /1000);
+            backupService.get().gitCommit(botId, "automatic commit on change, timestamp of commit " + System.currentTimeMillis() / 1000);
             backupService.get().gitPush(botId);
         }
 

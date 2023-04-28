@@ -9,8 +9,8 @@ import ai.labs.eddi.datastore.serialization.IDocumentBuilder;
 import ai.labs.eddi.utils.RuntimeUtilities;
 import com.mongodb.reactivestreams.client.MongoDatabase;
 
-import javax.enterprise.context.ApplicationScoped;
-import javax.inject.Inject;
+import jakarta.enterprise.context.ApplicationScoped;
+import jakarta.inject.Inject;
 
 
 /**
@@ -19,7 +19,7 @@ import javax.inject.Inject;
 
 @ApplicationScoped
 public class GitCallsStore implements IGitCallsStore {
-    private HistorizedResourceStore<GitCallsConfiguration> gitCallsResourceStore;
+    private final HistorizedResourceStore<GitCallsConfiguration> gitCallsResourceStore;
 
     @Inject
     public GitCallsStore(MongoDatabase database, IDocumentBuilder documentBuilder) {

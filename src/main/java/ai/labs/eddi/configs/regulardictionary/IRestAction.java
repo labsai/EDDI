@@ -2,8 +2,8 @@ package ai.labs.eddi.configs.regulardictionary;
 
 import org.eclipse.microprofile.openapi.annotations.Operation;
 
-import javax.ws.rs.*;
-import javax.ws.rs.core.MediaType;
+import jakarta.ws.rs.*;
+import jakarta.ws.rs.core.MediaType;
 import java.util.List;
 
 /**

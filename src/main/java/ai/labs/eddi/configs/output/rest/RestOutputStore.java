@@ -11,11 +11,11 @@ import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.models.DocumentDescriptor;
 import org.jboss.logging.Logger;
 
-import javax.enterprise.context.ApplicationScoped;
-import javax.inject.Inject;
-import javax.ws.rs.InternalServerErrorException;
-import javax.ws.rs.NotFoundException;
-import javax.ws.rs.core.Response;
+import jakarta.enterprise.context.ApplicationScoped;
+import jakarta.inject.Inject;
+import jakarta.ws.rs.InternalServerErrorException;
+import jakarta.ws.rs.NotFoundException;
+import jakarta.ws.rs.core.Response;
 import java.util.List;
 
 /**
@@ -119,15 +119,14 @@ public class RestOutputStore implements IRestOutputStore {
         for (var patchInstruction : patchInstructions) {
             var outputConfigurationSetPatch = patchInstruction.getDocument();
             switch (patchInstruction.getOperation()) {
-                case SET:
+                case SET -> {
                     currentOutputConfigurationSet.getOutputSet().removeAll(outputConfigurationSetPatch.getOutputSet());
                     currentOutputConfigurationSet.getOutputSet().addAll(outputConfigurationSetPatch.getOutputSet());
-                    break;
-                case DELETE:
-                    currentOutputConfigurationSet.getOutputSet().removeAll(outputConfigurationSetPatch.getOutputSet());
-                    break;
-                default:
-                    throw new IResourceStore.ResourceStoreException("Patch operation must be either SET or DELETE!");
+                }
+                case DELETE ->
+                        currentOutputConfigurationSet.getOutputSet().removeAll(outputConfigurationSetPatch.getOutputSet());
+                default ->
+                        throw new IResourceStore.ResourceStoreException("Patch operation must be either SET or DELETE!");
             }
         }
 

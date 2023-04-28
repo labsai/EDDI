@@ -5,8 +5,8 @@ import org.jboss.resteasy.client.jaxrs.ResteasyClientBuilder;
 import org.jboss.resteasy.client.jaxrs.ResteasyWebTarget;
 import org.jboss.resteasy.client.jaxrs.engines.ApacheHttpClient43Engine;
 
-import javax.enterprise.context.ApplicationScoped;
-import javax.ws.rs.client.ClientBuilder;
+import jakarta.enterprise.context.ApplicationScoped;
+import jakarta.ws.rs.client.ClientBuilder;
 import java.util.HashMap;
 import java.util.Map;
 

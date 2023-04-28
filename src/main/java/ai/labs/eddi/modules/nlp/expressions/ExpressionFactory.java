@@ -5,7 +5,7 @@ import ai.labs.eddi.modules.nlp.expressions.value.AnyValue;
 import ai.labs.eddi.modules.nlp.expressions.value.Value;
 import lombok.extern.slf4j.Slf4j;
 
-import javax.enterprise.context.ApplicationScoped;
+import jakarta.enterprise.context.ApplicationScoped;
 import java.util.Hashtable;
 
 import static ai.labs.eddi.utils.CharacterUtilities.isNumber;
@@ -35,7 +35,7 @@ public class ExpressionFactory implements IExpressionFactory {
         for (Expression exp : expressions)
             l.add(getExpression(exp));
 
-        return l.toArray(new Expression[l.size()]);
+        return l.toArray(new Expression[0]);
     }
 
     @Override

@@ -22,18 +22,17 @@ import ai.labs.eddi.models.*;
 import ai.labs.eddi.models.ExtensionDescriptor.ConfigValue;
 import ai.labs.eddi.models.ExtensionDescriptor.FieldType;
 import ai.labs.eddi.modules.templating.ITemplatingEngine;
+import jakarta.enterprise.context.ApplicationScoped;
+import jakarta.inject.Inject;
 import ognl.Ognl;
 import ognl.OgnlException;
 import org.jboss.logging.Logger;
 
-import javax.enterprise.context.ApplicationScoped;
-import javax.inject.Inject;
 import java.io.IOException;
 import java.net.URI;
 import java.util.*;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
-import java.util.stream.Collectors;
 
 import static ai.labs.eddi.utils.MatchingUtilities.executeValuePath;
 import static ai.labs.eddi.utils.RuntimeUtilities.checkNotNull;
@@ -102,7 +101,7 @@ public class HttpCallsTask implements ILifecycleTask {
                     filter(httpCall -> {
                         List<String> httpCallActions = httpCall.getActions();
                         return httpCallActions.contains(action) || httpCallActions.contains("*");
-                    }).distinct().collect(Collectors.toList());
+                    }).distinct().toList();
 
             for (var call : filteredHttpCalls) {
                 try {
@@ -429,10 +428,10 @@ public class HttpCallsTask implements ILifecycleTask {
                         if (!isNullOrEmpty(path)) {
                             propertyValue = Ognl.getValue(path, templateDataObjects);
                         } else {
-                            Object value = propertyInstruction.getValueString();
+                            var value = propertyInstruction.getValueString();
 
                             if (!isNullOrEmpty(value)) {
-                                value = templateValues((String) value, templateDataObjects);
+                                value = templateValues(value, templateDataObjects);
                             }
 
                             propertyValue = value;

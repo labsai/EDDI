@@ -2,7 +2,7 @@ package ai.labs.eddi.engine.internal;
 
 import ai.labs.eddi.models.Deployment;
 
-import javax.enterprise.context.ApplicationScoped;
+import jakarta.enterprise.context.ApplicationScoped;
 import java.util.HashMap;
 import java.util.Map;
 

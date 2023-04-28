@@ -10,9 +10,9 @@ import com.mongodb.reactivestreams.client.MongoCollection;
 import io.reactivex.rxjava3.core.Observable;
 import org.bson.Document;
 
-import javax.ws.rs.BadRequestException;
-import javax.ws.rs.core.MediaType;
-import javax.ws.rs.core.Response;
+import jakarta.ws.rs.BadRequestException;
+import jakarta.ws.rs.core.MediaType;
+import jakarta.ws.rs.core.Response;
 import java.net.URI;
 import java.util.Comparator;
 import java.util.Date;
@@ -21,7 +21,7 @@ import java.util.List;
 import java.util.stream.Collectors;
 
 import static ai.labs.eddi.utils.RuntimeUtilities.isNullOrEmpty;
-import static javax.ws.rs.core.Response.Status.BAD_REQUEST;
+import static jakarta.ws.rs.core.Response.Status.BAD_REQUEST;
 
 public class ResourceUtilities {
     private static final String MONGO_OBJECT_ID = "_id";

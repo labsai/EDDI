@@ -9,15 +9,15 @@ import ai.labs.eddi.datastore.serialization.IDocumentBuilder;
 import ai.labs.eddi.utils.RuntimeUtilities;
 import com.mongodb.reactivestreams.client.MongoDatabase;
 
-import javax.enterprise.context.ApplicationScoped;
-import javax.inject.Inject;
+import jakarta.enterprise.context.ApplicationScoped;
+import jakarta.inject.Inject;
 
 /**
  * @author ginccc
  */
 @ApplicationScoped
 public class PropertySetterStore implements IPropertySetterStore {
-    private HistorizedResourceStore<PropertySetterConfiguration> propertySetterResourceStore;
+    private final HistorizedResourceStore<PropertySetterConfiguration> propertySetterResourceStore;
 
     @Inject
     public PropertySetterStore(MongoDatabase database, IDocumentBuilder documentBuilder) {
