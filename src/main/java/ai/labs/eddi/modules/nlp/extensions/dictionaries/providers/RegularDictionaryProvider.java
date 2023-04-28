@@ -14,8 +14,8 @@ import ai.labs.eddi.utils.RuntimeUtilities;
 import io.quarkus.runtime.Startup;
 import lombok.extern.slf4j.Slf4j;
 
-import javax.enterprise.context.ApplicationScoped;
-import javax.inject.Inject;
+import jakarta.enterprise.context.ApplicationScoped;
+import jakarta.inject.Inject;
 import java.net.URI;
 import java.util.HashMap;
 import java.util.Map;

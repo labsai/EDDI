@@ -6,8 +6,8 @@ import ai.labs.eddi.modules.nlp.extensions.dictionaries.DecimalDictionary;
 import ai.labs.eddi.modules.nlp.extensions.dictionaries.IDictionary;
 import io.quarkus.runtime.Startup;
 
-import javax.enterprise.context.ApplicationScoped;
-import javax.inject.Inject;
+import jakarta.enterprise.context.ApplicationScoped;
+import jakarta.inject.Inject;
 import java.util.Map;
 
 

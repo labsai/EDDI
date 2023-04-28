@@ -5,8 +5,8 @@ import ai.labs.eddi.engine.runtime.IPackageFactory;
 import ai.labs.eddi.engine.runtime.client.packages.IPackageStoreClientLibrary;
 import ai.labs.eddi.engine.runtime.service.ServiceException;
 
-import javax.enterprise.context.ApplicationScoped;
-import javax.inject.Inject;
+import jakarta.enterprise.context.ApplicationScoped;
+import jakarta.inject.Inject;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 

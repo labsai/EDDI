@@ -4,7 +4,7 @@ import ai.labs.eddi.models.ExtensionDescriptor.ConfigValue;
 import ai.labs.eddi.modules.nlp.extensions.normalizers.INormalizer;
 import ai.labs.eddi.modules.nlp.extensions.normalizers.PunctuationNormalizer;
 
-import javax.enterprise.context.ApplicationScoped;
+import jakarta.enterprise.context.ApplicationScoped;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.regex.Pattern;

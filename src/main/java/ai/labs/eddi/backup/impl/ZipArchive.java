@@ -2,7 +2,7 @@ package ai.labs.eddi.backup.impl;
 
 import ai.labs.eddi.backup.IZipArchive;
 
-import javax.enterprise.context.ApplicationScoped;
+import jakarta.enterprise.context.ApplicationScoped;
 import java.io.*;
 import java.util.LinkedList;
 import java.util.List;

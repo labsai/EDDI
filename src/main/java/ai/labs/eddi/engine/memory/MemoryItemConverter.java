@@ -3,7 +3,7 @@ package ai.labs.eddi.engine.memory;
 import ai.labs.eddi.engine.memory.model.ConversationOutput;
 import ai.labs.eddi.models.Context;
 
-import javax.enterprise.context.ApplicationScoped;
+import jakarta.enterprise.context.ApplicationScoped;
 import java.util.*;
 
 import static ai.labs.eddi.engine.memory.ConversationMemoryUtilities.prepareContext;

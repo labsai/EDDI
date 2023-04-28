@@ -1,3 +1,4 @@
+/*
 package ai.labs.eddi.backup.impl;
 
 
@@ -16,12 +17,12 @@ import io.quarkus.runtime.Startup;
 import org.eclipse.microprofile.context.ManagedExecutor;
 import org.jboss.logging.Logger;
 
-import javax.enterprise.context.ApplicationScoped;
-import javax.inject.Inject;
-import javax.inject.Provider;
-import javax.interceptor.AroundInvoke;
-import javax.interceptor.Interceptor;
-import javax.interceptor.InvocationContext;
+import jakarta.enterprise.context.ApplicationScoped;
+import jakarta.inject.Inject;
+import jakarta.inject.Provider;
+import jakarta.interceptor.AroundInvoke;
+import jakarta.interceptor.Interceptor;
+import jakarta.interceptor.InvocationContext;
 import java.io.IOException;
 import java.net.URI;
 import java.util.LinkedHashMap;
@@ -119,4 +120,4 @@ public class GitConfigurationUpdateService  {
         return ret;
     }
 
-}
+}*/

@@ -6,8 +6,8 @@ import ai.labs.eddi.modules.nlp.expressions.IExpressionFactory;
 import ai.labs.eddi.modules.nlp.expressions.value.Value;
 import org.jboss.logging.Logger;
 
-import javax.enterprise.context.ApplicationScoped;
-import javax.inject.Inject;
+import jakarta.enterprise.context.ApplicationScoped;
+import jakarta.inject.Inject;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;

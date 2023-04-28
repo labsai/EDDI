@@ -1,7 +1,7 @@
 package ai.labs.eddi.ui;
 
-import javax.enterprise.context.ApplicationScoped;
-import javax.ws.rs.core.Response;
+import jakarta.enterprise.context.ApplicationScoped;
+import jakarta.ws.rs.core.Response;
 
 import static ai.labs.eddi.utils.RuntimeUtilities.getResourceAsStream;
 

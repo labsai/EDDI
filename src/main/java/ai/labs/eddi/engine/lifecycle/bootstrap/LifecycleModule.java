@@ -3,8 +3,8 @@ package ai.labs.eddi.engine.lifecycle.bootstrap;
 import ai.labs.eddi.engine.lifecycle.ILifecycleTask;
 import io.quarkus.runtime.Startup;
 
-import javax.enterprise.context.ApplicationScoped;
-import javax.inject.Provider;
+import jakarta.enterprise.context.ApplicationScoped;
+import jakarta.inject.Provider;
 import java.util.HashMap;
 import java.util.Map;
 

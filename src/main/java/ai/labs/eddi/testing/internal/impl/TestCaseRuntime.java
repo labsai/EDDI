@@ -14,11 +14,11 @@ import ai.labs.eddi.testing.model.TestCase;
 import ai.labs.eddi.testing.model.TestCaseState;
 import ai.labs.eddi.utils.RuntimeUtilities;
 
-import javax.enterprise.context.ApplicationScoped;
-import javax.inject.Inject;
-import javax.ws.rs.container.AsyncResponse;
-import javax.ws.rs.container.TimeoutHandler;
-import javax.ws.rs.core.Response;
+import jakarta.enterprise.context.ApplicationScoped;
+import jakarta.inject.Inject;
+import jakarta.ws.rs.container.AsyncResponse;
+import jakarta.ws.rs.container.TimeoutHandler;
+import jakarta.ws.rs.core.Response;
 import java.net.URI;
 import java.util.*;
 import java.util.concurrent.Callable;

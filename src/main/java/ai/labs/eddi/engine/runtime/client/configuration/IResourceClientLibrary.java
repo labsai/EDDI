@@ -2,7 +2,7 @@ package ai.labs.eddi.engine.runtime.client.configuration;
 
 import ai.labs.eddi.engine.runtime.service.ServiceException;
 
-import javax.ws.rs.core.Response;
+import jakarta.ws.rs.core.Response;
 import java.net.URI;
 
 /**

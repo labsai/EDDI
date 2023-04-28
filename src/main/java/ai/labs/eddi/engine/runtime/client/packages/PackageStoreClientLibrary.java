@@ -15,9 +15,9 @@ import ai.labs.eddi.engine.runtime.service.ServiceException;
 import ai.labs.eddi.models.DocumentDescriptor;
 import ai.labs.eddi.utils.RestUtilities;
 
-import javax.enterprise.context.ApplicationScoped;
-import javax.inject.Inject;
-import javax.inject.Provider;
+import jakarta.enterprise.context.ApplicationScoped;
+import jakarta.inject.Inject;
+import jakarta.inject.Provider;
 import java.net.URI;
 import java.util.List;
 import java.util.Map;

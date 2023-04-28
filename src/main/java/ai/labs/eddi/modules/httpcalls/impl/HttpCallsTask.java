@@ -26,8 +26,8 @@ import ognl.Ognl;
 import ognl.OgnlException;
 import org.jboss.logging.Logger;
 
-import javax.enterprise.context.ApplicationScoped;
-import javax.inject.Inject;
+import jakarta.enterprise.context.ApplicationScoped;
+import jakarta.inject.Inject;
 import java.io.IOException;
 import java.net.URI;
 import java.util.*;

@@ -4,8 +4,8 @@ import ai.labs.eddi.models.DatabaseLog;
 import ai.labs.eddi.models.Deployment;
 import org.eclipse.microprofile.openapi.annotations.Operation;
 
-import javax.ws.rs.*;
-import javax.ws.rs.core.MediaType;
+import jakarta.ws.rs.*;
+import jakarta.ws.rs.core.MediaType;
 import java.util.List;
 
 // @Api(value = "Bot Engine -> Logs", authorizations = {@Authorization(value = "eddi_auth")})
