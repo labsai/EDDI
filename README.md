@@ -17,10 +17,9 @@ Documentation: [here](https://docs.labs.ai/)
 
 ## Intro
 
-E.D.D.I is a highly scalable and enterprise-certified cloud-native chatbot middleware
+E.D.D.I is a highly scalable and enterprise-certified cloud-native conversation AI middleware
 that serves as a trusted gatekeeper for various conversational services. Designed to run smoothly in cloud environments
-like Docker, Kubernetes, and Openshift, E.D.D.I offers configurable NLP and Behavior Rules that facilitate conversations
-and can act as watchdog for sensitive topics. Its API integration capabilities make it easy to connect
+like Docker, Kubernetes, and Openshift. Its API integration capabilities make it easy to connect
 with other conversational or classical REST APIs. Multiple bots can be easily integrated and run side by side,
 including multiple versions of the same bot for a smooth upgrading transition.
 
@@ -46,11 +45,11 @@ technical spec:
 
 * Java 17
 * Maven 3.8.4
-* MongoDB > 4.0
+* MongoDB > 4.4
 
 ## How to run the project
 
-1. Setup a local mongodb \(&gt; v4.0\)
+1. Setup a local mongodb \(&gt; v4.4\)
 2. On a terminal, under project root folder, run the following command:
 
 ```shell script

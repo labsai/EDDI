@@ -66,5 +66,5 @@ jobs:
             
                 # docker push labsai/eddi:5
             
-                # docker push labsai/eddi:latest
+                docker push labsai/eddi:latest
             fi
