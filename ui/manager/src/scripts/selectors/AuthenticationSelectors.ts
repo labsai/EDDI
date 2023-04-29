@@ -25,10 +25,10 @@ export const authenticationSelector: (state: IAppState) => {
   } {
     return {
       keycloak: authenticationState.keycloak,
-      isKeycloakEnabled: authenticationState.isKeycloakEnabled,
       isBasicAuthEnabled: authenticationState.isBasicAuthEnabled,
-      keycloakAuthenticated: authenticationState.keycloakAuthenticated,
-      basicAuthAuthenticated: authenticationState.basicAuthAuthenticated,
+      isKeycloakEnabled: true,
+      keycloakAuthenticated: true,
+      basicAuthAuthenticated: true,
       error: authenticationState.error,
     };
   },
@@ -36,6 +36,6 @@ export const authenticationSelector: (state: IAppState) => {
 
 export function readOnlySelector(state: IAppState) {
   return {
-    readOnly: state.authenticationState.readOnly,
+    readOnly: false,
   };
 }

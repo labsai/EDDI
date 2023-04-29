@@ -95,7 +95,7 @@ const App = ({
   isLoading,
 }: IPrivateProps) => {
   const classes = useStyles();
-  const [authChecked, setAuthChecked] = React.useState(false);
+  const [authChecked, setAuthChecked] = React.useState(true);
   React.useEffect(() => {
     runSagaMiddleware();
     const queryStrings = Parser.getQueryStrings(location.search);

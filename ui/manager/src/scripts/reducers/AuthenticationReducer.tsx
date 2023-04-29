@@ -32,8 +32,8 @@ export const initialState: IAuthenticationState = {
   isKeycloakEnabled: false,
   isBasicAuthEnabled: false,
   readOnly: false,
-  keycloakAuthenticated: false,
-  basicAuthAuthenticated: false,
+  keycloakAuthenticated: true,
+  basicAuthAuthenticated: true,
   keycloak: null,
   error: null,
 };

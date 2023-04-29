@@ -48,7 +48,7 @@ export function basicAuthSignInFailedAction(
   };
 }
 
-export interface IBasicAuthSignInSuccessAction extends Action {}
+export interface IBasicAuthSignInSuccessAction extends Action { }
 
 export function basicAuthSignInSuccessAction(): IBasicAuthSignInSuccessAction {
   return {
@@ -108,7 +108,7 @@ export function keycloakRefreshTokenAction(
   };
 }
 
-export interface IKeycloakRefreshTokenSuccessAction extends Action {}
+export interface IKeycloakRefreshTokenSuccessAction extends Action { }
 
 export function keycloakRefreshTokenSuccessAction(): IKeycloakRefreshTokenSuccessAction {
   return {
@@ -142,7 +142,7 @@ export function signOutAction(
   };
 }
 
-export interface ISignOutSuccessAction extends Action {}
+export interface ISignOutSuccessAction extends Action { }
 
 export function signOutSuccessAction(): ISignOutSuccessAction {
   return {
@@ -161,7 +161,7 @@ export function signOutFailedAction(error: Error): ISignOutFailedAction {
   };
 }
 
-export interface ICheckAuthenticationAction extends Action {}
+export interface ICheckAuthenticationAction extends Action { }
 
 export function checkAuthenticationAction(): ICheckAuthenticationAction {
   return {
