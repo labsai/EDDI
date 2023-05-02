@@ -18,6 +18,7 @@ import org.jboss.logging.Logger;
 
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
+
 import java.net.CookieStore;
 import java.net.URI;
 import java.nio.charset.Charset;
@@ -163,6 +164,11 @@ public class HttpClientWrapper implements IHttpClient {
 
         @Override
         public String toString() {
+            var requestBody = this.requestBody;
+            if (requestBody.length() > 300) {
+                requestBody = requestBody.substring(0, 300) + "...";
+            }
+            requestBody = requestBody.replaceAll("\\r?\\n", "");
             return "RequestWrapper{" +
                     "uri=" + uri +
                     ", request=" + request.toString() +
