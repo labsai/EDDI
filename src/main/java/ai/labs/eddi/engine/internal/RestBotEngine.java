@@ -9,12 +9,11 @@ import ai.labs.eddi.engine.caching.ICache;
 import ai.labs.eddi.engine.caching.ICacheFactory;
 import ai.labs.eddi.engine.lifecycle.IConversation;
 import ai.labs.eddi.engine.lifecycle.exceptions.LifecycleException;
+import ai.labs.eddi.engine.memory.ConversationLogGenerator;
 import ai.labs.eddi.engine.memory.IConversationMemory;
 import ai.labs.eddi.engine.memory.IConversationMemoryStore;
 import ai.labs.eddi.engine.memory.IPropertiesHandler;
 import ai.labs.eddi.engine.memory.descriptor.IConversationDescriptorStore;
-import ai.labs.eddi.engine.memory.model.ConversationLog;
-import ai.labs.eddi.engine.memory.model.ConversationLog.ConversationPart;
 import ai.labs.eddi.engine.memory.model.SimpleConversationMemorySnapshot;
 import ai.labs.eddi.engine.runtime.*;
 import ai.labs.eddi.engine.runtime.service.ServiceException;
@@ -26,26 +25,25 @@ import ai.labs.eddi.models.Deployment.Environment;
 import ai.labs.eddi.models.InputData;
 import io.micrometer.core.instrument.MeterRegistry;
 import io.micrometer.core.instrument.Timer;
-import org.eclipse.microprofile.config.inject.ConfigProperty;
-import org.jboss.logging.Logger;
-import org.jboss.resteasy.spi.NoLogWebApplicationException;
-
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import jakarta.ws.rs.InternalServerErrorException;
 import jakarta.ws.rs.NotFoundException;
 import jakarta.ws.rs.container.AsyncResponse;
-import jakarta.ws.rs.core.MediaType;
 import jakarta.ws.rs.core.Response;
+import org.eclipse.microprofile.config.inject.ConfigProperty;
+import org.jboss.logging.Logger;
+import org.jboss.resteasy.spi.NoLogWebApplicationException;
+
 import java.util.*;
 import java.util.concurrent.*;
-import java.util.stream.Collectors;
 
 import static ai.labs.eddi.engine.internal.RestBotManagement.KEY_LANG;
 import static ai.labs.eddi.engine.memory.ConversationMemoryUtilities.*;
 import static ai.labs.eddi.models.Context.ContextType.string;
 import static ai.labs.eddi.utils.RestUtilities.createURI;
 import static ai.labs.eddi.utils.RuntimeUtilities.*;
+import static jakarta.ws.rs.core.MediaType.*;
 
 /**
  * @author ginccc
@@ -127,7 +125,7 @@ public class RestBotEngine implements IRestBotEngine {
             if (latestBot == null) {
                 String message = "No instance of bot (botId=%s) deployed in environment (environment=%s)!";
                 message = String.format(message, botId, environment);
-                return Response.status(Response.Status.NOT_FOUND).type(MediaType.TEXT_PLAIN).entity(message).build();
+                return Response.status(Response.Status.NOT_FOUND).type(TEXT_PLAIN).entity(message).build();
             }
 
             userId = conversationSetup.computeAnonymousUserIdIfEmpty(userId, context.get(USER_ID));
@@ -230,30 +228,13 @@ public class RestBotEngine implements IRestBotEngine {
     public Response readConversationLog(String conversationId, String outputType) {
         try {
             var memorySnapshot = conversationMemoryStore.loadConversationMemorySnapshot(conversationId);
-
-            ConversationLog conversationLog = new ConversationLog();
-            for (int i = 0; i < memorySnapshot.getConversationOutputs().size(); i++) {
-                var conversationOutput = memorySnapshot.getConversationOutputs().get(i);
-                String input = conversationOutput.get("input", String.class);
-                if (input != null) {
-                    conversationLog.getMessages().add(new ConversationPart("user", input));
-                }
-
-
-                List<Map<String,Object>> outputList = (List<Map<String, Object>>) conversationOutput.get("output");
-                if (outputList != null) {
-                    var output = outputList.
-                            stream().toList().stream().
-                            map(item -> item.get("text").toString()).collect(Collectors.joining(" "));
-                    conversationLog.getMessages().add(new ConversationPart("assistant", output));
-                }
-            }
-
+            var conversationLog = new ConversationLogGenerator(memorySnapshot).generate();
             outputType = outputType.toLowerCase();
+
             if (isNullOrEmpty(outputType) || outputType.equals("string") || outputType.equals("text")) {
-                return Response.ok(conversationLog.getConversationLogAsString(), MediaType.TEXT_PLAIN).build();
+                return Response.ok(conversationLog.toString(), TEXT_PLAIN).build();
             } else {
-                return Response.ok(conversationLog.getConversationLogAsObject(), MediaType.APPLICATION_JSON).build();
+                return Response.ok(conversationLog.toObject(), APPLICATION_JSON).build();
             }
         } catch (ResourceStoreException | ResourceNotFoundException e) {
             LOGGER.error(e.getLocalizedMessage(), e);
@@ -344,8 +325,7 @@ public class RestBotEngine implements IRestBotEngine {
             if (!botId.equals(conversationMemory.getBotId())) {
                 String message = "Supplied botId (%s) is incompatible with conversationId (%s)";
                 message = String.format(message, botId, conversationId);
-                response.resume(Response.status(Response.Status.CONFLICT).type(MediaType.TEXT_PLAIN).
-                        entity(message).build());
+                response.resume(Response.status(Response.Status.CONFLICT).type(TEXT_PLAIN).entity(message).build());
                 return;
             }
 

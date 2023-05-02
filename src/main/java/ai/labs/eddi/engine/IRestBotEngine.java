@@ -67,7 +67,7 @@ public interface IRestBotEngine {
     @Produces(MediaType.APPLICATION_JSON)
     @Operation(description = "Read conversation. outputType=text || json")
     Response readConversationLog(@PathParam("conversationId") String conversationId,
-                                 @QueryParam("outputType") String outputType);
+                                 @QueryParam("outputType") @DefaultValue("json") String outputType);
 
     @GET
     @NoCache

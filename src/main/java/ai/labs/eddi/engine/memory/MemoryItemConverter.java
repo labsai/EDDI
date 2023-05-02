@@ -1,9 +1,12 @@
 package ai.labs.eddi.engine.memory;
 
+import ai.labs.eddi.datastore.serialization.IJsonSerialization;
 import ai.labs.eddi.engine.memory.model.ConversationOutput;
 import ai.labs.eddi.models.Context;
 
 import jakarta.enterprise.context.ApplicationScoped;
+import jakarta.inject.Inject;
+
 import java.util.*;
 
 import static ai.labs.eddi.engine.memory.ConversationMemoryUtilities.prepareContext;
@@ -21,41 +24,58 @@ public class MemoryItemConverter implements IMemoryItemConverter {
     private static final String KEY_PROPERTIES = "properties";
     private static final String KEY_USER_INFO = "userInfo";
     private static final String KEY_USER_ID = "userId";
+    private static final String KEY_CONVERSATION_ID = "conversationId";
+    private static final String KEY_CONVERSATION_INFO = "conversationInfo";
+    private static final String KEY_JSON = "json";
+    private static final String KEY_CONVERSATION_LOG = "conversationLog";
+    private final IJsonSerialization jsonSerialization;
+
+    @Inject
+    public MemoryItemConverter(IJsonSerialization jsonSerialization) {
+        this.jsonSerialization = jsonSerialization;
+    }
 
     @Override
     public Map<String, Object> convert(IConversationMemory memory) {
-        Map<String, Object> ret = new LinkedHashMap<>();
+        Map<String, Object> conversationDataObjects = new LinkedHashMap<>();
         List<IData<Context>> contextDataList = memory.getCurrentStep().getAllData(KEY_CONTEXT);
         var contextMap = prepareContext(contextDataList);
         var memoryMap = convertMemoryItems(memory);
-        var userId = memory.getUserId();
         var conversationProperties = memory.getConversationProperties();
 
         if (!contextMap.isEmpty()) {
-            ret.put(KEY_CONTEXT, contextMap);
-            ret.putAll(contextMap);
+            conversationDataObjects.put(KEY_CONTEXT, contextMap);
+            conversationDataObjects.putAll(contextMap);
         }
 
         if (!conversationProperties.isEmpty()) {
-            ret.put(KEY_PROPERTIES, conversationProperties.toMap());
+            conversationDataObjects.put(KEY_PROPERTIES, conversationProperties.toMap());
         }
 
         if (!memoryMap.isEmpty()) {
-            ret.put(KEY_MEMORY, convertMemoryItems(memory));
+            conversationDataObjects.put(KEY_MEMORY, convertMemoryItems(memory));
         }
 
-        if (!isNullOrEmpty(userId)) {
-            if (ret.containsKey(KEY_USER_INFO)) {
-                Object o = ret.get(KEY_USER_INFO);
+        addInfoObject(conversationDataObjects, memory.getUserId(), KEY_USER_INFO, KEY_USER_ID);
+        addInfoObject(conversationDataObjects, memory.getConversationId(), KEY_CONVERSATION_INFO, KEY_CONVERSATION_ID);
+
+        conversationDataObjects.put(KEY_JSON, jsonSerialization);
+        conversationDataObjects.put(KEY_CONVERSATION_LOG, new ConversationLogGenerator(memory));
+
+        return conversationDataObjects;
+    }
+
+    private void addInfoObject(Map<String, Object> ret, String id, String keyInfo, String keyId) {
+        if (!isNullOrEmpty(id)) {
+            if (ret.containsKey(keyInfo)) {
+                Object o = ret.get(keyInfo);
                 if (o instanceof Map) {
-                    ((Map) o).put(KEY_USER_ID, userId);
+                    ((Map) o).put(keyId, id);
                 }
             } else {
-                ret.put(KEY_USER_INFO, Map.of(KEY_USER_ID, userId));
+                ret.put(keyInfo, Map.of(keyId, id));
             }
         }
-
-        return ret;
     }
 
     private static Map<String, Object> convertMemoryItems(IConversationMemory memory) {
@@ -82,7 +102,6 @@ public class MemoryItemConverter implements IMemoryItemConverter {
         }
 
         props.put(KEY_PAST, past);
-
 
         return props;
     }
