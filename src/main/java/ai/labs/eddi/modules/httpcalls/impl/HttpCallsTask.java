@@ -37,6 +37,7 @@ import java.util.concurrent.TimeUnit;
 import static ai.labs.eddi.utils.MatchingUtilities.executeValuePath;
 import static ai.labs.eddi.utils.RuntimeUtilities.checkNotNull;
 import static ai.labs.eddi.utils.RuntimeUtilities.isNullOrEmpty;
+import static jakarta.ws.rs.core.MediaType.TEXT_PLAIN;
 import static java.lang.String.format;
 import static java.util.Objects.requireNonNullElse;
 
@@ -489,12 +490,16 @@ public class HttpCallsTask implements ILifecycleTask {
         if (!path.startsWith(SLASH_CHAR) && !path.isEmpty() && !path.startsWith("http")) {
             path = SLASH_CHAR + path;
         }
-        URI targetUri = URI.create(templateValues(targetServerUrl + path, templateDataObjects));
-        String requestBody = templateValues(requestConfig.getBody(), templateDataObjects);
+        var targetDestination = !path.startsWith("http") ? targetServerUrl + path : path;
+        var targetUri = URI.create(templateValues(targetDestination, templateDataObjects));
+        var requestBody = templateValues(requestConfig.getBody(), templateDataObjects);
 
         var method = Method.valueOf(requestConfig.getMethod().toUpperCase());
-        IRequest request = httpClient.newRequest(targetUri, method).
-                setBodyEntity(requestBody, UTF_8, requestConfig.getContentType());
+        IRequest request = httpClient.newRequest(targetUri, method);
+        if (!isNullOrEmpty(requestBody)) {
+            String contentType = requestConfig.getContentType();
+            request.setBodyEntity(requestBody, UTF_8, !isNullOrEmpty(contentType) ? contentType : TEXT_PLAIN);
+        }
 
         Map<String, String> headers = requestConfig.getHeaders();
         for (String headerName : headers.keySet()) {

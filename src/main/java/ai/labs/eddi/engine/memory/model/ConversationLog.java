@@ -11,17 +11,17 @@ import java.util.stream.Collectors;
 @NoArgsConstructor
 @AllArgsConstructor
 @EqualsAndHashCode
-@ToString
 public class ConversationLog {
     private List<ConversationPart> messages = new LinkedList<>();
 
-    public String getConversationLogAsString() {
+    @Override
+    public String toString() {
         return messages.
                 stream().map(part -> part.getRole() + ": " + part.getContent()).
                 collect(Collectors.joining("\n"));
     }
 
-    public Object getConversationLogAsObject() {
+    public Object toObject() {
         return messages;
     }
 
