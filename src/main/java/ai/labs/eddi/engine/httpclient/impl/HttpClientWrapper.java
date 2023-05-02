@@ -165,10 +165,13 @@ public class HttpClientWrapper implements IHttpClient {
         @Override
         public String toString() {
             var requestBody = this.requestBody;
-            if (requestBody.length() > 300) {
-                requestBody = requestBody.substring(0, 300) + "...";
+            if (requestBody != null) {
+                if (requestBody.length() > 300) {
+                    requestBody = requestBody.substring(0, 300) + "...";
+                }
+                requestBody = requestBody.replaceAll("\\r?\\n", "");
             }
-            requestBody = requestBody.replaceAll("\\r?\\n", "");
+
             return "RequestWrapper{" +
                     "uri=" + uri +
                     ", request=" + request.toString() +
