@@ -1,4 +1,4 @@
-# E.D.D.I: Enhanced Prompt & Conversation Management Middleware
+# E.D.D.I: Prompt & Conversation Management Middleware for Conversational AI APIs
 
 E.D.D.I (Enhanced Dialog Driven Interface) is an enterprise-certified chatbot middleware that offers advanced prompt and conversation management for Conversational AI APIs, such as ChatGPT. Developed in Java using Quarkus, it is lean, RESTful, scalable, and cloud-native. It comes with Docker support and can be orchestrated with Kubernetes or Openshift.
 
