@@ -24,16 +24,19 @@
 <!-- Navigation -->
 <nav class="navbar fixed-top navbar-expand-lg navbar-dark bg-black fixed-top">
     <div class="container">
-        <img src="img/logo_high.png" alt="E.D.D.I Logo" class="eddi-logo"/>
-        <h4>&nbsp;Enhanced Dialog Driven Intelligence</h4>
+        <img src="img/logo_high.png" alt="Logo of EDDI - Enhanced Dialog Driven Interface" class="eddi-logo"/>
         <div class="collapse navbar-collapse" id="navbarResponsive">
             <ul class="navbar-nav ml-auto">
                 <li class="nav-item">
                     <a class="nav-link text-color" href="https://docs.labs.ai" target="_blank">Docs</a>
                 </li>
                 <li class="nav-item">
+                    <a class="nav-link text-color" href="https://github.com/labsai/EDDI"
+                       target="_blank">Community Support</a>
+                </li>
+                <li class="nav-item">
                     <a class="nav-link text-color" href="https://labsai.atlassian.net/servicedesk/customer/portal/1"
-                       target="_blank">Support & Feedback</a>
+                       target="_blank">Enterprise Support</a>
                 </li>
             </ul>
         </div>
@@ -52,23 +55,23 @@
                 <h4 class="card-header">
                     Deployed Bots
                     <span style="float:right;"><a href="/q/swagger-ui" class="btn btn-primary" target="_blank">
-                        View API
+                        Open API
                     </a>
                         &nbsp;
                         <a id="botBuilderUrl" href="/manage" class="btn btn-primary" target="_blank">
-                            Go to Bot Manager
+                            Open Manager
                         </a>
                     </span>
                 </h4>
                 <div class="card-body">
-                    <p id="card-1" class="card-text">
-                    <div id="no-bots-deployed">
-                        No Bots deployed yet..<br>
-                        <a id="btnDeployExampleBots" href="" onclick="eddi.deployExampleBots(); return false;"
-                           class="btn btn-primary">
-                            Deploy Example Bots</a>
+                    <div id="card-1" class="card-text">
+                        <div id="no-bots-deployed">
+                            No Bots deployed yet..<br>
+                            <a id="btnDeployExampleBots" href="" onclick="eddi.deployExampleBots(); return false;"
+                               class="btn btn-primary">
+                                Deploy Example Bot</a>
+                        </div>
                     </div>
-                    </p>
                 </div>
             </div>
         </div>
