@@ -5,7 +5,7 @@ Behavior Rules, and API connectivity for seamless integration with various conve
 
 Developed in Java (with Quarkus), provided with Docker, orchestrated with Kubernetes or Openshift.
 
-Latest stable version: 5.0.4
+Latest stable version: 5.1.0
 
 License: Apache License 2.0
 
