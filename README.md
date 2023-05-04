@@ -1,11 +1,8 @@
-# E.D.D.I
+# E.D.D.I: Enhanced Prompt & Conversation Management Middleware
 
-E.D.D.I (Enhanced Dialog Driven Interface) is an enterprise-certified chatbot middleware that offers configurable NLP,
-Behavior Rules, and API connectivity for seamless integration with various conversational services.
+E.D.D.I (Enhanced Dialog Driven Interface) is an enterprise-certified chatbot middleware that offers advanced prompt and conversation management for Conversational AI APIs, such as ChatGPT. Developed in Java using Quarkus, it is lean, RESTful, scalable, and cloud-native. It comes with Docker support and can be orchestrated with Kubernetes or Openshift.
 
-Developed in Java (with Quarkus), provided with Docker, orchestrated with Kubernetes or Openshift.
-
-Latest stable version: 5.0.4
+Latest stable version: 5.1.0
 
 License: Apache License 2.0
 
@@ -15,24 +12,24 @@ Documentation: [here](https://docs.labs.ai/)
 
 [![Codacy Badge](https://app.codacy.com/project/badge/Grade/2c5d183d4bd24dbaa77427cfbf5d4074)](https://www.codacy.com/gh/labsai/EDDI/dashboard?utm_source=github.com&amp;utm_medium=referral&amp;utm_content=labsai/EDDI&amp;utm_campaign=Badge_Grade) [![CircleCI](https://circleci.com/gh/labsai/EDDI/tree/main.svg?style=svg)](https://circleci.com/gh/labsai/EDDI/tree/main)
 
-## Intro
+## Overview
 
-E.D.D.I is a highly scalable and enterprise-certified cloud-native conversation AI middleware
-that serves as a trusted gatekeeper for various conversational services. Designed to run smoothly in cloud environments
-like Docker, Kubernetes, and Openshift. Its API integration capabilities make it easy to connect
-with other conversational or classical REST APIs. Multiple bots can be easily integrated and run side by side,
-including multiple versions of the same bot for a smooth upgrading transition.
+E.D.D.I is a highly scalable, enterprise-certified, cloud-native middleware for managing conversations 
+in AI-driven applications. It is designed to run efficiently in cloud environments such as Docker, Kubernetes, 
+and Openshift. E.D.D.I offers seamless API integration capabilities, allowing easy connection with various 
+conversational services or traditional REST APIs. It supports the integration of multiple chatbots, 
+even multiple versions of the same bot, for smooth upgrading and transitions.
 
-Features worth mentioning:
+Notable features include:
 
-* Easily integrate other conversational or classical REST APIs
-* Configurable NLP and Behavior rules allow conversation facilitation as well as watch dog for sensitive topics
-* Multiple bots could be easily integrated and run side by side even multiple versions of the same bot 
+* Seamless integration with conversational or traditional REST APIs
+* Configurable NLP and Behavior rules to facilitate conversations and monitor sensitive topics
+* Support for multiple chatbots, including multiple versions of the same bot, running concurrently
 
-technical spec:
+Technical specifications:
 
-* Resource- / REST-oriented architecture
-* Java Quarkus
+* Resource-/REST-oriented architecture
+* Java Quarkus framework
 * JAX-RS
 * Dependency Injection
 * Prometheus integration (Metrics endpoint)
@@ -41,7 +38,7 @@ technical spec:
 * OAuth 2.0 (Keycloak) for authentication and user management
 * HTML, CSS, Javascript (Dashboard & Basic Chat UI)
 
-## Prerequirements
+## Prerequisites
 
 * Java 17
 * Maven 3.8.4
