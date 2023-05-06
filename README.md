@@ -12,6 +12,8 @@ Documentation: [here](https://docs.labs.ai/)
 
 [![Codacy Badge](https://app.codacy.com/project/badge/Grade/2c5d183d4bd24dbaa77427cfbf5d4074)](https://www.codacy.com/gh/labsai/EDDI/dashboard?utm_source=github.com&amp;utm_medium=referral&amp;utm_content=labsai/EDDI&amp;utm_campaign=Badge_Grade) [![CircleCI](https://circleci.com/gh/labsai/EDDI/tree/main.svg?style=svg)](https://circleci.com/gh/labsai/EDDI/tree/main)
 
+![alt text](https://eddi.labs.ai/EDDI-landing-page-image.png)
+
 ## Overview
 
 E.D.D.I is a highly scalable, enterprise-certified, cloud-native middleware for managing conversations 
