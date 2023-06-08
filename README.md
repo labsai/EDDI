@@ -2,7 +2,7 @@
 
 E.D.D.I (Enhanced Dialog Driven Interface) is an enterprise-certified chatbot middleware that offers advanced prompt and conversation management for Conversational AI APIs, such as ChatGPT. Developed in Java using Quarkus, it is lean, RESTful, scalable, and cloud-native. It comes with Docker support and can be orchestrated with Kubernetes or Openshift.
 
-Latest stable version: 5.1.0
+Latest stable version: 5.1.1
 
 License: Apache License 2.0
 
