@@ -15,15 +15,13 @@ import ai.labs.eddi.models.ExtensionDescriptor;
 import ai.labs.eddi.modules.nlp.expressions.Expression;
 import ai.labs.eddi.modules.nlp.expressions.Expressions;
 import ai.labs.eddi.modules.nlp.expressions.utilities.IExpressionProvider;
-import org.jboss.logging.Logger;
-
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
+import org.jboss.logging.Logger;
+
 import java.io.IOException;
 import java.net.URI;
-import java.util.LinkedList;
-import java.util.List;
-import java.util.Map;
+import java.util.*;
 import java.util.stream.Collectors;
 
 import static ai.labs.eddi.models.ExtensionDescriptor.ConfigValue;
@@ -138,22 +136,23 @@ public class BehaviorRulesEvaluationTask implements ILifecycleTask {
                              boolean addResultsToConversationMemory, boolean makePublic, boolean appendActions) {
         var currentStep = memory.getCurrentStep();
 
-        List<String> results = new LinkedList<>();
+        var distinctResults = new LinkedHashSet<>();
         if (appendActions || allCurrentActions.isEmpty()) {
             IData<List<String>> latestResults = currentStep.getLatestData(key);
             if (latestResults != null && latestResults.getResult() != null) {
-                results.addAll(latestResults.getResult());
+                distinctResults.addAll(latestResults.getResult());
             }
         }
 
-        results.addAll(allCurrentActions.stream().filter(result -> !results.contains(result)).toList());
+        distinctResults.addAll(allCurrentActions);
 
-        var resultsData = new Data<>(key, results);
+        var endResult = new ArrayList<>(distinctResults);
+        var resultsData = new Data<>(key, endResult);
         resultsData.setPublic(makePublic);
         currentStep.storeData(resultsData);
         if (addResultsToConversationMemory) {
             currentStep.resetConversationOutput(key);
-            currentStep.addConversationOutputList(key, results);
+            currentStep.addConversationOutputList(key, endResult);
         }
     }
 
