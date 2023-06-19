@@ -5,7 +5,7 @@
     <modelVersion>4.0.0</modelVersion>
     <groupId>ai.labs</groupId>
     <artifactId>eddi</artifactId>
-    <version>5.1.1</version>
+    <version>5.1.2</version>
     <properties>
         <compiler-plugin.version>3.11.0</compiler-plugin.version>
         <maven.compiler.source>17</maven.compiler.source>
@@ -16,8 +16,8 @@
         <quarkus.microprofile.version>2.7.2.Final</quarkus.microprofile.version>
         <quarkus.platform.artifact-id>quarkus-bom</quarkus.platform.artifact-id>
         <quarkus.platform.group-id>io.quarkus.platform</quarkus.platform.group-id>
-        <quarkus.platform.version>3.1.1.Final</quarkus.platform.version>
-        <quarkus-plugin.version>3.1.1.Final</quarkus-plugin.version>
+        <quarkus.platform.version>3.1.2.Final</quarkus.platform.version>
+        <quarkus-plugin.version>3.1.2.Final</quarkus-plugin.version>
         <jandex-maven-plugin.version>1.2.2</jandex-maven-plugin.version>
         <maven.compiler.parameters>true</maven.compiler.parameters>
         <surefire-plugin.version>3.0.0</surefire-plugin.version>
