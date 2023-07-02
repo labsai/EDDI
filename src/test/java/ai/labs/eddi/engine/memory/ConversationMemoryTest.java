@@ -35,7 +35,7 @@ public class ConversationMemoryTest {
         // test
         IConversationMemory.IConversationStepStack steps = memory.getAllSteps();
 
-        // test
+        // assert
         Assertions.assertSame(step3, steps.get(0));
         Assertions.assertSame(step2, steps.get(1));
         Assertions.assertSame(step1, steps.get(2));
