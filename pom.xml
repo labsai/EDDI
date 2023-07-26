@@ -16,8 +16,8 @@
         <quarkus.microprofile.version>3.0.0.Final</quarkus.microprofile.version>
         <quarkus.platform.artifact-id>quarkus-bom</quarkus.platform.artifact-id>
         <quarkus.platform.group-id>io.quarkus.platform</quarkus.platform.group-id>
-        <quarkus.platform.version>3.1.3.Final</quarkus.platform.version>
-        <quarkus-plugin.version>3.1.3.Final</quarkus-plugin.version>
+        <quarkus.platform.version>3.2.2.Final</quarkus.platform.version>
+        <quarkus-plugin.version>3.2.2.Final</quarkus-plugin.version>
         <jandex-maven-plugin.version>1.2.2</jandex-maven-plugin.version>
         <maven.compiler.parameters>true</maven.compiler.parameters>
         <surefire-plugin.version>3.0.0</surefire-plugin.version>
@@ -167,12 +167,12 @@
         <dependency>
             <groupId>org.infinispan</groupId>
             <artifactId>infinispan-core</artifactId>
-            <version>14.0.10.Final</version>
+            <version>14.0.11.Final</version>
         </dependency>
         <dependency>
             <groupId>org.infinispan</groupId>
             <artifactId>infinispan-component-annotations</artifactId>
-            <version>14.0.10.Final</version>
+            <version>14.0.11.Final</version>
             <scope>compile</scope>
         </dependency>
         <dependency>
