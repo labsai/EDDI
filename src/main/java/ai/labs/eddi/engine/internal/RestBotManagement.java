@@ -7,9 +7,8 @@ import ai.labs.eddi.engine.IRestBotEngine;
 import ai.labs.eddi.engine.IRestBotManagement;
 import ai.labs.eddi.models.*;
 import ai.labs.eddi.utils.RestUtilities;
-import io.quarkus.security.ForbiddenException;
+import io.quarkus.security.UnauthorizedException;
 import io.quarkus.security.identity.SecurityIdentity;
-import io.smallrye.mutiny.unchecked.Unchecked;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import jakarta.ws.rs.InternalServerErrorException;
@@ -25,7 +24,6 @@ import lombok.Setter;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.jboss.logging.Logger;
 
-import javax.security.auth.AuthPermission;
 import java.net.URI;
 import java.util.List;
 import java.util.Map;
@@ -277,15 +275,11 @@ public class RestBotManagement implements IRestBotManagement {
         restUserConversationStore.createUserConversation(intent, userId, userConversation);
     }
 
-    private void checkUserAuthIfApplicable(UserConversation userConversation) throws ForbiddenException {
-        if (checkForUserAuthentication && !unrestricted.equals(userConversation.getEnvironment())) {
-            identity.checkPermission(new AuthPermission("{resource_name}")).onItem()
-                    .transform(Unchecked.function(granted -> {
-                        if (granted) {
-                            return identity.getAttribute("permissions");
-                        }
-                        throw new ForbiddenException();
-                    }));
+    private void checkUserAuthIfApplicable(UserConversation userConversation) throws UnauthorizedException {
+        if (checkForUserAuthentication &&
+                !unrestricted.equals(userConversation.getEnvironment()) &&
+                identity.isAnonymous()) {
+            throw new UnauthorizedException();
         }
     }
 
