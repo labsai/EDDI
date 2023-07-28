@@ -61,7 +61,6 @@ public class RestBotEngine implements IRestBotEngine {
     private final IConversationCoordinator conversationCoordinator;
     private final IRuntime runtime;
     private final IContextLogger contextLogger;
-    private final IBotDeploymentManagement botDeploymentManagement;
     private final int botTimeout;
     private final IConversationSetup conversationSetup;
     private final ICache<String, ConversationState> conversationStateCache;
@@ -73,7 +72,6 @@ public class RestBotEngine implements IRestBotEngine {
 
     @Inject
     public RestBotEngine(IBotFactory botFactory,
-                         IBotDeploymentManagement botDeploymentManagement,
                          IConversationMemoryStore conversationMemoryStore,
                          IConversationDescriptorStore conversationDescriptorStore,
                          IPropertiesStore propertiesStore,
@@ -85,7 +83,6 @@ public class RestBotEngine implements IRestBotEngine {
                          MeterRegistry meterRegistry,
                          @ConfigProperty(name = "systemRuntime.botTimeoutInSeconds") int botTimeout) {
         this.botFactory = botFactory;
-        this.botDeploymentManagement = botDeploymentManagement;
         this.conversationMemoryStore = conversationMemoryStore;
         this.conversationDescriptorStore = conversationDescriptorStore;
         this.propertiesStore = propertiesStore;
@@ -400,11 +397,12 @@ public class RestBotEngine implements IRestBotEngine {
     }
 
     private IBot getBot(Environment environment, String botId, Integer botVersion)
-            throws ServiceException, ResourceStoreException, IllegalAccessException {
+            throws ServiceException, IllegalAccessException {
 
         IBot bot = botFactory.getBot(environment, botId, botVersion);
         if (bot == null) {
-            bot = botDeploymentManagement.attemptBotDeployment(environment, botId, botVersion);
+            botFactory.deployBot(environment, botId, botVersion, null);
+            bot = botFactory.getBot(environment, botId, botVersion);
         }
 
         return bot;
