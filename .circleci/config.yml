@@ -38,7 +38,7 @@ jobs:
 
       - run:
           name: Package app & build docker image
-          command: ./mvnw package -DskipTests "-Dquarkus.container-image.build=true" "-Dquarkus.container-image.additional-tags=5.1.3-b$CIRCLE_BUILD_NUM,5.1.3,5.1,5"
+          command: ./mvnw package -DskipTests "-Dquarkus.container-image.build=true" "-Dquarkus.container-image.additional-tags=5.1.4-b$CIRCLE_BUILD_NUM,5.1.4,5.1,5"
 
       ## cache the dependencies
       - save_cache:
@@ -58,9 +58,9 @@ jobs:
           command: |
             if [ "${CIRCLE_BRANCH}" == "main" ]; then
                 echo "$DOCKER_PASS" | docker login --username $DOCKER_USER --password-stdin
-                docker push labsai/eddi:5.1.3-b$CIRCLE_BUILD_NUM
+                docker push labsai/eddi:5.1.4-b$CIRCLE_BUILD_NUM
             
-                # docker push labsai/eddi:5.1.3
+                # docker push labsai/eddi:5.1.4
             
                 # docker push labsai/eddi:5.1
             
