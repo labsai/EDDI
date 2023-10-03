@@ -25,15 +25,20 @@ _**Prerequisite**: You need an up and running `Docker` environment. (For referen
 
 ### Use launch docker containers manually
 
-1.  Start a `MongoDB` instance using the `MongoDB` `Docker` image:
+1.  Create a shared network
 
     ```
-     docker run --name mongodb -e MONGODB_DBNAME=eddi -d mongo
+    docker network create eddi-network
     ```
-2.  Start **EDDI** :
+2.  Start a `MongoDB` instance using the `MongoDB` `Docker` image:
 
     ```
-     docker run --name eddi --link mongodb:mongodb -p 7070:7070 -d labsai/eddi
+    docker run --name mongodb --network=eddi-network -d mongo
+    ```
+3.  Start **EDDI** :
+
+    ```
+    docker run --name eddi --network=eddi-network -p 7070:7070 -d labsai/eddi
     ```
 
 ## Option 2 - Run from Source
@@ -43,8 +48,6 @@ _**Prerequisite**: You need an up and running `Docker` environment. (For referen
 * Java 17
 * Maven 3.8.4
 * MongoDB > 4.0
-
-
 
 ### How to run the project
 
