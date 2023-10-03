@@ -1,0 +1,529 @@
+{
+	"variables": [],
+	"info": {
+		"name": "EDDI -  Weather bot",
+		"_postman_id": "12926b3f-0dfb-f461-6f0c-f575bdeda5a8",
+		"description": "",
+		"schema": "https://schema.getpostman.com/json/collection/v2.0.0/collection.json"
+	},
+	"item": [
+		{
+			"name": "1 - Create dictionary (weather)",
+			"event": [
+				{
+					"listen": "test",
+					"script": {
+						"type": "text/javascript",
+						"exec": [
+							"var location_header=postman.getResponseHeader(\"location\");\r",
+							"var re1='(eddi)';\t// Word 1\r",
+							"var re2='(:)';\t// Any Single Character 1\r",
+							"var re3='(\\\\/)';\t// Any Single Character 2\r",
+							"var re4='(\\\\/)';\t// Any Single Character 3\r",
+							"var re5='(ai)';\t// Word 2\r",
+							"var re6='(\\\\.)';\t// Any Single Character 4\r",
+							"var re7='(labs)';\t// Word 3\r",
+							"var re8='(\\\\.)';\t// Any Single Character 5\r",
+							"var re9='((?:[a-z][a-z]+))';\t// Word 4\r",
+							"var re10='(\\\\/)';\t// Any Single Character 6\r",
+							"var re11='((?:[a-z][a-z]+))';\t// Word 5\r",
+							"var re12='(\\\\/)';\t// Any Single Character 7\r",
+							"var re13='((?:[a-z][a-z]+))';\t// Word 6\r",
+							"var re14='(\\\\/)';\t// Any Single Character 8\r",
+							"var re15='(\\\\d+)';\t// Integer Number 1\r",
+							"var re16='((?:[a-z][a-z]*[0-9]+[a-z0-9]*))';\t// Alphanum 1\r",
+							"var re17='(\\\\?)';\t// Any Single Character 9\r",
+							"var re18='(version)';\t// Word 7\r",
+							"var re19='(=)';\t// Any Single Character 10\r",
+							"var re20='(\\\\d+)';\t// Integer Number 2\r",
+							"\r",
+							"var p = new RegExp(re1+re2+re3+re4+re5+re6+re7+re8+re9+re10+re11+re12+re13+re14+re15+re16+re17+re18+re19+re20,[\"i\"]);\r",
+							"var m = p.exec(location_header);\r",
+							"if (m !== null)\r",
+							"{\r",
+							"    postman.setEnvironmentVariable(\"dictionary_id\", m[15]+m[16]);\r",
+							"}\r",
+							""
+						]
+					}
+				}
+			],
+			"request": {
+				"url": "{{host}}/regulardictionarystore/regulardictionaries",
+				"method": "POST",
+				"header": [
+					{
+						"key": "Content-Type",
+						"value": "application/json",
+						"description": ""
+					}
+				],
+				"body": {
+					"mode": "raw",
+					"raw": "{\r\n  \"words\" : [ {\r\n    \"word\" : \"weather\",\r\n    \"exp\" : \"trigger(current_weather)\",\r\n    \"frequency\" : 0\r\n  } ],\r\n  \"phrases\" : [ {\r\n    \"phrase\" : \"what is the weather\",\r\n    \"exp\" : \"trigger(current_weather)\"\r\n  }, {\r\n    \"phrase\" : \"whats the weather\",\r\n    \"exp\" : \"trigger(current_weather)\"\r\n  } ]\r\n}"
+				},
+				"description": ""
+			},
+			"response": []
+		},
+		{
+			"name": "2 - Create behaviourSet",
+			"event": [
+				{
+					"listen": "test",
+					"script": {
+						"type": "text/javascript",
+						"exec": [
+							"var location_header=postman.getResponseHeader(\"location\");\r",
+							"var re1='(eddi)';\t// Word 1\r",
+							"var re2='(:)';\t// Any Single Character 1\r",
+							"var re3='(\\\\/)';\t// Any Single Character 2\r",
+							"var re4='(\\\\/)';\t// Any Single Character 3\r",
+							"var re5='(ai)';\t// Word 2\r",
+							"var re6='(\\\\.)';\t// Any Single Character 4\r",
+							"var re7='(labs)';\t// Word 3\r",
+							"var re8='(\\\\.)';\t// Any Single Character 5\r",
+							"var re9='((?:[a-z][a-z]+))';\t// Word 4\r",
+							"var re10='(\\\\/)';\t// Any Single Character 6\r",
+							"var re11='((?:[a-z][a-z]+))';\t// Word 5\r",
+							"var re12='(\\\\/)';\t// Any Single Character 7\r",
+							"var re13='((?:[a-z][a-z]+))';\t// Word 6\r",
+							"var re14='(\\\\/)';\t// Any Single Character 8\r",
+							"var re15='(\\\\d+)';\t// Integer Number 1\r",
+							"var re16='((?:[a-z][a-z]*[0-9]+[a-z0-9]*))';\t// Alphanum 1\r",
+							"var re17='(\\\\?)';\t// Any Single Character 9\r",
+							"var re18='(version)';\t// Word 7\r",
+							"var re19='(=)';\t// Any Single Character 10\r",
+							"var re20='(\\\\d+)';\t// Integer Number 2\r",
+							"\r",
+							"var p = new RegExp(re1+re2+re3+re4+re5+re6+re7+re8+re9+re10+re11+re12+re13+re14+re15+re16+re17+re18+re19+re20,[\"i\"]);\r",
+							"var m = p.exec(location_header);\r",
+							"if (m !== null)\r",
+							"{\r",
+							"    postman.setEnvironmentVariable(\"behaviourset_id\", m[15]+m[16]);\r",
+							"}"
+						]
+					}
+				}
+			],
+			"request": {
+				"url": "{{host}}/behaviorstore/behaviorsets",
+				"method": "POST",
+				"header": [
+					{
+						"key": "Content-Type",
+						"value": "application/json",
+						"description": ""
+					}
+				],
+				"body": {
+					"mode": "raw",
+					"raw": "{\r\n  \"behaviorGroups\" : [ {\r\n    \"name\" : \"\",\r\n    \"behaviorRules\" : [ {\r\n      \"name\" : \"Ask for City\",\r\n      \"actions\" : [ \"ask_for_city\" ],\r\n      \"children\" : [ {\r\n        \"type\" : \"inputmatcher\",\r\n        \"values\" : {\r\n          \"expressions\" : \"trigger(current_weather)\"\r\n        },\r\n        \"children\" : [ ]\r\n      } ]\r\n    }, {\r\n      \"name\" : \"Current Weather in City\",\r\n      \"actions\" : [ \"current_weather_in_city\" ],\r\n      \"children\" : [ {\r\n        \"type\" : \"inputmatcher\",\r\n        \"values\" : {\r\n          \"expressions\" : \"trigger(current_weather)\",\r\n          \"occurrence\" : \"lastStep\"\r\n        },\r\n        \"children\" : [ ]\r\n      } ]\r\n    } ]\r\n  } ]\r\n}"
+				},
+				"description": ""
+			},
+			"response": []
+		},
+		{
+			"name": "3 - Create outputset",
+			"event": [
+				{
+					"listen": "test",
+					"script": {
+						"type": "text/javascript",
+						"exec": [
+							"var location_header=postman.getResponseHeader(\"location\");\r",
+							"var re1='(eddi)';\t// Word 1\r",
+							"var re2='(:)';\t// Any Single Character 1\r",
+							"var re3='(\\\\/)';\t// Any Single Character 2\r",
+							"var re4='(\\\\/)';\t// Any Single Character 3\r",
+							"var re5='(ai)';\t// Word 2\r",
+							"var re6='(\\\\.)';\t// Any Single Character 4\r",
+							"var re7='(labs)';\t// Word 3\r",
+							"var re8='(\\\\.)';\t// Any Single Character 5\r",
+							"var re9='((?:[a-z][a-z]+))';\t// Word 4\r",
+							"var re10='(\\\\/)';\t// Any Single Character 6\r",
+							"var re11='((?:[a-z][a-z]+))';\t// Word 5\r",
+							"var re12='(\\\\/)';\t// Any Single Character 7\r",
+							"var re13='((?:[a-z][a-z]+))';\t// Word 6\r",
+							"var re14='(\\\\/)';\t// Any Single Character 8\r",
+							"var re15='(\\\\d+)';\t// Integer Number 1\r",
+							"var re16='((?:[a-z][a-z]*[0-9]+[a-z0-9]*))';\t// Alphanum 1\r",
+							"var re17='(\\\\?)';\t// Any Single Character 9\r",
+							"var re18='(version)';\t// Word 7\r",
+							"var re19='(=)';\t// Any Single Character 10\r",
+							"var re20='(\\\\d+)';\t// Integer Number 2\r",
+							"\r",
+							"var p = new RegExp(re1+re2+re3+re4+re5+re6+re7+re8+re9+re10+re11+re12+re13+re14+re15+re16+re17+re18+re19+re20,[\"i\"]);\r",
+							"var m = p.exec(location_header);\r",
+							"if (m !== null)\r",
+							"{\r",
+							"    postman.setEnvironmentVariable(\"outputset_id\", m[15]+m[16]);\r",
+							"}\r",
+							""
+						]
+					}
+				}
+			],
+			"request": {
+				"url": "{{host}}/outputstore/outputsets ",
+				"method": "POST",
+				"header": [
+					{
+						"key": "Content-Type",
+						"value": "application/json",
+						"description": ""
+					}
+				],
+				"body": {
+					"mode": "raw",
+					"raw": "{\r\n  \"outputSet\" : [ {\r\n    \"action\" : \"ask_for_city\",\r\n    \"timesOccurred\" : 0,\r\n    \"outputs\" : [ {\r\n      \"type\" : \"text\",\r\n      \"valueAlternatives\" : [ \"Which City would you like to know the weather of?\" ]\r\n    } ],\r\n    \"quickReplies\" : [ ]\r\n  }, {\r\n    \"action\" : \"current_weather_in_city\",\r\n    \"timesOccurred\" : 0,\r\n    \"outputs\" : [ {\r\n      \"type\" : \"text\",\r\n      \"valueAlternatives\" : [ \"The current weather situation of [[${memory.current.input}]] is [[${memory.current.httpCalls.currentWeather.weather[0].description}]] at [[${memory.current.httpCalls.currentWeather.main.temp}]] Â°C\" ]\r\n    } ],\r\n    \"quickReplies\" : [ ]\r\n  } ]\r\n}"
+				},
+				"description": ""
+			},
+			"response": []
+		},
+		{
+			"name": "4 - Create  httpcall",
+			"event": [
+				{
+					"listen": "test",
+					"script": {
+						"type": "text/javascript",
+						"exec": [
+							"var location_header=postman.getResponseHeader(\"location\");\r",
+							"var re1='(eddi)';\t// Word 1\r",
+							"var re2='(:)';\t// Any Single Character 1\r",
+							"var re3='(\\\\/)';\t// Any Single Character 2\r",
+							"var re4='(\\\\/)';\t// Any Single Character 3\r",
+							"var re5='(ai)';\t// Word 2\r",
+							"var re6='(\\\\.)';\t// Any Single Character 4\r",
+							"var re7='(labs)';\t// Word 3\r",
+							"var re8='(\\\\.)';\t// Any Single Character 5\r",
+							"var re9='((?:[a-z][a-z]+))';\t// Word 4\r",
+							"var re10='(\\\\/)';\t// Any Single Character 6\r",
+							"var re11='((?:[a-z][a-z]+))';\t// Word 5\r",
+							"var re12='(\\\\/)';\t// Any Single Character 7\r",
+							"var re13='((?:[a-z][a-z]+))';\t// Word 6\r",
+							"var re14='(\\\\/)';\t// Any Single Character 8\r",
+							"var re15='(\\\\d+)';\t// Integer Number 1\r",
+							"var re16='((?:[a-z][a-z]*[0-9]+[a-z0-9]*))';\t// Alphanum 1\r",
+							"var re17='(\\\\?)';\t// Any Single Character 9\r",
+							"var re18='(version)';\t// Word 7\r",
+							"var re19='(=)';\t// Any Single Character 10\r",
+							"var re20='(\\\\d+)';\t// Integer Number 2\r",
+							"\r",
+							"var p = new RegExp(re1+re2+re3+re4+re5+re6+re7+re8+re9+re10+re11+re12+re13+re14+re15+re16+re17+re18+re19+re20,[\"i\"]);\r",
+							"var m = p.exec(location_header);\r",
+							"if (m !== null)\r",
+							"{\r",
+							"    postman.setEnvironmentVariable(\"httpcall_id\", m[15]+m[16]);\r",
+							"}\r",
+							""
+						]
+					}
+				}
+			],
+			"request": {
+				"url": "{{host}}/httpcallsstore/httpcalls",
+				"method": "POST",
+				"header": [
+					{
+						"key": "Content-Type",
+						"value": "application/json",
+						"description": ""
+					}
+				],
+				"body": {
+					"mode": "raw",
+					"raw": "{\r\n  \"targetServer\" : \"https://api.openweathermap.org/data/2.5/weather\",\r\n  \"httpCalls\" : [ {\r\n    \"name\" : \"currentWeather\",\r\n    \"saveResponse\" : true,\r\n    \"responseObjectName\" : \"currentWeather\",\r\n    \"actions\" : [ \"current_weather_in_city\" ],\r\n    \"request\" : {\r\n      \"path\" : \"\",\r\n      \"headers\" : { },\r\n      \"queryParams\" : {\r\n        \"APPID\" : \"c3366d78c7c0f76d63eb4cdf1384ddbf\",\r\n        \"units\" : \"metric\",\r\n        \"q\" : \"[[${memory.current.input}]]\"\r\n      },\r\n      \"method\" : \"get\",\r\n      \"contentType\" : \"\",\r\n      \"body\" : \"\"\r\n    }\r\n  } ]\r\n}"
+				},
+				"description": ""
+			},
+			"response": []
+		},
+		{
+			"name": "5 - Creating package",
+			"event": [
+				{
+					"listen": "test",
+					"script": {
+						"type": "text/javascript",
+						"exec": [
+							"var location_header=postman.getResponseHeader(\"location\");\r",
+							"var re1='(eddi)';\t// Word 1\r",
+							"var re2='(:)';\t// Any Single Character 1\r",
+							"var re3='(\\\\/)';\t// Any Single Character 2\r",
+							"var re4='(\\\\/)';\t// Any Single Character 3\r",
+							"var re5='(ai)';\t// Word 2\r",
+							"var re6='(\\\\.)';\t// Any Single Character 4\r",
+							"var re7='(labs)';\t// Word 3\r",
+							"var re8='(\\\\.)';\t// Any Single Character 5\r",
+							"var re9='((?:[a-z][a-z]+))';\t// Word 4\r",
+							"var re10='(\\\\/)';\t// Any Single Character 6\r",
+							"var re11='((?:[a-z][a-z]+))';\t// Word 5\r",
+							"var re12='(\\\\/)';\t// Any Single Character 7\r",
+							"var re13='((?:[a-z][a-z]+))';\t// Word 6\r",
+							"var re14='(\\\\/)';\t// Any Single Character 8\r",
+							"var re15='(\\\\d+)';\t// Integer Number 1\r",
+							"var re16='((?:[a-z][a-z]*[0-9]+[a-z0-9]*))';\t// Alphanum 1\r",
+							"var re17='(\\\\?)';\t// Any Single Character 9\r",
+							"var re18='(version)';\t// Word 7\r",
+							"var re19='(=)';\t// Any Single Character 10\r",
+							"var re20='(\\\\d+)';\t// Integer Number 2\r",
+							"\r",
+							"var p = new RegExp(re1+re2+re3+re4+re5+re6+re7+re8+re9+re10+re11+re12+re13+re14+re15+re16+re17+re18+re19+re20,[\"i\"]);\r",
+							"var m = p.exec(location_header);\r",
+							"if (m !== null)\r",
+							"{\r",
+							"    postman.setEnvironmentVariable(\"package_id\", m[15]+m[16]);\r",
+							"}\r",
+							""
+						]
+					}
+				}
+			],
+			"request": {
+				"url": "{{host}}/packagestore/packages",
+				"method": "POST",
+				"header": [
+					{
+						"key": "Content-Type",
+						"value": "application/json",
+						"description": ""
+					}
+				],
+				"body": {
+					"mode": "raw",
+					"raw": "{\r\n  \"packageExtensions\": [\r\n    {\r\n      \"type\": \"eddi://ai.labs.parser\",\r\n      \"extensions\": {\r\n        \"dictionaries\": [\r\n          {\r\n            \"type\": \"eddi://ai.labs.parser.dictionaries.integer\"\r\n          },\r\n          {\r\n            \"type\": \"eddi://ai.labs.parser.dictionaries.decimal\"\r\n          },\r\n          {\r\n            \"type\": \"eddi://ai.labs.parser.dictionaries.punctuation\"\r\n          },\r\n          {\r\n            \"type\": \"eddi://ai.labs.parser.dictionaries.email\"\r\n          },\r\n          {\r\n            \"type\": \"eddi://ai.labs.parser.dictionaries.time\"\r\n          },\r\n          {\r\n            \"type\": \"eddi://ai.labs.parser.dictionaries.ordinalNumber\"\r\n          },\r\n          {\r\n            \"type\": \"eddi://ai.labs.parser.dictionaries.regular\",\r\n            \"config\": {\r\n              \"uri\": \"eddi://ai.labs.regulardictionary/regulardictionarystore/regulardictionaries/{{dictionary_id}}?version=1\"\r\n            }\r\n          }\r\n        ],\r\n        \"corrections\": [\r\n          {\r\n            \"type\": \"eddi://ai.labs.parser.corrections.stemming\",\r\n            \"config\": {\r\n              \"language\": \"english\",\r\n              \"lookupIfKnown\": \"false\"\r\n            }\r\n          },\r\n          {\r\n            \"type\": \"eddi://ai.labs.parser.corrections.levenshtein\",\r\n            \"config\": {\r\n              \"distance\": \"2\"\r\n            }\r\n          },\r\n          {\r\n            \"type\": \"eddi://ai.labs.parser.corrections.mergedTerms\"\r\n          }\r\n        ]\r\n      },\r\n      \"config\": {}\r\n    },\r\n   \r\n    {\r\n      \"type\": \"eddi://ai.labs.behavior\",\r\n      \"config\": {\r\n        \"uri\": \"eddi://ai.labs.behavior/behaviorstore/behaviorsets/{{behaviourset_id}}?version=1\"\r\n      }\r\n    },\r\n    {\r\n      \"type\": \"eddi://ai.labs.httpcalls\",\r\n      \"config\": {\r\n        \"uri\": \"eddi://ai.labs.httpcalls/httpcallsstore/httpcalls/{{httpcall_id}}?version=1\"\r\n      }\r\n    },\r\n    {\r\n      \"type\": \"eddi://ai.labs.output\",\r\n      \"config\": {\r\n        \"uri\": \"eddi://ai.labs.output/outputstore/outputsets/{{outputset_id}}?version=1\"\r\n      }\r\n    },\r\n     {\r\n      \"type\": \"eddi://ai.labs.templating\",\r\n\t  \"extensions\": {},\r\n\t  \"config\": {}\r\n\t}\r\n  ]\r\n}"
+				},
+				"description": ""
+			},
+			"response": []
+		},
+		{
+			"name": "6 - Creating bot",
+			"event": [
+				{
+					"listen": "test",
+					"script": {
+						"type": "text/javascript",
+						"exec": [
+							"var location_header=postman.getResponseHeader(\"location\");\r",
+							"var re1='(eddi)';\t// Word 1\r",
+							"var re2='(:)';\t// Any Single Character 1\r",
+							"var re3='(\\\\/)';\t// Any Single Character 2\r",
+							"var re4='(\\\\/)';\t// Any Single Character 3\r",
+							"var re5='(ai)';\t// Word 2\r",
+							"var re6='(\\\\.)';\t// Any Single Character 4\r",
+							"var re7='(labs)';\t// Word 3\r",
+							"var re8='(\\\\.)';\t// Any Single Character 5\r",
+							"var re9='((?:[a-z][a-z]+))';\t// Word 4\r",
+							"var re10='(\\\\/)';\t// Any Single Character 6\r",
+							"var re11='((?:[a-z][a-z]+))';\t// Word 5\r",
+							"var re12='(\\\\/)';\t// Any Single Character 7\r",
+							"var re13='((?:[a-z][a-z]+))';\t// Word 6\r",
+							"var re14='(\\\\/)';\t// Any Single Character 8\r",
+							"var re15='(\\\\d+)';\t// Integer Number 1\r",
+							"var re16='((?:[a-z][a-z]*[0-9]+[a-z0-9]*))';\t// Alphanum 1\r",
+							"var re17='(\\\\?)';\t// Any Single Character 9\r",
+							"var re18='(version)';\t// Word 7\r",
+							"var re19='(=)';\t// Any Single Character 10\r",
+							"var re20='(\\\\d+)';\t// Integer Number 2\r",
+							"\r",
+							"var p = new RegExp(re1+re2+re3+re4+re5+re6+re7+re8+re9+re10+re11+re12+re13+re14+re15+re16+re17+re18+re19+re20,[\"i\"]);\r",
+							"var m = p.exec(location_header);\r",
+							"if (m !== null)\r",
+							"{\r",
+							"    postman.setEnvironmentVariable(\"bot_id\", m[15]+m[16]);\r",
+							"}\r",
+							""
+						]
+					}
+				}
+			],
+			"request": {
+				"url": "{{host}}/botstore/bots",
+				"method": "POST",
+				"header": [
+					{
+						"key": "Content-Type",
+						"value": "application/json",
+						"description": ""
+					}
+				],
+				"body": {
+					"mode": "raw",
+					"raw": "{\r\n  \"packages\" : [\r\n    \"eddi://ai.labs.package/packagestore/packages/{{package_id}}?version=1\"\r\n  ],    \"channels\" : []\r\n}"
+				},
+				"description": ""
+			},
+			"response": []
+		},
+		{
+			"name": "7 - Deploy the bot",
+			"request": {
+				"url": {
+					"raw": "{{host}}/administration/unrestricted/deploy/{{bot_id}}?version=1",
+					"host": [
+						"{{host}}"
+					],
+					"path": [
+						"administration",
+						"unrestricted",
+						"deploy",
+						"{{bot_id}}"
+					],
+					"query": [
+						{
+							"key": "version",
+							"value": "1",
+							"equals": true,
+							"description": ""
+						}
+					],
+					"variable": []
+				},
+				"method": "POST",
+				"header": [],
+				"body": {
+					"mode": "raw",
+					"raw": ""
+				},
+				"description": ""
+			},
+			"response": []
+		},
+		{
+			"name": "8 - Create conversation",
+			"event": [
+				{
+					"listen": "test",
+					"script": {
+						"type": "text/javascript",
+						"exec": [
+							"var location_header=postman.getResponseHeader(\"location\");\r",
+							"var re1='(eddi)';\t// Word 1\r",
+							"var re2='(:)';\t// Any Single Character 1\r",
+							"var re3='(\\\\/)';\t// Any Single Character 2\r",
+							"var re4='(\\\\/)';\t// Any Single Character 3\r",
+							"var re5='(ai)';\t// Word 2\r",
+							"var re6='(\\\\.)';\t// Any Single Character 4\r",
+							"var re7='(labs)';\t// Word 3\r",
+							"var re8='(\\\\.)';\t// Any Single Character 5\r",
+							"var re9='((?:[a-z][a-z]+))';\t// Word 4\r",
+							"var re10='(\\\\/)';\t// Any Single Character 6\r",
+							"var re11='((?:[a-z][a-z]+))';\t// Word 5\r",
+							"var re12='(\\\\/)';\t// Any Single Character 7\r",
+							"var re13='((?:[a-z][a-z]+))';\t// Word 6\r",
+							"var re14='(\\\\/)';\t// Any Single Character 8\r",
+							"var re15='(\\\\d+)';\t// Integer Number 1\r",
+							"var re16='((?:[a-z][a-z]*[0-9]+[a-z0-9]*))';\t// Alphanum 1\r",
+							"\r",
+							"\r",
+							"\r",
+							"var p = new RegExp(re1+re2+re3+re4+re5+re6+re7+re8+re9+re10+re11+re12+re13+re14+re15+re16,[\"i\"]);\r",
+							"var m = p.exec(location_header);\r",
+							"if (m !== null)\r",
+							"{\r",
+							"    postman.setEnvironmentVariable(\"conversation_id\", m[15]+m[16]);\r",
+							"}\r",
+							""
+						]
+					}
+				}
+			],
+			"request": {
+				"url": "{{host}}/bots/unrestricted/{{bot_id}}",
+				"method": "POST",
+				"header": [],
+				"body": {
+					"mode": "raw",
+					"raw": ""
+				},
+				"description": ""
+			},
+			"response": []
+		},
+		{
+			"name": "9 - Say weather",
+			"request": {
+				"url": {
+					"raw": "{{host}}/bots/unrestricted/{{bot_id}}/{{conversation_id}}?returnDetailed=false&returnCurrentStepOnly=true",
+					"host": [
+						"{{host}}"
+					],
+					"path": [
+						"bots",
+						"unrestricted",
+						"{{bot_id}}",
+						"{{conversation_id}}"
+					],
+					"query": [
+						{
+							"key": "returnDetailed",
+							"value": "false",
+							"equals": true,
+							"description": ""
+						},
+						{
+							"key": "returnCurrentStepOnly",
+							"value": "true",
+							"equals": true,
+							"description": ""
+						}
+					],
+					"variable": []
+				},
+				"method": "POST",
+				"header": [],
+				"body": {
+					"mode": "raw",
+					"raw": "weather"
+				},
+				"description": ""
+			},
+			"response": []
+		},
+		{
+			"name": "10 - Say city",
+			"request": {
+				"url": {
+					"raw": "{{host}}/bots/unrestricted/{{bot_id}}/{{conversation_id}}?returnDetailed=false&returnCurrentStepOnly=true",
+					"host": [
+						"{{host}}"
+					],
+					"path": [
+						"bots",
+						"unrestricted",
+						"{{bot_id}}",
+						"{{conversation_id}}"
+					],
+					"query": [
+						{
+							"key": "returnDetailed",
+							"value": "false",
+							"equals": true,
+							"description": ""
+						},
+						{
+							"key": "returnCurrentStepOnly",
+							"value": "true",
+							"equals": true,
+							"description": ""
+						}
+					],
+					"variable": []
+				},
+				"method": "POST",
+				"header": [],
+				"body": {
+					"mode": "raw",
+					"raw": "New york"
+				},
+				"description": ""
+			},
+			"response": []
+		}
+	]
+}

@@ -1,0 +1,430 @@
+{
+	"variables": [],
+	"info": {
+		"name": "Creating and chatting with abot",
+		"_postman_id": "aba0dda2-2856-0357-9a03-b4d5f785d17f",
+		"description": "",
+		"schema": "https://schema.getpostman.com/json/collection/v2.0.0/collection.json"
+	},
+	"item": [
+		{
+			"name": "1 - Create dictionary (greetings)",
+			"event": [
+				{
+					"listen": "test",
+					"script": {
+						"type": "text/javascript",
+						"exec": [
+							"var location_header=postman.getResponseHeader(\"location\");\r",
+							"var re1='(eddi)';\t// Word 1\r",
+							"var re2='(:)';\t// Any Single Character 1\r",
+							"var re3='(\\\\/)';\t// Any Single Character 2\r",
+							"var re4='(\\\\/)';\t// Any Single Character 3\r",
+							"var re5='(ai)';\t// Word 2\r",
+							"var re6='(\\\\.)';\t// Any Single Character 4\r",
+							"var re7='(labs)';\t// Word 3\r",
+							"var re8='(\\\\.)';\t// Any Single Character 5\r",
+							"var re9='((?:[a-z][a-z]+))';\t// Word 4\r",
+							"var re10='(\\\\/)';\t// Any Single Character 6\r",
+							"var re11='((?:[a-z][a-z]+))';\t// Word 5\r",
+							"var re12='(\\\\/)';\t// Any Single Character 7\r",
+							"var re13='((?:[a-z][a-z]+))';\t// Word 6\r",
+							"var re14='(\\\\/)';\t// Any Single Character 8\r",
+							"var re15='(\\\\d+)';\t// Integer Number 1\r",
+							"var re16='((?:[a-z][a-z]*[0-9]+[a-z0-9]*))';\t// Alphanum 1\r",
+							"var re17='(\\\\?)';\t// Any Single Character 9\r",
+							"var re18='(version)';\t// Word 7\r",
+							"var re19='(=)';\t// Any Single Character 10\r",
+							"var re20='(\\\\d+)';\t// Integer Number 2\r",
+							"\r",
+							"var p = new RegExp(re1+re2+re3+re4+re5+re6+re7+re8+re9+re10+re11+re12+re13+re14+re15+re16+re17+re18+re19+re20,[\"i\"]);\r",
+							"var m = p.exec(location_header);\r",
+							"if (m !== null)\r",
+							"{\r",
+							"    postman.setEnvironmentVariable(\"dictionary_id\", m[15]+m[16]);\r",
+							"}\r",
+							""
+						]
+					}
+				}
+			],
+			"request": {
+				"url": "{{host}}/regulardictionarystore/regulardictionaries",
+				"method": "POST",
+				"header": [
+					{
+						"key": "Content-Type",
+						"value": "application/json",
+						"description": ""
+					}
+				],
+				"body": {
+					"mode": "raw",
+					"raw": "{\r\n  \"language\" : \"en\",\r\n  \"words\" : [\r\n    {\r\n      \"word\" : \"hello\",\r\n      \"exp\" : \"greeting(hello)\",\r\n      \"frequency\" : 0\r\n    },\r\n    {\r\n      \"word\" : \"hi\",\r\n      \"exp\" : \"greeting(hi)\",\r\n      \"frequency\" : 0\r\n    },\r\n    {\r\n      \"word\" : \"hey\",\r\n      \"exp\" : \"greeting(hey)\",\r\n      \"frequency\" : 0\r\n    },\r\n    {\r\n      \"word\" : \"bye\",\r\n      \"exp\" : \"goodbye(bye)\",\r\n      \"frequency\" : 0\r\n    },\r\n    {\r\n      \"word\" : \"thanks\",\r\n      \"exp\" : \"thanks(thanks)\",\r\n      \"frequency\" : 0\r\n    }\r\n  ],\r\n  \"phrases\" : [\r\n    {\r\n      \"phrase\" : \"good afternoon\",\r\n      \"exp\" : \"greeting(good_afternoon)\"\r\n    },\r\n     {\r\n      \"phrase\" : \"good night\",\r\n      \"exp\" : \"goodbye(good_night)\"\r\n    },\r\n    {\r\n      \"phrase\" : \"good morning\",\r\n      \"exp\" : \"greeting(good_morning)\"\r\n    },\r\n    {\r\n      \"phrase\" : \"how are you\",\r\n      \"exp\" : \"how_are_you\"\r\n    }\r\n  ]\r\n}"
+				},
+				"description": ""
+			},
+			"response": []
+		},
+		{
+			"name": "2 - Create behaviourSet",
+			"event": [
+				{
+					"listen": "test",
+					"script": {
+						"type": "text/javascript",
+						"exec": [
+							"var location_header=postman.getResponseHeader(\"location\");\r",
+							"var re1='(eddi)';\t// Word 1\r",
+							"var re2='(:)';\t// Any Single Character 1\r",
+							"var re3='(\\\\/)';\t// Any Single Character 2\r",
+							"var re4='(\\\\/)';\t// Any Single Character 3\r",
+							"var re5='(ai)';\t// Word 2\r",
+							"var re6='(\\\\.)';\t// Any Single Character 4\r",
+							"var re7='(labs)';\t// Word 3\r",
+							"var re8='(\\\\.)';\t// Any Single Character 5\r",
+							"var re9='((?:[a-z][a-z]+))';\t// Word 4\r",
+							"var re10='(\\\\/)';\t// Any Single Character 6\r",
+							"var re11='((?:[a-z][a-z]+))';\t// Word 5\r",
+							"var re12='(\\\\/)';\t// Any Single Character 7\r",
+							"var re13='((?:[a-z][a-z]+))';\t// Word 6\r",
+							"var re14='(\\\\/)';\t// Any Single Character 8\r",
+							"var re15='(\\\\d+)';\t// Integer Number 1\r",
+							"var re16='((?:[a-z][a-z]*[0-9]+[a-z0-9]*))';\t// Alphanum 1\r",
+							"var re17='(\\\\?)';\t// Any Single Character 9\r",
+							"var re18='(version)';\t// Word 7\r",
+							"var re19='(=)';\t// Any Single Character 10\r",
+							"var re20='(\\\\d+)';\t// Integer Number 2\r",
+							"\r",
+							"var p = new RegExp(re1+re2+re3+re4+re5+re6+re7+re8+re9+re10+re11+re12+re13+re14+re15+re16+re17+re18+re19+re20,[\"i\"]);\r",
+							"var m = p.exec(location_header);\r",
+							"if (m !== null)\r",
+							"{\r",
+							"    postman.setEnvironmentVariable(\"behaviourset_id\", m[15]+m[16]);\r",
+							"}"
+						]
+					}
+				}
+			],
+			"request": {
+				"url": "{{host}}/behaviorstore/behaviorsets",
+				"method": "POST",
+				"header": [
+					{
+						"key": "Content-Type",
+						"value": "application/json",
+						"description": ""
+					}
+				],
+				"body": {
+					"mode": "raw",
+					"raw": "{\r\n  \"behaviorGroups\": [\r\n    {\r\n      \"name\": \"Smalltalk\",\r\n      \"behaviorRules\": [\r\n        {\r\n          \"name\": \"Welcome\",\r\n          \"actions\": [\r\n            \"welcome\"\r\n          ],\r\n          \"children\": [\r\n            {\r\n              \"type\": \"negation\",\r\n              \"children\": [\r\n                {\r\n                  \"type\": \"occurrence\",\r\n                  \"values\": {\r\n                    \"maxTimesOccurred\": 1,\r\n                    \"behaviorRuleName\": \"Welcome\"\r\n                  }\r\n                }\r\n              ]\r\n            }\r\n          ]\r\n        },\r\n        {\r\n          \"name\": \"Greeting\",\r\n          \"actions\": [\r\n            \"greet\"\r\n          ],\r\n          \"children\": [\r\n            {\r\n              \"type\": \"inputmatcher\",\r\n              \"values\": {\r\n                \"expressions\": \"greeting(*)\",\r\n                \"occurrence\": \"currentStep\"\r\n              }\r\n            }\r\n          ]\r\n        },\r\n        {\r\n          \"name\": \"Goodbye\",\r\n          \"actions\": [\r\n            \"say_goodbye\",\r\n            \"CONVERSATION_END\"\r\n          ],\r\n          \"children\": [\r\n            {\r\n              \"type\": \"inputmatcher\",\r\n              \"values\": {\r\n                \"expressions\": \"goodbye(*)\"\r\n              }\r\n            }\r\n          ]\r\n        },\r\n        {\r\n          \"name\": \"Thank\",\r\n          \"actions\": [\r\n            \"thank\"\r\n          ],\r\n          \"children\": [\r\n            {\r\n              \"type\": \"inputmatcher\",\r\n              \"values\": {\r\n                \"expressions\": \"thank(*)\"\r\n              }\r\n            }\r\n          ]\r\n        },\r\n        {\r\n          \"name\": \"how are you\",\r\n          \"actions\": [\r\n            \"how_are_you\"\r\n          ],\r\n          \"children\": [\r\n            {\r\n              \"type\": \"inputmatcher\",\r\n              \"values\": {\r\n                \"expressions\": \"how_are_you\"\r\n              }\r\n            }\r\n          ]\r\n        }\r\n      ]\r\n    }\r\n  ]\r\n}"
+				},
+				"description": ""
+			},
+			"response": []
+		},
+		{
+			"name": "3 - Create outputSet",
+			"event": [
+				{
+					"listen": "test",
+					"script": {
+						"type": "text/javascript",
+						"exec": [
+							"var location_header=postman.getResponseHeader(\"location\");\r",
+							"var re1='(eddi)';\t// Word 1\r",
+							"var re2='(:)';\t// Any Single Character 1\r",
+							"var re3='(\\\\/)';\t// Any Single Character 2\r",
+							"var re4='(\\\\/)';\t// Any Single Character 3\r",
+							"var re5='(ai)';\t// Word 2\r",
+							"var re6='(\\\\.)';\t// Any Single Character 4\r",
+							"var re7='(labs)';\t// Word 3\r",
+							"var re8='(\\\\.)';\t// Any Single Character 5\r",
+							"var re9='((?:[a-z][a-z]+))';\t// Word 4\r",
+							"var re10='(\\\\/)';\t// Any Single Character 6\r",
+							"var re11='((?:[a-z][a-z]+))';\t// Word 5\r",
+							"var re12='(\\\\/)';\t// Any Single Character 7\r",
+							"var re13='((?:[a-z][a-z]+))';\t// Word 6\r",
+							"var re14='(\\\\/)';\t// Any Single Character 8\r",
+							"var re15='(\\\\d+)';\t// Integer Number 1\r",
+							"var re16='((?:[a-z][a-z]*[0-9]+[a-z0-9]*))';\t// Alphanum 1\r",
+							"var re17='(\\\\?)';\t// Any Single Character 9\r",
+							"var re18='(version)';\t// Word 7\r",
+							"var re19='(=)';\t// Any Single Character 10\r",
+							"var re20='(\\\\d+)';\t// Integer Number 2\r",
+							"\r",
+							"var p = new RegExp(re1+re2+re3+re4+re5+re6+re7+re8+re9+re10+re11+re12+re13+re14+re15+re16+re17+re18+re19+re20,[\"i\"]);\r",
+							"var m = p.exec(location_header);\r",
+							"if (m !== null)\r",
+							"{\r",
+							"    postman.setEnvironmentVariable(\"outputset_id\", m[15]+m[16]);\r",
+							"}\r",
+							""
+						]
+					}
+				}
+			],
+			"request": {
+				"url": "{{host}}/outputstore/outputsets ",
+				"method": "POST",
+				"header": [
+					{
+						"key": "Content-Type",
+						"value": "application/json",
+						"description": ""
+					}
+				],
+				"body": {
+					"mode": "raw",
+					"raw": "{\r\n  \"outputSet\": [\r\n    {\r\n      \"action\": \"welcome\",\r\n      \"timesOccurred\": 0,\r\n      \"outputs\": [\r\n        {\r\n          \"type\": \"text\",\r\n          \"valueAlternatives\": [\r\n            \"Welcome!\"\r\n          ]\r\n        },\r\n        {\r\n          \"type\": \"text\",\r\n          \"valueAlternatives\": [\r\n            \"My name is E.D.D.I\"\r\n          ]\r\n        }\r\n      ],\r\n      \"quickReplies\": [\r\n        {\r\n          \"value\": \"Hi EDDI\",\r\n          \"expressions\": \"greeting(hi)\"\r\n        },\r\n        {\r\n          \"value\": \"Bye EDDI\",\r\n          \"expressions\": \"goodbye(bye)\"\r\n        }\r\n      ]\r\n    },\r\n    {\r\n      \"action\": \"greet\",\r\n      \"timesOccurred\": 0,\r\n      \"outputs\": [\r\n        {\r\n          \"type\": \"text\",\r\n          \"valueAlternatives\": [\r\n            \"Hi there! Nice to meet up! :-)\",\r\n            \"Hey you!\"\r\n          ]\r\n        }\r\n      ]\r\n    },\r\n    {\r\n      \"action\": \"greet\",\r\n      \"timesOccurred\": 1,\r\n      \"outputs\": [\r\n        {\r\n          \"type\": \"text\",\r\n          \"valueAlternatives\": [\r\n            \"Did we already say hi ?! Well, twice is better than not at all! ;-)\"\r\n          ]\r\n        }\r\n      ]\r\n    },\r\n    {\r\n      \"action\": \"say_goodbye\",\r\n      \"timesOccurred\": 0,\r\n      \"outputs\": [\r\n        {\r\n          \"type\": \"text\",\r\n          \"valueAlternatives\": [\r\n            \"See you soon!\"\r\n          ]\r\n        }\r\n      ]\r\n    },\r\n    {\r\n      \"action\": \"thank\",\r\n      \"timesOccurred\": 0,\r\n      \"outputs\": [\r\n        {\r\n          \"type\": \"text\",\r\n          \"valueAlternatives\": [\r\n            \"Your Welcome!\"\r\n          ]\r\n        }\r\n      ]\r\n    },\r\n    {\r\n      \"action\": \"how_are_you\",\r\n      \"timesOccurred\": 0,\r\n      \"outputs\": [\r\n        {\r\n          \"type\": \"text\",\r\n          \"valueAlternatives\": [\r\n            \"Pretty good.. having lovely conversations all day long.. :-D\"\r\n          ]\r\n        }\r\n      ]\r\n    }\r\n  ]\r\n}"
+				},
+				"description": ""
+			},
+			"response": []
+		},
+		{
+			"name": "4 - Creating package",
+			"event": [
+				{
+					"listen": "test",
+					"script": {
+						"type": "text/javascript",
+						"exec": [
+							"var location_header=postman.getResponseHeader(\"location\");\r",
+							"var re1='(eddi)';\t// Word 1\r",
+							"var re2='(:)';\t// Any Single Character 1\r",
+							"var re3='(\\\\/)';\t// Any Single Character 2\r",
+							"var re4='(\\\\/)';\t// Any Single Character 3\r",
+							"var re5='(ai)';\t// Word 2\r",
+							"var re6='(\\\\.)';\t// Any Single Character 4\r",
+							"var re7='(labs)';\t// Word 3\r",
+							"var re8='(\\\\.)';\t// Any Single Character 5\r",
+							"var re9='((?:[a-z][a-z]+))';\t// Word 4\r",
+							"var re10='(\\\\/)';\t// Any Single Character 6\r",
+							"var re11='((?:[a-z][a-z]+))';\t// Word 5\r",
+							"var re12='(\\\\/)';\t// Any Single Character 7\r",
+							"var re13='((?:[a-z][a-z]+))';\t// Word 6\r",
+							"var re14='(\\\\/)';\t// Any Single Character 8\r",
+							"var re15='(\\\\d+)';\t// Integer Number 1\r",
+							"var re16='((?:[a-z][a-z]*[0-9]+[a-z0-9]*))';\t// Alphanum 1\r",
+							"var re17='(\\\\?)';\t// Any Single Character 9\r",
+							"var re18='(version)';\t// Word 7\r",
+							"var re19='(=)';\t// Any Single Character 10\r",
+							"var re20='(\\\\d+)';\t// Integer Number 2\r",
+							"\r",
+							"var p = new RegExp(re1+re2+re3+re4+re5+re6+re7+re8+re9+re10+re11+re12+re13+re14+re15+re16+re17+re18+re19+re20,[\"i\"]);\r",
+							"var m = p.exec(location_header);\r",
+							"if (m !== null)\r",
+							"{\r",
+							"    postman.setEnvironmentVariable(\"package_id\", m[15]+m[16]);\r",
+							"}\r",
+							""
+						]
+					}
+				}
+			],
+			"request": {
+				"url": "{{host}}/packagestore/packages",
+				"method": "POST",
+				"header": [
+					{
+						"key": "Content-Type",
+						"value": "application/json",
+						"description": ""
+					}
+				],
+				"body": {
+					"mode": "raw",
+					"raw": "{\r\n  \"packageExtensions\": [\r\n    {\r\n      \"type\": \"eddi://ai.labs.normalizer\",\r\n      \"config\": {\r\n        \"allowedChars\": \"1234567890abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ !?:;.,\",\r\n        \"convertUmlaute\": \"true\"\r\n      }\r\n    },\r\n    {\r\n      \"type\": \"eddi://ai.labs.parser\",\r\n      \"extensions\": {\r\n        \"dictionaries\": [\r\n          {\r\n            \"type\": \"eddi://ai.labs.parser.dictionaries.integer\"\r\n          },\r\n          {\r\n            \"type\": \"eddi://ai.labs.parser.dictionaries.decimal\"\r\n          },\r\n          {\r\n            \"type\": \"eddi://ai.labs.parser.dictionaries.punctuation\"\r\n          },\r\n          {\r\n            \"type\": \"eddi://ai.labs.parser.dictionaries.email\"\r\n          },\r\n          {\r\n            \"type\": \"eddi://ai.labs.parser.dictionaries.time\"\r\n          },\r\n          {\r\n            \"type\": \"eddi://ai.labs.parser.dictionaries.ordinalNumber\"\r\n          },\r\n          {\r\n            \"type\": \"eddi://ai.labs.parser.dictionaries.regular\",\r\n            \"config\": {\r\n              \"uri\": \"eddi://ai.labs.regulardictionary/regulardictionarystore/regulardictionaries/{{dictionary_id}}?version=1\"\r\n            }\r\n          }\r\n        ],\r\n        \"corrections\": [\r\n          {\r\n            \"type\": \"eddi://ai.labs.parser.corrections.stemming\",\r\n            \"config\": {\r\n              \"language\": \"english\",\r\n              \"lookupIfKnown\": \"false\"\r\n            }\r\n          },\r\n          {\r\n            \"type\": \"eddi://ai.labs.parser.corrections.levenshtein\",\r\n            \"config\": {\r\n              \"distance\": \"2\"\r\n            }\r\n          },\r\n          {\r\n            \"type\": \"eddi://ai.labs.parser.corrections.mergedTerms\"\r\n          }\r\n        ]\r\n      },\r\n      \"config\": {}\r\n    },\r\n    {\r\n      \"type\": \"eddi://ai.labs.behavior\",\r\n      \"config\": {\r\n        \"uri\": \"eddi://ai.labs.behavior/behaviorstore/behaviorsets/{{behaviourset_id}}?version=1\"\r\n      }\r\n    },\r\n    {\r\n      \"type\": \"eddi://ai.labs.output\",\r\n      \"config\": {\r\n        \"uri\": \"eddi://ai.labs.output/outputstore/outputsets/{{outputset_id}}?version=1\"\r\n      }\r\n    }\r\n  ]\r\n}"
+				},
+				"description": ""
+			},
+			"response": []
+		},
+		{
+			"name": "5 - Creating bot",
+			"event": [
+				{
+					"listen": "test",
+					"script": {
+						"type": "text/javascript",
+						"exec": [
+							"var location_header=postman.getResponseHeader(\"location\");\r",
+							"var re1='(eddi)';\t// Word 1\r",
+							"var re2='(:)';\t// Any Single Character 1\r",
+							"var re3='(\\\\/)';\t// Any Single Character 2\r",
+							"var re4='(\\\\/)';\t// Any Single Character 3\r",
+							"var re5='(ai)';\t// Word 2\r",
+							"var re6='(\\\\.)';\t// Any Single Character 4\r",
+							"var re7='(labs)';\t// Word 3\r",
+							"var re8='(\\\\.)';\t// Any Single Character 5\r",
+							"var re9='((?:[a-z][a-z]+))';\t// Word 4\r",
+							"var re10='(\\\\/)';\t// Any Single Character 6\r",
+							"var re11='((?:[a-z][a-z]+))';\t// Word 5\r",
+							"var re12='(\\\\/)';\t// Any Single Character 7\r",
+							"var re13='((?:[a-z][a-z]+))';\t// Word 6\r",
+							"var re14='(\\\\/)';\t// Any Single Character 8\r",
+							"var re15='(\\\\d+)';\t// Integer Number 1\r",
+							"var re16='((?:[a-z][a-z]*[0-9]+[a-z0-9]*))';\t// Alphanum 1\r",
+							"var re17='(\\\\?)';\t// Any Single Character 9\r",
+							"var re18='(version)';\t// Word 7\r",
+							"var re19='(=)';\t// Any Single Character 10\r",
+							"var re20='(\\\\d+)';\t// Integer Number 2\r",
+							"\r",
+							"var p = new RegExp(re1+re2+re3+re4+re5+re6+re7+re8+re9+re10+re11+re12+re13+re14+re15+re16+re17+re18+re19+re20,[\"i\"]);\r",
+							"var m = p.exec(location_header);\r",
+							"if (m !== null)\r",
+							"{\r",
+							"    postman.setEnvironmentVariable(\"bot_id\", m[15]+m[16]);\r",
+							"}\r",
+							""
+						]
+					}
+				}
+			],
+			"request": {
+				"url": "{{host}}/botstore/bots",
+				"method": "POST",
+				"header": [
+					{
+						"key": "Content-Type",
+						"value": "application/json",
+						"description": ""
+					}
+				],
+				"body": {
+					"mode": "raw",
+					"raw": "{\r\n  \"packages\" : [\r\n    \"eddi://ai.labs.package/packagestore/packages/{{package_id}}?version=1\"\r\n  ],    \"channels\" : []\r\n}"
+				},
+				"description": ""
+			},
+			"response": []
+		},
+		{
+			"name": "6 - Deploy the bot",
+			"request": {
+				"url": {
+					"raw": "{{host}}/administration/unrestricted/deploy/{{bot_id}}?version=1",
+					"host": [
+						"{{host}}"
+					],
+					"path": [
+						"administration",
+						"unrestricted",
+						"deploy",
+						"{{bot_id}}"
+					],
+					"query": [
+						{
+							"key": "version",
+							"value": "1",
+							"equals": true,
+							"description": ""
+						}
+					],
+					"variable": []
+				},
+				"method": "POST",
+				"header": [],
+				"body": {
+					"mode": "raw",
+					"raw": ""
+				},
+				"description": ""
+			},
+			"response": []
+		},
+		{
+			"name": "7 - Create conversation",
+			"event": [
+				{
+					"listen": "test",
+					"script": {
+						"type": "text/javascript",
+						"exec": [
+							"var location_header=postman.getResponseHeader(\"location\");\r",
+							"var re1='(eddi)';\t// Word 1\r",
+							"var re2='(:)';\t// Any Single Character 1\r",
+							"var re3='(\\\\/)';\t// Any Single Character 2\r",
+							"var re4='(\\\\/)';\t// Any Single Character 3\r",
+							"var re5='(ai)';\t// Word 2\r",
+							"var re6='(\\\\.)';\t// Any Single Character 4\r",
+							"var re7='(labs)';\t// Word 3\r",
+							"var re8='(\\\\.)';\t// Any Single Character 5\r",
+							"var re9='((?:[a-z][a-z]+))';\t// Word 4\r",
+							"var re10='(\\\\/)';\t// Any Single Character 6\r",
+							"var re11='((?:[a-z][a-z]+))';\t// Word 5\r",
+							"var re12='(\\\\/)';\t// Any Single Character 7\r",
+							"var re13='((?:[a-z][a-z]+))';\t// Word 6\r",
+							"var re14='(\\\\/)';\t// Any Single Character 8\r",
+							"var re15='(\\\\d+)';\t// Integer Number 1\r",
+							"var re16='((?:[a-z][a-z]*[0-9]+[a-z0-9]*))';\t// Alphanum 1\r",
+							"\r",
+							"\r",
+							"\r",
+							"var p = new RegExp(re1+re2+re3+re4+re5+re6+re7+re8+re9+re10+re11+re12+re13+re14+re15+re16,[\"i\"]);\r",
+							"var m = p.exec(location_header);\r",
+							"if (m !== null)\r",
+							"{\r",
+							"    postman.setEnvironmentVariable(\"conversation_id\", m[15]+m[16]);\r",
+							"}\r",
+							""
+						]
+					}
+				}
+			],
+			"request": {
+				"url": "{{host}}/bots/unrestricted/{{bot_id}}",
+				"method": "POST",
+				"header": [],
+				"body": {
+					"mode": "raw",
+					"raw": ""
+				},
+				"description": ""
+			},
+			"response": []
+		},
+		{
+			"name": "8 - Say Hello to the bot",
+			"request": {
+				"url": {
+					"raw": "{{host}}/bots/unrestricted/{{bot_id}}/{{conversation_id}}?returnDetailed=false&returnCurrentStepOnly=true",
+					"host": [
+						"{{host}}"
+					],
+					"path": [
+						"bots",
+						"unrestricted",
+						"{{bot_id}}",
+						"{{conversation_id}}"
+					],
+					"query": [
+						{
+							"key": "returnDetailed",
+							"value": "false",
+							"equals": true,
+							"description": ""
+						},
+						{
+							"key": "returnCurrentStepOnly",
+							"value": "true",
+							"equals": true,
+							"description": ""
+						}
+					],
+					"variable": []
+				},
+				"method": "POST",
+				"header": [],
+				"body": {
+					"mode": "raw",
+					"raw": "{\r\n  \"input\": \"Hello\"\r\n}"
+				},
+				"description": ""
+			},
+			"response": []
+		}
+	]
+}
