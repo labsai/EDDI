@@ -125,7 +125,8 @@ public class HttpCallsTask implements ILifecycleTask {
                                         httpCallsConfig.getTargetServerUrl(), call.getRequest(), templateDataObjects);
                                 response = executeAndMeasureRequest(call, request, retryCall, amountOfExecutions);
 
-                                if (response.getHttpCode() < 200 || response.getHttpCode() >= 300) {
+                                var isResponseSuccessful = response.getHttpCode() >= 200 && response.getHttpCode() < 300;
+                                if (!isResponseSuccessful) {
                                     String message = "HttpCall (%s) didn't return http code 2xx, instead %s.";
                                     LOGGER.warn(format(message, call.getName(), response.getHttpCode()));
                                     LOGGER.warn("Error Msg:" + response.getHttpCodeMessage());
@@ -138,7 +139,7 @@ public class HttpCallsTask implements ILifecycleTask {
                                     createHttpMemoryEntry(currentStep, responseObjectHeader, responseHeaderObjectName);
                                 }
 
-                                if (response.getHttpCode() == 200 && call.getSaveResponse()) {
+                                if (isResponseSuccessful && call.getSaveResponse()) {
                                     final String responseBody = response.getContentAsString();
                                     String actualContentType = response.getHttpHeader().get(CONTENT_TYPE);
                                     if (actualContentType != null) {
@@ -147,14 +148,18 @@ public class HttpCallsTask implements ILifecycleTask {
                                         actualContentType = "<not-present>";
                                     }
 
+                                    Object responseObject;
                                     if (!CONTENT_TYPE_APPLICATION_JSON.startsWith(actualContentType)) {
                                         var message =
                                                 "HttpCall (%s) didn't return application/json " +
                                                         "as content-type, instead was (%s)";
                                         LOGGER.warn(format(message, call.getName(), actualContentType));
+
+                                        responseObject = responseBody;
+                                    } else {
+                                        responseObject = jsonSerialization.deserialize(responseBody, Object.class);
                                     }
 
-                                    var responseObject = jsonSerialization.deserialize(responseBody, Object.class);
                                     var responseObjectName = call.getResponseObjectName();
                                     templateDataObjects.put(responseObjectName, responseObject);
 
