@@ -149,15 +149,18 @@ public class HttpCallsTask implements ILifecycleTask {
                                     }
 
                                     Object responseObject;
-                                    if (!CONTENT_TYPE_APPLICATION_JSON.startsWith(actualContentType)) {
-                                        var message =
-                                                "HttpCall (%s) didn't return application/json " +
-                                                        "as content-type, instead was (%s)";
-                                        LOGGER.warn(format(message, call.getName(), actualContentType));
+                                    if (CONTENT_TYPE_APPLICATION_JSON.startsWith(actualContentType)) {
+                                        responseObject = jsonSerialization.deserialize(responseBody, Object.class);
+                                    } else {
+                                        if (!actualContentType.startsWith("<not-present>") &&
+                                                !actualContentType.startsWith("text")) {
+                                            var message =
+                                                    "HttpCall (%s) didn't return application/json, text/plain nor text/html " +
+                                                            "as content-type, instead was (%s)";
+                                            LOGGER.warn(format(message, call.getName(), actualContentType));
+                                        }
 
                                         responseObject = responseBody;
-                                    } else {
-                                        responseObject = jsonSerialization.deserialize(responseBody, Object.class);
                                     }
 
                                     var responseObjectName = call.getResponseObjectName();
@@ -192,7 +195,9 @@ public class HttpCallsTask implements ILifecycleTask {
         var memoryDataName = "httpCalls:" + responseObjectName;
         IData<Object> httpResponseData = dataFactory.createData(memoryDataName, responseObject);
         currentStep.storeData(httpResponseData);
-        currentStep.addConversationOutputMap(KEY_HTTP_CALLS, Map.of(responseObjectName, responseObject));
+        Map<String, Object> map = new HashMap<>();
+        map.put(responseObjectName, responseObject);
+        currentStep.addConversationOutputMap(KEY_HTTP_CALLS, map);
     }
 
     private IResponse executeAndMeasureRequest(HttpCall call, IRequest request, boolean retryCall, int amountOfExecutions)
