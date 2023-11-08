@@ -134,7 +134,7 @@ public class RestBotEngine implements IRestBotEngine {
             cacheConversationState(conversationId, conversationMemory.getConversationState());
             var conversationUri = createURI(resourceURI, conversationId);
 
-            conversationSetup.createConversationDescriptor(botId, latestBot, conversationId, conversationUri);
+            conversationSetup.createConversationDescriptor(botId, latestBot, userId, conversationId, conversationUri);
 
             return Response.created(conversationUri).build();
         } catch (ServiceException |

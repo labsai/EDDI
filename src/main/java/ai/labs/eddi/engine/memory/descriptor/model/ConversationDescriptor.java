@@ -20,6 +20,7 @@ public class ConversationDescriptor extends ResourceDescriptor {
     }
 
     private String botName;
+    private String userId;
     private URI botResource;
     private ViewState viewState;
     private int conversationStepSize;

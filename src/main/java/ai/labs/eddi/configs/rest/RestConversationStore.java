@@ -124,6 +124,10 @@ public class RestConversationStore implements IRestConversationStore {
             var memorySnapshot =
                     conversationMemoryStore.loadConversationMemorySnapshot(resourceId.getId());
 
+            if (conversationDescriptor.getUserId() == null) {
+                //fallback for older conversations pre v5.1.6
+                conversationDescriptor.setUserId(memorySnapshot.getUserId());
+            }
             conversationDescriptor.setEnvironment(memorySnapshot.getEnvironment());
             conversationDescriptor.setConversationStepSize(memorySnapshot.getConversationSteps().size());
             conversationDescriptor.setConversationState(memorySnapshot.getConversationState());

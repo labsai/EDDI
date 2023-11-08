@@ -30,14 +30,14 @@ public class ConversationSetup implements IConversationSetup {
     }
 
     @Override
-    public void createConversationDescriptor(String botId, IBot latestBot, String conversationId, URI conversationUri)
+    public void createConversationDescriptor(String botId, IBot latestBot, String userId, String conversationId, URI conversationUri)
             throws ResourceStoreException, ResourceNotFoundException {
 
         var botVersion = latestBot.getBotVersion();
         var botResourceUri =
                 createURI(IRestBotStore.resourceURI, botId, IRestBotStore.versionQueryParam, botVersion);
         var conversationDescriptor =
-                createConversationDescriptorDocument(conversationUri, botResourceUri);
+                createConversationDescriptorDocument(conversationUri, botResourceUri, userId);
         var botDescriptor =
                 documentDescriptorStore.readDescriptor(latestBot.getBotId(), latestBot.getBotVersion());
 

@@ -8,7 +8,7 @@ import ai.labs.eddi.models.Context;
 import java.net.URI;
 
 public interface IConversationSetup {
-    void createConversationDescriptor(String botId, IBot latestBot, String conversationId, URI conversationUri)
+    void createConversationDescriptor(String botId, IBot latestBot, String userId, String conversationId, URI conversationUri)
             throws IResourceStore.ResourceStoreException, IResourceStore.ResourceNotFoundException;
 
     String computeAnonymousUserIdIfEmpty(String userId, Context userIdContext);

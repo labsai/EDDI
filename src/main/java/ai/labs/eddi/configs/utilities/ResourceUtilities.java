@@ -145,9 +145,10 @@ public class ResourceUtilities {
         return descriptor;
     }
 
-    public static ConversationDescriptor createConversationDescriptorDocument(URI resource, URI botResourceURI) {
+    public static ConversationDescriptor createConversationDescriptorDocument(URI resource, URI botResourceURI, String userId) {
         ConversationDescriptor conversationDescriptor = new ConversationDescriptor();
         conversationDescriptor.setResource(resource);
+        conversationDescriptor.setUserId(userId);
         conversationDescriptor.setBotResource(botResourceURI);
         Date createdOn = new Date(System.currentTimeMillis());
         conversationDescriptor.setCreatedOn(createdOn);

@@ -30,6 +30,7 @@ public class DescriptorStore<T> implements IDescriptorStore<T> {
     private static final String FIELD_DELETED = "deleted";
 
     private static final String collectionName = "descriptors";
+    private static final String FIELD_USER_ID = "userId";
     private final ModifiableHistorizedResourceStore<T> descriptorResourceStore;
 
     private final IResourceFilter<T> resourceFilter;
@@ -44,6 +45,7 @@ public class DescriptorStore<T> implements IDescriptorStore<T> {
         this.resourceFilter = new ResourceFilter<>(descriptorCollection, descriptorResourceStore);
 
         Observable.fromPublisher(descriptorCollection.createIndex(Indexes.ascending(FIELD_RESOURCE), new IndexOptions().unique(true))).blockingFirst();
+        Observable.fromPublisher(descriptorCollection.createIndex(Indexes.ascending(FIELD_USER_ID), new IndexOptions().unique(false))).blockingFirst();
         Observable.fromPublisher(descriptorCollection.createIndex(Indexes.ascending(FIELD_NAME), new IndexOptions().unique(false))).blockingFirst();
         Observable.fromPublisher(descriptorCollection.createIndex(Indexes.ascending(FIELD_BOT_NAME), new IndexOptions().unique(false))).blockingFirst();
         Observable.fromPublisher(descriptorCollection.createIndex(Indexes.ascending(FIELD_DESCRIPTION), new IndexOptions().unique(false))).blockingFirst();
@@ -63,6 +65,7 @@ public class DescriptorStore<T> implements IDescriptorStore<T> {
         List<IResourceFilter.QueryFilter> queryFiltersOptional = new LinkedList<>();
         if (filter != null) {
             filter = StringUtilities.convertToSearchString(filter);
+            queryFiltersOptional.add(new IResourceFilter.QueryFilter(FIELD_USER_ID, filter));
             queryFiltersOptional.add(new IResourceFilter.QueryFilter(FIELD_NAME, filter));
             queryFiltersOptional.add(new IResourceFilter.QueryFilter(FIELD_BOT_NAME, filter));
             queryFiltersOptional.add(new IResourceFilter.QueryFilter(FIELD_DESCRIPTION, filter));
