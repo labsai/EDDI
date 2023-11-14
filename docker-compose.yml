@@ -8,10 +8,13 @@ services:
       - "7070:7070"
       - "7443:7443"
 #      - "5005:5005"
-    links:
-      - mongodb
     depends_on:
       - mongodb
   mongodb:
-    image: mongo:4.2
+    image: mongo:4.4
     restart: always
+    volumes:
+      - mongodb-data:/data/db
+
+volumes:
+  mongodb-data:
