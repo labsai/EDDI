@@ -222,10 +222,10 @@ public class RestBotEngine implements IRestBotEngine {
     }
 
     @Override
-    public Response readConversationLog(String conversationId, String outputType) {
+    public Response readConversationLog(String conversationId, String outputType, Integer logSize) {
         try {
             var memorySnapshot = conversationMemoryStore.loadConversationMemorySnapshot(conversationId);
-            var conversationLog = new ConversationLogGenerator(memorySnapshot).generate();
+            var conversationLog = new ConversationLogGenerator(memorySnapshot).generate(logSize);
             outputType = outputType.toLowerCase();
 
             if (isNullOrEmpty(outputType) || outputType.equals("string") || outputType.equals("text")) {

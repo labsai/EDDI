@@ -26,6 +26,9 @@ public class ConversationLogGenerator {
     }
 
     public ConversationLog generate() {
+        return generate(-1);
+    }
+    public ConversationLog generate(int logSize) {
         if(conversationMemory == null && memorySnapshot == null) {
             throw new IllegalStateException("ConversationMemory was null. " +
                     "You need to either set IConversationMemory or ConversationMemorySnapshot");
@@ -35,7 +38,9 @@ public class ConversationLogGenerator {
         var conversationOutputs = conversationMemory != null ?
                 conversationMemory.getConversationOutputs() : memorySnapshot.getConversationOutputs();
 
-        for (var conversationOutput : conversationOutputs) {
+        var startIndex = logSize > 0 && conversationOutputs.size() > logSize ? conversationOutputs.size() - logSize : 0;
+        for (var index = startIndex; index < conversationOutputs.size(); index++) {
+            var conversationOutput = conversationOutputs.get(index);
             var input = conversationOutput.get(OUTPUT_KEY_INPUT, String.class);
             if (input != null) {
                 conversationLog.getMessages().add(new ConversationLog.ConversationPart(KEY_ROLE_USER, input));
