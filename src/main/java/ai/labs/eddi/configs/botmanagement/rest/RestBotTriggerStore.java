@@ -6,14 +6,15 @@ import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.engine.caching.ICache;
 import ai.labs.eddi.engine.caching.ICacheFactory;
 import ai.labs.eddi.models.BotTriggerConfiguration;
-import org.jboss.logging.Logger;
-
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import jakarta.ws.rs.InternalServerErrorException;
 import jakarta.ws.rs.NotFoundException;
 import jakarta.ws.rs.WebApplicationException;
 import jakarta.ws.rs.core.Response;
+import org.jboss.logging.Logger;
+
+import java.util.List;
 
 /**
  * @author ginccc
@@ -32,6 +33,16 @@ public class RestBotTriggerStore implements IRestBotTriggerStore {
                                ICacheFactory cacheFactory) {
         this.botTriggerStore = botTriggerStore;
         botTriggersCache = cacheFactory.getCache(CACHE_NAME);
+    }
+
+    @Override
+    public List<BotTriggerConfiguration> readAllBotTriggers() {
+        try {
+            return botTriggerStore.readAllBotTriggers();
+        } catch (IResourceStore.ResourceStoreException e) {
+            log.error(e.getLocalizedMessage(), e);
+            throw new InternalServerErrorException(e.getLocalizedMessage());
+        }
     }
 
     @Override

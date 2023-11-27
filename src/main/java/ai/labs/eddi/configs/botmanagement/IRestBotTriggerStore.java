@@ -7,11 +7,18 @@ import jakarta.ws.rs.*;
 import jakarta.ws.rs.core.MediaType;
 import jakarta.ws.rs.core.Response;
 
+import java.util.List;
+
 //@Api(value = "Configurations -> (5) Bot Management", authorizations = {@Authorization(value = "eddi_auth")})
 @Path("/bottriggerstore/bottriggers")
 @Tag(name = "08. Bot Administration", description = "Deploy & Undeploy Bots")
 public interface IRestBotTriggerStore {
     String resourceURI = "eddi://ai.labs.bottrigger/bottriggerstore/bottriggers/";
+
+
+    @GET
+    @Produces(MediaType.APPLICATION_JSON)
+    List<BotTriggerConfiguration> readAllBotTriggers();
 
     @GET
     @Path("/{intent}")

@@ -12,11 +12,13 @@ import com.mongodb.client.model.Indexes;
 import com.mongodb.reactivestreams.client.MongoCollection;
 import com.mongodb.reactivestreams.client.MongoDatabase;
 import io.reactivex.rxjava3.core.Observable;
-import org.bson.Document;
-
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
+import org.bson.Document;
+
 import java.io.IOException;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.NoSuchElementException;
 
 /**
@@ -44,6 +46,11 @@ public class BotTriggerStore implements IBotTriggerStore {
         Observable.fromPublisher(
                 collection.createIndex(Indexes.ascending(INTENT_FIELD), new IndexOptions().unique(true))
         ).blockingFirst();
+    }
+
+    @Override
+    public List<BotTriggerConfiguration> readAllBotTriggers() throws IResourceStore.ResourceStoreException {
+        return botTriggerStore.readAllBotTriggers();
     }
 
     @Override
@@ -94,6 +101,22 @@ public class BotTriggerStore implements IBotTriggerStore {
                 String message = "BotTriggerConfiguration with intent=%s does not exist";
                 message = String.format(message, intent);
                 throw new IResourceStore.ResourceNotFoundException(message);
+            }
+        }
+
+        List<BotTriggerConfiguration> readAllBotTriggers()
+                throws IResourceStore.ResourceStoreException {
+
+            List<BotTriggerConfiguration> botTriggers = new ArrayList<>();
+            try {
+                var documents = Observable.fromPublisher(collection.find()).blockingIterable();
+                for (var document : documents) {
+                    botTriggers.add(documentBuilder.build(document, BotTriggerConfiguration.class));
+                }
+
+                return botTriggers;
+            } catch (IOException e) {
+                throw new IResourceStore.ResourceStoreException(e.getLocalizedMessage(), e);
             }
         }
 

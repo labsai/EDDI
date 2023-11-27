@@ -4,7 +4,13 @@ package ai.labs.eddi.configs.botmanagement;
 import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.models.BotTriggerConfiguration;
 
+import java.util.List;
+
 public interface IBotTriggerStore {
+
+    List<BotTriggerConfiguration> readAllBotTriggers()
+            throws IResourceStore.ResourceStoreException;
+
     BotTriggerConfiguration readBotTrigger(String intent)
             throws IResourceStore.ResourceNotFoundException, IResourceStore.ResourceStoreException;
 
