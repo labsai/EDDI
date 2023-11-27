@@ -27,6 +27,11 @@ public final class JsonSerialization implements IJsonSerialization {
     }
 
     @Override
+    public <T> T deserialize(String json) throws IOException {
+        return objectMapper.readerFor(Object.class).readValue(json);
+    }
+
+    @Override
     public <T> T deserialize(String json, Class<T> type) throws IOException {
         return objectMapper.readerFor(type).readValue(json);
     }
