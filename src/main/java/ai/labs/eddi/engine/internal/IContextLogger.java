@@ -11,4 +11,6 @@ public interface IContextLogger {
                                              String userId);
 
     void setLoggingContext(Map<String, String> loggingContext);
+
+    void clearLoggingContext();
 }
