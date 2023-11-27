@@ -13,6 +13,7 @@ import ai.labs.eddi.models.Context;
 import ai.labs.eddi.models.Context.ContextType;
 
 import jakarta.enterprise.context.ApplicationScoped;
+
 import java.util.HashMap;
 import java.util.LinkedList;
 import java.util.List;
@@ -28,20 +29,12 @@ import static ai.labs.eddi.utils.RuntimeUtilities.isNullOrEmpty;
 
 @ApplicationScoped
 public class ConversationMemoryUtilities {
+    private static final String KEY_INPUT = "input";
+    private static final String KEY_OUTPUT = "output";
+    private static final String KEY_QUICK_REPLIES = "quickReplies";
+
     public static ConversationMemorySnapshot convertConversationMemory(IConversationMemory conversationMemory) {
-        ConversationMemorySnapshot snapshot = new ConversationMemorySnapshot();
-
-        if (conversationMemory.getUserId() != null) {
-            snapshot.setUserId(conversationMemory.getUserId());
-        }
-
-        if (conversationMemory.getConversationId() != null) {
-            snapshot.setConversationId(conversationMemory.getConversationId());
-        }
-
-        snapshot.setBotId(conversationMemory.getBotId());
-        snapshot.setBotVersion(conversationMemory.getBotVersion());
-        snapshot.setConversationState(conversationMemory.getConversationState());
+        var snapshot = getMemorySnapshot(conversationMemory);
 
         for (var redoStep : conversationMemory.getRedoCache()) {
             var redoStepSnapshot = iterateConversationStep(redoStep);
@@ -59,13 +52,30 @@ public class ConversationMemoryUtilities {
         return snapshot;
     }
 
+    private static ConversationMemorySnapshot getMemorySnapshot(IConversationMemory conversationMemory) {
+        ConversationMemorySnapshot snapshot = new ConversationMemorySnapshot();
+
+        if (conversationMemory.getUserId() != null) {
+            snapshot.setUserId(conversationMemory.getUserId());
+        }
+
+        if (conversationMemory.getConversationId() != null) {
+            snapshot.setConversationId(conversationMemory.getConversationId());
+        }
+
+        snapshot.setBotId(conversationMemory.getBotId());
+        snapshot.setBotVersion(conversationMemory.getBotVersion());
+        snapshot.setConversationState(conversationMemory.getConversationState());
+        return snapshot;
+    }
+
     private static ConversationStepSnapshot iterateConversationStep(IConversationStep conversationStep) {
         ConversationStepSnapshot conversationStepSnapshot = new ConversationStepSnapshot();
 
         if (!conversationStep.isEmpty()) {
             var packageRunSnapshot = new PackageRunSnapshot();
             conversationStepSnapshot.getPackages().add(packageRunSnapshot);
-            for (IData data : conversationStep.getAllElements()) {
+            for (var data : conversationStep.getAllElements()) {
                 var resultSnapshot = new ResultSnapshot(
                         data.getKey(),
                         data.getResult(),
@@ -121,7 +131,7 @@ public class ConversationMemoryUtilities {
             var conversationStepSnapshot = conversationSteps.get(i);
             for (var packageRunSnapshot : conversationStepSnapshot.getPackages()) {
                 for (var resultSnapshot : packageRunSnapshot.getLifecycleTasks()) {
-                    Data data = new Data(resultSnapshot.getKey(), resultSnapshot.getResult(), resultSnapshot.getPossibleResults(), resultSnapshot.getTimestamp(), resultSnapshot.isPublic());
+                    var data = new Data(resultSnapshot.getKey(), resultSnapshot.getResult(), resultSnapshot.getPossibleResults(), resultSnapshot.getTimestamp(), resultSnapshot.isPublic());
                     conversationMemory.getCurrentStep().storeData(data);
                 }
             }
@@ -133,6 +143,54 @@ public class ConversationMemoryUtilities {
     public static SimpleConversationMemorySnapshot convertSimpleConversationMemory(
             ConversationMemorySnapshot conversationMemorySnapshot, boolean returnDetailed) {
 
+        var simpleSnapshot = getSimpleMemorySnapshot(conversationMemorySnapshot);
+
+        if (!returnDetailed) {
+            var simpleConversationOutputs = simpleSnapshot.getConversationOutputs();
+            var memoryConversationOutputs = conversationMemorySnapshot.getConversationOutputs();
+            for (int i = 0; i < memoryConversationOutputs.size(); i++) {
+                var conversationOutput = memoryConversationOutputs.get(i);
+                simpleConversationOutputs.add(new ConversationOutput());
+                for (String key : conversationOutput.keySet()) {
+                    if (key.startsWith(KEY_INPUT) || key.startsWith(KEY_OUTPUT) || key.startsWith(KEY_QUICK_REPLIES)) {
+                        simpleConversationOutputs.get(i).put(key, conversationOutput.get(key));
+                    }
+                }
+            }
+        } else {
+            simpleSnapshot.getConversationOutputs().addAll(conversationMemorySnapshot.getConversationOutputs());
+            simpleSnapshot.getConversationProperties().putAll(conversationMemorySnapshot.getConversationProperties());
+        }
+
+        for (var conversationStepSnapshot : conversationMemorySnapshot.getConversationSteps()) {
+            var simpleConversationStep = new SimpleConversationStep();
+            simpleSnapshot.getConversationSteps().add(simpleConversationStep);
+            for (var packageRunSnapshot : conversationStepSnapshot.getPackages()) {
+                for (var resultSnapshot : packageRunSnapshot.getLifecycleTasks()) {
+                    if (returnDetailed || resultSnapshot.isPublic()) {
+                        Object result = resultSnapshot.getResult();
+                        String key = resultSnapshot.getKey();
+                        if (!returnDetailed || key.startsWith(KEY_INPUT) || key.startsWith(KEY_OUTPUT) || key.startsWith(KEY_QUICK_REPLIES)) {
+                            simpleConversationStep.getConversationStep().add(
+                                    new ConversationStepData(
+                                            key,
+                                            result,
+                                            resultSnapshot.getTimestamp(),
+                                            resultSnapshot.getOriginPackageId()));
+                        }
+                    } else {
+                        continue;
+                    }
+
+                    simpleConversationStep.setTimestamp(resultSnapshot.getTimestamp());
+                }
+            }
+        }
+
+        return simpleSnapshot;
+    }
+
+    private static SimpleConversationMemorySnapshot getSimpleMemorySnapshot(ConversationMemorySnapshot conversationMemorySnapshot) {
         SimpleConversationMemorySnapshot simpleSnapshot = new SimpleConversationMemorySnapshot();
 
         if (conversationMemorySnapshot.getUserId() != null) {
@@ -145,33 +203,7 @@ public class ConversationMemoryUtilities {
         simpleSnapshot.setConversationState(conversationMemorySnapshot.getConversationState());
         simpleSnapshot.setEnvironment(conversationMemorySnapshot.getEnvironment());
         simpleSnapshot.setUndoAvailable(conversationMemorySnapshot.getConversationSteps().size() > 1);
-        simpleSnapshot.setRedoAvailable(conversationMemorySnapshot.getRedoCache().size() > 0);
-
-        simpleSnapshot.getConversationOutputs().addAll(conversationMemorySnapshot.getConversationOutputs());
-        simpleSnapshot.getConversationProperties().putAll(conversationMemorySnapshot.getConversationProperties());
-
-        for (var conversationStepSnapshot : conversationMemorySnapshot.getConversationSteps()) {
-            var simpleConversationStep = new SimpleConversationStep();
-            simpleSnapshot.getConversationSteps().add(simpleConversationStep);
-            for (var packageRunSnapshot : conversationStepSnapshot.getPackages()) {
-                for (var resultSnapshot : packageRunSnapshot.getLifecycleTasks()) {
-                    if (returnDetailed || resultSnapshot.isPublic()) {
-                        Object result = resultSnapshot.getResult();
-                        simpleConversationStep.getConversationStep().add(
-                                new ConversationStepData(
-                                        resultSnapshot.getKey(),
-                                        result,
-                                        resultSnapshot.getTimestamp(),
-                                        resultSnapshot.getOriginPackageId()));
-                    } else {
-                        continue;
-                    }
-
-                    simpleConversationStep.setTimestamp(resultSnapshot.getTimestamp());
-                }
-            }
-        }
-
+        simpleSnapshot.setRedoAvailable(!conversationMemorySnapshot.getRedoCache().isEmpty());
         return simpleSnapshot;
     }
 
