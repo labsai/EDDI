@@ -151,7 +151,7 @@ public class ConversationMemoryUtilities {
             for (int i = 0; i < memoryConversationOutputs.size(); i++) {
                 var conversationOutput = memoryConversationOutputs.get(i);
                 simpleConversationOutputs.add(new ConversationOutput());
-                for (String key : conversationOutput.keySet()) {
+                for (var key : conversationOutput.keySet()) {
                     if (key.startsWith(KEY_INPUT) || key.startsWith(KEY_OUTPUT) || key.startsWith(KEY_QUICK_REPLIES)) {
                         simpleConversationOutputs.get(i).put(key, conversationOutput.get(key));
                     }
@@ -167,17 +167,18 @@ public class ConversationMemoryUtilities {
             simpleSnapshot.getConversationSteps().add(simpleConversationStep);
             for (var packageRunSnapshot : conversationStepSnapshot.getPackages()) {
                 for (var resultSnapshot : packageRunSnapshot.getLifecycleTasks()) {
-                    if (returnDetailed || resultSnapshot.isPublic()) {
-                        Object result = resultSnapshot.getResult();
-                        String key = resultSnapshot.getKey();
-                        if (!returnDetailed || key.startsWith(KEY_INPUT) || key.startsWith(KEY_OUTPUT) || key.startsWith(KEY_QUICK_REPLIES)) {
-                            simpleConversationStep.getConversationStep().add(
-                                    new ConversationStepData(
-                                            key,
-                                            result,
-                                            resultSnapshot.getTimestamp(),
-                                            resultSnapshot.getOriginPackageId()));
-                        }
+                    var key = resultSnapshot.getKey();
+                    if (returnDetailed || resultSnapshot.isPublic() ||
+                            key.equals(KEY_INPUT) || key.startsWith(KEY_OUTPUT) || key.startsWith(KEY_QUICK_REPLIES)) {
+
+                        var result = resultSnapshot.getResult();
+                        simpleConversationStep.getConversationStep().add(
+                                new ConversationStepData(
+                                        key,
+                                        result,
+                                        resultSnapshot.getTimestamp(),
+                                        resultSnapshot.getOriginPackageId()));
+
                     } else {
                         continue;
                     }
@@ -247,6 +248,10 @@ public class ConversationMemoryUtilities {
                 }
             } else {
                 memorySnapshot.setConversationOutputs(null);
+            }
+
+            if (!isNullOrEmpty(returningFields) && !returningFields.contains("conversationProperties")) {
+                memorySnapshot.setConversationProperties(null);
             }
         }
         return memorySnapshot;

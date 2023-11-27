@@ -5,6 +5,7 @@ import ai.labs.eddi.configs.botmanagement.IRestUserConversationStore;
 import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.engine.IRestBotEngine;
 import ai.labs.eddi.engine.IRestBotManagement;
+import ai.labs.eddi.engine.memory.model.SimpleConversationMemorySnapshot;
 import ai.labs.eddi.models.*;
 import ai.labs.eddi.utils.RestUtilities;
 import io.quarkus.security.UnauthorizedException;
@@ -75,7 +76,7 @@ public class RestBotManagement implements IRestBotManagement {
                             returnDetailed,
                             returnCurrentStepOnly, returningFields);
 
-            Property languageProperty = memorySnapshot.getConversationProperties().get("lang");
+            Property languageProperty = extractLanguageProperty(memorySnapshot);
             if (!userConversationResult.isNewlyCreatedConversation() &&
                     (languageProperty != null && languageProperty.getValueString() != null &&
                             !languageProperty.getValueString().equals(language))) {
@@ -94,6 +95,11 @@ public class RestBotManagement implements IRestBotManagement {
         }
     }
 
+    private static Property extractLanguageProperty(SimpleConversationMemorySnapshot memorySnapshot) {
+        var conversationProperties = memorySnapshot.getConversationProperties();
+        return conversationProperties != null ? conversationProperties.get("lang") : null;
+    }
+
     @Override
     public void sayWithinContext(String intent,
                                  String userId,
@@ -108,8 +114,11 @@ public class RestBotManagement implements IRestBotManagement {
 
             checkUserAuthIfApplicable(userConversation);
 
-            restBotEngine.sayWithinContext(userConversation.getEnvironment(), userConversation.getBotId(),
-                    userConversation.getConversationId(), returnDetailed, returnCurrentStepOnly, returningFields, inputData, response);
+            restBotEngine.sayWithinContext(
+                    userConversation.getEnvironment(),
+                    userConversation.getBotId(),
+                    userConversation.getConversationId(),
+                    returnDetailed, returnCurrentStepOnly, returningFields, inputData, response);
 
         } catch (Exception e) {
             log.error(e.getLocalizedMessage(), e);
