@@ -12,6 +12,7 @@ import lombok.Setter;
 public class PropertyInstruction extends Property {
     private String fromObjectPath = "";
     private String toObjectPath = "";
+    private Boolean convertToObject = false;
     private Boolean override = true;
     private Boolean runOnValidationError = false;
     private HttpCodeValidator httpCodeValidator;

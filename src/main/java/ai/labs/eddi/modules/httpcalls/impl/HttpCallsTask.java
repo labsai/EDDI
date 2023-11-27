@@ -444,9 +444,21 @@ public class HttpCallsTask implements ILifecycleTask {
 
                             if (!isNullOrEmpty(value)) {
                                 value = templateValues(value, templateDataObjects);
+                                var valueTrimmed = value.trim();
+                                if (propertyInstruction.getConvertToObject() &&
+                                        valueTrimmed.startsWith("{") && valueTrimmed.endsWith("}")) {
+                                    try {
+                                        propertyValue = jsonSerialization.deserialize(valueTrimmed);
+                                    } catch (IOException e) {
+                                        propertyValue = value;
+                                    }
+                                } else {
+                                    propertyValue = value;
+                                }
+                            } else {
+                                propertyValue = "";
                             }
 
-                            propertyValue = value;
                         }
                         if (propertyValue instanceof String s) {
                             memory.getConversationProperties().put(propertyName,
