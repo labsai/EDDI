@@ -1,6 +1,7 @@
 package ai.labs.eddi.engine.httpclient;
 
-import java.net.CookieStore;
+import org.eclipse.jetty.http.HttpCookieStore;
+
 import java.net.URI;
 
 public interface IHttpClient {
@@ -13,7 +14,7 @@ public interface IHttpClient {
         PATCH
     }
 
-    CookieStore getCookieStore();
+    HttpCookieStore getCookieStore();
 
     IRequest newRequest(URI uri);
 

@@ -1,5 +1,6 @@
 package ai.labs.eddi.engine.httpclient;
 
+import java.util.Map;
 import java.util.concurrent.TimeUnit;
 
 public interface IRequest {
@@ -18,6 +19,8 @@ public interface IRequest {
     IRequest setTimeout(long timeout, TimeUnit timeUnit);
 
     IResponse send() throws HttpRequestException;
+
+    Map<String,Object> toMap();
 
     void send(ICompleteListener completeListener) throws HttpRequestException;
 
