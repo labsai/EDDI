@@ -123,6 +123,7 @@ public class HttpCallsTask implements ILifecycleTask {
                             do {
                                 request = buildRequest(
                                         httpCallsConfig.getTargetServerUrl(), call.getRequest(), templateDataObjects);
+                                createHttpMemoryEntry(currentStep, request.toMap(), call.getName() + "Request");
                                 response = executeAndMeasureRequest(call, request, retryCall, amountOfExecutions);
 
                                 var isResponseSuccessful = response.getHttpCode() >= 200 && response.getHttpCode() < 300;
