@@ -20,6 +20,7 @@ import org.jboss.logging.Logger;
 import java.net.URI;
 import java.nio.charset.Charset;
 import java.util.*;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
 
@@ -41,9 +42,7 @@ public class HttpClientWrapper implements IHttpClient {
     private static final Logger log = Logger.getLogger(HttpClientWrapper.class);
 
     @Inject
-    public HttpClientWrapper(JettyHttpClient httpClient,
-                             @ConfigProperty(name = "systemRuntime.projectDomain") String projectDomain,
-                             @ConfigProperty(name = "systemRuntime.projectVersion") String projectVersion) {
+    public HttpClientWrapper(JettyHttpClient httpClient, @ConfigProperty(name = "systemRuntime.projectDomain") String projectDomain, @ConfigProperty(name = "systemRuntime.projectVersion") String projectVersion) {
         this.httpClient = httpClient.getHttpClient();
         this.projectDomain = projectDomain;
         this.projectVersion = projectVersion;
@@ -61,13 +60,10 @@ public class HttpClientWrapper implements IHttpClient {
 
     @Override
     public IRequest newRequest(URI uri, Method method) {
-        Request request = httpClient.
-                newRequest(uri).
-                method(method.name()).
-                headers(httpFields -> {
-                    var userAgent = projectDomain.toUpperCase() + "/" + projectVersion;
-                    httpFields.put(HttpHeader.USER_AGENT, userAgent);
-                });
+        Request request = httpClient.newRequest(uri).method(method.name()).headers(httpFields -> {
+            var userAgent = projectDomain.toUpperCase() + "/" + projectVersion;
+            httpFields.put(HttpHeader.USER_AGENT, userAgent);
+        });
         return new RequestWrapper(uri, request);
     }
 
@@ -87,9 +83,7 @@ public class HttpClientWrapper implements IHttpClient {
         @Override
         public IRequest setBasicAuthentication(String username, String password, String realm, boolean preemptive) {
             if (preemptive) {
-                request.headers(httpFields ->
-                        httpFields.add("Authorization", "Basic " + Base64.getEncoder().
-                                encodeToString((username + ":" + password).getBytes())));
+                request.headers(httpFields -> httpFields.add("Authorization", "Basic " + Base64.getEncoder().encodeToString((username + ":" + password).getBytes())));
             } else {
                 AuthenticationStore auth = httpClient.getAuthenticationStore();
                 auth.addAuthentication(new BasicAuthentication(uri, realm, username, password));
@@ -138,12 +132,13 @@ public class HttpClientWrapper implements IHttpClient {
 
         @Override
         public IResponse send() throws HttpRequestException {
-            final var listener = new CompletableResponseListener(request, maxLength);
-            request.send(listener);
             try {
-                final ContentResponse response = listener.send().get();
+                var listener = new CompletableResponseListener(request, maxLength);
+                CompletableFuture<ContentResponse> completableFuture = listener.send();
+                completableFuture.thenApply(ContentResponse::getContentAsString);
+                var response = completableFuture.get();
                 var responseWrapper = new ResponseWrapper();
-                responseWrapper.setContentAsString(listener.getContentAsString());
+                responseWrapper.setContentAsString(response.getContentAsString());
                 responseWrapper.setHttpCode(response.getStatus());
                 responseWrapper.setHttpCodeMessage(response.getReason());
                 responseWrapper.setHttpHeader(convertHeaderToMap(response.getHeaders()));
@@ -234,13 +229,7 @@ public class HttpClientWrapper implements IHttpClient {
                 requestBody = requestBody.replaceAll("\\r?\\n", "");
             }
 
-            return "RequestWrapper{" +
-                    "uri=" + uri +
-                    ", request=" + request.toString() +
-                    ", requestBody=" + requestBody +
-                    ", maxLength=" + maxLength +
-                    ", queryParams=" + request.getParams() +
-                    '}';
+            return "RequestWrapper{" + "uri=" + uri + ", request=" + request.toString() + ", requestBody=" + requestBody + ", maxLength=" + maxLength + ", queryParams=" + request.getParams() + '}';
         }
     }
 
@@ -255,12 +244,8 @@ public class HttpClientWrapper implements IHttpClient {
 
         @Override
         public String toString() {
-            return "ResponseWrapper{" +
-                    "httpCode=" + httpCode +
-                    ", httpCodeMessage=" + httpCodeMessage +
-                    ", responseBody=" + contentAsString +
-                    ", httpHeader=" + httpHeader.toString() +
-                    '}';
+            contentAsString = contentAsString.replaceAll("\\r?\\n", "");
+            return "ResponseWrapper{" + "httpCode=" + httpCode + ", httpCodeMessage=" + httpCodeMessage + ", responseBody=" + contentAsString + ", httpHeader=" + httpHeader.toString() + '}';
         }
     }
 
