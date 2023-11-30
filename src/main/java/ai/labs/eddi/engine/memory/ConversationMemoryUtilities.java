@@ -29,7 +29,8 @@ import static ai.labs.eddi.utils.RuntimeUtilities.isNullOrEmpty;
 
 @ApplicationScoped
 public class ConversationMemoryUtilities {
-    private static final String KEY_INPUT = "input";
+    private static final String KEY_INPUT_INITIAL = "input:initial";
+    private static final String KEY_ACTIONS = "actions";
     private static final String KEY_OUTPUT = "output";
     private static final String KEY_QUICK_REPLIES = "quickReplies";
 
@@ -152,7 +153,8 @@ public class ConversationMemoryUtilities {
                 var conversationOutput = memoryConversationOutputs.get(i);
                 simpleConversationOutputs.add(new ConversationOutput());
                 for (var key : conversationOutput.keySet()) {
-                    if (key.startsWith(KEY_INPUT) || key.startsWith(KEY_OUTPUT) || key.startsWith(KEY_QUICK_REPLIES)) {
+                    if (key.startsWith(KEY_INPUT_INITIAL) || key.startsWith(KEY_ACTIONS) ||
+                            key.startsWith(KEY_OUTPUT) || key.startsWith(KEY_QUICK_REPLIES)) {
                         simpleConversationOutputs.get(i).put(key, conversationOutput.get(key));
                     }
                 }
@@ -168,8 +170,9 @@ public class ConversationMemoryUtilities {
             for (var packageRunSnapshot : conversationStepSnapshot.getPackages()) {
                 for (var resultSnapshot : packageRunSnapshot.getLifecycleTasks()) {
                     var key = resultSnapshot.getKey();
-                    if (returnDetailed || resultSnapshot.isPublic() ||
-                            key.equals(KEY_INPUT) || key.startsWith(KEY_OUTPUT) || key.startsWith(KEY_QUICK_REPLIES)) {
+                    if (returnDetailed ||
+                            key.equals(KEY_INPUT_INITIAL) || key.startsWith(KEY_ACTIONS) ||
+                            key.startsWith(KEY_OUTPUT) || key.startsWith(KEY_QUICK_REPLIES)) {
 
                         var result = resultSnapshot.getResult();
                         simpleConversationStep.getConversationStep().add(
