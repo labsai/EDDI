@@ -1,7 +1,7 @@
 const eddi = {};
 eddi.isFirstConversation = true;
 eddi.isFirstMessage = true;
-eddi.skipDelay = false;
+eddi.skipDelay = true;
 
 class Message {
     constructor(text) {
@@ -259,6 +259,10 @@ $(function () {
             }
         }
 
+        let typingIndicator = new Message('<img src="/img/typing-indicator.svg" />');
+        typingIndicator.draw();
+        smoothScrolling();
+
         $.ajax({
             type: 'POST',
             url: '/bots/' + eddi.environment + '/' + eddi.botId + '/' + eddi.conversationId,
@@ -266,7 +270,11 @@ $(function () {
             contentType: 'application/json; charset=utf-8',
             dataType: 'json',
             success: function (conversationMemory) {
+                typingIndicator.remove();
                 refreshConversationLog(conversationMemory);
+            },
+            error: function() {
+                typingIndicator.remove();
             }
         });
     };
