@@ -1,7 +1,7 @@
 package ai.labs.eddi.engine.internal;
 
 import ai.labs.eddi.configs.botmanagement.IRestBotTriggerStore;
-import ai.labs.eddi.configs.botmanagement.IRestUserConversationStore;
+import ai.labs.eddi.configs.botmanagement.IUserConversationStore;
 import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.engine.IRestBotEngine;
 import ai.labs.eddi.engine.IRestBotManagement;
@@ -36,7 +36,7 @@ import static ai.labs.eddi.models.Deployment.Environment.unrestricted;
 public class RestBotManagement implements IRestBotManagement {
     public static final String KEY_LANG = "lang";
     private final IRestBotEngine restBotEngine;
-    private final IRestUserConversationStore restUserConversationStore;
+    private final IUserConversationStore userConversationStore;
     private final IRestBotTriggerStore restBotManagementStore;
     private final boolean checkForUserAuthentication;
 
@@ -47,11 +47,11 @@ public class RestBotManagement implements IRestBotManagement {
 
     @Inject
     public RestBotManagement(IRestBotEngine restBotEngine,
-                             IRestUserConversationStore restUserConversationStore,
+                             IUserConversationStore userConversationStore,
                              IRestBotTriggerStore restBotManagementStore,
                              @ConfigProperty(name = "quarkus.oidc.enabled") boolean checkForUserAuthentication) {
         this.restBotEngine = restBotEngine;
-        this.restUserConversationStore = restUserConversationStore;
+        this.userConversationStore = userConversationStore;
         this.restBotManagementStore = restBotManagementStore;
         this.checkForUserAuthentication = checkForUserAuthentication;
     }
@@ -155,10 +155,17 @@ public class RestBotManagement implements IRestBotManagement {
 
     @Override
     public Response endCurrentConversation(String intent, String userId) {
-        UserConversation userConversation = restUserConversationStore.readUserConversation(intent, userId);
-        checkUserAuthIfApplicable(userConversation);
-        restBotEngine.endConversation(userConversation.getConversationId());
-        return Response.ok().build();
+        try {
+            var userConversation = userConversationStore.readUserConversation(intent, userId);
+            if (userConversation != null) {
+                checkUserAuthIfApplicable(userConversation);
+                restBotEngine.endConversation(userConversation.getConversationId());
+            }
+            return Response.ok().build();
+        } catch (IResourceStore.ResourceStoreException e) {
+            log.error(e.getLocalizedMessage(), e);
+            throw new InternalServerErrorException();
+        }
     }
 
     @Override
@@ -218,7 +225,12 @@ public class RestBotManagement implements IRestBotManagement {
     }
 
     private void deleteUserConversation(String intent, String userId) {
-        restUserConversationStore.deleteUserConversation(intent, userId);
+        try {
+            userConversationStore.deleteUserConversation(intent, userId);
+        } catch (IResourceStore.ResourceStoreException e) {
+            log.error(e.getLocalizedMessage(), e);
+            throw new InternalServerErrorException();
+        }
     }
 
     private boolean isConversationEnded(UserConversation userConversation) {
@@ -263,7 +275,7 @@ public class RestBotManagement implements IRestBotManagement {
                 botDeployment.getBotId(),
                 conversationId);
 
-        storeUserConversation(intent, userId, userConversation);
+        storeUserConversation(userConversation);
 
         return userConversation;
     }
@@ -277,11 +289,21 @@ public class RestBotManagement implements IRestBotManagement {
     }
 
     private UserConversation getUserConversation(String intent, String userId) {
-        return restUserConversationStore.readUserConversation(intent, userId);
+        try {
+            return userConversationStore.readUserConversation(intent, userId);
+        } catch (IResourceStore.ResourceStoreException e) {
+            log.error(e.getLocalizedMessage(), e);
+            throw new InternalServerErrorException();
+        }
     }
 
-    private void storeUserConversation(String intent, String userId, UserConversation userConversation) {
-        restUserConversationStore.createUserConversation(intent, userId, userConversation);
+    private void storeUserConversation(UserConversation userConversation) {
+        try {
+            userConversationStore.createUserConversation(userConversation);
+        } catch (IResourceStore.ResourceAlreadyExistsException | IResourceStore.ResourceStoreException e) {
+            log.error(e.getLocalizedMessage(), e);
+            throw new InternalServerErrorException();
+        }
     }
 
     private void checkUserAuthIfApplicable(UserConversation userConversation) throws UnauthorizedException {
