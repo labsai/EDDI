@@ -171,41 +171,57 @@ public class RestBotManagement implements IRestBotManagement {
     @Override
     public Boolean isUndoAvailable(String intent, String userId) {
         var userConversation = getUserConversation(intent, userId);
-        checkUserAuthIfApplicable(userConversation);
-        return restBotEngine.isUndoAvailable(
-                userConversation.getEnvironment(),
-                userConversation.getBotId(),
-                userConversation.getConversationId());
+        if (userConversation != null) {
+            checkUserAuthIfApplicable(userConversation);
+            return restBotEngine.isUndoAvailable(
+                    userConversation.getEnvironment(),
+                    userConversation.getBotId(),
+                    userConversation.getConversationId());
+        } else {
+            return false;
+        }
     }
 
     @Override
     public Response undo(String intent, String userId) {
         var userConversation = getUserConversation(intent, userId);
-        checkUserAuthIfApplicable(userConversation);
-        return restBotEngine.undo(
-                userConversation.getEnvironment(),
-                userConversation.getBotId(),
-                userConversation.getConversationId());
+        if (userConversation != null) {
+            checkUserAuthIfApplicable(userConversation);
+            return restBotEngine.undo(
+                    userConversation.getEnvironment(),
+                    userConversation.getBotId(),
+                    userConversation.getConversationId());
+        } else {
+            return Response.status(Response.Status.NOT_FOUND).build();
+        }
     }
 
     @Override
     public Boolean isRedoAvailable(String intent, String userId) {
         var userConversation = getUserConversation(intent, userId);
-        checkUserAuthIfApplicable(userConversation);
-        return restBotEngine.isRedoAvailable(
-                userConversation.getEnvironment(),
-                userConversation.getBotId(),
-                userConversation.getConversationId());
+        if (userConversation != null) {
+            checkUserAuthIfApplicable(userConversation);
+            return restBotEngine.isRedoAvailable(
+                    userConversation.getEnvironment(),
+                    userConversation.getBotId(),
+                    userConversation.getConversationId());
+        } else {
+            return false;
+        }
     }
 
     @Override
     public Response redo(String intent, String userId) {
         var userConversation = getUserConversation(intent, userId);
-        checkUserAuthIfApplicable(userConversation);
-        return restBotEngine.redo(
-                userConversation.getEnvironment(),
-                userConversation.getBotId(),
-                userConversation.getConversationId());
+        if (userConversation != null) {
+            checkUserAuthIfApplicable(userConversation);
+            return restBotEngine.redo(
+                    userConversation.getEnvironment(),
+                    userConversation.getBotId(),
+                    userConversation.getConversationId());
+        } else {
+            return Response.status(Response.Status.NOT_FOUND).build();
+        }
     }
 
     private static String extractLanguage(InputData inputData) {
