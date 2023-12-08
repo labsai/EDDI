@@ -7,7 +7,7 @@ description: >-
 
 # E.D.D.I Documentation
 
-v5.1.5 - STABLE
+v5.1.6 - STABLE
 
 License: Apache License 2.0
 
