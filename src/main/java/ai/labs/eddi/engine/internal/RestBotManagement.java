@@ -13,7 +13,6 @@ import io.quarkus.security.identity.SecurityIdentity;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import jakarta.ws.rs.InternalServerErrorException;
-import jakarta.ws.rs.NotFoundException;
 import jakarta.ws.rs.WebApplicationException;
 import jakarta.ws.rs.container.AsyncResponse;
 import jakarta.ws.rs.core.MediaType;
@@ -138,9 +137,9 @@ public class RestBotManagement implements IRestBotManagement {
 
         UserConversation userConversation;
         boolean newlyCreatedConversation = false;
-        try {
-            userConversation = getUserConversation(intent, userId);
-        } catch (NotFoundException e) {
+
+        userConversation = getUserConversation(intent, userId);
+        if (userConversation == null) {
             userConversation = createNewConversation(intent, userId, language);
             newlyCreatedConversation = true;
         }
