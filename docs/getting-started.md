@@ -45,7 +45,7 @@ _**Prerequisite**: You need an up and running `Docker` environment. (For referen
 
 #### _Prerequisites:_
 
-* Java 17
+* Java 21
 * Maven 3.8.4
 * MongoDB > 4.0
 

@@ -42,7 +42,7 @@ Technical specifications:
 
 ## Prerequisites
 
-* Java 17
+* Java 21
 * Maven 3.8.4
 * MongoDB > 4.4
 
