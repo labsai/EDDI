@@ -8,9 +8,9 @@
     <version>5.2.0</version>
     <properties>
         <compiler-plugin.version>3.11.0</compiler-plugin.version>
-        <maven.compiler.source>17</maven.compiler.source>
-        <maven.compiler.target>17</maven.compiler.target>
-        <maven.compiler.release>17</maven.compiler.release>
+        <maven.compiler.source>21</maven.compiler.source>
+        <maven.compiler.target>21</maven.compiler.target>
+        <maven.compiler.release>21</maven.compiler.release>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
         <project.reporting.outputEncoding>UTF-8</project.reporting.outputEncoding>
         <quarkus.microprofile.version>3.0.0.Final</quarkus.microprofile.version>
@@ -21,7 +21,7 @@
         <quarkus-logger-manager.version>3.0.2</quarkus-logger-manager.version>
         <jandex-maven-plugin.version>3.1.6</jandex-maven-plugin.version>
         <maven.compiler.parameters>true</maven.compiler.parameters>
-        <surefire-plugin.version>3.0.0</surefire-plugin.version>
+        <surefire-plugin.version>3.1.2</surefire-plugin.version>
         <failsafe-plugin.version>3.0.0</failsafe-plugin.version>
         <failsafe.useModulePath>false</failsafe.useModulePath>
         <war-plugin.version>3.3.2</war-plugin.version>

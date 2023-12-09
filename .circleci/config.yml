@@ -2,7 +2,7 @@ version: 2
 jobs:
   build:
     docker:
-      - image: cimg/openjdk:17.0
+      - image: cimg/openjdk:21.0
     working_directory: ~/repo
     resource_class: large
     environment:
@@ -26,7 +26,7 @@ jobs:
           command: chmod +x mvnw
 
       - setup_remote_docker:
-          version: 20.10.14
+          version: docker24
 
       - run:
           name: Compile app
