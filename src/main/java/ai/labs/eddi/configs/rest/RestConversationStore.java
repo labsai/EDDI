@@ -11,7 +11,6 @@ import ai.labs.eddi.engine.memory.rest.IRestConversationStore;
 import ai.labs.eddi.models.ConversationState;
 import ai.labs.eddi.models.ConversationStatus;
 import org.jboss.logging.Logger;
-import org.jboss.resteasy.spi.NoLogWebApplicationException;
 
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
@@ -108,7 +107,7 @@ public class RestConversationStore implements IRestConversationStore {
             log.error(e.getMessage(), e);
             throw new InternalServerErrorException(e.getMessage(), e);
         } catch (IResourceStore.ResourceNotFoundException e) {
-            throw new NoLogWebApplicationException(e);
+            throw new NotFoundException();
         }
     }
 

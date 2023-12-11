@@ -17,14 +17,14 @@ import ai.labs.eddi.models.Deployment;
 import ai.labs.eddi.models.Deployment.Status;
 import ai.labs.eddi.models.DocumentDescriptor;
 import ai.labs.eddi.utils.RuntimeUtilities;
-import org.jboss.logging.Logger;
-import org.jboss.resteasy.spi.NoLogWebApplicationException;
-
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import jakarta.ws.rs.InternalServerErrorException;
+import jakarta.ws.rs.WebApplicationException;
 import jakarta.ws.rs.core.MediaType;
 import jakarta.ws.rs.core.Response;
+import org.jboss.logging.Logger;
+
 import java.util.*;
 import java.util.concurrent.Callable;
 
@@ -165,7 +165,7 @@ public class RestBotAdministration implements IRestBotAdministration {
         String message = "Bot deployment is currently in progress! (botId=%s , version=%s)";
         message = String.format(message, botId, version);
         log.error(message, e);
-        throw new NoLogWebApplicationException(new Throwable(message), Response.Status.FORBIDDEN.getStatusCode());
+        throw new WebApplicationException(new Throwable(message), Response.Status.FORBIDDEN.getStatusCode());
     }
 
     @Override

@@ -19,8 +19,8 @@ import ai.labs.eddi.datastore.serialization.IJsonSerialization;
 import ai.labs.eddi.models.DocumentDescriptor;
 import ai.labs.eddi.utils.FileUtilities;
 import ai.labs.eddi.utils.RestUtilities;
+import jakarta.ws.rs.NotFoundException;
 import org.jboss.logging.Logger;
-import org.jboss.resteasy.spi.NoLogWebApplicationException;
 
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
@@ -93,7 +93,7 @@ public class RestExportService extends AbstractBackupService implements IRestExp
             String zipFilePath = FileUtilities.buildPath(tmpPath.toString(), botFilename);
             return Response.ok(new BufferedInputStream(new FileInputStream(zipFilePath))).build();
         } catch (FileNotFoundException e) {
-            throw new NoLogWebApplicationException(Response.Status.NOT_FOUND);
+            throw new NotFoundException();
         }
     }
 
@@ -148,7 +148,7 @@ public class RestExportService extends AbstractBackupService implements IRestExp
             this.zipArchive.createZip(botPath.toString(), targetZipPath);
             return Response.ok().location(URI.create("/backup/export/" + zipFilename)).build();
         } catch (IResourceStore.ResourceNotFoundException e) {
-            throw new NoLogWebApplicationException(Response.Status.NOT_FOUND);
+            throw new NotFoundException();
         } catch (IResourceStore.ResourceStoreException | IOException | CallbackMatcher.CallbackMatcherException e) {
             log.error(e.getLocalizedMessage(), e);
             throw new InternalServerErrorException();

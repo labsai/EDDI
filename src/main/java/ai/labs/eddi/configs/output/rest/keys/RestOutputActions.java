@@ -11,15 +11,17 @@ import ai.labs.eddi.configs.packages.model.PackageConfiguration;
 import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.utils.CollectionUtilities;
 import ai.labs.eddi.utils.RestUtilities;
-import org.jboss.logging.Logger;
-import org.jboss.resteasy.spi.NoLogWebApplicationException;
-
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import jakarta.ws.rs.InternalServerErrorException;
-import jakarta.ws.rs.core.Response;
+import jakarta.ws.rs.NotFoundException;
+import org.jboss.logging.Logger;
+
 import java.net.URI;
-import java.util.*;
+import java.util.Collections;
+import java.util.LinkedList;
+import java.util.List;
+import java.util.Map;
 
 /**
  * @author ginccc
@@ -76,7 +78,7 @@ public class RestOutputActions implements IRestOutputActions {
 
             return sortedOutputKeys(retOutputKeys);
         } catch (IResourceStore.ResourceNotFoundException e) {
-            throw new NoLogWebApplicationException(Response.Status.NOT_FOUND.getStatusCode());
+            throw new NotFoundException();
         } catch (IResourceStore.ResourceStoreException e) {
             log.error(e.getLocalizedMessage(), e);
             throw new InternalServerErrorException(e);
