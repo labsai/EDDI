@@ -8,22 +8,23 @@ import ai.labs.eddi.models.ResourceDescriptor;
 import ai.labs.eddi.testing.descriptor.ITestCaseDescriptorStore;
 import ai.labs.eddi.testing.descriptor.model.TestCaseDescriptor;
 import ai.labs.eddi.utils.RestUtilities;
-import org.jboss.logging.Logger;
-
 import jakarta.inject.Inject;
-import jakarta.ws.rs.*;
+import jakarta.ws.rs.BadRequestException;
+import jakarta.ws.rs.HttpMethod;
+import jakarta.ws.rs.InternalServerErrorException;
+import jakarta.ws.rs.NotFoundException;
 import jakarta.ws.rs.container.ContainerRequestContext;
 import jakarta.ws.rs.container.ContainerResponseContext;
 import jakarta.ws.rs.container.ContainerResponseFilter;
-import jakarta.ws.rs.container.ResourceInfo;
-import jakarta.ws.rs.core.Context;
 import jakarta.ws.rs.core.HttpHeaders;
 import jakarta.ws.rs.core.UriInfo;
 import jakarta.ws.rs.ext.Provider;
-import java.lang.reflect.Method;
+import org.jboss.logging.Logger;
+
 import java.net.URI;
 import java.util.Date;
 
+import static ai.labs.eddi.configs.documentdescriptor.IRestDocumentDescriptorStore.DESCRIPTOR_STORE_PATH;
 import static ai.labs.eddi.configs.utilities.ResourceUtilities.createDocumentDescriptor;
 
 /**
@@ -31,24 +32,20 @@ import static ai.labs.eddi.configs.utilities.ResourceUtilities.createDocumentDes
  */
 
 @Provider
-public class DocumentDescriptorInterceptor implements ContainerResponseFilter {
-    private static final String METHOD_NAME_UPDATE_DESCRIPTOR = "updateDescriptor";
+public class DocumentDescriptorFilter implements ContainerResponseFilter {
     private final IDocumentDescriptorStore documentDescriptorStore;
     private final IConversationDescriptorStore conversationDescriptorStore;
     private final ITestCaseDescriptorStore testCaseDescriptorStore;
 
-    private static final Logger log = Logger.getLogger(DocumentDescriptorInterceptor.class);
+    private static final Logger log = Logger.getLogger(DocumentDescriptorFilter.class);
 
-    @Context
-    ResourceInfo resourceInfo;
-
-    @Context
+    @Inject
     UriInfo uriInfo;
 
     @Inject
-    public DocumentDescriptorInterceptor(IDocumentDescriptorStore documentDescriptorStore,
-                                         IConversationDescriptorStore conversationDescriptorStore,
-                                         ITestCaseDescriptorStore testCaseDescriptorStore) {
+    public DocumentDescriptorFilter(IDocumentDescriptorStore documentDescriptorStore,
+                                    IConversationDescriptorStore conversationDescriptorStore,
+                                    ITestCaseDescriptorStore testCaseDescriptorStore) {
         this.documentDescriptorStore = documentDescriptorStore;
         this.conversationDescriptorStore = conversationDescriptorStore;
         this.testCaseDescriptorStore = testCaseDescriptorStore;
@@ -59,14 +56,13 @@ public class DocumentDescriptorInterceptor implements ContainerResponseFilter {
         try {
             int httpStatus = contextResponse.getStatus();
 
-            if (httpStatus < 200 || httpStatus >= 300 || resourceInfo == null) {
+            if (httpStatus < 200 || httpStatus >= 300) {
                 return;
             }
 
-            Method resourceMethod = resourceInfo.getResourceMethod();
-            if (resourceMethod != null &&
-                    (isPUT(resourceMethod) || isPATCH(resourceMethod) ||
-                            isPOST(resourceMethod) || isDELETE(resourceMethod))) {
+            var invokedHttpMethod = contextRequest.getMethod();
+            if ((isPUT(invokedHttpMethod) || isPATCH(invokedHttpMethod) ||
+                    isPOST(invokedHttpMethod) || isDELETE(invokedHttpMethod))) {
 
                 String resourceLocationUri = contextResponse.getHeaderString(HttpHeaders.LOCATION);
                 if (resourceLocationUri != null) {
@@ -74,7 +70,7 @@ public class DocumentDescriptorInterceptor implements ContainerResponseFilter {
                         URI createdResourceURI = URI.create(resourceLocationUri);
                         IResourceStore.IResourceId resourceId = RestUtilities.extractResourceId(createdResourceURI);
 
-                        if (isPOST(resourceMethod)) {
+                        if (isPOST(invokedHttpMethod)) {
                             // the resource was created successfully
                             if (httpStatus == 201) {
                                 if (isResourceIdValid(resourceId) &&
@@ -96,18 +92,19 @@ public class DocumentDescriptorInterceptor implements ContainerResponseFilter {
                             return;
                         }
 
-                        if ((isPUT(resourceMethod) || isPATCH(resourceMethod)) && !isUpdateDescriptor(resourceMethod)) {
+                        if ((isPUT(invokedHttpMethod) || isPATCH(invokedHttpMethod)) && !isDescriptorStore(uriInfo.getPath())) {
                             var descriptorStore = getDescriptorStore(resourceLocationUri);
-                            ResourceDescriptor resourceDescriptor = (ResourceDescriptor) descriptorStore.readDescriptor(resourceId.getId(), resourceId.getVersion() - 1);
+                            var resourceDescriptor = (ResourceDescriptor)
+                                    descriptorStore.readDescriptor(resourceId.getId(), resourceId.getVersion() - 1);
                             resourceDescriptor.setLastModifiedOn(new Date(System.currentTimeMillis()));
-                            /*resourceDescriptor.setLastModifiedBy(UserUtilities.getUserURI(userStore, SecurityUtilities.getPrincipal(ThreadContext.getSubject())));*/
-                            resourceDescriptor.setResource(createNewVersionOfResource(resourceDescriptor.getResource(), resourceId.getVersion()));
+                            resourceDescriptor.setResource(
+                                    createNewVersionOfResource(resourceDescriptor.getResource(), resourceId.getVersion()));
                             descriptorStore.updateDescriptor(resourceId.getId(), resourceId.getVersion() - 1, resourceDescriptor);
                         }
                     }
                 }
 
-                if (isDELETE(resourceMethod)) {
+                if (isDELETE(invokedHttpMethod)) {
                     String currentResourceURI = uriInfo.getRequestUri().toString();
                     var descriptorStore = getDescriptorStore(currentResourceURI);
                     IResourceStore.IResourceId resourceId = RestUtilities.extractResourceId(URI.create(currentResourceURI));
@@ -169,24 +166,24 @@ public class DocumentDescriptorInterceptor implements ContainerResponseFilter {
         return URI.create(resourceURIString);
     }
 
-    private static boolean isUpdateDescriptor(Method resourceMethod) {
-        return resourceMethod.getName().equals(METHOD_NAME_UPDATE_DESCRIPTOR);
+    private static boolean isDescriptorStore(String uriPath) {
+        return uriPath != null && uriPath.startsWith(DESCRIPTOR_STORE_PATH);
     }
 
-    private static boolean isPUT(Method resourceMethod) {
-        return resourceMethod.isAnnotationPresent(PUT.class);
+    private static boolean isPUT(String resourceMethod) {
+        return HttpMethod.PUT.equalsIgnoreCase(resourceMethod);
     }
 
-    private static boolean isPATCH(Method resourceMethod) {
-        return resourceMethod.isAnnotationPresent(PATCH.class);
+    private static boolean isPATCH(String resourceMethod) {
+        return HttpMethod.PATCH.equalsIgnoreCase(resourceMethod);
     }
 
-    private static boolean isPOST(Method resourceMethod) {
-        return resourceMethod.isAnnotationPresent(POST.class);
+    private static boolean isPOST(String resourceMethod) {
+        return HttpMethod.POST.equalsIgnoreCase(resourceMethod);
     }
 
-    private static boolean isDELETE(Method resourceMethod) {
-        return resourceMethod.isAnnotationPresent(DELETE.class);
+    private static boolean isDELETE(String resourceMethod) {
+        return HttpMethod.DELETE.equalsIgnoreCase(resourceMethod);
     }
 
     private static boolean isResourceIdValid(IResourceStore.IResourceId resourceId) {

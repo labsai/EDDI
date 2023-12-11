@@ -16,7 +16,8 @@ import java.util.List;
 // @Api(value = "Configurations -> (1) General", authorizations = {@Authorization(value = "eddi_auth")})
 @Path("/descriptorstore/descriptors")
 public interface IRestDocumentDescriptorStore {
-    String resourceURI = "eddi://ai.labs.descriptor/descriptorstore/descriptors/";
+    String DESCRIPTOR_STORE_PATH = "/descriptorstore/descriptors/";
+    String resourceURI = "eddi://ai.labs.descriptor" + DESCRIPTOR_STORE_PATH;
 
     @GET
     @Produces(MediaType.APPLICATION_JSON)

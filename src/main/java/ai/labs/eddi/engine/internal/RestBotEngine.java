@@ -33,7 +33,6 @@ import jakarta.ws.rs.container.AsyncResponse;
 import jakarta.ws.rs.core.Response;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.jboss.logging.Logger;
-import org.jboss.resteasy.spi.NoLogWebApplicationException;
 
 import java.util.*;
 import java.util.concurrent.*;
@@ -215,7 +214,7 @@ public class RestBotEngine implements IRestBotEngine {
             LOGGER.error(e.getLocalizedMessage(), e);
             throw new InternalServerErrorException(e.getLocalizedMessage(), e);
         } catch (ResourceNotFoundException e) {
-            throw new NoLogWebApplicationException(Response.Status.NOT_FOUND.getStatusCode());
+            throw new NotFoundException();
         } finally {
             record(startTime, timerConversationRead);
         }
@@ -253,7 +252,7 @@ public class RestBotEngine implements IRestBotEngine {
         if (conversationState == null) {
             String message = "No conversation found! (conversationId=%s)";
             message = String.format(message, conversationId);
-            throw new NoLogWebApplicationException(new Throwable(message), Response.Status.NOT_FOUND.getStatusCode());
+            throw new NotFoundException(message);
         }
 
         return conversationState;
@@ -389,7 +388,7 @@ public class RestBotEngine implements IRestBotEngine {
             LOGGER.error(errorMsg, e);
             throw new InternalServerErrorException(errorMsg, e);
         } catch (ResourceNotFoundException e) {
-            throw new NoLogWebApplicationException(Response.Status.NOT_FOUND.getStatusCode());
+            throw new NotFoundException();
         } catch (Exception e) {
             LOGGER.error(e.getLocalizedMessage(), e);
             throw new InternalServerErrorException(e.getLocalizedMessage(), e);
@@ -485,7 +484,7 @@ public class RestBotEngine implements IRestBotEngine {
             LOGGER.error(e.getLocalizedMessage(), e);
             throw new InternalServerErrorException();
         } catch (ResourceNotFoundException e) {
-            throw new NoLogWebApplicationException(Response.Status.NOT_FOUND.getStatusCode());
+            throw new NotFoundException();
         }
     }
 
@@ -511,7 +510,7 @@ public class RestBotEngine implements IRestBotEngine {
             LOGGER.error(errorMsg, e);
             throw new InternalServerErrorException(errorMsg, e);
         } catch (ResourceNotFoundException e) {
-            throw new NoLogWebApplicationException(Response.Status.NOT_FOUND.getStatusCode());
+            throw new NotFoundException();
         } catch (Exception e) {
             contextLogger.setLoggingContext(loggingContext);
             LOGGER.error(e.getLocalizedMessage(), e);
@@ -541,7 +540,7 @@ public class RestBotEngine implements IRestBotEngine {
             loggingContext.put(USER_ID, conversationMemory.getUserId());
             return conversationMemory.isRedoAvailable();
         } catch (ResourceStoreException e) {
-            throw new NoLogWebApplicationException(Response.Status.NOT_FOUND.getStatusCode());
+            throw new NotFoundException();
         } catch (ResourceNotFoundException e) {
             contextLogger.setLoggingContext(loggingContext);
             LOGGER.error(e.getLocalizedMessage(), e);
@@ -569,7 +568,7 @@ public class RestBotEngine implements IRestBotEngine {
             LOGGER.error(errorMsg, e);
             throw new InternalServerErrorException(errorMsg, e);
         } catch (ResourceNotFoundException e) {
-            throw new NoLogWebApplicationException(Response.Status.NOT_FOUND.getStatusCode());
+            throw new NotFoundException();
         } catch (Exception e) {
             LOGGER.error(e.getLocalizedMessage(), e);
             throw new InternalServerErrorException(e.getLocalizedMessage(), e);
