@@ -1,13 +1,14 @@
 package ai.labs.eddi.engine.httpclient.bootstrap;
 
 import ai.labs.eddi.engine.httpclient.impl.JettyHttpClient;
-import org.eclipse.jetty.client.HttpClient;
-import org.eclipse.microprofile.config.inject.ConfigProperty;
-import org.eclipse.microprofile.context.ManagedExecutor;
-
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import jakarta.ws.rs.Produces;
+import org.eclipse.jetty.client.HttpClient;
+import org.eclipse.jetty.client.WWWAuthenticationProtocolHandler;
+import org.eclipse.microprofile.config.inject.ConfigProperty;
+import org.eclipse.microprofile.context.ManagedExecutor;
+
 import java.util.Arrays;
 
 @ApplicationScoped
@@ -24,7 +25,9 @@ public class HttpClientModule {
                                              @ConfigProperty(name = "httpClient.responseBufferSize") Integer responseBufferSize,
                                              @ConfigProperty(name = "httpClient.maxRedirects") Integer maxRedirects,
                                              @ConfigProperty(name = "httpClient.idleTimeoutInMillis") Integer idleTimeout,
-                                             @ConfigProperty(name = "httpClient.connectTimeoutInMillis") Integer connectTimeout) {
+                                             @ConfigProperty(name = "httpClient.connectTimeoutInMillis") Integer connectTimeout,
+                                             @ConfigProperty(name = "httpClient.disableWWWAuthenticationValidation")
+                                             Boolean disableWWWAuthenticationValidation) {
 
         try {
             HttpClient httpClient = new HttpClient();
@@ -37,6 +40,10 @@ public class HttpClientModule {
             httpClient.setIdleTimeout(idleTimeout);
             httpClient.setConnectTimeout(connectTimeout);
             httpClient.start();
+
+            if (disableWWWAuthenticationValidation) {
+                httpClient.getProtocolHandlers().remove(WWWAuthenticationProtocolHandler.NAME);
+            }
 
             registerHttpClientShutdownHook(httpClient);
 
