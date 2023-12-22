@@ -2,17 +2,22 @@ package ai.labs.eddi.datastore.mongo;
 
 import ai.labs.eddi.datastore.IResourceStorage;
 import ai.labs.eddi.datastore.serialization.IDocumentBuilder;
-import ai.labs.eddi.utils.RuntimeUtilities;
 import com.mongodb.client.model.Filters;
+import com.mongodb.client.model.IndexOptions;
+import com.mongodb.client.model.Indexes;
 import com.mongodb.client.model.UpdateOptions;
 import com.mongodb.reactivestreams.client.MongoCollection;
 import com.mongodb.reactivestreams.client.MongoDatabase;
 import io.reactivex.rxjava3.core.Observable;
 import org.bson.Document;
+import org.bson.conversions.Bson;
 import org.bson.types.ObjectId;
 
 import java.io.IOException;
+import java.util.Arrays;
 import java.util.NoSuchElementException;
+
+import static ai.labs.eddi.utils.RuntimeUtilities.checkNotNull;
 
 /**
  * @author ginccc
@@ -32,13 +37,31 @@ public class MongoResourceStorage<T> implements IResourceStorage<T> {
     public MongoResourceStorage(MongoDatabase database, String collectionName,
                                 IDocumentBuilder documentBuilder,
                                 Class<T> documentType) {
-        this.documentType = documentType;
-        RuntimeUtilities.checkNotNull(database, "database");
+        this(database, collectionName, documentBuilder, documentType, new String[0]);
+    }
 
+    public MongoResourceStorage(MongoDatabase database, String collectionName,
+                                IDocumentBuilder documentBuilder,
+                                Class<T> documentType, String... indexes) {
+        checkNotNull(database, "database");
+
+        this.documentType = documentType;
         this.currentCollection = database.getCollection(collectionName);
         this.historyCollection = database.getCollection(collectionName + HISTORY_POSTFIX);
-        //this.historyCollection.createIndex(Indexes.ascending(ID_FIELD, VERSION_FIELD));
         this.documentBuilder = documentBuilder;
+
+        ensureIndex(currentCollection, Indexes.ascending(ID_FIELD, VERSION_FIELD), true);
+
+        Arrays.stream(indexes).forEach(index -> {
+            ensureIndex(currentCollection, Indexes.ascending(index), false);
+            ensureIndex(historyCollection, Indexes.ascending(index), false);
+        });
+    }
+
+    private void ensureIndex(MongoCollection<Document> mongoCollection, Bson indexKey, boolean unique) {
+        Observable.fromPublisher(
+                mongoCollection.createIndex(indexKey, new IndexOptions().unique(unique))
+        ).blockingFirst();
     }
 
     @Override

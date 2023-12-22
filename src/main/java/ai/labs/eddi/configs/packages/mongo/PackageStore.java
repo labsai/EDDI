@@ -12,18 +12,20 @@ import ai.labs.eddi.models.DocumentDescriptor;
 import ai.labs.eddi.utils.RestUtilities;
 import ai.labs.eddi.utils.RuntimeUtilities;
 import com.mongodb.reactivestreams.client.MongoDatabase;
-import org.bson.Document;
-
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
+
 import java.util.LinkedList;
 import java.util.List;
+
+import static com.mongodb.client.model.Filters.*;
 
 /**
  * @author ginccc
  */
 @ApplicationScoped
 public class PackageStore implements IPackageStore {
+    public static final String PACKAGE_EXTENSIONS_FIELD = "packageExtensions";
     private final IDocumentDescriptorStore documentDescriptorStore;
     private final PackageHistorizedResourceStore packageResourceStore;
 
@@ -45,7 +47,7 @@ public class PackageStore implements IPackageStore {
 
     @Override
     public IResourceStore.IResourceId create(PackageConfiguration packageConfiguration) throws IResourceStore.ResourceStoreException {
-        RuntimeUtilities.checkCollectionNoNullElements(packageConfiguration.getPackageExtensions(), "packageExtensions");
+        RuntimeUtilities.checkCollectionNoNullElements(packageConfiguration.getPackageExtensions(), PACKAGE_EXTENSIONS_FIELD);
         return packageResourceStore.create(packageConfiguration);
     }
 
@@ -57,7 +59,7 @@ public class PackageStore implements IPackageStore {
     @Override
     @ConfigurationUpdate
     public Integer update(String id, Integer version, PackageConfiguration packageConfiguration) throws IResourceStore.ResourceStoreException, IResourceStore.ResourceModifiedException, IResourceStore.ResourceNotFoundException {
-        RuntimeUtilities.checkCollectionNoNullElements(packageConfiguration.getPackageExtensions(), "packageExtensions");
+        RuntimeUtilities.checkCollectionNoNullElements(packageConfiguration.getPackageExtensions(), PACKAGE_EXTENSIONS_FIELD);
         return packageResourceStore.update(id, version, packageConfiguration);
     }
 
@@ -126,13 +128,26 @@ public class PackageStore implements IPackageStore {
     }
 
     private class PackageMongoResourceStorage extends MongoResourceStorage<PackageConfiguration> {
-        PackageMongoResourceStorage(MongoDatabase database, String collectionName, IDocumentBuilder documentBuilder, Class<PackageConfiguration> documentType) {
-            super(database, collectionName, documentBuilder, documentType);
+
+        public static final String PACKAGE_EXTENSIONS_CONFIG_URI_FIELD = "packageExtensions.config.uri";
+        public static final String PACKAGE_EXTENSIONS_DICTIONARIES_CONFIG_URI_FIELD =
+                "packageExtensions.extensions.dictionaries.config.uri";
+
+        PackageMongoResourceStorage(MongoDatabase database, String collectionName,
+                                    IDocumentBuilder documentBuilder, Class<PackageConfiguration> documentType) {
+
+            super(database, collectionName, documentBuilder, documentType,
+                    PACKAGE_EXTENSIONS_CONFIG_URI_FIELD, PACKAGE_EXTENSIONS_DICTIONARIES_CONFIG_URI_FIELD);
         }
 
-        List<IResourceStore.IResourceId> getPackageDescriptorsContainingResource(String resourceURI) throws IResourceStore.ResourceNotFoundException {
-            String searchQuery = String.format("JSON.stringify(this).indexOf('%s')!=-1", resourceURI);
-            Document filter = new Document("$where", searchQuery);
+        List<IResourceStore.IResourceId> getPackageDescriptorsContainingResource(String resourceURI)
+                throws IResourceStore.ResourceNotFoundException {
+
+            // Building a filter to search in arrays and nested objects
+            var filter = or(
+                    elemMatch(PACKAGE_EXTENSIONS_FIELD, eq(PACKAGE_EXTENSIONS_CONFIG_URI_FIELD, resourceURI)),
+                    elemMatch(PACKAGE_EXTENSIONS_FIELD, eq(PACKAGE_EXTENSIONS_DICTIONARIES_CONFIG_URI_FIELD, resourceURI))
+            );
 
             return ResourceUtilities.getAllConfigsContainingResources(filter,
                     currentCollection, historyCollection, documentDescriptorStore);
