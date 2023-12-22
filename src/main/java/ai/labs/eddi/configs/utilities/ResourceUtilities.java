@@ -13,6 +13,8 @@ import org.bson.Document;
 import jakarta.ws.rs.BadRequestException;
 import jakarta.ws.rs.core.MediaType;
 import jakarta.ws.rs.core.Response;
+import org.bson.conversions.Bson;
+
 import java.net.URI;
 import java.util.Comparator;
 import java.util.Date;
@@ -28,7 +30,7 @@ public class ResourceUtilities {
     private static final String MONGO_OBJECT_VERSION = "_version";
     private static final String COPY_APPENDIX = " - Copy";
 
-    public static List<IResourceStore.IResourceId> getAllConfigsContainingResources(Document filter,
+    public static List<IResourceStore.IResourceId> getAllConfigsContainingResources(Bson filter,
                                                                                     MongoCollection<Document> currentCollection,
                                                                                     MongoCollection<Document> historyCollection,
                                                                                     IDocumentDescriptorStore documentDescriptorStore)
