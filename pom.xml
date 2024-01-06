@@ -97,6 +97,11 @@
         <dependency>
             <groupId>io.quarkus</groupId>
             <artifactId>quarkus-keycloak-authorization</artifactId>
+        </dependency>-->
+        <dependency>
+            <groupId>io.quarkiverse.langchain4j</groupId>
+            <artifactId>quarkus-langchain4j-openai</artifactId>
+            <version>0.6.1</version>
         </dependency>
         <dependency>
             <groupId>io.quarkiverse.jgit</groupId>
