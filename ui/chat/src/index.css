@@ -1,13 +1,231 @@
 body {
-  margin: 0;
-  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen',
+    background-color: black;
+    margin: 0;
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen',
     'Ubuntu', 'Cantarell', 'Fira Sans', 'Droid Sans', 'Helvetica Neue',
     sans-serif;
-  -webkit-font-smoothing: antialiased;
-  -moz-osx-font-smoothing: grayscale;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
 }
 
 code {
-  font-family: source-code-pro, Menlo, Monaco, Consolas, 'Courier New',
+    font-family: source-code-pro, Menlo, Monaco, Consolas, 'Courier New',
     monospace;
 }
+
+.chatImg {
+    height: 90px;
+    padding: 10px;
+    display: inline-block;
+    margin: 0 0 5em 0;
+}
+
+/* Base styles */
+.chat-container {
+    padding-top: 10vh;
+    display: flex;
+    flex-direction: column;
+    height: 50vh; /* Full viewport height */
+    background-color: black; /* Consistent background color */
+    color: white;
+    max-width: 800px;
+    margin: auto;
+}
+
+.messages {
+    flex-grow: 1; /* Allow this area to grow as needed */
+    overflow-y: auto;
+    padding: 10px;
+    background-color: black; /* Consistent background color */
+}
+
+.message {
+    font-size: 1.1rem;
+    color: #F1F1F1;
+    margin-bottom: 10px;
+    padding: 12px;
+    border-radius: 5px;
+    max-width: 90%; /* Max width for each message */
+    word-break: break-word;
+}
+
+.message.user {
+    background-color: #113B92;
+    color: white;
+    margin-left: auto;
+}
+
+.message.bot {
+    background-color: #333333;
+}
+
+.loading-indicator {
+    height: 10px;
+    color: #f1f1f2;
+    padding-left: 5px;
+}
+
+.scroll-to-bottom {
+    position: absolute;
+    bottom: 40%; /* Adjust so it's above the quick replies */
+    left: 50%; /* Centralize horizontally */
+    transform: translateX(-50%); /* Offset its own width */
+    width: 40px;
+    height: 40px;
+    border-radius: 50%;
+    background-color: white;
+    color: black;
+    border: none;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 20px;
+    padding: 0;
+    margin: 0;
+    background-clip: content-box;
+    z-index: 3; /* Ensure it's above the quick replies */
+}
+
+.scroll-to-bottom::before {
+    content: '\2193'; /* Unicode for downward arrow */
+}
+
+.scroll-to-bottom * {
+    background: transparent;
+    width: auto;
+    margin: 0;
+    padding: 0;
+}
+
+.quick-replies {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: center;
+    padding: 10px;
+    gap: 5px;
+    position: relative; /* Ensure proper positioning context */
+    z-index: 2;
+}
+
+.quick-replies button {
+    background-color: #999999;
+    color: white;
+    border: none;
+    border-radius: 15px;
+    padding: 5px 10px;
+    cursor: pointer;
+    transition: background-color 0.3s;
+}
+
+.message-form {
+    position: relative; /* Added to ensure positioning context for the button */
+    z-index: 1; /* Make sure the input form is above the button */
+    display: flex;
+    padding: 10px;
+}
+
+.message-form input, .message-form button {
+    font-size: 1.1rem;
+    border: none;
+    padding: 10px;
+    border-radius: 5px;
+}
+
+.message-form input {
+    flex: 1;
+    margin-right: 10px;
+}
+
+.message-form button {
+    background-color: rgba(17, 59, 146, 0.82);
+    color: white;
+    cursor: pointer;
+    transition: background-color 0.3s;
+}
+
+/* Scrollbar styles */
+.messages::-webkit-scrollbar {
+    width: 5px;
+}
+
+.messages::-webkit-scrollbar-track {
+    background: #333;
+}
+
+.messages::-webkit-scrollbar-thumb {
+    background: #888;
+}
+
+/* Responsive styles */
+@media (max-width: 768px) {
+    .chatImg {
+        height: 60px;
+        padding: 10px;
+        display: inline-block;
+        margin: 0 0 3em 0;
+    }
+
+    .scroll-to-bottom {
+        bottom: 60px; /* Adjust as necessary for smaller screens */
+        width: 35px;
+        height: 35px;
+    }
+
+    .messages {
+        max-height: calc(100vh - 120px); /* Smaller adjustments for smaller screens */
+    }
+
+    .chat-container {
+        padding-top: 0;
+        max-width: 100%;
+        height: 100%;
+    }
+
+    .message {
+        max-width: 75%; /* Adjust message width on smaller screens */
+    }
+
+    .message-form {
+        position: fixed; /* Or use 'sticky' */
+        bottom: 0;
+        left: 0;
+        width: 100%;
+        z-index: 1000; /* Ensure it's above other elements */
+        background-color: #333333; /* Or any other color that fits your design */
+
+        /* Optional: Add some shadow or border to distinguish it from the content above */
+        box-shadow: #999999;
+        border-top: 1px solid #999;
+    }
+
+    .message-form button {
+        margin-right: 30px;
+    }
+
+    /* Ensure the container takes the full width minus any global padding/margin */
+    .chat-container {
+        padding-bottom: 60px; /* Adjust this based on the height of your .message-form */
+    }
+
+    .message-form {
+        padding: 10px; /* Adjust as per your design */
+    }
+}
+
+@media (max-width: 480px) {
+    .scroll-to-bottom {
+        bottom: 70px; /* Adjust as necessary for mobile screens */
+        width: 30px;
+        height: 30px;
+    }
+
+    .message {
+        max-width: 70%; /* Further adjust message width on very small screens */
+    }
+
+    .message-form input, .message-form button {
+        padding: 8px; /* Adjust padding for smaller devices */
+    }
+}
+
