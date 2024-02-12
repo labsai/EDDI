@@ -28,12 +28,11 @@ const Chat: React.FC = () => {
 
     const userId = userIdFromParams != null ? userIdFromParams : new URLSearchParams(location.search).get('userId');
 
-    const managedBotsBaseUrl = process.env.REACT_APP_MANAGED_BOTS_BASE_URL;
-    const botsBaseUrl = process.env.REACT_APP_BOTS_BASE_URL;
+    const eddiBaseUrl = ""; // const eddiBaseUrl = "http://localhost:7070";
 
     const startConversation = async () => {
         try {
-            const response = await fetch(`${botsBaseUrl}/${environment}/${botId}?userId=${userId}`, {
+            const response = await fetch(`${eddiBaseUrl}/bots/${environment}/${botId}?userId=${userId}`, {
                 method: 'POST',
             });
 
@@ -56,7 +55,7 @@ const Chat: React.FC = () => {
             console.error("Error starting conversation: ", error);
         }
     };
-    
+
     useEffect(() => {
         const currentPath = window.location.pathname;
         const isManagedBots = currentPath.startsWith("/chat/managedbots");
@@ -80,9 +79,9 @@ const Chat: React.FC = () => {
         });
 
         if (isManagedBots) {
-            fetchUrl = `${managedBotsBaseUrl}/${intent}/${userId}?${queryParams}`;
+            fetchUrl = `${eddiBaseUrl}/managedbots/${intent}/${userId}?${queryParams}`;
         } else {
-            fetchUrl = `${botsBaseUrl}/${environment}/${botId}/${conversationId}?${queryParams}`;
+            fetchUrl = `${eddiBaseUrl}/bots/${environment}/${botId}/${conversationId}?${queryParams}`;
         }
 
         try {
@@ -90,7 +89,6 @@ const Chat: React.FC = () => {
                 method: 'GET',
                 headers: {
                     'Content-Type': 'application/json',
-                    // Include any necessary headers, such as Authorization if required
                 },
             });
 
@@ -135,7 +133,7 @@ const Chat: React.FC = () => {
         }
         setAutoScroll(true);
     };
-    
+
     useEffect(() => {
         scrollToBottom();
         setAutoScroll(true);
@@ -157,8 +155,8 @@ const Chat: React.FC = () => {
         setIsBotTyping(true);
 
         const endpoint = isManagedBots ?
-            `${managedBotsBaseUrl}/${intent}/${userId}` :
-            `${botsBaseUrl}/${environment}/${botId}/${conversationId}?userId=${userId}`;
+            `${eddiBaseUrl}/managedbots/${intent}/${userId}` :
+            `${eddiBaseUrl}/bots/${environment}/${botId}/${conversationId}?userId=${userId}`;
 
         const method = 'POST';
         const headers = {'Content-Type': 'application/json'};
@@ -208,7 +206,7 @@ const Chat: React.FC = () => {
         sendMessage(input);
         setInput('');
     };
-    
+
     return (
         <div>
             <img id="eddiLogo" className="chatImg" src="/img/logo_eddi.png" alt="EDDI Logo"/>
