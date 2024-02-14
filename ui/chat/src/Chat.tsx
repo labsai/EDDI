@@ -216,7 +216,8 @@ const Chat: React.FC = () => {
                     {messages.map((msg, index) => (
                         <div key={index} className={`message ${msg.sender}`}>
                             {msg.sender === 'bot'
-                                ? <div dangerouslySetInnerHTML={{__html: DOMPurify.sanitize(msg.text)}}/>
+                                ? <div dangerouslySetInnerHTML={{__html: DOMPurify.sanitize(
+                                    msg.text.replace(/(\\n)/g, '<br>'))}}/>
                                 : msg.text
                             }
                         </div>
