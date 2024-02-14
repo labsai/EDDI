@@ -1,4 +1,4 @@
-import React, {useState, useEffect, useRef} from 'react';
+import React, {useState, useEffect, useRef, useCallback} from 'react';
 import {useLocation, useParams} from "react-router-dom";
 
 type Message = {
@@ -16,7 +16,7 @@ const Chat: React.FC = () => {
     const [quickReplies, setQuickReplies] = useState<QuickReply[]>([]);
     const [isBotTyping, setIsBotTyping] = useState<boolean>(false);
     const [hasNewMessages, setHasNewMessages] = useState<boolean>(false);
-    const [autoScroll, setAutoScroll] = useState<boolean>(true);
+    const [, setAutoScroll] = useState<boolean>(true);
     const [conversationId, setConversationId] = useState<string | null>(null);
     const [isManagedBots, setIsManagedBots] = useState<boolean>(false);
 
@@ -30,10 +30,10 @@ const Chat: React.FC = () => {
 
     const eddiBaseUrl = ""; // const eddiBaseUrl = "http://localhost:7070";
 
-    const startConversation = async () => {
+    const startConversation = useCallback(  async () => {
         try {
             const response = await fetch(`${eddiBaseUrl}/bots/${environment}/${botId}?userId=${userId}`, {
-                method: 'POST',
+                method: 'POST'
             });
 
             if (response.ok) {
@@ -54,7 +54,7 @@ const Chat: React.FC = () => {
         } catch (error) {
             console.error("Error starting conversation: ", error);
         }
-    };
+    }, [botId, environment, userId]);
 
     useEffect(() => {
         const currentPath = window.location.pathname;
@@ -63,16 +63,16 @@ const Chat: React.FC = () => {
         if (!isManagedBots) {
             startConversation();
         }
-    }, []);
+    }, [isManagedBots, startConversation]);
 
-    const loadConversation = async () => {
+    const loadConversation = useCallback( async () => {
         if (isManagedBots) {
             if (!intent || !userId) return;
         } else {
             if (!conversationId || !environment || !botId) return;
         }
 
-        let fetchUrl = '';
+        let fetchUrl: string;
         const queryParams = new URLSearchParams({
             returnDetailed: "false",
             returnCurrentStepOnly: "true",
@@ -110,11 +110,11 @@ const Chat: React.FC = () => {
         } catch (error) {
             console.error("Error loading conversation:", error);
         }
-    };
+    }, [botId, conversationId, environment, intent, isManagedBots, userId]);
 
     useEffect(() => {
         loadConversation();
-    }, [conversationId, intent])
+    }, [conversationId, intent, loadConversation])
 
     const scrollToBottom = () => {
         if (messagesContainerRef.current) {
