@@ -1,5 +1,6 @@
 import React, {useState, useEffect, useRef} from 'react';
 import {useLocation, useParams} from "react-router-dom";
+import DOMPurify from 'dompurify';
 
 type Message = {
     sender: 'user' | 'bot';
@@ -214,7 +215,10 @@ const Chat: React.FC = () => {
                 <div className="messages" onScroll={handleScroll} ref={messagesContainerRef}>
                     {messages.map((msg, index) => (
                         <div key={index} className={`message ${msg.sender}`}>
-                            {msg.text}
+                            {msg.sender === 'bot'
+                                ? <div dangerouslySetInnerHTML={{__html: DOMPurify.sanitize(msg.text)}}/>
+                                : msg.text
+                            }
                         </div>
                     ))}
                     {isBotTyping && <div className="loading-indicator">
