@@ -1,5 +1,5 @@
 import React, {useState, useEffect, useRef, useCallback} from 'react';
-import {useLocation, useParams} from "react-router-dom";
+import {useLocation, useParams} from 'react-router-dom';
 import DOMPurify from 'dompurify';
 
 type Message = {
@@ -29,44 +29,39 @@ const Chat: React.FC = () => {
 
     const userId = userIdFromParams != null ? userIdFromParams : new URLSearchParams(location.search).get('userId');
 
-    const eddiBaseUrl = ""; // const eddiBaseUrl = "http://localhost:7070";
+    const eddiBaseUrl = ''; // const eddiBaseUrl = 'http://localhost:7070';
 
-    const startConversation = useCallback(  async () => {
-        try {
-            const response = await fetch(`${eddiBaseUrl}/bots/${environment}/${botId}?userId=${userId}`, {
-                method: 'POST'
-            });
+    const startConversation = useCallback(async () => {
 
-            if (response.ok) {
-                // Extract the Location header
-                const locationHeader = response.headers.get('Location');
-                console.log("Location Header:", locationHeader);
+        fetch(`${eddiBaseUrl}/bots/${environment}/${botId}?userId=${userId}`, {
+            method: 'POST'
+        }).then(response => {
+            // Extract the Location header
+            const locationHeader = response.headers.get('Location');
+            console.log('Location Header:', locationHeader);
 
-                if (locationHeader) {
-                    // Assuming the conversationId is the last segment in the URI
-                    const segments = locationHeader.split('/');
-                    const conversationId = segments[segments.length - 1];
-                    setConversationId(conversationId);
-                    console.log("Extracted conversationId:", conversationId);
-                } else {
-                    throw new Error('Location header is missing in the response.');
-                }
+            if (locationHeader) {
+                // Assuming the conversationId is the last segment in the URI
+                const segments = locationHeader.split('/');
+                const conversationId = segments[segments.length - 1];
+                setConversationId(conversationId);
+                console.log('Extracted conversationId:', conversationId);
+            } else {
+                console.error('Location header is missing in the response.');
             }
-        } catch (error) {
-            console.error("Error starting conversation: ", error);
-        }
+        }).catch(reason => console.log('Error while creating conversation' + reason));
     }, [botId, environment, userId]);
 
     useEffect(() => {
         const currentPath = window.location.pathname;
-        const isManagedBots = currentPath.startsWith("/chat/managedbots");
+        const isManagedBots = currentPath.startsWith('/chat/managedbots');
         setIsManagedBots(isManagedBots);
         if (!isManagedBots) {
             startConversation();
         }
     }, [isManagedBots, startConversation]);
 
-    const loadConversation = useCallback( async () => {
+    const loadConversation = useCallback(async () => {
         if (isManagedBots) {
             if (!intent || !userId) return;
         } else {
@@ -75,8 +70,8 @@ const Chat: React.FC = () => {
 
         let fetchUrl: string;
         const queryParams = new URLSearchParams({
-            returnDetailed: "false",
-            returnCurrentStepOnly: "true",
+            returnDetailed: 'false',
+            returnCurrentStepOnly: 'true',
         });
 
         if (isManagedBots) {
@@ -85,32 +80,7 @@ const Chat: React.FC = () => {
             fetchUrl = `${eddiBaseUrl}/bots/${environment}/${botId}/${conversationId}?${queryParams}`;
         }
 
-        try {
-            const response = await fetch(fetchUrl, {
-                method: 'GET',
-                headers: {
-                    'Content-Type': 'application/json',
-                },
-            });
-
-            if (!response.ok) {
-                throw new Error(`Failed to load conversation: ${response.status}`);
-            }
-
-            const data = await response.json();
-
-            const botReplies: any[] = data.conversationOutputs[0].output || [];
-            botReplies.forEach(reply => {
-                setMessages(currentMessages => [...currentMessages, {sender: 'bot', text: reply.text}]);
-            });
-
-            const botQuickReplies: QuickReply[] = data.conversationOutputs[0].quickReplies || [];
-            setQuickReplies(botQuickReplies);
-
-            setAutoScroll(true);
-        } catch (error) {
-            console.error("Error loading conversation:", error);
-        }
+        fetchEndpoint(fetchUrl, 'GET', null);
     }, [botId, conversationId, environment, intent, isManagedBots, userId]);
 
     useEffect(() => {
@@ -159,35 +129,37 @@ const Chat: React.FC = () => {
             `${eddiBaseUrl}/managedbots/${intent}/${userId}` :
             `${eddiBaseUrl}/bots/${environment}/${botId}/${conversationId}?userId=${userId}`;
 
-        const method = 'POST';
+        fetchEndpoint(endpoint, 'POST', userInput);
+    };
+
+    const fetchEndpoint = (url: string, method: string, userInput: string | null) => {
         const headers = {'Content-Type': 'application/json'};
         const body = JSON.stringify({input: userInput});
+        const init = method === 'POST' ? {method, headers, body} : {method, headers};
 
-        try {
-            const response = await fetch(endpoint, {method, headers, body});
-            if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
+        fetch(url, init)
+            .then(response => response.json())
+            .then(data => {
+                setIsBotTyping(false);
 
-            const data = await response.json();
+                if (data.conversationState === 'ERROR') {
+                    console.log('ConversationState was ERROR.');
+                }
+
+                const botReplies: any[] = data.conversationOutputs[0].output || [];
+                botReplies.forEach(reply => {
+                    setMessages(currentMessages => [...currentMessages, {sender: 'bot', text: reply.text}]);
+                });
+
+                const botQuickReplies: QuickReply[] = data.conversationOutputs[0].quickReplies || [];
+                setQuickReplies(botQuickReplies);
+
+                setAutoScroll(true);
+            }).catch(error => {
+            console.error(error);
             setIsBotTyping(false);
-
-            if (data.conversationState === 'ERROR') {
-                console.log("ConversationState was ERROR.");
-            }
-
-            const botReplies: any[] = data.conversationOutputs[0].output || [];
-            botReplies.forEach(reply => {
-                setMessages(currentMessages => [...currentMessages, {sender: 'bot', text: reply.text}]);
-            });
-
-            const botQuickReplies: QuickReply[] = data.conversationOutputs[0].quickReplies || [];
-            setQuickReplies(botQuickReplies);
-
-            setAutoScroll(true);
-
-        } catch (error) {
-            console.error("Failed to send message: ", error);
-        }
-    };
+        });
+    }
 
     const handleScroll = () => {
         if (messagesContainerRef.current) {
@@ -210,29 +182,31 @@ const Chat: React.FC = () => {
 
     return (
         <div>
-            <img id="eddiLogo" className="chatImg" src="/img/logo_eddi.png" alt="EDDI Logo"/>
-            <div className="chat-container">
-                <div className="messages" onScroll={handleScroll} ref={messagesContainerRef}>
+            <img id='eddiLogo' className='chatImg' src='/img/logo_eddi.png' alt='EDDI Logo'/>
+            <div className='chat-container'>
+                <div className='messages' onScroll={handleScroll} ref={messagesContainerRef}>
                     {messages.map((msg, index) => (
                         <div key={index} className={`message ${msg.sender}`}>
                             {msg.sender === 'bot'
-                                ? <div dangerouslySetInnerHTML={{__html: DOMPurify.sanitize(
-                                    msg.text.replace(/(\\n)/g, '<br>'))}}/>
+                                ? <div dangerouslySetInnerHTML={{
+                                    __html: DOMPurify.sanitize(
+                                        msg.text.replace(/(\\n)/g, '<br>'))
+                                }}/>
                                 : msg.text
                             }
                         </div>
                     ))}
-                    {isBotTyping && <div className="loading-indicator">
-                        <img src="/img/loading-indicator.svg" alt="Answer is being generated..."/>
+                    {isBotTyping && <div className='loading-indicator'>
+                        <img src='/img/loading-indicator.svg' alt='Answer is being generated...'/>
                     </div>}
                     <div ref={messagesEndRef}/>
                 </div>
                 {hasNewMessages && (
-                    <button onClick={scrollToBottom} className="scroll-to-bottom">
+                    <button onClick={scrollToBottom} className='scroll-to-bottom'>
                     </button>
                 )}
                 {quickReplies.length > 0 && (
-                    <div className="quick-replies">
+                    <div className='quick-replies'>
                         {quickReplies.map((quickReply, index) => (
                             <button key={index} onClick={() => handleQuickReply(quickReply)}>
                                 {quickReply.value}
@@ -240,14 +214,14 @@ const Chat: React.FC = () => {
                         ))}
                     </div>
                 )}
-                <form onSubmit={handleSubmit} className="message-form">
+                <form onSubmit={handleSubmit} className='message-form'>
                     <input
-                        type="text"
+                        type='text'
                         value={input}
                         onChange={handleInputChange}
-                        placeholder="Type a message..."
+                        placeholder='Type a message...'
                     />
-                    <button type="submit">Send</button>
+                    <button type='submit'>Send</button>
                 </form>
             </div>
         </div>
