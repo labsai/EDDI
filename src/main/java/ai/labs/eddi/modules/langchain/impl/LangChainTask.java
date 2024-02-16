@@ -13,8 +13,10 @@ import ai.labs.eddi.models.ExtensionDescriptor;
 import ai.labs.eddi.models.ExtensionDescriptor.ConfigValue;
 import ai.labs.eddi.models.ExtensionDescriptor.FieldType;
 import ai.labs.eddi.modules.langchain.model.LangChainConfiguration;
-import dev.ai4j.openai4j.OpenAiClient;
+import ai.labs.eddi.modules.langchain.model.OpenAIWrapper;
+import ai.labs.eddi.modules.templating.ITemplatingEngine;
 import dev.ai4j.openai4j.chat.*;
+import io.quarkiverse.langchain4j.openai.QuarkusOpenAiClient;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import org.jboss.logging.Logger;
@@ -25,28 +27,30 @@ import java.util.Map;
 import java.util.stream.Collectors;
 
 import static ai.labs.eddi.utils.RuntimeUtilities.isNullOrEmpty;
+import static java.lang.String.format;
 
 @ApplicationScoped
 public class LangChainTask implements ILifecycleTask {
     public static final String ID = "ai.labs.langchain";
     private static final String ACTION_KEY = "actions";
     private static final String KEY_LANG_CHAIN = "langChain";
-
     private static final String MEMORY_OUTPUT_IDENTIFIER = "output";
     private final IResourceClientLibrary resourceClientLibrary;
     private final IDataFactory dataFactory;
     private final IMemoryItemConverter memoryItemConverter;
-    private final OpenAiClient openAiClient;
+    private final ITemplatingEngine templatingEngine;
 
     private static final Logger LOGGER = Logger.getLogger(LangChainTask.class);
 
     @Inject
-    public LangChainTask(IResourceClientLibrary resourceClientLibrary, IDataFactory dataFactory, IMemoryItemConverter memoryItemConverter,
-                         OpenAiClient openAiClient) {
+    public LangChainTask(IResourceClientLibrary resourceClientLibrary,
+                         IDataFactory dataFactory,
+                         IMemoryItemConverter memoryItemConverter,
+                         ITemplatingEngine templatingEngine) {
         this.resourceClientLibrary = resourceClientLibrary;
         this.dataFactory = dataFactory;
         this.memoryItemConverter = memoryItemConverter;
-        this.openAiClient = openAiClient;
+        this.templatingEngine = templatingEngine;
     }
 
     @Override
@@ -61,38 +65,51 @@ public class LangChainTask implements ILifecycleTask {
 
     @Override
     public void execute(IConversationMemory memory, Object component) throws LifecycleException {
-        final var langChainConfig = (LangChainConfiguration) component;
+        final var openAIWrapper = (OpenAIWrapper) component;
+        final var openAiClient = openAIWrapper.openAiClient();
+        final var langChainConfig = openAIWrapper.langChainConfiguration();
 
-        IWritableConversationStep currentStep = memory.getCurrentStep();
-        IData<List<String>> latestData = currentStep.getLatestData(ACTION_KEY);
-        if (latestData == null) {
-            return;
+        try {
+            IWritableConversationStep currentStep = memory.getCurrentStep();
+            IData<List<String>> latestData = currentStep.getLatestData(ACTION_KEY);
+            if (latestData == null) {
+                return;
+            }
+
+            var templateDataObjects = memoryItemConverter.convert(memory);
+            var actions = latestData.getResult();
+            if (actions == null) {
+                return;
+            }
+
+            for (var action : actions) {
+                if (langChainConfig.actions().contains(action)) {
+                    var systemMessage = templatingEngine.processTemplate(langChainConfig.systemMessage(), templateDataObjects);
+                    var chatCompletionRequest = ChatCompletionRequest.builder().
+                            addSystemMessage(systemMessage).
+                            messages(
+                                    new ConversationLogGenerator(memory).
+                                            generate(langChainConfig.logSizeLimit())
+                                            .getMessages()
+                                            .stream()
+                                            .map(this::convertMessage)
+                                            .collect(Collectors.toList())
+                            ).
+                            build();
+
+                    var chatCompletionResponseStreaming = openAiClient.chatCompletion(chatCompletionRequest);
+                    var completionResponse = chatCompletionResponseStreaming.execute();
+                    String content = completionResponse.content();
+
+                    var outputData = dataFactory.createData("output:text:langchain", content);
+                    currentStep.storeData(outputData);
+                    currentStep.addConversationOutputString(MEMORY_OUTPUT_IDENTIFIER, content);
+                }
+            }
+
+        } catch (ITemplatingEngine.TemplateEngineException e) {
+            throw new LifecycleException(e.getLocalizedMessage(), e);
         }
-
-        Map<String, Object> templateDataObjects = memoryItemConverter.convert(memory);
-        List<String> actions = latestData.getResult();
-
-
-        var chatCompletionRequest = ChatCompletionRequest.builder().
-                addSystemMessage(langChainConfig.systemMessage()).
-                messages(
-                        new ConversationLogGenerator(memory).
-                                generate(langChainConfig.logSizeLimit())
-                                .getMessages()
-                                .stream()
-                                .map(this::convertMessage)
-                                .collect(Collectors.toList())
-                ).
-                build();
-
-        var chatCompletionResponseStreaming = openAiClient.chatCompletion(chatCompletionRequest);
-        var completionResponse = chatCompletionResponseStreaming.execute();
-        var content = completionResponse.content();
-
-        var outputData = dataFactory.createData("output:text:langchain", content);
-        // outputData.setPublic(true);
-        currentStep.storeData(outputData);
-        currentStep.addConversationOutputString(MEMORY_OUTPUT_IDENTIFIER, content);
     }
 
     private Message convertMessage(ConversationLog.ConversationPart eddiMessage) {
@@ -114,19 +131,22 @@ public class LangChainTask implements ILifecycleTask {
             try {
                 var langChainConfig = resourceClientLibrary.getResource(uri, LangChainConfiguration.class);
 
-                /*String targetServerUrl = langChainConfig.getTargetServerUrl();
-                if (isNullOrEmpty(targetServerUrl)) {
-                    String message = format("Property \"targetServerUrl\" in HttpCalls cannot be null or empty! (uri:%s)", uriObj);
+                var actions = langChainConfig.actions();
+                if (isNullOrEmpty(actions)) {
+                    String message = format("Property \"actions\" in LangChain cannot be null or empty! (uri:%s)", uriObj);
                     throw new ServiceException(message);
                 }
-                if (targetServerUrl.endsWith(SLASH_CHAR)) {
-                    targetServerUrl = targetServerUrl.substring(0, targetServerUrl.length() - 2);
+
+                var authKey = langChainConfig.authKey();
+                if (isNullOrEmpty(authKey)) {
+                    String message = format("Property \"authKey\" in LangChain cannot be null or empty! (uri:%s)", uriObj);
+                    throw new ServiceException(message);
                 }
-                langChainConfig.setTargetServerUrl(targetServerUrl);*/
-                return langChainConfig;
+
+                return new OpenAIWrapper(langChainConfig, new QuarkusOpenAiClient(langChainConfig.authKey()));
             } catch (ServiceException e) {
                 LOGGER.error(e.getLocalizedMessage(), e);
-                throw new PackageConfigurationException(e.getMessage(), e);
+                throw new PackageConfigurationException(e.getLocalizedMessage(), e);
             }
         }
 
@@ -140,8 +160,5 @@ public class LangChainTask implements ILifecycleTask {
         ConfigValue configValue = new ConfigValue("Resource URI", FieldType.URI, false, null);
         extensionDescriptor.getConfigs().put("uri", configValue);
         return extensionDescriptor;
-    }
-
-    private static class LangChainValidationException extends Exception {
     }
 }
