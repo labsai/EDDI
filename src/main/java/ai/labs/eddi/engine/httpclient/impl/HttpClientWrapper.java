@@ -36,16 +36,15 @@ public class HttpClientWrapper implements IHttpClient {
     private static final String KEY_USER_AGENT = "userAgent";
     private static final String KEY_MAX_LENGTH = "maxLength";
     private final HttpClient httpClient;
-    private final String projectDomain;
-    private final String projectVersion;
-
+    private final String userAgent;
     private static final Logger log = Logger.getLogger(HttpClientWrapper.class);
 
     @Inject
-    public HttpClientWrapper(JettyHttpClient httpClient, @ConfigProperty(name = "systemRuntime.projectDomain") String projectDomain, @ConfigProperty(name = "systemRuntime.projectVersion") String projectVersion) {
+    public HttpClientWrapper(JettyHttpClient httpClient,
+                             @ConfigProperty(name = "systemRuntime.projectDomain") String projectDomain,
+                             @ConfigProperty(name = "systemRuntime.projectVersion") String projectVersion) {
         this.httpClient = httpClient.getHttpClient();
-        this.projectDomain = projectDomain;
-        this.projectVersion = projectVersion;
+        this.userAgent = projectDomain.toUpperCase() + "/" + projectVersion;
     }
 
     @Override
@@ -60,10 +59,10 @@ public class HttpClientWrapper implements IHttpClient {
 
     @Override
     public IRequest newRequest(URI uri, Method method) {
-        Request request = httpClient.newRequest(uri).method(method.name()).headers(httpFields -> {
-            var userAgent = projectDomain.toUpperCase() + "/" + projectVersion;
-            httpFields.put(HttpHeader.USER_AGENT, userAgent);
-        });
+        var request = httpClient.newRequest(uri).method(method.name()).
+                headers(httpFields -> {
+                    httpFields.put(HttpHeader.USER_AGENT, userAgent);
+                });
         return new RequestWrapper(uri, request);
     }
 
