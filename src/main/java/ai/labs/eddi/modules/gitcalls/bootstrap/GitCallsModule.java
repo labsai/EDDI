@@ -15,6 +15,7 @@ import java.util.Map;
 
 @Startup(1000)
 @ApplicationScoped
+@Deprecated
 public class GitCallsModule {
 
     private static final Logger LOGGER = Logger.getLogger("Startup");

@@ -18,6 +18,7 @@ import jakarta.inject.Inject;
  */
 
 @ApplicationScoped
+@Deprecated
 public class GitCallsStore implements IGitCallsStore {
     private final HistorizedResourceStore<GitCallsConfiguration> gitCallsResourceStore;
 

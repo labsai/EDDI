@@ -12,6 +12,7 @@ import jakarta.ws.rs.core.Response;
 
 @Path("/backup/git")
 @Tag(name = "10. Backup Bots", description = "Import & Export Bots as Zip Files")
+@Deprecated
 public interface IRestGitBackupService {
 
     @POST

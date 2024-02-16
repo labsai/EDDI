@@ -26,7 +26,7 @@ import ai.labs.eddi.datastore.serialization.IJsonSerialization;
 import ai.labs.eddi.engine.IRestBotAdministration;
 import ai.labs.eddi.engine.runtime.client.factory.IRestInterfaceFactory;
 import ai.labs.eddi.engine.runtime.client.factory.RestInterfaceFactory;
-import ai.labs.eddi.models.BotDeploymentStatus;
+import ai.labs.eddi.engine.model.BotDeploymentStatus;
 import ai.labs.eddi.models.DocumentDescriptor;
 import ai.labs.eddi.utils.FileUtilities;
 import ai.labs.eddi.utils.RestUtilities;

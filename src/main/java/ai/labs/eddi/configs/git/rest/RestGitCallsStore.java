@@ -20,6 +20,7 @@ import java.util.List;
  * @author rpi
  */
 @ApplicationScoped
+@Deprecated
 public class RestGitCallsStore implements IRestGitCallsStore {
     private final IGitCallsStore gitCallsStore;
     private final IJsonSchemaCreator jsonSchemaCreator;

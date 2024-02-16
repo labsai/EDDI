@@ -11,6 +11,7 @@ import java.util.List;
 
 @Getter
 @Setter
+@Deprecated
 public class GitCall {
     private String name;
     private List<String> actions;

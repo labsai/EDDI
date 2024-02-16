@@ -33,6 +33,7 @@ import java.util.Map;
 @IResourceStore.ConfigurationUpdate
 @Interceptor
 @Dependent
+@Deprecated
 public class GitConfigurationUpdateService {
 
     final private Provider<IRestGitBackupService> backupService;

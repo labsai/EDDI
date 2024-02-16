@@ -38,6 +38,7 @@ import static ai.labs.eddi.utils.RuntimeUtilities.isNullOrEmpty;
 import static org.eclipse.jgit.lib.ConfigConstants.CONFIG_BRANCH_SECTION;
 
 @ApplicationScoped
+@Deprecated
 public class GitCallsTask implements ILifecycleTask {
     public static final String ID = "ai.labs.gitcalls";
     private static final String ACTION_KEY = "actions";

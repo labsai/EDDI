@@ -40,6 +40,7 @@ import static org.eclipse.jgit.lib.ConfigConstants.CONFIG_BRANCH_SECTION;
  */
 
 @ApplicationScoped
+@Deprecated
 public class RestGitBackupService implements IRestGitBackupService {
     private final IBotStore botStore;
     private final String tmpPath = System.getProperty("user.dir") + "/tmp/";

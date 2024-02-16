@@ -7,5 +7,6 @@ import ai.labs.eddi.datastore.IResourceStore;
  * @author rpi
  */
 
+@Deprecated
 public interface IGitCallsStore extends IResourceStore<GitCallsConfiguration> {
 }
