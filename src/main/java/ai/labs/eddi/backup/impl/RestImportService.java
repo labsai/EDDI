@@ -61,7 +61,6 @@ public class RestImportService extends AbstractBackupService implements IRestImp
     private static final Pattern EDDI_URI_PATTERN = Pattern.compile("\"eddi://ai.labs..*?\"");
     private static final String BOT_FILE_ENDING = ".bot.json";
     private final Path tmpPath = Paths.get(FileUtilities.buildPath(System.getProperty("user.dir"), "tmp", "import"));
-    private final Path examplePath = Paths.get("examples");
     private final IZipArchive zipArchive;
     private final IJsonSerialization jsonSerialization;
     private final IRestInterfaceFactory restInterfaceFactory;
@@ -92,9 +91,8 @@ public class RestImportService extends AbstractBackupService implements IRestImp
                         new MockAsyncResponse() {
                             @Override
                             public boolean resume(Object responseObj) {
-                                if (responseObj instanceof Response) {
-                                    Response response = (Response) responseObj;
-                                    IResourceId botId = RestUtilities.extractResourceId(response.getLocation());
+                                if (responseObj instanceof Response response) {
+                                    var botId = RestUtilities.extractResourceId(response.getLocation());
                                     restBotAdministration.
                                             deployBot(
                                                     unrestricted,

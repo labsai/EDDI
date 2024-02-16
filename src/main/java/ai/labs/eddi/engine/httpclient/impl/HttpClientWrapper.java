@@ -60,9 +60,7 @@ public class HttpClientWrapper implements IHttpClient {
     @Override
     public IRequest newRequest(URI uri, Method method) {
         var request = httpClient.newRequest(uri).method(method.name()).
-                headers(httpFields -> {
-                    httpFields.put(HttpHeader.USER_AGENT, userAgent);
-                });
+                headers(httpFields -> httpFields.put(HttpHeader.USER_AGENT, userAgent));
         return new RequestWrapper(uri, request);
     }
 

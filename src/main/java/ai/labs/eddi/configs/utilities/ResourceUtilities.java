@@ -59,9 +59,8 @@ public class ResourceUtilities {
     }
 
     private static void extractIds(List<String> ids, FindPublisher<Document> documentIterable) {
-        Observable.fromPublisher(documentIterable).subscribe(document -> {
-            ids.add(document.getObjectId(MONGO_OBJECT_ID).toString());
-        });
+        Observable.fromPublisher(documentIterable).
+                subscribe(document -> ids.add(document.getObjectId(MONGO_OBJECT_ID).toString()));
 
     }
 

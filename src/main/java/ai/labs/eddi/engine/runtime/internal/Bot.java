@@ -21,10 +21,10 @@ import java.util.Map;
  */
 public class Bot implements IBot {
     @Getter
-    private String botId;
+    private final String botId;
     @Getter
-    private Integer botVersion;
-    private List<IExecutablePackage> executablePackages;
+    private final Integer botVersion;
+    private final List<IExecutablePackage> executablePackages;
 
     @Getter
     @Setter

@@ -169,7 +169,7 @@ public class InputParserTask implements ILifecycleTask {
             Solution solution =
                     extractExpressions(parsedSolutions,
                             parserConfig.isIncludeUnused(),
-                            parserConfig.isIncludeUnknown()).get(0);
+                            parserConfig.isIncludeUnknown()).getFirst();
 
             Expressions newExpressions = solution.getExpressions();
             if (parserConfig.isAppendExpressions() && !newExpressions.isEmpty()) {

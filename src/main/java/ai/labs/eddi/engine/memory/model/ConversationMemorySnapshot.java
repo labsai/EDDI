@@ -42,10 +42,6 @@ public class ConversationMemorySnapshot {
         return conversationSteps != null ? conversationSteps.hashCode() : 0;
     }
 
-    public Map<String, Property> getConversationProperties() {
-        return conversationProperties;
-    }
-
     @JsonProperty("_id")
     @Id
     public String getId() {

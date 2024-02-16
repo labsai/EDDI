@@ -60,7 +60,7 @@ public class BotDeploymentManagement implements IBotDeploymentManagement {
     private final int maximumLifeTimeOfIdleConversationsInDays;
     private Instant lastDeploymentCheck = null;
     private static final Logger LOGGER = Logger.getLogger(BotDeploymentManagement.class);
-    private List<DeploymentInfo> deploymentInfos = new LinkedList<>();
+    private final List<DeploymentInfo> deploymentInfos = new LinkedList<>();
 
     @Inject
     public BotDeploymentManagement(IDeploymentStore deploymentStore,

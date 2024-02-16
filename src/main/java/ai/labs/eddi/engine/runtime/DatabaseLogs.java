@@ -45,12 +45,6 @@ public class DatabaseLogs extends Handler implements IDatabaseLogs {
     }
 
     @Override
-    public List<DatabaseLog> getLogs(Environment environment, String botId, Integer botVersion, Integer skip, Integer limit) {
-        return getLogs(createFilter(environment, botId, botVersion, null, null), skip, limit);
-
-    }
-
-    @Override
     public List<DatabaseLog> getLogs(Environment environment, String botId, Integer botVersion, String conversationId, String userId, Integer skip, Integer limit) {
         return getLogs(createFilter(environment, botId, botVersion, conversationId, userId), skip, limit);
     }

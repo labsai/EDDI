@@ -269,8 +269,8 @@ public class RestBotManagement implements IRestBotManagement {
                 initialContext);
         int responseHttpCode = botResponse.getStatus();
         if (responseHttpCode == 201) {
-            URI locationUri = URI.create(botResponse.getHeaders().get("location").get(0).toString());
-            IResourceStore.IResourceId resourceId = RestUtilities.extractResourceId(locationUri);
+            var locationUri = URI.create(botResponse.getHeaders().get("location").getFirst().toString());
+            var resourceId = RestUtilities.extractResourceId(locationUri);
             return createUserConversation(intent, userId, botDeployment, resourceId.getId());
         } else {
             throw new CannotCreateConversationException(
