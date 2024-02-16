@@ -24,7 +24,6 @@
         <failsafe.useModulePath>false</failsafe.useModulePath>
         <war-plugin.version>3.3.2</war-plugin.version>
         <dependency.version.lombok>1.18.30</dependency.version.lombok>
-        <quarkus.jgit.version>2.2.0</quarkus.jgit.version>
         <skipITs>true</skipITs>
     </properties>
     <dependencyManagement>
@@ -102,7 +101,7 @@
         <dependency>
             <groupId>io.quarkiverse.jgit</groupId>
             <artifactId>quarkus-jgit</artifactId>
-            <version>${quarkus.jgit.version}</version>
+            <version>2.3.1</version>
         </dependency>
         <dependency>
             <groupId>org.scala-lang</groupId>
@@ -170,12 +169,12 @@
         <dependency>
             <groupId>org.infinispan</groupId>
             <artifactId>infinispan-core</artifactId>
-            <version>14.0.21.Final</version>
+            <version>14.0.24.Final</version>
         </dependency>
         <dependency>
             <groupId>org.infinispan</groupId>
             <artifactId>infinispan-component-annotations</artifactId>
-            <version>14.0.21.Final</version>
+            <version>14.0.24.Final</version>
             <scope>compile</scope>
         </dependency>
         <dependency>
