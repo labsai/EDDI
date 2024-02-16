@@ -1,12 +1,13 @@
-package ai.labs.eddi.models;
+package ai.labs.eddi.engine.model;
 
-import ai.labs.eddi.models.Deployment.Environment;
+import ai.labs.eddi.engine.model.Deployment.Environment;
+import ai.labs.eddi.configs.documentdescriptor.model.DocumentDescriptor;
 import lombok.AllArgsConstructor;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
 import lombok.Setter;
 
-import static ai.labs.eddi.models.Deployment.Status;
+import static ai.labs.eddi.engine.model.Deployment.Status;
 
 @NoArgsConstructor
 @AllArgsConstructor

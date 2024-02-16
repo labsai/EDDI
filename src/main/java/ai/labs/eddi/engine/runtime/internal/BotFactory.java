@@ -9,8 +9,8 @@ import ai.labs.eddi.engine.runtime.IBotFactory;
 import ai.labs.eddi.engine.runtime.IExecutablePackage;
 import ai.labs.eddi.engine.runtime.client.bots.IBotStoreClientLibrary;
 import ai.labs.eddi.engine.runtime.service.ServiceException;
-import ai.labs.eddi.models.Context;
-import ai.labs.eddi.models.Deployment;
+import ai.labs.eddi.engine.model.Context;
+import ai.labs.eddi.engine.model.Deployment;
 import lombok.*;
 import org.jboss.logging.Logger;
 

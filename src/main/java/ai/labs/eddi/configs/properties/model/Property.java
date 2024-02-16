@@ -1,4 +1,4 @@
-package ai.labs.eddi.models;
+package ai.labs.eddi.configs.properties.model;
 
 import lombok.*;
 

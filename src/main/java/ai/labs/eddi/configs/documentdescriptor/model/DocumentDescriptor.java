@@ -1,6 +1,7 @@
-package ai.labs.eddi.models;
+package ai.labs.eddi.configs.documentdescriptor.model;
 
 
+import ai.labs.eddi.engine.model.ResourceDescriptor;
 import lombok.Getter;
 import lombok.Setter;
 

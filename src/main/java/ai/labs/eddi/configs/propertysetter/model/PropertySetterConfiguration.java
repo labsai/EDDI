@@ -1,6 +1,6 @@
 package ai.labs.eddi.configs.propertysetter.model;
 
-import ai.labs.eddi.models.SetOnActions;
+import ai.labs.eddi.modules.properties.model.SetOnActions;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
 import lombok.Setter;

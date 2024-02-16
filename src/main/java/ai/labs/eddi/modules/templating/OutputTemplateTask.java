@@ -6,7 +6,7 @@ import ai.labs.eddi.engine.memory.IConversationMemory.IWritableConversationStep;
 import ai.labs.eddi.engine.memory.IData;
 import ai.labs.eddi.engine.memory.IDataFactory;
 import ai.labs.eddi.engine.memory.IMemoryItemConverter;
-import ai.labs.eddi.models.ExtensionDescriptor;
+import ai.labs.eddi.configs.packages.model.ExtensionDescriptor;
 import ai.labs.eddi.modules.output.model.QuickReply;
 import ai.labs.eddi.modules.output.model.types.ImageOutputItem;
 import ai.labs.eddi.modules.output.model.types.QuickReplyOutputItem;

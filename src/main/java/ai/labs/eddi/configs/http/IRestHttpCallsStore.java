@@ -2,7 +2,7 @@ package ai.labs.eddi.configs.http;
 
 import ai.labs.eddi.configs.IRestVersionInfo;
 import ai.labs.eddi.configs.http.model.HttpCallsConfiguration;
-import ai.labs.eddi.models.DocumentDescriptor;
+import ai.labs.eddi.configs.documentdescriptor.model.DocumentDescriptor;
 import org.eclipse.microprofile.openapi.annotations.Operation;
 import org.eclipse.microprofile.openapi.annotations.parameters.Parameter;
 import org.eclipse.microprofile.openapi.annotations.responses.APIResponse;

@@ -7,8 +7,8 @@ import ai.labs.eddi.engine.memory.IConversationMemory;
 import ai.labs.eddi.engine.memory.IPropertiesHandler;
 import ai.labs.eddi.engine.runtime.IBot;
 import ai.labs.eddi.engine.runtime.IExecutablePackage;
-import ai.labs.eddi.models.Context;
-import ai.labs.eddi.models.Deployment;
+import ai.labs.eddi.engine.model.Context;
+import ai.labs.eddi.engine.model.Deployment;
 import lombok.Getter;
 import lombok.Setter;
 

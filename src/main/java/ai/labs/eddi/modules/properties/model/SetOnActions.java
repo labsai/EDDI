@@ -1,5 +1,6 @@
-package ai.labs.eddi.models;
+package ai.labs.eddi.modules.properties.model;
 
+import ai.labs.eddi.configs.properties.model.PropertyInstruction;
 import lombok.Getter;
 import lombok.Setter;
 

@@ -10,10 +10,10 @@ import ai.labs.eddi.engine.memory.*;
 import ai.labs.eddi.engine.memory.IConversationMemory.IConversationProperties;
 import ai.labs.eddi.engine.memory.model.Data;
 import ai.labs.eddi.engine.runtime.IExecutablePackage;
-import ai.labs.eddi.models.Context;
-import ai.labs.eddi.models.ConversationState;
-import ai.labs.eddi.models.Property;
-import ai.labs.eddi.models.Property.Scope;
+import ai.labs.eddi.engine.model.Context;
+import ai.labs.eddi.engine.model.ConversationState;
+import ai.labs.eddi.configs.properties.model.Property;
+import ai.labs.eddi.configs.properties.model.Property.Scope;
 
 import java.util.*;
 import java.util.stream.Collectors;

@@ -4,7 +4,7 @@ import ai.labs.eddi.configs.documentdescriptor.IDocumentDescriptorStore;
 import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.datastore.serialization.IDescriptorStore;
 import ai.labs.eddi.engine.memory.descriptor.IConversationDescriptorStore;
-import ai.labs.eddi.models.ResourceDescriptor;
+import ai.labs.eddi.engine.model.ResourceDescriptor;
 import ai.labs.eddi.testing.descriptor.ITestCaseDescriptorStore;
 import ai.labs.eddi.testing.descriptor.model.TestCaseDescriptor;
 import ai.labs.eddi.utils.RestUtilities;

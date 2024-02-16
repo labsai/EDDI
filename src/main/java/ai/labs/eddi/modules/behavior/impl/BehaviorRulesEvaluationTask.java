@@ -11,7 +11,7 @@ import ai.labs.eddi.engine.memory.IData;
 import ai.labs.eddi.engine.memory.model.Data;
 import ai.labs.eddi.engine.runtime.client.configuration.IResourceClientLibrary;
 import ai.labs.eddi.engine.runtime.service.ServiceException;
-import ai.labs.eddi.models.ExtensionDescriptor;
+import ai.labs.eddi.configs.packages.model.ExtensionDescriptor;
 import ai.labs.eddi.modules.nlp.expressions.Expression;
 import ai.labs.eddi.modules.nlp.expressions.Expressions;
 import ai.labs.eddi.modules.nlp.expressions.utilities.IExpressionProvider;
@@ -24,8 +24,8 @@ import java.net.URI;
 import java.util.*;
 import java.util.stream.Collectors;
 
-import static ai.labs.eddi.models.ExtensionDescriptor.ConfigValue;
-import static ai.labs.eddi.models.ExtensionDescriptor.FieldType;
+import static ai.labs.eddi.configs.packages.model.ExtensionDescriptor.ConfigValue;
+import static ai.labs.eddi.configs.packages.model.ExtensionDescriptor.FieldType;
 
 /**
  * @author ginccc

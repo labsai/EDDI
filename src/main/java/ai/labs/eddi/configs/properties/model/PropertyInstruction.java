@@ -1,5 +1,6 @@
-package ai.labs.eddi.models;
+package ai.labs.eddi.configs.properties.model;
 
+import ai.labs.eddi.configs.http.model.HttpCodeValidator;
 import lombok.AllArgsConstructor;
 import lombok.Getter;
 import lombok.NoArgsConstructor;

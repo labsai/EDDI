@@ -1,7 +1,7 @@
 package ai.labs.eddi.engine.memory;
 
-import ai.labs.eddi.models.Context;
-import ai.labs.eddi.models.Property;
+import ai.labs.eddi.engine.model.Context;
+import ai.labs.eddi.configs.properties.model.Property;
 
 import java.util.Map;
 

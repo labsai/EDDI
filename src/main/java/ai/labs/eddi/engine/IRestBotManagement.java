@@ -1,6 +1,6 @@
 package ai.labs.eddi.engine;
 
-import ai.labs.eddi.models.InputData;
+import ai.labs.eddi.engine.model.InputData;
 import org.eclipse.microprofile.openapi.annotations.Operation;
 import org.eclipse.microprofile.openapi.annotations.parameters.Parameter;
 import org.eclipse.microprofile.openapi.annotations.tags.Tag;

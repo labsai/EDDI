@@ -1,6 +1,6 @@
-package ai.labs.eddi.models;
+package ai.labs.eddi.engine.model;
 
-import ai.labs.eddi.models.Deployment.Environment;
+import ai.labs.eddi.engine.model.Deployment.Environment;
 import lombok.Getter;
 import lombok.Setter;
 

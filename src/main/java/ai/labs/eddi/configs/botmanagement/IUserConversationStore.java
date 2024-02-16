@@ -1,7 +1,7 @@
 package ai.labs.eddi.configs.botmanagement;
 
 import ai.labs.eddi.datastore.IResourceStore;
-import ai.labs.eddi.models.UserConversation;
+import ai.labs.eddi.engine.model.UserConversation;
 
 import static ai.labs.eddi.datastore.IResourceStore.ResourceAlreadyExistsException;
 

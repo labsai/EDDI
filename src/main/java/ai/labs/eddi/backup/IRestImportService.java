@@ -1,6 +1,6 @@
 package ai.labs.eddi.backup;
 
-import ai.labs.eddi.models.BotDeploymentStatus;
+import ai.labs.eddi.engine.model.BotDeploymentStatus;
 import org.eclipse.microprofile.openapi.annotations.tags.Tag;
 
 import jakarta.ws.rs.Consumes;

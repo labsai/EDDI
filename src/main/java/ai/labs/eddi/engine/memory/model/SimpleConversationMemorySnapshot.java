@@ -1,8 +1,8 @@
 package ai.labs.eddi.engine.memory.model;
 
 import ai.labs.eddi.engine.memory.IConversationMemory;
-import ai.labs.eddi.models.ConversationState;
-import ai.labs.eddi.models.Deployment;
+import ai.labs.eddi.engine.model.ConversationState;
+import ai.labs.eddi.engine.model.Deployment;
 import lombok.AllArgsConstructor;
 import lombok.Getter;
 import lombok.Setter;

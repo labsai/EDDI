@@ -5,7 +5,7 @@ import ai.labs.eddi.engine.lifecycle.exceptions.LifecycleException;
 import ai.labs.eddi.engine.lifecycle.exceptions.PackageConfigurationException;
 import ai.labs.eddi.engine.lifecycle.exceptions.UnrecognizedExtensionException;
 import ai.labs.eddi.engine.memory.IConversationMemory;
-import ai.labs.eddi.models.ExtensionDescriptor;
+import ai.labs.eddi.configs.packages.model.ExtensionDescriptor;
 
 import java.util.Map;
 

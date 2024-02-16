@@ -3,7 +3,7 @@ package ai.labs.eddi.configs.packages.rest;
 import ai.labs.eddi.configs.packages.IRestPackageExtensionStore;
 import ai.labs.eddi.engine.lifecycle.ILifecycleTask;
 import ai.labs.eddi.engine.lifecycle.bootstrap.LifecycleExtensions;
-import ai.labs.eddi.models.ExtensionDescriptor;
+import ai.labs.eddi.configs.packages.model.ExtensionDescriptor;
 
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;

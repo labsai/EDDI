@@ -1,7 +1,7 @@
 package ai.labs.eddi.modules.properties;
 
-import ai.labs.eddi.models.Property;
-import ai.labs.eddi.models.SetOnActions;
+import ai.labs.eddi.configs.properties.model.Property;
+import ai.labs.eddi.modules.properties.model.SetOnActions;
 import ai.labs.eddi.modules.nlp.expressions.Expressions;
 
 import java.util.List;

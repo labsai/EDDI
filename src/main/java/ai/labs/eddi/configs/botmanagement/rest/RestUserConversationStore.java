@@ -5,7 +5,7 @@ import ai.labs.eddi.configs.botmanagement.IUserConversationStore;
 import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.engine.caching.ICache;
 import ai.labs.eddi.engine.caching.ICacheFactory;
-import ai.labs.eddi.models.UserConversation;
+import ai.labs.eddi.engine.model.UserConversation;
 import org.jboss.logging.Logger;
 
 import jakarta.enterprise.context.ApplicationScoped;

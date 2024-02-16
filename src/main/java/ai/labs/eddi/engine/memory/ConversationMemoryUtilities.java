@@ -9,8 +9,8 @@ import ai.labs.eddi.engine.memory.model.ConversationMemorySnapshot.ResultSnapsho
 import ai.labs.eddi.engine.memory.model.ConversationOutput;
 import ai.labs.eddi.engine.memory.model.Data;
 import ai.labs.eddi.engine.memory.model.SimpleConversationMemorySnapshot;
-import ai.labs.eddi.models.Context;
-import ai.labs.eddi.models.Context.ContextType;
+import ai.labs.eddi.engine.model.Context;
+import ai.labs.eddi.engine.model.Context.ContextType;
 
 import jakarta.enterprise.context.ApplicationScoped;
 

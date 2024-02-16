@@ -1,4 +1,4 @@
-package ai.labs.eddi.models;
+package ai.labs.eddi.configs.descriptor.model;
 
 import lombok.AllArgsConstructor;
 import lombok.Getter;

@@ -1,6 +1,6 @@
 package ai.labs.eddi.engine;
 
-import ai.labs.eddi.models.BotDeploymentStatus;
+import ai.labs.eddi.engine.model.BotDeploymentStatus;
 import io.swagger.v3.oas.annotations.Operation;
 import jakarta.ws.rs.*;
 import jakarta.ws.rs.core.MediaType;
@@ -11,7 +11,7 @@ import org.jboss.resteasy.reactive.NoCache;
 
 import java.util.List;
 
-import static ai.labs.eddi.models.Deployment.Environment;
+import static ai.labs.eddi.engine.model.Deployment.Environment;
 
 /**
  * @author ginccc

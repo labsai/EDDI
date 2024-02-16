@@ -1,4 +1,4 @@
-package ai.labs.eddi.models;
+package ai.labs.eddi.engine.model;
 
 import java.util.LinkedHashMap;
 
