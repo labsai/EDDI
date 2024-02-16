@@ -17,7 +17,6 @@
         <quarkus.platform.artifact-id>quarkus-bom</quarkus.platform.artifact-id>
         <quarkus.platform.group-id>io.quarkus.platform</quarkus.platform.group-id>
         <quarkus.platform.version>3.7.3</quarkus.platform.version>
-        <quarkus-logger-manager.version>3.0.2</quarkus-logger-manager.version>
         <jandex-maven-plugin.version>3.1.6</jandex-maven-plugin.version>
         <maven.compiler.parameters>true</maven.compiler.parameters>
         <surefire-plugin.version>3.1.2</surefire-plugin.version>
@@ -99,12 +98,6 @@
         <dependency>
             <groupId>io.quarkus</groupId>
             <artifactId>quarkus-keycloak-authorization</artifactId>
-        </dependency>
-        <dependency>
-            <groupId>io.quarkiverse.loggingmanager</groupId>
-            <artifactId>quarkus-logging-manager</artifactId>
-            <version>${quarkus-logger-manager.version}</version>
-            <scope>runtime</scope>
         </dependency>
         <dependency>
             <groupId>io.quarkiverse.jgit</groupId>
