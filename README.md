@@ -44,11 +44,11 @@ Technical specifications:
 
 * Java 21
 * Maven 3.8.4
-* MongoDB > 4.4
+* MongoDB >= 5.0
 
 ## How to run the project
 
-1. Setup a local mongodb \(&gt; v4.4\)
+1. Setup a local mongodb \(&gt; v5.0\)
 2. On a terminal, under project root folder, run the following command:
 
 ```shell script
