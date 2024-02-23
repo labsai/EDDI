@@ -16,7 +16,7 @@
         <quarkus.microprofile.version>3.0.0.Final</quarkus.microprofile.version>
         <quarkus.platform.artifact-id>quarkus-bom</quarkus.platform.artifact-id>
         <quarkus.platform.group-id>io.quarkus.platform</quarkus.platform.group-id>
-        <quarkus.platform.version>3.7.3</quarkus.platform.version>
+        <quarkus.platform.version>3.7.4</quarkus.platform.version>
         <jandex-maven-plugin.version>3.1.6</jandex-maven-plugin.version>
         <maven.compiler.parameters>true</maven.compiler.parameters>
         <surefire-plugin.version>3.2.5</surefire-plugin.version>
