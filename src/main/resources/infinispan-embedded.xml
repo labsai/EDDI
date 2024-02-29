@@ -1,4 +1,4 @@
-<infinispan xmlns="urn:infinispan:config:13.0">
+<infinispan xmlns="urn:infinispan:config:15.0">
     <cache-container default-cache="local" statistics="true">
         <metrics gauges="true" histograms="true"/>
 

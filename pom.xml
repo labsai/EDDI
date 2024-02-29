@@ -167,13 +167,13 @@
         </dependency>
         <dependency>
             <groupId>org.infinispan</groupId>
-            <artifactId>infinispan-core</artifactId>
-            <version>14.0.24.Final</version>
+            <artifactId>infinispan-quarkus-embedded</artifactId>
+            <version>15.0.0.Dev10</version>
         </dependency>
         <dependency>
             <groupId>org.infinispan</groupId>
             <artifactId>infinispan-component-annotations</artifactId>
-            <version>14.0.24.Final</version>
+            <version>15.0.0.Dev10</version>
             <scope>compile</scope>
         </dependency>
         <dependency>
