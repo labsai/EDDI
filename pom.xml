@@ -16,7 +16,7 @@
         <quarkus.microprofile.version>3.0.0.Final</quarkus.microprofile.version>
         <quarkus.platform.artifact-id>quarkus-bom</quarkus.platform.artifact-id>
         <quarkus.platform.group-id>io.quarkus.platform</quarkus.platform.group-id>
-        <quarkus.platform.version>3.8.1</quarkus.platform.version>
+        <quarkus.platform.version>3.8.2</quarkus.platform.version>
         <jandex-maven-plugin.version>3.1.6</jandex-maven-plugin.version>
         <maven.compiler.parameters>true</maven.compiler.parameters>
         <surefire-plugin.version>3.2.5</surefire-plugin.version>
@@ -210,7 +210,7 @@
         <dependency>
             <groupId>org.eclipse.jetty</groupId>
             <artifactId>jetty-client</artifactId>
-            <version>12.0.6</version>
+            <version>12.0.7</version>
         </dependency>
         <dependency>
             <groupId>jakarta.transaction</groupId>
