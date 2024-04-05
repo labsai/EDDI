@@ -23,7 +23,7 @@
         <failsafe-plugin.version>3.0.0</failsafe-plugin.version>
         <failsafe.useModulePath>false</failsafe.useModulePath>
         <war-plugin.version>3.3.2</war-plugin.version>
-        <dependency.version.lombok>1.18.30</dependency.version.lombok>
+        <dependency.version.lombok>1.18.32</dependency.version.lombok>
         <skipITs>true</skipITs>
     </properties>
     <dependencyManagement>
@@ -168,12 +168,12 @@
         <dependency>
             <groupId>org.infinispan</groupId>
             <artifactId>infinispan-quarkus-embedded</artifactId>
-            <version>15.0.0.CR1</version>
+            <version>15.0.0.Final</version>
         </dependency>
         <dependency>
             <groupId>org.infinispan</groupId>
             <artifactId>infinispan-component-annotations</artifactId>
-            <version>15.0.0.CR1</version>
+            <version>15.0.0.Final</version>
             <scope>compile</scope>
         </dependency>
         <dependency>
@@ -210,7 +210,7 @@
         <dependency>
             <groupId>org.eclipse.jetty</groupId>
             <artifactId>jetty-client</artifactId>
-            <version>12.0.7</version>
+            <version>12.0.8</version>
         </dependency>
         <dependency>
             <groupId>jakarta.transaction</groupId>
