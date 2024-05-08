@@ -1,7 +1,7 @@
 package ai.labs.eddi.configs.langchain;
 
 import ai.labs.eddi.configs.IRestVersionInfo;
-import ai.labs.eddi.models.DocumentDescriptor;
+import ai.labs.eddi.configs.documentdescriptor.model.DocumentDescriptor;
 import ai.labs.eddi.modules.langchain.model.LangChainConfiguration;
 import jakarta.ws.rs.*;
 import jakarta.ws.rs.core.MediaType;

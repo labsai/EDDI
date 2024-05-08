@@ -8,7 +8,6 @@ public record LangChainConfiguration(List<Task> tasks) {
                        String id,
                        String type,
                        String description,
-                       Map<String, Object> parameters) {
+                       Map<String, String> parameters) {
         }
-
 }
