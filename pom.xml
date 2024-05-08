@@ -16,8 +16,8 @@
         <quarkus.microprofile.version>3.0.0.Final</quarkus.microprofile.version>
         <quarkus.platform.artifact-id>quarkus-bom</quarkus.platform.artifact-id>
         <quarkus.platform.group-id>io.quarkus.platform</quarkus.platform.group-id>
-        <quarkus.platform.version>3.9.3</quarkus.platform.version>
-        <jandex-maven-plugin.version>3.1.6</jandex-maven-plugin.version>
+        <quarkus.platform.version>3.10.0</quarkus.platform.version>
+        <jandex-maven-plugin.version>3.1.7</jandex-maven-plugin.version>
         <maven.compiler.parameters>true</maven.compiler.parameters>
         <surefire-plugin.version>3.2.5</surefire-plugin.version>
         <failsafe-plugin.version>3.0.0</failsafe-plugin.version>
@@ -97,11 +97,21 @@
         <dependency>
             <groupId>io.quarkus</groupId>
             <artifactId>quarkus-keycloak-authorization</artifactId>
-        </dependency>-->
+        </dependency>
         <dependency>
             <groupId>io.quarkiverse.langchain4j</groupId>
             <artifactId>quarkus-langchain4j-openai</artifactId>
-            <version>0.8.3</version>
+            <version>0.12.1</version>
+        </dependency>
+        <dependency>
+            <groupId>io.quarkiverse.langchain4j</groupId>
+            <artifactId>quarkus-langchain4j-hugging-face</artifactId>
+            <version>0.12.1</version>
+        </dependency>
+        <dependency>
+            <groupId>io.quarkiverse.langchain4j</groupId>
+            <artifactId>quarkus-langchain4j-anthropic</artifactId>
+            <version>0.12.1</version>
         </dependency>
         <dependency>
             <groupId>io.quarkiverse.jgit</groupId>
@@ -117,12 +127,12 @@
         <dependency>
             <groupId>io.swagger.core.v3</groupId>
             <artifactId>swagger-annotations</artifactId>
-            <version>2.2.9</version>
+            <version>2.2.21</version>
         </dependency>
         <dependency>
             <groupId>de.undercouch</groupId>
             <artifactId>bson4jackson</artifactId>
-            <version>2.13.1</version>
+            <version>2.15.1</version>
             <exclusions>
                 <exclusion>
                     <groupId>com.fasterxml.jackson.core</groupId>
@@ -173,12 +183,12 @@
         <dependency>
             <groupId>org.infinispan</groupId>
             <artifactId>infinispan-quarkus-embedded</artifactId>
-            <version>15.0.0.Final</version>
+            <version>15.0.2.Final</version>
         </dependency>
         <dependency>
             <groupId>org.infinispan</groupId>
             <artifactId>infinispan-component-annotations</artifactId>
-            <version>15.0.0.Final</version>
+            <version>15.0.2.Final</version>
             <scope>compile</scope>
         </dependency>
         <dependency>
@@ -189,7 +199,7 @@
         <dependency>
             <groupId>org.apache.commons</groupId>
             <artifactId>commons-lang3</artifactId>
-            <version>3.12.0</version>
+            <version>3.14.0</version>
             <scope>compile</scope>
         </dependency>
         <dependency>
@@ -229,13 +239,13 @@
         <dependency>
             <groupId>io.rest-assured</groupId>
             <artifactId>rest-assured</artifactId>
-            <version>5.2.1</version>
+            <version>5.4.0</version>
             <scope>test</scope>
         </dependency>
         <dependency>
             <groupId>org.mockito</groupId>
             <artifactId>mockito-core</artifactId>
-            <version>4.8.1</version>
+            <version>4.11.0</version>
             <scope>test</scope>
         </dependency>
     </dependencies>
