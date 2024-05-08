@@ -10,9 +10,7 @@ import ai.labs.eddi.engine.memory.IConversationMemory.IWritableConversationStep;
 import ai.labs.eddi.engine.memory.model.ConversationLog;
 import ai.labs.eddi.engine.runtime.client.configuration.IResourceClientLibrary;
 import ai.labs.eddi.engine.runtime.service.ServiceException;
-import ai.labs.eddi.modules.langchain.impl.builder.AnthropicLanguageModelBuilder;
-import ai.labs.eddi.modules.langchain.impl.builder.HuggingFaceLanguageModelBuilder;
-import ai.labs.eddi.modules.langchain.impl.builder.OpenAILanguageModelBuilder;
+import ai.labs.eddi.modules.langchain.impl.builder.*;
 import ai.labs.eddi.modules.langchain.model.LangChainConfiguration;
 import ai.labs.eddi.modules.templating.ITemplatingEngine;
 import dev.langchain4j.data.message.AiMessage;
@@ -55,6 +53,9 @@ public class LangChainTask implements ILifecycleTask {
     private final IDataFactory dataFactory;
     private final IMemoryItemConverter memoryItemConverter;
     private final ITemplatingEngine templatingEngine;
+    private final IOpenAILanguageModelBuilder openAILanguageModelBuilder;
+    private final IHuggingFaceLanguageModelBuilder huggingFaceLanguageModelBuilder;
+    private final IAnthropicLanguageModelBuilder anthropicLanguageModelBuilder;
 
     private static final Logger LOGGER = Logger.getLogger(LangChainTask.class);
     private final Map<ModelCacheKey, ChatLanguageModel> modelCache = new ConcurrentHashMap<>(1);
@@ -63,11 +64,17 @@ public class LangChainTask implements ILifecycleTask {
     public LangChainTask(IResourceClientLibrary resourceClientLibrary,
                          IDataFactory dataFactory,
                          IMemoryItemConverter memoryItemConverter,
-                         ITemplatingEngine templatingEngine) {
+                         ITemplatingEngine templatingEngine,
+                         IOpenAILanguageModelBuilder openAILanguageModelBuilder,
+                         IHuggingFaceLanguageModelBuilder huggingFaceLanguageModelBuilder,
+                         IAnthropicLanguageModelBuilder anthropicLanguageModelBuilder) {
         this.resourceClientLibrary = resourceClientLibrary;
         this.dataFactory = dataFactory;
         this.memoryItemConverter = memoryItemConverter;
         this.templatingEngine = templatingEngine;
+        this.openAILanguageModelBuilder = openAILanguageModelBuilder;
+        this.huggingFaceLanguageModelBuilder = huggingFaceLanguageModelBuilder;
+        this.anthropicLanguageModelBuilder = anthropicLanguageModelBuilder;
     }
 
     @Override
@@ -141,9 +148,9 @@ public class LangChainTask implements ILifecycleTask {
         ChatLanguageModel model = null;
 
         switch (type) {
-            case LLM_TYPE_OPENAI -> model = OpenAILanguageModelBuilder.build(parameters);
-            case LLM_TYPE_HUGGINGFACE -> model = HuggingFaceLanguageModelBuilder.build(parameters);
-            case LLM_TYPE_ANTHROPIC -> model = AnthropicLanguageModelBuilder.build(parameters);
+            case LLM_TYPE_OPENAI -> model = openAILanguageModelBuilder.build(parameters);
+            case LLM_TYPE_HUGGINGFACE -> model = huggingFaceLanguageModelBuilder.build(parameters);
+            case LLM_TYPE_ANTHROPIC -> model = anthropicLanguageModelBuilder.build(parameters);
         }
 
         if (model != null) {

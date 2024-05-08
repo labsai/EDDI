@@ -8,7 +8,8 @@ import ai.labs.eddi.engine.memory.IMemoryItemConverter;
 import ai.labs.eddi.engine.runtime.client.configuration.IResourceClientLibrary;
 import ai.labs.eddi.modules.langchain.model.LangChainConfiguration;
 import ai.labs.eddi.modules.templating.ITemplatingEngine;
-import io.quarkus.test.junit.QuarkusTest;
+import dev.langchain4j.data.message.AiMessage;
+import dev.langchain4j.model.output.Response;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.Mock;
@@ -24,7 +25,6 @@ import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
 import static org.mockito.MockitoAnnotations.openMocks;
 
-@QuarkusTest
 class LangChainTaskTest {
     @Mock
     private IResourceClientLibrary resourceClientLibrary;
@@ -41,7 +41,8 @@ class LangChainTaskTest {
     @BeforeEach
     void setUp() {
         openMocks(this);
-        langChainTask = new LangChainTask(resourceClientLibrary, dataFactory, memoryItemConverter, templatingEngine);
+        langChainTask = new LangChainTask(resourceClientLibrary, dataFactory, memoryItemConverter, templatingEngine,
+                parameters -> messages -> new Response<>(new AiMessage("test")), null, null);
     }
 
     @Test
