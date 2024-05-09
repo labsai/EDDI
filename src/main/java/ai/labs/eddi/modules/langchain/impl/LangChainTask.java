@@ -20,6 +20,7 @@ import dev.langchain4j.data.message.UserMessage;
 import dev.langchain4j.model.chat.ChatLanguageModel;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
+import jakarta.inject.Provider;
 import org.jboss.logging.Logger;
 
 import java.net.URI;
@@ -45,17 +46,11 @@ public class LangChainTask implements ILifecycleTask {
     static final String MEMORY_OUTPUT_IDENTIFIER = "output";
     static final String LANGCHAIN_OUTPUT_IDENTIFIER = MEMORY_OUTPUT_IDENTIFIER + ":text:langchain";
 
-    public static final String LLM_TYPE_OPENAI = "openai";
-    public static final String LLM_TYPE_HUGGINGFACE = "huggingface";
-    public static final String LLM_TYPE_ANTHROPIC = "anthropic";
-
     private final IResourceClientLibrary resourceClientLibrary;
     private final IDataFactory dataFactory;
     private final IMemoryItemConverter memoryItemConverter;
     private final ITemplatingEngine templatingEngine;
-    private final IOpenAILanguageModelBuilder openAILanguageModelBuilder;
-    private final IHuggingFaceLanguageModelBuilder huggingFaceLanguageModelBuilder;
-    private final IAnthropicLanguageModelBuilder anthropicLanguageModelBuilder;
+    private final Map<String, Provider<ILanguageModelBuilder>> languageModelApiConnectorBuilders;
 
     private static final Logger LOGGER = Logger.getLogger(LangChainTask.class);
     private final Map<ModelCacheKey, ChatLanguageModel> modelCache = new ConcurrentHashMap<>(1);
@@ -65,16 +60,12 @@ public class LangChainTask implements ILifecycleTask {
                          IDataFactory dataFactory,
                          IMemoryItemConverter memoryItemConverter,
                          ITemplatingEngine templatingEngine,
-                         IOpenAILanguageModelBuilder openAILanguageModelBuilder,
-                         IHuggingFaceLanguageModelBuilder huggingFaceLanguageModelBuilder,
-                         IAnthropicLanguageModelBuilder anthropicLanguageModelBuilder) {
+                         Map<String, Provider<ILanguageModelBuilder>> languageModelApiConnectorBuilders) {
         this.resourceClientLibrary = resourceClientLibrary;
         this.dataFactory = dataFactory;
         this.memoryItemConverter = memoryItemConverter;
         this.templatingEngine = templatingEngine;
-        this.openAILanguageModelBuilder = openAILanguageModelBuilder;
-        this.huggingFaceLanguageModelBuilder = huggingFaceLanguageModelBuilder;
-        this.anthropicLanguageModelBuilder = anthropicLanguageModelBuilder;
+        this.languageModelApiConnectorBuilders = languageModelApiConnectorBuilders;
     }
 
     @Override
@@ -145,20 +136,14 @@ public class LangChainTask implements ILifecycleTask {
             return modelCache.get(cacheKey);
         }
 
-        ChatLanguageModel model = null;
-
-        switch (type) {
-            case LLM_TYPE_OPENAI -> model = openAILanguageModelBuilder.build(parameters);
-            case LLM_TYPE_HUGGINGFACE -> model = huggingFaceLanguageModelBuilder.build(parameters);
-            case LLM_TYPE_ANTHROPIC -> model = anthropicLanguageModelBuilder.build(parameters);
+        if (!languageModelApiConnectorBuilders.containsKey(type)) {
+            throw new UnsupportedLangchainTaskException(String.format("Type \"%s\" is not supported", type));
         }
 
-        if (model != null) {
-            modelCache.put(cacheKey, model);
-            return model;
-        }
+        var model = languageModelApiConnectorBuilders.get(type).get().build(parameters);
+        modelCache.put(cacheKey, model);
 
-        throw new UnsupportedLangchainTaskException(String.format("Type \"%s\" is not supported", type));
+        return model;
     }
 
     private ChatMessage convertMessage(ConversationLog.ConversationPart eddiMessage) {

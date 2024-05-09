@@ -6,10 +6,12 @@ import ai.labs.eddi.engine.memory.IData;
 import ai.labs.eddi.engine.memory.IDataFactory;
 import ai.labs.eddi.engine.memory.IMemoryItemConverter;
 import ai.labs.eddi.engine.runtime.client.configuration.IResourceClientLibrary;
+import ai.labs.eddi.modules.langchain.impl.builder.ILanguageModelBuilder;
 import ai.labs.eddi.modules.langchain.model.LangChainConfiguration;
 import ai.labs.eddi.modules.templating.ITemplatingEngine;
 import dev.langchain4j.data.message.AiMessage;
 import dev.langchain4j.model.output.Response;
+import jakarta.inject.Provider;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.Mock;
@@ -41,8 +43,12 @@ class LangChainTaskTest {
     @BeforeEach
     void setUp() {
         openMocks(this);
+        Map<String, Provider<ILanguageModelBuilder>> languageModelApiConnectorBuilders = new HashMap<>();
+        languageModelApiConnectorBuilders.put("openai",
+                () -> parameters -> messages -> new Response<>(new AiMessage("test")));
+
         langChainTask = new LangChainTask(resourceClientLibrary, dataFactory, memoryItemConverter, templatingEngine,
-                parameters -> messages -> new Response<>(new AiMessage("test")), null, null);
+                languageModelApiConnectorBuilders);
     }
 
     @Test
