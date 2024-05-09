@@ -101,17 +101,22 @@
         <dependency>
             <groupId>io.quarkiverse.langchain4j</groupId>
             <artifactId>quarkus-langchain4j-openai</artifactId>
-            <version>0.12.1</version>
+            <version>0.13.1</version>
         </dependency>
         <dependency>
             <groupId>io.quarkiverse.langchain4j</groupId>
             <artifactId>quarkus-langchain4j-hugging-face</artifactId>
-            <version>0.12.1</version>
+            <version>0.13.1</version>
         </dependency>
         <dependency>
             <groupId>io.quarkiverse.langchain4j</groupId>
             <artifactId>quarkus-langchain4j-anthropic</artifactId>
-            <version>0.12.1</version>
+            <version>0.13.1</version>
+        </dependency>
+        <dependency>
+            <groupId>io.quarkiverse.langchain4j</groupId>
+            <artifactId>quarkus-langchain4j-vertex-ai-gemini</artifactId>
+            <version>0.13.1</version>
         </dependency>
         <dependency>
             <groupId>io.quarkiverse.jgit</groupId>
