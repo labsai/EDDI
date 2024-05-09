@@ -4,6 +4,7 @@ package ai.labs.eddi.modules.langchain.bootstrap;
 import ai.labs.eddi.engine.lifecycle.ILifecycleTask;
 import ai.labs.eddi.engine.lifecycle.bootstrap.LifecycleExtensions;
 import ai.labs.eddi.modules.langchain.impl.LangChainTask;
+import ai.labs.eddi.modules.langchain.impl.builder.*;
 import io.quarkus.runtime.Startup;
 import jakarta.annotation.PostConstruct;
 import jakarta.enterprise.context.ApplicationScoped;
@@ -12,26 +13,52 @@ import jakarta.inject.Inject;
 import jakarta.inject.Provider;
 import org.jboss.logging.Logger;
 
+import java.util.HashMap;
 import java.util.Map;
 
 @Startup(1000)
 @ApplicationScoped
 public class LangChainModule {
-
     private static final Logger LOGGER = Logger.getLogger("Startup");
+
+    public static final String LLM_TYPE_OPENAI = "openai";
+    public static final String LLM_TYPE_HUGGING_FACE = "hugging-face";
+    public static final String LLM_TYPE_ANTHROPIC = "anthropic";
+    public static final String LLM_TYPE_VERTEX_GEMINI = "vertex-gemini";
+
     private final Map<String, Provider<ILifecycleTask>> lifecycleTaskProviders;
-    private final Instance<ILifecycleTask> instance;
+    private final Instance<ILifecycleTask> lifecycleTaskInstance;
+    private final Instance<ILanguageModelBuilder> langModelBuilderInstance;
+
+    private final Map<String, Provider<ILanguageModelBuilder>> languageModelApiConnectorBuilders = new HashMap<>();
+
+    @ApplicationScoped
+    public Map<String, Provider<ILanguageModelBuilder>> getLanguageModelApiConnectorBuilders() {
+        return languageModelApiConnectorBuilders;
+    }
 
     public LangChainModule(@LifecycleExtensions Map<String, Provider<ILifecycleTask>> lifecycleTaskProviders,
-                           Instance<ILifecycleTask> instance) {
+                           Instance<ILifecycleTask> lifecycleTaskInstance,
+                           Instance<ILanguageModelBuilder> langModelBuilderInstance) {
+
         this.lifecycleTaskProviders = lifecycleTaskProviders;
-        this.instance = instance;
+        this.lifecycleTaskInstance = lifecycleTaskInstance;
+        this.langModelBuilderInstance = langModelBuilderInstance;
     }
 
     @PostConstruct
     @Inject
     protected void configure() {
-        lifecycleTaskProviders.put(LangChainTask.ID, () -> instance.select(LangChainTask.class).get());
+        languageModelApiConnectorBuilders.put(LLM_TYPE_OPENAI, () ->
+                langModelBuilderInstance.select(OpenAILanguageModelBuilder.class).get());
+        languageModelApiConnectorBuilders.put(LLM_TYPE_HUGGING_FACE, () ->
+                langModelBuilderInstance.select(HuggingFaceLanguageModelBuilder.class).get());
+        languageModelApiConnectorBuilders.put(LLM_TYPE_ANTHROPIC, () ->
+                langModelBuilderInstance.select(AnthropicLanguageModelBuilder.class).get());
+        languageModelApiConnectorBuilders.put(LLM_TYPE_VERTEX_GEMINI, () ->
+                langModelBuilderInstance.select(VertexGeminiLanguageModelBuilder.class).get());
+
+        lifecycleTaskProviders.put(LangChainTask.ID, () -> lifecycleTaskInstance.select(LangChainTask.class).get());
         LOGGER.debug("Added LangChain Module, current size of lifecycle modules " + lifecycleTaskProviders.size());
     }
 

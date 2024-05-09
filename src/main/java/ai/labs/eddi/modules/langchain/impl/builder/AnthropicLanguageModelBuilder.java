@@ -10,7 +10,7 @@ import java.util.Map;
 import static ai.labs.eddi.utils.RuntimeUtilities.isNullOrEmpty;
 
 @ApplicationScoped
-public class AnthropicLanguageModelBuilder implements IAnthropicLanguageModelBuilder {
+public class AnthropicLanguageModelBuilder implements ILanguageModelBuilder {
     private static final String KEY_API_KEY = "apiKey";
     private static final String KEY_TEMPERATURE = "temperature";
     private static final String KEY_MODEL_NAME = "modelName";

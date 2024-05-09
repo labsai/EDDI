@@ -1,7 +1,7 @@
 package ai.labs.eddi.modules.langchain.impl.builder;
 
 import dev.langchain4j.model.chat.ChatLanguageModel;
-import dev.langchain4j.model.openai.OpenAiChatModel;
+import io.quarkiverse.langchain4j.vertexai.runtime.gemini.VertexAiGeminiChatLanguageModel;
 import jakarta.enterprise.context.ApplicationScoped;
 
 import java.time.Duration;
@@ -10,21 +10,27 @@ import java.util.Map;
 import static ai.labs.eddi.utils.RuntimeUtilities.isNullOrEmpty;
 
 @ApplicationScoped
-public class OpenAILanguageModelBuilder implements ILanguageModelBuilder {
-    private static final String KEY_API_KEY = "apiKey";
+public class VertexGeminiLanguageModelBuilder implements ILanguageModelBuilder {
+    private static final String KEY_PUBLISHER = "publisher";
+    private static final String KEY_MODEL_ID = "modelID";
     private static final String KEY_TEMPERATURE = "temperature";
-    private static final String KEY_MODEL_NAME = "modelName";
     private static final String KEY_TIMEOUT = "timeout";
+    private static final String KEY_PROJECT_ID = "projectId";
 
     @Override
     public ChatLanguageModel build(Map<String, String> parameters) {
-        var builder = OpenAiChatModel.builder();
-        if (!isNullOrEmpty(parameters.get(KEY_API_KEY))) {
-            builder.apiKey(parameters.get(KEY_API_KEY));
+        var builder = VertexAiGeminiChatLanguageModel.builder();
+
+        if (!isNullOrEmpty(parameters.get(KEY_PROJECT_ID))) {
+            builder.projectId(parameters.get(KEY_PROJECT_ID));
         }
 
-        if (!isNullOrEmpty(parameters.get(KEY_MODEL_NAME))) {
-            builder.modelName(parameters.get(KEY_MODEL_NAME));
+        if (!isNullOrEmpty(parameters.get(KEY_PUBLISHER))) {
+            builder.publisher(parameters.get(KEY_PUBLISHER));
+        }
+
+        if (!isNullOrEmpty(parameters.get(KEY_MODEL_ID))) {
+            builder.modelId(parameters.get(KEY_MODEL_ID));
         }
 
         if (!isNullOrEmpty(parameters.get(KEY_TIMEOUT))) {

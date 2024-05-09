@@ -10,7 +10,7 @@ import java.util.Map;
 import static ai.labs.eddi.utils.RuntimeUtilities.isNullOrEmpty;
 
 @ApplicationScoped
-public class HuggingFaceLanguageModelBuilder implements IHuggingFaceLanguageModelBuilder {
+public class HuggingFaceLanguageModelBuilder implements ILanguageModelBuilder {
     private static final String KEY_ACCESS_TOKEN = "accessToken";
     private static final String KEY_MODEL_ID = "modelId";
     private static final String KEY_TEMPERATURE = "temperature";
