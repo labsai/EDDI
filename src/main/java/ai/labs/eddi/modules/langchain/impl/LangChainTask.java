@@ -10,8 +10,9 @@ import ai.labs.eddi.engine.memory.IConversationMemory.IWritableConversationStep;
 import ai.labs.eddi.engine.memory.model.ConversationLog;
 import ai.labs.eddi.engine.runtime.client.configuration.IResourceClientLibrary;
 import ai.labs.eddi.engine.runtime.service.ServiceException;
-import ai.labs.eddi.modules.langchain.impl.builder.*;
+import ai.labs.eddi.modules.langchain.impl.builder.ILanguageModelBuilder;
 import ai.labs.eddi.modules.langchain.model.LangChainConfiguration;
+import ai.labs.eddi.modules.output.model.types.TextOutputItem;
 import ai.labs.eddi.modules.templating.ITemplatingEngine;
 import dev.langchain4j.data.message.AiMessage;
 import dev.langchain4j.data.message.ChatMessage;
@@ -24,10 +25,7 @@ import jakarta.inject.Provider;
 import org.jboss.logging.Logger;
 
 import java.net.URI;
-import java.util.HashMap;
-import java.util.LinkedList;
-import java.util.List;
-import java.util.Map;
+import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 
 import static ai.labs.eddi.configs.packages.model.ExtensionDescriptor.ConfigValue;
@@ -39,6 +37,7 @@ public class LangChainTask implements ILifecycleTask {
     public static final String ID = "ai.labs.langchain";
 
     private static final String ACTION_KEY = "actions";
+    private static final String KEY_URI = "uri";
     private static final String KEY_LANGCHAIN = "langchain";
     private static final String KEY_SYSTEM_MESSAGE = "systemMessage";
     private static final String KEY_LOG_SIZE_LIMIT = "logSizeLimit";
@@ -96,29 +95,40 @@ public class LangChainTask implements ILifecycleTask {
             }
 
             for (var task : langChainConfig.tasks()) {
-                if (task.actions().stream().anyMatch(actions::contains)) {
+                if (task.actions().contains("*") || task.actions().stream().anyMatch(actions::contains)) {
                     var parameters = task.parameters();
-                    var systemMessage =
-                            templatingEngine.processTemplate(
-                                    parameters.get(KEY_SYSTEM_MESSAGE), templateDataObjects);
-                    var logSizeLimit = Integer.parseInt(parameters.get(KEY_LOG_SIZE_LIMIT));
+                    var messages = new LinkedList<ChatMessage>();
+                    if (parameters.containsKey(KEY_SYSTEM_MESSAGE)) {
+                        var systemMessage = templatingEngine.processTemplate(
+                                parameters.get(KEY_SYSTEM_MESSAGE), templateDataObjects);
+                        messages = new LinkedList<>(List.of(new SystemMessage(systemMessage)));
+                    }
 
-                    var messages = new LinkedList<ChatMessage>(List.of(new SystemMessage(systemMessage)));
-                    messages.addAll(
-                            new ConversationLogGenerator(memory).
-                                    generate(logSizeLimit)
-                                    .getMessages()
-                                    .stream()
-                                    .map(this::convertMessage)
-                                    .toList());
+                    int logSizeLimit = -1;
+                    if (parameters.containsKey((KEY_LOG_SIZE_LIMIT))) {
+                        logSizeLimit = Integer.parseInt(parameters.get(KEY_LOG_SIZE_LIMIT));
+                    }
 
+                    var chatMessages = new ConversationLogGenerator(memory).
+                            generate(logSizeLimit)
+                            .getMessages()
+                            .stream()
+                            .map(this::convertMessage)
+                            .toList();
+
+                    if (chatMessages.isEmpty()) {
+                        //start of the conversation
+                        continue;
+                    }
+
+                    messages.addAll(chatMessages);
                     var chatLanguageModel = getChatLanguageModel(task.type(), task.parameters());
                     var messageResponse = chatLanguageModel.generate(messages);
                     var content = messageResponse.content().text();
-
                     var outputData = dataFactory.createData(LANGCHAIN_OUTPUT_IDENTIFIER + ":" + task.type(), content);
                     currentStep.storeData(outputData);
-                    currentStep.addConversationOutputString(MEMORY_OUTPUT_IDENTIFIER, content);
+                    var outputItem = new TextOutputItem(content, 0);
+                    currentStep.addConversationOutputList(MEMORY_OUTPUT_IDENTIFIER, Collections.singletonList(outputItem));
                 }
             }
 
@@ -158,7 +168,7 @@ public class LangChainTask implements ILifecycleTask {
     public Object configure(Map<String, Object> configuration, Map<String, Object> extensions)
             throws PackageConfigurationException {
 
-        Object uriObj = configuration.get("uri");
+        Object uriObj = configuration.get(KEY_URI);
         if (!isNullOrEmpty(uriObj)) {
             URI uri = URI.create(uriObj.toString());
 
@@ -178,7 +188,7 @@ public class LangChainTask implements ILifecycleTask {
         ExtensionDescriptor extensionDescriptor = new ExtensionDescriptor(ID);
         extensionDescriptor.setDisplayName("Lang Chain");
         ConfigValue configValue = new ConfigValue("Resource URI", FieldType.URI, false, null);
-        extensionDescriptor.getConfigs().put("uri", configValue);
+        extensionDescriptor.getConfigs().put(KEY_URI, configValue);
         return extensionDescriptor;
     }
 
