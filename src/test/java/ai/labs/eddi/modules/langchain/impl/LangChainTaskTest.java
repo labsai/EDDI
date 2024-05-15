@@ -39,13 +39,14 @@ class LangChainTaskTest {
 
     private LangChainTask langChainTask;
 
+    private static final String TEST_MESSAGE_FROM_LLM = "Message from LLM";
 
     @BeforeEach
     void setUp() {
         openMocks(this);
         Map<String, Provider<ILanguageModelBuilder>> languageModelApiConnectorBuilders = new HashMap<>();
         languageModelApiConnectorBuilders.put("openai",
-                () -> parameters -> messages -> new Response<>(new AiMessage("test")));
+                () -> parameters -> messages -> new Response<>(new AiMessage(TEST_MESSAGE_FROM_LLM)));
 
         langChainTask = new LangChainTask(resourceClientLibrary, dataFactory, memoryItemConverter, templatingEngine,
                 languageModelApiConnectorBuilders);
@@ -85,7 +86,7 @@ class LangChainTaskTest {
 
         // Verify that the conversation output string was updated
         verify(currentStep, times(1)).
-                addConversationOutputString(eq(LangChainTask.MEMORY_OUTPUT_IDENTIFIER), anyString());
+                addConversationOutputString(eq(LangChainTask.MEMORY_OUTPUT_IDENTIFIER), eq(TEST_MESSAGE_FROM_LLM));
     }
 
 
@@ -135,5 +136,4 @@ class LangChainTaskTest {
         assertNotNull(uriConfig, "'uri' config should not be null.");
         assertEquals(ExtensionDescriptor.FieldType.URI, uriConfig.getFieldType(), "'uri' config type should be URI.");
     }
-
 }
