@@ -25,6 +25,7 @@ public class LangChainModule {
     public static final String LLM_TYPE_HUGGING_FACE = "hugging-face";
     public static final String LLM_TYPE_ANTHROPIC = "anthropic";
     public static final String LLM_TYPE_VERTEX_GEMINI = "vertex-gemini";
+    public static final String LLM_TYPE_OLLAMA = "ollama";
 
     private final Map<String, Provider<ILifecycleTask>> lifecycleTaskProviders;
     private final Instance<ILifecycleTask> lifecycleTaskInstance;
@@ -57,6 +58,8 @@ public class LangChainModule {
                 langModelBuilderInstance.select(AnthropicLanguageModelBuilder.class).get());
         languageModelApiConnectorBuilders.put(LLM_TYPE_VERTEX_GEMINI, () ->
                 langModelBuilderInstance.select(VertexGeminiLanguageModelBuilder.class).get());
+        languageModelApiConnectorBuilders.put(LLM_TYPE_OLLAMA, () ->
+                langModelBuilderInstance.select(OllamaLanguageModelBuilder.class).get());
 
         lifecycleTaskProviders.put(LangChainTask.ID, () -> lifecycleTaskInstance.select(LangChainTask.class).get());
         LOGGER.debug("Added LangChain Module, current size of lifecycle modules " + lifecycleTaskProviders.size());
