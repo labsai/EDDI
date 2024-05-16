@@ -26,9 +26,12 @@ public class ConversationLogGenerator {
     }
 
     public ConversationLog generate() {
-        return generate(-1);
+        return generate(-1, true);
     }
     public ConversationLog generate(int logSize) {
+        return generate(logSize, true);
+    }
+    public ConversationLog generate(int logSize, boolean includeFirstBotMessage) {
         if(conversationMemory == null && memorySnapshot == null) {
             throw new IllegalStateException("ConversationMemory was null. " +
                     "You need to either set IConversationMemory or ConversationMemorySnapshot");
@@ -53,6 +56,10 @@ public class ConversationLogGenerator {
                         map(item -> item.get(KEY_TEXT).toString()).collect(Collectors.joining(" "));
                 conversationLog.getMessages().add(new ConversationLog.ConversationPart(KEY_ROLE_ASSISTANT, output));
             }
+        }
+
+        if(!includeFirstBotMessage && !conversationLog.getMessages().isEmpty()) {
+            conversationLog.getMessages().removeFirst();
         }
 
         return conversationLog;

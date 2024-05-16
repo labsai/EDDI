@@ -109,8 +109,13 @@ public class LangChainTask implements ILifecycleTask {
                         logSizeLimit = Integer.parseInt(parameters.get(KEY_LOG_SIZE_LIMIT));
                     }
 
+                    boolean includeFirstBotMessage = true;
+                    if (parameters.containsKey((KEY_INCLUDE_FIRST_BOT_MESSAGE))) {
+                        includeFirstBotMessage = Boolean.parseBoolean(parameters.get(KEY_INCLUDE_FIRST_BOT_MESSAGE));
+                    }
+
                     var chatMessages = new ConversationLogGenerator(memory).
-                            generate(logSizeLimit)
+                            generate(logSizeLimit, includeFirstBotMessage)
                             .getMessages()
                             .stream()
                             .map(this::convertMessage)
