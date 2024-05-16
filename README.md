@@ -1,6 +1,12 @@
 # E.D.D.I: Prompt & Conversation Management Middleware for Conversational AI APIs
 
-E.D.D.I (Enhanced Dialog Driven Interface) is an enterprise-certified chatbot middleware that offers advanced prompt and conversation management for Conversational AI APIs, such as ChatGPT. Developed in Java using Quarkus, it is lean, RESTful, scalable, and cloud-native. It comes with Docker support and can be orchestrated with Kubernetes or Openshift.
+E.D.D.I (Enhanced Dialog Driven Interface) is a middleware to connect and manage LLM API bots 
+with advanced prompt and conversation management for APIs such as OpenAI ChatGPT, Facebook Hugging Face, 
+Anthropic Claude, and Google Gemini. 
+
+Developed in Java using Quarkus, it is lean, RESTful, scalable, and cloud-native. 
+It comes as Docker container and can be orchestrated with Kubernetes or Openshift.
+The Docker container has been certified by IBM/Red Hat.
 
 Latest stable version: 5.2.1
 
@@ -25,8 +31,9 @@ even multiple versions of the same bot, for smooth upgrading and transitions.
 Notable features include:
 
 * Seamless integration with conversational or traditional REST APIs
-* Configurable NLP and Behavior rules to facilitate conversations and monitor sensitive topics
+* Configurable NLP and Behavior rules to orchestrate LLM involvement
 * Support for multiple chatbots, including multiple versions of the same bot, running concurrently
+* Support for Major AI API integrations via langchain4j: OpenAI, Hugging Face (text only), Anthropic Claude, and Gemini (and more to come)
 
 Technical specifications:
 
@@ -38,7 +45,8 @@ Technical specifications:
 * Kubernetes integration (Liveness/Readiness endpoint)
 * MongoDB for storing bot configurations and conversation logs
 * OAuth 2.0 (Keycloak) for authentication and user management
-* HTML, CSS, Javascript (Dashboard & Basic Chat UI)
+* HTML, CSS, Javascript (Dashboard)
+* React (Basic Chat UI)
 
 ## Prerequisites
 
