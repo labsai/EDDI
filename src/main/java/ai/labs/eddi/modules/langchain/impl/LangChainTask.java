@@ -36,14 +36,16 @@ import static ai.labs.eddi.utils.RuntimeUtilities.isNullOrEmpty;
 public class LangChainTask implements ILifecycleTask {
     public static final String ID = "ai.labs.langchain";
 
-    private static final String ACTION_KEY = "actions";
     private static final String KEY_URI = "uri";
+    private static final String KEY_ACTIONS = "actions";
     private static final String KEY_LANGCHAIN = "langchain";
     private static final String KEY_SYSTEM_MESSAGE = "systemMessage";
     private static final String KEY_LOG_SIZE_LIMIT = "logSizeLimit";
+    private static final String KEY_INCLUDE_FIRST_BOT_MESSAGE = "includeFirstBotMessage";
 
     static final String MEMORY_OUTPUT_IDENTIFIER = "output";
     static final String LANGCHAIN_OUTPUT_IDENTIFIER = MEMORY_OUTPUT_IDENTIFIER + ":text:langchain";
+    public static final String MATCH_ALL_OPERATOR = "*";
 
     private final IResourceClientLibrary resourceClientLibrary;
     private final IDataFactory dataFactory;
@@ -51,8 +53,9 @@ public class LangChainTask implements ILifecycleTask {
     private final ITemplatingEngine templatingEngine;
     private final Map<String, Provider<ILanguageModelBuilder>> languageModelApiConnectorBuilders;
 
-    private static final Logger LOGGER = Logger.getLogger(LangChainTask.class);
     private final Map<ModelCacheKey, ChatLanguageModel> modelCache = new ConcurrentHashMap<>(1);
+
+    private static final Logger LOGGER = Logger.getLogger(LangChainTask.class);
 
     @Inject
     public LangChainTask(IResourceClientLibrary resourceClientLibrary,
@@ -83,7 +86,7 @@ public class LangChainTask implements ILifecycleTask {
 
         try {
             IWritableConversationStep currentStep = memory.getCurrentStep();
-            IData<List<String>> latestData = currentStep.getLatestData(ACTION_KEY);
+            IData<List<String>> latestData = currentStep.getLatestData(KEY_ACTIONS);
             if (latestData == null) {
                 return;
             }
@@ -95,7 +98,9 @@ public class LangChainTask implements ILifecycleTask {
             }
 
             for (var task : langChainConfig.tasks()) {
-                if (task.actions().contains("*") || task.actions().stream().anyMatch(actions::contains)) {
+                if (task.actions().contains(MATCH_ALL_OPERATOR) ||
+                        task.actions().stream().anyMatch(actions::contains)) {
+
                     var parameters = task.parameters();
                     var messages = new LinkedList<ChatMessage>();
                     if (parameters.containsKey(KEY_SYSTEM_MESSAGE)) {
@@ -133,7 +138,7 @@ public class LangChainTask implements ILifecycleTask {
                     var outputData = dataFactory.createData(LANGCHAIN_OUTPUT_IDENTIFIER + ":" + task.type(), content);
                     currentStep.storeData(outputData);
                     var outputItem = new TextOutputItem(content, 0);
-                    currentStep.addConversationOutputList(MEMORY_OUTPUT_IDENTIFIER, Collections.singletonList(outputItem));
+                    currentStep.addConversationOutputList(MEMORY_OUTPUT_IDENTIFIER, List.of(outputItem));
                 }
             }
 
