@@ -10,7 +10,7 @@ import java.util.Map;
 import static ai.labs.eddi.utils.RuntimeUtilities.isNullOrEmpty;
 
 @ApplicationScoped
-public class VertexGeminiLanguageModelBuilder implements ILanguageModelBuilder {
+public class GeminiLanguageModelBuilder implements ILanguageModelBuilder {
     private static final String KEY_PUBLISHER = "publisher";
     private static final String KEY_MODEL_ID = "modelID";
     private static final String KEY_TEMPERATURE = "temperature";

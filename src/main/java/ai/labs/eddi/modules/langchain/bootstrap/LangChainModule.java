@@ -57,7 +57,7 @@ public class LangChainModule {
         languageModelApiConnectorBuilders.put(LLM_TYPE_ANTHROPIC, () ->
                 langModelBuilderInstance.select(AnthropicLanguageModelBuilder.class).get());
         languageModelApiConnectorBuilders.put(LLM_TYPE_VERTEX_GEMINI, () ->
-                langModelBuilderInstance.select(VertexGeminiLanguageModelBuilder.class).get());
+                langModelBuilderInstance.select(GeminiLanguageModelBuilder.class).get());
         languageModelApiConnectorBuilders.put(LLM_TYPE_OLLAMA, () ->
                 langModelBuilderInstance.select(OllamaLanguageModelBuilder.class).get());
 

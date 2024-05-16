@@ -13,8 +13,8 @@ import static ai.labs.eddi.utils.RuntimeUtilities.isNullOrEmpty;
 public class OllamaLanguageModelBuilder implements ILanguageModelBuilder {
     private static final String KEY_MODEL = "model";
     private static final String KEY_TIMEOUT = "timeout";
-    private static final String KEY_LOG_REQUESTS = "LOG_REQUESTS";
-    private static final String KEY_LOG_RESPONSES = "LOG_RESPONSES";
+    private static final String KEY_LOG_REQUESTS = "logRequests";
+    private static final String KEY_LOG_RESPONSES = "logResponses";
 
     @Override
     public ChatLanguageModel build(Map<String, String> parameters) {
