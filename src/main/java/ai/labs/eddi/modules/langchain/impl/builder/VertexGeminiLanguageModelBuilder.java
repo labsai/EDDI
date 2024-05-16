@@ -16,6 +16,8 @@ public class VertexGeminiLanguageModelBuilder implements ILanguageModelBuilder {
     private static final String KEY_TEMPERATURE = "temperature";
     private static final String KEY_TIMEOUT = "timeout";
     private static final String KEY_PROJECT_ID = "projectId";
+    private static final String KEY_LOG_REQUESTS = "logRequests";
+    private static final String KEY_LOG_RESPONSES = "logResponses";
 
     @Override
     public ChatLanguageModel build(Map<String, String> parameters) {
@@ -39,6 +41,14 @@ public class VertexGeminiLanguageModelBuilder implements ILanguageModelBuilder {
 
         if (!isNullOrEmpty(parameters.get(KEY_TEMPERATURE))) {
             builder.temperature(Double.parseDouble(parameters.get(KEY_TEMPERATURE)));
+        }
+
+        if (!isNullOrEmpty(parameters.get(KEY_LOG_REQUESTS))) {
+            builder.logRequests(Boolean.parseBoolean(parameters.get(KEY_LOG_REQUESTS)));
+        }
+
+        if (!isNullOrEmpty(parameters.get(KEY_LOG_RESPONSES))) {
+            builder.logResponses(Boolean.parseBoolean(parameters.get(KEY_LOG_RESPONSES)));
         }
 
         return builder.build();
