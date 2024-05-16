@@ -5,9 +5,11 @@ import ai.labs.eddi.engine.memory.IConversationMemory;
 import ai.labs.eddi.engine.memory.IData;
 import ai.labs.eddi.engine.memory.IDataFactory;
 import ai.labs.eddi.engine.memory.IMemoryItemConverter;
+import ai.labs.eddi.engine.memory.model.ConversationOutput;
 import ai.labs.eddi.engine.runtime.client.configuration.IResourceClientLibrary;
 import ai.labs.eddi.modules.langchain.impl.builder.ILanguageModelBuilder;
 import ai.labs.eddi.modules.langchain.model.LangChainConfiguration;
+import ai.labs.eddi.modules.output.model.types.TextOutputItem;
 import ai.labs.eddi.modules.templating.ITemplatingEngine;
 import dev.langchain4j.data.message.AiMessage;
 import dev.langchain4j.model.output.Response;
@@ -59,7 +61,11 @@ class LangChainTaskTest {
         IConversationMemory.IWritableConversationStep currentStep = mock(IConversationMemory.IWritableConversationStep.class);
         when(memory.getCurrentStep()).thenReturn(currentStep);
 
-        IData actionData = mock(IData.class);
+        var conversationOutput = new ConversationOutput();
+        conversationOutput.put("input", "hi");
+        when(memory.getConversationOutputs()).thenReturn(List.of(conversationOutput));
+
+        var actionData = mock(IData.class);
         when(currentStep.getLatestData("actions")).thenReturn(actionData);
         when(actionData.getResult()).thenReturn(List.of("action1"));
 
@@ -85,8 +91,9 @@ class LangChainTaskTest {
         verify(currentStep, times(1)).storeData(any(IData.class));
 
         // Verify that the conversation output string was updated
+        var expectedOutputItem = List.of(new TextOutputItem(TEST_MESSAGE_FROM_LLM, 0));
         verify(currentStep, times(1)).
-                addConversationOutputString(eq(LangChainTask.MEMORY_OUTPUT_IDENTIFIER), eq(TEST_MESSAGE_FROM_LLM));
+                addConversationOutputList(eq(LangChainTask.MEMORY_OUTPUT_IDENTIFIER), eq(expectedOutputItem));
     }
 
 
