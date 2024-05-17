@@ -21,6 +21,7 @@
 * [Output Templating](output-templating.md)
 * [HttpCalls](httpcalls.md)
 * [Docker](docker.md)
+* [Setting Up EDDI on AWS with MongoDB Atlas](setup-eddi-on-aws-with-mongodb-atlas.md)
 * [RedHat Openshift](redhat-openshift.md)
 * [Metrics](metrics.md)
 * [FAQs](how-to....md)
