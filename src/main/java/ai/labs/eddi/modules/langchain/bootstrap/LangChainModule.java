@@ -22,9 +22,9 @@ public class LangChainModule {
     private static final Logger LOGGER = Logger.getLogger("Startup");
 
     public static final String LLM_TYPE_OPENAI = "openai";
-    public static final String LLM_TYPE_HUGGING_FACE = "hugging-face";
+    public static final String LLM_TYPE_HUGGING_FACE = "huggingface";
     public static final String LLM_TYPE_ANTHROPIC = "anthropic";
-    public static final String LLM_TYPE_VERTEX_GEMINI = "vertex-gemini";
+    public static final String LLM_TYPE_GEMINI = "gemini";
     public static final String LLM_TYPE_OLLAMA = "ollama";
 
     private final Map<String, Provider<ILifecycleTask>> lifecycleTaskProviders;
@@ -56,7 +56,7 @@ public class LangChainModule {
                 langModelBuilderInstance.select(HuggingFaceLanguageModelBuilder.class).get());
         languageModelApiConnectorBuilders.put(LLM_TYPE_ANTHROPIC, () ->
                 langModelBuilderInstance.select(AnthropicLanguageModelBuilder.class).get());
-        languageModelApiConnectorBuilders.put(LLM_TYPE_VERTEX_GEMINI, () ->
+        languageModelApiConnectorBuilders.put(LLM_TYPE_GEMINI, () ->
                 langModelBuilderInstance.select(GeminiLanguageModelBuilder.class).get());
         languageModelApiConnectorBuilders.put(LLM_TYPE_OLLAMA, () ->
                 langModelBuilderInstance.select(OllamaLanguageModelBuilder.class).get());
