@@ -33,6 +33,8 @@ const Chat: React.FC = () => {
 
     const userId = userIdFromParams != null ? userIdFromParams : new URLSearchParams(location.search).get('userId');
 
+    const inputRef = useRef<HTMLInputElement>(null);
+
     const eddiBaseUrl = ''; // const eddiBaseUrl = 'http://localhost:7070';
 
     const startConversation = useCallback(async () => {
@@ -113,6 +115,13 @@ const Chat: React.FC = () => {
         scrollToBottom();
         setAutoScroll(true);
     }, [messages]);
+
+    useEffect(() => {
+        if (inputRef.current) {
+            inputRef.current.focus();
+        }
+    }, []);
+
 
     const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
         setInput(e.target.value);
@@ -224,6 +233,7 @@ const Chat: React.FC = () => {
                         value={input}
                         onChange={handleInputChange}
                         placeholder='Type a message...'
+                        ref={inputRef}
                     />
                     <button type='submit'>Send</button>
                 </form>
