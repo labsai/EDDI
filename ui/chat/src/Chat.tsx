@@ -1,6 +1,10 @@
 import React, {useState, useEffect, useRef, useCallback} from 'react';
 import {useLocation, useParams} from 'react-router-dom';
-import DOMPurify from 'dompurify';
+import Markdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
+import rehypeKatex from 'rehype-katex';
+import remarkMath from 'remark-math';
+import 'katex/dist/katex.min.css';
 
 type Message = {
     sender: 'user' | 'bot';
@@ -187,12 +191,12 @@ const Chat: React.FC = () => {
                 <div className='messages' onScroll={handleScroll} ref={messagesContainerRef}>
                     {messages.map((msg, index) => (
                         <div key={index} className={`message ${msg.sender}`}>
-                            {msg.sender === 'bot'
-                                ? <div dangerouslySetInnerHTML={{
-                                    __html: DOMPurify.sanitize(
-                                        msg.text.replace(/(\\n)/g, '<br>'))
-                                }}/>
-                                : msg.text
+                            {msg.sender === 'bot' ?
+                                (
+                                    <Markdown remarkPlugins={[remarkGfm, remarkMath]} rehypePlugins={[rehypeKatex]}>
+                                        {msg.text}
+                                    </Markdown>
+                                ) : msg.text
                             }
                         </div>
                     ))}
