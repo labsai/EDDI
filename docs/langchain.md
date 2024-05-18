@@ -2,6 +2,8 @@
 
 The LangChain lifecycle task (using the langchain4j library) allows EDDI to leverage the capabilities of various large language model (LLM) APIs. This task seamlessly integrates with a range of currently supported APIs, including OpenAI's ChatGPT, Hugging Face models, Anthropic Claude, Google Gemini, and Ollama, thereby facilitating advanced natural language processing within EDDI bots.
 
+**Note**: To streamline the initial setup and configuration of the LangChain lifecycle task, you can utilize the "Bot Father" bot. The "Bot Father" bot guides you through the process of creating and configuring tasks, ensuring that you properly integrate the various LLM APIs. By using "Bot Father," you can quickly get your LangChain configurations up and running with ease, leveraging its intuitive interface and automated assistance to minimize errors and enhance productivity.
+
 ### Configuration
 
 The LangChain task is configured through a JSON object that defines a list of tasks, where each task can interact with a specific LLM API. These tasks can be tailored to specific use cases, utilizing unique parameters and settings.
