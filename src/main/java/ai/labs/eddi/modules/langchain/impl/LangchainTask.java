@@ -113,18 +113,6 @@ public class LangchainTask implements ILifecycleTask {
                 if (task.actions().contains(MATCH_ALL_OPERATOR) ||
                         task.actions().stream().anyMatch(actions::contains)) {
 
-
-                   /* {
-                            "systemMessage":"",
-                            "prompt":"", // user input if not set
-                            "sendConversation":"false",
-                            "includeFirstBotMessage":"true",
-                            "logSizeLimit":"-1",
-                            "convertToObject":"false",
-                            "addToOutput":"false",
-                    }*/
-
-
                     var parameters = task.parameters();
                     var messages = new LinkedList<ChatMessage>();
                     if (parameters.containsKey(KEY_SYSTEM_MESSAGE)) {
