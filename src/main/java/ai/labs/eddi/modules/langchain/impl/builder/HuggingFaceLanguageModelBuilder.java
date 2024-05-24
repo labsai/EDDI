@@ -1,6 +1,6 @@
 package ai.labs.eddi.modules.langchain.impl.builder;
 
-import ai.labs.eddi.modules.langchain.impl.LangChainTask;
+import ai.labs.eddi.modules.langchain.impl.LangchainTask;
 import dev.langchain4j.model.chat.ChatLanguageModel;
 import io.quarkiverse.langchain4j.huggingface.QuarkusHuggingFaceChatModel;
 import jakarta.enterprise.context.ApplicationScoped;
@@ -23,7 +23,7 @@ public class HuggingFaceLanguageModelBuilder implements ILanguageModelBuilder {
     private static final String KEY_LOG_RESPONSES = "logResponses";
     private static final String BASE_URL_HUGGING_FACE = "https://api-inference.huggingface.co/models/";
 
-    private static final Logger LOGGER = Logger.getLogger(LangChainTask.class);
+    private static final Logger LOGGER = Logger.getLogger(LangchainTask.class);
 
     @Override
     public ChatLanguageModel build(Map<String, String> parameters) {

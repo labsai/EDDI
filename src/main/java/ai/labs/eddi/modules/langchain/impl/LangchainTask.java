@@ -2,6 +2,7 @@ package ai.labs.eddi.modules.langchain.impl;
 
 
 import ai.labs.eddi.configs.packages.model.ExtensionDescriptor;
+import ai.labs.eddi.datastore.serialization.IJsonSerialization;
 import ai.labs.eddi.engine.lifecycle.ILifecycleTask;
 import ai.labs.eddi.engine.lifecycle.exceptions.LifecycleException;
 import ai.labs.eddi.engine.lifecycle.exceptions.PackageConfigurationException;
@@ -10,6 +11,7 @@ import ai.labs.eddi.engine.memory.IConversationMemory.IWritableConversationStep;
 import ai.labs.eddi.engine.memory.model.ConversationLog;
 import ai.labs.eddi.engine.runtime.client.configuration.IResourceClientLibrary;
 import ai.labs.eddi.engine.runtime.service.ServiceException;
+import ai.labs.eddi.modules.httpcalls.impl.PrePostUtils;
 import ai.labs.eddi.modules.langchain.impl.builder.ILanguageModelBuilder;
 import ai.labs.eddi.modules.langchain.model.LangChainConfiguration;
 import ai.labs.eddi.modules.output.model.types.TextOutputItem;
@@ -24,6 +26,7 @@ import jakarta.inject.Inject;
 import jakarta.inject.Provider;
 import org.jboss.logging.Logger;
 
+import java.io.IOException;
 import java.net.URI;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
@@ -33,15 +36,18 @@ import static ai.labs.eddi.configs.packages.model.ExtensionDescriptor.FieldType;
 import static ai.labs.eddi.utils.RuntimeUtilities.isNullOrEmpty;
 
 @ApplicationScoped
-public class LangChainTask implements ILifecycleTask {
+public class LangchainTask implements ILifecycleTask {
     public static final String ID = "ai.labs.langchain";
 
     private static final String KEY_URI = "uri";
     private static final String KEY_ACTIONS = "actions";
     private static final String KEY_LANGCHAIN = "langchain";
     private static final String KEY_SYSTEM_MESSAGE = "systemMessage";
+    private static final String KEY_PROMPT = "prompt";
     private static final String KEY_LOG_SIZE_LIMIT = "logSizeLimit";
     private static final String KEY_INCLUDE_FIRST_BOT_MESSAGE = "includeFirstBotMessage";
+    private static final String KEY_CONVERT_TO_OBJECT = "convertToObject";
+    private static final String KEY_ADD_TO_OUTPUT = "addToOutput";
 
     static final String MEMORY_OUTPUT_IDENTIFIER = "output";
     static final String LANGCHAIN_OUTPUT_IDENTIFIER = MEMORY_OUTPUT_IDENTIFIER + ":text:langchain";
@@ -51,22 +57,28 @@ public class LangChainTask implements ILifecycleTask {
     private final IDataFactory dataFactory;
     private final IMemoryItemConverter memoryItemConverter;
     private final ITemplatingEngine templatingEngine;
+    private final IJsonSerialization jsonSerialization;
+    private final PrePostUtils prePostUtils;
     private final Map<String, Provider<ILanguageModelBuilder>> languageModelApiConnectorBuilders;
 
     private final Map<ModelCacheKey, ChatLanguageModel> modelCache = new ConcurrentHashMap<>(1);
 
-    private static final Logger LOGGER = Logger.getLogger(LangChainTask.class);
+    private static final Logger LOGGER = Logger.getLogger(LangchainTask.class);
 
     @Inject
-    public LangChainTask(IResourceClientLibrary resourceClientLibrary,
+    public LangchainTask(IResourceClientLibrary resourceClientLibrary,
                          IDataFactory dataFactory,
                          IMemoryItemConverter memoryItemConverter,
                          ITemplatingEngine templatingEngine,
+                         IJsonSerialization jsonSerialization,
+                         PrePostUtils prePostUtils,
                          Map<String, Provider<ILanguageModelBuilder>> languageModelApiConnectorBuilders) {
         this.resourceClientLibrary = resourceClientLibrary;
         this.dataFactory = dataFactory;
         this.memoryItemConverter = memoryItemConverter;
         this.templatingEngine = templatingEngine;
+        this.jsonSerialization = jsonSerialization;
+        this.prePostUtils = prePostUtils;
         this.languageModelApiConnectorBuilders = languageModelApiConnectorBuilders;
     }
 
@@ -101,6 +113,18 @@ public class LangChainTask implements ILifecycleTask {
                 if (task.actions().contains(MATCH_ALL_OPERATOR) ||
                         task.actions().stream().anyMatch(actions::contains)) {
 
+
+                   /* {
+                            "systemMessage":"",
+                            "prompt":"", // user input if not set
+                            "sendConversation":"false",
+                            "includeFirstBotMessage":"true",
+                            "logSizeLimit":"-1",
+                            "convertToObject":"false",
+                            "addToOutput":"false",
+                    }*/
+
+
                     var parameters = task.parameters();
                     var messages = new LinkedList<ChatMessage>();
                     if (parameters.containsKey(KEY_SYSTEM_MESSAGE)) {
@@ -119,30 +143,63 @@ public class LangChainTask implements ILifecycleTask {
                         includeFirstBotMessage = Boolean.parseBoolean(parameters.get(KEY_INCLUDE_FIRST_BOT_MESSAGE));
                     }
 
-                    var chatMessages = new ConversationLogGenerator(memory).
+                    var chatMessages = new ArrayList<>(new ConversationLogGenerator(memory).
                             generate(logSizeLimit, includeFirstBotMessage)
                             .getMessages()
                             .stream()
                             .map(this::convertMessage)
-                            .toList();
+                            .toList());
 
                     if (chatMessages.isEmpty()) {
                         //start of the conversation
                         continue;
                     }
 
+                    if (!isNullOrEmpty(parameters.get(KEY_PROMPT))) {
+                        // if there is a prompt defined, we override last user input with it
+                        // to allow alerting the user input before it hits the LLM
+                        chatMessages.removeLast();
+                        chatMessages.add(new UserMessage(
+                                templatingEngine.processTemplate(parameters.get(KEY_PROMPT), templateDataObjects)));
+                    }
+
                     messages.addAll(chatMessages);
                     var chatLanguageModel = getChatLanguageModel(task.type(), task.parameters());
+                    prePostUtils.executePreRequestPropertyInstructions(memory, templateDataObjects, task.preRequest());
                     var messageResponse = chatLanguageModel.generate(messages);
                     var content = messageResponse.content().text();
-                    var outputData = dataFactory.createData(LANGCHAIN_OUTPUT_IDENTIFIER + ":" + task.type(), content);
-                    currentStep.storeData(outputData);
-                    var outputItem = new TextOutputItem(content, 0);
-                    currentStep.addConversationOutputList(MEMORY_OUTPUT_IDENTIFIER, List.of(outputItem));
+
+                    var langchainObjects = templateDataObjects.containsKey(KEY_LANGCHAIN) ?
+                            (Map<String, Object>) templateDataObjects.get(KEY_LANGCHAIN) :
+                            new HashMap<String, Object>();
+
+                    if (!isNullOrEmpty(parameters.get(KEY_CONVERT_TO_OBJECT))) {
+                        var contentAsObject =
+                                jsonSerialization.deserialize(parameters.get(KEY_CONVERT_TO_OBJECT), Map.class);
+                        langchainObjects.put(task.id(), contentAsObject);
+                    } else {
+                        langchainObjects.put(task.id(), content);
+                    }
+                    templateDataObjects.put(KEY_LANGCHAIN, langchainObjects);
+
+                    var langchainData = dataFactory.createData(KEY_LANGCHAIN + ":" + task.type() + ":" + task.id(), content);
+                    currentStep.storeData(langchainData);
+
+                    if (!isNullOrEmpty(parameters.get(KEY_ADD_TO_OUTPUT))) {
+                        var outputData = dataFactory.createData(LANGCHAIN_OUTPUT_IDENTIFIER + ":" + task.type(), content);
+                        currentStep.storeData(outputData);
+                        var outputItem = new TextOutputItem(content, 0);
+                        currentStep.addConversationOutputList(MEMORY_OUTPUT_IDENTIFIER, List.of(outputItem));
+                    }
+
+                    if (task.postResponse() != null && task.postResponse().getPropertyInstructions() != null) {
+                        prePostUtils.executePropertyInstructions(task.postResponse().getPropertyInstructions(),
+                                0, false, memory, templateDataObjects);
+                    }
                 }
             }
 
-        } catch (ITemplatingEngine.TemplateEngineException | UnsupportedLangchainTaskException e) {
+        } catch (ITemplatingEngine.TemplateEngineException | UnsupportedLangchainTaskException | IOException e) {
             throw new LifecycleException(e.getLocalizedMessage(), e);
         }
     }

@@ -9,7 +9,6 @@ import java.util.List;
 @Getter
 @Setter
 public class PostResponse {
-    private RetryHttpCallInstruction retryHttpCallInstruction;
     private List<PropertyInstruction> propertyInstructions;
     private List<OutputBuildingInstruction> outputBuildInstructions;
     private List<QuickRepliesBuildingInstruction> qrBuildInstructions;

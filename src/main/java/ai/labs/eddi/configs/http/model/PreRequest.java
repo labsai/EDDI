@@ -10,6 +10,4 @@ import java.util.List;
 @Setter
 public class PreRequest {
     private List<PropertyInstruction> propertyInstructions;
-    private BatchRequestBuildingInstruction batchRequests;
-    private Integer delayBeforeExecutingInMillis = 0;
 }

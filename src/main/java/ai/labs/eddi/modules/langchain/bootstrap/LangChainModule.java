@@ -3,7 +3,7 @@ package ai.labs.eddi.modules.langchain.bootstrap;
 
 import ai.labs.eddi.engine.lifecycle.ILifecycleTask;
 import ai.labs.eddi.engine.lifecycle.bootstrap.LifecycleExtensions;
-import ai.labs.eddi.modules.langchain.impl.LangChainTask;
+import ai.labs.eddi.modules.langchain.impl.LangchainTask;
 import ai.labs.eddi.modules.langchain.impl.builder.*;
 import io.quarkus.runtime.Startup;
 import jakarta.annotation.PostConstruct;
@@ -61,7 +61,7 @@ public class LangChainModule {
         languageModelApiConnectorBuilders.put(LLM_TYPE_OLLAMA, () ->
                 langModelBuilderInstance.select(OllamaLanguageModelBuilder.class).get());
 
-        lifecycleTaskProviders.put(LangChainTask.ID, () -> lifecycleTaskInstance.select(LangChainTask.class).get());
+        lifecycleTaskProviders.put(LangchainTask.ID, () -> lifecycleTaskInstance.select(LangchainTask.class).get());
         LOGGER.debug("Added LangChain Module, current size of lifecycle modules " + lifecycleTaskProviders.size());
     }
 
