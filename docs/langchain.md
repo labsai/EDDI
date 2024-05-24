@@ -20,7 +20,7 @@ The Langchain task is configured through a JSON object that defines a list of ta
    - **sendConversation**: Boolean indicating whether to send the entire conversation or only user input (`true` or `false`, default: `true`).
    - **includeFirstBotMessage**: Boolean indicating whether to include the first bot message in the conversation (`true` or `false`, default: `true`).
    - **logSizeLimit**: Limit for the size of the log (`-1` for no limit).
-   - **convertToObject**: Boolean indicating whether to convert the LLM response to an object (`true` or `false`, default: `false`).
+   - **convertToObject**: Boolean indicating whether to convert the LLM response to an object (`true` or `false`, default: `false`). Note: For this to work, the response from your LLM needs to be in valid JSON format! 
    - **addToOutput**: Boolean indicating whether the LLM output should automatically be added to the output (`true` or `false`, default: `false`).
    
 

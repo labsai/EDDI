@@ -1,7 +1,6 @@
 ---
 description: >-
-  Prompt & Conversation Management Middleware for Conversational AI APIs such as
-  ChatGPT. Developed in Java, powered by Quarkus, provided with Docker, and
+  Prompt & Conversation Management Middleware for Conversational AI APIs. Developed in Java, powered by Quarkus, provided with Docker, and
   orchestrated with Kubernetes or Openshift.
 ---
 
