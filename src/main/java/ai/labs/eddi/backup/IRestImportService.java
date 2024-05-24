@@ -20,9 +20,9 @@ import java.util.List;
 @Tag(name = "10. Backup Bots", description = "Import & Export Bots as Zip Files")
 public interface IRestImportService {
     @POST
-    @Path("/examples")
+    @Path("/initialBots")
     @Produces(MediaType.APPLICATION_JSON)
-    List<BotDeploymentStatus> importBotExamples();
+    List<BotDeploymentStatus> importInitialBots();
 
     @POST
     @Consumes("application/zip")

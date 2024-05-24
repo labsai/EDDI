@@ -4,7 +4,7 @@ eddi.environments = ['unrestricted', 'restricted', 'test'];
 eddi.importBotExamples = function () {
     $.ajax({
         method: 'POST',
-        url: '/backup/import/examples', statusCode: {
+        url: '/backup/import/initialBots', statusCode: {
             200: function (response) {
                 if (typeof response !== 'undefined' && response.length !== 0) {
                     eddi.addBotDeployments(eddi.environments[0], response);
@@ -14,7 +14,7 @@ eddi.importBotExamples = function () {
     });
 };
 
-eddi.deployExampleBots = function () {
+eddi.deployInitialBots = function () {
     $('#btnDeployExampleBots').hide();
     $('#no-bots-deployed').html('Deploying Bots...');
     eddi.importBotExamples();

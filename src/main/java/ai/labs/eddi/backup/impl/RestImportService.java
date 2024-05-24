@@ -83,11 +83,11 @@ public class RestImportService extends AbstractBackupService implements IRestImp
     }
 
     @Override
-    public List<BotDeploymentStatus> importBotExamples() {
+    public List<BotDeploymentStatus> importInitialBots() {
         try {
-            var botExampleFiles = getResourceFiles("/examples/available_examples.txt");
-            for (var botExampleFileName : botExampleFiles) {
-                importBot(getResourceAsStream("/examples/" + botExampleFileName),
+            var botExampleFiles = getResourceFiles("/initial-bots/available_bots.txt");
+            for (var botFileName : botExampleFiles) {
+                importBot(getResourceAsStream("/initial-bots/" + botFileName),
                         new MockAsyncResponse() {
                             @Override
                             public boolean resume(Object responseObj) {
@@ -108,7 +108,7 @@ public class RestImportService extends AbstractBackupService implements IRestImp
             }
 
             Thread.sleep(500);
-            log.info("Imported & Deployed Example Bots");
+            log.info("Imported & Deployed Initial Bots");
             return restBotAdministration.getDeploymentStatuses(unrestricted);
         } catch (IOException | InterruptedException e) {
             log.error(e.getLocalizedMessage(), e);
