@@ -1,12 +1,14 @@
 package ai.labs.eddi.modules.langchain.impl;
 
 import ai.labs.eddi.configs.packages.model.ExtensionDescriptor;
+import ai.labs.eddi.datastore.serialization.IJsonSerialization;
 import ai.labs.eddi.engine.memory.IConversationMemory;
 import ai.labs.eddi.engine.memory.IData;
 import ai.labs.eddi.engine.memory.IDataFactory;
 import ai.labs.eddi.engine.memory.IMemoryItemConverter;
 import ai.labs.eddi.engine.memory.model.ConversationOutput;
 import ai.labs.eddi.engine.runtime.client.configuration.IResourceClientLibrary;
+import ai.labs.eddi.modules.httpcalls.impl.PrePostUtils;
 import ai.labs.eddi.modules.langchain.impl.builder.ILanguageModelBuilder;
 import ai.labs.eddi.modules.langchain.model.LangChainConfiguration;
 import ai.labs.eddi.modules.output.model.types.TextOutputItem;
@@ -16,6 +18,9 @@ import dev.langchain4j.model.output.Response;
 import jakarta.inject.Provider;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.Arguments;
+import org.junit.jupiter.params.provider.MethodSource;
 import org.mockito.Mock;
 
 import java.net.URI;
@@ -23,13 +28,14 @@ import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.stream.Stream;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
 import static org.mockito.MockitoAnnotations.openMocks;
 
-class LangChainTaskTest {
+class LangchainTaskTest {
     @Mock
     private IResourceClientLibrary resourceClientLibrary;
     @Mock
@@ -39,7 +45,7 @@ class LangChainTaskTest {
     @Mock
     private ITemplatingEngine templatingEngine;
 
-    private LangChainTask langChainTask;
+    private LangchainTask langChainTask;
 
     private static final String TEST_MESSAGE_FROM_LLM = "Message from LLM";
 
@@ -50,12 +56,48 @@ class LangChainTaskTest {
         languageModelApiConnectorBuilders.put("openai",
                 () -> parameters -> messages -> new Response<>(new AiMessage(TEST_MESSAGE_FROM_LLM)));
 
-        langChainTask = new LangChainTask(resourceClientLibrary, dataFactory, memoryItemConverter, templatingEngine,
+        var jsonSerialization = mock(IJsonSerialization.class);
+        var prePostUtils = mock(PrePostUtils.class);
+        langChainTask = new LangchainTask(resourceClientLibrary, dataFactory, memoryItemConverter, templatingEngine,
+                jsonSerialization, prePostUtils,
                 languageModelApiConnectorBuilders);
     }
 
-    @Test
-    void execute() throws Exception {
+    static Stream<Arguments> provideParameters() {
+        return Stream.of(
+                Arguments.of(
+                        Map.of(
+                                "systemMessage", "Act as a real estate agent",
+                                "logSizeLimit", "10",
+                                "apiKey", "<apiKey>",
+                                "addToOutput", "true"
+                        ),
+                        "Processed template content",
+                        List.of(new TextOutputItem(TEST_MESSAGE_FROM_LLM, 0)),
+                        1, // times for templatingEngine.processTemplate
+                        2, // times for currentStep.storeData
+                        1  // times for currentStep.addConversationOutputList
+                ),
+                Arguments.of(
+                        Map.of(
+                                "systemMessage", "Act as a real estate agent",
+                                "logSizeLimit", "10",
+                                "apiKey", "<apiKey1>"
+                        ),
+                        "Another template content",
+                        List.of(new TextOutputItem(TEST_MESSAGE_FROM_LLM, 0)),
+                        1, // times for templatingEngine.processTemplate
+                        1, // times for currentStep.storeData
+                        0  // times for currentStep.addConversationOutputList
+                )
+                // Add more test cases as needed
+        );
+    }
+
+    @ParameterizedTest
+    @MethodSource("provideParameters")
+    void execute(Map<String, String> parameters, String processedTemplate, List<TextOutputItem> expectedOutput,
+                 int timesTemplate, int timesStoreData, int timesAddOutputList) throws Exception {
         // Setup
         IConversationMemory memory = mock(IConversationMemory.class);
         IConversationMemory.IWritableConversationStep currentStep = mock(IConversationMemory.IWritableConversationStep.class);
@@ -69,10 +111,10 @@ class LangChainTaskTest {
         when(currentStep.getLatestData("actions")).thenReturn(actionData);
         when(actionData.getResult()).thenReturn(List.of("action1"));
 
-        LangChainConfiguration langChainConfig = new LangChainConfiguration(List.of(
+        var langChainConfig = new LangChainConfiguration(List.of(
                 new LangChainConfiguration.Task(
                         List.of("action1"), "taskId", "openai", "description",
-                        Map.of("systemMessage", "Act as a real estate agent", "logSizeLimit", "10", "apiKey", "<apiKey>"))
+                        null, null, parameters)
         ));
 
         IData outputData = mock(IData.class);
@@ -85,15 +127,15 @@ class LangChainTaskTest {
 
         // Assert
         // Verify that the templating engine was called
-        verify(templatingEngine, times(1)).processTemplate(anyString(), anyMap());
+        verify(templatingEngine, times(timesTemplate)).processTemplate(anyString(), anyMap());
 
         // Verify that data was correctly added to the conversation step
-        verify(currentStep, times(1)).storeData(any(IData.class));
+        verify(currentStep, times(timesStoreData)).storeData(any(IData.class));
 
         // Verify that the conversation output string was updated
         var expectedOutputItem = List.of(new TextOutputItem(TEST_MESSAGE_FROM_LLM, 0));
-        verify(currentStep, times(1)).
-                addConversationOutputList(eq(LangChainTask.MEMORY_OUTPUT_IDENTIFIER), eq(expectedOutputItem));
+        verify(currentStep, times(timesAddOutputList)).
+                addConversationOutputList(eq(LangchainTask.MEMORY_OUTPUT_IDENTIFIER), eq(expectedOutputItem));
     }
 
 
@@ -109,6 +151,7 @@ class LangChainTaskTest {
                 "taskId",
                 "taskType",
                 "A task description",
+                null, null,
                 Map.of("key", "value")
         )));
 
@@ -133,7 +176,7 @@ class LangChainTaskTest {
         assertNotNull(descriptor, "The returned ExtensionDescriptor should not be null.");
 
         // Assuming ID and Display Name are known and static for the LangChainTask
-        assertEquals(LangChainTask.ID, descriptor.getType(), "The ID should match the expected value.");
+        assertEquals(LangchainTask.ID, descriptor.getType(), "The ID should match the expected value.");
         assertEquals("Lang Chain", descriptor.getDisplayName(), "The display name should match 'Lang Chain'.");
 
         assertFalse(descriptor.getConfigs().isEmpty(), "Expected configs to be defined.");
