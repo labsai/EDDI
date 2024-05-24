@@ -7,27 +7,38 @@ description: >-
 
 # E.D.D.I Documentation
 
-v5.2.1 - STABLE
+E.D.D.I (Enhanced Dialog Driven Interface) is a middleware to connect and manage LLM API bots
+with advanced prompt and conversation management for APIs such as OpenAI ChatGPT, Facebook Hugging Face,
+Anthropic Claude, Google Gemini and Ollama
+
+Developed in Java using Quarkus, it is lean, RESTful, scalable, and cloud-native.
+It comes as Docker container and can be orchestrated with Kubernetes or Openshift.
+The Docker container has been certified by IBM/Red Hat.
+
+Latest stable version: 5.2.1
 
 License: Apache License 2.0
 
-Visit [here](https://eddi.labs.ai/) for further references about the project.
+Project website: [here](https://eddi.labs.ai/)
 
+[![Codacy Badge](https://app.codacy.com/project/badge/Grade/2c5d183d4bd24dbaa77427cfbf5d4074)](https://app.codacy.com/organizations/gh/labsai/dashboard?utm_source=github.com&amp;utm_medium=referral&amp;utm_content=labsai/EDDI&amp;utm_campaign=Badge_Grade) [![CircleCI](https://circleci.com/gh/labsai/EDDI/tree/main.svg?style=svg)](https://circleci.com/gh/labsai/EDDI/tree/main)
 
-
-[![Codacy Badge](https://app.codacy.com/project/badge/Grade/2c5d183d4bd24dbaa77427cfbf5d4074)](https://www.codacy.com/gh/labsai/EDDI/dashboard?utm\_source=github.com\&amp;utm\_medium=referral\&amp;utm\_content=labsai/EDDI\&amp;utm\_campaign=Badge\_Grade) [![CircleCI](https://circleci.com/gh/labsai/EDDI/tree/main.svg?style=svg)](https://circleci.com/gh/labsai/EDDI/tree/main)
-
-
+![alt text](https://eddi.labs.ai/EDDI-landing-page-image.png)
 
 ## Intro
 
-The Conversational AI Middleware System - E.D.D.I (Enhanced Dialog Driven Interface), has been developed with the focus on running it in cloud environments such as plain docker, kubernetes or openshift.
+E.D.D.I is a high performance middleware for managing conversations in AI-driven applications.
+It is designed to run efficiently in cloud environments such as Docker, Kubernetes, and Openshift.
+E.D.D.I offers seamless API integration capabilities, allowing easy connection with various conversational services or
+traditional REST APIs with runtime configurations.
+It supports the integration of multiple chatbots, even multiple versions of the same bot, for smooth upgrading and transitions.
 
-The most outstanding features are:
+Notable features include:
 
 * Seamless integration with conversational or traditional REST APIs
-* Configurable NLP and Behavior rules to facilitate conversations and monitor sensitive topics
+* Configurable NLP and Behavior rules to orchestrate LLM involvement
 * Support for multiple chatbots, including multiple versions of the same bot, running concurrently
+* Support for Major AI API integrations via langchain4j: OpenAI, Hugging Face (text only), Claude, Gemini, Ollama (and more to come)
 
 Technical specifications:
 
@@ -39,4 +50,5 @@ Technical specifications:
 * Kubernetes integration (Liveness/Readiness endpoint)
 * MongoDB for storing bot configurations and conversation logs
 * OAuth 2.0 (Keycloak) for authentication and user management
-* HTML, CSS, Javascript (Dashboard & Basic Chat UI)
+* HTML, CSS, Javascript (Dashboard)
+* React (Basic Chat UI)
