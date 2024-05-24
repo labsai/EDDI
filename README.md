@@ -33,7 +33,7 @@ Notable features include:
 * Seamless integration with conversational or traditional REST APIs
 * Configurable NLP and Behavior rules to orchestrate LLM involvement
 * Support for multiple chatbots, including multiple versions of the same bot, running concurrently
-* Support for Major AI API integrations via langchain4j: OpenAI, Hugging Face (text only), Anthropic Claude, and Gemini (and more to come)
+* Support for Major AI API integrations via langchain4j: OpenAI, Hugging Face (text only), Claude, Gemini, Ollama (and more to come)
 
 Technical specifications:
 
