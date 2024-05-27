@@ -21,6 +21,7 @@ const Chat: React.FC = () => {
     const [quickReplies, setQuickReplies] = useState<QuickReply[]>([]);
     const [isBotTyping, setIsBotTyping] = useState<boolean>(false);
     const [hasNewMessages, setHasNewMessages] = useState<boolean>(false);
+    const [conversationEnded, setConversationEnded] = useState<boolean>(false);
     const [, setAutoScroll] = useState<boolean>(true);
     const [conversationId, setConversationId] = useState<string | null>(null);
     const [isManagedBots, setIsManagedBots] = useState<boolean>(false);
@@ -38,6 +39,8 @@ const Chat: React.FC = () => {
     const eddiBaseUrl = ''; // const eddiBaseUrl = 'http://localhost:7070';
 
     const startConversation = useCallback(async () => {
+        setConversationEnded(false);
+        setMessages([]);
 
         fetch(`${eddiBaseUrl}/bots/${environment}/${botId}?userId=${userId}`, {
             method: 'POST'
@@ -159,6 +162,10 @@ const Chat: React.FC = () => {
                     console.log('ConversationState was ERROR.');
                 }
 
+                if (data.conversationState === 'ENDED') {
+                    setConversationEnded(true);
+                }
+
                 const botReplies: any[] = data.conversationOutputs[0].output || [];
                 botReplies.forEach(reply => {
                     setMessages(currentMessages => [...currentMessages, {sender: 'bot', text: reply.text}]);
@@ -193,6 +200,12 @@ const Chat: React.FC = () => {
         setInput('');
     };
 
+    const restartConversation = () => {
+        if(!isManagedBots) {
+            startConversation();
+        }
+    };
+
     return (
         <div>
             <img id='eddiLogo' className='chatImg' src='/img/logo_eddi.png' alt='EDDI Logo'/>
@@ -209,16 +222,16 @@ const Chat: React.FC = () => {
                             }
                         </div>
                     ))}
-                    {isBotTyping && <div className='loading-indicator'>
+                    {!conversationEnded && isBotTyping && <div className='loading-indicator'>
                         <img src='/img/loading-indicator.svg' alt='Answer is being generated...'/>
                     </div>}
                     <div ref={messagesEndRef}/>
                 </div>
-                {hasNewMessages && (
+                {!conversationEnded && hasNewMessages && (
                     <button onClick={scrollToBottom} className='scroll-to-bottom'>
                     </button>
                 )}
-                {quickReplies.length > 0 && (
+                {!conversationEnded && quickReplies.length > 0 && (
                     <div className='quick-replies'>
                         {quickReplies.map((quickReply, index) => (
                             <button key={index} onClick={() => handleQuickReply(quickReply)}>
@@ -227,16 +240,24 @@ const Chat: React.FC = () => {
                         ))}
                     </div>
                 )}
-                <form onSubmit={handleSubmit} className='message-form'>
-                    <input
-                        type='text'
-                        value={input}
-                        onChange={handleInputChange}
-                        placeholder='Type a message...'
-                        ref={inputRef}
-                    />
-                    <button type='submit'>Send</button>
-                </form>
+                {!conversationEnded &&
+                    <form onSubmit={handleSubmit} className='message-form'>
+                        <input
+                            type='text'
+                            value={input}
+                            onChange={handleInputChange}
+                            placeholder='Type a message...'
+                            ref={inputRef}
+                        />
+                        <button type='submit'>Send</button>
+                    </form>
+                }
+
+                {conversationEnded && <div className='conversation-ended'>
+                    <div>Conversation Ended</div>
+                    <button type='submit' onClick={restartConversation}>Restart</button>
+                </div>}
+
             </div>
         </div>
     );
