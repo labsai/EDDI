@@ -12,7 +12,7 @@ Anthropic Claude, Google Gemini and Ollama
 
 Developed in Java using Quarkus, it is lean, RESTful, scalable, and cloud-native.
 It comes as Docker container and can be orchestrated with Kubernetes or Openshift.
-The Docker container has been certified by IBM/Red Hat.
+The Docker image has been certified by IBM/Red Hat.
 
 Latest stable version: 5.2.1
 
