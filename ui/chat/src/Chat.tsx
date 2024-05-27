@@ -126,7 +126,15 @@ const Chat: React.FC = () => {
         if (inputRef.current) {
             inputRef.current.focus();
         }
-    }, []);
+    }, [isLoading]);
+
+    useEffect(() => {
+        const params = new URLSearchParams(location.search);
+        const showInputParam = params.get('forceInput');
+
+        setForceInput(showInputParam === 'true');
+
+    }, [location.search]);
 
 
     const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
