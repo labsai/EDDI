@@ -21,6 +21,8 @@ const Chat: React.FC = () => {
     const [quickReplies, setQuickReplies] = useState<QuickReply[]>([]);
     const [isBotTyping, setIsBotTyping] = useState<boolean>(false);
     const [hasNewMessages, setHasNewMessages] = useState<boolean>(false);
+    const [isLoading, setIsLoading] = useState<boolean>(true);
+    const [forceInput, setForceInput] = useState<boolean>(false);
     const [conversationEnded, setConversationEnded] = useState<boolean>(false);
     const [, setAutoScroll] = useState<boolean>(true);
     const [conversationId, setConversationId] = useState<string | null>(null);
@@ -89,6 +91,7 @@ const Chat: React.FC = () => {
             fetchUrl = `${eddiBaseUrl}/bots/${environment}/${botId}/${conversationId}?${queryParams}`;
         }
 
+        setIsLoading(true);
         fetchEndpoint(fetchUrl, 'GET', null);
     }, [botId, conversationId, environment, intent, isManagedBots, userId]);
 
@@ -139,6 +142,7 @@ const Chat: React.FC = () => {
         if (!userInput.trim()) return;
         const userMessage: Message = {sender: 'user', text: userInput};
         setMessages(currentMessages => [...currentMessages, userMessage]);
+        setIsLoading(true);
         setIsBotTyping(true);
 
         const endpoint = isManagedBots ?
@@ -156,6 +160,7 @@ const Chat: React.FC = () => {
         fetch(url, init)
             .then(response => response.json())
             .then(data => {
+                setIsLoading(false);
                 setIsBotTyping(false);
 
                 if (data.conversationState === 'ERROR') {
@@ -164,6 +169,11 @@ const Chat: React.FC = () => {
 
                 if (data.conversationState === 'ENDED') {
                     setConversationEnded(true);
+                }
+
+                let actions = data.conversationOutputs[0].actions || [];
+                if (actions.includes('show_input')) {
+                    setForceInput(true);
                 }
 
                 const botReplies: any[] = data.conversationOutputs[0].output || [];
@@ -177,6 +187,7 @@ const Chat: React.FC = () => {
                 setAutoScroll(true);
             }).catch(error => {
             console.error(error);
+            setIsLoading(false);
             setIsBotTyping(false);
         });
     }
@@ -201,9 +212,13 @@ const Chat: React.FC = () => {
     };
 
     const restartConversation = () => {
-        if(!isManagedBots) {
+        setIsLoading(true);
+        if (!isManagedBots) {
             startConversation();
+        } else {
+            loadConversation();
         }
+        setConversationEnded(false);
     };
 
     return (
@@ -240,18 +255,18 @@ const Chat: React.FC = () => {
                         ))}
                     </div>
                 )}
-                {!conversationEnded &&
-                    <form onSubmit={handleSubmit} className='message-form'>
-                        <input
-                            type='text'
-                            value={input}
-                            onChange={handleInputChange}
-                            placeholder='Type a message...'
-                            ref={inputRef}
-                        />
-                        <button type='submit'>Send</button>
-                    </form>
-                }
+                {isLoading ? null : (quickReplies.length === 0 || forceInput) && !conversationEnded &&
+                    (<form onSubmit={handleSubmit} className='message-form'>
+                            <input
+                                type='text'
+                                value={input}
+                                onChange={handleInputChange}
+                                placeholder='Type a message...'
+                                ref={inputRef}
+                            />
+                            <button type='submit'>Send</button>
+                        </form>
+                    )}
 
                 {conversationEnded && <div className='conversation-ended'>
                     <div>Conversation Ended</div>
