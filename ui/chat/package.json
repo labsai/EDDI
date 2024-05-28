@@ -1,6 +1,6 @@
 {
   "name": "eddi-chat-ui",
-  "version": "1.1.0",
+  "version": "2.0.0",
   "private": true,
   "dependencies": {
     "@types/node": "^20.12.12",
@@ -12,7 +12,9 @@
     "react-markdown": "^9.0.1",
     "react-router-dom": "^6.23.1",
     "react-scripts": "^5.0.1",
+    "rehype-highlight": "^7.0.0",
     "rehype-katex": "^7.0.0",
+    "rehype-raw": "^7.0.0",
     "remark-gfm": "^4.0.0",
     "remark-math": "^6.0.0",
     "web-vitals": "^4.0.0"

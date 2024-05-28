@@ -2,8 +2,10 @@ import React, {useState, useEffect, useRef, useCallback} from 'react';
 import {useLocation, useParams} from 'react-router-dom';
 import Markdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
-import rehypeKatex from 'rehype-katex';
 import remarkMath from 'remark-math';
+import rehypeKatex from 'rehype-katex';
+import rehypeRaw from 'rehype-raw';
+import rehypeHighlight from 'rehype-highlight';
 import 'katex/dist/katex.min.css';
 
 type Message = {
@@ -238,7 +240,8 @@ const Chat: React.FC = () => {
                         <div key={index} className={`message ${msg.sender}`}>
                             {msg.sender === 'bot' ?
                                 (
-                                    <Markdown remarkPlugins={[remarkGfm, remarkMath]} rehypePlugins={[rehypeKatex]}>
+                                    <Markdown remarkPlugins={[remarkGfm, remarkMath]}
+                                              rehypePlugins={[rehypeRaw, rehypeHighlight, rehypeKatex]}>
                                         {msg.text}
                                     </Markdown>
                                 ) : msg.text
