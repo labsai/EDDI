@@ -12,6 +12,22 @@ code {
     font-family: 'Noto Sans Mono', monospace;
 }
 
+a:link {
+    color: #79bcff;
+}
+
+a:visited {
+    color: #b5a5d6;
+}
+
+a:hover {
+    color: #87CEFA;
+}
+
+a:active {
+    color: #b378a5;
+}
+
 .chatImg {
     height: 90px;
     padding: 10px;
