@@ -25,6 +25,8 @@ const Chat: React.FC = () => {
     const [hasNewMessages, setHasNewMessages] = useState<boolean>(false);
     const [isLoading, setIsLoading] = useState<boolean>(true);
     const [forceInput, setForceInput] = useState<boolean>(false);
+    const [baseUrl, setBaseUrl] = useState<string>('');
+    const [isBaseUrlSet, setIsBaseUrlSet] = useState<boolean>(false);
     const [conversationEnded, setConversationEnded] = useState<boolean>(false);
     const [, setAutoScroll] = useState<boolean>(true);
     const [conversationId, setConversationId] = useState<string | null>(null);
@@ -40,39 +42,47 @@ const Chat: React.FC = () => {
 
     const inputRef = useRef<HTMLInputElement>(null);
 
-    const eddiBaseUrl = ''; // const eddiBaseUrl = 'http://localhost:7070';
+    useEffect(() => {
+        const params = new URLSearchParams(location.search);
+        const showInputParam = params.get('forceInput');
+        setForceInput(showInputParam === 'true');
+
+        const apiServerParam = params.get('apiServer');
+        setBaseUrl(apiServerParam ? apiServerParam : '');
+        setIsBaseUrlSet(true);
+    }, [location.search]);
 
     const startConversation = useCallback(async () => {
         setConversationEnded(false);
         setMessages([]);
 
-        fetch(`${eddiBaseUrl}/bots/${environment}/${botId}?userId=${userId}`, {
+        fetch(`${baseUrl}/bots/${environment}/${botId}?userId=${userId}`, {
             method: 'POST'
         }).then(response => {
             // Extract the Location header
             const locationHeader = response.headers.get('Location');
-            console.log('Location Header:', locationHeader);
+            //console.log('Location Header:', locationHeader);
 
             if (locationHeader) {
                 // Assuming the conversationId is the last segment in the URI
                 const segments = locationHeader.split('/');
                 const conversationId = segments[segments.length - 1];
                 setConversationId(conversationId);
-                console.log('Extracted conversationId:', conversationId);
+                //console.log('Extracted conversationId:', conversationId);
             } else {
                 console.error('Location header is missing in the response.');
             }
         }).catch(reason => console.log('Error while creating conversation' + reason));
-    }, [botId, environment, userId]);
+    }, [baseUrl, botId, environment, userId]);
 
     useEffect(() => {
         const currentPath = window.location.pathname;
         const isManagedBots = currentPath.startsWith('/chat/managedbots');
         setIsManagedBots(isManagedBots);
-        if (!isManagedBots) {
+        if (!isManagedBots && isBaseUrlSet) {
             startConversation();
         }
-    }, [isManagedBots, startConversation]);
+    }, [isManagedBots, isBaseUrlSet, startConversation]);
 
     const loadConversation = useCallback(async () => {
         if (isManagedBots) {
@@ -88,9 +98,9 @@ const Chat: React.FC = () => {
         });
 
         if (isManagedBots) {
-            fetchUrl = `${eddiBaseUrl}/managedbots/${intent}/${userId}?${queryParams}`;
+            fetchUrl = `${baseUrl}/managedbots/${intent}/${userId}?${queryParams}`;
         } else {
-            fetchUrl = `${eddiBaseUrl}/bots/${environment}/${botId}/${conversationId}?${queryParams}`;
+            fetchUrl = `${baseUrl}/bots/${environment}/${botId}/${conversationId}?${queryParams}`;
         }
 
         setIsLoading(true);
@@ -130,14 +140,6 @@ const Chat: React.FC = () => {
         }
     }, [isLoading]);
 
-    useEffect(() => {
-        const params = new URLSearchParams(location.search);
-        const showInputParam = params.get('forceInput');
-
-        setForceInput(showInputParam === 'true');
-
-    }, [location.search]);
-
 
     const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
         setInput(e.target.value);
@@ -156,8 +158,8 @@ const Chat: React.FC = () => {
         setIsBotTyping(true);
 
         const endpoint = isManagedBots ?
-            `${eddiBaseUrl}/managedbots/${intent}/${userId}` :
-            `${eddiBaseUrl}/bots/${environment}/${botId}/${conversationId}?userId=${userId}`;
+            `${baseUrl}/managedbots/${intent}/${userId}` :
+            `${baseUrl}/bots/${environment}/${botId}/${conversationId}?userId=${userId}`;
 
         fetchEndpoint(endpoint, 'POST', userInput);
     };
