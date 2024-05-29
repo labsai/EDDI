@@ -113,22 +113,21 @@ public class LangchainTask implements ILifecycleTask {
                 if (task.actions().contains(MATCH_ALL_OPERATOR) ||
                         task.actions().stream().anyMatch(actions::contains)) {
 
-                    var parameters = task.parameters();
+                    var processedParams = runTemplateEngineOnParams(task.parameters(), templateDataObjects);
                     var messages = new LinkedList<ChatMessage>();
-                    if (parameters.containsKey(KEY_SYSTEM_MESSAGE)) {
-                        var systemMessage = templatingEngine.processTemplate(
-                                parameters.get(KEY_SYSTEM_MESSAGE), templateDataObjects);
+                    if (processedParams.containsKey(KEY_SYSTEM_MESSAGE)) {
+                        var systemMessage = processedParams.get(KEY_SYSTEM_MESSAGE);
                         messages = new LinkedList<>(List.of(new SystemMessage(systemMessage)));
                     }
 
                     int logSizeLimit = -1;
-                    if (parameters.containsKey((KEY_LOG_SIZE_LIMIT))) {
-                        logSizeLimit = Integer.parseInt(parameters.get(KEY_LOG_SIZE_LIMIT));
+                    if (processedParams.containsKey((KEY_LOG_SIZE_LIMIT))) {
+                        logSizeLimit = Integer.parseInt(processedParams.get(KEY_LOG_SIZE_LIMIT));
                     }
 
                     boolean includeFirstBotMessage = true;
-                    if (parameters.containsKey((KEY_INCLUDE_FIRST_BOT_MESSAGE))) {
-                        includeFirstBotMessage = Boolean.parseBoolean(parameters.get(KEY_INCLUDE_FIRST_BOT_MESSAGE));
+                    if (processedParams.containsKey((KEY_INCLUDE_FIRST_BOT_MESSAGE))) {
+                        includeFirstBotMessage = Boolean.parseBoolean(processedParams.get(KEY_INCLUDE_FIRST_BOT_MESSAGE));
                     }
 
                     var chatMessages = new ArrayList<>(new ConversationLogGenerator(memory).
@@ -143,16 +142,15 @@ public class LangchainTask implements ILifecycleTask {
                         continue;
                     }
 
-                    if (!isNullOrEmpty(parameters.get(KEY_PROMPT))) {
+                    if (!isNullOrEmpty(processedParams.get(KEY_PROMPT))) {
                         // if there is a prompt defined, we override last user input with it
                         // to allow alerting the user input before it hits the LLM
                         chatMessages.removeLast();
-                        chatMessages.add(new UserMessage(
-                                templatingEngine.processTemplate(parameters.get(KEY_PROMPT), templateDataObjects)));
+                        chatMessages.add(new UserMessage(processedParams.get(KEY_PROMPT)));
                     }
 
                     messages.addAll(chatMessages);
-                    var chatLanguageModel = getChatLanguageModel(task.type(), task.parameters());
+                    var chatLanguageModel = getChatLanguageModel(task.type(), filterParams(processedParams));
                     prePostUtils.executePreRequestPropertyInstructions(memory, templateDataObjects, task.preRequest());
                     var messageResponse = chatLanguageModel.generate(messages);
                     var content = messageResponse.content().text();
@@ -161,9 +159,9 @@ public class LangchainTask implements ILifecycleTask {
                             (Map<String, Object>) templateDataObjects.get(KEY_LANGCHAIN) :
                             new HashMap<String, Object>();
 
-                    if (!isNullOrEmpty(parameters.get(KEY_CONVERT_TO_OBJECT))) {
+                    if (!isNullOrEmpty(processedParams.get(KEY_CONVERT_TO_OBJECT))) {
                         var contentAsObject =
-                                jsonSerialization.deserialize(parameters.get(KEY_CONVERT_TO_OBJECT), Map.class);
+                                jsonSerialization.deserialize(processedParams.get(KEY_CONVERT_TO_OBJECT), Map.class);
                         langchainObjects.put(task.id(), contentAsObject);
                     } else {
                         langchainObjects.put(task.id(), content);
@@ -173,7 +171,7 @@ public class LangchainTask implements ILifecycleTask {
                     var langchainData = dataFactory.createData(KEY_LANGCHAIN + ":" + task.type() + ":" + task.id(), content);
                     currentStep.storeData(langchainData);
 
-                    if (!isNullOrEmpty(parameters.get(KEY_ADD_TO_OUTPUT))) {
+                    if (!isNullOrEmpty(processedParams.get(KEY_ADD_TO_OUTPUT))) {
                         var outputData = dataFactory.createData(LANGCHAIN_OUTPUT_IDENTIFIER + ":" + task.type(), content);
                         currentStep.storeData(outputData);
                         var outputItem = new TextOutputItem(content, 0);
@@ -190,6 +188,34 @@ public class LangchainTask implements ILifecycleTask {
         } catch (ITemplatingEngine.TemplateEngineException | UnsupportedLangchainTaskException | IOException e) {
             throw new LifecycleException(e.getLocalizedMessage(), e);
         }
+    }
+
+    private HashMap<String, String> runTemplateEngineOnParams(Map<String, String> parameters,
+                                                              Map<String, Object> templateDataObjects) {
+
+        var processedParams = new HashMap<>(parameters);
+        processedParams.forEach((key, value) -> {
+            try {
+                if (!isNullOrEmpty(value)) {
+                    processedParams.put(key, templatingEngine.processTemplate(value, templateDataObjects));
+                }
+            } catch (ITemplatingEngine.TemplateEngineException e) {
+                LOGGER.error(e.getLocalizedMessage(), e);
+            }
+        });
+        return processedParams;
+    }
+
+    private Map<String, String> filterParams(HashMap<String, String> processedParams) {
+        //remove all props that are not directly configuring the langchain builders (for better caching)
+        var returnMap = new HashMap<>(processedParams);
+        returnMap.remove(KEY_INCLUDE_FIRST_BOT_MESSAGE);
+        returnMap.remove(KEY_SYSTEM_MESSAGE);
+        returnMap.remove(KEY_PROMPT);
+        returnMap.remove(KEY_LOG_SIZE_LIMIT);
+        returnMap.remove(KEY_ADD_TO_OUTPUT);
+        returnMap.remove(KEY_CONVERT_TO_OBJECT);
+        return returnMap;
     }
 
     private ChatLanguageModel getChatLanguageModel(String type, Map<String, String> parameters)
