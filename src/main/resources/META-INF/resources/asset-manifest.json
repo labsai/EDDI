@@ -1,7 +1,7 @@
 {
   "files": {
-    "main.css": "/css/main.fd694533.css",
-    "main.js": "/js/main.d4b85786.js",
+    "main.css": "/css/main.e409d29a.css",
+    "main.js": "/js/main.645d37fc.js",
     "fonts/KaTeX_AMS-Regular.ttf": "/fonts/KaTeX_AMS-Regular.853be92419a6c3766b9a.ttf",
     "fonts/KaTeX_Main-Regular.ttf": "/fonts/KaTeX_Main-Regular.9eba1d77abcf2aa6e94e.ttf",
     "fonts/KaTeX_Main-Bold.ttf": "/fonts/KaTeX_Main-Bold.8169508bf58f8bd92ad8.ttf",
@@ -63,11 +63,11 @@
     "fonts/KaTeX_Size3-Regular.woff": "/fonts/KaTeX_Size3-Regular.7947224e8a9914fa332b.woff",
     "fonts/KaTeX_Size3-Regular.woff2": "/fonts/KaTeX_Size3-Regular.e1951519f6f0596f7356.woff2",
     "chat.html": "/chat",
-    "main.fd694533.css.map": "/css/main.fd694533.css.map",
-    "main.d4b85786.js.map": "/js/main.d4b85786.js.map"
+    "main.e409d29a.css.map": "/css/main.e409d29a.css.map",
+    "main.645d37fc.js.map": "/js/main.645d37fc.js.map"
   },
   "entrypoints": [
-    "css/main.fd694533.css",
-    "js/main.d4b85786.js"
+    "css/main.e409d29a.css",
+    "js/main.645d37fc.js"
   ]
 }
