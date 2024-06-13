@@ -16,6 +16,7 @@ import java.util.Map;
 
 import static ai.labs.eddi.engine.memory.IConversationMemory.IConversationStepStack;
 import static ai.labs.eddi.modules.behavior.impl.conditions.IBehaviorCondition.ExecutionState.*;
+import static ai.labs.eddi.utils.StringUtilities.joinStrings;
 
 /**
  * @author ginccc
