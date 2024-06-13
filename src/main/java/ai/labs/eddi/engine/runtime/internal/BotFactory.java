@@ -11,6 +11,8 @@ import ai.labs.eddi.engine.runtime.client.bots.IBotStoreClientLibrary;
 import ai.labs.eddi.engine.runtime.service.ServiceException;
 import ai.labs.eddi.engine.model.Context;
 import ai.labs.eddi.engine.model.Deployment;
+import io.micrometer.core.instrument.MeterRegistry;
+import io.micrometer.core.instrument.Tags;
 import lombok.*;
 import org.jboss.logging.Logger;
 
@@ -27,13 +29,16 @@ import java.util.stream.Collectors;
 @ApplicationScoped
 public class BotFactory implements IBotFactory {
     private final Map<Deployment.Environment, ConcurrentHashMap<BotId, IBot>> environments;
+    private final List<BotId> deployedBots;
     private final IBotStoreClientLibrary botStoreClientLibrary;
 
     private static final Logger log = Logger.getLogger(BotFactory.class);
 
     @Inject
-    public BotFactory(IBotStoreClientLibrary botStoreClientLibrary) {
+    public BotFactory(IBotStoreClientLibrary botStoreClientLibrary, MeterRegistry meterRegistry) {
         this.botStoreClientLibrary = botStoreClientLibrary;
+        this.deployedBots = new LinkedList<>();
+        meterRegistry.gaugeCollectionSize("eddi_bots_deployed", Tags.empty(), deployedBots);
         this.environments = Collections.unmodifiableMap(createEmptyEnvironments());
     }
 
@@ -152,6 +157,9 @@ public class BotFactory implements IBotFactory {
                 Deployment.Status ready = Deployment.Status.READY;
                 ((Bot) bot).setDeploymentStatus(ready);
                 botEnvironment.put(id, bot);
+                if (!deployedBots.contains(id)) {
+                    deployedBots.add(id);
+                }
                 deploymentProcess.completed(ready);
                 logBotDeployment(environment.toString(), botId, version, ready);
             }
@@ -169,6 +177,7 @@ public class BotFactory implements IBotFactory {
 
         BotId id = new BotId(botId, version);
         botEnvironment.remove(id);
+        deployedBots.remove(id);
     }
 
     private ConcurrentHashMap<BotId, IBot> getBotEnvironment(Deployment.Environment environment) {
@@ -224,9 +233,13 @@ public class BotFactory implements IBotFactory {
     @Getter
     @Setter
     @EqualsAndHashCode
-    @ToString
     private static class BotId {
         private String id;
         private Integer version;
+
+        @Override
+        public String toString() {
+            return id + ":" + version;
+        }
     }
 }
