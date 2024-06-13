@@ -115,18 +115,18 @@ public class LangchainTask implements ILifecycleTask {
 
                     var processedParams = runTemplateEngineOnParams(task.parameters(), templateDataObjects);
                     var messages = new LinkedList<ChatMessage>();
-                    if (processedParams.containsKey(KEY_SYSTEM_MESSAGE)) {
+                    if (!isNullOrEmpty(processedParams.get(KEY_SYSTEM_MESSAGE))) {
                         var systemMessage = processedParams.get(KEY_SYSTEM_MESSAGE);
                         messages = new LinkedList<>(List.of(new SystemMessage(systemMessage)));
                     }
 
                     int logSizeLimit = -1;
-                    if (processedParams.containsKey((KEY_LOG_SIZE_LIMIT))) {
+                    if (!isNullOrEmpty(processedParams.get((KEY_LOG_SIZE_LIMIT)))) {
                         logSizeLimit = Integer.parseInt(processedParams.get(KEY_LOG_SIZE_LIMIT));
                     }
 
                     boolean includeFirstBotMessage = true;
-                    if (processedParams.containsKey((KEY_INCLUDE_FIRST_BOT_MESSAGE))) {
+                    if (!isNullOrEmpty(processedParams.get((KEY_INCLUDE_FIRST_BOT_MESSAGE)))) {
                         includeFirstBotMessage = Boolean.parseBoolean(processedParams.get(KEY_INCLUDE_FIRST_BOT_MESSAGE));
                     }
 
@@ -137,15 +137,12 @@ public class LangchainTask implements ILifecycleTask {
                             .map(this::convertMessage)
                             .toList());
 
-                    if (chatMessages.isEmpty()) {
-                        //start of the conversation
-                        continue;
-                    }
-
                     if (!isNullOrEmpty(processedParams.get(KEY_PROMPT))) {
-                        // if there is a prompt defined, we override last user input with it
-                        // to allow alerting the user input before it hits the LLM
-                        chatMessages.removeLast();
+                        // if there is a prompt defined, we replace the last user input with it
+                        // to allow changing the user input before it is being sent to the LLM
+                        if (!chatMessages.isEmpty()) {
+                            chatMessages.removeLast();
+                        }
                         chatMessages.add(new UserMessage(processedParams.get(KEY_PROMPT)));
                     }
 
@@ -160,11 +157,13 @@ public class LangchainTask implements ILifecycleTask {
                             new HashMap<String, Object>();
 
                     if (!isNullOrEmpty(processedParams.get(KEY_CONVERT_TO_OBJECT))) {
-                        var contentAsObject =
-                                jsonSerialization.deserialize(processedParams.get(KEY_CONVERT_TO_OBJECT), Map.class);
-                        langchainObjects.put(task.id(), contentAsObject);
-                    } else {
-                        langchainObjects.put(task.id(), content);
+                        if (Boolean.parseBoolean(processedParams.get(KEY_CONVERT_TO_OBJECT))) {
+                            var contentAsObject =
+                                    jsonSerialization.deserialize(processedParams.get(KEY_CONVERT_TO_OBJECT), Map.class);
+                            langchainObjects.put(task.id(), contentAsObject);
+                        } else {
+                            langchainObjects.put(task.id(), content);
+                        }
                     }
                     templateDataObjects.put(KEY_LANGCHAIN, langchainObjects);
 
@@ -172,10 +171,12 @@ public class LangchainTask implements ILifecycleTask {
                     currentStep.storeData(langchainData);
 
                     if (!isNullOrEmpty(processedParams.get(KEY_ADD_TO_OUTPUT))) {
-                        var outputData = dataFactory.createData(LANGCHAIN_OUTPUT_IDENTIFIER + ":" + task.type(), content);
-                        currentStep.storeData(outputData);
-                        var outputItem = new TextOutputItem(content, 0);
-                        currentStep.addConversationOutputList(MEMORY_OUTPUT_IDENTIFIER, List.of(outputItem));
+                        if (Boolean.parseBoolean(processedParams.get(KEY_ADD_TO_OUTPUT))) {
+                            var outputData = dataFactory.createData(LANGCHAIN_OUTPUT_IDENTIFIER + ":" + task.type(), content);
+                            currentStep.storeData(outputData);
+                            var outputItem = new TextOutputItem(content, 0);
+                            currentStep.addConversationOutputList(MEMORY_OUTPUT_IDENTIFIER, List.of(outputItem));
+                        }
                     }
 
                     if (task.postResponse() != null && task.postResponse().getPropertyInstructions() != null) {
