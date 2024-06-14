@@ -8,6 +8,7 @@ import ai.labs.eddi.configs.bots.model.BotConfiguration;
 import ai.labs.eddi.configs.documentdescriptor.IDocumentDescriptorStore;
 import ai.labs.eddi.configs.git.IGitCallsStore;
 import ai.labs.eddi.configs.http.IHttpCallsStore;
+import ai.labs.eddi.configs.langchain.ILangChainStore;
 import ai.labs.eddi.configs.output.IOutputStore;
 import ai.labs.eddi.configs.packages.IPackageStore;
 import ai.labs.eddi.configs.packages.model.PackageConfiguration;
@@ -53,6 +54,7 @@ public class RestExportService extends AbstractBackupService implements IRestExp
     private final IRegularDictionaryStore regularDictionaryStore;
     private final IBehaviorStore behaviorStore;
     private final IHttpCallsStore httpCallsStore;
+    private final ILangChainStore langChainStore;
     private final IPropertySetterStore propertySetterStore;
     private final IOutputStore outputStore;
     private final IJsonSerialization jsonSerialization;
@@ -69,6 +71,7 @@ public class RestExportService extends AbstractBackupService implements IRestExp
                              IRegularDictionaryStore regularDictionaryStore,
                              IBehaviorStore behaviorStore,
                              IHttpCallsStore httpCallsStore,
+                             ILangChainStore langChainStore,
                              IPropertySetterStore propertySetterStore,
                              IOutputStore outputStore,
                              IJsonSerialization jsonSerialization,
@@ -80,6 +83,7 @@ public class RestExportService extends AbstractBackupService implements IRestExp
         this.regularDictionaryStore = regularDictionaryStore;
         this.behaviorStore = behaviorStore;
         this.httpCallsStore = httpCallsStore;
+        this.langChainStore = langChainStore;
         this.propertySetterStore = propertySetterStore;
         this.outputStore = outputStore;
         this.jsonSerialization = jsonSerialization;
@@ -123,6 +127,9 @@ public class RestExportService extends AbstractBackupService implements IRestExp
                 writeConfigs(packagePath, convertConfigsToString(readConfigs(httpCallsStore,
                         extractResourcesUris(packageConfigurationString, HTTPCALLS_URI_PATTERN))), HTTPCALLS_EXT);
 
+                writeConfigs(packagePath, convertConfigsToString(readConfigs(langChainStore,
+                        extractResourcesUris(packageConfigurationString, LANGCHAIN_URI_PATTERN))), LANGCHAIN_EXT);
+
                 writeConfigs(packagePath, convertConfigsToString(readConfigs(propertySetterStore,
                         extractResourcesUris(packageConfigurationString, PROPERTY_URI_PATTERN))), PROPERTY_EXT);
 
@@ -137,6 +144,7 @@ public class RestExportService extends AbstractBackupService implements IRestExp
                 writeAllVersionsOfUris(unusedPath, regularDictionaryStore, extractResourcesUris(packageConfigurationString, DICTIONARY_URI_PATTERN), DICTIONARY_EXT);
                 writeAllVersionsOfUris(unusedPath, behaviorStore, extractResourcesUris(packageConfigurationString, BEHAVIOR_URI_PATTERN), BEHAVIOR_EXT);
                 writeAllVersionsOfUris(unusedPath, httpCallsStore, extractResourcesUris(packageConfigurationString, HTTPCALLS_URI_PATTERN), HTTPCALLS_EXT);
+                writeAllVersionsOfUris(unusedPath, langChainStore, extractResourcesUris(packageConfigurationString, LANGCHAIN_URI_PATTERN), LANGCHAIN_EXT);
                 writeAllVersionsOfUris(unusedPath, propertySetterStore, extractResourcesUris(packageConfigurationString, PROPERTY_URI_PATTERN), PROPERTY_EXT);
                 writeAllVersionsOfUris(unusedPath, outputStore, extractResourcesUris(packageConfigurationString, OUTPUT_URI_PATTERN), OUTPUT_EXT);
                 writeAllVersionsOfUris(unusedPath, gitCallsStore, extractResourcesUris(packageConfigurationString, GITCALLS_URI_PATTERN), GITCALLS_EXT);

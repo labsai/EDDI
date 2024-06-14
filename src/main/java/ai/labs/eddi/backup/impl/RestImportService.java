@@ -11,6 +11,7 @@ import ai.labs.eddi.configs.git.IRestGitCallsStore;
 import ai.labs.eddi.configs.git.model.GitCallsConfiguration;
 import ai.labs.eddi.configs.http.IRestHttpCallsStore;
 import ai.labs.eddi.configs.http.model.HttpCallsConfiguration;
+import ai.labs.eddi.configs.langchain.IRestLangChainStore;
 import ai.labs.eddi.configs.migration.IMigrationManager;
 import ai.labs.eddi.configs.output.IRestOutputStore;
 import ai.labs.eddi.configs.output.model.OutputConfigurationSet;
@@ -28,6 +29,7 @@ import ai.labs.eddi.engine.runtime.client.factory.IRestInterfaceFactory;
 import ai.labs.eddi.engine.runtime.client.factory.RestInterfaceFactory;
 import ai.labs.eddi.engine.model.BotDeploymentStatus;
 import ai.labs.eddi.configs.documentdescriptor.model.DocumentDescriptor;
+import ai.labs.eddi.modules.langchain.model.LangChainConfiguration;
 import ai.labs.eddi.utils.FileUtilities;
 import ai.labs.eddi.utils.RestUtilities;
 import org.bson.Document;
@@ -220,6 +222,15 @@ public class RestImportService extends AbstractBackupService implements IRestImp
                             updateDocumentDescriptor(packagePath, httpCallsUris, newHttpCallsUris);
                             packageFileString = replaceURIs(packageFileString, httpCallsUris, newHttpCallsUris);
 
+                            // ... for langchain
+                            List<URI> langchainUris = extractResourcesUris(packageFileString, LANGCHAIN_URI_PATTERN);
+                            List<URI> newLangchainUris = createNewLangchain(
+                                    readResources(langchainUris, packagePath,
+                                            LANGCHAIN_EXT, LangChainConfiguration.class));
+
+                            updateDocumentDescriptor(packagePath, langchainUris, newLangchainUris);
+                            packageFileString = replaceURIs(packageFileString, langchainUris, newLangchainUris);
+
                             // ... for property
                             List<URI> propertyUris = extractResourcesUris(packageFileString, PROPERTY_URI_PATTERN);
                             List<URI> newPropertyUris = createNewProperties(
@@ -311,6 +322,16 @@ public class RestImportService extends AbstractBackupService implements IRestImp
             Response httpCallsResponse = restHttpCallsStore.createHttpCalls(httpCallsConfiguration);
             checkIfCreatedResponse(httpCallsResponse);
             return httpCallsResponse.getLocation();
+        }).collect(Collectors.toList());
+    }
+
+    private List<URI> createNewLangchain(List<LangChainConfiguration> langChainConfigurations)
+            throws RestInterfaceFactory.RestInterfaceFactoryException {
+        IRestLangChainStore restLangChainStore = getRestResourceStore(IRestLangChainStore.class);
+        return langChainConfigurations.stream().map(langChainConfiguration -> {
+            Response langchainResponse = restLangChainStore.createLangChain(langChainConfiguration);
+            checkIfCreatedResponse(langchainResponse);
+            return langchainResponse.getLocation();
         }).collect(Collectors.toList());
     }
 
