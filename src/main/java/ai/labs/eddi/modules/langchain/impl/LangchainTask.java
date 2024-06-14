@@ -48,6 +48,8 @@ public class LangchainTask implements ILifecycleTask {
     private static final String KEY_INCLUDE_FIRST_BOT_MESSAGE = "includeFirstBotMessage";
     private static final String KEY_CONVERT_TO_OBJECT = "convertToObject";
     private static final String KEY_ADD_TO_OUTPUT = "addToOutput";
+    public static final String KEY_CONVERSATION_START = "CONVERSATION_START";
+    private static final String KEY_RUN_ON_CONVERSATION_START = "runOnConversationStart";
 
     static final String MEMORY_OUTPUT_IDENTIFIER = "output";
     static final String LANGCHAIN_OUTPUT_IDENTIFIER = MEMORY_OUTPUT_IDENTIFIER + ":text:langchain";
@@ -115,6 +117,15 @@ public class LangchainTask implements ILifecycleTask {
 
                     var processedParams = runTemplateEngineOnParams(task.parameters(), templateDataObjects);
                     var messages = new LinkedList<ChatMessage>();
+
+                    if (actions.contains(KEY_CONVERSATION_START) &&
+                            (isNullOrEmpty(processedParams.get(KEY_RUN_ON_CONVERSATION_START)) ||
+                                    !Boolean.parseBoolean(processedParams.get(KEY_RUN_ON_CONVERSATION_START)))) {
+
+                        // don't run on CONVERSATION_START by default
+                        continue;
+                    }
+
                     if (!isNullOrEmpty(processedParams.get(KEY_SYSTEM_MESSAGE))) {
                         var systemMessage = processedParams.get(KEY_SYSTEM_MESSAGE);
                         messages = new LinkedList<>(List.of(new SystemMessage(systemMessage)));
@@ -147,6 +158,9 @@ public class LangchainTask implements ILifecycleTask {
                     }
 
                     messages.addAll(chatMessages);
+                    if(messages.isEmpty()) {
+                        continue;
+                    }
                     var chatLanguageModel = getChatLanguageModel(task.type(), filterParams(processedParams));
                     prePostUtils.executePreRequestPropertyInstructions(memory, templateDataObjects, task.preRequest());
                     var messageResponse = chatLanguageModel.generate(messages);
@@ -156,27 +170,25 @@ public class LangchainTask implements ILifecycleTask {
                             (Map<String, Object>) templateDataObjects.get(KEY_LANGCHAIN) :
                             new HashMap<String, Object>();
 
-                    if (!isNullOrEmpty(processedParams.get(KEY_CONVERT_TO_OBJECT))) {
-                        if (Boolean.parseBoolean(processedParams.get(KEY_CONVERT_TO_OBJECT))) {
-                            var contentAsObject =
-                                    jsonSerialization.deserialize(processedParams.get(KEY_CONVERT_TO_OBJECT), Map.class);
-                            langchainObjects.put(task.id(), contentAsObject);
-                        } else {
-                            langchainObjects.put(task.id(), content);
-                        }
+                    if (!isNullOrEmpty(processedParams.get(KEY_CONVERT_TO_OBJECT)) &&
+                            Boolean.parseBoolean(processedParams.get(KEY_CONVERT_TO_OBJECT))) {
+                        var contentAsObject =
+                                jsonSerialization.deserialize(processedParams.get(KEY_CONVERT_TO_OBJECT), Map.class);
+                        langchainObjects.put(task.id(), contentAsObject);
+                    } else {
+                        langchainObjects.put(task.id(), content);
                     }
                     templateDataObjects.put(KEY_LANGCHAIN, langchainObjects);
 
                     var langchainData = dataFactory.createData(KEY_LANGCHAIN + ":" + task.type() + ":" + task.id(), content);
                     currentStep.storeData(langchainData);
 
-                    if (!isNullOrEmpty(processedParams.get(KEY_ADD_TO_OUTPUT))) {
-                        if (Boolean.parseBoolean(processedParams.get(KEY_ADD_TO_OUTPUT))) {
-                            var outputData = dataFactory.createData(LANGCHAIN_OUTPUT_IDENTIFIER + ":" + task.type(), content);
-                            currentStep.storeData(outputData);
-                            var outputItem = new TextOutputItem(content, 0);
-                            currentStep.addConversationOutputList(MEMORY_OUTPUT_IDENTIFIER, List.of(outputItem));
-                        }
+                    if (!isNullOrEmpty(processedParams.get(KEY_ADD_TO_OUTPUT)) &&
+                            Boolean.parseBoolean(processedParams.get(KEY_ADD_TO_OUTPUT))) {
+                        var outputData = dataFactory.createData(LANGCHAIN_OUTPUT_IDENTIFIER + ":" + task.type(), content);
+                        currentStep.storeData(outputData);
+                        var outputItem = new TextOutputItem(content, 0);
+                        currentStep.addConversationOutputList(MEMORY_OUTPUT_IDENTIFIER, List.of(outputItem));
                     }
 
                     if (task.postResponse() != null && task.postResponse().getPropertyInstructions() != null) {

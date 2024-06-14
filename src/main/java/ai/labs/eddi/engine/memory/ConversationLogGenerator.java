@@ -2,16 +2,17 @@ package ai.labs.eddi.engine.memory;
 
 import ai.labs.eddi.engine.memory.model.ConversationLog;
 import ai.labs.eddi.engine.memory.model.ConversationMemorySnapshot;
+import ai.labs.eddi.modules.output.model.types.TextOutputItem;
 
 import java.util.List;
 import java.util.Map;
 import java.util.stream.Collectors;
 
 public class ConversationLogGenerator {
-    private static final String OUTPUT_KEY_INPUT = "input";
     private static final String KEY_ROLE_USER = "user";
-    private static final String OUTPUT_ROLE_OUTPUT = "output";
     private static final String KEY_ROLE_ASSISTANT = "assistant";
+    private static final String OUTPUT_KEY_INPUT = "input";
+    private static final String OUTPUT_KEY_OUTPUT = "output";
     private static final String KEY_TEXT = "text";
 
     private IConversationMemory conversationMemory;
@@ -56,12 +57,25 @@ public class ConversationLogGenerator {
                     conversationLog.getMessages().add(new ConversationLog.ConversationPart(KEY_ROLE_USER, input));
                 }
 
-                var outputList = (List<Map<String, Object>>) conversationOutput.get(OUTPUT_ROLE_OUTPUT);
-                if (outputList != null) {
-                    var output = outputList.
-                            stream().toList().stream().
-                            map(item -> item.get(KEY_TEXT).toString()).collect(Collectors.joining(" "));
-                    conversationLog.getMessages().add(new ConversationLog.ConversationPart(KEY_ROLE_ASSISTANT, output));
+                var output = conversationOutput.get(OUTPUT_KEY_OUTPUT);
+                if (output instanceof List) {
+                    List<?> outputList = (List<?>) output;
+                    if (!outputList.isEmpty()) {
+                        if (outputList.getFirst() instanceof Map) {
+                            @SuppressWarnings("unchecked")
+                            List<Map<String, Object>> mapList = (List<Map<String, Object>>) outputList;
+                            var joinedOutput = mapList.stream()
+                                    .map(item -> item.get(KEY_TEXT).toString())
+                                    .collect(Collectors.joining(" "));
+                            conversationLog.getMessages().add(new ConversationLog.ConversationPart(KEY_ROLE_ASSISTANT, joinedOutput));
+                        } else if (outputList.getFirst() instanceof TextOutputItem) {
+                            List<TextOutputItem> textOutputList = (List<TextOutputItem>) outputList;
+                            var joinedOutput = textOutputList.stream()
+                                    .map(TextOutputItem::getText)
+                                    .collect(Collectors.joining(" "));
+                            conversationLog.getMessages().add(new ConversationLog.ConversationPart(KEY_ROLE_ASSISTANT, joinedOutput));
+                        }
+                    }
                 }
             }
 
