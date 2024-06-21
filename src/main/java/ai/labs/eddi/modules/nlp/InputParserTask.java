@@ -1,15 +1,16 @@
 package ai.labs.eddi.modules.nlp;
 
+import ai.labs.eddi.configs.packages.model.ExtensionDescriptor;
+import ai.labs.eddi.configs.packages.model.ExtensionDescriptor.ConfigValue;
 import ai.labs.eddi.engine.lifecycle.ILifecycleTask;
 import ai.labs.eddi.engine.lifecycle.exceptions.IllegalExtensionConfigurationException;
 import ai.labs.eddi.engine.lifecycle.exceptions.PackageConfigurationException;
 import ai.labs.eddi.engine.lifecycle.exceptions.UnrecognizedExtensionException;
 import ai.labs.eddi.engine.memory.IConversationMemory;
+import ai.labs.eddi.engine.memory.IConversationMemory.IWritableConversationStep;
 import ai.labs.eddi.engine.memory.IData;
 import ai.labs.eddi.engine.memory.model.ConversationOutput;
 import ai.labs.eddi.engine.memory.model.Data;
-import ai.labs.eddi.configs.packages.model.ExtensionDescriptor;
-import ai.labs.eddi.configs.packages.model.ExtensionDescriptor.ConfigValue;
 import ai.labs.eddi.modules.nlp.bootstrap.ParserCorrectionExtensions;
 import ai.labs.eddi.modules.nlp.bootstrap.ParserDictionaryExtensions;
 import ai.labs.eddi.modules.nlp.bootstrap.ParserNormalizerExtensions;
@@ -27,17 +28,18 @@ import ai.labs.eddi.modules.nlp.internal.matches.RawSolution;
 import ai.labs.eddi.modules.output.model.QuickReply;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import org.jboss.logging.Logger;
-
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import jakarta.inject.Provider;
+import org.jboss.logging.Logger;
+
 import java.net.URI;
 import java.util.*;
+import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
-import static ai.labs.eddi.engine.memory.ContextUtilities.retrieveContextLanguageFromLongTermMemory;
 import static ai.labs.eddi.configs.packages.model.ExtensionDescriptor.FieldType.BOOLEAN;
+import static ai.labs.eddi.engine.memory.ContextUtilities.retrieveContextLanguageFromLongTermMemory;
 import static ai.labs.eddi.modules.nlp.DictionaryUtilities.convertQuickReplies;
 import static ai.labs.eddi.modules.nlp.DictionaryUtilities.extractExpressions;
 import static ai.labs.eddi.utils.RuntimeUtilities.isNullOrEmpty;
@@ -57,6 +59,7 @@ public class InputParserTask implements ILifecycleTask {
     private static final String EXTENSION_NAME_NORMALIZER = "normalizer";
     private static final String EXTENSION_NAME_DICTIONARIES = "dictionaries";
     private static final String EXTENSION_NAME_CORRECTIONS = "corrections";
+    private static final Pattern NON_ALPHANUMERIC = Pattern.compile("[^a-zA-Z0-9 ]+");
     private final ObjectMapper objectMapper;
 
     private static final String KEY_INPUT = "input";
@@ -146,15 +149,25 @@ public class InputParserTask implements ILifecycleTask {
         return convertObjectToListOfMaps(conversationOutput.get("quickReplies"));
     }
 
-    private List<QuickReply> extractQuickReplies(List<Map<String, Object>> quickReplyOutputList) {
-        return quickReplyOutputList.stream().
-                filter(Objects::nonNull).
-                map((quickReplyData) -> new QuickReply(quickReplyData.get("value").toString(),
-                        quickReplyData.get("expressions").toString(), (Boolean) quickReplyData.get("default"))).
-                collect(Collectors.toList());
+    private static List<QuickReply> extractQuickReplies(List<Map<String, Object>> quickReplyOutputList) {
+        return quickReplyOutputList.stream()
+                .filter(Objects::nonNull)
+                .map(quickReplyData -> {
+                    String value = quickReplyData.get("value").toString();
+                    String expressions = quickReplyData.get("expressions") != null ?
+                            quickReplyData.get("expressions").toString() :
+                            generateExpression(value);
+                    return new QuickReply(value, expressions, (Boolean) quickReplyData.get("default"));
+                })
+                .collect(Collectors.toList());
     }
 
-    private void storeNormalizedResultInMemory(IConversationMemory.IWritableConversationStep currentStep, String normalizedInput) {
+    private static String generateExpression(String value) {
+        var sanitized = NON_ALPHANUMERIC.matcher(value).replaceAll("");
+        return sanitized.trim().replaceAll("\\s+", "_").toLowerCase();
+    }
+
+    private static void storeNormalizedResultInMemory(IWritableConversationStep currentStep, String normalizedInput) {
         if (!isNullOrEmpty(normalizedInput)) {
             IData<String> expressionsData = new Data<>(KEY_INPUT_NORMALIZED, normalizedInput);
             currentStep.storeData(expressionsData);
@@ -162,7 +175,7 @@ public class InputParserTask implements ILifecycleTask {
         }
     }
 
-    private void storeResultInMemory(IConversationMemory.IWritableConversationStep currentStep,
+    private void storeResultInMemory(IWritableConversationStep currentStep,
                                      List<RawSolution> parsedSolutions,
                                      IInputParser.Config parserConfig) {
         if (!parsedSolutions.isEmpty()) {
