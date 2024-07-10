@@ -1,0 +1,8 @@
+global:
+  scrape_interval: 5s
+
+scrape_configs:
+  - job_name: 'eddi'
+    metrics_path: /q/metrics
+    static_configs:
+      - targets: ['eddi:7070']
