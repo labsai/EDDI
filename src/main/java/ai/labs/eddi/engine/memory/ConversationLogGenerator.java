@@ -58,8 +58,7 @@ public class ConversationLogGenerator {
                 }
 
                 var output = conversationOutput.get(OUTPUT_KEY_OUTPUT);
-                if (output instanceof List) {
-                    List<?> outputList = (List<?>) output;
+                if (output instanceof List<?> outputList) {
                     if (!outputList.isEmpty()) {
                         if (outputList.getFirst() instanceof Map) {
                             @SuppressWarnings("unchecked")
@@ -69,6 +68,7 @@ public class ConversationLogGenerator {
                                     .collect(Collectors.joining(" "));
                             conversationLog.getMessages().add(new ConversationLog.ConversationPart(KEY_ROLE_ASSISTANT, joinedOutput));
                         } else if (outputList.getFirst() instanceof TextOutputItem) {
+                            @SuppressWarnings("unchecked")
                             List<TextOutputItem> textOutputList = (List<TextOutputItem>) outputList;
                             var joinedOutput = textOutputList.stream()
                                     .map(TextOutputItem::getText)
