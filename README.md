@@ -8,7 +8,7 @@ Developed in Java using Quarkus, it is lean, RESTful, scalable, and cloud-native
 It comes as Docker container and can be orchestrated with Kubernetes or Openshift.
 The Docker image has been certified by IBM/Red Hat.
 
-Latest stable version: 5.3.2
+Latest stable version: 5.3.3
 
 License: Apache License 2.0
 
