@@ -16,8 +16,8 @@
         <quarkus.microprofile.version>3.0.0.Final</quarkus.microprofile.version>
         <quarkus.platform.artifact-id>quarkus-bom</quarkus.platform.artifact-id>
         <quarkus.platform.group-id>io.quarkus.platform</quarkus.platform.group-id>
-        <quarkus.platform.version>3.12.2</quarkus.platform.version>
-        <quarkus.langchain4j.version>0.16.2</quarkus.langchain4j.version>
+        <quarkus.platform.version>3.13.3</quarkus.platform.version>
+        <quarkus.langchain4j.version>0.17.0</quarkus.langchain4j.version>
         <jandex-maven-plugin.version>3.2.0</jandex-maven-plugin.version>
         <maven.compiler.parameters>true</maven.compiler.parameters>
         <surefire-plugin.version>3.3.0</surefire-plugin.version>
@@ -203,12 +203,12 @@
         <dependency>
             <groupId>org.infinispan</groupId>
             <artifactId>infinispan-quarkus-embedded</artifactId>
-            <version>15.0.5.Final</version>
+            <version>15.0.7.Final</version>
         </dependency>
         <dependency>
             <groupId>org.infinispan</groupId>
             <artifactId>infinispan-component-annotations</artifactId>
-            <version>15.0.5.Final</version>
+            <version>15.0.7.Final</version>
             <scope>compile</scope>
         </dependency>
         <dependency>
@@ -251,7 +251,7 @@
         <dependency>
             <groupId>org.eclipse.jetty</groupId>
             <artifactId>jetty-client</artifactId>
-            <version>12.0.11</version>
+            <version>12.0.12</version>
         </dependency>
         <dependency>
             <groupId>jakarta.transaction</groupId>
