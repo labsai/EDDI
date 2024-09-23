@@ -33,6 +33,25 @@ public class ConversationLog {
     @ToString
     public static class ConversationPart {
         private String role;
-        private String content;
+        private List<Content> content;
+
+        @Getter
+        @Setter
+        @NoArgsConstructor
+        @AllArgsConstructor
+        @EqualsAndHashCode
+        @ToString
+        public static class Content {
+            private ContentType type;
+            private String value;
+        }
+
+        public enum ContentType {
+            text,
+            image,
+            pdf,
+            audio,
+            video
+        }
     }
 }

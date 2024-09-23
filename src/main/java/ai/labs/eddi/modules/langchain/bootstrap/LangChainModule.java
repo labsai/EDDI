@@ -24,6 +24,7 @@ public class LangChainModule {
     public static final String LLM_TYPE_OPENAI = "openai";
     public static final String LLM_TYPE_HUGGING_FACE = "huggingface";
     public static final String LLM_TYPE_ANTHROPIC = "anthropic";
+    public static final String LLM_TYPE_GEMINI_VERTEX = "gemini-vertex";
     public static final String LLM_TYPE_GEMINI = "gemini";
     public static final String LLM_TYPE_OLLAMA = "ollama";
 
@@ -56,6 +57,8 @@ public class LangChainModule {
                 langModelBuilderInstance.select(HuggingFaceLanguageModelBuilder.class).get());
         languageModelApiConnectorBuilders.put(LLM_TYPE_ANTHROPIC, () ->
                 langModelBuilderInstance.select(AnthropicLanguageModelBuilder.class).get());
+        languageModelApiConnectorBuilders.put(LLM_TYPE_GEMINI_VERTEX, () ->
+                langModelBuilderInstance.select(VertexGeminiLanguageModelBuilder.class).get());
         languageModelApiConnectorBuilders.put(LLM_TYPE_GEMINI, () ->
                 langModelBuilderInstance.select(GeminiLanguageModelBuilder.class).get());
         languageModelApiConnectorBuilders.put(LLM_TYPE_OLLAMA, () ->
