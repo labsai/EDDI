@@ -16,10 +16,7 @@ import ai.labs.eddi.modules.langchain.impl.builder.ILanguageModelBuilder;
 import ai.labs.eddi.modules.langchain.model.LangChainConfiguration;
 import ai.labs.eddi.modules.output.model.types.TextOutputItem;
 import ai.labs.eddi.modules.templating.ITemplatingEngine;
-import dev.langchain4j.data.message.AiMessage;
-import dev.langchain4j.data.message.ChatMessage;
-import dev.langchain4j.data.message.SystemMessage;
-import dev.langchain4j.data.message.UserMessage;
+import dev.langchain4j.data.message.*;
 import dev.langchain4j.model.chat.ChatLanguageModel;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
@@ -30,6 +27,7 @@ import java.io.IOException;
 import java.net.URI;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.stream.Collectors;
 
 import static ai.labs.eddi.configs.packages.model.ExtensionDescriptor.ConfigValue;
 import static ai.labs.eddi.configs.packages.model.ExtensionDescriptor.FieldType;
@@ -154,7 +152,7 @@ public class LangchainTask implements ILifecycleTask {
                         if (!chatMessages.isEmpty()) {
                             chatMessages.removeLast();
                         }
-                        chatMessages.add(new UserMessage(processedParams.get(KEY_PROMPT)));
+                        chatMessages.add(UserMessage.from(processedParams.get(KEY_PROMPT)));
                     }
 
                     messages.addAll(chatMessages);
@@ -166,7 +164,9 @@ public class LangchainTask implements ILifecycleTask {
                     var messageResponse = chatLanguageModel.generate(messages);
                     var content = messageResponse.content().text();
 
-                    var langchainObjects = templateDataObjects.containsKey(KEY_LANGCHAIN) ?
+                    @SuppressWarnings("unchecked")
+                    var langchainObjects = templateDataObjects.containsKey(KEY_LANGCHAIN) &&
+                            templateDataObjects.get(KEY_LANGCHAIN) instanceof Map ?
                             (Map<String, Object>) templateDataObjects.get(KEY_LANGCHAIN) :
                             new HashMap<String, Object>();
 
@@ -252,10 +252,26 @@ public class LangchainTask implements ILifecycleTask {
 
     private ChatMessage convertMessage(ConversationLog.ConversationPart eddiMessage) {
         return switch (eddiMessage.getRole().toLowerCase()) {
-            case "user" -> UserMessage.from(eddiMessage.getContent());
-            case "assistant" -> AiMessage.from(eddiMessage.getContent());
-            default -> SystemMessage.from(eddiMessage.getContent());
+            case "user" -> {
+                var contentList = new LinkedList<Content>();
+                for (var content : eddiMessage.getContent()) {
+                    switch (content.getType()) {
+                        case text -> contentList.add(TextContent.from(content.getValue()));
+                        case pdf -> contentList.add(PdfFileContent.from(content.getValue()));
+                        case audio -> contentList.add(AudioContent.from(content.getValue()));
+                        case video -> contentList.add(VideoContent.from(content.getValue()));
+                    }
+                }
+                yield UserMessage.from(contentList);
+            }
+            case "assistant" -> AiMessage.from(joinMessages(eddiMessage));
+            default -> SystemMessage.from(joinMessages(eddiMessage));
         };
+    }
+
+    private static String joinMessages(ConversationLog.ConversationPart eddiMessage) {
+        return eddiMessage.getContent().stream().
+                map(ConversationLog.ConversationPart.Content::getValue).collect(Collectors.joining(" "));
     }
 
     @Override
