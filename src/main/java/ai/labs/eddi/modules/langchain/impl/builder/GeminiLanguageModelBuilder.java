@@ -1,54 +1,62 @@
 package ai.labs.eddi.modules.langchain.impl.builder;
 
 import dev.langchain4j.model.chat.ChatLanguageModel;
-import io.quarkiverse.langchain4j.vertexai.runtime.gemini.VertexAiGeminiChatLanguageModel;
+import dev.langchain4j.model.googleai.GoogleAiGeminiChatModel;
 import jakarta.enterprise.context.ApplicationScoped;
 
 import java.time.Duration;
 import java.util.Map;
 
 import static ai.labs.eddi.utils.RuntimeUtilities.isNullOrEmpty;
+import static dev.langchain4j.model.chat.request.ResponseFormat.JSON;
+import static dev.langchain4j.model.chat.request.ResponseFormat.TEXT;
 
 @ApplicationScoped
 public class GeminiLanguageModelBuilder implements ILanguageModelBuilder {
-    private static final String KEY_PUBLISHER = "publisher";
-    private static final String KEY_MODEL_ID = "modelID";
+    private static final String KEY_API_KEY = "apiKey";
+    private static final String KEY_MODEL_NAME = "modelName";
     private static final String KEY_TEMPERATURE = "temperature";
+    private static final String KEY_LOG_REQUESTS_AND_RESPONSES = "logRequestsAndResponses";
+    private static final String KEY_RESPONSE_FORMAT = "responseFormat";
+    private static final String KEY_MAX_OUTPUT_TOKENS = "maxOutputTokens";
+    private static final String KEY_ALLOW_CODE_EXECUTION = "allowCodeExecution";
+    private static final String TYPE_JSON = "json";
     private static final String KEY_TIMEOUT = "timeout";
-    private static final String KEY_PROJECT_ID = "projectId";
-    private static final String KEY_LOG_REQUESTS = "logRequests";
-    private static final String KEY_LOG_RESPONSES = "logResponses";
 
     @Override
     public ChatLanguageModel build(Map<String, String> parameters) {
-        var builder = VertexAiGeminiChatLanguageModel.builder();
+        var builder = GoogleAiGeminiChatModel.builder();
 
-        if (!isNullOrEmpty(parameters.get(KEY_PROJECT_ID))) {
-            builder.projectId(parameters.get(KEY_PROJECT_ID));
+        if (!isNullOrEmpty(parameters.get(KEY_API_KEY))) {
+            builder.apiKey(parameters.get(KEY_API_KEY));
         }
 
-        if (!isNullOrEmpty(parameters.get(KEY_PUBLISHER))) {
-            builder.publisher(parameters.get(KEY_PUBLISHER));
-        }
-
-        if (!isNullOrEmpty(parameters.get(KEY_MODEL_ID))) {
-            builder.modelId(parameters.get(KEY_MODEL_ID));
-        }
-
-        if (!isNullOrEmpty(parameters.get(KEY_TIMEOUT))) {
-            builder.timeout(Duration.ofMillis(Long.parseLong(parameters.get(KEY_TIMEOUT))));
+        if (!isNullOrEmpty(parameters.get(KEY_MODEL_NAME))) {
+            builder.modelName(parameters.get(KEY_MODEL_NAME));
         }
 
         if (!isNullOrEmpty(parameters.get(KEY_TEMPERATURE))) {
             builder.temperature(Double.parseDouble(parameters.get(KEY_TEMPERATURE)));
         }
 
-        if (!isNullOrEmpty(parameters.get(KEY_LOG_REQUESTS))) {
-            builder.logRequests(Boolean.parseBoolean(parameters.get(KEY_LOG_REQUESTS)));
+        if (!isNullOrEmpty(parameters.get(KEY_RESPONSE_FORMAT))) {
+            builder.responseFormat(TYPE_JSON.equalsIgnoreCase(parameters.get(KEY_RESPONSE_FORMAT))? JSON : TEXT);
         }
 
-        if (!isNullOrEmpty(parameters.get(KEY_LOG_RESPONSES))) {
-            builder.logResponses(Boolean.parseBoolean(parameters.get(KEY_LOG_RESPONSES)));
+        if (!isNullOrEmpty(parameters.get(KEY_MAX_OUTPUT_TOKENS))) {
+            builder.maxOutputTokens(Integer.parseInt(parameters.get(KEY_MAX_OUTPUT_TOKENS)));
+        }
+
+        if (!isNullOrEmpty(parameters.get(KEY_ALLOW_CODE_EXECUTION))) {
+            builder.allowCodeExecution(Boolean.parseBoolean(parameters.get(KEY_ALLOW_CODE_EXECUTION)));
+        }
+
+        if (!isNullOrEmpty(parameters.get(KEY_LOG_REQUESTS_AND_RESPONSES))) {
+            builder.logRequestsAndResponses(Boolean.parseBoolean(parameters.get(KEY_LOG_REQUESTS_AND_RESPONSES)));
+        }
+
+        if (!isNullOrEmpty(parameters.get(KEY_TIMEOUT))) {
+            builder.timeout(Duration.ofMillis(Long.parseLong(parameters.get(KEY_TIMEOUT))));
         }
 
         return builder.build();
