@@ -16,7 +16,8 @@ public class Context {
     public enum ContextType {
         string,
         expressions,
-        object
+        object,
+        array
     }
 
     private ContextType type;

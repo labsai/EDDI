@@ -69,7 +69,7 @@ public class ConversationLogGenerator {
                 var contentList = new LinkedList<Content>();
                 if (!isNullOrEmpty(context) &&
                         context.get(KEY_INPUT_FILES) instanceof List &&
-                        ((List<?>) context.get(KEY_INPUT_FILES)).getFirst() instanceof String) {
+                        ((List<?>) context.get(KEY_INPUT_FILES)).getFirst() instanceof Map) {
 
                     @SuppressWarnings("unchecked")
                     var inputFiles = (List<Map<String, String>>) context.get(KEY_INPUT_FILES);
