@@ -37,6 +37,7 @@ import java.util.stream.Collectors;
 import static ai.labs.eddi.configs.properties.model.Property.Scope.conversation;
 import static ai.labs.eddi.utils.RuntimeUtilities.checkNotNull;
 import static ai.labs.eddi.utils.RuntimeUtilities.isNullOrEmpty;
+import static ai.labs.eddi.utils.StringUtilities.joinStrings;
 import static java.lang.Boolean.parseBoolean;
 
 /**
@@ -117,7 +118,8 @@ public class PropertySetterTask implements ILifecycleTask {
         }
 
         if (expressionsData != null) {
-            aggregatedExpressions.addAll(expressionProvider.parseExpressions(expressionsData.getResult()));
+            String expressionString = joinStrings(", ", expressionsData.getResult());
+            aggregatedExpressions.addAll(expressionProvider.parseExpressions(expressionString));
         }
 
         var properties = propertySetter.extractProperties(aggregatedExpressions);

@@ -67,6 +67,8 @@ public class InputParserTask implements ILifecycleTask {
     private static final String KEY_EXPRESSIONS = "expressions";
     private static final String KEY_EXPRESSIONS_PARSED = KEY_EXPRESSIONS + ":parsed";
     private static final String KEY_INTENT = "intents";
+
+    private static final String KEY_EXPRESSIONS_WITH_INPUT = "nobehaviour:" + KEY_EXPRESSIONS + ":withinput";
     private static final String KEY_TYPE = "type";
     private static final String KEY_CONFIG = "config";
 
@@ -205,9 +207,15 @@ public class InputParserTask implements ILifecycleTask {
                 Data<List<String>> intentData = new Data<>(KEY_INTENT, intents);
                 currentStep.storeData(intentData);
                 currentStep.addConversationOutputList(KEY_INTENT, intents);
+
+                currentStep.addConversationOutputObject("withinputexpression", convertObjectToListOfMaps(newExpressions));
+
             }
         }
     }
+
+
+
 
     @Override
     public Object configure(Map<String, Object> configuration, Map<String, Object> extensions)
@@ -387,4 +395,5 @@ public class InputParserTask implements ILifecycleTask {
         URI normalizerUri = URI.create(resourceMap.get(KEY_TYPE).toString());
         return normalizerUri.getHost();
     }
+
 }
