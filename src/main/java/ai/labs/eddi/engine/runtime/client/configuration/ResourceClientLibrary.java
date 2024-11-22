@@ -1,7 +1,6 @@
 package ai.labs.eddi.engine.runtime.client.configuration;
 
 import ai.labs.eddi.configs.behavior.IRestBehaviorStore;
-import ai.labs.eddi.configs.git.IRestGitCallsStore;
 import ai.labs.eddi.configs.http.IRestHttpCallsStore;
 import ai.labs.eddi.configs.langchain.IRestLangChainStore;
 import ai.labs.eddi.configs.output.IRestOutputStore;
@@ -33,7 +32,6 @@ public class ResourceClientLibrary implements IResourceClientLibrary {
     private final IRestLangChainStore restLangChainStore;
     private final IRestOutputStore restOutputStore;
     private final IRestPropertySetterStore restPropertySetterStore;
-    private final IRestGitCallsStore restGitCallsStore;
     private Map<String, IResourceService> restInterfaces;
 
     @Inject
@@ -43,8 +41,7 @@ public class ResourceClientLibrary implements IResourceClientLibrary {
                                  IRestHttpCallsStore restHttpCallsStore,
                                  IRestLangChainStore restLangChainStore,
                                  IRestOutputStore restOutputStore,
-                                 IRestPropertySetterStore restPropertySetterStore,
-                                 IRestGitCallsStore restGitCallsStore) {
+                                 IRestPropertySetterStore restPropertySetterStore) {
         this.restParserStore = restParserStore;
         this.restRegularDictionaryStore = restRegularDictionaryStore;
         this.restBehaviorStore = restBehaviorStore;
@@ -52,7 +49,6 @@ public class ResourceClientLibrary implements IResourceClientLibrary {
         this.restLangChainStore = restLangChainStore;
         this.restOutputStore = restOutputStore;
         this.restPropertySetterStore = restPropertySetterStore;
-        this.restGitCallsStore = restGitCallsStore;
 
         init();
     }
@@ -143,19 +139,6 @@ public class ResourceClientLibrary implements IResourceClientLibrary {
                 return restPropertySetterStore.duplicatePropertySetter(id, version);
             }
         });
-
-        restInterfaces.put("ai.labs.gitcalls", new IResourceService() {
-            @Override
-            public Object read(String id, Integer version) {
-                return restGitCallsStore.readGitCalls(id, version);
-            }
-
-            @Override
-            public Response duplicate(String id, Integer version) {
-                return restGitCallsStore.duplicateGitCalls(id, version);
-            }
-        });
-
     }
 
     @Override

@@ -6,7 +6,7 @@ import ai.labs.eddi.configs.behavior.IBehaviorStore;
 import ai.labs.eddi.configs.bots.IBotStore;
 import ai.labs.eddi.configs.bots.model.BotConfiguration;
 import ai.labs.eddi.configs.documentdescriptor.IDocumentDescriptorStore;
-import ai.labs.eddi.configs.git.IGitCallsStore;
+import ai.labs.eddi.configs.documentdescriptor.model.DocumentDescriptor;
 import ai.labs.eddi.configs.http.IHttpCallsStore;
 import ai.labs.eddi.configs.langchain.ILangChainStore;
 import ai.labs.eddi.configs.output.IOutputStore;
@@ -17,16 +17,16 @@ import ai.labs.eddi.configs.regulardictionary.IRegularDictionaryStore;
 import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.datastore.IResourceStore.IResourceId;
 import ai.labs.eddi.datastore.serialization.IJsonSerialization;
-import ai.labs.eddi.configs.documentdescriptor.model.DocumentDescriptor;
 import ai.labs.eddi.utils.FileUtilities;
 import ai.labs.eddi.utils.RestUtilities;
-import jakarta.ws.rs.NotFoundException;
-import org.jboss.logging.Logger;
-
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
+import jakarta.ws.rs.BadRequestException;
 import jakarta.ws.rs.InternalServerErrorException;
+import jakarta.ws.rs.NotFoundException;
 import jakarta.ws.rs.core.Response;
+import org.jboss.logging.Logger;
+
 import java.io.*;
 import java.net.URI;
 import java.net.URLEncoder;
@@ -59,7 +59,6 @@ public class RestExportService extends AbstractBackupService implements IRestExp
     private final IOutputStore outputStore;
     private final IJsonSerialization jsonSerialization;
     private final IZipArchive zipArchive;
-    private final IGitCallsStore gitCallsStore;
     private final Path tmpPath = Paths.get(FileUtilities.buildPath(System.getProperty("user.dir"), "tmp"));
 
     private static final Logger log = Logger.getLogger(RestExportService.class);
@@ -75,8 +74,7 @@ public class RestExportService extends AbstractBackupService implements IRestExp
                              IPropertySetterStore propertySetterStore,
                              IOutputStore outputStore,
                              IJsonSerialization jsonSerialization,
-                             IZipArchive zipArchive,
-                             IGitCallsStore gitCallsStore) {
+                             IZipArchive zipArchive) {
         this.documentDescriptorStore = documentDescriptorStore;
         this.botStore = botStore;
         this.packageStore = packageStore;
@@ -88,7 +86,6 @@ public class RestExportService extends AbstractBackupService implements IRestExp
         this.outputStore = outputStore;
         this.jsonSerialization = jsonSerialization;
         this.zipArchive = zipArchive;
-        this.gitCallsStore = gitCallsStore;
     }
 
     @Override
@@ -144,9 +141,6 @@ public class RestExportService extends AbstractBackupService implements IRestExp
                 writeConfigs(packagePath, convertConfigsToString(readConfigs(outputStore,
                         extractResourcesUris(packageConfigurationString, OUTPUT_URI_PATTERN))), OUTPUT_EXT);
 
-                writeConfigs(packagePath, convertConfigsToString(readConfigs(gitCallsStore,
-                        extractResourcesUris(packageConfigurationString, GITCALLS_URI_PATTERN))), GITCALLS_EXT);
-
                 Path unusedPath = Files.createDirectories(Paths.get(tmpPath.toString(), botId, "unused"));
 
                 writeAllVersionsOfUris(unusedPath, regularDictionaryStore, extractResourcesUris(packageConfigurationString, DICTIONARY_URI_PATTERN), DICTIONARY_EXT);
@@ -155,7 +149,6 @@ public class RestExportService extends AbstractBackupService implements IRestExp
                 writeAllVersionsOfUris(unusedPath, langChainStore, extractResourcesUris(packageConfigurationString, LANGCHAIN_URI_PATTERN), LANGCHAIN_EXT);
                 writeAllVersionsOfUris(unusedPath, propertySetterStore, extractResourcesUris(packageConfigurationString, PROPERTY_URI_PATTERN), PROPERTY_EXT);
                 writeAllVersionsOfUris(unusedPath, outputStore, extractResourcesUris(packageConfigurationString, OUTPUT_URI_PATTERN), OUTPUT_EXT);
-                writeAllVersionsOfUris(unusedPath, gitCallsStore, extractResourcesUris(packageConfigurationString, GITCALLS_URI_PATTERN), GITCALLS_EXT);
 
             }
 
