@@ -89,8 +89,6 @@ public class SemanticParserModule {
 
         map.put(DamerauLevenshteinCorrectionProvider.ID, () ->
                 instance.select(DamerauLevenshteinCorrectionProvider.class).get());
-        map.put(StemmingCorrectionProvider.ID, () ->
-                instance.select(StemmingCorrectionProvider.class).get());
         map.put(PhoneticCorrectionProvider.ID, () ->
                 instance.select(PhoneticCorrectionProvider.class).get());
         map.put(MergedTermsCorrectionProvider.ID, () ->

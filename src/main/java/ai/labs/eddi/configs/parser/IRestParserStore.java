@@ -84,13 +84,6 @@ public interface IRestParserStore extends IRestVersionInfo {
      * ],
      * "corrections": [
      * {
-     * "type": "eddi://ai.labs.parser.corrections.stemming",
-     * "config": {
-     * "language": "english",
-     * "lookupIfKnown": "false"
-     * }
-     * },
-     * {
      * "type": "eddi://ai.labs.parser.corrections.levenshtein",
      * "config": {
      * "distance": "2"
