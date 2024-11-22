@@ -94,8 +94,16 @@ public class RestExportService extends AbstractBackupService implements IRestExp
     @Override
     public Response getBotZipArchive(String botFilename) {
         try {
-            String zipFilePath = FileUtilities.buildPath(tmpPath.toString(), botFilename);
-            return Response.ok(new BufferedInputStream(new FileInputStream(zipFilePath))).build();
+            botFilename = sanitizeFileName(botFilename);
+
+            Path zipFilePath = Paths.get(tmpPath.toString(), botFilename).normalize();
+
+            Path tmpDirPath = Paths.get(tmpPath.toString()).toAbsolutePath().normalize();
+            if (!zipFilePath.startsWith(tmpDirPath)) {
+                throw new SecurityException("Invalid file path detected.");
+            }
+
+            return Response.ok(new BufferedInputStream(new FileInputStream(zipFilePath.toFile()))).build();
         } catch (FileNotFoundException e) {
             throw new NotFoundException();
         }
@@ -304,5 +312,22 @@ public class RestExportService extends AbstractBackupService implements IRestExp
         if (Files.exists(path)) {
             Files.delete(path);
         }
+    }
+
+    private static String sanitizeFileName(String botFilename) {
+        if (botFilename == null || botFilename.isEmpty()) {
+            throw new BadRequestException("Filename is empty.");
+        }
+
+        botFilename = botFilename.
+                replaceAll("\\.\\./", "").
+                replaceAll("\\\\", "").
+                replaceAll("/", "");
+
+        if (!botFilename.matches("^[a-zA-Z0-9_.-]+$")) {
+            throw new BadRequestException("Filename contains invalid characters.");
+        }
+
+        return botFilename;
     }
 }
