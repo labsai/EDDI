@@ -317,7 +317,7 @@ public class RestExportService extends AbstractBackupService implements IRestExp
                 replaceAll("\\\\", "").
                 replaceAll("/", "");
 
-        if (!botFilename.matches("^[a-zA-Z0-9_.-]+$")) {
+        if (!botFilename.matches("^[a-zA-Z0-9_.+\\-]+$")) {
             throw new BadRequestException("Filename contains invalid characters.");
         }
 
