@@ -105,7 +105,7 @@ const Chat: React.FC = () => {
 
         setIsLoading(true);
         fetchEndpoint(fetchUrl, 'GET', null);
-    }, [botId, conversationId, environment, intent, isManagedBots, userId]);
+    }, [baseUrl, botId, conversationId, environment, intent, isManagedBots, userId]);
 
     useEffect(() => {
         loadConversation();

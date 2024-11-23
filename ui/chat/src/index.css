@@ -129,7 +129,7 @@ a:active {
     transform: translateX(-50%);
     z-index: 999;
     background-color: black;
-    margin-bottom: 25px;
+    margin-bottom: -4%;
     max-width: 800px;
     width: 100%;
     box-sizing: border-box;
