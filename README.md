@@ -1,3 +1,5 @@
+![EDDI Banner Image](/screenshots/EDDI-landing-page-image.png)
+
 # E.D.D.I: Prompt & Conversation Management Middleware for Conversational AI APIs
 
 E.D.D.I (Enhanced Dialog Driven Interface) is a middleware to connect and manage LLM API bots 
@@ -17,8 +19,6 @@ Project website: [here](https://eddi.labs.ai/)
 Documentation: [here](https://docs.labs.ai/)
 
 [![Codacy Badge](https://app.codacy.com/project/badge/Grade/2c5d183d4bd24dbaa77427cfbf5d4074)](https://app.codacy.com/organizations/gh/labsai/dashboard?utm_source=github.com&amp;utm_medium=referral&amp;utm_content=labsai/EDDI&amp;utm_campaign=Badge_Grade) [![CircleCI](https://circleci.com/gh/labsai/EDDI/tree/main.svg?style=svg)](https://circleci.com/gh/labsai/EDDI/tree/main)
-
-![EDDI Banner Image](/screenshots/EDDI-landing-page-image.png)
 
 EDDI Dashboard:
 ![EDDI Screenshot Dashboard](/screenshots/EDDI-Screenshot-Dashboard-Interface.png)
