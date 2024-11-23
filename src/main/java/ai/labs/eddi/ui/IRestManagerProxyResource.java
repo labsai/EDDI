@@ -11,11 +11,6 @@ import jakarta.ws.rs.core.Response;
 public interface IRestManagerProxyResource {
 
     @GET
-    @Path("/scripts/{path:.*}")
-    @Produces(MediaType.APPLICATION_JSON)
-    Response proxyClientScript(@PathParam("path") String path);
-
-    @GET
     @Path("/manage")
     @Produces(MediaType.TEXT_HTML)
     Response

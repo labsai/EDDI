@@ -1,16 +1,16 @@
 package ai.labs.eddi.ui;
 
-import ai.labs.eddi.engine.httpclient.IHttpClient;
-import ai.labs.eddi.engine.httpclient.IRequest;
-import ai.labs.eddi.engine.httpclient.IResponse;
-import org.eclipse.microprofile.config.inject.ConfigProperty;
+import jakarta.enterprise.context.ApplicationScoped;
+import jakarta.ws.rs.ForbiddenException;
+import jakarta.ws.rs.InternalServerErrorException;
+import jakarta.ws.rs.core.Response;
 import org.jboss.logging.Logger;
 
-import jakarta.enterprise.context.ApplicationScoped;
-import jakarta.inject.Inject;
-import jakarta.ws.rs.core.MediaType;
-import jakarta.ws.rs.core.Response;
-import java.net.URI;
+import java.io.FileNotFoundException;
+import java.io.IOException;
+import java.io.InputStream;
+import java.nio.file.Path;
+import java.nio.file.Paths;
 
 /**
  * @author ginccc
@@ -18,52 +18,58 @@ import java.net.URI;
 @ApplicationScoped
 public class RestManagerProxyResource implements IRestManagerProxyResource {
     private static final Logger LOGGER = Logger.getLogger(RestManagerProxyResource.class);
-    public static final String JS_SUFFIX = "js";
-    private final IHttpClient httpClient;
-    private final String managerBaseUrl;
-
-    @Inject
-    public RestManagerProxyResource(IHttpClient httpClient,
-                                    @ConfigProperty(name = "eddi.manager.baseUrl") String managerBaseUrl) {
-        this.httpClient = httpClient;
-        this.managerBaseUrl = managerBaseUrl;
-    }
-
-    @Override
-    public Response proxyClientScript(String path) {
-        try {
-
-            URI uri = URI.create(managerBaseUrl + "/scripts/" + path);
-            IRequest request = httpClient.newRequest(uri, IHttpClient.Method.GET);
-
-            IResponse response = request.send();
-
-            return Response.ok(response.getContentAsString()).build();
-
-        } catch (IRequest.HttpRequestException e) {
-            LOGGER.error(e.getLocalizedMessage(), e);
-            throw new RuntimeException();
-        }
-    }
 
     @Override
     public Response proxyClientRequest() {
-        return proxyClientRequest("/");
+        return proxyClientRequest("/manage.html");
     }
 
     @Override
     public Response proxyClientRequest(String path) {
         try {
+            // Strip leading "./" or "././" for clarity
+            while (path.startsWith("./")) {
+                path = path.substring(2);
+            }
 
-            var uriString = managerBaseUrl + (path.startsWith("/") ? path : "/" + path);
-            var response = httpClient.newRequest(URI.create(uriString)).send();
+            // Normalize the path to resolve relative elements
+            Path resourcePath = Paths.get("META-INF/resources", path).normalize();
 
-            return Response.ok(response.getContentAsString(),
-                    path.endsWith(JS_SUFFIX) ? MediaType.APPLICATION_JSON : MediaType.TEXT_HTML).build();
+            // Prevent directory traversal by checking for ".." in the normalized path
+            if (resourcePath.toString().contains("..")) {
+                throw new SecurityException("Directory traversal attempt detected: " + path);
+            }
 
-        } catch (IRequest.HttpRequestException e) {
+            // Disallow characters in file names that may be used maliciously
+            if (path.matches(".*[<>|:*?\"].*")) {
+                throw new SecurityException("Invalid characters in file path: " + path);
+            }
+
+            // Attempt to load the file from the resources folder
+            InputStream fileStream = Thread.currentThread()
+                    .getContextClassLoader()
+                    .getResourceAsStream(resourcePath.toString());
+
+            // If the file doesn't exist, fallback to "manage.html"
+            if (fileStream == null) {
+                fileStream = Thread.currentThread()
+                        .getContextClassLoader()
+                        .getResourceAsStream("META-INF/resources/manage.html");
+
+                if (fileStream == null) {
+                    throw new FileNotFoundException("manage.html not found in META-INF/resources");
+                }
+            }
+
+            // Return the file (or manage.html) as a response
+            return Response.ok(fileStream).build();
+
+        } catch (SecurityException e) {
             LOGGER.error(e.getLocalizedMessage(), e);
-            throw new RuntimeException();
+            throw new ForbiddenException("Access to the requested file is forbidden: " + path);
+        } catch (IOException e) {
+            LOGGER.error(e.getLocalizedMessage(), e);
+            throw new InternalServerErrorException("An error occurred while accessing the file: " + path);
         }
     }
 }
