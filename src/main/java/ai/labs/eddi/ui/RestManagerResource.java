@@ -16,16 +16,16 @@ import java.nio.file.Paths;
  * @author ginccc
  */
 @ApplicationScoped
-public class RestManagerProxyResource implements IRestManagerProxyResource {
-    private static final Logger LOGGER = Logger.getLogger(RestManagerProxyResource.class);
+public class RestManagerResource implements IRestManagerResource {
+    private static final Logger LOGGER = Logger.getLogger(RestManagerResource.class);
 
     @Override
-    public Response proxyClientRequest() {
-        return proxyClientRequest("/manage.html");
+    public Response fetchManagerResources() {
+        return fetchManagerResources("/manage.html");
     }
 
     @Override
-    public Response proxyClientRequest(String path) {
+    public Response fetchManagerResources(String path) {
         try {
             // Strip leading "./" or "././" for clarity
             while (path.startsWith("./")) {
