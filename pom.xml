@@ -5,7 +5,7 @@
     <modelVersion>4.0.0</modelVersion>
     <groupId>ai.labs</groupId>
     <artifactId>eddi</artifactId>
-    <version>5.4.0</version>
+    <version>5.4.1</version>
     <properties>
         <compiler-plugin.version>3.13.0</compiler-plugin.version>
         <maven.compiler.source>21</maven.compiler.source>
