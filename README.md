@@ -24,7 +24,7 @@ EDDI Dashboard:
 ![EDDI Screenshot Dashboard](/screenshots/EDDI-Screenshot-Dashboard-Interface.png)
 
 EDDI Chat:
-![EDDI Screenshot Chat](//screenshots/EDDI-Screenshot-Chat-Interface.png)
+![EDDI Screenshot Chat](/screenshots/EDDI-Screenshot-Chat-Interface.png)
 
 EDDI Manager:
 ![EDDI Screenshot Manager](/screenshots/EDDI-Screenshot-Manager-Interface.png)
