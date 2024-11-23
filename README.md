@@ -2,13 +2,13 @@
 
 E.D.D.I (Enhanced Dialog Driven Interface) is a middleware to connect and manage LLM API bots 
 with advanced prompt and conversation management for APIs such as OpenAI ChatGPT, Facebook Hugging Face, 
-Anthropic Claude, Google Gemini and Ollama 
+Anthropic Claude, Google Gemini, Ollama and Jlama
 
 Developed in Java using Quarkus, it is lean, RESTful, scalable, and cloud-native. 
 It comes as Docker container and can be orchestrated with Kubernetes or Openshift.
 The Docker image has been certified by IBM/Red Hat.
 
-Latest stable version: 5.3.3
+Latest stable version: 5.4.0
 
 License: Apache License 2.0
 
@@ -18,7 +18,16 @@ Documentation: [here](https://docs.labs.ai/)
 
 [![Codacy Badge](https://app.codacy.com/project/badge/Grade/2c5d183d4bd24dbaa77427cfbf5d4074)](https://app.codacy.com/organizations/gh/labsai/dashboard?utm_source=github.com&amp;utm_medium=referral&amp;utm_content=labsai/EDDI&amp;utm_campaign=Badge_Grade) [![CircleCI](https://circleci.com/gh/labsai/EDDI/tree/main.svg?style=svg)](https://circleci.com/gh/labsai/EDDI/tree/main)
 
-![alt text](https://eddi.labs.ai/EDDI-landing-page-image.png)
+![EDDI Banner Image](/screenshots/EDDI-landing-page-image.png)
+
+EDDI Dashboard:
+![EDDI Screenshot Dashboard](/screenshots/EDDI-Screenshot-Dashboard-Interface.png)
+
+EDDI Chat:
+![EDDI Screenshot Chat](//screenshots/EDDI-Screenshot-Chat-Interface.png)
+
+EDDI Manager:
+![EDDI Screenshot Manager](/screenshots/EDDI-Screenshot-Manager-Interface.png)
 
 ## Overview
 
@@ -31,9 +40,9 @@ It supports the integration of multiple chatbots, even multiple versions of the 
 Notable features include:
 
 * Seamless integration with conversational or traditional REST APIs
-* Configurable NLP and Behavior rules to orchestrate LLM involvement
+* Configurable Behavior rules to orchestrate LLM involvement
 * Support for multiple chatbots, including multiple versions of the same bot, running concurrently
-* Support for Major AI API integrations via langchain4j: OpenAI, Hugging Face (text only), Claude, Gemini, Ollama (and more to come)
+* Support for Major AI API integrations via langchain4j: OpenAI, Hugging Face (text only), Claude, Gemini, Ollama, Jlama (and more to come)
 
 Technical specifications:
 
