@@ -156,12 +156,11 @@ public class BotFactory implements IBotFactory {
     @Override
     public void deployBot(Deployment.Environment environment, final String botId, final Integer version,
                           DeploymentProcess deploymentProcess) {
-        deploymentProcess = defaultIfNull(deploymentProcess);
+        var finalDeploymentProcess = defaultIfNull(deploymentProcess);
 
         BotId id = new BotId(botId, version);
         ConcurrentHashMap<BotId, IBot> botEnvironment = getBotEnvironment(environment);
 
-        var finalDeploymentProcess = deploymentProcess;
         botEnvironment.compute(id, (key, existingBot) -> {
             if (existingBot != null) {
                 // If a bot already exists, ensure it is in a valid state
