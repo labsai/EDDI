@@ -7,6 +7,7 @@ import ai.labs.eddi.configs.behavior.model.BehaviorConfiguration;
 import ai.labs.eddi.configs.bots.IRestBotStore;
 import ai.labs.eddi.configs.bots.model.BotConfiguration;
 import ai.labs.eddi.configs.documentdescriptor.IRestDocumentDescriptorStore;
+import ai.labs.eddi.configs.documentdescriptor.model.DocumentDescriptor;
 import ai.labs.eddi.configs.http.IRestHttpCallsStore;
 import ai.labs.eddi.configs.http.model.HttpCallsConfiguration;
 import ai.labs.eddi.configs.langchain.IRestLangChainStore;
@@ -23,28 +24,29 @@ import ai.labs.eddi.configs.regulardictionary.model.RegularDictionaryConfigurati
 import ai.labs.eddi.datastore.IResourceStore.IResourceId;
 import ai.labs.eddi.datastore.serialization.IJsonSerialization;
 import ai.labs.eddi.engine.IRestBotAdministration;
+import ai.labs.eddi.engine.model.BotDeploymentStatus;
 import ai.labs.eddi.engine.runtime.client.factory.IRestInterfaceFactory;
 import ai.labs.eddi.engine.runtime.client.factory.RestInterfaceFactory;
-import ai.labs.eddi.engine.model.BotDeploymentStatus;
-import ai.labs.eddi.configs.documentdescriptor.model.DocumentDescriptor;
+import ai.labs.eddi.engine.runtime.internal.IDeploymentListener;
 import ai.labs.eddi.modules.langchain.model.LangChainConfiguration;
 import ai.labs.eddi.utils.FileUtilities;
 import ai.labs.eddi.utils.RestUtilities;
-import org.bson.Document;
-import org.jboss.logging.Logger;
-
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import jakarta.ws.rs.InternalServerErrorException;
 import jakarta.ws.rs.container.AsyncResponse;
 import jakarta.ws.rs.container.TimeoutHandler;
 import jakarta.ws.rs.core.Response;
+import org.bson.Document;
+import org.jboss.logging.Logger;
+
 import java.io.*;
 import java.net.URI;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.*;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
@@ -66,6 +68,7 @@ public class RestImportService extends AbstractBackupService implements IRestImp
     private final IRestInterfaceFactory restInterfaceFactory;
     private final IRestBotAdministration restBotAdministration;
     private final IMigrationManager migrationManager;
+    private final IDeploymentListener deploymentListener;
 
     private static final Logger log = Logger.getLogger(RestImportService.class);
 
@@ -74,18 +77,22 @@ public class RestImportService extends AbstractBackupService implements IRestImp
                              IJsonSerialization jsonSerialization,
                              IRestInterfaceFactory restInterfaceFactory,
                              IRestBotAdministration restBotAdministration,
-                             IMigrationManager migrationManager) {
+                             IMigrationManager migrationManager,
+                             IDeploymentListener deploymentListener) {
         this.zipArchive = zipArchive;
         this.jsonSerialization = jsonSerialization;
         this.restInterfaceFactory = restInterfaceFactory;
         this.restBotAdministration = restBotAdministration;
         this.migrationManager = migrationManager;
+        this.deploymentListener = deploymentListener;
     }
 
     @Override
     public List<BotDeploymentStatus> importInitialBots() {
         try {
             var botExampleFiles = getResourceFiles("/initial-bots/available_bots.txt");
+            List<CompletableFuture<Void>> deploymentFutures = new ArrayList<>();
+
             for (var botFileName : botExampleFiles) {
                 importBot(getResourceAsStream("/initial-bots/" + botFileName),
                         new MockAsyncResponse() {
@@ -93,24 +100,28 @@ public class RestImportService extends AbstractBackupService implements IRestImp
                             public boolean resume(Object responseObj) {
                                 if (responseObj instanceof Response response) {
                                     var botId = RestUtilities.extractResourceId(response.getLocation());
-                                    restBotAdministration.
-                                            deployBot(
-                                                    unrestricted,
-                                                    botId.getId(),
-                                                    botId.getVersion(),
-                                                    true);
-                                    return true;
-                                }
+                                    if (botId != null) {
+                                        var deploymentFuture =
+                                                deploymentListener.registerBotDeployment(botId.getId(), botId.getVersion());
+                                        deploymentFutures.add(deploymentFuture);
 
+                                        restBotAdministration.deployBot(
+                                                unrestricted, botId.getId(), botId.getVersion(), true);
+
+                                        return true;
+                                    }
+                                }
                                 return false;
                             }
                         });
             }
 
-            Thread.sleep(500);
+            // Wait for all deployments to complete
+            CompletableFuture.allOf(deploymentFutures.toArray(new CompletableFuture[0])).join();
+
             log.info("Imported & Deployed Initial Bots");
             return restBotAdministration.getDeploymentStatuses(unrestricted);
-        } catch (IOException | InterruptedException e) {
+        } catch (IOException e) {
             log.error(e.getLocalizedMessage(), e);
             throw new InternalServerErrorException();
         }
