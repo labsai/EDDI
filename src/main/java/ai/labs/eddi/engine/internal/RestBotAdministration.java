@@ -7,15 +7,16 @@ import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.engine.IRestBotAdministration;
 import ai.labs.eddi.engine.memory.IConversationMemoryStore;
 import ai.labs.eddi.engine.memory.rest.IRestConversationStore;
+import ai.labs.eddi.engine.model.BotDeploymentStatus;
+import ai.labs.eddi.engine.model.Deployment;
+import ai.labs.eddi.engine.model.Deployment.Status;
 import ai.labs.eddi.engine.runtime.IBot;
 import ai.labs.eddi.engine.runtime.IBotFactory;
 import ai.labs.eddi.engine.runtime.IRuntime;
 import ai.labs.eddi.engine.runtime.ThreadContext;
+import ai.labs.eddi.engine.runtime.internal.IDeploymentListener;
+import ai.labs.eddi.engine.runtime.model.DeploymentEvent;
 import ai.labs.eddi.engine.runtime.service.ServiceException;
-import ai.labs.eddi.engine.model.BotDeploymentStatus;
-import ai.labs.eddi.engine.model.Deployment;
-import ai.labs.eddi.engine.model.Deployment.Status;
-import ai.labs.eddi.configs.documentdescriptor.model.DocumentDescriptor;
 import ai.labs.eddi.utils.RuntimeUtilities;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
@@ -28,6 +29,8 @@ import org.jboss.logging.Logger;
 import java.util.*;
 import java.util.concurrent.Callable;
 
+import static ai.labs.eddi.engine.model.Deployment.Status.*;
+
 /**
  * @author ginccc
  */
@@ -38,6 +41,7 @@ public class RestBotAdministration implements IRestBotAdministration {
     private final IConversationMemoryStore conversationMemoryStore;
     private final IRestConversationStore restConversationStore;
     private final IDocumentDescriptorStore documentDescriptorStore;
+    private final IDeploymentListener deploymentListener;
     private final IRuntime runtime;
 
     private static final Logger log = Logger.getLogger(RestBotAdministration.class);
@@ -48,13 +52,15 @@ public class RestBotAdministration implements IRestBotAdministration {
                                  IDeploymentStore deploymentStore,
                                  IConversationMemoryStore conversationMemoryStore,
                                  IRestConversationStore restConversationStore,
-                                 IDocumentDescriptorStore documentDescriptorStore) {
+                                 IDocumentDescriptorStore documentDescriptorStore,
+                                 IDeploymentListener deploymentListener) {
         this.runtime = runtime;
         this.botFactory = botFactory;
         this.deploymentStore = deploymentStore;
         this.conversationMemoryStore = conversationMemoryStore;
         this.restConversationStore = restConversationStore;
         this.documentDescriptorStore = documentDescriptorStore;
+        this.deploymentListener = deploymentListener;
     }
 
     @Override
@@ -78,28 +84,41 @@ public class RestBotAdministration implements IRestBotAdministration {
                         final String botId, final Integer version, final Boolean autoDeploy) {
         Callable<Void> deployBot = () -> {
             try {
-                if (EnumSet.of(Status.NOT_FOUND, Status.ERROR).contains(checkDeploymentStatus(environment, botId, version))) {
+                if (EnumSet.of(NOT_FOUND, ERROR).contains(checkDeploymentStatus(environment, botId, version))) {
                     botFactory.deployBot(environment, botId, version,
                             status -> {
-                                if (status == Status.READY && autoDeploy) {
+                                if (status == READY && autoDeploy) {
                                     deploymentStore.setDeploymentInfo(environment.toString(),
                                             botId, version, DeploymentInfo.DeploymentStatus.deployed);
                                 }
                             });
                 }
-            } catch (ServiceException e) {
-                throwError(botId, version, e, "Error while deploying bot! (botId=%s , version=%s)");
-            } catch (IllegalAccessException e) {
-                throwErrorForbidden(botId, version, e);
+
+                deploymentListener.onDeploymentEvent(
+                        new DeploymentEvent(botId, version, environment, READY));
+
             } catch (Exception e) {
-                log.error(e.getLocalizedMessage(), e);
-                throw new InternalServerErrorException(e.getLocalizedMessage(), e);
+                handleDeploymentException(e, botId, version, environment);
             }
 
             return null;
         };
 
         runtime.submitCallable(deployBot, ThreadContext.getResources());
+    }
+
+    private void handleDeploymentException(Exception e, String botId, Integer version, Deployment.Environment environment) {
+        deploymentListener.onDeploymentEvent(new DeploymentEvent(botId, version, environment, ERROR));
+
+        if (e instanceof ServiceException) {
+            throwError(botId, version, (ServiceException) e,
+                    "Error while deploying bot! (botId=%s , version=%s)");
+        } else if (e instanceof IllegalAccessException) {
+            throwErrorForbidden(botId, version, (IllegalAccessException) e);
+        } else {
+            log.error(e.getLocalizedMessage(), e);
+            throw new InternalServerErrorException();
+        }
     }
 
     @Override
@@ -117,14 +136,7 @@ public class RestBotAdministration implements IRestBotAdministration {
                         var activeConversations = restConversationStore.getActiveConversations(botId, version);
                         restConversationStore.endActiveConversations(activeConversations);
                     } else {
-                        String message = "%s active (thus not ENDED) conversation(s) going on with this bot!" +
-                                "\nCheck GET /conversationstore/conversations/active/%s?botVersion=%s " +
-                                "to see active conversations and end conversations with " +
-                                "POST /conversationstore/conversations/end , " +
-                                "providing the list you receive with GET" +
-                                "\nIn order to end all active conversations, the query param 'endAllActiveConversations' " +
-                                "can be set to true.";
-                        message = String.format(message, activeConversationCount, botId, version);
+                        var message = getConflictExplanations(botId, version, activeConversationCount);
                         return Response.status(Response.Status.CONFLICT).entity(message).type(MediaType.TEXT_PLAIN).build();
                     }
                 }
@@ -138,6 +150,21 @@ public class RestBotAdministration implements IRestBotAdministration {
             log.error(e.getLocalizedMessage(), e);
             throw new InternalServerErrorException(e.getLocalizedMessage(), e);
         }
+    }
+
+    private static String getConflictExplanations(String botId, Integer version, Long activeConversationCount) {
+        var message = """
+                %s active (thus not ENDED) conversation(s) going on with this bot!\
+                
+                Check GET /conversationstore/conversations/active/%s?botVersion=%s \
+                to see active conversations and end conversations with \
+                POST /conversationstore/conversations/end , \
+                providing the list you receive with GET\
+                
+                In order to end all active conversations, the query param 'endAllActiveConversations' \
+                can be set to true.""";
+        message = String.format(message, activeConversationCount, botId, version);
+        return message;
     }
 
     private void undeploy(Deployment.Environment environment, String botId, Integer version) {
@@ -161,13 +188,6 @@ public class RestBotAdministration implements IRestBotAdministration {
         runtime.submitCallable(undeployBot, ThreadContext.getResources());
     }
 
-    private Void throwErrorForbidden(String botId, Integer version, IllegalAccessException e) {
-        String message = "Bot deployment is currently in progress! (botId=%s , version=%s)";
-        message = String.format(message, botId, version);
-        log.error(message, e);
-        throw new WebApplicationException(new Throwable(message), Response.Status.FORBIDDEN.getStatusCode());
-    }
-
     @Override
     public String getDeploymentStatus(Deployment.Environment environment, String botId, Integer version) {
         RuntimeUtilities.checkNotNull(environment, "environment");
@@ -184,9 +204,9 @@ public class RestBotAdministration implements IRestBotAdministration {
         try {
             List<BotDeploymentStatus> botDeploymentStatuses = new LinkedList<>();
             for (IBot latestBot : botFactory.getAllLatestBots(environment)) {
-                String botId = latestBot.getBotId();
-                Integer botVersion = latestBot.getBotVersion();
-                DocumentDescriptor documentDescriptor = documentDescriptorStore.readDescriptor(botId, botVersion);
+                var botId = latestBot.getBotId();
+                var botVersion = latestBot.getBotVersion();
+                var documentDescriptor = documentDescriptorStore.readDescriptor(botId, botVersion);
                 botDeploymentStatuses.add(new BotDeploymentStatus(
                         environment,
                         botId,
@@ -207,11 +227,7 @@ public class RestBotAdministration implements IRestBotAdministration {
     private Status checkDeploymentStatus(Deployment.Environment environment, String botId, Integer version) {
         try {
             IBot bot = botFactory.getBot(environment, botId, version);
-            if (bot != null) {
-                return bot.getDeploymentStatus();
-            } else {
-                return Status.NOT_FOUND;
-            }
+            return bot != null ? bot.getDeploymentStatus() : NOT_FOUND;
         } catch (ServiceException e) {
             return throwError(botId, version, e, "Error while deploying bot! (botId=%s , version=%s)");
         }
@@ -220,6 +236,13 @@ public class RestBotAdministration implements IRestBotAdministration {
     private Status throwError(String botId, Integer version, ServiceException e, String message) {
         message = String.format(message, botId, version);
         log.error(message, e);
-        throw new InternalServerErrorException(message, e);
+        throw new InternalServerErrorException();
+    }
+
+    private Void throwErrorForbidden(String botId, Integer version, IllegalAccessException e) {
+        String message = "Bot deployment is currently in progress! (botId=%s , version=%s)";
+        message = String.format(message, botId, version);
+        log.error(message, e);
+        throw new WebApplicationException(new Throwable(message), Response.Status.FORBIDDEN.getStatusCode());
     }
 }

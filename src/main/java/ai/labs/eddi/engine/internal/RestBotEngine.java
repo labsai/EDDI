@@ -148,9 +148,9 @@ public class RestBotEngine implements IRestBotEngine {
         }
 
         try {
-            IBot latestBot = botFactory.getLatestBot(environment, botId);
+            IBot latestBot = botFactory.getLatestReadyBot(environment, botId);
             if (latestBot == null) {
-                String message = "No instance of bot (botId=%s) deployed in environment (environment=%s)!";
+                String message = "No version of bot (botId=%s) ready for interaction (environment=%s)!";
                 message = String.format(message, botId, environment);
                 return Response.status(Response.Status.NOT_FOUND).type(TEXT_PLAIN).entity(message).build();
             }
