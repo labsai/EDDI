@@ -11,6 +11,8 @@ import java.util.List;
 public interface IBotFactory {
     IBot getLatestBot(Deployment.Environment environment, String botId) throws ServiceException;
 
+    IBot getLatestReadyBot(Deployment.Environment environment, String botId) throws ServiceException;
+
     List<IBot> getAllLatestBots(Deployment.Environment environment) throws ServiceException;
 
     IBot getBot(Deployment.Environment environment, String botId, Integer version) throws ServiceException;
