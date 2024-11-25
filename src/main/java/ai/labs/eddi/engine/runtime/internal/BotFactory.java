@@ -116,12 +116,15 @@ public class BotFactory implements IBotFactory {
 
         // Check if the bot is already in a non-IN_PROGRESS state
         IBot bot = bots.get(botIdObj);
-        if (bot != null && bot.getDeploymentStatus() != Deployment.Status.IN_PROGRESS) {
-            return bot;
+        if (bot != null) {
+            if (bot.getDeploymentStatus() != Deployment.Status.IN_PROGRESS) {
+                return bot;
+            } else {
+                return waitForDeploymentCompletion(botIdObj, environment);
+            }
         }
 
-        // Wait for deployment to complete
-        return waitForDeploymentCompletion(botIdObj, environment);
+        return null;
     }
 
     private IBot waitForDeploymentCompletion(BotId botIdObj, Deployment.Environment environment) {
