@@ -165,13 +165,13 @@ public class BotFactory implements IBotFactory {
             if (existingBot != null) {
                 // If a bot already exists, ensure it is in a valid state
                 if (existingBot.getDeploymentStatus() == Deployment.Status.READY) {
-                    log.info(String.format("Bot is already deployed: %s (environment=%s, version=%d)", botId, environment, version));
+                    log.debug(String.format("Bot is already deployed: %s (environment=%s, version=%d)", botId, environment, version));
                     finalDeploymentProcess.completed(Deployment.Status.READY);
                     return existingBot; // No need to redeploy
                 }
 
                 if (existingBot.getDeploymentStatus() == Deployment.Status.IN_PROGRESS) {
-                    log.warn(String.format("Bot deployment is already in progress: %s (environment=%s, version=%d)", botId, environment, version));
+                    log.debug(String.format("Bot deployment is already in progress: %s (environment=%s, version=%d)", botId, environment, version));
                     return existingBot; // Keep the IN_PROGRESS state
                 }
             }
