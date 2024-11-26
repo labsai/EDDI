@@ -17,7 +17,7 @@
         <quarkus.platform.artifact-id>quarkus-bom</quarkus.platform.artifact-id>
         <quarkus.platform.group-id>io.quarkus.platform</quarkus.platform.group-id>
         <quarkus.platform.version>3.16.4</quarkus.platform.version>
-        <quarkus.langchain4j.version>0.22.0.CR1</quarkus.langchain4j.version>
+        <quarkus.langchain4j.version>0.22.0.CR2</quarkus.langchain4j.version>
         <langchain4j.version>0.36.2</langchain4j.version>
         <jandex-maven-plugin.version>3.2.3</jandex-maven-plugin.version>
         <maven.compiler.parameters>true</maven.compiler.parameters>
