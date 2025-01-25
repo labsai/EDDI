@@ -1,6 +1,7 @@
 package ai.labs.eddi.modules.nlp;
 
 
+import ai.labs.eddi.modules.nlp.expressions.Expression;
 import ai.labs.eddi.modules.nlp.expressions.Expressions;
 import ai.labs.eddi.modules.nlp.expressions.utilities.IExpressionProvider;
 import ai.labs.eddi.modules.nlp.extensions.dictionaries.IDictionary;
@@ -21,10 +22,13 @@ public class DictionaryUtilities {
                                                                              dictionaryEntries) {
         Expressions expressions = new Expressions();
 
-        for (IDictionary.IDictionaryEntry dictionaryEntry : dictionaryEntries) {
-            expressions.addAll(dictionaryEntry.getExpressions());
+        for (IDictionary.IFoundWord dictionaryEntry : dictionaryEntries) {
+            Expressions localExpressions = dictionaryEntry.getExpressions();
+            for (Expression expression : localExpressions) {
+                expression.setInputValue(dictionaryEntry.getFoundWord().getValue());
+            }
+            expressions.addAll(localExpressions);
         }
-
         return expressions;
     }
 
