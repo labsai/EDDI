@@ -13,6 +13,8 @@ public record LangChainConfiguration(List<Task> tasks) {
                        String description,
                        PreRequest preRequest,
                        PostResponse postResponse,
+                       String responseObjectName,
+                       String responseMetadataObjectName,
                        Map<String, String> parameters) {
         }
 }

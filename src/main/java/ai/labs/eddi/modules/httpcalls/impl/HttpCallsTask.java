@@ -18,7 +18,6 @@ import ai.labs.eddi.engine.memory.IConversationMemory.IWritableConversationStep;
 import ai.labs.eddi.engine.memory.IData;
 import ai.labs.eddi.engine.memory.IDataFactory;
 import ai.labs.eddi.engine.memory.IMemoryItemConverter;
-import ai.labs.eddi.engine.model.Context;
 import ai.labs.eddi.engine.runtime.IRuntime;
 import ai.labs.eddi.engine.runtime.client.configuration.IResourceClientLibrary;
 import ai.labs.eddi.engine.runtime.service.ServiceException;
@@ -27,9 +26,11 @@ import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import org.jboss.logging.Logger;
 
-import java.io.IOException;
 import java.net.URI;
-import java.util.*;
+import java.util.Collections;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
 
@@ -123,7 +124,7 @@ public class HttpCallsTask implements ILifecycleTask {
                             do {
                                 request = buildRequest(
                                         httpCallsConfig.getTargetServerUrl(), call.getRequest(), templateDataObjects);
-                                createHttpMemoryEntry(currentStep, request.toMap(), call.getName() + "Request");
+                                prePostUtils.createMemoryEntry(currentStep, request.toMap(), call.getName() + "Request", KEY_HTTP_CALLS);
                                 response = executeAndMeasureRequest(call, request, retryCall, amountOfExecutions);
 
                                 var isResponseSuccessful = response.getHttpCode() >= 200 && response.getHttpCode() < 300;
@@ -137,7 +138,7 @@ public class HttpCallsTask implements ILifecycleTask {
                                 if (!isNullOrEmpty(responseHeaderObjectName)) {
                                     var responseObjectHeader = requireNonNullElse(response.getHttpHeader(), new HashMap<>());
                                     templateDataObjects.put(responseHeaderObjectName, responseObjectHeader);
-                                    createHttpMemoryEntry(currentStep, responseObjectHeader, responseHeaderObjectName);
+                                    prePostUtils.createMemoryEntry(currentStep, responseObjectHeader, responseHeaderObjectName, KEY_HTTP_CALLS);
                                 }
 
                                 if (isResponseSuccessful && call.getSaveResponse()) {
@@ -167,7 +168,7 @@ public class HttpCallsTask implements ILifecycleTask {
                                     var responseObjectName = call.getResponseObjectName();
                                     templateDataObjects.put(responseObjectName, responseObject);
 
-                                    createHttpMemoryEntry(currentStep, responseObject, responseObjectName);
+                                    prePostUtils.createMemoryEntry(currentStep, responseObject, responseObjectName, KEY_HTTP_CALLS);
                                 }
 
                                 amountOfExecutions++;
@@ -179,7 +180,7 @@ public class HttpCallsTask implements ILifecycleTask {
                             validationError = true;
                         }
 
-                        runPostResponse(memory, call, templateDataObjects, response.getHttpCode(), validationError);
+                        prePostUtils.runPostResponse(memory, call.getPostResponse(), templateDataObjects, response.getHttpCode(), validationError);
                     }
                 } catch (Exception e) {
                     LOGGER.error(e.getLocalizedMessage(), e);
@@ -187,18 +188,6 @@ public class HttpCallsTask implements ILifecycleTask {
                 }
             }
         }
-    }
-
-    private void createHttpMemoryEntry(IWritableConversationStep currentStep,
-                                       Object responseObject,
-                                       String responseObjectName) {
-
-        var memoryDataName = "httpCalls:" + responseObjectName;
-        IData<Object> httpResponseData = dataFactory.createData(memoryDataName, responseObject);
-        currentStep.storeData(httpResponseData);
-        Map<String, Object> map = new HashMap<>();
-        map.put(responseObjectName, responseObject);
-        currentStep.addConversationOutputMap(KEY_HTTP_CALLS, map);
     }
 
     private IResponse executeAndMeasureRequest(HttpCall call, IRequest request, boolean retryCall, int amountOfExecutions)
@@ -219,8 +208,6 @@ public class HttpCallsTask implements ILifecycleTask {
         return response;
     }
 
-
-
     private void executeFireAndForgetCalls(String targetServerUrl,
                                            HttpCall call,
                                            HttpPreRequest preRequest,
@@ -234,7 +221,7 @@ public class HttpCallsTask implements ILifecycleTask {
             }
 
             runtime.submitCallable(() -> {
-                List<Object> batchIterationList = buildListFromJson(
+                List<Object> batchIterationList = prePostUtils.buildListFromJson(
                         batchRequest.getIterationObjectName(), batchRequest.getPathToTargetArray(),
                         batchRequest.getTemplateFilterExpression(), null, templateDataObjects);
 
@@ -338,74 +325,6 @@ public class HttpCallsTask implements ILifecycleTask {
         throw new HttpCallsValidationException();
     }
 
-    private void runPostResponse(IConversationMemory memory,
-                                 HttpCall call,
-                                 Map<String, Object> templateDataObjects,
-                                 int httpCode, boolean validationError)
-            throws IOException, ITemplatingEngine.TemplateEngineException {
-
-        var postResponse = call.getPostResponse();
-        if (postResponse != null) {
-            var propertyInstructions = postResponse.getPropertyInstructions();
-            prePostUtils.executePropertyInstructions(propertyInstructions, httpCode, validationError, memory, templateDataObjects);
-
-            buildOutput(memory, templateDataObjects, httpCode, postResponse);
-            buildQuickReplies(memory, templateDataObjects, httpCode, postResponse);
-        }
-
-
-    }
-
-    private void buildOutput(IConversationMemory memory, Map<String, Object> templateDataObjects, int httpCode, HttpPostResponse postResponse)
-            throws IOException, ITemplatingEngine.TemplateEngineException {
-
-        var outputBuildInstructions = postResponse.getOutputBuildInstructions();
-        if (outputBuildInstructions != null) {
-            List<Object> output = new LinkedList<>();
-            for (var buildingInstruction : outputBuildInstructions) {
-                if (prePostUtils.verifyHttpCode(buildingInstruction.getHttpCodeValidator(), httpCode)) {
-
-                    output.addAll(
-                            buildOutput(
-                                    buildingInstruction.getIterationObjectName(),
-                                    buildingInstruction.getPathToTargetArray(),
-                                    buildingInstruction.getTemplateFilterExpression(),
-                                    buildingInstruction.getOutputType(),
-                                    buildingInstruction.getOutputValue(),
-                                    templateDataObjects));
-                }
-            }
-
-            var context = new Context(Context.ContextType.object, output);
-            IData<Context> contextData = dataFactory.createData("context:output", context);
-            memory.getCurrentStep().storeData(contextData);
-        }
-    }
-
-    private void buildQuickReplies(IConversationMemory memory, Map<String, Object> templateDataObjects, int httpCode, PostResponse postResponse) throws IOException, ITemplatingEngine.TemplateEngineException {
-        var qrBuildInstructions = postResponse.getQrBuildInstructions();
-        if (qrBuildInstructions != null) {
-            List<Object> quickReplies = new LinkedList<>();
-            for (QuickRepliesBuildingInstruction qrBuildInstruction : qrBuildInstructions) {
-                if (prePostUtils.verifyHttpCode(qrBuildInstruction.getHttpCodeValidator(), httpCode)) {
-
-                    quickReplies.addAll(
-                            buildQuickReplies(
-                                    qrBuildInstruction.getIterationObjectName(),
-                                    qrBuildInstruction.getPathToTargetArray(),
-                                    qrBuildInstruction.getTemplateFilterExpression(),
-                                    qrBuildInstruction.getQuickReplyValue(),
-                                    qrBuildInstruction.getQuickReplyExpressions(),
-                                    templateDataObjects));
-                }
-            }
-
-            var context = new Context(Context.ContextType.object, quickReplies);
-            IData<Context> contextData = dataFactory.createData("context:quickReplies", context);
-            memory.getCurrentStep().storeData(contextData);
-        }
-    }
-
     private IRequest buildRequest(String targetServerUrl, Request requestConfig,
                                   Map<String, Object> templateDataObjects)
             throws ITemplatingEngine.TemplateEngineException {
@@ -435,77 +354,6 @@ public class HttpCallsTask implements ILifecycleTask {
             request.setQueryParam(queryParam, prePostUtils.templateValues(queryParams.get(queryParam), templateDataObjects));
         }
         return request;
-    }
-
-    private List<Object> buildOutput(String iterationObjectName,
-                                     String pathToTargetArray,
-                                     String templateFilterExpression,
-                                     String outputType,
-                                     String outputValue,
-                                     Map<String, Object> templateDataObjects)
-            throws IOException, ITemplatingEngine.TemplateEngineException {
-
-        final String quickReplyTemplate = "    {" +
-                "        \"type\":\"" + outputType + "\"," +
-                "        \"valueAlternatives\":[{" +
-                "               \"type\":\"" + outputType + "\"," +
-                "               \"text\":\"" + outputValue + "\"" +
-                "        }]" +
-                "    },";
-
-        return buildListFromJson(iterationObjectName,
-                pathToTargetArray, templateFilterExpression, quickReplyTemplate, templateDataObjects);
-    }
-
-    private List<Object> buildQuickReplies(String iterationObjectName,
-                                           String pathToTargetArray,
-                                           String templateFilterExpression,
-                                           String quickReplyValue,
-                                           String quickReplyExpressions,
-                                           Map<String, Object> templateDataObjects)
-            throws IOException, ITemplatingEngine.TemplateEngineException {
-
-        final String quickReplyTemplate = "    {" +
-                "        \"value\":\"" + quickReplyValue + "\"," +
-                "        \"expressions\":\"" + quickReplyExpressions + "\"" +
-                "    },";
-
-        return buildListFromJson(iterationObjectName,
-                pathToTargetArray, templateFilterExpression, quickReplyTemplate, templateDataObjects);
-    }
-
-
-    private List<Object> buildListFromJson(String iterationObjectName,
-                                           String pathToTargetArray,
-                                           String templateFilterExpression,
-                                           String iterationValue,
-                                           Map<String, Object> templateDataObjects)
-            throws ITemplatingEngine.TemplateEngineException, IOException {
-
-        String templateCode = "[" +
-                "[# th:each=\"" + iterationObjectName + " : ${" + pathToTargetArray + "}\"";
-
-        if (!isNullOrEmpty(templateFilterExpression)) {
-            templateCode += "   th:object=\"${" + iterationObjectName + "}\"";
-            templateCode += "   th:if=\"" + templateFilterExpression + "\"";
-        }
-
-        templateCode += "]" +
-                (isNullOrEmpty(iterationValue) ? "\"[[${" + iterationObjectName + "}]]\"," : iterationValue) +
-                "[/]" +
-                "]";
-
-        String jsonList = templatingEngine.processTemplate(templateCode, templateDataObjects);
-
-        jsonList = jsonList.replace("\n", "\\\\n");
-
-        //remove last comma of iterated array
-        if (jsonList.contains(",")) {
-            jsonList = new StringBuilder(jsonList).
-                    deleteCharAt(jsonList.lastIndexOf(",")).toString();
-        }
-
-        return jsonSerialization.deserialize(jsonList, List.class);
     }
 
     @Override

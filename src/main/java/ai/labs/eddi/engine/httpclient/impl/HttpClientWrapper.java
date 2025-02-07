@@ -35,6 +35,7 @@ public class HttpClientWrapper implements IHttpClient {
     private static final String KEY_BODY = "body";
     private static final String KEY_USER_AGENT = "userAgent";
     private static final String KEY_MAX_LENGTH = "maxLength";
+    private static final int TEXT_LIMIT = 150;
     private final HttpClient httpClient;
     private final String userAgent;
     private static final Logger log = Logger.getLogger(HttpClientWrapper.class);
@@ -218,15 +219,10 @@ public class HttpClientWrapper implements IHttpClient {
 
         @Override
         public String toString() {
-            var requestBody = this.requestBody;
-            if (requestBody != null) {
-                if (requestBody.length() > 300) {
-                    requestBody = requestBody.substring(0, 300) + "...";
-                }
-                requestBody = requestBody.replaceAll("\\r?\\n", "");
-            }
+            String requestBody = truncateAndClean(this.requestBody);
 
-            return "RequestWrapper{" + "uri=" + uri + ", request=" + request.toString() + ", requestBody=" + requestBody + ", maxLength=" + maxLength + ", queryParams=" + request.getParams() + '}';
+            return String.format("RequestWrapper{uri=%s, request=%s, requestBody=\"%s\", maxLength=%d, queryParams=%s}",
+                    uri, request, requestBody, maxLength, request.getParams());
         }
     }
 
@@ -241,9 +237,26 @@ public class HttpClientWrapper implements IHttpClient {
 
         @Override
         public String toString() {
-            contentAsString = contentAsString.replaceAll("\\r?\\n", "");
-            return "ResponseWrapper{" + "httpCode=" + httpCode + ", httpCodeMessage=" + httpCodeMessage + ", responseBody=" + contentAsString + ", httpHeader=" + httpHeader.toString() + '}';
+            String contentAsString = truncateAndClean(this.contentAsString);
+
+            String httpHeaderString = httpHeader != null ? httpHeader.toString() : null;
+
+            return String.format("ResponseWrapper{httpCode=%d, httpCodeMessage=\"%s\", responseBody=\"%s\", httpHeader=%s}",
+                    httpCode, httpCodeMessage, contentAsString, httpHeaderString);
         }
+    }
+
+    private static String truncateAndClean(String text) {
+        if (text == null) {
+            return null;
+        }
+
+        text = text.replaceAll("\\r?\\n", " ");
+        if (text.length() > TEXT_LIMIT) {
+            text = text.substring(0, TEXT_LIMIT) + "...";
+        }
+
+        return text;
     }
 
     private static Map<String, String> convertHeaderToMap(HttpFields headers) {

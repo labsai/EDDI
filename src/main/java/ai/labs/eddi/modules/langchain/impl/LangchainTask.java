@@ -32,6 +32,7 @@ import java.util.stream.Collectors;
 import static ai.labs.eddi.configs.packages.model.ExtensionDescriptor.ConfigValue;
 import static ai.labs.eddi.configs.packages.model.ExtensionDescriptor.FieldType;
 import static ai.labs.eddi.utils.RuntimeUtilities.isNullOrEmpty;
+import static java.util.Objects.requireNonNullElse;
 
 @ApplicationScoped
 public class LangchainTask implements ILifecycleTask {
@@ -46,7 +47,7 @@ public class LangchainTask implements ILifecycleTask {
     private static final String KEY_INCLUDE_FIRST_BOT_MESSAGE = "includeFirstBotMessage";
     private static final String KEY_CONVERT_TO_OBJECT = "convertToObject";
     private static final String KEY_ADD_TO_OUTPUT = "addToOutput";
-    public static final String KEY_CONVERSATION_START = "CONVERSATION_START";
+    private static final String KEY_CONVERSATION_START = "CONVERSATION_START";
     private static final String KEY_RUN_ON_CONVERSATION_START = "runOnConversationStart";
 
     static final String MEMORY_OUTPUT_IDENTIFIER = "output";
@@ -156,45 +157,47 @@ public class LangchainTask implements ILifecycleTask {
                     }
 
                     messages.addAll(chatMessages);
-                    if(messages.isEmpty()) {
+                    if (messages.isEmpty()) {
                         continue;
                     }
                     var chatLanguageModel = getChatLanguageModel(task.type(), filterParams(processedParams));
                     prePostUtils.executePreRequestPropertyInstructions(memory, templateDataObjects, task.preRequest());
-                    var messageResponse = chatLanguageModel.generate(messages);
-                    var content = messageResponse.content().text();
+                    var messageResponse = chatLanguageModel.chat(messages);
+                    var responseContent = messageResponse.aiMessage().text();
+                    var responseMetadata = messageResponse.metadata();
 
-                    @SuppressWarnings("unchecked")
-                    var langchainObjects = templateDataObjects.containsKey(KEY_LANGCHAIN) &&
-                            templateDataObjects.get(KEY_LANGCHAIN) instanceof Map ?
-                            (Map<String, Object>) templateDataObjects.get(KEY_LANGCHAIN) :
-                            new HashMap<String, Object>();
+                    var responseMetadataObjectName = task.responseMetadataObjectName();
+                    if (!isNullOrEmpty(responseMetadataObjectName)) {
+                        var responseObjectHeader = requireNonNullElse(responseMetadata, new HashMap<>());
+                        templateDataObjects.put(responseMetadataObjectName, responseObjectHeader);
+                        prePostUtils.createMemoryEntry(currentStep, responseObjectHeader, responseMetadataObjectName, KEY_LANGCHAIN);
+                    }
 
+                    var responseObjectName = task.responseObjectName();
+                    if (isNullOrEmpty(responseObjectName)) {
+                        responseObjectName = task.id();
+                    }
                     if (!isNullOrEmpty(processedParams.get(KEY_CONVERT_TO_OBJECT)) &&
                             Boolean.parseBoolean(processedParams.get(KEY_CONVERT_TO_OBJECT))) {
                         var contentAsObject =
                                 jsonSerialization.deserialize(processedParams.get(KEY_CONVERT_TO_OBJECT), Map.class);
-                        langchainObjects.put(task.id(), contentAsObject);
+                        templateDataObjects.put(responseObjectName, contentAsObject);
                     } else {
-                        langchainObjects.put(task.id(), content);
+                        templateDataObjects.put(responseObjectName, responseContent);
                     }
-                    templateDataObjects.put(KEY_LANGCHAIN, langchainObjects);
 
-                    var langchainData = dataFactory.createData(KEY_LANGCHAIN + ":" + task.type() + ":" + task.id(), content);
+                    var langchainData = dataFactory.createData(KEY_LANGCHAIN + ":" + task.type() + ":" + task.id(), responseContent);
                     currentStep.storeData(langchainData);
 
                     if (!isNullOrEmpty(processedParams.get(KEY_ADD_TO_OUTPUT)) &&
                             Boolean.parseBoolean(processedParams.get(KEY_ADD_TO_OUTPUT))) {
-                        var outputData = dataFactory.createData(LANGCHAIN_OUTPUT_IDENTIFIER + ":" + task.type(), content);
+                        var outputData = dataFactory.createData(LANGCHAIN_OUTPUT_IDENTIFIER + ":" + task.type(), responseContent);
                         currentStep.storeData(outputData);
-                        var outputItem = new TextOutputItem(content, 0);
+                        var outputItem = new TextOutputItem(responseContent, 0);
                         currentStep.addConversationOutputList(MEMORY_OUTPUT_IDENTIFIER, List.of(outputItem));
                     }
 
-                    if (task.postResponse() != null && task.postResponse().getPropertyInstructions() != null) {
-                        prePostUtils.executePropertyInstructions(task.postResponse().getPropertyInstructions(),
-                                0, false, memory, templateDataObjects);
-                    }
+                    prePostUtils.runPostResponse(memory, task.postResponse(), templateDataObjects, 200, false);
                 }
             }
 
