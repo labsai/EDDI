@@ -1,6 +1,6 @@
 package ai.labs.eddi.configs.botmanagement;
 
-import ai.labs.eddi.models.BotTriggerConfiguration;
+import ai.labs.eddi.engine.model.BotTriggerConfiguration;
 import org.eclipse.microprofile.openapi.annotations.tags.Tag;
 
 import jakarta.ws.rs.*;

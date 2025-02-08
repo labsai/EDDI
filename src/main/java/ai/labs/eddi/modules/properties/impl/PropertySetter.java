@@ -1,7 +1,7 @@
 package ai.labs.eddi.modules.properties.impl;
 
-import ai.labs.eddi.models.Property;
-import ai.labs.eddi.models.SetOnActions;
+import ai.labs.eddi.configs.properties.model.Property;
+import ai.labs.eddi.modules.properties.model.SetOnActions;
 import ai.labs.eddi.modules.nlp.expressions.Expression;
 import ai.labs.eddi.modules.nlp.expressions.Expressions;
 import ai.labs.eddi.modules.nlp.expressions.value.Value;
@@ -12,7 +12,7 @@ import java.util.LinkedList;
 import java.util.List;
 import java.util.stream.Collectors;
 
-import static ai.labs.eddi.models.Property.Scope.*;
+import static ai.labs.eddi.configs.properties.model.Property.Scope.*;
 
 /**
  * @author ginccc

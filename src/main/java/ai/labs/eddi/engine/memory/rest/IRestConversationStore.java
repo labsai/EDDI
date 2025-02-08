@@ -4,8 +4,8 @@ import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.engine.memory.descriptor.model.ConversationDescriptor;
 import ai.labs.eddi.engine.memory.model.ConversationMemorySnapshot;
 import ai.labs.eddi.engine.memory.model.SimpleConversationMemorySnapshot;
-import ai.labs.eddi.models.ConversationState;
-import ai.labs.eddi.models.ConversationStatus;
+import ai.labs.eddi.engine.model.ConversationState;
+import ai.labs.eddi.engine.model.ConversationStatus;
 import org.eclipse.microprofile.openapi.annotations.parameters.Parameter;
 import org.eclipse.microprofile.openapi.annotations.tags.Tag;
 

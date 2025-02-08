@@ -1,7 +1,7 @@
 package ai.labs.eddi.engine.runtime;
 
-import ai.labs.eddi.models.DatabaseLog;
-import ai.labs.eddi.models.Deployment.Environment;
+import ai.labs.eddi.engine.model.DatabaseLog;
+import ai.labs.eddi.engine.model.Deployment.Environment;
 import ai.labs.eddi.utils.RuntimeUtilities;
 import com.mongodb.reactivestreams.client.MongoCollection;
 import com.mongodb.reactivestreams.client.MongoDatabase;
@@ -42,12 +42,6 @@ public class DatabaseLogs extends Handler implements IDatabaseLogs {
     @Override
     public List<DatabaseLog> getLogs(Integer skip, Integer limit) {
         return getLogs(new Document(), skip, limit);
-    }
-
-    @Override
-    public List<DatabaseLog> getLogs(Environment environment, String botId, Integer botVersion, Integer skip, Integer limit) {
-        return getLogs(createFilter(environment, botId, botVersion, null, null), skip, limit);
-
     }
 
     @Override

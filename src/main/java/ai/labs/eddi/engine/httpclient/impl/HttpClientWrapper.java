@@ -35,17 +35,17 @@ public class HttpClientWrapper implements IHttpClient {
     private static final String KEY_BODY = "body";
     private static final String KEY_USER_AGENT = "userAgent";
     private static final String KEY_MAX_LENGTH = "maxLength";
+    private static final int TEXT_LIMIT = 150;
     private final HttpClient httpClient;
-    private final String projectDomain;
-    private final String projectVersion;
-
+    private final String userAgent;
     private static final Logger log = Logger.getLogger(HttpClientWrapper.class);
 
     @Inject
-    public HttpClientWrapper(JettyHttpClient httpClient, @ConfigProperty(name = "systemRuntime.projectDomain") String projectDomain, @ConfigProperty(name = "systemRuntime.projectVersion") String projectVersion) {
+    public HttpClientWrapper(JettyHttpClient httpClient,
+                             @ConfigProperty(name = "systemRuntime.projectDomain") String projectDomain,
+                             @ConfigProperty(name = "systemRuntime.projectVersion") String projectVersion) {
         this.httpClient = httpClient.getHttpClient();
-        this.projectDomain = projectDomain;
-        this.projectVersion = projectVersion;
+        this.userAgent = projectDomain.toUpperCase() + "/" + projectVersion;
     }
 
     @Override
@@ -60,10 +60,8 @@ public class HttpClientWrapper implements IHttpClient {
 
     @Override
     public IRequest newRequest(URI uri, Method method) {
-        Request request = httpClient.newRequest(uri).method(method.name()).headers(httpFields -> {
-            var userAgent = projectDomain.toUpperCase() + "/" + projectVersion;
-            httpFields.put(HttpHeader.USER_AGENT, userAgent);
-        });
+        var request = httpClient.newRequest(uri).method(method.name()).
+                headers(httpFields -> httpFields.put(HttpHeader.USER_AGENT, userAgent));
         return new RequestWrapper(uri, request);
     }
 
@@ -221,15 +219,10 @@ public class HttpClientWrapper implements IHttpClient {
 
         @Override
         public String toString() {
-            var requestBody = this.requestBody;
-            if (requestBody != null) {
-                if (requestBody.length() > 300) {
-                    requestBody = requestBody.substring(0, 300) + "...";
-                }
-                requestBody = requestBody.replaceAll("\\r?\\n", "");
-            }
+            String requestBody = truncateAndClean(this.requestBody);
 
-            return "RequestWrapper{" + "uri=" + uri + ", request=" + request.toString() + ", requestBody=" + requestBody + ", maxLength=" + maxLength + ", queryParams=" + request.getParams() + '}';
+            return String.format("RequestWrapper{uri=%s, request=%s, requestBody=\"%s\", maxLength=%d, queryParams=%s}",
+                    uri, request, requestBody, maxLength, request.getParams());
         }
     }
 
@@ -244,9 +237,26 @@ public class HttpClientWrapper implements IHttpClient {
 
         @Override
         public String toString() {
-            contentAsString = contentAsString.replaceAll("\\r?\\n", "");
-            return "ResponseWrapper{" + "httpCode=" + httpCode + ", httpCodeMessage=" + httpCodeMessage + ", responseBody=" + contentAsString + ", httpHeader=" + httpHeader.toString() + '}';
+            String contentAsString = truncateAndClean(this.contentAsString);
+
+            String httpHeaderString = httpHeader != null ? httpHeader.toString() : null;
+
+            return String.format("ResponseWrapper{httpCode=%d, httpCodeMessage=\"%s\", responseBody=\"%s\", httpHeader=%s}",
+                    httpCode, httpCodeMessage, contentAsString, httpHeaderString);
         }
+    }
+
+    private static String truncateAndClean(String text) {
+        if (text == null) {
+            return null;
+        }
+
+        text = text.replaceAll("\\r?\\n", " ");
+        if (text.length() > TEXT_LIMIT) {
+            text = text.substring(0, TEXT_LIMIT) + "...";
+        }
+
+        return text;
     }
 
     private static Map<String, String> convertHeaderToMap(HttpFields headers) {

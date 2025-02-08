@@ -1,7 +1,7 @@
 package ai.labs.eddi.engine.logging;
 
-import ai.labs.eddi.models.DatabaseLog;
-import ai.labs.eddi.models.Deployment;
+import ai.labs.eddi.engine.model.DatabaseLog;
+import ai.labs.eddi.engine.model.Deployment;
 import org.eclipse.microprofile.openapi.annotations.Operation;
 
 import jakarta.ws.rs.*;

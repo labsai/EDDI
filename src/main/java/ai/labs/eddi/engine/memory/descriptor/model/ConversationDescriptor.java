@@ -1,8 +1,8 @@
 package ai.labs.eddi.engine.memory.descriptor.model;
 
-import ai.labs.eddi.models.ConversationState;
-import ai.labs.eddi.models.Deployment;
-import ai.labs.eddi.models.ResourceDescriptor;
+import ai.labs.eddi.engine.model.ConversationState;
+import ai.labs.eddi.engine.model.Deployment;
+import ai.labs.eddi.engine.model.ResourceDescriptor;
 import lombok.Getter;
 import lombok.Setter;
 

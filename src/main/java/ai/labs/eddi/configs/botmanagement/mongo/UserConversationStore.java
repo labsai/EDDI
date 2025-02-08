@@ -5,7 +5,7 @@ import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.datastore.IResourceStore.ResourceAlreadyExistsException;
 import ai.labs.eddi.datastore.serialization.IDocumentBuilder;
 import ai.labs.eddi.datastore.serialization.IJsonSerialization;
-import ai.labs.eddi.models.UserConversation;
+import ai.labs.eddi.engine.model.UserConversation;
 import ai.labs.eddi.utils.RuntimeUtilities;
 import com.mongodb.client.model.IndexOptions;
 import com.mongodb.client.model.Indexes;

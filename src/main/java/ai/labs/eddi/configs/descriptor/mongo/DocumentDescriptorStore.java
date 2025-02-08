@@ -3,7 +3,7 @@ package ai.labs.eddi.configs.descriptor.mongo;
 import ai.labs.eddi.configs.documentdescriptor.IDocumentDescriptorStore;
 import ai.labs.eddi.datastore.mongo.DescriptorStore;
 import ai.labs.eddi.datastore.serialization.IDocumentBuilder;
-import ai.labs.eddi.models.DocumentDescriptor;
+import ai.labs.eddi.configs.documentdescriptor.model.DocumentDescriptor;
 import com.mongodb.reactivestreams.client.MongoDatabase;
 
 import jakarta.enterprise.context.ApplicationScoped;

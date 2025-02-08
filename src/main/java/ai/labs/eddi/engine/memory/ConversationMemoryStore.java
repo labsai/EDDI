@@ -2,8 +2,8 @@ package ai.labs.eddi.engine.memory;
 
 import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.engine.memory.model.ConversationMemorySnapshot;
-import ai.labs.eddi.models.Context;
-import ai.labs.eddi.models.ConversationState;
+import ai.labs.eddi.engine.model.Context;
+import ai.labs.eddi.engine.model.ConversationState;
 import com.mongodb.client.model.Filters;
 import com.mongodb.client.model.Indexes;
 import com.mongodb.reactivestreams.client.MongoCollection;
@@ -20,7 +20,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.NoSuchElementException;
 
-import static ai.labs.eddi.models.ConversationState.ENDED;
+import static ai.labs.eddi.engine.model.ConversationState.ENDED;
 
 /**
  * @author ginccc

@@ -6,7 +6,7 @@ import ai.labs.eddi.datastore.IResourceStore.ResourceNotFoundException;
 import ai.labs.eddi.datastore.IResourceStore.ResourceStoreException;
 import ai.labs.eddi.engine.memory.descriptor.IConversationDescriptorStore;
 import ai.labs.eddi.engine.runtime.IBot;
-import ai.labs.eddi.models.Context;
+import ai.labs.eddi.engine.model.Context;
 
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;

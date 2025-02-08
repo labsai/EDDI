@@ -1,6 +1,6 @@
 package ai.labs.eddi.configs.packages;
 
-import ai.labs.eddi.models.ExtensionDescriptor;
+import ai.labs.eddi.configs.packages.model.ExtensionDescriptor;
 import org.eclipse.microprofile.openapi.annotations.tags.Tag;
 
 import jakarta.ws.rs.*;

@@ -6,8 +6,9 @@ import ai.labs.eddi.configs.behavior.IBehaviorStore;
 import ai.labs.eddi.configs.bots.IBotStore;
 import ai.labs.eddi.configs.bots.model.BotConfiguration;
 import ai.labs.eddi.configs.documentdescriptor.IDocumentDescriptorStore;
-import ai.labs.eddi.configs.git.IGitCallsStore;
+import ai.labs.eddi.configs.documentdescriptor.model.DocumentDescriptor;
 import ai.labs.eddi.configs.http.IHttpCallsStore;
+import ai.labs.eddi.configs.langchain.ILangChainStore;
 import ai.labs.eddi.configs.output.IOutputStore;
 import ai.labs.eddi.configs.packages.IPackageStore;
 import ai.labs.eddi.configs.packages.model.PackageConfiguration;
@@ -16,16 +17,16 @@ import ai.labs.eddi.configs.regulardictionary.IRegularDictionaryStore;
 import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.datastore.IResourceStore.IResourceId;
 import ai.labs.eddi.datastore.serialization.IJsonSerialization;
-import ai.labs.eddi.models.DocumentDescriptor;
 import ai.labs.eddi.utils.FileUtilities;
 import ai.labs.eddi.utils.RestUtilities;
-import jakarta.ws.rs.NotFoundException;
-import org.jboss.logging.Logger;
-
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
+import jakarta.ws.rs.BadRequestException;
 import jakarta.ws.rs.InternalServerErrorException;
+import jakarta.ws.rs.NotFoundException;
 import jakarta.ws.rs.core.Response;
+import org.jboss.logging.Logger;
+
 import java.io.*;
 import java.net.URI;
 import java.net.URLEncoder;
@@ -53,11 +54,11 @@ public class RestExportService extends AbstractBackupService implements IRestExp
     private final IRegularDictionaryStore regularDictionaryStore;
     private final IBehaviorStore behaviorStore;
     private final IHttpCallsStore httpCallsStore;
+    private final ILangChainStore langChainStore;
     private final IPropertySetterStore propertySetterStore;
     private final IOutputStore outputStore;
     private final IJsonSerialization jsonSerialization;
     private final IZipArchive zipArchive;
-    private final IGitCallsStore gitCallsStore;
     private final Path tmpPath = Paths.get(FileUtilities.buildPath(System.getProperty("user.dir"), "tmp"));
 
     private static final Logger log = Logger.getLogger(RestExportService.class);
@@ -69,29 +70,37 @@ public class RestExportService extends AbstractBackupService implements IRestExp
                              IRegularDictionaryStore regularDictionaryStore,
                              IBehaviorStore behaviorStore,
                              IHttpCallsStore httpCallsStore,
+                             ILangChainStore langChainStore,
                              IPropertySetterStore propertySetterStore,
                              IOutputStore outputStore,
                              IJsonSerialization jsonSerialization,
-                             IZipArchive zipArchive,
-                             IGitCallsStore gitCallsStore) {
+                             IZipArchive zipArchive) {
         this.documentDescriptorStore = documentDescriptorStore;
         this.botStore = botStore;
         this.packageStore = packageStore;
         this.regularDictionaryStore = regularDictionaryStore;
         this.behaviorStore = behaviorStore;
         this.httpCallsStore = httpCallsStore;
+        this.langChainStore = langChainStore;
         this.propertySetterStore = propertySetterStore;
         this.outputStore = outputStore;
         this.jsonSerialization = jsonSerialization;
         this.zipArchive = zipArchive;
-        this.gitCallsStore = gitCallsStore;
     }
 
     @Override
     public Response getBotZipArchive(String botFilename) {
         try {
-            String zipFilePath = FileUtilities.buildPath(tmpPath.toString(), botFilename);
-            return Response.ok(new BufferedInputStream(new FileInputStream(zipFilePath))).build();
+            botFilename = sanitizeFileName(botFilename);
+
+            Path zipFilePath = Paths.get(tmpPath.toString(), botFilename).normalize();
+
+            Path tmpDirPath = Paths.get(tmpPath.toString()).toAbsolutePath().normalize();
+            if (!zipFilePath.startsWith(tmpDirPath)) {
+                throw new SecurityException("Invalid file path detected.");
+            }
+
+            return Response.ok(new BufferedInputStream(new FileInputStream(zipFilePath.toFile()))).build();
         } catch (FileNotFoundException e) {
             throw new NotFoundException();
         }
@@ -123,23 +132,23 @@ public class RestExportService extends AbstractBackupService implements IRestExp
                 writeConfigs(packagePath, convertConfigsToString(readConfigs(httpCallsStore,
                         extractResourcesUris(packageConfigurationString, HTTPCALLS_URI_PATTERN))), HTTPCALLS_EXT);
 
+                writeConfigs(packagePath, convertConfigsToString(readConfigs(langChainStore,
+                        extractResourcesUris(packageConfigurationString, LANGCHAIN_URI_PATTERN))), LANGCHAIN_EXT);
+
                 writeConfigs(packagePath, convertConfigsToString(readConfigs(propertySetterStore,
                         extractResourcesUris(packageConfigurationString, PROPERTY_URI_PATTERN))), PROPERTY_EXT);
 
                 writeConfigs(packagePath, convertConfigsToString(readConfigs(outputStore,
                         extractResourcesUris(packageConfigurationString, OUTPUT_URI_PATTERN))), OUTPUT_EXT);
 
-                writeConfigs(packagePath, convertConfigsToString(readConfigs(gitCallsStore,
-                        extractResourcesUris(packageConfigurationString, GITCALLS_URI_PATTERN))), GITCALLS_EXT);
-
                 Path unusedPath = Files.createDirectories(Paths.get(tmpPath.toString(), botId, "unused"));
 
                 writeAllVersionsOfUris(unusedPath, regularDictionaryStore, extractResourcesUris(packageConfigurationString, DICTIONARY_URI_PATTERN), DICTIONARY_EXT);
                 writeAllVersionsOfUris(unusedPath, behaviorStore, extractResourcesUris(packageConfigurationString, BEHAVIOR_URI_PATTERN), BEHAVIOR_EXT);
                 writeAllVersionsOfUris(unusedPath, httpCallsStore, extractResourcesUris(packageConfigurationString, HTTPCALLS_URI_PATTERN), HTTPCALLS_EXT);
+                writeAllVersionsOfUris(unusedPath, langChainStore, extractResourcesUris(packageConfigurationString, LANGCHAIN_URI_PATTERN), LANGCHAIN_EXT);
                 writeAllVersionsOfUris(unusedPath, propertySetterStore, extractResourcesUris(packageConfigurationString, PROPERTY_URI_PATTERN), PROPERTY_EXT);
                 writeAllVersionsOfUris(unusedPath, outputStore, extractResourcesUris(packageConfigurationString, OUTPUT_URI_PATTERN), OUTPUT_EXT);
-                writeAllVersionsOfUris(unusedPath, gitCallsStore, extractResourcesUris(packageConfigurationString, GITCALLS_URI_PATTERN), GITCALLS_EXT);
 
             }
 
@@ -296,5 +305,22 @@ public class RestExportService extends AbstractBackupService implements IRestExp
         if (Files.exists(path)) {
             Files.delete(path);
         }
+    }
+
+    private static String sanitizeFileName(String botFilename) {
+        if (botFilename == null || botFilename.isEmpty()) {
+            throw new BadRequestException("Filename is empty.");
+        }
+
+        botFilename = botFilename.
+                replaceAll("\\.\\./", "").
+                replaceAll("\\\\", "").
+                replaceAll("/", "");
+
+        if (!botFilename.matches("^[a-zA-Z0-9_.+\\-]+$")) {
+            throw new BadRequestException("Filename contains invalid characters.");
+        }
+
+        return botFilename;
     }
 }

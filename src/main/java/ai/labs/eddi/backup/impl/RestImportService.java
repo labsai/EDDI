@@ -7,10 +7,10 @@ import ai.labs.eddi.configs.behavior.model.BehaviorConfiguration;
 import ai.labs.eddi.configs.bots.IRestBotStore;
 import ai.labs.eddi.configs.bots.model.BotConfiguration;
 import ai.labs.eddi.configs.documentdescriptor.IRestDocumentDescriptorStore;
-import ai.labs.eddi.configs.git.IRestGitCallsStore;
-import ai.labs.eddi.configs.git.model.GitCallsConfiguration;
+import ai.labs.eddi.configs.documentdescriptor.model.DocumentDescriptor;
 import ai.labs.eddi.configs.http.IRestHttpCallsStore;
 import ai.labs.eddi.configs.http.model.HttpCallsConfiguration;
+import ai.labs.eddi.configs.langchain.IRestLangChainStore;
 import ai.labs.eddi.configs.migration.IMigrationManager;
 import ai.labs.eddi.configs.output.IRestOutputStore;
 import ai.labs.eddi.configs.output.model.OutputConfigurationSet;
@@ -24,33 +24,35 @@ import ai.labs.eddi.configs.regulardictionary.model.RegularDictionaryConfigurati
 import ai.labs.eddi.datastore.IResourceStore.IResourceId;
 import ai.labs.eddi.datastore.serialization.IJsonSerialization;
 import ai.labs.eddi.engine.IRestBotAdministration;
+import ai.labs.eddi.engine.model.BotDeploymentStatus;
 import ai.labs.eddi.engine.runtime.client.factory.IRestInterfaceFactory;
 import ai.labs.eddi.engine.runtime.client.factory.RestInterfaceFactory;
-import ai.labs.eddi.models.BotDeploymentStatus;
-import ai.labs.eddi.models.DocumentDescriptor;
+import ai.labs.eddi.engine.runtime.internal.IDeploymentListener;
+import ai.labs.eddi.modules.langchain.model.LangChainConfiguration;
 import ai.labs.eddi.utils.FileUtilities;
 import ai.labs.eddi.utils.RestUtilities;
-import org.bson.Document;
-import org.jboss.logging.Logger;
-
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import jakarta.ws.rs.InternalServerErrorException;
 import jakarta.ws.rs.container.AsyncResponse;
 import jakarta.ws.rs.container.TimeoutHandler;
 import jakarta.ws.rs.core.Response;
+import org.bson.Document;
+import org.jboss.logging.Logger;
+
 import java.io.*;
 import java.net.URI;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.*;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 
-import static ai.labs.eddi.models.Deployment.Environment.unrestricted;
+import static ai.labs.eddi.engine.model.Deployment.Environment.unrestricted;
 import static ai.labs.eddi.utils.RuntimeUtilities.getResourceAsStream;
 
 /**
@@ -61,12 +63,12 @@ public class RestImportService extends AbstractBackupService implements IRestImp
     private static final Pattern EDDI_URI_PATTERN = Pattern.compile("\"eddi://ai.labs..*?\"");
     private static final String BOT_FILE_ENDING = ".bot.json";
     private final Path tmpPath = Paths.get(FileUtilities.buildPath(System.getProperty("user.dir"), "tmp", "import"));
-    private final Path examplePath = Paths.get("examples");
     private final IZipArchive zipArchive;
     private final IJsonSerialization jsonSerialization;
     private final IRestInterfaceFactory restInterfaceFactory;
     private final IRestBotAdministration restBotAdministration;
     private final IMigrationManager migrationManager;
+    private final IDeploymentListener deploymentListener;
 
     private static final Logger log = Logger.getLogger(RestImportService.class);
 
@@ -75,44 +77,51 @@ public class RestImportService extends AbstractBackupService implements IRestImp
                              IJsonSerialization jsonSerialization,
                              IRestInterfaceFactory restInterfaceFactory,
                              IRestBotAdministration restBotAdministration,
-                             IMigrationManager migrationManager) {
+                             IMigrationManager migrationManager,
+                             IDeploymentListener deploymentListener) {
         this.zipArchive = zipArchive;
         this.jsonSerialization = jsonSerialization;
         this.restInterfaceFactory = restInterfaceFactory;
         this.restBotAdministration = restBotAdministration;
         this.migrationManager = migrationManager;
+        this.deploymentListener = deploymentListener;
     }
 
     @Override
-    public List<BotDeploymentStatus> importBotExamples() {
+    public List<BotDeploymentStatus> importInitialBots() {
         try {
-            var botExampleFiles = getResourceFiles("/examples/available_examples.txt");
-            for (var botExampleFileName : botExampleFiles) {
-                importBot(getResourceAsStream("/examples/" + botExampleFileName),
+            var botExampleFiles = getResourceFiles("/initial-bots/available_bots.txt");
+            List<CompletableFuture<Void>> deploymentFutures = new ArrayList<>();
+
+            for (var botFileName : botExampleFiles) {
+                importBot(getResourceAsStream("/initial-bots/" + botFileName),
                         new MockAsyncResponse() {
                             @Override
                             public boolean resume(Object responseObj) {
-                                if (responseObj instanceof Response) {
-                                    Response response = (Response) responseObj;
-                                    IResourceId botId = RestUtilities.extractResourceId(response.getLocation());
-                                    restBotAdministration.
-                                            deployBot(
-                                                    unrestricted,
-                                                    botId.getId(),
-                                                    botId.getVersion(),
-                                                    true);
-                                    return true;
-                                }
+                                if (responseObj instanceof Response response) {
+                                    var botId = RestUtilities.extractResourceId(response.getLocation());
+                                    if (botId != null) {
+                                        var deploymentFuture =
+                                                deploymentListener.registerBotDeployment(botId.getId(), botId.getVersion());
+                                        deploymentFutures.add(deploymentFuture);
 
+                                        restBotAdministration.deployBot(
+                                                unrestricted, botId.getId(), botId.getVersion(), true);
+
+                                        return true;
+                                    }
+                                }
                                 return false;
                             }
                         });
             }
 
-            Thread.sleep(500);
-            log.info("Imported & Deployed Example Bots");
+            // Wait for all deployments to complete
+            CompletableFuture.allOf(deploymentFutures.toArray(new CompletableFuture[0])).join();
+
+            log.info("Imported & Deployed Initial Bots");
             return restBotAdministration.getDeploymentStatuses(unrestricted);
-        } catch (IOException | InterruptedException e) {
+        } catch (IOException e) {
             log.error(e.getLocalizedMessage(), e);
             throw new InternalServerErrorException();
         }
@@ -222,6 +231,15 @@ public class RestImportService extends AbstractBackupService implements IRestImp
                             updateDocumentDescriptor(packagePath, httpCallsUris, newHttpCallsUris);
                             packageFileString = replaceURIs(packageFileString, httpCallsUris, newHttpCallsUris);
 
+                            // ... for langchain
+                            List<URI> langchainUris = extractResourcesUris(packageFileString, LANGCHAIN_URI_PATTERN);
+                            List<URI> newLangchainUris = createNewLangchain(
+                                    readResources(langchainUris, packagePath,
+                                            LANGCHAIN_EXT, LangChainConfiguration.class));
+
+                            updateDocumentDescriptor(packagePath, langchainUris, newLangchainUris);
+                            packageFileString = replaceURIs(packageFileString, langchainUris, newLangchainUris);
+
                             // ... for property
                             List<URI> propertyUris = extractResourcesUris(packageFileString, PROPERTY_URI_PATTERN);
                             List<URI> newPropertyUris = createNewProperties(
@@ -230,15 +248,6 @@ public class RestImportService extends AbstractBackupService implements IRestImp
 
                             updateDocumentDescriptor(packagePath, propertyUris, newPropertyUris);
                             packageFileString = replaceURIs(packageFileString, propertyUris, newPropertyUris);
-
-                            // ... for git calls
-                            List<URI> gitCallsUris = extractResourcesUris(packageFileString, GITCALLS_URI_PATTERN);
-                            List<URI> newGitCallsUris = createNewGitCalls(
-                                    readResources(gitCallsUris, packagePath,
-                                            GITCALLS_EXT, GitCallsConfiguration.class));
-
-                            updateDocumentDescriptor(packagePath, gitCallsUris, newGitCallsUris);
-                            packageFileString = replaceURIs(packageFileString, gitCallsUris, newGitCallsUris);
 
                             // ... for output
                             List<URI> outputUris = extractResourcesUris(packageFileString, OUTPUT_URI_PATTERN);
@@ -316,6 +325,16 @@ public class RestImportService extends AbstractBackupService implements IRestImp
         }).collect(Collectors.toList());
     }
 
+    private List<URI> createNewLangchain(List<LangChainConfiguration> langChainConfigurations)
+            throws RestInterfaceFactory.RestInterfaceFactoryException {
+        IRestLangChainStore restLangChainStore = getRestResourceStore(IRestLangChainStore.class);
+        return langChainConfigurations.stream().map(langChainConfiguration -> {
+            Response langchainResponse = restLangChainStore.createLangChain(langChainConfiguration);
+            checkIfCreatedResponse(langchainResponse);
+            return langchainResponse.getLocation();
+        }).collect(Collectors.toList());
+    }
+
     private List<URI> createNewProperties(List<PropertySetterConfiguration> propertySetterConfigurations)
             throws RestInterfaceFactory.RestInterfaceFactoryException {
         IRestPropertySetterStore restPropertySetterStore = getRestResourceStore(IRestPropertySetterStore.class);
@@ -323,16 +342,6 @@ public class RestImportService extends AbstractBackupService implements IRestImp
             Response propertySetter = restPropertySetterStore.createPropertySetter(propertySetterConfiguration);
             checkIfCreatedResponse(propertySetter);
             return propertySetter.getLocation();
-        }).collect(Collectors.toList());
-    }
-
-    private List<URI> createNewGitCalls(List<GitCallsConfiguration> gitCallsConfigurations)
-            throws RestInterfaceFactory.RestInterfaceFactoryException {
-        IRestGitCallsStore restGitCallsStore = getRestResourceStore(IRestGitCallsStore.class);
-        return gitCallsConfigurations.stream().map(gitCallsConfiguration -> {
-            Response gitCallsResponse = restGitCallsStore.createGitCalls(gitCallsConfiguration);
-            checkIfCreatedResponse(gitCallsResponse);
-            return gitCallsResponse.getLocation();
         }).collect(Collectors.toList());
     }
 

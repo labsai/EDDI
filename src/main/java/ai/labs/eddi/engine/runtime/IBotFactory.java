@@ -1,7 +1,7 @@
 package ai.labs.eddi.engine.runtime;
 
 import ai.labs.eddi.engine.runtime.service.ServiceException;
-import ai.labs.eddi.models.Deployment;
+import ai.labs.eddi.engine.model.Deployment;
 
 import java.util.List;
 
@@ -10,6 +10,8 @@ import java.util.List;
  */
 public interface IBotFactory {
     IBot getLatestBot(Deployment.Environment environment, String botId) throws ServiceException;
+
+    IBot getLatestReadyBot(Deployment.Environment environment, String botId) throws ServiceException;
 
     List<IBot> getAllLatestBots(Deployment.Environment environment) throws ServiceException;
 

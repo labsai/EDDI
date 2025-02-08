@@ -8,8 +8,8 @@ import ai.labs.eddi.engine.memory.IMemoryItemConverter;
 import ai.labs.eddi.engine.memory.model.ConversationProperties;
 import ai.labs.eddi.engine.memory.model.Data;
 import ai.labs.eddi.engine.runtime.client.configuration.IResourceClientLibrary;
-import ai.labs.eddi.models.Context;
-import ai.labs.eddi.models.Property;
+import ai.labs.eddi.engine.model.Context;
+import ai.labs.eddi.configs.properties.model.Property;
 import ai.labs.eddi.modules.nlp.expressions.Expression;
 import ai.labs.eddi.modules.nlp.expressions.Expressions;
 import ai.labs.eddi.modules.nlp.expressions.utilities.IExpressionProvider;
@@ -26,7 +26,7 @@ import java.util.Collections;
 import java.util.LinkedList;
 import java.util.List;
 
-import static ai.labs.eddi.models.Property.Scope.conversation;
+import static ai.labs.eddi.configs.properties.model.Property.Scope.conversation;
 import static org.mockito.AdditionalMatchers.not;
 import static org.mockito.Mockito.*;
 

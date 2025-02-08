@@ -1,6 +1,6 @@
 package ai.labs.eddi.modules.nlp.extensions.normalizers.providers;
 
-import ai.labs.eddi.models.ExtensionDescriptor.ConfigValue;
+import ai.labs.eddi.configs.packages.model.ExtensionDescriptor.ConfigValue;
 import ai.labs.eddi.modules.nlp.extensions.normalizers.INormalizer;
 import ai.labs.eddi.modules.nlp.extensions.normalizers.PunctuationNormalizer;
 
@@ -9,8 +9,8 @@ import java.util.HashMap;
 import java.util.Map;
 import java.util.regex.Pattern;
 
-import static ai.labs.eddi.models.ExtensionDescriptor.FieldType.BOOLEAN;
-import static ai.labs.eddi.models.ExtensionDescriptor.FieldType.STRING;
+import static ai.labs.eddi.configs.packages.model.ExtensionDescriptor.FieldType.BOOLEAN;
+import static ai.labs.eddi.configs.packages.model.ExtensionDescriptor.FieldType.STRING;
 
 @ApplicationScoped
 public class PunctuationNormalizerProvider implements INormalizerProvider {

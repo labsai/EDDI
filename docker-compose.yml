@@ -1,4 +1,3 @@
-version: '3'
 services:
   eddi:
     image: labsai/eddi:latest
@@ -11,10 +10,10 @@ services:
     depends_on:
       - mongodb
   mongodb:
-    image: mongo:4.4
+    image: mongo:5.0
     restart: always
     volumes:
-      - mongodb-data:/data/db
+      - mongodb-db:/data/db
 
 volumes:
-  mongodb-data:
+  mongodb-db:

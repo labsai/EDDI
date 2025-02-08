@@ -1,6 +1,5 @@
 package ai.labs.eddi.configs.http.model;
 
-import ai.labs.eddi.models.HttpCodeValidator;
 import lombok.Getter;
 import lombok.Setter;
 

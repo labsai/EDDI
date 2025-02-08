@@ -2,7 +2,7 @@ package ai.labs.eddi.engine.memory;
 
 import ai.labs.eddi.engine.memory.model.ConversationOutput;
 import ai.labs.eddi.engine.memory.model.ConversationProperties;
-import ai.labs.eddi.models.ConversationState;
+import ai.labs.eddi.engine.model.ConversationState;
 
 import java.util.ArrayList;
 import java.util.LinkedList;

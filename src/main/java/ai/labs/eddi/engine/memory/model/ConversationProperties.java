@@ -1,7 +1,7 @@
 package ai.labs.eddi.engine.memory.model;
 
 import ai.labs.eddi.engine.memory.IConversationMemory;
-import ai.labs.eddi.models.Property;
+import ai.labs.eddi.configs.properties.model.Property;
 import com.fasterxml.jackson.annotation.JsonIgnore;
 
 import java.util.Collections;

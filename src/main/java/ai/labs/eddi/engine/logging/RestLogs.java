@@ -1,8 +1,8 @@
 package ai.labs.eddi.engine.logging;
 
 import ai.labs.eddi.engine.runtime.IDatabaseLogs;
-import ai.labs.eddi.models.DatabaseLog;
-import ai.labs.eddi.models.Deployment;
+import ai.labs.eddi.engine.model.DatabaseLog;
+import ai.labs.eddi.engine.model.Deployment;
 import jakarta.inject.Inject;
 import lombok.extern.slf4j.Slf4j;
 

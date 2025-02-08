@@ -8,7 +8,7 @@ import ai.labs.eddi.configs.regulardictionary.model.RegularDictionaryConfigurati
 import ai.labs.eddi.configs.rest.RestVersionInfo;
 import ai.labs.eddi.configs.schema.IJsonSchemaCreator;
 import ai.labs.eddi.datastore.IResourceStore;
-import ai.labs.eddi.models.DocumentDescriptor;
+import ai.labs.eddi.configs.documentdescriptor.model.DocumentDescriptor;
 import org.jboss.logging.Logger;
 
 import jakarta.enterprise.context.ApplicationScoped;

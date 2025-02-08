@@ -3,7 +3,7 @@ package ai.labs.eddi.configs.utilities;
 import ai.labs.eddi.configs.documentdescriptor.IDocumentDescriptorStore;
 import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.engine.memory.descriptor.model.ConversationDescriptor;
-import ai.labs.eddi.models.DocumentDescriptor;
+import ai.labs.eddi.configs.documentdescriptor.model.DocumentDescriptor;
 import ai.labs.eddi.utils.RestUtilities;
 import com.mongodb.reactivestreams.client.FindPublisher;
 import com.mongodb.reactivestreams.client.MongoCollection;
@@ -59,9 +59,8 @@ public class ResourceUtilities {
     }
 
     private static void extractIds(List<String> ids, FindPublisher<Document> documentIterable) {
-        Observable.fromPublisher(documentIterable).subscribe(document -> {
-            ids.add(document.getObjectId(MONGO_OBJECT_ID).toString());
-        });
+        Observable.fromPublisher(documentIterable).
+                subscribe(document -> ids.add(document.getObjectId(MONGO_OBJECT_ID).toString()));
 
     }
 

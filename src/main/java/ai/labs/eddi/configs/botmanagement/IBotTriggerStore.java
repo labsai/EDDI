@@ -2,7 +2,7 @@ package ai.labs.eddi.configs.botmanagement;
 
 
 import ai.labs.eddi.datastore.IResourceStore;
-import ai.labs.eddi.models.BotTriggerConfiguration;
+import ai.labs.eddi.engine.model.BotTriggerConfiguration;
 
 import java.util.List;
 

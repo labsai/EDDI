@@ -12,8 +12,8 @@ import ai.labs.eddi.engine.runtime.IBotFactory;
 import ai.labs.eddi.engine.runtime.IRuntime;
 import ai.labs.eddi.engine.runtime.internal.readiness.IBotsReadiness;
 import ai.labs.eddi.engine.runtime.service.ServiceException;
-import ai.labs.eddi.models.ConversationState;
-import ai.labs.eddi.models.Deployment.Environment;
+import ai.labs.eddi.engine.model.ConversationState;
+import ai.labs.eddi.engine.model.Deployment.Environment;
 import io.quarkus.runtime.Startup;
 import io.quarkus.runtime.StartupEvent;
 import io.quarkus.scheduler.Scheduled;
@@ -60,7 +60,7 @@ public class BotDeploymentManagement implements IBotDeploymentManagement {
     private final int maximumLifeTimeOfIdleConversationsInDays;
     private Instant lastDeploymentCheck = null;
     private static final Logger LOGGER = Logger.getLogger(BotDeploymentManagement.class);
-    private List<DeploymentInfo> deploymentInfos = new LinkedList<>();
+    private final List<DeploymentInfo> deploymentInfos = new LinkedList<>();
 
     @Inject
     public BotDeploymentManagement(IDeploymentStore deploymentStore,

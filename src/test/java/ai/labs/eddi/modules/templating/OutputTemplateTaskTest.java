@@ -5,7 +5,7 @@ import ai.labs.eddi.engine.memory.IData;
 import ai.labs.eddi.engine.memory.IDataFactory;
 import ai.labs.eddi.engine.memory.IMemoryItemConverter;
 import ai.labs.eddi.engine.memory.model.Data;
-import ai.labs.eddi.models.Context;
+import ai.labs.eddi.engine.model.Context;
 import ai.labs.eddi.modules.output.model.QuickReply;
 import ai.labs.eddi.modules.output.model.types.TextOutputItem;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -129,8 +129,8 @@ public class OutputTemplateTaskTest {
         when(templatingEngine.processTemplate(eq(templateString), anyMap(), eq(TEXT))).
                 then(invocation -> expectedOutputString);
 
-        var expectedPreQuickReply = expectedPreQuickReplies.get(0);
-        var expectedPostQuickReply = expectedPostQuickReplies.get(0);
+        var expectedPreQuickReply = expectedPreQuickReplies.getFirst();
+        var expectedPostQuickReply = expectedPostQuickReplies.getFirst();
 
         String expectedPreQuickReplyValue = expectedPreQuickReply.getValue();
         String expectedPostQuickReplyValue = expectedPostQuickReply.getValue();

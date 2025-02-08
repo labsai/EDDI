@@ -3,7 +3,7 @@ package ai.labs.eddi.configs.rest;
 import ai.labs.eddi.configs.IRestVersionInfo;
 import ai.labs.eddi.configs.documentdescriptor.IDocumentDescriptorStore;
 import ai.labs.eddi.datastore.IResourceStore;
-import ai.labs.eddi.models.DocumentDescriptor;
+import ai.labs.eddi.configs.documentdescriptor.model.DocumentDescriptor;
 import ai.labs.eddi.utils.RestUtilities;
 import ai.labs.eddi.utils.RuntimeUtilities;
 import org.jboss.logging.Logger;

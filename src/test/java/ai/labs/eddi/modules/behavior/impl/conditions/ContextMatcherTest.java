@@ -3,7 +3,7 @@ package ai.labs.eddi.modules.behavior.impl.conditions;
 import ai.labs.eddi.datastore.serialization.IJsonSerialization;
 import ai.labs.eddi.engine.memory.IConversationMemory;
 import ai.labs.eddi.engine.memory.IData;
-import ai.labs.eddi.models.Context;
+import ai.labs.eddi.engine.model.Context;
 import ai.labs.eddi.modules.nlp.expressions.Expression;
 import ai.labs.eddi.modules.nlp.expressions.Expressions;
 import ai.labs.eddi.modules.nlp.expressions.utilities.IExpressionProvider;

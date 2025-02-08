@@ -1,9 +1,9 @@
 package ai.labs.eddi.engine.memory.model;
 
 import ai.labs.eddi.datastore.serialization.Id;
-import ai.labs.eddi.models.ConversationState;
-import ai.labs.eddi.models.Deployment;
-import ai.labs.eddi.models.Property;
+import ai.labs.eddi.engine.model.ConversationState;
+import ai.labs.eddi.engine.model.Deployment;
+import ai.labs.eddi.configs.properties.model.Property;
 import com.fasterxml.jackson.annotation.JsonIgnore;
 import com.fasterxml.jackson.annotation.JsonProperty;
 import lombok.*;
@@ -40,10 +40,6 @@ public class ConversationMemorySnapshot {
     @Override
     public int hashCode() {
         return conversationSteps != null ? conversationSteps.hashCode() : 0;
-    }
-
-    public Map<String, Property> getConversationProperties() {
-        return conversationProperties;
     }
 
     @JsonProperty("_id")

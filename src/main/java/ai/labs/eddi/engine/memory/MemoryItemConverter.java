@@ -2,7 +2,7 @@ package ai.labs.eddi.engine.memory;
 
 import ai.labs.eddi.datastore.serialization.IJsonSerialization;
 import ai.labs.eddi.engine.memory.model.ConversationOutput;
-import ai.labs.eddi.models.Context;
+import ai.labs.eddi.engine.model.Context;
 
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;

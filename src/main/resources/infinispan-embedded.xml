@@ -1,0 +1,21 @@
+<infinispan xmlns="urn:infinispan:config:15.0">
+    <cache-container default-cache="local" statistics="true">
+        <metrics gauges="true" histograms="true"/>
+
+        <!-- template configurations -->
+        <local-cache-configuration name="base-template-config">
+            <memory max-count="1000"/>
+        </local-cache-configuration>
+
+        <local-cache-configuration name="user-conversations-config">
+            <memory max-count="10000"/>
+        </local-cache-configuration>
+
+        <!-- cache definitions -->
+        <local-cache name="local" configuration="base-template-config"/>
+        <local-cache name="parser" configuration="base-template-config"/>
+        <local-cache name="botTriggers" configuration="base-template-config"/>
+        <local-cache name="conversationState" configuration="base-template-config"/>
+        <local-cache name="userConversations" configuration="user-conversations-config"/>
+    </cache-container>
+</infinispan>

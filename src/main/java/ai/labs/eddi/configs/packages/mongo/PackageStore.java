@@ -8,7 +8,7 @@ import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.datastore.mongo.HistorizedResourceStore;
 import ai.labs.eddi.datastore.mongo.MongoResourceStorage;
 import ai.labs.eddi.datastore.serialization.IDocumentBuilder;
-import ai.labs.eddi.models.DocumentDescriptor;
+import ai.labs.eddi.configs.documentdescriptor.model.DocumentDescriptor;
 import ai.labs.eddi.utils.RestUtilities;
 import ai.labs.eddi.utils.RuntimeUtilities;
 import com.mongodb.reactivestreams.client.MongoDatabase;

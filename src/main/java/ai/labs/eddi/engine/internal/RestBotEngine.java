@@ -15,15 +15,20 @@ import ai.labs.eddi.engine.memory.IConversationMemoryStore;
 import ai.labs.eddi.engine.memory.IPropertiesHandler;
 import ai.labs.eddi.engine.memory.descriptor.IConversationDescriptorStore;
 import ai.labs.eddi.engine.memory.model.SimpleConversationMemorySnapshot;
-import ai.labs.eddi.engine.runtime.*;
+import ai.labs.eddi.engine.model.Context;
+import ai.labs.eddi.engine.model.ConversationState;
+import ai.labs.eddi.engine.model.Deployment;
+import ai.labs.eddi.engine.model.Deployment.Environment;
+import ai.labs.eddi.engine.model.InputData;
+import ai.labs.eddi.engine.runtime.IBot;
+import ai.labs.eddi.engine.runtime.IBotFactory;
+import ai.labs.eddi.engine.runtime.IConversationCoordinator;
+import ai.labs.eddi.engine.runtime.IRuntime;
 import ai.labs.eddi.engine.runtime.service.ServiceException;
 import ai.labs.eddi.engine.utilities.IConversationSetup;
-import ai.labs.eddi.models.Context;
-import ai.labs.eddi.models.ConversationState;
-import ai.labs.eddi.models.Deployment;
-import ai.labs.eddi.models.Deployment.Environment;
-import ai.labs.eddi.models.InputData;
+import io.micrometer.core.instrument.Counter;
 import io.micrometer.core.instrument.MeterRegistry;
+import io.micrometer.core.instrument.Tags;
 import io.micrometer.core.instrument.Timer;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
@@ -39,10 +44,11 @@ import java.util.concurrent.*;
 
 import static ai.labs.eddi.engine.internal.RestBotManagement.KEY_LANG;
 import static ai.labs.eddi.engine.memory.ConversationMemoryUtilities.*;
-import static ai.labs.eddi.models.Context.ContextType.string;
+import static ai.labs.eddi.engine.model.Context.ContextType.string;
 import static ai.labs.eddi.utils.RestUtilities.createURI;
 import static ai.labs.eddi.utils.RuntimeUtilities.*;
-import static jakarta.ws.rs.core.MediaType.*;
+import static jakarta.ws.rs.core.MediaType.APPLICATION_JSON;
+import static jakarta.ws.rs.core.MediaType.TEXT_PLAIN;
 
 /**
  * @author ginccc
@@ -64,8 +70,19 @@ public class RestBotEngine implements IRestBotEngine {
     private final IConversationSetup conversationSetup;
     private final ICache<String, ConversationState> conversationStateCache;
     private final Timer timerConversationStart;
-    private final Timer timerConversationRead;
-    private final Timer timerConversationSay;
+    private final Timer timerConversationEnd;
+    private final Timer timerConversationLoad;
+    private final Timer timerConversationProcessing;
+    private final Timer timerConversationUndo;
+    private final Timer timerConversationRedo;
+    private final Counter counterConversationStart;
+    private final Counter counterConversationEnd;
+    private final Counter counterConversationLoad;
+    private final Counter counterConversationProcessing;
+    private final Counter counterConversationUndo;
+    private final Counter counterConversationRedo;
+
+    private final List<String> processingConversationReferences;
 
     private static final Logger LOGGER = Logger.getLogger(RestBotEngine.class);
 
@@ -91,10 +108,24 @@ public class RestBotEngine implements IRestBotEngine {
         this.runtime = runtime;
         this.contextLogger = contextLogger;
         this.botTimeout = botTimeout;
+        this.processingConversationReferences = new ArrayList<>();
 
-        this.timerConversationStart = meterRegistry.timer("conversation.start");
-        this.timerConversationRead = meterRegistry.timer("conversation.load");
-        this.timerConversationSay = meterRegistry.timer("conversation.processing");
+        this.timerConversationStart = meterRegistry.timer("eddi_conversation_start_duration");
+        this.timerConversationEnd = meterRegistry.timer("eddi_conversation_end_duration");
+        this.timerConversationLoad = meterRegistry.timer("eddi_conversation_load_duration");
+        this.timerConversationProcessing = meterRegistry.timer("eddi_conversation_processing_duration");
+        this.timerConversationUndo = meterRegistry.timer("eddi_conversation_undo_duration");
+        this.timerConversationRedo = meterRegistry.timer("eddi_conversation_redo_duration");
+
+        this.counterConversationStart = meterRegistry.counter("eddi_conversation_start_count");
+        this.counterConversationEnd = meterRegistry.counter("eddi_conversation_end_count");
+        this.counterConversationLoad = meterRegistry.counter("eddi_conversation_load_count");
+        this.counterConversationProcessing = meterRegistry.counter("eddi_conversation_processing_count");
+        this.counterConversationUndo = meterRegistry.counter("eddi_conversation_undo_count");
+        this.counterConversationRedo = meterRegistry.counter("eddi_conversation_redo_count");
+
+        meterRegistry.gaugeCollectionSize("eddi_processing_conversation_count",
+                Tags.empty(), processingConversationReferences);
     }
 
     @Override
@@ -117,9 +148,9 @@ public class RestBotEngine implements IRestBotEngine {
         }
 
         try {
-            IBot latestBot = botFactory.getLatestBot(environment, botId);
+            IBot latestBot = botFactory.getLatestReadyBot(environment, botId);
             if (latestBot == null) {
-                String message = "No instance of bot (botId=%s) deployed in environment (environment=%s)!";
+                String message = "No version of bot (botId=%s) ready for interaction (environment=%s)!";
                 message = String.format(message, botId, environment);
                 return Response.status(Response.Status.NOT_FOUND).type(TEXT_PLAIN).entity(message).build();
             }
@@ -146,7 +177,7 @@ public class RestBotEngine implements IRestBotEngine {
             LOGGER.error(e.getLocalizedMessage(), e);
             throw new InternalServerErrorException(e.getLocalizedMessage(), e);
         } finally {
-            record(startTime, timerConversationStart);
+            recordMetrics(timerConversationStart, counterConversationStart, startTime);
         }
     }
 
@@ -177,7 +208,9 @@ public class RestBotEngine implements IRestBotEngine {
 
     @Override
     public Response endConversation(String conversationId) {
+        long startTime = System.nanoTime();
         setConversationState(conversationId, ConversationState.ENDED);
+        recordMetrics(timerConversationEnd, counterConversationEnd, startTime);
         return Response.ok().build();
     }
 
@@ -216,7 +249,7 @@ public class RestBotEngine implements IRestBotEngine {
         } catch (ResourceNotFoundException e) {
             throw new NotFoundException();
         } finally {
-            record(startTime, timerConversationRead);
+            recordMetrics(timerConversationLoad, counterConversationLoad, startTime);
         }
     }
 
@@ -312,6 +345,7 @@ public class RestBotEngine implements IRestBotEngine {
 
         long startTime = System.nanoTime();
         try {
+            processingConversationReferences.add(createReferenceForMetrics(botId, conversationId));
             final IConversationMemory conversationMemory = loadConversationMemory(conversationId);
             checkConversationMemoryNotNull(conversationMemory, conversationId);
             var loggingContext = contextLogger.createLoggingContext(environment, botId, conversationId, conversationMemory.getUserId());
@@ -344,8 +378,9 @@ public class RestBotEngine implements IRestBotEngine {
                         memorySnapshot.setEnvironment(environment);
                         cacheConversationState(conversationId, memorySnapshot.getConversationState());
                         conversationDescriptorStore.updateTimeStamp(conversationId);
+                        recordMetrics(timerConversationProcessing, counterConversationProcessing, startTime);
+                        processingConversationReferences.remove(createReferenceForMetrics(botId, conversationId));
                         response.resume(memorySnapshot);
-                        record(startTime, timerConversationSay);
                     });
 
             if (conversation.isEnded()) {
@@ -384,14 +419,17 @@ public class RestBotEngine implements IRestBotEngine {
 
             conversationCoordinator.submitInOrder(conversationId, processUserInput);
         } catch (InstantiationException | IllegalAccessException e) {
-            String errorMsg = "Error while processing message!";
+            var errorMsg = "Error while processing message!";
             LOGGER.error(errorMsg, e);
-            throw new InternalServerErrorException(errorMsg, e);
+            processingConversationReferences.remove(createReferenceForMetrics(botId, conversationId));
+            throw new InternalServerErrorException(errorMsg);
         } catch (ResourceNotFoundException e) {
+            processingConversationReferences.remove(createReferenceForMetrics(botId, conversationId));
             throw new NotFoundException();
         } catch (Exception e) {
             LOGGER.error(e.getLocalizedMessage(), e);
-            throw new InternalServerErrorException(e.getLocalizedMessage(), e);
+            processingConversationReferences.remove(createReferenceForMetrics(botId, conversationId));
+            throw new InternalServerErrorException(e.getLocalizedMessage());
         }
     }
 
@@ -492,6 +530,7 @@ public class RestBotEngine implements IRestBotEngine {
     public Response undo(final Environment environment, String botId, final String conversationId) {
         validateParams(environment, botId, conversationId);
         var loggingContext = contextLogger.createLoggingContext(environment, botId, conversationId, null);
+        long startTime = System.nanoTime();
         try {
             IConversationMemory conversationMemory = loadAndValidateConversationMemory(botId, conversationId);
             loggingContext.put(USER_ID, conversationMemory.getUserId());
@@ -515,6 +554,8 @@ public class RestBotEngine implements IRestBotEngine {
             contextLogger.setLoggingContext(loggingContext);
             LOGGER.error(e.getLocalizedMessage(), e);
             throw new InternalServerErrorException(e.getLocalizedMessage(), e);
+        } finally {
+            recordMetrics(timerConversationUndo, counterConversationUndo, startTime);
         }
     }
 
@@ -552,6 +593,7 @@ public class RestBotEngine implements IRestBotEngine {
     public Response redo(final Environment environment, String botId, final String conversationId) {
         validateParams(environment, botId, conversationId);
 
+        long startTime = System.nanoTime();
         try {
             IConversationMemory conversationMemory = loadAndValidateConversationMemory(botId, conversationId);
 
@@ -572,6 +614,8 @@ public class RestBotEngine implements IRestBotEngine {
         } catch (Exception e) {
             LOGGER.error(e.getLocalizedMessage(), e);
             throw new InternalServerErrorException(e.getLocalizedMessage(), e);
+        } finally {
+            recordMetrics(timerConversationRedo, counterConversationRedo, startTime);
         }
     }
 
@@ -612,7 +656,12 @@ public class RestBotEngine implements IRestBotEngine {
         }
     }
 
-    private static void record(long startTime, Timer timer) {
+    private void recordMetrics(Timer timer, Counter counter, long startTime) {
+        counter.increment();
         timer.record(System.nanoTime() - startTime, TimeUnit.NANOSECONDS);
+    }
+
+    private static String createReferenceForMetrics(String botId, String conversationId) {
+        return botId.concat(":").concat(conversationId);
     }
 }

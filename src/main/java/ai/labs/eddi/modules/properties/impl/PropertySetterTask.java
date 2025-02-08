@@ -1,6 +1,10 @@
 package ai.labs.eddi.modules.properties.impl;
 
+import ai.labs.eddi.configs.packages.model.ExtensionDescriptor;
+import ai.labs.eddi.configs.properties.model.Property;
+import ai.labs.eddi.configs.properties.model.PropertyInstruction;
 import ai.labs.eddi.configs.propertysetter.model.PropertySetterConfiguration;
+import ai.labs.eddi.engine.model.Context;
 import ai.labs.eddi.engine.lifecycle.ILifecycleTask;
 import ai.labs.eddi.engine.lifecycle.exceptions.LifecycleException;
 import ai.labs.eddi.engine.lifecycle.exceptions.PackageConfigurationException;
@@ -11,11 +15,11 @@ import ai.labs.eddi.engine.memory.IDataFactory;
 import ai.labs.eddi.engine.memory.IMemoryItemConverter;
 import ai.labs.eddi.engine.runtime.client.configuration.IResourceClientLibrary;
 import ai.labs.eddi.engine.runtime.service.ServiceException;
-import ai.labs.eddi.models.*;
-import ai.labs.eddi.models.Property.Scope;
+import ai.labs.eddi.configs.properties.model.Property.Scope;
 import ai.labs.eddi.modules.nlp.expressions.Expressions;
 import ai.labs.eddi.modules.nlp.expressions.utilities.IExpressionProvider;
 import ai.labs.eddi.modules.properties.IPropertySetter;
+import ai.labs.eddi.modules.properties.model.SetOnActions;
 import ai.labs.eddi.modules.templating.ITemplatingEngine;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -30,7 +34,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.stream.Collectors;
 
-import static ai.labs.eddi.models.Property.Scope.conversation;
+import static ai.labs.eddi.configs.properties.model.Property.Scope.conversation;
 import static ai.labs.eddi.utils.RuntimeUtilities.checkNotNull;
 import static ai.labs.eddi.utils.RuntimeUtilities.isNullOrEmpty;
 import static java.lang.Boolean.parseBoolean;

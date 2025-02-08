@@ -1,8 +1,8 @@
 package ai.labs.eddi.configs.documentdescriptor;
 
 import ai.labs.eddi.configs.patch.PatchInstruction;
-import ai.labs.eddi.models.DocumentDescriptor;
-import ai.labs.eddi.models.SimpleDocumentDescriptor;
+import ai.labs.eddi.configs.documentdescriptor.model.DocumentDescriptor;
+import ai.labs.eddi.configs.descriptor.model.SimpleDocumentDescriptor;
 import org.eclipse.microprofile.openapi.annotations.Operation;
 import org.eclipse.microprofile.openapi.annotations.parameters.Parameter;
 

@@ -9,9 +9,7 @@ import ai.labs.eddi.engine.memory.model.ConversationMemorySnapshot.ResultSnapsho
 import ai.labs.eddi.engine.memory.model.ConversationOutput;
 import ai.labs.eddi.engine.memory.model.Data;
 import ai.labs.eddi.engine.memory.model.SimpleConversationMemorySnapshot;
-import ai.labs.eddi.models.Context;
-import ai.labs.eddi.models.Context.ContextType;
-
+import ai.labs.eddi.engine.model.Context;
 import jakarta.enterprise.context.ApplicationScoped;
 
 import java.util.HashMap;
@@ -268,8 +266,8 @@ public class ConversationMemoryUtilities {
             String key = dataKey.substring(dataKey.indexOf(":") + 1);
             if (context != null) {
                 var contextType = context.getType();
-                if (contextType.equals(ContextType.object) || contextType.equals(ContextType.string)) {
-                    dynamicAttributesMap.put(key, context.getValue());
+                switch (contextType) {
+                    case object, array, string -> dynamicAttributesMap.put(key, context.getValue());
                 }
             } else {
                 dynamicAttributesMap.put(key, null);

@@ -7,8 +7,8 @@ import ai.labs.eddi.engine.memory.IConversationMemory;
 import ai.labs.eddi.engine.memory.IPropertiesHandler;
 import ai.labs.eddi.engine.runtime.IBot;
 import ai.labs.eddi.engine.runtime.IExecutablePackage;
-import ai.labs.eddi.models.Context;
-import ai.labs.eddi.models.Deployment;
+import ai.labs.eddi.engine.model.Context;
+import ai.labs.eddi.engine.model.Deployment;
 import lombok.Getter;
 import lombok.Setter;
 
@@ -21,10 +21,10 @@ import java.util.Map;
  */
 public class Bot implements IBot {
     @Getter
-    private String botId;
+    private final String botId;
     @Getter
-    private Integer botVersion;
-    private List<IExecutablePackage> executablePackages;
+    private final Integer botVersion;
+    private final List<IExecutablePackage> executablePackages;
 
     @Getter
     @Setter

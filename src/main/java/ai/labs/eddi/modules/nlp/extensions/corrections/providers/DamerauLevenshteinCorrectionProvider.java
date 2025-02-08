@@ -1,7 +1,7 @@
 package ai.labs.eddi.modules.nlp.extensions.corrections.providers;
 
 
-import ai.labs.eddi.models.ExtensionDescriptor.ConfigValue;
+import ai.labs.eddi.configs.packages.model.ExtensionDescriptor.ConfigValue;
 import ai.labs.eddi.modules.nlp.extensions.corrections.DamerauLevenshteinCorrection;
 import ai.labs.eddi.modules.nlp.extensions.corrections.ICorrection;
 import io.quarkus.runtime.Startup;
@@ -10,7 +10,7 @@ import jakarta.enterprise.context.ApplicationScoped;
 import java.util.HashMap;
 import java.util.Map;
 
-import static ai.labs.eddi.models.ExtensionDescriptor.FieldType.INT;
+import static ai.labs.eddi.configs.packages.model.ExtensionDescriptor.FieldType.INT;
 
 /**
  * @author ginccc

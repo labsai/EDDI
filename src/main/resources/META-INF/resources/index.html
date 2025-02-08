@@ -9,14 +9,14 @@
     <meta name="author" content="LABS.AI">
 
     <link rel="icon" href="/img/favicon.ico" class="js-favicon">
-    <link href="/css/bootstrap-4.6.2.min.css" rel="stylesheet" type="text/css">
-    <link href="/css/dashboard.css" rel="stylesheet" type="text/css">
+    <link href="/scripts/css/bootstrap-4.6.2.min.css" rel="stylesheet" type="text/css">
+    <link href="/scripts/css/dashboard.css" rel="stylesheet" type="text/css">
 
-    <script type="text/javascript" src="/js/jquery-3.6.1.min.js"></script>
-    <script type="text/javascript" src="/js/bootstrap-4.6.2.min.js"></script>
-    <script type="text/javascript" src="/js/moment-2.29.4.min.js"></script>
+    <script type="text/javascript" src="/scripts/js/jquery-3.7.1.min.js"></script>
+    <script type="text/javascript" src="/scripts/js/bootstrap-4.6.2.min.js"></script>
+    <script type="text/javascript" src="/scripts/js/moment-2.30.1.min.js"></script>
 
-    <script type="text/javascript" src="/js/dashboard.js"></script>
+    <script type="text/javascript" src="/scripts/js/dashboard.js"></script>
     <!-- KEYCLOAK-SCRIPT-INSERT-IF-ENABLED -->
 </head>
 <body>
@@ -24,7 +24,7 @@
 <!-- Navigation -->
 <nav class="navbar fixed-top navbar-expand-lg navbar-dark bg-black fixed-top">
     <div class="container">
-        <img src="img/logo_high.png" alt="Logo of EDDI - Enhanced Dialog Driven Interface" class="eddi-logo"/>
+        <img src="img/logo_eddi.png" alt="Logo of EDDI - Enhanced Dialog Driven Interface" class="eddi-logo"/>
         <div class="collapse navbar-collapse" id="navbarResponsive">
             <ul class="navbar-nav ml-auto">
                 <li class="nav-item">
@@ -67,9 +67,9 @@
                     <div id="card-1" class="card-text">
                         <div id="no-bots-deployed">
                             No Bots deployed yet..<br>
-                            <a id="btnDeployExampleBots" href="" onclick="eddi.deployExampleBots(); return false;"
+                            <a id="btnDeployBots" href="" onclick="eddi.deployInitialBots(); return false;"
                                class="btn btn-primary">
-                                Deploy Example Bot</a>
+                                Deploy Initial Bots...</a>
                         </div>
                     </div>
                 </div>
@@ -88,7 +88,7 @@
             <a href="https://eddi.labs.ai"
                target="_blank">LABS.AI</a>
             <br>
-            &COPY; 2006-2023
+            &COPY; 2006-2025
         </p>
     </div>
     <!-- /.container -->

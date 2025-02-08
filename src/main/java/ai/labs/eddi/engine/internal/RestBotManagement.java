@@ -2,11 +2,12 @@ package ai.labs.eddi.engine.internal;
 
 import ai.labs.eddi.configs.botmanagement.IRestBotTriggerStore;
 import ai.labs.eddi.configs.botmanagement.IUserConversationStore;
+import ai.labs.eddi.configs.properties.model.Property;
 import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.engine.IRestBotEngine;
 import ai.labs.eddi.engine.IRestBotManagement;
+import ai.labs.eddi.engine.model.*;
 import ai.labs.eddi.engine.memory.model.SimpleConversationMemorySnapshot;
-import ai.labs.eddi.models.*;
 import ai.labs.eddi.utils.RestUtilities;
 import io.quarkus.security.UnauthorizedException;
 import io.quarkus.security.identity.SecurityIdentity;
@@ -29,7 +30,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Random;
 
-import static ai.labs.eddi.models.Deployment.Environment.unrestricted;
+import static ai.labs.eddi.engine.model.Deployment.Environment.unrestricted;
 
 @ApplicationScoped
 public class RestBotManagement implements IRestBotManagement {
@@ -268,8 +269,8 @@ public class RestBotManagement implements IRestBotManagement {
                 initialContext);
         int responseHttpCode = botResponse.getStatus();
         if (responseHttpCode == 201) {
-            URI locationUri = URI.create(botResponse.getHeaders().get("location").get(0).toString());
-            IResourceStore.IResourceId resourceId = RestUtilities.extractResourceId(locationUri);
+            var locationUri = URI.create(botResponse.getHeaders().get("location").getFirst().toString());
+            var resourceId = RestUtilities.extractResourceId(locationUri);
             return createUserConversation(intent, userId, botDeployment, resourceId.getId());
         } else {
             throw new CannotCreateConversationException(

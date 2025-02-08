@@ -3,7 +3,7 @@ package ai.labs.eddi.configs.bots;
 
 import ai.labs.eddi.configs.bots.model.BotConfiguration;
 import ai.labs.eddi.datastore.IResourceStore;
-import ai.labs.eddi.models.DocumentDescriptor;
+import ai.labs.eddi.configs.documentdescriptor.model.DocumentDescriptor;
 
 import java.util.List;
 
