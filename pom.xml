@@ -17,7 +17,7 @@
         <quarkus.platform.artifact-id>quarkus-bom</quarkus.platform.artifact-id>
         <quarkus.platform.group-id>io.quarkus.platform</quarkus.platform.group-id>
         <quarkus.platform.version>3.18.2</quarkus.platform.version>
-        <quarkus.langchain4j.version>0.24.0.CR3</quarkus.langchain4j.version>
+        <quarkus.langchain4j.version>0.24.0</quarkus.langchain4j.version>
         <langchain4j.version>1.0.0-beta1</langchain4j.version>
         <infinispan.version>15.1.5.Final</infinispan.version>
         <jandex-maven-plugin.version>3.2.5</jandex-maven-plugin.version>
@@ -154,7 +154,7 @@
         <dependency>
             <groupId>io.swagger.core.v3</groupId>
             <artifactId>swagger-annotations</artifactId>
-            <version>2.2.27</version>
+            <version>2.2.28</version>
         </dependency>
         <dependency>
             <groupId>de.undercouch</groupId>
