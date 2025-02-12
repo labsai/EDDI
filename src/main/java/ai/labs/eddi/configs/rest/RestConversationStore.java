@@ -168,7 +168,10 @@ public class RestConversationStore implements IRestConversationStore {
         checkNotNull(returnCurrentStepOnly, "returnCurrentStepOnly");
 
         try {
-            return convertSimpleConversationMemory(conversationMemoryStore.loadConversationMemorySnapshot(conversationId), returnDetailed);
+            return convertSimpleConversationMemory(
+                    conversationMemoryStore.loadConversationMemorySnapshot(conversationId),
+                    returnDetailed, returnCurrentStepOnly);
+
         } catch (IResourceStore.ResourceStoreException e) {
             log.error(e.getMessage(), e);
             throw new InternalServerErrorException(e);

@@ -9,17 +9,18 @@ import com.mongodb.client.model.Indexes;
 import com.mongodb.reactivestreams.client.MongoCollection;
 import com.mongodb.reactivestreams.client.MongoDatabase;
 import io.reactivex.rxjava3.core.Observable;
+import jakarta.enterprise.context.ApplicationScoped;
+import jakarta.inject.Inject;
 import org.bson.Document;
 import org.bson.conversions.Bson;
 import org.bson.types.ObjectId;
 
-import jakarta.enterprise.context.ApplicationScoped;
-import jakarta.inject.Inject;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.NoSuchElementException;
 
+import static ai.labs.eddi.engine.model.Context.ContextType.valueOf;
 import static ai.labs.eddi.engine.model.ConversationState.ENDED;
 
 /**
@@ -28,10 +29,13 @@ import static ai.labs.eddi.engine.model.ConversationState.ENDED;
 @ApplicationScoped
 public class ConversationMemoryStore implements IConversationMemoryStore, IResourceStore<ConversationMemorySnapshot> {
     private static final String CONVERSATION_COLLECTION = "conversationmemories";
-    private static final String CONVERSATION_STATE_FIELD = "conversationState";
-    private static final String CONVERSATION_BOT_ID_FIELD = "botId";
-    private static final String CONVERSATION_BOT_VERSION_FIELD = "botVersion";
     private static final String OBJECT_ID = "_id";
+    private static final String KEY_CONTEXT = "context";
+    private static final String KEY_TYPE = "type";
+    private static final String KEY_VALUE = "value";
+    private static final String KEY_BOT_ID = "botId";
+    private static final String KEY_BOT_VERSION = "botVersion";
+    private static final String KEY_CONVERSATION_STATE = "conversationState";
     private final MongoCollection<Document> conversationCollectionDocument;
     private final MongoCollection<ConversationMemorySnapshot> conversationCollectionObject;
 
@@ -40,13 +44,13 @@ public class ConversationMemoryStore implements IConversationMemoryStore, IResou
         this.conversationCollectionDocument = database.getCollection(CONVERSATION_COLLECTION, Document.class);
         this.conversationCollectionObject = database.getCollection(CONVERSATION_COLLECTION, ConversationMemorySnapshot.class);
         Observable.fromPublisher(
-                conversationCollectionDocument.createIndex(Indexes.ascending(CONVERSATION_STATE_FIELD))
+                conversationCollectionDocument.createIndex(Indexes.ascending(KEY_CONVERSATION_STATE))
         ).blockingFirst();
         Observable.fromPublisher(
-                conversationCollectionDocument.createIndex(Indexes.ascending(CONVERSATION_BOT_ID_FIELD))
+                conversationCollectionDocument.createIndex(Indexes.ascending(KEY_BOT_ID))
         ).blockingFirst();
         Observable.fromPublisher(
-                conversationCollectionDocument.createIndex(Indexes.ascending(CONVERSATION_BOT_VERSION_FIELD))
+                conversationCollectionDocument.createIndex(Indexes.ascending(KEY_BOT_VERSION))
         ).blockingFirst();
     }
 
@@ -65,22 +69,18 @@ public class ConversationMemoryStore implements IConversationMemoryStore, IResou
     }
 
     @Override
-    public ConversationMemorySnapshot loadConversationMemorySnapshot(String conversationId)
-            throws IResourceStore.ResourceNotFoundException {
-
+    public ConversationMemorySnapshot loadConversationMemorySnapshot(String conversationId) {
         var memorySnapshot = Observable.fromPublisher(conversationCollectionObject.find(
                 new Document(OBJECT_ID, new ObjectId(conversationId))).first()).blockingFirst();
 
-        for (ConversationMemorySnapshot.ConversationStepSnapshot conversationStep : memorySnapshot.getConversationSteps()) {
-            for (ConversationMemorySnapshot.PackageRunSnapshot aPackage : conversationStep.getPackages()) {
-                for (ConversationMemorySnapshot.ResultSnapshot lifecycleTask : aPackage.getLifecycleTasks()) {
-                    if (lifecycleTask.getKey().startsWith("context")) {
-                        Object result = lifecycleTask.getResult();
+        for (var conversationStep : memorySnapshot.getConversationSteps()) {
+            for (var aPackage : conversationStep.getPackages()) {
+                for (var lifecycleTask : aPackage.getLifecycleTasks()) {
+                    if (lifecycleTask.getKey().startsWith(KEY_CONTEXT)) {
+                        var result = lifecycleTask.getResult();
                         if (result instanceof LinkedHashMap) {
-                            LinkedHashMap<String, Object> map = (LinkedHashMap<String, Object>) result;
-                            Context context = new Context(
-                                    Context.ContextType.valueOf(map.get("type").toString()),
-                                    map.get("value"));
+                            var map = (LinkedHashMap<String, Object>) result;
+                            var context = new Context(valueOf(map.get(KEY_TYPE).toString()), map.get(KEY_VALUE));
                             lifecycleTask.setResult(context);
                         }
                     }
@@ -88,12 +88,7 @@ public class ConversationMemoryStore implements IConversationMemoryStore, IResou
             }
         }
 
-        if (memorySnapshot == null) {
-            String message = "Could not find ConversationMemorySnapshot (conversationId=%s)";
-            message = String.format(message, conversationId);
-            throw new IResourceStore.ResourceNotFoundException(message);
-        }
-
+        memorySnapshot.setConversationId(conversationId);
         return memorySnapshot;
     }
 
@@ -105,11 +100,11 @@ public class ConversationMemoryStore implements IConversationMemoryStore, IResou
             ArrayList<ConversationMemorySnapshot> retRet = new ArrayList<>();
 
             Document query = new Document();
-            query.put("botId", botId);
-            query.put("botVersion", botVersion);
-            query.put("conversationState", new Document("$ne", ENDED.toString()));
+            query.put(KEY_BOT_ID, botId);
+            query.put(KEY_BOT_VERSION, botVersion);
+            query.put(KEY_CONVERSATION_STATE, new Document("$ne", ENDED.toString()));
 
-            Iterable<ConversationMemorySnapshot> ret = Observable.fromPublisher(conversationCollectionObject.find(query)).blockingIterable();
+            var ret = Observable.fromPublisher(conversationCollectionObject.find(query)).blockingIterable();
             ret.forEach(retRet::add);
             return retRet;
         } catch (Exception e) {
@@ -119,13 +114,17 @@ public class ConversationMemoryStore implements IConversationMemoryStore, IResou
 
     @Override
     public void setConversationState(String conversationId, ConversationState conversationState) {
-        Document updateConversationStateField = new Document("$set", new Document(CONVERSATION_STATE_FIELD, conversationState.name()));
-        Observable.fromPublisher(conversationCollectionDocument.updateOne(new Document(OBJECT_ID, new ObjectId(conversationId)), updateConversationStateField)).blockingFirst();
+        var updateConversationStateField =
+                new Document("$set", new Document(KEY_CONVERSATION_STATE, conversationState.name()));
+
+        Observable.fromPublisher(conversationCollectionDocument.updateOne(
+                new Document(OBJECT_ID, new ObjectId(conversationId)), updateConversationStateField)).blockingFirst();
     }
 
     @Override
     public void deleteConversationMemorySnapshot(String conversationId) {
-        Observable.fromPublisher(conversationCollectionDocument.deleteOne(new Document(OBJECT_ID, new ObjectId(conversationId)))).blockingFirst();
+        Observable.fromPublisher(conversationCollectionDocument.deleteOne(
+                new Document(OBJECT_ID, new ObjectId(conversationId)))).blockingFirst();
     }
 
     @Override
@@ -133,10 +132,10 @@ public class ConversationMemoryStore implements IConversationMemoryStore, IResou
         try {
             Document conversationMemoryDocument = Observable.fromPublisher(conversationCollectionDocument.find(
                             new Document(OBJECT_ID, new ObjectId(conversationId))).
-                    projection(new Document(CONVERSATION_STATE_FIELD, 1).append(OBJECT_ID, 0)).
+                    projection(new Document(KEY_CONVERSATION_STATE, 1).append(OBJECT_ID, 0)).
                     first()).blockingFirst();
-            if (conversationMemoryDocument.containsKey(CONVERSATION_STATE_FIELD)) {
-                return ConversationState.valueOf(conversationMemoryDocument.get(CONVERSATION_STATE_FIELD).toString());
+            if (conversationMemoryDocument.containsKey(KEY_CONVERSATION_STATE)) {
+                return ConversationState.valueOf(conversationMemoryDocument.get(KEY_CONVERSATION_STATE).toString());
             }
         } catch (NoSuchElementException ne) {
             return null;
@@ -146,13 +145,15 @@ public class ConversationMemoryStore implements IConversationMemoryStore, IResou
 
     @Override
     public Long getActiveConversationCount(String botId, Integer botVersion) {
-        Bson query = Filters.and(Filters.eq("botId", botId), Filters.eq("botVersion", botVersion),
-                Filters.not(new Document("conversationState", ENDED.toString())));
+        Bson query = Filters.and(Filters.eq(KEY_BOT_ID, botId), Filters.eq(KEY_BOT_VERSION, botVersion),
+                Filters.not(new Document(KEY_CONVERSATION_STATE, ENDED.toString())));
         return Observable.fromPublisher(conversationCollectionDocument.countDocuments(query)).blockingFirst();
     }
 
     @Override
-    public ConversationMemorySnapshot readIncludingDeleted(String id, Integer version) throws IResourceStore.ResourceNotFoundException, IResourceStore.ResourceStoreException {
+    public ConversationMemorySnapshot readIncludingDeleted(String id, Integer version)
+            throws IResourceStore.ResourceNotFoundException, IResourceStore.ResourceStoreException {
+
         return loadConversationMemorySnapshot(id);
     }
 
