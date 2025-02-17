@@ -6,6 +6,7 @@ import ai.labs.eddi.modules.templating.OutputTemplateTask;
 import ai.labs.eddi.modules.templating.impl.HtmlTemplateEngine;
 import ai.labs.eddi.modules.templating.impl.JavaScriptTemplateEngine;
 import ai.labs.eddi.modules.templating.impl.TextTemplateEngine;
+import ai.labs.eddi.modules.templating.impl.dialects.encoding.EncoderDialect;
 import ai.labs.eddi.modules.templating.impl.dialects.json.JsonDialect;
 import ai.labs.eddi.modules.templating.impl.dialects.uuid.UUIDDialect;
 import io.quarkus.runtime.Startup;
@@ -71,6 +72,7 @@ public class TemplateEngineModule {
         templateEngine.addTemplateResolver(templateResolver);
         templateEngine.addDialect(new UUIDDialect());
         templateEngine.addDialect(new JsonDialect());
+        templateEngine.addDialect(new EncoderDialect());
 
         return templateEngine;
     }
