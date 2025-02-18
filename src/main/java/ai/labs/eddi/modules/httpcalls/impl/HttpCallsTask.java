@@ -9,6 +9,7 @@ import ai.labs.eddi.datastore.serialization.IJsonSerialization;
 import ai.labs.eddi.engine.httpclient.IHttpClient;
 import ai.labs.eddi.engine.httpclient.IHttpClient.Method;
 import ai.labs.eddi.engine.httpclient.IRequest;
+import ai.labs.eddi.engine.httpclient.IRequest.HttpRequestException;
 import ai.labs.eddi.engine.httpclient.IResponse;
 import ai.labs.eddi.engine.lifecycle.ILifecycleTask;
 import ai.labs.eddi.engine.lifecycle.exceptions.LifecycleException;
@@ -16,12 +17,11 @@ import ai.labs.eddi.engine.lifecycle.exceptions.PackageConfigurationException;
 import ai.labs.eddi.engine.memory.IConversationMemory;
 import ai.labs.eddi.engine.memory.IConversationMemory.IWritableConversationStep;
 import ai.labs.eddi.engine.memory.IData;
-import ai.labs.eddi.engine.memory.IDataFactory;
 import ai.labs.eddi.engine.memory.IMemoryItemConverter;
 import ai.labs.eddi.engine.runtime.IRuntime;
 import ai.labs.eddi.engine.runtime.client.configuration.IResourceClientLibrary;
 import ai.labs.eddi.engine.runtime.service.ServiceException;
-import ai.labs.eddi.modules.templating.ITemplatingEngine;
+import ai.labs.eddi.modules.templating.ITemplatingEngine.TemplateEngineException;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import org.jboss.logging.Logger;
@@ -38,6 +38,7 @@ import static ai.labs.eddi.utils.MatchingUtilities.executeValuePath;
 import static ai.labs.eddi.utils.RuntimeUtilities.isNullOrEmpty;
 import static jakarta.ws.rs.core.MediaType.TEXT_PLAIN;
 import static java.lang.String.format;
+import static java.lang.System.currentTimeMillis;
 import static java.util.Objects.requireNonNullElse;
 
 @ApplicationScoped
@@ -52,8 +53,6 @@ public class HttpCallsTask implements ILifecycleTask {
     private final IHttpClient httpClient;
     private final IJsonSerialization jsonSerialization;
     private final IResourceClientLibrary resourceClientLibrary;
-    private final IDataFactory dataFactory;
-    private final ITemplatingEngine templatingEngine;
     private final IMemoryItemConverter memoryItemConverter;
     private final IRuntime runtime;
     private final PrePostUtils prePostUtils;
@@ -61,15 +60,14 @@ public class HttpCallsTask implements ILifecycleTask {
     private static final Logger LOGGER = Logger.getLogger(HttpCallsTask.class);
 
     @Inject
-    public HttpCallsTask(IHttpClient httpClient, IJsonSerialization jsonSerialization,
-                         IResourceClientLibrary resourceClientLibrary, IDataFactory dataFactory,
-                         ITemplatingEngine templatingEngine, IMemoryItemConverter memoryItemConverter,
+    public HttpCallsTask(IHttpClient httpClient,
+                         IJsonSerialization jsonSerialization,
+                         IResourceClientLibrary resourceClientLibrary,
+                         IMemoryItemConverter memoryItemConverter,
                          IRuntime runtime, PrePostUtils prePostUtils) {
         this.httpClient = httpClient;
         this.jsonSerialization = jsonSerialization;
         this.resourceClientLibrary = resourceClientLibrary;
-        this.dataFactory = dataFactory;
-        this.templatingEngine = templatingEngine;
         this.memoryItemConverter = memoryItemConverter;
         this.runtime = runtime;
         this.prePostUtils = prePostUtils;
@@ -108,12 +106,12 @@ public class HttpCallsTask implements ILifecycleTask {
             for (var call : filteredHttpCalls) {
                 try {
                     var preRequest = call.getPreRequest();
-                    templateDataObjects = prePostUtils.executePreRequestPropertyInstructions(memory, templateDataObjects, preRequest);
+                    templateDataObjects = prePostUtils.
+                            executePreRequestPropertyInstructions(memory, templateDataObjects, preRequest);
 
                     if (call.getFireAndForget()) {
-                        executeFireAndForgetCalls(
-                                httpCallsConfig.getTargetServerUrl(),
-                                call, preRequest, templateDataObjects);
+                        executeFireAndForgetCalls(httpCallsConfig.getTargetServerUrl(), call.getRequest(), preRequest, templateDataObjects, call.getName()
+                        );
                     } else {
                         IRequest request;
                         IResponse response = null;
@@ -124,7 +122,8 @@ public class HttpCallsTask implements ILifecycleTask {
                             do {
                                 request = buildRequest(
                                         httpCallsConfig.getTargetServerUrl(), call.getRequest(), templateDataObjects);
-                                prePostUtils.createMemoryEntry(currentStep, request.toMap(), call.getName() + "Request", KEY_HTTP_CALLS);
+                                var objectName = call.getName() + "Request";
+                                prePostUtils.createMemoryEntry(currentStep, request.toMap(), objectName, KEY_HTTP_CALLS);
                                 response = executeAndMeasureRequest(call, request, retryCall, amountOfExecutions);
 
                                 var isResponseSuccessful = response.getHttpCode() >= 200 && response.getHttpCode() < 300;
@@ -136,9 +135,11 @@ public class HttpCallsTask implements ILifecycleTask {
 
                                 var responseHeaderObjectName = call.getResponseHeaderObjectName();
                                 if (!isNullOrEmpty(responseHeaderObjectName)) {
-                                    var responseObjectHeader = requireNonNullElse(response.getHttpHeader(), new HashMap<>());
+                                    var responseObjectHeader =
+                                            requireNonNullElse(response.getHttpHeader(), new HashMap<>());
                                     templateDataObjects.put(responseHeaderObjectName, responseObjectHeader);
-                                    prePostUtils.createMemoryEntry(currentStep, responseObjectHeader, responseHeaderObjectName, KEY_HTTP_CALLS);
+                                    prePostUtils.createMemoryEntry(currentStep, responseObjectHeader,
+                                            responseHeaderObjectName, KEY_HTTP_CALLS);
                                 }
 
                                 if (isResponseSuccessful && call.getSaveResponse()) {
@@ -191,14 +192,15 @@ public class HttpCallsTask implements ILifecycleTask {
     }
 
     private IResponse executeAndMeasureRequest(HttpCall call, IRequest request, boolean retryCall, int amountOfExecutions)
-            throws IRequest.HttpRequestException, ExecutionException, InterruptedException {
+            throws HttpRequestException, ExecutionException, InterruptedException {
 
-        LOGGER.info(call.getName() + " Request:  " + (amountOfExecutions > 0 ? amountOfExecutions + ". retry - " : "") + request.toString());
+        LOGGER.info(call.getName() + " Request: " +
+                (amountOfExecutions > 0 ? amountOfExecutions + ". retry - " : "") + request.toString());
         int delayInMillis = getDelayInMillis(call, retryCall, amountOfExecutions);
 
-        long executionStart = System.currentTimeMillis();
+        long executionStart = currentTimeMillis();
         IResponse response = executeRequest(request, delayInMillis);
-        long executionEnd = System.currentTimeMillis();
+        long executionEnd = currentTimeMillis();
         long duration = executionEnd - executionStart;
 
         LOGGER.info(call.getName() + " Response: " + response.toString());
@@ -209,10 +211,10 @@ public class HttpCallsTask implements ILifecycleTask {
     }
 
     private void executeFireAndForgetCalls(String targetServerUrl,
-                                           HttpCall call,
+                                           Request callRequest,
                                            HttpPreRequest preRequest,
-                                           Map<String, Object> templateDataObjects)
-            throws ITemplatingEngine.TemplateEngineException, IRequest.HttpRequestException {
+                                           Map<String, Object> templateDataObjects,
+                                           String callName) throws TemplateEngineException, HttpRequestException {
 
         if (preRequest != null && preRequest.getBatchRequests() != null) {
             BatchRequestBuildingInstruction batchRequest = preRequest.getBatchRequests();
@@ -228,28 +230,40 @@ public class HttpCallsTask implements ILifecycleTask {
                 IRequest request;
                 for (Object iterationObject : batchIterationList) {
                     templateDataObjects.put(batchRequest.getIterationObjectName(), iterationObject);
-                    request = buildRequest(targetServerUrl, call.getRequest(), templateDataObjects);
+                    request = buildRequest(targetServerUrl, callRequest, templateDataObjects);
                     if (batchRequest.getExecuteCallsSequentially()) {
-                        request.send();
-                        LOGGER.info("Batch Request: " + request);
+                        long executionStart = currentTimeMillis();
+                        LOGGER.info(callName + " Batch Request: " + request);
+                        IResponse response = request.send();
+                        logExecutionResponse(response, callName, executionStart, currentTimeMillis(), false);
                     } else {
-                        request.send(r -> {
-                            //ignore response
-                        });
-                        LOGGER.info("Batch Request (f'n'f): " + request);
+                        executeFireAndForgetCall(request, callName);
                     }
                 }
                 return null;
             }, null);
 
-
         } else {
-            IRequest request = buildRequest(targetServerUrl, call.getRequest(), templateDataObjects);
-            request.send(r -> {
-                //ignore response
-            });
-            LOGGER.info("Request (f'n'f): " + request);
+            IRequest request = buildRequest(targetServerUrl, callRequest, templateDataObjects);
+            executeFireAndForgetCall(request, callName);
         }
+    }
+
+    private static void executeFireAndForgetCall(IRequest request, String httpCallsName)
+            throws HttpRequestException {
+
+        LOGGER.info(httpCallsName + " Request (f'n'f): " + request);
+        long executionStart = currentTimeMillis();
+        request.send(res ->
+                logExecutionResponse(res, httpCallsName, executionStart, currentTimeMillis(), true));
+    }
+
+    private static void logExecutionResponse(IResponse response, String httpCallsName,
+                                             long executionStart, long executionEnd, boolean fireAndForget) {
+
+        long duration = executionEnd - executionStart;
+        LOGGER.info(httpCallsName + " Response " + (fireAndForget ? "(f'n'f)" : "") + ": " + response.toString());
+        LOGGER.info(httpCallsName + format(" Execution time: %sms\n", duration));
     }
 
     private static int getDelayInMillis(HttpCall call, boolean retryCall, int amountOfExecutions) {
@@ -273,7 +287,7 @@ public class HttpCallsTask implements ILifecycleTask {
     }
 
     private IResponse executeRequest(IRequest request, int delay)
-            throws IRequest.HttpRequestException, ExecutionException, InterruptedException {
+            throws HttpRequestException, ExecutionException, InterruptedException {
 
         if (delay > 0) {
             return runtime.submitScheduledCallable(
@@ -287,7 +301,8 @@ public class HttpCallsTask implements ILifecycleTask {
 
     private boolean retryCall(HttpPostResponse postResponse,
                               Map<String, Object> conversationValues,
-                              int amountOfExecutions, int httpCode, String contentAsString) throws HttpCallsValidationException {
+                              int amountOfExecutions, int httpCode, String contentAsString)
+            throws HttpCallsValidationException {
 
         if (isNullOrEmpty(postResponse)) {
             return false;
@@ -327,7 +342,7 @@ public class HttpCallsTask implements ILifecycleTask {
 
     private IRequest buildRequest(String targetServerUrl, Request requestConfig,
                                   Map<String, Object> templateDataObjects)
-            throws ITemplatingEngine.TemplateEngineException {
+            throws TemplateEngineException {
 
         String path = requestConfig.getPath().trim();
         if (!path.startsWith(SLASH_CHAR) && !path.isEmpty() && !path.startsWith("http")) {

@@ -27,11 +27,9 @@ import ognl.Ognl;
 
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
+
 import java.net.URI;
-import java.util.Collections;
-import java.util.LinkedList;
-import java.util.List;
-import java.util.Map;
+import java.util.*;
 import java.util.stream.Collectors;
 
 import static ai.labs.eddi.configs.properties.model.Property.Scope.conversation;
@@ -132,7 +130,8 @@ public class PropertySetterTask implements ILifecycleTask {
                     List<String> actions = setOnAction.getActions();
                     if (actions.contains(action) || actions.contains("*")) {
                         setOnAction.getSetProperties().stream().
-                                filter(propertyInstruction -> !propertyInstructions.contains(propertyInstruction)).
+                                filter(propertyInstruction ->
+                                        !propertyInstructions.contains(propertyInstruction)).
                                 forEach(propertyInstructions::add);
                     }
                 });
@@ -152,37 +151,48 @@ public class PropertySetterTask implements ILifecycleTask {
                             if (!conversationProperties.containsKey(name) || property.getOverride()) {
                                 if (!isNullOrEmpty(fromObjectPath)) {
                                     templatedObj = Ognl.getValue(fromObjectPath, templateDataObjects);
-                                    if (templatedObj instanceof String) {
-                                        templateString = templatingEngine.processTemplate(templatedObj.toString(), templateDataObjects);
-                                        conversationProperties.put(name, new Property(name, templateString, scope));
-                                    } else if (templatedObj instanceof Map valueMap) {
-                                        conversationProperties.put(name, new Property(name, valueMap, scope));
-                                    } else if (templatedObj instanceof List valueList) {
-                                        conversationProperties.put(name, new Property(name, valueList, scope));
-                                    } else if (templatedObj instanceof Integer valueInt) {
-                                        conversationProperties.put(name, new Property(name, valueInt, scope));
-                                    } else if (templatedObj instanceof Float valueFloat) {
-                                        conversationProperties.put(name, new Property(name, valueFloat, scope));
-                                    }
-
-                                    if (!isNullOrEmpty(templatedObj) && !isNullOrEmpty(toObjectPath)) {
+                                    if (!isNullOrEmpty(toObjectPath)) {
                                         Ognl.setValue(toObjectPath, templateDataObjects, templatedObj);
+                                    } else if (templatedObj instanceof String) {
+                                        templateString = templatingEngine.processTemplate(
+                                                templatedObj.toString(),
+                                                templateDataObjects);
+                                        conversationProperties.put(name,
+                                                new Property(name, templateString, scope));
+                                    } else if (templatedObj instanceof Map valueMap) {
+                                        conversationProperties.put(name,
+                                                new Property(name, new LinkedHashMap<>(valueMap), scope));
+                                    } else if (templatedObj instanceof List valueList) {
+                                        conversationProperties.put(name,
+                                                new Property(name, new ArrayList<>(valueList), scope));
+                                    } else if (templatedObj instanceof Integer valueInt) {
+                                        conversationProperties.put(name,
+                                                new Property(name, valueInt, scope));
+                                    } else if (templatedObj instanceof Float valueFloat) {
+                                        conversationProperties.put(name,
+                                                new Property(name, valueFloat, scope));
+                                    } else if (templatedObj instanceof Boolean valueBoolean) {
+                                        conversationProperties.put(name,
+                                                new Property(name, valueBoolean, scope));
                                     }
                                 } else {
                                     var valueString = property.getValueString();
                                     if (!isNullOrEmpty(valueString)) {
-                                        templateString = templatingEngine.processTemplate(valueString, templateDataObjects);
+                                        templateString =
+                                                templatingEngine.processTemplate(valueString, templateDataObjects);
                                         conversationProperties.put(name, new Property(name, templateString, scope));
                                     }
 
-                                    var valueObject = property.getValueObject();
-                                    if (valueObject != null) {
-                                        conversationProperties.put(name, new Property(name, valueObject, scope));
+                                    var valueMap = property.getValueObject();
+                                    if (valueMap != null) {
+                                        conversationProperties.put(name,
+                                                new Property(name, new LinkedHashMap<>(valueMap), scope));
                                     }
 
                                     var valueList = property.getValueList();
                                     if (valueList != null) {
-                                        conversationProperties.put(name, new Property(name, valueList, scope));
+                                        conversationProperties.put(name,
+                                                new Property(name, new ArrayList<>(valueList), scope));
                                     }
 
                                     var valueInt = property.getValueInt();
@@ -341,7 +351,7 @@ public class PropertySetterTask implements ILifecycleTask {
                 propertyInstruction.setValueInt(i);
             } else if (property.containsKey(VALUE_FLOAT) && property.get(VALUE_FLOAT) instanceof Float f) {
                 propertyInstruction.setValueFloat(f);
-            }else if (property.containsKey(VALUE_BOOLEAN) && property.get(VALUE_BOOLEAN) instanceof Boolean b) {
+            } else if (property.containsKey(VALUE_BOOLEAN) && property.get(VALUE_BOOLEAN) instanceof Boolean b) {
                 propertyInstruction.setValueBoolean(b);
             }
 

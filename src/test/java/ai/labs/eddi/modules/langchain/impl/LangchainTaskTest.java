@@ -112,7 +112,7 @@ class LangchainTaskTest {
         var langChainConfig = new LangChainConfiguration(List.of(
                 new LangChainConfiguration.Task(
                         List.of("action1"), "taskId", "openai", "description",
-                        null, null, null, null, parameters)
+                        null, parameters, null, null, null)
         ));
 
         IData outputData = mock(IData.class);
@@ -161,9 +161,7 @@ class LangchainTaskTest {
                 "taskId",
                 "taskType",
                 "A task description",
-                null, null,
-                null, null,
-                Map.of("key", "value")
+                null, Map.of("key", "value"), null, null, null
         )));
 
         when(resourceClientLibrary.getResource(any(URI.class), eq(LangChainConfiguration.class))).thenReturn(expectedConfig);

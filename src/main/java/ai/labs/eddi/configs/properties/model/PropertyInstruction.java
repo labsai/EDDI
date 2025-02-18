@@ -1,15 +1,13 @@
 package ai.labs.eddi.configs.properties.model;
 
 import ai.labs.eddi.configs.http.model.HttpCodeValidator;
-import lombok.AllArgsConstructor;
-import lombok.Getter;
-import lombok.NoArgsConstructor;
-import lombok.Setter;
+import lombok.*;
 
 @Getter
 @Setter
 @NoArgsConstructor
 @AllArgsConstructor
+@EqualsAndHashCode(callSuper = true)
 public class PropertyInstruction extends Property {
     private String fromObjectPath = "";
     private String toObjectPath = "";
