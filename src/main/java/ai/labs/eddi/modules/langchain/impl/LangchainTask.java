@@ -47,12 +47,9 @@ public class LangchainTask implements ILifecycleTask {
     private static final String KEY_INCLUDE_FIRST_BOT_MESSAGE = "includeFirstBotMessage";
     private static final String KEY_CONVERT_TO_OBJECT = "convertToObject";
     private static final String KEY_ADD_TO_OUTPUT = "addToOutput";
-    private static final String KEY_CONVERSATION_START = "CONVERSATION_START";
-    private static final String KEY_RUN_ON_CONVERSATION_START = "runOnConversationStart";
 
     static final String MEMORY_OUTPUT_IDENTIFIER = "output";
     static final String LANGCHAIN_OUTPUT_IDENTIFIER = MEMORY_OUTPUT_IDENTIFIER + ":text:langchain";
-    public static final String MATCH_ALL_OPERATOR = "*";
 
     private final IResourceClientLibrary resourceClientLibrary;
     private final IDataFactory dataFactory;
@@ -111,19 +108,9 @@ public class LangchainTask implements ILifecycleTask {
             }
 
             for (var task : langChainConfig.tasks()) {
-                if (task.actions().contains(MATCH_ALL_OPERATOR) ||
-                        task.actions().stream().anyMatch(actions::contains)) {
-
+                if (task.actions().stream().anyMatch(actions::contains)) {
                     var processedParams = runTemplateEngineOnParams(task.parameters(), templateDataObjects);
                     var messages = new LinkedList<ChatMessage>();
-
-                    if (actions.contains(KEY_CONVERSATION_START) &&
-                            (isNullOrEmpty(processedParams.get(KEY_RUN_ON_CONVERSATION_START)) ||
-                                    !Boolean.parseBoolean(processedParams.get(KEY_RUN_ON_CONVERSATION_START)))) {
-
-                        // don't run on CONVERSATION_START by default
-                        continue;
-                    }
 
                     if (!isNullOrEmpty(processedParams.get(KEY_SYSTEM_MESSAGE))) {
                         var systemMessage = processedParams.get(KEY_SYSTEM_MESSAGE);

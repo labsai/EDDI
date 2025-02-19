@@ -2,6 +2,9 @@ package ai.labs.eddi.modules.output.impl;
 
 import ai.labs.eddi.configs.output.model.OutputConfiguration;
 import ai.labs.eddi.configs.output.model.OutputConfigurationSet;
+import ai.labs.eddi.configs.packages.model.ExtensionDescriptor;
+import ai.labs.eddi.configs.packages.model.ExtensionDescriptor.ConfigValue;
+import ai.labs.eddi.configs.packages.model.ExtensionDescriptor.FieldType;
 import ai.labs.eddi.engine.lifecycle.ILifecycleTask;
 import ai.labs.eddi.engine.lifecycle.exceptions.PackageConfigurationException;
 import ai.labs.eddi.engine.memory.IConversationMemory;
@@ -10,12 +13,9 @@ import ai.labs.eddi.engine.memory.IConversationMemory.IConversationStepStack;
 import ai.labs.eddi.engine.memory.IConversationMemory.IWritableConversationStep;
 import ai.labs.eddi.engine.memory.IData;
 import ai.labs.eddi.engine.memory.IDataFactory;
+import ai.labs.eddi.engine.model.Context;
 import ai.labs.eddi.engine.runtime.client.configuration.IResourceClientLibrary;
 import ai.labs.eddi.engine.runtime.service.ServiceException;
-import ai.labs.eddi.engine.model.Context;
-import ai.labs.eddi.configs.packages.model.ExtensionDescriptor;
-import ai.labs.eddi.configs.packages.model.ExtensionDescriptor.ConfigValue;
-import ai.labs.eddi.configs.packages.model.ExtensionDescriptor.FieldType;
 import ai.labs.eddi.modules.output.IOutputFilter;
 import ai.labs.eddi.modules.output.IOutputGeneration;
 import ai.labs.eddi.modules.output.model.OutputEntry;
@@ -26,17 +26,15 @@ import ai.labs.eddi.modules.output.model.types.QuickReplyOutputItem;
 import ai.labs.eddi.utils.StringUtilities;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import org.jboss.logging.Logger;
-
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
+
 import java.net.URI;
 import java.util.*;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 
 import static ai.labs.eddi.engine.memory.ContextUtilities.retrieveContextLanguageFromLongTermMemory;
-import static java.lang.String.format;
 
 /**
  * @author ginccc
@@ -55,12 +53,10 @@ public class OutputGenerationTask implements ILifecycleTask {
     private static final String KEY_EXPRESSIONS = "expressions";
     private static final String KEY_IS_DEFAULT = "isDefault";
     private static final String OUTPUT_TYPE_QUICK_REPLY = "quickReply";
-    public static final String OUTPUT_TYPE = "output";
+    private static final String OUTPUT_TYPE = "output";
     private final IResourceClientLibrary resourceClientLibrary;
     private final IDataFactory dataFactory;
     private final ObjectMapper objectMapper;
-
-    private static final Logger log = Logger.getLogger(OutputGenerationTask.class);
 
     @Inject
     public OutputGenerationTask(IResourceClientLibrary resourceClientLibrary,
@@ -108,10 +104,6 @@ public class OutputGenerationTask implements ILifecycleTask {
                             storeQuickReplies(currentStep, outputEntry.getQuickReplies(), outputEntry.getAction());
                         }));
             }
-        } else {
-            log.error(
-                    format("OutputGeneration component was unexpectedly null. (botId=%s, conversationId=%s).",
-                            memory.getBotId(), memory.getConversationId()));
         }
     }
 
@@ -221,31 +213,33 @@ public class OutputGenerationTask implements ILifecycleTask {
     @Override
     public Object configure(Map<String, Object> configuration, Map<String, Object> extensions)
             throws PackageConfigurationException {
-
-        Object uriObj = configuration.get(OUTPUT_SET_CONFIG_URI);
-        URI uri = URI.create(uriObj.toString());
-
         try {
-            var outputConfigurationSet = resourceClientLibrary.getResource(uri, OutputConfigurationSet.class);
-            var outputLanguage = outputConfigurationSet.getLang();
-            var outputSet = outputConfigurationSet.getOutputSet();
-            outputSet.sort((o1, o2) -> {
-                int comparisonOfKeys = o1.getAction().compareTo(o2.getAction());
-                if (comparisonOfKeys == 0) {
-                    return Integer.compare(o1.getTimesOccurred(), o2.getTimesOccurred());
-                } else {
-                    return comparisonOfKeys;
-                }
-            });
+            Object uriObj = configuration.get(OUTPUT_SET_CONFIG_URI);
+            if (uriObj != null) {
+                URI uri = URI.create(uriObj.toString());
+                var outputConfigurationSet = resourceClientLibrary.getResource(uri, OutputConfigurationSet.class);
+                var outputLanguage = outputConfigurationSet.getLang();
+                var outputSet = outputConfigurationSet.getOutputSet();
+                outputSet.sort((o1, o2) -> {
+                    int comparisonOfKeys = o1.getAction().compareTo(o2.getAction());
+                    if (comparisonOfKeys == 0) {
+                        return Integer.compare(o1.getTimesOccurred(), o2.getTimesOccurred());
+                    } else {
+                        return comparisonOfKeys;
+                    }
+                });
 
-            var outputGeneration = new OutputGeneration(outputLanguage);
-            outputSet.forEach(outputConfig -> outputGeneration.addOutputEntry(
-                    new OutputEntry(outputConfig.getAction(),
-                            outputConfig.getTimesOccurred(),
-                            convertOutputTypesConfig(outputConfig.getOutputs()),
-                            convertQuickRepliesConfig(outputConfig.getQuickReplies()))));
+                var outputGeneration = new OutputGeneration(outputLanguage);
+                outputSet.forEach(outputConfig -> outputGeneration.addOutputEntry(
+                        new OutputEntry(outputConfig.getAction(),
+                                outputConfig.getTimesOccurred(),
+                                convertOutputTypesConfig(outputConfig.getOutputs()),
+                                convertQuickRepliesConfig(outputConfig.getQuickReplies()))));
 
-            return outputGeneration;
+                return outputGeneration;
+            } else {
+                return null;
+            }
         } catch (ServiceException e) {
             String message = "Error while fetching OutputConfigurationSet!\n" + e.getLocalizedMessage();
             throw new PackageConfigurationException(message, e);
