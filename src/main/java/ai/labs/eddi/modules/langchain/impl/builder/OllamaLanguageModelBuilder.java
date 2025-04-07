@@ -1,7 +1,7 @@
 package ai.labs.eddi.modules.langchain.impl.builder;
 
 import dev.langchain4j.model.chat.ChatLanguageModel;
-import io.quarkiverse.langchain4j.ollama.OllamaChatLanguageModel;
+import dev.langchain4j.model.ollama.OllamaChatModel;
 import jakarta.enterprise.context.ApplicationScoped;
 
 import java.time.Duration;
@@ -18,10 +18,10 @@ public class OllamaLanguageModelBuilder implements ILanguageModelBuilder {
 
     @Override
     public ChatLanguageModel build(Map<String, String> parameters) {
-        var builder = OllamaChatLanguageModel.builder();
+        var builder = OllamaChatModel.builder();
 
         if (!isNullOrEmpty(parameters.get(KEY_MODEL))) {
-            builder.model(parameters.get(KEY_MODEL));
+            builder.modelName(parameters.get(KEY_MODEL));
         }
 
         if (!isNullOrEmpty(parameters.get(KEY_TIMEOUT))) {
