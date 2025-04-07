@@ -82,20 +82,23 @@ FROM registry.access.redhat.com/ubi9/openjdk-21-runtime:1.22
 
 ENV LANG='en_US.UTF-8' LANGUAGE='en_US:en'
 
+USER root
 
-# We make four distinct layers so if there are application changes the library layers can be re-used
+RUN mkdir -p /deployments/tmp/import && \
+    chown -R 185:0 /deployments/tmp && \
+    chmod -R 775 /deployments/tmp
+
 COPY --chown=185 target/quarkus-app/lib/ /deployments/lib/
 COPY --chown=185 target/quarkus-app/*.jar /deployments/
 COPY --chown=185 target/quarkus-app/app/ /deployments/app/
 COPY --chown=185 target/quarkus-app/quarkus/ /deployments/quarkus/
 COPY --chown=185 licenses/ /licenses/
 
-EXPOSE 7070
 USER 185
+EXPOSE 7070
 ENV JAVA_OPTS_APPEND="-Dquarkus.http.host=0.0.0.0 -Djava.util.logging.manager=org.jboss.logmanager.LogManager -Dfile.encoding=UTF8"
 # for debugging:
 # ENV JAVA_OPTS_APPEND="-agentlib:jdwp=transport=dt_socket,server=y,suspend=n,address=*:5005"
 ENV JAVA_APP_JAR="/deployments/quarkus-run.jar"
 
 ENTRYPOINT [ "/opt/jboss/container/java/run/run-java.sh" ]
-
