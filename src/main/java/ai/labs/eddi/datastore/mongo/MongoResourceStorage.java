@@ -136,9 +136,9 @@ public class MongoResourceStorage<T> implements IResourceStorage<T> {
         Document query = new Document();
         query.put("$gt", beginId);
         query.put("$lt", endId);
-        Document object = new Document();
-        object.put(ID_FIELD, query);
-        Observable.fromPublisher(historyCollection.deleteOne(object)).blockingFirst();
+        Document idQuery = new Document();
+        idQuery.put(ID_FIELD, query);
+        Observable.fromPublisher(historyCollection.deleteMany(idQuery)).blockingFirst();
     }
 
     @Override

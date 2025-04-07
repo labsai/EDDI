@@ -10,14 +10,21 @@ import ai.labs.eddi.engine.memory.model.SimpleConversationMemorySnapshot;
 import ai.labs.eddi.engine.memory.rest.IRestConversationStore;
 import ai.labs.eddi.engine.model.ConversationState;
 import ai.labs.eddi.engine.model.ConversationStatus;
-import org.jboss.logging.Logger;
-
+import ai.labs.eddi.engine.runtime.IRuntime;
+import ai.labs.eddi.engine.runtime.ThreadContext;
+import io.quarkus.scheduler.Scheduled;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import jakarta.ws.rs.InternalServerErrorException;
 import jakarta.ws.rs.NotFoundException;
 import jakarta.ws.rs.core.Response;
+import org.eclipse.microprofile.config.inject.ConfigProperty;
+import org.jboss.logging.Logger;
+
 import java.net.URI;
+import java.time.Duration;
+import java.time.Instant;
+import java.util.Date;
 import java.util.LinkedList;
 import java.util.List;
 
@@ -38,16 +45,24 @@ public class RestConversationStore implements IRestConversationStore {
     private final IDocumentDescriptorStore documentDescriptorStore;
     private final IConversationDescriptorStore conversationDescriptorStore;
     private final IConversationMemoryStore conversationMemoryStore;
+    private final IRuntime runtime;
+    private final Integer deleteEndedConversationsOnceOlderThanDays;
 
     private static final Logger log = Logger.getLogger(RestConversationStore.class);
 
     @Inject
     public RestConversationStore(IDocumentDescriptorStore documentDescriptorStore,
                                  IConversationDescriptorStore conversationDescriptorStore,
-                                 IConversationMemoryStore conversationMemoryStore) {
+                                 IConversationMemoryStore conversationMemoryStore,
+                                 IRuntime runtime,
+                                 @ConfigProperty(name = "eddi.conversations.deleteEndedConversationsOnceOlderThanDays")
+                                 Integer deleteEndedConversationsOnceOlderThanDays) {
+
         this.documentDescriptorStore = documentDescriptorStore;
         this.conversationDescriptorStore = conversationDescriptorStore;
         this.conversationMemoryStore = conversationMemoryStore;
+        this.runtime = runtime;
+        this.deleteEndedConversationsOnceOlderThanDays = deleteEndedConversationsOnceOlderThanDays;
     }
 
     @Override
@@ -111,7 +126,9 @@ public class RestConversationStore implements IRestConversationStore {
         }
     }
 
-    private List<ConversationDescriptor> readConversationDescriptors(Integer index, Integer limit, String filter) throws IResourceStore.ResourceStoreException, IResourceStore.ResourceNotFoundException {
+    private List<ConversationDescriptor> readConversationDescriptors(Integer index, Integer limit, String filter)
+            throws IResourceStore.ResourceStoreException, IResourceStore.ResourceNotFoundException {
+
         return conversationDescriptorStore.readDescriptors(DESCRIPTOR_TYPE, filter, index, limit, false);
     }
 
@@ -192,6 +209,46 @@ public class RestConversationStore implements IRestConversationStore {
 
         // DocumentDescriptorInterceptor will mark the DocumentDescriptor of this resource as deleted,
         // regardless of whether it has been permanently deleted or not
+    }
+
+    @Scheduled(every = "24h")
+    public void deleteEndedConversationsOlderThanXDays() {
+        runtime.submitCallable(() -> {
+            try {
+                var amountOfEndedConversations =
+                        permanentlyDeleteEndedConversationLogs(deleteEndedConversationsOnceOlderThanDays);
+
+                if (amountOfEndedConversations > 0) {
+                    log.info(format("Successfully deleted %s conversations, which were older than %s days",
+                            amountOfEndedConversations, deleteEndedConversationsOnceOlderThanDays));
+                }
+            } catch (IResourceStore.ResourceStoreException | IResourceStore.ResourceNotFoundException e) {
+                log.error(e.getLocalizedMessage(), e);
+            }
+            return null;
+        }, ThreadContext.getResources());
+    }
+
+    @Override
+    public Integer permanentlyDeleteEndedConversationLogs(Integer deleteOlderThanDays)
+            throws IResourceStore.ResourceStoreException, IResourceStore.ResourceNotFoundException {
+
+        int amountOfEndedConversations = 0;
+        if (deleteOlderThanDays != null && deleteOlderThanDays > -1) {
+            var deleteOlderThanThisDate = Date.from(Instant.now().minus(Duration.ofDays(deleteOlderThanDays)));
+            var endedConversationIds = conversationMemoryStore.getEndedConversationIds();
+
+            for (var endedConversationId : endedConversationIds) {
+                var descriptor = documentDescriptorStore.readDescriptor(endedConversationId, 0);
+                if (descriptor.getLastModifiedOn().before(deleteOlderThanThisDate)) {
+                    documentDescriptorStore.deleteAllDescriptor(endedConversationId);
+                    conversationMemoryStore.deleteConversationMemorySnapshot(endedConversationId);
+                    amountOfEndedConversations++;
+                }
+            }
+        }
+
+        return amountOfEndedConversations;
     }
 
     @Override

@@ -23,4 +23,6 @@ public interface IConversationMemoryStore {
     ConversationState getConversationState(String conversationId);
 
     Long getActiveConversationCount(String botId, Integer botVersion);
+
+    List<String> getEndedConversationIds();
 }

@@ -151,6 +151,13 @@ public class ConversationMemoryStore implements IConversationMemoryStore, IResou
     }
 
     @Override
+    public List<String> getEndedConversationIds() {
+        return Observable.fromPublisher(
+                conversationCollectionDocument.find(Filters.eq(KEY_CONVERSATION_STATE, ENDED.toString()))
+        ).blockingStream().map(document -> document.get(OBJECT_ID).toString()).collect(Collectors.toList());
+    }
+
+    @Override
     public ConversationMemorySnapshot readIncludingDeleted(String id, Integer version)
             throws IResourceStore.ResourceNotFoundException, IResourceStore.ResourceStoreException {
 

@@ -62,7 +62,7 @@ public class UserConversationStore implements IUserConversationStore {
 
     @Override
     public void createUserConversation(UserConversation userConversation)
-            throws IResourceStore.ResourceStoreException {
+            throws IResourceStore.ResourceStoreException, ResourceAlreadyExistsException {
         RuntimeUtilities.checkNotNull(userConversation, "userConversation");
         RuntimeUtilities.checkNotNull(userConversation.getIntent(), "userConversation.intent");
         RuntimeUtilities.checkNotNull(userConversation.getUserId(), "userConversation.userId");
@@ -100,7 +100,7 @@ public class UserConversationStore implements IUserConversationStore {
         }
 
         void createUserConversation(UserConversation userConversation)
-                throws IResourceStore.ResourceStoreException {
+                throws IResourceStore.ResourceStoreException, ResourceAlreadyExistsException {
 
             Document filter = new Document();
             filter.put(INTENT_FIELD, userConversation.getIntent());
@@ -117,8 +117,6 @@ public class UserConversationStore implements IUserConversationStore {
             } catch (NoSuchElementException e) {
                 //no user conversation with the given intent has been found, so we create a new one
                 Observable.fromPublisher(collection.insertOne(createDocument(userConversation))).blockingFirst();
-            } catch (ResourceAlreadyExistsException e) {
-                throw new RuntimeException(e);
             }
 
         }
