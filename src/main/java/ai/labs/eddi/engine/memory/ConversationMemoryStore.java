@@ -19,6 +19,7 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.NoSuchElementException;
+import java.util.stream.Collectors;
 
 import static ai.labs.eddi.engine.model.Context.ContextType.valueOf;
 import static ai.labs.eddi.engine.model.ConversationState.ENDED;

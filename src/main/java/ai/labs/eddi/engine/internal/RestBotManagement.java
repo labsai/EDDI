@@ -4,6 +4,7 @@ import ai.labs.eddi.configs.botmanagement.IRestBotTriggerStore;
 import ai.labs.eddi.configs.botmanagement.IUserConversationStore;
 import ai.labs.eddi.configs.properties.model.Property;
 import ai.labs.eddi.datastore.IResourceStore;
+import ai.labs.eddi.datastore.IResourceStore.ResourceAlreadyExistsException;
 import ai.labs.eddi.engine.IRestBotEngine;
 import ai.labs.eddi.engine.IRestBotManagement;
 import ai.labs.eddi.engine.model.*;
@@ -141,7 +142,11 @@ public class RestBotManagement implements IRestBotManagement {
 
         userConversation = getUserConversation(intent, userId);
         if (userConversation == null) {
-            userConversation = createNewConversation(intent, userId, language);
+            try {
+                userConversation = createNewConversation(intent, userId, language);
+            } catch (CannotCreateConversationException e) {
+                userConversation = getUserConversation(intent, userId);
+            }
             newlyCreatedConversation = true;
         }
 
@@ -271,7 +276,19 @@ public class RestBotManagement implements IRestBotManagement {
         if (responseHttpCode == 201) {
             var locationUri = URI.create(botResponse.getHeaders().get("location").getFirst().toString());
             var resourceId = RestUtilities.extractResourceId(locationUri);
-            return createUserConversation(intent, userId, botDeployment, resourceId.getId());
+            try {
+                return createUserConversation(intent, userId, botDeployment, resourceId.getId());
+            } catch (ResourceAlreadyExistsException e) {
+                throw new CannotCreateConversationException(
+                        String.format("Cannot create conversation for botId=%s in environment=%s (httpCode=%s), " +
+                                        "Conversation already exists",
+                                botId,
+                                botDeployment.getEnvironment(),
+                                responseHttpCode));
+            } catch (IResourceStore.ResourceStoreException e) {
+                log.error(e.getLocalizedMessage(), e);
+                throw new InternalServerErrorException();
+            }
         } else {
             throw new CannotCreateConversationException(
                     String.format("Cannot create conversation for botId=%s in environment=%s (httpCode=%s)",
@@ -282,7 +299,8 @@ public class RestBotManagement implements IRestBotManagement {
     }
 
     private UserConversation createUserConversation(String intent, String userId,
-                                                    BotDeployment botDeployment, String conversationId) {
+                                                    BotDeployment botDeployment, String conversationId)
+            throws ResourceAlreadyExistsException, IResourceStore.ResourceStoreException {
 
         UserConversation userConversation = new UserConversation(
                 intent,
@@ -313,13 +331,11 @@ public class RestBotManagement implements IRestBotManagement {
         }
     }
 
-    private void storeUserConversation(UserConversation userConversation) {
-        try {
+    private void storeUserConversation(UserConversation userConversation)
+            throws ResourceAlreadyExistsException, IResourceStore.ResourceStoreException {
+
             userConversationStore.createUserConversation(userConversation);
-        } catch (IResourceStore.ResourceAlreadyExistsException | IResourceStore.ResourceStoreException e) {
-            log.error(e.getLocalizedMessage(), e);
-            throw new InternalServerErrorException();
-        }
+
     }
 
     private void checkUserAuthIfApplicable(UserConversation userConversation) throws UnauthorizedException {
