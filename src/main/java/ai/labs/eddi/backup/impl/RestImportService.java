@@ -150,33 +150,36 @@ public class RestImportService extends AbstractBackupService implements IRestImp
             importBotZipFile(zippedBotConfigFiles, targetDir, response);
         } catch (IOException e) {
             log.error(e.getLocalizedMessage(), e);
-            response.resume(new InternalServerErrorException());
+            if (response != null) {
+                response.resume(new InternalServerErrorException());
+            }
         }
     }
 
-    private void importBotZipFile(InputStream zippedBotConfigFiles, File targetDir, AsyncResponse response) throws
-            IOException {
+    private void importBotZipFile(InputStream zippedBotConfigFiles, File targetDir, AsyncResponse response)
+            throws IOException {
+
         this.zipArchive.unzip(zippedBotConfigFiles, targetDir);
+        var targetDirPath = targetDir.getPath();
+        try (var directoryStream = Files.newDirectoryStream(Paths.get(targetDirPath),
+                path -> path.toString().endsWith(BOT_FILE_ENDING))) {
+            directoryStream.forEach(botFilePath -> {
+                try {
+                    String botFileString = readFile(botFilePath);
+                    BotConfiguration botConfiguration =
+                            jsonSerialization.deserialize(botFileString, BotConfiguration.class);
+                    botConfiguration.getPackages().forEach(packageUri ->
+                            parsePackage(targetDirPath, packageUri, botConfiguration, response));
 
-        String targetDirPath = targetDir.getPath();
-        Files.newDirectoryStream(Paths.get(targetDirPath),
-                        path -> path.toString().endsWith(BOT_FILE_ENDING))
-                .forEach(botFilePath -> {
-                    try {
-                        String botFileString = readFile(botFilePath);
-                        BotConfiguration botConfiguration =
-                                jsonSerialization.deserialize(botFileString, BotConfiguration.class);
-                        botConfiguration.getPackages().forEach(packageUri ->
-                                parsePackage(targetDirPath, packageUri, botConfiguration, response));
-
-                        URI newBotUri = createNewBot(botConfiguration);
-                        updateDocumentDescriptor(Paths.get(targetDirPath), buildOldBotUri(botFilePath), newBotUri);
-                        response.resume(Response.ok().location(newBotUri).build());
-                    } catch (IOException | RestInterfaceFactory.RestInterfaceFactoryException e) {
-                        log.error(e.getLocalizedMessage(), e);
-                        response.resume(new InternalServerErrorException());
-                    }
-                });
+                    URI newBotUri = createNewBot(botConfiguration);
+                    updateDocumentDescriptor(Paths.get(targetDirPath), buildOldBotUri(botFilePath), newBotUri);
+                    response.resume(Response.ok().location(newBotUri).build());
+                } catch (IOException | RestInterfaceFactory.RestInterfaceFactoryException e) {
+                    log.error(e.getLocalizedMessage(), e);
+                    response.resume(new InternalServerErrorException());
+                }
+            });
+        }
     }
 
     private URI buildOldBotUri(Path botPath) {
@@ -191,86 +194,94 @@ public class RestImportService extends AbstractBackupService implements IRestImp
             botConfiguration, AsyncResponse response) {
         try {
             IResourceId packageResourceId = RestUtilities.extractResourceId(packageUri);
+            if (packageResourceId == null) {
+                return;
+            }
             String packageId = packageResourceId.getId();
             String packageVersion = String.valueOf(packageResourceId.getVersion());
 
-            Files.newDirectoryStream(Paths.get(FileUtilities.buildPath(targetDirPath, packageId, packageVersion)),
-                            packageFilePath -> packageFilePath.toString().endsWith(".package.json")).
-                    forEach(packageFilePath -> {
-                        try {
-                            Path packagePath = packageFilePath.getParent();
-                            String packageFileString = readFile(packageFilePath);
+            var dir = Paths.get(FileUtilities.buildPath(targetDirPath, packageId, packageVersion));
+            try(var directoryStream = Files.newDirectoryStream(dir,
+                    packageFilePath -> packageFilePath.toString().endsWith(".package.json"))) {
+                directoryStream.
+                        forEach(packageFilePath -> {
+                            try {
+                                Path packagePath = packageFilePath.getParent();
+                                String packageFileString = readFile(packageFilePath);
 
-                            // loading old resources, creating them in the new system,
-                            // updating document descriptor and replacing references in package config
+                                // loading old resources, creating them in the new system,
+                                // updating document descriptor and replacing references in package config
 
-                            // ... for dictionaries
-                            List<URI> dictionaryUris = extractResourcesUris(packageFileString, DICTIONARY_URI_PATTERN);
-                            List<URI> newDictionaryUris = createNewDictionaries(
-                                    readResources(dictionaryUris, packagePath,
-                                            DICTIONARY_EXT, RegularDictionaryConfiguration.class));
+                                // ... for dictionaries
+                                List<URI> dictionaryUris = extractResourcesUris(packageFileString, DICTIONARY_URI_PATTERN);
+                                List<URI> newDictionaryUris = createNewDictionaries(
+                                        readResources(dictionaryUris, packagePath,
+                                                DICTIONARY_EXT, RegularDictionaryConfiguration.class));
 
-                            updateDocumentDescriptor(packagePath, dictionaryUris, newDictionaryUris);
-                            packageFileString = replaceURIs(packageFileString, dictionaryUris, newDictionaryUris);
+                                updateDocumentDescriptor(packagePath, dictionaryUris, newDictionaryUris);
+                                packageFileString = replaceURIs(packageFileString, dictionaryUris, newDictionaryUris);
 
-                            // ... for behavior
-                            List<URI> behaviorUris = extractResourcesUris(packageFileString, BEHAVIOR_URI_PATTERN);
-                            List<URI> newBehaviorUris = createNewBehaviors(
-                                    readResources(behaviorUris, packagePath,
-                                            BEHAVIOR_EXT, BehaviorConfiguration.class));
+                                // ... for behavior
+                                List<URI> behaviorUris = extractResourcesUris(packageFileString, BEHAVIOR_URI_PATTERN);
+                                List<URI> newBehaviorUris = createNewBehaviors(
+                                        readResources(behaviorUris, packagePath,
+                                                BEHAVIOR_EXT, BehaviorConfiguration.class));
 
-                            updateDocumentDescriptor(packagePath, behaviorUris, newBehaviorUris);
-                            packageFileString = replaceURIs(packageFileString, behaviorUris, newBehaviorUris);
+                                updateDocumentDescriptor(packagePath, behaviorUris, newBehaviorUris);
+                                packageFileString = replaceURIs(packageFileString, behaviorUris, newBehaviorUris);
 
-                            // ... for http calls
-                            List<URI> httpCallsUris = extractResourcesUris(packageFileString, HTTPCALLS_URI_PATTERN);
-                            List<URI> newHttpCallsUris = createNewHttpCalls(
-                                    readResources(httpCallsUris, packagePath,
-                                            HTTPCALLS_EXT, HttpCallsConfiguration.class));
+                                // ... for http calls
+                                List<URI> httpCallsUris = extractResourcesUris(packageFileString, HTTPCALLS_URI_PATTERN);
+                                List<URI> newHttpCallsUris = createNewHttpCalls(
+                                        readResources(httpCallsUris, packagePath,
+                                                HTTPCALLS_EXT, HttpCallsConfiguration.class));
 
-                            updateDocumentDescriptor(packagePath, httpCallsUris, newHttpCallsUris);
-                            packageFileString = replaceURIs(packageFileString, httpCallsUris, newHttpCallsUris);
+                                updateDocumentDescriptor(packagePath, httpCallsUris, newHttpCallsUris);
+                                packageFileString = replaceURIs(packageFileString, httpCallsUris, newHttpCallsUris);
 
-                            // ... for langchain
-                            List<URI> langchainUris = extractResourcesUris(packageFileString, LANGCHAIN_URI_PATTERN);
-                            List<URI> newLangchainUris = createNewLangchain(
-                                    readResources(langchainUris, packagePath,
-                                            LANGCHAIN_EXT, LangChainConfiguration.class));
+                                // ... for langchain
+                                List<URI> langchainUris = extractResourcesUris(packageFileString, LANGCHAIN_URI_PATTERN);
+                                List<URI> newLangchainUris = createNewLangchain(
+                                        readResources(langchainUris, packagePath,
+                                                LANGCHAIN_EXT, LangChainConfiguration.class));
 
-                            updateDocumentDescriptor(packagePath, langchainUris, newLangchainUris);
-                            packageFileString = replaceURIs(packageFileString, langchainUris, newLangchainUris);
+                                updateDocumentDescriptor(packagePath, langchainUris, newLangchainUris);
+                                packageFileString = replaceURIs(packageFileString, langchainUris, newLangchainUris);
 
-                            // ... for property
-                            List<URI> propertyUris = extractResourcesUris(packageFileString, PROPERTY_URI_PATTERN);
-                            List<URI> newPropertyUris = createNewProperties(
-                                    readResources(propertyUris, packagePath,
-                                            PROPERTY_EXT, PropertySetterConfiguration.class));
+                                // ... for property
+                                List<URI> propertyUris = extractResourcesUris(packageFileString, PROPERTY_URI_PATTERN);
+                                List<URI> newPropertyUris = createNewProperties(
+                                        readResources(propertyUris, packagePath,
+                                                PROPERTY_EXT, PropertySetterConfiguration.class));
 
-                            updateDocumentDescriptor(packagePath, propertyUris, newPropertyUris);
-                            packageFileString = replaceURIs(packageFileString, propertyUris, newPropertyUris);
+                                updateDocumentDescriptor(packagePath, propertyUris, newPropertyUris);
+                                packageFileString = replaceURIs(packageFileString, propertyUris, newPropertyUris);
 
-                            // ... for output
-                            List<URI> outputUris = extractResourcesUris(packageFileString, OUTPUT_URI_PATTERN);
-                            List<URI> newOutputUris = createNewOutputs(
-                                    readResources(outputUris, packagePath,
-                                            OUTPUT_EXT, OutputConfigurationSet.class));
+                                // ... for output
+                                List<URI> outputUris = extractResourcesUris(packageFileString, OUTPUT_URI_PATTERN);
+                                List<URI> newOutputUris = createNewOutputs(
+                                        readResources(outputUris, packagePath,
+                                                OUTPUT_EXT, OutputConfigurationSet.class));
 
-                            updateDocumentDescriptor(packagePath, outputUris, newOutputUris);
-                            packageFileString = replaceURIs(packageFileString, outputUris, newOutputUris);
+                                updateDocumentDescriptor(packagePath, outputUris, newOutputUris);
+                                packageFileString = replaceURIs(packageFileString, outputUris, newOutputUris);
 
-                            // creating updated package and replacing references in bot config
-                            URI newPackageUri = createNewPackage(packageFileString);
-                            updateDocumentDescriptor(packagePath, packageUri, newPackageUri);
-                            botConfiguration.setPackages(botConfiguration.getPackages().stream().
-                                    map(uri -> uri.equals(packageUri) ? newPackageUri : uri).
-                                    collect(Collectors.toList()));
+                                // creating updated package and replacing references in bot config
+                                URI newPackageUri = createNewPackage(packageFileString);
+                                updateDocumentDescriptor(packagePath, packageUri, newPackageUri);
+                                botConfiguration.setPackages(botConfiguration.getPackages().stream().
+                                        map(uri -> uri.equals(packageUri) ? newPackageUri : uri).
+                                        collect(Collectors.toList()));
 
-                        } catch (IOException | RestInterfaceFactory.RestInterfaceFactoryException |
-                                 CallbackMatcher.CallbackMatcherException e) {
-                            log.error(e.getLocalizedMessage(), e);
-                            response.resume(new InternalServerErrorException());
-                        }
-                    });
+                            } catch (IOException | RestInterfaceFactory.RestInterfaceFactoryException |
+                                     CallbackMatcher.CallbackMatcherException e) {
+                                log.error(e.getLocalizedMessage(), e);
+                                response.resume(new InternalServerErrorException());
+                            }
+                        });
+
+            }
+
         } catch (IOException e) {
             log.error(e.getLocalizedMessage(), e);
             response.resume(new InternalServerErrorException());
@@ -368,16 +379,21 @@ public class RestImportService extends AbstractBackupService implements IRestImp
             try {
                 URI oldUri = oldUris.get(idx);
                 IResourceId oldResourceId = RestUtilities.extractResourceId(oldUri);
-                DocumentDescriptor oldDocumentDescriptor = readDocumentDescriptorFromFile(directoryPath, oldResourceId);
+                if (oldResourceId != null) {
+                    var oldDocumentDescriptor = readDocumentDescriptorFromFile(directoryPath, oldResourceId);
 
-                URI newUri = newUris.get(idx);
-                IResourceId newResourceId = RestUtilities.extractResourceId(newUri);
+                    URI newUri = newUris.get(idx);
+                    IResourceId newResourceId = RestUtilities.extractResourceId(newUri);
 
-                PatchInstruction<DocumentDescriptor> patchInstruction = new PatchInstruction<>();
-                patchInstruction.setOperation(PatchInstruction.PatchOperation.SET);
-                patchInstruction.setDocument(oldDocumentDescriptor);
+                    if (newResourceId != null) {
+                        PatchInstruction<DocumentDescriptor> patchInstruction = new PatchInstruction<>();
+                        patchInstruction.setOperation(PatchInstruction.PatchOperation.SET);
+                        patchInstruction.setDocument(oldDocumentDescriptor);
 
-                restDocumentDescriptorStore.patchDescriptor(newResourceId.getId(), newResourceId.getVersion(), patchInstruction);
+                        restDocumentDescriptorStore.patchDescriptor(newResourceId.getId(),
+                                newResourceId.getVersion(), patchInstruction);
+                    }
+                }
             } catch (IOException e) {
                 log.error(e.getLocalizedMessage(), e);
             }
@@ -422,6 +438,9 @@ public class RestImportService extends AbstractBackupService implements IRestImp
             String resourceContent = null;
             try {
                 IResourceId resourceId = RestUtilities.extractResourceId(uri);
+                if (resourceId == null) {
+                    throw new IOException("resourceId was null");
+                }
                 resourcePath = createResourcePath(packagePath, resourceId.getId(), extension);
                 resourceContent = readFile(resourcePath);
                 if (uri.toString().startsWith(IRestPropertySetterStore.resourceBaseType)) {

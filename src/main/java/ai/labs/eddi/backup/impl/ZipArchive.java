@@ -3,6 +3,7 @@ package ai.labs.eddi.backup.impl;
 import ai.labs.eddi.backup.IZipArchive;
 
 import jakarta.enterprise.context.ApplicationScoped;
+
 import java.io.*;
 import java.util.LinkedList;
 import java.util.List;
@@ -13,7 +14,6 @@ import java.util.zip.ZipOutputStream;
 /**
  * @author ginccc
  */
-@SuppressWarnings("ResultOfMethodCallIgnored")
 @ApplicationScoped
 public class ZipArchive implements IZipArchive {
     private static final int BUFFER_SIZE = 4096;
@@ -40,70 +40,89 @@ public class ZipArchive implements IZipArchive {
     }
 
     private static void writeZipFile(String targetZipFile, File directoryToZip, List<File> fileList) throws IOException {
-        FileOutputStream fos = new FileOutputStream(targetZipFile);
-        ZipOutputStream zos = new ZipOutputStream(new BufferedOutputStream(fos));
+        try (FileOutputStream fos = new FileOutputStream(targetZipFile);
+             ZipOutputStream zos = new ZipOutputStream(new BufferedOutputStream(fos))) {
 
-        for (File file : fileList) {
-            if (!file.isDirectory()) { // we only zip files, not directories
-                addToZip(directoryToZip, file, zos);
+            for (File file : fileList) {
+                if (!file.isDirectory()) {
+                    addToZip(directoryToZip, file, zos);
+                }
             }
         }
-
-        zos.close();
-        fos.close();
     }
 
     private static void addToZip(File directoryToZip, File file, ZipOutputStream zos) throws IOException {
-        FileInputStream fis = new FileInputStream(file);
+        // Use try-with-resources for automatic stream closing
+        try (FileInputStream fis = new FileInputStream(file)) {
+            // Ensure consistent path separators and protect against traversal in entry name creation itself
+            var zipEntry = getZipEntry(directoryToZip, file);
+            zos.putNextEntry(zipEntry);
 
-        String zipFilePath = file.getCanonicalPath().
-                substring(directoryToZip.getCanonicalPath().length() + 1).replace('\\', '/');
-        ZipEntry zipEntry = new ZipEntry(zipFilePath);
-        zos.putNextEntry(zipEntry);
+            byte[] bytes = new byte[BUFFER_SIZE];
+            int length;
+            while ((length = fis.read(bytes)) >= 0) {
+                zos.write(bytes, 0, length);
+            }
+            zos.closeEntry();
+        }
+    }
 
-        byte[] bytes = new byte[1024];
-        int length;
-        while ((length = fis.read(bytes)) >= 0) {
-            zos.write(bytes, 0, length);
+    private static ZipEntry getZipEntry(File directoryToZip, File file) throws IOException {
+        String entryName = file.getCanonicalPath()
+                .substring(directoryToZip.getCanonicalPath().length() + 1)
+                .replace(File.separatorChar, '/'); // Use '/' for zip standard
+
+        // Basic check for traversal sequences in the source file path relative to the source directory
+        if (entryName.contains("../")) {
+            throw new IOException("Malicious entry: " + entryName);
         }
 
-        zos.closeEntry();
-        fis.close();
+        return new ZipEntry(entryName);
     }
 
     @Override
     public void unzip(InputStream zipFile, File targetDir) throws IOException {
         if (!targetDir.exists()) {
-            targetDir.mkdir();
-        }
-        ZipInputStream zipIn = new ZipInputStream(zipFile);
-
-        ZipEntry entry = zipIn.getNextEntry();
-        // iterates over entries in the zip file
-        while (entry != null) {
-            String filePath = targetDir.getPath() + File.separator + entry.getName();
-            if (!entry.isDirectory()) {
-                // if the entry is a file, extracts it
-                new File(filePath).getParentFile().mkdirs();
-                extractFile(zipIn, filePath);
-            } else {
-                // if the entry is a directory, make the directory
-                File dir = new File(filePath);
-                dir.mkdirs();
+            if (!targetDir.mkdirs()) {
+                throw new IOException("Could not create target directory: " + targetDir);
             }
-            zipIn.closeEntry();
-            entry = zipIn.getNextEntry();
         }
-        zipIn.close();
+
+        String targetDirPath = targetDir.getCanonicalPath();
+        try (ZipInputStream zipIn = new ZipInputStream(new BufferedInputStream(zipFile))) {
+            ZipEntry entry;
+            while ((entry = zipIn.getNextEntry()) != null) {
+                File destFile = new File(targetDir, entry.getName());
+                String destFilePath = destFile.getCanonicalPath();
+
+                // Ensure the resolved destination path starts with the target directory path
+                if (!destFilePath.startsWith(targetDirPath + File.separator)) {
+                    throw new IOException("Entry is outside of the target dir: " + entry.getName());
+                }
+
+                if (entry.isDirectory()) {
+                    if (!destFile.mkdirs() && !destFile.isDirectory()) {
+                        throw new IOException("Could not create directory: " + destFilePath);
+                    }
+                } else {
+                    File parentDir = destFile.getParentFile();
+                    if (!parentDir.mkdirs() && !parentDir.isDirectory()) {
+                        throw new IOException("Could not create parent directories for: " + destFilePath);
+                    }
+                    extractFile(zipIn, destFile);
+                }
+                zipIn.closeEntry();
+            }
+        }
     }
 
-    private void extractFile(ZipInputStream zipIn, String filePath) throws IOException {
-        BufferedOutputStream bos = new BufferedOutputStream(new FileOutputStream(filePath));
-        byte[] bytesIn = new byte[BUFFER_SIZE];
-        int read;
-        while ((read = zipIn.read(bytesIn)) != -1) {
-            bos.write(bytesIn, 0, read);
+    private void extractFile(ZipInputStream zipIn, File destFile) throws IOException {
+        try (BufferedOutputStream bos = new BufferedOutputStream(new FileOutputStream(destFile))) {
+            byte[] bytesIn = new byte[BUFFER_SIZE];
+            int read;
+            while ((read = zipIn.read(bytesIn)) != -1) {
+                bos.write(bytesIn, 0, read);
+            }
         }
-        bos.close();
     }
 }
