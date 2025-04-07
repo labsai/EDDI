@@ -13,8 +13,9 @@ import ai.labs.eddi.modules.langchain.impl.builder.ILanguageModelBuilder;
 import ai.labs.eddi.modules.langchain.model.LangChainConfiguration;
 import ai.labs.eddi.modules.output.model.types.TextOutputItem;
 import ai.labs.eddi.modules.templating.ITemplatingEngine;
-import dev.langchain4j.data.message.AiMessage;
-import dev.langchain4j.model.output.Response;
+import dev.langchain4j.data.message.ChatMessage;
+import dev.langchain4j.model.chat.ChatLanguageModel;
+import dev.langchain4j.model.chat.response.ChatResponse;
 import jakarta.inject.Provider;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -30,6 +31,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.stream.Stream;
 
+import static dev.langchain4j.data.message.AiMessage.aiMessage;
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
@@ -54,7 +56,12 @@ class LangchainTaskTest {
         openMocks(this);
         Map<String, Provider<ILanguageModelBuilder>> languageModelApiConnectorBuilders = new HashMap<>();
         languageModelApiConnectorBuilders.put("openai",
-                () -> parameters -> messages -> new Response<>(new AiMessage(TEST_MESSAGE_FROM_LLM)));
+                () -> parameters -> new ChatLanguageModel() {
+                    @Override
+                    public ChatResponse chat(List<ChatMessage> messages) {
+                        return ChatResponse.builder().aiMessage(aiMessage(TEST_MESSAGE_FROM_LLM)).build();
+                    }
+                });
 
         var jsonSerialization = mock(IJsonSerialization.class);
         var prePostUtils = mock(PrePostUtils.class);
