@@ -1,7 +1,7 @@
 package ai.labs.eddi.modules.langchain.impl.builder;
 
 import dev.langchain4j.model.anthropic.AnthropicChatModel;
-import dev.langchain4j.model.chat.ChatLanguageModel;
+import dev.langchain4j.model.chat.ChatModel;
 import jakarta.enterprise.context.ApplicationScoped;
 
 import java.time.Duration;
@@ -19,7 +19,7 @@ public class AnthropicLanguageModelBuilder implements ILanguageModelBuilder {
     private static final String KEY_LOG_RESPONSES = "logResponses";
 
     @Override
-    public ChatLanguageModel build(Map<String, String> parameters) {
+    public ChatModel build(Map<String, String> parameters) {
         var builder = AnthropicChatModel.builder();
 
         if (!isNullOrEmpty(parameters.get(KEY_API_KEY))) {

@@ -1,6 +1,6 @@
 package ai.labs.eddi.modules.langchain.impl.builder;
 
-import dev.langchain4j.model.chat.ChatLanguageModel;
+import dev.langchain4j.model.chat.ChatModel;
 import io.quarkiverse.langchain4j.vertexai.runtime.gemini.VertexAiGeminiChatLanguageModel;
 import jakarta.enterprise.context.ApplicationScoped;
 
@@ -20,7 +20,7 @@ public class VertexGeminiLanguageModelBuilder implements ILanguageModelBuilder {
     private static final String KEY_LOG_RESPONSES = "logResponses";
 
     @Override
-    public ChatLanguageModel build(Map<String, String> parameters) {
+    public ChatModel build(Map<String, String> parameters) {
         var builder = VertexAiGeminiChatLanguageModel.builder();
 
         if (!isNullOrEmpty(parameters.get(KEY_PROJECT_ID))) {

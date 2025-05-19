@@ -14,7 +14,7 @@ import ai.labs.eddi.modules.langchain.model.LangChainConfiguration;
 import ai.labs.eddi.modules.output.model.types.TextOutputItem;
 import ai.labs.eddi.modules.templating.ITemplatingEngine;
 import dev.langchain4j.data.message.ChatMessage;
-import dev.langchain4j.model.chat.ChatLanguageModel;
+import dev.langchain4j.model.chat.ChatModel;
 import dev.langchain4j.model.chat.response.ChatResponse;
 import jakarta.inject.Provider;
 import org.junit.jupiter.api.BeforeEach;
@@ -56,7 +56,7 @@ class LangchainTaskTest {
         openMocks(this);
         Map<String, Provider<ILanguageModelBuilder>> languageModelApiConnectorBuilders = new HashMap<>();
         languageModelApiConnectorBuilders.put("openai",
-                () -> parameters -> new ChatLanguageModel() {
+                () -> parameters -> new ChatModel() {
                     @Override
                     public ChatResponse chat(List<ChatMessage> messages) {
                         return ChatResponse.builder().aiMessage(aiMessage(TEST_MESSAGE_FROM_LLM)).build();

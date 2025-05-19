@@ -1,6 +1,6 @@
 package ai.labs.eddi.modules.langchain.impl.builder;
 
-import dev.langchain4j.model.chat.ChatLanguageModel;
+import dev.langchain4j.model.chat.ChatModel;
 import dev.langchain4j.model.openai.OpenAiChatModel;
 import jakarta.enterprise.context.ApplicationScoped;
 
@@ -19,7 +19,7 @@ public class OpenAILanguageModelBuilder implements ILanguageModelBuilder {
     private static final String KEY_LOG_RESPONSES = "logResponses";
 
     @Override
-    public ChatLanguageModel build(Map<String, String> parameters) {
+    public ChatModel build(Map<String, String> parameters) {
         var builder = OpenAiChatModel.builder();
         if (!isNullOrEmpty(parameters.get(KEY_API_KEY))) {
             builder.apiKey(parameters.get(KEY_API_KEY));

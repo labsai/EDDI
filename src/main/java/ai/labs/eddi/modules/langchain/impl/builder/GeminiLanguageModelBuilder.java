@@ -1,6 +1,6 @@
 package ai.labs.eddi.modules.langchain.impl.builder;
 
-import dev.langchain4j.model.chat.ChatLanguageModel;
+import dev.langchain4j.model.chat.ChatModel;
 import dev.langchain4j.model.googleai.GoogleAiGeminiChatModel;
 import jakarta.enterprise.context.ApplicationScoped;
 
@@ -24,7 +24,7 @@ public class GeminiLanguageModelBuilder implements ILanguageModelBuilder {
     private static final String KEY_TIMEOUT = "timeout";
 
     @Override
-    public ChatLanguageModel build(Map<String, String> parameters) {
+    public ChatModel build(Map<String, String> parameters) {
         var builder = GoogleAiGeminiChatModel.builder();
 
         if (!isNullOrEmpty(parameters.get(KEY_API_KEY))) {

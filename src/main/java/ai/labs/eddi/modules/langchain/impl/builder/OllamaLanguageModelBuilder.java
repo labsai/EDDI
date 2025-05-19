@@ -1,6 +1,6 @@
 package ai.labs.eddi.modules.langchain.impl.builder;
 
-import dev.langchain4j.model.chat.ChatLanguageModel;
+import dev.langchain4j.model.chat.ChatModel;
 import dev.langchain4j.model.ollama.OllamaChatModel;
 import jakarta.enterprise.context.ApplicationScoped;
 
@@ -17,7 +17,7 @@ public class OllamaLanguageModelBuilder implements ILanguageModelBuilder {
     private static final String KEY_LOG_RESPONSES = "logResponses";
 
     @Override
-    public ChatLanguageModel build(Map<String, String> parameters) {
+    public ChatModel build(Map<String, String> parameters) {
         var builder = OllamaChatModel.builder();
 
         if (!isNullOrEmpty(parameters.get(KEY_MODEL))) {

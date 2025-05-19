@@ -1,7 +1,7 @@
 package ai.labs.eddi.modules.langchain.impl.builder;
 
 import ai.labs.eddi.modules.langchain.impl.LangchainTask;
-import dev.langchain4j.model.chat.ChatLanguageModel;
+import dev.langchain4j.model.chat.ChatModel;
 import io.quarkiverse.langchain4j.huggingface.QuarkusHuggingFaceChatModel;
 import jakarta.enterprise.context.ApplicationScoped;
 import org.jboss.logging.Logger;
@@ -38,7 +38,7 @@ public class HuggingFaceLanguageModelBuilder implements ILanguageModelBuilder {
     private static final Logger LOGGER = Logger.getLogger(LangchainTask.class);
 
     @Override
-    public ChatLanguageModel build(Map<String, String> parameters) {
+    public ChatModel build(Map<String, String> parameters) {
         var builder = QuarkusHuggingFaceChatModel.builder();
         if (!isNullOrEmpty(parameters.get(KEY_ACCESS_TOKEN))) {
             builder.accessToken(parameters.get(KEY_ACCESS_TOKEN));
