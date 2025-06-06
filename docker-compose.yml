@@ -1,6 +1,6 @@
 services:
   eddi:
-    image: labsai/eddi:latest
+    image: labsai/eddi:5
 #    environment:
 #      - "JAVA_OPTS_APPEND=-Dquarkus.http.cors.origins=http://localhost:3000"
     ports:
@@ -10,7 +10,7 @@ services:
     depends_on:
       - mongodb
   mongodb:
-    image: mongo:5.0
+    image: mongo:6.0
     restart: always
     volumes:
       - mongodb-db:/data/db
