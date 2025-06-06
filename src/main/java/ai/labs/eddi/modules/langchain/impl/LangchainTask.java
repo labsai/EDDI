@@ -47,6 +47,7 @@ public class LangchainTask implements ILifecycleTask {
     private static final String KEY_INCLUDE_FIRST_BOT_MESSAGE = "includeFirstBotMessage";
     private static final String KEY_CONVERT_TO_OBJECT = "convertToObject";
     private static final String KEY_ADD_TO_OUTPUT = "addToOutput";
+    private static final String MATCH_ALL_OPERATOR = "*";
 
     static final String MEMORY_OUTPUT_IDENTIFIER = "output";
     static final String LANGCHAIN_OUTPUT_IDENTIFIER = MEMORY_OUTPUT_IDENTIFIER + ":text:langchain";
@@ -108,7 +109,8 @@ public class LangchainTask implements ILifecycleTask {
             }
 
             for (var task : langChainConfig.tasks()) {
-                if (task.actions().stream().anyMatch(actions::contains)) {
+                if (task.actions().contains(MATCH_ALL_OPERATOR) ||
+                        task.actions().stream().anyMatch(actions::contains)) {
                     var processedParams = runTemplateEngineOnParams(task.parameters(), templateDataObjects);
                     var messages = new LinkedList<ChatMessage>();
 
