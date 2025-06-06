@@ -10,7 +10,7 @@ Developed in Java using Quarkus, it is lean, RESTful, scalable, and cloud-native
 It comes as Docker container and can be orchestrated with Kubernetes or Openshift.
 The Docker image has been certified by IBM/Red Hat.
 
-Latest stable version: 5.5.0
+Latest stable version: 5.5.1
 
 License: Apache License 2.0
 
@@ -61,7 +61,7 @@ Technical specifications:
 
 * Java 21
 * Maven 3.8.4
-* MongoDB >= 5.0
+* MongoDB >= 6.0
 
 ## How to run the project
 
