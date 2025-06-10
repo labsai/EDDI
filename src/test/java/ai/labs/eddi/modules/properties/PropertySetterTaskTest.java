@@ -88,6 +88,7 @@ public class PropertySetterTaskTest {
         IData<List<Property>> expectedPropertyData = new Data<>("properties:extracted", propertyEntries);
 
         final String propertyExpression = "property(someMeaning(someValue))";
+        when(currentStep.getLatestData("actions")).thenReturn(null);
         when(currentStep.getLatestData(eq(KEY_EXPRESSIONS_PARSED))).thenAnswer(invocation ->
                 new Data<>(KEY_EXPRESSIONS_PARSED, propertyExpression));
         when(propertySetter.extractProperties(eq(expressions))).thenAnswer(invocation -> {
