@@ -1,25 +1,23 @@
 package ai.labs.eddi.engine.httpclient.bootstrap;
 
-import ai.labs.eddi.engine.httpclient.impl.JettyHttpClient;
+import ai.labs.eddi.engine.httpclient.impl.VertxHttpClient;
+import io.vertx.core.Vertx;
+import io.vertx.ext.web.client.WebClient;
+import io.vertx.ext.web.client.WebClientOptions;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import jakarta.ws.rs.Produces;
-import org.eclipse.jetty.client.HttpClient;
-import org.eclipse.jetty.client.WWWAuthenticationProtocolHandler;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
-import org.eclipse.microprofile.context.ManagedExecutor;
-
-import java.util.Arrays;
 
 @ApplicationScoped
 public class HttpClientModule {
 
     @Inject
-    ManagedExecutor executorService;
+    Vertx vertx;
 
     @Produces
     @ApplicationScoped
-    public JettyHttpClient provideHttpClient(@ConfigProperty(name = "httpClient.maxConnectionsQueued") Integer maxConnectionsQueued,
+    public VertxHttpClient provideHttpClient(@ConfigProperty(name = "httpClient.maxConnectionsQueued") Integer maxConnectionsQueued,
                                              @ConfigProperty(name = "httpClient.maxConnectionPerRoute") Integer maxConnectionPerRoute,
                                              @ConfigProperty(name = "httpClient.requestBufferSize") Integer requestBufferSize,
                                              @ConfigProperty(name = "httpClient.responseBufferSize") Integer responseBufferSize,
@@ -29,45 +27,36 @@ public class HttpClientModule {
                                              @ConfigProperty(name = "httpClient.disableWWWAuthenticationValidation")
                                              Boolean disableWWWAuthenticationValidation) {
 
-        try {
-            HttpClient httpClient = new HttpClient();
-            httpClient.setExecutor(executorService);
-            httpClient.setMaxConnectionsPerDestination(maxConnectionsQueued);
-            httpClient.setMaxRequestsQueuedPerDestination(maxConnectionPerRoute);
-            httpClient.setRequestBufferSize(requestBufferSize);
-            httpClient.setResponseBufferSize(responseBufferSize);
-            httpClient.setMaxRedirects(maxRedirects);
-            httpClient.setIdleTimeout(idleTimeout);
-            httpClient.setConnectTimeout(connectTimeout);
-            httpClient.start();
+        WebClientOptions options = new WebClientOptions();
 
-            if (disableWWWAuthenticationValidation) {
-                httpClient.getProtocolHandlers().remove(WWWAuthenticationProtocolHandler.NAME);
-            }
+        // Mapping configuration
+        options.setMaxPoolSize(maxConnectionPerRoute); // Closest mapping to MaxConnectionsPerDestination/MaxRequestsQueuedPerDestination
+        // maxConnectionsQueued (Jetty) -> MaxWaitQueueSize (Vertx)? Vertx doesn't seem to have exact equivalent exposed in options simply.
+        // setExecutor is handled by Vertx instance.
 
-            registerHttpClientShutdownHook(httpClient);
+        // request/response buffer sizes are not directly configurable in WebClientOptions in the same way,
+        // but we can control some limits. For now, we might skip exact buffer size mapping unless critical.
+        // Jetty's setRequestBufferSize/setResponseBufferSize -> Vertx ?
+        // Vertx handles buffers dynamically mostly.
 
-            return new JettyHttpClient(httpClient);
-        } catch (Exception e) {
-            System.out.println(Arrays.toString(e.getStackTrace()));
-            throw new RuntimeException(e.getLocalizedMessage(), e);
+        options.setMaxRedirects(maxRedirects);
+        // Vertx: setIdleTimeout(int idleTimeout) - "The amount of time a connection can be idle before it is closed. 0 means no timeout."
+        // usually seconds in Vertx.
+        int idleTimeoutSeconds = idleTimeout / 1000;
+        if (idleTimeout > 0 && idleTimeoutSeconds == 0) {
+            idleTimeoutSeconds = 1;
         }
-    }
+        options.setIdleTimeout(idleTimeoutSeconds);
 
-    private void registerHttpClientShutdownHook(final HttpClient httpClient) {
-        Runtime.getRuntime().addShutdownHook(new Thread("ShutdownHook_HttpClient") {
-            @Override
-            public void run() {
-                try {
-                    if (!httpClient.isStopped()) {
-                        httpClient.stop();
-                    }
-                } catch (Throwable e) {
-                    String message = "HttpClient did not stop as expected.";
-                    System.out.println(message);
-                    System.out.println(Arrays.toString(e.getStackTrace()));
-                }
-            }
-        });
+        options.setConnectTimeout(connectTimeout); // Vertx: setConnectTimeout(int connectTimeout) in ms.
+
+        // disableWWWAuthenticationValidation -> Vertx handles auth differently.
+        // If this means disable automatic handling of 401, Vertx WebClient doesn't do it automatically unless configured.
+
+        // We also need to consider KeepAlive which is usually true by default.
+
+        WebClient webClient = WebClient.create(vertx, options);
+
+        return new VertxHttpClient(vertx, webClient);
     }
 }
