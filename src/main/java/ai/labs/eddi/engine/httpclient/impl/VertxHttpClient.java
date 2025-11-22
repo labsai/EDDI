@@ -2,6 +2,7 @@ package ai.labs.eddi.engine.httpclient.impl;
 
 import io.vertx.core.Vertx;
 import io.vertx.ext.web.client.WebClient;
+import io.vertx.ext.web.client.WebClientSession;
 import lombok.AllArgsConstructor;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
@@ -13,5 +14,5 @@ import lombok.Setter;
 @Setter
 public class VertxHttpClient {
     private Vertx vertx;
-    private WebClient webClient;
+    private WebClientSession webClient;
 }

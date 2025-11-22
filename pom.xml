@@ -269,7 +269,6 @@
         <dependency>
             <groupId>io.vertx</groupId>
             <artifactId>vertx-web-client</artifactId>
-            <version>5.0.5</version>
         </dependency>
         <dependency>
             <groupId>jakarta.transaction</groupId>

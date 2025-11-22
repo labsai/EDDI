@@ -8,7 +8,7 @@ import io.vertx.core.MultiMap;
 import io.vertx.core.buffer.Buffer;
 import io.vertx.ext.web.client.HttpRequest;
 import io.vertx.ext.web.client.HttpResponse;
-import io.vertx.ext.web.client.WebClient;
+import io.vertx.ext.web.client.WebClientSession;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import lombok.EqualsAndHashCode;
@@ -36,7 +36,7 @@ public class HttpClientWrapper implements IHttpClient {
     private static final String KEY_USER_AGENT = "userAgent";
     private static final String KEY_MAX_LENGTH = "maxLength";
     private static final int TEXT_LIMIT = 150;
-    private final WebClient webClient;
+    private final WebClientSession webClient;
     private final String userAgent;
     private static final Logger log = Logger.getLogger(HttpClientWrapper.class);
 
