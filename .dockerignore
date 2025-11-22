@@ -4,3 +4,8 @@
 !target/lib/*
 !target/quarkus-app/*
 !licenses/*
+!grafana/*
+!grafana/dashboards/*
+!grafana/provisioning/*
+!docker/*
+!prometheus.yml
