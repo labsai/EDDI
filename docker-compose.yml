@@ -9,22 +9,22 @@ services:
       - monitoring
 
   prometheus:
-    image: prom/prometheus
-    volumes:
-      - ./prometheus.yml:/etc/prometheus/prometheus.yml
+    build:
+      context: .
+      dockerfile: docker/prometheus/Dockerfile
     ports:
       - "9090:9090"
     networks:
       - monitoring
 
   grafana:
-    image: grafana/grafana:12.3.0
+    build:
+      context: .
+      dockerfile: docker/grafana/Dockerfile
     ports:
       - "3000:3000"
     volumes:
       - grafana-datastore:/var/lib/grafana
-      - ./grafana/provisioning:/etc/grafana/provisioning
-      - ./grafana/dashboards:/var/lib/grafana/dashboards
     environment:
       - GF_SECURITY_ADMIN_PASSWORD=secret
     networks:
