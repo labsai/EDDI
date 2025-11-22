@@ -5,8 +5,6 @@ services:
       - "7070:7070"
     depends_on:
       - mongodb
-    networks:
-      - monitoring
 
   prometheus:
     build:
@@ -14,8 +12,6 @@ services:
       dockerfile: docker/prometheus/Dockerfile
     ports:
       - "9090:9090"
-    networks:
-      - monitoring
 
   grafana:
     build:
@@ -27,20 +23,13 @@ services:
       - grafana-datastore:/var/lib/grafana
     environment:
       - GF_SECURITY_ADMIN_PASSWORD=secret
-    networks:
-      - monitoring
 
   mongodb:
     image: mongo:7.0
     restart: always
     volumes:
       - mongodb-datastore:/data/db
-    networks:
-      - monitoring
 
 volumes:
   grafana-datastore:
   mongodb-datastore:
-
-networks:
-  monitoring:
