@@ -24,9 +24,7 @@ public class HttpClientModule {
                                              @ConfigProperty(name = "httpClient.responseBufferSize") Integer responseBufferSize,
                                              @ConfigProperty(name = "httpClient.maxRedirects") Integer maxRedirects,
                                              @ConfigProperty(name = "httpClient.idleTimeoutInMillis") Integer idleTimeout,
-                                             @ConfigProperty(name = "httpClient.connectTimeoutInMillis") Integer connectTimeout,
-                                             @ConfigProperty(name = "httpClient.disableWWWAuthenticationValidation")
-                                             Boolean disableWWWAuthenticationValidation) {
+                                             @ConfigProperty(name = "httpClient.connectTimeoutInMillis") Integer connectTimeout) {
 
         WebClientOptions options = new WebClientOptions();
 
