@@ -84,7 +84,7 @@
         "type": "timeseries",
         "targets": [
           {
-            "expr": "sum(rate(conversation_processing_duration_seconds_sum[1m])) by (job) / sum(rate(conversation_processing_duration_seconds_count[1m])) by (job)",
+            "expr": "sum(rate(eddi_conversation_processing_duration_seconds_sum[1m])) by (job) / sum(rate(eddi_conversation_processing_duration_seconds_count[1m])) by (job)",
             "legendFormat": "Avg Duration",
             "refId": "A"
           }
@@ -123,7 +123,7 @@
         "type": "timeseries",
         "targets": [
           {
-            "expr": "sum(rate(conversation_start_duration_seconds_sum[1m])) by (job) / sum(rate(conversation_start_duration_seconds_count[1m])) by (job)",
+            "expr": "sum(rate(eddi_conversation_start_duration_seconds_sum[1m])) by (job) / sum(rate(eddi_conversation_start_duration_seconds_count[1m])) by (job)",
             "legendFormat": "Avg Duration",
             "refId": "B"
           }
@@ -152,7 +152,7 @@
         "type": "timeseries",
         "targets": [
           {
-            "expr": "sum(rate(conversation_load_duration_seconds_sum[1m])) by (job) / sum(rate(conversation_load_duration_seconds_count[1m])) by (job)",
+            "expr": "sum(rate(eddi_conversation_load_duration_seconds_sum[1m])) by (job) / sum(rate(eddi_conversation_load_duration_seconds_count[1m])) by (job)",
             "legendFormat": "Avg Duration",
             "refId": "C"
           }
@@ -254,7 +254,7 @@
       },
       "targets": [
         {
-          "expr": "conversation_start_duration_seconds_sum / conversation_start_duration_seconds_count",
+          "expr": "eddi_conversation_start_duration_seconds_sum / eddi_conversation_start_duration_seconds_count",
           "legendFormat": "Avg Duration",
           "refId": "A"
         }
@@ -309,12 +309,12 @@
       "pluginVersion": "11.0.0",
       "targets": [
         {
-          "expr": "conversation_load_total",
+          "expr": "sum(increase(eddi_conversation_load_count_total[1m]))",
           "legendFormat": "Count",
           "refId": "E"
         }
       ],
-      "title": "Conversation Load Count",
+      "title": "Conversations Loaded (1m)",
       "type": "stat"
     },
     {
@@ -395,7 +395,7 @@
       },
       "targets": [
         {
-          "expr": "conversation_load_duration_seconds_sum / conversation_load_duration_seconds_count",
+          "expr": "eddi_conversation_load_duration_seconds_sum / eddi_conversation_load_duration_seconds_count",
           "legendFormat": "Avg Duration",
           "refId": "B"
         }
@@ -481,7 +481,7 @@
       },
       "targets": [
         {
-          "expr": "conversation_processing_duration_seconds_sum / conversation_processing_duration_seconds_count",
+          "expr": "eddi_conversation_processing_duration_seconds_sum / eddi_conversation_processing_duration_seconds_count",
           "legendFormat": "Avg Duration",
           "refId": "C"
         }
@@ -536,12 +536,12 @@
       "pluginVersion": "11.0.0",
       "targets": [
         {
-          "expr": "conversation_start_total",
+          "expr": "sum(increase(eddi_conversation_start_count_total[1m]))",
           "legendFormat": "Count",
           "refId": "D"
         }
       ],
-      "title": "Conversation Start Count",
+      "title": "Conversations Started (1m)",
       "type": "stat"
     },
     {
@@ -591,12 +591,12 @@
       "pluginVersion": "11.0.0",
       "targets": [
         {
-          "expr": "conversation_processing_total",
+          "expr": "sum(increase(eddi_conversation_processing_count_total[1m]))",
           "legendFormat": "Count",
           "refId": "F"
         }
       ],
-      "title": "Conversation Processing Count",
+      "title": "Conversations Processed (1m)",
       "type": "stat"
     },
     {
@@ -699,7 +699,7 @@
           },
           "disableTextWrap": false,
           "editorMode": "builder",
-          "expr": "conversation_start_seconds_count",
+          "expr": "eddi_conversation_start_duration_seconds_count",
           "fullMetaSearch": false,
           "includeNullMetadata": true,
           "instant": false,
@@ -799,7 +799,7 @@
           },
           "disableTextWrap": false,
           "editorMode": "builder",
-          "expr": "conversation_processing_seconds_sum",
+          "expr": "eddi_conversation_processing_duration_seconds_sum",
           "fullMetaSearch": false,
           "includeNullMetadata": true,
           "instant": false,
@@ -899,7 +899,7 @@
           },
           "disableTextWrap": false,
           "editorMode": "builder",
-          "expr": "conversation_load_seconds_count",
+          "expr": "eddi_conversation_load_duration_seconds_count",
           "fullMetaSearch": false,
           "includeNullMetadata": true,
           "instant": false,
@@ -998,7 +998,7 @@
           },
           "disableTextWrap": false,
           "editorMode": "builder",
-          "expr": "conversation_processing_seconds_count",
+          "expr": "eddi_conversation_processing_duration_seconds_count",
           "fullMetaSearch": false,
           "includeNullMetadata": true,
           "instant": false,
@@ -4735,8 +4735,8 @@
     ]
   },
   "timezone": "browser",
-  "title": "EDDI - Quarkus - Metrics",
-  "uid": "pmacxmnlAk__",
+  "title": "EDDI Consolidated Dashboard",
+  "uid": "eddi-dashboard",
   "version": 1,
   "weekStart": ""
 }
