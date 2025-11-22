@@ -73,6 +73,7 @@ public class HttpClientWrapper implements IHttpClient {
         private String requestBody;
         private String requestEncoding;
         private String requestContentType;
+        private long currentTimeout = 60000; // Default timeout fallback
         private final Map<String, List<String>> queryParamsMap = new HashMap<>();
 
         RequestWrapper(URI uri, HttpRequest<Buffer> request, io.vertx.core.http.HttpMethod method) {
@@ -96,7 +97,8 @@ public class HttpClientWrapper implements IHttpClient {
         @Override
         public IRequest setBasicAuthentication(String username, String password, String realm, boolean preemptive) {
              // Vert.x basic auth helper
-             // realm and preemptive are not used in Vert.x basicAuthentication as it sets the header directly (preemptive)
+             // Note: 'realm' and 'preemptive' parameters are ignored by Vert.x WebClient's basicAuthentication helper.
+             // It automatically sets the Authorization header (equivalent to preemptive=true).
              request.basicAuthentication(username, password);
              return this;
         }
@@ -147,7 +149,9 @@ public class HttpClientWrapper implements IHttpClient {
 
         @Override
         public IRequest setTimeout(long timeout, TimeUnit timeUnit) {
-            request.timeout(timeUnit.toMillis(timeout));
+            long timeoutMillis = timeUnit.toMillis(timeout);
+            this.currentTimeout = timeoutMillis;
+            request.timeout(timeoutMillis);
             return this;
         }
 
@@ -164,7 +168,11 @@ public class HttpClientWrapper implements IHttpClient {
             });
 
             try {
-                return future.get();
+                // Use a timeout slightly larger than the request timeout to ensure we don't block indefinitely
+                // if the callback never fires (though Vert.x should handle the timeout).
+                return future.get(currentTimeout + 1000, TimeUnit.MILLISECONDS);
+            } catch (java.util.concurrent.TimeoutException e) {
+                throw new HttpRequestException("Request timed out while waiting for response", e);
             } catch (InterruptedException | ExecutionException e) {
                 if (e instanceof InterruptedException) {
                     Thread.currentThread().interrupt();
@@ -174,9 +182,15 @@ public class HttpClientWrapper implements IHttpClient {
         }
 
         private void doSend(io.vertx.core.Handler<io.vertx.core.AsyncResult<IResponse>> handler) {
-            // Use stream to handle large responses safely
+            // Buffer entire response in memory; check size limits in handleResponse to mitigate large responses.
             if (requestBody != null) {
-                Buffer buffer = requestEncoding != null ? Buffer.buffer(requestBody, requestEncoding) : Buffer.buffer(requestBody);
+                Buffer buffer;
+                try {
+                    buffer = requestEncoding != null ? Buffer.buffer(requestBody, requestEncoding) : Buffer.buffer(requestBody);
+                } catch (IllegalArgumentException e) {
+                    handler.handle(io.vertx.core.Future.failedFuture(new HttpRequestException("Invalid encoding: " + requestEncoding, e)));
+                    return;
+                }
                 request.sendBuffer(buffer, ar -> handleResponse(ar, handler));
             } else {
                 request.send(ar -> handleResponse(ar, handler));
@@ -271,11 +285,11 @@ public class HttpClientWrapper implements IHttpClient {
                     }
                 } else {
                     log.error(ar.cause().getLocalizedMessage(), ar.cause());
-                    // Attempt to notify listener of failure via a 500 response if possible,
+                    // Attempt to notify listener of failure via a 503 response.
                     // strictly speaking ICompleteListener expects a response.
                     ResponseWrapper errorResponse = new ResponseWrapper();
-                    errorResponse.setHttpCode(500);
-                    errorResponse.setHttpCodeMessage(ar.cause().getLocalizedMessage());
+                    errorResponse.setHttpCode(503);
+                    errorResponse.setHttpCodeMessage("Service Unavailable: " + ar.cause().getLocalizedMessage());
                     try {
                         completeListener.onComplete(errorResponse);
                     } catch (IResponse.HttpResponseException e) {

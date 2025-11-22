@@ -6,6 +6,7 @@ import io.vertx.ext.web.client.WebClient;
 import io.vertx.ext.web.client.WebClientSession;
 import io.vertx.ext.web.client.WebClientOptions;
 import jakarta.enterprise.context.ApplicationScoped;
+import jakarta.enterprise.inject.Disposes;
 import jakarta.inject.Inject;
 import jakarta.ws.rs.Produces;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
@@ -43,5 +44,11 @@ public class HttpClientModule {
         WebClientSession webClientSession = WebClientSession.create(webClient);
 
         return new VertxHttpClient(vertx, webClientSession);
+    }
+
+    public void close(@Disposes VertxHttpClient client) {
+        if (client.getWebClient() != null) {
+            client.getWebClient().close();
+        }
     }
 }
