@@ -96,6 +96,7 @@ public class HttpClientWrapper implements IHttpClient {
         @Override
         public IRequest setBasicAuthentication(String username, String password, String realm, boolean preemptive) {
              // Vert.x basic auth helper
+             // realm and preemptive are not used in Vert.x basicAuthentication as it sets the header directly (preemptive)
              request.basicAuthentication(username, password);
              return this;
         }
@@ -165,56 +166,64 @@ public class HttpClientWrapper implements IHttpClient {
             try {
                 return future.get();
             } catch (InterruptedException | ExecutionException e) {
+                if (e instanceof InterruptedException) {
+                    Thread.currentThread().interrupt();
+                }
                 throw new HttpRequestException(e.getLocalizedMessage(), e);
             }
         }
 
         private void doSend(io.vertx.core.Handler<io.vertx.core.AsyncResult<IResponse>> handler) {
-            io.vertx.core.Future<HttpResponse<Buffer>> future;
-
+            // Use stream to handle large responses safely
             if (requestBody != null) {
-                // If encoding is specified, we might need to encode it.
-                // But usually strings are just strings.
-                // If specific charset is needed for wire transmission:
-                if (requestEncoding != null) {
-                    future = request.sendBuffer(Buffer.buffer(requestBody, requestEncoding));
-                } else {
-                    future = request.sendBuffer(Buffer.buffer(requestBody));
-                }
+                Buffer buffer = requestEncoding != null ? Buffer.buffer(requestBody, requestEncoding) : Buffer.buffer(requestBody);
+                request.sendBuffer(buffer, ar -> handleResponse(ar, handler));
             } else {
-                future = request.send();
+                request.send(ar -> handleResponse(ar, handler));
             }
+        }
 
-            future.onComplete(ar -> {
-                if (ar.succeeded()) {
-                    HttpResponse<Buffer> response = ar.result();
-                    Buffer body = response.body();
-                    if (body != null && body.length() > maxLength) {
-                        String message = String.format("Response body length %d exceeds maximum allowed length %d", body.length(), maxLength);
-                        log.warn(message);
-                        // We could treat this as failure, but to be consistent with potentially just truncation or just warning,
-                        // we'll just warn for now or truncate if we want to simulate buffering limit.
-                        // The previous implementation 'BufferingResponseListener(maxLength)' would throw an exception if limit exceeded.
-                        // So we should fail the future.
-                        handler.handle(io.vertx.core.Future.failedFuture(new IResponse.HttpResponseException(message)));
-                        return;
-                    }
+        private void handleResponse(io.vertx.core.AsyncResult<HttpResponse<Buffer>> ar, io.vertx.core.Handler<io.vertx.core.AsyncResult<IResponse>> handler) {
+             if (ar.succeeded()) {
+                 HttpResponse<Buffer> response = ar.result();
+                 // Check Content-Length header if available
+                 String contentLengthHeader = response.getHeader("Content-Length");
+                 if (contentLengthHeader != null) {
+                     try {
+                         long contentLength = Long.parseLong(contentLengthHeader);
+                         if (contentLength > maxLength) {
+                             String message = String.format("Response Content-Length %d exceeds maximum allowed length %d", contentLength, maxLength);
+                             log.warn(message);
+                             handler.handle(io.vertx.core.Future.failedFuture(new IResponse.HttpResponseException(message)));
+                             return;
+                         }
+                     } catch (NumberFormatException e) {
+                         // Ignore invalid content-length
+                     }
+                 }
 
-                    ResponseWrapper responseWrapper = new ResponseWrapper();
-                    if (body != null) {
-                        responseWrapper.setContentAsString(response.bodyAsString());
-                    } else {
-                        responseWrapper.setContentAsString("");
-                    }
+                 Buffer body = response.body();
+                 if (body != null && body.length() > maxLength) {
+                     String message = String.format("Response body length %d exceeds maximum allowed length %d", body.length(), maxLength);
+                     log.warn(message);
+                     handler.handle(io.vertx.core.Future.failedFuture(new IResponse.HttpResponseException(message)));
+                     return;
+                 }
 
-                    responseWrapper.setHttpCode(response.statusCode());
-                    responseWrapper.setHttpCodeMessage(response.statusMessage());
-                    responseWrapper.setHttpHeader(convertHeaderToMap(response.headers()));
-                    handler.handle(io.vertx.core.Future.succeededFuture(responseWrapper));
-                } else {
-                    handler.handle(io.vertx.core.Future.failedFuture(ar.cause()));
-                }
-            });
+                 ResponseWrapper responseWrapper = new ResponseWrapper();
+                 if (body != null) {
+                     responseWrapper.setContentAsString(response.bodyAsString());
+                 } else {
+                     responseWrapper.setContentAsString("");
+                 }
+
+                 responseWrapper.setHttpCode(response.statusCode());
+                 responseWrapper.setHttpCodeMessage(response.statusMessage());
+                 responseWrapper.setHttpHeader(convertHeaderToMap(response.headers()));
+                 handler.handle(io.vertx.core.Future.succeededFuture(responseWrapper));
+             } else {
+                 handler.handle(io.vertx.core.Future.failedFuture(ar.cause()));
+             }
         }
 
         @Override
@@ -261,7 +270,17 @@ public class HttpClientWrapper implements IHttpClient {
                         log.error(e.getLocalizedMessage(), e);
                     }
                 } else {
-                     log.error(ar.cause().getLocalizedMessage(), ar.cause());
+                    log.error(ar.cause().getLocalizedMessage(), ar.cause());
+                    // Attempt to notify listener of failure via a 500 response if possible,
+                    // strictly speaking ICompleteListener expects a response.
+                    ResponseWrapper errorResponse = new ResponseWrapper();
+                    errorResponse.setHttpCode(500);
+                    errorResponse.setHttpCodeMessage(ar.cause().getLocalizedMessage());
+                    try {
+                        completeListener.onComplete(errorResponse);
+                    } catch (IResponse.HttpResponseException e) {
+                        log.error("Error while calling onComplete with error response", e);
+                    }
                 }
             });
         }
