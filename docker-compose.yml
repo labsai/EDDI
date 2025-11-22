@@ -1,19 +1,35 @@
 services:
   eddi:
     image: labsai/eddi:latest
-#    environment:
-#      - "JAVA_OPTS_APPEND=-Dquarkus.http.cors.origins=http://localhost:3000"
     ports:
       - "7070:7070"
-      - "7443:7443"
-#      - "5005:5005"
     depends_on:
       - mongodb
+
+  prometheus:
+    build:
+      context: .
+      dockerfile: docker/prometheus/Dockerfile
+    ports:
+      - "9090:9090"
+
+  grafana:
+    build:
+      context: .
+      dockerfile: docker/grafana/Dockerfile
+    ports:
+      - "3000:3000"
+    volumes:
+      - grafana-datastore:/var/lib/grafana
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=secret
+
   mongodb:
-    image: mongo:5.0
+    image: mongo:7.0
     restart: always
     volumes:
-      - mongodb-data:/data/db
+      - mongodb-datastore:/data/db
 
 volumes:
-  mongodb-data:
+  grafana-datastore:
+  mongodb-datastore:
