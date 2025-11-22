@@ -18,7 +18,9 @@ import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.jboss.logging.Logger;
 
 import java.net.URI;
+import java.net.URLDecoder;
 import java.nio.charset.Charset;
+import java.nio.charset.StandardCharsets;
 import java.util.*;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutionException;
@@ -63,6 +65,14 @@ public class HttpClientWrapper implements IHttpClient {
         return new RequestWrapper(uri, request, vertxMethod);
     }
 
+    /**
+     * Wrapper for Vert.x HttpRequest.
+     * <p>
+     * <b>Note:</b> This class is stateful and wraps a mutable {@link HttpRequest}.
+     * It is designed to be used for a single request configuration and execution.
+     * Reusing an instance of this class for multiple {@code send()} calls may result in
+     * accumulated headers or query parameters.
+     */
     @Getter
     @EqualsAndHashCode
     private class RequestWrapper implements IRequest {
@@ -72,7 +82,6 @@ public class HttpClientWrapper implements IHttpClient {
         private int maxLength = 8 * 1024 * 1024;
         private String requestBody;
         private String requestEncoding;
-        private String requestContentType;
         private long currentTimeout = 60000; // Default timeout fallback
         private final Map<String, List<String>> queryParamsMap = new HashMap<>();
 
@@ -89,6 +98,10 @@ public class HttpClientWrapper implements IHttpClient {
                     int idx = pair.indexOf(KEY_EQUALS);
                     String key = idx > 0 ? pair.substring(0, idx) : pair;
                     String value = idx > 0 && pair.length() > idx + 1 ? pair.substring(idx + 1) : null;
+
+                    if (key != null) key = URLDecoder.decode(key, StandardCharsets.UTF_8);
+                    if (value != null) value = URLDecoder.decode(value, StandardCharsets.UTF_8);
+
                     queryParamsMap.computeIfAbsent(key, k -> new ArrayList<>()).add(value);
                 }
             }
@@ -99,6 +112,7 @@ public class HttpClientWrapper implements IHttpClient {
              // Vert.x basic auth helper
              // Note: 'realm' and 'preemptive' parameters are ignored by Vert.x WebClient's basicAuthentication helper.
              // It automatically sets the Authorization header (equivalent to preemptive=true).
+             // WARNING: Non-preemptive authentication (preemptive=false) is NOT supported in this implementation.
              request.basicAuthentication(username, password);
              return this;
         }
@@ -125,7 +139,6 @@ public class HttpClientWrapper implements IHttpClient {
         public IRequest setBodyEntity(String content, String encoding, String contentType) {
             this.requestBody = content;
             this.requestEncoding = encoding;
-            this.requestContentType = contentType;
 
             if (contentType != null) {
                  request.putHeader("Content-Type", contentType);
@@ -136,14 +149,8 @@ public class HttpClientWrapper implements IHttpClient {
         @Override
         public IRequest setMaxResponseSize(int maxLength) {
             this.maxLength = maxLength;
-            // Vert.x doesn't have a direct "max response size" on the request builder that limits buffering
-            // automatically in the same way as Jetty's response listener might, but we can inspect content-length
-            // or handle it in a stream if needed. However, for standard buffer response, it just buffers.
-            // If we needed strict limiting, we might need to use sendStream and count bytes.
-            // For now, we will assume the buffer handles it or we check afterwards.
-            // Actually, `as(BodyCodec.string())` or similar doesn't limit.
-            // Given the previous implementation used `BufferingResponseListener` with a limit,
-            // we should be careful. But Vert.x WebClient buffers everything by default.
+            // Note: Vert.x WebClient buffers the entire response by default.
+            // Size limits are validated in handleResponse() after the response is received.
             return this;
         }
 
@@ -177,7 +184,8 @@ public class HttpClientWrapper implements IHttpClient {
                 if (e instanceof InterruptedException) {
                     Thread.currentThread().interrupt();
                 }
-                throw new HttpRequestException(e.getLocalizedMessage(), e);
+                Throwable cause = (e instanceof ExecutionException && e.getCause() != null) ? e.getCause() : e;
+                throw new HttpRequestException(cause.getLocalizedMessage(), cause);
             }
         }
 
@@ -286,7 +294,7 @@ public class HttpClientWrapper implements IHttpClient {
                 } else {
                     log.error(ar.cause().getLocalizedMessage(), ar.cause());
                     // Attempt to notify listener of failure via a 503 response.
-                    // strictly speaking ICompleteListener expects a response.
+                    // Strictly speaking ICompleteListener expects a response.
                     ResponseWrapper errorResponse = new ResponseWrapper();
                     errorResponse.setHttpCode(503);
                     errorResponse.setHttpCodeMessage("Service Unavailable: " + ar.cause().getLocalizedMessage());

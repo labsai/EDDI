@@ -30,9 +30,12 @@ public class HttpClientModule {
         options.setMaxPoolSize(maxConnectionPerRoute);
 
         options.setMaxRedirects(maxRedirects);
-        int idleTimeoutSeconds = idleTimeout / 1000;
-        if (idleTimeout > 0 && idleTimeoutSeconds == 0) {
-            idleTimeoutSeconds = 1;
+
+        int idleTimeoutSeconds;
+        if (idleTimeout == 0) {
+            idleTimeoutSeconds = 0;
+        } else {
+            idleTimeoutSeconds = (int) Math.ceil(idleTimeout / 1000.0);
         }
         options.setIdleTimeout(idleTimeoutSeconds);
 
@@ -43,12 +46,12 @@ public class HttpClientModule {
         WebClient webClient = WebClient.create(vertx, options);
         WebClientSession webClientSession = WebClientSession.create(webClient);
 
-        return new VertxHttpClient(vertx, webClientSession);
+        return new VertxHttpClient(vertx, webClientSession, webClient);
     }
 
     public void close(@Disposes VertxHttpClient client) {
-        if (client.getWebClient() != null) {
-            client.getWebClient().close();
+        if (client.getUnderlyingClient() != null) {
+            client.getUnderlyingClient().close();
         }
     }
 }
