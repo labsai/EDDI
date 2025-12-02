@@ -77,6 +77,20 @@ cd EDDI
 open http://localhost:7070
 ```
 
+### Configuring AI Tools
+
+If you plan to use the **Web Search** or **Weather** tools in your bots, you need to set up API keys in your environment or `application.properties`.
+
+**Web Search (Google):**
+- `eddi.tools.websearch.provider=google`
+- `eddi.tools.websearch.google.api-key=...`
+- `eddi.tools.websearch.google.cx=...`
+
+**Weather (OpenWeatherMap):**
+- `eddi.tools.weather.openweathermap.api-key=...`
+
+See [LangChain Documentation](langchain.md#tool-configuration-server-side) for details.
+
 ## Your First Bot (via API)
 
 ### 1. Create a Dictionary

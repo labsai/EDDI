@@ -54,6 +54,40 @@ When creating a new connector bot via Bot Father, you'll now be asked three addi
 
 ---
 
+## Tool Configuration (Server-Side)
+
+Some tools require API keys or external configuration to function. These are configured via **Environment Variables** or `application.properties` on the EDDI server, not in the bot configuration.
+
+### Web Search Tool
+By default, the tool uses **DuckDuckGo** (HTML scraping), which requires no configuration.
+
+To use **Google Custom Search** (more reliable/structured), configure these properties:
+
+```properties
+# In application.properties
+eddi.tools.websearch.provider=google
+eddi.tools.websearch.google.api-key=YOUR_GOOGLE_API_KEY
+eddi.tools.websearch.google.cx=YOUR_CUSTOM_SEARCH_ENGINE_ID
+```
+
+**Docker Environment Variables:**
+- `EDDI_TOOLS_WEBSEARCH_PROVIDER=google`
+- `EDDI_TOOLS_WEBSEARCH_GOOGLE_API_KEY=...`
+- `EDDI_TOOLS_WEBSEARCH_GOOGLE_CX=...`
+
+### Weather Tool
+The weather tool uses **OpenWeatherMap**. You must provide an API key:
+
+```properties
+# In application.properties
+eddi.tools.weather.openweathermap.api-key=YOUR_OWM_API_KEY
+```
+
+**Docker Environment Variables:**
+- `EDDI_TOOLS_WEATHER_OPENWEATHERMAP_API_KEY=...`
+
+---
+
 ## Configuration Examples
 
 ### Example 1: Customer Support Bot with Tools
