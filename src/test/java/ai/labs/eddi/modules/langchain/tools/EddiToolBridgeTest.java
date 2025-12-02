@@ -101,7 +101,7 @@ class EddiToolBridgeTest {
             Map<String, Object> executionResult = new HashMap<>();
             executionResult.put("temperature", 20);
             executionResult.put("humidity", 65);
-            when(httpCallExecutor.execute(eq(httpCall), isNull(), anyMap(), eq("http://localhost:8080")))
+            when(httpCallExecutor.execute(eq(httpCall), any(), anyMap(), eq("http://localhost:8080")))
                     .thenReturn(executionResult);
 
             when(jsonSerialization.serialize(executionResult)).thenReturn("{\"temperature\": 20, \"humidity\": 65}");
@@ -112,7 +112,7 @@ class EddiToolBridgeTest {
             // Assert
             assertEquals("{\"temperature\": 20, \"humidity\": 65}", result);
             verify(resourceClientLibrary).getResource(URI.create(httpCallUri), HttpCallsConfiguration.class);
-            verify(httpCallExecutor).execute(eq(httpCall), isNull(), anyMap(), eq("http://localhost:8080"));
+            verify(httpCallExecutor).execute(eq(httpCall), any(), anyMap(), eq("http://localhost:8080"));
         }
 
         @Test
@@ -135,7 +135,7 @@ class EddiToolBridgeTest {
                     .thenReturn(config);
             when(conversationMemoryStore.loadConversationMemorySnapshot(conversationId))
                     .thenReturn(new ConversationMemorySnapshot());
-            when(httpCallExecutor.execute(any(), isNull(), anyMap(), anyString()))
+            when(httpCallExecutor.execute(any(), any(), anyMap(), anyString()))
                     .thenReturn(Map.of("status", "ok"));
             when(jsonSerialization.serialize(any())).thenReturn("{\"status\": \"ok\"}");
 
@@ -144,7 +144,7 @@ class EddiToolBridgeTest {
 
             // Assert
             assertNotNull(result);
-            verify(httpCallExecutor).execute(any(), isNull(), argThat(map -> 
+            verify(httpCallExecutor).execute(any(), any(), argThat(map -> 
                     map.containsKey("param1") && map.containsKey("param2")
             ), anyString());
         }
