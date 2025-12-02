@@ -5,6 +5,7 @@ import ai.labs.eddi.configs.http.model.HttpCall;
 import ai.labs.eddi.configs.http.model.HttpCallsConfiguration;
 import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.datastore.serialization.IJsonSerialization;
+import ai.labs.eddi.engine.memory.ConversationMemory;
 import ai.labs.eddi.engine.memory.IConversationMemoryStore;
 import ai.labs.eddi.engine.memory.IMemoryItemConverter;
 import ai.labs.eddi.engine.memory.model.ConversationMemorySnapshot;
@@ -114,6 +115,9 @@ public class EddiToolBridge {
             // Load the conversation memory snapshot
             ConversationMemorySnapshot snapshot = conversationMemoryStore.loadConversationMemorySnapshot(conversationId);
 
+            // Create a temporary memory instance to satisfy HttpCallExecutor contract
+            ConversationMemory memory = new ConversationMemory(conversationId, snapshot.getBotId(), snapshot.getBotVersion(), snapshot.getUserId());
+
             // Build template data by merging agent arguments with conversation memory
             // Note: In real usage, we'd need an IConversationMemory instance, not a snapshot
             // This is a simplified version - the DeclarativeAgentTask will handle this properly
@@ -122,7 +126,7 @@ public class EddiToolBridge {
             // Execute the httpcall using the shared executor
             Map<String, Object> result = httpCallExecutor.execute(
                     httpCall,
-                    null, // Memory would be injected properly in DeclarativeAgentTask context
+                    memory,
                     templateData,
                     config.getTargetServerUrl()
             );

@@ -168,9 +168,17 @@ public class AgentExecutionHelper {
      * Determines if an error is retryable
      */
     private static boolean isRetryableError(Exception e) {
+        // Check for specific exception types first
+        if (e instanceof java.net.SocketTimeoutException || 
+            e instanceof java.util.concurrent.TimeoutException) {
+            return true;
+        }
+
         String message = e.getMessage() != null ? e.getMessage().toLowerCase() : "";
 
         // Retry on common transient errors
+        // Note: String matching is fragile and locale-dependent, but necessary as a fallback
+        // for exceptions that don't have specific types or wrap underlying errors.
         return message.contains("timeout") ||
                message.contains("rate limit") ||
                message.contains("too many requests") ||

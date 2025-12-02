@@ -1,6 +1,11 @@
 package ai.labs.eddi.modules.langchain.rest;
 
+import ai.labs.eddi.engine.memory.IConversationMemoryStore;
+import ai.labs.eddi.engine.memory.model.ConversationMemorySnapshot;
+import ai.labs.eddi.engine.memory.model.ConversationStepSnapshot;
+import ai.labs.eddi.engine.memory.model.DataSnapshot;
 import ai.labs.eddi.modules.langchain.model.ToolExecutionTrace;
+import ai.labs.eddi.modules.langchain.model.ToolExecutionTrace.ToolCall;
 import ai.labs.eddi.modules.langchain.tools.ToolCacheService;
 import ai.labs.eddi.modules.langchain.tools.ToolCostTracker;
 import ai.labs.eddi.modules.langchain.tools.ToolRateLimiter;
@@ -10,7 +15,9 @@ import jakarta.ws.rs.core.MediaType;
 import jakarta.ws.rs.core.Response;
 import org.jboss.logging.Logger;
 
+import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 
 /**
@@ -32,8 +39,8 @@ public class RestToolHistory {
     @Inject
     ToolCostTracker costTracker;
 
-    // In-memory storage for conversation traces (in production, use database)
-    private final Map<String, ToolExecutionTrace> conversationTraces = new HashMap<>();
+    @Inject
+    IConversationMemoryStore conversationMemoryStore;
 
     /**
      * Get tool execution history for a conversation
@@ -42,21 +49,58 @@ public class RestToolHistory {
     @Path("/history/{conversationId}")
     public Response getToolHistory(@PathParam("conversationId") String conversationId) {
         try {
-            ToolExecutionTrace trace = conversationTraces.get(conversationId);
+            ConversationMemorySnapshot snapshot = conversationMemoryStore.loadConversationMemorySnapshot(conversationId);
+            ToolExecutionTrace trace = new ToolExecutionTrace();
+            List<ToolCall> toolCalls = new ArrayList<>();
 
-            if (trace == null) {
-                return Response.status(Response.Status.NOT_FOUND)
-                    .entity(Map.of("error", "No tool history found for conversation"))
-                    .build();
+            for (ConversationStepSnapshot step : snapshot.getConversationSteps()) {
+                for (DataSnapshot data : step.getData()) {
+                    if (data.getKey().startsWith("langchain:trace:")) {
+                        Object result = data.getResult();
+                        if (result instanceof List) {
+                            List<Map<String, Object>> stepTrace = (List<Map<String, Object>>) result;
+                            processStepTrace(stepTrace, toolCalls);
+                        }
+                    }
+                }
             }
+            
+            trace.setToolCalls(toolCalls);
+            // Calculate totals
+            trace.setTotalExecutionTimeMs(toolCalls.stream().mapToLong(ToolCall::getExecutionTimeMs).sum());
+            trace.setHasErrors(toolCalls.stream().anyMatch(tc -> tc.getError() != null));
+            trace.setTotalCost(toolCalls.stream().mapToDouble(ToolCall::getCost).sum());
 
             return Response.ok(trace).build();
 
+        } catch (ai.labs.eddi.datastore.IResourceStore.ResourceNotFoundException e) {
+             return Response.status(Response.Status.NOT_FOUND)
+                    .entity(Map.of("error", "Conversation not found"))
+                    .build();
         } catch (Exception e) {
-            LOGGER.error("Error fetching tool history", e);
+            LOGGER.error("Error retrieving tool history", e);
             return Response.status(Response.Status.INTERNAL_SERVER_ERROR)
-                .entity(Map.of("error", e.getMessage()))
-                .build();
+                    .entity(Map.of("error", e.getMessage()))
+                    .build();
+        }
+    }
+
+    private void processStepTrace(List<Map<String, Object>> stepTrace, List<ToolCall> toolCalls) {
+        ToolCall currentCall = null;
+        for (Map<String, Object> event : stepTrace) {
+            String type = (String) event.get("type");
+            if ("tool_call".equals(type)) {
+                currentCall = new ToolCall();
+                currentCall.setToolName((String) event.get("tool"));
+                currentCall.setArguments((String) event.get("arguments"));
+                currentCall.setSuccess(true); // Assume success until error
+                toolCalls.add(currentCall);
+            } else if ("tool_result".equals(type) && currentCall != null) {
+                // Match with last call - simplistic but works for sequential execution
+                if (currentCall.getToolName().equals(event.get("tool"))) {
+                    currentCall.setResult((String) event.get("result"));
+                }
+            }
         }
     }
 
@@ -296,14 +340,6 @@ public class RestToolHistory {
                 .entity(Map.of("error", e.getMessage()))
                 .build();
         }
-    }
-
-    /**
-     * Internal method to store trace (called by DeclarativeAgentTask)
-     */
-    public void storeTrace(String conversationId, ToolExecutionTrace trace) {
-        conversationTraces.put(conversationId, trace);
-        LOGGER.debug("Stored tool execution trace for conversation: " + conversationId);
     }
 }
 

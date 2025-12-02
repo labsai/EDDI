@@ -237,8 +237,12 @@ public class ToolCacheService {
      * Build cache key from tool name and arguments
      */
     private String buildKey(String toolName, String arguments) {
-        // Use tool name + hash of arguments for key
-        return toolName + ":" + Math.abs(arguments.hashCode());
+        // Use tool name + arguments for key (readable and unique)
+        // If arguments are excessively long (> 2048 chars), we truncate and append hash for safety
+        if (arguments.length() > 2048) {
+            return toolName + ":" + arguments.substring(0, 2048) + ":" + arguments.hashCode();
+        }
+        return toolName + ":" + arguments;
     }
 
     /**
