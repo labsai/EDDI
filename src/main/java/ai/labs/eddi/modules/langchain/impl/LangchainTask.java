@@ -283,8 +283,7 @@ public class LangchainTask implements ILifecycleTask {
             responseObjectName = task.getId();
         }
 
-        if (!isNullOrEmpty(processedParams.get(KEY_CONVERT_TO_OBJECT)) &&
-                Boolean.parseBoolean(processedParams.get(KEY_CONVERT_TO_OBJECT))) {
+        if (Boolean.parseBoolean(processedParams.get(KEY_CONVERT_TO_OBJECT))) {
             var contentAsObject = jsonSerialization.deserialize(responseContent, Map.class);
             templateDataObjects.put(responseObjectName, contentAsObject);
         } else {
