@@ -59,8 +59,17 @@ public class RestToolHistory {
                     for (ResultSnapshot data : packageRun.getLifecycleTasks()) {
                         if (data.getKey() != null && data.getKey().startsWith("langchain:trace:")) {
                             Object result = data.getResult();
-                            if (result instanceof List) {
-                                List<Map<String, Object>> stepTrace = (List<Map<String, Object>>) result;
+                            if (result instanceof List<?> rawList) {
+                                List<Map<String, Object>> stepTrace = new ArrayList<>();
+                                for (Object item : rawList) {
+                                    if (item instanceof Map) {
+                                        @SuppressWarnings("unchecked")
+                                        Map<String, Object> mapItem = (Map<String, Object>) item;
+                                        stepTrace.add(mapItem);
+                                    } else {
+                                        LOGGER.warn("Unexpected item type in tool trace list: " + item.getClass());
+                                    }
+                                }
                                 processStepTrace(stepTrace, toolCalls);
                             }
                         }

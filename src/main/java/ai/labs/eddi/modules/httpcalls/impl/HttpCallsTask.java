@@ -77,8 +77,8 @@ public class HttpCallsTask implements ILifecycleTask {
 
             for (var call : filteredHttpCalls) {
                 var httpCallResult = httpCallExecutor.execute(call, memory, templateDataObjects, httpCallsConfig.getTargetServerUrl());
-                // Result is already stored in memory by HttpCallExecutor via prePostUtils
-                // The returned map can be used for additional processing if needed
+                // HttpCallExecutor stores response in conversation memory via prePostUtils.
+                // We also merge into templateDataObjects so subsequent calls in this loop can reference previous results.
                 if (httpCallResult != null && !httpCallResult.isEmpty()) {
                     templateDataObjects.putAll(httpCallResult);
                 }

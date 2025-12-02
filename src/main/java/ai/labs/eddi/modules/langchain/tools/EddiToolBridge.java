@@ -40,9 +40,9 @@ public class EddiToolBridge {
 
     static {
         try {
-            INTERNAL_EXECUTE_METHOD = EddiToolBridge.class.getMethod("internalExecuteHttpCall", String.class, String.class, Map.class);
+            INTERNAL_EXECUTE_METHOD = EddiToolBridge.class.getMethod("executeHttpCallInternal", String.class, String.class, Map.class);
         } catch (NoSuchMethodException e) {
-            throw new ExceptionInInitializerError("Failed to cache internalExecuteHttpCall method: " + e.getMessage());
+            throw new ExceptionInInitializerError("Failed to cache executeHttpCallInternal method: " + e.getMessage());
         }
     }
 
@@ -94,7 +94,7 @@ public class EddiToolBridge {
         );
     }
 
-    public String internalExecuteHttpCall(String conversationId, String httpCallUri, Map<String, Object> arguments) {
+    public String executeHttpCallInternal(String conversationId, String httpCallUri, Map<String, Object> arguments) {
         try {
             LOGGER.info("Agent executing httpcall: " + httpCallUri + " for conversation: " + conversationId);
 

@@ -367,8 +367,8 @@ public class LangchainTask implements ILifecycleTask {
         // chatMemory will contain history + last user message + tool calls + tool results + final response.
         // We want to capture everything after the last user message (which is already in chatMessages).
         
-        // Actually, chatMessages includes the last user message.
-        // So we want to capture everything *after* the messages we seeded.
+        // chatMessages includes the last user message.
+        // Capture all messages added after the seeded history (i.e., after the last user message).
         int seedSize = chatMessages.size();
         if (allMessages.size() > seedSize) {
             for (int i = seedSize; i < allMessages.size(); i++) {
