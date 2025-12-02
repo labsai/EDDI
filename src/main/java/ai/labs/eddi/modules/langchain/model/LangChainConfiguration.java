@@ -97,7 +97,7 @@ public record LangChainConfiguration(List<Task> tasks) {
          * Enable built-in tools (calculator, web search, datetime, etc.)
          * Default: false (opt-in for security)
          */
-        private boolean enableBuiltInTools = false;
+        private Boolean enableBuiltInTools = false;
 
         /**
          * Whitelist of specific built-in tools to enable.
