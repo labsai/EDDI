@@ -64,8 +64,17 @@ public class HttpCallExecutor implements IHttpCallExecutor {
                                         IConversationMemory memory,
                                         Map<String, Object> templateDataObjects,
                                         String targetServerUrl) throws LifecycleException {
+        if (call == null) {
+            throw new IllegalArgumentException("call cannot be null");
+        }
         if (memory == null) {
             throw new IllegalArgumentException("memory cannot be null");
+        }
+        if (templateDataObjects == null) {
+            throw new IllegalArgumentException("templateDataObjects cannot be null");
+        }
+        if (targetServerUrl == null || targetServerUrl.trim().isEmpty()) {
+            throw new IllegalArgumentException("targetServerUrl cannot be null or empty");
         }
 
         try {

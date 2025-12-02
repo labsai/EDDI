@@ -109,7 +109,9 @@ public class RestToolHistory {
                 toolCalls.add(currentCall);
             } else if ("tool_result".equals(type) && currentCall != null) {
                 // Match with last call - simplistic but works for sequential execution
-                if (currentCall.getToolName().equals(event.get("tool"))) {
+                String toolName = currentCall.getToolName();
+                Object eventTool = event.get("tool");
+                if (toolName != null && toolName.equals(eventTool)) {
                     currentCall.setResult((String) event.get("result"));
                 }
             }
