@@ -1,8 +1,34 @@
 # Behavior Rules
 
-## Behavior Rules
+## Overview
 
-`Behavior Rules` are very flexible in structure to cover most use cases that you will come across. `Behavior Rules` are clustered in `Groups`. `Behavior Rules` are executed sequential within each `Group`. As soon as one `Behavior Rule` succeeds, all remaining `Behavior Rules` in this `Group` will be skipped.
+**Behavior Rules** are the decision-making engine in EDDI's Lifecycle Pipeline. They are IF-THEN rules that evaluate conversation state and trigger actions based on conditions. This is where you define **when** to call an LLM, **when** to invoke an API, and **how** your bot responds to user inputs.
+
+### Role in the Lifecycle
+
+In EDDI's processing pipeline, Behavior Rules sit between input parsing and action execution:
+
+```
+User Input → Parser → Behavior Rules → API/LLM Calls → Output Generation
+```
+
+Behavior Rules examine the conversation memory (including parsed input, context data, and conversation history) and decide:
+- Which actions to trigger
+- Whether to call an LLM or skip it
+- Whether to make external API calls
+- What output to generate
+
+### Key Concepts
+
+- **Rules are IF-THEN logic**: If all conditions match, execute the specified actions
+- **Rules are grouped**: Multiple rules can be organized into groups for better structure
+- **Sequential execution**: Rules within a group execute in order until one succeeds
+- **First match wins**: Once a rule in a group succeeds, remaining rules in that group are skipped
+- **Actions trigger other lifecycle tasks**: Actions like `httpcall(weather-api)` or `send_to_llm` activate other parts of the pipeline
+
+## Behavior Rules Structure
+
+`Behavior Rules` are very flexible in structure to cover most use cases that you will come across. `Behavior Rules` are clustered in `Groups`. `Behavior Rules` are executed sequentially within each `Group`. As soon as one `Behavior Rule` succeeds, all remaining `Behavior Rules` in this `Group` will be skipped.
 
 ## **Groups**
 
@@ -272,6 +298,31 @@ This will allow you to compile a condition based on any http request/properties 
 }
 (...)
 ```
+
+### Size Matcher
+
+This condition type checks the size of arrays or collections in the conversation memory.
+
+```javascript
+(...)
+  {
+  "type": "sizematcher",
+  "configs": {
+    "valuePath": "memory.current.httpCalls.results",
+    "min": "1",
+    "max": "10",
+    "equal": "-1"
+  }
+}
+(...)
+```
+
+| Config | Type | Description |
+|--------|------|-------------|
+| `valuePath` | string | Path to the array/collection to check |
+| `min` | int | Minimum size required (-1 to skip check) |
+| `max` | int | Maximum size allowed (-1 to skip check) |
+| `equal` | int | Exact size required (-1 to skip check) |
 
 ## The Behavior Rule API Endpoints
 

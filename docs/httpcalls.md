@@ -1,6 +1,40 @@
 # HttpCalls
 
-## HttpCalls
+## Overview
+
+**HttpCalls** enable EDDI bots to integrate with external REST APIs, making EDDI a powerful orchestration layer that can combine conversational AI with traditional backend services. This is how bots can fetch real-time data, authenticate users, store information in external systems, or trigger business workflows.
+
+### Role in the Lifecycle
+
+HttpCalls are lifecycle tasks that execute during the bot's processing pipeline:
+
+```
+User Input → Parser → Behavior Rules → HttpCalls → Output Generation
+```
+
+Typically, Behavior Rules decide **when** to make an API call by triggering an action like `httpcall(weather-api)`, and the HttpCalls extension defines **how** to make that call.
+
+### Common Use Cases
+
+- **Fetching external data**: Weather, stock prices, product information, etc.
+- **Authentication**: OAuth flows, token validation, user verification
+- **CRM Integration**: Creating tickets, updating customer records, searching databases
+- **Business workflows**: Processing payments, sending notifications, triggering events
+- **Multi-step APIs**: First call gets auth token, second call uses it to access protected resources
+- **Analytics**: Sending conversation data to external analytics platforms
+- **Self-modification**: The "Bot Father" bot uses HttpCalls to create other bots via EDDI's own API
+
+### Key Features
+
+- **Template-based**: Use conversation memory in URLs, headers, and body (e.g., `${context.userName}`)
+- **Response handling**: Save JSON responses to memory for use in outputs or subsequent calls
+- **Chaining**: One HttpCall's response can be used in another HttpCall
+- **Quick reply generation**: Automatically create quick reply buttons from API response arrays
+- **Property extraction**: Extract specific values from responses and save them to conversation memory
+- **Batch requests**: Make multiple API calls by iterating over an array
+- **Fire and forget**: Optional asynchronous calls that don't wait for a response
+
+## HttpCalls Configuration
 
 In this article we will talk about EDDI's **`httpCalls`** **feature** (calling other `JSON` APIs).
 
@@ -37,12 +71,14 @@ We will emphasize the `httpCall` model and go through an example step by step, y
         "body": "string"
       },
       "postResponse": {
-        "qrBuildInstruction": {
-          "pathToTargetArray": "String",
-          "iterationObjectName": "String",
-          "quickReplyValue": "String",
-          "quickReplyExpressions": "String"
-        },
+        "qrBuildInstructions": [
+          {
+            "pathToTargetArray": "String",
+            "iterationObjectName": "String",
+            "quickReplyValue": "String",
+            "quickReplyExpressions": "String"
+          }
+        ],
         "propertyInstructions": [
           {
             "name": "string",
@@ -89,10 +125,10 @@ You can use _**`${memory.current.httpCalls.<responseObjectName>}`**_ to access y
 | httpCall.request.method                                                     | (`String`) `HTTP` Method of the `httpCall` (e.g `GET`,`POST`,etc...)                                                                                                                                                             |
 | httpCall.request.contentType                                                | (`String`) value of the `contentType HTTP header` of the `httpCall`                                                                                                                                                              |
 | httpCall.request.body                                                       | (`String`) an escaped `JSON` object that goes in the `HTTP Request` body if needed.                                                                                                                                              |
-| httpCall.postResponse.qrBuildInstruction.pathToTargetArray                  | (`String`) path to the array in your `JSON` **response data.**                                                                                                                                                                   |
-| httpCall.postResponse.qrBuildInstruction.iterationObjectName                | (`String`) a variable name that will point to the `TargetArray.`                                                                                                                                                                 |
-| httpCall.postResponse.qrBuildInstruction.quickReplyValue                    | (`String`) `thymeleaf expression` to use as a `quickReply` value.                                                                                                                                                                |
-| httpCall.postResponse.qrBuildInstruction.quickReplyExpressions              | (`String`) `expression` to retrieve a property from `iterationObjectName`.                                                                                                                                                       |
+| httpCall.postResponse.qrBuildInstructions[].pathToTargetArray              | (`String`) path to the array in your `JSON` **response data.**                                                                                                                                                                   |
+| httpCall.postResponse.qrBuildInstructions[].iterationObjectName            | (`String`) a variable name that will point to the `TargetArray.`                                                                                                                                                                 |
+| httpCall.postResponse.qrBuildInstructions[].quickReplyValue                | (`String`) `thymeleaf expression` to use as a `quickReply` value.                                                                                                                                                                |
+| httpCall.postResponse.qrBuildInstructions[].quickReplyExpressions          | (`String`) `expression` to retrieve a property from `iterationObjectName`.                                                                                                                                                       |
 | httpCall.postResponse.propertyInstructions.name                             | (`String`) name of property to be used in templating                                                                                                                                                                             |
 | httpCall.postResponse.propertyInstructions.value                            | (`String`) a static value can be set here if `fromObjectPath` is not defined.                                                                                                                                                    |
 | httpCall.postResponse.propertyInstructions.scope                            | <p>(<code>String</code>) Can be either : </p><p><code>step</code> used for only for one user interaction </p><p><code>conversation</code> for entire conversation and </p><p><code>longTerm</code> for between conversations</p> |

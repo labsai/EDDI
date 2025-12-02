@@ -1,0 +1,4 @@
+{
+  "packages" : [ "eddi://ai.labs.package/packagestore/packages/6740832a2b0f614abcaee79e?version=1", "eddi://ai.labs.package/packagestore/packages/6740832a2b0f614abcaee7a4?version=1", "eddi://ai.labs.package/packagestore/packages/6740832a2b0f614abcaee7aa?version=1", "eddi://ai.labs.package/packagestore/packages/6740832a2b0f614abcaee7b0?version=1", "eddi://ai.labs.package/packagestore/packages/6740832b2b0f614abcaee7b6?version=1", "eddi://ai.labs.package/packagestore/packages/6740832b2b0f614abcaee7bc?version=1", "eddi://ai.labs.package/packagestore/packages/6740832b2b0f614abcaee7c2?version=1", "eddi://ai.labs.package/packagestore/packages/6740832b2b0f614abcaee7c8?version=1", "eddi://ai.labs.package/packagestore/packages/6740832b2b0f614abcaee7c9?version=1" ],
+  "channels" : [ ]
+}

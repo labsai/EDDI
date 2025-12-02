@@ -1,0 +1,136 @@
+{
+  "setOnActions" : [ {
+    "actions" : [ "set_api_key" ],
+    "setProperties" : [ {
+      "name" : "apiKey",
+      "valueString" : "[[${memory.current.input}]]",
+      "scope" : "conversation",
+      "fromObjectPath" : "",
+      "toObjectPath" : "",
+      "convertToObject" : false,
+      "override" : true,
+      "runOnValidationError" : false
+    } ]
+  }, {
+    "actions" : [ "set_model_name" ],
+    "setProperties" : [ {
+      "name" : "modelName",
+      "valueString" : "[[${memory.current.input}]]",
+      "scope" : "conversation",
+      "fromObjectPath" : "",
+      "toObjectPath" : "",
+      "convertToObject" : false,
+      "override" : true,
+      "runOnValidationError" : false
+    } ]
+  }, {
+    "actions" : [ "set_temperature" ],
+    "setProperties" : [ {
+      "name" : "temperature",
+      "valueString" : "[[${memory.current.input}]]",
+      "scope" : "conversation",
+      "fromObjectPath" : "",
+      "toObjectPath" : "",
+      "convertToObject" : false,
+      "override" : true,
+      "runOnValidationError" : false
+    } ]
+  }, {
+    "actions" : [ "set_timeout" ],
+    "setProperties" : [ {
+      "name" : "timeout",
+      "valueString" : "[[${memory.current.input}]]",
+      "scope" : "conversation",
+      "fromObjectPath" : "",
+      "toObjectPath" : "",
+      "convertToObject" : false,
+      "override" : true,
+      "runOnValidationError" : false
+    } ]
+  }, {
+    "actions" : [ "set_enable_builtin_tools" ],
+    "setProperties" : [ {
+      "name" : "enableBuiltInTools",
+      "valueString" : "true",
+      "scope" : "conversation",
+      "fromObjectPath" : "",
+      "toObjectPath" : "",
+      "convertToObject" : false,
+      "override" : true,
+      "runOnValidationError" : false
+    } ]
+  }, {
+    "actions" : [ "set_disable_builtin_tools" ],
+    "setProperties" : [ {
+      "name" : "enableBuiltInTools",
+      "valueString" : "false",
+      "scope" : "conversation",
+      "fromObjectPath" : "",
+      "toObjectPath" : "",
+      "convertToObject" : false,
+      "override" : true,
+      "runOnValidationError" : false
+    } ]
+  }, {
+    "actions" : [ "set_empty_whitelist" ],
+    "setProperties" : [ {
+      "name" : "builtInToolsWhitelist",
+      "valueString" : "[]",
+      "scope" : "conversation",
+      "fromObjectPath" : "",
+      "toObjectPath" : "",
+      "convertToObject" : false,
+      "override" : true,
+      "runOnValidationError" : false
+    } ]
+  }, {
+    "actions" : [ "set_tools_calculator_websearch" ],
+    "setProperties" : [ {
+      "name" : "builtInToolsWhitelist",
+      "valueString" : "[\"calculator\",\"websearch\"]",
+      "scope" : "conversation",
+      "fromObjectPath" : "",
+      "toObjectPath" : "",
+      "convertToObject" : false,
+      "override" : true,
+      "runOnValidationError" : false
+    } ]
+  }, {
+    "actions" : [ "set_tools_calculator_web_datetime" ],
+    "setProperties" : [ {
+      "name" : "builtInToolsWhitelist",
+      "valueString" : "[\"calculator\",\"websearch\",\"datetime\"]",
+      "scope" : "conversation",
+      "fromObjectPath" : "",
+      "toObjectPath" : "",
+      "convertToObject" : false,
+      "override" : true,
+      "runOnValidationError" : false
+    } ]
+  }, {
+    "actions" : [ "set_tools_custom" ],
+    "setProperties" : [ {
+      "name" : "builtInToolsWhitelist",
+      "valueString" : "[[${memory.current.input}]]",
+      "scope" : "conversation",
+      "fromObjectPath" : "",
+      "toObjectPath" : "",
+      "convertToObject" : false,
+      "override" : true,
+      "runOnValidationError" : false
+    } ]
+  }, {
+    "actions" : [ "set_conversation_history_limit" ],
+    "setProperties" : [ {
+      "name" : "conversationHistoryLimit",
+      "valueString" : "[[${memory.current.input}]]",
+      "scope" : "conversation",
+      "fromObjectPath" : "",
+      "toObjectPath" : "",
+      "convertToObject" : false,
+      "override" : true,
+      "runOnValidationError" : false
+    } ]
+  } ]
+}
+

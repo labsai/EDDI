@@ -1,0 +1,213 @@
+{
+  "expressionsAsActions" : true,
+  "behaviorGroups" : [ {
+    "behaviorRules" : [ {
+      "name" : "Ask for api url",
+      "actions" : [ "ask_for_huggingface_api_url" ],
+      "conditions" : [ {
+        "type" : "actionmatcher",
+        "configs" : {
+          "actions" : "create_huggingface_bot",
+          "occurrence" : "currentStep"
+        }
+      } ]
+    }, {
+      "name" : "Set api url and ask for model name",
+      "actions" : [ "set_api_url", "ask_for_huggingface_model_name" ],
+      "conditions" : [ {
+        "type" : "actionmatcher",
+        "configs" : {
+          "actions" : "ask_for_huggingface_api_url",
+          "occurrence" : "lastStep"
+        }
+      }, {
+        "type" : "inputmatcher",
+        "configs" : {
+          "expressions" : "*",
+          "occurrence" : "currentStep"
+        }
+      } ]
+    }, {
+      "name" : "Set model name and ask for auth token",
+      "actions" : [ "set_model_name", "ask_for_huggingface_auth_token" ],
+      "conditions" : [ {
+        "type" : "actionmatcher",
+        "configs" : {
+          "actions" : "ask_for_huggingface_model_name",
+          "occurrence" : "lastStep"
+        }
+      }, {
+        "type" : "inputmatcher",
+        "configs" : {
+          "expressions" : "*",
+          "occurrence" : "currentStep"
+        }
+      } ]
+    }, {
+      "name" : "Set auth token and ask for temperature",
+      "actions" : [ "set_auth_token", "ask_for_huggingface_temperature" ],
+      "conditions" : [ {
+        "type" : "actionmatcher",
+        "configs" : {
+          "actions" : "ask_for_huggingface_auth_token",
+          "occurrence" : "lastStep"
+        }
+      }, {
+        "type" : "inputmatcher",
+        "configs" : {
+          "expressions" : "*",
+          "occurrence" : "currentStep"
+        }
+      } ]
+    }, {
+      "name" : "Set temperature and ask for built-in tools",
+      "actions" : [ "set_temperature", "ask_for_huggingface_builtin_tools" ],
+      "conditions" : [ {
+        "type" : "actionmatcher",
+        "configs" : {
+          "actions" : "ask_for_huggingface_temperature",
+          "occurrence" : "lastStep"
+        }
+      }, {
+        "type" : "inputmatcher",
+        "configs" : {
+          "expressions" : "*",
+          "occurrence" : "currentStep"
+        }
+      } ]
+    }, {
+      "name" : "Enable tools and ask for whitelist",
+      "actions" : [ "set_enable_builtin_tools", "ask_for_huggingface_tools_whitelist" ],
+      "conditions" : [ {
+        "type" : "actionmatcher",
+        "configs" : {
+          "actions" : "ask_for_huggingface_builtin_tools",
+          "occurrence" : "lastStep"
+        }
+      }, {
+        "type" : "inputmatcher",
+        "configs" : {
+          "expressions" : "true",
+          "occurrence" : "currentStep"
+        }
+      } ]
+    }, {
+      "name" : "Disable tools and skip to conversation history",
+      "actions" : [ "set_disable_builtin_tools", "set_empty_whitelist", "ask_for_huggingface_conversation_history_limit" ],
+      "conditions" : [ {
+        "type" : "actionmatcher",
+        "configs" : {
+          "actions" : "ask_for_huggingface_builtin_tools",
+          "occurrence" : "lastStep"
+        }
+      }, {
+        "type" : "inputmatcher",
+        "configs" : {
+          "expressions" : "false",
+          "occurrence" : "currentStep"
+        }
+      } ]
+    }, {
+      "name" : "Set all tools and ask for conversation history",
+      "actions" : [ "set_empty_whitelist", "ask_for_huggingface_conversation_history_limit" ],
+      "conditions" : [ {
+        "type" : "actionmatcher",
+        "configs" : {
+          "actions" : "ask_for_huggingface_tools_whitelist",
+          "occurrence" : "lastStep"
+        }
+      }, {
+        "type" : "inputmatcher",
+        "configs" : {
+          "expressions" : "enable_all_tools",
+          "occurrence" : "currentStep"
+        }
+      } ]
+    }, {
+      "name" : "Set calculator and websearch tools and ask for conversation history",
+      "actions" : [ "set_tools_calculator_websearch", "ask_for_huggingface_conversation_history_limit" ],
+      "conditions" : [ {
+        "type" : "actionmatcher",
+        "configs" : {
+          "actions" : "ask_for_huggingface_tools_whitelist",
+          "occurrence" : "lastStep"
+        }
+      }, {
+        "type" : "inputmatcher",
+        "configs" : {
+          "expressions" : "tools_calc_web",
+          "occurrence" : "currentStep"
+        }
+      } ]
+    }, {
+      "name" : "Set calculator, websearch, and datetime tools and ask for conversation history",
+      "actions" : [ "set_tools_calculator_web_datetime", "ask_for_huggingface_conversation_history_limit" ],
+      "conditions" : [ {
+        "type" : "actionmatcher",
+        "configs" : {
+          "actions" : "ask_for_huggingface_tools_whitelist",
+          "occurrence" : "lastStep"
+        }
+      }, {
+        "type" : "inputmatcher",
+        "configs" : {
+          "expressions" : "tools_calc_web_datetime",
+          "occurrence" : "currentStep"
+        }
+      } ]
+    }, {
+      "name" : "Set custom tools from input and ask for conversation history",
+      "actions" : [ "set_tools_custom", "ask_for_huggingface_conversation_history_limit" ],
+      "conditions" : [ {
+        "type" : "actionmatcher",
+        "configs" : {
+          "actions" : "ask_for_huggingface_tools_whitelist",
+          "occurrence" : "lastStep"
+        }
+      }, {
+        "type" : "negation",
+        "configs" : {
+          "condition" : {
+            "type" : "inputmatcher",
+            "configs" : {
+              "expressions" : "enable_all_tools,tools_calc_web,tools_calc_web_datetime",
+              "occurrence" : "currentStep"
+            }
+          }
+        }
+      }, {
+        "type" : "inputmatcher",
+        "configs" : {
+          "expressions" : "*",
+          "occurrence" : "currentStep"
+        }
+      } ]
+    }, {
+      "name" : "Set conversation history limit and ask for confirmation",
+      "actions" : [ "set_conversation_history_limit", "ask_for_bot_creation_confirmation_for_huggingface" ],
+      "conditions" : [ {
+        "type" : "actionmatcher",
+        "configs" : {
+          "actions" : "ask_for_huggingface_conversation_history_limit",
+          "occurrence" : "lastStep"
+        }
+      }, {
+        "type" : "inputmatcher",
+        "configs" : {
+          "expressions" : "*",
+          "occurrence" : "currentStep"
+        }
+      } ]
+    }, {
+      "name" : "Create bot",
+      "actions" : [ "create_properties_for_huggingface", "create_behavior_rules_for_huggingface", "create_langchain_huggingface", "create_output_for_huggingface", "create_package_for_huggingface", "create_bot_for_huggingface", "deploy_bot_for_huggingface", "CONVERSATION_END" ],
+      "conditions" : [ {
+        "type" : "inputmatcher",
+        "configs" : {
+          "expressions" : "orchestrate_create_bot_for_huggingface"
+        }
+      } ]
+    } ]
+  } ]
+}
+

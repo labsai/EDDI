@@ -1,0 +1,401 @@
+{
+  "targetServerUrl" : "http://localhost:7070",
+  "httpCalls" : [ {
+    "name" : "Create behavior rules",
+    "actions" : [ "create_behavior_rules_for_anthropic" ],
+    "saveResponse" : true,
+    "responseObjectName" : "EDDIResponse",
+    "responseHeaderObjectName" : "EDDIResponseHeader",
+    "fireAndForget" : false,
+    "isBatchCalls" : false,
+    "request" : {
+      "path" : "/behaviorstore/behaviorsets",
+      "headers" : { },
+      "queryParams" : { },
+      "method" : "post",
+      "contentType" : "application/json",
+      "body" : "{\"expressionsAsActions\":true,\"behaviorGroups\":[{\"behaviorRules\":[{\"name\":\"Send Message to LLM API\",\"actions\":[\"send_message\"],\"conditions\":[{\"type\":\"inputmatcher\",\"configs\":{\"expressions\":\"*\"}}]}]}]}"
+    },
+    "postResponse" : {
+      "propertyInstructions" : [ {
+        "name" : "behaviorSetLocation",
+        "scope" : "conversation",
+        "fromObjectPath" : "EDDIResponseHeader.Location",
+        "toObjectPath" : "",
+        "convertToObject" : false,
+        "override" : true,
+        "runOnValidationError" : false
+      } ],
+      "retryHttpCallInstruction" : {
+        "maxRetries" : 3,
+        "exponentialBackoffDelayInMillis" : 1000,
+        "retryOnHttpCodes" : [ 502, 503 ]
+      }
+    }
+  }, {
+    "name" : "Create name for behavior rules",
+    "actions" : [ "create_behavior_rules_for_anthropic" ],
+    "saveResponse" : false,
+    "fireAndForget" : false,
+    "isBatchCalls" : false,
+    "preRequest" : {
+      "propertyInstructions" : [ {
+        "name" : "behaviorId",
+        "valueString" : "[[${#strings.substring(properties.behaviorSetLocation, 51, 75)}]]",
+        "scope" : "conversation",
+        "fromObjectPath" : "",
+        "toObjectPath" : "",
+        "convertToObject" : false,
+        "override" : true,
+        "runOnValidationError" : false
+      }, {
+        "name" : "behaviorVersion",
+        "valueString" : "[[${#strings.substring(properties.behaviorSetLocation, 84)}]]",
+        "scope" : "conversation",
+        "fromObjectPath" : "",
+        "toObjectPath" : "",
+        "convertToObject" : false,
+        "override" : true,
+        "runOnValidationError" : false
+      } ],
+      "delayBeforeExecutingInMillis" : 0
+    },
+    "request" : {
+      "path" : "/descriptorstore/descriptors/[[${properties.behaviorId}]]",
+      "headers" : { },
+      "queryParams" : {
+        "version" : "[[${properties.behaviorVersion}]]"
+      },
+      "method" : "patch",
+      "contentType" : "application/json",
+      "body" : "{\"operation\":\"SET\",\"document\":{\"name\":\"[[${properties.botName}]]\",\"description\":\"\"}}"
+    }
+  }, {
+    "name" : "Create anthropic connection",
+    "actions" : [ "create_langchain_anthropic" ],
+    "saveResponse" : true,
+    "responseObjectName" : "EDDIResponse",
+    "responseHeaderObjectName" : "EDDIResponseHeader",
+    "fireAndForget" : false,
+    "isBatchCalls" : false,
+    "request" : {
+      "path" : "/langchainstore/langchains",
+      "headers" : { },
+      "queryParams" : { },
+      "method" : "post",
+      "contentType" : "application/json",
+      "body" : "{\"tasks\":[{\"actions\":[\"send_message\"],\"id\":\"anthropic\",\"type\":\"anthropic\",\"description\":\"Integration with anthropic API\",\"parameters\":{\"systemMessage\":\"[(${properties.prompt})]\",\"addToOutput\":\"true\",\"apiKey\":\"[(${properties.apiKey})]\",\"modelName\":\"[(${properties.modelName})]\",\"timeout\":\"[(${properties.timeout})]\",\"temperature\":\"[(${properties.temperature})]\", \"includeFirstBotMessage\":\"false\",\"logRequests\":\"true\",\"logResponses\":\"true\"},\"enableBuiltInTools\":[(${properties.enableBuiltInTools})],\"builtInToolsWhitelist\":[(${properties.builtInToolsWhitelist})],\"conversationHistoryLimit\":[(${properties.conversationHistoryLimit})]
+
+}]}"
+      "propertyInstructions" : [ {
+        "name" : "langChainLocation",
+        "scope" : "conversation",
+        "fromObjectPath" : "EDDIResponseHeader.Location",
+        "toObjectPath" : "",
+        "convertToObject" : false,
+        "override" : true,
+        "runOnValidationError" : false
+      } ],
+      "retryHttpCallInstruction" : {
+        "maxRetries" : 3,
+        "exponentialBackoffDelayInMillis" : 1000,
+        "retryOnHttpCodes" : [ 502, 503 ]
+      }
+    }
+  }, {
+    "name" : "Create name for langchain",
+    "actions" : [ "create_langchain_anthropic" ],
+    "saveResponse" : false,
+    "fireAndForget" : false,
+    "isBatchCalls" : false,
+    "preRequest" : {
+      "propertyInstructions" : [ {
+        "name" : "langChainId",
+        "valueString" : "[[${#strings.substring(properties.langChainLocation, 51, 75)}]]",
+        "scope" : "conversation",
+        "fromObjectPath" : "",
+        "toObjectPath" : "",
+        "convertToObject" : false,
+        "override" : true,
+        "runOnValidationError" : false
+      }, {
+        "name" : "langChainVersion",
+        "valueString" : "[[${#strings.substring(properties.langChainLocation, 84)}]]",
+        "scope" : "conversation",
+        "fromObjectPath" : "",
+        "toObjectPath" : "",
+        "convertToObject" : false,
+        "override" : true,
+        "runOnValidationError" : false
+      } ],
+      "delayBeforeExecutingInMillis" : 0
+    },
+    "request" : {
+      "path" : "/descriptorstore/descriptors/[[${properties.langChainId}]]",
+      "headers" : { },
+      "queryParams" : {
+        "version" : "[[${properties.langChainVersion}]]"
+      },
+      "method" : "patch",
+      "contentType" : "application/json",
+      "body" : "{\"operation\":\"SET\",\"document\":{\"name\":\"[[${properties.botName}]]\",\"description\":\"\"}}"
+    }
+  }, {
+    "name" : "Create output",
+    "actions" : [ "create_output_for_anthropic" ],
+    "saveResponse" : true,
+    "responseObjectName" : "EDDIResponse",
+    "responseHeaderObjectName" : "EDDIResponseHeader",
+    "fireAndForget" : false,
+    "isBatchCalls" : false,
+    "request" : {
+      "path" : "/outputstore/outputsets",
+      "headers" : { },
+      "queryParams" : { },
+      "method" : "post",
+      "contentType" : "application/json",
+      "body" : "{\"outputSet\":[{\"action\":\"CONVERSATION_START\",\"timesOccurred\":0,\"outputs\":[{\"valueAlternatives\":[{\"type\":\"text\",\"text\":\"[(${properties.intro})]\",\"delay\":0}]}]}]}"
+    },
+    "postResponse" : {
+      "propertyInstructions" : [ {
+        "name" : "outputSetLocation",
+        "scope" : "conversation",
+        "fromObjectPath" : "EDDIResponseHeader.Location",
+        "toObjectPath" : "",
+        "convertToObject" : false,
+        "override" : true,
+        "runOnValidationError" : false
+      } ],
+      "retryHttpCallInstruction" : {
+        "maxRetries" : 3,
+        "exponentialBackoffDelayInMillis" : 1000,
+        "retryOnHttpCodes" : [ 502, 503 ]
+      }
+    }
+  }, {
+    "name" : "Create name for output",
+    "actions" : [ "create_output_for_anthropic" ],
+    "saveResponse" : false,
+    "fireAndForget" : false,
+    "isBatchCalls" : false,
+    "preRequest" : {
+      "propertyInstructions" : [ {
+        "name" : "outputSetId",
+        "valueString" : "[[${#strings.substring(properties.outputSetLocation, 45, 69)}]]",
+        "scope" : "conversation",
+        "fromObjectPath" : "",
+        "toObjectPath" : "",
+        "convertToObject" : false,
+        "override" : true,
+        "runOnValidationError" : false
+      }, {
+        "name" : "outputSetVersion",
+        "valueString" : "[[${#strings.substring(properties.outputSetLocation, 78)}]]",
+        "scope" : "conversation",
+        "fromObjectPath" : "",
+        "toObjectPath" : "",
+        "convertToObject" : false,
+        "override" : true,
+        "runOnValidationError" : false
+      } ],
+      "delayBeforeExecutingInMillis" : 0
+    },
+    "request" : {
+      "path" : "/descriptorstore/descriptors/[[${properties.outputSetId}]]",
+      "headers" : { },
+      "queryParams" : {
+        "version" : "[[${properties.outputSetVersion}]]"
+      },
+      "method" : "patch",
+      "contentType" : "application/json",
+      "body" : "{\"operation\":\"SET\",\"document\":{\"name\":\"[[${properties.botName}]]\",\"description\":\"\"}}"
+    }
+  }, {
+    "name" : "Create package",
+    "actions" : [ "create_package_for_anthropic" ],
+    "saveResponse" : true,
+    "responseObjectName" : "EDDIResponse",
+    "responseHeaderObjectName" : "EDDIResponseHeader",
+    "fireAndForget" : false,
+    "isBatchCalls" : false,
+    "request" : {
+      "path" : "/packagestore/packages",
+      "headers" : { },
+      "queryParams" : { },
+      "method" : "post",
+      "contentType" : "application/json",
+      "body" : "{\"packageExtensions\":[{\"type\":\"eddi://ai.labs.parser\"},{\"type\":\"eddi://ai.labs.behavior\",\"config\":{\"uri\":\"[[${properties.behaviorSetLocation}]]\"}},{\"type\":\"eddi://ai.labs.langchain\",\"config\":{\"uri\":\"[[${properties.langChainLocation}]]\"}},{\"type\":\"eddi://ai.labs.output\",\"config\":{\"uri\":\"[[${properties.outputSetLocation}]]\"}}]}"
+    },
+    "postResponse" : {
+      "propertyInstructions" : [ {
+        "name" : "packageLocation",
+        "scope" : "conversation",
+        "fromObjectPath" : "EDDIResponseHeader.Location",
+        "toObjectPath" : "",
+        "convertToObject" : false,
+        "override" : true,
+        "runOnValidationError" : false
+      } ],
+      "retryHttpCallInstruction" : {
+        "maxRetries" : 3,
+        "exponentialBackoffDelayInMillis" : 1000,
+        "retryOnHttpCodes" : [ 502, 503 ]
+      }
+    }
+  }, {
+    "name" : "Create name for package",
+    "actions" : [ "create_package_for_anthropic" ],
+    "saveResponse" : false,
+    "fireAndForget" : false,
+    "isBatchCalls" : false,
+    "preRequest" : {
+      "propertyInstructions" : [ {
+        "name" : "packageId",
+        "valueString" : "[[${#strings.substring(properties.packageLocation, 45, 69)}]]",
+        "scope" : "conversation",
+        "fromObjectPath" : "",
+        "toObjectPath" : "",
+        "convertToObject" : false,
+        "override" : true,
+        "runOnValidationError" : false
+      }, {
+        "name" : "packageVersion",
+        "valueString" : "[[${#strings.substring(properties.packageLocation, 78)}]]",
+        "scope" : "conversation",
+        "fromObjectPath" : "",
+        "toObjectPath" : "",
+        "convertToObject" : false,
+        "override" : true,
+        "runOnValidationError" : false
+      } ],
+      "delayBeforeExecutingInMillis" : 0
+    },
+    "request" : {
+      "path" : "/descriptorstore/descriptors/[[${properties.packageId}]]",
+      "headers" : { },
+      "queryParams" : {
+        "version" : "[[${properties.packageVersion}]]"
+      },
+      "method" : "patch",
+      "contentType" : "application/json",
+      "body" : "{\"operation\":\"SET\",\"document\":{\"name\":\"[[${properties.botName}]]\",\"description\":\"anthropic powered Package\"}}"
+    }
+  }, {
+    "name" : "Create bot",
+    "actions" : [ "create_bot_for_anthropic" ],
+    "saveResponse" : true,
+    "responseObjectName" : "EDDIResponse",
+    "responseHeaderObjectName" : "EDDIResponseHeader",
+    "fireAndForget" : false,
+    "isBatchCalls" : false,
+    "request" : {
+      "path" : "/botstore/bots",
+      "headers" : { },
+      "queryParams" : { },
+      "method" : "post",
+      "contentType" : "application/json",
+      "body" : "{\"packages\": [\"[[${properties.packageLocation}]]\"]}"
+    },
+    "postResponse" : {
+      "propertyInstructions" : [ {
+        "name" : "botLocation",
+        "scope" : "conversation",
+        "fromObjectPath" : "EDDIResponseHeader.Location",
+        "toObjectPath" : "",
+        "convertToObject" : false,
+        "override" : true,
+        "runOnValidationError" : false
+      } ],
+      "retryHttpCallInstruction" : {
+        "maxRetries" : 3,
+        "exponentialBackoffDelayInMillis" : 1000,
+        "retryOnHttpCodes" : [ 502, 503 ]
+      }
+    }
+  }, {
+    "name" : "Create name for bot",
+    "actions" : [ "create_bot_for_anthropic" ],
+    "saveResponse" : false,
+    "fireAndForget" : false,
+    "isBatchCalls" : false,
+    "preRequest" : {
+      "propertyInstructions" : [ {
+        "name" : "botId",
+        "valueString" : "[[${#strings.substring(properties.botLocation, 33, 57)}]]",
+        "scope" : "conversation",
+        "fromObjectPath" : "",
+        "toObjectPath" : "",
+        "convertToObject" : false,
+        "override" : true,
+        "runOnValidationError" : false
+      }, {
+        "name" : "botVersion",
+        "valueString" : "[[${#strings.substring(properties.botLocation, 66)}]]",
+        "scope" : "conversation",
+        "fromObjectPath" : "",
+        "toObjectPath" : "",
+        "convertToObject" : false,
+        "override" : true,
+        "runOnValidationError" : false
+      } ],
+      "delayBeforeExecutingInMillis" : 0
+    },
+    "request" : {
+      "path" : "/descriptorstore/descriptors/[[${properties.botId}]]",
+      "headers" : { },
+      "queryParams" : {
+        "version" : "[[${properties.botVersion}]]"
+      },
+      "method" : "patch",
+      "contentType" : "application/json",
+      "body" : "{\"operation\":\"SET\",\"document\":{\"name\":\"[[${properties.botName}]]\",\"description\":\"anthropic powered Bot\"}}"
+    }
+  }, {
+    "name" : "Deploy bot",
+    "actions" : [ "deploy_bot_for_anthropic" ],
+    "saveResponse" : true,
+    "responseObjectName" : "EDDIResponse",
+    "responseHeaderObjectName" : "EDDIResponseHeader",
+    "fireAndForget" : false,
+    "isBatchCalls" : false,
+    "preRequest" : {
+      "propertyInstructions" : [ {
+        "name" : "botIntent",
+        "valueString" : "[[${#strings.toLowerCase(#strings.replace(properties.botName, ' ', '-'))}]]-[[${properties.botId}]]",
+        "scope" : "conversation",
+        "fromObjectPath" : "",
+        "toObjectPath" : "",
+        "convertToObject" : false,
+        "override" : true,
+        "runOnValidationError" : false
+      } ],
+      "delayBeforeExecutingInMillis" : 0
+    },
+    "request" : {
+      "path" : "/administration/unrestricted/deploy/[[${properties.botId}]]",
+      "headers" : { },
+      "queryParams" : {
+        "version" : "[[${properties.botVersion}]]"
+      },
+      "method" : "post",
+      "contentType" : "text/plain",
+      "body" : ""
+    }
+  }, {
+    "name" : "Create Bot Management Config",
+    "actions" : [ "deploy_bot_for_anthropic" ],
+    "saveResponse" : true,
+    "responseObjectName" : "EDDIResponse",
+    "responseHeaderObjectName" : "EDDIResponseHeader",
+    "fireAndForget" : false,
+    "isBatchCalls" : false,
+    "request" : {
+      "path" : "/bottriggerstore/bottriggers",
+      "headers" : { },
+      "queryParams" : { },
+      "method" : "post",
+      "contentType" : "application/json",
+      "body" : "{\"intent\":\"[[${properties.botIntent}]]\",\"botDeployments\":[{\"environment\":\"unrestricted\",\"botId\":\"[[${properties.botId}]]\"}]}"
+    }
+  } ]
+}

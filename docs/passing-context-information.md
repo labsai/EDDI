@@ -1,8 +1,85 @@
-# Passing context information
+# Passing Context Information
+
+## Overview
+
+**Context** is external data that you pass from your application into EDDI conversations. It's how you inject real-world information—like user profiles, session data, or business state—into your bot's logic without hard-coding it.
+
+### Why Context Matters
+
+Context enables your bots to:
+- **Personalize responses**: Use user names, preferences, account details
+- **Make business decisions**: Check user roles, subscription status, account balances
+- **Maintain session state**: Pass authentication tokens, session IDs
+- **Adapt behavior**: Change bot responses based on time of day, location, language
+- **Integrate with your systems**: Bring data from your CRM, database, or services
+
+### Context vs Conversation Memory
+
+| Aspect | Context | Conversation Memory |
+|--------|---------|---------------------|
+| **Source** | Your application (external) | EDDI (internal) |
+| **Direction** | Input to EDDI | Managed by EDDI |
+| **Lifetime** | Per request | Persistent across conversation |
+| **Purpose** | Inject external data | Store conversation history |
+| **Usage** | `${context.userName}` | `${memory.current.input}` |
+
+### Context Types
+
+EDDI supports three context types:
+
+1. **`string`**: Simple text values
+   ```json
+   "userRole": {"type": "string", "value": "premium"}
+   ```
+
+2. **`object`**: Structured JSON data
+   ```json
+   "userInfo": {"type": "object", "value": {"name": "John", "age": 30}}
+   ```
+
+3. **`expressions`**: Parsed semantic expressions
+   ```json
+   "intent": {"type": "expressions", "value": "purchase(product)"}
+   ```
+
+### How Context is Used
+
+Once passed to EDDI, context can be:
+- **Matched in Behavior Rules**: Conditions check context values
+- **Used in Output Templates**: `[[${context.userName}]]`
+- **Included in HTTP Call Bodies**: Pass to external APIs
+- **Stored as Properties**: Save to conversation memory
+
+### Example Flow
+
+```
+Your App → POST /bots/unrestricted/bot123/conv456
+{
+  "input": "What's my account balance?",
+  "context": {
+    "userId": {"type": "string", "value": "user-789"},
+    "accountType": {"type": "string", "value": "premium"}
+  }
+}
+
+→ EDDI Behavior Rule checks context:
+   IF context.accountType = "premium" THEN httpcall(get-balance)
+
+→ HTTP Call uses context:
+   GET /api/accounts/${context.userId}/balance
+
+→ Output Template uses context:
+   "Hello! Your premium account balance is $[[${httpCalls.balance.amount}]]"
+
+→ Response to Your App:
+   "Hello! Your premium account balance is $1,250.00"
+```
+
+## Sending Context to Conversations
 
 In this section we will explain how **EDDI** handles the context of a conversation and which data can be passed within the scope of a conversation.
 
-In order to talk to **EDDI** within a context, a **`POST`** request shall be sent to `/bots/{environment}/`**`{botId}`**`/`**`{conversationId}`**, (_same way as interacting in a normal conversation in EDDI_) but this time we must provide more parameters:
+In order to talk to **EDDI** with context, send a **`POST`** request to `/bots/{environment}/`**`{botId}`**`/`**`{conversationId}`** (same way as interacting in a normal conversation in EDDI), but this time provide context parameters:
 
 ### Send message in a conversation with a Chatbot REST API Endpoint
 

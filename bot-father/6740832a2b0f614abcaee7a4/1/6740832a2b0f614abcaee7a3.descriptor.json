@@ -1,0 +1,8 @@
+{
+  "resource" : "eddi://ai.labs.output/outputstore/outputsets/6740832a2b0f614abcaee7a3?version=1",
+  "createdOn" : 1732281130639,
+  "lastModifiedOn" : 1764675697996,
+  "deleted" : false,
+  "name" : "Create OpenAI Connector Bot",
+  "description" : ""
+}

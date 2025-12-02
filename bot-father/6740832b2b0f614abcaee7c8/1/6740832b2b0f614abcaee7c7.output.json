@@ -1,0 +1,110 @@
+{
+  "outputSet" : [ {
+    "action" : "ask_for_jlama_model_name",
+    "timesOccurred" : 0,
+    "outputs" : [ {
+      "valueAlternatives" : [ {
+        "type" : "text",
+        "text" : "What's the model name?",
+        "delay" : 0
+      } ]
+    } ],
+    "quickReplies" : [ ]
+  }, {
+    "action" : "ask_for_jlama_auth_token",
+    "timesOccurred" : 0,
+    "outputs" : [ {
+      "valueAlternatives" : [ {
+        "type" : "text",
+        "text" : "Please provide the authentication token.",
+        "delay" : 0
+      } ]
+    } ],
+    "quickReplies" : [ ]
+  }, {
+    "action" : "ask_for_jlama_temperature",
+    "timesOccurred" : 0,
+    "outputs" : [ {
+      "valueAlternatives" : [ {
+        "type" : "text",
+        "text" : "What temperature would you like to set for this bot (e.g., 0.5)?",
+        "delay" : 0
+      } ]
+    } ],
+    "quickReplies" : [ ]
+  }, {
+    "action" : "ask_for_jlama_builtin_tools",
+    "timesOccurred" : 0,
+    "outputs" : [ {
+      "valueAlternatives" : [ {
+        "type" : "text",
+        "text" : "Would you like to enable built-in tools (calculator, websearch, datetime, weather, etc.) for this bot?",
+        "delay" : 0
+      } ]
+    } ],
+    "quickReplies" : [ {
+      "value" : "Yes, enable tools",
+      "expressions" : "true"
+    }, {
+      "value" : "No, just simple chat",
+      "expressions" : "false"
+    } ]
+  }, {
+    "action" : "ask_for_jlama_tools_whitelist",
+    "timesOccurred" : 0,
+    "outputs" : [ {
+      "valueAlternatives" : [ {
+        "type" : "text",
+        "text" : "Great! Which specific tools would you like to enable?",
+        "delay" : 0
+      } ]
+    }, {
+      "valueAlternatives" : [ {
+        "type" : "text",
+        "text" : "Enter tools as a JSON array, e.g.: [\"calculator\", \"websearch\", \"datetime\"]",
+        "delay" : 0
+      } ]
+    }, {
+      "valueAlternatives" : [ {
+        "type" : "text",
+        "text" : "Available tools: calculator, datetime, websearch, dataformatter, webscraper, textsummarizer, pdfreader, weather",
+        "delay" : 0
+      } ]
+    } ],
+    "quickReplies" : [ {
+      "value" : "Enable all tools",
+      "expressions" : "enable_all_tools"
+    }, {
+      "value" : "Calculator & Web Search",
+      "expressions" : "tools_calc_web"
+    }, {
+      "value" : "Calculator, Web, DateTime",
+      "expressions" : "tools_calc_web_datetime"
+    } ]
+  }, {
+    "action" : "ask_for_jlama_conversation_history_limit",
+    "timesOccurred" : 0,
+    "outputs" : [ {
+      "valueAlternatives" : [ {
+        "type" : "text",
+        "text" : "How many conversation turns would you like to include in the context?",
+        "delay" : 0
+      } ]
+    }, {
+      "valueAlternatives" : [ {
+        "type" : "text",
+        "text" : "(-1 = unlimited, 0 = none, recommended: 10-20)",
+        "delay" : 0
+      } ]
+    } ],
+    "quickReplies" : [ {
+      "value" : "10 turns (recommended)",
+      "expressions" : "10"
+    }, {
+      "value" : "20 turns",
+      "expressions" : "20"
+    }, {
+      "value" : "Unlimited",
+      "expressions" : "-1"
+    } ]
+  }, {

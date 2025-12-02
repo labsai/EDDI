@@ -1,10 +1,71 @@
-# Deployement management of Chatbots
+# Deployment Management of Chatbots
 
-## Deployement management of Chatbots
+## Overview
 
-In this section we will discuss the deployment management of Chatbots which consists of deployment/undeployment, checking status of deployment and list all the deployed Chatbots.
+**Deployment Management** controls the lifecycle of your bots across different environments. In EDDI, bots go through a **create → configure → deploy** workflow before they can process conversations.
 
-After all the resources required of the chatbot has been well created and configured ( **`Dictionary`** ,**`Behavior Rules`,`Output`,`Package`,etc..)** and the Chatbot is created through a **`POST`** to the API endpoint **`/botstore/bots`**, the deployment management of the Chatbots is offered by **EDDI** is key to have granular control over the deployed bots.
+### Why Deployment Management?
+
+Deployment management provides:
+- **Environment Isolation**: Test bots without affecting production
+- **Version Control**: Deploy specific bot versions, roll back if needed
+- **Gradual Rollout**: Test in `test` environment, then `unrestricted`, finally `restricted`
+- **Zero-Downtime Updates**: Deploy new versions while old ones are still running
+- **Audit Trail**: Track what's deployed, when, and by whom
+
+### EDDI Environments
+
+| Environment | Purpose | Access Control |
+|-------------|---------|----------------|
+| **`test`** | Development and testing | Typically unrestricted |
+| **`unrestricted`** | Public/demo deployments | No authentication required |
+| **`restricted`** | Production with authentication | Requires valid OAuth token |
+
+### Deployment Lifecycle
+
+```
+1. CREATE Bot
+   POST /botstore/bots
+   → Bot exists but is NOT deployed
+
+2. DEPLOY Bot
+   POST /administration/unrestricted/deploy/bot123?version=1
+   → Bot becomes active and can handle conversations
+
+3. USE Bot
+   POST /bots/unrestricted/bot123
+   → Users can now interact with the bot
+
+4. UPDATE Bot
+   Create new version → Deploy new version
+   → Old version still available if specified
+
+5. UNDEPLOY Bot
+   POST /administration/unrestricted/undeploy/bot123
+   → Bot stops processing new conversations
+```
+
+### Auto-Deploy Feature
+
+- **`autoDeploy=true`**: Automatically deploy new versions when bot is updated
+- **`autoDeploy=false`**: Manual deployment required for each version
+
+This is useful for:
+- **Development**: Auto-deploy to `test` for rapid iteration
+- **Production**: Manual deployment to `restricted` for controlled releases
+
+### Checking Deployment Status
+
+You can check:
+- **Single Bot Status**: Is bot123 deployed in unrestricted?
+- **All Deployments**: List all deployed bots across environments
+- **Version Info**: Which version is currently deployed?
+
+## Deployment Operations
+
+In this section we will discuss the deployment management of Chatbots, including deployment/undeployment, checking deployment status, and listing all deployed Chatbots.
+
+After all the required resources for the chatbot have been created and configured (**`Dictionary`**, **`Behavior Rules`**, **`Output`**, **`Package`**, etc.) and the Chatbot is created through **`POST`** to **`/botstore/bots`**, deployment management is key to having granular control over deployed bots.
 
 ## **Deployment of a Chatbot :**
 
@@ -132,7 +193,7 @@ _Response Headers_
 }
 ```
 
-To list all the deployed Chabots a `GET` to **`/administration/{environment}/deploymentstore/{botId}`**:
+To list all the deployed Chatbots a `GET` to **`/administration/{environment}/deploymentstore/{botId}`**:
 
 ### List of Deployed Chatbots REST API Endpoint
 

@@ -1,0 +1,8 @@
+{
+  "resource" : "eddi://ai.labs.package/packagestore/packages/6740832b2b0f614abcaee7c2?version=1",
+  "createdOn" : 1732281131421,
+  "lastModifiedOn" : 1764675697996,
+  "deleted" : false,
+  "name" : "Create Ollama Connector Bot",
+  "description" : ""
+}

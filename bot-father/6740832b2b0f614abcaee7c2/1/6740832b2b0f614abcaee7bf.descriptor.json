@@ -1,0 +1,8 @@
+{
+  "resource" : "eddi://ai.labs.httpcalls/httpcallsstore/httpcalls/6740832b2b0f614abcaee7bf?version=1",
+  "createdOn" : 1732281131332,
+  "lastModifiedOn" : 1764675697996,
+  "deleted" : false,
+  "name" : "Create Ollama Connector Bot",
+  "description" : ""
+}

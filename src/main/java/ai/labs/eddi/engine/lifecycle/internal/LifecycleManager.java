@@ -17,11 +17,78 @@ import static ai.labs.eddi.utils.LifecycleUtilities.createComponentKey;
 import static ai.labs.eddi.utils.RuntimeUtilities.checkNotNull;
 import static ai.labs.eddi.utils.RuntimeUtilities.isNullOrEmpty;
 
+/**
+ * Executes the Lifecycle Pipeline - EDDI's core processing engine.
+ *
+ * <p>The LifecycleManager is responsible for executing a bot's configured sequence of
+ * {@link ILifecycleTask} components, passing conversation state through each task in order.</p>
+ *
+ * <h2>Lifecycle Pipeline Concept</h2>
+ * <p>Instead of hard-coded bot logic, EDDI processes conversations through a configurable
+ * pipeline of tasks:</p>
+ * <pre>
+ * User Input → Parser → Behavior Rules → API Calls → LLM → Output Generation
+ * </pre>
+ *
+ * <p>Each task transforms the {@link IConversationMemory} object, building up the
+ * conversation state step by step.</p>
+ *
+ * <h2>Key Features</h2>
+ * <ul>
+ *   <li><strong>Sequential Execution</strong>: Tasks execute in order, each building on
+ *       previous results</li>
+ *   <li><strong>Stateless Design</strong>: Tasks don't maintain state; all state is in
+ *       the memory object</li>
+ *   <li><strong>Interruptible</strong>: Pipeline can stop early if STOP_CONVERSATION
+ *       action is triggered</li>
+ *   <li><strong>Selective Execution</strong>: Can execute only a subset of tasks starting
+ *       from a specific type</li>
+ *   <li><strong>Component-Based</strong>: Each task has an associated component (config/resource)
+ *       loaded from the package</li>
+ * </ul>
+ *
+ * <h2>Example Flow</h2>
+ * <pre>{@code
+ * // 1. User sends message
+ * memory.getCurrentStep().storeData("input", "What's the weather?");
+ *
+ * // 2. Parser task extracts entities
+ * memory.getCurrentStep().storeData("expressions", ["question(what)", "entity(weather)"]);
+ *
+ * // 3. Behavior rules evaluate conditions and trigger actions
+ * memory.getCurrentStep().storeData("actions", ["httpcall(weather-api)"]);
+ *
+ * // 4. HTTP Calls task executes API call
+ * memory.getCurrentStep().storeData("weatherData", {temp: 75, condition: "sunny"});
+ *
+ * // 5. Output task generates response
+ * memory.getCurrentStep().storeData("output", ["The weather is sunny with 75°F"]);
+ * }</pre>
+ *
+ * @author ginccc
+ * @see ILifecycleTask
+ * @see IConversationMemory
+ * @see ai.labs.eddi.engine.runtime.internal.ConversationCoordinator
+ */
 public class LifecycleManager implements ILifecycleManager {
     private static final String KEY_ACTIONS = "actions";
 
+    /**
+     * The ordered list of lifecycle tasks to execute.
+     * Tasks are added during bot initialization based on package configuration.
+     */
     private final List<ILifecycleTask> lifecycleTasks;
+
+    /**
+     * Cache of task-specific components (configurations, resources, etc.).
+     * Components are loaded once and reused across executions for performance.
+     */
     private final IComponentCache componentCache;
+
+    /**
+     * Identifier of the package this lifecycle manager belongs to.
+     * Used for component cache lookups.
+     */
     private final IResourceStore.IResourceId packageId;
 
     public LifecycleManager(IComponentCache componentCache, IResourceStore.IResourceId packageId) {
@@ -31,31 +98,81 @@ public class LifecycleManager implements ILifecycleManager {
         lifecycleTasks = new LinkedList<>();
     }
 
+    /**
+     * Executes the lifecycle pipeline, transforming the conversation memory.
+     *
+     * <p>This method iterates through the configured lifecycle tasks, executing each one
+     * in sequence. Each task reads from and writes to the conversation memory, building
+     * up the conversation state progressively.</p>
+     *
+     * <h3>Execution Flow</h3>
+     * <ol>
+     *   <li>Determine which tasks to execute (all or filtered by type)</li>
+     *   <li>For each task:
+     *     <ul>
+     *       <li>Check if thread has been interrupted (allows graceful shutdown)</li>
+     *       <li>Retrieve task's component from cache</li>
+     *       <li>Execute task with memory and component</li>
+     *       <li>Check if STOP_CONVERSATION action was triggered</li>
+     *     </ul>
+     *   </li>
+     *   <li>If STOP_CONVERSATION action found, throw ConversationStopException</li>
+     * </ol>
+     *
+     * <h3>Selective Execution</h3>
+     * <p>If {@code lifecycleTaskTypes} is provided, only tasks starting from the first
+     * matching type will be executed. This allows partial pipeline execution, useful for
+     * debugging or specialized processing.</p>
+     *
+     * <h3>Example</h3>
+     * <pre>{@code
+     * // Execute full pipeline
+     * lifecycleManager.executeLifecycle(memory, null);
+     *
+     * // Execute only from behavior rules onward
+     * lifecycleManager.executeLifecycle(memory, List.of("behavior_rules"));
+     * }</pre>
+     *
+     * @param conversationMemory the conversation state to transform
+     * @param lifecycleTaskTypes optional filter to execute only specific task types
+     * @throws LifecycleException if any task execution fails
+     * @throws ConversationStopException if STOP_CONVERSATION action is triggered
+     */
     public void executeLifecycle(final IConversationMemory conversationMemory, List<String> lifecycleTaskTypes)
             throws LifecycleException, ConversationStopException {
 
         checkNotNull(conversationMemory, "conversationMemory");
 
+        // Determine which tasks to execute
         List<ILifecycleTask> lifecycleTasks;
         if (isNullOrEmpty(lifecycleTaskTypes)) {
+            // Execute all tasks
             lifecycleTasks = this.lifecycleTasks;
         } else {
+            // Execute only tasks starting from specified type
             lifecycleTasks = getLifecycleTasks(lifecycleTaskTypes);
         }
 
+        // Execute each task in sequence
         for (int index = 0; index < lifecycleTasks.size(); index++) {
             ILifecycleTask task = lifecycleTasks.get(index);
+
+            // Check if execution should be interrupted (graceful shutdown)
             if (Thread.currentThread().isInterrupted()) {
                 throw new LifecycleException.LifecycleInterruptedException("Execution was interrupted!");
             }
 
             try {
+                // Retrieve task's component from cache
+                // Component contains task-specific configuration loaded during bot initialization
                 var components = componentCache.getComponentMap(task.getId());
                 var componentKey = createComponentKey(packageId.getId(), packageId.getVersion(), index);
                 var component = components.getOrDefault(componentKey, null);
 
+                // Execute the task, transforming the conversation memory
                 task.execute(conversationMemory, component);
 
+                // Check if task triggered a STOP_CONVERSATION action
                 checkIfStopConversationAction(conversationMemory);
             } catch (LifecycleException e) {
                 throw new LifecycleException("Error while executing lifecycle!", e);
@@ -63,11 +180,36 @@ public class LifecycleManager implements ILifecycleManager {
         }
     }
 
+    /**
+     * Filters lifecycle tasks to execute only those starting from specified types.
+     *
+     * <p>This enables partial pipeline execution. For example, if you specify
+     * ["behavior_rules"], it will execute behavior_rules and all subsequent tasks,
+     * but skip earlier tasks like parsing.</p>
+     *
+     * @param lifecycleTaskTypes list of task type prefixes to match
+     * @return filtered list of tasks to execute
+     */
+    /**
+     * Filters lifecycle tasks to execute only those starting from specified types.
+     *
+     * <p>This enables partial pipeline execution. For example, if you specify
+     * ["behavior_rules"], it will execute behavior_rules and all subsequent tasks,
+     * but skip earlier tasks like parsing.</p>
+     *
+     * @param lifecycleTaskTypes list of task type prefixes to match
+     * @return filtered list of tasks to execute
+     */
     private List<ILifecycleTask> getLifecycleTasks(List<String> lifecycleTaskTypes) {
         List<ILifecycleTask> ret = new LinkedList<>();
+
+        // Find the first task that matches any of the specified types
         for (int i = 0; i < this.lifecycleTasks.size(); i++) {
             ILifecycleTask task = this.lifecycleTasks.get(i);
+
+            // Check if this task's type matches any of the requested types (prefix match)
             if (lifecycleTaskTypes.stream().anyMatch(type -> type.startsWith(task.getType()))) {
+                // Include this task and all subsequent tasks
                 ret.addAll(this.lifecycleTasks.subList(i, this.lifecycleTasks.size()));
                 break;
             }
@@ -76,16 +218,55 @@ public class LifecycleManager implements ILifecycleManager {
         return ret;
     }
 
+    /**
+     * Checks if the current step contains a STOP_CONVERSATION action.
+     *
+     * <p>STOP_CONVERSATION is a special action that can be triggered by behavior rules
+     * to immediately halt the lifecycle pipeline and end the conversation. This is useful
+     * for scenarios like:</p>
+     * <ul>
+     *   <li>User explicitly says "goodbye" or "end conversation"</li>
+     *   <li>Maximum conversation turns reached</li>
+     *   <li>Error conditions that should terminate the conversation</li>
+     *   <li>Business logic determines conversation should end</li>
+     * </ul>
+     *
+     * @param conversationMemory the conversation memory to check
+     * @throws ConversationStopException if STOP_CONVERSATION action is found
+     */
     private void checkIfStopConversationAction(IConversationMemory conversationMemory) throws ConversationStopException {
+        // Retrieve actions from current step
         IData<List<String>> actionData = conversationMemory.getCurrentStep().getLatestData(KEY_ACTIONS);
         if (actionData != null) {
             var result = actionData.getResult();
+
+            // Check if STOP_CONVERSATION is in the actions list
             if (result != null && result.contains(IConversation.STOP_CONVERSATION)) {
                 throw new ConversationStopException();
             }
         }
     }
 
+    /**
+     * Adds a lifecycle task to this manager's execution pipeline.
+     *
+     * <p>Tasks are executed in the order they are added. This method is typically called
+     * during bot initialization, when the bot's package configuration is being loaded.</p>
+     *
+     * <p><strong>Important:</strong> Tasks should be added in the correct order to ensure
+     * proper pipeline flow. A typical order is:</p>
+     * <ol>
+     *   <li>Input normalization/parsing</li>
+     *   <li>Semantic parsing (dictionaries)</li>
+     *   <li>Behavior rules</li>
+     *   <li>Property extraction</li>
+     *   <li>HTTP calls / LangChain</li>
+     *   <li>Output generation</li>
+     * </ol>
+     *
+     * @param lifecycleTask the task to add to the pipeline
+     * @throws IllegalArgumentException if lifecycleTask is null
+     */
     @Override
     public void addLifecycleTask(ILifecycleTask lifecycleTask) {
         checkNotNull(lifecycleTask, "lifecycleTask");

@@ -1,6 +1,115 @@
 # Import/Export a Chatbot
 
-In this tutorial we will talk about **importing/exporting** bots, this is a very useful feature that will allow our bots to be very portable and easy to re-use in other machines/instances of **EDDI** and of course to backup and restore our bots and maintain them and keep them shiny.
+## Overview
+
+**Import/Export** functionality allows you to package entire bots (including all their dependencies) into portable ZIP files. This is essential for bot lifecycle management, collaboration, and deployment automation.
+
+### Why Import/Export?
+
+**Use Cases**:
+- **Backup & Restore**: Protect your bot configurations from accidental deletion or corruption
+- **Version Control**: Store bot configurations alongside code in Git
+- **Environment Migration**: Move bots from development → staging → production
+- **Team Collaboration**: Share bots with team members or customers
+- **Disaster Recovery**: Quickly restore bots after system failures
+- **Bot Templates**: Create reusable bot templates for similar use cases
+- **CI/CD Integration**: Automate bot deployment in your pipeline
+
+### What Gets Exported?
+
+When you export a bot, EDDI packages:
+- ✅ Bot configuration (package references)
+- ✅ All packages used by the bot
+- ✅ All extensions (behavior rules, dictionaries, HTTP calls, outputs, etc.)
+- ✅ Version information
+- ✅ Configuration metadata
+
+**Note**: Conversations and conversation history are **NOT** exported (only configurations).
+
+### Export/Import Workflow
+
+```
+DEVELOPMENT EDDI
+    ↓
+1. Export Bot
+   POST /backup/export/bot123?botVersion=1
+   ← Returns: bot123-1.zip
+    ↓
+2. Download ZIP file
+   GET /backup/export/bot123-1.zip
+   ← Receives: bot123-1.zip file
+    ↓
+3. Store in version control / backup / transfer
+    ↓
+PRODUCTION EDDI
+    ↓
+4. Upload ZIP file
+   POST /backup/import
+   Body: (multipart/form-data with ZIP file)
+   ← Returns: New bot ID
+    ↓
+5. Deploy imported bot
+   POST /administration/unrestricted/deploy/{newBotId}?version=1
+```
+
+### Best Practices
+
+- **Version Your Exports**: Include version numbers in filenames: `customer-support-bot-v2.3.zip`
+- **Document Changes**: Keep a changelog of what changed between exports
+- **Regular Backups**: Schedule automated exports of production bots
+- **Test Imports**: Always test imported bots in a test environment first
+- **Store Securely**: Keep exports in secure, version-controlled storage (e.g., Git LFS, S3)
+
+### Common Scenarios
+
+**Scenario 1: Promoting to Production**
+```bash
+# 1. Export from test environment
+curl -X POST http://test.eddi.com/backup/export/bot123?botVersion=1
+
+# 2. Download the ZIP
+curl -O http://test.eddi.com/backup/export/bot123-1.zip
+
+# 3. Import to production
+curl -X POST -F "file=@bot123-1.zip" http://prod.eddi.com/backup/import
+
+# 4. Deploy in production
+curl -X POST http://prod.eddi.com/administration/restricted/deploy/{newBotId}?version=1
+```
+
+**Scenario 2: Sharing Bot with Team**
+```bash
+# Export bot
+curl -X POST http://localhost:7070/backup/export/bot123?botVersion=1
+
+# Commit to Git
+git add bot123-1.zip
+git commit -m "Added customer support bot v1"
+git push
+
+# Team member pulls and imports
+git pull
+curl -X POST -F "file=@bot123-1.zip" http://localhost:7070/backup/import
+```
+
+**Scenario 3: Disaster Recovery**
+```bash
+# Regular automated backup (cron job)
+#!/bin/bash
+DATE=$(date +%Y%m%d)
+curl -X POST http://prod.eddi.com/backup/export/bot123?botVersion=1
+curl -O http://prod.eddi.com/backup/export/bot123-1.zip
+mv bot123-1.zip "backups/bot123-$DATE.zip"
+aws s3 cp "backups/bot123-$DATE.zip" s3://bot-backups/
+
+# Restore after failure
+aws s3 cp s3://bot-backups/bot123-20250103.zip ./
+curl -X POST -F "file=@bot123-20250103.zip" http://prod.eddi.com/backup/import
+```
+
+## API Reference
+
+In this tutorial we will explain **importing/exporting** bots. This is a very useful feature that makes bots portable and easy to re-use across different EDDI instances, and allows you to backup, restore, and maintain your bots.
 
 ## Exporting a Chatbot:
 
@@ -73,8 +182,8 @@ Same process as exporting; send a `POST` request to the following API endpoint ,
 
 For the sake of simplifying things you can use [Postman](https://www.getpostman.com/) to upload the zip file of the exported bot just don't forget to add the **http header** of content type : _**`application/zip`****.**_
 
-Take a look at he image below to understand how can you upload the zip file in Postman:
+Take a look at the image below to understand how you can upload the zip file in Postman:
 
 ![](<.gitbook/assets/postman\_upload\_bin (3).png>)
 
-> **Important:** The bot will not be deployed after import you will have to deploy it yourself by using the corresponding API endpoint, please referrer to [Deploying a bot.](deployement-management-of-chatbots.md)
+> **Important:** The bot will not be deployed after import you will have to deploy it yourself by using the corresponding API endpoint, please refer to [Deploying a bot.](deployment-management-of-chatbots.md)
