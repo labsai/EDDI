@@ -2,8 +2,9 @@ package ai.labs.eddi.modules.langchain.rest;
 
 import ai.labs.eddi.engine.memory.IConversationMemoryStore;
 import ai.labs.eddi.engine.memory.model.ConversationMemorySnapshot;
-import ai.labs.eddi.engine.memory.model.ConversationStepSnapshot;
-import ai.labs.eddi.engine.memory.model.DataSnapshot;
+import ai.labs.eddi.engine.memory.model.ConversationMemorySnapshot.ConversationStepSnapshot;
+import ai.labs.eddi.engine.memory.model.ConversationMemorySnapshot.PackageRunSnapshot;
+import ai.labs.eddi.engine.memory.model.ConversationMemorySnapshot.ResultSnapshot;
 import ai.labs.eddi.modules.langchain.model.ToolExecutionTrace;
 import ai.labs.eddi.modules.langchain.model.ToolExecutionTrace.ToolCall;
 import ai.labs.eddi.modules.langchain.tools.ToolCacheService;
@@ -54,12 +55,14 @@ public class RestToolHistory {
             List<ToolCall> toolCalls = new ArrayList<>();
 
             for (ConversationStepSnapshot step : snapshot.getConversationSteps()) {
-                for (DataSnapshot data : step.getData()) {
-                    if (data.getKey().startsWith("langchain:trace:")) {
-                        Object result = data.getResult();
-                        if (result instanceof List) {
-                            List<Map<String, Object>> stepTrace = (List<Map<String, Object>>) result;
-                            processStepTrace(stepTrace, toolCalls);
+                for (PackageRunSnapshot packageRun : step.getPackages()) {
+                    for (ResultSnapshot data : packageRun.getLifecycleTasks()) {
+                        if (data.getKey() != null && data.getKey().startsWith("langchain:trace:")) {
+                            Object result = data.getResult();
+                            if (result instanceof List) {
+                                List<Map<String, Object>> stepTrace = (List<Map<String, Object>>) result;
+                                processStepTrace(stepTrace, toolCalls);
+                            }
                         }
                     }
                 }
