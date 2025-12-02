@@ -56,6 +56,7 @@ Notable features include:
 
 * **Lifecycle Pipeline Architecture**: Configurable, pluggable task pipeline for processing conversations
 * **LLM Orchestration**: Decide when and how to invoke LLMs through behavior rules, not just direct forwarding
+* **AI Agent Tooling**: Built-in tools (calculator, web search, weather, datetime, etc.) that AI agents can invoke autonomously
 * **Seamless integration with conversational or traditional REST APIs**
 * **Configurable Behavior Rules**: Complex IF-THEN logic to orchestrate LLM involvement and business logic
 * **Composable Bot Model**: Bots assembled from version-controlled packages and extensions (Bot → Package → Extension)
@@ -69,9 +70,42 @@ Notable features include:
 * **[Architecture Overview](docs/architecture.md)** - Deep dive into EDDI's design and components
 * **[Behavior Rules](docs/behavior-rules.md)** - Configuring bot logic
 * **[LangChain Integration](docs/langchain.md)** - Connecting to LLM APIs
+* **[LangChain Tools Guide](docs/bot-father-langchain-tools-guide.md)** - Built-in AI agent tools configuration
 * **[HTTP Calls](docs/httpcalls.md)** - External API integration
 * **[Bot Father Deep Dive](docs/bot-father-deep-dive.md)** - Real-world orchestration example
 * **[Complete Documentation](https://docs.labs.ai/)** - Full documentation site
+
+## AI Agent Tools
+
+EDDI includes built-in tools that AI agents can invoke autonomously during conversations:
+
+| Tool | Description |
+|------|-------------|
+| **Calculator** | Perform mathematical calculations |
+| **DateTime** | Get current date, time, and timezone conversions |
+| **Web Search** | Search the web via DuckDuckGo or Google Custom Search |
+| **Weather** | Get weather information (requires OpenWeatherMap API key) |
+| **Data Formatter** | Format and convert data (JSON, CSV, XML) |
+| **Web Scraper** | Extract content from web pages |
+| **Text Summarizer** | Summarize long text content |
+| **PDF Reader** | Extract text from PDF files |
+| **HTTP Calls** | Execute pre-configured API calls (see below) |
+
+### HTTP Calls as Secure Tools
+
+In addition to built-in tools, EDDI allows you to **expose your own HTTP call configurations as tools** for AI agents. This provides a crucial **security layer**: instead of allowing agents to make arbitrary HTTP requests, they can only invoke APIs that have been explicitly configured and whitelisted in your httpcalls configuration.
+
+**Benefits:**
+- **Security**: Agents are sandboxed to pre-approved API endpoints only
+- **Control**: Define exactly which parameters the agent can pass
+- **Auditability**: All tool invocations go through EDDI's logging and tracking
+- **Templating**: Use EDDI's templating engine to safely construct requests
+
+See [HTTP Calls](docs/httpcalls.md) for configuration details.
+
+Tools include enterprise features: **caching** (configurable TTL), **rate limiting**, and **cost tracking**.
+
+See the [LangChain Tools Guide](docs/bot-father-langchain-tools-guide.md) for configuration details.
 
 Technical specifications:
 

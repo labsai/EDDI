@@ -20,8 +20,8 @@ import org.jboss.logging.Logger;
 
 import java.lang.reflect.Method;
 import java.net.URI;
-import java.util.HashMap;
 import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * A CDI bean that provides a generic @Tool for Langchain4j agents.
@@ -56,7 +56,7 @@ public class EddiToolBridge {
     ToolExecutionService toolExecutionService;
 
     // Cache for httpcall configurations to avoid repeated lookups
-    private final Map<String, HttpCallsConfiguration> configCache = new HashMap<>();
+    private final Map<String, HttpCallsConfiguration> configCache = new ConcurrentHashMap<>();
 
     /**
      * This method is exposed to the LLM as a tool.
