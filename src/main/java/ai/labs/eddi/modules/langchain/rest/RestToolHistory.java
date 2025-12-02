@@ -77,7 +77,7 @@ public class RestToolHistory {
             return Response.ok(trace).build();
 
         } catch (ai.labs.eddi.datastore.IResourceStore.ResourceNotFoundException e) {
-             return Response.status(Response.Status.NOT_FOUND)
+            return Response.status(Response.Status.NOT_FOUND)
                     .entity(Map.of("error", "Conversation not found"))
                     .build();
         } catch (Exception e) {

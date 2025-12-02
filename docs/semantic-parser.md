@@ -493,6 +493,23 @@ Let's build an agent routing system for customer service:
 **Problem**: Corrections too aggressive (wrong routing)  
 **Solution**: Reduce Levenshtein distance or disable specific corrections
 
+> **Example:** To reduce the Levenshtein distance threshold for fuzzy matching, set the value in your pattern matcher configuration (e.g., in `pattern-matcher.yaml`):
+>
+> ```yaml
+> fuzzy_matching:
+>   levenshtein_distance: 1
+> ```
+>
+> Or in JSON configuration:
+> ```json
+> {
+>   "type": "eddi://ai.labs.parser.corrections.levenshtein",
+>   "config": {
+>     "distance": "1"
+>   }
+> }
+> ```
+
 > **Note:** The pattern matcher is optimized for conversational inputs, not full-text documents. Design dictionaries for typical user queries.
 
 ## Related Documentation

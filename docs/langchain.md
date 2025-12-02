@@ -300,10 +300,13 @@ This is the standard way to use the Langchain task - just connect to an LLM and 
 | **Tool Configuration** ||||
 | `enableBuiltInTools` | boolean | Enable built-in tools | false |
 | `builtInToolsWhitelist` | string[] | Specific tools to enable | (all if not specified) |
+| `tools` | string[] | Custom HTTP call tool URIs to enable | (none) |
 | **Context Control** ||||
 | `conversationHistoryLimit` | int | Max conversation turns in context | 10 |
-
-**Note**: Additional agent mode features like `maxBudgetPerConversation`, `enableToolCaching`, `enableRateLimiting`, and custom HTTP call tools are defined in the configuration model but not yet fully implemented in the code execution path.
+| **Cost & Performance** ||||
+| `maxBudgetPerConversation` | number | Limit total tool/LLM usage cost per conversation | (unlimited) |
+| `enableToolCaching` | boolean | Cache tool results to reduce API calls | true |
+| `enableRateLimiting` | boolean | Limit tool/LLM usage rate | true |
 
 ---
 

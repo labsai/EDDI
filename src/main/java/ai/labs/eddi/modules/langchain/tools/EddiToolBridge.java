@@ -35,6 +35,17 @@ import java.util.concurrent.ConcurrentHashMap;
 public class EddiToolBridge {
     private static final Logger LOGGER = Logger.getLogger(EddiToolBridge.class);
 
+    // Cache Method object to avoid repeated reflection lookups on every tool execution
+    private static final java.lang.reflect.Method INTERNAL_EXECUTE_METHOD;
+
+    static {
+        try {
+            INTERNAL_EXECUTE_METHOD = EddiToolBridge.class.getMethod("internalExecuteHttpCall", String.class, String.class, Map.class);
+        } catch (NoSuchMethodException e) {
+            throw new ExceptionInInitializerError("Failed to cache internalExecuteHttpCall method: " + e.getMessage());
+        }
+    }
+
     @Inject
     IHttpCallsStore httpCallsStore;
 
@@ -74,19 +85,13 @@ public class EddiToolBridge {
      */
     @Tool("Executes a pre-configured EDDI httpcall. Use only httpcalls that have been explicitly provided to you.")
     public String executeHttpCall(String conversationId, String httpCallUri, Map<String, Object> arguments) {
-        try {
-            Method method = this.getClass().getMethod("internalExecuteHttpCall", String.class, String.class, Map.class);
-            return toolExecutionService.executeTool(
-                    this,
-                    method,
-                    new Object[]{conversationId, httpCallUri, arguments},
-                    conversationId,
-                    new ToolExecutionTrace()
-            );
-        } catch (NoSuchMethodException e) {
-            LOGGER.error("Error finding internal method", e);
-            return errorResult("Internal error: " + e.getMessage());
-        }
+        return toolExecutionService.executeTool(
+                this,
+                INTERNAL_EXECUTE_METHOD,
+                new Object[]{conversationId, httpCallUri, arguments},
+                conversationId,
+                new ToolExecutionTrace()
+        );
     }
 
     public String internalExecuteHttpCall(String conversationId, String httpCallUri, Map<String, Object> arguments) {

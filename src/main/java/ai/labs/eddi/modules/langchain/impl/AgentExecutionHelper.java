@@ -165,28 +165,58 @@ public class AgentExecutionHelper {
     }
 
     /**
-     * Determines if an error is retryable
+     * Enum of known retryable error types.
      */
-    private static boolean isRetryableError(Exception e) {
-        // Check for specific exception types first
-        if (e instanceof java.net.SocketTimeoutException || 
-            e instanceof java.util.concurrent.TimeoutException) {
-            return true;
+    private enum RetryableErrorType {
+        SOCKET_TIMEOUT(java.net.SocketTimeoutException.class),
+        TIMEOUT(java.util.concurrent.TimeoutException.class),
+        CONNECT_EXCEPTION(java.net.ConnectException.class),
+        UNKNOWN_HOST(java.net.UnknownHostException.class);
+        // Add more known retryable exception types here as needed
+
+        private final Class<? extends Throwable> exceptionClass;
+
+        RetryableErrorType(Class<? extends Throwable> exceptionClass) {
+            this.exceptionClass = exceptionClass;
         }
 
-        String message = e.getMessage() != null ? e.getMessage().toLowerCase() : "";
+        public boolean matches(Throwable t) {
+            return exceptionClass.isInstance(t);
+        }
+    }
 
-        // Retry on common transient errors
-        // Note: String matching is fragile and locale-dependent, but necessary as a fallback
-        // for exceptions that don't have specific types or wrap underlying errors.
-        return message.contains("timeout") ||
-               message.contains("rate limit") ||
-               message.contains("too many requests") ||
-               message.contains("503") ||
-               message.contains("502") ||
-               message.contains("504") ||
-               message.contains("connection") ||
-               message.contains("temporary");
+    /**
+     * Determines if an error is retryable by checking known types and traversing the cause chain.
+     */
+    private static boolean isRetryableError(Exception e) {
+        Throwable current = e;
+
+        while (current != null) {
+            // Check for known retryable exception types
+            for (RetryableErrorType type : RetryableErrorType.values()) {
+                if (type.matches(current)) {
+                    return true;
+                }
+            }
+
+            // Fallback: string matching on message
+            String message = current.getMessage() != null ? current.getMessage().toLowerCase() : "";
+
+            if (message.contains("timeout") ||
+                message.contains("rate limit") ||
+                message.contains("too many requests") ||
+                message.contains("503") ||
+                message.contains("502") ||
+                message.contains("504") ||
+                message.contains("connection") ||
+                message.contains("temporary")) {
+                return true;
+            }
+
+            current = current.getCause();
+        }
+
+        return false;
     }
 }
 
