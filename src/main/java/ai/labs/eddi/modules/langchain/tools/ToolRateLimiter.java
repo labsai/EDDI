@@ -43,7 +43,7 @@ public class ToolRateLimiter {
      * Rate limit bucket for a specific tool
      */
     private static class RateLimitBucket {
-        private final int limit;
+        private int limit;
         private final AtomicInteger count;
         private long windowStart;
 
@@ -51,6 +51,16 @@ public class ToolRateLimiter {
             this.limit = limit;
             this.count = new AtomicInteger(0);
             this.windowStart = System.currentTimeMillis();
+        }
+
+        /**
+         * Update the rate limit for this bucket.
+         * Only updates if the new limit differs from the default.
+         */
+        synchronized void updateLimit(int newLimit) {
+            if (this.limit != newLimit) {
+                this.limit = newLimit;
+            }
         }
 
         synchronized boolean tryAcquire() {
@@ -106,9 +116,15 @@ public class ToolRateLimiter {
      * @return true if allowed, false if rate limited
      */
     public boolean tryAcquire(String toolName, int limit) {
-        RateLimitBucket bucket = buckets.computeIfAbsent(
+        RateLimitBucket bucket = buckets.compute(
             toolName,
-            k -> new RateLimitBucket(limit)
+            (k, existing) -> {
+                if (existing == null) {
+                    return new RateLimitBucket(limit);
+                }
+                existing.updateLimit(limit);
+                return existing;
+            }
         );
 
         boolean acquired = bucket.tryAcquire();

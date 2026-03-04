@@ -20,6 +20,9 @@ import java.util.concurrent.atomic.DoubleAdder;
 public class ToolCostTracker {
     private static final Logger LOGGER = Logger.getLogger(ToolCostTracker.class);
 
+    /** Maximum number of conversation cost entries before eviction */
+    static final int MAX_CONVERSATION_ENTRIES = 10_000;
+
     @Inject
     MeterRegistry meterRegistry;
 
@@ -129,6 +132,9 @@ public class ToolCostTracker {
         conversationCosts.computeIfAbsent(conversationId, ConversationCostMetrics::new)
                          .addToolCost(toolName, cost);
 
+        // Evict oldest entries if map exceeds max size
+        evictIfNeeded();
+
         // Track total cost
         totalCost.add(cost);
 
@@ -187,6 +193,25 @@ public class ToolCostTracker {
         }
 
         return withinBudget;
+    }
+
+    /**
+     * Evict oldest conversation cost entries if the map exceeds the maximum size.
+     * Removes approximately 10% of entries when the limit is hit.
+     */
+    void evictIfNeeded() {
+        if (conversationCosts.size() > MAX_CONVERSATION_ENTRIES) {
+            int toRemove = conversationCosts.size() - (int) (MAX_CONVERSATION_ENTRIES * 0.9);
+            var iterator = conversationCosts.keySet().iterator();
+            int removed = 0;
+            while (iterator.hasNext() && removed < toRemove) {
+                iterator.next();
+                iterator.remove();
+                removed++;
+            }
+            LOGGER.info("Evicted " + removed + " conversation cost entries (size was " +
+                    (conversationCosts.size() + removed) + ")");
+        }
     }
 
     /**

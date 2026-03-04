@@ -8,6 +8,10 @@ import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import org.jboss.logging.Logger;
 
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
+import java.util.HexFormat;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.TimeUnit;
@@ -234,15 +238,29 @@ public class ToolCacheService {
     }
 
     /**
-     * Build cache key from tool name and arguments
+     * Build cache key from tool name and arguments.
+     * For short arguments (≤2048 chars), the key is readable: "toolName:arguments".
+     * For longer arguments, a SHA-256 digest is used to avoid collisions.
      */
     private String buildKey(String toolName, String arguments) {
-        // Use tool name + arguments for key (readable and unique)
-        // If arguments are excessively long (> 2048 chars), we truncate and append hash for safety
         if (arguments.length() > 2048) {
-            return toolName + ":" + arguments.substring(0, 2048) + ":" + arguments.hashCode();
+            return toolName + ":" + sha256(arguments);
         }
         return toolName + ":" + arguments;
+    }
+
+    /**
+     * Compute SHA-256 hex digest of the given input.
+     */
+    private static String sha256(String input) {
+        try {
+            MessageDigest digest = MessageDigest.getInstance("SHA-256");
+            byte[] hash = digest.digest(input.getBytes(StandardCharsets.UTF_8));
+            return HexFormat.of().formatHex(hash);
+        } catch (NoSuchAlgorithmException e) {
+            // SHA-256 is guaranteed to be available in every JVM
+            throw new AssertionError("SHA-256 not available", e);
+        }
     }
 
     /**
