@@ -19,7 +19,6 @@ import org.jboss.logging.Logger;
 
 import java.net.URI;
 import java.net.URLDecoder;
-import java.nio.charset.Charset;
 import java.nio.charset.StandardCharsets;
 import java.util.*;
 import java.util.concurrent.CompletableFuture;
@@ -109,12 +108,11 @@ public class HttpClientWrapper implements IHttpClient {
 
         @Override
         public IRequest setBasicAuthentication(String username, String password, String realm, boolean preemptive) {
-             // Vert.x basic auth helper
-             // Note: 'realm' and 'preemptive' parameters are ignored by Vert.x WebClient's basicAuthentication helper.
-             // It automatically sets the Authorization header (equivalent to preemptive=true).
-             // WARNING: Non-preemptive authentication (preemptive=false) is NOT supported in this implementation.
-             request.basicAuthentication(username, password);
-             return this;
+            if (!preemptive) {
+                log.warn("Non-preemptive authentication is not supported with Vert.x WebClient; falling back to preemptive.");
+            }
+            request.basicAuthentication(username, password);
+            return this;
         }
 
         public IRequest setHttpHeader(String headerName, String value) {
@@ -140,8 +138,10 @@ public class HttpClientWrapper implements IHttpClient {
             this.requestBody = content;
             this.requestEncoding = encoding;
 
-            if (contentType != null) {
-                 request.putHeader("Content-Type", contentType);
+            if (contentType != null && encoding != null) {
+                request.putHeader("Content-Type", contentType + "; charset=" + encoding);
+            } else if (contentType != null) {
+                request.putHeader("Content-Type", contentType);
             }
             return this;
         }
@@ -206,46 +206,46 @@ public class HttpClientWrapper implements IHttpClient {
         }
 
         private void handleResponse(io.vertx.core.AsyncResult<HttpResponse<Buffer>> ar, io.vertx.core.Handler<io.vertx.core.AsyncResult<IResponse>> handler) {
-             if (ar.succeeded()) {
-                 HttpResponse<Buffer> response = ar.result();
-                 // Check Content-Length header if available
-                 String contentLengthHeader = response.getHeader("Content-Length");
-                 if (contentLengthHeader != null) {
-                     try {
-                         long contentLength = Long.parseLong(contentLengthHeader);
-                         if (contentLength > maxLength) {
-                             String message = String.format("Response Content-Length %d exceeds maximum allowed length %d", contentLength, maxLength);
-                             log.warn(message);
-                             handler.handle(io.vertx.core.Future.failedFuture(new IResponse.HttpResponseException(message)));
-                             return;
-                         }
-                     } catch (NumberFormatException e) {
-                         // Ignore invalid content-length
-                     }
-                 }
+            if (ar.succeeded()) {
+                HttpResponse<Buffer> response = ar.result();
+                // Check Content-Length header if available
+                String contentLengthHeader = response.getHeader("Content-Length");
+                if (contentLengthHeader != null) {
+                    try {
+                        long contentLength = Long.parseLong(contentLengthHeader);
+                        if (contentLength > maxLength) {
+                            String message = String.format("Response Content-Length %d exceeds maximum allowed length %d", contentLength, maxLength);
+                            log.warn(message);
+                            handler.handle(io.vertx.core.Future.failedFuture(new IResponse.HttpResponseException(message)));
+                            return;
+                        }
+                    } catch (NumberFormatException e) {
+                        // Ignore invalid content-length
+                    }
+                }
 
-                 Buffer body = response.body();
-                 if (body != null && body.length() > maxLength) {
-                     String message = String.format("Response body length %d exceeds maximum allowed length %d", body.length(), maxLength);
-                     log.warn(message);
-                     handler.handle(io.vertx.core.Future.failedFuture(new IResponse.HttpResponseException(message)));
-                     return;
-                 }
+                Buffer body = response.body();
+                if (body != null && body.length() > maxLength) {
+                    String message = String.format("Response body length %d exceeds maximum allowed length %d", body.length(), maxLength);
+                    log.warn(message);
+                    handler.handle(io.vertx.core.Future.failedFuture(new IResponse.HttpResponseException(message)));
+                    return;
+                }
 
-                 ResponseWrapper responseWrapper = new ResponseWrapper();
-                 if (body != null) {
-                     responseWrapper.setContentAsString(response.bodyAsString());
-                 } else {
-                     responseWrapper.setContentAsString("");
-                 }
+                ResponseWrapper responseWrapper = new ResponseWrapper();
+                if (body != null && body.length() > 0) {
+                    responseWrapper.setContentAsString(body.toString());
+                } else {
+                    responseWrapper.setContentAsString("");
+                }
 
-                 responseWrapper.setHttpCode(response.statusCode());
-                 responseWrapper.setHttpCodeMessage(response.statusMessage());
-                 responseWrapper.setHttpHeader(convertHeaderToMap(response.headers()));
-                 handler.handle(io.vertx.core.Future.succeededFuture(responseWrapper));
-             } else {
-                 handler.handle(io.vertx.core.Future.failedFuture(ar.cause()));
-             }
+                responseWrapper.setHttpCode(response.statusCode());
+                responseWrapper.setHttpCodeMessage(response.statusMessage());
+                responseWrapper.setHttpHeader(convertHeaderToMap(response.headers()));
+                handler.handle(io.vertx.core.Future.succeededFuture(responseWrapper));
+            } else {
+                handler.handle(io.vertx.core.Future.failedFuture(ar.cause()));
+            }
         }
 
         @Override
@@ -293,11 +293,12 @@ public class HttpClientWrapper implements IHttpClient {
                     }
                 } else {
                     log.error(ar.cause().getLocalizedMessage(), ar.cause());
-                    // Attempt to notify listener of failure via a 503 response.
-                    // Strictly speaking ICompleteListener expects a response.
+                    // Notify listener of failure via a synthetic 503 response.
                     ResponseWrapper errorResponse = new ResponseWrapper();
                     errorResponse.setHttpCode(503);
                     errorResponse.setHttpCodeMessage("Service Unavailable: " + ar.cause().getLocalizedMessage());
+                    errorResponse.setContentAsString("");
+                    errorResponse.setHttpHeader(Collections.emptyMap());
                     try {
                         completeListener.onComplete(errorResponse);
                     } catch (IResponse.HttpResponseException e) {

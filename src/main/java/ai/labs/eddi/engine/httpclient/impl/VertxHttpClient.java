@@ -5,15 +5,11 @@ import io.vertx.ext.web.client.WebClient;
 import io.vertx.ext.web.client.WebClientSession;
 import lombok.AllArgsConstructor;
 import lombok.Getter;
-import lombok.NoArgsConstructor;
-import lombok.Setter;
 
-@NoArgsConstructor
 @AllArgsConstructor
 @Getter
-@Setter
 public class VertxHttpClient {
-    private Vertx vertx;
-    private WebClientSession webClient;
-    private WebClient underlyingClient;
+    private final Vertx vertx;
+    private final WebClientSession webClient;
+    private final WebClient underlyingClient;
 }

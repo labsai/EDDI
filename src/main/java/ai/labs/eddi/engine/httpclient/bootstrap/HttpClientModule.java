@@ -50,6 +50,9 @@ public class HttpClientModule {
     }
 
     public void close(@Disposes VertxHttpClient client) {
+        if (client.getWebClient() != null) {
+            client.getWebClient().close();
+        }
         if (client.getUnderlyingClient() != null) {
             client.getUnderlyingClient().close();
         }
