@@ -17,6 +17,8 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
 
+import static ai.labs.eddi.modules.langchain.tools.UrlValidationUtils.validateUrl;
+
 /**
  * PDF reader tool for extracting text from PDF documents.
  * Supports both local files and URLs.
@@ -32,23 +34,18 @@ public class PdfReaderTool {
                 .build();
     }
 
-    @Tool("Extracts all text content from a PDF file. Supports both local file paths and URLs.")
+    @Tool("Extracts all text content from a PDF file. Provide the URL to the PDF document.")
     public String extractTextFromPdf(
-            @P("PDF file path or URL") String pdfLocation) {
+            @P("URL to the PDF file (http or https)") String pdfLocation) {
 
         try {
             LOGGER.info("Extracting text from PDF: " + pdfLocation);
+            validateUrl(pdfLocation);
 
             Path tempFile = null;
-            boolean isUrl = pdfLocation.startsWith("http://") || pdfLocation.startsWith("https://");
-
             try {
-                if (isUrl) {
-                    tempFile = downloadPdf(pdfLocation);
-                    return extractTextFromFile(tempFile.toFile());
-                } else {
-                    return extractTextFromFile(new File(pdfLocation));
-                }
+                tempFile = downloadPdf(pdfLocation);
+                return extractTextFromFile(tempFile.toFile());
             } finally {
                 if (tempFile != null) {
                     try {
@@ -67,23 +64,18 @@ public class PdfReaderTool {
 
     @Tool("Extracts text from specific pages of a PDF file")
     public String extractTextFromPdfPages(
-            @P("PDF file path or URL") String pdfLocation,
+            @P("URL to the PDF file (http or https)") String pdfLocation,
             @P("Start page number (1-based)") int startPage,
             @P("End page number (1-based)") int endPage) {
 
         try {
             LOGGER.info("Extracting text from PDF pages " + startPage + "-" + endPage + ": " + pdfLocation);
+            validateUrl(pdfLocation);
 
             Path tempFile = null;
-            boolean isUrl = pdfLocation.startsWith("http://") || pdfLocation.startsWith("https://");
-
             try {
-                if (isUrl) {
-                    tempFile = downloadPdf(pdfLocation);
-                    return extractTextFromFilePages(tempFile.toFile(), startPage, endPage);
-                } else {
-                    return extractTextFromFilePages(new File(pdfLocation), startPage, endPage);
-                }
+                tempFile = downloadPdf(pdfLocation);
+                return extractTextFromFilePages(tempFile.toFile(), startPage, endPage);
             } finally {
                 if (tempFile != null) {
                     try {
@@ -102,23 +94,17 @@ public class PdfReaderTool {
 
     @Tool("Gets metadata and information about a PDF file (number of pages, title, author, etc.)")
     public String getPdfInfo(
-            @P("PDF file path or URL") String pdfLocation) {
+            @P("URL to the PDF file (http or https)") String pdfLocation) {
 
         PDDocument document = null;
         Path tempFile = null;
 
         try {
             LOGGER.info("Getting PDF info for: " + pdfLocation);
+            validateUrl(pdfLocation);
 
-            boolean isUrl = pdfLocation.startsWith("http://") || pdfLocation.startsWith("https://");
-            File pdfFile;
-
-            if (isUrl) {
-                tempFile = downloadPdf(pdfLocation);
-                pdfFile = tempFile.toFile();
-            } else {
-                pdfFile = new File(pdfLocation);
-            }
+            tempFile = downloadPdf(pdfLocation);
+            File pdfFile = tempFile.toFile();
 
             document = PDDocument.load(pdfFile);
 

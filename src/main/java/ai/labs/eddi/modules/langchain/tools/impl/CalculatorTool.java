@@ -5,85 +5,60 @@ import dev.langchain4j.agent.tool.Tool;
 import jakarta.enterprise.context.ApplicationScoped;
 import org.jboss.logging.Logger;
 
-import javax.script.ScriptEngine;
-import javax.script.ScriptEngineManager;
-import javax.script.ScriptException;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
+import java.util.function.DoubleBinaryOperator;
+import java.util.function.DoubleUnaryOperator;
 
 /**
  * Calculator tool for performing mathematical operations.
- * Uses JavaScript engine for safe expression evaluation.
+ * Uses a safe recursive descent parser for expression evaluation.
+ * No external scripting engine required - pure Java implementation.
  */
 @ApplicationScoped
 public class CalculatorTool {
     private static final Logger LOGGER = Logger.getLogger(CalculatorTool.class);
-    private final ScriptEngine engine;
 
-    public CalculatorTool() {
-        ScriptEngineManager manager = new ScriptEngineManager();
-        this.engine = manager.getEngineByName("javascript");
-    }
-
-    @Tool("Performs mathematical calculations. Supports basic operations (+, -, *, /), powers (Math.pow), square roots (Math.sqrt), trigonometry (Math.sin, Math.cos, Math.tan), and more. Returns the numeric result.")
+    @Tool("Performs mathematical calculations. Supports basic operations (+, -, *, /, ^, %), " +
+          "functions (sqrt, pow, abs, ceil, floor, round, min, max, sin, cos, tan, atan, log, exp), " +
+          "and constants (PI, E). Returns the numeric result.")
     public String calculate(
-            @P("Mathematical expression to evaluate (e.g., '2 + 2', 'Math.sqrt(16)', '(10 * 5) / 2')")
+            @P("Mathematical expression to evaluate (e.g., '2 + 2', 'sqrt(16)', '(10 * 5) / 2')")
             String expression) {
 
         try {
             LOGGER.debug("Calculating expression: " + expression);
 
-            // Sanitize input - only allow mathematical expressions
-            if (!isSafeExpression(expression)) {
-                return "Error: Invalid expression. Only mathematical operations are allowed.";
+            if (expression == null || expression.isBlank()) {
+                return "Error: Expression must not be empty.";
             }
 
-            Object result = engine.eval(expression);
+            double result = new SafeMathParser(expression).parse();
 
-            if (result instanceof Number) {
-                // Round to reasonable precision
-                BigDecimal decimal = new BigDecimal(result.toString());
-                decimal = decimal.setScale(10, RoundingMode.HALF_UP);
-                decimal = decimal.stripTrailingZeros();
-
-                String resultStr = decimal.toPlainString();
-                LOGGER.info("Calculation result: " + expression + " = " + resultStr);
-                return resultStr;
-            } else {
-                return result.toString();
+            // Handle special values
+            if (Double.isNaN(result)) {
+                return "NaN";
+            }
+            if (Double.isInfinite(result)) {
+                return result > 0 ? "Infinity" : "-Infinity";
             }
 
-        } catch (ScriptException e) {
+            // Round to reasonable precision
+            BigDecimal decimal = BigDecimal.valueOf(result);
+            decimal = decimal.setScale(10, RoundingMode.HALF_UP);
+            decimal = decimal.stripTrailingZeros();
+
+            String resultStr = decimal.toPlainString();
+            LOGGER.info("Calculation result: " + expression + " = " + resultStr);
+            return resultStr;
+
+        } catch (IllegalArgumentException e) {
             LOGGER.error("Calculation error: " + e.getMessage());
-            return "Error: Could not evaluate expression - " + e.getMessage();
+            return "Error: " + e.getMessage();
         } catch (Exception e) {
             LOGGER.error("Unexpected calculation error", e);
             return "Error: An unexpected error occurred during calculation.";
         }
-    }
-
-    /**
-     * Validates that the expression only contains safe mathematical operations
-     */
-    private boolean isSafeExpression(String expression) {
-        // Remove whitespace for checking
-        String cleaned = expression.replaceAll("\\s+", "");
-
-        // Check for dangerous patterns
-        if (cleaned.contains("import") ||
-            cleaned.contains("java.") ||
-            cleaned.contains("eval") ||
-            cleaned.contains("function") ||
-            cleaned.contains("var ") ||
-            cleaned.contains("let ") ||
-            cleaned.contains("const ") ||
-            cleaned.contains("System") ||
-            cleaned.contains("Runtime")) {
-            return false;
-        }
-
-        // Only allow numbers, operators, Math functions, and parentheses
-        return cleaned.matches("[0-9+\\-*/.(),MathsqrtpowabsceilflooroundminmaxsincostanatanlogexpPI\\s]+");
     }
 
     @Tool("Converts between different units of measurement")
@@ -146,6 +121,228 @@ public class CalculatorTool {
         }
 
         throw new IllegalArgumentException("Unsupported conversion: " + fromUnit + " to " + toUnit);
+    }
+
+    /**
+     * Safe recursive descent math expression parser.
+     * Supports: +, -, *, /, %, ^, parentheses, Math functions, and constants.
+     * No code injection possible - only evaluates mathematical expressions.
+     *
+     * Grammar:
+     *   expression := term (('+' | '-') term)*
+     *   term       := power (('*' | '/' | '%') power)*
+     *   power      := unary ('^' power)?
+     *   unary      := '-' unary | '+' unary | primary
+     *   primary    := NUMBER | CONSTANT | FUNCTION '(' args ')' | '(' expression ')'
+     *   args       := expression (',' expression)*
+     */
+    static class SafeMathParser {
+        private final String expression;
+        private int pos;
+
+        SafeMathParser(String expression) {
+            this.expression = expression.trim();
+            this.pos = 0;
+        }
+
+        double parse() {
+            double result = parseExpression();
+            skipWhitespace();
+            if (pos < expression.length()) {
+                throw new IllegalArgumentException(
+                        "Unexpected character '" + expression.charAt(pos) + "' at position " + pos);
+            }
+            return result;
+        }
+
+        private double parseExpression() {
+            double result = parseTerm();
+            skipWhitespace();
+            while (pos < expression.length()) {
+                char c = expression.charAt(pos);
+                if (c == '+') {
+                    pos++;
+                    result += parseTerm();
+                } else if (c == '-') {
+                    pos++;
+                    result -= parseTerm();
+                } else {
+                    break;
+                }
+                skipWhitespace();
+            }
+            return result;
+        }
+
+        private double parseTerm() {
+            double result = parsePower();
+            skipWhitespace();
+            while (pos < expression.length()) {
+                char c = expression.charAt(pos);
+                if (c == '*') {
+                    pos++;
+                    result *= parsePower();
+                } else if (c == '/') {
+                    pos++;
+                    result /= parsePower();
+                } else if (c == '%') {
+                    pos++;
+                    result %= parsePower();
+                } else {
+                    break;
+                }
+                skipWhitespace();
+            }
+            return result;
+        }
+
+        private double parsePower() {
+            double base = parseUnary();
+            skipWhitespace();
+            if (pos < expression.length() && expression.charAt(pos) == '^') {
+                pos++;
+                double exponent = parsePower(); // Right-recursive for right-associativity
+                return Math.pow(base, exponent);
+            }
+            return base;
+        }
+
+        private double parseUnary() {
+            skipWhitespace();
+            if (pos < expression.length()) {
+                if (expression.charAt(pos) == '-') {
+                    pos++;
+                    return -parseUnary();
+                }
+                if (expression.charAt(pos) == '+') {
+                    pos++;
+                    return parseUnary();
+                }
+            }
+            return parsePrimary();
+        }
+
+        private double parsePrimary() {
+            skipWhitespace();
+            if (pos >= expression.length()) {
+                throw new IllegalArgumentException("Unexpected end of expression");
+            }
+
+            char c = expression.charAt(pos);
+
+            // Number
+            if (Character.isDigit(c) || c == '.') {
+                return parseNumber();
+            }
+
+            // Parenthesized expression
+            if (c == '(') {
+                pos++;
+                double result = parseExpression();
+                expect(')');
+                return result;
+            }
+
+            // Function or constant name
+            String name = parseName();
+
+            // Strip optional "Math." prefix
+            if (name.startsWith("Math.")) {
+                name = name.substring(5);
+            }
+
+            return switch (name) {
+                // Constants
+                case "PI" -> Math.PI;
+                case "E" -> Math.E;
+
+                // Single-argument functions
+                case "sqrt" -> callOneArg(Math::sqrt);
+                case "abs" -> callOneArg(Math::abs);
+                case "ceil" -> callOneArg(Math::ceil);
+                case "floor" -> callOneArg(Math::floor);
+                case "round" -> callOneArg(v -> (double) Math.round(v));
+                case "sin" -> callOneArg(Math::sin);
+                case "cos" -> callOneArg(Math::cos);
+                case "tan" -> callOneArg(Math::tan);
+                case "atan" -> callOneArg(Math::atan);
+                case "asin" -> callOneArg(Math::asin);
+                case "acos" -> callOneArg(Math::acos);
+                case "log" -> callOneArg(Math::log);
+                case "log10" -> callOneArg(Math::log10);
+                case "exp" -> callOneArg(Math::exp);
+                case "signum", "sign" -> callOneArg(Math::signum);
+                case "toRadians" -> callOneArg(Math::toRadians);
+                case "toDegrees" -> callOneArg(Math::toDegrees);
+                case "cbrt" -> callOneArg(Math::cbrt);
+
+                // Two-argument functions
+                case "pow" -> callTwoArgs(Math::pow);
+                case "min" -> callTwoArgs(Math::min);
+                case "max" -> callTwoArgs(Math::max);
+                case "atan2" -> callTwoArgs(Math::atan2);
+
+                default -> throw new IllegalArgumentException("Unknown function or constant: " + name);
+            };
+        }
+
+        private double callOneArg(DoubleUnaryOperator fn) {
+            expect('(');
+            double arg = parseExpression();
+            expect(')');
+            return fn.applyAsDouble(arg);
+        }
+
+        private double callTwoArgs(DoubleBinaryOperator fn) {
+            expect('(');
+            double arg1 = parseExpression();
+            expect(',');
+            double arg2 = parseExpression();
+            expect(')');
+            return fn.applyAsDouble(arg1, arg2);
+        }
+
+        private double parseNumber() {
+            int start = pos;
+            while (pos < expression.length() &&
+                    (Character.isDigit(expression.charAt(pos)) || expression.charAt(pos) == '.')) {
+                pos++;
+            }
+            String numStr = expression.substring(start, pos);
+            try {
+                return Double.parseDouble(numStr);
+            } catch (NumberFormatException e) {
+                throw new IllegalArgumentException("Invalid number: " + numStr);
+            }
+        }
+
+        private String parseName() {
+            int start = pos;
+            while (pos < expression.length() &&
+                    (Character.isLetterOrDigit(expression.charAt(pos)) || expression.charAt(pos) == '.')) {
+                pos++;
+            }
+            if (pos == start) {
+                throw new IllegalArgumentException(
+                        "Expected function name or constant at position " + pos);
+            }
+            return expression.substring(start, pos);
+        }
+
+        private void expect(char c) {
+            skipWhitespace();
+            if (pos >= expression.length() || expression.charAt(pos) != c) {
+                throw new IllegalArgumentException(
+                        "Expected '" + c + "' at position " + pos);
+            }
+            pos++;
+        }
+
+        private void skipWhitespace() {
+            while (pos < expression.length() && Character.isWhitespace(expression.charAt(pos))) {
+                pos++;
+            }
+        }
     }
 }
 

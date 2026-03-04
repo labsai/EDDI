@@ -129,7 +129,7 @@ public class HttpCallExecutor implements IHttpCallExecutor {
                             }
 
                             Object responseObject;
-                            if (CONTENT_TYPE_APPLICATION_JSON.startsWith(actualContentType)) {
+                            if (CONTENT_TYPE_APPLICATION_JSON.equals(actualContentType)) {
                                 responseObject = jsonSerialization.deserialize(responseBody, Object.class);
                             } else {
                                 if (!actualContentType.startsWith("<not-present>") &&
@@ -311,7 +311,7 @@ public class HttpCallExecutor implements IHttpCallExecutor {
             }
         }
 
-        throw new HttpCallsValidationException();
+        return false;
     }
 
     private IRequest buildRequest(String targetServerUrl, Request requestConfig,

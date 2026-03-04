@@ -16,6 +16,8 @@ import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.time.Duration;
 
+import static ai.labs.eddi.modules.langchain.tools.UrlValidationUtils.validateUrl;
+
 /**
  * Web content extraction tool for scraping and parsing HTML content.
  */
@@ -226,6 +228,8 @@ public class WebScraperTool {
     }
 
     private String fetchUrl(String url) throws IOException, InterruptedException {
+        validateUrl(url);
+
         HttpRequest request = HttpRequest.newBuilder()
                 .uri(URI.create(url))
                 .timeout(Duration.ofSeconds(15))
