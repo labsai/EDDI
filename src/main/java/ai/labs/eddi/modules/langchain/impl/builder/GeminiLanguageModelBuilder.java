@@ -1,5 +1,6 @@
 package ai.labs.eddi.modules.langchain.impl.builder;
 
+import dev.langchain4j.http.client.jdk.JdkHttpClient;
 import dev.langchain4j.model.chat.ChatModel;
 import dev.langchain4j.model.googleai.GoogleAiGeminiChatModel;
 import jakarta.enterprise.context.ApplicationScoped;
@@ -25,7 +26,8 @@ public class GeminiLanguageModelBuilder implements ILanguageModelBuilder {
 
     @Override
     public ChatModel build(Map<String, String> parameters) {
-        var builder = GoogleAiGeminiChatModel.builder();
+        var builder = GoogleAiGeminiChatModel.builder()
+                .httpClientBuilder(JdkHttpClient.builder());
 
         if (!isNullOrEmpty(parameters.get(KEY_API_KEY))) {
             builder.apiKey(parameters.get(KEY_API_KEY));

@@ -2,7 +2,7 @@
 
 ## Git support
 
-As part of **EDDI**'s features, **Git** is supported, this means you can `init`, `commit`, `push` and `pull` a **Chabot** to a **Git** repository.
+As part of **EDDI**'s features, **Git** is supported, this means you can `init`, `commit`, `push` and `pull` a **Chatbot** to a **Git** repository.
 
 ## git`init` a Chatbot:
 
@@ -54,8 +54,8 @@ Same process as exporting; send a `POST` request to the following API endpoint ,
 
 For the sake of simplifying things you can use [Postman](https://www.getpostman.com/) to upload the zip file of the exported bot just don't forget to add the **http header** of content type : _**`application/zip`****.**_
 
-Take a look at he image below to understand how can you upload the zip file in Postman:
+Take a look at the image below to understand how you can upload the zip file in Postman:
 
 ![](<.gitbook/assets/postman\_upload\_bin (1).png>)
 
-> **Important:** The bot will not be deployed after import you will have to deploy it yourself by using the corresponding api endpoint, please referrer to [Deploying a bot](deployement-management-of-chatbots.md).
+> **Important:** The bot will not be deployed after import you will have to deploy it yourself by using the corresponding api endpoint, please refer to [Deploying a bot](deployment-management-of-chatbots.md).

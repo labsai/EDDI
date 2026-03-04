@@ -1,0 +1,164 @@
+{
+  "outputSet" : [ {
+    "action" : "ask_for_ollama_model",
+    "timesOccurred" : 0,
+    "outputs" : [ {
+      "valueAlternatives" : [ {
+        "type" : "text",
+        "text" : "What's the model?",
+        "delay" : 0
+      } ]
+    } ],
+    "quickReplies" : [ ]
+  }, {
+    "action" : "ask_for_ollama_timeout",
+    "timesOccurred" : 0,
+    "outputs" : [ {
+      "valueAlternatives" : [ {
+        "type" : "text",
+        "text" : "And what would you like to set for request timeout (in millis)?",
+        "delay" : 0
+      } ]
+    } ],
+    "quickReplies" : [ ]
+  }, {
+    "action" : "ask_for_ollama_builtin_tools",
+    "timesOccurred" : 0,
+    "outputs" : [ {
+      "valueAlternatives" : [ {
+        "type" : "text",
+        "text" : "Would you like to enable built-in tools (calculator, websearch, datetime, weather, etc.) for this bot?",
+        "delay" : 0
+      } ]
+    } ],
+    "quickReplies" : [ {
+      "value" : "Yes, enable tools",
+      "expressions" : "true"
+    }, {
+      "value" : "No, just simple chat",
+      "expressions" : "false"
+    } ]
+  }, {
+    "action" : "ask_for_ollama_tools_whitelist",
+    "timesOccurred" : 0,
+    "outputs" : [ {
+      "valueAlternatives" : [ {
+        "type" : "text",
+        "text" : "Great! Which specific tools would you like to enable?",
+        "delay" : 0
+      } ]
+    }, {
+      "valueAlternatives" : [ {
+        "type" : "text",
+        "text" : "Enter tools as a JSON array, e.g.: [\"calculator\", \"websearch\", \"datetime\"]",
+        "delay" : 0
+      } ]
+    }, {
+      "valueAlternatives" : [ {
+        "type" : "text",
+        "text" : "Available tools: calculator, datetime, websearch, dataformatter, webscraper, textsummarizer, pdfreader, weather",
+        "delay" : 0
+      } ]
+    } ],
+    "quickReplies" : [ {
+      "value" : "Enable all tools",
+      "expressions" : "enable_all_tools"
+    }, {
+      "value" : "Calculator & Web Search",
+      "expressions" : "tools_calc_web"
+    }, {
+      "value" : "Calculator, Web, DateTime",
+      "expressions" : "tools_calc_web_datetime"
+    }, {
+      "value" : "Web Search & Weather",
+      "expressions" : "tools_web_weather"
+    }, {
+      "value" : "Document Tools",
+      "expressions" : "tools_docs"
+    } ]
+  }, {
+    "action" : "ask_for_ollama_conversation_history_limit",
+    "timesOccurred" : 0,
+    "outputs" : [ {
+      "valueAlternatives" : [ {
+        "type" : "text",
+        "text" : "How many conversation turns would you like to include in the context? (Default is 10)",
+        "delay" : 0
+      } ]
+    }, {
+      "valueAlternatives" : [ {
+        "type" : "text",
+        "text" : "(-1 = unlimited, 0 = none, recommended: 10-20)",
+        "delay" : 0
+      } ]
+    } ],
+    "quickReplies" : [ {
+      "value" : "Default (10)",
+      "expressions" : "history_10"
+    }, {
+      "value" : "20",
+      "expressions" : "history_20"
+    }, {
+      "value" : "-1",
+      "expressions" : "history_unlimited"
+    } ]
+  }, {
+    "action" : "ask_for_bot_creation_confirmation_for_ollama",
+    "timesOccurred" : 0,
+    "outputs" : [ {
+      "valueAlternatives" : [ {
+        "type" : "text",
+        "text" : "Ok great!",
+        "delay" : 0
+      } ]
+    }, {
+      "valueAlternatives" : [ {
+        "type" : "text",
+        "text" : "Continue with creating this connector bot?",
+        "delay" : 0
+      } ]
+    } ],
+    "quickReplies" : [ {
+      "value" : "Create the bot!",
+      "expressions" : "orchestrate_create_bot_for_ollama"
+    }, {
+      "value" : "Cancel this",
+      "expressions" : "exit_conversation, CONVERSATION_END"
+    } ]
+  }, {
+    "action" : "confirm_bot_creation_for_ollama",
+    "timesOccurred" : 0,
+    "outputs" : [ {
+      "valueAlternatives" : [ {
+        "type" : "text",
+        "text" : "It's all done! Your bot \"[[${properties.botName}]]\" was successfully created!",
+        "delay" : 0
+      } ]
+    }, {
+      "valueAlternatives" : [ {
+        "type" : "text",
+        "text" : "Go to the bot overview page and refresh the page to see your newly created bot!",
+        "delay" : 0
+      } ]
+    }, {
+      "valueAlternatives" : [ {
+        "type" : "text",
+        "text" : "Enjoy your new creation!",
+        "delay" : 0
+      } ]
+    }, {
+      "valueAlternatives" : [ {
+        "type" : "text",
+        "text" : "You can access it here: <a href=\"/chat/unrestricted/[(${properties.botId})]\" target=\"_blank\">Open chat with Connector Bot [(${properties.botName})]</a>",
+        "delay" : 0
+      } ]
+    }, {
+      "valueAlternatives" : [ {
+        "type" : "text",
+        "text" : "Bot intent for bot management api is \"[[${properties.botIntent}]]\": <a href=\"/managedbots/[(${properties.botIntent})]/put-user-id-here\" target=\"_blank\">Open API to Bot Connector [(${properties.botName})]</a>",
+        "delay" : 0
+      } ]
+    } ],
+    "quickReplies" : [ ]
+  } ]
+}

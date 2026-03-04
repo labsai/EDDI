@@ -1,6 +1,35 @@
 # Output Configuration
 
-`Output Configurations` are rather simple as they contain prepared sentences that the Chatbot should reply to the user (depending on the `actions` coming from the `Behavior Rules`).
+## Overview
+
+**Output Configurations** define what your bot says to users. They are templates that are triggered by **actions** from Behavior Rules, making them the final step in EDDI's Lifecycle Pipeline.
+
+### Role in the Lifecycle
+
+```
+User Input → Parser → Behavior Rules → Actions → Output Configuration → Response
+```
+
+When a Behavior Rule matches, it triggers **actions**. The Output Configuration contains pre-defined responses mapped to those actions, which are then sent to the user.
+
+### Key Features
+
+- **Action-Based**: Each output is mapped to a specific action name
+- **Multiple Alternatives**: Provide multiple response variations for natural conversations
+- **Quick Replies**: Suggest user responses with quick reply buttons
+- **Occurrence Tracking**: Show different outputs based on how many times an action has been triggered
+- **Templating Support**: Combine with output templating for dynamic responses
+
+### How It Works
+
+1. **Behavior Rule triggers action**: `actions: ["welcome"]`
+2. **Output Configuration matches action**: Finds output with `action: "welcome"`
+3. **Selects output variant**: Randomly chooses from `valueAlternatives` (if multiple exist)
+4. **Returns to user**: Sends the selected output as bot response
+
+## Configuration Structure
+
+`Output Configurations` contain prepared sentences that the Chatbot replies to the user (depending on the `actions` coming from the `Behavior Rules`).
 
 Simple Output Configuration looks like this:
 

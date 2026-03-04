@@ -1,0 +1,267 @@
+{
+  "expressionsAsActions" : true,
+  "behaviorGroups" : [ {
+    "behaviorRules" : [ {
+      "name" : "Ask for model",
+      "actions" : [ "ask_for_ollama_model" ],
+      "conditions" : [ {
+        "type" : "actionmatcher",
+        "configs" : {
+          "actions" : "create_ollama_bot",
+          "occurrence" : "currentStep"
+        }
+      } ]
+    }, {
+      "name" : "Set model and ask for timeout",
+      "actions" : [ "set_model_name", "ask_for_ollama_timeout" ],
+      "conditions" : [ {
+        "type" : "actionmatcher",
+        "configs" : {
+          "actions" : "ask_for_ollama_model",
+          "occurrence" : "lastStep"
+        }
+      }, {
+        "type" : "inputmatcher",
+        "configs" : {
+          "expressions" : "*",
+          "occurrence" : "currentStep"
+        }
+      } ]
+    }, {
+      "name" : "Set timeout and ask for built-in tools",
+      "actions" : [ "set_timeout", "ask_for_ollama_builtin_tools" ],
+      "conditions" : [ {
+        "type" : "actionmatcher",
+        "configs" : {
+          "actions" : "ask_for_ollama_timeout",
+          "occurrence" : "lastStep"
+        }
+      }, {
+        "type" : "inputmatcher",
+        "configs" : {
+          "expressions" : "*",
+          "occurrence" : "currentStep"
+        }
+      } ]
+    }, {
+      "name" : "Enable tools and ask for whitelist",
+      "actions" : [ "set_enable_builtin_tools", "ask_for_ollama_tools_whitelist" ],
+      "conditions" : [ {
+        "type" : "actionmatcher",
+        "configs" : {
+          "actions" : "ask_for_ollama_builtin_tools",
+          "occurrence" : "lastStep"
+        }
+      }, {
+        "type" : "inputmatcher",
+        "configs" : {
+          "expressions" : "true",
+          "occurrence" : "currentStep"
+        }
+      } ]
+    }, {
+      "name" : "Disable tools and skip to conversation history",
+      "actions" : [ "set_disable_builtin_tools", "set_empty_whitelist", "ask_for_ollama_conversation_history_limit" ],
+      "conditions" : [ {
+        "type" : "actionmatcher",
+        "configs" : {
+          "actions" : "ask_for_ollama_builtin_tools",
+          "occurrence" : "lastStep"
+        }
+      }, {
+        "type" : "inputmatcher",
+        "configs" : {
+          "expressions" : "false",
+          "occurrence" : "currentStep"
+        }
+      } ]
+    }, {
+      "name" : "Set all tools and ask for conversation history",
+      "actions" : [ "set_empty_whitelist", "ask_for_ollama_conversation_history_limit" ],
+      "conditions" : [ {
+        "type" : "actionmatcher",
+        "configs" : {
+          "actions" : "ask_for_ollama_tools_whitelist",
+          "occurrence" : "lastStep"
+        }
+      }, {
+        "type" : "inputmatcher",
+        "configs" : {
+          "expressions" : "enable_all_tools",
+          "occurrence" : "currentStep"
+        }
+      } ]
+    }, {
+      "name" : "Set calculator and websearch tools and ask for conversation history",
+      "actions" : [ "set_tools_calculator_websearch", "ask_for_ollama_conversation_history_limit" ],
+      "conditions" : [ {
+        "type" : "actionmatcher",
+        "configs" : {
+          "actions" : "ask_for_ollama_tools_whitelist",
+          "occurrence" : "lastStep"
+        }
+      }, {
+        "type" : "inputmatcher",
+        "configs" : {
+          "expressions" : "tools_calc_web",
+          "occurrence" : "currentStep"
+        }
+      } ]
+    }, {
+      "name" : "Set calculator, websearch, and datetime tools and ask for conversation history",
+      "actions" : [ "set_tools_calculator_web_datetime", "ask_for_ollama_conversation_history_limit" ],
+      "conditions" : [ {
+        "type" : "actionmatcher",
+        "configs" : {
+          "actions" : "ask_for_ollama_tools_whitelist",
+          "occurrence" : "lastStep"
+        }
+      }, {
+        "type" : "inputmatcher",
+        "configs" : {
+          "expressions" : "tools_calc_web_datetime",
+          "occurrence" : "currentStep"
+        }
+      } ]
+    }, {
+      "name" : "Set websearch and weather tools and ask for conversation history",
+      "actions" : [ "set_tools_web_weather", "ask_for_ollama_conversation_history_limit" ],
+      "conditions" : [ {
+        "type" : "actionmatcher",
+        "configs" : {
+          "actions" : "ask_for_ollama_tools_whitelist",
+          "occurrence" : "lastStep"
+        }
+      }, {
+        "type" : "inputmatcher",
+        "configs" : {
+          "expressions" : "tools_web_weather",
+          "occurrence" : "currentStep"
+        }
+      } ]
+    }, {
+      "name" : "Set document tools and ask for conversation history",
+      "actions" : [ "set_tools_docs", "ask_for_ollama_conversation_history_limit" ],
+      "conditions" : [ {
+        "type" : "actionmatcher",
+        "configs" : {
+          "actions" : "ask_for_ollama_tools_whitelist",
+          "occurrence" : "lastStep"
+        }
+      }, {
+        "type" : "inputmatcher",
+        "configs" : {
+          "expressions" : "tools_docs",
+          "occurrence" : "currentStep"
+        }
+      } ]
+    }, {
+      "name" : "Set custom tools from input and ask for conversation history",
+      "actions" : [ "set_tools_custom", "ask_for_ollama_conversation_history_limit" ],
+      "conditions" : [ {
+        "type" : "actionmatcher",
+        "configs" : {
+          "actions" : "ask_for_ollama_tools_whitelist",
+          "occurrence" : "lastStep"
+        }
+      }, {
+        "type" : "negation",
+        "conditions" : [ {
+          "type" : "inputmatcher",
+          "configs" : {
+            "expressions" : "enable_all_tools,tools_calc_web,tools_calc_web_datetime,tools_web_weather,tools_docs",
+            "occurrence" : "currentStep"
+          }
+        } ]
+      }, {
+        "type" : "inputmatcher",
+        "configs" : {
+          "expressions" : "*",
+          "occurrence" : "currentStep"
+        }
+      } ]
+    }, {
+      "name" : "Set conversation history limit 10 and ask for confirmation",
+      "actions" : [ "set_history_10", "ask_for_bot_creation_confirmation_for_ollama" ],
+      "conditions" : [ {
+        "type" : "actionmatcher",
+        "configs" : {
+          "actions" : "ask_for_ollama_conversation_history_limit",
+          "occurrence" : "lastStep"
+        }
+      }, {
+        "type" : "inputmatcher",
+        "configs" : {
+          "expressions" : "history_10",
+          "occurrence" : "currentStep"
+        }
+      } ]
+    }, {
+      "name" : "Set conversation history limit 20 and ask for confirmation",
+      "actions" : [ "set_history_20", "ask_for_bot_creation_confirmation_for_ollama" ],
+      "conditions" : [ {
+        "type" : "actionmatcher",
+        "configs" : {
+          "actions" : "ask_for_ollama_conversation_history_limit",
+          "occurrence" : "lastStep"
+        }
+      }, {
+        "type" : "inputmatcher",
+        "configs" : {
+          "expressions" : "history_20",
+          "occurrence" : "currentStep"
+        }
+      } ]
+    }, {
+      "name" : "Set conversation history limit unlimited and ask for confirmation",
+      "actions" : [ "set_history_unlimited", "ask_for_bot_creation_confirmation_for_ollama" ],
+      "conditions" : [ {
+        "type" : "actionmatcher",
+        "configs" : {
+          "actions" : "ask_for_ollama_conversation_history_limit",
+          "occurrence" : "lastStep"
+        }
+      }, {
+        "type" : "inputmatcher",
+        "configs" : {
+          "expressions" : "history_unlimited",
+          "occurrence" : "currentStep"
+        }
+      } ]
+    }, {
+      "name" : "Set conversation history limit and ask for confirmation",
+      "actions" : [ "set_conversation_history_limit", "ask_for_bot_creation_confirmation_for_ollama" ],
+      "conditions" : [ {
+        "type" : "actionmatcher",
+        "configs" : {
+          "actions" : "ask_for_ollama_conversation_history_limit",
+          "occurrence" : "lastStep"
+        }
+      }, {
+        "type" : "negation",
+        "conditions" : [ {
+          "type" : "inputmatcher",
+          "configs" : {
+            "expressions" : "history_10,history_20,history_unlimited",
+            "occurrence" : "currentStep"
+          }
+        } ]
+      }, {
+        "type" : "inputmatcher",
+        "configs" : {
+          "expressions" : "*",
+          "occurrence" : "currentStep"
+        }
+      } ]
+    }, {
+      "name" : "Create bot",
+      "actions" : [ "create_properties_for_ollama", "create_behavior_rules_for_ollama", "create_langchain_ollama", "create_output_for_ollama", "create_package_for_ollama", "create_bot_for_ollama", "deploy_bot_for_ollama", "CONVERSATION_END" ],
+      "conditions" : [ {
+        "type" : "inputmatcher",
+        "configs" : {
+          "expressions" : "orchestrate_create_bot_for_ollama"
+        }
+      } ]
+    } ]
+  } ]
+}
