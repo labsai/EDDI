@@ -113,8 +113,14 @@ public void execute(IConversationMemory memory, Object component) {
 For agent-based tasks (like `LangchainTask`), tools are:
 * Injected as dependencies via constructor
 * Annotated with `@Tool` from langchain4j
-* Passed to `AiServices.builder()` for agent mode
+* Executed through `ToolExecutionService.executeToolWrapped()` which applies rate limiting, caching, and cost tracking
 * Each tool method should have clear `@Tool` annotations with descriptions
+
+All tool invocations (built-in **and** HTTP-call-based) flow through the **Tool Execution Service** pipeline:
+
+```
+Tool Call ──▶ Rate Limiter ──▶ Cache Check ──▶ Execute Tool ──▶ Cost Tracker ──▶ Result
+```
 
 Example:
 ```java
@@ -125,6 +131,25 @@ public class MyTool {
         // Tool implementation
         return result;
     }
+}
+```
+
+#### 2a. Tool Security Requirements
+
+When creating tools that accept URLs or file paths from user/LLM input:
+
+* **Always validate URLs** using `UrlValidationUtils.validateUrl(url)` before fetching
+* **Only allow `http` and `https` schemes** — never `file://`, `ftp://`, etc.
+* **Block private/internal addresses** (loopback, site-local, link-local, cloud metadata endpoints)
+* **Never use `ScriptEngine`** for expression evaluation — use a sandboxed parser instead (see `CalculatorTool.SafeMathParser`)
+
+```java
+import static ai.labs.eddi.modules.langchain.tools.UrlValidationUtils.validateUrl;
+
+@Tool("Fetches data from a URL")
+public String fetchData(@P("URL (http or https)") String url) {
+    validateUrl(url); // throws IllegalArgumentException if blocked
+    // ... proceed with fetch
 }
 ```
 
@@ -390,6 +415,13 @@ Provide a complete `junit` test file (e.g., `MyFeatureTaskTest.java`) that:
 * Tasks are singletons - never store conversation-specific data in instance variables
 * All state must be in `IConversationMemory`
 * Use `@ApplicationScoped` for stateless services only
+* When checking-then-acting on shared state (e.g., queue isEmpty → offer → submit), wrap the entire sequence in a `synchronized` block to prevent race conditions
+
+### Security — Tool Inputs
+* Treat all LLM-supplied arguments as **untrusted** user input
+* Validate URLs with `UrlValidationUtils` (blocks private IPs, internal hostnames, non-HTTP schemes)
+* Never evaluate arbitrary code — use `SafeMathParser` (recursive-descent) instead of `ScriptEngine`
+* Limit unbounded data structures (`ToolCostTracker` caps conversation entries at 10 000 with eviction)
 
 ### Null Safety
 * Always check `getLatestData()` for null before calling `getResult()`

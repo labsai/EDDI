@@ -150,15 +150,13 @@
         }
       }, {
         "type" : "negation",
-        "configs" : {
-          "condition" : {
-            "type" : "inputmatcher",
-            "configs" : {
-              "expressions" : "enable_all_tools,tools_calc_web,tools_calc_web_datetime",
-              "occurrence" : "currentStep"
-            }
+        "conditions" : [ {
+          "type" : "inputmatcher",
+          "configs" : {
+            "expressions" : "enable_all_tools,tools_calc_web,tools_calc_web_datetime",
+            "occurrence" : "currentStep"
           }
-        }
+        } ]
       }, {
         "type" : "inputmatcher",
         "configs" : {

@@ -14,7 +14,7 @@ Developed in Java using Quarkus, it is lean, RESTful, scalable, and cloud-native
 It comes as Docker container and can be orchestrated with Kubernetes or Openshift.
 The Docker image has been certified by IBM/Red Hat.
 
-Latest stable version: 5.5.1
+Latest stable version: 5.6.0
 
 License: Apache License 2.0
 
@@ -71,6 +71,7 @@ Notable features include:
 * **[Behavior Rules](docs/behavior-rules.md)** - Configuring bot logic
 * **[LangChain Integration](docs/langchain.md)** - Connecting to LLM APIs
 * **[LangChain Tools Guide](docs/bot-father-langchain-tools-guide.md)** - Built-in AI agent tools configuration
+* **[Security](docs/security.md)** - SSRF protection, sandboxed evaluation, and tool hardening
 * **[HTTP Calls](docs/httpcalls.md)** - External API integration
 * **[Bot Father Deep Dive](docs/bot-father-deep-dive.md)** - Real-world orchestration example
 * **[Complete Documentation](https://docs.labs.ai/)** - Full documentation site
@@ -81,14 +82,14 @@ EDDI includes built-in tools that AI agents can invoke autonomously during conve
 
 | Tool | Description |
 |------|-------------|
-| **Calculator** | Perform mathematical calculations |
+| **Calculator** | Safe expression evaluator (no code injection; recursive-descent parser) |
 | **DateTime** | Get current date, time, and timezone conversions |
 | **Web Search** | Search the web via DuckDuckGo or Google Custom Search |
 | **Weather** | Get weather information (requires OpenWeatherMap API key) |
 | **Data Formatter** | Format and convert data (JSON, CSV, XML) |
-| **Web Scraper** | Extract content from web pages |
+| **Web Scraper** | Extract content from web pages (SSRF-protected) |
 | **Text Summarizer** | Summarize long text content |
-| **PDF Reader** | Extract text from PDF files |
+| **PDF Reader** | Extract text from PDF URLs (SSRF-protected, http/https only) |
 | **HTTP Calls** | Execute pre-configured API calls (see below) |
 
 ### HTTP Calls as Secure Tools
@@ -103,9 +104,30 @@ In addition to built-in tools, EDDI allows you to **expose your own HTTP call co
 
 See [HTTP Calls](docs/httpcalls.md) for configuration details.
 
-Tools include enterprise features: **caching** (configurable TTL), **rate limiting**, and **cost tracking**.
+### Tool Execution Pipeline
 
-See the [LangChain Tools Guide](docs/bot-father-langchain-tools-guide.md) for configuration details.
+All tool invocations (both built-in and HTTP call tools) are routed through a unified **Tool Execution Service** that provides:
+
+- **Rate Limiting** — Configurable per-tool token-bucket rate limits to prevent API abuse
+- **Smart Caching** — Deduplicates identical calls with configurable TTL
+- **Cost Tracking** — Per-conversation budget enforcement with automatic eviction of stale data
+- **SSRF Protection** — URL validation blocks private/internal addresses for web-facing tools
+- **Secure Evaluation** — Calculator uses a sandboxed math parser (no script engine / no code injection)
+
+These controls are driven by your `langchain.json` configuration:
+
+```json
+{
+  "enableRateLimiting": true,
+  "defaultRateLimit": 100,
+  "toolRateLimits": { "websearch": 30 },
+  "enableToolCaching": true,
+  "enableCostTracking": true,
+  "maxBudgetPerConversation": 5.0
+}
+```
+
+See the [LangChain Tools Guide](docs/bot-father-langchain-tools-guide.md) and [Security](docs/security.md) for details.
 
 Technical specifications:
 
