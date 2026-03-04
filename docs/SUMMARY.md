@@ -19,6 +19,7 @@
 * [Behavior Rules](behavior-rules.md)
 * [HttpCalls](httpcalls.md)
 * [Langchain](langchain.md)
+* [Security](security.md)
 * [Output Configuration](output-configuration.md)
 * [Conversations](conversations.md)
 * [Passing context information](passing-context-information.md)

@@ -17,7 +17,7 @@ Developed in Java using Quarkus, it is lean, RESTful, scalable, and cloud-native
 It comes as Docker container and can be orchestrated with Kubernetes or Openshift.
 The Docker image has been certified by IBM/Red Hat.
 
-Latest stable version: 5.5.1
+Latest stable version: 5.6.0
 
 License: Apache License 2.0
 
@@ -65,6 +65,7 @@ Start with these guides to understand EDDI:
 * **[Creating Your First Chatbot](creating-your-first-chatbot/)** - Step-by-step tutorial
 * **[Behavior Rules](behavior-rules.md)** - Configure bot logic and decision-making
 * **[LangChain Integration](langchain.md)** - Connect to LLM APIs (OpenAI, Claude, etc.)
+* **[Security](security.md)** - SSRF protection, sandboxed evaluation, and tool hardening
 * **[HTTP Calls](httpcalls.md)** - Integrate with external REST APIs
 * **[Bot Father Deep Dive](bot-father-deep-dive.md)** - Real-world orchestration example
 

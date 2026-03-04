@@ -43,13 +43,13 @@ When creating a new connector bot via Bot Father, you'll now be asked three addi
 
 | Tool | Identifier | Description | Example Use Case |
 |------|-----------|-------------|------------------|
-| **Calculator** | `calculator` | Perform math calculations | "What's 15% tip on $84.50?" |
+| **Calculator** | `calculator` | Safe math evaluation (sandboxed) | "What's 15% tip on $84.50?" |
 | **Date/Time** | `datetime` | Get current date, time, timezone | "What time is it in Tokyo?" |
 | **Web Search** | `websearch` | Search the web (Wikipedia, news) | "What's the weather forecast today?" |
 | **Data Formatter** | `dataformatter` | Format JSON, CSV, XML | "Convert this JSON to CSV" |
-| **Web Scraper** | `webscraper` | Extract content from web pages | "Get the content from example.com" |
+| **Web Scraper** | `webscraper` | Extract content from web pages (SSRF-protected) | "Get the content from example.com" |
 | **Text Summarizer** | `textsummarizer` | Summarize long text | "Summarize this article" |
-| **PDF Reader** | `pdfreader` | Extract text from PDFs | "Read this PDF file" |
+| **PDF Reader** | `pdfreader` | Extract text from PDF URLs (SSRF-protected) | "Read this PDF file" |
 | **Weather** | `weather` | Get weather information | "What's the weather in Paris?" |
 
 ---
@@ -129,6 +129,50 @@ eddi.tools.weather.openweathermap.api-key=YOUR_OWM_API_KEY
 }
 ```
 **Use Case:** Math tutor that can perform calculations but doesn't need web access.
+
+---
+
+## Tool Execution Pipeline
+
+All tool invocations flow through a unified pipeline that provides enterprise-grade controls. These settings can be added to the `langchain.json` task configuration:
+
+| Setting | Type | Default | Description |
+|---------|------|---------|-------------|
+| `enableRateLimiting` | boolean | `true` | Token-bucket rate limiting per tool |
+| `defaultRateLimit` | int | `100` | Default calls/minute for each tool |
+| `toolRateLimits` | map | `{}` | Per-tool overrides, e.g. `{"websearch": 30}` |
+| `enableToolCaching` | boolean | `true` | Cache identical tool calls |
+| `enableCostTracking` | boolean | `true` | Track cost per conversation |
+| `maxBudgetPerConversation` | number | unlimited | Maximum spend per conversation |
+
+### Example: Restrict web search rate and set a budget
+
+```json
+{
+  "enableBuiltInTools": true,
+  "builtInToolsWhitelist": ["calculator", "websearch"],
+  "enableRateLimiting": true,
+  "defaultRateLimit": 100,
+  "toolRateLimits": { "websearch": 20 },
+  "enableCostTracking": true,
+  "maxBudgetPerConversation": 2.0
+}
+```
+
+---
+
+## Security
+
+Tools that accept URLs (PDF Reader, Web Scraper) are protected against **SSRF** (Server-Side Request Forgery):
+
+- Only `http://` and `https://` URLs accepted
+- Private / internal IP ranges blocked (127.x, 10.x, 192.168.x, 172.16-31.x)
+- Cloud metadata endpoints blocked (169.254.169.254, metadata.google.internal)
+- Internal hostnames rejected (localhost, *.local, *.internal)
+
+The **Calculator** tool uses a sandboxed recursive-descent parser — no script engine, no code injection risk.
+
+See the [Security documentation](security.md) for full details.
 
 ---
 
@@ -254,13 +298,14 @@ When Bot Father creates the langchain configuration, it generates:
 ## Related Documentation
 
 - [LangChain Integration](langchain.md) - Complete LangChain task documentation
+- [Security](security.md) - SSRF protection, sandboxed evaluation, tool hardening
 - [Bot Father Deep Dive](bot-father-deep-dive.md) - Bot Father architecture
 - [Behavior Rules](behavior-rules.md) - Understanding behavior rules
 - [Output Configuration](output-configuration.md) - Configuring bot outputs
 
 ---
 
-**Last Updated:** November 2024  
+**Last Updated:** March 2026  
 **EDDI Version:** 5.6.0  
 **Bot Father Version:** 3.0.1
 

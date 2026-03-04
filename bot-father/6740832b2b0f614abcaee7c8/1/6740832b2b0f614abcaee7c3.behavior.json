@@ -38,7 +38,55 @@
         }
       } ]
     }, {
-      "name" : "Set temperature and ask for built-in tools",
+      "name" : "Set temperature 0.7 and ask for built-in tools",
+      "actions" : [ "set_temp_0_7", "ask_for_jlama_builtin_tools" ],
+      "conditions" : [ {
+        "type" : "actionmatcher",
+        "configs" : {
+          "actions" : "ask_for_jlama_temperature",
+          "occurrence" : "lastStep"
+        }
+      }, {
+        "type" : "inputmatcher",
+        "configs" : {
+          "expressions" : "temp_0_7",
+          "occurrence" : "currentStep"
+        }
+      } ]
+    }, {
+      "name" : "Set temperature 0.9 and ask for built-in tools",
+      "actions" : [ "set_temp_0_9", "ask_for_jlama_builtin_tools" ],
+      "conditions" : [ {
+        "type" : "actionmatcher",
+        "configs" : {
+          "actions" : "ask_for_jlama_temperature",
+          "occurrence" : "lastStep"
+        }
+      }, {
+        "type" : "inputmatcher",
+        "configs" : {
+          "expressions" : "temp_0_9",
+          "occurrence" : "currentStep"
+        }
+      } ]
+    }, {
+      "name" : "Set temperature 0.2 and ask for built-in tools",
+      "actions" : [ "set_temp_0_2", "ask_for_jlama_builtin_tools" ],
+      "conditions" : [ {
+        "type" : "actionmatcher",
+        "configs" : {
+          "actions" : "ask_for_jlama_temperature",
+          "occurrence" : "lastStep"
+        }
+      }, {
+        "type" : "inputmatcher",
+        "configs" : {
+          "expressions" : "temp_0_2",
+          "occurrence" : "currentStep"
+        }
+      } ]
+    }, {
+      "name" : "Set custom temperature and ask for built-in tools",
       "actions" : [ "set_temperature", "ask_for_jlama_builtin_tools" ],
       "conditions" : [ {
         "type" : "actionmatcher",
@@ -46,6 +94,15 @@
           "actions" : "ask_for_jlama_temperature",
           "occurrence" : "lastStep"
         }
+      }, {
+        "type" : "negation",
+        "conditions" : [ {
+          "type" : "inputmatcher",
+          "configs" : {
+            "expressions" : "temp_0_7,temp_0_9,temp_0_2",
+            "occurrence" : "currentStep"
+          }
+        } ]
       }, {
         "type" : "inputmatcher",
         "configs" : {
@@ -134,6 +191,38 @@
         }
       } ]
     }, {
+      "name" : "Set whitelist to websearch and weather and ask for conversation history limit",
+      "actions" : [ "set_tools_web_weather", "ask_for_jlama_conversation_history_limit" ],
+      "conditions" : [ {
+        "type" : "actionmatcher",
+        "configs" : {
+          "actions" : "ask_for_jlama_tools_whitelist",
+          "occurrence" : "lastStep"
+        }
+      }, {
+        "type" : "inputmatcher",
+        "configs" : {
+          "expressions" : "tools_web_weather",
+          "occurrence" : "currentStep"
+        }
+      } ]
+    }, {
+      "name" : "Set whitelist to document tools and ask for conversation history limit",
+      "actions" : [ "set_tools_docs", "ask_for_jlama_conversation_history_limit" ],
+      "conditions" : [ {
+        "type" : "actionmatcher",
+        "configs" : {
+          "actions" : "ask_for_jlama_tools_whitelist",
+          "occurrence" : "lastStep"
+        }
+      }, {
+        "type" : "inputmatcher",
+        "configs" : {
+          "expressions" : "tools_docs",
+          "occurrence" : "currentStep"
+        }
+      } ]
+    }, {
       "name" : "Set whitelist to custom input and ask for conversation history limit",
       "actions" : [ "set_tools_whitelist", "ask_for_jlama_conversation_history_limit" ],
       "conditions" : [ {
@@ -144,15 +233,13 @@
         }
       }, {
         "type" : "negation",
-        "configs" : {
-          "condition" : {
-            "type" : "inputmatcher",
-            "configs" : {
-              "expressions" : "enable_all_tools,tools_calc_web,tools_calc_web_datetime",
-              "occurrence" : "currentStep"
-            }
+        "conditions" : [ {
+          "type" : "inputmatcher",
+          "configs" : {
+            "expressions" : "enable_all_tools,tools_calc_web,tools_calc_web_datetime,tools_web_weather,tools_docs",
+            "occurrence" : "currentStep"
           }
-        }
+        } ]
       }, {
         "type" : "inputmatcher",
         "configs" : {
@@ -161,13 +248,76 @@
         }
       } ]
     }, {
-      "name" : "Set history limit and ask for bot creation confirmation",
+      "name" : "Set history limit 10",
+      "actions" : [ "set_history_10", "ask_for_bot_creation_confirmation_for_jlama" ],
+      "conditions" : [ {
+        "type" : "actionmatcher",
+        "configs" : {
+          "actions" : "ask_for_jlama_conversation_history_limit",
+          "occurrence" : "lastStep"
+        }
+      }, {
+        "type" : "inputmatcher",
+        "configs" : {
+          "expressions" : "history_10",
+          "occurrence" : "currentStep"
+        }
+      } ]
+    }, {
+      "name" : "Set history limit 20",
+      "actions" : [ "set_history_20", "ask_for_bot_creation_confirmation_for_jlama" ],
+      "conditions" : [ {
+        "type" : "actionmatcher",
+        "configs" : {
+          "actions" : "ask_for_jlama_conversation_history_limit",
+          "occurrence" : "lastStep"
+        }
+      }, {
+        "type" : "inputmatcher",
+        "configs" : {
+          "expressions" : "history_20",
+          "occurrence" : "currentStep"
+        }
+      } ]
+    }, {
+      "name" : "Set history limit unlimited",
+      "actions" : [ "set_history_unlimited", "ask_for_bot_creation_confirmation_for_jlama" ],
+      "conditions" : [ {
+        "type" : "actionmatcher",
+        "configs" : {
+          "actions" : "ask_for_jlama_conversation_history_limit",
+          "occurrence" : "lastStep"
+        }
+      }, {
+        "type" : "inputmatcher",
+        "configs" : {
+          "expressions" : "history_unlimited",
+          "occurrence" : "currentStep"
+        }
+      } ]
+    }, {
+      "name" : "Set custom history limit",
       "actions" : [ "set_conversation_history_limit", "ask_for_bot_creation_confirmation_for_jlama" ],
       "conditions" : [ {
         "type" : "actionmatcher",
         "configs" : {
           "actions" : "ask_for_jlama_conversation_history_limit",
           "occurrence" : "lastStep"
+        }
+      }, {
+        "type" : "negation",
+        "conditions" : [ {
+          "type" : "inputmatcher",
+          "configs" : {
+            "expressions" : "history_10,history_20,history_unlimited",
+            "occurrence" : "currentStep"
+          }
+        } ]
+      }, {
+        "type" : "inputmatcher",
+        "configs" : {
+          "expressions" : "*",
+          "occurrence" : "currentStep"
         }
       } ]
     }, {

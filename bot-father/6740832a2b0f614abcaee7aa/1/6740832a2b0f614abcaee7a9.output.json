@@ -27,11 +27,50 @@
     "outputs" : [ {
       "valueAlternatives" : [ {
         "type" : "text",
-        "text" : "What temperature would you like to set?",
+        "text" : "What temperature would you like to set? (0.0 - 1.0)",
+        "delay" : 0
+      } ]
+    }, {
+      "valueAlternatives" : [ {
+        "type" : "text",
+        "text" : "Higher values like 0.8 will make the output more random, while lower values like 0.2 will make it more focused and deterministic.",
         "delay" : 0
       } ]
     } ],
-    "quickReplies" : [ ]
+    "quickReplies" : [ {
+      "value" : "0.0",
+      "expressions" : "temp_0_0"
+    }, {
+      "value" : "0.1",
+      "expressions" : "temp_0_1"
+    }, {
+      "value" : "0.2",
+      "expressions" : "temp_0_2"
+    }, {
+      "value" : "0.3",
+      "expressions" : "temp_0_3"
+    }, {
+      "value" : "0.4",
+      "expressions" : "temp_0_4"
+    }, {
+      "value" : "0.5",
+      "expressions" : "temp_0_5"
+    }, {
+      "value" : "0.6",
+      "expressions" : "temp_0_6"
+    }, {
+      "value" : "0.7",
+      "expressions" : "temp_0_7"
+    }, {
+      "value" : "0.8",
+      "expressions" : "temp_0_8"
+    }, {
+      "value" : "0.9",
+      "expressions" : "temp_0_9"
+    }, {
+      "value" : "1.0",
+      "expressions" : "temp_1_0"
+    } ]
   }, {
     "action" : "ask_for_huggingface_timeout",
     "timesOccurred" : 0,
@@ -91,6 +130,12 @@
     }, {
       "value" : "Calculator, Web, DateTime",
       "expressions" : "tools_calc_web_datetime"
+    }, {
+      "value" : "Web Search & Weather",
+      "expressions" : "tools_web_weather"
+    }, {
+      "value" : "Document Tools",
+      "expressions" : "tools_docs"
     } ]
   }, {
     "action" : "ask_for_huggingface_conversation_history_limit",
@@ -98,7 +143,7 @@
     "outputs" : [ {
       "valueAlternatives" : [ {
         "type" : "text",
-        "text" : "How many conversation turns would you like to include in the context?",
+        "text" : "How many conversation turns would you like to include in the context? (Default is 10)",
         "delay" : 0
       } ]
     }, {
@@ -109,14 +154,14 @@
       } ]
     } ],
     "quickReplies" : [ {
-      "value" : "10 turns (recommended)",
-      "expressions" : "10"
+      "value" : "Default (10)",
+      "expressions" : "history_10"
     }, {
-      "value" : "20 turns",
-      "expressions" : "20"
+      "value" : "20",
+      "expressions" : "history_20"
     }, {
-      "value" : "Unlimited",
-      "expressions" : "-1"
+      "value" : "-1",
+      "expressions" : "history_unlimited"
     } ]
   }, {
     "action" : "ask_for_bot_creation_confirmation_for_huggingface",
