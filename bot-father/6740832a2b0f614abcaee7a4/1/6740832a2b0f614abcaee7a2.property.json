@@ -159,7 +159,7 @@
     "actions" : [ "set_tools_docs" ],
     "setProperties" : [ {
       "name" : "builtInToolsWhitelist",
-      "valueString" : "[\"pdfreader\",\"textsummarizer\"]",
+      "valueString" : "[\"textsummarizer\",\"pdfreader\",\"dataformatter\"]",
       "scope" : "conversation",
       "fromObjectPath" : "",
       "toObjectPath" : "",
