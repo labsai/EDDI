@@ -15,8 +15,8 @@ import ai.labs.eddi.modules.httpcalls.impl.PrePostUtils;
 import ai.labs.eddi.modules.langchain.impl.builder.ILanguageModelBuilder;
 import ai.labs.eddi.modules.langchain.model.LangChainConfiguration;
 import ai.labs.eddi.modules.langchain.model.LangChainConfiguration.Task;
-import ai.labs.eddi.modules.langchain.agents.DeclarativeAgent;
 import ai.labs.eddi.modules.langchain.tools.EddiToolBridge;
+import ai.labs.eddi.modules.langchain.tools.ToolExecutionService;
 import ai.labs.eddi.modules.langchain.tools.impl.*;
 import ai.labs.eddi.modules.output.model.types.TextOutputItem;
 import ai.labs.eddi.modules.templating.ITemplatingEngine;
@@ -25,7 +25,13 @@ import dev.langchain4j.data.message.*;
 import dev.langchain4j.memory.ChatMemory;
 import dev.langchain4j.memory.chat.MessageWindowChatMemory;
 import dev.langchain4j.model.chat.ChatModel;
-import dev.langchain4j.service.AiServices;
+import dev.langchain4j.model.chat.request.ChatRequest;
+import dev.langchain4j.model.chat.request.ChatRequestParameters;
+import dev.langchain4j.model.chat.response.ChatResponse;
+import dev.langchain4j.agent.tool.ToolSpecification;
+import dev.langchain4j.agent.tool.ToolSpecifications;
+import dev.langchain4j.service.tool.DefaultToolExecutor;
+import dev.langchain4j.service.tool.ToolExecutor;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import jakarta.inject.Provider;
@@ -77,6 +83,7 @@ public class LangchainTask implements ILifecycleTask {
     private final PdfReaderTool pdfReaderTool;
     private final WeatherTool weatherTool;
     private final EddiToolBridge eddiToolBridge;
+    private final ToolExecutionService toolExecutionService;
 
     private final Map<ModelCacheKey, ChatModel> modelCache = new ConcurrentHashMap<>(1);
 
@@ -98,7 +105,8 @@ public class LangchainTask implements ILifecycleTask {
                          TextSummarizerTool textSummarizerTool,
                          PdfReaderTool pdfReaderTool,
                          WeatherTool weatherTool,
-                         EddiToolBridge eddiToolBridge) {
+                         EddiToolBridge eddiToolBridge,
+                         ToolExecutionService toolExecutionService) {
         this.resourceClientLibrary = resourceClientLibrary;
         this.dataFactory = dataFactory;
         this.memoryItemConverter = memoryItemConverter;
@@ -115,6 +123,7 @@ public class LangchainTask implements ILifecycleTask {
         this.pdfReaderTool = pdfReaderTool;
         this.weatherTool = weatherTool;
         this.eddiToolBridge = eddiToolBridge;
+        this.toolExecutionService = toolExecutionService;
     }
 
     @Override
@@ -246,7 +255,7 @@ public class LangchainTask implements ILifecycleTask {
         if (!enabledTools.isEmpty()) {
             // Agent mode: Execute with tools using AiServices
             LOGGER.info("Executing with " + enabledTools.size() + " enabled tools");
-            var executionResult = executeWithTools(chatModel, systemMessage, chatMessages, enabledTools, task);
+            var executionResult = executeWithTools(chatModel, systemMessage, chatMessages, enabledTools, task, memory);
             responseContent = executionResult.response();
             toolTrace = executionResult.trace();
         } else {
@@ -315,81 +324,141 @@ public class LangchainTask implements ILifecycleTask {
     }
 
     /**
-     * Executes chat with tool support using langchain4j AiServices
+     * Executes chat with tool support using direct ChatModel API with tool execution loop.
+     * This avoids using AiServices which triggers Quarkus-LangChain4j CDI interception.
      */
     private ExecutionResult executeWithTools(ChatModel chatModel, String systemMessage,
                                    List<ChatMessage> chatMessages, List<Object> tools,
-                                   Task task) throws LifecycleException {
-        // Extract last user message
-        String userMessage = "";
-        for (int i = chatMessages.size() - 1; i >= 0; i--) {
-            ChatMessage msg = chatMessages.get(i);
-            if (msg instanceof UserMessage) {
-                userMessage = ((UserMessage) msg).singleText();
-                break;
-            }
-        }
+                                   Task task, IConversationMemory memory) throws LifecycleException {
 
-        // Build ChatMemory with history
-        ChatMemory chatMemory = MessageWindowChatMemory.withMaxMessages(100);
-        chatMessages.forEach(chatMemory::add);
+        // Build tool specifications and executors from tool objects
+        List<ToolSpecification> toolSpecs = new ArrayList<>();
+        Map<String, ToolExecutor> toolExecutors = new HashMap<>();
 
-        // Build AI Service with tools
-        var builder = AiServices.builder(DeclarativeAgent.class)
-                .chatModel(chatModel)
-                .chatMemory(chatMemory);
-
-        if (!isNullOrEmpty(systemMessage)) {
-            builder.systemMessageProvider(chatMemoryId -> systemMessage);
-        }
-
-        // Add all tools
         for (Object tool : tools) {
-            builder.tools(tool);
-        }
-
-        DeclarativeAgent agent = builder.build();
-
-        // Execute agent with retry logic
-        String finalUserMessage = userMessage;
-        String response = AgentExecutionHelper.executeWithRetry(
-                () -> agent.chat(finalUserMessage),
-                task,
-                "Agent execution"
-        );
-
-        // Capture trace from new messages
-        List<Map<String, Object>> trace = new ArrayList<>();
-        List<ChatMessage> allMessages = chatMemory.messages();
-        
-        // Filter for messages added during this turn (after the initial history)
-        // Note: chatMessages contains history + last user message. 
-        // chatMemory will contain history + last user message + tool calls + tool results + final response.
-        // We want to capture everything after the last user message (which is already in chatMessages).
-        
-        // chatMessages includes the last user message.
-        // Capture all messages added after the seeded history (i.e., after the last user message).
-        int seedSize = chatMessages.size();
-        if (allMessages.size() > seedSize) {
-            for (int i = seedSize; i < allMessages.size(); i++) {
-                ChatMessage msg = allMessages.get(i);
-                if (msg instanceof AiMessage aiMsg && aiMsg.hasToolExecutionRequests()) {
-                    for (ToolExecutionRequest req : aiMsg.toolExecutionRequests()) {
-                        Map<String, Object> step = new HashMap<>();
-                        step.put("type", "tool_call");
-                        step.put("tool", req.name());
-                        step.put("arguments", req.arguments());
-                        trace.add(step);
-                    }
-                } else if (msg instanceof ToolExecutionResultMessage toolMsg) {
-                    Map<String, Object> step = new HashMap<>();
-                    step.put("type", "tool_result");
-                    step.put("tool", toolMsg.toolName());
-                    step.put("result", toolMsg.text());
-                    trace.add(step);
+            var specs = ToolSpecifications.toolSpecificationsFrom(tool);
+            toolSpecs.addAll(specs);
+            
+            // Find methods annotated with @Tool and map them to executors
+            for (java.lang.reflect.Method method : tool.getClass().getDeclaredMethods()) {
+                if (method.isAnnotationPresent(dev.langchain4j.agent.tool.Tool.class)) {
+                    dev.langchain4j.agent.tool.Tool toolAnnotation = method.getAnnotation(dev.langchain4j.agent.tool.Tool.class);
+                    // Tool name defaults to method name if not specified
+                    String toolName = toolAnnotation.name().isEmpty() ? method.getName() : toolAnnotation.name();
+                    toolExecutors.put(toolName, new DefaultToolExecutor(tool, method));
                 }
             }
         }
+
+        // Build message list with system message if provided
+        List<ChatMessage> messages = new ArrayList<>();
+        if (!isNullOrEmpty(systemMessage)) {
+            messages.add(SystemMessage.from(systemMessage));
+        }
+        messages.addAll(chatMessages);
+
+        // Trace for tool calls
+        List<Map<String, Object>> trace = new ArrayList<>();
+
+        // Read config fields for tool execution controls
+        boolean enableRateLimiting = task.getEnableRateLimiting() != null ? task.getEnableRateLimiting() : true;
+        boolean enableCaching = task.getEnableToolCaching() != null ? task.getEnableToolCaching() : true;
+        boolean enableCostTracking = task.getEnableCostTracking() != null ? task.getEnableCostTracking() : true;
+        int defaultRateLimit = task.getDefaultRateLimit() != null ? task.getDefaultRateLimit() : 100;
+        Map<String, Integer> toolRateLimits = task.getToolRateLimits();
+        Double maxBudget = task.getMaxBudgetPerConversation();
+        String conversationId = memory.getConversationId();
+
+        // Execute with retry logic - the tool execution loop
+        String response = AgentExecutionHelper.executeWithRetry(() -> {
+            List<ChatMessage> currentMessages = new ArrayList<>(messages);
+            int maxIterations = 10; // Prevent infinite loops
+
+            for (int i = 0; i < maxIterations; i++) {
+                // Build chat request with tools
+                ChatRequest.Builder requestBuilder = ChatRequest.builder()
+                        .messages(currentMessages);
+
+                if (!toolSpecs.isEmpty()) {
+                    requestBuilder.parameters(ChatRequestParameters.builder()
+                            .toolSpecifications(toolSpecs)
+                            .build());
+                }
+
+                ChatResponse chatResponse = chatModel.chat(requestBuilder.build());
+                AiMessage aiMessage = chatResponse.aiMessage();
+                currentMessages.add(aiMessage);
+
+                // Check if there are tool execution requests
+                if (aiMessage.hasToolExecutionRequests()) {
+                    for (ToolExecutionRequest toolRequest : aiMessage.toolExecutionRequests()) {
+                        // Record in trace
+                        Map<String, Object> callStep = new HashMap<>();
+                        callStep.put("type", "tool_call");
+                        callStep.put("tool", toolRequest.name());
+                        callStep.put("arguments", toolRequest.arguments());
+                        trace.add(callStep);
+
+                        // Check budget before executing tool
+                        if (maxBudget != null && conversationId != null &&
+                                !toolExecutionService.getCostTracker().isWithinBudget(conversationId, maxBudget)) {
+                            String budgetError = "Budget exceeded for conversation " + conversationId;
+                            LOGGER.warn(budgetError);
+
+                            Map<String, Object> budgetStep = new HashMap<>();
+                            budgetStep.put("type", "tool_error");
+                            budgetStep.put("tool", toolRequest.name());
+                            budgetStep.put("error", budgetError);
+                            trace.add(budgetStep);
+
+                            currentMessages.add(ToolExecutionResultMessage.from(toolRequest,
+                                    "Error: " + budgetError));
+                            continue;
+                        }
+
+                        // Execute the tool through ToolExecutionService for rate limiting, caching, cost tracking
+                        ToolExecutor executor = toolExecutors.get(toolRequest.name());
+                        String toolResult;
+                        if (executor != null) {
+                            int rateLimit = (toolRateLimits != null && toolRateLimits.containsKey(toolRequest.name()))
+                                    ? toolRateLimits.get(toolRequest.name())
+                                    : defaultRateLimit;
+
+                            toolResult = toolExecutionService.executeToolWrapped(
+                                    toolRequest.name(),
+                                    toolRequest.arguments(),
+                                    conversationId,
+                                    () -> executor.execute(toolRequest, null),
+                                    enableRateLimiting,
+                                    enableCaching,
+                                    enableCostTracking,
+                                    rateLimit
+                            );
+                        } else {
+                            toolResult = "Error: Tool '" + toolRequest.name() + "' not found";
+                        }
+
+                        // Record result in trace
+                        Map<String, Object> resultStep = new HashMap<>();
+                        resultStep.put("type", "tool_result");
+                        resultStep.put("tool", toolRequest.name());
+                        resultStep.put("result", toolResult);
+                        trace.add(resultStep);
+
+                        // Add tool result to messages
+                        currentMessages.add(ToolExecutionResultMessage.from(toolRequest, toolResult));
+                    }
+                    // Continue the loop to send tool results back to the model
+                } else {
+                    // No tool calls, return the response
+                    return aiMessage.text();
+                }
+            }
+
+            // Max iterations reached
+            AiMessage lastMessage = (AiMessage) currentMessages.get(currentMessages.size() - 1);
+            return lastMessage.text() != null ? lastMessage.text() : "Max tool iterations reached";
+        }, task, "Agent execution");
 
         return new ExecutionResult(response, trace);
     }

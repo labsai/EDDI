@@ -1,5 +1,6 @@
 package ai.labs.eddi.modules.langchain.impl.builder;
 
+import dev.langchain4j.http.client.jdk.JdkHttpClient;
 import dev.langchain4j.model.anthropic.AnthropicChatModel;
 import dev.langchain4j.model.chat.ChatModel;
 import jakarta.enterprise.context.ApplicationScoped;
@@ -20,7 +21,8 @@ public class AnthropicLanguageModelBuilder implements ILanguageModelBuilder {
 
     @Override
     public ChatModel build(Map<String, String> parameters) {
-        var builder = AnthropicChatModel.builder();
+        var builder = AnthropicChatModel.builder()
+                .httpClientBuilder(JdkHttpClient.builder());
 
         if (!isNullOrEmpty(parameters.get(KEY_API_KEY))) {
             builder.apiKey(parameters.get(KEY_API_KEY));

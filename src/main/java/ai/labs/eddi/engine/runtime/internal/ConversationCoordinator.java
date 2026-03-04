@@ -135,51 +135,52 @@ public class ConversationCoordinator implements IConversationCoordinator {
         final BlockingQueue<Callable<Void>> queue = conversationQueues.
                 computeIfAbsent(conversationId, (key) -> new LinkedTransferQueue<>());
 
-        // If queue is empty, this is the first message - start processing immediately
-        if (queue.isEmpty()) {
+        // Synchronize the isEmpty() check + offer() + submit to prevent race condition
+        // where two threads both see isEmpty()=true and both submit to runtime
+        synchronized (queue) {
+            boolean wasEmpty = queue.isEmpty();
             queue.offer(callable);
 
-            // Submit to runtime thread pool with callback for when it completes
-            runtime.submitCallable(callable,
-                    new IRuntime.IFinishedExecution<>() {
-                        @Override
-                        public void onComplete(Void result) {
-                            submitNext();
-                        }
+            if (wasEmpty) {
+                // Submit to runtime thread pool with callback for when it completes
+                runtime.submitCallable(callable,
+                        new IRuntime.IFinishedExecution<>() {
+                            @Override
+                            public void onComplete(Void result) {
+                                submitNext();
+                            }
 
-                        @Override
-                        public void onFailure(Throwable t) {
-                            // Log error but continue processing next message
-                            // This prevents one failed message from blocking the conversation
-                            log.error(t.getLocalizedMessage(), t);
-                            submitNext();
-                        }
+                            @Override
+                            public void onFailure(Throwable t) {
+                                // Log error but continue processing next message
+                                // This prevents one failed message from blocking the conversation
+                                log.error(t.getLocalizedMessage(), t);
+                                submitNext();
+                            }
 
-                        /**
-                         * Processes the next message in the queue after current one completes.
-                         * This creates a chain reaction where each completed message triggers
-                         * the next one, ensuring sequential processing.
-                         */
-                        private void submitNext() {
-                            synchronized (queue) {
-                                if (!queue.isEmpty()) {
-                                    // Remove the just-completed task
-                                    queue.remove();
-
-                                    // If there are more tasks waiting, submit the next one
+                            /**
+                             * Processes the next message in the queue after current one completes.
+                             * This creates a chain reaction where each completed message triggers
+                             * the next one, ensuring sequential processing.
+                             */
+                            private void submitNext() {
+                                synchronized (queue) {
                                     if (!queue.isEmpty()) {
-                                        runtime.submitCallable(queue.element(), this, null);
+                                        // Remove the just-completed task
+                                        queue.remove();
+
+                                        // If there are more tasks waiting, submit the next one
+                                        if (!queue.isEmpty()) {
+                                            runtime.submitCallable(queue.element(), this, null);
+                                        }
+                                        // If queue is now empty, conversation is idle until next message
                                     }
-                                    // If queue is now empty, conversation is idle until next message
                                 }
                             }
-                        }
-                    }, Collections.emptyMap());
-        } else {
-            // Queue is not empty - another message is being processed
-            // Just add this task to the queue; it will be automatically submitted
-            // when its turn comes (by the submitNext() callback above)
-            queue.offer(callable);
+                        }, Collections.emptyMap());
+            }
+            // If queue was not empty, the task is already queued and will be
+            // automatically submitted when its turn comes (by submitNext() callback)
         }
     }
 }

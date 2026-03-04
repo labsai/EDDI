@@ -190,16 +190,6 @@ public class LifecycleManager implements ILifecycleManager {
      * @param lifecycleTaskTypes list of task type prefixes to match
      * @return filtered list of tasks to execute
      */
-    /**
-     * Filters lifecycle tasks to execute only those starting from specified types.
-     *
-     * <p>This enables partial pipeline execution. For example, if you specify
-     * ["behavior_rules"], it will execute behavior_rules and all subsequent tasks,
-     * but skip earlier tasks like parsing.</p>
-     *
-     * @param lifecycleTaskTypes list of task type prefixes to match
-     * @return filtered list of tasks to execute
-     */
     private List<ILifecycleTask> getLifecycleTasks(List<String> lifecycleTaskTypes) {
         List<ILifecycleTask> ret = new LinkedList<>();
 
@@ -208,7 +198,7 @@ public class LifecycleManager implements ILifecycleManager {
             ILifecycleTask task = this.lifecycleTasks.get(i);
 
             // Check if this task's type matches any of the requested types (prefix match)
-            if (lifecycleTaskTypes.stream().anyMatch(type -> type.startsWith(task.getType()))) {
+            if (lifecycleTaskTypes.stream().anyMatch(type -> task.getType().startsWith(type))) {
                 // Include this task and all subsequent tasks
                 ret.addAll(this.lifecycleTasks.subList(i, this.lifecycleTasks.size()));
                 break;
