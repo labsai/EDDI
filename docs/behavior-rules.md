@@ -303,7 +303,7 @@ This will allow you to compile a condition based on any http request/properties 
 
 This condition type checks the size of arrays or collections in the conversation memory.
 
-```javascript
+```json
 (...)
   {
   "type": "sizematcher",

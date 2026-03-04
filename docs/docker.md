@@ -41,7 +41,7 @@ docker run --name eddi \
   --link mongodb:mongodb \
   -p 7070:7070 \
   -e EDDI_TOOLS_WEBSEARCH_PROVIDER=google \
-  -e EDDI_TOOLS_WEBSEARCH_GOOGLE_API_KEY=AIzaSy... \
-  -e EDDI_TOOLS_WEBSEARCH_GOOGLE_CX=012345... \
+  -e EDDI_TOOLS_WEBSEARCH_GOOGLE_API_KEY=YOUR_GOOGLE_API_KEY \
+  -e EDDI_TOOLS_WEBSEARCH_GOOGLE_CX=YOUR_GOOGLE_CX \
   -d labsai/eddi
 ```

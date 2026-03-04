@@ -22,7 +22,9 @@ EDDI provides comprehensive metrics for monitoring tool usage, performance, cach
 
 ### Cache Metrics
 
-Monitor tool caching performance with Infinispan-based smart caching:
+Monitor tool caching performance with Infinispan-based smart caching.
+
+> **Note:** The metric names below use Micrometer's dotted format (e.g., `eddi.tool.cache.hits`) as seen at `/q/metrics`. When scraped by Prometheus, these are automatically converted to underscored format with a `_total` suffix for counters (e.g., `eddi_tool_cache_hits_total`). The Prometheus queries in this document use the Prometheus naming convention.
 
 ```
 eddi.tool.cache.hits                    # Total cache hits

@@ -82,7 +82,7 @@ On a terminal, under project root folder, run the following command:
 
 1. Go to Browser --> [http://localhost:7070](http://localhost:7070)
 
-Note: If running locally inside an IDE you need _lombok_ to be enabled (otherwise you will get compile errors complaining about missing constructors). Either download as plugin (e.g. inside Intellij) or follow instructions here [https://projectlombok.org/](https://projectlombok.org/)
+Note: If running locally inside an IDE you need _lombok_ to be enabled (otherwise you will get compile errors complaining about missing constructors). Either download as plugin (e.g. inside IntelliJ) or follow instructions here [https://projectlombok.org/](https://projectlombok.org/)
 
 ### Build App & Docker image
 

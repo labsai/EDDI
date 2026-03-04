@@ -10,8 +10,14 @@ import java.util.Map;
 @Setter
 public class HttpCall {
     private String name;
-    private String description; // Natural language description for LLM agents
-    private Map<String, String> parameters; // Map of parameter_name -> parameter_description for LLM agents
+    /**
+     * Natural language description for LLM agents.
+     */
+    private String description;
+    /**
+     * Map of parameter name to parameter description for LLM agents.
+     */
+    private Map<String, String> parameters;
     private List<String> actions;
     private Boolean saveResponse = false;
     private String responseObjectName;
