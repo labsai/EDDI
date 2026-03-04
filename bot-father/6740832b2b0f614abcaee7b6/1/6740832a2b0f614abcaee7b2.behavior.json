@@ -1,0 +1,20 @@
+{
+  "appendActions" : true,
+  "behaviorGroups" : [ {
+    "behaviorRules" : [ {
+      "name" : "",
+      "actions" : [ "confirm_bot_creation_for_gemini", "CONVERSATION_END" ],
+      "conditions" : [ {
+        "type" : "actionmatcher",
+        "configs" : {
+          "actions" : "deploy_bot_for_gemini"
+        }
+      }, {
+        "type" : "dynamicvaluematcher",
+        "configs" : {
+          "valuePath" : "properties.botLocation"
+        }
+      } ]
+    } ]
+  } ]
+}

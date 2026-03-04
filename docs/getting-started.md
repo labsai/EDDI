@@ -6,7 +6,24 @@ Welcome to **EDDI**!
 
 This article will help you to get started with **EDDI**.
 
-You have two options to run **EDDI**, The most convenient way is to run **EDDI** with Docker. Alternatively, of course, you can run **EDDI** also from the source by checking out the git repository and build the project with maven using either the `mvn` command line or an IDE such as eclipse.
+## What You're Installing
+
+EDDI is a **middleware orchestration service** for conversational AI. When you run EDDI, you're starting:
+
+1. **The EDDI Service**: A Java/Quarkus application that exposes REST APIs for bot management and conversations
+2. **MongoDB**: A database that stores bot configurations, packages, and conversation history
+3. **Optional UI**: A web-based dashboard for managing bots (accessible at http://localhost:7070)
+
+Once running, you can:
+- Create and configure bots through the API or dashboard
+- Integrate bots into your applications via REST API
+- Connect to LLM services (OpenAI, Claude, Gemini, etc.)
+- Build complex conversation flows with behavior rules
+- Call external APIs from your bot logic
+
+## Installation Options
+
+You have two options to run **EDDI**: The most convenient way is to run **EDDI** with Docker. Alternatively, you can run **EDDI** from source by checking out the git repository and building the project with Maven.
 
 ## Option 1 - EDDI with Docker
 
@@ -65,7 +82,7 @@ On a terminal, under project root folder, run the following command:
 
 1. Go to Browser --> [http://localhost:7070](http://localhost:7070)
 
-Note: If running locally inside an IDE you need _lombok_ to be enabled (otherwise you will get compile errors complaining about missing constructors). Either download as plugin (e.g. inside Intellij) or follow instructions here \[https://projectlombok.org/]\(https://projectlombok.org/
+Note: If running locally inside an IDE you need _lombok_ to be enabled (otherwise you will get compile errors complaining about missing constructors). Either download as plugin (e.g. inside IntelliJ) or follow instructions here [https://projectlombok.org/](https://projectlombok.org/)
 
 ### Build App & Docker image
 

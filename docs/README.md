@@ -1,20 +1,23 @@
 ---
 description: >-
-  Prompt & Conversation Management Middleware for Conversational AI APIs. Developed in Java, powered by Quarkus, provided with Docker, and
-  orchestrated with Kubernetes or Openshift.
+  Multi-Agent Orchestration Middleware for Conversational AI. Coordinates multiple AI agents, business systems, and conversation flows. Developed in Java, powered by Quarkus, provided with Docker, and orchestrated with Kubernetes or Openshift.
 ---
 
 # E.D.D.I Documentation
 
-E.D.D.I (Enhanced Dialog Driven Interface) is a middleware to connect and manage LLM API bots
-with advanced prompt and conversation management for APIs such as OpenAI ChatGPT, Facebook Hugging Face,
-Anthropic Claude, Google Gemini and Ollama
+E.D.D.I (Enhanced Dialog Driven Interface) is a **multi-agent orchestration middleware** that coordinates between users, AI agents (LLMs), and business systems. It provides intelligent routing, conversation management, and API orchestration for building sophisticated AI-powered applications.
+
+**What EDDI Does:**
+- **Orchestrates Multiple AI Agents**: Route conversations to different LLMs (OpenAI, Claude, Gemini, Ollama) based on context and rules
+- **Coordinates Business Logic**: Integrate AI agents with your APIs, databases, and services
+- **Manages Conversations**: Maintain stateful, context-aware conversations across multiple agents
+- **Controls Agent Behavior**: Define when and how agents are invoked through configurable rules
 
 Developed in Java using Quarkus, it is lean, RESTful, scalable, and cloud-native.
 It comes as Docker container and can be orchestrated with Kubernetes or Openshift.
 The Docker image has been certified by IBM/Red Hat.
 
-Latest stable version: 5.5.1
+Latest stable version: 5.6.0
 
 License: Apache License 2.0
 
@@ -26,18 +29,45 @@ Project website: [here](https://eddi.labs.ai/)
 
 ## Intro
 
-E.D.D.I is a high performance middleware for managing conversations in AI-driven applications.
-It is designed to run efficiently in cloud environments such as Docker, Kubernetes, and Openshift.
-E.D.D.I offers seamless API integration capabilities, allowing easy connection with various conversational services or
-traditional REST APIs with runtime configurations.
-It supports the integration of multiple chatbots, even multiple versions of the same bot, for smooth upgrading and transitions.
+E.D.D.I is a **multi-agent orchestration middleware** for conversational AI systems. It sits between your application and multiple AI agents (LLMs, APIs, services), intelligently routing requests, coordinating responses, and maintaining conversation state.
 
-Notable features include:
+**EDDI as Orchestration Middleware:**
+- **Agent Coordination**: Manage multiple AI agents (OpenAI, Claude, Gemini, etc.) from a single interface
+- **Intelligent Routing**: Direct conversations to appropriate agents based on context, rules, and intent
+- **Business Integration**: Connect AI agents with your existing systems (CRMs, databases, APIs)
+- **Conversation Management**: Maintain stateful, context-aware conversations across agent interactions
+- **Behavior Control**: Define complex orchestration logic without coding
 
-* Seamless integration with conversational or traditional REST APIs
-* Configurable NLP and Behavior rules to orchestrate LLM involvement
+**Architecture:**
+- **Lifecycle Pipeline**: Configurable processing pipeline (Input → Parse → Route → Agents → Aggregate → Output)
+- **Composable Agents**: Agents are assembled from reusable, version-controlled configurations
+- **Stateful Orchestration**: Complete conversation history maintained across agent interactions
+- **Asynchronous Processing**: Non-blocking architecture handles thousands of concurrent conversations
+
+**Key Capabilities:**
+* **Multi-Agent Orchestration**: Coordinate multiple AI agents in a single conversation flow
+* **Conditional Agent Invocation**: Decide which agents to call based on business rules
+* **Agent Response Aggregation**: Combine outputs from multiple agents intelligently
+* **Seamless API Integration**: Connect agents with traditional REST APIs
+* **Pattern-Based Input Processing**: Route requests based on vocabulary and patterns
+* **Dynamic Output Generation**: Template-based responses using agent outputs and business data
+* **Composable Bot Model**: Bots assembled from version-controlled packages and extensions (Bot → Package → Extension)
 * Support for multiple chatbots, including multiple versions of the same bot, running concurrently
 * Support for Major AI API integrations via langchain4j: OpenAI, Hugging Face (text only), Claude, Gemini, Ollama (and more to come)
+
+## Documentation
+
+Start with these guides to understand EDDI:
+
+* **[Getting Started](getting-started.md)** - Setup and installation
+* **[Developer Quickstart Guide](developer-quickstart.md)** - Build your first bot in 5 minutes
+* **[Architecture Overview](architecture.md)** - Deep dive into how EDDI works internally
+* **[Creating Your First Chatbot](creating-your-first-chatbot/)** - Step-by-step tutorial
+* **[Behavior Rules](behavior-rules.md)** - Configure bot logic and decision-making
+* **[LangChain Integration](langchain.md)** - Connect to LLM APIs (OpenAI, Claude, etc.)
+* **[Security](security.md)** - SSRF protection, sandboxed evaluation, and tool hardening
+* **[HTTP Calls](httpcalls.md)** - Integrate with external REST APIs
+* **[Bot Father Deep Dive](bot-father-deep-dive.md)** - Real-world orchestration example
 
 Technical specifications:
 

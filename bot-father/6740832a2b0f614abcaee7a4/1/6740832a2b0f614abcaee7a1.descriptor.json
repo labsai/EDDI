@@ -1,0 +1,8 @@
+{
+  "resource" : "eddi://ai.labs.httpcalls/httpcallsstore/httpcalls/6740832a2b0f614abcaee7a1?version=1",
+  "createdOn" : 1732281130579,
+  "lastModifiedOn" : 1764675697996,
+  "deleted" : false,
+  "name" : "Create OpenAI Connector Bot",
+  "description" : ""
+}

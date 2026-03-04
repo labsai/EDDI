@@ -1,10 +1,38 @@
 # Conversations
 
-## Conversations
+## Overview
 
-In this section we will talk about how to send/receive messages from a Chatbot, the first step is the creation of the `conversation`, once you have the `conversation` `Id` you will be able to **send** a message to the Chatbot through a **`POST`** and to **receive** the message through A **`GET`**, while having the capacity to send context information through the body of the **POST** request as well.
+**Conversations** are the primary interaction mechanism in EDDI. Each conversation represents a stateful dialog session between a user and a bot, maintaining complete history, context, and state throughout the interaction.
 
-> **Important:** EDDI has a great feature for conversations with chatbots, it's the possibility to go back in time by using the two API endpoints : `/undo` and `/redo` !
+### Key Concepts
+
+- **Stateful Sessions**: Each conversation maintains its own state (conversation memory) that persists across multiple interactions
+- **Conversation ID**: Unique identifier that references a specific conversation session
+- **Lifecycle States**: Conversations transition through states: `READY`, `IN_PROGRESS`, `ENDED`, `ERROR`
+- **History Management**: Full conversation history is maintained, with support for undo/redo operations
+- **Context Passing**: External context can be injected into conversations at any step
+
+### How Conversations Work in EDDI
+
+When you create a conversation:
+1. EDDI creates a new `IConversationMemory` object
+2. Assigns a unique conversation ID
+3. Links it to a specific bot and user
+4. Initializes the first conversation step
+5. Returns the conversation ID for subsequent interactions
+
+Each message sent to a conversation:
+1. Loads the conversation memory from MongoDB/cache
+2. Executes the bot's lifecycle pipeline
+3. Updates the conversation memory with results
+4. Saves the updated memory
+5. Returns the bot's response
+
+> **Time Travel Feature**: EDDI has a powerful feature for conversations—the ability to go back in time using the `/undo` and `/redo` API endpoints!
+
+## Working with Conversations
+
+In this section we will explain how to **send/receive messages** from a Chatbot. The first step is creating a `conversation`. Once you have the `conversation` `Id`, you can **send** messages via **`POST`** requests and **receive** responses via **`GET`** requests, while having the capacity to send context information through the body of the **POST** request.
 
 ## Creating/initiating a conversation :
 
@@ -230,7 +258,7 @@ In this section we will talk about how to send/receive messages from a Chatbot, 
 }
 ```
 
-The `conversationId` will be provided through the **`location`** **HTTP Header** of the response,  you will use that later to submit messages to the Chabot to maintain a conversation.
+The `conversationId` will be provided through the **`location`** **HTTP Header** of the response,  you will use that later to submit messages to the Chatbot to maintain a conversation.
 
 ### Example _:_
 
@@ -424,48 +452,223 @@ Response Headers
 }
 ```
 
-## Undo and redo :
+## Time Travel: Undo and Redo
 
-The undo and redo methods basically allow you to return a **step back** in a conversation, this is done by sending a **`POST`** along with bot and conversation ids to `/bots/{environment}/`**`{botId}`**`/redo/`**`{conversationId}`** endpoint**,** the `GET` call of the same endpoint with the same parameters will allow you to see if the last submitted **undo**/**redo** was successful by receiving a `true` or `false` in the **response body.**
+One of EDDI's most powerful features is the ability to **go back in time** within a conversation. The undo/redo functionality allows you to step backward and forward through conversation history, perfect for:
+- **User Correction**: User made a mistake and wants to retry
+- **Testing**: Developers testing different conversation paths
+- **Debugging**: Analyzing bot behavior at specific steps
+- **User Experience**: Allowing users to explore different options
 
-### Undo and redo in a conversation REST API Endpoint
+### How It Works
 
-| Element          | Tags                                                                                                                   |
-| ---------------- | ---------------------------------------------------------------------------------------------------------------------- |
-| HTTP Method      | `POST`                                                                                                                 |
-| API endpoint     | `/bots/{environment}/{botId}/[undo/redo]/{conversationId}`                                                             |
-| {environment}    | (`Path` **parameter**):`String` Deployment environment (e.g: `restricted,unrestricted,test`)                           |
-| {botId}          | (`Path` parameter):`String Id` of the bot that you wish to **continue a conversation with**.                           |
-| {conversationId} | (`Path` **parameter**): `String Id` of the **conversation** that you wish to **undo/redo** the last conversation step. |
+EDDI maintains a **redo cache** of undone conversation steps. When you undo a step, it's moved to this cache. You can then either:
+- Continue the conversation (clears redo cache)
+- Redo the step (restores it from cache)
 
-### Example (undo)
+```
+Step 1 → Step 2 → Step 3 (current)
+         undo ↓
+Step 1 → Step 2 (current) | [Step 3 in redo cache]
+         redo ↓
+Step 1 → Step 2 → Step 3 (current)
+```
 
-_Request URL:_
+### Undo API
 
-`http://localhost:7070/bots/restricted/5aaf98e19f7dd421ac3c7de9/undo/5ade58dda081a23418503d6f`
+#### Check if Undo is Available
 
-_Response Body_
+| Element | Value |
+|---------|-------|
+| HTTP Method | `GET` |
+| API Endpoint | `/bots/{environment}/{botId}/undo/{conversationId}` |
+| Response | `true` if undo is available, `false` otherwise |
 
-`no content`
+**Example:**
+```bash
+curl -X GET "http://localhost:7070/bots/unrestricted/BOT_ID/undo/CONV_ID"
+```
 
-_Response Code_
+**Response:**
+```json
+true
+```
 
-`200`
+#### Perform Undo
 
-_Response Headers_
+| Element | Value |
+|---------|-------|
+| HTTP Method | `POST` |
+| API Endpoint | `/bots/{environment}/{botId}/undo/{conversationId}` |
+| Response | HTTP 200 (no content) |
 
-```javascript
+**Example:**
+```bash
+curl -X POST "http://localhost:7070/bots/unrestricted/BOT_ID/undo/CONV_ID"
+```
+
+**Response:** HTTP 200 (No Content)
+
+**Effect**: The last conversation step is removed from the conversation history and stored in the redo cache.
+
+### Redo API
+
+#### Check if Redo is Available
+
+| Element | Value |
+|---------|-------|
+| HTTP Method | `GET` |
+| API Endpoint | `/bots/{environment}/{botId}/redo/{conversationId}` |
+| Response | `true` if redo is available, `false` otherwise |
+
+**Example:**
+```bash
+curl -X GET "http://localhost:7070/bots/unrestricted/BOT_ID/redo/CONV_ID"
+```
+
+**Response:**
+```json
+true
+```
+
+#### Perform Redo
+
+| Element | Value |
+|---------|-------|
+| HTTP Method | `POST` |
+| API Endpoint | `/bots/{environment}/{botId}/redo/{conversationId}` |
+| Response | HTTP 200 (no content) |
+
+**Example:**
+```bash
+curl -X POST "http://localhost:7070/bots/unrestricted/BOT_ID/redo/CONV_ID"
+```
+
+**Response:** HTTP 200 (No Content)
+
+**Effect**: The last undone step is restored from the redo cache and added back to the conversation history.
+
+### Complete Example Flow
+
+```bash
+# 1. Start conversation
+curl -X POST "http://localhost:7070/bots/unrestricted/BOT_ID" -d '{}'
+# Returns: {"conversationId": "CONV_ID"}
+
+# 2. Send message
+curl -X POST "http://localhost:7070/bots/unrestricted/BOT_ID/CONV_ID" \
+  -H "Content-Type: application/json" \
+  -d '{"input": "Hello"}'
+# Bot responds: "Hi! How can I help?"
+
+# 3. Send another message
+curl -X POST "http://localhost:7070/bots/unrestricted/BOT_ID/CONV_ID" \
+  -H "Content-Type: application/json" \
+  -d '{"input": "Book a flight"}'
+# Bot responds: "Where would you like to go?"
+
+# 4. Oops, user meant hotel not flight! Undo last step
+curl -X POST "http://localhost:7070/bots/unrestricted/BOT_ID/undo/CONV_ID"
+# Now back to: "Hi! How can I help?"
+
+# 5. Try again with correct input
+curl -X POST "http://localhost:7070/bots/unrestricted/BOT_ID/CONV_ID" \
+  -H "Content-Type: application/json" \
+  -d '{"input": "Book a hotel"}'
+# Bot responds: "Which city?"
+
+# 6. Wait, maybe flight was right. Check if redo is available
+curl -X GET "http://localhost:7070/bots/unrestricted/BOT_ID/redo/CONV_ID"
+# Returns: false (because we sent a new message, clearing redo cache)
+```
+
+### Redo Cache Behavior
+
+**Important**: The redo cache is cleared when you send a new message after an undo. This prevents inconsistent conversation states.
+
+```
+Normal flow:
+Step 1 → Step 2 → Step 3
+
+After undo:
+Step 1 → Step 2 | [Step 3 cached]
+         ↓ can redo
+         
+After new message:
+Step 1 → Step 2 → Step 4
+         ↓ redo cache cleared (Step 3 lost)
+```
+
+### Checking Redo Cache Size
+
+The conversation response includes `redoCacheSize` field:
+
+```json
 {
-  "access-control-allow-origin": "*",
-  "date": "Mon, 23 Apr 2018 22:20:57 GMT",
-  "access-control-allow-headers": "authorization, Content-Type",
-  "content-length": "0",
-  "access-control-allow-methods": "GET, PUT, POST, DELETE, PATCH, OPTIONS",
-  "content-type": null
+  "conversationId": "CONV_ID",
+  "redoCacheSize": 0,
+  "conversationState": "READY"
 }
 ```
 
-### Sample bot:
+- `redoCacheSize: 0` - No undo has been performed, redo not available
+- `redoCacheSize: 1` - One undo performed, one redo available
+- `redoCacheSize: 2` - Two undos performed, two redos available
+
+### Use Cases
+
+**1. User Correction**
+```
+User: "Book me a table at 7pm"
+Bot: "For how many people?"
+User: "Wait, I meant 8pm"
+→ Undo and retry
+```
+
+**2. Exploring Options**
+```
+User: "Show me flights to Paris"
+Bot: [Shows flights]
+User: "Actually, let me see hotels instead"
+→ Undo and try different path
+```
+
+**3. Testing Bot Behavior**
+```
+Developer tests:
+1. Input A → Response X
+2. Undo
+3. Input B → Response Y
+4. Undo, redo → Back to Response X
+```
+
+### Limitations
+
+- Undo/redo only affects conversation **history** and **memory**
+- External API calls made during undone steps are **not reversed**
+  - Example: If a payment API was called, undoing won't refund the payment
+- Redo cache has a **size limit** (configurable)
+- Redo cache is **session-specific** (cleared on conversation end)
+
+### Best Practices
+
+1. **Always check availability** before calling undo/redo to avoid errors
+2. **Inform users** when undo clears redo cache (UX consideration)
+3. **Be careful with side effects** - undo doesn't reverse external API calls
+4. **Use for user convenience** - great for conversational UX
+5. **Log undo/redo** - helps with analytics and debugging
+
+## Related API Endpoints
+
+- `POST /bots/{environment}/{botId}` - Start conversation
+- `POST /bots/{environment}/{botId}/{conversationId}` - Send message
+- `GET /bots/{environment}/{botId}/{conversationId}` - Get conversation state
+- `POST /bots/{environment}/{botId}/undo/{conversationId}` - Undo last step
+- `POST /bots/{environment}/{botId}/redo/{conversationId}` - Redo last step
+- `GET /bots/{environment}/{botId}/undo/{conversationId}` - Check undo availability
+- `GET /bots/{environment}/{botId}/redo/{conversationId}` - Check redo availability
+
+## Sample Bot
 
 {% file src=".gitbook/assets/weather_bot_v2.zip" %}
 Weather-bot-v2.zip

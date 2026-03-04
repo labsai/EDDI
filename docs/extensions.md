@@ -1,12 +1,56 @@
 # Extensions
 
+## Overview
+
+**Extensions** are the building blocks of EDDI bots. In EDDI's composable architecture, bots are not monolithic applications but rather **assemblies of extensions**, each providing a specific capability. Extensions are referenced by packages, and packages are combined to form complete bots.
+
+### The Bot Composition Hierarchy
+
+```
+Bot (.bot.json)
+  └─ Package 1 (.package.json)
+      ├─ Extension 1: Behavior Rules (eddi://ai.labs.behavior)
+      ├─ Extension 2: HTTP Calls (eddi://ai.labs.httpcalls)
+      └─ Extension 3: Output Sets (eddi://ai.labs.output)
+  └─ Package 2 (.package.json)
+      ├─ Extension 1: Dictionary (eddi://ai.labs.parser.dictionaries.regular)
+      └─ Extension 2: LangChain (eddi://ai.labs.langchain)
+```
+
+### What Extensions Do
+
+Each extension type corresponds to a **lifecycle task** or **resource** that the bot can use:
+
+| Extension Type | Purpose | Lifecycle Role |
+|----------------|---------|----------------|
+| `ai.labs.parser` | Input parsing and normalization | Transforms raw user input into structured expressions |
+| `ai.labs.parser.dictionaries.*` | Define vocabularies and entities | Used by parser to recognize intents and entities |
+| `ai.labs.behavior` | Define IF-THEN rules | Decides what actions to take based on conditions |
+| `ai.labs.httpcalls` | Configure external API calls | Executes HTTP requests to external services |
+| `ai.labs.langchain` | Configure LLM integrations | Sends requests to LLM APIs (OpenAI, Claude, etc.) |
+| `ai.labs.output` | Define output templates | Formats responses using conversation data |
+| `ai.labs.property` | Extract and store data | Manages conversation memory properties |
+
+### EDDI Resource URIs
+
+All EDDI's resources start with `eddi://`, which is used to distinguish EDDI-specific extensions from other resources. This URI scheme allows:
+- **Version control**: Each extension can have multiple versions
+- **Reusability**: The same extension can be used by multiple packages/bots
+- **Clear references**: Explicit URIs make configuration transparent
+
+Example URI:
+```
+eddi://ai.labs.behavior/behaviorstore/behaviorsets/673abc123?version=1
+```
+
+## Extension Discovery
+
 In this article we will talk about **EDDI**'s **`extensions`**.
 
 **EDDI's `extensions`** are the features that your current instance of EDDI is supporting, the latter are used in the process of configuring/developing a Chatbot.
 
 The list of `extensions` will allow you to have an overview of what is enabled in your current instance of **EDDI**, the list can be retrieved by calling the API endpoint below.
 
-> **Note** All EDDI's resources start with `eddi://`, this is used to distinguish if the resource is an EDDI extension, e.g : `callbacks`, `httpcalls`, `outputsets`, `bot packages`, etc..
 
 ### &#x20;Extensions REST API Endpoint
 

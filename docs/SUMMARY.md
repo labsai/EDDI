@@ -1,7 +1,11 @@
 # Table of contents
 
 * [E.D.D.I Documentation](README.md)
+* [Architecture Overview](architecture.md)
+* [Conversation Memory & State Management](conversation-memory.md)
 * [Getting started](getting-started.md)
+* [Developer Quickstart Guide](developer-quickstart.md)
+* [Putting It All Together](putting-it-all-together.md)
 * [Your first bot](your-first-bot/README.md)
   * [Understanding your first bot](your-first-bot/understanding-your-first-bot.md)
 * [Bot Manager GUI](bot-manager-gui.md)
@@ -10,19 +14,33 @@
   * [Create a bot that reacts to user inputs](creating-your-first-chatbot/creating-your-first-chatbot-1.md)
 * [Import/Export a Chatbot](import-export-a-chatbot.md)
 * [Managed Bots](managed-bots.md)
-* [Deployement management of Chatbots](deployement-management-of-chatbots.md)
+* [Deployment Management of Chatbots](deployment-management-of-chatbots.md)
 * [Extensions](extensions.md)
 * [Behavior Rules](behavior-rules.md)
 * [HttpCalls](httpcalls.md)
 * [Langchain](langchain.md)
+* [Security](security.md)
 * [Output Configuration](output-configuration.md)
 * [Conversations](conversations.md)
 * [Passing context information](passing-context-information.md)
 * [Output Templating](output-templating.md)
 * [Semantic Parser](semantic-parser.md)
-* [Git support](git-support.md)
+
+## Advanced Concepts
+
+* [Bot Father: A Deep Dive](bot-father-deep-dive.md)
+* [Bot Father: LangChain Tools Guide](bot-father-langchain-tools-guide.md)
+* [Bot Father: Conversation Flow](bot-father-conversation-flow.md)
+* [Bot Father: Implementation Summary](bot-father-implementation-summary.md)
+* [Bot Father: LangChain Updates](bot-father-langchain-updates.md)
+* [Bot Father: Tools Configuration Fix](bot-father-tools-configuration-fix.md)
+
+## Deployment & Infrastructure
+
+* [Git Commit Guide](git-commit-guide.md)
 * [Docker](docker.md)
 * [Setting Up EDDI on AWS with MongoDB Atlas](setup-eddi-on-aws-with-mongodb-atlas.md)
 * [RedHat Openshift](redhat-openshift.md)
 * [Metrics](metrics.md)
+* [Tasks / Roadmap](tasks.md)
 * [FAQs](how-to....md)

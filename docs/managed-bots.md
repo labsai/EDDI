@@ -1,12 +1,84 @@
 # Managed Bots
 
-## Managed Bots
+## Overview
 
-This feature will allow you to take advantage of **EDDI**'s automatic management of bots, it is possible to avoid creating conversations and managing them yourself, but let them be managed by **EDDI**.
+**Managed Bots** is an EDDI feature that provides automatic conversation management, allowing you to trigger bots based on **intents** without manually creating and managing conversation IDs. EDDI handles the conversation lifecycle for you.
 
-This will act as a shortcut to start directly a conversation with a bot that covers a specific **intent**.
+### The Problem It Solves
 
-But first you will have to set up a `BotTrigger`.
+**Without Managed Bots** (manual approach):
+1. Your app creates a conversation: `POST /bots/unrestricted/bot123`
+2. EDDI returns conversation ID: `conv-456`
+3. Your app stores this ID
+4. Your app sends messages: `POST /bots/unrestricted/bot123/conv-456`
+5. Your app manages conversation lifecycle
+
+**With Managed Bots** (automatic approach):
+1. You define a bot trigger with an intent keyword
+2. Your app sends: `POST /managedbots/weather_help/user123`
+3. EDDI automatically:
+   - Creates conversation (if none exists for this user/intent)
+   - Routes to correct bot
+   - Manages conversation state
+   - Reuses existing conversation on subsequent calls
+
+### Use Cases
+
+- **Multi-Bot Applications**: Route users to different bots based on intent without tracking conversation IDs
+- **Microservices Architecture**: Each service triggers bots by intent, EDDI handles coordination
+- **Simplified Integration**: Client apps don't need conversation management logic
+- **User-Centric Sessions**: One conversation per user per intent, automatically managed
+- **A/B Testing**: Define multiple bots for same intent; EDDI picks one randomly
+
+### Key Concepts
+
+**Intent**: A keyword or phrase that maps to one or more bot deployments
+- Example: `"weather_help"` → Weather Bot
+- Example: `"order_status"` → Order Tracking Bot
+- Example: `"support_technical"` → Technical Support Bot
+
+**Bot Trigger**: Configuration that links an intent to specific bots
+
+**User ID**: Identifies the user; EDDI maintains one conversation per user per intent
+
+### How It Works
+
+```
+1. Define Bot Trigger:
+   Intent: "weather_help" → Bot: weather-bot-v2 (unrestricted)
+
+2. User Requests:
+   POST /managedbots/weather_help/user-123
+   {"input": "What's the weather?"}
+
+3. EDDI Logic:
+   - Checks if user-123 has active conversation for "weather_help"
+   - If NO: Creates new conversation with weather-bot-v2
+   - If YES: Continues existing conversation
+   - Processes message through bot's lifecycle
+   - Returns response
+
+4. Subsequent Requests:
+   POST /managedbots/weather_help/user-123
+   {"input": "What about tomorrow?"}
+   → Continues same conversation
+```
+
+### Benefits
+
+- **Simplified Client Logic**: No conversation ID management needed
+- **Intent-Based Routing**: Natural way to organize multi-bot systems
+- **Automatic Session Management**: EDDI handles conversation lifecycle
+- **Initial Context Support**: Pass context at conversation start
+- **Random Bot Selection**: A/B testing or load distribution built-in
+
+## Managed Bots Configuration
+
+This feature allows you to take advantage of **EDDI**'s automatic management of bots. It is possible to avoid creating conversations and managing them yourself—let EDDI handle it.
+
+This acts as a shortcut to directly start a conversation with a bot that covers a specific **intent**.
+
+First, you need to set up a `BotTrigger`.
 
 ## BotTrigger
 
