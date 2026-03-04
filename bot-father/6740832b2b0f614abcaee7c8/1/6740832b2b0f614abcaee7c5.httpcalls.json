@@ -84,7 +84,7 @@
       "queryParams" : { },
       "method" : "post",
       "contentType" : "application/json",
-      "body" : "{\"tasks\":[{\"actions\":[\"send_message\"],\"id\":\"jlama\",\"type\":\"jlama\",\"description\":\"Integration with jlama API\",\"parameters\":{\"systemMessage\":\"[(${properties.prompt})]\",\"addToOutput\":\"true\",\"modelName\":\"[(${properties.modelName})]\",\"timeout\":\"[(${properties.timeout})]\",\"logRequests\":\"true\",\"logResponses\":\"true\"}}]}"
+      "body" : "{\"tasks\":[{\"actions\":[\"send_message\"],\"id\":\"jlama\",\"type\":\"jlama\",\"description\":\"Integration with jlama API\",\"parameters\":{\"systemMessage\":\"[(${properties.prompt})]\",\"addToOutput\":\"true\",\"modelName\":\"[(${properties.modelName})]\",\"logRequests\":\"true\",\"logResponses\":\"true\"},\"enableBuiltInTools\":[(${properties.enableBuiltInTools})],\"builtInToolsWhitelist\":[(${properties.builtInToolsWhitelist})],\"conversationHistoryLimit\":[(${properties.conversationHistoryLimit})]}]}"
     },
     "postResponse" : {
       "propertyInstructions" : [ {

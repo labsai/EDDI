@@ -27,11 +27,20 @@
     "outputs" : [ {
       "valueAlternatives" : [ {
         "type" : "text",
-        "text" : "What temperature would you like to set for this bot (e.g., 0.5)?",
+        "text" : "What temperature would you like to set for this bot? (0.0 to 1.0, where 0.7 is a good balance of creativity and focus)",
         "delay" : 0
       } ]
     } ],
-    "quickReplies" : [ ]
+    "quickReplies" : [ {
+      "value" : "Default (0.7)",
+      "expressions" : "temp_0_7"
+    }, {
+      "value" : "Creative (0.9)",
+      "expressions" : "temp_0_9"
+    }, {
+      "value" : "Precise (0.2)",
+      "expressions" : "temp_0_2"
+    } ]
   }, {
     "action" : "ask_for_jlama_builtin_tools",
     "timesOccurred" : 0,
@@ -80,6 +89,12 @@
     }, {
       "value" : "Calculator, Web, DateTime",
       "expressions" : "tools_calc_web_datetime"
+    }, {
+      "value" : "Web Search & Weather",
+      "expressions" : "tools_web_weather"
+    }, {
+      "value" : "Document Tools",
+      "expressions" : "tools_docs"
     } ]
   }, {
     "action" : "ask_for_jlama_conversation_history_limit",
@@ -87,7 +102,7 @@
     "outputs" : [ {
       "valueAlternatives" : [ {
         "type" : "text",
-        "text" : "How many conversation turns would you like to include in the context?",
+        "text" : "How many conversation turns would you like to include in the context? (Default is 10)",
         "delay" : 0
       } ]
     }, {
@@ -98,13 +113,72 @@
       } ]
     } ],
     "quickReplies" : [ {
-      "value" : "10 turns (recommended)",
-      "expressions" : "10"
+      "value" : "Default (10)",
+      "expressions" : "history_10"
     }, {
-      "value" : "20 turns",
-      "expressions" : "20"
+      "value" : "20",
+      "expressions" : "history_20"
     }, {
-      "value" : "Unlimited",
-      "expressions" : "-1"
+      "value" : "-1",
+      "expressions" : "history_unlimited"
     } ]
   }, {
+    "action" : "ask_for_bot_creation_confirmation_for_jlama",
+    "timesOccurred" : 0,
+    "outputs" : [ {
+      "valueAlternatives" : [ {
+        "type" : "text",
+        "text" : "Ok great!",
+        "delay" : 0
+      } ]
+    }, {
+      "valueAlternatives" : [ {
+        "type" : "text",
+        "text" : "Continue with creating this connector bot?",
+        "delay" : 0
+      } ]
+    } ],
+    "quickReplies" : [ {
+      "value" : "Create the bot!",
+      "expressions" : "orchestrate_create_bot_for_jlama"
+    }, {
+      "value" : "Cancel this",
+      "expressions" : "exit_conversation, CONVERSATION_END"
+    } ]
+  }, {
+    "action" : "confirm_bot_creation_for_jlama",
+    "timesOccurred" : 0,
+    "outputs" : [ {
+      "valueAlternatives" : [ {
+        "type" : "text",
+        "text" : "It's all done! Your bot \"[[${properties.botName}]]\" was successfully created!",
+        "delay" : 0
+      } ]
+    }, {
+      "valueAlternatives" : [ {
+        "type" : "text",
+        "text" : "Go to the bot overview page and refresh the page to see your newly created bot!",
+        "delay" : 0
+      } ]
+    }, {
+      "valueAlternatives" : [ {
+        "type" : "text",
+        "text" : "Enjoy your new creation!",
+        "delay" : 0
+      } ]
+    }, {
+      "valueAlternatives" : [ {
+        "type" : "text",
+        "text" : "You can access it here: <a href=\"/chat/unrestricted/[(${properties.botId})]\" target=\"_blank\">Open chat with Connector Bot [(${properties.botName})]</a>",
+        "delay" : 0
+      } ]
+    }, {
+      "valueAlternatives" : [ {
+        "type" : "text",
+        "text" : "Bot intent for bot management api is \"[[${properties.botIntent}]]\": <a href=\"/managedbots/[(${properties.botIntent})]/put-user-id-here\" target=\"_blank\">Open API to Bot Connector [(${properties.botName})]</a>",
+        "delay" : 0
+      } ]
+    } ],
+    "quickReplies" : [ ]
+  } ]
+}

@@ -44,6 +44,182 @@
         }
       } ]
     }, {
+      "name" : "Set temperature 0.0 and ask for timeout",
+      "actions" : [ "set_temp_0_0", "ask_for_gemini_timeout" ],
+      "conditions" : [ {
+        "type" : "actionmatcher",
+        "configs" : {
+          "actions" : "ask_for_gemini_temperature",
+          "occurrence" : "lastStep"
+        }
+      }, {
+        "type" : "inputmatcher",
+        "configs" : {
+          "expressions" : "temp_0_0",
+          "occurrence" : "currentStep"
+        }
+      } ]
+    }, {
+      "name" : "Set temperature 0.1 and ask for timeout",
+      "actions" : [ "set_temp_0_1", "ask_for_gemini_timeout" ],
+      "conditions" : [ {
+        "type" : "actionmatcher",
+        "configs" : {
+          "actions" : "ask_for_gemini_temperature",
+          "occurrence" : "lastStep"
+        }
+      }, {
+        "type" : "inputmatcher",
+        "configs" : {
+          "expressions" : "temp_0_1",
+          "occurrence" : "currentStep"
+        }
+      } ]
+    }, {
+      "name" : "Set temperature 0.2 and ask for timeout",
+      "actions" : [ "set_temp_0_2", "ask_for_gemini_timeout" ],
+      "conditions" : [ {
+        "type" : "actionmatcher",
+        "configs" : {
+          "actions" : "ask_for_gemini_temperature",
+          "occurrence" : "lastStep"
+        }
+      }, {
+        "type" : "inputmatcher",
+        "configs" : {
+          "expressions" : "temp_0_2",
+          "occurrence" : "currentStep"
+        }
+      } ]
+    }, {
+      "name" : "Set temperature 0.3 and ask for timeout",
+      "actions" : [ "set_temp_0_3", "ask_for_gemini_timeout" ],
+      "conditions" : [ {
+        "type" : "actionmatcher",
+        "configs" : {
+          "actions" : "ask_for_gemini_temperature",
+          "occurrence" : "lastStep"
+        }
+      }, {
+        "type" : "inputmatcher",
+        "configs" : {
+          "expressions" : "temp_0_3",
+          "occurrence" : "currentStep"
+        }
+      } ]
+    }, {
+      "name" : "Set temperature 0.4 and ask for timeout",
+      "actions" : [ "set_temp_0_4", "ask_for_gemini_timeout" ],
+      "conditions" : [ {
+        "type" : "actionmatcher",
+        "configs" : {
+          "actions" : "ask_for_gemini_temperature",
+          "occurrence" : "lastStep"
+        }
+      }, {
+        "type" : "inputmatcher",
+        "configs" : {
+          "expressions" : "temp_0_4",
+          "occurrence" : "currentStep"
+        }
+      } ]
+    }, {
+      "name" : "Set temperature 0.5 and ask for timeout",
+      "actions" : [ "set_temp_0_5", "ask_for_gemini_timeout" ],
+      "conditions" : [ {
+        "type" : "actionmatcher",
+        "configs" : {
+          "actions" : "ask_for_gemini_temperature",
+          "occurrence" : "lastStep"
+        }
+      }, {
+        "type" : "inputmatcher",
+        "configs" : {
+          "expressions" : "temp_0_5",
+          "occurrence" : "currentStep"
+        }
+      } ]
+    }, {
+      "name" : "Set temperature 0.6 and ask for timeout",
+      "actions" : [ "set_temp_0_6", "ask_for_gemini_timeout" ],
+      "conditions" : [ {
+        "type" : "actionmatcher",
+        "configs" : {
+          "actions" : "ask_for_gemini_temperature",
+          "occurrence" : "lastStep"
+        }
+      }, {
+        "type" : "inputmatcher",
+        "configs" : {
+          "expressions" : "temp_0_6",
+          "occurrence" : "currentStep"
+        }
+      } ]
+    }, {
+      "name" : "Set temperature 0.7 and ask for timeout",
+      "actions" : [ "set_temp_0_7", "ask_for_gemini_timeout" ],
+      "conditions" : [ {
+        "type" : "actionmatcher",
+        "configs" : {
+          "actions" : "ask_for_gemini_temperature",
+          "occurrence" : "lastStep"
+        }
+      }, {
+        "type" : "inputmatcher",
+        "configs" : {
+          "expressions" : "temp_0_7",
+          "occurrence" : "currentStep"
+        }
+      } ]
+    }, {
+      "name" : "Set temperature 0.8 and ask for timeout",
+      "actions" : [ "set_temp_0_8", "ask_for_gemini_timeout" ],
+      "conditions" : [ {
+        "type" : "actionmatcher",
+        "configs" : {
+          "actions" : "ask_for_gemini_temperature",
+          "occurrence" : "lastStep"
+        }
+      }, {
+        "type" : "inputmatcher",
+        "configs" : {
+          "expressions" : "temp_0_8",
+          "occurrence" : "currentStep"
+        }
+      } ]
+    }, {
+      "name" : "Set temperature 0.9 and ask for timeout",
+      "actions" : [ "set_temp_0_9", "ask_for_gemini_timeout" ],
+      "conditions" : [ {
+        "type" : "actionmatcher",
+        "configs" : {
+          "actions" : "ask_for_gemini_temperature",
+          "occurrence" : "lastStep"
+        }
+      }, {
+        "type" : "inputmatcher",
+        "configs" : {
+          "expressions" : "temp_0_9",
+          "occurrence" : "currentStep"
+        }
+      } ]
+    }, {
+      "name" : "Set temperature 1.0 and ask for timeout",
+      "actions" : [ "set_temp_1_0", "ask_for_gemini_timeout" ],
+      "conditions" : [ {
+        "type" : "actionmatcher",
+        "configs" : {
+          "actions" : "ask_for_gemini_temperature",
+          "occurrence" : "lastStep"
+        }
+      }, {
+        "type" : "inputmatcher",
+        "configs" : {
+          "expressions" : "temp_1_0",
+          "occurrence" : "currentStep"
+        }
+      } ]
+    }, {
       "name" : "Set temperature and ask for timeout",
       "actions" : [ "set_temperature", "ask_for_gemini_timeout" ],
       "conditions" : [ {
@@ -52,6 +228,15 @@
           "actions" : "ask_for_gemini_temperature",
           "occurrence" : "lastStep"
         }
+      }, {
+        "type" : "negation",
+        "conditions" : [ {
+          "type" : "inputmatcher",
+          "configs" : {
+            "expressions" : "temp_0_0,temp_0_1,temp_0_2,temp_0_3,temp_0_4,temp_0_5,temp_0_6,temp_0_7,temp_0_8,temp_0_9,temp_1_0",
+            "occurrence" : "currentStep"
+          }
+        } ]
       }, {
         "type" : "inputmatcher",
         "configs" : {
@@ -156,6 +341,38 @@
         }
       } ]
     }, {
+      "name" : "Set websearch and weather tools and ask for conversation history",
+      "actions" : [ "set_tools_web_weather", "ask_for_gemini_conversation_history_limit" ],
+      "conditions" : [ {
+        "type" : "actionmatcher",
+        "configs" : {
+          "actions" : "ask_for_gemini_tools_whitelist",
+          "occurrence" : "lastStep"
+        }
+      }, {
+        "type" : "inputmatcher",
+        "configs" : {
+          "expressions" : "tools_web_weather",
+          "occurrence" : "currentStep"
+        }
+      } ]
+    }, {
+      "name" : "Set document tools and ask for conversation history",
+      "actions" : [ "set_tools_docs", "ask_for_gemini_conversation_history_limit" ],
+      "conditions" : [ {
+        "type" : "actionmatcher",
+        "configs" : {
+          "actions" : "ask_for_gemini_tools_whitelist",
+          "occurrence" : "lastStep"
+        }
+      }, {
+        "type" : "inputmatcher",
+        "configs" : {
+          "expressions" : "tools_docs",
+          "occurrence" : "currentStep"
+        }
+      } ]
+    }, {
       "name" : "Set custom tools from input and ask for conversation history",
       "actions" : [ "set_tools_custom", "ask_for_gemini_conversation_history_limit" ],
       "conditions" : [ {
@@ -166,19 +383,65 @@
         }
       }, {
         "type" : "negation",
-        "configs" : {
-          "condition" : {
-            "type" : "inputmatcher",
-            "configs" : {
-              "expressions" : "enable_all_tools,tools_calc_web,tools_calc_web_datetime",
-              "occurrence" : "currentStep"
-            }
+        "conditions" : [ {
+          "type" : "inputmatcher",
+          "configs" : {
+            "expressions" : "enable_all_tools,tools_calc_web,tools_calc_web_datetime,tools_web_weather,tools_docs",
+            "occurrence" : "currentStep"
           }
-        }
+        } ]
       }, {
         "type" : "inputmatcher",
         "configs" : {
           "expressions" : "*",
+          "occurrence" : "currentStep"
+        }
+      } ]
+    }, {
+      "name" : "Set conversation history limit 10 and ask for confirmation",
+      "actions" : [ "set_history_10", "ask_for_bot_creation_confirmation_for_gemini" ],
+      "conditions" : [ {
+        "type" : "actionmatcher",
+        "configs" : {
+          "actions" : "ask_for_gemini_conversation_history_limit",
+          "occurrence" : "lastStep"
+        }
+      }, {
+        "type" : "inputmatcher",
+        "configs" : {
+          "expressions" : "history_10",
+          "occurrence" : "currentStep"
+        }
+      } ]
+    }, {
+      "name" : "Set conversation history limit 20 and ask for confirmation",
+      "actions" : [ "set_history_20", "ask_for_bot_creation_confirmation_for_gemini" ],
+      "conditions" : [ {
+        "type" : "actionmatcher",
+        "configs" : {
+          "actions" : "ask_for_gemini_conversation_history_limit",
+          "occurrence" : "lastStep"
+        }
+      }, {
+        "type" : "inputmatcher",
+        "configs" : {
+          "expressions" : "history_20",
+          "occurrence" : "currentStep"
+        }
+      } ]
+    }, {
+      "name" : "Set conversation history limit unlimited and ask for confirmation",
+      "actions" : [ "set_history_unlimited", "ask_for_bot_creation_confirmation_for_gemini" ],
+      "conditions" : [ {
+        "type" : "actionmatcher",
+        "configs" : {
+          "actions" : "ask_for_gemini_conversation_history_limit",
+          "occurrence" : "lastStep"
+        }
+      }, {
+        "type" : "inputmatcher",
+        "configs" : {
+          "expressions" : "history_unlimited",
           "occurrence" : "currentStep"
         }
       } ]
@@ -191,6 +454,15 @@
           "actions" : "ask_for_gemini_conversation_history_limit",
           "occurrence" : "lastStep"
         }
+      }, {
+        "type" : "negation",
+        "conditions" : [ {
+          "type" : "inputmatcher",
+          "configs" : {
+            "expressions" : "history_10,history_20,history_unlimited",
+            "occurrence" : "currentStep"
+          }
+        } ]
       }, {
         "type" : "inputmatcher",
         "configs" : {

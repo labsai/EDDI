@@ -24,6 +24,42 @@
       "runOnValidationError" : false
     } ]
   }, {
+    "actions" : [ "set_temp_0_7" ],
+    "setProperties" : [ {
+      "name" : "temperature",
+      "valueString" : "0.7",
+      "scope" : "conversation",
+      "fromObjectPath" : "",
+      "toObjectPath" : "",
+      "convertToObject" : false,
+      "override" : true,
+      "runOnValidationError" : false
+    } ]
+  }, {
+    "actions" : [ "set_temp_0_9" ],
+    "setProperties" : [ {
+      "name" : "temperature",
+      "valueString" : "0.9",
+      "scope" : "conversation",
+      "fromObjectPath" : "",
+      "toObjectPath" : "",
+      "convertToObject" : false,
+      "override" : true,
+      "runOnValidationError" : false
+    } ]
+  }, {
+    "actions" : [ "set_temp_0_2" ],
+    "setProperties" : [ {
+      "name" : "temperature",
+      "valueString" : "0.2",
+      "scope" : "conversation",
+      "fromObjectPath" : "",
+      "toObjectPath" : "",
+      "convertToObject" : false,
+      "override" : true,
+      "runOnValidationError" : false
+    } ]
+  }, {
     "actions" : [ "set_temperature" ],
     "setProperties" : [ {
       "name" : "temperature",
@@ -96,10 +132,70 @@
       "runOnValidationError" : false
     } ]
   }, {
+    "actions" : [ "set_tools_web_weather" ],
+    "setProperties" : [ {
+      "name" : "builtInToolsWhitelist",
+      "valueString" : "[\"websearch\",\"weather\"]",
+      "scope" : "conversation",
+      "fromObjectPath" : "",
+      "toObjectPath" : "",
+      "convertToObject" : false,
+      "override" : true,
+      "runOnValidationError" : false
+    } ]
+  }, {
+    "actions" : [ "set_tools_docs" ],
+    "setProperties" : [ {
+      "name" : "builtInToolsWhitelist",
+      "valueString" : "[\"pdfreader\",\"textsummarizer\"]",
+      "scope" : "conversation",
+      "fromObjectPath" : "",
+      "toObjectPath" : "",
+      "convertToObject" : false,
+      "override" : true,
+      "runOnValidationError" : false
+    } ]
+  }, {
     "actions" : [ "set_tools_whitelist" ],
     "setProperties" : [ {
       "name" : "builtInToolsWhitelist",
       "valueString" : "[[${memory.current.input}]]",
+      "scope" : "conversation",
+      "fromObjectPath" : "",
+      "toObjectPath" : "",
+      "convertToObject" : false,
+      "override" : true,
+      "runOnValidationError" : false
+    } ]
+  }, {
+    "actions" : [ "set_history_10" ],
+    "setProperties" : [ {
+      "name" : "conversationHistoryLimit",
+      "valueString" : "10",
+      "scope" : "conversation",
+      "fromObjectPath" : "",
+      "toObjectPath" : "",
+      "convertToObject" : false,
+      "override" : true,
+      "runOnValidationError" : false
+    } ]
+  }, {
+    "actions" : [ "set_history_20" ],
+    "setProperties" : [ {
+      "name" : "conversationHistoryLimit",
+      "valueString" : "20",
+      "scope" : "conversation",
+      "fromObjectPath" : "",
+      "toObjectPath" : "",
+      "convertToObject" : false,
+      "override" : true,
+      "runOnValidationError" : false
+    } ]
+  }, {
+    "actions" : [ "set_history_unlimited" ],
+    "setProperties" : [ {
+      "name" : "conversationHistoryLimit",
+      "valueString" : "-1",
       "scope" : "conversation",
       "fromObjectPath" : "",
       "toObjectPath" : "",

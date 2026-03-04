@@ -84,9 +84,9 @@
       "queryParams" : { },
       "method" : "post",
       "contentType" : "application/json",
-      "body" : "{\"tasks\":[{\"actions\":[\"send_message\"],\"id\":\"anthropic\",\"type\":\"anthropic\",\"description\":\"Integration with anthropic API\",\"parameters\":{\"systemMessage\":\"[(${properties.prompt})]\",\"addToOutput\":\"true\",\"apiKey\":\"[(${properties.apiKey})]\",\"modelName\":\"[(${properties.modelName})]\",\"timeout\":\"[(${properties.timeout})]\",\"temperature\":\"[(${properties.temperature})]\", \"includeFirstBotMessage\":\"false\",\"logRequests\":\"true\",\"logResponses\":\"true\"},\"enableBuiltInTools\":[(${properties.enableBuiltInTools})],\"builtInToolsWhitelist\":[(${properties.builtInToolsWhitelist})],\"conversationHistoryLimit\":[(${properties.conversationHistoryLimit})]
-
-}]}"
+      "body" : "{\"tasks\":[{\"actions\":[\"send_message\"],\"id\":\"anthropic\",\"type\":\"anthropic\",\"description\":\"Integration with anthropic API\",\"parameters\":{\"systemMessage\":\"[(${properties.prompt})]\",\"addToOutput\":\"true\",\"apiKey\":\"[(${properties.apiKey})]\",\"modelName\":\"[(${properties.modelName})]\",\"timeout\":\"[(${properties.timeout})]\",\"temperature\":\"[(${properties.temperature})]\", \"includeFirstBotMessage\":\"false\",\"logRequests\":\"true\",\"logResponses\":\"true\"},\"enableBuiltInTools\":[(${properties.enableBuiltInTools})],\"builtInToolsWhitelist\":[(${properties.builtInToolsWhitelist})],\"conversationHistoryLimit\":[(${properties.conversationHistoryLimit})]}]}"
+    },
+    "postResponse" : {
       "propertyInstructions" : [ {
         "name" : "langChainLocation",
         "scope" : "conversation",

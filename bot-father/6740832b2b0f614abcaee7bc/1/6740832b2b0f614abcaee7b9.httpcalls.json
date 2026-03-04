@@ -84,7 +84,7 @@
       "queryParams" : { },
       "method" : "post",
       "contentType" : "application/json",
-      "body" : "{\"tasks\":[{\"actions\":[\"send_message\"],\"id\":\"gemini\",\"type\":\"gemini-vertex\",\"description\":\"Integration with Gemini Vertex\",\"parameters\":{\"systemMessage\":\"[(${properties.prompt})]\",\"addToOutput\":\"true\",\"modelId\":\"[(${properties.modelId})]\",\"timeout\":\"[(${properties.timeout})]\",\"temperature\":\"[(${properties.temperature})]\",\"logRequests\":\"true\",\"logResponses\":\"true\"},\"enableBuiltInTools\":[(${properties.enableBuiltInTools})],\"builtInToolsWhitelist\":[(${properties.builtInToolsWhitelist})],\"conversationHistoryLimit\":[(${properties.conversationHistoryLimit})]}]}"
+      "body" : "{\"tasks\":[{\"actions\":[\"send_message\"],\"id\":\"gemini\",\"type\":\"gemini-vertex\",\"description\":\"Integration with Gemini Vertex\",\"parameters\":{\"systemMessage\":\"[(${properties.prompt})]\",\"addToOutput\":\"true\",\"publisher\":\"[(${properties.publisher})]\",\"modelId\":\"[(${properties.modelId})]\",\"timeout\":\"[(${properties.timeout})]\",\"temperature\":\"[(${properties.temperature})]\",\"logRequests\":\"true\",\"logResponses\":\"true\"},\"enableBuiltInTools\":[(${properties.enableBuiltInTools})],\"builtInToolsWhitelist\":[(${properties.builtInToolsWhitelist})],\"conversationHistoryLimit\":[(${properties.conversationHistoryLimit})]}]}"
     },
     "postResponse" : {
       "propertyInstructions" : [ {

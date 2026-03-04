@@ -27,11 +27,20 @@
     "outputs" : [ {
       "valueAlternatives" : [ {
         "type" : "text",
-        "text" : "What temperature would you like to set?",
+        "text" : "What temperature would you like to set? (0.0 to 1.0, where 0.7 is a good balance of creativity and focus)",
         "delay" : 0
       } ]
     } ],
-    "quickReplies" : [ ]
+    "quickReplies" : [ {
+      "value" : "Default (0.7)",
+      "expressions" : "temp_0_7"
+    }, {
+      "value" : "Creative (0.9)",
+      "expressions" : "temp_0_9"
+    }, {
+      "value" : "Precise (0.2)",
+      "expressions" : "temp_0_2"
+    } ]
   }, {
     "action" : "ask_for_anthropic_timeout",
     "timesOccurred" : 0,
@@ -91,6 +100,12 @@
     }, {
       "value" : "Calculator, Web, DateTime",
       "expressions" : "tools_calc_web_datetime"
+    }, {
+      "value" : "Web Search & Weather",
+      "expressions" : "tools_web_weather"
+    }, {
+      "value" : "Document Tools",
+      "expressions" : "tools_docs"
     } ]
   }, {
     "action" : "ask_for_anthropic_conversation_history_limit",
@@ -98,7 +113,7 @@
     "outputs" : [ {
       "valueAlternatives" : [ {
         "type" : "text",
-        "text" : "How many conversation turns would you like to include in the context?",
+        "text" : "How many conversation turns would you like to include in the context? (Default is 10)",
         "delay" : 0
       } ]
     }, {
@@ -109,14 +124,14 @@
       } ]
     } ],
     "quickReplies" : [ {
-      "value" : "10 turns (recommended)",
-      "expressions" : "10"
+      "value" : "Default (10)",
+      "expressions" : "history_10"
     }, {
-      "value" : "20 turns",
-      "expressions" : "20"
+      "value" : "20",
+      "expressions" : "history_20"
     }, {
-      "value" : "Unlimited",
-      "expressions" : "-1"
+      "value" : "-1",
+      "expressions" : "history_unlimited"
     } ]
   }, {
     "action" : "ask_for_bot_creation_confirmation_for_anthropic",

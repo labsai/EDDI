@@ -1,6 +1,6 @@
 # EDDI Architecture
 
-**Version: ≥5.5.x**
+**Version: ≥5.6.x**
 
 This document provides a comprehensive overview of EDDI's architecture, design principles, and internal workflow.
 
@@ -439,6 +439,26 @@ public class PackageConfiguration {
     }
 }
 ```
+
+### ToolExecutionService
+
+**Location**: `ai.labs.eddi.modules.langchain.tools.ToolExecutionService`
+
+**Purpose**: Unified execution pipeline for all AI agent tool invocations
+
+**Pipeline**:
+```
+Tool Call ──▶ Rate Limiter ──▶ Cache Check ──▶ Execute ──▶ Cost Tracker ──▶ Result
+```
+
+**Features**:
+- Token-bucket rate limiting per tool (configurable per-tool or global default)
+- Smart caching — deduplicates calls with identical arguments
+- Cost tracking with per-conversation budgets and automatic eviction
+- Security: tools that accept URLs are validated against private/internal addresses (SSRF protection via `UrlValidationUtils`)
+- Security: math expressions are evaluated in a sandboxed parser (`SafeMathParser`)
+
+See the [Security documentation](security.md) for details.
 
 ---
 

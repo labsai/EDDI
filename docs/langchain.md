@@ -1,6 +1,6 @@
 # Langchain Lifecycle Task
 
-**Version: ≥5.3.x**
+**Version: ≥5.6.x**
 
 ## Overview
 
@@ -316,13 +316,13 @@ When `enableBuiltInTools: true`, you can use these tools:
 
 | Tool Name | Description | Whitelist Value |
 |-----------|-------------|-----------------|
-| **Calculator** | Perform mathematical calculations | `calculator` |
+| **Calculator** | Safe math expressions (sandboxed parser) | `calculator` |
 | **Date/Time** | Get current date, time, timezone info | `datetime` |
 | **Web Search** | Search the web (includes Wikipedia & News) | `websearch` |
 | **Data Formatter** | Format JSON, CSV, XML data | `dataformatter` |
-| **Web Scraper** | Extract content from web pages | `webscraper` |
+| **Web Scraper** | Extract content from web pages (SSRF-protected) | `webscraper` |
 | **Text Summarizer** | Summarize long text | `textsummarizer` |
-| **PDF Reader** | Extract text from PDF files | `pdfreader` |
+| **PDF Reader** | Extract text from PDF URLs (SSRF-protected) | `pdfreader` |
 | **Weather** | Get weather information | `weather` |
 
 ### Tool Configuration (Server-Side)
@@ -547,21 +547,57 @@ The Langchain task configurations can be managed via REST API endpoints.
 
 ---
 
-## Advanced Agent Features
+## Tool Execution Pipeline
 
-For users who need enterprise-grade tool management, EDDI provides additional capabilities:
+All tool invocations—both built-in tools and custom HTTP call tools—are routed through a unified **Tool Execution Service** that applies enterprise-grade controls:
 
-### Tool Management Services (Planned)
+```
+Tool Call ──▶ Rate Limiter ──▶ Cache Check ──▶ Execute Tool ──▶ Cost Tracker ──▶ Result
+```
 
-The following advanced features are defined in the configuration model and planned for future implementation:
+### Controls
 
-- **Smart Caching** - Cache tool results to avoid redundant API calls
-- **Cost Tracking** - Track and limit spending per conversation
-- **Rate Limiting** - Prevent API abuse with configurable limits
-- **Parallel Execution** - Execute multiple tools simultaneously
-- **Budget Control** - Set maximum budget per conversation
+| Feature | Description | Config Key |
+|---------|-------------|------------|
+| **Rate Limiting** | Token-bucket per tool, configurable limits | `enableRateLimiting`, `defaultRateLimit`, `toolRateLimits` |
+| **Smart Caching** | Deduplicates identical tool calls by arguments hash | `enableToolCaching` |
+| **Cost Tracking** | Per-conversation budget enforcement with automatic stale-data eviction | `enableCostTracking`, `maxBudgetPerConversation` |
 
-### Monitoring & Observability
+### Configuration Example
+
+```json
+{
+  "tasks": [{
+    "actions": ["help"],
+    "type": "openai",
+    "enableBuiltInTools": true,
+    "enableRateLimiting": true,
+    "defaultRateLimit": 100,
+    "toolRateLimits": { "websearch": 30, "weather": 50 },
+    "enableToolCaching": true,
+    "enableCostTracking": true,
+    "maxBudgetPerConversation": 5.0,
+    "parameters": { "apiKey": "...", "modelName": "gpt-4o" }
+  }]
+}
+```
+
+### Security Hardening
+
+Tools that accept URLs from LLM-generated arguments are protected against **Server-Side Request Forgery (SSRF)**:
+
+- Only `http` and `https` schemes are allowed
+- Private/internal IP ranges are blocked (loopback, site-local, link-local)
+- Cloud metadata endpoints are blocked (`169.254.169.254`, `metadata.google.internal`)
+- Internal hostnames (`.local`, `.internal`, `localhost`) are rejected
+
+The **Calculator** tool uses a sandboxed recursive-descent math parser (`SafeMathParser`) instead of a script engine, eliminating any possibility of code injection.
+
+See the [Security documentation](security.md) for full details.
+
+---
+
+## Monitoring & Observability
 
 EDDI provides built-in metrics for monitoring agent performance:
 
@@ -693,7 +729,8 @@ Then reference this action in your Langchain task:
 ## See Also
 
 - [Behavior Rules](behavior-rules.md) - Triggering LLM tasks conditionally
-- [HTTP Calls](httpcalls.md) - Creating custom tools (planned feature)
+- [HTTP Calls](httpcalls.md) - Creating custom HTTP call tools for agents
+- [Security](security.md) - SSRF protection, sandboxed evaluation, tool hardening
 - [Output Configuration](output-configuration.md) - Formatting bot responses
 - [Conversation Memory](conversation-memory.md) - Understanding conversation state
 - [Metrics](metrics.md) - Monitoring LLM performance
@@ -707,9 +744,11 @@ The Langchain Lifecycle Task provides a flexible, unified interface for integrat
 1. ✅ **Simple by Default** - Start with basic chat, add tools when needed
 2. ✅ **Multi-Provider Support** - OpenAI, Anthropic, Google, Ollama, Hugging Face, Jlama
 3. ✅ **Built-in Tools** - 8 tools available when you enable agent mode
-4. ✅ **Fine-Grained Control** - Pre/post processing, context management, templating
-5. ✅ **Orchestration Layer** - Conditional invocation, hybrid workflows, state persistence
-6. ✅ **Easy Configuration** - Use Bot Father for guided setup
+4. ✅ **Tool Execution Pipeline** - Rate limiting, caching, cost tracking for every tool call
+5. ✅ **Security Hardened** - SSRF protection, sandboxed math evaluation, input validation
+6. ✅ **Fine-Grained Control** - Pre/post processing, context management, templating
+7. ✅ **Orchestration Layer** - Conditional invocation, hybrid workflows, state persistence
+8. ✅ **Easy Configuration** - Use Bot Father for guided setup
 
 Whether you need simple chat or advanced agent capabilities, the Langchain task provides the foundation for intelligent conversational experiences in EDDI.
 

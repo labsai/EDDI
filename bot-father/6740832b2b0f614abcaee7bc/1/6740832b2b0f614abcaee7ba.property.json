@@ -36,6 +36,138 @@
       "runOnValidationError" : false
     } ]
   }, {
+    "actions" : [ "set_temp_0_0" ],
+    "setProperties" : [ {
+      "name" : "temperature",
+      "valueString" : "0.0",
+      "scope" : "conversation",
+      "fromObjectPath" : "",
+      "toObjectPath" : "",
+      "convertToObject" : false,
+      "override" : true,
+      "runOnValidationError" : false
+    } ]
+  }, {
+    "actions" : [ "set_temp_0_1" ],
+    "setProperties" : [ {
+      "name" : "temperature",
+      "valueString" : "0.1",
+      "scope" : "conversation",
+      "fromObjectPath" : "",
+      "toObjectPath" : "",
+      "convertToObject" : false,
+      "override" : true,
+      "runOnValidationError" : false
+    } ]
+  }, {
+    "actions" : [ "set_temp_0_2" ],
+    "setProperties" : [ {
+      "name" : "temperature",
+      "valueString" : "0.2",
+      "scope" : "conversation",
+      "fromObjectPath" : "",
+      "toObjectPath" : "",
+      "convertToObject" : false,
+      "override" : true,
+      "runOnValidationError" : false
+    } ]
+  }, {
+    "actions" : [ "set_temp_0_3" ],
+    "setProperties" : [ {
+      "name" : "temperature",
+      "valueString" : "0.3",
+      "scope" : "conversation",
+      "fromObjectPath" : "",
+      "toObjectPath" : "",
+      "convertToObject" : false,
+      "override" : true,
+      "runOnValidationError" : false
+    } ]
+  }, {
+    "actions" : [ "set_temp_0_4" ],
+    "setProperties" : [ {
+      "name" : "temperature",
+      "valueString" : "0.4",
+      "scope" : "conversation",
+      "fromObjectPath" : "",
+      "toObjectPath" : "",
+      "convertToObject" : false,
+      "override" : true,
+      "runOnValidationError" : false
+    } ]
+  }, {
+    "actions" : [ "set_temp_0_5" ],
+    "setProperties" : [ {
+      "name" : "temperature",
+      "valueString" : "0.5",
+      "scope" : "conversation",
+      "fromObjectPath" : "",
+      "toObjectPath" : "",
+      "convertToObject" : false,
+      "override" : true,
+      "runOnValidationError" : false
+    } ]
+  }, {
+    "actions" : [ "set_temp_0_6" ],
+    "setProperties" : [ {
+      "name" : "temperature",
+      "valueString" : "0.6",
+      "scope" : "conversation",
+      "fromObjectPath" : "",
+      "toObjectPath" : "",
+      "convertToObject" : false,
+      "override" : true,
+      "runOnValidationError" : false
+    } ]
+  }, {
+    "actions" : [ "set_temp_0_7" ],
+    "setProperties" : [ {
+      "name" : "temperature",
+      "valueString" : "0.7",
+      "scope" : "conversation",
+      "fromObjectPath" : "",
+      "toObjectPath" : "",
+      "convertToObject" : false,
+      "override" : true,
+      "runOnValidationError" : false
+    } ]
+  }, {
+    "actions" : [ "set_temp_0_8" ],
+    "setProperties" : [ {
+      "name" : "temperature",
+      "valueString" : "0.8",
+      "scope" : "conversation",
+      "fromObjectPath" : "",
+      "toObjectPath" : "",
+      "convertToObject" : false,
+      "override" : true,
+      "runOnValidationError" : false
+    } ]
+  }, {
+    "actions" : [ "set_temp_0_9" ],
+    "setProperties" : [ {
+      "name" : "temperature",
+      "valueString" : "0.9",
+      "scope" : "conversation",
+      "fromObjectPath" : "",
+      "toObjectPath" : "",
+      "convertToObject" : false,
+      "override" : true,
+      "runOnValidationError" : false
+    } ]
+  }, {
+    "actions" : [ "set_temp_1_0" ],
+    "setProperties" : [ {
+      "name" : "temperature",
+      "valueString" : "1.0",
+      "scope" : "conversation",
+      "fromObjectPath" : "",
+      "toObjectPath" : "",
+      "convertToObject" : false,
+      "override" : true,
+      "runOnValidationError" : false
+    } ]
+  }, {
     "actions" : [ "set_timeout" ],
     "setProperties" : [ {
       "name" : "timeout",
@@ -120,10 +252,103 @@
       "runOnValidationError" : false
     } ]
   }, {
+    "actions" : [ "enable_all_tools" ],
+    "setProperties" : [ {
+      "name" : "enableBuiltInTools",
+      "valueString" : "true",
+      "scope" : "conversation",
+      "fromObjectPath" : "",
+      "toObjectPath" : "",
+      "convertToObject" : false,
+      "override" : true,
+      "runOnValidationError" : false
+    }, {
+      "name" : "builtInToolsWhitelist",
+      "valueString" : "[]",
+      "scope" : "conversation",
+      "fromObjectPath" : "",
+      "toObjectPath" : "",
+      "convertToObject" : false,
+      "override" : true,
+      "runOnValidationError" : false
+    } ]
+  }, {
+    "actions" : [ "set_tools_calc_web" ],
+    "setProperties" : [ {
+      "name" : "builtInToolsWhitelist",
+      "valueString" : "[\"calculator\",\"websearch\"]",
+      "scope" : "conversation",
+      "fromObjectPath" : "",
+      "toObjectPath" : "",
+      "convertToObject" : false,
+      "override" : true,
+      "runOnValidationError" : false
+    } ]
+  }, {
+    "actions" : [ "set_tools_calc_web_datetime" ],
+    "setProperties" : [ {
+      "name" : "builtInToolsWhitelist",
+      "valueString" : "[\"calculator\",\"websearch\",\"datetime\"]",
+      "scope" : "conversation",
+      "fromObjectPath" : "",
+      "toObjectPath" : "",
+      "convertToObject" : false,
+      "override" : true,
+      "runOnValidationError" : false
+    } ]
+  }, {
     "actions" : [ "set_conversation_history_limit" ],
     "setProperties" : [ {
       "name" : "conversationHistoryLimit",
       "valueString" : "[[${memory.current.input}]]",
+      "scope" : "conversation",
+      "fromObjectPath" : "",
+      "toObjectPath" : "",
+      "convertToObject" : false,
+      "override" : true,
+      "runOnValidationError" : false
+    } ]
+  }, {
+    "actions" : [ "set_history_0" ],
+    "setProperties" : [ {
+      "name" : "conversationHistoryLimit",
+      "valueString" : "0",
+      "scope" : "conversation",
+      "fromObjectPath" : "",
+      "toObjectPath" : "",
+      "convertToObject" : false,
+      "override" : true,
+      "runOnValidationError" : false
+    } ]
+  }, {
+    "actions" : [ "set_history_5" ],
+    "setProperties" : [ {
+      "name" : "conversationHistoryLimit",
+      "valueString" : "5",
+      "scope" : "conversation",
+      "fromObjectPath" : "",
+      "toObjectPath" : "",
+      "convertToObject" : false,
+      "override" : true,
+      "runOnValidationError" : false
+    } ]
+  }, {
+    "actions" : [ "set_history_10" ],
+    "setProperties" : [ {
+      "name" : "conversationHistoryLimit",
+      "valueString" : "10",
+      "scope" : "conversation",
+      "fromObjectPath" : "",
+      "toObjectPath" : "",
+      "convertToObject" : false,
+      "override" : true,
+      "runOnValidationError" : false
+    } ]
+  }, {
+    "actions" : [ "set_history_20" ],
+    "setProperties" : [ {
+      "name" : "conversationHistoryLimit",
+      "valueString" : "20",
       "scope" : "conversation",
       "fromObjectPath" : "",
       "toObjectPath" : "",
