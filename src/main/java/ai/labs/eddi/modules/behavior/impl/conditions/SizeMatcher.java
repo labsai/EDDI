@@ -3,8 +3,7 @@ package ai.labs.eddi.modules.behavior.impl.conditions;
 import ai.labs.eddi.engine.memory.IConversationMemory;
 import ai.labs.eddi.engine.memory.IMemoryItemConverter;
 import ai.labs.eddi.modules.behavior.impl.BehaviorRule;
-import ognl.Ognl;
-import ognl.OgnlException;
+import ai.labs.eddi.utils.PathNavigator;
 import org.jboss.logging.Logger;
 
 import java.util.HashMap;
@@ -82,8 +81,11 @@ public class SizeMatcher implements IBehaviorCondition {
 
         int size = 0;
         try {
-            size = Integer.parseInt(Ognl.getValue(valuePath, memoryItemConverter.convert(memory)).toString());
-        } catch (OgnlException e) {
+            Object rawValue = PathNavigator.getValue(valuePath, memoryItemConverter.convert(memory));
+            if (rawValue != null) {
+                size = Integer.parseInt(rawValue.toString());
+            }
+        } catch (Exception e) {
             LOGGER.error(e.getLocalizedMessage(), e);
         }
 

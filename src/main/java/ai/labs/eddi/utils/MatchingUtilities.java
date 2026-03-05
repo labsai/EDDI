@@ -1,7 +1,5 @@
 package ai.labs.eddi.utils;
 
-import ognl.Ognl;
-
 import java.util.List;
 import java.util.Map;
 
@@ -9,15 +7,15 @@ import static ai.labs.eddi.utils.RuntimeUtilities.isNullOrEmpty;
 
 public class MatchingUtilities {
     public static boolean executeValuePath(Map<String, Object> conversationValues,
-                                           String valuePath, String equals, String contains) {
+            String valuePath, String equals, String contains) {
 
         boolean success = false;
 
         Object value = null;
         try {
-            value = Ognl.getValue(valuePath, conversationValues);
+            value = PathNavigator.getValue(valuePath, conversationValues);
         } catch (Exception e) {
-            //no value was found, which is an expected case, so silent exception here
+            // no value was found, which is an expected case, so silent exception here
         }
         if (value != null) {
             if (!isNullOrEmpty(equals) && equals.equals(value.toString())) {

@@ -23,7 +23,7 @@ import ai.labs.eddi.modules.properties.model.SetOnActions;
 import ai.labs.eddi.modules.templating.ITemplatingEngine;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import ognl.Ognl;
+import ai.labs.eddi.utils.PathNavigator;
 
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
@@ -72,11 +72,11 @@ public class PropertySetterTask implements ILifecycleTask {
 
     @Inject
     public PropertySetterTask(IExpressionProvider expressionProvider,
-                              IMemoryItemConverter memoryItemConverter,
-                              ITemplatingEngine templatingEngine,
-                              IDataFactory dataFactory,
-                              IResourceClientLibrary resourceClientLibrary,
-                              ObjectMapper objectMapper) {
+            IMemoryItemConverter memoryItemConverter,
+            ITemplatingEngine templatingEngine,
+            IDataFactory dataFactory,
+            IResourceClientLibrary resourceClientLibrary,
+            ObjectMapper objectMapper) {
         this.expressionProvider = expressionProvider;
         this.memoryItemConverter = memoryItemConverter;
         this.templatingEngine = templatingEngine;
@@ -129,10 +129,9 @@ public class PropertySetterTask implements ILifecycleTask {
                 setOnActionsList.forEach(setOnAction -> {
                     List<String> actions = setOnAction.getActions();
                     if (actions.contains(action) || actions.contains("*")) {
-                        setOnAction.getSetProperties().stream().
-                                filter(propertyInstruction ->
-                                        !propertyInstructions.contains(propertyInstruction)).
-                                forEach(propertyInstructions::add);
+                        setOnAction.getSetProperties().stream()
+                                .filter(propertyInstruction -> !propertyInstructions.contains(propertyInstruction))
+                                .forEach(propertyInstructions::add);
                     }
                 });
 
@@ -150,9 +149,9 @@ public class PropertySetterTask implements ILifecycleTask {
                             Object templatedObj;
                             if (!conversationProperties.containsKey(name) || property.getOverride()) {
                                 if (!isNullOrEmpty(fromObjectPath)) {
-                                    templatedObj = Ognl.getValue(fromObjectPath, templateDataObjects);
+                                    templatedObj = PathNavigator.getValue(fromObjectPath, templateDataObjects);
                                     if (!isNullOrEmpty(toObjectPath)) {
-                                        Ognl.setValue(toObjectPath, templateDataObjects, templatedObj);
+                                        PathNavigator.setValue(toObjectPath, templateDataObjects, templatedObj);
                                     } else if (templatedObj instanceof String) {
                                         templateString = templatingEngine.processTemplate(
                                                 templatedObj.toString(),
@@ -178,8 +177,8 @@ public class PropertySetterTask implements ILifecycleTask {
                                 } else {
                                     var valueString = property.getValueString();
                                     if (!isNullOrEmpty(valueString)) {
-                                        templateString =
-                                                templatingEngine.processTemplate(valueString, templateDataObjects);
+                                        templateString = templatingEngine.processTemplate(valueString,
+                                                templateDataObjects);
                                         conversationProperties.put(name, new Property(name, templateString, scope));
                                     }
 
@@ -221,7 +220,8 @@ public class PropertySetterTask implements ILifecycleTask {
             }
         }
 
-        // see if action "CATCH_ANY_INPUT_AS_PROPERTY" was in the last step, so we take last user input into account
+        // see if action "CATCH_ANY_INPUT_AS_PROPERTY" was in the last step, so we take
+        // last user input into account
         IConversationStepStack previousSteps = memory.getPreviousSteps();
         if (previousSteps.size() > 0) {
             actionsData = previousSteps.get(0).getLatestData(ACTIONS_IDENTIFIER);
@@ -279,8 +279,8 @@ public class PropertySetterTask implements ILifecycleTask {
                 Object uriObj = configuration.get(KEY_URI);
                 if (!isNullOrEmpty(uriObj) && uriObj.toString().startsWith("eddi")) {
                     URI uri = URI.create(uriObj.toString());
-                    var propertySetterConfig =
-                            resourceClientLibrary.getResource(uri, PropertySetterConfiguration.class);
+                    var propertySetterConfig = resourceClientLibrary.getResource(uri,
+                            PropertySetterConfiguration.class);
                     setOnActionsList.addAll(propertySetterConfig.getSetOnActions());
                 }
             }
@@ -291,7 +291,6 @@ public class PropertySetterTask implements ILifecycleTask {
 
         return new PropertySetter(new LinkedList<>(setOnActionsList));
     }
-
 
     private List<SetOnActions> parseRawConfig(Map<String, Object> configuration) {
         var setOnActionsRaw = convertObjectToListOfMapsWithObjects(configuration.get(KEY_SET_ON_ACTIONS));

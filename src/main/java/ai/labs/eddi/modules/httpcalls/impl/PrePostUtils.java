@@ -17,8 +17,7 @@ import ai.labs.eddi.modules.output.model.types.TextOutputItem;
 import ai.labs.eddi.modules.templating.ITemplatingEngine;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
-import ognl.Ognl;
-import ognl.OgnlException;
+import ai.labs.eddi.utils.PathNavigator;
 import org.jboss.logging.Logger;
 
 import java.io.IOException;
@@ -38,9 +37,9 @@ public class PrePostUtils {
 
     @Inject
     public PrePostUtils(IJsonSerialization jsonSerialization,
-                        IMemoryItemConverter memoryItemConverter,
-                        ITemplatingEngine templatingEngine,
-                        IDataFactory dataFactory) {
+            IMemoryItemConverter memoryItemConverter,
+            ITemplatingEngine templatingEngine,
+            IDataFactory dataFactory) {
         this.jsonSerialization = jsonSerialization;
         this.memoryItemConverter = memoryItemConverter;
         this.templatingEngine = templatingEngine;
@@ -48,8 +47,8 @@ public class PrePostUtils {
     }
 
     public Map<String, Object> executePreRequestPropertyInstructions(IConversationMemory memory,
-                                                                     Map<String, Object> templateDataObjects,
-                                                                     PreRequest preRequest)
+            Map<String, Object> templateDataObjects,
+            PreRequest preRequest)
             throws ITemplatingEngine.TemplateEngineException {
 
         if (preRequest != null && preRequest.getPropertyInstructions() != null) {
@@ -61,8 +60,8 @@ public class PrePostUtils {
     }
 
     public void executePropertyInstructions(List<PropertyInstruction> propertyInstructions,
-                                            int httpCode, boolean validationError, IConversationMemory memory,
-                                            Map<String, Object> templateDataObjects)
+            int httpCode, boolean validationError, IConversationMemory memory,
+            Map<String, Object> templateDataObjects)
             throws ITemplatingEngine.TemplateEngineException {
 
         if (propertyInstructions != null) {
@@ -81,7 +80,7 @@ public class PrePostUtils {
                     Object propertyValue;
                     try {
                         if (!isNullOrEmpty(path)) {
-                            propertyValue = Ognl.getValue(path, templateDataObjects);
+                            propertyValue = PathNavigator.getValue(path, templateDataObjects);
                         } else {
                             propertyValue = propertyInstruction.getValueString();
                         }
@@ -124,7 +123,7 @@ public class PrePostUtils {
                         }
 
                         templateDataObjects.put("properties", memory.getConversationProperties().toMap());
-                    } catch (OgnlException e) {
+                    } catch (Exception e) {
                         LOGGER.error(e.getLocalizedMessage(), e);
                     }
                 }
@@ -155,8 +154,8 @@ public class PrePostUtils {
     }
 
     public void createMemoryEntry(IConversationMemory.IWritableConversationStep currentStep,
-                                  Object responseObject,
-                                  String responseObjectName, String outputKey) {
+            Object responseObject,
+            String responseObjectName, String outputKey) {
 
         var memoryDataName = outputKey + ":" + responseObjectName;
         IData<Object> httpResponseData = dataFactory.createData(memoryDataName, responseObject);
@@ -167,9 +166,9 @@ public class PrePostUtils {
     }
 
     public void runPostResponse(IConversationMemory memory,
-                                PostResponse postResponse,
-                                Map<String, Object> templateDataObjects,
-                                int httpCode, boolean validationError)
+            PostResponse postResponse,
+            Map<String, Object> templateDataObjects,
+            int httpCode, boolean validationError)
             throws IOException, ITemplatingEngine.TemplateEngineException {
 
         if (postResponse != null) {
@@ -180,11 +179,10 @@ public class PrePostUtils {
             buildQuickReplies(memory, templateDataObjects, httpCode, postResponse);
         }
 
-
     }
 
     private void buildOutput(IConversationMemory memory, Map<String, Object> templateDataObjects,
-                             int httpCode, PostResponse postResponse)
+            int httpCode, PostResponse postResponse)
             throws IOException, ITemplatingEngine.TemplateEngineException {
 
         var outputBuildInstructions = postResponse.getOutputBuildInstructions();
@@ -211,7 +209,7 @@ public class PrePostUtils {
     }
 
     private void buildQuickReplies(IConversationMemory memory, Map<String, Object> templateDataObjects,
-                                   int httpCode, PostResponse postResponse)
+            int httpCode, PostResponse postResponse)
             throws IOException, ITemplatingEngine.TemplateEngineException {
 
         var qrBuildInstructions = postResponse.getQrBuildInstructions();
@@ -238,11 +236,11 @@ public class PrePostUtils {
     }
 
     private List<Object> buildOutput(String iterationObjectName,
-                                     String pathToTargetArray,
-                                     String templateFilterExpression,
-                                     String outputType,
-                                     String outputValue,
-                                     Map<String, Object> templateDataObjects)
+            String pathToTargetArray,
+            String templateFilterExpression,
+            String outputType,
+            String outputValue,
+            Map<String, Object> templateDataObjects)
             throws IOException, ITemplatingEngine.TemplateEngineException {
 
         if (!isNullOrEmpty(pathToTargetArray)) {
@@ -264,11 +262,11 @@ public class PrePostUtils {
     }
 
     private List<Object> buildQuickReplies(String iterationObjectName,
-                                           String pathToTargetArray,
-                                           String templateFilterExpression,
-                                           String quickReplyValue,
-                                           String quickReplyExpressions,
-                                           Map<String, Object> templateDataObjects)
+            String pathToTargetArray,
+            String templateFilterExpression,
+            String quickReplyValue,
+            String quickReplyExpressions,
+            Map<String, Object> templateDataObjects)
             throws IOException, ITemplatingEngine.TemplateEngineException {
 
         final String quickReplyTemplate = "    {" +
@@ -281,10 +279,10 @@ public class PrePostUtils {
     }
 
     public List<Object> buildListFromJson(String iterationObjectName,
-                                          String pathToTargetArray,
-                                          String templateFilterExpression,
-                                          String iterationValue,
-                                          Map<String, Object> templateDataObjects)
+            String pathToTargetArray,
+            String templateFilterExpression,
+            String iterationValue,
+            Map<String, Object> templateDataObjects)
             throws ITemplatingEngine.TemplateEngineException, IOException {
 
         String templateCode = "[" +
@@ -304,10 +302,9 @@ public class PrePostUtils {
 
         jsonList = jsonList.replace("\n", "\\\\n");
 
-        //remove last comma of iterated array
+        // remove last comma of iterated array
         if (jsonList.contains(",")) {
-            jsonList = new StringBuilder(jsonList).
-                    deleteCharAt(jsonList.lastIndexOf(",")).toString();
+            jsonList = new StringBuilder(jsonList).deleteCharAt(jsonList.lastIndexOf(",")).toString();
         }
 
         return jsonSerialization.deserialize(jsonList, List.class);
