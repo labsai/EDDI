@@ -43,6 +43,30 @@ Each entry follows this format:
 
 _Entries will be added here as implementation progresses._
 
+### 2026-03-05 — Extract ConversationService from RestBotEngine
+
+**Repo:** EDDI  
+**Branch:** `feature/version-6.0.0`  
+**Phase:** 1 — Item #1
+
+**What changed:**
+
+- `IConversationService.java` [NEW]: Domain interface with `ConversationResponseHandler` callback, records (`ConversationResult`, `ConversationLogResult`), and domain exceptions (`BotNotReadyException`, `ConversationNotFoundException`, `BotMismatchException`, `ConversationEndedException`)
+- `ConversationService.java` [NEW]: All business logic extracted from RestBotEngine — conversation lifecycle, metrics, caching, memory management (~565 lines)
+- `RestBotEngine.java` [MODIFIED]: Refactored from 668 to ~230 lines — now a thin JAX-RS adapter that delegates to `IConversationService` and maps domain exceptions to HTTP responses
+- `ConversationServiceTest.java` [NEW]: 16 unit tests covering start, end, state, read, say, undo/redo, and properties handler
+
+**Design decision:**
+Kept metrics and caching inside `ConversationService` rather than extracting separate `ConversationMetricsService` and `ConversationStateCache` classes. The metrics code is ~20 lines and caching is 3 trivial methods — separate classes would be premature decomposition. Can be split later if needed.
+
+**Testing:**
+
+- [x] Builds cleanly
+- [x] All 515 tests pass (0 failures, 0 errors, 4 skipped)
+- [x] No regressions
+
+**Commit:** `refactor(engine): extract ConversationService from RestBotEngine` (`7dd1488e`)
+
 ### Template for Each Entry
 
 ```markdown

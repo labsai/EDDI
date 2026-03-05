@@ -1,6 +1,6 @@
 # EDDI v6.0 — Current Status
 
-> **Last updated:** 2026-03-05 by conversation `d109a59c`
+> **Last updated:** 2026-03-05 by conversation `cad9b9bd`
 > **Branch:** `feature/version-6.0.0`
 
 ## Completed
@@ -11,23 +11,26 @@
 - [x] `PathNavigator` replaces all 5 explicit `Ognl.getValue()`/`Ognl.setValue()` calls
 - [x] 27 new PathNavigator tests, all 499 tests pass
 
+### Phase 1, Item 1: Extract `ConversationService` from `RestBotEngine` ✅ (commit `7dd1488e`)
+
+- [x] Created `IConversationService` interface with domain exceptions (no JAX-RS deps)
+- [x] Created `ConversationService` implementation with all business logic (~565 lines)
+- [x] Refactored `RestBotEngine` from 668 to ~230 lines (thin REST adapter)
+- [x] 16 new unit tests for `ConversationService`
+- [x] All 515 tests pass (0 failures, 0 errors, 4 skipped)
+
+**Key files:**
+
+- `src/main/java/ai/labs/eddi/engine/IConversationService.java`
+- `src/main/java/ai/labs/eddi/engine/internal/ConversationService.java`
+- `src/main/java/ai/labs/eddi/engine/internal/RestBotEngine.java`
+- `src/test/java/ai/labs/eddi/engine/internal/ConversationServiceTest.java`
+
 ## Next Up
 
-### Phase 1, Item 1: Extract `ConversationService` from `RestBotEngine` (5 SP)
+### Phase 1, Item 2: Typed Memory Accessors (8 SP)
 
-`RestBotEngine.java` is a 668-line "god class" mixing REST handling, service logic, metrics, and caching. The goal is to extract the core conversation logic into a clean `ConversationService` class.
-
-**Key file:** `src/main/java/ai/labs/eddi/engine/internal/RestBotEngine.java`
-
-**What to extract:**
-
-- `startConversation()` / `startConversationWithContext()`
-- `say()` / `sayWithReturn()`
-- `endConversation()`
-- `getConversationState()`
-- `rerunLastConversationStep()` / `undoLastConversationStep()`
-
-**Leave in `RestBotEngine`:** Only JAX-RS annotations, request parsing, `AsyncResponse` handling.
+Replace stringly-typed `memory.getCurrentStep().getLatestData("actions")` with type-safe accessors. See `docs/v6-planning/implementation_plan.md` Appendix F, Item 2 for details.
 
 ## Important Rules
 
