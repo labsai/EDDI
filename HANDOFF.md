@@ -1,6 +1,6 @@
 # EDDI v6.0 — Current Status
 
-> **Last updated:** 2026-03-06 by conversation `052fba42`
+> **Last updated:** 2026-03-06 by conversation `02683fa7`
 > **Branch:** `feature/version-6.0.0`
 
 ## Completed
@@ -68,15 +68,30 @@
 - `src/main/java/ai/labs/eddi/engine/exception/SneakyThrow.java`
 - `src/main/java/ai/labs/eddi/engine/exception/Resource*ExceptionMapper.java` (4 files)
 
+### Phase 1, Item 6: Decompose `LangchainTask` ✅
+
+- [x] Created `ChatModelRegistry` — model creation, caching, and lookup
+- [x] Created `ConversationHistoryBuilder` — memory → ChatMessage list conversion
+- [x] Created `LegacyChatExecutor` — simple chat mode (no tools)
+- [x] Created `AgentOrchestrator` — tool-calling agent loop with budget/rate-limiting
+- [x] Refactored `LangchainTask` from 592→252 lines (thin orchestrator)
+- [x] Trimmed `AgentExecutionHelper` from 223→140 lines (retry-only utility)
+- [x] 16 new tests in `AgentOrchestratorTest`
+- [x] All 540 tests pass (0 failures, 0 errors, 4 skipped)
+
+**Key files:**
+
+- `src/main/java/ai/labs/eddi/modules/langchain/impl/ChatModelRegistry.java`
+- `src/main/java/ai/labs/eddi/modules/langchain/impl/ConversationHistoryBuilder.java`
+- `src/main/java/ai/labs/eddi/modules/langchain/impl/LegacyChatExecutor.java`
+- `src/main/java/ai/labs/eddi/modules/langchain/impl/AgentOrchestrator.java`
+- `src/main/java/ai/labs/eddi/modules/langchain/impl/LangchainTask.java`
+
 ## Next Up
 
 ### Phase 1, Item 5: Streaming API (SSE endpoint, `StreamingChatModel`) — 🔴 Critical
 
 Add Server-Sent Events (SSE) support for real-time streaming of LLM responses. See `docs/v6-planning/implementation_plan.md` Part 8 Item 2.
-
-### Phase 1, Item 6: Decompose `LangchainTask` — 🟡 High
-
-Split the 583-line `LangchainTask` into focused classes: `ChatModelRegistry`, `LegacyChatExecutor`, `AgentOrchestrator`, `ConversationHistoryBuilder`. See Appendix F Item 3.
 
 ## Important Rules
 

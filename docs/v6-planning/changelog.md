@@ -123,6 +123,32 @@ Kept metrics and caching inside `ConversationService` rather than extracting sep
 
 **Commit:** `refactor(engine): extract ConversationService from RestBotEngine` (`7dd1488e`)
 
+### 2026-03-06 — Decompose LangchainTask into Focused Classes
+
+**Repo:** EDDI  
+**Branch:** `feature/version-6.0.0`  
+**Phase:** 1 — Item #6
+
+**What changed:**
+
+- `ChatModelRegistry.java` [NEW]: Model creation, caching, and lookup. Owns ConcurrentHashMap model cache, filterParams logic, ModelCacheKey record, UnsupportedLangchainTaskException
+- `ConversationHistoryBuilder.java` [NEW]: Memory → ChatMessage list conversion. Handles system message prepending, prompt replacement, log size limits, multi-modal content types
+- `LegacyChatExecutor.java` [NEW]: Simple chat mode (no tools). Executes chat with retry, returns response + metadata
+- `AgentOrchestrator.java` [NEW]: Tool-calling agent loop. Owns all built-in tool references, collectEnabledTools logic, tool spec/executor building, budget checks, execution trace
+- `LangchainTask.java` [MODIFIED]: 592→252 lines. Now a thin orchestrator delegating to the 4 helper classes. Constructor signature unchanged (CDI injection preserved)
+- `AgentExecutionHelper.java` [MODIFIED]: 223→140 lines. Trimmed to just retry logic (executeWithRetry, executeChatWithRetry, isRetryableError). collectEnabledTools moved to AgentOrchestrator
+- `AgentExecutionHelperTest.java` [MODIFIED]: Trimmed to 7 retry-focused tests. Tool collection tests moved to new test
+- `AgentOrchestratorTest.java` [NEW]: 16 tests for tool collection, isAgentMode, getSystemMessage
+
+**Design decision:**
+All 4 new classes are package-private helpers (not CDI beans). They are instantiated by LangchainTask's constructor and receive dependencies through constructor parameters. This keeps the public API surface unchanged — LangchainTask remains the sole @ApplicationScoped entry point. AgentExecutionHelper was kept as a lean static utility for retry logic rather than deleted entirely.
+
+**Testing:**
+
+- [x] Builds cleanly
+- [x] All 540 tests pass (0 failures, 0 errors, 4 skipped)
+- [x] No regressions
+
 ### Template for Each Entry
 
 ```markdown
