@@ -20,6 +20,9 @@ import java.util.stream.Collectors;
 
 import static ai.labs.eddi.engine.memory.ContextUtilities.storeContextLanguageInLongTermMemory;
 import static ai.labs.eddi.engine.memory.IConversationMemory.IWritableConversationStep;
+import static ai.labs.eddi.engine.memory.MemoryKeys.ACTIONS;
+import static ai.labs.eddi.engine.memory.MemoryKeys.INPUT;
+import static ai.labs.eddi.engine.memory.MemoryKeys.INPUT_INITIAL;
 import static ai.labs.eddi.utils.RuntimeUtilities.isNullOrEmpty;
 
 /**
@@ -27,18 +30,16 @@ import static ai.labs.eddi.utils.RuntimeUtilities.isNullOrEmpty;
  */
 public class Conversation implements IConversation {
     private static final String KEY_USER_INFO = "userInfo";
-    private static final String KEY_INPUT = "input";
     private static final String KEY_CONTEXT = "context";
-    private static final String KEY_ACTIONS = "actions";
     private final List<IExecutablePackage> executablePackages;
     private final IConversationMemory conversationMemory;
     private final IPropertiesHandler propertiesHandler;
     private final IConversation.IConversationOutputRenderer outputProvider;
 
     Conversation(List<IExecutablePackage> executablePackages,
-                 IConversationMemory conversationMemory,
-                 IPropertiesHandler propertiesHandler,
-                 IConversationOutputRenderer outputProvider) {
+            IConversationMemory conversationMemory,
+            IPropertiesHandler propertiesHandler,
+            IConversationOutputRenderer outputProvider) {
         this.executablePackages = executablePackages;
         this.conversationMemory = conversationMemory;
         this.propertiesHandler = propertiesHandler;
@@ -81,8 +82,8 @@ public class Conversation implements IConversation {
 
     private static void addConversationStartAction(IWritableConversationStep currentStep) {
         List<String> conversationEndArray = Collections.singletonList(CONVERSATION_START);
-        currentStep.storeData(new Data<>(KEY_ACTIONS, conversationEndArray));
-        currentStep.addConversationOutputList(KEY_ACTIONS, conversationEndArray);
+        currentStep.set(ACTIONS, conversationEndArray);
+        currentStep.addConversationOutputList(ACTIONS.key(), conversationEndArray);
     }
 
     private void loadLongTermProperties(IConversationMemory conversationMemory) throws LifecycleException {
@@ -92,8 +93,8 @@ public class Conversation implements IConversation {
             if (properties.containsKey(KEY_USER_INFO)) {
                 Object userInfo = properties.get(KEY_USER_INFO);
                 if (userInfo instanceof Map userInfoMap) {
-                    conversationMemory.getConversationProperties().
-                            put(KEY_USER_INFO, new Property(KEY_USER_INFO, userInfoMap, Scope.conversation));
+                    conversationMemory.getConversationProperties().put(KEY_USER_INFO,
+                            new Property(KEY_USER_INFO, userInfoMap, Scope.conversation));
                 }
             }
 
@@ -120,7 +121,8 @@ public class Conversation implements IConversation {
         runStep(message, contexts, true, new LinkedList<>());
     }
 
-    private void runStep(String message, Map<String, Context> contexts, boolean startNewStep, List<String> lifecycleTaskTypes)
+    private void runStep(String message, Map<String, Context> contexts, boolean startNewStep,
+            List<String> lifecycleTaskTypes)
             throws ConversationNotReadyException, LifecycleException {
 
         checkIfConversationInProgress();
@@ -172,7 +174,7 @@ public class Conversation implements IConversation {
     }
 
     private List<IData> prepareLifecycleData(String message, Map<String, Context> contexts,
-                                             List<String> taskTypeResultsToBeRemoved) {
+            List<String> taskTypeResultsToBeRemoved) {
 
         List<IData<Context>> contextData = createContextData(contexts);
         List<IData> lifecycleData = new LinkedList<>(contextData);
@@ -188,7 +190,7 @@ public class Conversation implements IConversation {
     }
 
     private void removedTaskTypeResultsFromPreviousRuns(IWritableConversationStep currentStep,
-                                                        List<String> taskTypeResultsToBeRemoved) {
+            List<String> taskTypeResultsToBeRemoved) {
 
         if (!isNullOrEmpty(taskTypeResultsToBeRemoved)) {
             taskTypeResultsToBeRemoved.forEach(type -> {
@@ -199,7 +201,7 @@ public class Conversation implements IConversation {
     }
 
     private void addContextToConversationOutput(IWritableConversationStep currentStep,
-                                                List<IData<Context>> contextData) {
+            List<IData<Context>> contextData) {
 
         if (!contextData.isEmpty()) {
             var context = ConversationMemoryUtilities.prepareContext(contextData);
@@ -211,14 +213,15 @@ public class Conversation implements IConversation {
         IData initialData;
         IWritableConversationStep currentStep = conversationMemory.getCurrentStep();
         if (!"".equals(message.trim())) {
-            initialData = new Data<>(KEY_INPUT + ":initial", message);
+            initialData = new Data<>(INPUT_INITIAL.key(), message);
             initialData.setPublic(true);
             lifecycleData.add(initialData);
-            currentStep.addConversationOutputString(KEY_INPUT, message);
+            currentStep.addConversationOutputString(INPUT.key(), message);
         }
     }
 
-    private void executeConversationStep(List<IData> lifecycleData, List<String> lifecycleTaskTypes) throws LifecycleException {
+    private void executeConversationStep(List<IData> lifecycleData, List<String> lifecycleTaskTypes)
+            throws LifecycleException {
         try {
             executePackages(lifecycleData, lifecycleTaskTypes);
         } catch (ConversationStopException unused) {
@@ -233,7 +236,7 @@ public class Conversation implements IConversation {
     }
 
     private void checkActionsForConversationEnd() {
-        IData<List<String>> actionData = conversationMemory.getCurrentStep().getLatestData(KEY_ACTIONS);
+        IData<List<String>> actionData = conversationMemory.getCurrentStep().getLatestData(ACTIONS);
         if (actionData != null) {
             List<String> result = actionData.getResult();
             if (result != null && result.contains(CONVERSATION_END)) {
@@ -265,10 +268,9 @@ public class Conversation implements IConversation {
 
     private void removeOldInvalidProperties() {
         IConversationProperties conversationProperties = conversationMemory.getConversationProperties();
-        Map<String, Property> filteredConversationProperties =
-                conversationProperties.entrySet().stream()
-                        .filter(property -> property.getValue().getScope() != Scope.step)
-                        .collect(Collectors.toMap(Map.Entry::getKey, Map.Entry::getValue));
+        Map<String, Property> filteredConversationProperties = conversationProperties.entrySet().stream()
+                .filter(property -> property.getValue().getScope() != Scope.step)
+                .collect(Collectors.toMap(Map.Entry::getKey, Map.Entry::getValue));
 
         conversationProperties.clear();
         conversationProperties.putAll(filteredConversationProperties);
@@ -310,11 +312,12 @@ public class Conversation implements IConversation {
         return contextData;
     }
 
-    private void executePackages(List<IData> data, List<String> lifecycleTaskTypes) throws LifecycleException, ConversationStopException {
+    private void executePackages(List<IData> data, List<String> lifecycleTaskTypes)
+            throws LifecycleException, ConversationStopException {
         for (IExecutablePackage executablePackage : executablePackages) {
             conversationMemory.getCurrentStep().setCurrentPackageId(executablePackage.getPackageId());
-            data.stream().filter(Objects::nonNull).
-                    forEach(datum -> conversationMemory.getCurrentStep().storeData(datum));
+            data.stream().filter(Objects::nonNull)
+                    .forEach(datum -> conversationMemory.getCurrentStep().storeData(datum));
             ILifecycleManager lifecycleManager = executablePackage.getLifecycleManager();
             lifecycleManager.executeLifecycle(conversationMemory, lifecycleTaskTypes);
         }

@@ -14,6 +14,7 @@ import jakarta.enterprise.context.ApplicationScoped;
 
 import java.util.*;
 
+import static ai.labs.eddi.engine.memory.MemoryKeys.*;
 import static ai.labs.eddi.engine.memory.model.SimpleConversationMemorySnapshot.ConversationStepData;
 import static ai.labs.eddi.engine.memory.model.SimpleConversationMemorySnapshot.SimpleConversationStep;
 import static ai.labs.eddi.utils.RuntimeUtilities.isNullOrEmpty;
@@ -24,10 +25,6 @@ import static ai.labs.eddi.utils.RuntimeUtilities.isNullOrEmpty;
 
 @ApplicationScoped
 public class ConversationMemoryUtilities {
-    private static final String KEY_INPUT_INITIAL = "input:initial";
-    private static final String KEY_ACTIONS = "actions";
-    private static final String KEY_OUTPUT = "output";
-    private static final String KEY_QUICK_REPLIES = "quickReplies";
     private static final String KEY_CONVERSATION_STEPS = "conversationSteps";
     private static final String KEY_CONVERSATION_OUTPUTS = "conversationOutputs";
     private static final String KEY_CONVERSATION_PROPERTIES = "conversationProperties";
@@ -162,8 +159,8 @@ public class ConversationMemoryUtilities {
                 var newConversationOutput = newConversationOutputs.get(index);
 
                 for (var key : conversationOutput.keySet()) {
-                    if (key.startsWith(KEY_INPUT_INITIAL) || key.startsWith(KEY_ACTIONS) ||
-                            key.startsWith(KEY_OUTPUT) || key.startsWith(KEY_QUICK_REPLIES)) {
+                    if (key.startsWith(INPUT_INITIAL.key()) || key.startsWith(ACTIONS.key()) ||
+                            key.startsWith(OUTPUT_PREFIX) || key.startsWith(QUICK_REPLIES_PREFIX)) {
                         newConversationOutput.put(key, conversationOutput.get(key));
                     }
                 }
@@ -179,8 +176,8 @@ public class ConversationMemoryUtilities {
                 for (var resultSnapshot : packageRunSnapshot.getLifecycleTasks()) {
                     var key = resultSnapshot.getKey();
                     if (returnDetailed ||
-                            key.equals(KEY_INPUT_INITIAL) || key.startsWith(KEY_ACTIONS) ||
-                            key.startsWith(KEY_OUTPUT) || key.startsWith(KEY_QUICK_REPLIES)) {
+                            key.equals(INPUT_INITIAL.key()) || key.startsWith(ACTIONS.key()) ||
+                            key.startsWith(OUTPUT_PREFIX) || key.startsWith(QUICK_REPLIES_PREFIX)) {
 
                         var result = resultSnapshot.getResult();
                         simpleConversationStep.getConversationStep().add(
@@ -239,8 +236,8 @@ public class ConversationMemoryUtilities {
             Boolean returnCurrentStepOnly,
             List<String> returningFields) {
 
-        var memorySnapshot =
-                convertSimpleConversationMemory(conversationMemorySnapshot, returnDetailed, returnCurrentStepOnly);
+        var memorySnapshot = convertSimpleConversationMemory(conversationMemorySnapshot, returnDetailed,
+                returnCurrentStepOnly);
 
         if (returnCurrentStepOnly) {
             if (isNullOrEmpty(returningFields) || returningFields.contains(KEY_CONVERSATION_STEPS)) {

@@ -39,6 +39,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.stream.Stream;
 
+import static ai.labs.eddi.engine.memory.MemoryKeys.ACTIONS;
 import static dev.langchain4j.data.message.AiMessage.aiMessage;
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.*;
@@ -103,8 +104,7 @@ class LangchainTaskTest {
                 pdfReaderTool,
                 weatherTool,
                 eddiToolBridge,
-                toolExecutionService
-        );
+                toolExecutionService);
     }
 
     static Stream<Arguments> provideParameters() {
@@ -114,35 +114,34 @@ class LangchainTaskTest {
                                 "systemMessage", "Act as a real estate agent",
                                 "logSizeLimit", "10",
                                 "apiKey", "<apiKey>",
-                                "addToOutput", "true"
-                        ),
+                                "addToOutput", "true"),
                         List.of(new TextOutputItem(TEST_MESSAGE_FROM_LLM, 0)),
                         4, // times for templatingEngine.processTemplate
                         2, // times for currentStep.storeData
-                        1  // times for currentStep.addConversationOutputList
+                        1 // times for currentStep.addConversationOutputList
                 ),
                 Arguments.of(
                         Map.of(
                                 "systemMessage", "Act as a real estate agent",
                                 "logSizeLimit", "10",
-                                "apiKey", "<apiKey1>"
-                        ),
+                                "apiKey", "<apiKey1>"),
                         List.of(new TextOutputItem(TEST_MESSAGE_FROM_LLM, 0)),
                         3, // times for templatingEngine.processTemplate
                         1, // times for currentStep.storeData
-                        0  // times for currentStep.addConversationOutputList
+                        0 // times for currentStep.addConversationOutputList
                 )
-                // Add more test cases as needed
+        // Add more test cases as needed
         );
     }
 
     @ParameterizedTest
     @MethodSource("provideParameters")
     void execute(Map<String, String> parameters, List<TextOutputItem> expectedOutput,
-                 int timesTemplate, int timesStoreData, int timesAddOutputList) throws Exception {
+            int timesTemplate, int timesStoreData, int timesAddOutputList) throws Exception {
         // Setup
         IConversationMemory memory = mock(IConversationMemory.class);
-        IConversationMemory.IWritableConversationStep currentStep = mock(IConversationMemory.IWritableConversationStep.class);
+        IConversationMemory.IWritableConversationStep currentStep = mock(
+                IConversationMemory.IWritableConversationStep.class);
         when(memory.getCurrentStep()).thenReturn(currentStep);
 
         var conversationOutput = new ConversationOutput();
@@ -150,7 +149,7 @@ class LangchainTaskTest {
         when(memory.getConversationOutputs()).thenReturn(List.of(conversationOutput));
 
         var actionData = mock(IData.class);
-        when(currentStep.getLatestData("actions")).thenReturn(actionData);
+        when(currentStep.getLatestData(ACTIONS)).thenReturn(actionData);
         when(actionData.getResult()).thenReturn(List.of("action1"));
 
         var task = new LangChainConfiguration.Task();
@@ -191,15 +190,16 @@ class LangchainTaskTest {
         verify(currentStep, times(timesStoreData)).storeData(any(IData.class));
 
         // Verify that the conversation output string was updated
-        verify(currentStep, times(timesAddOutputList)).
-                addConversationOutputList(eq(LangchainTask.MEMORY_OUTPUT_IDENTIFIER), eq(expectedOutput));
+        verify(currentStep, times(timesAddOutputList))
+                .addConversationOutputList(eq(LangchainTask.MEMORY_OUTPUT_IDENTIFIER), eq(expectedOutput));
     }
 
     @Test
     void testExecute_AgentMode() throws Exception {
         // Setup
         IConversationMemory memory = mock(IConversationMemory.class);
-        IConversationMemory.IWritableConversationStep currentStep = mock(IConversationMemory.IWritableConversationStep.class);
+        IConversationMemory.IWritableConversationStep currentStep = mock(
+                IConversationMemory.IWritableConversationStep.class);
         when(memory.getCurrentStep()).thenReturn(currentStep);
 
         var conversationOutput = new ConversationOutput();
@@ -207,7 +207,7 @@ class LangchainTaskTest {
         when(memory.getConversationOutputs()).thenReturn(List.of(conversationOutput));
 
         var actionData = mock(IData.class);
-        when(currentStep.getLatestData("actions")).thenReturn(actionData);
+        when(currentStep.getLatestData(ACTIONS)).thenReturn(actionData);
         when(actionData.getResult()).thenReturn(List.of("agent_action"));
 
         var task = new LangChainConfiguration.Task();
@@ -228,11 +228,15 @@ class LangchainTaskTest {
         when(templatingEngine.processTemplate(anyString(), anyMap())).thenAnswer(i -> i.getArgument(0));
 
         // Execute
-        // Note: This test validates that the Agent Mode path (executeWithTools) is invoked.
-        // In a real unit test without Quarkus CDI context, the AiServices.builder() will fail
-        // because it requires Arc.container(). This is expected behavior and validates that
+        // Note: This test validates that the Agent Mode path (executeWithTools) is
+        // invoked.
+        // In a real unit test without Quarkus CDI context, the AiServices.builder()
+        // will fail
+        // because it requires Arc.container(). This is expected behavior and validates
+        // that
         // the Agent Mode code path is executed.
-        // The exception may be NullPointerException or ExceptionInInitializerError (wrapping NPE)
+        // The exception may be NullPointerException or ExceptionInInitializerError
+        // (wrapping NPE)
         // depending on whether the CDI class initializer has already been attempted.
         assertThrows(Throwable.class, () -> {
             langChainTask.execute(memory, langChainConfig);
@@ -258,19 +262,21 @@ class LangchainTaskTest {
 
         LangChainConfiguration expectedConfig = new LangChainConfiguration(List.of(task));
 
-        when(resourceClientLibrary.getResource(any(URI.class), eq(LangChainConfiguration.class))).thenReturn(expectedConfig);
+        when(resourceClientLibrary.getResource(any(URI.class), eq(LangChainConfiguration.class)))
+                .thenReturn(expectedConfig);
 
         // Test
         Object result = langChainTask.configure(configuration, Collections.emptyMap());
 
         // Assert
         assertNotNull(result, "Configuration result should not be null.");
-        assertInstanceOf(LangChainConfiguration.class, result, "Result should be an instance of LangChainConfiguration.");
+        assertInstanceOf(LangChainConfiguration.class, result,
+                "Result should be an instance of LangChainConfiguration.");
         LangChainConfiguration configResult = (LangChainConfiguration) result;
         assertEquals(expectedConfig.tasks().size(), configResult.tasks().size(), "Task sizes should match.");
-        assertEquals(expectedConfig.tasks().getFirst().getId(), configResult.tasks().getFirst().getId(), "Task IDs should match.");
+        assertEquals(expectedConfig.tasks().getFirst().getId(), configResult.tasks().getFirst().getId(),
+                "Task IDs should match.");
     }
-
 
     @Test
     void testGetExtensionDescriptor() {
@@ -301,7 +307,8 @@ class LangchainTaskTest {
         void testLegacyConfigurationWithoutTools() throws Exception {
             // Setup
             IConversationMemory memory = mock(IConversationMemory.class);
-            IConversationMemory.IWritableConversationStep currentStep = mock(IConversationMemory.IWritableConversationStep.class);
+            IConversationMemory.IWritableConversationStep currentStep = mock(
+                    IConversationMemory.IWritableConversationStep.class);
             when(memory.getCurrentStep()).thenReturn(currentStep);
 
             var conversationOutput = new ConversationOutput();
@@ -309,7 +316,7 @@ class LangchainTaskTest {
             when(memory.getConversationOutputs()).thenReturn(List.of(conversationOutput));
 
             var actionData = mock(IData.class);
-            when(currentStep.getLatestData("actions")).thenReturn(actionData);
+            when(currentStep.getLatestData(ACTIONS)).thenReturn(actionData);
             when(actionData.getResult()).thenReturn(List.of("chat"));
 
             // Legacy configuration - no tools, no agent mode flags
@@ -320,8 +327,7 @@ class LangchainTaskTest {
             task.setParameters(Map.of(
                     "systemMessage", "You are helpful",
                     "apiKey", "test-key",
-                    "addToOutput", "true"
-            ));
+                    "addToOutput", "true"));
             // Note: enableBuiltInTools defaults to false, tools is null
 
             var langChainConfig = new LangChainConfiguration(List.of(task));
@@ -343,7 +349,8 @@ class LangchainTaskTest {
         void testExplicitlyDisabledToolsRunsInLegacyMode() throws Exception {
             // Setup
             IConversationMemory memory = mock(IConversationMemory.class);
-            IConversationMemory.IWritableConversationStep currentStep = mock(IConversationMemory.IWritableConversationStep.class);
+            IConversationMemory.IWritableConversationStep currentStep = mock(
+                    IConversationMemory.IWritableConversationStep.class);
             when(memory.getCurrentStep()).thenReturn(currentStep);
 
             var conversationOutput = new ConversationOutput();
@@ -351,7 +358,7 @@ class LangchainTaskTest {
             when(memory.getConversationOutputs()).thenReturn(List.of(conversationOutput));
 
             var actionData = mock(IData.class);
-            when(currentStep.getLatestData("actions")).thenReturn(actionData);
+            when(currentStep.getLatestData(ACTIONS)).thenReturn(actionData);
             when(actionData.getResult()).thenReturn(List.of("chat"));
 
             var task = new LangChainConfiguration.Task();
@@ -361,8 +368,7 @@ class LangchainTaskTest {
             task.setEnableBuiltInTools(false); // Explicitly disabled
             task.setParameters(Map.of(
                     "systemMessage", "You are helpful",
-                    "apiKey", "test-key"
-            ));
+                    "apiKey", "test-key"));
 
             var langChainConfig = new LangChainConfiguration(List.of(task));
 
@@ -383,9 +389,10 @@ class LangchainTaskTest {
         @DisplayName("Task should execute when action matches exactly")
         void testExactActionMatch() throws Exception {
             IConversationMemory memory = mock(IConversationMemory.class);
-            IConversationMemory.IWritableConversationStep currentStep = mock(IConversationMemory.IWritableConversationStep.class);
+            IConversationMemory.IWritableConversationStep currentStep = mock(
+                    IConversationMemory.IWritableConversationStep.class);
             when(memory.getCurrentStep()).thenReturn(currentStep);
-            
+
             // Setup conversation outputs with user input for conversation history
             var conversationOutput = new ConversationOutput();
             conversationOutput.put("input", "user message");
@@ -393,7 +400,7 @@ class LangchainTaskTest {
             when(memoryItemConverter.convert(memory)).thenReturn(new HashMap<>());
 
             var actionData = mock(IData.class);
-            when(currentStep.getLatestData("actions")).thenReturn(actionData);
+            when(currentStep.getLatestData(ACTIONS)).thenReturn(actionData);
             when(actionData.getResult()).thenReturn(List.of("specific_action"));
 
             var task = new LangChainConfiguration.Task();
@@ -417,7 +424,8 @@ class LangchainTaskTest {
         @DisplayName("Task should execute when wildcard (*) action is configured")
         void testWildcardActionMatch() throws Exception {
             IConversationMemory memory = mock(IConversationMemory.class);
-            IConversationMemory.IWritableConversationStep currentStep = mock(IConversationMemory.IWritableConversationStep.class);
+            IConversationMemory.IWritableConversationStep currentStep = mock(
+                    IConversationMemory.IWritableConversationStep.class);
             when(memory.getCurrentStep()).thenReturn(currentStep);
 
             // Setup conversation outputs with user input for conversation history
@@ -427,7 +435,7 @@ class LangchainTaskTest {
             when(memoryItemConverter.convert(memory)).thenReturn(new HashMap<>());
 
             var actionData = mock(IData.class);
-            when(currentStep.getLatestData("actions")).thenReturn(actionData);
+            when(currentStep.getLatestData(ACTIONS)).thenReturn(actionData);
             when(actionData.getResult()).thenReturn(List.of("any_random_action"));
 
             var task = new LangChainConfiguration.Task();
@@ -451,13 +459,14 @@ class LangchainTaskTest {
         @DisplayName("Task should NOT execute when action does not match")
         void testNoActionMatch() throws Exception {
             IConversationMemory memory = mock(IConversationMemory.class);
-            IConversationMemory.IWritableConversationStep currentStep = mock(IConversationMemory.IWritableConversationStep.class);
+            IConversationMemory.IWritableConversationStep currentStep = mock(
+                    IConversationMemory.IWritableConversationStep.class);
             when(memory.getCurrentStep()).thenReturn(currentStep);
             when(memory.getConversationOutputs()).thenReturn(List.of(new ConversationOutput()));
             when(memoryItemConverter.convert(memory)).thenReturn(new HashMap<>());
 
             var actionData = mock(IData.class);
-            when(currentStep.getLatestData("actions")).thenReturn(actionData);
+            when(currentStep.getLatestData(ACTIONS)).thenReturn(actionData);
             when(actionData.getResult()).thenReturn(List.of("different_action"));
 
             var task = new LangChainConfiguration.Task();
@@ -483,7 +492,8 @@ class LangchainTaskTest {
         @DisplayName("Should handle null actions data gracefully")
         void testNullActionsData() throws Exception {
             IConversationMemory memory = mock(IConversationMemory.class);
-            IConversationMemory.IWritableConversationStep currentStep = mock(IConversationMemory.IWritableConversationStep.class);
+            IConversationMemory.IWritableConversationStep currentStep = mock(
+                    IConversationMemory.IWritableConversationStep.class);
             when(memory.getCurrentStep()).thenReturn(currentStep);
             when(currentStep.getLatestData("actions")).thenReturn(null);
 
@@ -503,11 +513,12 @@ class LangchainTaskTest {
         @DisplayName("Should handle null action result gracefully")
         void testNullActionResult() throws Exception {
             IConversationMemory memory = mock(IConversationMemory.class);
-            IConversationMemory.IWritableConversationStep currentStep = mock(IConversationMemory.IWritableConversationStep.class);
+            IConversationMemory.IWritableConversationStep currentStep = mock(
+                    IConversationMemory.IWritableConversationStep.class);
             when(memory.getCurrentStep()).thenReturn(currentStep);
 
             var actionData = mock(IData.class);
-            when(currentStep.getLatestData("actions")).thenReturn(actionData);
+            when(currentStep.getLatestData(ACTIONS)).thenReturn(actionData);
             when(actionData.getResult()).thenReturn(null);
 
             var task = new LangChainConfiguration.Task();
@@ -526,17 +537,19 @@ class LangchainTaskTest {
         @DisplayName("Should throw exception for unsupported model type")
         void testUnsupportedModelType() throws Exception {
             IConversationMemory memory = mock(IConversationMemory.class);
-            IConversationMemory.IWritableConversationStep currentStep = mock(IConversationMemory.IWritableConversationStep.class);
+            IConversationMemory.IWritableConversationStep currentStep = mock(
+                    IConversationMemory.IWritableConversationStep.class);
             when(memory.getCurrentStep()).thenReturn(currentStep);
-            
-            // Setup conversation outputs with user input - required so messages list is not empty
+
+            // Setup conversation outputs with user input - required so messages list is not
+            // empty
             var conversationOutput = new ConversationOutput();
             conversationOutput.put("input", "user message");
             when(memory.getConversationOutputs()).thenReturn(List.of(conversationOutput));
             when(memoryItemConverter.convert(memory)).thenReturn(new HashMap<>());
 
             var actionData = mock(IData.class);
-            when(currentStep.getLatestData("actions")).thenReturn(actionData);
+            when(currentStep.getLatestData(ACTIONS)).thenReturn(actionData);
             when(actionData.getResult()).thenReturn(List.of("action"));
 
             var task = new LangChainConfiguration.Task();
@@ -558,9 +571,8 @@ class LangchainTaskTest {
             Map<String, Object> configuration = new HashMap<>();
             // No URI provided
 
-            assertThrows(PackageConfigurationException.class, () ->
-                    langChainTask.configure(configuration, Collections.emptyMap())
-            );
+            assertThrows(PackageConfigurationException.class,
+                    () -> langChainTask.configure(configuration, Collections.emptyMap()));
         }
 
         @Test
@@ -572,9 +584,8 @@ class LangchainTaskTest {
             when(resourceClientLibrary.getResource(any(URI.class), eq(LangChainConfiguration.class)))
                     .thenThrow(new ServiceException("Connection failed"));
 
-            assertThrows(PackageConfigurationException.class, () ->
-                    langChainTask.configure(configuration, Collections.emptyMap())
-            );
+            assertThrows(PackageConfigurationException.class,
+                    () -> langChainTask.configure(configuration, Collections.emptyMap()));
         }
     }
 

@@ -43,6 +43,31 @@ Each entry follows this format:
 
 _Entries will be added here as implementation progresses._
 
+### 2026-03-05 — Typed Memory Accessors
+
+**Repo:** EDDI  
+**Branch:** `feature/version-6.0.0`  
+**Phase:** 1 — Item #2
+
+**What changed:**
+
+- `MemoryKey.java` [NEW]: Generic type-safe key class — binds a string name to a Java type and carries an `isPublic` flag
+- `MemoryKeys.java` [NEW]: Central registry of well-known keys (`ACTIONS`, `INPUT`, `EXPRESSIONS_PARSED`, `INTENTS`, etc.) with prefix strings for dynamic keys (`OUTPUT_PREFIX`, `QUICK_REPLIES_PREFIX`)
+- `IConversationMemory.java` [MODIFIED]: Added typed accessor methods `get(MemoryKey)`, `getData(MemoryKey)`, `getLatestData(MemoryKey)`, `set(MemoryKey, T)` to step interfaces
+- `ConversationStep.java`, `ConversationMemory.java` [MODIFIED]: Implemented typed accessors
+- 10 production files migrated: `Conversation`, `LifecycleManager`, `ConversationMemoryUtilities`, `InputParserTask`, `BehaviorRulesEvaluationTask`, `ActionMatcher`, `InputMatcher`, `HttpCallsTask`, `LangchainTask`, `OutputGenerationTask`
+- `MemoryKeyTest.java` [NEW]: 15 tests for MemoryKey and typed accessors
+- 4 existing test files updated: `ActionMatcherTest`, `InputMatcherTest`, `OutputItemContainerGenerationTaskTest`, `LangchainTaskTest`
+
+**Design decision:**
+Additive approach — typed methods sit alongside existing string-based methods for backward compatibility. Dynamic keys (output:text:action, quickReplies:action) remain as `String` prefix constants since they're used for key construction. `occurredInAnyStep()` continues to use string-based `getLatestData(String)` via `getAllLatestData(String)`.
+
+**Testing:**
+
+- [x] Builds cleanly
+- [x] All 533 tests pass (0 failures, 0 errors, 4 skipped)
+- [x] No regressions
+
 ### 2026-03-05 — Extract ConversationService from RestBotEngine
 
 **Repo:** EDDI  

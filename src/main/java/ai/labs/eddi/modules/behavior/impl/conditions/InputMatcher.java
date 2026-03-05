@@ -15,6 +15,7 @@ import java.util.List;
 import java.util.Map;
 
 import static ai.labs.eddi.engine.memory.IConversationMemory.IConversationStepStack;
+import static ai.labs.eddi.engine.memory.MemoryKeys.EXPRESSIONS_PARSED;
 import static ai.labs.eddi.modules.behavior.impl.conditions.IBehaviorCondition.ExecutionState.*;
 
 /**
@@ -67,22 +68,24 @@ public class InputMatcher extends BaseMatcher implements IBehaviorCondition {
         ExecutionState state = NOT_EXECUTED;
         switch (occurrence) {
             case currentStep -> {
-                data = memory.getCurrentStep().getLatestData(KEY_EXPRESSIONS);
+                data = memory.getCurrentStep().getLatestData(EXPRESSIONS_PARSED);
                 state = evaluateInputExpressions(data);
             }
             case lastStep -> {
                 IConversationStepStack previousSteps = memory.getPreviousSteps();
                 if (previousSteps.size() > 0) {
-                    data = previousSteps.get(0).getLatestData(KEY_EXPRESSIONS);
+                    data = previousSteps.get(0).getLatestData(EXPRESSIONS_PARSED);
                     state = evaluateInputExpressions(data);
                 } else {
                     state = FAIL;
                 }
             }
             case anyStep ->
-                    state = occurredInAnyStep(memory, KEY_EXPRESSIONS, this::evaluateInputExpressions) ? SUCCESS : FAIL;
+                state = occurredInAnyStep(memory, EXPRESSIONS_PARSED.key(), this::evaluateInputExpressions) ? SUCCESS
+                        : FAIL;
             case never ->
-                    state = occurredInAnyStep(memory, KEY_EXPRESSIONS, this::evaluateInputExpressions) ? FAIL : SUCCESS;
+                state = occurredInAnyStep(memory, EXPRESSIONS_PARSED.key(), this::evaluateInputExpressions) ? FAIL
+                        : SUCCESS;
         }
 
         return state;

@@ -1,6 +1,7 @@
 package ai.labs.eddi.engine.memory;
 
 import ai.labs.eddi.engine.memory.model.ConversationOutput;
+import ai.labs.eddi.engine.memory.model.Data;
 
 import java.util.*;
 import java.util.function.Function;
@@ -47,6 +48,13 @@ public class ConversationStep implements IConversationMemory.IWritableConversati
     }
 
     @Override
+    public <T> void set(MemoryKey<T> key, T value) {
+        Data<T> data = new Data<>(key.key(), value);
+        data.setPublic(key.isPublic());
+        storeData(data);
+    }
+
+    @Override
     public void removeData(String keyToBeRemoved) {
         store.entrySet().removeIf(dataEntry -> dataEntry.getValue().getKey().startsWith(keyToBeRemoved));
     }
@@ -67,8 +75,8 @@ public class ConversationStep implements IConversationMemory.IWritableConversati
 
     @Override
     public void replaceConversationOutputObject(String key, Object valueToBeReplaced, Object replace) {
-        var outputs = (List<Object>) conversationOutput.
-                computeIfAbsent(key, (Function<String, List>) k -> new ArrayList());
+        var outputs = (List<Object>) conversationOutput.computeIfAbsent(key,
+                (Function<String, List>) k -> new ArrayList());
 
         IntStream.range(0, outputs.size()).forEach(i -> {
             var currentValue = outputs.get(i);
@@ -85,16 +93,16 @@ public class ConversationStep implements IConversationMemory.IWritableConversati
 
     @Override
     public void addConversationOutputList(String key, List list) {
-        var currentList = (List<Object>) conversationOutput.
-                computeIfAbsent(key, (Function<String, List>) k -> new ArrayList());
+        var currentList = (List<Object>) conversationOutput.computeIfAbsent(key,
+                (Function<String, List>) k -> new ArrayList());
 
         currentList.addAll(list);
     }
 
     @Override
     public void addConversationOutputMap(String key, Map<String, Object> map) {
-        var currentMap = (Map<String, Object>) conversationOutput.
-                computeIfAbsent(key, (Function<String, Map>) k -> new LinkedHashMap<String, Object>());
+        var currentMap = (Map<String, Object>) conversationOutput.computeIfAbsent(key,
+                (Function<String, Map>) k -> new LinkedHashMap<String, Object>());
 
         currentMap.putAll(map);
     }
@@ -114,7 +122,6 @@ public class ConversationStep implements IConversationMemory.IWritableConversati
         return new ArrayList<>(store.values());
     }
 
-
     @Override
     public <T> IData<T> getLatestData(String prefix) {
         List<IData> elements = getAllElements();
@@ -129,6 +136,22 @@ public class ConversationStep implements IConversationMemory.IWritableConversati
     }
 
     @Override
+    public <T> IData<T> getLatestData(MemoryKey<T> key) {
+        return getLatestData(key.key());
+    }
+
+    @Override
+    public <T> IData<T> getData(MemoryKey<T> key) {
+        return getData(key.key());
+    }
+
+    @Override
+    public <T> T get(MemoryKey<T> key) {
+        IData<T> data = getData(key.key());
+        return data != null ? data.getResult() : null;
+    }
+
+    @Override
     public int size() {
         return store.size();
     }
@@ -140,8 +163,10 @@ public class ConversationStep implements IConversationMemory.IWritableConversati
 
     @Override
     public boolean equals(Object o) {
-        if (this == o) return true;
-        if (!(o instanceof ConversationStep)) return false;
+        if (this == o)
+            return true;
+        if (!(o instanceof ConversationStep))
+            return false;
 
         ConversationStep that = (ConversationStep) o;
 

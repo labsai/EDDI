@@ -40,11 +40,14 @@ import java.util.stream.Collectors;
 
 import static ai.labs.eddi.configs.packages.model.ExtensionDescriptor.FieldType.BOOLEAN;
 import static ai.labs.eddi.engine.memory.ContextUtilities.retrieveContextLanguageFromLongTermMemory;
+import static ai.labs.eddi.engine.memory.MemoryKeys.EXPRESSIONS_PARSED;
+import static ai.labs.eddi.engine.memory.MemoryKeys.INPUT;
+import static ai.labs.eddi.engine.memory.MemoryKeys.INPUT_NORMALIZED;
+import static ai.labs.eddi.engine.memory.MemoryKeys.INTENTS;
 import static ai.labs.eddi.modules.nlp.DictionaryUtilities.convertQuickReplies;
 import static ai.labs.eddi.modules.nlp.DictionaryUtilities.extractExpressions;
 import static ai.labs.eddi.utils.RuntimeUtilities.isNullOrEmpty;
 import static ai.labs.eddi.utils.StringUtilities.joinStrings;
-
 
 /**
  * @author ginccc
@@ -62,11 +65,7 @@ public class InputParserTask implements ILifecycleTask {
     private static final Pattern NON_ALPHANUMERIC = Pattern.compile("[^a-zA-Z0-9 ]+");
     private final ObjectMapper objectMapper;
 
-    private static final String KEY_INPUT = "input";
-    private static final String KEY_INPUT_NORMALIZED = KEY_INPUT + ":normalized";
     private static final String KEY_EXPRESSIONS = "expressions";
-    private static final String KEY_EXPRESSIONS_PARSED = KEY_EXPRESSIONS + ":parsed";
-    private static final String KEY_INTENT = "intents";
     private static final String KEY_TYPE = "type";
     private static final String KEY_CONFIG = "config";
 
@@ -79,10 +78,10 @@ public class InputParserTask implements ILifecycleTask {
 
     @Inject
     public InputParserTask(IExpressionProvider expressionProvider,
-                           @ParserNormalizerExtensions Map<String, Provider<INormalizerProvider>> normalizerProviders,
-                           @ParserDictionaryExtensions Map<String, Provider<IDictionaryProvider>> dictionaryProviders,
-                           @ParserCorrectionExtensions Map<String, Provider<ICorrectionProvider>> correctionProviders,
-                           ObjectMapper objectMapper) {
+            @ParserNormalizerExtensions Map<String, Provider<INormalizerProvider>> normalizerProviders,
+            @ParserDictionaryExtensions Map<String, Provider<IDictionaryProvider>> dictionaryProviders,
+            @ParserCorrectionExtensions Map<String, Provider<ICorrectionProvider>> correctionProviders,
+            ObjectMapper objectMapper) {
         this.expressionProvider = expressionProvider;
         this.normalizerProviders = normalizerProviders;
         this.dictionaryProviders = dictionaryProviders;
@@ -104,8 +103,8 @@ public class InputParserTask implements ILifecycleTask {
     public void execute(IConversationMemory memory, Object component) {
         final IInputParser parser = (IInputParser) component;
 
-        //parse user input to meanings
-        final IData<String> inputData = memory.getCurrentStep().getLatestData(KEY_INPUT);
+        // parse user input to meanings
+        final IData<String> inputData = memory.getCurrentStep().getLatestData(INPUT);
         if (inputData == null) {
             return;
         }
@@ -126,7 +125,6 @@ public class InputParserTask implements ILifecycleTask {
 
         storeResultInMemory(memory.getCurrentStep(), parsedSolutions, parser.getConfig());
     }
-
 
     private List<IDictionary> prepareTemporaryDictionaries(IConversationMemory memory) {
         List<ConversationOutput> conversationOutputs = memory.getConversationOutputs();
@@ -154,9 +152,9 @@ public class InputParserTask implements ILifecycleTask {
                 .filter(Objects::nonNull)
                 .map(quickReplyData -> {
                     String value = quickReplyData.get("value").toString();
-                    String expressions = quickReplyData.get("expressions") != null ?
-                            quickReplyData.get("expressions").toString() :
-                            generateExpression(value);
+                    String expressions = quickReplyData.get("expressions") != null
+                            ? quickReplyData.get("expressions").toString()
+                            : generateExpression(value);
                     return new QuickReply(value, expressions, (Boolean) quickReplyData.get("default"));
                 })
                 .collect(Collectors.toList());
@@ -169,42 +167,41 @@ public class InputParserTask implements ILifecycleTask {
 
     private static void storeNormalizedResultInMemory(IWritableConversationStep currentStep, String normalizedInput) {
         if (!isNullOrEmpty(normalizedInput)) {
-            IData<String> expressionsData = new Data<>(KEY_INPUT_NORMALIZED, normalizedInput);
+            IData<String> expressionsData = new Data<>(INPUT_NORMALIZED.key(), normalizedInput);
             currentStep.storeData(expressionsData);
-            currentStep.addConversationOutputString(KEY_INPUT, normalizedInput);
+            currentStep.addConversationOutputString(INPUT.key(), normalizedInput);
         }
     }
 
     private void storeResultInMemory(IWritableConversationStep currentStep,
-                                     List<RawSolution> parsedSolutions,
-                                     IInputParser.Config parserConfig) {
+            List<RawSolution> parsedSolutions,
+            IInputParser.Config parserConfig) {
         if (!parsedSolutions.isEmpty()) {
-            Solution solution =
-                    extractExpressions(parsedSolutions,
-                            parserConfig.isIncludeUnused(),
-                            parserConfig.isIncludeUnknown()).getFirst();
+            Solution solution = extractExpressions(parsedSolutions,
+                    parserConfig.isIncludeUnused(),
+                    parserConfig.isIncludeUnknown()).getFirst();
 
             Expressions newExpressions = solution.getExpressions();
             if (parserConfig.isAppendExpressions() && !newExpressions.isEmpty()) {
-                IData<String> latestExpressions = currentStep.getLatestData(KEY_EXPRESSIONS_PARSED);
+                IData<String> latestExpressions = currentStep.getLatestData(EXPRESSIONS_PARSED);
                 if (latestExpressions != null) {
                     Expressions currentExpressions = expressionProvider.parseExpressions(latestExpressions.getResult());
                     currentExpressions.addAll(newExpressions);
-                    newExpressions = currentExpressions.stream().distinct().collect(Collectors.toCollection(Expressions::new));
+                    newExpressions = currentExpressions.stream().distinct()
+                            .collect(Collectors.toCollection(Expressions::new));
                 }
 
                 String expressionString = joinStrings(", ", newExpressions);
-                IData<String> expressionsData = new Data<>(KEY_EXPRESSIONS_PARSED, expressionString);
+                IData<String> expressionsData = new Data<>(EXPRESSIONS_PARSED.key(), expressionString);
                 currentStep.storeData(expressionsData);
                 currentStep.addConversationOutputString(KEY_EXPRESSIONS, expressionString);
 
-                List<String> intents = newExpressions.stream().
-                        map(Expression::getExpressionName).
-                        distinct().collect(Collectors.toList());
+                List<String> intents = newExpressions.stream().map(Expression::getExpressionName).distinct()
+                        .collect(Collectors.toList());
 
-                Data<List<String>> intentData = new Data<>(KEY_INTENT, intents);
+                Data<List<String>> intentData = new Data<>(INTENTS.key(), intents);
                 currentStep.storeData(intentData);
-                currentStep.addConversationOutputList(KEY_INTENT, intents);
+                currentStep.addConversationOutputList(INTENTS.key(), intents);
             }
         }
     }
@@ -256,9 +253,9 @@ public class InputParserTask implements ILifecycleTask {
         return new InputParser(normalizers, dictionaries, corrections, config);
     }
 
-
     private List<Map<String, Object>> convertObjectToListOfMaps(Object extension) {
-        return objectMapper.convertValue(extension, new TypeReference<>() {});
+        return objectMapper.convertValue(extension, new TypeReference<>() {
+        });
     }
 
     @Override
@@ -296,7 +293,8 @@ public class InputParserTask implements ILifecycleTask {
         Map<String, ConfigValue> extensionConfigs = new HashMap<>();
         extensionConfigs.put(CONFIG_APPEND_EXPRESSIONS, new ConfigValue("Append Expressions", BOOLEAN, true, true));
         extensionConfigs.put(CONFIG_INCLUDE_UNUSED, new ConfigValue("Include Unused Expressions", BOOLEAN, true, true));
-        extensionConfigs.put(CONFIG_INCLUDE_UNKNOWN, new ConfigValue("Include Unknown Expressions", BOOLEAN, true, true));
+        extensionConfigs.put(CONFIG_INCLUDE_UNKNOWN,
+                new ConfigValue("Include Unknown Expressions", BOOLEAN, true, true));
         extensionDescriptor.setConfigs(extensionConfigs);
 
         return extensionDescriptor;
@@ -311,10 +309,9 @@ public class InputParserTask implements ILifecycleTask {
             if (normalizerProvider != null) {
                 INormalizerProvider normalizer = normalizerProvider.get();
                 Object configObject = normalizerMap.get(KEY_CONFIG);
-                var providedNormalizer =
-                        configObject instanceof Map ?
-                                normalizer.provide(convertObjectToMap(configObject)) :
-                                normalizer.provide(Collections.emptyMap());
+                var providedNormalizer = configObject instanceof Map
+                        ? normalizer.provide(convertObjectToMap(configObject))
+                        : normalizer.provide(Collections.emptyMap());
 
                 normalizers.add(providedNormalizer);
             } else {
@@ -336,10 +333,9 @@ public class InputParserTask implements ILifecycleTask {
             if (dictionaryProvider != null) {
                 IDictionaryProvider dictionary = dictionaryProvider.get();
                 Object configObject = dictionaryMap.get(KEY_CONFIG);
-                var providedDictionary =
-                        configObject instanceof Map ?
-                                dictionary.provide(convertObjectToMap(configObject)) :
-                                dictionary.provide(Collections.emptyMap());
+                var providedDictionary = configObject instanceof Map
+                        ? dictionary.provide(convertObjectToMap(configObject))
+                        : dictionary.provide(Collections.emptyMap());
 
                 dictionaries.add(providedDictionary);
             } else {
@@ -352,7 +348,8 @@ public class InputParserTask implements ILifecycleTask {
         return dictionaries;
     }
 
-    private List<ICorrection> convertCorrections(List<Map<String, Object>> correctionList, List<IDictionary> dictionaries)
+    private List<ICorrection> convertCorrections(List<Map<String, Object>> correctionList,
+            List<IDictionary> dictionaries)
             throws UnrecognizedExtensionException, IllegalExtensionConfigurationException {
 
         List<ICorrection> corrections = new LinkedList<>();
@@ -362,10 +359,9 @@ public class InputParserTask implements ILifecycleTask {
             if (correctionProviderCreator != null) {
                 ICorrectionProvider correctionProvider = correctionProviderCreator.get();
                 Object configObject = correctionMap.get(KEY_CONFIG);
-                var correction =
-                        configObject instanceof Map ?
-                                correctionProvider.provide(convertObjectToMap(configObject)) :
-                                correctionProvider.provide(Collections.emptyMap());
+                var correction = configObject instanceof Map
+                        ? correctionProvider.provide(convertObjectToMap(configObject))
+                        : correctionProvider.provide(Collections.emptyMap());
 
                 correction.init(dictionaries);
                 corrections.add(correction);
@@ -380,7 +376,8 @@ public class InputParserTask implements ILifecycleTask {
     }
 
     private Map<String, Object> convertObjectToMap(Object configObject) {
-        return objectMapper.convertValue(configObject, new TypeReference<>() {});
+        return objectMapper.convertValue(configObject, new TypeReference<>() {
+        });
     }
 
     private static String getResourceType(Map<String, Object> resourceMap) {

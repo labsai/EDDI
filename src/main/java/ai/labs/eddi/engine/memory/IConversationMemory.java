@@ -48,9 +48,11 @@ public interface IConversationMemory extends Serializable {
 
     Stack<IConversationStep> getRedoCache();
 
-
     interface IConversationStepStack {
         <T> IData<T> getLatestData(String key);
+
+        /** Type-safe variant of {@link #getLatestData(String)}. */
+        <T> IData<T> getLatestData(MemoryKey<T> key);
 
         <T> List<List<IData<T>>> getAllData(String prefix);
 
@@ -66,6 +68,16 @@ public interface IConversationMemory extends Serializable {
     interface IConversationStep extends Serializable {
         <T> IData<T> getData(String key);
 
+        /** Type-safe variant of {@link #getData(String)}. */
+        <T> IData<T> getData(MemoryKey<T> key);
+
+        /**
+         * Convenience method: returns the value directly, or {@code null} if not
+         * present.
+         * Equivalent to {@code getData(key) != null ? getData(key).getResult() : null}.
+         */
+        <T> T get(MemoryKey<T> key);
+
         <T> List<IData<T>> getAllData(String prefix);
 
         Set<String> getAllKeys();
@@ -78,11 +90,20 @@ public interface IConversationMemory extends Serializable {
 
         <T> IData<T> getLatestData(String prefix);
 
+        /** Type-safe variant of {@link #getLatestData(String)}. */
+        <T> IData<T> getLatestData(MemoryKey<T> key);
+
         ConversationOutput getConversationOutput();
     }
 
     interface IWritableConversationStep extends IConversationStep {
         void storeData(IData element);
+
+        /**
+         * Type-safe store: creates a {@link IData} wrapper, sets the public flag
+         * from the key, and stores it in this step.
+         */
+        <T> void set(MemoryKey<T> key, T value);
 
         void removeData(String key);
 

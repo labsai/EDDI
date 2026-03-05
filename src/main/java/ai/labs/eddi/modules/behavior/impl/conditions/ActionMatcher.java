@@ -14,6 +14,7 @@ import java.util.Map;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
+import static ai.labs.eddi.engine.memory.MemoryKeys.ACTIONS;
 import static ai.labs.eddi.modules.behavior.impl.conditions.IBehaviorCondition.ExecutionState.*;
 
 /**
@@ -59,20 +60,20 @@ public class ActionMatcher extends BaseMatcher implements IBehaviorCondition {
         ExecutionState state = NOT_EXECUTED;
         switch (occurrence) {
             case currentStep -> {
-                data = memory.getCurrentStep().getLatestData(KEY_ACTIONS);
+                data = memory.getCurrentStep().getLatestData(ACTIONS);
                 state = evaluateActions(data);
             }
             case lastStep -> {
                 IConversationMemory.IConversationStepStack previousSteps = memory.getPreviousSteps();
                 if (previousSteps.size() > 0) {
-                    data = previousSteps.get(0).getLatestData(KEY_ACTIONS);
+                    data = previousSteps.get(0).getLatestData(ACTIONS);
                     state = evaluateActions(data);
                 } else {
                     state = FAIL;
                 }
             }
-            case anyStep -> state = occurredInAnyStep(memory, KEY_ACTIONS, this::evaluateActions) ? SUCCESS : FAIL;
-            case never -> state = occurredInAnyStep(memory, KEY_ACTIONS, this::evaluateActions) ? FAIL : SUCCESS;
+            case anyStep -> state = occurredInAnyStep(memory, ACTIONS.key(), this::evaluateActions) ? SUCCESS : FAIL;
+            case never -> state = occurredInAnyStep(memory, ACTIONS.key(), this::evaluateActions) ? FAIL : SUCCESS;
         }
 
         return state;

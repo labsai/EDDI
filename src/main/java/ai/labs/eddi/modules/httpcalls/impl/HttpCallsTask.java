@@ -1,6 +1,5 @@
 package ai.labs.eddi.modules.httpcalls.impl;
 
-
 import ai.labs.eddi.configs.http.model.*;
 import ai.labs.eddi.configs.packages.model.ExtensionDescriptor;
 import ai.labs.eddi.configs.packages.model.ExtensionDescriptor.ConfigValue;
@@ -22,13 +21,13 @@ import java.net.URI;
 import java.util.List;
 import java.util.Map;
 
+import static ai.labs.eddi.engine.memory.MemoryKeys.ACTIONS;
 import static ai.labs.eddi.utils.RuntimeUtilities.isNullOrEmpty;
 import static java.lang.String.format;
 
 @ApplicationScoped
 public class HttpCallsTask implements ILifecycleTask {
     public static final String ID = "ai.labs.httpcalls";
-    private static final String ACTION_KEY = "actions";
     private static final String KEY_HTTP_CALLS = "httpCalls";
     private final IResourceClientLibrary resourceClientLibrary;
     private final IMemoryItemConverter memoryItemConverter;
@@ -38,8 +37,8 @@ public class HttpCallsTask implements ILifecycleTask {
 
     @Inject
     public HttpCallsTask(IResourceClientLibrary resourceClientLibrary,
-                         IMemoryItemConverter memoryItemConverter,
-                         IHttpCallExecutor httpCallExecutor) {
+            IMemoryItemConverter memoryItemConverter,
+            IHttpCallExecutor httpCallExecutor) {
         this.resourceClientLibrary = resourceClientLibrary;
         this.memoryItemConverter = memoryItemConverter;
         this.httpCallExecutor = httpCallExecutor;
@@ -60,7 +59,7 @@ public class HttpCallsTask implements ILifecycleTask {
         final var httpCallsConfig = (HttpCallsConfiguration) component;
 
         IWritableConversationStep currentStep = memory.getCurrentStep();
-        IData<List<String>> latestData = currentStep.getLatestData(ACTION_KEY);
+        IData<List<String>> latestData = currentStep.getLatestData(ACTIONS);
         if (latestData == null) {
             return;
         }
@@ -69,16 +68,17 @@ public class HttpCallsTask implements ILifecycleTask {
         List<String> actions = latestData.getResult();
 
         for (String action : actions) {
-            List<HttpCall> filteredHttpCalls = httpCallsConfig.getHttpCalls().stream().
-                    filter(httpCall -> {
-                        List<String> httpCallActions = httpCall.getActions();
-                        return httpCallActions.contains(action) || httpCallActions.contains("*");
-                    }).distinct().toList();
+            List<HttpCall> filteredHttpCalls = httpCallsConfig.getHttpCalls().stream().filter(httpCall -> {
+                List<String> httpCallActions = httpCall.getActions();
+                return httpCallActions.contains(action) || httpCallActions.contains("*");
+            }).distinct().toList();
 
             for (var call : filteredHttpCalls) {
-                var httpCallResult = httpCallExecutor.execute(call, memory, templateDataObjects, httpCallsConfig.getTargetServerUrl());
+                var httpCallResult = httpCallExecutor.execute(call, memory, templateDataObjects,
+                        httpCallsConfig.getTargetServerUrl());
                 // HttpCallExecutor stores response in conversation memory via prePostUtils.
-                // We also merge into templateDataObjects so subsequent calls in this loop can reference previous results.
+                // We also merge into templateDataObjects so subsequent calls in this loop can
+                // reference previous results.
                 if (httpCallResult != null && !httpCallResult.isEmpty()) {
                     templateDataObjects.putAll(httpCallResult);
                 }
@@ -95,11 +95,13 @@ public class HttpCallsTask implements ILifecycleTask {
             URI uri = URI.create(uriObj.toString());
 
             try {
-                HttpCallsConfiguration httpCallsConfig = resourceClientLibrary.getResource(uri, HttpCallsConfiguration.class);
+                HttpCallsConfiguration httpCallsConfig = resourceClientLibrary.getResource(uri,
+                        HttpCallsConfiguration.class);
 
                 String targetServerUrl = httpCallsConfig.getTargetServerUrl();
                 if (isNullOrEmpty(targetServerUrl)) {
-                    String message = format("Property \"targetServerUrl\" in HttpCalls cannot be null or empty! (uri:%s)", uriObj);
+                    String message = format(
+                            "Property \"targetServerUrl\" in HttpCalls cannot be null or empty! (uri:%s)", uriObj);
                     throw new ServiceException(message);
                 }
                 if (targetServerUrl.endsWith("/")) {

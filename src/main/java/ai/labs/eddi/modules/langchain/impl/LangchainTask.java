@@ -1,6 +1,5 @@
 package ai.labs.eddi.modules.langchain.impl;
 
-
 import ai.labs.eddi.configs.packages.model.ExtensionDescriptor;
 import ai.labs.eddi.datastore.serialization.IJsonSerialization;
 import ai.labs.eddi.engine.lifecycle.ILifecycleTask;
@@ -45,6 +44,7 @@ import java.util.stream.Collectors;
 
 import static ai.labs.eddi.configs.packages.model.ExtensionDescriptor.ConfigValue;
 import static ai.labs.eddi.configs.packages.model.ExtensionDescriptor.FieldType;
+import static ai.labs.eddi.engine.memory.MemoryKeys.ACTIONS;
 import static ai.labs.eddi.utils.RuntimeUtilities.isNullOrEmpty;
 
 @ApplicationScoped
@@ -52,7 +52,6 @@ public class LangchainTask implements ILifecycleTask {
     public static final String ID = "ai.labs.langchain";
 
     private static final String KEY_URI = "uri";
-    private static final String KEY_ACTIONS = "actions";
     private static final String KEY_LANGCHAIN = "langchain";
     private static final String KEY_SYSTEM_MESSAGE = "systemMessage";
     private static final String KEY_PROMPT = "prompt";
@@ -91,22 +90,22 @@ public class LangchainTask implements ILifecycleTask {
 
     @Inject
     public LangchainTask(IResourceClientLibrary resourceClientLibrary,
-                         IDataFactory dataFactory,
-                         IMemoryItemConverter memoryItemConverter,
-                         ITemplatingEngine templatingEngine,
-                         IJsonSerialization jsonSerialization,
-                         PrePostUtils prePostUtils,
-                         Map<String, Provider<ILanguageModelBuilder>> languageModelApiConnectorBuilders,
-                         CalculatorTool calculatorTool,
-                         DateTimeTool dateTimeTool,
-                         WebSearchTool webSearchTool,
-                         DataFormatterTool dataFormatterTool,
-                         WebScraperTool webScraperTool,
-                         TextSummarizerTool textSummarizerTool,
-                         PdfReaderTool pdfReaderTool,
-                         WeatherTool weatherTool,
-                         EddiToolBridge eddiToolBridge,
-                         ToolExecutionService toolExecutionService) {
+            IDataFactory dataFactory,
+            IMemoryItemConverter memoryItemConverter,
+            ITemplatingEngine templatingEngine,
+            IJsonSerialization jsonSerialization,
+            PrePostUtils prePostUtils,
+            Map<String, Provider<ILanguageModelBuilder>> languageModelApiConnectorBuilders,
+            CalculatorTool calculatorTool,
+            DateTimeTool dateTimeTool,
+            WebSearchTool webSearchTool,
+            DataFormatterTool dataFormatterTool,
+            WebScraperTool webScraperTool,
+            TextSummarizerTool textSummarizerTool,
+            PdfReaderTool pdfReaderTool,
+            WeatherTool weatherTool,
+            EddiToolBridge eddiToolBridge,
+            ToolExecutionService toolExecutionService) {
         this.resourceClientLibrary = resourceClientLibrary;
         this.dataFactory = dataFactory;
         this.memoryItemConverter = memoryItemConverter;
@@ -142,7 +141,7 @@ public class LangchainTask implements ILifecycleTask {
 
         try {
             IWritableConversationStep currentStep = memory.getCurrentStep();
-            IData<List<String>> latestData = currentStep.getLatestData(KEY_ACTIONS);
+            IData<List<String>> latestData = currentStep.getLatestData(ACTIONS);
             if (latestData == null) {
                 return;
             }
@@ -160,18 +159,21 @@ public class LangchainTask implements ILifecycleTask {
                 }
             }
 
-        } catch (ITemplatingEngine.TemplateEngineException | UnsupportedLangchainTaskException | IOException | LifecycleException e) {
+        } catch (ITemplatingEngine.TemplateEngineException | UnsupportedLangchainTaskException | IOException
+                | LifecycleException e) {
             throw new LifecycleException(e.getLocalizedMessage(), e);
         }
     }
 
     /**
-     * Execute task - handles both legacy mode (simple chat) and agent mode (with tools)
+     * Execute task - handles both legacy mode (simple chat) and agent mode (with
+     * tools)
      */
     private void executeTask(IConversationMemory memory, Task task,
-                            IWritableConversationStep currentStep,
-                            Map<String, Object> templateDataObjects)
-            throws ITemplatingEngine.TemplateEngineException, UnsupportedLangchainTaskException, IOException, LifecycleException {
+            IWritableConversationStep currentStep,
+            Map<String, Object> templateDataObjects)
+            throws ITemplatingEngine.TemplateEngineException, UnsupportedLangchainTaskException, IOException,
+            LifecycleException {
 
         var processedParams = runTemplateEngineOnParams(task.getParameters(), templateDataObjects);
 
@@ -182,8 +184,7 @@ public class LangchainTask implements ILifecycleTask {
         }
 
         // Build conversation history
-        int logSizeLimit = task.getConversationHistoryLimit() != null ?
-                task.getConversationHistoryLimit() : -1;
+        int logSizeLimit = task.getConversationHistoryLimit() != null ? task.getConversationHistoryLimit() : -1;
 
         // Override with legacy parameter if present
         if (!isNullOrEmpty(processedParams.get(KEY_LOG_SIZE_LIMIT))) {
@@ -195,12 +196,12 @@ public class LangchainTask implements ILifecycleTask {
             includeFirstBotMessage = Boolean.parseBoolean(processedParams.get(KEY_INCLUDE_FIRST_BOT_MESSAGE));
         }
 
-        var chatMessages = new ArrayList<>(new ConversationLogGenerator(memory).
-                generate(logSizeLimit, includeFirstBotMessage)
-                .getMessages()
-                .stream()
-                .map(this::convertMessage)
-                .toList());
+        var chatMessages = new ArrayList<>(
+                new ConversationLogGenerator(memory).generate(logSizeLimit, includeFirstBotMessage)
+                        .getMessages()
+                        .stream()
+                        .map(this::convertMessage)
+                        .toList());
 
         if (!isNullOrEmpty(processedParams.get(KEY_PROMPT))) {
             // if there is a prompt defined, we replace the last user input with it
@@ -231,11 +232,13 @@ public class LangchainTask implements ILifecycleTask {
             enabledTools.add(eddiToolBridge);
 
             // Append tool instructions to system message
-            StringBuilder toolInstructions = new StringBuilder("\n\nYou have access to the following external tools via the 'executeHttpCall' function:\n");
+            StringBuilder toolInstructions = new StringBuilder(
+                    "\n\nYou have access to the following external tools via the 'executeHttpCall' function:\n");
             for (String toolUri : task.getTools()) {
                 toolInstructions.append("- ").append(toolUri).append("\n");
             }
-            toolInstructions.append("When using 'executeHttpCall', pass the exact URI as the 'httpCallUri' argument.\n");
+            toolInstructions
+                    .append("When using 'executeHttpCall', pass the exact URI as the 'httpCallUri' argument.\n");
 
             if (isNullOrEmpty(systemMessage)) {
                 systemMessage = toolInstructions.toString();
@@ -273,8 +276,7 @@ public class LangchainTask implements ILifecycleTask {
                     responseMetadata.put("tokenUsage", Map.of(
                             "inputTokens", metadata.tokenUsage().inputTokenCount(),
                             "outputTokens", metadata.tokenUsage().outputTokenCount(),
-                            "totalTokens", metadata.tokenUsage().totalTokenCount()
-                    ));
+                            "totalTokens", metadata.tokenUsage().totalTokenCount()));
                 }
             }
         }
@@ -299,22 +301,25 @@ public class LangchainTask implements ILifecycleTask {
             templateDataObjects.put(responseObjectName, responseContent);
         }
 
-        var langchainData = dataFactory.createData(KEY_LANGCHAIN + ":" + task.getType() + ":" + task.getId(), responseContent);
+        var langchainData = dataFactory.createData(KEY_LANGCHAIN + ":" + task.getType() + ":" + task.getId(),
+                responseContent);
         currentStep.storeData(langchainData);
 
         // Store tool trace if available
         if (!toolTrace.isEmpty()) {
-            var traceData = dataFactory.createData(KEY_LANGCHAIN + ":trace:" + task.getType() + ":" + task.getId(), toolTrace);
+            var traceData = dataFactory.createData(KEY_LANGCHAIN + ":trace:" + task.getType() + ":" + task.getId(),
+                    toolTrace);
             currentStep.storeData(traceData);
         }
 
         // Add to output if configured (or if in agent mode with tools)
         boolean shouldAddToOutput = !enabledTools.isEmpty() || // Always output in agent mode with tools
                 (!isNullOrEmpty(processedParams.get(KEY_ADD_TO_OUTPUT)) &&
-                 Boolean.parseBoolean(processedParams.get(KEY_ADD_TO_OUTPUT)));
+                        Boolean.parseBoolean(processedParams.get(KEY_ADD_TO_OUTPUT)));
 
         if (shouldAddToOutput) {
-            var outputData = dataFactory.createData(LANGCHAIN_OUTPUT_IDENTIFIER + ":" + task.getType(), responseContent);
+            var outputData = dataFactory.createData(LANGCHAIN_OUTPUT_IDENTIFIER + ":" + task.getType(),
+                    responseContent);
             currentStep.storeData(outputData);
             var outputItem = new TextOutputItem(responseContent, 0);
             currentStep.addConversationOutputList(MEMORY_OUTPUT_IDENTIFIER, List.of(outputItem));
@@ -324,12 +329,14 @@ public class LangchainTask implements ILifecycleTask {
     }
 
     /**
-     * Executes chat with tool support using direct ChatModel API with tool execution loop.
-     * This avoids using AiServices which triggers Quarkus-LangChain4j CDI interception.
+     * Executes chat with tool support using direct ChatModel API with tool
+     * execution loop.
+     * This avoids using AiServices which triggers Quarkus-LangChain4j CDI
+     * interception.
      */
     private ExecutionResult executeWithTools(ChatModel chatModel, String systemMessage,
-                                   List<ChatMessage> chatMessages, List<Object> tools,
-                                   Task task, IConversationMemory memory) throws LifecycleException {
+            List<ChatMessage> chatMessages, List<Object> tools,
+            Task task, IConversationMemory memory) throws LifecycleException {
 
         // Build tool specifications and executors from tool objects
         List<ToolSpecification> toolSpecs = new ArrayList<>();
@@ -338,11 +345,12 @@ public class LangchainTask implements ILifecycleTask {
         for (Object tool : tools) {
             var specs = ToolSpecifications.toolSpecificationsFrom(tool);
             toolSpecs.addAll(specs);
-            
+
             // Find methods annotated with @Tool and map them to executors
             for (java.lang.reflect.Method method : tool.getClass().getDeclaredMethods()) {
                 if (method.isAnnotationPresent(dev.langchain4j.agent.tool.Tool.class)) {
-                    dev.langchain4j.agent.tool.Tool toolAnnotation = method.getAnnotation(dev.langchain4j.agent.tool.Tool.class);
+                    dev.langchain4j.agent.tool.Tool toolAnnotation = method
+                            .getAnnotation(dev.langchain4j.agent.tool.Tool.class);
                     // Tool name defaults to method name if not specified
                     String toolName = toolAnnotation.name().isEmpty() ? method.getName() : toolAnnotation.name();
                     toolExecutors.put(toolName, new DefaultToolExecutor(tool, method));
@@ -416,7 +424,8 @@ public class LangchainTask implements ILifecycleTask {
                             continue;
                         }
 
-                        // Execute the tool through ToolExecutionService for rate limiting, caching, cost tracking
+                        // Execute the tool through ToolExecutionService for rate limiting, caching,
+                        // cost tracking
                         ToolExecutor executor = toolExecutors.get(toolRequest.name());
                         String toolResult;
                         if (executor != null) {
@@ -432,8 +441,7 @@ public class LangchainTask implements ILifecycleTask {
                                     enableRateLimiting,
                                     enableCaching,
                                     enableCostTracking,
-                                    rateLimit
-                            );
+                                    rateLimit);
                         } else {
                             toolResult = "Error: Tool '" + toolRequest.name() + "' not found";
                         }
@@ -463,11 +471,11 @@ public class LangchainTask implements ILifecycleTask {
         return new ExecutionResult(response, trace);
     }
 
-    private record ExecutionResult(String response, List<Map<String, Object>> trace) {}
-
+    private record ExecutionResult(String response, List<Map<String, Object>> trace) {
+    }
 
     private HashMap<String, String> runTemplateEngineOnParams(Map<String, String> parameters,
-                                                              Map<String, Object> templateDataObjects) {
+            Map<String, Object> templateDataObjects) {
 
         var processedParams = new HashMap<>(parameters);
         processedParams.forEach((key, value) -> {
@@ -483,7 +491,8 @@ public class LangchainTask implements ILifecycleTask {
     }
 
     private Map<String, String> filterParams(HashMap<String, String> processedParams) {
-        //remove all props that are not directly configuring the langchain builders (for better caching)
+        // remove all props that are not directly configuring the langchain builders
+        // (for better caching)
         var returnMap = new HashMap<>(processedParams);
         returnMap.remove(KEY_INCLUDE_FIRST_BOT_MESSAGE);
         returnMap.remove(KEY_SYSTEM_MESSAGE);
@@ -533,8 +542,8 @@ public class LangchainTask implements ILifecycleTask {
     }
 
     private static String joinMessages(ConversationLog.ConversationPart eddiMessage) {
-        return eddiMessage.getContent().stream().
-                map(ConversationLog.ConversationPart.Content::getValue).collect(Collectors.joining(" "));
+        return eddiMessage.getContent().stream().map(ConversationLog.ConversationPart.Content::getValue)
+                .collect(Collectors.joining(" "));
     }
 
     @Override

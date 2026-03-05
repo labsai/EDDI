@@ -176,6 +176,11 @@ public class ConversationMemory implements IConversationMemory {
         }
 
         @Override
+        public <T> IData<T> getLatestData(MemoryKey<T> key) {
+            return getLatestData(key.key());
+        }
+
+        @Override
         public <T> List<List<IData<T>>> getAllData(String prefix) {
             List<List<IData<T>>> allData = new LinkedList<>();
 
@@ -192,8 +197,9 @@ public class ConversationMemory implements IConversationMemory {
 
         @Override
         public <T> List<IData<T>> getAllLatestData(String prefix) {
-            return conversationSteps.stream().map((IConversationStep conversationStep) ->
-                    conversationStep.<T>getLatestData(prefix)).collect(Collectors.toList());
+            return conversationSteps.stream()
+                    .map((IConversationStep conversationStep) -> conversationStep.<T>getLatestData(prefix))
+                    .collect(Collectors.toList());
         }
 
         @Override

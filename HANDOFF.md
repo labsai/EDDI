@@ -1,6 +1,6 @@
 # EDDI v6.0 — Current Status
 
-> **Last updated:** 2026-03-05 by conversation `cad9b9bd`
+> **Last updated:** 2026-03-05 by conversation `a266b030`
 > **Branch:** `feature/version-6.0.0`
 
 ## Completed
@@ -26,11 +26,27 @@
 - `src/main/java/ai/labs/eddi/engine/internal/RestBotEngine.java`
 - `src/test/java/ai/labs/eddi/engine/internal/ConversationServiceTest.java`
 
+### Phase 1, Item 2: Typed Memory Accessors ✅
+
+- [x] Created `MemoryKey<T>` — type-safe key class with phantom type parameter and `isPublic` flag
+- [x] Created `MemoryKeys` — central registry of well-known keys (`ACTIONS`, `INPUT`, `EXPRESSIONS_PARSED`, etc.)
+- [x] Added typed accessor methods (`get`, `getData`, `getLatestData`, `set`) to `IConversationStep`, `IWritableConversationStep`, `IConversationStepStack`
+- [x] Migrated 10 production files to use `MemoryKeys.*` constants
+- [x] 15 new tests in `MemoryKeyTest`, updated 4 existing test files
+- [x] All 533 tests pass (0 failures, 0 errors, 4 skipped)
+
+**Key files:**
+
+- `src/main/java/ai/labs/eddi/engine/memory/MemoryKey.java`
+- `src/main/java/ai/labs/eddi/engine/memory/MemoryKeys.java`
+- `src/main/java/ai/labs/eddi/engine/memory/IConversationMemory.java`
+- `src/test/java/ai/labs/eddi/engine/memory/MemoryKeyTest.java`
+
 ## Next Up
 
-### Phase 1, Item 2: Typed Memory Accessors (8 SP)
+### Phase 1, Item 3: Consolidate Configuration Stores (8 SP)
 
-Replace stringly-typed `memory.getCurrentStep().getLatestData("actions")` with type-safe accessors. See `docs/v6-planning/implementation_plan.md` Appendix F, Item 2 for details.
+Extract shared CRUD logic from per-resource MongoDB stores into a generic base class. See `docs/v6-planning/implementation_plan.md` Appendix F, Item 3 for details.
 
 ## Important Rules
 
