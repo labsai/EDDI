@@ -1,6 +1,6 @@
 # EDDI v6.0 — Current Status
 
-> **Last updated:** 2026-03-05 by conversation `a266b030`
+> **Last updated:** 2026-03-05 by conversation `fb8b2b9c`
 > **Branch:** `feature/version-6.0.0`
 
 ## Completed
@@ -42,11 +42,24 @@
 - `src/main/java/ai/labs/eddi/engine/memory/IConversationMemory.java`
 - `src/test/java/ai/labs/eddi/engine/memory/MemoryKeyTest.java`
 
+### Phase 1, Item 3: Consolidate Configuration Stores ✅ (commit `201c5f99`)
+
+- [x] Created `AbstractMongoResourceStore<T>` — generic base class with two constructors and 7 shared CRUD methods
+- [x] Refactored 8 stores to extend base class: `LangChainStore`, `ParserStore`, `PropertySetterStore`, `HttpCallsStore`, `BehaviorStore`, `OutputStore`, `RegularDictionaryStore`, `BotStore`, `PackageStore`
+- [x] ~350 lines of duplicated delegation code eliminated
+- [x] 7 new tests in `AbstractMongoResourceStoreTest`
+- [x] All 540 tests pass (0 failures, 0 errors, 4 skipped)
+
+**Key files:**
+
+- `src/main/java/ai/labs/eddi/datastore/mongo/AbstractMongoResourceStore.java`
+- `src/test/java/ai/labs/eddi/datastore/mongo/AbstractMongoResourceStoreTest.java`
+
 ## Next Up
 
-### Phase 1, Item 3: Consolidate Configuration Stores (8 SP)
+### Phase 1, Item 4: Centralize REST Error Handling (5 SP)
 
-Extract shared CRUD logic from per-resource MongoDB stores into a generic base class. See `docs/v6-planning/implementation_plan.md` Appendix F, Item 3 for details.
+Replace scattered try/catch + re-throw as `WebApplicationException` with a centralized JAX-RS `ExceptionMapper`. See `docs/v6-planning/implementation_plan.md` Appendix F, Item 4.
 
 ## Important Rules
 

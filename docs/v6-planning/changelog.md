@@ -68,6 +68,37 @@ Additive approach — typed methods sit alongside existing string-based methods 
 - [x] All 533 tests pass (0 failures, 0 errors, 4 skipped)
 - [x] No regressions
 
+### 2026-03-05 — Consolidate Configuration Stores
+
+**Repo:** EDDI  
+**Branch:** `feature/version-6.0.0`  
+**Phase:** 1 — Item #3
+
+**What changed:**
+
+- `AbstractMongoResourceStore.java` [NEW]: Generic abstract base class that encapsulates the shared `MongoResourceStorage` + `HistorizedResourceStore` constructor pattern and 7 CRUD delegation methods. Two constructors: standard (creates storage internally) and custom (accepts pre-built `HistorizedResourceStore` for stores with inner class extensions)
+- `LangChainStore.java` [MODIFIED]: 72→23 lines. Extends `AbstractMongoResourceStore`, all CRUD delegation removed
+- `ParserStore.java` [MODIFIED]: 69→23 lines. Same pattern
+- `PropertySetterStore.java` [MODIFIED]: 68→23 lines. Same pattern
+- `HttpCallsStore.java` [MODIFIED]: 91→41 lines. CRUD removed; `readActions()` retained
+- `BehaviorStore.java` [MODIFIED]: 98→57 lines. CRUD removed; `readActions()` + validation overrides retained
+- `OutputStore.java` [MODIFIED]: 127→93 lines. CRUD removed; filtering/sorting `read()` + `readActions()` retained
+- `RegularDictionaryStore.java` [MODIFIED]: 162→127 lines. CRUD removed; filtering/sorting + comparators retained
+- `BotStore.java` [MODIFIED]: 158→140 lines. Uses second constructor; inner classes + custom query retained
+- `PackageStore.java` [MODIFIED]: 171→155 lines. Same approach as BotStore
+- `AbstractMongoResourceStoreTest.java` [NEW]: 7 tests verifying CRUD delegation
+
+**Design decision:**
+Two-constructor base class: standard constructor for 7 stores, second constructor accepts pre-built `HistorizedResourceStore` for `BotStore`/`PackageStore` which have custom inner classes extending `MongoResourceStorage`. `@ConfigurationUpdate` annotation stays on base class `update()`/`delete()` — CDI interceptors bind by annotation regardless of concrete class. Stores with validation (e.g. `BehaviorStore`) override `create()`/`update()` and call `super` after validation.
+
+**Testing:**
+
+- [x] Builds cleanly
+- [x] All 540 tests pass (0 failures, 0 errors, 4 skipped)
+- [x] No regressions
+
+**Commit:** `refactor(configs): consolidate configuration stores into AbstractMongoResourceStore` (`201c5f99`)
+
 ### 2026-03-05 — Extract ConversationService from RestBotEngine
 
 **Repo:** EDDI  
