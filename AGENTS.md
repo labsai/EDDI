@@ -170,21 +170,19 @@ A new `ILifecycleTask` requires ALL of:
 
 **If picking up from a previous session:**
 
-1. Read `changelog.md` — it has a "Handoff Notes" section if the previous session was interrupted
-2. Run `git log -10 --oneline` across all repos to see recent commits
+1. Read `HANDOFF.md` — it has the current status, what's done, and what's next
+2. Run `git log -5 --oneline` on `feature/version-6.0.0` to see recent commits
 3. Run `git status` to check for uncommitted changes
 4. Check which phase/item from Section 3 is currently in progress
 
-**If ending a session mid-task:**
+**If ending a session (or at a natural break point):**
 
-1. Commit all working code (even partial) with `wip:` prefix
-2. Update `changelog.md` with:
-
-   ```markdown
-   ### Handoff Notes (session interrupted)
-
-   **In progress:** [what you were working on]
-   **Done so far:** [completed items]  
-   **Next steps:** [what needs to happen next]
-   **Open questions:** [any unresolved decisions]
-   ```
+1. Commit all working code (even partial) with `wip:` prefix if incomplete
+2. Update `HANDOFF.md` with:
+   - What was completed (with commit hashes)
+   - What's next (the specific Phase/Item from Section 3)
+   - Any open questions or decisions needed
+3. **Tell the user it's a good time for a new conversation** if:
+   - A phase is complete
+   - A major item (3+ SP) is done and tests pass
+   - Context is getting long (many files explored)
