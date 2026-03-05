@@ -1,6 +1,6 @@
 # EDDI v6.0 — Current Status
 
-> **Last updated:** 2026-03-05 by conversation `fb8b2b9c`
+> **Last updated:** 2026-03-06 by conversation `052fba42`
 > **Branch:** `feature/version-6.0.0`
 
 ## Completed
@@ -55,11 +55,28 @@
 - `src/main/java/ai/labs/eddi/datastore/mongo/AbstractMongoResourceStore.java`
 - `src/test/java/ai/labs/eddi/datastore/mongo/AbstractMongoResourceStoreTest.java`
 
+### Phase 1, Item 4: Centralize REST Error Handling ✅ (commit `d4ab62bd`)
+
+- [x] Created 4 JAX-RS `ExceptionMapper`s: `ResourceNotFoundExceptionMapper` (404), `ResourceStoreExceptionMapper` (500), `ResourceModifiedExceptionMapper` (409), `ResourceAlreadyExistsExceptionMapper` (409)
+- [x] Created `SneakyThrow` utility for rethrowing checked exceptions as unchecked (avoids touching 50+ files to change exception hierarchy)
+- [x] Refactored 22 REST classes to use `sneakyThrow` instead of manual exception translation
+- [x] Net reduction of 91 lines of boilerplate error handling code
+- [x] All 540 tests pass (0 failures, 0 errors, 4 skipped)
+
+**Key files:**
+
+- `src/main/java/ai/labs/eddi/engine/exception/SneakyThrow.java`
+- `src/main/java/ai/labs/eddi/engine/exception/Resource*ExceptionMapper.java` (4 files)
+
 ## Next Up
 
-### Phase 1, Item 4: Centralize REST Error Handling (5 SP)
+### Phase 1, Item 5: Streaming API (SSE endpoint, `StreamingChatModel`) — 🔴 Critical
 
-Replace scattered try/catch + re-throw as `WebApplicationException` with a centralized JAX-RS `ExceptionMapper`. See `docs/v6-planning/implementation_plan.md` Appendix F, Item 4.
+Add Server-Sent Events (SSE) support for real-time streaming of LLM responses. See `docs/v6-planning/implementation_plan.md` Part 8 Item 2.
+
+### Phase 1, Item 6: Decompose `LangchainTask` — 🟡 High
+
+Split the 583-line `LangchainTask` into focused classes: `ChatModelRegistry`, `LegacyChatExecutor`, `AgentOrchestrator`, `ConversationHistoryBuilder`. See Appendix F Item 3.
 
 ## Important Rules
 
