@@ -34,6 +34,7 @@
 - All work on **`feature/version-6.0.0`** branch (never `main`)
 - Read `AGENTS.md` for development order and guidelines
 - Read `GEMINI.md` (user rules) for Java coding standards
+- Read `docs/v6-planning/` for architecture analysis, changelog, and business logic analysis
 - Commit often with conventional commits
 - Run `.\mvnw test` before committing
 - Suggest a new conversation when a phase or major item is completed

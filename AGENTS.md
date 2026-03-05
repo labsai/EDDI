@@ -30,7 +30,11 @@
 
 ### Before Starting Any Work
 
-1. **Find and read the planning docs**: Search for `changelog.md` and `implementation_plan.md` in the Antigravity brain directory (under `~/.gemini/antigravity/brain/`). These contain the full audit (14 appendices, A-N) and a running log of all changes across sessions. If you cannot find them, search for files named `changelog.md` or `implementation_plan.md` under the user's home directory.
+1. **Read the planning docs** in [`docs/v6-planning/`](docs/v6-planning/):
+   - [`implementation_plan.md`](docs/v6-planning/implementation_plan.md) — Full architecture audit (14 appendices, A-N) and phased roadmap
+   - [`business-logic-analysis.md`](docs/v6-planning/business-logic-analysis.md) — Configuration model, Bot Father, parser/expression deep dive
+   - [`changelog.md`](docs/v6-planning/changelog.md) — Running log of all changes, decisions, and reasoning across sessions
+   - [`phase0-walkthrough.md`](docs/v6-planning/phase0-walkthrough.md) — Phase 0 completion summary (CORS + PathNavigator)
 2. **Check git status**: Run `git status` and `git log -5 --oneline` to see current branch state and recent work.
 
 ### During Work
@@ -47,7 +51,7 @@
 
 ### After Completing Work (or if interrupted/switching sessions)
 
-6. **Update the changelog**: Find `changelog.md` (same location as step 1) and add an entry with:
+6. **Update the changelog**: Edit [`docs/v6-planning/changelog.md`](docs/v6-planning/changelog.md) and add an entry with:
    - Date and short title
    - Repo and branch
    - What changed (files + reasoning)
@@ -156,13 +160,14 @@ A new `ILifecycleTask` requires ALL of:
 
 ### Key Files
 
-| File                                        | Purpose                                         |
-| ------------------------------------------- | ----------------------------------------------- |
-| `src/main/resources/application.properties` | Quarkus config (CORS, health, OpenAPI, MongoDB) |
-| `src/main/resources/initial-bots/`          | Bot Father and sample bot configs               |
-| `.circleci/config.yml`                      | Current CI (migrating to GitHub Actions)        |
-| `docs/`                                     | 40 markdown files, published at docs.labs.ai    |
-| `docker-compose.yml`                        | EDDI + MongoDB local setup                      |
+| File                                        | Purpose                                                   |
+| ------------------------------------------- | --------------------------------------------------------- |
+| `src/main/resources/application.properties` | Quarkus config (CORS, health, OpenAPI, MongoDB)           |
+| `src/main/resources/initial-bots/`          | Bot Father and sample bot configs                         |
+| `.circleci/config.yml`                      | Current CI (migrating to GitHub Actions)                  |
+| `docs/`                                     | 40 markdown files, published at docs.labs.ai              |
+| `docs/v6-planning/`                         | Architecture analysis, changelog, business logic analysis |
+| `docker-compose.yml`                        | EDDI + MongoDB local setup                                |
 
 ---
 
