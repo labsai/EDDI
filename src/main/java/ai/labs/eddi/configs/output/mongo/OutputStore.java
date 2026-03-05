@@ -4,8 +4,7 @@ import ai.labs.eddi.configs.output.IOutputStore;
 import ai.labs.eddi.configs.output.model.OutputConfiguration;
 import ai.labs.eddi.configs.output.model.OutputConfigurationSet;
 import ai.labs.eddi.datastore.IResourceStore;
-import ai.labs.eddi.datastore.mongo.HistorizedResourceStore;
-import ai.labs.eddi.datastore.mongo.MongoResourceStorage;
+import ai.labs.eddi.datastore.mongo.AbstractMongoResourceStore;
 import ai.labs.eddi.datastore.mongo.ResultManipulator;
 import ai.labs.eddi.datastore.serialization.IDocumentBuilder;
 import com.mongodb.reactivestreams.client.MongoDatabase;
@@ -22,42 +21,39 @@ import static ai.labs.eddi.utils.RuntimeUtilities.*;
  * @author ginccc
  */
 @ApplicationScoped
-public class OutputStore implements IOutputStore {
-    private final HistorizedResourceStore<OutputConfigurationSet> outputResourceStore;
+public class OutputStore extends AbstractMongoResourceStore<OutputConfigurationSet>
+        implements IOutputStore {
+
     private static final OutputComparator OUTPUT_COMPARATOR = new OutputComparator();
 
     @Inject
     public OutputStore(MongoDatabase database, IDocumentBuilder documentBuilder) {
-        checkNotNull(database, "database");
-        final String collectionName = "outputs";
-        MongoResourceStorage<OutputConfigurationSet> resourceStorage =
-                new MongoResourceStorage<>(database, collectionName, documentBuilder, OutputConfigurationSet.class);
-
-
-        this.outputResourceStore = new HistorizedResourceStore<>(resourceStorage);
+        super(database, "outputs", documentBuilder, OutputConfigurationSet.class);
     }
 
     @Override
-    public OutputConfigurationSet readIncludingDeleted(String id, Integer version) throws IResourceStore.ResourceNotFoundException, IResourceStore.ResourceStoreException {
-        return outputResourceStore.readIncludingDeleted(id, version);
-    }
-
-    @Override
-    public IResourceStore.IResourceId create(OutputConfigurationSet outputConfigurationSet) throws IResourceStore.ResourceStoreException {
+    public IResourceStore.IResourceId create(OutputConfigurationSet outputConfigurationSet)
+            throws IResourceStore.ResourceStoreException {
         checkCollectionNoNullElements(outputConfigurationSet.getOutputSet(), "outputSets");
-        return outputResourceStore.create(outputConfigurationSet);
+        return super.create(outputConfigurationSet);
     }
 
     @Override
-    public OutputConfigurationSet read(String id, Integer version) throws IResourceStore.ResourceNotFoundException, IResourceStore.ResourceStoreException {
-        return outputResourceStore.read(id, version);
+    @ConfigurationUpdate
+    public Integer update(String id, Integer version, OutputConfigurationSet outputConfigurationSet)
+            throws IResourceStore.ResourceStoreException, IResourceStore.ResourceModifiedException,
+            IResourceStore.ResourceNotFoundException {
+
+        checkCollectionNoNullElements(outputConfigurationSet.getOutputSet(), "outputSets");
+        return super.update(id, version, outputConfigurationSet);
     }
 
     @Override
-    public OutputConfigurationSet read(String id, Integer version, String filter, String order, Integer index, Integer limit)
+    public OutputConfigurationSet read(String id, Integer version, String filter, String order, Integer index,
+            Integer limit)
             throws IResourceStore.ResourceNotFoundException, IResourceStore.ResourceStoreException {
 
-        OutputConfigurationSet outputConfigurationSet = outputResourceStore.read(id, version);
+        OutputConfigurationSet outputConfigurationSet = read(id, version);
 
         ResultManipulator<OutputConfiguration> outputManipulator;
         outputManipulator = new ResultManipulator<>(outputConfigurationSet.getOutputSet(), OutputConfiguration.class);
@@ -84,37 +80,10 @@ public class OutputStore implements IOutputStore {
     public List<String> readActions(String id, Integer version, String filter, Integer limit)
             throws IResourceStore.ResourceStoreException, IResourceStore.ResourceNotFoundException {
 
-        List<String> actions = read(id, version).
-                getOutputSet().stream().
-                map(OutputConfiguration::getAction).
-                collect(Collectors.toList());
+        List<String> actions = read(id, version).getOutputSet().stream().map(OutputConfiguration::getAction)
+                .collect(Collectors.toList());
 
         return limit > 0 ? actions.subList(0, limit) : actions;
-    }
-
-    @Override
-    @ConfigurationUpdate
-    public Integer update(String id, Integer version, OutputConfigurationSet outputConfigurationSet)
-            throws IResourceStore.ResourceStoreException, IResourceStore.ResourceModifiedException, IResourceStore.ResourceNotFoundException {
-
-        checkCollectionNoNullElements(outputConfigurationSet.getOutputSet(), "outputSets");
-        return outputResourceStore.update(id, version, outputConfigurationSet);
-    }
-
-    @Override
-    @ConfigurationUpdate
-    public void delete(String id, Integer version) throws IResourceStore.ResourceModifiedException, IResourceStore.ResourceNotFoundException {
-        outputResourceStore.delete(id, version);
-    }
-
-    @Override
-    public void deleteAllPermanently(String id) {
-        outputResourceStore.deleteAllPermanently(id);
-    }
-
-    @Override
-    public IResourceStore.IResourceId getCurrentResourceId(String id) throws IResourceStore.ResourceNotFoundException {
-        return outputResourceStore.getCurrentResourceId(id);
     }
 
     private static class OutputComparator implements Comparator<OutputConfiguration> {

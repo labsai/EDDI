@@ -6,6 +6,7 @@ import ai.labs.eddi.configs.descriptor.mongo.DocumentDescriptorStore;
 import ai.labs.eddi.configs.documentdescriptor.IDocumentDescriptorStore;
 import ai.labs.eddi.configs.utilities.ResourceUtilities;
 import ai.labs.eddi.datastore.IResourceStore;
+import ai.labs.eddi.datastore.mongo.AbstractMongoResourceStore;
 import ai.labs.eddi.datastore.mongo.HistorizedResourceStore;
 import ai.labs.eddi.datastore.mongo.MongoResourceStorage;
 import ai.labs.eddi.datastore.serialization.IDocumentBuilder;
@@ -27,67 +28,52 @@ import static ai.labs.eddi.utils.RestUtilities.extractResourceId;
  */
 
 @ApplicationScoped
-public class BotStore implements IBotStore {
+public class BotStore extends AbstractMongoResourceStore<BotConfiguration> implements IBotStore {
     public static final String PACKAGES_FIELD = "packages";
     private final IDocumentDescriptorStore documentDescriptorStore;
     private final BotHistorizedResourceStore botResourceStore;
 
     @Inject
-    public BotStore(MongoDatabase database, IDocumentBuilder documentBuilder, DocumentDescriptorStore documentDescriptorStore) {
+    public BotStore(MongoDatabase database, IDocumentBuilder documentBuilder,
+            DocumentDescriptorStore documentDescriptorStore) {
+        super(createBotResourceStore(database, documentBuilder, documentDescriptorStore));
         this.documentDescriptorStore = documentDescriptorStore;
+        this.botResourceStore = (BotHistorizedResourceStore) this.resourceStore;
+    }
+
+    private static BotHistorizedResourceStore createBotResourceStore(MongoDatabase database,
+            IDocumentBuilder documentBuilder,
+            IDocumentDescriptorStore documentDescriptorStore) {
         RuntimeUtilities.checkNotNull(database, "database");
-        final String collectionName = "bots";
-        BotMongoResourceStorage resourceStorage =
-                new BotMongoResourceStorage(database, collectionName, documentBuilder, BotConfiguration.class);
-        this.botResourceStore = new BotHistorizedResourceStore(resourceStorage);
+        BotMongoResourceStorage resourceStorage = new BotMongoResourceStorage(database, "bots", documentBuilder,
+                BotConfiguration.class, documentDescriptorStore);
+        return new BotHistorizedResourceStore(resourceStorage);
     }
 
     @Override
-    public BotConfiguration readIncludingDeleted(String id, Integer version) throws IResourceStore.ResourceNotFoundException, IResourceStore.ResourceStoreException {
-        return botResourceStore.readIncludingDeleted(id, version);
-    }
-
-    @Override
-    public IResourceStore.IResourceId create(BotConfiguration botConfiguration) throws IResourceStore.ResourceStoreException {
+    public IResourceStore.IResourceId create(BotConfiguration botConfiguration)
+            throws IResourceStore.ResourceStoreException {
         RuntimeUtilities.checkCollectionNoNullElements(botConfiguration.getPackages(), PACKAGES_FIELD);
-        return botResourceStore.create(botConfiguration);
-    }
-
-    @Override
-    public BotConfiguration read(String id, Integer version) throws IResourceStore.ResourceNotFoundException, IResourceStore.ResourceStoreException {
-        return botResourceStore.read(id, version);
+        return super.create(botConfiguration);
     }
 
     @Override
     @IResourceStore.ConfigurationUpdate
-    public Integer update(String id, Integer version, BotConfiguration botConfiguration) throws IResourceStore.ResourceStoreException, IResourceStore.ResourceModifiedException, IResourceStore.ResourceNotFoundException {
+    public Integer update(String id, Integer version, BotConfiguration botConfiguration)
+            throws IResourceStore.ResourceStoreException, IResourceStore.ResourceModifiedException,
+            IResourceStore.ResourceNotFoundException {
         RuntimeUtilities.checkCollectionNoNullElements(botConfiguration.getPackages(), PACKAGES_FIELD);
-        return botResourceStore.update(id, version, botConfiguration);
+        return super.update(id, version, botConfiguration);
     }
 
-    @Override
-    @IResourceStore.ConfigurationUpdate
-    public void delete(String id, Integer version) throws IResourceStore.ResourceModifiedException, IResourceStore.ResourceNotFoundException {
-        botResourceStore.delete(id, version);
-    }
-
-    @Override
-    public void deleteAllPermanently(String id) {
-        botResourceStore.deleteAllPermanently(id);
-    }
-
-    @Override
-    public IResourceStore.IResourceId getCurrentResourceId(String id) throws IResourceStore.ResourceNotFoundException {
-        return botResourceStore.getCurrentResourceId(id);
-    }
-
-    public List<DocumentDescriptor> getBotDescriptorsContainingPackage(String packageId, Integer packageVersion, boolean includePreviousVersions)
+    public List<DocumentDescriptor> getBotDescriptorsContainingPackage(String packageId, Integer packageVersion,
+            boolean includePreviousVersions)
             throws IResourceStore.ResourceNotFoundException, IResourceStore.ResourceStoreException {
 
         List<DocumentDescriptor> ret = new LinkedList<>();
         do {
-            List<IResourceStore.IResourceId> botIdsContainingPackageUri =
-                    botResourceStore.getBotIdsContainingPackage(packageId, packageVersion);
+            List<IResourceStore.IResourceId> botIdsContainingPackageUri = botResourceStore
+                    .getBotIdsContainingPackage(packageId, packageVersion);
 
             for (IResourceStore.IResourceId botId : botIdsContainingPackageUri) {
 
@@ -96,8 +82,7 @@ public class BotStore implements IBotStore {
                 }
 
                 boolean alreadyContainsResource = ret.stream().anyMatch(
-                        descriptor ->
-                                extractResourceId(descriptor.getResource()).getId().equals(botId.getId()));
+                        descriptor -> extractResourceId(descriptor.getResource()).getId().equals(botId.getId()));
 
                 if (alreadyContainsResource) {
                     continue;
@@ -107,7 +92,7 @@ public class BotStore implements IBotStore {
                     var botDescriptor = documentDescriptorStore.readDescriptor(botId.getId(), botId.getVersion());
                     ret.add(botDescriptor);
                 } catch (ResourceNotFoundException e) {
-                    //skip, as this resource is not available anymore due to deletion
+                    // skip, as this resource is not available anymore due to deletion
                 }
             }
 
@@ -117,15 +102,18 @@ public class BotStore implements IBotStore {
         return ret;
     }
 
-    private class BotMongoResourceStorage extends MongoResourceStorage<BotConfiguration> {
+    private static class BotMongoResourceStorage extends MongoResourceStorage<BotConfiguration> {
         private static final String packageResourceURI = "eddi://ai.labs.package/packagestore/packages/";
         private static final String versionQueryParam = "?version=";
+        private final IDocumentDescriptorStore documentDescriptorStore;
 
         BotMongoResourceStorage(MongoDatabase database, String collectionName,
-                                IDocumentBuilder documentBuilder,
-                                Class<BotConfiguration> botConfigurationClass) {
+                IDocumentBuilder documentBuilder,
+                Class<BotConfiguration> botConfigurationClass,
+                IDocumentDescriptorStore documentDescriptorStore) {
 
             super(database, collectionName, documentBuilder, botConfigurationClass, PACKAGES_FIELD);
+            this.documentDescriptorStore = documentDescriptorStore;
         }
 
         List<IResourceStore.IResourceId> getBotIdsContainingPackageUri(String packageId, Integer packageVersion)
@@ -141,7 +129,7 @@ public class BotStore implements IBotStore {
         }
     }
 
-    private class BotHistorizedResourceStore extends HistorizedResourceStore<BotConfiguration> {
+    private static class BotHistorizedResourceStore extends HistorizedResourceStore<BotConfiguration> {
         private final BotMongoResourceStorage resourceStorage;
 
         BotHistorizedResourceStore(BotMongoResourceStorage resourceStorage) {
