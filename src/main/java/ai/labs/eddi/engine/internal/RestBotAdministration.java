@@ -25,6 +25,7 @@ import jakarta.ws.rs.WebApplicationException;
 import jakarta.ws.rs.core.MediaType;
 import jakarta.ws.rs.core.Response;
 import org.jboss.logging.Logger;
+import static ai.labs.eddi.engine.exception.SneakyThrow.sneakyThrow;
 
 import java.util.*;
 import java.util.concurrent.Callable;
@@ -116,8 +117,7 @@ public class RestBotAdministration implements IRestBotAdministration {
         } else if (e instanceof IllegalAccessException) {
             throwErrorForbidden(botId, version, (IllegalAccessException) e);
         } else {
-            log.error(e.getLocalizedMessage(), e);
-            throw new InternalServerErrorException();
+            throw sneakyThrow(e);
         }
     }
 
@@ -236,7 +236,7 @@ public class RestBotAdministration implements IRestBotAdministration {
     private Status throwError(String botId, Integer version, ServiceException e, String message) {
         message = String.format(message, botId, version);
         log.error(message, e);
-        throw new InternalServerErrorException();
+        throw sneakyThrow(e);
     }
 
     private Void throwErrorForbidden(String botId, Integer version, IllegalAccessException e) {

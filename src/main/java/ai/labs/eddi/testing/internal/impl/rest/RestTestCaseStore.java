@@ -14,10 +14,8 @@ import ai.labs.eddi.testing.rest.IRestTestCaseStore;
 import ai.labs.eddi.utils.RestUtilities;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
-import jakarta.ws.rs.InternalServerErrorException;
-import jakarta.ws.rs.NotFoundException;
-import jakarta.ws.rs.WebApplicationException;
 import jakarta.ws.rs.core.Response;
+import static ai.labs.eddi.engine.exception.SneakyThrow.sneakyThrow;
 import org.jboss.logging.Logger;
 
 import java.net.URI;
@@ -81,11 +79,9 @@ public class RestTestCaseStore implements IRestTestCaseStore {
             return retConversationDescriptors;
 
         } catch (IResourceStore.ResourceStoreException e) {
-            log.error(e.getMessage(), e);
-            throw new InternalServerErrorException(e.getMessage(), e);
+            throw sneakyThrow(e);
         } catch (IResourceStore.ResourceNotFoundException e) {
-            log.debug(e.getLocalizedMessage(), e);
-            throw new NotFoundException();
+            throw sneakyThrow(e);
         }
     }
 
@@ -110,11 +106,9 @@ public class RestTestCaseStore implements IRestTestCaseStore {
 
             testCaseDescriptorStore.setDescriptor(id, version, testCaseDescriptor);
         } catch (IResourceStore.ResourceStoreException e) {
-            log.error(e.getLocalizedMessage(), e);
-            throw new InternalServerErrorException(e.getLocalizedMessage(), e);
+            throw sneakyThrow(e);
         } catch (IResourceStore.ResourceNotFoundException e) {
-            log.debug(e.getLocalizedMessage(), e);
-            throw new NotFoundException(e.getLocalizedMessage(), e);
+            throw sneakyThrow(e);
         }
     }
 
@@ -123,10 +117,9 @@ public class RestTestCaseStore implements IRestTestCaseStore {
         try {
             return testCaseStore.read(id, 0);
         } catch (IResourceStore.ResourceStoreException e) {
-            log.error(e.getLocalizedMessage(), e);
-            throw new InternalServerErrorException(e);
+            throw sneakyThrow(e);
         } catch (IResourceStore.ResourceNotFoundException e) {
-            throw new NotFoundException();
+            throw sneakyThrow(e);
         }
     }
 
@@ -146,11 +139,9 @@ public class RestTestCaseStore implements IRestTestCaseStore {
             URI createdUri = RestUtilities.createURI(resourceURI, resourceId.getId(), versionQueryParam, 0);
             return Response.created(createdUri).build();
         } catch (IResourceStore.ResourceStoreException e) {
-            log.error(e.getLocalizedMessage(), e);
-            throw new InternalServerErrorException(e);
+            throw sneakyThrow(e);
         } catch (IResourceStore.ResourceNotFoundException e) {
-            log.debug(e.getLocalizedMessage(), e);
-            throw new NotFoundException();
+            throw sneakyThrow(e);
         }
     }
 
@@ -160,14 +151,11 @@ public class RestTestCaseStore implements IRestTestCaseStore {
             testCaseStore.update(id, 0, testCase);
             return RestUtilities.createURI(resourceURI, id, versionQueryParam, 0);
         } catch (IResourceStore.ResourceStoreException e) {
-            log.error(e.getLocalizedMessage(), e);
-            throw new InternalServerErrorException(e);
+            throw sneakyThrow(e);
         } catch (IResourceStore.ResourceNotFoundException e) {
-            log.debug(e.getLocalizedMessage(), e);
-            throw new NotFoundException();
+            throw sneakyThrow(e);
         } catch (IResourceStore.ResourceModifiedException e) {
-            log.debug(e.getLocalizedMessage(), e);
-            throw new WebApplicationException(Response.Status.CONFLICT);
+            throw sneakyThrow(e);
         }
     }
 
@@ -176,14 +164,11 @@ public class RestTestCaseStore implements IRestTestCaseStore {
         try {
             testCaseStore.delete(id, 0);
         } catch (IResourceStore.ResourceStoreException e) {
-            log.error(e.getLocalizedMessage(), e);
-            throw new InternalServerErrorException(e);
+            throw sneakyThrow(e);
         } catch (IResourceStore.ResourceModifiedException e) {
-            log.debug(e.getLocalizedMessage(), e);
-            throw new WebApplicationException(Response.Status.CONFLICT);
+            throw sneakyThrow(e);
         } catch (IResourceStore.ResourceNotFoundException e) {
-            log.debug(e.getLocalizedMessage(), e);
-            throw new NotFoundException();
+            throw sneakyThrow(e);
         }
     }
 }

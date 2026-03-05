@@ -5,6 +5,7 @@ import ai.labs.eddi.testing.internal.impl.TestCaseRuntime;
 import ai.labs.eddi.testing.model.TestCaseState;
 import ai.labs.eddi.testing.rest.IRestTestCaseRuntime;
 import org.jboss.logging.Logger;
+import static ai.labs.eddi.engine.exception.SneakyThrow.sneakyThrow;
 
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
@@ -33,8 +34,7 @@ public class RestTestCaseRuntime implements IRestTestCaseRuntime {
             testCaseRuntime.executeTestCase(id, testCaseStore.loadTestCase(id));
             return Response.accepted().build();
         } catch (Exception e) {
-            log.error(e.getLocalizedMessage(), e);
-            throw new InternalServerErrorException(e);
+            throw sneakyThrow(e);
         }
     }
 

@@ -15,8 +15,7 @@ import ai.labs.eddi.engine.runtime.ThreadContext;
 import io.quarkus.scheduler.Scheduled;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
-import jakarta.ws.rs.InternalServerErrorException;
-import jakarta.ws.rs.NotFoundException;
+import static ai.labs.eddi.engine.exception.SneakyThrow.sneakyThrow;
 import jakarta.ws.rs.core.Response;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.jboss.logging.Logger;
@@ -52,11 +51,10 @@ public class RestConversationStore implements IRestConversationStore {
 
     @Inject
     public RestConversationStore(IDocumentDescriptorStore documentDescriptorStore,
-                                 IConversationDescriptorStore conversationDescriptorStore,
-                                 IConversationMemoryStore conversationMemoryStore,
-                                 IRuntime runtime,
-                                 @ConfigProperty(name = "eddi.conversations.deleteEndedConversationsOnceOlderThanDays")
-                                 Integer deleteEndedConversationsOnceOlderThanDays) {
+            IConversationDescriptorStore conversationDescriptorStore,
+            IConversationMemoryStore conversationMemoryStore,
+            IRuntime runtime,
+            @ConfigProperty(name = "eddi.conversations.deleteEndedConversationsOnceOlderThanDays") Integer deleteEndedConversationsOnceOlderThanDays) {
 
         this.documentDescriptorStore = documentDescriptorStore;
         this.conversationDescriptorStore = conversationDescriptorStore;
@@ -67,9 +65,9 @@ public class RestConversationStore implements IRestConversationStore {
 
     @Override
     public List<ConversationDescriptor> readConversationDescriptors(Integer index, Integer limit, String filter,
-                                                                    String conversationId, String botId, Integer botVersion,
-                                                                    ConversationState conversationState,
-                                                                    ConversationDescriptor.ViewState viewState) {
+            String conversationId, String botId, Integer botVersion,
+            ConversationState conversationState,
+            ConversationDescriptor.ViewState viewState) {
         try {
             List<ConversationDescriptor> conversationDescriptors;
             List<ConversationDescriptor> retConversationDescriptors = new LinkedList<>();
@@ -118,11 +116,8 @@ public class RestConversationStore implements IRestConversationStore {
 
             return retConversationDescriptors;
 
-        } catch (IResourceStore.ResourceStoreException e) {
-            log.error(e.getMessage(), e);
-            throw new InternalServerErrorException(e.getMessage(), e);
-        } catch (IResourceStore.ResourceNotFoundException e) {
-            throw new NotFoundException();
+        } catch (IResourceStore.ResourceStoreException | IResourceStore.ResourceNotFoundException e) {
+            throw sneakyThrow(e);
         }
     }
 
@@ -133,23 +128,22 @@ public class RestConversationStore implements IRestConversationStore {
     }
 
     private void populateDataToDescriptor(ConversationDescriptor conversationDescriptor,
-                                          IResourceStore.IResourceId resourceId)
+            IResourceStore.IResourceId resourceId)
             throws IResourceStore.ResourceStoreException, IResourceStore.ResourceNotFoundException {
 
         try {
-            var memorySnapshot =
-                    conversationMemoryStore.loadConversationMemorySnapshot(resourceId.getId());
+            var memorySnapshot = conversationMemoryStore.loadConversationMemorySnapshot(resourceId.getId());
 
             if (conversationDescriptor.getUserId() == null) {
-                //fallback for older conversations pre v5.1.6
+                // fallback for older conversations pre v5.1.6
                 conversationDescriptor.setUserId(memorySnapshot.getUserId());
             }
             conversationDescriptor.setEnvironment(memorySnapshot.getEnvironment());
             conversationDescriptor.setConversationStepSize(memorySnapshot.getConversationSteps().size());
             conversationDescriptor.setConversationState(memorySnapshot.getConversationState());
             if (isNullOrEmpty(conversationDescriptor.getBotName())) {
-                var documentDescriptor =
-                        documentDescriptorStore.readDescriptor(memorySnapshot.getBotId(), memorySnapshot.getBotVersion());
+                var documentDescriptor = documentDescriptorStore.readDescriptor(memorySnapshot.getBotId(),
+                        memorySnapshot.getBotVersion());
 
                 conversationDescriptor.setBotName(documentDescriptor.getName());
             }
@@ -167,19 +161,16 @@ public class RestConversationStore implements IRestConversationStore {
 
         try {
             return conversationMemoryStore.loadConversationMemorySnapshot(conversationId);
-        } catch (IResourceStore.ResourceStoreException e) {
-            log.error(e.getMessage(), e);
-            throw new InternalServerErrorException(e);
-        } catch (IResourceStore.ResourceNotFoundException e) {
-            throw new NotFoundException(format("Conversation (%s) could not be found", conversationId));
+        } catch (IResourceStore.ResourceStoreException | IResourceStore.ResourceNotFoundException e) {
+            throw sneakyThrow(e);
         }
     }
 
     @Override
     public SimpleConversationMemorySnapshot readSimpleConversationLog(String conversationId,
-                                                                      Boolean returnDetailed,
-                                                                      Boolean returnCurrentStepOnly,
-                                                                      List<String> returningFields) {
+            Boolean returnDetailed,
+            Boolean returnCurrentStepOnly,
+            List<String> returningFields) {
         checkNotNull(conversationId, "conversationId");
         checkNotNull(returnDetailed, "returnDetailed");
         checkNotNull(returnCurrentStepOnly, "returnCurrentStepOnly");
@@ -189,11 +180,8 @@ public class RestConversationStore implements IRestConversationStore {
                     conversationMemoryStore.loadConversationMemorySnapshot(conversationId),
                     returnDetailed, returnCurrentStepOnly);
 
-        } catch (IResourceStore.ResourceStoreException e) {
-            log.error(e.getMessage(), e);
-            throw new InternalServerErrorException(e);
-        } catch (IResourceStore.ResourceNotFoundException e) {
-            throw new NotFoundException(format("Conversation (%s) could not be found", conversationId));
+        } catch (IResourceStore.ResourceStoreException | IResourceStore.ResourceNotFoundException e) {
+            throw sneakyThrow(e);
         }
     }
 
@@ -207,7 +195,8 @@ public class RestConversationStore implements IRestConversationStore {
             log.info(format("Conversation has been permanently deleted (conversationId=%s)", conversationId));
         }
 
-        // DocumentDescriptorInterceptor will mark the DocumentDescriptor of this resource as deleted,
+        // DocumentDescriptorInterceptor will mark the DocumentDescriptor of this
+        // resource as deleted,
         // regardless of whether it has been permanently deleted or not
     }
 
@@ -215,8 +204,8 @@ public class RestConversationStore implements IRestConversationStore {
     public void deleteEndedConversationsOlderThanXDays() {
         runtime.submitCallable(() -> {
             try {
-                var amountOfEndedConversations =
-                        permanentlyDeleteEndedConversationLogs(deleteEndedConversationsOnceOlderThanDays);
+                var amountOfEndedConversations = permanentlyDeleteEndedConversationLogs(
+                        deleteEndedConversationsOnceOlderThanDays);
 
                 if (amountOfEndedConversations > 0) {
                     log.info(format("Successfully deleted %s conversations, which were older than %s days",
@@ -285,8 +274,8 @@ public class RestConversationStore implements IRestConversationStore {
                         conversationId,
                         ConversationState.ENDED);
 
-                ConversationDescriptor conversationDescriptor = conversationDescriptorStore.
-                        readDescriptor(conversationId, 0);
+                ConversationDescriptor conversationDescriptor = conversationDescriptorStore
+                        .readDescriptor(conversationId, 0);
                 conversationDescriptor.setConversationState(ConversationState.ENDED);
                 conversationDescriptorStore.setDescriptor(conversationId, 0, conversationDescriptor);
 
@@ -295,8 +284,7 @@ public class RestConversationStore implements IRestConversationStore {
 
             return Response.ok().build();
         } catch (IResourceStore.ResourceStoreException | IResourceStore.ResourceNotFoundException e) {
-            log.error(e.getLocalizedMessage(), e);
-            throw new InternalServerErrorException();
+            throw sneakyThrow(e);
         }
     }
 }

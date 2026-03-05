@@ -13,6 +13,7 @@ import jakarta.inject.Inject;
 import jakarta.ws.rs.InternalServerErrorException;
 import jakarta.ws.rs.core.Response;
 import org.jboss.logging.Logger;
+import static ai.labs.eddi.engine.exception.SneakyThrow.sneakyThrow;
 
 import java.util.List;
 
@@ -41,8 +42,7 @@ public class RestLangChainStore implements IRestLangChainStore {
         try {
             return Response.ok(jsonSchemaCreator.generateSchema(LangChainConfiguration.class)).build();
         } catch (Exception e) {
-            log.error(e.getLocalizedMessage(), e);
-            throw new InternalServerErrorException();
+            throw sneakyThrow(e);
         }
     }
 

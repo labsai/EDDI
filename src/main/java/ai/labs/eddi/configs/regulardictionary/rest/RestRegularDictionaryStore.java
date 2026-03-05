@@ -14,9 +14,10 @@ import org.jboss.logging.Logger;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import jakarta.ws.rs.InternalServerErrorException;
-import jakarta.ws.rs.NotFoundException;
 import jakarta.ws.rs.core.Response;
 import java.util.List;
+
+import static ai.labs.eddi.engine.exception.SneakyThrow.sneakyThrow;
 
 /**
  * @author ginccc
@@ -32,8 +33,8 @@ public class RestRegularDictionaryStore implements IRestRegularDictionaryStore {
 
     @Inject
     public RestRegularDictionaryStore(IRegularDictionaryStore regularDictionaryStore,
-                                      IDocumentDescriptorStore documentDescriptorStore,
-                                      IJsonSchemaCreator jsonSchemaCreator) {
+            IDocumentDescriptorStore documentDescriptorStore,
+            IJsonSchemaCreator jsonSchemaCreator) {
         restVersionInfo = new RestVersionInfo<>(resourceURI, regularDictionaryStore, documentDescriptorStore);
         this.regularDictionaryStore = regularDictionaryStore;
         this.jsonSchemaCreator = jsonSchemaCreator;
@@ -44,8 +45,7 @@ public class RestRegularDictionaryStore implements IRestRegularDictionaryStore {
         try {
             return Response.ok(jsonSchemaCreator.generateSchema(RegularDictionaryConfiguration.class)).build();
         } catch (Exception e) {
-            log.error(e.getLocalizedMessage(), e);
-            throw new InternalServerErrorException();
+            throw sneakyThrow(e);
         }
     }
 
@@ -56,24 +56,23 @@ public class RestRegularDictionaryStore implements IRestRegularDictionaryStore {
 
     @Override
     public RegularDictionaryConfiguration readRegularDictionary(String id, Integer version, String filter,
-                                                                String order, Integer index, Integer limit) {
+            String order, Integer index, Integer limit) {
         return restVersionInfo.read(id, version);
     }
 
     @Override
-    public List<String> readExpressions(String id, Integer version, String filter, String order, Integer index, Integer limit) {
+    public List<String> readExpressions(String id, Integer version, String filter, String order, Integer index,
+            Integer limit) {
         try {
             return regularDictionaryStore.readExpressions(id, version, filter, order, index, limit);
-        } catch (IResourceStore.ResourceStoreException e) {
-            log.error(e.getLocalizedMessage(), e);
-            throw new InternalServerErrorException(e.getLocalizedMessage(), e);
-        } catch (IResourceStore.ResourceNotFoundException e) {
-            throw new NotFoundException(e.getLocalizedMessage(), e);
+        } catch (IResourceStore.ResourceStoreException | IResourceStore.ResourceNotFoundException e) {
+            throw sneakyThrow(e);
         }
     }
 
     @Override
-    public Response updateRegularDictionary(String id, Integer version, RegularDictionaryConfiguration regularDictionaryConfiguration) {
+    public Response updateRegularDictionary(String id, Integer version,
+            RegularDictionaryConfiguration regularDictionaryConfiguration) {
         return restVersionInfo.update(id, version, regularDictionaryConfiguration);
     }
 
@@ -89,19 +88,16 @@ public class RestRegularDictionaryStore implements IRestRegularDictionaryStore {
 
     @Override
     public Response patchRegularDictionary(String id, Integer version,
-                                           List<PatchInstruction<RegularDictionaryConfiguration>> patchInstructions) {
+            List<PatchInstruction<RegularDictionaryConfiguration>> patchInstructions) {
         try {
             var currentRegularDictionaryConfiguration = regularDictionaryStore.read(id, version);
-            var patchedRegularDictionaryConfiguration =
-                    patchDocument(currentRegularDictionaryConfiguration, patchInstructions);
+            var patchedRegularDictionaryConfiguration = patchDocument(currentRegularDictionaryConfiguration,
+                    patchInstructions);
 
             return updateRegularDictionary(id, version, patchedRegularDictionaryConfiguration);
 
-        } catch (IResourceStore.ResourceStoreException e) {
-            log.error(e.getLocalizedMessage(), e);
-            throw new InternalServerErrorException(e.getLocalizedMessage(), e);
-        } catch (IResourceStore.ResourceNotFoundException e) {
-            throw new NotFoundException(e.getLocalizedMessage(), e);
+        } catch (IResourceStore.ResourceStoreException | IResourceStore.ResourceNotFoundException e) {
+            throw sneakyThrow(e);
         }
     }
 
@@ -124,7 +120,7 @@ public class RestRegularDictionaryStore implements IRestRegularDictionaryStore {
                     currentDictionaryConfig.getPhrases().removeAll(regularConfigPatch.getPhrases());
                 }
                 default ->
-                        throw new IResourceStore.ResourceStoreException("Patch operation must be either SET or DELETE!");
+                    throw new IResourceStore.ResourceStoreException("Patch operation must be either SET or DELETE!");
             }
         }
 
@@ -137,11 +133,8 @@ public class RestRegularDictionaryStore implements IRestRegularDictionaryStore {
         try {
             var regularDictionaryConfiguration = regularDictionaryStore.read(id, version);
             return restVersionInfo.create(regularDictionaryConfiguration);
-        } catch (IResourceStore.ResourceNotFoundException e) {
-            throw new NotFoundException();
-        } catch (IResourceStore.ResourceStoreException e) {
-            log.error(e.getLocalizedMessage(), e);
-            throw new InternalServerErrorException();
+        } catch (IResourceStore.ResourceNotFoundException | IResourceStore.ResourceStoreException e) {
+            throw sneakyThrow(e);
         }
     }
 

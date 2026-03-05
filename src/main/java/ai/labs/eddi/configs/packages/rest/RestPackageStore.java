@@ -25,6 +25,7 @@ import java.util.List;
 import java.util.Map;
 
 import static ai.labs.eddi.configs.utilities.ResourceUtilities.*;
+import static ai.labs.eddi.engine.exception.SneakyThrow.sneakyThrow;
 import static ai.labs.eddi.utils.RuntimeUtilities.isNullOrEmpty;
 import static jakarta.ws.rs.core.Response.Status.BAD_REQUEST;
 
@@ -42,9 +43,9 @@ public class RestPackageStore implements IRestPackageStore {
 
     @Inject
     public RestPackageStore(IPackageStore packageStore,
-                            ResourceClientLibrary resourceClientLibrary,
-                            IDocumentDescriptorStore documentDescriptorStore,
-                            IJsonSchemaCreator jsonSchemaCreator) {
+            ResourceClientLibrary resourceClientLibrary,
+            IDocumentDescriptorStore documentDescriptorStore,
+            IJsonSchemaCreator jsonSchemaCreator) {
         restVersionInfo = new RestVersionInfo<>(resourceURI, packageStore, documentDescriptorStore);
         this.documentDescriptorStore = documentDescriptorStore;
         this.packageStore = packageStore;
@@ -57,8 +58,7 @@ public class RestPackageStore implements IRestPackageStore {
         try {
             return Response.ok(jsonSchemaCreator.generateSchema(PackageConfiguration.class)).build();
         } catch (Exception e) {
-            log.error(e.getLocalizedMessage(), e);
-            throw new InternalServerErrorException();
+            throw sneakyThrow(e);
         }
     }
 
@@ -69,10 +69,10 @@ public class RestPackageStore implements IRestPackageStore {
 
     @Override
     public List<DocumentDescriptor> readPackageDescriptors(String filter,
-                                                           Integer index,
-                                                           Integer limit,
-                                                           String containingResourceUri,
-                                                           Boolean includePreviousVersions) {
+            Integer index,
+            Integer limit,
+            String containingResourceUri,
+            Boolean includePreviousVersions) {
 
         if (validateUri(containingResourceUri) == null) {
             return createMalFormattedResourceUriException(containingResourceUri);
@@ -83,11 +83,9 @@ public class RestPackageStore implements IRestPackageStore {
                     containingResourceUri,
                     includePreviousVersions);
         } catch (IResourceStore.ResourceNotFoundException | IResourceStore.ResourceStoreException e) {
-            log.error(e.getLocalizedMessage(), e);
-            throw new InternalServerErrorException();
+            throw sneakyThrow(e);
         }
     }
-
 
     @Override
     public PackageConfiguration readPackage(String id, Integer version) {
@@ -181,12 +179,12 @@ public class RestPackageStore implements IRestPackageStore {
             }
 
             Response createPackageResponse = restVersionInfo.create(packageConfiguration);
-            createDocumentDescriptorForDuplicate(documentDescriptorStore, id, version, createPackageResponse.getLocation());
+            createDocumentDescriptorForDuplicate(documentDescriptorStore, id, version,
+                    createPackageResponse.getLocation());
 
             return createPackageResponse;
         } catch (Exception e) {
-            log.error(e.getLocalizedMessage(), e);
-            throw new InternalServerErrorException();
+            throw sneakyThrow(e);
         }
     }
 
@@ -235,7 +233,8 @@ public class RestPackageStore implements IRestPackageStore {
         if (isNullOrEmpty(newResourceLocation)) {
             String errorMsg = String.format(
                     "New resource for %s could not be created. " +
-                            "Mission Location Header.", resourceUriObj);
+                            "Mission Location Header.",
+                    resourceUriObj);
             throw new ServiceException(errorMsg);
         }
 

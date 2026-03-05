@@ -20,6 +20,7 @@ import jakarta.ws.rs.core.HttpHeaders;
 import jakarta.ws.rs.core.UriInfo;
 import jakarta.ws.rs.ext.Provider;
 import org.jboss.logging.Logger;
+import static ai.labs.eddi.engine.exception.SneakyThrow.sneakyThrow;
 
 import java.net.URI;
 import java.util.Date;
@@ -122,8 +123,7 @@ public class DocumentDescriptorFilter implements ContainerResponseFilter {
             log.debug(e.getLocalizedMessage(), e);
             throw new BadRequestException(e.getLocalizedMessage());
         } catch (Exception e) {
-            log.error(e.getLocalizedMessage(), e);
-            throw new InternalServerErrorException();
+            throw sneakyThrow(e);
         }
     }
 

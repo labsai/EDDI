@@ -9,6 +9,7 @@ import ai.labs.eddi.configs.schema.IJsonSchemaCreator;
 import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.configs.documentdescriptor.model.DocumentDescriptor;
 import org.jboss.logging.Logger;
+import static ai.labs.eddi.engine.exception.SneakyThrow.sneakyThrow;
 
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
@@ -42,8 +43,7 @@ public class RestPropertySetterStore implements IRestPropertySetterStore {
         try {
             return Response.ok(jsonSchemaCreator.generateSchema(PropertySetterConfiguration.class)).build();
         } catch (Exception e) {
-            log.error(e.getLocalizedMessage(), e);
-            throw new InternalServerErrorException();
+            throw sneakyThrow(e);
         }
     }
 

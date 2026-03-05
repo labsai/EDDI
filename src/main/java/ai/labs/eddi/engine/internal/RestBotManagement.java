@@ -25,6 +25,7 @@ import lombok.NoArgsConstructor;
 import lombok.Setter;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.jboss.logging.Logger;
+import static ai.labs.eddi.engine.exception.SneakyThrow.sneakyThrow;
 
 import java.net.URI;
 import java.util.List;
@@ -168,8 +169,7 @@ public class RestBotManagement implements IRestBotManagement {
             }
             return Response.ok().build();
         } catch (IResourceStore.ResourceStoreException e) {
-            log.error(e.getLocalizedMessage(), e);
-            throw new InternalServerErrorException();
+            throw sneakyThrow(e);
         }
     }
 
@@ -249,8 +249,7 @@ public class RestBotManagement implements IRestBotManagement {
         try {
             userConversationStore.deleteUserConversation(intent, userId);
         } catch (IResourceStore.ResourceStoreException e) {
-            log.error(e.getLocalizedMessage(), e);
-            throw new InternalServerErrorException();
+            throw sneakyThrow(e);
         }
     }
 
@@ -286,8 +285,7 @@ public class RestBotManagement implements IRestBotManagement {
                                 botDeployment.getEnvironment(),
                                 responseHttpCode));
             } catch (IResourceStore.ResourceStoreException e) {
-                log.error(e.getLocalizedMessage(), e);
-                throw new InternalServerErrorException();
+                throw sneakyThrow(e);
             }
         } else {
             throw new CannotCreateConversationException(
@@ -326,8 +324,7 @@ public class RestBotManagement implements IRestBotManagement {
         try {
             return userConversationStore.readUserConversation(intent, userId);
         } catch (IResourceStore.ResourceStoreException e) {
-            log.error(e.getLocalizedMessage(), e);
-            throw new InternalServerErrorException();
+            throw sneakyThrow(e);
         }
     }
 

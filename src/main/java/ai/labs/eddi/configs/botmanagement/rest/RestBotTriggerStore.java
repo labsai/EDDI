@@ -8,13 +8,12 @@ import ai.labs.eddi.engine.caching.ICacheFactory;
 import ai.labs.eddi.engine.model.BotTriggerConfiguration;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
-import jakarta.ws.rs.InternalServerErrorException;
-import jakarta.ws.rs.NotFoundException;
-import jakarta.ws.rs.WebApplicationException;
 import jakarta.ws.rs.core.Response;
 import org.jboss.logging.Logger;
 
 import java.util.List;
+
+import static ai.labs.eddi.engine.exception.SneakyThrow.sneakyThrow;
 
 /**
  * @author ginccc
@@ -30,7 +29,7 @@ public class RestBotTriggerStore implements IRestBotTriggerStore {
 
     @Inject
     public RestBotTriggerStore(IBotTriggerStore botTriggerStore,
-                               ICacheFactory cacheFactory) {
+            ICacheFactory cacheFactory) {
         this.botTriggerStore = botTriggerStore;
         botTriggersCache = cacheFactory.getCache(CACHE_NAME);
     }
@@ -40,8 +39,7 @@ public class RestBotTriggerStore implements IRestBotTriggerStore {
         try {
             return botTriggerStore.readAllBotTriggers();
         } catch (IResourceStore.ResourceStoreException e) {
-            log.error(e.getLocalizedMessage(), e);
-            throw new InternalServerErrorException(e.getLocalizedMessage());
+            throw sneakyThrow(e);
         }
     }
 
@@ -55,11 +53,8 @@ public class RestBotTriggerStore implements IRestBotTriggerStore {
             }
 
             return botTriggerConfiguration;
-        } catch (IResourceStore.ResourceNotFoundException e) {
-            throw new NotFoundException(e.getLocalizedMessage());
-        } catch (IResourceStore.ResourceStoreException e) {
-            log.error(e.getLocalizedMessage(), e);
-            throw new InternalServerErrorException(e.getLocalizedMessage());
+        } catch (IResourceStore.ResourceNotFoundException | IResourceStore.ResourceStoreException e) {
+            throw sneakyThrow(e);
         }
     }
 
@@ -69,11 +64,8 @@ public class RestBotTriggerStore implements IRestBotTriggerStore {
             botTriggerStore.updateBotTrigger(intent, botTriggerConfiguration);
             botTriggersCache.put(intent, botTriggerConfiguration);
             return Response.ok().build();
-        } catch (IResourceStore.ResourceNotFoundException e) {
-            throw new NotFoundException(e.getLocalizedMessage());
-        } catch (IResourceStore.ResourceStoreException e) {
-            log.error(e.getLocalizedMessage(), e);
-            throw new InternalServerErrorException(e.getLocalizedMessage());
+        } catch (IResourceStore.ResourceNotFoundException | IResourceStore.ResourceStoreException e) {
+            throw sneakyThrow(e);
         }
     }
 
@@ -83,11 +75,8 @@ public class RestBotTriggerStore implements IRestBotTriggerStore {
             botTriggerStore.createBotTrigger(botTriggerConfiguration);
             botTriggersCache.put(botTriggerConfiguration.getIntent(), botTriggerConfiguration);
             return Response.ok().build();
-        } catch (IResourceStore.ResourceAlreadyExistsException e) {
-            throw new WebApplicationException(e.getLocalizedMessage(), Response.Status.CONFLICT);
-        } catch (IResourceStore.ResourceStoreException e) {
-            log.error(e.getLocalizedMessage(), e);
-            throw new InternalServerErrorException(e.getLocalizedMessage());
+        } catch (IResourceStore.ResourceAlreadyExistsException | IResourceStore.ResourceStoreException e) {
+            throw sneakyThrow(e);
         }
     }
 
@@ -98,8 +87,7 @@ public class RestBotTriggerStore implements IRestBotTriggerStore {
             botTriggersCache.remove(intent);
             return Response.ok().build();
         } catch (IResourceStore.ResourceStoreException e) {
-            log.error(e.getLocalizedMessage(), e);
-            throw new InternalServerErrorException(e.getLocalizedMessage());
+            throw sneakyThrow(e);
         }
     }
 }

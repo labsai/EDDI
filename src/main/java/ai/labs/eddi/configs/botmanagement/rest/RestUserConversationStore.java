@@ -10,10 +10,9 @@ import org.jboss.logging.Logger;
 
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
-import jakarta.ws.rs.InternalServerErrorException;
-import jakarta.ws.rs.NotFoundException;
-import jakarta.ws.rs.WebApplicationException;
 import jakarta.ws.rs.core.Response;
+
+import static ai.labs.eddi.engine.exception.SneakyThrow.sneakyThrow;
 
 /**
  * @author ginccc
@@ -29,7 +28,7 @@ public class RestUserConversationStore implements IRestUserConversationStore {
 
     @Inject
     public RestUserConversationStore(IUserConversationStore userConversationStore,
-                                     ICacheFactory cacheFactory) {
+            ICacheFactory cacheFactory) {
         this.userConversationStore = userConversationStore;
         userConversationCache = cacheFactory.getCache(CACHE_NAME);
     }
@@ -49,14 +48,13 @@ public class RestUserConversationStore implements IRestUserConversationStore {
             if (userConversation == null) {
                 String message = "UserConversation with intent=%s and userId=%s does not exist.";
                 message = String.format(message, intent, userId);
-                throw new NotFoundException(message);
+                throw new IResourceStore.ResourceNotFoundException(message);
             }
 
             return userConversation;
 
-        } catch (IResourceStore.ResourceStoreException e) {
-            log.error(e.getLocalizedMessage(), e);
-            throw new InternalServerErrorException(e.getLocalizedMessage());
+        } catch (IResourceStore.ResourceStoreException | IResourceStore.ResourceNotFoundException e) {
+            throw sneakyThrow(e);
         }
     }
 
@@ -66,11 +64,8 @@ public class RestUserConversationStore implements IRestUserConversationStore {
             userConversationStore.createUserConversation(userConversation);
             userConversationCache.put(calculateCacheKey(intent, userId), userConversation);
             return Response.ok().build();
-        } catch (IResourceStore.ResourceAlreadyExistsException e) {
-            throw new WebApplicationException(e.getLocalizedMessage(), Response.Status.CONFLICT);
-        } catch (IResourceStore.ResourceStoreException e) {
-            log.error(e.getLocalizedMessage(), e);
-            throw new InternalServerErrorException(e.getLocalizedMessage());
+        } catch (IResourceStore.ResourceAlreadyExistsException | IResourceStore.ResourceStoreException e) {
+            throw sneakyThrow(e);
         }
     }
 
@@ -81,8 +76,7 @@ public class RestUserConversationStore implements IRestUserConversationStore {
             userConversationCache.remove(calculateCacheKey(intent, userId));
             return Response.ok().build();
         } catch (IResourceStore.ResourceStoreException e) {
-            log.error(e.getLocalizedMessage(), e);
-            throw new InternalServerErrorException(e.getLocalizedMessage());
+            throw sneakyThrow(e);
         }
     }
 

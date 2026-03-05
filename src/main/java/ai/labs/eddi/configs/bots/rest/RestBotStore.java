@@ -23,6 +23,7 @@ import java.net.URI;
 import java.util.List;
 
 import static ai.labs.eddi.configs.utilities.ResourceUtilities.*;
+import static ai.labs.eddi.engine.exception.SneakyThrow.sneakyThrow;
 import static jakarta.ws.rs.core.Response.Status.BAD_REQUEST;
 
 /**
@@ -42,9 +43,9 @@ public class RestBotStore implements IRestBotStore {
 
     @Inject
     public RestBotStore(IBotStore botStore,
-                        IRestPackageStore restPackageStore,
-                        IDocumentDescriptorStore documentDescriptorStore,
-                        IJsonSchemaCreator jsonSchemaCreator) {
+            IRestPackageStore restPackageStore,
+            IDocumentDescriptorStore documentDescriptorStore,
+            IJsonSchemaCreator jsonSchemaCreator) {
         restVersionInfo = new RestVersionInfo<>(resourceURI, botStore, documentDescriptorStore);
         this.documentDescriptorStore = documentDescriptorStore;
         this.botStore = botStore;
@@ -57,8 +58,7 @@ public class RestBotStore implements IRestBotStore {
         try {
             return Response.ok(jsonSchemaCreator.generateSchema(BotConfiguration.class)).build();
         } catch (Exception e) {
-            log.error(e.getLocalizedMessage(), e);
-            throw new InternalServerErrorException();
+            throw sneakyThrow(e);
         }
     }
 
@@ -69,7 +69,7 @@ public class RestBotStore implements IRestBotStore {
 
     @Override
     public List<DocumentDescriptor> readBotDescriptors(String filter, Integer index, Integer limit,
-                                                       String containingPackageUri, Boolean includePreviousVersions) {
+            String containingPackageUri, Boolean includePreviousVersions) {
 
         IResourceId validatedResourceId = validateUri(containingPackageUri);
         if (validatedResourceId == null || !containingPackageUri.startsWith(PACKAGE_URI)) {
@@ -80,8 +80,7 @@ public class RestBotStore implements IRestBotStore {
             return botStore.getBotDescriptorsContainingPackage(
                     validatedResourceId.getId(), validatedResourceId.getVersion(), includePreviousVersions);
         } catch (IResourceStore.ResourceNotFoundException | IResourceStore.ResourceStoreException e) {
-            log.error(e.getLocalizedMessage(), e);
-            throw new InternalServerErrorException();
+            throw sneakyThrow(e);
         }
     }
 
@@ -134,8 +133,8 @@ public class RestBotStore implements IRestBotStore {
                 for (int i = 0; i < packages.size(); i++) {
                     URI packageUri = packages.get(i);
                     IResourceId resourceId = RestUtilities.extractResourceId(packageUri);
-                    Response duplicateResourceResponse = restPackageStore.
-                            duplicatePackage(resourceId.getId(), resourceId.getVersion(), true);
+                    Response duplicateResourceResponse = restPackageStore.duplicatePackage(resourceId.getId(),
+                            resourceId.getVersion(), true);
                     URI newResourceLocation = duplicateResourceResponse.getLocation();
                     packages.set(i, newResourceLocation);
                 }
@@ -146,8 +145,7 @@ public class RestBotStore implements IRestBotStore {
 
             return createBotResponse;
         } catch (Exception e) {
-            log.error(e.getLocalizedMessage(), e);
-            throw new InternalServerErrorException();
+            throw sneakyThrow(e);
         }
     }
 

@@ -19,6 +19,7 @@ import jakarta.ws.rs.container.AsyncResponse;
 import jakarta.ws.rs.core.Response;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.jboss.logging.Logger;
+import static ai.labs.eddi.engine.exception.SneakyThrow.sneakyThrow;
 
 import java.util.Collections;
 import java.util.HashMap;
@@ -97,7 +98,7 @@ public class RestBotEngine implements IRestBotEngine {
             LOGGER.error(e.getLocalizedMessage(), e);
             throw new InternalServerErrorException(e.getLocalizedMessage(), e);
         } catch (ResourceNotFoundException e) {
-            throw new NotFoundException();
+            throw sneakyThrow(e);
         }
     }
 
@@ -108,7 +109,7 @@ public class RestBotEngine implements IRestBotEngine {
             return Response.ok(result.content(), result.mediaType()).build();
         } catch (ResourceStoreException | ResourceNotFoundException e) {
             LOGGER.error(e.getLocalizedMessage(), e);
-            throw new InternalServerErrorException();
+            throw sneakyThrow(e);
         }
     }
 
@@ -197,9 +198,9 @@ public class RestBotEngine implements IRestBotEngine {
             return conversationService.isUndoAvailable(environment, botId, conversationId);
         } catch (ResourceStoreException e) {
             LOGGER.error(e.getLocalizedMessage(), e);
-            throw new InternalServerErrorException();
+            throw sneakyThrow(e);
         } catch (ResourceNotFoundException e) {
-            throw new NotFoundException();
+            throw sneakyThrow(e);
         }
     }
 
@@ -212,7 +213,7 @@ public class RestBotEngine implements IRestBotEngine {
             LOGGER.error(e.getLocalizedMessage(), e);
             throw new InternalServerErrorException("Error while processing message!", e);
         } catch (ResourceNotFoundException e) {
-            throw new NotFoundException();
+            throw sneakyThrow(e);
         } catch (ResourceStoreException e) {
             LOGGER.error(e.getLocalizedMessage(), e);
             throw new InternalServerErrorException(e.getLocalizedMessage(), e);
@@ -224,10 +225,10 @@ public class RestBotEngine implements IRestBotEngine {
         try {
             return conversationService.isRedoAvailable(environment, botId, conversationId);
         } catch (ResourceStoreException e) {
-            throw new NotFoundException();
+            throw sneakyThrow(e);
         } catch (ResourceNotFoundException e) {
             LOGGER.error(e.getLocalizedMessage(), e);
-            throw new InternalServerErrorException();
+            throw sneakyThrow(e);
         }
     }
 
@@ -240,7 +241,7 @@ public class RestBotEngine implements IRestBotEngine {
             LOGGER.error(e.getLocalizedMessage(), e);
             throw new InternalServerErrorException("Error while processing message!", e);
         } catch (ResourceNotFoundException e) {
-            throw new NotFoundException();
+            throw sneakyThrow(e);
         } catch (ResourceStoreException e) {
             LOGGER.error(e.getLocalizedMessage(), e);
             throw new InternalServerErrorException(e.getLocalizedMessage(), e);

@@ -26,6 +26,7 @@ import jakarta.ws.rs.InternalServerErrorException;
 import jakarta.ws.rs.NotFoundException;
 import jakarta.ws.rs.core.Response;
 import org.jboss.logging.Logger;
+import static ai.labs.eddi.engine.exception.SneakyThrow.sneakyThrow;
 
 import java.io.*;
 import java.net.URI;
@@ -102,7 +103,7 @@ public class RestExportService extends AbstractBackupService implements IRestExp
 
             return Response.ok(new BufferedInputStream(new FileInputStream(zipFilePath.toFile()))).build();
         } catch (FileNotFoundException e) {
-            throw new NotFoundException();
+            throw sneakyThrow(e);
         }
     }
 
@@ -157,10 +158,9 @@ public class RestExportService extends AbstractBackupService implements IRestExp
             this.zipArchive.createZip(botPath.toString(), targetZipPath);
             return Response.ok().location(URI.create("/backup/export/" + zipFilename)).build();
         } catch (IResourceStore.ResourceNotFoundException e) {
-            throw new NotFoundException();
+            throw sneakyThrow(e);
         } catch (IResourceStore.ResourceStoreException | IOException | CallbackMatcher.CallbackMatcherException e) {
-            log.error(e.getLocalizedMessage(), e);
-            throw new InternalServerErrorException();
+            throw sneakyThrow(e);
         }
     }
 

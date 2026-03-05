@@ -16,6 +16,7 @@ import jakarta.inject.Inject;
 import jakarta.ws.rs.InternalServerErrorException;
 import jakarta.ws.rs.NotFoundException;
 import org.jboss.logging.Logger;
+import static ai.labs.eddi.engine.exception.SneakyThrow.sneakyThrow;
 
 import java.net.URI;
 import java.util.Collections;
@@ -78,10 +79,9 @@ public class RestOutputActions implements IRestOutputActions {
 
             return sortedOutputKeys(retOutputKeys);
         } catch (IResourceStore.ResourceNotFoundException e) {
-            throw new NotFoundException();
+            throw sneakyThrow(e);
         } catch (IResourceStore.ResourceStoreException e) {
-            log.error(e.getLocalizedMessage(), e);
-            throw new InternalServerErrorException(e);
+            throw sneakyThrow(e);
         }
     }
 

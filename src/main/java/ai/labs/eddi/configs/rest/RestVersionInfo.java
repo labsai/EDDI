@@ -6,14 +6,12 @@ import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.configs.documentdescriptor.model.DocumentDescriptor;
 import ai.labs.eddi.utils.RestUtilities;
 import ai.labs.eddi.utils.RuntimeUtilities;
-import org.jboss.logging.Logger;
 
-import jakarta.ws.rs.InternalServerErrorException;
-import jakarta.ws.rs.NotFoundException;
-import jakarta.ws.rs.WebApplicationException;
 import jakarta.ws.rs.core.Response;
 import java.net.URI;
 import java.util.List;
+
+import static ai.labs.eddi.engine.exception.SneakyThrow.sneakyThrow;
 
 /**
  * @author ginccc
@@ -23,10 +21,8 @@ public class RestVersionInfo<T> implements IRestVersionInfo {
     private final IResourceStore<T> resourceStore;
     protected final IDocumentDescriptorStore documentDescriptorStore;
 
-    private final Logger log = Logger.getLogger(RestVersionInfo.class);
-
     public RestVersionInfo(String resourceURI, IResourceStore<T> resourceStore,
-                           IDocumentDescriptorStore documentDescriptorStore) {
+            IDocumentDescriptorStore documentDescriptorStore) {
         this.resourceURI = resourceURI;
         this.resourceStore = resourceStore;
         this.documentDescriptorStore = documentDescriptorStore;
@@ -35,11 +31,8 @@ public class RestVersionInfo<T> implements IRestVersionInfo {
     public List<DocumentDescriptor> readDescriptors(String type, String filter, Integer index, Integer limit) {
         try {
             return documentDescriptorStore.readDescriptors(type, filter, index, limit, false);
-        } catch (IResourceStore.ResourceNotFoundException e) {
-            throw new WebApplicationException(Response.Status.NOT_FOUND);
-        } catch (Exception e) {
-            log.error(e.getLocalizedMessage(), e);
-            throw new InternalServerErrorException();
+        } catch (IResourceStore.ResourceStoreException | IResourceStore.ResourceNotFoundException e) {
+            throw sneakyThrow(e);
         }
     }
 
@@ -48,11 +41,11 @@ public class RestVersionInfo<T> implements IRestVersionInfo {
 
         try {
             IResourceStore.IResourceId resourceId = resourceStore.create(document);
-            URI createdUri = RestUtilities.createURI(resourceURI, resourceId.getId(), versionQueryParam, resourceId.getVersion());
+            URI createdUri = RestUtilities.createURI(resourceURI, resourceId.getId(), versionQueryParam,
+                    resourceId.getVersion());
             return Response.created(createdUri).location(createdUri).build();
-        } catch (Exception e) {
-            log.error(e.getLocalizedMessage(), e);
-            throw new InternalServerErrorException();
+        } catch (IResourceStore.ResourceStoreException e) {
+            throw sneakyThrow(e);
         }
     }
 
@@ -63,11 +56,8 @@ public class RestVersionInfo<T> implements IRestVersionInfo {
 
         try {
             return resourceStore.read(id, version);
-        } catch (IResourceStore.ResourceNotFoundException e) {
-            throw new NotFoundException(e.getLocalizedMessage(), e);
-        } catch (IResourceStore.ResourceStoreException e) {
-            log.error(e.getLocalizedMessage(), e);
-            throw new InternalServerErrorException(e.getLocalizedMessage(), e);
+        } catch (IResourceStore.ResourceNotFoundException | IResourceStore.ResourceStoreException e) {
+            throw sneakyThrow(e);
         }
     }
 
@@ -79,13 +69,9 @@ public class RestVersionInfo<T> implements IRestVersionInfo {
             Integer newVersion = resourceStore.update(id, version, document);
             URI newResourceUri = RestUtilities.createURI(resourceURI, id, versionQueryParam, newVersion);
             return Response.ok().location(newResourceUri).build();
-        } catch (IResourceStore.ResourceModifiedException e) {
-            return throwConflictException(id, e);
-        } catch (IResourceStore.ResourceNotFoundException e) {
-            throw new NotFoundException(e.getLocalizedMessage(), e);
-        } catch (Exception e) {
-            log.error(e.getLocalizedMessage(), e);
-            throw new InternalServerErrorException();
+        } catch (IResourceStore.ResourceStoreException | IResourceStore.ResourceModifiedException
+                | IResourceStore.ResourceNotFoundException e) {
+            throw sneakyThrow(e);
         }
     }
 
@@ -95,14 +81,9 @@ public class RestVersionInfo<T> implements IRestVersionInfo {
         try {
             resourceStore.delete(id, version);
             return Response.ok().build();
-        } catch (IResourceStore.ResourceModifiedException e) {
-            throwConflictException(id, e);
-            return null;
-        } catch (IResourceStore.ResourceNotFoundException e) {
-            throw new NotFoundException(e.getLocalizedMessage(), e);
-        } catch (Exception e) {
-            log.error(e.getLocalizedMessage(), e);
-            throw new InternalServerErrorException();
+        } catch (IResourceStore.ResourceStoreException | IResourceStore.ResourceModifiedException
+                | IResourceStore.ResourceNotFoundException e) {
+            throw sneakyThrow(e);
         }
     }
 
@@ -115,15 +96,6 @@ public class RestVersionInfo<T> implements IRestVersionInfo {
             version = getCurrentVersion(id);
         }
         return version;
-    }
-
-    private Response throwConflictException(String id, IResourceStore.ResourceModifiedException e) {
-        try {
-            IResourceStore.IResourceId currentId = resourceStore.getCurrentResourceId(id);
-            throw RestUtilities.createConflictException(resourceURI, currentId);
-        } catch (IResourceStore.ResourceNotFoundException e1) {
-            throw new NotFoundException(e.getLocalizedMessage(), e);
-        }
     }
 
     @Override
