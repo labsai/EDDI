@@ -1,0 +1,58 @@
+{
+  "app": {
+    "title": "EDDI Manager",
+    "description": "Admin-Dashboard für die EDDI KI-Plattform"
+  },
+  "nav": {
+    "dashboard": "Dashboard",
+    "bots": "Bots",
+    "packages": "Pakete",
+    "conversations": "Gespräche",
+    "resources": "Ressourcen"
+  },
+  "theme": {
+    "light": "Hell",
+    "dark": "Dunkel",
+    "system": "System"
+  },
+  "language": {
+    "label": "Sprache",
+    "en": "English",
+    "de": "Deutsch",
+    "ar": "العربية"
+  },
+  "pages": {
+    "dashboard": {
+      "title": "Dashboard",
+      "subtitle": "Übersicht Ihrer EDDI Bots und Gespräche"
+    },
+    "bots": {
+      "title": "Bots",
+      "subtitle": "Verwalten Sie Ihre KI-Bots"
+    },
+    "packages": {
+      "title": "Pakete",
+      "subtitle": "Konfigurieren Sie Bot-Pakete und Erweiterungen"
+    },
+    "conversations": {
+      "title": "Gespräche",
+      "subtitle": "Anzeigen und Verwalten von Bot-Gesprächen"
+    },
+    "resources": {
+      "title": "Ressourcen",
+      "subtitle": "Verwalten Sie Verhaltensregeln, Wörterbücher, Ausgaben und mehr"
+    }
+  },
+  "common": {
+    "loading": "Laden...",
+    "error": "Etwas ist schiefgelaufen",
+    "retry": "Erneut versuchen",
+    "save": "Speichern",
+    "cancel": "Abbrechen",
+    "delete": "Löschen",
+    "create": "Erstellen",
+    "edit": "Bearbeiten",
+    "search": "Suchen...",
+    "noResults": "Keine Ergebnisse gefunden"
+  }
+}

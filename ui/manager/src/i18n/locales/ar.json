@@ -1,0 +1,58 @@
+{
+  "app": {
+    "title": "مدير EDDI",
+    "description": "لوحة تحكم منصة EDDI للذكاء الاصطناعي"
+  },
+  "nav": {
+    "dashboard": "لوحة التحكم",
+    "bots": "الروبوتات",
+    "packages": "الحزم",
+    "conversations": "المحادثات",
+    "resources": "الموارد"
+  },
+  "theme": {
+    "light": "فاتح",
+    "dark": "داكن",
+    "system": "النظام"
+  },
+  "language": {
+    "label": "اللغة",
+    "en": "English",
+    "de": "Deutsch",
+    "ar": "العربية"
+  },
+  "pages": {
+    "dashboard": {
+      "title": "لوحة التحكم",
+      "subtitle": "نظرة عامة على الروبوتات والمحادثات"
+    },
+    "bots": {
+      "title": "الروبوتات",
+      "subtitle": "إدارة روبوتات الذكاء الاصطناعي"
+    },
+    "packages": {
+      "title": "الحزم",
+      "subtitle": "تكوين حزم وإضافات الروبوت"
+    },
+    "conversations": {
+      "title": "المحادثات",
+      "subtitle": "عرض وإدارة محادثات الروبوت"
+    },
+    "resources": {
+      "title": "الموارد",
+      "subtitle": "إدارة قواعد السلوك والقواميس والمخرجات والمزيد"
+    }
+  },
+  "common": {
+    "loading": "جاري التحميل...",
+    "error": "حدث خطأ ما",
+    "retry": "إعادة المحاولة",
+    "save": "حفظ",
+    "cancel": "إلغاء",
+    "delete": "حذف",
+    "create": "إنشاء",
+    "edit": "تعديل",
+    "search": "بحث...",
+    "noResults": "لم يتم العثور على نتائج"
+  }
+}

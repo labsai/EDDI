@@ -1,3 +1,0 @@
-{
-  "extends": ["./tslint.extended.json", "tslint-config-prettier"]
-}

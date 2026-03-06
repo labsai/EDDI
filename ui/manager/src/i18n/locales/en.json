@@ -1,0 +1,58 @@
+{
+  "app": {
+    "title": "EDDI Manager",
+    "description": "Admin dashboard for the EDDI conversational AI platform"
+  },
+  "nav": {
+    "dashboard": "Dashboard",
+    "bots": "Bots",
+    "packages": "Packages",
+    "conversations": "Conversations",
+    "resources": "Resources"
+  },
+  "theme": {
+    "light": "Light",
+    "dark": "Dark",
+    "system": "System"
+  },
+  "language": {
+    "label": "Language",
+    "en": "English",
+    "de": "Deutsch",
+    "ar": "العربية"
+  },
+  "pages": {
+    "dashboard": {
+      "title": "Dashboard",
+      "subtitle": "Overview of your EDDI bots and conversations"
+    },
+    "bots": {
+      "title": "Bots",
+      "subtitle": "Manage your conversational AI bots"
+    },
+    "packages": {
+      "title": "Packages",
+      "subtitle": "Configure bot packages and extensions"
+    },
+    "conversations": {
+      "title": "Conversations",
+      "subtitle": "View and manage bot conversations"
+    },
+    "resources": {
+      "title": "Resources",
+      "subtitle": "Manage behavior rules, dictionaries, outputs, and more"
+    }
+  },
+  "common": {
+    "loading": "Loading...",
+    "error": "Something went wrong",
+    "retry": "Retry",
+    "save": "Save",
+    "cancel": "Cancel",
+    "delete": "Delete",
+    "create": "Create",
+    "edit": "Edit",
+    "search": "Search...",
+    "noResults": "No results found"
+  }
+}
