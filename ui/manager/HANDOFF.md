@@ -55,12 +55,20 @@
 
 ---
 
-### What's Next: Phase 4 — Chat-UI Rewrite
+### What's Next: Phases 3.14–3.19 — Editing Layer
 
-- CRA → Vite migration
-- SSE streaming support
-- Extract shared `@eddi/chat-core` package
-- Dark/light mode + i18n
+The current UI is a **read-only dashboard**. These phases add the **editing layer** — the core value of the Manager.
+
+| Phase | Description                                                                                                                   | Dependencies           |
+| ----- | ----------------------------------------------------------------------------------------------------------------------------- | ---------------------- |
+| 3.14  | **JSON Editor & Version Picker** — Monaco editor, schema validation, version dropdown, generic extension CRUD API             | `@monaco-editor/react` |
+| 3.15  | **Bot Editor** — inline edit name/desc, add/remove packages, deploy/undeploy via `/administration`, deployment status polling | 3.14                   |
+| 3.16  | **Package Editor** — drag-and-drop extension pipeline builder, add/remove/reorder lifecycle tasks                             | 3.14, `@dnd-kit/core`  |
+| 3.17  | **Behavior Rules & HTTP Calls Editors** — condition builder, action editor, URL template editor, pre/post instructions        | 3.16                   |
+| 3.18  | **LangChain, Output, Property Setter, Dictionary Editors** — model config, prompt editor, output groups, expression mapping   | 3.16                   |
+| 3.19  | **Polish, i18n, Tests** — ~100+ new keys per locale, editor tests, MSW handlers, documentation                                | 3.17, 3.18             |
+
+**After 3.19**: Phase 4 — Chat-UI Rewrite (CRA → Vite, SSE streaming, `@eddi/chat-core`)
 
 ---
 
