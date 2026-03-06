@@ -9,6 +9,8 @@ import { ConversationsPage } from "@/pages/conversations";
 import { ConversationDetailPage } from "@/pages/conversation-detail";
 import { ChatPage } from "@/pages/chat";
 import { ResourcesPage } from "@/pages/resources";
+import { ResourceListPage } from "@/pages/resource-list";
+import { ResourceDetailPage } from "@/pages/resource-detail";
 
 export function App() {
   return (
@@ -26,6 +28,11 @@ export function App() {
         />
         <Route path="/manage/chat" element={<ChatPage />} />
         <Route path="/manage/resources" element={<ResourcesPage />} />
+        <Route path="/manage/resources/:type" element={<ResourceListPage />} />
+        <Route
+          path="/manage/resources/:type/:id"
+          element={<ResourceDetailPage />}
+        />
         <Route path="/" element={<Navigate to="/manage" replace />} />
         <Route path="*" element={<Navigate to="/manage" replace />} />
       </Route>

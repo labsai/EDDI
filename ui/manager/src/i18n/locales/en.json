@@ -128,5 +128,49 @@
     "history": "History",
     "continueConversation": "Continue",
     "noHistory": "No conversation history yet."
+  },
+  "resources": {
+    "unnamed": "Unnamed Resource",
+    "noDescription": "No description",
+    "backToResources": "Back to Resources",
+    "backToList": "Back to {{type}}",
+    "unknownType": "Unknown resource type",
+    "rawConfig": "Raw Configuration",
+    "rawConfigHint": "JSON configuration for this resource",
+    "create": "Create {{type}}",
+    "createTitle": "Create {{type}}",
+    "createDescription": "Create an empty {{type}} configuration. You can edit it after creation.",
+    "confirmDelete": "Are you sure you want to delete this {{type}}?",
+    "empty": "No {{type}} resources yet.",
+    "itemCount_one": "{{count}} item",
+    "itemCount_other": "{{count}} items",
+    "count_one": "{{count}} resource",
+    "count_other": "{{count}} resources",
+    "types": {
+      "behavior": {
+        "name": "Behavior Rules",
+        "description": "Define conversation flow rules and decision logic"
+      },
+      "httpcalls": {
+        "name": "HTTP Calls",
+        "description": "Configure external API integrations and webhooks"
+      },
+      "output": {
+        "name": "Output Sets",
+        "description": "Manage bot response templates and output variations"
+      },
+      "dictionaries": {
+        "name": "Dictionaries",
+        "description": "Define word and phrase recognition patterns"
+      },
+      "langchain": {
+        "name": "LangChain",
+        "description": "Configure AI agent models, prompts, and tool bindings"
+      },
+      "propertysetter": {
+        "name": "Property Setter",
+        "description": "Set conversation properties and manage slot-filling"
+      }
+    }
   }
 }

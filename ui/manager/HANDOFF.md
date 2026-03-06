@@ -2,33 +2,34 @@
 
 > **Last updated**: 2026-03-06  
 > **Branch**: `feature/version-6.0.0`  
-> **Last commit**: Phase 3.9 — Chat Panel with SSE streaming, history, and bot selector
+> **Last commit**: Phase 3.10 — Generic Resources CRUD pages for 6 extension types
 
 ---
 
 ## Current Status
 
-**Phase 3 (Manager UI Rewrite)**: Phases 3.1–3.9 complete.
+**Phase 3 (Manager UI Rewrite)**: Phases 3.1–3.10 complete.
 
 ### What's Done
 
-| Phase | Description                                                           | Commit    |
-| ----- | --------------------------------------------------------------------- | --------- |
-| 3.1   | Study existing Manager + implementation plan                          | —         |
-| 3.2   | Vite + React 19 + Tailwind v4 + ESLint + Vitest + Playwright scaffold | `020007e` |
-| 3.3   | Layout shell: sidebar, top bar, dark/light/system theme, i18n w/ RTL  | `020007e` |
-| 3.4   | Bots page: bot cards, deployment status, search, create dialog        | `e47b0fb` |
-| 3.5   | Bot Detail page: package management, deployment, raw config viewer    | `dadc669` |
-| 3.6   | Package Detail page: extensions list, raw JSON viewer                 | `938aa6e` |
-| 3.7   | Packages list page: cards grid, search, create dialog                 | `938aa6e` |
-| 3.8   | Conversations page: list w/ filters, conversation detail viewer       | `938aa6e` |
-| 3.9   | Chat Panel: bot selector, SSE streaming toggle, history, markdown     | —         |
+| Phase | Description                                                               | Commit    |
+| ----- | ------------------------------------------------------------------------- | --------- |
+| 3.1   | Study existing Manager + implementation plan                              | —         |
+| 3.2   | Vite + React 19 + Tailwind v4 + ESLint + Vitest + Playwright scaffold     | `020007e` |
+| 3.3   | Layout shell: sidebar, top bar, dark/light/system theme, i18n w/ RTL      | `020007e` |
+| 3.4   | Bots page: bot cards, deployment status, search, create dialog            | `e47b0fb` |
+| 3.5   | Bot Detail page: package management, deployment, raw config viewer        | `dadc669` |
+| 3.6   | Package Detail page: extensions list, raw JSON viewer                     | `938aa6e` |
+| 3.7   | Packages list page: cards grid, search, create dialog                     | `938aa6e` |
+| 3.8   | Conversations page: list w/ filters, conversation detail viewer           | `938aa6e` |
+| 3.9   | Chat Panel: bot selector, SSE streaming toggle, history, markdown         | —         |
+| 3.10  | Resources Pages: generic CRUD for 6 extension types (hub + list + detail) | —         |
 
 ### Test Status
 
 - **TypeScript**: Zero errors (`npx tsc -b`)
-- **Unit/Component**: 38/38 pass (`npm run test`) — 8 files
-- **Build**: Succeeds (754KB JS, 33KB CSS)
+- **Unit/Component**: 53/53 pass (`npm run test`) — 9 files
+- **Build**: Succeeds
 
 ### Files Created (summary)
 
@@ -38,29 +39,17 @@
 - **Packages**: `package-card.tsx`, `create-package-dialog.tsx`, `packages.tsx`, `package-detail.tsx`
 - **Conversations**: `conversations.tsx`, `conversation-detail.tsx`
 - **Chat**: `chat-panel.tsx`, `chat-message.tsx`, `chat-input.tsx`, `chat-history.tsx`, `streaming-toggle.tsx`, `chat.tsx`
-- **API**: `api-client.ts`, `api/bots.ts`, `api/packages.ts`, `api/descriptors.ts`, `api/conversations.ts`, `api/chat.ts`
-- **Hooks**: `use-bots.ts`, `use-packages.ts`, `use-conversations.ts`, `use-chat.ts`
+- **Resources**: `resource-card.tsx`, `create-resource-dialog.tsx`, `resources.tsx` (hub), `resource-list.tsx`, `resource-detail.tsx`
+- **API**: `api-client.ts`, `api/bots.ts`, `api/packages.ts`, `api/descriptors.ts`, `api/conversations.ts`, `api/chat.ts`, `api/resources.ts`
+- **Hooks**: `use-bots.ts`, `use-packages.ts`, `use-conversations.ts`, `use-chat.ts`, `use-resources.ts`
 - **i18n**: `config.ts`, `en.json`, `de.json`, `ar.json`
-- **Tests**: `sidebar.test.tsx`, `top-bar.test.tsx`, `config.test.ts`, `bots.test.tsx`, `bots.test.ts`, `packages.test.tsx`, `conversations.test.tsx`, `chat.test.tsx`
+- **Tests**: `sidebar.test.tsx`, `top-bar.test.tsx`, `config.test.ts`, `bots.test.tsx`, `bots.test.ts`, `packages.test.tsx`, `conversations.test.tsx`, `chat.test.tsx`, `resources.test.tsx`
 - **E2E**: `navigation.spec.ts`, `theme.spec.ts`, `rtl.spec.ts`
-- **MSW**: `handlers.ts` (bots, packages, conversations mocks), `server.ts`
+- **MSW**: `handlers.ts` (bots, packages, conversations, resources mocks), `server.ts`
 
 ---
 
-## Next Steps (Phase 3.10+)
-
-### Phase 3.10: Resources Pages (CRUD)
-
-Build generic resource CRUD pages for each extension type:
-
-- Behavior rules (`/behaviorstore/behaviorsets`)
-- HTTP calls (`/httpcallsstore/httpcalls`)
-- Output sets (`/outputstore/outputsets`)
-- Regular dictionaries (`/regulardictionarystore/regulardictionaries`)
-- LangChain configs (`/langchainstore/langchains`)
-- Property setter (`/propertysetterstore/propertysetters`)
-
-Consider building a **generic ResourcePage** component since the CRUD pattern is the same across all types.
+## Next Steps (Phase 3.11+)
 
 ### Phase 3.11: Import/Export + Bot Wizard
 

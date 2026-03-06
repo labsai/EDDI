@@ -231,4 +231,67 @@ export const handlers = [
       },
     });
   }),
+
+  // --- Resource Stores ---
+  // Generic descriptor handlers for all 6 resource types
+  ...createResourceHandlers("behaviorstore", "behaviorsets", "behavior"),
+  ...createResourceHandlers("httpcallsstore", "httpcalls", "httpcalls"),
+  ...createResourceHandlers("outputstore", "outputsets", "output"),
+  ...createResourceHandlers(
+    "regulardictionarystore",
+    "regulardictionaries",
+    "dictionary"
+  ),
+  ...createResourceHandlers("langchainstore", "langchains", "langchain"),
+  ...createResourceHandlers(
+    "propertysetterstore",
+    "propertysetters",
+    "propertysetter"
+  ),
 ];
+
+function createResourceHandlers(
+  store: string,
+  plural: string,
+  label: string
+) {
+  const mockDescriptors = [
+    {
+      resource: `eddi://ai.labs.${label}/${store}/${plural}/res1?version=1`,
+      name: `${label} Config 1`,
+      description: `First ${label} configuration`,
+      createdOn: Date.now() - 86400000,
+      lastModifiedOn: Date.now(),
+    },
+    {
+      resource: `eddi://ai.labs.${label}/${store}/${plural}/res2?version=1`,
+      name: `${label} Config 2`,
+      description: `Second ${label} configuration`,
+      createdOn: Date.now() - 172800000,
+      lastModifiedOn: Date.now() - 3600000,
+    },
+  ];
+
+  return [
+    http.get(`*/${store}/${plural}/descriptors`, () => {
+      return HttpResponse.json(mockDescriptors);
+    }),
+    http.get(`*/${store}/${plural}/:id`, () => {
+      return HttpResponse.json({ type: label, config: {} });
+    }),
+    http.post(`*/${store}/${plural}`, () => {
+      return new HttpResponse(null, {
+        status: 201,
+        headers: {
+          Location: `/${store}/${plural}/new-res?version=1`,
+        },
+      });
+    }),
+    http.put(`*/${store}/${plural}/:id`, () => {
+      return new HttpResponse(null, { status: 200 });
+    }),
+    http.delete(`*/${store}/${plural}/:id`, () => {
+      return new HttpResponse(null, { status: 204 });
+    }),
+  ];
+}

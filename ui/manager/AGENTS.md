@@ -67,13 +67,14 @@ src/
 ├── components/
 │   ├── layout/                # Sidebar, TopBar, AppLayout, ThemeProvider
 │   ├── bots/                  # BotCard, CreateBotDialog
-│   └── packages/              # PackageCard, CreatePackageDialog
-├── hooks/                     # TanStack Query hooks (use-bots, use-packages, use-conversations)
+│   ├── packages/              # PackageCard, CreatePackageDialog
+│   └── resources/             # ResourceCard, CreateResourceDialog
+├── hooks/                     # TanStack Query hooks (use-bots, use-packages, use-conversations, use-chat, use-resources)
 ├── lib/
 │   ├── api-client.ts          # Typed fetch client (base URL from window.location.origin)
-│   ├── api/                   # API modules: bots.ts, packages.ts, descriptors.ts, conversations.ts
+│   ├── api/                   # API modules: bots.ts, packages.ts, descriptors.ts, conversations.ts, chat.ts, resources.ts
 │   └── utils.ts               # cn() for Tailwind class merging
-├── pages/                     # Route pages (dashboard, bots, bot-detail, packages, package-detail, conversations, conversation-detail, resources)
+├── pages/                     # Route pages (dashboard, bots, bot-detail, packages, package-detail, conversations, conversation-detail, chat, resources, resource-list, resource-detail)
 ├── i18n/                      # config.ts + locales/ (en, de, ar)
 └── test/                      # setup.ts, mocks/ (handlers.ts, server.ts), test-utils.tsx
 e2e/                           # Playwright tests (navigation, theme, RTL)
@@ -86,7 +87,7 @@ e2e/                           # Playwright tests (navigation, theme, RTL)
 ### API Communication
 
 - Base URL: `window.location.origin` (no hardcoded URLs)
-- Vite proxy forwards `/botstore/*`, `/packagestore/*`, `/conversationstore/*`, `/administration/*`, `/managedbots/*` to EDDI backend
+- Vite proxy forwards `/botstore/*`, `/packagestore/*`, `/conversationstore/*`, `/administration/*`, `/managedbots/*`, `/behaviorstore/*`, `/httpcallsstore/*`, `/outputstore/*`, `/regulardictionarystore/*`, `/langchainstore/*`, `/propertysetterstore/*` to EDDI backend
 - All API calls through typed modules in `src/lib/api/`
 - Server state via TanStack Query hooks in `src/hooks/`
 
