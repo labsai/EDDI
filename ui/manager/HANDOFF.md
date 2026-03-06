@@ -2,30 +2,31 @@
 
 > **Last updated**: 2026-03-06  
 > **Branch**: `feature/version-6.0.0`  
-> **Last commit**: Phase 3.12 — Finalize i18n (11 languages)
+> **Last commit**: Phase 3.13 — EDDI branding, Noto Sans, system theme fix
 
 ---
 
 ## Current Status
 
-**Phase 3 (Manager UI Rewrite)**: Phases 3.1–3.12 complete.
+**Phase 3 (Manager UI Rewrite)**: Phases 3.1–3.13 complete.
 
 ### What's Done
 
-| Phase | Description                                                               | Commit    |
-| ----- | ------------------------------------------------------------------------- | --------- |
-| 3.1   | Study existing Manager + implementation plan                              | —         |
-| 3.2   | Vite + React 19 + Tailwind v4 + ESLint + Vitest + Playwright scaffold     | `020007e` |
-| 3.3   | Layout shell: sidebar, top bar, dark/light/system theme, i18n w/ RTL      | `020007e` |
-| 3.4   | Bots page: bot cards, deployment status, search, create dialog            | `e47b0fb` |
-| 3.5   | Bot Detail page: package management, deployment, raw config viewer        | `dadc669` |
-| 3.6   | Package Detail page: extensions list, raw JSON viewer                     | `938aa6e` |
-| 3.7   | Packages list page: cards grid, search, create dialog                     | `938aa6e` |
-| 3.8   | Conversations page: list w/ filters, conversation detail viewer           | `938aa6e` |
-| 3.9   | Chat Panel: bot selector, SSE streaming toggle, history, markdown         | —         |
-| 3.10  | Resources Pages: generic CRUD for 6 extension types (hub + list + detail) | —         |
-| 3.11  | Import/Export + Bot Wizard: file upload/download, 4-step guided creation  | —         |
-| 3.12  | i18n finalized: 11 languages (en, de, fr, es, ar, zh, th, ja, ko, pt, hi) | —         |
+| Phase | Description                                                                                              | Commit    |
+| ----- | -------------------------------------------------------------------------------------------------------- | --------- |
+| 3.1   | Study existing Manager + implementation plan                                                             | —         |
+| 3.2   | Vite + React 19 + Tailwind v4 + ESLint + Vitest + Playwright scaffold                                    | `020007e` |
+| 3.3   | Layout shell: sidebar, top bar, dark/light/system theme, i18n w/ RTL                                     | `020007e` |
+| 3.4   | Bots page: bot cards, deployment status, search, create dialog                                           | `e47b0fb` |
+| 3.5   | Bot Detail page: package management, deployment, raw config viewer                                       | `dadc669` |
+| 3.6   | Package Detail page: extensions list, raw JSON viewer                                                    | `938aa6e` |
+| 3.7   | Packages list page: cards grid, search, create dialog                                                    | `938aa6e` |
+| 3.8   | Conversations page: list w/ filters, conversation detail viewer                                          | `938aa6e` |
+| 3.9   | Chat Panel: bot selector, SSE streaming toggle, history, markdown                                        | —         |
+| 3.10  | Resources Pages: generic CRUD for 6 extension types (hub + list + detail)                                | —         |
+| 3.11  | Import/Export + Bot Wizard: file upload/download, 4-step guided creation                                 | —         |
+| 3.12  | i18n finalized: 11 languages (en, de, fr, es, ar, zh, th, ja, ko, pt, hi)                                | —         |
+| 3.13  | EDDI branding: black/gold theme, Noto Sans font, original logo, system theme fix, wide-screen constraint | —         |
 
 ### Test Status
 
@@ -36,7 +37,8 @@
 ### Files Created (summary)
 
 - **Config**: `package.json`, `vite.config.ts`, `tsconfig*.json`, `eslint.config.js`, `vitest.config.ts`, `playwright.config.ts`, `index.html`
-- **Layout**: `sidebar.tsx`, `top-bar.tsx`, `app-layout.tsx`, `theme-provider.tsx`
+- **Layout**: `sidebar.tsx` (with `logo_eddi.png`), `top-bar.tsx`, `app-layout.tsx` (max-width constraint), `theme-provider.tsx` (system theme listener)
+- **Assets**: `public/logo_eddi.png` (original EDDI wordmark)
 - **Bots**: `bot-card.tsx`, `create-bot-dialog.tsx`, `bots.tsx`, `bot-detail.tsx`
 - **Packages**: `package-card.tsx`, `create-package-dialog.tsx`, `packages.tsx`, `package-detail.tsx`
 - **Conversations**: `conversations.tsx`, `conversation-detail.tsx`
@@ -72,6 +74,9 @@
 6. **i18n** auto-detects RTL from language and sets `dir` attribute on `<html>`
 7. **Version deduplication** — `groupBotsByName()` keeps latest version per name
 8. **Two conversation APIs** — low-level (`/conversationstore/conversations`) for browsing, managed (`/managedbots`) for Chat Panel
+9. **Noto Sans** as primary font — Google Fonts with script variants (Arabic, Thai, Devanagari, JP, KR, SC) for universal glyph coverage
+10. **System theme mode** uses `matchMedia` listener — reacts to OS dark/light changes in real time
+11. **Main content max-width** 1536px (`max-w-screen-2xl`) — prevents infinite stretching on ultrawide monitors
 
 ---
 

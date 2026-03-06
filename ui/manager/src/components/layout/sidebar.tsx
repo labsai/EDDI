@@ -43,14 +43,35 @@ export function Sidebar({ collapsed, onToggle }: SidebarProps) {
     >
       {/* Logo */}
       <div className="flex h-16 items-center justify-center border-b border-sidebar-border px-4">
-        <span
-          className={cn(
-            "text-xl font-bold text-sidebar-accent transition-all",
-            collapsed && "text-base"
-          )}
-        >
-          {collapsed ? "E" : "EDDI"}
-        </span>
+        {collapsed ? (
+          <svg
+            width="28"
+            height="28"
+            viewBox="0 0 28 28"
+            fill="none"
+            xmlns="http://www.w3.org/2000/svg"
+            className="shrink-0"
+            aria-label="EDDI"
+          >
+            <rect width="28" height="28" rx="6" className="fill-sidebar-accent" />
+            <text
+              x="5"
+              y="20"
+              fontFamily="'Noto Sans', sans-serif"
+              fontWeight="700"
+              fontSize="16"
+              className="fill-sidebar"
+            >
+              E.
+            </text>
+          </svg>
+        ) : (
+          <img
+            src="/logo_eddi.png"
+            alt="EDDI"
+            className="h-7 w-auto"
+          />
+        )}
       </div>
 
       {/* Navigation */}

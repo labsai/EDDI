@@ -38,7 +38,7 @@ describe("Sidebar", () => {
       <Sidebar collapsed={false} onToggle={() => {}} />
     );
 
-    expect(screen.getByText("EDDI")).toBeInTheDocument();
+    expect(screen.getByAltText("EDDI")).toBeInTheDocument();
   });
 
   it("shows abbreviated logo when collapsed", () => {
@@ -46,7 +46,7 @@ describe("Sidebar", () => {
       <Sidebar collapsed={true} onToggle={() => {}} />
     );
 
-    expect(screen.getByText("E")).toBeInTheDocument();
-    expect(screen.queryByText("EDDI")).not.toBeInTheDocument();
+    expect(screen.getByLabelText("EDDI")).toBeInTheDocument();
+    expect(screen.queryByAltText("EDDI")).not.toBeInTheDocument();
   });
 });

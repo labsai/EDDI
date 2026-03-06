@@ -33,8 +33,18 @@ export function ThemeProvider({
   const [theme, setTheme] = useState<Theme>(
     () => (localStorage.getItem(storageKey) as Theme) || defaultTheme
   );
+  const [systemTheme, setSystemTheme] = useState<"dark" | "light">(getSystemTheme);
 
-  const resolvedTheme = theme === "system" ? getSystemTheme() : theme;
+  // Listen for OS theme changes so "system" mode reacts in real time
+  useEffect(() => {
+    const mql = window.matchMedia("(prefers-color-scheme: dark)");
+    const handler = (e: MediaQueryListEvent) =>
+      setSystemTheme(e.matches ? "dark" : "light");
+    mql.addEventListener("change", handler);
+    return () => mql.removeEventListener("change", handler);
+  }, []);
+
+  const resolvedTheme = theme === "system" ? systemTheme : theme;
 
   useEffect(() => {
     const root = window.document.documentElement;
