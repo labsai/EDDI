@@ -4,66 +4,64 @@
 
 ## 1. Project Context
 
-**EDDI Manager** is the admin dashboard for the EDDI conversational AI platform. It's a **React + TypeScript** SPA served from the EDDI backend at `/chat/unrestricted`.
+**EDDI Manager** is the admin dashboard for the EDDI conversational AI platform. It is a **greenfield rewrite** (v6.0.0) as a modern React SPA.
 
-### Current State → Target
+### Tech Stack (v6.0.0 — Current)
 
-| Aspect           | Current                | Target                   |
-| ---------------- | ---------------------- | ------------------------ |
-| **Build tool**   | Webpack (custom)       | Vite                     |
-| **UI framework** | MUI v4 (deprecated)    | shadcn/ui + Tailwind CSS |
-| **State**        | Redux + recompose HOCs | Redux + React hooks      |
-| **Linting**      | tslint (deprecated)    | ESLint                   |
-| **Styling**      | CSS modules + MUI      | Tailwind CSS             |
-| **i18n**         | None                   | react-i18next + RTL      |
-| **Theme**        | Light only             | Dark/Light toggle        |
-| **Responsive**   | Desktop only           | Mobile-first             |
+| Layer              | Technology                                   |
+| ------------------ | -------------------------------------------- |
+| **Build**          | Vite 6                                       |
+| **UI**             | React 19 + TypeScript 5.7 (strict)           |
+| **Styling**        | Tailwind CSS v4 + CSS variables for theming  |
+| **Components**     | shadcn/ui + Radix UI primitives              |
+| **State (server)** | TanStack Query v5                            |
+| **State (UI)**     | Zustand                                      |
+| **Routing**        | React Router v6                              |
+| **i18n**           | react-i18next (en, de, ar with auto LTR/RTL) |
+| **Linting**        | ESLint flat config                           |
+| **Test (unit)**    | Vitest + React Testing Library + MSW         |
+| **Test (E2E)**     | Playwright                                   |
+| **Auth**           | keycloak-js 26+ (to be wired)                |
 
 ### Ecosystem
 
-| Repo               | Relationship                                                          |
-| ------------------ | --------------------------------------------------------------------- |
-| **EDDI** (backend) | Manager calls EDDI's REST API. Bundle is copied into EDDI's resources |
-| **eddi-chat-ui**   | Shares chat rendering logic — extracting shared `@eddi/chat-core`     |
-| **eddi-website**   | Separate marketing site at eddi.labs.ai                               |
+| Repo               | Relationship                                                             |
+| ------------------ | ------------------------------------------------------------------------ |
+| **EDDI** (backend) | Manager calls EDDI's REST API via Vite proxy (dev) or same-origin (prod) |
+| **eddi-chat-ui**   | Shares chat rendering logic — extracting shared `@eddi/chat-core`        |
+| **eddi-website**   | Separate marketing site at eddi.labs.ai                                  |
 
-All repos are at `c:\dev\git\`. The full implementation plan (14 appendices) and changelog are in the Antigravity brain directory — search for `implementation_plan.md` and `changelog.md` under `~/.gemini/antigravity/brain/`.
+All repos are at `c:\dev\git\`. Branch: `feature/version-6.0.0`.
 
 ---
 
 ## 2. Mandatory Workflow Protocol
 
-1. **Before work**: Find and read `changelog.md` and `implementation_plan.md` (Appendix J covers Manager). Check `git status` + `git log -5`.
-2. **During work**: Commit often with `feat(manager):`, `fix(manager):`, `refactor(manager):`. Each commit must build (`npm run build`).
-3. **After work**: Update `changelog.md` with what changed, decisions made, and next steps.
+1. **Before work**: Read this file + `HANDOFF.md`. Check `git log -5` on `feature/version-6.0.0`.
+2. **During work**: Commit often with `feat(v6):`, `fix(v6):`, `refactor(v6):`. Each commit must build (`npm run build`) and pass tests (`npm run test`).
+3. **After work**: Update `HANDOFF.md` with what changed, decisions made, and next steps.
 
 ---
 
-## 3. Development Order (Manager-specific)
+## 3. Project Structure
 
 ```
-Phase 1: Foundation (unblocks everything)
-  1. Fix env.json → use relative URL or window.location.origin
-  2. Migrate tslint → ESLint
-  3. Replace recompose HOCs with React hooks
-
-Phase 2: Core UX (must-do for a great product)
-  4. Dark/light mode toggle (Tailwind dark: variant)
-  5. i18n (react-i18next) + RTL support
-  6. Pagination + sorting on Bots/Conversations lists
-  7. Deduplicate bot entries (group by name, show versions)
-  8. Replace eddi:// URIs with human-readable names
-  9. Conversation export (JSON/CSV)
-  10. Bot health indicators (green/yellow/red)
-
-Phase 3: Polish (makes it exceptional)
-  11. Config editor: JSON Schema validation + autocomplete
-  12. Config editor: Diff view (changed vs saved)
-  13. Config editor: Undo/Redo
-  14. Keyboard shortcuts (Ctrl+S, Ctrl+Enter, Esc)
-  15. Import/export UI (not just Swagger)
-  16. First-use onboarding tour
-  17. Config version history
+src/
+├── app.tsx                    # React Router routes
+├── main.tsx                   # Entry point (providers)
+├── index.css                  # Tailwind v4 + EDDI tokens
+├── components/
+│   ├── layout/                # Sidebar, TopBar, AppLayout, ThemeProvider
+│   └── bots/                  # BotCard, CreateBotDialog
+├── hooks/                     # TanStack Query hooks (use-bots, use-packages)
+├── lib/
+│   ├── api-client.ts          # Typed fetch client (base URL from window.location.origin)
+│   ├── api/                   # API modules: bots.ts, packages.ts, descriptors.ts
+│   └── utils.ts               # cn() for Tailwind class merging
+├── pages/                     # Route pages (dashboard, bots, bot-detail, packages, etc.)
+├── i18n/                      # config.ts + locales/ (en, de, ar)
+└── test/                      # setup.ts, mocks/, test-utils.tsx
+e2e/                           # Playwright tests (navigation, theme, RTL)
 ```
 
 ---
@@ -72,39 +70,26 @@ Phase 3: Polish (makes it exceptional)
 
 ### API Communication
 
-- Base URL from `env.json` → `window.eddiApiUrl` (**Phase 1 fix target**: use relative URL)
-- All API calls through Redux action dispatchers
-- EDDI REST API has no version prefix (e.g., `/botstore/bots`)
+- Base URL: `window.location.origin` (no hardcoded URLs)
+- Vite proxy forwards `/botstore/*`, `/packagestore/*`, `/administration/*` to EDDI backend
+- All API calls through typed modules in `src/lib/api/`
+- Server state via TanStack Query hooks in `src/hooks/`
 
-### Important: DO NOT
+### RTL Support
 
-- Do NOT use MUI v4 components in new code — use shadcn/ui
-- Do NOT create new recompose HOCs — use React hooks
-- Do NOT use tslint annotations — use ESLint equivalents
-- Do NOT use moment.js for new date formatting — use `date-fns` or native `Intl`
-- Do NOT hardcode the API URL — always read from env.json or window.location.origin
+- Use **logical properties**: `ps-*` / `pe-*` / `ms-*` / `me-*` / `start-*` / `end-*`
+- Never use `pl-*` / `pr-*` / `ml-*` / `mr-*` / `left-*` / `right-*`
+- `border-e` instead of `border-r` for sidebar borders
 
-### Key Files
+### DO NOT
 
-| File                                               | Purpose                                          |
-| -------------------------------------------------- | ------------------------------------------------ |
-| `src/scripts/resources/env.json`                   | API URL config — **Phase 1 fix target**          |
-| `src/scripts/components/`                          | All UI components                                |
-| `src/scripts/reducers/`                            | Redux state management                           |
-| `src/scripts/actions/`                             | API action dispatchers                           |
-| `src/scripts/selectors/AuthenticationSelectors.ts` | ⚠️ Hardcodes `authenticated: true` — auth bypass |
-| `tslint.json`                                      | Deprecated linter — **Phase 1 migration target** |
-
-### Known Issues
-
-- `AuthenticationSelectors.ts` hardcodes `authenticated: true` — auth is non-functional
-- `recompose` HOCs wrap most container components — dead library since 2019
-- `moment.js` used in some date formatting — replace with `date-fns` or native `Intl`
-- Duplicate bot entries appear due to multiple deployments/versions of same bot
-- `PackagesUsingPlugin.tsx` shows which packages use a resource (already implemented)
+- Do NOT use MUI, Redux, recompose, or any old code patterns
+- Do NOT use `moment.js` — use native `Intl` or `date-fns`
+- Do NOT hardcode the API URL
+- Do NOT use `left`/`right` in CSS — use logical properties for RTL
 
 ---
 
 ## 5. Handoff Protocol
 
-Same as EDDI backend — read `changelog.md`, check `git log`, update changelog if interrupted. See EDDI/AGENTS.md Section 5 for full protocol.
+Read `HANDOFF.md`, check `git log -5`, update `HANDOFF.md` after work. See also EDDI/AGENTS.md Section 5 for the full protocol.
