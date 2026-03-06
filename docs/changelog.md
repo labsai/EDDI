@@ -41,6 +41,36 @@ Each entry follows this format:
 
 ## Implementation Log
 
+### 2026-03-06 — Manager UI: Chat Panel
+
+**Repo:** EDDI-Manager  
+**Branch:** `feature/version-6.0.0`  
+**Phase:** 3 — Item #9
+
+**What changed:**
+
+1. **Chat API module** (`chat.ts`) — typed functions for `startConversation` (POST), `readConversation` (GET, for welcome messages + resume), `sendMessage` (text/plain), `sendMessageWithContext` (JSON), `sendMessageStreaming` (SSE async generator), `endConversation`
+2. **Zustand store + TanStack Query hooks** (`use-chat.ts`) — `useChatStore` for local state (messages, bot selection, streaming toggle persisted to localStorage), `useDeployedBots`, `useStartConversation` (auto-GETs welcome message), `useSendMessage` (auto-branches streaming/non-streaming), `useConversationHistory`, `useLoadConversation`, `useEndConversation`
+3. **Chat components** — `chat-message.tsx` (markdown bubbles via react-markdown + remark-gfm), `chat-input.tsx` (auto-grow textarea), `chat-history.tsx` (conversation history sidebar with resume), `streaming-toggle.tsx` (Zap toggle), `chat-panel.tsx` (main container with bot selector dropdown, history panel, message list, input)
+4. **Chat page** (`chat.tsx`) — full-height layout with `ChatPanel`
+5. **Routing** — `/manage/chat` → ChatPage
+6. **Sidebar** — "Chat" nav item with `MessageCircle` icon between Conversations and Resources
+7. **i18n** — 16 new keys under `nav.chat`, `pages.chat.*`, `chat.*`
+8. **MSW handlers** — start conversation (201 + Location), send message (snapshot), read conversation (welcome snapshot)
+9. **CSS** — chat prose overrides for markdown code blocks and links
+10. **Tests** — 7 new tests for ChatPage (heading, subtitle, bot selector, input, streaming toggle, history toggle, empty state)
+
+**Key decisions:**
+
+- After `startConversation` (POST), immediately GETs the conversation to pick up any welcome message
+- Streaming mode is **configurable via UI toggle** (persisted to localStorage), not hardcoded
+- Conversation history sidebar allows resuming past conversations — loads full conversation via GET
+- Uses raw `fetch` for text/plain and SSE endpoints (api-client defaults to JSON)
+
+**Tests:** ✅ 38/38 passing (8 files), TypeScript zero errors, build succeeds (754KB JS, 33KB CSS)
+
+---
+
 ### 2026-03-06 — Manager UI: Packages + Conversations Pages
 
 **Repo:** EDDI-Manager  
