@@ -8,9 +8,11 @@ import {
   Trash2,
   MoreVertical,
   ExternalLink,
+  Download,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useDeploymentStatus, useDeployBot, useUndeployBot } from "@/hooks/use-bots";
+import { useExportBot } from "@/hooks/use-backup";
 import type { BotDescriptor } from "@/lib/api/bots";
 import { useState } from "react";
 import { Link } from "react-router-dom";
@@ -19,6 +21,7 @@ interface BotCardProps {
   bot: BotDescriptor & { id: string; version: number };
   onDuplicate: (id: string, version: number) => void;
   onDelete: (id: string, version: number) => void;
+  onExport?: (id: string, version: number) => void;
 }
 
 const statusConfig = {
@@ -58,6 +61,7 @@ export function BotCard({ bot, onDuplicate, onDelete }: BotCardProps) {
   const { data: deployment } = useDeploymentStatus(bot.id);
   const deployMutation = useDeployBot();
   const undeployMutation = useUndeployBot();
+  const exportMutation = useExportBot();
 
   const status = deployment?.status ?? "NOT_FOUND";
   const config = statusConfig[status];
@@ -130,6 +134,19 @@ export function BotCard({ bot, onDuplicate, onDelete }: BotCardProps) {
                 >
                   <Copy className="h-4 w-4" />
                   {t("common.duplicate", "Duplicate")}
+                </button>
+                <button
+                  onClick={() => {
+                    exportMutation.mutate({ botId: bot.id, version: bot.version });
+                    setMenuOpen(false);
+                  }}
+                  disabled={exportMutation.isPending}
+                  className="flex w-full items-center gap-2 px-3 py-2 text-sm text-popover-foreground hover:bg-secondary disabled:opacity-50"
+                >
+                  <Download className="h-4 w-4" />
+                  {exportMutation.isPending
+                    ? t("bots.exporting", "Exporting...")
+                    : t("bots.export", "Export")}
                 </button>
                 <button
                   onClick={() => {

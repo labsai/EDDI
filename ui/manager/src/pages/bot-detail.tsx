@@ -15,7 +15,7 @@ import {
   AlertCircle,
   ExternalLink,
   Settings,
-
+  Download,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import {
@@ -25,6 +25,7 @@ import {
   useUndeployBot,
   useDeleteBot,
 } from "@/hooks/use-bots";
+import { useExportBot } from "@/hooks/use-backup";
 import { usePackageDescriptors, useUpdateBotPackages } from "@/hooks/use-packages";
 import { parseResourceUri } from "@/lib/api/bots";
 
@@ -49,6 +50,7 @@ export function BotDetailPage() {
   const undeployMutation = useUndeployBot();
   const deleteMutation = useDeleteBot();
   const updatePackagesMutation = useUpdateBotPackages();
+  const exportMutation = useExportBot();
 
   const status = deployment?.status ?? "NOT_FOUND";
   const config = statusConfig[status];
@@ -158,6 +160,19 @@ export function BotDetailPage() {
               : isDeployed
                 ? t("bots.undeploy")
                 : t("bots.deploy")}
+          </button>
+
+          {/* Export */}
+          <button
+            onClick={() => exportMutation.mutate({ botId: id!, version })}
+            disabled={exportMutation.isPending}
+            className="rounded-lg border border-input px-4 py-2 text-sm font-medium text-foreground hover:bg-secondary transition-colors disabled:opacity-50"
+            data-testid="export-bot-btn"
+          >
+            <Download className="h-4 w-4 inline-block me-1.5" />
+            {exportMutation.isPending
+              ? t("bots.exporting", "Exporting...")
+              : t("bots.export", "Export")}
           </button>
 
           {/* Delete */}

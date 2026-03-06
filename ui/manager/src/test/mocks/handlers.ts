@@ -232,6 +232,28 @@ export const handlers = [
     });
   }),
 
+  // --- Backup / Import / Export ---
+  http.post("*/backup/export/:botId", () => {
+    return new HttpResponse(null, {
+      status: 200,
+      headers: { Location: "/backup/export/test-bot-1.zip" },
+    });
+  }),
+
+  http.get("*/backup/export/:filename", () => {
+    return new HttpResponse(new Blob(["fake-zip"]), {
+      status: 200,
+      headers: { "Content-Type": "application/zip" },
+    });
+  }),
+
+  http.post("*/backup/import", () => {
+    return new HttpResponse(null, {
+      status: 200,
+      headers: { Location: "/botstore/bots/imported-bot?version=1" },
+    });
+  }),
+
   // --- Resource Stores ---
   // Generic descriptor handlers for all 6 resource types
   ...createResourceHandlers("behaviorstore", "behaviorsets", "behavior"),

@@ -2,13 +2,13 @@
 
 > **Last updated**: 2026-03-06  
 > **Branch**: `feature/version-6.0.0`  
-> **Last commit**: Phase 3.10 — Generic Resources CRUD pages for 6 extension types
+> **Last commit**: Phase 3.11 — Import/Export + Bot Wizard
 
 ---
 
 ## Current Status
 
-**Phase 3 (Manager UI Rewrite)**: Phases 3.1–3.10 complete.
+**Phase 3 (Manager UI Rewrite)**: Phases 3.1–3.11 complete.
 
 ### What's Done
 
@@ -24,11 +24,12 @@
 | 3.8   | Conversations page: list w/ filters, conversation detail viewer           | `938aa6e` |
 | 3.9   | Chat Panel: bot selector, SSE streaming toggle, history, markdown         | —         |
 | 3.10  | Resources Pages: generic CRUD for 6 extension types (hub + list + detail) | —         |
+| 3.11  | Import/Export + Bot Wizard: file upload/download, 4-step guided creation  | —         |
 
 ### Test Status
 
 - **TypeScript**: Zero errors (`npx tsc -b`)
-- **Unit/Component**: 53/53 pass (`npm run test`) — 9 files
+- **Unit/Component**: 64/64 pass (`npm run test`) — 11 files
 - **Build**: Succeeds
 
 ### Files Created (summary)
@@ -40,21 +41,16 @@
 - **Conversations**: `conversations.tsx`, `conversation-detail.tsx`
 - **Chat**: `chat-panel.tsx`, `chat-message.tsx`, `chat-input.tsx`, `chat-history.tsx`, `streaming-toggle.tsx`, `chat.tsx`
 - **Resources**: `resource-card.tsx`, `create-resource-dialog.tsx`, `resources.tsx` (hub), `resource-list.tsx`, `resource-detail.tsx`
-- **API**: `api-client.ts`, `api/bots.ts`, `api/packages.ts`, `api/descriptors.ts`, `api/conversations.ts`, `api/chat.ts`, `api/resources.ts`
-- **Hooks**: `use-bots.ts`, `use-packages.ts`, `use-conversations.ts`, `use-chat.ts`, `use-resources.ts`
+- **Backup**: `api/backup.ts` (export/download/import), `use-backup.ts` (hooks)
+- **Bot Wizard**: `bot-wizard.tsx` (4-step guided creation)
+- **API**: `api-client.ts`, `api/bots.ts`, `api/packages.ts`, `api/descriptors.ts`, `api/conversations.ts`, `api/chat.ts`, `api/resources.ts`, `api/backup.ts`
+- **Hooks**: `use-bots.ts`, `use-packages.ts`, `use-conversations.ts`, `use-chat.ts`, `use-resources.ts`, `use-backup.ts`
 - **i18n**: `config.ts`, `en.json`, `de.json`, `ar.json`
-- **Tests**: `sidebar.test.tsx`, `top-bar.test.tsx`, `config.test.ts`, `bots.test.tsx`, `bots.test.ts`, `packages.test.tsx`, `conversations.test.tsx`, `chat.test.tsx`, `resources.test.tsx`
+- **Tests**: `sidebar.test.tsx`, `top-bar.test.tsx`, `config.test.ts`, `bots.test.tsx`, `bots.test.ts`, `packages.test.tsx`, `conversations.test.tsx`, `chat.test.tsx`, `resources.test.tsx`, `backup.test.tsx`, `bot-wizard.test.tsx`
 - **E2E**: `navigation.spec.ts`, `theme.spec.ts`, `rtl.spec.ts`
 - **MSW**: `handlers.ts` (bots, packages, conversations, resources mocks), `server.ts`
 
 ---
-
-## Next Steps (Phase 3.11+)
-
-### Phase 3.11: Import/Export + Bot Wizard
-
-- Bot import/export UI
-- Guided bot creation wizard
 
 ### Phase 3.12: Finalize i18n
 

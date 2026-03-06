@@ -1,7 +1,9 @@
-import { useState } from "react";
+import { useState, useRef } from "react";
 import { useTranslation } from "react-i18next";
-import { Bot, Search, Plus, RefreshCw, AlertCircle } from "lucide-react";
+import { Link } from "react-router-dom";
+import { Bot, Search, Plus, RefreshCw, AlertCircle, Upload, Wand2 } from "lucide-react";
 import { useBotDescriptors, useDeleteBot, useDuplicateBot, groupBotsByName } from "@/hooks/use-bots";
+import { useImportBot } from "@/hooks/use-backup";
 import { BotCard } from "@/components/bots/bot-card";
 import { CreateBotDialog } from "@/components/bots/create-bot-dialog";
 import { cn } from "@/lib/utils";
@@ -10,10 +12,20 @@ export function BotsPage() {
   const { t } = useTranslation();
   const [search, setSearch] = useState("");
   const [createOpen, setCreateOpen] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   const { data: bots, isLoading, isError, refetch } = useBotDescriptors(100, 0, search);
   const deleteMutation = useDeleteBot();
   const duplicateMutation = useDuplicateBot();
+  const importMutation = useImportBot();
+
+  function handleImport(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (file) {
+      importMutation.mutate(file);
+      e.target.value = ""; // reset for re-upload
+    }
+  }
 
   const groupedBots = bots ? groupBotsByName(bots) : [];
 
@@ -40,14 +52,43 @@ export function BotsPage() {
             {t("pages.bots.subtitle")}
           </p>
         </div>
-        <button
-          onClick={() => setCreateOpen(true)}
-          className="inline-flex items-center gap-2 rounded-lg bg-primary px-4 py-2.5 text-sm font-medium text-primary-foreground shadow-sm transition-all hover:bg-primary/90 hover:shadow-md active:scale-[0.98]"
-          data-testid="create-bot-btn"
-        >
-          <Plus className="h-4 w-4" />
-          {t("bots.createBot", "Create Bot")}
-        </button>
+        <div className="flex flex-wrap items-center gap-2">
+          <button
+            onClick={() => fileInputRef.current?.click()}
+            disabled={importMutation.isPending}
+            className="inline-flex items-center gap-2 rounded-lg border border-input px-4 py-2.5 text-sm font-medium text-foreground transition-all hover:bg-secondary active:scale-[0.98] disabled:opacity-50"
+            data-testid="import-bot-btn"
+          >
+            <Upload className="h-4 w-4" />
+            {importMutation.isPending
+              ? t("bots.importing", "Importing...")
+              : t("bots.import", "Import Bot")}
+          </button>
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept=".zip"
+            onChange={handleImport}
+            className="hidden"
+            data-testid="import-file-input"
+          />
+          <Link
+            to="/manage/bots/wizard"
+            className="inline-flex items-center gap-2 rounded-lg border border-primary/30 px-4 py-2.5 text-sm font-medium text-primary transition-all hover:bg-primary/10 active:scale-[0.98]"
+            data-testid="bot-wizard-btn"
+          >
+            <Wand2 className="h-4 w-4" />
+            {t("wizard.title", "Bot Wizard")}
+          </Link>
+          <button
+            onClick={() => setCreateOpen(true)}
+            className="inline-flex items-center gap-2 rounded-lg bg-primary px-4 py-2.5 text-sm font-medium text-primary-foreground shadow-sm transition-all hover:bg-primary/90 hover:shadow-md active:scale-[0.98]"
+            data-testid="create-bot-btn"
+          >
+            <Plus className="h-4 w-4" />
+            {t("bots.createBot", "Create Bot")}
+          </button>
+        </div>
       </div>
 
       {/* Search bar */}
